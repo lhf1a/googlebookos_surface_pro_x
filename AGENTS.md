@@ -9,6 +9,7 @@ Read docs/HANDOFF.md and docs/BUILD.md before changing the port.
 - Keep normal audio, no-audio and rescue entries. Audit concatenated initramfs in last-entry-wins order. Back up locally, validate gzip/hash, sync and replace atomically.
 - Identify the physical disk, ESP marker, UUIDs and root source before disk operations. Old USB scripts deliberately reject NVMe; do not weaken guards to reuse them blindly. Never touch the workstation system disk.
 - Do not routinely unload active QCA Bluetooth transport modules: this previously hung the board. Use the documented HAL/bridge path.
+- Initialize Bluetooth transport only after Android boot completion; preserve BluetoothManager's persisted bluetooth_on choice. Do not force enable on boot or add a second state file that can override airplane/user policy.
 - Distinguish framework restarts (system_server/SurfaceFlinger PIDs) from board reboots (boot ID). A user long-press reboot is not an autonomous crash.
 - PM debug-stage completion does not prove actual suspend works. A framework wake lock does not reliably prevent sleep on this port.
 - Keep private/, out/, downloads/, upstream/, work/, keys, credentials and raw logs out of Git. Use the operator's own SSH identity and host verification.

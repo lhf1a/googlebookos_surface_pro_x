@@ -48,7 +48,17 @@ int main(int argc, char **argv) {
     }
     if (ioctl(hci,HCIDEVDOWN,dev)<0 && errno!=EALREADY) die("HCIDEVDOWN");
     struct sockaddr_hci addr={AF_BLUETOOTH,(uint16_t)dev,1};
-    if (bind(hci,(struct sockaddr *)&addr,sizeof(addr))<0) die("HCI_USER bind");
+    /* Kernel setup is asynchronous; hci0 existing does not mean HCI_SETUP
+     * has cleared. Bound the wait instead of exiting permanently on EBUSY.
+     * Do not unload/reset the live QCA UART driver to retry this bind.
+     */
+    for (unsigned attempt=0;;attempt++) {
+        if (bind(hci,(struct sockaddr *)&addr,sizeof(addr))==0) break;
+        if ((errno!=EBUSY && errno!=EAGAIN) || attempt>=119)
+            die("HCI_USER bind");
+        if (attempt%10==0) fprintf(stderr,"HCI_USER waiting for kernel setup (%u/120)\n",attempt+1);
+        sleep(1);
+    }
     int master=posix_openpt(O_RDWR|O_NOCTTY|O_CLOEXEC);
     if (master<0 || grantpt(master)<0 || unlockpt(master)<0) die("PTY create");
     char *name=ptsname(master);

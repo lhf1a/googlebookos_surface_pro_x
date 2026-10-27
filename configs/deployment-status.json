@@ -4,8 +4,8 @@
   "os": "mica 16471258",
   "kernel": "6.3.8-sq2-android1",
   "sha256": {
-    "deployed_initramfs": "37ad094c531dcb17cc73a3c110c900232dec101cc517939aec3913b297c3fd48",
-    "power_connectivity_storage_addon": "212c0cc63ae186e7a0622264023f406f1c8bccb2d55b45f62fc11d489788c97c",
+    "deployed_initramfs": "a2b3909e1acedece2ed693bc6ad239eafda5cb75b89ab6e885c165d81f246e11",
+    "power_connectivity_storage_addon": "cf243236c264a6e5ec012a5797f25663cb9f852e9d4cd11664c17725de0afa77",
     "graphics_only_base": "8d4f493bdf149d448b843358dc6a446d5684a041e24a521045ae8775f25a5269",
     "Image": "ea226b77e2b9e06ef5262f9e6c192bf3d865ed31b383121396ee706613193a52",
     "dtb": "7a4d1c73cc8d64ffef979edf00e1240bef8bf15678690b7a53c45b72434dda55",
@@ -23,6 +23,7 @@
   "suspend": "screen_only_guard_verified_power_key_and_lid_tests_user_confirmed_pass",
   "cover_hotplug": "keyboard_and_touchpad_auto_recovery_user_confirmed_pass",
   "touch_startup": "post_framework_reinitialization_user_confirmed_pass",
+  "bluetooth": "ON and OFF preserved across separate reboots; OFF-to-ON and helper reentry passed; final state ON",
   "audio_tuning": "deferred_by_user",
   "note": "Hashes describe this local deployment; binary images, embedded local credentials and raw logs are not distributed. Not a fresh-clone reproducibility claim."
 }
