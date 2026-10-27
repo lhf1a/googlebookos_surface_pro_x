@@ -27,5 +27,6 @@
   "normal_boot": "diagnostic networking, SSH, continuous logging disabled; user confirmed desktop/Wi-Fi/input normal; TCP 22 not accepting connections",
   "grub": "normal audio, rescue, poweroff; old no-audio second entry removed; default timeout 3 seconds",
   "audio_tuning": "deferred_by_user",
+  "lockscreen": "Sq2Lockscreen fabricated overlay enabled for users 0/10; screen off/on and credential-free unlock user confirmed; overlay persisted in userdata, reboot not yet verified",
   "note": "Hashes describe this local deployment; binary images, embedded local credentials and raw logs are not distributed. Not a fresh-clone reproducibility claim."
 }
