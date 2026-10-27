@@ -4,8 +4,8 @@
   "os": "mica 16471258",
   "kernel": "6.3.8-sq2-android1",
   "sha256": {
-    "deployed_initramfs": "243c70c467baf9e40015866df720f7e28a3e75443e17c131d524c995d41a1add",
-    "power_connectivity_storage_addon": "4448595f40c5de10d25ceffba4cdfeb1b559b00ddb9e97302d8565e04810b7a2",
+    "deployed_initramfs": "0a5d6ab71ebb09c437dc14d53b2018508c96652711af62ed92678e95ddc62a35",
+    "power_connectivity_storage_addon": "8025132addaa217ce0337c3077662bceb99183f670eeaa32904c040f6ea96a32",
     "graphics_only_base": "8d4f493bdf149d448b843358dc6a446d5684a041e24a521045ae8775f25a5269",
     "Image": "e7c7a3e5399a6be93a363afc5f880fea30f17cb8a59f176807d3620f967b7ca8",
     "dtb": "7a4d1c73cc8d64ffef979edf00e1240bef8bf15678690b7a53c45b72434dda55",
@@ -26,7 +26,7 @@
   "bluetooth": "ON and OFF preserved across separate reboots; OFF-to-ON and helper reentry passed; final state ON",
   "normal_boot": "Android owns saved Wi-Fi; public-key SSH starts asynchronously after boot_completed; no diagnostic DHCP/association/continuous logs; SSH connection verified after normal boot",
   "grub": "normal audio, rescue, poweroff; old no-audio second entry removed; default timeout 3 seconds",
-  "audio_tuning": "deferred_by_user",
+  "audio_tuning": "Mute-before-teardown modules plus pmdown_time=0: user confirmed two ALSA runs, two AAudio runs and two video pause/resume cycles without pops. Startup policy deployed, reboot persistence not yet verified. Low volume/bass/stereo calibration remain open.",
   "lockscreen": "Startup helper restores default resource after reboot without changing lock/credential choice; final normal reboot and 8-second screen-off/wake verified Keyguard showing=true, inputRestricted=true",
   "note": "Hashes describe this local deployment; binary images, embedded local credentials and raw logs are not distributed. Not a fresh-clone reproducibility claim.",
   "device_info": {

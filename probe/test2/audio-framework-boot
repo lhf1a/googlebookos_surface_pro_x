@@ -27,6 +27,14 @@ for node in /dev/snd/*; do
     [ ! -c "$node" ] || { chown 1000:1005 "$node"; chmod 660 "$node"; }
 done
 audio-speaker-route enable
+# With the mute-before-SoundWire-teardown modules, do not leave DAPM powered
+# after the PCM stream is removed. ALSA and AAudio repeated-open probes passed;
+# arbitrary application pause/resume remains a separate listening check.
+for link in MultiMedia1 'SLIM Playback' 'SLIM WCD Playback'; do
+    control="/sys/devices/platform/sound/$link/pmdown_time"
+    [ -w "$control" ] || { echo "AUDIO_FAILED: missing $control"; exit 1; }
+    echo 0 > "$control"
+done
 mkdir -p /proc/1/root/debug_ramdisk/sq2-audio
 cp /etc/sq2-audio/audio-hal /proc/1/root/debug_ramdisk/sq2-audio/audio-hal
 chmod 755 /proc/1/root/debug_ramdisk/sq2-audio/audio-hal

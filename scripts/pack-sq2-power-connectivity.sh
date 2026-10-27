@@ -6,12 +6,15 @@ O="$ROOT/out/power-connectivity-20261027"
 S=$(mktemp -d "$B/power-connectivity.XXXXXX")
 mkdir -p "$S/bin" "$S/etc/sq2-power" "$S/etc/googlebook-security/bin/hw" "$S/etc/googlebook-security/etc/init"
 cp "$ROOT/probe/test2/init-googlebook-native" "$S/init"
-for name in lockscreen-framework-boot ssh-framework-boot apply-device-info bluetooth-framework-boot power-input-boot lab-input-posture lab-keep-awake refresh-sq2-power-input-nodes cover-input-watch touch-framework-ready touch-resume-watch test-sq2-pm-stage; do
+for name in audio-framework-boot audio-speaker-route lockscreen-framework-boot ssh-framework-boot apply-device-info bluetooth-framework-boot power-input-boot lab-input-posture lab-keep-awake refresh-sq2-power-input-nodes cover-input-watch touch-framework-ready touch-resume-watch test-sq2-pm-stage; do
     cp "$ROOT/probe/test2/$name" "$S/bin/"
     sh -n "$S/bin/$name"
 done
 mkdir -p "$S/lib/modules/6.3.8-sq2-android1/kernel/drivers/hid/spi-hid"
 cp "$O/spi-hid.ko" "$S/lib/modules/6.3.8-sq2-android1/kernel/drivers/hid/spi-hid/"
+mkdir -p "$S/lib/modules/6.3.8-sq2-android1/kernel/sound/soc/"{codecs,qcom}
+cp "$ROOT/out/audio-sequencing/snd-soc-wsa881x.ko" "$S/lib/modules/6.3.8-sq2-android1/kernel/sound/soc/codecs/"
+cp "$ROOT/out/audio-sequencing/snd-soc-sdm845.ko" "$S/lib/modules/6.3.8-sq2-android1/kernel/sound/soc/qcom/"
 cp "$ROOT/out/connectivity/sq2-hci-bridge" "$S/bin/"
 cp "$O/"{surface_aggregator_tabletsw,gpio_keys,pm8941-pwrkey}.ko "$S/etc/sq2-power/"
 cp "$ROOT/out/connectivity/com.google.cf.bt/bin/hw/android.hardware.bluetooth-service.cuttlefish" "$S/etc/googlebook-security/bin/hw/sq2-bluetooth"

@@ -13,12 +13,14 @@ test "$(sha256sum "$ROOT/out/android-test/native-combined-initramfs.cpio.gz" | c
 test "$(sha256sum "$ROOT/out/touch/native-touch-fixup.cpio.gz" | cut -d' ' -f1)" = 83fcc4de064f9874536d4c960fe4b85653c3fbdbbfb0c80a03d4672a753ba949
 make -s -C "$B/kernel" O="$B/kernel-android-out" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH="$S" INSTALL_MOD_STRIP=1 modules_install
 find "$S/lib/modules" -type l -delete
+cp "$ROOT/out/audio-sequencing/snd-soc-wsa881x.ko" "$S/lib/modules/6.3.8-sq2-android1/kernel/sound/soc/codecs/"
+cp "$ROOT/out/audio-sequencing/snd-soc-sdm845.ko" "$S/lib/modules/6.3.8-sq2-android1/kernel/sound/soc/qcom/"
 mkdir -p "$S/bin" "$S/etc/sq2-audio"
 mkdir -p "$S/etc/googlebook-security/lib64/egl"
 # Include the tested multi-plane mapper fix in subsequent complete SSD images.
 cp "$ROOT/out/sq2-graphics/runtime/libEGL_freedreno.so" "$S/etc/googlebook-security/lib64/egl/"
 cp "$ROOT/probe/test2/init-googlebook-native" "$S/init"
-for name in lockscreen-framework-boot ssh-framework-boot prepare-native-ssd apply-security-overlay apply-device-info audio-framework-boot audio-drivers-start audio-speaker-route collect-audio-crash test-speaker-readiness lab-input-posture lab-keep-awake lab-local-setup skip-google-setup wifi-framework-boot wifi-rollback bluetooth-framework-boot power-input-boot refresh-sq2-power-input-nodes cover-input-watch touch-framework-ready touch-resume-watch test-sq2-pm-stage; do
+for name in audio-framework-boot audio-speaker-route lockscreen-framework-boot ssh-framework-boot prepare-native-ssd apply-security-overlay apply-device-info audio-drivers-start collect-audio-crash test-speaker-readiness lab-input-posture lab-keep-awake lab-local-setup skip-google-setup wifi-framework-boot wifi-rollback bluetooth-framework-boot power-input-boot refresh-sq2-power-input-nodes cover-input-watch touch-framework-ready touch-resume-watch test-sq2-pm-stage; do
     cp "$ROOT/probe/test2/$name" "$S/bin/"
     sh -n "$S/bin/$name"
 done

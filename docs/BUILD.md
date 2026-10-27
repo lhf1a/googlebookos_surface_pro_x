@@ -29,6 +29,7 @@ build-test3-ssh.sh 要求 SQ2_AUTHORIZED_KEY_FILE 指向自己的公钥；主机
 4. 触摸：build-test3-iptsd.py → build-touch-fixup.sh；检查最后 cpio 成员中的有效 IPTSd/配置。
 5. 连接：fetch-connectivity-reference.py、fetch-wifi-hal-source.py 等准备 donor/headers；build-sq2-connectivity.sh 编译桥接/HAL；不能任意更换 donor HAL 版本。
 6. 音频：build-sq2-audio-tools.sh、patch-sq2-audio.py、patch-sq2-audio-hal.py 及 policy/路由，保留和校验原始 HAL。
+   当前增量还需运行 build-sq2-audio-sequencing.sh，在现有 NVMe 配置上构建静音时序模块，输出 out/audio-sequencing/ 两个模块供打包脚本使用。完整 modules modpost 校验符号；不要仅构建孤立 .ko。audio-framework-boot 同时设置 pmdown_time=0，当前有限听音结果见 HANDOFF。
 7. 电源/输入：build-sq2-lid-power.sh 合并现有配置并编译模块，保留 NVMe；SPI PM 为未完成实验，用户暂停真实睡眠测试。
 8. SSD：build-googlebook-internal-ssd.py 准备布局；pack-googlebook-internal-ssd.sh 合并旧基线/触摸/当前 addon。旧归档有固定输入哈希，缺少时仍需复原前置阶段；并非从源一键构建。
 

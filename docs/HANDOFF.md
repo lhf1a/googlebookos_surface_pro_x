@@ -15,7 +15,7 @@
 ## 当前待办
 
 - 真正休眠修复暂停；用户改为要求“只关闭屏幕”，具体保护策略见下节。
-- 音频结束约 10 秒后爆音、缺低频、声像偏右暂缓，见 configs/audio-known-issues.json。
+- 音频修复已于 2026-10-27 恢复推进：停播/重新开声爆音、音量小、缺低频及声像问题仍开放，见 configs/audio-known-issues.json。
 - 蓝牙其他配置文件、LTE 有 SIM 联网、Turnip Vulkan、长期稳定性尚未完成验证；不要默认开始这些新测试。
 
 ## 关于设备信息
@@ -76,6 +76,14 @@ Wi-Fi 使用内核接口及 Android 通用 HAL 适配：sq2-wifi-driver.c、sq2-
 ADSP → SLIM/WCD9340 → SoundWire/双 WSA881x。物理左右均有声；Android AIDL HAL 和 48 kHz S16 stereo policy 已接入。patch-sq2-audio-hal.py 去掉模拟器跳帧逻辑，校验原始/修改后哈希。audio-drivers-start、audio-speaker-route、audio-framework-boot 负责固件、路由、HAL。
 
 调音问题仍开放。历史音频期间发生过整机重启；有限视频观察不能证明所有音频故障已解决。
+
+2026-10-27 音频实验：RX7/RX8 从 raw 66 改为 72（-12 dB），PA 增益未提高，DAC/COMP/BOOST 配对端口保持。用户仍报告视频音量小、像通话。pmdown_time=0 的直接 ALSA 单次测试无爆音，但实际视频暂停立即爆音，因此已恢复原 5000 ms，未保留该策略。不要把一次无爆音视为修复。
+
+新增 patch-sq2-audio-sequencing.py 在 SoundWire teardown 前静音 WSA881x，并在 SPKR PGA PRE_PMD 提前静音。实验模块已重启加载，但用户报告分开播放左右 WAV 时右侧开始即爆音，尚未证实补丁有效。五档音调测试后用户澄清从 160 Hz 起听不到，左右分别表现尚待核对；这不是校准频响测量。RX INT7/8 HPF 配置为 0.48 Hz。generate-sq2-audio-probes.py 提供渐入渐出、固定幅度测试 WAV；channel-continuity 在同一个 PCM 流中左/右/左/右切换，用于区分声道异常与重新开流。sq2-audio-wav-test 可经 Android 播放与 tinyplay 完全相同的文件，避免音源幅度不同混淆结论。不得盲目增加低频/PA 增益或关闭配对 SoundWire 端口。
+
+音频后续对照结论：同一 PCM 流中左/右/左/右均无爆音，分两次开流且间隔 10 秒时第二次开声爆音。新静音模块下将三个音频 link 的 pmdown_time 设为 0 后，直接 ALSA 两遍、同 WAV AAudio 两遍均无爆音且音量接近；用户随后确认实际视频暂停等待 10 秒再恢复两轮也无爆音。audio-framework-boot 已在 HAL 启动前设置此策略，镜像已写入，尚未验证本次策略的重启持久性或长期效果。低频/音量问题未解决。新增 test-sq2-audio-reopen.sh 为临时 A/B 工具，退出会恢复原设置，不能替代启动策略。
+
+此次 ESP 因历史备份占满导致临时镜像写入失败，原启动镜像未受影响。已将本次回滚镜像（fc5e7a7b…）复制到工作站 out/audio-fix-20261027/native-before-audio-pmdown.cpio.gz 并校验完整哈希；只移除 ESP 上该重复备份及本次失败的 .new 文件后完成原子替换。早期 ESP 备份仍保留。下一次更新应先检查可用空间。
 
 ## 合盖、电源与休眠（暂停）
 

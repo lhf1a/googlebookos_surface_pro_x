@@ -1,12 +1,24 @@
 {
   "updated": "2026-10-27",
   "device": "Surface Pro X SQ2",
-  "priority": "deferred_by_user",
-  "source": "User listening report after merged graphics fix and audio-enabled boot",
+  "priority": "active",
+  "source": "User listening reports and bounded ALSA/Android comparisons on 2026-10-27",
   "issues": [
-    {"id": "speaker-pop-after-stop", "description": "播放结束约 10 秒后出现爆音", "status": "open"},
-    {"id": "speaker-missing-bass", "description": "扬声器没有低频", "status": "open"},
-    {"id": "speaker-image-right", "description": "声像位置不对，偏右", "status": "open"}
+    {
+      "id": "speaker-pop-after-stop",
+      "description": "新静音模块配合 pmdown_time=0：直接 ALSA 两遍、同文件 AAudio 两遍及视频暂停等待10秒再恢复两轮，用户均确认无爆音。配置已在线启用并写入启动镜像；尚未验证此次启动策略的重启持久性及长期表现。",
+      "status": "mitigated_pending_reboot_and_extended_validation"
+    },
+    {
+      "id": "speaker-missing-bass",
+      "description": "视频音量偏小、音质像通话；五档测试后用户澄清从 160 Hz 起听不到。左右分别的低频表现尚未明确，无校准声学测量。RX INT7/8 HPF 为 0.48 Hz，不能据此排除其他滤波或声学因素。",
+      "status": "open"
+    },
+    {
+      "id": "speaker-image-right",
+      "description": "声像位置不对，偏右",
+      "status": "open"
+    }
   ],
-  "instruction": "只记录，暂不调整音频；休眠也已按用户要求暂停。共享存储修复及交接发布优先。"
+  "instruction": "继续音频定位；不盲目提高低频或 PA 增益，不关闭 DAC/COMP/BOOST 配对端口。真正休眠仍暂停。"
 }
