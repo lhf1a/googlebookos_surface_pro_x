@@ -1,0 +1,20 @@
+#!/bin/busybox sh
+touch-services; service_rc=$?; echo "touch-services exit=$service_rc"
+[ "$service_rc" -eq 0 ] || exit "$service_rc"
+cat /proc/interrupts > /logs/interrupts-before-touch.txt
+echo 'TOUCHSCREEN TEST: in 5 seconds, tap and swipe the SCREEN with one and two fingers.'
+sleep 5
+mode=touchscreen
+[ "${1:-all}" = multitouch ] && mode=multitouch
+input-events "$mode" 30 > /logs/touchscreen-events.txt 2>&1
+screen_rc=$?
+echo "touchscreen capture exit=$screen_rc"; tail -n 4 /logs/touchscreen-events.txt
+cat /proc/interrupts > /logs/interrupts-after-touch.txt
+kill -0 "$(cat /run/iptsd.pid)" 2>/dev/null || { echo 'IPTSD_EXITED during capture'; exit 1; }
+case "${1:-all}" in touchscreen|multitouch) exit "$screen_rc";; esac
+echo 'TOUCHPAD TEST: in 5 seconds, move and click the TYPE COVER TOUCHPAD, then use two fingers.'
+sleep 5
+input-events touchpad 30 > /logs/touchpad-events.txt 2>&1
+pad_rc=$?
+echo "touchpad capture exit=$pad_rc"; tail -n 4 /logs/touchpad-events.txt
+[ "$screen_rc" -eq 0 ] && [ "$pad_rc" -eq 0 ]

@@ -1,0 +1,49 @@
+#!/bin/busybox sh
+mode=${1:-all}
+echo 'Wi-Fi: connecting to configured lab Wi-Fi, then testing DHCP, gateway, DNS and external IP. Allow up to 4 minutes.'
+{
+    wifi-services || exit 1
+    timeout 40 modprobe ath10k_snoc; echo "modprobe exit=$?"
+    for i in $(seq 1 60); do
+        iw dev 2>/dev/null | grep -q Interface && break
+        sleep 1
+    done
+    [ "$mode" = network ] || iw phy
+    iw dev; iw reg get
+    found=0; network_ok=0
+    for d in /sys/class/net/*; do
+        [ -d "$d/phy80211" ] || [ -L "$d/phy80211" ] || continue
+        dev=$(basename "$d"); found=1
+        echo "=== interface $dev ==="
+        ip link set "$dev" up; echo "link-up exit=$?"
+        if [ "$mode" = network ]; then
+            echo 'SKIP full scan: validated in test3; association discovery remains automatic.'
+        else
+            timeout 40 iw dev "$dev" scan; echo "scan exit=$?"
+        fi
+        wpa_supplicant -B -D nl80211 -i "$dev" -c /etc/wpa_supplicant.conf -f /logs/wpa-supplicant.txt
+        echo "wpa_supplicant exit=$?"
+        connected=0
+        for i in $(seq 1 45); do
+            wpa_cli -p /run/wpa_supplicant -i "$dev" status 2>/dev/null | grep -q 'wpa_state=COMPLETED' && { connected=1; break; }
+            sleep 1
+        done
+        wpa_cli -p /run/wpa_supplicant -i "$dev" status
+        if [ "$connected" -eq 1 ]; then
+            udhcpc -i "$dev" -s /bin/dhcp-hook -n -q -t 5 -T 3
+            dhcp_rc=$?; echo "DHCP exit=$dhcp_rc"
+            [ "$dhcp_rc" -eq 0 ] && network_ok=1
+            ip addr show dev "$dev"; ip route
+            gateway=$(ip route | awk '/^default / {print $3; exit}')
+            [ -n "$gateway" ] && { ping -c 3 -W 2 "$gateway"; echo "gateway-ping exit=$?"; }
+            ping -c 3 -W 2 1.1.1.1; echo "external-IP-ping exit=$?"
+            timeout 10 nslookup example.com; echo "DNS-lookup exit=$?"
+        fi
+        iw dev "$dev" link
+    done
+    echo "wireless-interface-found=$found"
+    echo "RESULT wifi_association_and_dhcp_ok=$network_ok (reachability is reported separately)"
+    echo "$network_ok" > /run/wifi-test-ok
+} > /logs/wifi.txt 2>&1
+tail -n 12 /logs/wifi.txt
+[ "$(cat /run/wifi-test-ok 2>/dev/null)" = 1 ]

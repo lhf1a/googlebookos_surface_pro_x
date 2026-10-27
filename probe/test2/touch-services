@@ -1,0 +1,53 @@
+#!/bin/busybox sh
+# Keep the observed SQ2 SPI device open through IPTSd during input enumeration.
+if [ -r /run/iptsd.pid ] && kill -0 "$(cat /run/iptsd.pid)" 2>/dev/null; then exit 0; fi
+mkdir -p /logs
+[ -c /dev/uinput ] || { echo 'UINPUT_MISSING: kernel must enable INPUT_MISC and INPUT_UINPUT' > /logs/touch-service.txt; exit 1; }
+for d in /sys/class/hidraw/hidraw*; do
+    [ -r "$d/device/uevent" ] || continue
+    grep -qi '^HID_ID=001C:0000045E:00000C21$' "$d/device/uevent" || continue
+    node=/dev/$(basename "$d")
+    echo "Checking SQ2 touchscreen $node" > /logs/touch-service.txt
+    cp "$d/device/report_descriptor" /logs/touch-report-descriptor.bin 2>/dev/null
+    # This SPI-HID driver returns from open before its asynchronous reset has
+    # set ready. Keep an independent descriptor open so check-device's close
+    # cannot power the device down again before the daemon starts.
+    exec 3<> "$node" || exit 1
+    ready=/sys/bus/spi/devices/spi0.0/ready
+    for i in $(seq 1 12); do
+        [ "$(cat "$ready" 2>/dev/null)" = ready ] && break
+        echo "Waiting for SPI ready ($i/12)" >> /logs/touch-service.txt
+        sleep 1
+    done
+    if [ "$(cat "$ready" 2>/dev/null)" != ready ]; then
+        echo 'SPI_READY_TIMEOUT: IPTSd not started; inspect transport-state.txt' >> /logs/touch-service.txt
+        exit 3
+    fi
+    echo 'SPI_READY before feature query' >> /logs/touch-service.txt
+    timeout 15 iptsd-check-device "$node" >> /logs/touch-service.txt 2>&1
+    checked=$?; echo "check-device exit=$checked" >> /logs/touch-service.txt
+    if [ "$checked" -ne 0 ]; then
+        # A mode transition can leave a stale SPI feature response. Let it
+        # settle and retry once while the independent HID descriptor is open.
+        sleep 2
+        timeout 15 iptsd-check-device "$node" >> /logs/touch-service.txt 2>&1
+        checked=$?; echo "check-device retry exit=$checked" >> /logs/touch-service.txt
+    fi
+    [ "$checked" -eq 0 ] || exit 1
+    # Parent retains FD 3 during startup; the daemon owns its own HID handle.
+    iptsd "$node" 3>&- > /logs/iptsd.txt 2>&1 &
+    echo "$!" > /run/iptsd.pid
+    sleep 4
+    if kill -0 "$(cat /run/iptsd.pid)" 2>/dev/null; then
+        echo "IPTSD_RUNNING device=$node" >> /logs/touch-service.txt
+        if [ -x /proc/1/root/system/bin/getprop ] && command -v refresh-iptsd-input-nodes >/dev/null 2>&1; then
+            refresh-iptsd-input-nodes >> /logs/touch-service.txt 2>&1 || return_code=$?
+            [ "${return_code:-0}" -eq 0 ] || exit "$return_code"
+        fi
+        exit 0
+    fi
+    echo 'IPTSD_EXITED: inspect iptsd.txt' >> /logs/touch-service.txt
+    exit 1
+done
+echo 'SQ2 SPI HID device not found' > /logs/touch-service.txt
+exit 2

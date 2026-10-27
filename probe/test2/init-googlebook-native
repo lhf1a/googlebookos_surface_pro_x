@@ -1,0 +1,195 @@
+#!/bin/busybox sh
+export PATH=/bin:/sbin
+/bin/busybox --install -s /bin
+mkdir -p /proc /sys /dev /run /tmp /logs /media /newroot
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mount -t tmpfs tmpfs /run
+mount -t tmpfs tmpfs /tmp
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts -o mode=620,ptmxmode=666
+echo 0 > /proc/sys/kernel/printk_ratelimit
+echo 4 > /proc/sys/kernel/printk
+fail() { echo "SQ2_NATIVE_PREP_FAILED: $*"; sync; while true; do setsid cttyhack /bin/sh; sleep 1; done; }
+smoke=0
+grep -q 'sq2.native=smoke' /proc/cmdline && smoke=1
+ssd=0
+ssd_smoke=0
+grep -q 'sq2.native=ssd' /proc/cmdline && ssd=1
+grep -q 'sq2.native=ssd-smoke' /proc/cmdline && ssd_smoke=1
+if ! grep -q 'sq2.storage=nvme' /proc/cmdline; then
+    ls /sys/class/block/nvme* >/dev/null 2>&1 && fail 'Internal NVMe was enumerated without authorization'
+fi
+if [ "$ssd" = 1 ]; then
+    . /bin/prepare-native-ssd
+elif [ "$smoke" = 0 ]; then
+    for n in $(seq 1 45); do [ -b /dev/sda2 ] && break; sleep 1; done
+    test "$(cat /sys/class/block/sda/size)" = 61440000 || fail USB-size
+    test "$(cat /sys/bus/usb/devices/1-1/serial)" = FC2425D40C3E1 || fail USB-serial
+    blkid /dev/sda1 | grep -q 9CF3-A1A5 || fail ESP-UUID
+    blkid /dev/sda2 | grep -q 3AF5-9B65 || fail DATA-UUID
+    mkdir -p /media/esp /media/data
+    mount -t vfat -o sync /dev/sda1 /media/esp || fail ESP-mount
+    test -f /media/esp/SQ2-PROBE-MEDIA.txt || fail media-marker
+    mount -t exfat -o ro /dev/sda2 /media/data || fail DATA-mount
+else
+    mkdir -p /media/esp
+    mount -t vfat -o sync /dev/vdg /media/esp || fail smoke-log-disk
+fi
+bootid=$(cat /proc/sys/kernel/random/boot_id)
+logdir=/media/esp/logs/googlebook-native-$bootid
+mkdir -p "$logdir" || fail log-directory
+mount --bind "$logdir" /logs || fail logs-bind
+boot-kmsg /logs/kernel-live.txt || fail kmsg-recorder
+exec > /dev/console 2>&1
+echo "SQ2_GOOGLEBOOK_NATIVE_PREP bootid=$bootid" | tee /logs/status.txt
+echo 'System images read-only; provisioned system disk selected; original Android init will become PID 1.' | tee -a /logs/status.txt
+cat /proc/cmdline > /logs/cmdline.txt
+memfd-compat > /logs/memfd-compat.txt 2>&1 || fail memfd-compat
+# Android BPF stats uses closing a PF_KEY socket as an RCU synchronization.
+# Load our matching module before Android's donor module loader takes over.
+modprobe af_key >> /logs/module-load.txt 2>&1 || fail af-key-module
+# vold needs FUSE before it creates the emulated storage volumes. Loading it
+# after boot leaves those volumes UNMOUNTABLE until the framework retries.
+modprobe fuse >> /logs/module-load.txt 2>&1 || fail fuse-module
+test -c /dev/fuse || fail fuse-device
+chmod 0666 /dev/fuse || fail fuse-device-permissions
+if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
+    for m in hid_multitouch surface_aggregator surface_aggregator_registry surface_aggregator_hub surface_hid_core surface_hid spi-geni-qcom spi-hid surface_battery surface_charger rtc-surface tun dummy; do
+        timeout 15 modprobe "$m" >> /logs/module-load.txt 2>&1
+    done
+    timeout 5 hwclock -s -u >> /logs/module-load.txt 2>&1
+    echo 'Preparing Wi-Fi and diagnostic SSH (maximum 120 seconds)...'
+    if timeout 120 network-up > /logs/network-up.txt 2>&1; then
+        start-ssh
+        keep-debug-route > /logs/debug-route.txt 2>&1 &
+    fi
+    touch-services > /logs/touch-startup.txt 2>&1
+fi
+if grep -q 'sq2.rescue=1' /proc/cmdline; then
+    echo 'SQ2_SSD_RESCUE_READY: SSH and USB logs; Android/data not mounted.' | tee -a /logs/status.txt
+    while true; do setsid cttyhack /bin/sh; sleep 1; done
+fi
+base=/media/data/googlebook-stage
+if [ "$ssd" = 1 ]; then
+    while read name offset bytes; do
+        slice=$(sq2-loop-slice "${ssd_part}3" "$offset" "$bytes") || fail "SSD-slice-$name"
+        ln -s "$slice" /dev/mapper/$name || fail "SSD-map-$name"
+    done < /etc/sq2-ssd-super-slices
+    mount -t erofs -o ro /dev/mapper/system_a /newroot
+elif [ "$smoke" = 1 ]; then mount -t erofs -o ro /dev/vda /newroot; else mount -t erofs -o ro,loop "$base/system_a.img" /newroot; fi
+test $? = 0 || fail system-mount
+index=b
+for name in vendor product system_ext system_dlkm vendor_dlkm; do
+    if [ "$ssd" = 1 ]; then mount -t erofs -o ro /dev/mapper/${name}_a /newroot/$name
+    elif [ "$smoke" = 1 ]; then mount -t erofs -o ro /dev/vd$index /newroot/$name; else mount -t erofs -o ro,loop "$base/${name}_a.img" /newroot/$name; fi
+    test $? = 0 || fail "$name-mount"
+    case "$index" in b) index=c;; c) index=d;; d) index=e;; e) index=f;; esac
+done
+mount -t tmpfs tmpfs /newroot/debug_ramdisk || fail debug-mount
+cp /bin/busybox /newroot/debug_ramdisk/busybox
+if [ -d /etc/googlebook-security ]; then
+    apply-security-overlay > /logs/security-overlay.txt 2>&1 || fail security-overlay
+    cat /logs/security-overlay.txt | tee -a /logs/status.txt
+fi
+cp /etc/android-native-test-policy /newroot/debug_ramdisk/precompiled_sepolicy
+mount --bind /newroot/debug_ramdisk/precompiled_sepolicy /newroot/vendor/etc/selinux/precompiled_sepolicy || fail test-policy
+echo 'DEVELOPMENT_ONLY: all SELinux domains permissive via RAM policy overlay; original images unchanged.' | tee -a /logs/status.txt
+cp /newroot/system/etc/init/keystore2.rc /newroot/debug_ramdisk/keystore2.rc
+cat >> /newroot/debug_ramdisk/keystore2.rc <<'RC'
+
+# SQ2 development only: keep diagnostics available while KeyMint is ported.
+on early-init
+    setprop init.svc_debug.no_fatal.keystore2 true
+RC
+mount --bind /newroot/debug_ramdisk/keystore2.rc /newroot/system/etc/init/keystore2.rc || fail keystore-debug-overlay
+if [ "$ssd" = 1 ]; then
+    # The port pins factory slot A and Surface-specific EFI payloads. The mica
+    # OTA installer cannot update these consistently; omit its init service.
+    echo '# SQ2 SSD development port: stock mica OTA service unavailable.' > /newroot/debug_ramdisk/update_engine.rc
+    mount --bind /newroot/debug_ramdisk/update_engine.rc /newroot/system/etc/init/update_engine.rc || fail SSD-OTA-overlay
+fi
+echo 'DEVELOPMENT_ONLY: keystore2 failures remain visible but do not request fatal reboot.' | tee -a /logs/status.txt
+mkdir -p /newroot/debug_ramdisk/logs
+mount --bind /logs /newroot/debug_ramdisk/logs
+if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
+    if prepare-native-gpu > /logs/gpu-native-startup.txt 2>&1; then
+        echo 'SQ2 GPU driver discovered; Android graphics userspace remains under development.' | tee -a /logs/status.txt
+    else
+        echo 'SQ2 GPU preparation failed; see gpu-native-startup.txt. SSH remains available.' | tee -a /logs/status.txt
+    fi
+fi
+for name in apex bootstrap-apex linkerconfig mnt tmp storage data_mirror; do mount -t tmpfs tmpfs /newroot/$name || fail "$name-tmpfs"; done
+if [ "$ssd" = 1 ]; then
+    mount -t ext4 -o rw,nodev,nosuid /dev/block/by-name/metadata /newroot/metadata || fail SSD-metadata
+else
+    mount -t tmpfs tmpfs /newroot/metadata || fail metadata-tmpfs
+fi
+mkdir -p /dev/mapper /dev/block/by-name /dev/socket /dev/binderfs
+# Restore a real ext4 template with casefold into RAM. Leave /data unmounted:
+# Android mount_all --late must own the initial mount and any fs tuning.
+if [ "$ssd" = 0 ]; then
+zcat /etc/googlebook-userdata.sparse.gz | sparse-restore /run/googlebook-userdata.img > /logs/userdata-format.txt 2>&1 || fail userdata-template
+data_loop=$(losetup -f) || fail userdata-loop
+losetup "$data_loop" /run/googlebook-userdata.img || fail userdata-loop-attach
+ln -s "$data_loop" /dev/block/by-name/userdata
+create-test-bootmeta > /logs/bootmeta.txt 2>&1 || fail bootmeta
+echo 'Userdata: fresh 2 GiB RAM filesystem, unencrypted and discarded on reboot.' | tee -a /logs/status.txt
+else
+echo 'Userdata: persistent external SSD ext4; metadata/misc physical; no automatic format. Development A slot, OTA unsupported.' | tee -a /logs/status.txt
+fi
+cp /etc/fstab.sq2-native /newroot/debug_ramdisk/fstab.sq2-native
+mount --bind /newroot/debug_ramdisk/fstab.sq2-native /newroot/vendor/etc/fstab.android-desktop || fail test-fstab
+test -e /dev/mapper/control || mknod -m 600 /dev/mapper/control c 10 236
+test -e /dev/device-mapper || mknod -m 600 /dev/device-mapper c 10 236
+test -e /dev/loop-control || mknod -m 600 /dev/loop-control c 10 237
+for n in $(seq 0 127); do test -e /dev/block/loop$n || mknod -m 600 /dev/block/loop$n b 7 $n; done
+mount -t binder binder /dev/binderfs || fail binderfs
+binder-setup || fail binder-nodes
+for name in binder hwbinder vndbinder; do ln -sf /dev/binderfs/$name /dev/$name; chmod 666 /dev/binderfs/$name; done
+mount -t selinuxfs selinuxfs /sys/fs/selinux || fail selinuxfs
+# Generated boot properties supplement a UEFI boot, which has no Android bootconfig.
+echo 'androidboot.hardware=android-desktop androidboot.hardware.platform=android-desktop androidboot.selinux=permissive androidboot.verifiedbootstate=orange androidboot.vbmeta.device_state=unlocked androidboot.slot_suffix=_a androidboot.serialno=SQ2TEST androidboot.force_normal_boot=1' > /run/android-cmdline
+cat /proc/cmdline >> /run/android-cmdline
+mount --bind /run/android-cmdline /proc/cmdline
+if [ -e /proc/bootconfig ]; then
+    echo 'androidboot.hardware = "android-desktop"' > /run/android-bootconfig
+    mount --bind /run/android-bootconfig /proc/bootconfig
+fi
+# Snapshot recursive binds only after the nested SELinux/binder/bootconfig mounts exist.
+for name in dev proc sys; do mount --rbind /$name /newroot/$name || fail "$name-bind"; done
+mkdir -p /android
+mount --rbind /newroot /android || fail android-debug-root
+cat /proc/mounts > /logs/mounts-before-init.txt
+echo 'SQ2_NATIVE_HANDOFF: original Android init as real PID 1; USB logs active.' | tee -a /logs/status.txt
+native-monitor > /logs/monitor.txt 2>&1 &
+lab-keep-awake > /logs/lab-keep-awake.txt 2>&1 &
+if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
+    if [ -x /bin/power-input-boot ]; then
+        power-input-boot > /logs/power-input-boot.txt 2>&1 &
+    fi
+    if [ -x /bin/bluetooth-framework-boot ]; then
+        bluetooth-framework-boot > /logs/bluetooth-framework-boot.txt 2>&1 &
+    fi
+    lab-input-posture > /logs/lab-input-posture.txt 2>&1 &
+    if [ -x /bin/lab-local-setup ]; then
+        lab-local-setup > /logs/lab-local-setup.txt 2>&1 &
+    fi
+    if grep -q 'sq2.audio=1' /proc/cmdline && [ -x /bin/audio-framework-boot ]; then
+        audio-framework-boot > /logs/audio-framework-boot.txt 2>&1 &
+    fi
+fi
+if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ] &&
+   [ -f /etc/googlebook-security/lib64/libsq2-wifi-hal.so ]; then
+    # Hand over ownership before Android can register its nl80211 listeners.
+    # The supervisor restores diagnostic Wi-Fi if framework startup fails.
+    wpa_cli -p /run/wpa_supplicant -i wlan0 terminate >> /logs/network-up.txt 2>&1 || true
+    if [ -r /run/udhcpc-wlan0.pid ]; then
+        kill "$(cat /run/udhcpc-wlan0.pid)" 2>/dev/null || true
+        rm -f /run/udhcpc-wlan0.pid
+    fi
+    wifi-framework-boot > /logs/wifi-framework-boot.txt 2>&1 &
+fi
+sync
+exec native-handoff /newroot

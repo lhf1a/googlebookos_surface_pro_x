@@ -1,0 +1,16 @@
+#!/bin/busybox sh
+echo 'GPU test: the screen may change or go blank. Wait 150 seconds before forcing a restart.'
+echo 'BEGIN GPU module load' > /logs/gpu.txt
+for m in phy-qcom-edp dispcc-sm8250 pwm_bl; do
+    echo "Loading prerequisite $m" >> /logs/gpu.txt
+    timeout 15 modprobe "$m" >> /logs/gpu.txt 2>&1
+    echo "exit=$?" >> /logs/gpu.txt
+done
+timeout 45 modprobe msm >> /logs/gpu.txt 2>&1
+echo "modprobe exit=$?" >> /logs/gpu.txt
+sleep 10
+timeout 20 gpu-probe >> /logs/gpu.txt 2>&1
+rc=$?
+echo "gpu-probe exit=$rc" >> /logs/gpu.txt
+cat /logs/gpu.txt
+exit "$rc"

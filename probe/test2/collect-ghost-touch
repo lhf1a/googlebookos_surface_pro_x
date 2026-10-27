@@ -1,0 +1,48 @@
+#!/bin/busybox sh
+# Passive pointer event capture. Does not stop IPTSd, grab input, or change
+# thresholds. An idle label is meaningful only when the operator avoids touch.
+set -eu
+export PATH=/bin:/sbin
+mode=${1:-idle}
+case "$mode" in idle|touch|battery-idle|charging-idle) ;; *) echo 'usage: collect-ghost-touch idle|touch|battery-idle|charging-idle'; exit 2;; esac
+dir=/logs/ghost-touch-$mode-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p "$dir"
+cat /proc/bus/input/devices > "$dir/devices.txt"
+cat /proc/sys/kernel/random/boot_id > "$dir/boot-id.txt"
+cat /proc/cmdline > "$dir/cmdline.txt"
+ps > "$dir/processes.txt"
+cp /etc/iptsd.conf "$dir/iptsd.conf" 2>/dev/null || true
+cp /logs/iptsd.txt "$dir/iptsd-before.txt" 2>/dev/null || true
+nsenter -t 1 -m -r -- /system/bin/dumpsys input > "$dir/android-input-before.txt"
+for d in /sys/class/power_supply/*; do
+    [ ! -r "$d/uevent" ] || cat "$d/uevent"
+done > "$dir/power.txt"
+echo "Capture mode=$mode duration=30 seconds output=$dir"
+pids=
+for d in /sys/class/input/event*; do
+    name=$(cat "$d/device/name")
+    case "$name" in
+        *Touchscreen*|*Stylus*|*Touchpad*|'spi 045E:0C21')
+            event=$(basename "$d")
+            echo "$event $name" >> "$dir/captured-devices.txt"
+            nsenter -t 1 -m -r -- /system/bin/getevent -lp "/dev/input/$event" > "$dir/$event-capabilities.txt" 2>&1 || true
+            (
+                set +e
+                timeout 30 nsenter -t 1 -m -r -- /system/bin/getevent -lt "/dev/input/$event" > "$dir/$event.txt" 2>&1
+                echo "$?" > "$dir/$event-exit-status.txt"
+            ) &
+            pids="$pids $!"
+            ;;
+    esac
+done
+for pid in $pids; do wait "$pid" || true; done
+nsenter -t 1 -m -r -- /system/bin/dumpsys input > "$dir/android-input-after.txt"
+cp /logs/iptsd.txt "$dir/iptsd-after.txt" 2>/dev/null || true
+dmesg | tail -150 > "$dir/kernel-tail.txt"
+echo 'Event counts (nonzero events alone do not prove unintended touches):'
+while read -r event name; do
+    wc -l "$dir/$event.txt"
+    echo "$event capture exit=$(cat "$dir/$event-exit-status.txt") (124/143 normally indicates timeout)"
+done < "$dir/captured-devices.txt"
+sync
+echo "GHOST_TOUCH_CAPTURE_SAVED=$dir"

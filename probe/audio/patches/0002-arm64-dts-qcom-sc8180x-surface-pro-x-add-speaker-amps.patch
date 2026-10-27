@@ -1,0 +1,97 @@
+--- a/arch/arm64/boot/dts/qcom/sc8180x-surface-pro-x.dts
++++ b/arch/arm64/boot/dts/qcom/sc8180x-surface-pro-x.dts
+@@ -288,6 +288,20 @@
+ 		vin-supply = <&vph_pwr>;
+ 	};
+ 
++	/* copied from Flex 5G: wcd9340 GPIO 4 enables the amplifier battery rail (UNVERIFIED on Pro X) */
++	vreg_spkr_bat: regulator-speaker-bat {
++		compatible = "regulator-fixed";
++		regulator-name = "vreg_speaker_bat";
++
++		gpio = <&wcdgpio 4 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++
++		regulator-always-on;
++		regulator-boot-on;
++
++		vin-supply = <&vph_pwr>;
++	};
++
+ 	vreg_ts_5p0: ts-5p0-regulator {
+ 		compatible = "regulator-fixed";
+ 		regulator-name = "vreg_ts_5p0";
+@@ -416,6 +430,16 @@
+ 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+ 		};
+ 
++		/* copied from Flex 5G; supply for the speaker amps (UNVERIFIED on Pro X) */
++		vreg_l14e_1p8: ldo14 {
++			regulator-min-microvolt = <1800000>;
++			regulator-max-microvolt = <1800000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++
++			regulator-boot-on;
++			regulator-always-on;
++		};
++
+ 		vreg_l16e_3p1: ldo16 {
+ 			regulator-min-microvolt = <3072000>;
+ 			regulator-max-microvolt = <3072000>;
+@@ -1224,6 +1248,8 @@
+ 
+ 	audio-routing =
+ 		"RX_BIAS", "MCLK",
++		"SpkrLeft IN", "SPK1 OUT",
++		"SpkrRight IN", "SPK2 OUT",
+ 		"MM_DL1",  "MultiMedia1 Playback",
+ 		"MM_DL3",  "MultiMedia3 Playback",
+ 		"MultiMedia2 Capture", "MM_UL2";
+@@ -1260,8 +1286,7 @@
+ 		};
+ 
+ 		codec {
+-			/* stage 2 adds the two speaker amps and &swm 0 here */
+-			sound-dai = <&wcd9340 0>;
++			sound-dai = <&left_spkr>, <&right_spkr>, <&swm 0>, <&wcd9340 0>;
+ 		};
+ 	};
+ 
+@@ -1313,6 +1338,37 @@
+ 	 */
+ };
+ 
++&swm {
++	/*
++	 * UNVERIFIED on Pro X: addresses and GPIOs copied from the Flex 5G.
++	 * Windows driver config suggests two SoundWire slaves with speaker
++	 * protection, but does not confirm the part or the control lines.
++	 */
++	left_spkr: speaker@0,3 {
++		compatible = "sdw10217211000";
++		reg = <0 3>;
++		powerdown-gpios = <&wcdgpio 1 GPIO_ACTIVE_LOW>;
++		#thermal-sensor-cells = <0>;
++		sound-name-prefix = "SpkrLeft";
++		#sound-dai-cells = <0>;
++		vdda-supply = <&vreg_l14e_1p8>;
++		vddb-supply = <&vreg_l14e_1p8>;
++		vddbat-supply = <&vreg_spkr_bat>;
++	};
++
++	right_spkr: speaker@0,4 {
++		compatible = "sdw10217211000";
++		reg = <0 4>;
++		powerdown-gpios = <&wcdgpio 2 GPIO_ACTIVE_LOW>;
++		#thermal-sensor-cells = <0>;
++		sound-name-prefix = "SpkrRight";
++		#sound-dai-cells = <0>;
++		vdda-supply = <&vreg_l14e_1p8>;
++		vddb-supply = <&vreg_l14e_1p8>;
++		vddbat-supply = <&vreg_spkr_bat>;
++	};
++};
++
+ &uart13 {
+ 	status = "okay";
+ 

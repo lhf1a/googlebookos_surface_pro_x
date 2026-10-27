@@ -1,0 +1,71 @@
+#!/bin/busybox sh
+# RAM-only experiment. Preserve the SPI HID open across IPTSd restart.
+set -eu
+export PATH=/bin:/sbin
+mode=${1:-apply}
+case "$mode" in apply|balanced|medium|shape|shape-only|restore) ;; *) exit 2;; esac
+backup=/run/iptsd.pre-ghost.conf
+[ -r /run/iptsd.pid ]
+pid=$(cat /run/iptsd.pid)
+case "$pid" in ''|*[!0-9]*) exit 3;; esac
+[ "$(cat /proc/$pid/comm)" = iptsd ]
+node=
+for d in /sys/class/hidraw/hidraw*; do
+    if grep -qi '^HID_ID=001C:0000045E:00000C21$' "$d/device/uevent"; then
+        node=/dev/$(basename "$d")
+        break
+    fi
+done
+[ -n "$node" ]
+exec 3<> "$node"
+if [ "$mode" != restore ]; then
+    [ -f "$backup" ] || cp /etc/iptsd.conf "$backup"
+    cp /etc/iptsd.conf /logs/iptsd-before-ghost-trial.conf
+    # This trial expects the known minimal config; do not discard other tuning.
+    [ "$(grep -c '^\[' "$backup")" -eq 1 ]
+    grep -q '^\[DFT\]' "$backup"
+    cp "$backup" /run/iptsd.trial.conf
+    if [ "$mode" = shape-only ]; then
+        printf '\n[Contacts]\nAspectMax = 2.0\n' >> /run/iptsd.trial.conf
+    elif [ "$mode" = shape ]; then
+        printf '\n[Contacts]\nActivationThreshold = 48\nDeactivationThreshold = 36\nOrientationThresholdMax = 90\nAspectMax = 2.0\n' >> /run/iptsd.trial.conf
+    elif [ "$mode" = medium ]; then
+        printf '\n[Contacts]\nActivationThreshold = 56\nDeactivationThreshold = 36\nOrientationThresholdMax = 90\n' >> /run/iptsd.trial.conf
+    elif [ "$mode" = balanced ]; then
+        printf '\n[Contacts]\nActivationThreshold = 48\nDeactivationThreshold = 36\nOrientationThresholdMax = 90\n' >> /run/iptsd.trial.conf
+    else
+        printf '\n[Contacts]\nActivationThreshold = 60\nDeactivationThreshold = 54\n' >> /run/iptsd.trial.conf
+    fi
+else
+    cp "$backup" /run/iptsd.trial.conf
+fi
+cp /logs/iptsd.txt /logs/iptsd-before-ghost-trial.txt
+kill "$pid"
+for n in $(seq 1 20); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+done
+if kill -0 "$pid" 2>/dev/null; then echo IPTSD_STOP_TIMEOUT; exit 4; fi
+cp /run/iptsd.trial.conf /etc/iptsd.conf
+sleep 2
+if ! touch-services; then
+    cp /logs/touch-service.txt /logs/ghost-trial-first-start.txt
+    cp /logs/iptsd.txt /logs/ghost-trial-first-iptsd.txt
+    sleep 2
+fi
+if ! kill -0 "$(cat /run/iptsd.pid)" 2>/dev/null && ! touch-services; then
+    cp "$backup" /etc/iptsd.conf
+    touch-services || true
+    echo TRIAL_FAILED_RESTORED_CONFIG
+    exit 5
+fi
+if [ -f /tmp/refresh-iptsd-input-nodes ]; then
+    sh /tmp/refresh-iptsd-input-nodes
+elif command -v refresh-iptsd-input-nodes >/dev/null 2>&1; then
+    refresh-iptsd-input-nodes
+else
+    echo 'WARNING: Android hotplug refresh helper is missing'
+fi
+cat /etc/iptsd.conf
+cat /logs/iptsd.txt
+echo TOUCH_TRIAL_READY

@@ -1,0 +1,16 @@
+--- a/arch/arm64/boot/dts/qcom/sc8180x-surface-pro-x.dts
++++ b/arch/arm64/boot/dts/qcom/sc8180x-surface-pro-x.dts
+@@ -1253,6 +1253,13 @@
+ 		"SpkrRight IN", "SPK2 OUT",
+ 		"MM_DL1",  "MultiMedia1 Playback",
+ 		"MM_DL3",  "MultiMedia3 Playback",
++		/*
++		 * Internal microphone array: two digital mics on DMIC0/DMIC1, both powered
++		 * from MIC BIAS1 (found by powering one MIC BIAS at a time; no other pin
++		 * makes either mic respond).
++		 */
++		"DMIC0", "MIC BIAS1",
++		"DMIC1", "MIC BIAS1",
+ 		"MultiMedia2 Capture", "MM_UL2";
+ 
+ 	mm1-dai-link {

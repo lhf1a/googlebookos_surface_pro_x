@@ -1,0 +1,4 @@
+# Development RAM userdata. System/vendor/product are already mounted read-only
+# by the SQ2 USB bootstrap. No physical block-device or removable-media entries.
+/dev/block/by-name/userdata /data ext4 rw,nodev,noatime,nosuid wait,latemount
+/dev/block/by-name/misc /misc emmc defaults defaults

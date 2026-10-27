@@ -1,0 +1,17 @@
+#!/bin/busybox sh
+# User-authorized LAN-only setup, including freshly formatted /data.
+set -eu
+export PATH=/bin:/sbin
+for n in $(seq 1 180); do
+    if [ -x /proc/1/root/system/bin/getprop ]; then
+        ready=$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null || true)
+        if [ "$ready" = 1 ]; then
+            provisioned=$(timeout 5 nsenter -t 1 -m -r -- /system/bin/settings get global device_provisioned 2>/dev/null || true)
+            if [ "$provisioned" != 1 ]; then skip-google-setup; fi
+            exit 0
+        fi
+    fi
+    sleep 2
+done
+echo 'LOCAL_SETUP_DEFERRED: framework not ready'
+exit 1

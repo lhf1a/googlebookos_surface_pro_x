@@ -1,0 +1,14 @@
+#!/bin/busybox sh
+# Development-only LAN SSH path. netd removes bootstrap policy-routing rules.
+# Preserve only the directly connected diagnostic Wi-Fi subnet, not Internet
+# routing or a claim that Android's Wi-Fi framework has been ported.
+export PATH=/bin:/sbin
+prefix=$(ip -4 route show dev wlan0 | awk '/scope link/ {print $1; exit}')
+case "$prefix" in */*) ;; *) echo 'No connected diagnostic subnet'; exit 1;; esac
+echo "Diagnostic LAN route: $prefix via main, priority 50"
+while true; do
+    if ! ip -4 rule show | grep -F "to $prefix lookup main" >/dev/null; then
+        ip -4 rule add priority 50 to "$prefix" lookup main && echo 'Restored diagnostic LAN rule'
+    fi
+    sleep 2
+done

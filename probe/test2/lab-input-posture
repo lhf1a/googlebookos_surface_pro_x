@@ -1,0 +1,42 @@
+#!/bin/busybox sh
+# Bridge actual SSAM cover posture to mica's missing platform posture provider.
+# Retain OPEN fallback only when the kernel has no SSAM state device.
+export PATH=/bin:/sbin
+android() { timeout 8 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+configured=
+previous=
+cover=/sys/bus/surface_aggregator/devices/01:0e:01:00:01/state
+while true; do
+    if [ "$(android getprop persist.sq2.input_posture 2>/dev/null)" = auto ]; then
+        echo 'SQ2_INPUT_POSTURE: automatic posture requested; lab override skipped.'
+        exit 0
+    fi
+    server=$(pidof system_server)
+    physical=$(cat "$cover" 2>/dev/null || echo unavailable)
+    case "$physical" in
+        closed) target=0;;
+        laptop) target=2;;
+        disconnected|folded-canvas|folded-back|book) target=3;;
+        unavailable) target=2;;
+        *) sleep 1; continue;;
+    esac
+    if [ -n "$server" ] && [ "$server:$target" != "$configured" ] &&
+       [ "$(android getprop sys.boot_completed 2>/dev/null)" = 1 ]; then
+        states=$(android cmd device_state print-states 2>/dev/null)
+        # IDs belong to the pinned mica build; fail closed on another schema.
+        if ! printf '%s\n' "$states" | grep "identifier=2, name='OPEN'" >/dev/null; then
+            echo 'SQ2_INPUT_POSTURE: expected OPEN state 2 absent; no override applied.'
+            exit 1
+        fi
+        if android cmd device_state base-state "$target"; then
+            if [ "$previous" = closed ] && [ "$physical" != closed ]; then
+                android cmd power wakeup || true
+            fi
+            previous=$physical
+            configured=$server:$target
+            echo "SQ2_INPUT_POSTURE: physical=$physical base=$target system_server=$server"
+            android dumpsys device_state
+        fi
+    fi
+    sleep 1
+done

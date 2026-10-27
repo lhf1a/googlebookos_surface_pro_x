@@ -1,0 +1,29 @@
+#!/bin/busybox sh
+# A transport reset loses the raw-touch mode set by IPTSd. Reapply it once.
+set -u
+export PATH=/bin:/sbin
+counter=/sys/bus/spi/devices/spi0.0/resume_count
+previous=$(cat "$counter" 2>/dev/null || echo 0)
+while true; do
+    current=$(cat "$counter" 2>/dev/null || echo "$previous")
+    if [ "$current" != "$previous" ]; then
+        previous=$current
+        ready=0
+        for n in $(seq 1 60); do
+            if [ "$(cat /sys/bus/spi/devices/spi0.0/ready 2>/dev/null)" = ready ]; then ready=1; break; fi
+            sleep 0.1
+        done
+        if [ "$ready" = 0 ]; then echo "TOUCH_RESUME_NOT_READY count=$current"; continue; fi
+        if [ -r /run/iptsd.pid ]; then
+            pid=$(cat /run/iptsd.pid)
+            if [ "$(cat /proc/$pid/comm 2>/dev/null)" = iptsd ]; then
+                kill "$pid" 2>/dev/null || true
+                sleep 1
+            fi
+            rm -f /run/iptsd.pid
+        fi
+        echo "TOUCH_RESUME_REINITIALIZE count=$current"
+        /bin/touch-services || echo "TOUCH_RESUME_FAILED count=$current"
+    fi
+    sleep 0.5
+done

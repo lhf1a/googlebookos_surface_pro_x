@@ -1,0 +1,23 @@
+#!/bin/busybox sh
+# Collect desktop-startup evidence without repeating interactive driver tests.
+export PATH=/bin:/sbin
+{
+    date -u
+    cat /proc/sys/kernel/random/boot_id
+    cat /proc/uptime
+    for key in sys.boot_completed sys.use_memfd vendor.minigbm.debug init.svc.netd init.svc.zygote init.svc.surfaceflinger init.svc.bootanim init.svc.vendor.graphics.allocator init.svc.vendor.hwcomposer-3; do
+        printf '%s=' "$key"
+        timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop "$key"
+    done
+    for service in netd activity package window SurfaceFlinger; do
+        timeout 5 nsenter -t 1 -m -r -- /system/bin/service check "$service"
+    done
+    ps -o pid,ppid,args | grep -E 'netd|zygote|system_server|surfaceflinger|bootanim'
+    ip -4 rule show
+    cat /logs/memfd-compat.txt
+} > /logs/framework-status.txt 2>&1
+timeout 15 nsenter -t 1 -m -r -- /system/bin/logcat -d -b main -b system -b crash -s SystemServer SystemServerTiming AndroidRuntime ActivityManager WindowManager Watchdog netd Netd libcutils SurfaceFlinger BootAnimation > /logs/framework-focused.txt 2>&1
+grep -E "Service '(netd|zygote|surfaceflinger|bootanim)'.*(exited|SIG)" /logs/kernel-live.txt | tail -40 > /logs/framework-exits.txt
+sync
+cat /logs/framework-status.txt
+tail -45 /logs/framework-focused.txt

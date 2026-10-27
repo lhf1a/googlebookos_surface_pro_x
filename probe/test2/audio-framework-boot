@@ -1,0 +1,35 @@
+#!/bin/busybox sh
+# Experimental physical audio startup. Select the no-audio GRUB entry to bypass.
+set -eu
+export PATH=/bin:/sbin
+grep -q 'sq2.audio=1' /proc/cmdline
+android() { nsenter -t 1 -m -r -- "$@"; }
+target=/apex/com.android.hardware.audio/bin/hw/android.hardware.audio.service-aidl.example
+ready=0
+for n in $(seq 1 120); do
+    if [ -x /proc/1/root/system/bin/getprop ] && [ -f /proc/1/root$target ]; then
+        state=$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null || true)
+        if [ "$state" = 1 ]; then ready=1; break; fi
+    fi
+    sleep 2
+done
+[ "$ready" = 1 ] || { echo 'AUDIO_DEFERRED: Android boot not complete'; exit 1; }
+original=$(sha256sum /proc/1/root$target)
+[ "${original%% *}" = fd219b1058eccc701de685cf59d6578e887c11182d877bb4e6c3a78bfd73e279 ] || { echo 'HAL build mismatch'; exit 1; }
+android /system/bin/setprop ctl.stop vendor.audio-hal-aidl
+android /system/bin/setprop ctl.stop vendor.pd_mapper
+sleep 1
+if ! audio-drivers-start; then
+    echo 'AUDIO_FAILED: driver initialization; leaving diagnostics available'
+    exit 1
+fi
+for node in /dev/snd/*; do
+    [ ! -c "$node" ] || { chown 1000:1005 "$node"; chmod 660 "$node"; }
+done
+audio-speaker-route enable
+mkdir -p /proc/1/root/debug_ramdisk/sq2-audio
+cp /etc/sq2-audio/audio-hal /proc/1/root/debug_ramdisk/sq2-audio/audio-hal
+chmod 755 /proc/1/root/debug_ramdisk/sq2-audio/audio-hal
+android /system/bin/mount --bind /debug_ramdisk/sq2-audio/audio-hal "$target"
+android /system/bin/setprop ctl.start vendor.audio-hal-aidl
+echo 'AUDIO_READY: physical stereo, conservative gain; audio crash root cause unresolved'

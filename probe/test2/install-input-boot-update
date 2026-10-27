@@ -1,0 +1,17 @@
+#!/bin/busybox sh
+# One-shot update for the recorded driver boot image; preserve a recovery copy.
+set -eu
+test "$(cat /media/esp/SQ2-SSD-ID.txt)" = SQ2-SSD-20261027-3001237923792379
+test "$(cat /run/sq2-ssd-device)" = /dev/sda
+boot=/media/esp/boot/sq2-android1
+target="$boot/native-combined-initramfs.cpio.gz"
+test "$(sha256sum "$target" | cut -d' ' -f1)" = 4be0cf8ba3c2a441f011f02570f89ced057dd4b41d706cf5aaf0162fde2142a9
+test "$(sha256sum /tmp/native-input-fixup.cpio.gz | cut -d' ' -f1)" = 41ac915244f09a3ce97bc938a87c73907ce12eaab9b133a93fe5f78b19fdb176
+test ! -e "$boot/native-combined-initramfs.pre-input.gz"
+cat "$target" /tmp/native-input-fixup.cpio.gz > "$boot/native-combined-initramfs.input-next.gz"
+test "$(sha256sum "$boot/native-combined-initramfs.input-next.gz" | cut -d' ' -f1)" = ae758cea2a36972b23b9d950e03615be2317fd54f514dce4fb8e849e1f3a710b
+sync
+mv "$target" "$boot/native-combined-initramfs.pre-input.gz"
+mv "$boot/native-combined-initramfs.input-next.gz" "$target"
+sync
+echo 'SQ2_INPUT_BOOT_INSTALLED: lab OPEN base state, physical posture still unported'

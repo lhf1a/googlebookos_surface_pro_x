@@ -1,0 +1,42 @@
+#!/bin/busybox sh
+# Load only after ADSP is running; do not unload/reset shared remote processors.
+set -eu
+export PATH=/bin:/sbin
+test "$(cat /sys/class/remoteproc/remoteproc2/name)" = 17300000.remoteproc
+test "$(cat /sys/class/remoteproc/remoteproc2/state)" = running
+# The 6.3 NGD child must finish registering before the locator announces its
+# audio domain. Temporarily stop only the retained initramfs mapper, then
+# reannounce after module initialization; never reset the shared ADSP.
+restart_mapper=0
+restore_mapper() {
+    if [ "$restart_mapper" = 1 ]; then
+        pd-mapper > /logs/pd-mapper-audio.txt 2>&1 &
+        restart_mapper=0
+    fi
+}
+trap restore_mapper EXIT
+if [ ! -c /dev/snd/controlC0 ]; then
+    for pid in $(pidof pd-mapper || true); do
+        if [ "$(readlink /proc/$pid/exe)" = /bin/pd-mapper ]; then
+            kill "$pid"
+            restart_mapper=1
+        fi
+    done
+    [ "$restart_mapper" = 1 ] || { echo 'Expected initramfs PD mapper'; exit 1; }
+    sleep 1
+fi
+for m in bam_dma apr q6core q6afe q6afe_dai q6afe_clocks q6asm q6asm_dai q6adm q6routing wcd934x gpio_wcd934x soundwire_qcom snd_soc_wcd934x snd_soc_wsa881x snd_soc_sdm845 slim_qcom_ngd_ctrl; do
+    echo "LOAD $m"
+    timeout 20 modprobe "$m"
+done
+restore_mapper
+for n in $(seq 1 30); do
+    for f in /sys/bus/platform/devices/wcd934x-soundwire.*/power/control /sys/bus/soundwire/devices/sdw:*/power/control /sys/bus/platform/devices/171c0000.slim-ngd/qcom,slim-ngd.1/power/control; do
+        [ ! -f "$f" ] || echo on > "$f"
+    done
+    [ ! -c /dev/snd/controlC0 ] || break
+    sleep 1
+done
+cat /proc/asound/cards /proc/asound/pcm
+ls -l /dev/snd
+tinymix -D 0 contents

@@ -1,0 +1,33 @@
+#!/bin/busybox sh
+# Preserve SQ2 firmware after Android replaces the initramfs root.
+# Only load drivers and record discovery; do not repeat the GPU test suite.
+set -eu
+target=${1:-/newroot}
+case "$target" in /newroot|/android) ;; *) exit 2;; esac
+test -d "$target/debug_ramdisk"
+dest=$target/debug_ramdisk/sq2-firmware
+mkdir -p "$dest"
+# Firmware requests also occur during Bluetooth setup and remoteproc resume.
+# Retain the selected ADSP blob (which fits the pinned DT), ath10k board data,
+# regulatory database, and QCA firmware, not just the three GPU blobs.
+cp -a /lib/firmware/. "$dest/"
+for name in a680_sqe.fw a680_gmu.bin msft/surface/pro-x-sq2/qcdxkmsuc8180.mbn; do
+    sha256sum "$dest/qcom/$name"
+done
+# module_param_string preserves a trailing newline: use printf, not echo.
+printf %s /debug_ramdisk/sq2-firmware > /sys/module/firmware_class/parameters/path
+for module in phy-qcom-edp dispcc-sm8250 pwm_bl msm; do
+    timeout 20 modprobe "$module"
+done
+for attempt in $(seq 1 15); do
+    [ -c /dev/dri/renderD128 ] && break
+    sleep 1
+done
+ls -l /dev/dri
+for connector in /sys/class/drm/card*-eDP-*; do
+    [ -f "$connector/status" ] || continue
+    echo "CONNECTOR=$connector"
+    cat "$connector/status" "$connector/modes"
+done
+test -c /dev/dri/renderD128
+echo 'SQ2_GPU_DRIVER_READY: rendering and Android graphics compatibility not tested here.'

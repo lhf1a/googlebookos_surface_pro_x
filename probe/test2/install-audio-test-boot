@@ -1,0 +1,20 @@
+#!/bin/busybox sh
+set -eu
+test "$(cat /media/esp/SQ2-SSD-ID.txt)" = SQ2-SSD-20261027-3001237923792379
+test "$(cat /run/sq2-ssd-device)" = /dev/sda
+cd /media/esp/boot/sq2-audio-next
+echo '144607a48872825a1ea7431fe2a0568cf456c0eae4a13bbd4ce8ce712e12d082  Image
+7a4d1c73cc8d64ffef979edf00e1240bef8bf15678690b7a53c45b72434dda55  sc8180x-surface-pro-x.dtb
+dce477fb32178e23afe4b5e6277c2329469786e05deccfa836a29b8dbee2b5ab  audio-addon.cpio.gz' | sha256sum -c -
+test ! -d /media/esp/boot/sq2-audio
+test -f /media/esp/boot/sq2-android1/Image
+test -f /media/esp/boot/sq2-android1/native-combined-initramfs.cpio.gz
+test ! -e /media/esp/EFI/BOOT/grub.pre-audio.cfg
+cp /media/esp/EFI/BOOT/grub.cfg /media/esp/EFI/BOOT/grub.pre-audio.cfg
+cp /tmp/grub-audio.cfg /media/esp/EFI/BOOT/grub.audio-next.cfg
+sync
+cd /
+mv /media/esp/boot/sq2-audio-next /media/esp/boot/sq2-audio
+mv /media/esp/EFI/BOOT/grub.audio-next.cfg /media/esp/EFI/BOOT/grub.cfg
+sync
+echo 'AUDIO_TEST_BOOT_INSTALLED: previous kernel entry and rescue retained; default 3 seconds.'

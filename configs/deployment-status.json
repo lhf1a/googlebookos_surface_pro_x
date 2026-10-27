@@ -1,0 +1,26 @@
+{
+  "recorded": "2026-10-27",
+  "device": "Surface Pro X SQ2 16GB, replacement 512GB internal NVMe",
+  "os": "mica 16471258",
+  "kernel": "6.3.8-sq2-android1",
+  "sha256": {
+    "deployed_initramfs": "a65e4d0d6e70d65edc8015f884f9392f19d2217d44d7b47db86ff4e27862d63d",
+    "power_connectivity_storage_addon": "c5016e819a996beadda6e195287521c7932f8def1c3e78ba2250fd5d1f7bb4af",
+    "graphics_only_base": "8d4f493bdf149d448b843358dc6a446d5684a041e24a521045ae8775f25a5269",
+    "Image": "87565f8fa3b7fa5642d899c481b5221975e38c67dc3061c40757cc48927d6060",
+    "dtb": "7a4d1c73cc8d64ffef979edf00e1240bef8bf15678690b7a53c45b72434dda55",
+    "libEGL_freedreno": "f16302e33e4f7c8bbaccbe5ab5fd5d19f3279222ee430ace236c4bad237a5434",
+    "iptsd": "7f03f7f8e54d202c13ced445b5206f0cc70341c61b06cb7aea870b5b830b36c5",
+    "audio_hal": "99e2a62520f4efc062f785ec92ddc63faccbcc6d7d6ba858f28b238e3c5f5836"
+  },
+  "storage_validation": {
+    "emulated_user_0": "MOUNTED",
+    "emulated_user_10": "MOUNTED",
+    "files_operations": "user_confirmed_pass",
+    "chrome_download": "user_confirmed_pass",
+    "userdata_reformatted": false
+  },
+  "suspend": "paused_by_user_unresolved",
+  "audio_tuning": "deferred_by_user",
+  "note": "Hashes describe this local deployment; binary images, embedded local credentials and raw logs are not distributed. Not a fresh-clone reproducibility claim."
+}

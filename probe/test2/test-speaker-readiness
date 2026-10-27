@@ -1,0 +1,24 @@
+#!/bin/busybox sh
+# Read-only check of physical audio prerequisites; does not play or change gains.
+export PATH=/bin:/sbin
+echo 'SQ2 physical speaker readiness (not an acoustic playback test)'
+date -u
+uname -r
+echo '--- Running kernel audio configuration ---'
+zcat /proc/config.gz | grep -E 'CONFIG_SOUND|CONFIG_SND|CONFIG_QCOM_APR'
+echo '--- ALSA cards and PCM devices ---'
+cat /proc/asound/cards /proc/asound/pcm 2>/dev/null
+ls -l /dev/snd 2>/dev/null
+echo '--- Android audio implementation ---'
+nsenter -t 1 -m -r -- /system/bin/ps -A | grep -i audio
+echo '--- Verdict ---'
+if [ ! -r /proc/asound/cards ]; then
+    echo 'BLOCKED: no ALSA subsystem/card is exposed by the running kernel.'
+    echo 'Physical speaker playback was not attempted; Android virtual SPEAKER routing is not hardware validation.'
+    exit 2
+fi
+if ! ls /dev/snd/pcmC*D*p >/dev/null 2>&1; then
+    echo 'BLOCKED: no ALSA playback PCM device.'
+    exit 2
+fi
+echo 'ALSA playback exists; board routing, amplifier controls and low-level playback still require validation.'

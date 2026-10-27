@@ -1,0 +1,11 @@
+# Real WCN3998 controller via Linux HCI_USER and a raw H4 PTY.
+service vendor.bluetooth-aidl-qti /vendor/bin/hw/sq2-bluetooth --serial /dev/sq2-bt-h4
+    class hal
+    disabled
+    user bluetooth
+    group bluetooth system wakelock
+    capabilities BLOCK_SUSPEND
+    seclabel u:r:hal_bluetooth_default:s0
+
+on property:vendor.sq2.bluetooth.ready=1
+    start vendor.bluetooth-aidl-qti

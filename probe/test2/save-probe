@@ -1,0 +1,29 @@
+#!/bin/busybox sh
+set -eu
+# Never mount the NVMe. Require a uniquely labeled USB partition and marker.
+mkdir /run/sq2-save-lock 2>/dev/null || { echo 'Log save already running.'; exit 1; }
+trap 'rmdir /run/sq2-save-lock' EXIT
+matches=''
+for p in /sys/class/block/*; do
+    [ -f "$p/partition" ] || continue
+    case "$(readlink -f "$p")" in */usb[0-9]*/*) ;; *) continue;; esac
+    dev=/dev/$(basename "$p")
+    blkid "$dev" 2>/dev/null | grep -q ' LABEL="SQ2PROBE"' || continue
+    blkid "$dev" 2>/dev/null | grep -q ' TYPE="vfat"' || continue
+    matches="$matches $dev"
+done
+set -- $matches
+[ "$#" -eq 1 ] || { echo 'Expected one USB partition labeled SQ2PROBE; no disk mounted.'; exit 1; }
+mkdir -p /media/probe
+mount -t vfat -o rw,nosuid,nodev,noexec "$1" /media/probe
+trap 'umount /media/probe; rmdir /run/sq2-save-lock' EXIT
+[ -f /media/probe/SQ2-PROBE-MEDIA.txt ] || { echo 'Diagnostic media marker missing.'; exit 1; }
+collect-probe >/dev/null 2>&1
+profile=$(cat /run/sq2-profile)
+case "$profile" in pending|all|input|gpu|wifi|smoke) ;; *) exit 1;; esac
+id=$(cat /proc/sys/kernel/random/boot_id)
+destination=/media/probe/logs/test3-$profile-$id
+mkdir -p "$destination"
+cp /logs/* "$destination/"
+sync
+echo "Saved logs to $destination on $1"

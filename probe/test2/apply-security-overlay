@@ -1,0 +1,27 @@
+#!/bin/busybox sh
+# Called before policy/fstab bind mounts and before original Android init.
+set -eu
+test -d /etc/googlebook-security
+mkdir -p /run/vendor-original /newroot/debug_ramdisk/vendor-upper /newroot/debug_ramdisk/vendor-work
+mount --move /newroot/vendor /run/vendor-original
+cp -a /etc/googlebook-security/. /newroot/debug_ramdisk/vendor-upper/
+mount -t overlay overlay -o lowerdir=/run/vendor-original,upperdir=/newroot/debug_ramdisk/vendor-upper,workdir=/newroot/debug_ramdisk/vendor-work /newroot/vendor
+if grep -q 'sq2.audio=1' /proc/cmdline && [ -f /etc/sq2-audio/primary_audio_policy_configuration.xml ]; then
+    cp /etc/sq2-audio/primary_audio_policy_configuration.xml /newroot/vendor/etc/primary_audio_policy_configuration.xml
+    # The Android mapper has no SQ2 avs/audio mapping and races the correct
+    # initramfs mapper. Disable its automatic class-core start before init.
+    rc=/newroot/vendor/etc/init/hw/init.target.rc
+    grep -q '^service vendor.pd_mapper /vendor/bin/pd-mapper' "$rc"
+    sed '/^service vendor.pd_mapper \/vendor\/bin\/pd-mapper/a\    disabled' "$rc" > /tmp/init.target.audio.rc
+    cp /tmp/init.target.audio.rc "$rc"
+fi
+test -x /newroot/vendor/bin/hw/android.hardware.security.keymint-service
+test -r /newroot/vendor/etc/init/sq2-software-keymint.rc
+# Hide the stock StrongBox APEX only in the writable RAM overlay. Advertising
+# the absent device makes keystore2 abort while reporting APEX module hashes.
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+rm /newroot/vendor/apex/com.android.hardware.keymint.strongbox.desktop.apex
+test -r /newroot/vendor/apex/com.android.hardware.audio.apex
+rm /newroot/vendor/apex/com.android.hardware.audio.desktop-arpal.apex
+sha256sum /newroot/vendor/bin/hw/android.hardware.security.keymint-service
+echo 'DEVELOPMENT_ONLY: software KeyMint RAM overlay; no hardware-backed security.'

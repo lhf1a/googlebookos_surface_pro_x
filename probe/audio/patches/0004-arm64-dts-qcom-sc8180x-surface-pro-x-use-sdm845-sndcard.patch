@@ -1,0 +1,15 @@
+--- a/arch/arm64/boot/dts/qcom/sc8180x-surface-pro-x.dts
++++ b/arch/arm64/boot/dts/qcom/sc8180x-surface-pro-x.dts
+@@ -1217,9 +1217,10 @@
+ &sound {
+ 	/*
+ 	 * UNVERIFIED on Surface Pro X: modelled on sc8180x-lenovo-flex-5g.dts.
+-	 * Needs a kernel machine driver that matches "qcom,sc8180x-sndcard".
++	 * Bound by the sdm845 machine driver (the one with SLIMbus/WCD934x
++	 * channel-map handling) through the "qcom,sdm845-sndcard" fallback.
+ 	 */
+-	compatible = "microsoft,surface-pro-x-sndcard", "qcom,sc8180x-sndcard";
++	compatible = "microsoft,surface-pro-x-sndcard", "qcom,sdm845-sndcard";
+ 	model = "Surface-Pro-X";
+ 
+ 	audio-routing =

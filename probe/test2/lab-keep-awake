@@ -1,0 +1,42 @@
+#!/bin/busybox sh
+# Lab-only workaround: retain a framework partial wakelock while suspend/resume
+# is unported. The shell-command wakelock is owned by system_server; recheck it
+# after framework restarts. No kernel or HAL success results are fabricated.
+export PATH=/bin:/sbin
+android() { timeout 8 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+configured=
+ticks=0
+echo 'LAB_KEEP_AWAKE: preventing automatic system suspend; resume remains unverified.'
+while true; do
+    locks=$(android cmd power set-wakelock list 2>/dev/null)
+    if ! printf '%s\n' "$locks" | grep 'PARTIAL_WAKE_LOCK:.*held=true' >/dev/null; then
+        result=$(android cmd power set-wakelock acquire PARTIAL_WAKE_LOCK 2>&1)
+        case "$result" in
+            *held=true*) date -u; echo "$result"; configured= ;;
+        esac
+    fi
+    if [ "$(android getprop sys.boot_completed 2>/dev/null)" = 1 ]; then
+        server=$(pidof system_server)
+        user=$(android cmd activity get-current-user 2>/dev/null)
+        case "$user" in ''|*[!0-9]*) user= ;; esac
+        if [ -n "$server" ] && [ -n "$user" ] && [ "$configured" != "$server:$user" ]; then
+            if android settings --user 0 put system screen_off_timeout 2147483647 &&
+               android settings --user "$user" put system screen_off_timeout 2147483647 &&
+               android cmd power wakeup; then
+                configured=$server:$user
+                echo "LAB_DISPLAY_AWAKE: system_server=$server user=$user"
+            fi
+        fi
+    fi
+    if [ "$ticks" = 0 ]; then
+        {
+            date -u
+            cat /proc/uptime
+            android cmd power set-wakelock list
+            android dumpsys suspend_control_internal --suspend_controls --kernel_suspends
+        } > /logs/power-state-next.txt 2>&1
+        mv /logs/power-state-next.txt /logs/power-state-latest.txt
+    fi
+    ticks=$(( (ticks + 1) % 4 ))
+    sleep 15
+done

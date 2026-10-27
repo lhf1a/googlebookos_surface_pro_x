@@ -1,0 +1,16 @@
+#!/bin/busybox sh
+# Bounded kernel PM stages, not full suspend. The kernel resumes after 5 seconds.
+set -eu
+stage=${1:-freezer}
+case "$stage" in freezer|devices|platform) ;; *) echo 'Use freezer, devices, or platform'; exit 2;; esac
+test -w /sys/power/pm_test
+test -w /sys/power/state
+test "$(cat /sys/power/mem_sleep)" = '[s2idle]'
+trap 'echo none > /sys/power/pm_test' EXIT
+echo "PM_STAGE=$stage BEGIN=$(cat /proc/uptime)"
+echo "$stage" > /sys/power/pm_test
+sync
+echo mem > /sys/power/state
+echo "PM_STAGE=$stage RETURNED=$(cat /proc/uptime)"
+cat /sys/power/suspend_stats/* 2>/dev/null || true
+sync

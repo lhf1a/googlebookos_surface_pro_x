@@ -1,0 +1,24 @@
+#!/bin/busybox sh
+# Lab device: user explicitly requested local-LAN operation without Google OOBE.
+set -eu
+android() { timeout 20 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+user=$(android cmd activity get-current-user)
+case "$user" in ''|*[!0-9]*) echo 'Cannot determine foreground user'; exit 1;; esac
+{
+    echo "user=$user"
+    android settings get global device_provisioned
+    android settings --user "$user" get secure user_setup_complete
+    android settings get global captive_portal_mode
+    android cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME
+} > /logs/setup-before-skip.txt
+# Disables captive-portal probing; it is not evidence of Internet access.
+android settings put global captive_portal_mode 0
+android settings put global device_provisioned 1
+android settings --user 0 put secure user_setup_complete 1
+android settings --user "$user" put secure user_setup_complete 1
+android settings --user "$user" put secure tv_user_setup_complete 1
+android pm disable-user --user "$user" com.google.android.setupwizard
+android am force-stop --user "$user" com.google.android.setupwizard
+android am start --user "$user" -a android.intent.action.MAIN -c android.intent.category.HOME
+android cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME
+echo 'SQ2_LOCAL_LAN_SETUP: Google setup skipped, captive checks disabled, no Internet claim'

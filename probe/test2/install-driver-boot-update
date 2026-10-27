@@ -1,0 +1,14 @@
+#!/bin/busybox sh
+set -eu
+test "$(cat /media/esp/SQ2-SSD-ID.txt)" = SQ2-SSD-20261027-3001237923792379
+test "$(cat /run/sq2-ssd-device)" = /dev/sda
+boot=/media/esp/boot/sq2-android1
+test "$(sha256sum "$boot/native-combined-initramfs.next.gz" | cut -d' ' -f1)" = 4843afdf1868e0e07ade3b5b868dde4a80920a5d3b732ce30bd7d21e184facc8
+cat /tmp/native-connectivity-fixup.cpio.gz >> "$boot/native-combined-initramfs.next.gz"
+test "$(sha256sum "$boot/native-combined-initramfs.next.gz" | cut -d' ' -f1)" = 4be0cf8ba3c2a441f011f02570f89ced057dd4b41d706cf5aaf0162fde2142a9
+sync
+test ! -e "$boot/native-combined-initramfs.pre-drivers.gz"
+mv "$boot/native-combined-initramfs.cpio.gz" "$boot/native-combined-initramfs.pre-drivers.gz"
+mv "$boot/native-combined-initramfs.next.gz" "$boot/native-combined-initramfs.cpio.gz"
+sync
+echo 'SQ2_DRIVER_BOOT_INSTALLED: Wi-Fi ownership, power hints, full firmware, QCA reopen fixes'

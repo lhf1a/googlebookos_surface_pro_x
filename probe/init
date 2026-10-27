@@ -1,0 +1,25 @@
+#!/bin/busybox sh
+export PATH=/bin:/sbin
+/bin/busybox --install -s /bin
+mkdir -p /proc /sys /dev /run /tmp /logs /media
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mount -t tmpfs tmpfs /run
+mount -t tmpfs tmpfs /tmp
+echo 7 > /proc/sys/kernel/printk
+# Deliberately no mdev hotplug/module autoload, network, or block-device mounts.
+# Surface HID uses only the aggregator, not the Qualcomm DSP/GPU firmware.
+for m in surface_aggregator surface_aggregator_registry surface_aggregator_hub surface_hid_core surface_hid; do
+    modprobe "$m" >> /logs/module-load.txt 2>&1 || true
+done
+/bin/collect-probe
+echo
+echo 'SQ2-PROBE-READY (Linux diagnostic environment, NOT Googlebook OS)'
+echo 'Internal disks have not been mounted. Logs are in /logs (RAM).'
+echo 'Commands: collect-probe, dmesg, cat /proc/bus/input/devices, poweroff -f'
+echo 'To save logs to the prepared USB, run: save-probe'
+while true; do
+    setsid cttyhack /bin/sh
+    sleep 1
+done

@@ -1,0 +1,28 @@
+#!/bin/busybox sh
+# Add a small touch overlay to the default boot; retain prior-kernel and rescue entries.
+set -eu
+test "$(cat /media/esp/SQ2-SSD-ID.txt)" = SQ2-SSD-20261027-3001237923792379
+test "$(cat /run/sq2-ssd-device)" = /dev/sda
+echo '83fcc4de064f9874536d4c960fe4b85653c3fbdbbfb0c80a03d4672a753ba949  /tmp/native-touch-fixup.cpio.gz' | sha256sum -c -
+grub=/media/esp/EFI/BOOT/grub.cfg
+backup=/media/esp/EFI/BOOT/grub.pre-touch.cfg
+test ! -e "$backup"
+test "$(grep -c '^set timeout=3$' "$grub")" = 1
+test "$(grep -c '^set default=0$' "$grub")" = 1
+awk '
+    /^    initrd \/boot\/sq2-android1\/native-combined-initramfs.cpio.gz \/boot\/sq2-audio\/audio-addon.cpio.gz$/ {
+        print $0 " /boot/sq2-touch/touch-addon.cpio.gz"; changed++; next
+    }
+    { print }
+    END { if (changed != 1) exit 3 }
+' "$grub" > /tmp/grub.touch-next.cfg
+mkdir -p /media/esp/boot/sq2-touch
+cp /tmp/native-touch-fixup.cpio.gz /media/esp/boot/sq2-touch/touch-addon.next.gz
+cp "$grub" "$backup"
+cp /tmp/grub.touch-next.cfg /media/esp/EFI/BOOT/grub.touch-next.cfg
+sync
+mv /media/esp/boot/sq2-touch/touch-addon.next.gz /media/esp/boot/sq2-touch/touch-addon.cpio.gz
+mv /media/esp/EFI/BOOT/grub.touch-next.cfg "$grub"
+sync
+echo 'SQ2_TOUCH_BOOT_INSTALLED: default entry loads continuity fix and calibrated shape filter'
+echo 'ROLLBACK: cp /media/esp/EFI/BOOT/grub.pre-touch.cfg /media/esp/EFI/BOOT/grub.cfg; sync'

@@ -1,0 +1,27 @@
+#!/bin/busybox sh
+# devtmpfs nodes may be visible before Android's input group can open them.
+# Publish already-permissioned nodes with IN_CREATE, which EventHub watches.
+# Only the two IPTSd virtual nodes are eligible; no physical input is removed.
+set -eu
+export PATH=/bin:/sbin
+stage=$(mktemp -d /dev/sq2-input-refresh.XXXXXX)
+trap 'rmdir "$stage" 2>/dev/null || true' EXIT
+for d in /sys/class/input/event*; do
+    name=$(cat "$d/device/name")
+    case "$name" in 'IPTSD Virtual Touchscreen 045E:0C21'|'IPTSD Virtual Stylus 045E:0C21') ;; *) continue;; esac
+    event=$(basename "$d")
+    numbers=$(cat "$d/dev")
+    major=${numbers%:*}
+    minor=${numbers#*:}
+    [ "$major" = 13 ]
+    mknod -m 660 "$stage/$event" c "$major" "$minor"
+    chown 0:1004 "$stage/$event"
+    rm "/dev/input/$event"
+    if ! ln "$stage/$event" "/dev/input/$event"; then
+        mv "$stage/$event" "/dev/input/$event"
+        echo "NODE_RESTORE_FALLBACK=$event"
+        exit 1
+    fi
+    rm "$stage/$event"
+    echo "REFRESHED=$event $name"
+done

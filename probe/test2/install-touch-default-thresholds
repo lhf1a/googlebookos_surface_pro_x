@@ -1,0 +1,15 @@
+#!/bin/busybox sh
+set -eu
+test "$(cat /media/esp/SQ2-SSD-ID.txt)" = SQ2-SSD-20261027-3001237923792379
+test "$(cat /run/sq2-ssd-device)" = /dev/sda
+echo '83fcc4de064f9874536d4c960fe4b85653c3fbdbbfb0c80a03d4672a753ba949  /tmp/native-touch-fixup.cpio.gz' | sha256sum -c -
+dir=/media/esp/boot/sq2-touch
+test -f /media/esp/EFI/BOOT/grub.pre-touch.cfg
+grep -q 'audio-addon.cpio.gz /boot/sq2-touch/touch-addon.cpio.gz' /media/esp/EFI/BOOT/grub.cfg
+test ! -e "$dir/touch-addon.threshold48.gz"
+cp /tmp/native-touch-fixup.cpio.gz "$dir/touch-addon.next.gz"
+cp "$dir/touch-addon.cpio.gz" "$dir/touch-addon.threshold48.gz"
+sync
+mv "$dir/touch-addon.next.gz" "$dir/touch-addon.cpio.gz"
+sync
+echo 'SQ2_TOUCH_DEFAULT_THRESHOLDS_INSTALLED: AspectMax=2.0 plus continuity and hotplug fixes'

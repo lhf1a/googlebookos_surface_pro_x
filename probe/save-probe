@@ -1,0 +1,34 @@
+#!/bin/busybox sh
+set -eu
+# Only mount the uniquely marked diagnostic partition on a USB transport.
+matches=''
+requested=${1:-}
+[ "$#" -le 1 ] || { echo 'Usage: save-probe [/dev/USB-partition]'; exit 1; }
+for partition in /sys/class/block/*; do
+    [ -f "$partition/partition" ] || continue
+    resolved=$(readlink -f "$partition")
+    case "$resolved" in */usb[0-9]*/*) ;; *) continue ;; esac
+    device=/dev/$(basename "$partition")
+    # An explicit USB partition allows reuse without changing its volume label.
+    # The marker is still required before writing, and internal disks are excluded.
+    if [ -n "$requested" ]; then
+        [ "$device" = "$requested" ] || continue
+        blkid "$device" 2>/dev/null | grep -q ' TYPE="vfat"' || continue
+    else
+        # BusyBox blkid accepts device arguments, not util-linux -s/-o options.
+        blkid "$device" 2>/dev/null | grep -q ' LABEL="SQ2PROBE"' || continue
+    fi
+    matches="$matches $device"
+done
+set -- $matches
+[ "$#" -eq 1 ] || { echo 'Expected one USB partition labeled SQ2PROBE; no disk mounted.'; echo 'For existing media: save-probe /dev/USB-partition (marker required).'; exit 1; }
+mkdir -p /media/probe
+mount -t vfat -o rw,nosuid,nodev,noexec "$1" /media/probe
+trap 'umount /media/probe' EXIT
+[ -f /media/probe/SQ2-PROBE-MEDIA.txt ] || { echo 'Diagnostic media marker missing.'; exit 1; }
+collect-probe
+destination=/media/probe/logs/$(date -u +%Y%m%dT%H%M%SZ)-$$
+mkdir -p "$destination"
+cp /logs/* "$destination/"
+sync
+echo "Saved logs to $destination on $1"

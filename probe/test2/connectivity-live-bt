@@ -1,0 +1,13 @@
+#!/bin/busybox sh
+set -eu
+nsenter -t 1 -m -r -- /system/bin/setprop ctl.stop vendor.bluetooth-aidl-qti
+cp /tmp/android.hardware.bluetooth-service.cuttlefish /proc/1/root/vendor/bin/hw/sq2-bluetooth
+chmod 755 /proc/1/root/vendor/bin/hw/sq2-bluetooth
+nohup /tmp/sq2-hci-bridge 0 /dev/sq2-bt-h4 > /logs/bluetooth-bridge.txt 2>&1 < /dev/null &
+echo $! > /run/sq2-bt-bridge.pid
+sleep 3
+test -L /dev/sq2-bt-h4
+nsenter -t 1 -m -r -- /system/bin/sh -c '/vendor/bin/hw/sq2-bluetooth --serial /dev/sq2-bt-h4 > /debug_ramdisk/logs/bluetooth-hal.txt 2>&1 < /dev/null &'
+sleep 2
+nsenter -t 1 -m -r -- /system/bin/service list | grep -i bluetooth || true
+nsenter -t 1 -m -r -- /system/bin/cmd bluetooth_manager enable

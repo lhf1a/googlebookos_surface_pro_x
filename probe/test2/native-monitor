@@ -1,0 +1,45 @@
+#!/bin/busybox sh
+export PATH=/bin:/sbin
+sleep 10
+if [ -d /etc/googlebook-security ]; then
+    {
+        ls -ld /android/vendor /android/vendor/etc/init
+        ls -l /android/vendor/etc/init/sq2-software-keymint.rc
+        ls -l /android/debug_ramdisk/vendor-upper/etc/init/sq2-software-keymint.rc
+        cat /proc/1/mounts
+    } > /logs/security-overlay-after-init.txt 2>&1
+fi
+while true; do
+    {
+        date -u
+        echo 'PID 1:'
+        cat /proc/1/comm
+        echo 'Process list:'
+        ps -o pid,ppid,args
+    } > /logs/processes-next.txt 2>&1
+    mv /logs/processes-next.txt /logs/processes-latest.txt
+    # Query only boot milestones. A full property dump opens hundreds of
+    # contexts and floods early-port SELinux audit logs on every iteration.
+    {
+        for key in sys.boot_completed apexd.status ro.crypto.state init.svc.apexd init.svc.servicemanager init.svc.vold init.svc.netd init.svc.zygote init.svc.surfaceflinger init.svc.vendor.boot-default init.svc.vendor.keymint-default init.svc.keystore2 init.svc_debug.no_fatal.keystore2; do
+            printf '[%s]: [' "$key"
+            timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop "$key" | tr -d '\n'
+            echo ']'
+        done
+    } > /logs/properties-next.txt 2>&1
+    mv /logs/properties-next.txt /logs/properties-latest.txt
+    timeout 5 nsenter -t 1 -m -r -- /system/bin/service list > /logs/services-next.txt 2>&1
+    mv /logs/services-next.txt /logs/services-latest.txt
+    # service list queries every HAL descriptor and can stall on an unrelated
+    # broken donor HAL. Check required registrations independently as well.
+    {
+        for service in android.hardware.security.keymint.IKeyMintDevice/default android.security.maintenance android.hardware.gatekeeper.IGatekeeper/default android.hardware.audio.core.IModule/default media.audio_flinger netd activity package window; do
+            timeout 5 nsenter -t 1 -m -r -- /system/bin/service check "$service"
+        done
+    } > /logs/service-checks-next.txt 2>&1
+    mv /logs/service-checks-next.txt /logs/service-checks-latest.txt
+    timeout 8 nsenter -t 1 -m -r -- /system/bin/logcat -b all -d -t 1000 > /logs/logcat-next.txt 2>&1
+    mv /logs/logcat-next.txt /logs/logcat-latest.txt
+    sync
+    sleep 20
+done

@@ -1,0 +1,38 @@
+#!/bin/busybox sh
+export PATH=/bin:/sbin
+/bin/busybox --install -s /bin
+mkdir -p /proc /sys /dev /run /tmp /logs /media
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts -o mode=620,ptmxmode=666
+mount -t tmpfs tmpfs /run
+mount -t tmpfs tmpfs /tmp
+mount -t debugfs debugfs /sys/kernel/debug
+echo 5 > /proc/sys/kernel/printk
+profile=pending
+for arg in $(cat /proc/cmdline); do case "$arg" in sq2.test=*) profile=${arg#sq2.test=};; esac; done
+echo "$profile" > /run/sq2-profile
+for m in hid_multitouch surface_aggregator surface_aggregator_registry surface_aggregator_hub surface_hid_core surface_hid spi-geni-qcom spi-hid surface_battery surface_charger rtc-surface; do
+    echo "Loading $m" >> /logs/module-load.txt
+    timeout 15 modprobe "$m" >> /logs/module-load.txt 2>&1
+    echo "exit=$?" >> /logs/module-load.txt
+done
+sleep 2
+# Read hardware time into the volatile OS clock; never write the hardware RTC.
+timeout 5 hwclock -r -u > /logs/rtc-initial.txt 2>&1
+timeout 5 hwclock -s -u >> /logs/rtc-initial.txt 2>&1
+collect-probe
+echo 'test3-20261026 revision=c; uinput-built-in; SSH-key-only; pending-multitouch; iptsd-3.1.1; adreno-smmu; wens-regdb; compatible-adsp' > /logs/build.txt
+echo 'SQ2-PROBE-READY test3 (hardware diagnostics, not Googlebook OS)'
+echo "Selected profile: $profile. Internal disks are not mounted."
+if [ "$profile" != smoke ]; then
+    echo 'Connecting Wi-Fi for remote SSH access...'
+    if timeout 200 network-up > /logs/network-up.txt 2>&1; then
+        start-ssh || echo 'SSH startup failed; inspect /logs/ssh.txt'
+    else echo 'Network startup failed; inspect /logs/network-up.txt; retry network-up then start-ssh'; fi
+    run-tests "$profile"
+fi
+echo 'Commands: run-tests pending, save-probe, poweroff -f (run-tests all is optional full regression)'
+while true; do setsid cttyhack /bin/sh; sleep 1; done

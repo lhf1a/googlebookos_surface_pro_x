@@ -1,0 +1,42 @@
+#!/bin/busybox sh
+# Sourced by PID 1. Match the provisioned system disk by filesystem/layout.
+. /etc/sq2-ssd-layout
+ssd_disk=
+for attempt in $(seq 1 45); do
+    matches=
+    for p in /sys/class/block/*; do
+        [ -f "$p/partition" ] || continue
+        [ "$(cat "$p/partition")" = 6 ] || continue
+        resolved=$(readlink -f "$p")
+        case "$resolved" in
+            */usb[0-9]*/*) ;;
+            */nvme/*) grep -q 'sq2.storage=nvme' /proc/cmdline || continue;;
+            */virtio*/*) [ "$ssd_smoke" = 1 ] || continue;;
+            *) continue;;
+        esac
+        esdev=/dev/$(basename "$p")
+        blkid "$esdev" | grep -q "UUID=\"${SSD_ESP_UUID:-B026-1027}\"" || continue
+        parent=$(basename "$(dirname "$resolved")")
+        [ "$(cat /sys/class/block/$parent/size)" = "$SSD_SECTORS" ] || fail SSD-capacity
+        matches="$matches /dev/$parent"
+    done
+    set -- $matches
+    [ "$#" -le 1 ] || fail ambiguous-SSD
+    if [ "$#" = 1 ]; then ssd_disk=$1; break; fi
+    sleep 1
+done
+[ -n "$ssd_disk" ] || fail SSD-not-found
+ssd_part=$ssd_disk
+case "$ssd_disk" in *[0-9]) ssd_part=${ssd_disk}p;; esac
+mkdir -p /media/esp /dev/block/by-name /dev/mapper
+mount -t vfat -o sync "${ssd_part}6" /media/esp || fail SSD-ESP-mount
+grep -qx "$SSD_ID" /media/esp/SQ2-SSD-ID.txt || fail SSD-marker
+while read name number sectors; do
+    dev=${ssd_part}${number}
+    [ "$(cat /sys/class/block/$(basename "$dev")/size)" = "$sectors" ] || fail "SSD-partition-$name"
+    ln -s "$dev" /dev/block/by-name/$name || fail "SSD-alias-$name"
+done < /etc/sq2-ssd-partitions
+blkid "${ssd_part}1" | grep -q "$SSD_DATA_UUID" || fail SSD-userdata-UUID
+actual=$(dd if="${ssd_part}3" bs=1048576 count=1 2>/dev/null | sha256sum)
+[ "${actual%% *}" = "$SSD_SUPER_HEADER_SHA256" ] || fail SSD-super-layout-changed
+echo "$ssd_disk" > /run/sq2-ssd-device

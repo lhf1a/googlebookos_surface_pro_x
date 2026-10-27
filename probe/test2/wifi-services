@@ -1,0 +1,21 @@
+#!/bin/busybox sh
+[ -x /bin/rmtfs ] || { echo 'Wi-Fi resource addon missing. Boot the unified GRUB test entry.'; exit 1; }
+[ -e /run/wifi-services-started ] && exit 0
+touch /run/wifi-services-started
+mkdir -p /run/rmtfs /var/lib/tqftpserv /run/wpa_supplicant
+chmod 700 /var/lib/tqftpserv
+for f in modem_fs1 modem_fs2 modem_fsc modem_fsg modem_tuning modem_tunning modem_tng modem_study; do
+    dd if=/dev/zero of="/run/rmtfs/$f" bs=1048576 count=2 2>/dev/null
+done
+qrtr-ns -f > /logs/qrtr-ns.txt 2>&1 &
+sleep 1
+timeout 30 modprobe qcom_q6v5_pas > /logs/remoteproc-load.txt 2>&1
+echo "modprobe exit=$?" >> /logs/remoteproc-load.txt
+sleep 2
+pd-mapper > /logs/pd-mapper.txt 2>&1 &
+tqftpserv > /logs/tqftpserv.txt 2>&1 &
+sleep 1
+# -o uses RAM files; -r prevents storage writes; -s starts the modem remoteproc.
+rmtfs -r -o /run/rmtfs -s -v > /logs/rmtfs.txt 2>&1 &
+sleep 3
+ps > /logs/wifi-services.txt

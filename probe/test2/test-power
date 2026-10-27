@@ -1,0 +1,12 @@
+#!/bin/busybox sh
+echo 'POWER TEST: 60 seconds. Unplug the CHARGER now; reconnect after 20 seconds. Keep USB connected.'
+: > /logs/power-timeline.txt
+: > /logs/rtc-timeline.txt
+for i in $(seq 1 12); do
+    [ "$i" -eq 5 ] && echo 'Reconnect the CHARGER now; keep it connected until this test finishes.'
+    collect-probe >/dev/null 2>&1
+    cat /logs/power-current.txt >> /logs/power-timeline.txt
+    { date -u; cat /proc/uptime; timeout 3 hwclock -r -u; cat /logs/rtc-current.txt; } >> /logs/rtc-timeline.txt 2>&1
+    sleep 5
+done
+echo 'Power/RTC sampling complete.'

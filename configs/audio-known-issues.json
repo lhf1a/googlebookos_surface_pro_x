@@ -1,0 +1,12 @@
+{
+  "updated": "2026-10-27",
+  "device": "Surface Pro X SQ2",
+  "priority": "deferred_by_user",
+  "source": "User listening report after merged graphics fix and audio-enabled boot",
+  "issues": [
+    {"id": "speaker-pop-after-stop", "description": "播放结束约 10 秒后出现爆音", "status": "open"},
+    {"id": "speaker-missing-bass", "description": "扬声器没有低频", "status": "open"},
+    {"id": "speaker-image-right", "description": "声像位置不对，偏右", "status": "open"}
+  ],
+  "instruction": "只记录，暂不调整音频；休眠也已按用户要求暂停。共享存储修复及交接发布优先。"
+}

@@ -1,0 +1,28 @@
+#!/debug_ramdisk/busybox sh
+BB=/debug_ramdisk/busybox
+export PATH=/system/bin:/debug_ramdisk
+$BB mount -t selinuxfs selinuxfs /sys/fs/selinux || exit 1
+$BB mount -t proc proc /proc
+$BB mount -t tmpfs tmpfs /dev -o mode=755
+$BB mkdir -p /dev/pts /dev/socket /dev/block /dev/mapper
+$BB mount -t devpts devpts /dev/pts -o newinstance,ptmxmode=666,mode=620
+$BB ln -s pts/ptmx /dev/ptmx
+for spec in 'null 1 3' 'zero 1 5' 'full 1 7' 'random 1 8' 'urandom 1 9' 'kmsg 1 11' 'tty 5 0'; do
+    set -- $spec; $BB mknod -m 666 /dev/$1 c $2 $3
+done
+$BB mknod -m 600 /dev/console c 5 1
+$BB mount --bind /dev/null /proc/sysrq-trigger || exit 1
+$BB mount --bind /proc/sys /proc/sys || exit 1
+$BB mount -o remount,bind,ro /proc/sys || exit 1
+$BB mknod -m 600 /dev/loop-control c 10 237
+for n in $($BB seq 0 63); do $BB mknod -m 600 /dev/block/loop$n b 7 $n; done
+# Binder character devices are selected by the outer wrapper, never raw disks.
+while read name major minor; do $BB mknod -m 666 /dev/$name c "$major" "$minor"; done < /debug_ramdisk/binder-nodes
+$BB mount -t tmpfs tmpfs /data -o mode=771,size=1024m
+$BB mount -t tmpfs tmpfs /metadata -o mode=700,size=64m
+for d in apex bootstrap-apex linkerconfig mnt tmp storage data_mirror; do $BB mount -t tmpfs tmpfs /$d; done
+$BB mount --bind /debug_ramdisk/cmdline /proc/cmdline
+if [ -e /proc/bootconfig ]; then $BB mount --bind /debug_ramdisk/bootconfig /proc/bootconfig; fi
+export INIT_STARTED_AT=0 INIT_SELINUX_STARTED_AT=0 INIT_AVB_VERSION=1.3
+echo 'GOOGLEBOOK_INIT_ATTEMPT: original system init, isolated PID/mount/network namespaces'
+exec /system/bin/init selinux_setup

@@ -1,0 +1,38 @@
+#!/bin/busybox sh
+# Connectivity for SSH, without repeating the already passed Wi-Fi test suite.
+set -e
+mkdir -p /logs /run/wpa_supplicant
+if [ "${1:-}" = ethernet ]; then
+    dev=eth0
+else
+    wifi-services
+    timeout 40 modprobe ath10k_snoc || true
+    dev=
+    for i in $(seq 1 60); do
+        for d in /sys/class/net/*; do
+            if [ -e "$d/phy80211" ]; then dev=$(basename "$d"); break; fi
+        done
+        [ -n "$dev" ] && break
+        sleep 1
+    done
+    [ -n "$dev" ] || { echo 'No Wi-Fi interface'; exit 1; }
+fi
+ip link set "$dev" up
+if [ "${1:-}" != ethernet ]; then
+    if ! wpa_cli -p /run/wpa_supplicant -i "$dev" ping 2>/dev/null | grep -q PONG; then
+        wpa_supplicant -B -D nl80211 -i "$dev" -c /etc/wpa_supplicant.conf -f /logs/wpa-supplicant.txt
+    fi
+    connected=0
+    for i in $(seq 1 60); do
+        wpa_cli -p /run/wpa_supplicant -i "$dev" status 2>/dev/null | grep -q 'wpa_state=COMPLETED' && { connected=1; break; }
+        sleep 1
+    done
+    [ "$connected" -eq 1 ] || { echo 'Wi-Fi association timed out'; exit 1; }
+fi
+pidfile=/run/udhcpc-$dev.pid
+if ! { [ -r "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; }; then
+    # Background on the first lease and remain alive to renew it.
+    udhcpc -i "$dev" -s /bin/dhcp-hook -p "$pidfile" -n -t 5 -T 3
+fi
+ip -4 addr show dev "$dev"
+echo "$dev" > /run/ssh-interface

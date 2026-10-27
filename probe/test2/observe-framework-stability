@@ -1,0 +1,28 @@
+#!/bin/busybox sh
+# Read-only bounded observation; run from the retained initramfs SSH shell.
+set -eu
+samples=${1:-21}
+interval=${2:-30}
+case "$samples:$interval" in *[!0-9:]*|:*|*:) exit 2;; esac
+test "$samples" -ge 2 && test "$samples" -le 121
+test "$interval" -ge 1 && test "$interval" -le 60
+boot=$(cat /proc/sys/kernel/random/boot_id)
+echo "BOOT_ID=$boot"
+sha256sum /proc/1/root/vendor/lib64/egl/libEGL_freedreno.so
+baseline=
+changed=0
+i=0
+while [ "$i" -lt "$samples" ]; do
+    sf=$(pidof surfaceflinger || true)
+    system=$(pidof system_server || true)
+    current="$sf/$system"
+    if [ "$i" -eq 0 ]; then baseline=$current; fi
+    if [ -z "$sf" ] || [ -z "$system" ] || [ "$current" != "$baseline" ]; then changed=1; fi
+    echo "UPTIME=$(cut -d' ' -f1 /proc/uptime) SF=$sf SYSTEM=$system CHANGED=$changed"
+    i=$((i+1))
+    if [ "$i" -lt "$samples" ]; then sleep "$interval"; fi
+done
+if [ "$changed" -eq 0 ]; then echo FRAMEWORK_PIDS_STABLE; else echo FRAMEWORK_RESTART_DETECTED; fi
+nsenter -t 1 -m -r -- /system/bin/logcat -b crash -d > /logs/crash-after-multiplane.txt
+sync
+exit "$changed"

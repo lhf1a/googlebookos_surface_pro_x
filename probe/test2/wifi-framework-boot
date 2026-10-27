@@ -1,0 +1,39 @@
+#!/bin/busybox sh
+# Retained-initramfs supervisor. The original Android init owns both HALs.
+set -u
+android() { timeout 15 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+cp /bin/wifi-rollback /tmp/wifi-rollback
+rm -f /run/sq2-wifi-commit
+rm -f /run/sq2-wifi-rollback-fired
+nohup sh /tmp/wifi-rollback 240 > /logs/wifi-rollback.txt 2>&1 < /dev/null &
+echo $! > /run/sq2-wifi-rollback.pid
+ready=0
+for attempt in $(seq 1 120); do
+    if [ "$(android getprop sys.boot_completed 2>/dev/null)" = 1 ]; then ready=1; break; fi
+    sleep 1
+done
+[ "$ready" = 1 ] || exit 1
+[ ! -e /run/sq2-wifi-rollback-fired ] || exit 1
+android svc wifi enable
+ssid=$(sed -n '1p' /etc/sq2-android-wifi.conf)
+password=$(sed -n '2p' /etc/sq2-android-wifi.conf)
+android cmd wifi connect-network "$ssid" wpa2 "$password" -r none
+unset password
+for attempt in $(seq 1 45); do
+    [ ! -e /run/sq2-wifi-rollback-fired ] || exit 1
+    android cmd wifi status > /logs/wifi-framework-status.txt 2>&1
+    if grep -Fxq "Wifi is connected to \"$ssid\"" /logs/wifi-framework-status.txt &&
+       ip -4 addr show dev wlan0 | grep -q 'inet '; then
+        address=$(ip -o -4 addr show dev wlan0 | awk '{print $4; exit}')
+        subnet=$(ipcalc -n "$address" | sed -n 's/^NETWORK=//p')
+        if [ -n "$subnet" ]; then
+            ip -4 route replace "$subnet/${address#*/}" dev wlan0 table main
+        fi
+        touch /run/sq2-wifi-commit
+        echo "SQ2_ANDROID_WIFI_READY: $address; Internet access not required"
+        exit 0
+    fi
+    sleep 2
+done
+echo 'Android Wi-Fi did not acquire IPv4; diagnostic rollback remains armed'
+exit 1

@@ -1,0 +1,33 @@
+#!/bin/busybox sh
+# Launched in retained initramfs BEFORE changing Android Wi-Fi ownership.
+# Touch /run/sq2-wifi-commit only after real Android connection is confirmed.
+set -u
+sleep "${1:-120}"
+[ -e /run/sq2-wifi-commit ] && exit 0
+touch /run/sq2-wifi-rollback-fired
+echo 'SQ2_WIFI_ROLLBACK: returning wlan0 to diagnostic supplicant'
+android() { timeout 8 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+android settings put global wifi_scan_always_enabled 0 || true
+android svc wifi disable || true
+android setprop ctl.stop vendor.wifi_hal_legacy || true
+android setprop ctl.stop wpa_supplicant || true
+android setprop ctl.stop wificond || true
+if [ -r /run/sq2-wifi-hal.pid ]; then kill "$(cat /run/sq2-wifi-hal.pid)" 2>/dev/null || true; fi
+sleep 3
+# The framework may recreate wlan0 with a new ifindex. A surviving bootstrap
+# supplicant can answer PING while still attached to the obsolete interface.
+timeout 5 wpa_cli -p /run/wpa_supplicant -i wlan0 terminate || true
+sleep 2
+# Stop the bootstrap DHCP client so netd's lease/address changes cannot leave
+# it believing that an old lease is still configured.
+if [ -r /run/udhcpc-wlan0.pid ]; then
+    kill "$(cat /run/udhcpc-wlan0.pid)" 2>/dev/null || true
+    rm -f /run/udhcpc-wlan0.pid
+fi
+if ! ip link show wlan0 >/dev/null 2>&1; then
+    iw phy phy0 interface add wlan0 type station || true
+fi
+ip link set wlan0 down
+ip link set wlan0 address 12:0b:63:bc:f7:15 || true
+ip link set wlan0 up
+timeout 100 /bin/network-up

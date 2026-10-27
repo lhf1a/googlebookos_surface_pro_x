@@ -1,0 +1,32 @@
+#!/bin/busybox sh
+# One kernel controller setup per boot; Android toggles retain the HCI_USER link.
+set -eu
+export PATH=/bin:/sbin
+android() { timeout 10 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+test ! -e /sys/module/hci_uart
+modprobe hci_uart
+for n in $(seq 1 30); do
+    [ -d /sys/class/bluetooth/hci0 ] && break
+    sleep 1
+done
+test -d /sys/class/bluetooth/hci0
+sleep 3
+nohup /bin/sq2-hci-bridge 0 /dev/sq2-bt-h4 > /logs/bluetooth-bridge.txt 2>&1 < /dev/null &
+bridge=$!
+echo "$bridge" > /run/sq2-bt-bridge.pid
+for n in $(seq 1 90); do
+    [ -L /dev/sq2-bt-h4 ] && break
+    kill -0 "$bridge" || exit 1
+    sleep 1
+done
+test -L /dev/sq2-bt-h4
+for n in $(seq 1 90); do
+    if android getprop sys.boot_completed >/dev/null 2>&1; then
+        android setprop vendor.sq2.bluetooth.ready 1
+        echo SQ2_BLUETOOTH_TRANSPORT_READY
+        exit 0
+    fi
+    sleep 1
+done
+echo 'Bluetooth transport is ready but Android property service is unavailable'
+exit 1

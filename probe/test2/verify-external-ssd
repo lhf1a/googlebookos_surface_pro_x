@@ -1,0 +1,41 @@
+#!/bin/busybox sh
+# Read-only provisioned-image check from the running Surface USB environment.
+set -eu
+export PATH=/bin:/sbin
+manifest=${1:-/tmp/ssd-extents.tsv}
+header_hash=${2:?Expected GPT header hash required}
+out=/logs/ssd-readback
+mkdir -p "$out"
+exec > "$out/verify.log" 2>&1
+echo "START $(date -u)"
+matches=
+for p in /sys/class/block/sd*; do
+    [ -f "$p/partition" ] && continue
+    [ -f "$p/size" ] || continue
+    [ "$(cat "$p/size")" = 250069680 ] || continue
+    case "$(readlink -f "$p")" in */usb[0-9]*/*) ;; *) continue;; esac
+    matches="$matches /dev/$(basename "$p")"
+done
+set -- $matches
+[ "$#" = 1 ] || { echo 'FAIL: expected exactly one 128GB USB SSD'; exit 2; }
+disk=$1
+actual=$(dd if="$disk" bs=4096 count=1 2>/dev/null | sha256sum)
+[ "${actual%% *}" = "$header_hash" ] || { echo 'FAIL: provisioned GPT identity mismatch'; exit 3; }
+# Refuse a disk that Android has already mounted or used for this boot.
+grep -q "^$disk[0-9]" /proc/1/mounts && { echo 'FAIL: target partition mounted'; exit 4; }
+echo "IDENTITY_OK $disk"
+cat /sys/class/block/$(basename "$disk")/device/model
+verified=0
+count=0
+while read offset bytes expected; do
+    [ $((offset % 4096)) = 0 ] && [ $((bytes % 4096)) = 0 ] || exit 5
+    echo "READ offset=$offset bytes=$bytes verified=$verified" > "$out/progress.txt"
+    actual=$(dd if="$disk" bs=4096 skip=$((offset / 4096)) count=$((bytes / 4096)) 2> "$out/last-dd.txt" | sha256sum)
+    [ "${actual%% *}" = "$expected" ] || { echo "FAIL: SHA256 offset=$offset"; exit 6; }
+    verified=$((verified + bytes))
+    count=$((count + 1))
+    [ $((count % 32)) != 0 ] || echo "VERIFIED $verified bytes ($count regions)"
+done < "$manifest"
+[ "$verified" = 19366498304 ] || { echo 'FAIL: incomplete range manifest'; exit 7; }
+echo "PASS ALL_REGIONS_SHA256 bytes=$verified regions=$count disk=$disk" | tee "$out/result.txt"
+sync

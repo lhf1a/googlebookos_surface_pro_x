@@ -1,0 +1,38 @@
+#!/bin/busybox sh
+/bin/collect-base
+{
+    date -u; cat /proc/uptime
+    for d in /sys/class/power_supply/*; do
+        [ -d "$d" ] || continue
+        echo "=== $d ==="
+        for p in type status present online capacity voltage_now current_now power_now energy_now energy_full energy_full_design charge_now charge_full charge_full_design cycle_count temp manufacturer model_name; do
+            [ -r "$d/$p" ] && { printf '%s=' "$p"; cat "$d/$p"; }
+        done
+    done
+} > /logs/power-current.txt 2>&1
+{
+    for d in /sys/class/rtc/*; do
+        [ -d "$d" ] || continue
+        echo "=== $d ==="; cat "$d/name" "$d/date" "$d/time" "$d/since_epoch"
+    done
+    cat /proc/driver/rtc
+} > /logs/rtc-current.txt 2>&1
+{
+    ls -l /sys/bus/spi/devices /sys/bus/hid/devices /sys/class/input /dev/input /dev/dri
+    cat /sys/kernel/debug/devices_deferred
+    for d in /sys/class/remoteproc/*; do
+        [ -d "$d" ] && { echo "$d"; cat "$d/name" "$d/state" "$d/firmware"; }
+    done
+    for f in /sys/class/drm/card*-*/status /sys/class/drm/card*-*/modes; do [ -r "$f" ] && { echo "$f"; cat "$f"; }; done
+} > /logs/extra-devices.txt 2>&1
+cat /run/sq2-profile > /logs/profile.txt
+{
+    for d in /sys/bus/spi/devices/*; do
+        for f in ready bus_error_count bus_last_error logic_error_count logic_last_error power_state; do
+            [ -r "$d/$f" ] && { echo "$d/$f"; cat "$d/$f"; }
+        done
+    done
+    for f in /sys/kernel/debug/qrtr/*; do [ -f "$f" ] && { echo "$f"; cat "$f"; }; done
+} > /logs/transport-state.txt 2>&1
+# Missing optional debugfs entries must not make save-probe abort under set -e.
+exit 0

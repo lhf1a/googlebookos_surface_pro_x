@@ -1,0 +1,15 @@
+#!/bin/busybox sh
+set -eu
+export PATH=/bin:/sbin
+# This file is explicitly RAM-backed; never use a physical misc partition.
+grep -q '^tmpfs /run tmpfs ' /proc/mounts
+file=/run/googlebook-misc.img
+test ! -e /dev/block/by-name/misc || { echo 'misc already exists'; exit 0; }
+test ! -e "$file"
+truncate -s 4194304 "$file"
+loop=$(losetup -f)
+losetup "$loop" "$file"
+test "$(cat /sys/class/block/${loop##*/}/loop/backing_file)" = "$file"
+mkdir -p /dev/block/by-name
+ln -s "$loop" /dev/block/by-name/misc
+echo "RAM_MISC_READY=$loop"

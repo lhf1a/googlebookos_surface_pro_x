@@ -1,0 +1,49 @@
+#!/bin/busybox sh
+# Read crash evidence without starting audio, clearing pstore, or resetting DSPs.
+set -eu
+export PATH=/bin:/sbin
+previous=${1:-0e331ff2-a0d7-4d8a-bdba-ef61233cbe1c}
+case "$previous" in ''|*[!0-9a-f-]*) echo 'Expected a previous boot UUID' >&2; exit 2;; esac
+test "${#previous}" = 36
+current=$(cat /proc/sys/kernel/random/boot_id)
+dest=/logs/audio-crash-$current
+mkdir -p "$dest"
+{
+    echo "previous_boot=$previous"
+    echo "current_boot=$current"
+    cat /proc/uptime /proc/cmdline
+    cat /proc/asound/cards 2>/dev/null || true
+    cat /proc/mounts
+} > "$dest/current-state.txt"
+dmesg > "$dest/current-dmesg.txt"
+if ! grep -q ' /sys/fs/pstore pstore ' /proc/mounts; then
+    mkdir -p /sys/fs/pstore
+    mount -t pstore pstore /sys/fs/pstore 2> "$dest/pstore-mount.txt" || true
+fi
+mkdir -p "$dest/pstore"
+for p in /sys/fs/pstore/*; do
+    [ ! -f "$p" ] || cp "$p" "$dest/pstore/"
+done
+ls -la /sys/fs/pstore > "$dest/pstore-list.txt"
+src=/media/esp/logs/googlebook-native-$previous
+if [ -d "$src" ]; then
+    ls -l "$src" > "$dest/previous-files.txt"
+    # Keep the full original files in their existing directory; copy bounded
+    # tails and matching call stacks to avoid duplicating a large audit log.
+    for name in kernel-live.txt logcat-latest.txt logcat-next.txt processes-latest.txt properties-latest.txt status.txt; do
+        [ ! -f "$src/$name" ] || tail -n 4000 "$src/$name" > "$dest/previous-$name"
+    done
+    if [ -f "$src/kernel-live.txt" ]; then
+        grep -i -n -B 12 -A 80 -E 'kernel panic|call trace|watchdog|fatal error|remoteproc.*crash|subsys.*restart|BUG:|Oops:|SError|soft lockup|hard LOCKUP|reboot:|Restarting system' \
+            "$src/kernel-live.txt" > "$dest/previous-kernel-crash-matches.txt" || true
+    fi
+fi
+if [ -x /proc/1/root/system/bin/logcat ]; then
+    timeout 8 nsenter -t 1 -m -r -- /system/bin/logcat -b crash -d > "$dest/current-logcat-crash.txt" 2>&1 || true
+    for prop in ro.boot.bootreason sys.boot.reason persist.sys.boot.reason; do
+        printf '%s=' "$prop"
+        timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop "$prop" || true
+    done > "$dest/android-bootreason.txt"
+fi
+sync
+echo "AUDIO_CRASH_EVIDENCE=$dest"

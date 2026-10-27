@@ -1,0 +1,41 @@
+{
+  "mesa": {
+    "version": "26.2.4",
+    "url": "https://archive.mesa3d.org/mesa-26.2.4.tar.xz",
+    "sha256": "bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9",
+    "backend": "msm",
+    "mapper5_patch": "upstream/gbos-vm/patches/mesa-android-mapper5.patch"
+  },
+  "ndk": {
+    "version": "r28c",
+    "url": "https://dl.google.com/android/repository/android-ndk-r28c-linux.zip",
+    "sha1": "a7b54a5de87fecd125a17d54f73c446199e72a64"
+  },
+  "minigbm": {
+    "repository": "https://android.googlesource.com/platform/external/minigbm",
+    "commit": "455b7456397dff01443584b09e2fd594079e905c",
+    "downloaded_main_archive_sha256": "d458369cd505a9d26d9d419be78628515e7f54ee01e380b357d661321f2a071b",
+    "build_defines": ["DRV_MSM", "QCOM_DISABLE_COMPRESSED_NV12"],
+    "note": "Development C driver bridge; Android C++ HAL comes from verified Cuttlefish 16373615 donor"
+  },
+  "cutils_headers": {
+    "repository": "https://android.googlesource.com/platform/system/core",
+    "commit": "a3b721a32242006b59cb12bd62c9133632af3a2d",
+    "subdirectory": "libcutils/include",
+    "downloaded_main_archive_sha256": "c5062c1242678b218a8a521b854fd43c59c81e89bf48048c80cc29ba31d2b06f"
+  },
+  "log_headers": {
+    "repository": "https://android.googlesource.com/platform/system/logging",
+    "commit": "bcac7c30d88a3773a7c0bc9f5617a23a886331fd",
+    "subdirectory": "liblog/include",
+    "downloaded_main_archive_sha256": "7de144d31592cf8957a4f2736a9f8bc88c75c557257b46a8eb800af643dae38e"
+  },
+  "adreno_tools_reference": {
+    "repository": "https://github.com/StevenMXZ/Adreno-Tools-Drivers",
+    "branch": "A8xx",
+    "commit": "b3b32ad30e7d7b4bd897e678af064036eeb9df09",
+    "archive_sha256": "1ea03318e6968688370f4232184bb39509bc32b06d122c4dd516a03cb81d3693",
+    "reviewed": "build_turnip.sh; patches/patchs2/common/apply_common.sh",
+    "findings": "Android NDK/Bionic build; freedreno-kmds=kgsl, EGL disabled, current variants A7xx/A8xx. Surface requires MSM; no device-specific patches imported blindly."
+  }
+}

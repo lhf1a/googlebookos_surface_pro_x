@@ -1,0 +1,54 @@
+#!/bin/busybox sh
+profile=${1:-pending}
+case "$profile" in pending|all|input|gpu|wifi) ;; *) echo 'Unknown profile'; exit 2;; esac
+mkdir /run/sq2-suite-lock 2>/dev/null || { echo 'Test suite already running'; exit 1; }
+trap 'rmdir /run/sq2-suite-lock' EXIT
+echo "$profile" > /run/sq2-profile
+: > /logs/suite.txt
+if [ "$profile" = pending ]; then
+    echo 'SQ2 follow-up: MULTITOUCH only. Move two fingers together on the screen.'
+    echo 'SKIP previously validated: basic touch, touchpad, power/RTC, GPU NOP/fence, Wi-Fi association/DHCP/gateway/external-IP/DNS' >> /logs/suite.txt
+else
+    echo 'SQ2 unified driver test: follow touch / touchpad / charger prompts. Wi-Fi and GPU follow automatically.'
+fi
+save-probe >/logs/save-initial.txt 2>&1
+# Periodic checkpoints survive a display failure if the kernel/USB still run.
+rm -f /run/stop-checkpoints
+(while sleep 10; do
+    [ -e /run/stop-checkpoints ] && break
+    save-probe > /logs/save-periodic.txt 2>&1
+done) &
+watcher=$!
+phase() {
+    name=$1; shift
+    echo "BEGIN $name" | tee -a /logs/suite.txt
+    date -u >> /logs/suite.txt
+    "$@"
+    rc=$?
+    echo "END $name exit=$rc (see detailed logs for functional coverage)" | tee -a /logs/suite.txt
+    for retry in 1 2 3; do save-probe && break; sleep 2; done
+}
+case "$profile" in
+    pending)
+        phase multitouch timeout 100 test-input multitouch
+        ;;
+    all)
+        phase input timeout 130 test-input
+        phase power-rtc timeout 110 test-power
+        phase wifi timeout 270 test-wifi
+        echo 'GPU is last. If display goes blank, wait 3 minutes; earlier results are already on USB.'
+        phase gpu timeout 120 test-gpu
+        ;;
+    input) phase input timeout 130 test-input; phase power-rtc timeout 110 test-power ;;
+    gpu) phase gpu timeout 120 test-gpu ;;
+    wifi) phase wifi timeout 270 test-wifi ;;
+esac
+touch /run/stop-checkpoints
+wait "$watcher"
+summarize-tests > /logs/summary.txt
+cat /logs/summary.txt
+if save-probe; then
+    echo 'TEST FINISHED AND LOGS SAVED. Type poweroff -f to shut down.'
+else
+    echo 'TEST FINISHED BUT FINAL SAVE FAILED. Keep USB connected and run save-probe before shutdown.'
+fi

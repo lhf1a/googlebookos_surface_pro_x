@@ -1,0 +1,15 @@
+#!/bin/busybox sh
+mkdir -p /logs
+uname -a > /logs/kernel.txt
+cat /proc/cmdline > /logs/cmdline.txt
+cat /proc/cpuinfo > /logs/cpuinfo.txt
+cat /proc/meminfo > /logs/memory.txt
+cat /proc/partitions > /logs/partitions.txt
+cat /proc/bus/input/devices > /logs/input.txt
+cat /proc/modules > /logs/modules.txt
+cat /proc/mounts > /logs/mounts.txt
+dmesg > /logs/dmesg.txt
+ls -l /sys/class/drm /sys/class/graphics /sys/class/net /sys/class/block > /logs/classes.txt 2>&1
+if [ -f /proc/device-tree/model ]; then tr '\000' '\n' < /proc/device-tree/model > /logs/dt-model.txt; fi
+if [ -r /proc/config.gz ]; then cp /proc/config.gz /logs/kernel-config.gz; fi
+echo 'Probe logs refreshed in RAM at /logs.'

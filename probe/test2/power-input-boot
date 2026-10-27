@@ -1,0 +1,23 @@
+#!/bin/busybox sh
+set -eu
+export PATH=/bin:/sbin
+if [ -x /bin/touch-resume-watch ]; then
+    /bin/touch-resume-watch > /logs/touch-resume.txt 2>&1 &
+fi
+for module in surface_aggregator_tabletsw gpio_keys pm8941-pwrkey; do
+    insmod "/etc/sq2-power/$module.ko"
+done
+for dev in /sys/bus/serial/devices/*; do
+    if grep -q 'Csurface,aggregator' "$dev/modalias" 2>/dev/null && [ -w "$dev/power/wakeup" ]; then
+        echo enabled > "$dev/power/wakeup"
+    fi
+done
+for n in $(seq 1 120); do
+    if [ "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null || true)" = 1 ]; then
+        /bin/refresh-sq2-power-input-nodes
+        echo SQ2_COVER_AND_POWER_INPUT_READY
+        exit 0
+    fi
+    sleep 1
+done
+exit 1

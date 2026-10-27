@@ -1,0 +1,17 @@
+#!/bin/busybox sh
+# Bounded stock-HAL driver-boundary experiment. Bootstrap keeps current lease.
+set -eu
+android() { nsenter -t 1 -m -r -- /system/bin/"$@"; }
+cp /tmp/libsq2-wifi-driver.so /proc/1/root/vendor/lib64/
+rm -f /run/sq2-wifi-commit
+nohup sh /tmp/wifi-rollback 120 > /logs/wifi-rollback.txt 2>&1 < /dev/null &
+echo $! > /run/sq2-wifi-rollback.pid
+android setprop ctl.stop vendor.wifi_hal_legacy
+sleep 1
+android sh -c 'LD_PRELOAD=/vendor/lib64/libsq2-wifi-driver.so /vendor/bin/hw/android.hardware.wifi-service > /debug_ramdisk/logs/wifi-hal.txt 2>&1 < /dev/null & echo $! > /debug_ramdisk/logs/wifi-hal.pid'
+cp /logs/wifi-hal.pid /run/sq2-wifi-hal.pid
+sleep 2
+android svc wifi enable
+sleep 8
+android cmd wifi status
+android logcat -d -t 1800 > /logs/wifi-driver-boundary-logcat.txt

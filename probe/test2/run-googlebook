@@ -1,0 +1,61 @@
+#!/bin/busybox sh
+set -eu
+mkdir /run/googlebook-attempt-lock || { echo 'Attempt already active'; exit 1; }
+trap 'rmdir /run/googlebook-attempt-lock' EXIT
+base=/media/sq2data/googlebook-stage
+root=/run/googlebook-root
+if [ ! -e /dev/vda ]; then
+    test "$(cat /sys/class/block/sda/size)" = 61440000
+    test "$(cat /sys/bus/usb/devices/1-1/serial)" = FC2425D40C3E1
+    blkid /dev/sda2 | grep -q 3AF5-9B65
+    mkdir -p /media/sq2data
+    grep -q ' /media/sq2data ' /proc/mounts || mount -t exfat /dev/sda2 /media/sq2data
+fi
+mkdir -p "$root" /run/android-debug
+if ! grep -q " $root " /proc/mounts; then
+    if [ -e /dev/vda ]; then mount -t erofs -o ro /dev/vda "$root"; else mount -t erofs -o ro,loop "$base/system_a.img" "$root"; fi
+    index=b
+    for name in vendor product system_ext system_dlkm vendor_dlkm; do
+        if [ -e /dev/vda ]; then
+            mount -t erofs -o ro /dev/vd$index "$root/$name"
+            case "$index" in b) index=c;; c) index=d;; d) index=e;; e) index=f;; esac
+        else mount -t erofs -o ro,loop "$base/${name}_a.img" "$root/$name"; fi
+    done
+    mount --bind /run/android-debug "$root/debug_ramdisk"
+    mount --bind /sys "$root/sys"
+    mount -o remount,bind,ro "$root/sys"
+fi
+cp /bin/busybox /bin/android-inner /run/android-debug/
+cp /etc/android-test-policy /run/android-debug/precompiled_sepolicy
+mount --bind /run/android-debug/precompiled_sepolicy "$root/vendor/etc/selinux/precompiled_sepolicy"
+mkdir -p /dev/binderfs
+grep -q ' /dev/binderfs ' /proc/mounts || mount -t binder binder /dev/binderfs
+binder-setup
+: > /run/android-debug/binder-nodes
+for name in binder hwbinder vndbinder; do
+    set -- $(stat -c '%t %T' /dev/binderfs/$name)
+    printf '%s %d %d\n' "$name" "0x$1" "0x$2" >> /run/android-debug/binder-nodes
+done
+echo 'androidboot.hardware=android-desktop androidboot.hardware.platform=android-desktop androidboot.selinux=permissive androidboot.verifiedbootstate=orange androidboot.vbmeta.device_state=unlocked androidboot.slot_suffix=_a androidboot.serialno=SQ2TEST androidboot.force_normal_boot=1' > /run/android-debug/cmdline
+tr ' ' '\n' < /run/android-debug/cmdline > /run/android-debug/bootconfig
+date -u > /logs/googlebook-attempt.txt
+mkdir -p /run/android-device-cgroup
+grep -q ' /run/android-device-cgroup ' /proc/mounts || mount -t cgroup -o devices devices /run/android-device-cgroup
+mkdir -p /run/android-device-cgroup/test
+echo a > /run/android-device-cgroup/test/devices.deny
+for major in 1 4 5 10 13 29 136 137 138 139 140 141 142 143 226; do echo "c $major:* rwm" > /run/android-device-cgroup/test/devices.allow; done
+while read name major minor; do echo "c $major:$minor rwm" > /run/android-device-cgroup/test/devices.allow; done < /run/android-debug/binder-nodes
+echo 'b 7:* rwm' > /run/android-device-cgroup/test/devices.allow
+cat /run/android-device-cgroup/test/devices.list >> /logs/googlebook-attempt.txt
+cat /proc/self/attr/current >> /logs/googlebook-attempt.txt
+# The child gets only loop block devices. Real internal/USB block nodes are not
+# exposed in its dev tmpfs. Namespace reboot terminates this child, not the host.
+set +e
+timeout -s KILL 90 android-namespace "$root" >> /logs/googlebook-attempt.txt 2>&1
+rc=$?
+echo "GOOGLEBOOK_INIT_EXIT=$rc" >> /logs/googlebook-attempt.txt
+dmesg > /logs/googlebook-dmesg.txt
+cat /logs/googlebook-attempt.txt
+grep -E 'init:|apexd|Fatal|linker|binder|SELinux:' /logs/googlebook-dmesg.txt | tail -160
+save-probe || true
+exit "$rc"

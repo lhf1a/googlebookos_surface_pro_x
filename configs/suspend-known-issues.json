@@ -1,0 +1,16 @@
+{
+  "updated": "2026-10-27",
+  "status": "paused_by_user",
+  "issues": [
+    "Lid close switches screen off, but opening the cover does not reliably wake it",
+    "After real sleep the touchscreen may stop responding",
+    "Longer screen-off periods have produced black screen and loss of SSH"
+  ],
+  "last_recovery": "User explicitly confirmed a manual long-press reboot, not an autonomous board reboot",
+  "partial_work": [
+    "SSAM lid/posture and power key events integrated",
+    "SPI-HID suspend/resume quiesce patch and IPTSd resume watcher included",
+    "Kernel devices/platform PM debug stages returned; real suspend still failed"
+  ],
+  "instruction": "Record only. Do not resume sleep testing until requested. Framework wake locks have not reliably prevented actual suspend."
+}

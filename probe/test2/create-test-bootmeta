@@ -1,0 +1,20 @@
+#!/bin/busybox sh
+set -eu
+export PATH=/bin:/sbin
+zcat /etc/googlebook-bootmeta.sparse.gz | sparse-restore /run/googlebook-bootmeta.img
+whole=$(losetup -f)
+losetup "$whole" /run/googlebook-bootmeta.img
+mkdir -p /dev/block/by-name
+# ChromeOS BootControl strips the partition number from a canonical device
+# path. Give it a disk/partition naming scheme it recognizes, backed only by RAM.
+set -- $(stat -c '%t %T' "$whole")
+mknod -m 600 /dev/block/sq2ram b "$((0x$1))" "$((0x$2))"
+while read name number offset bytes; do
+    loop=$(losetup -f)
+    if [ "$name" = misc ]; then losetup -o "$offset" "$loop" /run/googlebook-bootmeta.img
+    else losetup -r -o "$offset" "$loop" /run/googlebook-bootmeta.img; fi
+    set -- $(stat -c '%t %T' "$loop")
+    mknod -m 600 /dev/block/sq2ram$number b "$((0x$1))" "$((0x$2))"
+    ln -s /dev/block/sq2ram$number /dev/block/by-name/$name
+done < /etc/googlebook-bootmeta-layout
+echo 'RAM_GPT_READY: original GPT/AVB metadata, sparse RAM backing, no partition scan'

@@ -1,0 +1,32 @@
+#!/bin/busybox sh
+echo 'SQ2 unified driver results (NOT Googlebook OS validation)'
+cat /logs/build.txt /logs/suite.txt
+profile=$(cat /run/sq2-profile)
+names='touchscreen touchpad'
+[ "$profile" = pending ] && names=touchscreen
+for name in $names; do
+    echo "=== $name ==="
+    if [ -r "/logs/$name-events.txt" ]; then
+        grep -E '^SUMMARY|^RESULT|^NO_DEVICE|^MULTITOUCH' "/logs/$name-events.txt"
+    else echo 'NOT COMPLETED'; fi
+done
+if [ "$profile" != pending ]; then
+echo '=== power ==='
+if [ -r /logs/power-timeline.txt ]; then
+    grep -E '^(online|status|capacity)=' /logs/power-timeline.txt
+else echo 'NOT COMPLETED'; fi
+echo '=== RTC ==='
+grep -E '^rtc_date|^rtc_time' /logs/rtc-timeline.txt 2>/dev/null || echo 'NOT COMPLETED'
+fi
+echo '=== SSH connection ==='
+cat /logs/ssh-connection.txt 2>/dev/null || echo 'SSH not started'
+if [ "$profile" != pending ]; then
+echo '=== Wi-Fi ==='
+grep -E 'wireless-interface-found|wpa_state=|DHCP exit|ping exit|lookup exit|RESULT' /logs/wifi.txt 2>/dev/null || echo 'NOT COMPLETED'
+fi
+if [ "$profile" != pending ]; then
+echo '=== GPU ==='
+grep -E 'DEVICE|PARAM |GEM_|GPU_|RESULT|exit=' /logs/gpu.txt 2>/dev/null || echo 'NOT COMPLETED'
+fi
+echo '=== kernel issues (may include recovered dependency-load attempts) ==='
+dmesg | grep -Ei 'spi_hid.*(invalid|failed)|regulatory.db.*(invalid|malformed)|No per-process|setting up firmware|timed out|GPU.*fault|DP AUX.*ERROR' | tail -25

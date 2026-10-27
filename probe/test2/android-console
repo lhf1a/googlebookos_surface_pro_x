@@ -1,0 +1,5 @@
+#!/bin/busybox sh
+# Invoked from the retained diagnostic SSH environment after native handoff.
+# Android init creates its own mount namespace for APEX; enter that namespace
+# before changing root so the Android linker sees the active APEX mounts.
+exec nsenter -t 1 -m -r -- /system/bin/sh "$@"

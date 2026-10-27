@@ -1,0 +1,55 @@
+#!/bin/busybox sh
+# Run from the retained initramfs, under nohup. Keep the timed rollback alive
+# across loss of SSH. Credentials are a root-only local input, never logged.
+set -eu
+android() { timeout 20 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+credentials=${1:-/etc/sq2-android-wifi.conf}
+test -r "$credentials"
+ssid=$(sed -n '1p' "$credentials")
+password=$(sed -n '2p' "$credentials")
+test -n "$ssid" && test -n "$password"
+rm -f /run/sq2-wifi-commit
+rm -f /run/sq2-wifi-rollback-fired
+nohup sh /tmp/wifi-rollback 180 > /logs/wifi-rollback.txt 2>&1 < /dev/null &
+echo $! > /run/sq2-wifi-rollback.pid
+android svc wifi disable || true
+android setprop ctl.stop wpa_supplicant || true
+android setprop ctl.stop vendor.wifi_hal_legacy
+if [ -r /run/sq2-wifi-hal.pid ]; then kill "$(cat /run/sq2-wifi-hal.pid)" 2>/dev/null || true; fi
+sleep 2
+cp /tmp/libsq2-wifi-hal.so /proc/1/root/vendor/lib64/libsq2-wifi-hal.so
+android sh -c 'LD_PRELOAD=/vendor/lib64/libsq2-wifi-hal.so /vendor/bin/hw/android.hardware.wifi-service > /debug_ramdisk/logs/wifi-hal.txt 2>&1 < /dev/null & echo $! > /debug_ramdisk/logs/wifi-hal.pid'
+cp /logs/wifi-hal.pid /run/sq2-wifi-hal.pid
+# Sole ownership: Android supplicant/DHCP must not race the bootstrap clients.
+wpa_cli -p /run/wpa_supplicant -i wlan0 terminate || true
+if [ -r /run/udhcpc-wlan0.pid ]; then
+    kill "$(cat /run/udhcpc-wlan0.pid)" 2>/dev/null || true
+    rm -f /run/udhcpc-wlan0.pid
+fi
+sleep 2
+android svc wifi enable
+sleep 5
+android cmd wifi connect-network "$ssid" wpa2 "$password" -r none
+unset password
+for attempt in $(seq 1 50); do
+    [ ! -e /run/sq2-wifi-rollback-fired ] || exit 1
+    android cmd wifi status > /logs/wifi-framework-status.txt 2>&1 || true
+    if grep -Fxq "Wifi is connected to \"$ssid\"" /logs/wifi-framework-status.txt &&
+       ip -4 addr show dev wlan0 | grep -q 'inet '; then
+        # Android netd uses its own per-interface route table. Add a narrow
+        # direct LAN route for the diagnostic root SSH socket in main too.
+        address=$(ip -o -4 addr show dev wlan0 | awk '{print $4; exit}')
+        subnet=$(ipcalc -n "$address" | sed -n 's/^NETWORK=//p')
+        if [ -n "$subnet" ]; then
+            ip -4 route replace "$subnet/${address#*/}" dev wlan0 table main || true
+        fi
+        touch /run/sq2-wifi-commit
+        echo 'SQ2_ANDROID_WIFI_CONNECTED: framework association and IPv4 present'
+        cat /logs/wifi-framework-status.txt
+        android dumpsys connectivity > /logs/wifi-framework-connectivity.txt
+        exit 0
+    fi
+    sleep 2
+done
+echo 'SQ2_ANDROID_WIFI_PENDING: timed rollback will restore diagnostic Wi-Fi'
+android logcat -d > /logs/wifi-handoff-logcat.txt

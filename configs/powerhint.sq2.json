@@ -1,0 +1,15 @@
+{
+  "Nodes": [
+    {
+      "Name": "TopAppSchedulerWeight",
+      "Path": "/dev/cpuctl/top-app/cpu.shares",
+      "Values": ["2048", "1024"],
+      "DefaultIndex": 1,
+      "ResetOnInit": true
+    }
+  ],
+  "Actions": [
+    {"PowerHint": "INTERACTION", "Node": "TopAppSchedulerWeight", "Duration": 150, "Value": "2048"},
+    {"PowerHint": "LAUNCH", "Node": "TopAppSchedulerWeight", "Duration": 3000, "Value": "2048"}
+  ]
+}

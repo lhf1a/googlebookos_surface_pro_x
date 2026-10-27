@@ -1,0 +1,20 @@
+#!/bin/busybox sh
+# Discover current QRTR service ports on each boot; do not reuse captured ports.
+# Only read firmware revision, operating mode, SIM presence and packet state.
+set -eu
+export PATH=/bin:/sbin
+lookup=/tmp/sq2-lte-services.$$
+trap 'rm -f "$lookup"' EXIT
+nsenter -t 1 -m -r -- /vendor/bin/qrtr-lookup > "$lookup"
+cat "$lookup"
+for query in '2 revision' '2 mode' '11 uim' '1 wds'; do
+    set -- $query
+    service=$1
+    kind=$2
+    endpoint=$(awk -v service="$service" '$1==service && $3==0 && $4==0 {print $4, $5; exit}' "$lookup")
+    if [ -z "$endpoint" ]; then echo "MISSING QMI service $service ($kind)"; exit 1; fi
+    set -- $endpoint
+    sq2-qmi-readonly "$1" "$2" "$kind"
+done
+echo 'Data interfaces (control-plane success alone does not prove Internet access):'
+ls /sys/class/net
