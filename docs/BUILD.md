@@ -47,6 +47,8 @@ Install-GooglebookInternalSSD.ps1 是有身份保护的特定实验盘安装器�
 
 ## 验证
 
+本机调试密码 SSH：build-sq2-password-ssh.sh 使用 Dropbear 2026.94 和本地缓存 libxcrypt-4.4.38.tar.xz（上游 besser82/libxcrypt release）交叉构建支持 crypt 的静态服务端，不重新生成主机密钥。pack-sq2-password-ssh.sh 要求 SQ2_SSH_SHADOW_FILE 指向操作者自己的本地 shadow 文件。生成的 out/password-ssh/addon.cpio.gz 含凭据，禁止发布。当前设备在已验证完整镜像后追加该 addon；以后重打基础/音频 addon 时也要将密码 SSH addon 放到最后，否则会退回旧服务端/账户配置。公开基础构建仍只支持公钥。
+
 ```sh
 python3 -m unittest discover -s tests -v
 python3 -m compileall -q scripts tests

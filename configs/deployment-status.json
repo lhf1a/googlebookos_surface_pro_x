@@ -4,7 +4,7 @@
   "os": "mica 16471258",
   "kernel": "6.3.8-sq2-android1",
   "sha256": {
-    "deployed_initramfs": "0a5d6ab71ebb09c437dc14d53b2018508c96652711af62ed92678e95ddc62a35",
+    "deployed_initramfs": "651f3831a0171908d7a9b1054a4c1c2a8fd657c36e79e7e3717674ef6389ecf8",
     "power_connectivity_storage_addon": "8025132addaa217ce0337c3077662bceb99183f670eeaa32904c040f6ea96a32",
     "graphics_only_base": "8d4f493bdf149d448b843358dc6a446d5684a041e24a521045ae8775f25a5269",
     "Image": "e7c7a3e5399a6be93a363afc5f880fea30f17cb8a59f176807d3620f967b7ca8",
@@ -24,7 +24,7 @@
   "cover_hotplug": "keyboard_and_touchpad_auto_recovery_user_confirmed_pass",
   "touch_startup": "post_framework_reinitialization_user_confirmed_pass",
   "bluetooth": "ON and OFF preserved across separate reboots; OFF-to-ON and helper reentry passed; final state ON",
-  "normal_boot": "Android owns saved Wi-Fi; public-key SSH starts asynchronously after boot_completed; no diagnostic DHCP/association/continuous logs; SSH connection verified after normal boot",
+  "normal_boot": "Android owns Wi-Fi; SSH starts after boot_completed. Current local lab addon enables root password authentication and retains public-key access; both verified live. Credential-bearing addon is private. No reboot performed for this update.",
   "grub": "normal audio, rescue, poweroff; old no-audio second entry removed; default timeout 3 seconds",
   "audio_tuning": "Mute-before-teardown modules plus pmdown_time=0: user confirmed two ALSA runs, two AAudio runs and two video pause/resume cycles without pops. Startup policy deployed, reboot persistence not yet verified. Low volume/bass/stereo calibration remain open.",
   "lockscreen": "Startup helper restores default resource after reboot without changing lock/credential choice; final normal reboot and 8-second screen-off/wake verified Keyguard showing=true, inputRestricted=true",

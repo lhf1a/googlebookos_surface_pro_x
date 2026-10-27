@@ -3,13 +3,14 @@ set -e
 mkdir -p /dev/pts /run /logs
 grep -q ' /dev/pts ' /proc/mounts || mount -t devpts devpts /dev/pts -o mode=620,ptmxmode=666
 if ! { [ -r /run/dropbear.pid ] && kill -0 "$(cat /run/dropbear.pid)" 2>/dev/null; }; then
-    # Password support is compiled out; the corresponding -s option is absent.
+    # Password-capable lab builds use the locally provisioned root shadow entry.
+    # Standard builds retain public-key-only authentication.
     dropbear -j -k -E -p 22 -P /run/dropbear.pid -r /etc/dropbear/dropbear_ed25519_host_key 2>> /logs/ssh.txt
 fi
 sleep 1
 kill -0 "$(cat /run/dropbear.pid)"
 {
-    echo 'SSH_READY: root, public-key login only; keep this device awake.'
+    echo 'SSH_READY: root; authentication follows the local build/account configuration.'
     ip -4 addr show scope global
     cat /etc/dropbear/host-public.txt
 } | tee /logs/ssh-connection.txt

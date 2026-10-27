@@ -1,5 +1,5 @@
 #!/bin/busybox sh
-# Public-key SSH after Android boot; Android owns Wi-Fi and DHCP.
+# SSH after Android boot; Android owns Wi-Fi and DHCP.
 set -eu
 export PATH=/bin:/sbin
 for n in $(seq 1 240); do

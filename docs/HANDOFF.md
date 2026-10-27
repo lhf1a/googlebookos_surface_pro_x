@@ -109,6 +109,8 @@ SSAM 状态来自 01:0e:01:00:01/state。patch-sq2-lid.py 将 closed 映射 SW_L
 
 ## 现场检查与保存
 
+用户已要求当前实验设备允许 root 密码 SSH，保留公钥登录。原 Dropbear 编译时禁用了密码认证，现另建带静态 libcrypt 的服务端，使用原主机密钥。2222 临时端口及正式 22 端口均通过禁用客户端密钥/agent 的密码认证，id -u 返回 0；公钥连接仍工作。shadow 与明文测试输入仅保存在忽略的 private/out，不进入仓库。启动镜像追加本地密码 SSH addon，重打包注意保留最后覆盖顺序，详见 BUILD。密码变更后若需跨重启保留，须重新保存本地 shadow 并打包；诊断根文件系统内直接 passwd 只修改当前 RAM。
+
 ### 无密码锁屏
 
 当前用户 10 未设置 PIN/密码，关屏亮屏直接进入桌面。镜像的 android:bool/config_disableLockscreenByDefault 为 true；单独执行 lock_settings set-disabled false 未恢复锁屏。已创建 com.android.shell:Sq2Lockscreen fabricated overlay，将该资源覆盖为 false，并对用户 0/10 启用，再显式启用当前用户锁屏。

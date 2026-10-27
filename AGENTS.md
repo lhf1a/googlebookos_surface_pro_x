@@ -13,5 +13,6 @@ Read docs/HANDOFF.md and docs/BUILD.md before changing the port.
 - Distinguish framework restarts (system_server/SurfaceFlinger PIDs) from board reboots (boot ID). A user long-press reboot is not an autonomous crash.
 - PM debug-stage completion does not prove actual suspend works. A framework wake lock does not reliably prevent sleep on this port.
 - Keep private/, out/, downloads/, upstream/, work/, keys, credentials and raw logs out of Git. Use the operator's own SSH identity and host verification.
+- The user subsequently enabled root password login on the current lab SSH server. Preserve public-key access too. The password and shadow entry stay private; local password-ssh addon must remain last when repacking this device. Standard public builds still default to key-only.
 - Report observations and limits honestly; do not label untested patches as working features.
 - Root/permissive/debug builds are authorized in this lab. This does not authorize erasing an unidentified disk or publishing secrets.
