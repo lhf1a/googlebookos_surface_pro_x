@@ -3,7 +3,7 @@
 Read docs/HANDOFF.md and docs/BUILD.md before changing the port.
 
 - Shared storage was repaired by loading FUSE before Android init. Both emulated volumes mount and the user confirmed Files and Chrome downloads work. Preserve this fix; never format userdata to repair a mount failure.
-- Suspend work is explicitly paused by the user. Do not trigger suspend, lid-close sleep or PM test scripts without a new request to resume.
+- True suspend repair remains paused. The user requested screen-off only: preserve the kernel suspend.screen_only guard and nohibernate boot option. Screen-off/on checks are authorized once the guard is verified; never disable it or resume actual sleep tests without a new request.
 - Speaker pop after playback, missing bass and right-biased stereo are recorded/deferred. Do not tune audio without a new request.
 - Preserve mapper import/multiplane graphics and touch state fixes. Default contact detection/stability plus AspectMax=2.0 were validated; do not reintroduce high detection thresholds.
 - Keep normal audio, no-audio and rescue entries. Audit concatenated initramfs in last-entry-wins order. Back up locally, validate gzip/hash, sync and replace atomically.

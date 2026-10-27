@@ -6,7 +6,7 @@ O="$ROOT/out/power-connectivity-20261027"
 S=$(mktemp -d "$B/power-connectivity.XXXXXX")
 mkdir -p "$S/bin" "$S/etc/sq2-power" "$S/etc/googlebook-security/bin/hw" "$S/etc/googlebook-security/etc/init"
 cp "$ROOT/probe/test2/init-googlebook-native" "$S/init"
-for name in bluetooth-framework-boot power-input-boot lab-input-posture refresh-sq2-power-input-nodes touch-resume-watch test-sq2-pm-stage; do
+for name in bluetooth-framework-boot power-input-boot lab-input-posture lab-keep-awake refresh-sq2-power-input-nodes cover-input-watch touch-framework-ready touch-resume-watch test-sq2-pm-stage; do
     cp "$ROOT/probe/test2/$name" "$S/bin/"
     sh -n "$S/bin/$name"
 done

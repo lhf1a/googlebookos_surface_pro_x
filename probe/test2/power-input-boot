@@ -15,6 +15,10 @@ done
 for n in $(seq 1 120); do
     if [ "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null || true)" = 1 ]; then
         /bin/refresh-sq2-power-input-nodes
+        /bin/cover-input-watch > /logs/cover-input-watch.txt 2>&1 &
+        # Reapply raw-touch mode after Android has enumerated physical inputs.
+        sleep 5
+        /bin/touch-framework-ready
         echo SQ2_COVER_AND_POWER_INPUT_READY
         exit 0
     fi

@@ -1,12 +1,12 @@
 #!/bin/busybox sh
-# Lab-only workaround: retain a framework partial wakelock while suspend/resume
-# is unported. The shell-command wakelock is owned by system_server; recheck it
-# after framework restarts. No kernel or HAL success results are fabricated.
+# Screen-only policy: a partial framework lock reduces autosuspend attempts.
+# The kernel's read-only suspend.screen_only guard is the actual protection.
+# Do not hold the display awake or override a user's normal screen timeout.
 export PATH=/bin:/sbin
 android() { timeout 8 nsenter -t 1 -m -r -- /system/bin/"$@"; }
 configured=
 ticks=0
-echo 'LAB_KEEP_AWAKE: preventing automatic system suspend; resume remains unverified.'
+echo 'LAB_SCREEN_ONLY: partial wakelock; kernel guard blocks system suspend.'
 while true; do
     locks=$(android cmd power set-wakelock list 2>/dev/null)
     if ! printf '%s\n' "$locks" | grep 'PARTIAL_WAKE_LOCK:.*held=true' >/dev/null; then
@@ -20,12 +20,16 @@ while true; do
         user=$(android cmd activity get-current-user 2>/dev/null)
         case "$user" in ''|*[!0-9]*) user= ;; esac
         if [ -n "$server" ] && [ -n "$user" ] && [ "$configured" != "$server:$user" ]; then
-            if android settings --user 0 put system screen_off_timeout 2147483647 &&
-               android settings --user "$user" put system screen_off_timeout 2147483647 &&
-               android cmd power wakeup; then
-                configured=$server:$user
-                echo "LAB_DISPLAY_AWAKE: system_server=$server user=$user"
-            fi
+            # Migrate only the old lab's effectively infinite timeout.
+            # Preserve any finite timeout the user selected.
+            for target in 0 "$user"; do
+                value=$(android settings --user "$target" get system screen_off_timeout)
+                if [ "$value" = 2147483647 ]; then
+                    android settings --user "$target" put system screen_off_timeout 120000
+                fi
+            done
+            configured=$server:$user
+            echo "LAB_SCREEN_ONLY: system_server=$server user=$user"
         fi
     fi
     if [ "$ticks" = 0 ]; then

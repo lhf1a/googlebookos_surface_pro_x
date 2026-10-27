@@ -1,0 +1,43 @@
+#!/bin/busybox sh
+# EventHub may see devtmpfs IN_CREATE before ueventd assigns the input group.
+# Republish each newly enumerated Surface cover node with permissions ready.
+# Track the sysfs input identity, not only eventN, which is reused on replug.
+set -u
+export PATH=/bin:/sbin
+cache=/run/sq2-cover-input
+mkdir -p "$cache"
+stage=$(mktemp -d /dev/sq2-cover-refresh.XXXXXX) || exit 1
+trap 'rmdir "$stage" 2>/dev/null || true' EXIT
+while true; do
+    for d in /sys/class/input/event*; do
+        name=$(cat "$d/device/name" 2>/dev/null) || continue
+        case "$name" in 'Microsoft Surface 045E:09AE'*|'Microsoft Surface 045E:09AF'*|'Microsoft Surface 045E:09B0'*) ;; *) continue;; esac
+        sysfs=$(readlink -f "$d/device") || continue
+        case "$sysfs" in */serial1-0/*/input/input*) ;; *) continue;; esac
+        numbers=$(cat "$d/dev" 2>/dev/null) || continue
+        major=${numbers%:*}; minor=${numbers#*:}
+        [ "$major" = 13 ] || continue
+        event=$(basename "$d")
+        identity=$sysfs:$numbers
+        [ "$(cat "$cache/$event" 2>/dev/null)" = "$identity" ] && continue
+        mknod -m 660 "$stage/$event" c "$major" "$minor" || continue
+        if ! chown 0:1004 "$stage/$event"; then rm "$stage/$event"; continue; fi
+        # Detach may race enumeration; do not replace a different device.
+        if [ "$(readlink -f "$d/device")" != "$sysfs" ] ||
+           [ "$(cat "$d/dev" 2>/dev/null)" != "$numbers" ]; then
+            rm "$stage/$event"
+            continue
+        fi
+        rm -f "/dev/input/$event"
+        if ln "$stage/$event" "/dev/input/$event"; then
+            rm "$stage/$event"
+            printf '%s\n' "$identity" > "$cache/$event"
+            echo "COVER_INPUT_REPUBLISHED=$event $name"
+        else
+            mv "$stage/$event" "/dev/input/$event"
+            echo "COVER_INPUT_RESTORE_FALLBACK=$event"
+        fi
+    done
+    [ "${1:-}" = --once ] && exit 0
+    sleep 1
+done

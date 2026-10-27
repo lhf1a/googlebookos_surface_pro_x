@@ -1,0 +1,25 @@
+#!/bin/busybox sh
+# Early IPTSd can remain alive without delivering contacts after Android starts.
+# Reapply the already-validated device mode once after framework enumeration.
+# This is a startup workaround, not a change to contact thresholds.
+set -eu
+export PATH=/bin:/sbin
+test "$(timeout 5 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed)" = 1
+if [ -r /run/iptsd.pid ]; then
+    pid=$(cat /run/iptsd.pid)
+    case "$pid" in ''|*[!0-9]*) echo INVALID_IPTSD_PID; exit 1;; esac
+    if [ "$(cat /proc/$pid/comm 2>/dev/null || true)" = iptsd ]; then
+        kill "$pid"
+        for n in $(seq 1 30); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.1
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            echo IPTSD_STOP_TIMEOUT
+            exit 1
+        fi
+    fi
+    rm /run/iptsd.pid
+fi
+/bin/touch-services
+echo SQ2_TOUCH_FRAMEWORK_REINITIALIZED
