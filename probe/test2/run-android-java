@@ -1,0 +1,14 @@
+#!/bin/busybox sh
+# app_process needs the boot classpath from the running Android zygote.
+set -eu
+jar=${1:?usage: run-android-java android.jar MainClass [args...]}
+main=${2:?MainClass required}
+shift 2
+pid=$(pidof zygote64 | awk '{print $1}')
+test -n "$pid"
+envfile=$(mktemp /run/android-java-env.XXXXXX)
+tr '\000' '\n' < "/proc/$pid/environ" |
+    grep -E '^(ANDROID_ROOT|ANDROID_ASSETS|ANDROID_DATA|ANDROID_STORAGE|ANDROID_ART_ROOT|ANDROID_I18N_ROOT|ANDROID_TZDATA_ROOT|BOOTCLASSPATH|DEX2OATBOOTCLASSPATH)=' > "$envfile"
+while IFS= read -r entry; do export "$entry"; done < "$envfile"
+rm -f "$envfile"
+exec nsenter -t 1 -m -r -- /system/bin/env "CLASSPATH=$jar" /system/bin/app_process /system/bin "$main" "$@"

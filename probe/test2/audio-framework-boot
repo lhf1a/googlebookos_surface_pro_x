@@ -38,6 +38,28 @@ done
 mkdir -p /proc/1/root/debug_ramdisk/sq2-audio
 cp /etc/sq2-audio/audio-hal /proc/1/root/debug_ramdisk/sq2-audio/audio-hal
 chmod 755 /proc/1/root/debug_ramdisk/sq2-audio/audio-hal
+# Android init rejects an executable with a tmpfs label even in permissive mode.
+# Apply the same executable type as the stock APEX audio/effect HAL services.
+android /system/bin/chcon u:object_r:hal_audio_default_exec:s0 /debug_ramdisk/sq2-audio/audio-hal
 android /system/bin/mount --bind /debug_ramdisk/sq2-audio/audio-hal "$target"
-android /system/bin/setprop ctl.start vendor.audio-hal-aidl
+# Restart after binding: service-manager requests may have started an old inode
+# again while drivers were initialized. Check the executable actually running.
+android /system/bin/setprop ctl.restart vendor.audio-hal-aidl
+expected_hal=$(sha256sum /etc/sq2-audio/audio-hal)
+expected_hal=${expected_hal%% *}
+started=0
+for n in $(seq 1 30); do
+    if [ "$(android /system/bin/getprop init.svc.vendor.audio-hal-aidl)" = running ]; then
+        pid=$(android /system/bin/pidof android.hardware.audio.service-aidl.example 2>/dev/null || true)
+        case "$pid" in
+        ''|*[!0-9]*) ;;
+        *)
+            actual_hal=$(sha256sum "/proc/$pid/exe" 2>/dev/null || true)
+            if [ "${actual_hal%% *}" = "$expected_hal" ]; then started=1; break; fi
+            ;;
+        esac
+    fi
+    sleep 1
+done
+[ "$started" = 1 ] || { echo 'AUDIO_FAILED: intended audio HAL not running; inspect init SELinux labels and executable hash'; exit 1; }
 echo 'AUDIO_READY: physical stereo, conservative gain; audio crash root cause unresolved'

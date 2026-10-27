@@ -1,0 +1,72 @@
+#!/bin/busybox sh
+# Temporary Android mix EQ. Does not alter PA gain or paired SoundWire ports.
+set -eu
+export PATH=/bin:/sbin
+mode=${1:-start}
+control=/proc/1/root/debug_ramdisk/sq2-bass-mode
+pidfile=/run/sq2-bass-eq-trial.pid
+mix() { tinymix -D 0 set "$@"; }
+alive() { test -r "$pidfile" && kill -0 "$(cat "$pidfile")" 2>/dev/null; }
+case "$mode" in
+on)
+    alive
+    echo on > "$control"
+    sleep 2
+    mix 'RX7 Digital Volume' 75
+    mix 'RX8 Digital Volume' 75
+    exit 0;;
+off)
+    alive
+    mix 'RX7 Digital Volume' 72
+    mix 'RX8 Digital Volume' 72
+    echo off > "$control"
+    sleep 2
+    exit 0;;
+stop)
+    alive
+    mix 'RX7 Digital Volume' 72
+    mix 'RX8 Digital Volume' 72
+    echo stop > "$control"
+    exit 0;;
+start) ;;
+*) echo 'usage: trial-sq2-bass-eq start [seconds] | on | off | stop'; exit 2;;
+esac
+! alive
+grep -q Surface-Pro-X /proc/asound/cards
+test "$(tinymix -D 0 get 'RX7 Digital Volume' | cut -d ' ' -f 1)" = 72
+test "$(tinymix -D 0 get 'RX8 Digital Volume' | cut -d ' ' -f 1)" = 72
+test "$(cat /sys/devices/platform/sound/MultiMedia1/pmdown_time)" = 0
+test -r /proc/1/root/data/local/tmp/sq2-audio-effects.jar
+duration=${2:-600}
+echo "$$" > "$pidfile"
+echo on > "$control"
+child=
+cleanup() {
+    mix 'RX7 Digital Volume' 72
+    mix 'RX8 Digital Volume' 72
+    echo stop > "$control"
+    if test -n "$child"; then
+        kill "$child" 2>/dev/null || true
+        wait "$child" 2>/dev/null || true
+    fi
+    rm -f "$pidfile"
+    echo SQ2_BASS_TRIAL_BASELINE_RESTORED
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+: > /logs/sq2-bass-eq.txt
+sh /tmp/run-android-java /data/local/tmp/sq2-audio-effects.jar Sq2AudioEffects trial "$duration" > /logs/sq2-bass-eq.txt 2>&1 &
+child=$!
+ready=0
+for n in $(seq 1 30); do
+    if grep -q 'SQ2_BASS_EQ_READY enabled=true' /logs/sq2-bass-eq.txt; then ready=1; break; fi
+    kill -0 "$child"
+    sleep 1
+done
+test "$ready" = 1
+mix 'RX7 Digital Volume' 75
+mix 'RX8 Digital Volume' 75
+cat /logs/sq2-bass-eq.txt
+echo SQ2_BASS_TRIAL_READY
+wait "$child"
