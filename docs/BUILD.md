@@ -39,6 +39,8 @@ build-test3-ssh.sh 要求 SQ2_AUTHORIZED_KEY_FILE 指向自己的公钥；主机
 
 `scripts/build-sq2-turnip.sh` 在 `/root/.cache/sq2-graphics/build-turnip` 独立构建 Android/MSM Turnip，输出 `out/sq2-turnip/runtime/vulkan.freedreno.so`，不覆盖已验证的 GLES。它复用 Mesa 26.2.4 源树、mapper5/multiplane 补丁及 NDK r28c；需要 Python venv 中 Meson、mako/PyYAML、Ninja、Bison/Flex/pkg-config，下载并校验的 libdrm 2.4.133 缓存。mapper5 上游补丁固定至 gbos-vm 提交 3b08ed29a73858644c65f24e06ee2a7cfb7e3774。不是无缓存的一键下载流程。
 
+后续 Wild Life 兼容补丁由 `patch-sq2-turnip-gmem.py` 应用，仅对 A680.1 + 3DMark 选择 sysmem，保留其它应用的 GMEM 路径；这是绕过措施，验证状态见 [WILD-LIFE.md](WILD-LIFE.md)。`pack-sq2-turnip-update.py BASE DRIVER OUTPUT --driver-sha256 HASH` 严格以麦克风基线 9dd3ff7a… 为输入，只替换 Vulkan HAL并保持凭据 addon 最后；不能用首次启用 Vulkan 的旧打包流程覆盖后续音频修复。
+
 `scripts/build-sq2-vulkan-probe.sh` 需要 glslangValidator、patchelf，构建计算、图像及 AHardwareBuffer 读回探针；运行参数可为 HAL 路径或 `/system/lib64/libvulkan.so`。`scripts/build-sq2-vulkan-app.sh` 另需 JDK keytool、zip 及 `$SQ2_GRAPHICS_WORK/sdk/android-35/android.jar`、`sdk/android-15/{aapt2,zipalign,apksigner}`（官方 build-tools 35.0.0 归档内目录名），构建普通 NativeActivity 测试 APK。签名密钥保存在忽略的 private/sq2-vulkan；测试应用使用普通系统加载器、FIFO 交换链，画满 120 帧后停止提交。应用必须处于解锁可见状态。
 
 `scripts/pack-sq2-vulkan.py BASE DRIVER OUTPUT --expected-base-sha256 HASH --preserve-lab-ssh` 只生成增量合并镜像及最后条目审计，不操作磁盘；本地带密码 SSH 的基线必须显式保留其最终 addon。包内仅更改 Vulkan HAL、属性及对应 feature XML，不打包工作区未部署的音频实验。先验证 gzip/hash 与审计，再按下述设备身份保护流程安装。下次启动仍保留 skiagl 桌面及 nocompression 配置；Vulkan 可由应用使用。
@@ -54,6 +56,10 @@ Install-GooglebookInternalSSD.ps1 是有身份保护的特定实验盘安装器�
 在线更新先核对盘和 ESP，备份原 initramfs，写同 ESP 临时文件，检查 hash/gzip，sync 后原子替换，保留正常启动、独立救援和关机项。正常入口在 Android 启动后自动开启公钥 SSH，不执行诊断 Wi-Fi 连接；sq2.ssh=0 可单次禁用。需要完整启动日志或救援联网时使用救援或 sq2.debug=1。
 
 ## 验证
+
+### 内置麦克风
+
+见 [MICROPHONE.md](MICROPHONE.md)。当前采用 `patch-sq2-microphone-hal.py` 从 stock donor 生成仅修正输入设备地址的 HAL，不能使用旧播放 pacing/MonoPipe 实验替代。`build-sq2-mic-app.sh` 生成标准 AudioRecord 录音/回放 APK；`pack-sq2-microphone.py` 以 d519b958… 资源监控镜像为唯一基线，逐项限定四项音频变化并保持凭据 addon 最后。一次性启动通过后已提为默认 9dd3ff7a…。48 kHz stereo、16 kHz mono 及原诊断应用、重启回归由用户确认。
 
 ### 资源监控器：CPU 温度与 Surface 电池
 

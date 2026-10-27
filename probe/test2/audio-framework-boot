@@ -1,5 +1,5 @@
 #!/bin/busybox sh
-# Experimental physical audio startup. Remove sq2.audio=1 in GRUB to bypass.
+# Physical SQ2 audio. Stock transfer/pacing with microphone address correction.
 set -eu
 export PATH=/bin:/sbin
 grep -q 'sq2.audio=1' /proc/cmdline
@@ -27,6 +27,7 @@ for node in /dev/snd/*; do
     [ ! -c "$node" ] || { chown 1000:1005 "$node"; chmod 660 "$node"; }
 done
 audio-speaker-route enable
+audio-microphone-route enable
 # With the mute-before-SoundWire-teardown modules, do not leave DAPM powered
 # after the PCM stream is removed. ALSA and AAudio repeated-open probes passed;
 # arbitrary application pause/resume remains a separate listening check.
@@ -62,4 +63,6 @@ for n in $(seq 1 30); do
     sleep 1
 done
 [ "$started" = 1 ] || { echo 'AUDIO_FAILED: intended audio HAL not running; inspect init SELinux labels and executable hash'; exit 1; }
-echo 'AUDIO_READY: physical stereo, conservative gain; audio crash root cause unresolved'
+# Reopen the framework against the final HAL/policy, not a boot-time old inode.
+android /system/bin/setprop ctl.restart audioserver
+echo 'AUDIO_READY: SQ2 speakers and DMIC0/1, stock transport with mic address fix'

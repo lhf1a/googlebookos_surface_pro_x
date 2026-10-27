@@ -21,6 +21,7 @@ PY
   patch -p1 -d "$SRC" < "$WORK/mapper5.patch"
 fi
 python3 "$ROOT/scripts/patch-mesa-sq2-multiplane.py" "$SRC/src/util/u_gralloc/u_gralloc_vm_mapper5.cpp"
+python3 "$ROOT/scripts/patch-sq2-turnip-gmem.py" "$SRC"
 cat > "$WORK/turnip-aarch64.cross" <<EOF
 [constants]
 ndk = '$NDK'

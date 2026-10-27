@@ -14,6 +14,7 @@
 
 ## 当前待办
 
+- 2026-10-28：麦克风已完成并通过重启实测，详见 [MICROPHONE.md](MICROPHONE.md)。方向传感器、前后摄像头按用户要求暂缓，明确缺口记入 [TODO.md](TODO.md)。Wild Life 花屏已通过 A680.1 + 3DMark 专用 sysmem 兼容补丁缓解并设为默认；重启回归 5264 分 / 31.52 FPS，前中后段采样正常。GMEM 根因、更多应用与长期功耗仍待查，详见 [WILD-LIFE.md](WILD-LIFE.md)。
 - 真正休眠修复暂停；用户改为要求“只关闭屏幕”，具体保护策略见下节。
 - 音频修复已于 2026-10-27 恢复推进：停播/重新开声爆音、音量小、缺低频及声像问题仍开放，见 configs/audio-known-issues.json。
 - 蓝牙其他配置文件、LTE 有 SIM 联网及长期稳定性尚未完成验证。用户已要求推进 Turnip Vulkan，当前实测与后续范围见图形章节。
@@ -54,6 +55,8 @@ sq2.rescue=1 自动启用 debug，保留独立救援联网和 SSH；sq2.debug=1 
 此前禁用自动 SSH 的精简入口重启后，用户确认桌面、Wi-Fi、触摸和键盘正常；当时 TCP 22 不接受连接。未进行严格启动耗时基准测试，不宣称具体节省秒数。
 
 ## 图形与框架稳定性
+
+最新默认部署为 Wild Life 兼容版 initramfs `fa64305d…`、Turnip `0b36eeba…`；由已验证的麦克风基线 `9dd3ff7a…` 仅替换 Vulkan HAL。一次性重启后自动加载，计算/图像/AHB 与完整 Wild Life 回归通过，随后提升同一镜像为默认并恢复原菜单，未再次重启。Image/DTB、麦克风 HAL `774cd7e7…`、IPTSd、CPU/GPU 温控保持。下文早期版本哈希为历史记录，当前完整哈希以 configs/deployment-status.json 为准。
 
 scripts/patch-mesa-sq2-multiplane.py 修复 mapper5 辅助实例未导入 handle 导致元数据查询失败，以及单平面假设。RAII import/free，读取 FOURCC、modifier、plane layout，支持 1–4 平面并检查偏移/步长，返回原 handle 借用 FD，避免释放后 FD 失效。
 
@@ -141,6 +144,14 @@ Wi-Fi 使用内核接口及 Android 通用 HAL 适配：sq2-wifi-driver.c、sq2-
 
 ## 音频
 
+### 当前有效版本：麦克风接入（2026-10-28）
+
+WCD9340 双 DMIC → MultiMedia2 / CARD_0_DEV_1 已打通；策略发布 48 kHz S16 stereo 内置麦克风。通用 HAL 的 XML 转换会把该地址覆盖为 bottom，导致选错 card0/dev0；新增严格限定原始 donor 哈希的单指令补丁，仅跳过 IN_MICROPHONE 的地址覆盖。实际播放/录音传输、pacing、MonoPipe 保持 stock，勿叠加旧实验 patch-sq2-audio-hal.py。
+
+当前实际 HAL 为 774cd7e7…，音频启动助手显式设置可执行标签、重启并检查 /proc/PID/exe，然后刷新 audioserver，消除了“路径已替换、运行仍是旧 inode”的竞态。用户确认 48 kHz 双声道、16 kHz 单声道录音/回放及原诊断应用正常；一次性启动后再次确认诊断录音回放正常。路由及进程哈希在重启后核对一致。不是 AEC/波束成形或全音频认证。
+
+已将实测包 9dd3ff7a… 提为默认，恢复原正常/救援/关机菜单；原 d519b958… 基线保留在本地 out/resource-monitor。只改策略、HAL、音频启动助手和新增麦克风路由四项，内核/DTB/触摸/GLES/Vulkan/温控/电池及凭据不变，凭据 addon 最后。以下旧音频实验记录保留作历史，不能覆盖本节当前状态。完整构建、证据边界见 [MICROPHONE.md](MICROPHONE.md)。
+
 ADSP → SLIM/WCD9340 → SoundWire/双 WSA881x。物理左右均有声；Android AIDL HAL 和 48 kHz S16 stereo policy 已接入。patch-sq2-audio-hal.py 去掉模拟器跳帧逻辑，校验原始/修改后哈希。audio-drivers-start、audio-speaker-route、audio-framework-boot 负责固件、路由、HAL。
 
 调音问题仍开放。历史音频期间发生过整机重启；有限视频观察不能证明所有音频故障已解决。
@@ -196,6 +207,8 @@ SSAM 状态来自 01:0e:01:00:01/state。patch-sq2-lid.py 将 closed 映射 SW_L
 用户已要求当前实验设备允许 root 密码 SSH，保留公钥登录。原 Dropbear 编译时禁用了密码认证，现另建带静态 libcrypt 的服务端，使用原主机密钥。2222 临时端口及正式 22 端口均通过禁用客户端密钥/agent 的密码认证，id -u 返回 0；公钥连接仍工作。shadow 与明文测试输入仅保存在忽略的 private/out，不进入仓库。启动镜像追加本地密码 SSH addon，重打包注意保留最后覆盖顺序，详见 BUILD。密码变更后若需跨重启保留，须重新保存本地 shadow 并打包；诊断根文件系统内直接 passwd 只修改当前 RAM。
 
 ### 无密码锁屏
+
+2026-10-28 调试期间用户已自行添加 PIN，随后将自动锁定延迟调整为 30 分钟，并明确继续保留该策略用于 GPU 调试。实读 user 10 的 lock_screen_lock_after_timeout=1800000。随后将 screen_off_timeout 从 120000 延长到 1800000，避免两分钟关屏打断测试；两项均为 30 分钟，不等于完全禁用锁屏。保留 PIN，不清除凭据。临时“不锁屏”资源/启动助手实验已撤回，原 Sq2Lockscreen overlay 恢复启用；以下为先前无密码锁屏适配历史。
 
 当前用户 10 未设置 PIN/密码，关屏亮屏直接进入桌面。镜像的 android:bool/config_disableLockscreenByDefault 为 true；单独执行 lock_settings set-disabled false 未恢复锁屏。已创建 com.android.shell:Sq2Lockscreen fabricated overlay，将该资源覆盖为 false，并对用户 0/10 启用，再显式启用当前用户锁屏。
 
