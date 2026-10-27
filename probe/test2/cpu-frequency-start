@@ -1,0 +1,19 @@
+#!/bin/busybox sh
+# Use hardware LUT frequencies/voltages; no userspace fixed-frequency policy.
+set -eu
+case " $(cat /proc/cmdline) " in
+    *' sq2.cpufreq=0 '*|*' sq2.rescue=1 '*) echo SQ2_CPUFREQ_SKIPPED;exit 0;;
+esac
+modprobe qcom-cpufreq-hw
+for n in $(seq 1 15); do
+    [ -f /sys/devices/system/cpu/cpufreq/policy0/scaling_driver ] &&
+    [ -f /sys/devices/system/cpu/cpufreq/policy4/scaling_driver ] && break
+    sleep 1
+done
+for policy in /sys/devices/system/cpu/cpufreq/policy0 /sys/devices/system/cpu/cpufreq/policy4; do
+    test "$(cat "$policy/scaling_driver")" = qcom-cpufreq-hw
+    printf '%s governor=' "$policy"
+    cat "$policy/scaling_governor"
+    cat "$policy/cpuinfo_min_freq" "$policy/cpuinfo_max_freq"
+done
+echo SQ2_CPUFREQ_READY

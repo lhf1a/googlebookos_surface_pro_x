@@ -1,0 +1,76 @@
+{
+  "Sensors": [
+    {
+      "Name": "cpu0-thermal",
+      "Type": "UNKNOWN",
+      "Multiplier": 0.001
+    },
+    {
+      "Name": "cpu1-thermal",
+      "Type": "UNKNOWN",
+      "Multiplier": 0.001
+    },
+    {
+      "Name": "cpu2-thermal",
+      "Type": "UNKNOWN",
+      "Multiplier": 0.001
+    },
+    {
+      "Name": "cpu3-thermal",
+      "Type": "UNKNOWN",
+      "Multiplier": 0.001
+    },
+    {
+      "Name": "cpu4-top-thermal",
+      "Type": "UNKNOWN",
+      "Multiplier": 0.001
+    },
+    {
+      "Name": "cpu5-top-thermal",
+      "Type": "UNKNOWN",
+      "Multiplier": 0.001
+    },
+    {
+      "Name": "cpu6-top-thermal",
+      "Type": "UNKNOWN",
+      "Multiplier": 0.001
+    },
+    {
+      "Name": "cpu7-top-thermal",
+      "Type": "UNKNOWN",
+      "Multiplier": 0.001
+    },
+    {
+      "Name": "SQ2-CPU",
+      "Type": "CPU",
+      "VirtualSensor": true,
+      "Formula": "MAXIMUM",
+      "Combination": [
+        "cpu0-thermal",
+        "cpu1-thermal",
+        "cpu2-thermal",
+        "cpu3-thermal",
+        "cpu4-top-thermal",
+        "cpu5-top-thermal",
+        "cpu6-top-thermal",
+        "cpu7-top-thermal"
+      ],
+      "Coefficient": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "Multiplier": 0.001
+    },
+    {
+      "Name": "gpu-thermal-top",
+      "Type": "GPU",
+      "Multiplier": 0.001
+    }
+  ]
+}

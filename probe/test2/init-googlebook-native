@@ -66,6 +66,15 @@ modprobe fuse >> /logs/module-load.txt 2>&1 || fail fuse-module
 test -c /dev/fuse || fail fuse-device
 chmod 0666 /dev/fuse || fail fuse-device-permissions
 if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
+    # SQ2_TSENS_V1: matching module before Android's incompatible donor loader.
+    if ! insmod /lib/modules/6.3.8-sq2-android1/kernel/drivers/thermal/qcom/qcom_tsens.ko >> /logs/module-load.txt 2>&1; then
+        # The high-frequency experiment must not boot without its sensor driver.
+        if [ -d /sys/firmware/devicetree/base/soc@0/gpu@2c00000/opp-table/opp-661000000 ]; then
+            fail gpu-tsens-module
+        fi
+    fi
+    # SQ2_CPUFREQ_V1: matching hardware driver before Android starts.
+    cpu-frequency-start > /logs/cpu-frequency.txt 2>&1 || echo 'SQ2_CPUFREQ_NOT_READY: see RAM log'
     for m in hid_multitouch surface_aggregator surface_aggregator_registry surface_aggregator_hub surface_hid_core surface_hid spi-geni-qcom spi-hid surface_battery surface_charger rtc-surface tun dummy; do
         timeout 15 modprobe "$m" >> /logs/module-load.txt 2>&1
     done
@@ -112,6 +121,7 @@ if [ -d /etc/googlebook-security ]; then
     cat /logs/security-overlay.txt | tee -a /logs/status.txt
 fi
 apply-device-info > /logs/device-info.txt 2>&1 || fail device-info
+resource-monitor-start > /logs/resource-monitor.txt 2>&1 || echo 'SQ2_RESOURCE_MONITOR_NOT_READY: see RAM log'
 cp /etc/android-native-test-policy /newroot/debug_ramdisk/precompiled_sepolicy
 mount --bind /newroot/debug_ramdisk/precompiled_sepolicy /newroot/vendor/etc/selinux/precompiled_sepolicy || fail test-policy
 echo 'DEVELOPMENT_ONLY: all SELinux domains permissive via RAM policy overlay; original images unchanged.' | tee -a /logs/status.txt

@@ -9,6 +9,7 @@ archive=ROOT/'downloads/iptsd-v3.1.1.tar.gz'
 assert hashlib.sha256(archive.read_bytes()).hexdigest()=='914b2618bd1019fd3d64851aa24284d49c76d7cdf9f2db8a7ddb0ab79db95b41'
 subprocess.run(['tar','-xf',str(archive),'-C',str(B)],check=True)
 subprocess.run(['python3',str(ROOT/'scripts/patch-iptsd-sq2-touch.py'),str(src)],check=True)
+subprocess.run(['python3',str(ROOT/'scripts/patch-iptsd-sq2-heatmap.py'),str(src)],check=True)
 cache=src/'subprojects/packagecache'; cache.mkdir(exist_ok=True)
 downloads=ROOT/'downloads/test3-iptsd'; downloads.mkdir(exist_ok=True)
 jobs=[]

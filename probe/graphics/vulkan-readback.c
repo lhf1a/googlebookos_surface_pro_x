@@ -1,0 +1,226 @@
+/* Isolated Vulkan hardware probe: real shader dispatch and optimal-image readback.
+ * Takes a driver or system loader path; requires SQ2's current A680 driver ID.
+ * SQ2's marketed GPU is Adreno 690; the board DT identifies adreno-680.1.
+ * No display surfaces, global properties, or boot configuration are changed.
+ */
+#define VK_NO_PROTOTYPES
+#define VK_USE_PLATFORM_ANDROID_KHR
+#include <vulkan/vulkan.h>
+#include <hardware/hwvulkan.h>
+#include <android/hardware_buffer.h>
+#include <dlfcn.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include "vulkan-compute.h"
+
+#define CHECK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) { \
+    fprintf(stderr, "%s: VkResult=%d\n", #x, r_); exit(1); } } while (0)
+#define FUNCS(X) \
+ X(DestroyInstance) X(EnumeratePhysicalDevices) X(GetPhysicalDeviceProperties) \
+ X(GetPhysicalDeviceQueueFamilyProperties) X(GetPhysicalDeviceMemoryProperties) \
+ X(EnumerateDeviceExtensionProperties) X(CreateDevice) X(DestroyDevice) X(GetDeviceQueue) \
+ X(CreateBuffer) X(DestroyBuffer) X(GetBufferMemoryRequirements) X(AllocateMemory) \
+ X(FreeMemory) X(BindBufferMemory) X(MapMemory) X(UnmapMemory) X(CreateShaderModule) \
+ X(DestroyShaderModule) X(CreateDescriptorSetLayout) X(DestroyDescriptorSetLayout) \
+ X(CreatePipelineLayout) X(DestroyPipelineLayout) X(CreateComputePipelines) X(DestroyPipeline) \
+ X(CreateDescriptorPool) X(DestroyDescriptorPool) X(AllocateDescriptorSets) X(UpdateDescriptorSets) \
+ X(CreateCommandPool) X(DestroyCommandPool) X(AllocateCommandBuffers) X(ResetCommandBuffer) \
+ X(BeginCommandBuffer) X(EndCommandBuffer) X(CmdBindPipeline) X(CmdBindDescriptorSets) \
+ X(CmdPushConstants) X(CmdDispatch) X(CmdPipelineBarrier) X(QueueSubmit) \
+ X(CreateFence) X(DestroyFence) X(ResetFences) X(WaitForFences) \
+ X(CreateImage) X(DestroyImage) X(GetImageMemoryRequirements) X(BindImageMemory) \
+ X(CmdClearColorImage) X(CmdCopyImageToBuffer)
+#define DECL(n) static PFN_vk##n vk##n;
+FUNCS(DECL)
+static VkPhysicalDeviceMemoryProperties memory;
+static uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags flags) {
+    for (uint32_t i=0; i<memory.memoryTypeCount; ++i)
+        if ((bits & (1u<<i)) && (memory.memoryTypes[i].propertyFlags & flags)==flags) return i;
+    fprintf(stderr,"No suitable memory type\n"); exit(1);
+}
+static void submit(VkDevice dev, VkQueue queue, VkCommandBuffer cb, VkFence fence) {
+    CHECK(vkEndCommandBuffer(cb));
+    VkSubmitInfo si={.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,.commandBufferCount=1,.pCommandBuffers=&cb};
+    CHECK(vkQueueSubmit(queue,1,&si,fence));
+    CHECK(vkWaitForFences(dev,1,&fence,VK_TRUE,10000000000ull));
+    CHECK(vkResetFences(dev,1,&fence));
+}
+int main(int argc,char **argv) {
+    if(argc!=2) { fprintf(stderr,"usage: vulkan-readback DRIVER_OR_LOADER.so\n"); return 2; }
+    setvbuf(stdout,NULL,_IOLBF,0);
+    /* Optional bounded ALU workload for frequency validation. Defaults retain
+     * the original small probe. CPU expectation uses a composed affine map. */
+    const char *seconds_env=getenv("SQ2_VULKAN_SECONDS");
+    const char *iterations_env=getenv("SQ2_VULKAN_ITERATIONS");
+    unsigned seconds=seconds_env ? (unsigned)atoi(seconds_env) : 0;
+    unsigned iterations=iterations_env ? (unsigned)atoi(iterations_env) : 0;
+    if(seconds>60 || iterations>65536) { fprintf(stderr,"Workload out of bounds\n");return 2; }
+    uint32_t multiplier=1,addition=0;
+    uint32_t words=seconds ? 4096 : 256;
+    for(unsigned j=0;j<iterations;j++){multiplier*=1664525u;addition=addition*1664525u+1013904223u;}
+    void *lib=dlopen(argv[1],RTLD_NOW|RTLD_LOCAL);
+    if(!lib) { fprintf(stderr,"dlopen: %s\n",dlerror()); return 1; }
+    PFN_vkGetInstanceProcAddr gipa=(PFN_vkGetInstanceProcAddr)dlsym(lib,"vk_icdGetInstanceProcAddr");
+    if(!gipa) gipa=(PFN_vkGetInstanceProcAddr)dlsym(lib,"vkGetInstanceProcAddr");
+    hw_device_t *hal_device=NULL;
+    if(!gipa) {
+        hw_module_t *module=(hw_module_t*)dlsym(lib,HAL_MODULE_INFO_SYM_AS_STR);
+        if(module && module->methods && module->methods->open &&
+           !module->methods->open(module,HWVULKAN_DEVICE_0,&hal_device))
+            gipa=((hwvulkan_device_t*)hal_device)->GetInstanceProcAddr;
+    }
+    if(!gipa) { fprintf(stderr,"No Vulkan entrypoint\n"); return 1; }
+    PFN_vkCreateInstance create=(PFN_vkCreateInstance)gipa(VK_NULL_HANDLE,"vkCreateInstance");
+    if(!create) return 1;
+    VkApplicationInfo app={.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,.pApplicationName="SQ2 hardware readback",.apiVersion=VK_API_VERSION_1_1};
+    VkInstanceCreateInfo ici={.sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,.pApplicationInfo=&app};
+    VkInstance inst; CHECK(create(&ici,NULL,&inst));
+#define LOAD(n) vk##n=(PFN_vk##n)gipa(inst,"vk" #n); if(!vk##n) { fprintf(stderr,"Missing vk%s\n",#n); return 1; }
+    FUNCS(LOAD)
+    uint32_t count=0; CHECK(vkEnumeratePhysicalDevices(inst,&count,NULL));
+    if(!count || count>16) { fprintf(stderr,"No usable physical device (count=%u)\n",count); return 1; }
+    VkPhysicalDevice devices[16]; CHECK(vkEnumeratePhysicalDevices(inst,&count,devices));
+    VkPhysicalDevice gpu=VK_NULL_HANDLE;
+    for(uint32_t i=0;i<count;i++) {
+        VkPhysicalDeviceProperties p; vkGetPhysicalDeviceProperties(devices[i],&p);
+        printf("GPU name=%s vendor=%x device=%x type=%d Vulkan=%u.%u.%u driver=%u\n",p.deviceName,p.vendorID,p.deviceID,p.deviceType,VK_VERSION_MAJOR(p.apiVersion),VK_VERSION_MINOR(p.apiVersion),VK_VERSION_PATCH(p.apiVersion),p.driverVersion);
+        if(p.vendorID==0x5143 && p.deviceType==VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU && strstr(p.deviceName,"680")) gpu=devices[i];
+    }
+    if(!gpu) { fprintf(stderr,"Expected hardware Adreno 680, refusing fallback\n"); return 1; }
+    vkGetPhysicalDeviceMemoryProperties(gpu,&memory);
+    uint32_t nq=0; vkGetPhysicalDeviceQueueFamilyProperties(gpu,&nq,NULL);
+    VkQueueFamilyProperties *qp=calloc(nq,sizeof(*qp)); if(!qp) return 1;
+    vkGetPhysicalDeviceQueueFamilyProperties(gpu,&nq,qp);
+    uint32_t family=UINT32_MAX;
+    for(uint32_t i=0;i<nq;i++) if((qp[i].queueFlags & (VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_COMPUTE_BIT))==(VK_QUEUE_GRAPHICS_BIT|VK_QUEUE_COMPUTE_BIT)) { family=i; break; }
+    free(qp); if(family==UINT32_MAX) return 1;
+    uint32_t ne=0; CHECK(vkEnumerateDeviceExtensionProperties(gpu,NULL,&ne,NULL));
+    VkExtensionProperties *ext=calloc(ne,sizeof(*ext)); if(!ext) return 1;
+    CHECK(vkEnumerateDeviceExtensionProperties(gpu,NULL,&ne,ext));
+    for(uint32_t i=0;i<ne;i++) if(strstr(ext[i].extensionName,"android") || strstr(ext[i].extensionName,"swapchain")) printf("EXT %s\n",ext[i].extensionName);
+    free(ext);
+    float priority=1.0;
+    VkDeviceQueueCreateInfo qci={.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,.queueFamilyIndex=family,.queueCount=1,.pQueuePriorities=&priority};
+    const char *device_ext=VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME;
+    VkDeviceCreateInfo dci={.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,.queueCreateInfoCount=1,.pQueueCreateInfos=&qci,.enabledExtensionCount=1,.ppEnabledExtensionNames=&device_ext};
+    VkDevice dev; CHECK(vkCreateDevice(gpu,&dci,NULL,&dev));
+    VkQueue queue; vkGetDeviceQueue(dev,family,0,&queue);
+    VkBufferCreateInfo bci={.sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,.size=64*64*4,.usage=VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,.sharingMode=VK_SHARING_MODE_EXCLUSIVE};
+    VkBuffer buffer; CHECK(vkCreateBuffer(dev,&bci,NULL,&buffer));
+    VkMemoryRequirements req; vkGetBufferMemoryRequirements(dev,buffer,&req);
+    VkMemoryAllocateInfo mai={.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,.allocationSize=req.size,.memoryTypeIndex=memory_type(req.memoryTypeBits,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+    VkDeviceMemory mem; CHECK(vkAllocateMemory(dev,&mai,NULL,&mem)); CHECK(vkBindBufferMemory(dev,buffer,mem,0));
+    uint32_t *mapped; CHECK(vkMapMemory(dev,mem,0,VK_WHOLE_SIZE,0,(void**)&mapped));
+    VkDescriptorSetLayoutBinding binding={.binding=0,.descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,.descriptorCount=1,.stageFlags=VK_SHADER_STAGE_COMPUTE_BIT};
+    VkDescriptorSetLayoutCreateInfo slci={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,.bindingCount=1,.pBindings=&binding};
+    VkDescriptorSetLayout sl; CHECK(vkCreateDescriptorSetLayout(dev,&slci,NULL,&sl));
+    VkPushConstantRange push={VK_SHADER_STAGE_COMPUTE_BIT,0,8};
+    VkPipelineLayoutCreateInfo plci={.sType=VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,.setLayoutCount=1,.pSetLayouts=&sl,.pushConstantRangeCount=1,.pPushConstantRanges=&push};
+    VkPipelineLayout pl; CHECK(vkCreatePipelineLayout(dev,&plci,NULL,&pl));
+    VkShaderModuleCreateInfo smci={.sType=VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,.codeSize=sizeof(sq2_compute),.pCode=sq2_compute};
+    VkShaderModule shader; CHECK(vkCreateShaderModule(dev,&smci,NULL,&shader));
+    VkComputePipelineCreateInfo cpci={.sType=VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,.stage={.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,.stage=VK_SHADER_STAGE_COMPUTE_BIT,.module=shader,.pName="main"},.layout=pl};
+    VkPipeline pipeline; CHECK(vkCreateComputePipelines(dev,VK_NULL_HANDLE,1,&cpci,NULL,&pipeline));
+    VkDescriptorPoolSize size={VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,1};
+    VkDescriptorPoolCreateInfo dpci={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,.maxSets=1,.poolSizeCount=1,.pPoolSizes=&size};
+    VkDescriptorPool pool; CHECK(vkCreateDescriptorPool(dev,&dpci,NULL,&pool));
+    VkDescriptorSetAllocateInfo dsai={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,.descriptorPool=pool,.descriptorSetCount=1,.pSetLayouts=&sl};
+    VkDescriptorSet ds; CHECK(vkAllocateDescriptorSets(dev,&dsai,&ds));
+    VkDescriptorBufferInfo bi={buffer,0,bci.size};
+    VkWriteDescriptorSet write={.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,.dstSet=ds,.dstBinding=0,.descriptorCount=1,.descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,.pBufferInfo=&bi};
+    vkUpdateDescriptorSets(dev,1,&write,0,NULL);
+    VkCommandPoolCreateInfo cpi={.sType=VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,.flags=VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,.queueFamilyIndex=family};
+    VkCommandPool cmdpool; CHECK(vkCreateCommandPool(dev,&cpi,NULL,&cmdpool));
+    VkCommandBufferAllocateInfo cbai={.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,.commandPool=cmdpool,.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,.commandBufferCount=1};
+    VkCommandBuffer cb; CHECK(vkAllocateCommandBuffers(dev,&cbai,&cb));
+    VkCommandBufferBeginInfo begin={.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkFenceCreateInfo fci={.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFence fence; CHECK(vkCreateFence(dev,&fci,NULL,&fence));
+    time_t started=time(NULL);
+    uint32_t rounds=0;
+    for(uint32_t round=0;round<1000000 && (round<16 || (seconds && time(NULL)-started<(time_t)seconds));round++) {
+        memset(mapped,0,bci.size);
+        CHECK(vkResetCommandBuffer(cb,0)); CHECK(vkBeginCommandBuffer(cb,&begin));
+        vkCmdBindPipeline(cb,VK_PIPELINE_BIND_POINT_COMPUTE,pipeline);
+        vkCmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_COMPUTE,pl,0,1,&ds,0,NULL);
+        uint32_t seed=round*7919u+12345u,params[2]={seed,iterations};
+        vkCmdPushConstants(cb,pl,VK_SHADER_STAGE_COMPUTE_BIT,0,8,params);
+        vkCmdDispatch(cb,words/64,1,1);
+        VkMemoryBarrier barrier={.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER,.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT,.dstAccessMask=VK_ACCESS_HOST_READ_BIT};
+        vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,1,&barrier,0,NULL,0,NULL);
+        submit(dev,queue,cb,fence);
+        for(uint32_t i=0;i<words;i++) if(mapped[i]!=(((i*1664525u+seed)*multiplier+addition)^0x9e3779b9u)) { fprintf(stderr,"Compute mismatch round=%u word=%u\n",round,i); return 1; }
+        rounds++;
+    }
+    printf("COMPUTE_OK %u rounds x %u checked words, ALU iterations=%u, elapsed=%lld seconds\n",rounds,words,iterations,(long long)(time(NULL)-started));
+    VkImageCreateInfo imci={.sType=VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,.imageType=VK_IMAGE_TYPE_2D,.format=VK_FORMAT_R8G8B8A8_UNORM,.extent={64,64,1},.mipLevels=1,.arrayLayers=1,.samples=VK_SAMPLE_COUNT_1_BIT,.tiling=VK_IMAGE_TILING_OPTIMAL,.usage=VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,.sharingMode=VK_SHARING_MODE_EXCLUSIVE,.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED};
+    VkImage im; CHECK(vkCreateImage(dev,&imci,NULL,&im)); vkGetImageMemoryRequirements(dev,im,&req);
+    mai.allocationSize=req.size; mai.memoryTypeIndex=memory_type(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkDeviceMemory immem; CHECK(vkAllocateMemory(dev,&mai,NULL,&immem)); CHECK(vkBindImageMemory(dev,im,immem,0));
+    CHECK(vkResetCommandBuffer(cb,0)); CHECK(vkBeginCommandBuffer(cb,&begin));
+    VkImageSubresourceRange range={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    VkImageMemoryBarrier ib={.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT,.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED,.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,.image=im,.subresourceRange=range};
+    vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,NULL,0,NULL,1,&ib);
+    VkClearColorValue color={.float32={1,0,0,1}};
+    vkCmdClearColorImage(cb,im,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,&color,1,&range);
+    ib.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT; ib.dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;
+    ib.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; ib.newLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,NULL,0,NULL,1,&ib);
+    VkBufferImageCopy region={.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1},.imageExtent={64,64,1}};
+    vkCmdCopyImageToBuffer(cb,im,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,buffer,1,&region);
+    VkMemoryBarrier mb={.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER,.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT,.dstAccessMask=VK_ACCESS_HOST_READ_BIT};
+    vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,1,&mb,0,NULL,0,NULL);
+    submit(dev,queue,cb,fence);
+    for(uint32_t i=0;i<4096;i++) if(mapped[i]!=0xff0000ffu) { fprintf(stderr,"Image mismatch pixel=%u value=%08x\n",i,mapped[i]); return 1; }
+    puts("IMAGE_OK 64x64 optimal-tiled RGBA clear/copy/readback");
+    vkDestroyImage(dev,im,NULL); vkFreeMemory(dev,immem,NULL);
+    /* Import an Android/minigbm allocation, write on the GPU, read through the
+     * mapper CPU lock. This exercises mapper5 metadata and shared-buffer layout. */
+    AHardwareBuffer_Desc desc={.width=64,.height=64,.layers=1,.format=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
+        .usage=AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN|AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT|AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE};
+    AHardwareBuffer *ahb=NULL;
+    if(AHardwareBuffer_allocate(&desc,&ahb)) { fprintf(stderr,"AHB allocation failed\n"); return 1; }
+    PFN_vkGetAndroidHardwareBufferPropertiesANDROID ahb_props=(PFN_vkGetAndroidHardwareBufferPropertiesANDROID)gipa(inst,"vkGetAndroidHardwareBufferPropertiesANDROID");
+    if(!ahb_props) return 1;
+    VkAndroidHardwareBufferFormatPropertiesANDROID fp={.sType=VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID};
+    VkAndroidHardwareBufferPropertiesANDROID ap={.sType=VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID,.pNext=&fp};
+    CHECK(ahb_props(dev,ahb,&ap));
+    if(fp.format!=VK_FORMAT_R8G8B8A8_UNORM) { fprintf(stderr,"Unexpected AHB VkFormat=%d\n",fp.format); return 1; }
+    VkExternalMemoryImageCreateInfo external={.sType=VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,.handleTypes=VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID};
+    imci.pNext=&external; imci.usage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    CHECK(vkCreateImage(dev,&imci,NULL,&im));
+    VkMemoryDedicatedAllocateInfo dedicated={.sType=VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,.image=im};
+    VkImportAndroidHardwareBufferInfoANDROID import={.sType=VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,.pNext=&dedicated,.buffer=ahb};
+    mai.pNext=&import; mai.allocationSize=ap.allocationSize; mai.memoryTypeIndex=memory_type(ap.memoryTypeBits,0);
+    CHECK(vkAllocateMemory(dev,&mai,NULL,&immem)); CHECK(vkBindImageMemory(dev,im,immem,0));
+    CHECK(vkResetCommandBuffer(cb,0)); CHECK(vkBeginCommandBuffer(cb,&begin));
+    ib.image=im; ib.srcAccessMask=0; ib.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
+    ib.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; ib.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,NULL,0,NULL,1,&ib);
+    color=(VkClearColorValue){.float32={0,1,0,1}};
+    vkCmdClearColorImage(cb,im,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,&color,1,&range);
+    ib.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;ib.dstAccessMask=VK_ACCESS_HOST_READ_BIT;
+    ib.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;ib.newLayout=VK_IMAGE_LAYOUT_GENERAL;
+    vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,0,NULL,0,NULL,1,&ib);
+    submit(dev,queue,cb,fence);
+    void *pixels=NULL;
+    if(AHardwareBuffer_lock(ahb,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,-1,NULL,&pixels)) return 1;
+    AHardwareBuffer_describe(ahb,&desc); uint32_t bad=0;
+    for(uint32_t y=0;y<64;y++) for(uint32_t x=0;x<64;x++) if(((uint32_t*)pixels)[y*desc.stride+x]!=0xff00ff00u)bad++;
+    if(AHardwareBuffer_unlock(ahb,NULL)) return 1;
+    if(bad){fprintf(stderr,"AHB mismatch pixels=%u\n",bad);return 1;}
+    puts("AHB_OK 64x64 mapper5 import/GPU clear/CPU readback");
+    vkDestroyImage(dev,im,NULL);vkFreeMemory(dev,immem,NULL);AHardwareBuffer_release(ahb);
+    vkDestroyFence(dev,fence,NULL);
+    vkDestroyCommandPool(dev,cmdpool,NULL); vkDestroyDescriptorPool(dev,pool,NULL);
+    vkDestroyPipeline(dev,pipeline,NULL); vkDestroyShaderModule(dev,shader,NULL);
+    vkDestroyPipelineLayout(dev,pl,NULL); vkDestroyDescriptorSetLayout(dev,sl,NULL);
+    vkUnmapMemory(dev,mem); vkDestroyBuffer(dev,buffer,NULL); vkFreeMemory(dev,mem,NULL);
+    vkDestroyDevice(dev,NULL); vkDestroyInstance(inst,NULL);
+    if(hal_device) hal_device->close(hal_device);
+    dlclose(lib);
+    puts("SQ2_VULKAN_READBACK_OK"); return 0;
+}

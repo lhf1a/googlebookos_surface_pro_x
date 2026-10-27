@@ -4,7 +4,9 @@
     "url": "https://archive.mesa3d.org/mesa-26.2.4.tar.xz",
     "sha256": "bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9",
     "backend": "msm",
-    "mapper5_patch": "upstream/gbos-vm/patches/mesa-android-mapper5.patch"
+    "mapper5_patch": "upstream/gbos-vm/patches/mesa-android-mapper5.patch",
+    "mapper5_patch_commit": "3b08ed29a73858644c65f24e06ee2a7cfb7e3774",
+    "mapper5_patch_repository": "https://github.com/skylartaylor/gbos-vm"
   },
   "ndk": {
     "version": "r28c",
@@ -15,7 +17,10 @@
     "repository": "https://android.googlesource.com/platform/external/minigbm",
     "commit": "455b7456397dff01443584b09e2fd594079e905c",
     "downloaded_main_archive_sha256": "d458369cd505a9d26d9d419be78628515e7f54ee01e380b357d661321f2a071b",
-    "build_defines": ["DRV_MSM", "QCOM_DISABLE_COMPRESSED_NV12"],
+    "build_defines": [
+      "DRV_MSM",
+      "QCOM_DISABLE_COMPRESSED_NV12"
+    ],
     "note": "Development C driver bridge; Android C++ HAL comes from verified Cuttlefish 16373615 donor"
   },
   "cutils_headers": {
@@ -37,5 +42,16 @@
     "archive_sha256": "1ea03318e6968688370f4232184bb39509bc32b06d122c4dd516a03cb81d3693",
     "reviewed": "build_turnip.sh; patches/patchs2/common/apply_common.sh",
     "findings": "Android NDK/Bionic build; freedreno-kmds=kgsl, EGL disabled, current variants A7xx/A8xx. Surface requires MSM; no device-specific patches imported blindly."
+  },
+  "libdrm": {
+    "version": "2.4.133",
+    "url": "https://dri.freedesktop.org/libdrm/libdrm-2.4.133.tar.xz",
+    "sha256": "fc68f9d0ba2ea63c9432a299e14fea09fad7a8a66e8039fcd7802ca59f77b4f5"
+  },
+  "vulkan_test_sdk": {
+    "platform_url": "https://dl.google.com/android/repository/platform-35_r02.zip",
+    "platform_sha1": "0bb560a90a7a2cbd0dd8348224d518b638fe7949",
+    "build_tools_url": "https://dl.google.com/android/repository/build-tools_r35_linux.zip",
+    "build_tools_sha1": "2cfaa0bbb2336e9ec18ed3ecea84fa2e2af607bc"
   }
 }
