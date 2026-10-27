@@ -22,10 +22,18 @@
 
 - Surface Pro X SQ2、16 GB，已替换为实验用 512 GB NVMe；内核 6.3.8-sq2-android1，内置 NVMe 已启用。
 - ESP 分区 6，userdata 分区 1；布局见 scripts/build-googlebook-internal-ssd.py。super 切片映射为只读 EROFS，适配经 RAM overlay 注入。
-- ESP /EFI/BOOT/grub.cfg；内核/DTB/initramfs 在 /boot/sq2-android1/。正常音频、禁用音频、诊断和关机入口，正常默认、3 秒。
-- initramfs 准备驱动、网络及保留的 Dropbear，再由原 Android init 成为 PID 1。SSH 根目录仍是调试 initramfs。
+- ESP /EFI/BOOT/grub.cfg；内核/DTB/initramfs 在 /boot/sq2-android1/。菜单现在为正常音频、独立救援、关机，正常默认、3 秒；原无音频第 2 项已删除。
+- 正常 initramfs 只准备必要驱动、固件与 Android 挂载，不启动 Dropbear，也不执行测试网络连接。显式救援或 sq2.debug=1 才启用调试网络和 SSH；SSH 根目录仍是调试 initramfs。
 - Android 命令：nsenter -t 1 -m -r -- /system/bin/<command>；Android 文件树 /proc/1/root；ESP /media/esp；本次日志 /logs。
-- sq2.audio=1 启用音频；禁用音频入口仍共享图形、触摸及存储修复。
+- sq2.audio=1 启用音频。如需临时隔离音频，可在 GRUB 编辑正常入口去掉该参数，不再提供单独菜单项。
+
+### 正常启动去除调试等待
+
+正常启动不执行 network-up、start-ssh、keep-debug-route、wifi-framework-boot/rollback、memfd 自测、boot-kmsg 或 native-monitor。不再等待实验室 SSID 关联和 DHCP，也不强制打开 Wi-Fi 或覆盖已保存网络。helper 输出只写 initramfs RAM，避免同步写 ESP；必要的 QCOM QRTR/PD mapper/RMTFS 固件服务、ath10k、音频/输入/GPU/RTC/FUSE 等仍保留。触控早期初始化并行执行，boot_completed 后的触控恢复仍生效。
+
+sq2.rescue=1 自动启用 debug，保留独立救援联网和 SSH；sq2.debug=1 可临时恢复完整 Android 调试启动。QEMU smoke 模式仍保留验证日志。正常启动后 SSH 不可连接是预期行为，不应为恢复远程访问而擅自重新加入自动启动。
+
+精简入口实际重启后，用户确认桌面、Wi-Fi、触摸和键盘正常；工作站检查原 Android 网络地址可达，但 TCP 22 不接受连接。未进行严格启动耗时基准测试，不宣称具体节省秒数。
 
 ## 图形与框架稳定性
 
@@ -49,7 +57,7 @@ IPTSd 3.1.1 加 scripts/patch-iptsd-sq2-touch.py 状态/连续性修复。config
 
 ## Wi-Fi 与蓝牙
 
-Wi-Fi 使用内核接口及 Android 通用 HAL 适配：sq2-wifi-driver.c、sq2-wifi-hal.cpp、wifi-framework-boot。已在设置内扫描、连接，开发通过内网 SSH；有实验室联网引导跳过逻辑。
+Wi-Fi 使用内核接口及 Android 通用 HAL 适配：sq2-wifi-driver.c、sq2-wifi-hal.cpp。正常启动由 Android 自身恢复已保存网络；wifi-framework-boot 仅在显式 debug 启动用于调试连接及回退。保留实验室联网引导跳过逻辑。
 
 蓝牙由 Linux hci_uart/btqca 初始化 WCN3998，sq2-hci-bridge 将真实 HCI_USER socket 桥接到 /dev/sq2-bt-h4，Cuttlefish AIDL HAL 接管。patch-sq2-bluetooth.py 包含关闭 serdev 防护、特定 baud ACK 处理及诊断；bluetooth-framework-boot 和 configs/sq2-bluetooth.rc 持久化。用户确认名称显示、配对成功；A2DP、通话等全流程未验证。不要在线反复卸载 QCA transport 模块。
 

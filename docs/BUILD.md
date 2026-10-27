@@ -42,7 +42,7 @@ pack-sq2-power-connectivity.sh 在已有缓存下打包 /init、蓝牙/输入脚
 
 Install-GooglebookInternalSSD.ps1 是有身份保护的特定实验盘安装器，仅用于授权整盘安装。修复存储挂载/HAL 不需格式化 userdata。旧 USB/外置 SSD 脚本属于不同阶段，不可混用。
 
-在线更新先核对盘和 ESP，备份原 initramfs，写同 ESP 临时文件，检查 hash/gzip，sync 后原子替换，保留三个启动入口。
+在线更新先核对盘和 ESP，备份原 initramfs，写同 ESP 临时文件，检查 hash/gzip，sync 后原子替换，保留正常启动、独立救援和关机项。正常入口不启用调试 SSH/联网；需要远程诊断时显式使用救援或临时添加 sq2.debug=1。
 
 ## 验证
 

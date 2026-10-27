@@ -1,5 +1,5 @@
 #!/bin/busybox sh
-# Experimental physical audio startup. Select the no-audio GRUB entry to bypass.
+# Experimental physical audio startup. Remove sq2.audio=1 in GRUB to bypass.
 set -eu
 export PATH=/bin:/sbin
 grep -q 'sq2.audio=1' /proc/cmdline

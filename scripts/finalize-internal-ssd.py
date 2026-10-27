@@ -23,8 +23,8 @@ for source, dest in [(o/'kernel.config','kernel.config'),(o/'validation.json','n
 (d/'INSTALL-NOTES.txt').write_text('''SQ2 Googlebook OS replacement SSD - 2026-10-27
 Target: 512110190592 bytes, internal NVMe or USB-attached boot.
 GRUB default: entry 1, timeout 3 seconds.
-1: desktop with experimental physical audio. 2: desktop without audio.
-3: SSH rescue (Android userdata not mounted). 4: shutdown.
+1: desktop with experimental physical audio (no automatic diagnostic SSH).
+2: SSH rescue (Android userdata not mounted). 3: shutdown.
 Includes input posture fix, IPTSD state fix + AspectMax=2.0 with default
 detection thresholds, Freedreno linear buffers, Wi-Fi framework adapter,
 LAN-only first setup, root/debug kernel and permissive SELinux.

@@ -16,8 +16,13 @@ smoke=0
 grep -q 'sq2.native=smoke' /proc/cmdline && smoke=1
 ssd=0
 ssd_smoke=0
+debug=0
+rescue=0
 grep -q 'sq2.native=ssd' /proc/cmdline && ssd=1
 grep -q 'sq2.native=ssd-smoke' /proc/cmdline && ssd_smoke=1
+grep -q 'sq2.rescue=1' /proc/cmdline && rescue=1
+grep -q 'sq2.debug=1' /proc/cmdline && debug=1
+if [ "$rescue" = 1 ] || [ "$smoke" = 1 ] || [ "$ssd_smoke" = 1 ]; then debug=1; fi
 if ! grep -q 'sq2.storage=nvme' /proc/cmdline; then
     ls /sys/class/block/nvme* >/dev/null 2>&1 && fail 'Internal NVMe was enumerated without authorization'
 fi
@@ -39,14 +44,19 @@ else
 fi
 bootid=$(cat /proc/sys/kernel/random/boot_id)
 logdir=/media/esp/logs/googlebook-native-$bootid
+if [ "$debug" = 1 ]; then
 mkdir -p "$logdir" || fail log-directory
 mount --bind "$logdir" /logs || fail logs-bind
 boot-kmsg /logs/kernel-live.txt || fail kmsg-recorder
+fi
+# Normal-boot helper output stays in initramfs RAM, without synchronous ESP I/O.
 exec > /dev/console 2>&1
 echo "SQ2_GOOGLEBOOK_NATIVE_PREP bootid=$bootid" | tee /logs/status.txt
 echo 'System images read-only; provisioned system disk selected; original Android init will become PID 1.' | tee -a /logs/status.txt
 cat /proc/cmdline > /logs/cmdline.txt
-memfd-compat > /logs/memfd-compat.txt 2>&1 || fail memfd-compat
+if [ "$debug" = 1 ]; then
+    memfd-compat > /logs/memfd-compat.txt 2>&1 || fail memfd-compat
+fi
 # Android BPF stats uses closing a PF_KEY socket as an RCU synchronization.
 # Load our matching module before Android's donor module loader takes over.
 modprobe af_key >> /logs/module-load.txt 2>&1 || fail af-key-module
@@ -60,14 +70,22 @@ if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
         timeout 15 modprobe "$m" >> /logs/module-load.txt 2>&1
     done
     timeout 5 hwclock -s -u >> /logs/module-load.txt 2>&1
-    echo 'Preparing Wi-Fi and diagnostic SSH (maximum 120 seconds)...'
-    if timeout 120 network-up > /logs/network-up.txt 2>&1; then
-        start-ssh
-        keep-debug-route > /logs/debug-route.txt 2>&1 &
+    if [ "$debug" = 1 ]; then
+        echo 'Preparing Wi-Fi and diagnostic SSH (maximum 120 seconds)...'
+        if timeout 120 network-up > /logs/network-up.txt 2>&1; then
+            start-ssh
+            keep-debug-route > /logs/debug-route.txt 2>&1 &
+        fi
+        touch-services > /logs/touch-startup.txt 2>&1
+    else
+        # Required QCOM firmware services are shared by Wi-Fi and audio.
+        # Load hardware only: Android owns Wi-Fi state, association and DHCP.
+        wifi-services > /logs/wifi-services-startup.txt 2>&1
+        timeout 40 modprobe ath10k_snoc >> /logs/wifi-services-startup.txt 2>&1
+        touch-services > /logs/touch-startup.txt 2>&1 &
     fi
-    touch-services > /logs/touch-startup.txt 2>&1
 fi
-if grep -q 'sq2.rescue=1' /proc/cmdline; then
+if [ "$rescue" = 1 ]; then
     echo 'SQ2_SSD_RESCUE_READY: SSH and USB logs; Android/data not mounted.' | tee -a /logs/status.txt
     while true; do setsid cttyhack /bin/sh; sleep 1; done
 fi
@@ -117,7 +135,7 @@ if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
     if prepare-native-gpu > /logs/gpu-native-startup.txt 2>&1; then
         echo 'SQ2 GPU driver discovered; Android graphics userspace remains under development.' | tee -a /logs/status.txt
     else
-        echo 'SQ2 GPU preparation failed; see gpu-native-startup.txt. SSH remains available.' | tee -a /logs/status.txt
+        echo 'SQ2 GPU preparation failed; see gpu-native-startup.txt or use the rescue entry.' | tee -a /logs/status.txt
     fi
 fi
 for name in apex bootstrap-apex linkerconfig mnt tmp storage data_mirror; do mount -t tmpfs tmpfs /newroot/$name || fail "$name-tmpfs"; done
@@ -162,8 +180,8 @@ for name in dev proc sys; do mount --rbind /$name /newroot/$name || fail "$name-
 mkdir -p /android
 mount --rbind /newroot /android || fail android-debug-root
 cat /proc/mounts > /logs/mounts-before-init.txt
-echo 'SQ2_NATIVE_HANDOFF: original Android init as real PID 1; USB logs active.' | tee -a /logs/status.txt
-native-monitor > /logs/monitor.txt 2>&1 &
+echo "SQ2_NATIVE_HANDOFF: original Android init as real PID 1; debug=$debug" | tee -a /logs/status.txt
+if [ "$debug" = 1 ]; then native-monitor > /logs/monitor.txt 2>&1 & fi
 lab-keep-awake > /logs/lab-keep-awake.txt 2>&1 &
 if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
     if [ -x /bin/power-input-boot ]; then
@@ -180,7 +198,7 @@ if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
         audio-framework-boot > /logs/audio-framework-boot.txt 2>&1 &
     fi
 fi
-if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ] &&
+if [ "$debug" = 1 ] && [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ] &&
    [ -f /etc/googlebook-security/lib64/libsq2-wifi-hal.so ]; then
     # Hand over ownership before Android can register its nl80211 listeners.
     # The supervisor restores diagnostic Wi-Fi if framework startup fails.
