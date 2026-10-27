@@ -11,7 +11,7 @@
     },
     {
       "id": "speaker-missing-bass",
-      "description": "视频音量偏小、音质像通话；五档测试后用户澄清从 160 Hz 起听不到。左右分别的低频表现尚未明确，无校准声学测量。RX INT7/8 HPF 为 0.48 Hz，不能据此排除其他滤波或声学因素。",
+      "description": "视频整体偏小、薄。raw75 (-9 dB) 相比72更清楚但仍偏小且无新增杂音。160 Hz 对照：单左/单右很微弱，同相双侧较明显，反相居中；用户强调全部仍非常微弱。250 Hz 相位对照差异不明确。暂无依据反转系统声道，也未测定基频/谐波或真实截止频率。Android MUSIC 15/15、master1、balance0、0 effect chains，RX INT7/8 HPF0.48Hz。",
       "status": "open"
     },
     {
@@ -20,5 +20,6 @@
       "status": "open"
     }
   ],
-  "instruction": "继续音频定位；不盲目提高低频或 PA 增益，不关闭 DAC/COMP/BOOST 配对端口。真正休眠仍暂停。"
+  "instruction": "继续音频定位；不盲目提高低频或 PA 增益，不关闭 DAC/COMP/BOOST 配对端口。真正休眠仍暂停。",
+  "volume_experiment": "2026-10-27: live RX7/RX8 raw 75 (-9 dB), PA unchanged and pmdown_time=0. User reports clearer but still quiet, no new distortion. Startup route remains raw 72; higher gain not yet persisted. Prepared 250/160 Hz L, R, same-polarity and inverted-polarity probe; system polarity unchanged."
 }
