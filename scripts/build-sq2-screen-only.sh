@@ -13,7 +13,8 @@ cp "$O/.config" "$DEST/kernel.config"
 python3 "$ROOT/scripts/patch-sq2-screen-only.py" "$K"
 export ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
 export KBUILD_BUILD_USER=sq2-probe KBUILD_BUILD_HOST=builder
-export KBUILD_BUILD_TIMESTAMP='2026-10-27 00:00:00 UTC'
+# Android Settings DeviceInfoUtils requires a weekday in uname().version.
+export KBUILD_BUILD_TIMESTAMP='Tue Oct 27 00:00:00 UTC 2026'
 make -s -C "$K" O="$O" -j16 Image > "$DEST/build.log" 2>&1
 cmp "$DEST/kernel.config" "$O/.config"
 cp "$O/arch/arm64/boot/Image" "$DEST/Image"

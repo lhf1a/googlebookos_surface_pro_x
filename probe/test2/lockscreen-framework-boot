@@ -1,0 +1,18 @@
+#!/bin/busybox sh
+# Fabricated overlays are not retained by this image across a reboot.
+# Restore the device default, never overwrite the user's lock/credential choice.
+set -eu
+export PATH=/bin:/sbin
+android() { timeout 10 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+for n in $(seq 1 240); do
+    if [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = 1 ]; then break; fi
+    sleep 1
+done
+[ "$(android getprop sys.boot_completed)" = 1 ] || exit 1
+user_id=$(android am get-current-user)
+case "$user_id" in ''|*[!0-9]*) exit 1;; esac
+android cmd overlay fabricate --target android --name Sq2Lockscreen \
+    android:bool/config_disableLockscreenByDefault 0x12 0
+android cmd overlay enable --user 0 com.android.shell:Sq2Lockscreen
+if [ "$user_id" != 0 ]; then android cmd overlay enable --user "$user_id" com.android.shell:Sq2Lockscreen; fi
+android cmd overlay lookup --user "$user_id" android android:bool/config_disableLockscreenByDefault

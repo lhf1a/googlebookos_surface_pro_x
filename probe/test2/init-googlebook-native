@@ -111,6 +111,7 @@ if [ -d /etc/googlebook-security ]; then
     apply-security-overlay > /logs/security-overlay.txt 2>&1 || fail security-overlay
     cat /logs/security-overlay.txt | tee -a /logs/status.txt
 fi
+apply-device-info > /logs/device-info.txt 2>&1 || fail device-info
 cp /etc/android-native-test-policy /newroot/debug_ramdisk/precompiled_sepolicy
 mount --bind /newroot/debug_ramdisk/precompiled_sepolicy /newroot/vendor/etc/selinux/precompiled_sepolicy || fail test-policy
 echo 'DEVELOPMENT_ONLY: all SELinux domains permissive via RAM policy overlay; original images unchanged.' | tee -a /logs/status.txt
@@ -184,6 +185,10 @@ echo "SQ2_NATIVE_HANDOFF: original Android init as real PID 1; debug=$debug" | t
 if [ "$debug" = 1 ]; then native-monitor > /logs/monitor.txt 2>&1 & fi
 lab-keep-awake > /logs/lab-keep-awake.txt 2>&1 &
 if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
+    if [ "$debug" = 0 ] && ! grep -q 'sq2.ssh=0' /proc/cmdline; then
+        ssh-framework-boot > /logs/ssh-framework-boot.txt 2>&1 &
+    fi
+    lockscreen-framework-boot > /logs/lockscreen-framework-boot.txt 2>&1 &
     if [ -x /bin/power-input-boot ]; then
         power-input-boot > /logs/power-input-boot.txt 2>&1 &
     fi

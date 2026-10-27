@@ -18,22 +18,28 @@
 - 音频结束约 10 秒后爆音、缺低频、声像偏右暂缓，见 configs/audio-known-issues.json。
 - 蓝牙其他配置文件、LTE 有 SIM 联网、Turnip Vulkan、长期稳定性尚未完成验证；不要默认开始这些新测试。
 
+## 关于设备信息
+
+SettingsGoogle 的“型号”读取 Build.MODEL；CPU Info 由 DiagnosticsPrebuilt 的 HardwareInfoProvider 提供，其 DefaultCpuDataSource 读取 Build.SOC_MODEL。原镜像显示 XPS Googlebook，CPU 为 unknown。apply-device-info 在原 Android init 加载属性之前，为现有 build.prop 创建 RAM 文件绑定覆盖：型号 Surface Pro X、品牌/制造商 Microsoft、ro.soc.model=Microsoft SQ2。保留用户设置的设备名称、mica 产品代号、android-desktop 硬件分派、ABI、构建指纹及软件版本，不修改只读 EROFS 镜像。
+
+内核版本页通过 Os.uname() 和 DeviceInfoUtils 正则解析；原构建日期“2026-10-27 00:00:00 UTC”缺少星期，解析失败。build-sq2-screen-only.sh 改为“Tue Oct 27 00:00:00 UTC 2026”，内核 release 保持 6.3.8-sq2-android1、配置及模块 ABI 不变。新 Image 已通过 QEMU 只关屏保护测试。实机正常重启后，设置页面截图确认 CPU 为 Microsoft SQ2（8 个线程）、型号 Surface Pro X，Android 版本子页显示 6.3.8-sq2-android1 和 #17 Tue Oct 27 00:00:00 UTC 2026。用户原有设备名称保留。
+
 ## 启动结构
 
 - Surface Pro X SQ2、16 GB，已替换为实验用 512 GB NVMe；内核 6.3.8-sq2-android1，内置 NVMe 已启用。
 - ESP 分区 6，userdata 分区 1；布局见 scripts/build-googlebook-internal-ssd.py。super 切片映射为只读 EROFS，适配经 RAM overlay 注入。
 - ESP /EFI/BOOT/grub.cfg；内核/DTB/initramfs 在 /boot/sq2-android1/。菜单现在为正常音频、独立救援、关机，正常默认、3 秒；原无音频第 2 项已删除。
-- 正常 initramfs 只准备必要驱动、固件与 Android 挂载，不启动 Dropbear，也不执行测试网络连接。显式救援或 sq2.debug=1 才启用调试网络和 SSH；SSH 根目录仍是调试 initramfs。
+- 正常 initramfs 准备必要驱动、固件与 Android 挂载，不执行测试网络连接；用户随后要求保留自动 SSH，现由 ssh-framework-boot 等待 Android boot_completed 后后台启动 Dropbear。SSH 根目录仍是调试 initramfs。
 - Android 命令：nsenter -t 1 -m -r -- /system/bin/<command>；Android 文件树 /proc/1/root；ESP /media/esp；本次日志 /logs。
 - sq2.audio=1 启用音频。如需临时隔离音频，可在 GRUB 编辑正常入口去掉该参数，不再提供单独菜单项。
 
 ### 正常启动去除调试等待
 
-正常启动不执行 network-up、start-ssh、keep-debug-route、wifi-framework-boot/rollback、memfd 自测、boot-kmsg 或 native-monitor。不再等待实验室 SSID 关联和 DHCP，也不强制打开 Wi-Fi 或覆盖已保存网络。helper 输出只写 initramfs RAM，避免同步写 ESP；必要的 QCOM QRTR/PD mapper/RMTFS 固件服务、ath10k、音频/输入/GPU/RTC/FUSE 等仍保留。触控早期初始化并行执行，boot_completed 后的触控恢复仍生效。
+正常启动的内核准备阶段不执行 network-up、start-ssh、keep-debug-route、wifi-framework-boot/rollback、memfd 自测、boot-kmsg 或 native-monitor。不再等待实验室 SSID 关联和 DHCP，也不强制打开 Wi-Fi 或覆盖已保存网络。helper 输出只写 initramfs RAM，避免同步写 ESP；必要的 QCOM QRTR/PD mapper/RMTFS 固件服务、ath10k、音频/输入/GPU/RTC/FUSE 等仍保留。触控早期初始化并行执行，boot_completed 后的触控恢复仍生效。
 
-sq2.rescue=1 自动启用 debug，保留独立救援联网和 SSH；sq2.debug=1 可临时恢复完整 Android 调试启动。QEMU smoke 模式仍保留验证日志。正常启动后 SSH 不可连接是预期行为，不应为恢复远程访问而擅自重新加入自动启动。
+sq2.rescue=1 自动启用 debug，保留独立救援联网和 SSH；sq2.debug=1 可临时恢复完整 Android 调试启动。QEMU smoke 模式仍保留验证日志。用户随后要求保留自动 SSH：正常模式的 ssh-framework-boot 在 boot_completed 后启动公钥认证服务，使用 Android netd 自身路由。实机无需额外路由即可连接，故不维护诊断子网规则，也不打开 Wi-Fi、不关联 SSID、不运行 DHCP。sq2.ssh=0 禁用该助手。显式 debug 模式继续走旧调试路径，不重复启动 SSH 助手。最终正常入口重启后，已通过原公钥自动连接；启动参数没有 sq2.debug=1，且没有 network-up/monitor 日志。
 
-精简入口实际重启后，用户确认桌面、Wi-Fi、触摸和键盘正常；工作站检查原 Android 网络地址可达，但 TCP 22 不接受连接。未进行严格启动耗时基准测试，不宣称具体节省秒数。
+此前禁用自动 SSH 的精简入口重启后，用户确认桌面、Wi-Fi、触摸和键盘正常；当时 TCP 22 不接受连接。未进行严格启动耗时基准测试，不宣称具体节省秒数。
 
 ## 图形与框架稳定性
 
@@ -101,7 +107,7 @@ SSAM 状态来自 01:0e:01:00:01/state。patch-sq2-lid.py 将 closed 映射 SW_L
 
 用户确认关屏再亮屏显示锁屏且能正常解锁；SystemUI 显示 KEYGUARD 和“点击或滑动即可解锁”。未创建或清除任何凭据，只关屏内核策略不变。cmd lock_settings get-disabled 在本次在线修改后仍返回 true，与实际 SystemUI 行为不一致，不能单独作为验证依据。
 
-复现脚本 scripts/enable-sq2-lockscreen.sh 需在 Android root 环境中手动执行一次（诊断 SSH 中通过 nsenter -t 1 -m -r -- /system/bin/sh 执行已复制到 Android 的脚本）。它不随启动运行，不持续覆盖用户设置。overlay 已记录到 userdata 的 /data/system/overlays.xml，资源文件在 /data/resource-cache；本轮尚未验证整机重启后的效果，清空 userdata 或制作全新盘不会自动包含该配置。回退资源覆盖可对用户 0 和实际前台用户执行 cmd overlay disable --user USER com.android.shell:Sq2Lockscreen；如需恢复原来的无锁屏选择，使用系统设置，不自动清除凭据。
+复现脚本 scripts/enable-sq2-lockscreen.sh 需在 Android root 环境中手动执行一次（诊断 SSH 中通过 nsenter -t 1 -m -r -- /system/bin/sh 执行已复制到 Android 的脚本）。它不随启动运行，不持续覆盖用户设置。overlay 已记录到 userdata 的 /data/system/overlays.xml，资源文件在 /data/resource-cache；后续实机重启发现该 fabricated overlay 被丢弃。现由 lockscreen-framework-boot 在 Android 启动后恢复默认资源覆盖，不调用 set-disabled，也不改动用户的密码或锁定选择。手动启用脚本仍用于首次显式选择无密码锁屏。使用 cmd power sleep 验证时需等待默认锁定延迟（本次等待 8 秒），不能用 1–3 秒立即唤醒认定无效。最终重启后无需手动执行恢复命令，关屏 8 秒再唤醒，Keyguard showing=true、inputRestricted=true；只关屏 guard 仍为 Y。回退资源覆盖可对用户 0 和实际前台用户执行 cmd overlay disable --user USER com.android.shell:Sq2Lockscreen；如需恢复原来的无锁屏选择，使用系统设置，不自动清除凭据。
 
 使用自己的 SSH key 并确认主机指纹；连接脚本支持 -IdentityFile 或 SQ2_SSH_KEY。
 

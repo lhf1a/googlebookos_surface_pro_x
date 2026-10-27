@@ -1,0 +1,13 @@
+#!/bin/busybox sh
+# Public-key SSH after Android boot; Android owns Wi-Fi and DHCP.
+set -eu
+export PATH=/bin:/sbin
+for n in $(seq 1 240); do
+    if [ "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null || true)" = 1 ]; then
+        break
+    fi
+    sleep 1
+done
+[ "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed)" = 1 ] || exit 1
+# Use Android netd routing; do not install diagnostic subnet/default routes.
+start-ssh
