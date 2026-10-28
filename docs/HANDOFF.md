@@ -14,6 +14,8 @@
 
 ## 当前待办
 
+- 闭源 GLES 多平面新进展：mapper3 按真实 mapper5 PlaneLayouts 解析 YV12/NV12，返回真实 Y/Cb/Cr 地址和步长；格式35仅在证实NV12布局后翻译为QTI具体格式0x109。两格式640×360各30帧，264×136、1280×720、1920×1080、2880×1920各3帧，均经外部YUV纹理→线性RGBA AHB→glReadPixels及CPU读回通过，4×4变色网格最大误差1，释放回零，mapper4哈希不变。**新的整套替换阻断点：原库内部RGBA纹理作为输出时，640×360纯RGB/YUV对照均有损坏；640×384及线性AHB输出通过。** 不能将成功的线性路径等同于内部纹理修复。ESX私有Direct候选配置没有改善此失败；并非已证实GMEM根因。下一步优先查内部纹理的布局/压缩/对齐，随后接可见窗口与SF。lockYCbCr适配已编译但该回调未在此矩阵中独立触发验证。详见 QUEST2-GPU-RESEARCH「YUV多平面与内部纹理阻断点」。
+
 - Quest 2 原配 GLES 的 ANativeWindow/BufferQueue 路径已推进：参考 v77 eglSubDriverAndroid 的 flags bit3 判断，mapper3 对已验证的线性 RGBA fd-backed 缓冲区提供该兼容位；新增窗口代理按真实 dequeue/queue/cancel 与 donor 引用释放映射。Android 系统加载器下 legacy/core 两入口各100轮、1200帧精确读回通过，四个额外尺寸至2880×1920各12帧通过；legacy每轮映射/窗口引用均回到零。私有链接的共享图像/错误导入150轮回归通过。系统未公布 EGL_EXT_platform_base，EXT测试明确返回77（不支持，不计通过）。正常 Mesa/boot ID/框架 PID 保持。下一步仍是多平面视频、可见窗口和 SurfaceFlinger；ImageReader BufferQueue 不是桌面呈现证明。详见 QUEST2-GPU-RESEARCH 的「原配窗口导入与 BufferQueue 生命周期」。
 
 - 最新闭源 GLES 已通过 Android 系统加载器：独立 mount namespace 中用系统 libEGL/libGLESv2 加载 v77 包装/桥接/原配库，无 LD_PRELOAD/LD_LIBRARY_PATH。EGL 1.5 core 150 轮、五尺寸线性 RGBA 双重读回与普通离屏路径通过，默认桌面 Mesa、boot ID/框架 PID 均不变。core/KHR 四种私有入口的共享引用与错误导入释放也各150轮通过。下一步是 ANativeWindow 交换、视频多平面、合成器和持久化，完整系统替换仍未完成。详见 QUEST2-GPU-RESEARCH「EGL 1.5 与 Android 系统加载器接入」；以下阶段记录保留历史证据，旧的 core/系统加载未覆盖已由本条更新。

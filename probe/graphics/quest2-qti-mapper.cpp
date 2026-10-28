@@ -1,6 +1,7 @@
 /* Experimental process-local QTI metadata adapter. Load only as a dependency
  * of the isolated donor (or probe preload). No registered service/system HAL changes.
- * Initial scope: unprotected linear RGBA8888 buffers. Other operations fail
+ * Mapper3 scope: unprotected linear RGBA8888, YV12 and verified NV12 buffers.
+ * Mapper4 retains its RGBA-only scope. Other operations fail
  * explicitly; this is not a complete Android mapper implementation. */
 #ifdef SQ2_QTI_MAPPER3
 #include <vendor/qti/hardware/display/mapper/3.0/IQtiMapper.h>
@@ -11,6 +12,7 @@
 #include <cstdio>
 #include "quest2-mapper5.h"
 #ifdef SQ2_QTI_MAPPER3
+#include "quest2-yuv-metadata.h"
 #include <fcntl.h>
 #include <pthread.h>
 #include <sys/mman.h>
@@ -37,7 +39,7 @@ namespace sq2 {
 // A minigbm handle has width/height at the assumed CPU-base offset, corrupting
 // the plane-offset arithmetic. Return an actual, stable mapping, not a fake
 // pointer or an assumed private handle layout. This bounded process-local
-// cache is for the isolated probe; system adoption needs image-lifetime hooks.
+// cache is tied to native-buffer proxy references in the isolated EGL wrapper.
 struct AddressMappings {
     struct Entry {dev_t dev;ino_t ino;uint64_t size;void *base;unsigned refs;};
     pthread_mutex_t mutex=PTHREAD_MUTEX_INITIALIZER;
@@ -84,16 +86,21 @@ struct AddressMappings {
     }
 };
 static AddressMappings &address_mappings(){static AddressMappings instance;return instance;}
+static bool supported_buffer(const native_handle_t *handle,BufferInfo &b){
+    if(color_info(handle,b)&&b.format==1&&b.fourcc==0x34324241u&&!(b.usage&(1ull<<14)))return true;
+    YuvInfo y;YuvLayout layout;
+    if(!yuv_info(handle,y,layout))return false;
+    b=y;return true;
+}
 // Explicit teardown hook. The caller MUST first destroy every image, texture,
 // surface and context and terminate EGL. Not safe for per-image destruction.
 extern "C" void sq2_qti_mapper3_reset_addresses(){address_mappings().reset();}
 extern "C" unsigned sq2_qti_mapper3_address_refs(){return address_mappings().references();}
 extern "C" bool sq2_qti_mapper3_retain_buffer(const native_handle_t *handle){
-    BufferInfo b;return color_info(handle,b)&&b.format==1&&b.fourcc==0x34324241u&&
-        !(b.usage&(1ull<<14))&&address_mappings().get(b,true);
+    BufferInfo b;return supported_buffer(handle,b)&&address_mappings().get(b,true);
 }
 extern "C" void sq2_qti_mapper3_release_buffer(const native_handle_t *handle){
-    BufferInfo b;if(color_info(handle,b))address_mappings().release(b);
+    BufferInfo b;if(supported_buffer(handle,b))address_mappings().release(b);
 }
 #endif
 static bool info(void *buffer,BufferInfo &b,const char *operation) {
@@ -105,6 +112,7 @@ static bool info(void *buffer,BufferInfo &b,const char *operation) {
     // QTI's allocated height is physical scanlines; StandardMetadata height
     // and plane heightInSamples are logical in this minigbm implementation.
     ok=ok && b.plane_size%b.stride==0 && b.plane_size/b.stride<=INT32_MAX;
+    if(!ok){YuvInfo y;YuvLayout layout;ok=yuv_info(static_cast<const native_handle_t*>(buffer),y,layout);if(ok)b=y;}
 #endif
     std::fprintf(stderr,"QTI_BRIDGE %s %s\n",operation,ok?"OK":"BAD_BUFFER");
     return ok;
@@ -131,7 +139,13 @@ struct Extensions final : qe1::IQtiMapperExtensions {
     GETTER(getLayerCount, b.layers, uint64_t)
     GETTER(getId, b.id, uint64_t)
     GETTER(getUsageFlags, b.usage, uint64_t)
+#ifdef SQ2_QTI_MAPPER3
+    // Flexible 420_888 is a request, not a QTI concrete layout enum. Only after
+    // yuv_info verifies actual NV12 planes, expose QTI YCbCr_420_SP (0x109).
+    GETTER(getFormat, b.format==35?0x109:b.format, int32_t)
+#else
     GETTER(getFormat, b.format, int32_t)
+#endif
 #ifdef SQ2_QTI_MAPPER3
     // v77 op 24 extracts bit 3 and refuses window buffers without it, before
     // calling its fd/size/offset MapMemory path. For validated minigbm DMA-BUFs
@@ -150,7 +164,7 @@ struct Extensions final : qe1::IQtiMapperExtensions {
     Return<void> getCustomDimensions(void *buffer,getCustomDimensions_cb cb) override {
         BufferInfo b;bool ok=info(buffer,b,__func__);
 #ifdef SQ2_QTI_MAPPER3
-        cb(ok?qe::Error::NONE:qe::Error::BAD_BUFFER,ok?b.stride/4:0,ok?b.plane_size/b.stride:0);
+        cb(ok?qe::Error::NONE:qe::Error::BAD_BUFFER,ok?b.stride*8/b.sample_bits:0,ok?b.plane_size/b.stride:0);
 #else
         cb(ok?qe::Error::NONE:qe::Error::BAD_BUFFER,ok?b.stride/4:0,ok?b.height:0);
 #endif
@@ -169,7 +183,27 @@ struct Extensions final : qe1::IQtiMapperExtensions {
     Return<void> calculateBufferAttributes(int32_t,int32_t,int32_t,uint64_t,calculateBufferAttributes_cb cb) override {
         std::fprintf(stderr,"QTI_BRIDGE calculateBufferAttributes UNSUPPORTED\n");cb(qe::Error::UNSUPPORTED,0,0,false);return Void();
     }
-    Return<void> getYuvPlaneInfo(void*,getYuvPlaneInfo_cb cb) override {cb(qe::Error::UNSUPPORTED,{});return Void();}
+    Return<void> getYuvPlaneInfo(void *buffer,getYuvPlaneInfo_cb cb) override {
+#ifdef SQ2_QTI_MAPPER3
+        YuvInfo b;YuvLayout l;
+        bool ok=yuv_info(static_cast<const native_handle_t*>(buffer),b,l);
+        char *base=ok?static_cast<char*>(address_mappings().get(b)):nullptr;
+        if(!base){cb(qe::Error::BAD_BUFFER,{});return Void();}
+        // Original v77 mapper returns two field layouts, zero second field for
+        // progressive images. Plane addresses are real CPU mapping+metadata.
+        hidl_vec<qe::YCbCrLayout> layouts;layouts.resize(2);
+        layouts[0]={base+l.y,base+l.cb,base+l.cr,static_cast<uint32_t>(l.y_stride),
+            static_cast<uint32_t>(l.c_stride),static_cast<uint32_t>(l.chroma_step)};
+        layouts[1]={};
+        std::fprintf(stderr,"QTI_YUV_LAYOUT y=%llu cb=%llu cr=%llu strides=%llu,%llu step=%llu\n",
+            (unsigned long long)l.y,(unsigned long long)l.cb,(unsigned long long)l.cr,
+            (unsigned long long)l.y_stride,(unsigned long long)l.c_stride,(unsigned long long)l.chroma_step);
+        cb(qe::Error::NONE,layouts);
+#else
+        (void)buffer;cb(qe::Error::UNSUPPORTED,{});
+#endif
+        return Void();
+    }
     Return<qe::Error> setSingleBufferMode(void*,bool) override {return qe::Error::UNSUPPORTED;}
     Return<void> getCustomFormatFlags(int32_t,uint64_t,getCustomFormatFlags_cb cb) override {cb(qe::Error::UNSUPPORTED,0,0);return Void();}
     Return<void> getSurfaceMetadata(void*,getSurfaceMetadata_cb cb) override {cb(qe::Error::UNSUPPORTED,nullptr);return Void();}
@@ -282,7 +316,19 @@ struct Mapper final : qm::IQtiMapper {
             ok?static_cast<int32_t>(b.sample_bits/8):0,ok?static_cast<int32_t>(b.stride):0);
         return Void();
     }
-    Return<void> lockYCbCr(void*,uint64_t,const Rect&,const hidl_handle&,lockYCbCr_cb cb) override {cb(am::Error::UNSUPPORTED,{});return Void();}
+    Return<void> lockYCbCr(void *buffer,uint64_t usage,const Rect &region,const hidl_handle &fence,lockYCbCr_cb cb) override {
+        YuvInfo b;YuvLayout l;
+        if(!yuv_info(static_cast<const native_handle_t*>(buffer),b,l)){cb(am::Error::BAD_BUFFER,{});return Void();}
+        return lock(buffer,usage,region,fence,[&](am::Error error,void *data,int32_t,int32_t){
+            am::YCbCrLayout result={};
+            if(error==am::Error::NONE){
+                char *base=static_cast<char*>(data);
+                result.y=base+l.y;result.cb=base+l.cb;result.cr=base+l.cr;
+                result.yStride=l.y_stride;result.cStride=l.c_stride;result.chromaStep=l.chroma_step;
+            }
+            cb(error,result);
+        });
+    }
 #else
     Return<void> lock(void*,uint64_t,const Rect&,const hidl_handle&,lock_cb cb) override {cb(am::Error::UNSUPPORTED,nullptr);return Void();}
 #endif

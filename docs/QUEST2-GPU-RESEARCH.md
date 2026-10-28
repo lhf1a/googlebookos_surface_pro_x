@@ -328,6 +328,45 @@ EXT的 getProcAddress 虽返回系统libEGL地址，直接调用曾得到空surf
 
 所有完成的测试 boot ID 和 system_server/SurfaceFlinger PID 保持，screen-only=Y，默认 Mesa EGL/Vulkan 完整哈希不变，最终筛选 GPU fault/hang 日志无输出。**ImageReader消费不是可见SurfaceFlinger呈现；完整系统替换仍未完成。** 下一步是多平面视频/其他格式、可见应用窗口、合成器、持久化和重启验证。不要把候选直接设为默认桌面。
 
+## YUV多平面与内部纹理阻断点（2026-10-28 后续）
+
+新增独立 `quest2-yuv-metadata.h`，保留原 mapper4/single-plane 解码路径不变。mapper3 的新路径严格解析标准 PlaneLayouts 的组件类型、位偏移、步长、尺寸、子采样和实际 fd 大小；拒绝未知格式、保护/压缩、非8位组件、平面重叠和越界。不按 QTI handle 强转，也不把多个平面压成一个 RGBA 平面。支持范围限定为实际 YV12三平面与格式35分配出的NV12两平面，非任意 flexible YUV。
+
+实测640×360元数据：
+
+| 请求/实际布局 | Y offset / stride / size | Cb offset | Cr offset | chroma stride / step | 像素fd总长 |
+| --- | --- | --- | --- | --- | --- |
+| YV12 / YV12 | 0 / 640 / 230400 | 288000 | 230400 | 320 / 1 | 352256 |
+| 35 / NV12 | 0 / 640 / 245760 | 245760 | 245761 | 640 / 2 | 380928 |
+
+原配 mapper getYuvPlaneInfo（VA0xd850）分配两个YCbCrLayout，复制真实android_ycbcr地址/步长，逐行图像的第二field保持零；grallocutils VA0xce70以base+plane offset构造地址。桥接依照这些契约返回真实mmap+元数据偏移，并复用已有native-buffer引用释放机制。还实现 mapper3 lockYCbCr 的 mapper5 lock 生命周期/YCbCr指针转换；**本轮外部纹理路径调用的是getYuvPlaneInfo，未独立实测lockYCbCr回调，不把其编译成功称为验证通过。**
+
+原驱动对格式35在getFormat后立即返回EGL_BAD_PARAMETER。桥接核对真实NV12组件顺序后，将查询结果翻译为QTI `HAL_PIXEL_FORMAT_YCbCr_420_SP=0x109`，AHB本身和元数据保持原样。具体枚举来自[高通公开gralloc定义](https://android.googlesource.com/platform/hardware/qcom/display/+/ed67014/libgralloc/gralloc_priv.h)，不是把所有格式35一律伪装为NV12；不支持的布局继续拒绝。随后同一缓冲区导入、采样通过。
+
+### 已通过的线性输出矩阵
+
+新 `quest2-yuv-readback.c` 使用正常系统EGL、私有vendor候选。由CPU通过AHardwareBuffer_lockPlanes填充真实Y/Cb/Cr，再导入external texture，立即销毁EGLImage而保留纹理引用，绘制4×4黑/白/红/绿网格；每帧循环移位颜色。glReadPixels和输出AHB CPU lock分别与独立BT.601 limited-range计算结果比较。仅省略每个色块边缘两像素的色度采样位置差异，alpha严格255，内部颜色允许20级误差；实测最大仅1级。这样同时覆盖横纵方向的平面步长和偏移，而非只看中心颜色样本。
+
+| 输入尺寸 | YV12 | NV12（请求35） |
+| --- | --- | --- |
+| 640×360 | 30帧，两条读回通过 | 30帧，两条读回通过 |
+| 264×136 | 3帧，两条读回通过 | 3帧，两条读回通过 |
+| 1280×720 | 3帧，两条读回通过 | 3帧，两条读回通过 |
+| 1920×1080 | 3帧，两条读回通过 | 3帧，两条读回通过 |
+| 2880×1920 | 3帧，两条读回通过 | 3帧，两条读回通过 |
+
+每帧重新创建/释放输入与输出AHB，映射最终回零。新增YUV支持后RGBA窗口三轮36帧/36fence回归通过。重建mapper4仍为 `3c3e04a3…`。所有进程结束后boot ID/框架PID保持，screen-only=Y，默认Mesa EGL/Vulkan完整哈希不变，筛选GPU fault/hang无输出。当前linked mapper3 SHA256 `a1a0b1c720b47acc0536036f71fd9184ab504ab319f1e545ef7dce02bc593f97`，YUV探针 `6eb32e0612b41250e7cff16e6553794ff1e68dbc069f8ac7c813926cfd65f567`。
+
+### 仍失败的内部纹理路径：下一优先级
+
+不设置SQ2_YUV_LINEAR_OUTPUT时，探针用glTexImage2D分配原库内部RGBA输出纹理。640×360的前三个中心样本正确，但从y=352、x=64开始包含alpha0等明显错误，首次条纹对照累计5504个错误通道。相同尺寸纯RGBA `gles-readback-system` 同样失败，首个错误为x=0/y=176处提前出现绿色，因此不能只归因于YUV地址或色度转换。640×384原库内部输出三帧通过；640×360改成线性AHB输出后两个YUV格式的网格与双读回均通过。**内部纹理/压缩/对齐根因未定位，不能用线性输出的成功缩减整套系统替换目标。**
+
+另已取得ESX配置路径证据：strace看到`/data/vendor/gpu/esx_config_<process>.txt`及`esx_config.txt`的查找；解析器VA0x1417c8检查头0x08675309。VA0x1465d8–0x1465f8以键0x375d04e5、settings+0x1ee0和枚举表VA0x3fabe8（Direct=0）调用设置解析。该键的可读名称尚未确认，不能直接套用Vulkan的RenderMode名字。
+
+`SQ2_GLES_DIRECT=1`的实验在独立mount namespace里把/data/vendor挂为临时tmpfs，再写`0x0=0x08675309`、`0x375d04e5=Direct`。未修改donor指令/全局配置；结束确认真实/data/vendor/gpu/esx_config.txt仍不存在。该配置对640×360失败没有改变；未单独证明实际renderpass模式变化，**不是GLES Direct修复，也不是GMEM根因证明**。可继续用原始失败矩阵定位内部纹理问题。
+
+原始数据仅在out/quest2-gpu/gles-linked和gles-linked-yuv-initial；先前窗口检查点已保留于gles-linked-window-adef289。下一步还包括可见窗口、RGBX等合成格式、SurfaceFlinger/应用覆盖、Vulkan系统接入、持久化与重启。当前系统仍为Mesa，完整替换保持未完成。
+
 ## 同一固件配套参考与布局对照（2026-10-28 后续）
 
 用户要求从 Quest 2 固件提取整套 GPU 驱动并直接参考实现。当前主参考统一为上述 v77 vendor，而不是把第三方 Vulkan 重打包与任意 GLES 组合当成原厂整套。`configs/quest2-v77-graphics-reference.json` 新增固定原配 Vulkan、mapper3 实现、gralloc.kona、gralloc core/utils、qdMetaData 及 QTI 接口库哈希；连同既有 EGL/GLES 清单共 18 个文件。它们都来自同一个已校验 vendor 分区。尚未认证 OEM 签名，主机侧抽取文件也不等于这些 HAL 已能在 Surface 加载运行。

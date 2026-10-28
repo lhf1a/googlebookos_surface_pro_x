@@ -25,7 +25,10 @@ patchelf --replace-needed libandroid.so libnativewindow.so "$OUT/gles-readback"
 "$NDK/bin/aarch64-linux-android35-clang" -O2 -Wall -Wextra -Werror \
   "$ROOT/probe/graphics/gles-window.c" -lEGL -lGLESv2 -landroid -lmediandk -ldl \
   -o "$OUT/gles-window"
-(cd "$OUT"; sha256sum gles-readback-system egl-private-namespace gles-window > SYSTEM_PROBE_SHA256SUMS)
+"$NDK/bin/aarch64-linux-android35-clang" -O2 -Wall -Wextra -Werror \
+  "$ROOT/probe/graphics/quest2-yuv-readback.c" -lEGL -lGLESv2 -landroid \
+  -o "$OUT/yuv-readback"
+(cd "$OUT"; sha256sum gles-readback-system egl-private-namespace gles-window yuv-readback > SYSTEM_PROBE_SHA256SUMS)
 "$NDK/bin/aarch64-linux-android35-clang" -shared -fPIC -O2 -Wall -Wextra -Werror \
   "$ROOT/probe/graphics/quest2-loader-trace.c" -ldl -o "$OUT/libquest2-loader-trace.so"
 "$NDK/bin/aarch64-linux-android35-clang" -shared -fPIC -O2 -Wall -Wextra -Werror \
@@ -34,6 +37,10 @@ patchelf --replace-needed libandroid.so libnativewindow.so "$OUT/gles-readback"
   "$ROOT/probe/graphics/quest2-ion-dmaheap.c" -o "$OUT/libquest2-ion-dmaheap.so"
 HIDL=${SQ2_QUEST2_WORK:-/root/.cache/sq2-quest2-hidl}
 VENDOR=${SQ2_ANDROID_VENDOR_LIB64:-/root/.cache/sq2-probe-build/googlebook/vendor/lib64}
+"$NDK/bin/aarch64-linux-android35-clang++" -std=c++17 -O2 -Wall -Wextra -Werror \
+  -static-libstdc++ -isystem "$HIDL/generated" -isystem "$HIDL/include" \
+  -I"$WORK/src/mesa-26.2.4/src/util/u_gralloc" \
+  "$ROOT/probe/graphics/quest2-yuv-info.cpp" -ldl -landroid -o "$OUT/yuv-info"
 "$NDK/bin/aarch64-linux-android35-clang++" -std=c++17 -O2 -fPIC -shared -fno-rtti \
   -DSQ2_QTI_MAPPER3 -include "$ROOT/probe/graphics/quest2-platform-cxx.h" \
   -nostdlib++ -Wall -Wextra -Werror -Wno-unused-parameter \

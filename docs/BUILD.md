@@ -35,6 +35,8 @@ build-test3-ssh.sh 要求 SQ2_AUTHORIZED_KEY_FILE 指向自己的公钥；主机
 
 ## 增量打包及安装
 
+YUV探针：上述构建另生成 `yuv-info`（只分配并解析元数据）和 `yuv-readback`。系统清单现在包含系统RGBA探针、namespace helper、窗口探针和YUV探针四项，需完整同步。独立入口 `SQ2_YUV_LINEAR_OUTPUT=1 sh /proc/1/root/data/local/tmp/sq2-closed/run-quest2-gles-system.sh --yuv` 默认640×360 YV12三帧；`SQ2_YUV_NV12=1`请求格式35，`SQ2_YUV_FRAMES=30`进行连续创建/销毁，宽高用 SQ2_YUV_WIDTH/HEIGHT（网格要求8的倍数）。不设置 LINEAR_OUTPUT 则使用原库内部RGBA纹理，当前640×360仍失败，必须保留这一对照。`SQ2_GLES_DIRECT=1`只在私有namespace的/data/vendor临时tmpfs中写ESX候选配置，目前未改善该失败，不能当成修复或正常部署配置。
+
 窗口交换探针：`build-quest2-gles-probe.sh` 另生成 `gles-window`，须与 `gles-readback-system`、`egl-private-namespace` 和新的三项 `SYSTEM_PROBE_SHA256SUMS` 一起同步至设备的私有 gles-v77 目录。重新生成并同步 gles-linked 候选（包含窗口代理和 mapper3 fd-backed 兼容位），不能只换探针后使用旧库。运行 `SQ2_WINDOW_ENTRY=core SQ2_WINDOW_CYCLES=100 SQ2_WINDOW_DESTROY_CURRENT=1 sh /proc/1/root/data/local/tmp/sq2-closed/run-quest2-gles-system.sh --window`；legacy入口同样可选，宽高用 SQ2_WINDOW_WIDTH/HEIGHT，默认每轮12帧。通过真实 ImageReader/BufferQueue 校验交换、fence、像素和释放，不创建可见桌面窗口。EXT入口需系统宣告 EGL_EXT_platform_base；本机未宣告，返回77并明确不计通过。所有 GPU 探针串行运行。
 
 Quest 2 闭源 GLES 的最新系统加载验证：运行 `build-quest2-gles-probe.sh` 后，`prepare-quest2-gles-linked.py` 校验固定输入并生成新的私有 ELF 依赖组合（已有输出目录时拒绝覆盖）。`run-quest2-gles-system.sh` 配合编译的 `egl-private-namespace`，只在独立且递归 private 的 mount namespace 中覆盖 EGL 目录，通过原系统 libEGL/libGLESv2 运行 `gles-readback-system`。必须同步 SYSTEM_PROBE_SHA256SUMS，并为系统探针和 namespace helper 设置0755；不写全局 vendor 或启动镜像。具体复制路径、验证结果及缺口见 QUEST2-GPU-RESEARCH 的「EGL 1.5 与 Android 系统加载器接入」。这个流程不是桌面切换/持久化打包器。

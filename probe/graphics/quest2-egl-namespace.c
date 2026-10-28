@@ -2,12 +2,13 @@
 #define _GNU_SOURCE
 #include <sched.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <unistd.h>
 int main(int argc,char **argv){
-    if(argc>2||(argc==2&&strcmp(argv[1],"--ahb")&&strcmp(argv[1],"--window")))return 2;
+    if(argc>2||(argc==2&&strcmp(argv[1],"--ahb")&&strcmp(argv[1],"--window")&&strcmp(argv[1],"--yuv")))return 2;
     struct stat init_ns,self_ns;
     if(geteuid()!=0||stat("/proc/1/ns/mnt",&init_ns)||unshare(CLONE_NEWNS)||
        stat("/proc/self/ns/mnt",&self_ns)||self_ns.st_ino==init_ns.st_ino){
@@ -16,6 +17,11 @@ int main(int argc,char **argv){
     if(mount(NULL,"/",NULL,MS_REC|MS_PRIVATE,NULL)||
        mount("tmpfs","/vendor/lib64/egl","tmpfs",MS_NOSUID|MS_NODEV,"size=268435456,mode=755")){
         perror("private EGL mount");return 1;
+    }
+    const char *direct=getenv("SQ2_GLES_DIRECT");
+    if(direct&&!strcmp(direct,"1")&&
+       mount("tmpfs","/data/vendor","tmpfs",MS_NOSUID|MS_NODEV,"size=1048576,mode=755")){
+        perror("private ESX configuration mount");return 1;
     }
     execl("/system/bin/sh","sh","/data/local/tmp/sq2-closed/run-quest2-gles-system.sh",
           "--inside",argc==2?argv[1]:NULL,(char*)NULL);
