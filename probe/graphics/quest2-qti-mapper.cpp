@@ -102,7 +102,7 @@ static bool supported_buffer(const native_handle_t *handle,BufferInfo &b){
     handle=sq2_v77_original_handle(handle);
     if(!handle)return false;
 #endif
-    if(color_info(handle,b)&&b.format==1&&b.fourcc==0x34324241u&&!(b.usage&(1ull<<14)))return true;
+    if(color_info(handle,b)&&linear_rgba_layout(b))return true;
     YuvInfo y;YuvLayout layout;
     if(!yuv_info(handle,y,layout))return false;
     b=y;return true;
@@ -123,10 +123,11 @@ static bool info(void *buffer,BufferInfo &b,const char *operation) {
     buffer=const_cast<native_handle_t*>(sq2_v77_original_handle(static_cast<const native_handle_t*>(buffer)));
     if(!buffer){std::fprintf(stderr,"QTI_BRIDGE %s BAD_BUFFER (rejected v77 view)\n",operation);return false;}
 #endif
-    bool ok=color_info(static_cast<const native_handle_t*>(buffer),b)&&b.format==1&&
-        b.fourcc==0x34324241u && b.sample_bits==32 && !(b.usage&(1ull<<14)) &&
-        b.stride/4<=INT32_MAX && b.width<=INT32_MAX && b.height<=INT32_MAX &&
-        b.stride%4==0 && b.offset%4==0 && b.width<=b.stride/4 && b.height<=b.plane_size/b.stride;
+    bool ok=color_info(static_cast<const native_handle_t*>(buffer),b)&&linear_rgba_layout(b)&&
+        b.stride/(b.sample_bits/8)<=INT32_MAX && b.width<=INT32_MAX && b.height<=INT32_MAX;
+#ifndef SQ2_QTI_MAPPER3
+    ok=ok&&b.format==1;
+#endif
 #ifdef SQ2_QTI_MAPPER3
     // QTI's allocated height is physical scanlines; StandardMetadata height
     // and plane heightInSamples are logical in this minigbm implementation.

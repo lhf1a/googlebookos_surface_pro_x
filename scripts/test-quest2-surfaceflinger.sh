@@ -2,8 +2,10 @@
 # Retained initramfs root only. A finite RAM-only global display trial.
 # No disk partition, boot image, persistent property or saved setting is changed.
 set -eu
+umask 077
 root=/proc/1/root
 base=/data/local/tmp/sq2-closed/combined-v1
+case "${SQ2_COMBINED_REVISION:-1}" in 1) ;; 3) base=/data/local/tmp/sq2-closed/combined-v3;; *) exit 2;; esac
 mesa_gl=f16302e33e4f7c8bbaccbe5ab5fd5d19f3279222ee430ace236c4bad237a5434
 mesa_vk=0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c
 android(){ nsenter -t 1 -m -r -- "$@"; }
@@ -27,10 +29,11 @@ rollback(){
     # Stat identity also covers the window between mounting and recording its
     # mount ID. Never unmount a path merely because a stale state file exists.
     if same_inode "$root/vendor/lib64/hw/vulkan.freedreno.so" "$root$stage/egl/libquest2-vulkan-wrapper.so";then
-        android /system/bin/umount /vendor/lib64/hw/vulkan.freedreno.so
+        android /system/bin/umount /vendor/lib64/hw/vulkan.freedreno.so ||
+            android /system/bin/umount -l /vendor/lib64/hw/vulkan.freedreno.so
     fi
     if same_inode "$root/vendor/lib64/egl" "$root$stage/egl";then
-        android /system/bin/umount /vendor/lib64/egl
+        android /system/bin/umount /vendor/lib64/egl || android /system/bin/umount -l /vendor/lib64/egl
     fi
     check_mesa
     android /system/bin/setprop ctl.start surfaceflinger
@@ -42,6 +45,9 @@ rollback(){
     check_mesa
     android /system/bin/getprop init.svc.surfaceflinger
     echo SF_TRIAL_MESA_RESTORED
+    if [ -d "$root$stage/evidence" ];then
+        cp "$state/watchdog.log" "$root$stage/evidence/watchdog.log"
+    fi
     touch "$state/complete"
     rmdir /tmp/sq2-sf-trial.lock
 }
@@ -49,11 +55,21 @@ case "${1:-}" in
     --rollback) test "$#" = 2;rollback "$2";exit;;
     --watchdog)
         test "$#" = 2;watch_state=$2;last=;changes=0;n=0
+        watch_stage=$(cat "$watch_state/stage")
+        case "$watch_stage" in /data/local/tmp/sq2-closed/sf-trial.[0-9]*.[0-9]*) ;; *) exit 2;; esac
+        evidence="$root$watch_stage/evidence"
+        mkdir "$evidence"
+        cp "$watch_state/boot" "$evidence/boot"
         while [ "$n" -lt 12 ];do
             sleep 5;n=$((n+1))
             current=$(android /system/bin/pidof surfaceflinger || true)
             if [ -n "$current" ] && [ -n "$last" ] && [ "$current" != "$last" ];then changes=$((changes+1));fi
-            if [ -n "$current" ];then last=$current;fi
+            if [ -n "$current" ];then
+                last=$current
+                grep -E 'lib(EGL|GLES|gsl|qti|quest2)|vulkan' "/proc/$current/maps" > "$evidence/maps.$n" 2>/dev/null || true
+            fi
+            printf 'tick=%s sf_pid=%s changes=%s\n' "$n" "$current" "$changes" >> "$evidence/progress"
+            cp "$watch_state/watchdog.log" "$evidence/watchdog.log"
             if [ "$changes" -ge 2 ];then echo SF_TRIAL_RESTART_LIMIT;break;fi
         done
         rollback "$watch_state";exit;;

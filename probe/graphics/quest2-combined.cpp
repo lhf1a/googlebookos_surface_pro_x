@@ -50,8 +50,10 @@ extern "C" int quest2_combined_audit() {
     if(!gsl||!mapper||!adapter||!ion||!donor||!platform) return 1;
     int mem=open("/proc/self/mem",O_RDONLY|O_CLOEXEC); if(mem<0) return 1;
     struct Slot {uintptr_t source; size_t offset; uintptr_t target; const char *name;};
+    const char *revision=getenv("SQ2_COMBINED_REVISION");
+    size_t resolver_slot=revision&&!strcmp(revision,"3")?0x1aab0:0x1a660;
     const Slot slots[]={{gsl,0x213f60,ion,"ion_open"},{gsl,0x213f68,ion,"ion_close"},
-        {gsl,0x213f90,ion,"ion_alloc_fd"},{mapper,0x1a660,adapter,"sq2_v77_original_handle"},
+        {gsl,0x213f90,ion,"ion_alloc_fd"},{mapper,resolver_slot,adapter,"sq2_v77_original_handle"},
         {donor,0x2e2be0,adapter,"SQ2NativeBuffer_getNativeHandle"},
         {donor,0x2e2bf0,adapter,"SQ2NativeBuffer_acquire"},
         {donor,0x2e3150,adapter,"SQ2NativeBuffer_release"},

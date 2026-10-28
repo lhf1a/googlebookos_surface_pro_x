@@ -14,6 +14,7 @@
 
 ## 当前待办
 
+- FP16独立适配已通过：`combined-v3`仅替换mapper3为`e9eaf753…`，保留真实分量与步长校验并隔离私有C++ helper ABI。FP16 384²连续150轮、13×7/全屏各3轮bit一致，RGBA8合成150轮、Vulkan/AHB、414读回和两顺序共存通过。第二次实际SF切换仍黑屏/卡住，用户手动长按恢复，已复核正常Mesa/boot_completed及关屏guard；pstore空、未留SF tombstone，根因尚未确定，不能宣称桌面通过或自主board crash。新watchdog持久化/忙挂载回退尚未设备验证。见 [QUEST2-FP16.md](QUEST2-FP16.md)，不要原样重复全局切换。
 - 首轮真实SurfaceFlinger闭源切换已执行：Skia shader-cache预热要求384×384 RGBA_FP16(format22)，当前桥接拒绝后RenderEngine abort。独立watchdog恢复原Mesa哈希，SSH/框架恢复、boot ID保持；未写启动镜像。真实SF明确证明FP16现为启动必需，不能继续仅凭桌面缓存RGBA排除它。四种color格式真实PlaneLayouts已采集；下一步组件级FP16准入/步长及GPU采样验证，再重试SF。见 [QUEST2-SURFACEFLINGER.md](QUEST2-SURFACEFLINGER.md)。
 - `combined-v1`14库已在同进程同时持有GLES context和Vulkan device，两加载顺序各GLES150轮+VK36帧、全屏各GL3轮+VK36帧全过；公共库唯一实例及13项真实GOT绑定通过，资源最终归零，原AHB回归正常。prepare逐字复制v4九库+fence-prune五专属库，不改任何ELF。见 [QUEST2-COMBINED.md](QUEST2-COMBINED.md)。下一步系统格式/DATASPACE、降低正常日志和真实SF可恢复切换；完整替换与性能功耗尚未验证。默认Mesa/启动镜像保持。
 - GLES server-wait历史依赖累积已有实测候选：`gles-linked-fence-prune`只以原GSL wait(old,0)确认旧pending全部完成后释放该context的持有，再执行原clone/merge。未完成/错误保留依赖，无阻塞等待。64×64连续150轮、640×360/2880×1920各3轮异步合成像素全过、FD稳定11；414读回、36窗口帧、YV12三帧回归通过。GLES `1d3ba33e…`，prepare/QEMU/复现见 [QUEST2-SYSTEM-GRAPHICS-PLAN.md](QUEST2-SYSTEM-GRAPHICS-PLAN.md) 第7节。下一步合并v4公共库、同进程GLES/Vulkan验证和真实SF；以下累积失败为前版记录。默认Mesa与启动镜像保持。

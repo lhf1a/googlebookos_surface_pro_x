@@ -2,6 +2,8 @@
 
 脚本来自迭代实验室，依赖缓存和分阶段产物；全新克隆不能直接生成完整可启动 SSD。不要删除哈希或磁盘身份保护以绕过缺失输入。
 
+FP16候选combined-v3的固定输入、私有helper隔离、build/prepare及运行入口见 [QUEST2-FP16.md](QUEST2-FP16.md)。runner使用`SQ2_COMBINED=1 SQ2_COMBINED_REVISION=3 --fp16`；v2因私有ABI冲突废弃。独立FP16验证通过，第二轮真实SF仍卡住且需手动恢复，当前不可部署为正常镜像。
+
 真实SF临时切换/回退脚本及首轮FP16阻断证据见 [QUEST2-SURFACEFLINGER.md](QUEST2-SURFACEFLINGER.md)。`build-quest2-color-info.sh`构建allocation/metadata-only探针，用于格式1/2/5/22真实component检查；没有GPU提交，不是格式支持证明。不要重复未修正的SF失败候选。
 
 14库合并候选及同进程双API探针见 [QUEST2-COMBINED.md](QUEST2-COMBINED.md)。WSL执行 `prepare-quest2-combined.py` 和 `build-quest2-combined.sh`，新runner设 `SQ2_COMBINED=1`、`SQ2_COMBINED_ORDER=egl-first|vulkan-first`，入口 `--combined`。它保留正常Mesa，仅在私有namespace同时绑定两套加载入口。
