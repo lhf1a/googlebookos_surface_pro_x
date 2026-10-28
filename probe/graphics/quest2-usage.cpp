@@ -6,6 +6,8 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <linux/dma-buf.h>
+extern "C" void sq2_upload_trace_start();
+extern "C" void sq2_upload_trace_end();
 
 static uint8_t usage_component(unsigned x,unsigned y,unsigned c,unsigned phase) {
     return static_cast<uint8_t>((x*(c*13+7)+y*(c*17+3)+phase*31+c*59)&255);
@@ -159,8 +161,11 @@ int main() {
        !parameter("SQ2_USAGE_CYCLES",3,150,&cycles))return 2;
     const char *mode=getenv("SQ2_USAGE_UPLOAD");bool upload=mode&&!strcmp(mode,"1");
     if(mode&&!upload)return 2;
-    bool pbo=false,raw=false;
-    if(!flag("SQ2_USAGE_PBO",&pbo)||!flag("SQ2_USAGE_RAW",&raw)||((pbo||raw)&&!upload))return 2;
+    bool pbo=false,raw=false,trace=false;
+    if(!flag("SQ2_USAGE_PBO",&pbo)||!flag("SQ2_USAGE_RAW",&raw)||!flag("SQ2_USAGE_TRACE",&trace)||((pbo||raw||trace)&&!upload))return 2;
+#ifdef SQ2_COMPOSITION_MESA_BASELINE
+    if(trace)return 2;
+#endif
     printf("USAGE_UPLOAD_MODE upload=%d pbo=%d raw_diagnostic=%d\n",upload,pbo,raw);
     const char *requested=getenv("SQ2_USAGE_SOURCE");
     if(requested){
@@ -169,6 +174,7 @@ int main() {
         else if(strcmp(requested,"0x900"))return 2;
     }
     Harness h;if(!h.start()||!h.current(0))return 1;
+    if(trace)sq2_upload_trace_start();
     const char pattern_text[]=R"(#version 300 es
 precision highp float;
 precision highp int;
@@ -194,8 +200,9 @@ void main(){color=texelFetch(src,ivec2(gl_FragCoord.xy),0);}
         printf("USAGE_FDS phase=%u current=%d baseline=%d\n",phase,fds,baseline);ok=ok&&fds>=0&&fds==baseline;
     }
     glDeleteProgram(pattern);glDeleteProgram(copy);ok=h.cleanup()&&ok;
-    printf("USAGE_%s usage=0x%llx cycles=%u size=%ux%u init=%s\n",raw?"DIAGNOSTIC":(ok?"PASS":"FAIL"),static_cast<unsigned long long>(usage),cycles,w,height,
+    if(trace)sq2_upload_trace_end();
+    printf("USAGE_%s usage=0x%llx cycles=%u size=%ux%u init=%s\n",(raw||trace)?"DIAGNOSTIC":(ok?"PASS":"FAIL"),static_cast<unsigned long long>(usage),cycles,w,height,
         upload?"glTexSubImage2D":"GPU-draw");
-    if(raw){printf("USAGE_DIAGNOSTIC_ONLY pixel_result=%s\n",ok?"PASS":"FAIL");return 3;}
+    if(raw||trace){printf("USAGE_DIAGNOSTIC_ONLY pixel_result=%s\n",ok?"PASS":"FAIL");return 3;}
     return ok?0:1;
 }

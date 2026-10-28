@@ -49,3 +49,9 @@ Usage：`SQ2_COMBINED=1 SQ2_COMBINED_REVISION=5 SQ2_USAGE_SOURCE=0x100 SQ2_USAGE
 PBO对照：64²三轮和150轮全部逐字节通过，FD保持10、映射归零；2880×54、64×47/48/49各三轮也过。但13×7、64×7、13×64首轮仍全零失败。不能将PBO宣传为通用修复。结果指向随尺寸/布局/传输策略变化的分支；简单75%占比假说不成立（64×47也通过），阈值或内部分支仍需实际跟踪，不能凭尺寸猜定。
 
 原始输出在out/quest2-gpu/kmsg/upload-{RAW,PBO,pbo-*}.txt。全部测试结束正常Mesa哈希、boot ID与SF/system_server PID保持。下一步应跟踪同一输入在direct/PBO成功/PBO失败三组的资源传输描述和实际目标地址，随后修正真正分支；不在产品中简单把全部上传变成PBO。
+
+## 暂存：上传路径跟踪与新的工作范围
+
+用户改为保留 Mesa EGL/GLES，仅替换系统 Vulkan 后端。闭源 EGL/GLES 研究保留，不再作为当前系统替换的前置条件。
+
+`SQ2_USAGE_TRACE=1` 是仅测试进程内的有界跟踪，复用固定版本的 CPU transfer hook；必须与上传模式一起使用，诊断退出码为 3，不算通过。直接 64×64 上传的图像传输描述中，一个 CPU 地址为 NULL；13×13 PBO 上传先完成 buffer copy，随后图像传输同样出现 NULL 地址。64×64 PBO 对照仅捕获 buffer copy，没有捕获该图像 CPU copy。结合原 fd 同步读回为零，下一步应调查图像目标映射/描述构造；尚未证明具体初始化根因，也未修复。原始跟踪留在忽略的 out，默认 Mesa 未改变。

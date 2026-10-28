@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+当前范围由用户调整：**保留闭源 EGL/GLES 进展，系统 EGL/GLES 使用 Mesa，仅推进闭源 Vulkan 后端替换。** 不再执行整套闭源桌面切换；图标/状态栏/HWUI 问题留存独立研究。Vulkan 多队列 create 的 Scudo 崩溃仍需修复，不能绕过后宣称系统替换完成。
+
 EGLImage上传新对照：直接上传后finish+DMA同步读取原fd仍全零；PBO上传64²连续150轮通过但小尺寸仍全零，尚非通用修复。诊断参数与边界见 [QUEST2-HWUI.md](QUEST2-HWUI.md) 末节；默认Mesa保持。
 
 最新隔离复现：HWUI仅硬件Bitmap失败；原生EGLImage纹理glTexSubImage2D上传后采样全零，Mesa对照正确，GPU绘制同类源及普通纹理上传正确。另Vulkan单队列通过、两个合法队列即在原Chrome位置Scudo abort，无需提交。两条具体阻断未修复，正常Mesa/boot保持；见 [QUEST2-HWUI.md](QUEST2-HWUI.md) 与 [QUEST2-VK-CREATE-AUDIT.md](QUEST2-VK-CREATE-AUDIT.md)。
