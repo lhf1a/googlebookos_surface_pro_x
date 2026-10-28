@@ -5,8 +5,8 @@
 Subsequent rollback verification: SSH reconnected, boot_completed=1,
 screen_only=Y, and the original msm full SHA256
 `f69c91e754e2a0d66cd195549d970973ed81b4c6f1bbfcbc3723f80a26414633`
-matched. This closes the SSH/module recovery gap below; a new user visual
-confirmation of this specific reboot is still pending. V5 remains undeployed.
+matched. The user then confirmed desktop/lockscreen recovery, closing both
+the SSH/module and visual recovery gaps below. V5 remains undeployed.
 
 V4 adds cached PHY/clock/training/video return codes and early DPCD snapshots,
 without changing PHY voltage, PLL constants or the native 60 Hz timing.

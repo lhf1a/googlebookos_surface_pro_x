@@ -1,6 +1,6 @@
 # SQ2 开发交接
 
-v4回退后补验：推送诊断分支后SSH已恢复，新boot ID、boot_completed=1、screen_only=Y、原msm完整哈希f69c91e7…均已核对，关闭下文“未复核回退”的缺口。本次重启的用户目视确认尚待反馈；v5仍未部署。
+v4回退后补验：推送诊断分支后SSH已恢复，新boot ID、boot_completed=1、screen_only=Y、原msm完整哈希f69c91e7…均已核对，用户随后确认桌面/锁屏恢复，关闭下文“未复核回退”的缺口；v5仍未部署。
 
 eDP v4诊断（2026-10-29）：初始5.4Gbps×4训练返回0，实读DPCD BW_SET=0、RATE_SET=6、lane状态77/77、对齐81，证明初始训练通过；不证明画面或高刷通过。PHY/OPP/像素时钟/视频ready调用均返回0，但vsync计数0/9/9/10/10停滞，后期AUX读取阻塞。已取回原始日志并主动sync+重启；用户最新反馈仍在启动，尚未复核本轮回退。v5仅本地构建：同一速率表路径限制2.7Gbps/index3、AUX仅前三次采样，待设备恢复后做对照，未部署。当前设备调试项仍v4，正常闭源/Mesa镜像未改。新分支codex/sq2-edp-training-diagnostics；详见DISPLAY-REFRESH。
 
