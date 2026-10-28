@@ -2,9 +2,265 @@
   "date": "2026-10-28",
   "branch": "codex/quest2-proprietary-gpu",
   "baseline_commit": "e1b523c137d187f4ff1d246eef3dfa03a62b2986",
-  "stage": "source_and_interface_audit",
+  "stage": "donor_static_audit_completed",
   "deployed": false,
-  "donor_userspace": null,
+  "donor_userspace": [
+    {
+      "release": "https://github.com/K11MCH1/AdrenoToolsDrivers/releases/tag/v819.1",
+      "url": "https://github.com/K11MCH1/AdrenoToolsDrivers/releases/download/v819.1/v819.zip",
+      "provenance": "Maintainer states extracted from Quest 2; repackaged AdrenoTools libraries, not independently matched to a stock vendor image",
+      "archive_sha256": "ed6a881c8321be751018057a2601e4d82bdcd7b7178d58165e5c71fd640c6fe3",
+      "scope": "Vulkan plus dependencies; no EGL/GLES entry library",
+      "files": [
+        {
+          "path": "notadreno_utils.so",
+          "sha256": "2505aacd67b9384c45f45d56aaf90dbb1f7194747813dc48eddf06333f353609",
+          "bytes": 200425,
+          "machine": "AArch64",
+          "needed": [
+            "notgsl.so",
+            "liblog.so",
+            "libnativewindow.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "a82c880f0886c42a6251a45c78aa3016"
+          ]
+        },
+        {
+          "path": "notdmabufheap.so",
+          "sha256": "8562807c7e9298c764834be12c155b3d845edc317383cb0e2d85bc5dc74cab8c",
+          "bytes": 152177,
+          "machine": "AArch64",
+          "needed": [
+            "liblog.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "ba10edeb3ca9c1ab656f7b8869ecfdb8"
+          ]
+        },
+        {
+          "path": "notgsl.so",
+          "sha256": "9446c108708ed89f72199f992b5b7a1300795b0831adf34c08cb7b61f920daa5",
+          "bytes": 2308889,
+          "machine": "AArch64",
+          "needed": [
+            "libcutils.so",
+            "liblog.so",
+            "libz.so",
+            "libsync.so",
+            "notdmabufheap.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "8a5f99ba801d2e9d1acd3ceeb1293af2"
+          ]
+        },
+        {
+          "path": "notllvm-glnext.so",
+          "sha256": "64cc77b2713d90a996d9dfdfa3784eba1451162e560a55b1d29922eddb127b23",
+          "bytes": 2365353,
+          "machine": "AArch64",
+          "needed": [
+            "notgsl.so",
+            "liblog.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "b93e47cda023f05c67027a0585b6bcea"
+          ]
+        },
+        {
+          "path": "notllvm-qgl.so",
+          "sha256": "422b336979995884990721b69954f8768f455a630a8d46f73507a1039aedb96d",
+          "bytes": 22881793,
+          "machine": "AArch64",
+          "needed": [
+            "notgsl.so",
+            "liblog.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "7ed2375d0435c6006509c5ee4c09e18f"
+          ]
+        },
+        {
+          "path": "vulkan.adreno.so",
+          "sha256": "b4b4132c3f6c1092563200686d21933ed83ffab865a1f99edda93218e96e1e27",
+          "bytes": 5354241,
+          "machine": "AArch64",
+          "needed": [
+            "libcutils.so",
+            "libz.so",
+            "notadreno_utils.so",
+            "notgsl.so",
+            "liblog.so",
+            "notllvm-glnext.so",
+            "libhardware.so",
+            "libbase.so",
+            "vendor.qti.hardware.display.mapper@2.0.so",
+            "android.hardware.graphics.mapper@2.0.so",
+            "vendor.qti.hardware.display.mapper@3.0.so",
+            "android.hardware.graphics.mapper@3.0.so",
+            "vendor.qti.hardware.display.mapperextensions@1.1.so",
+            "libhidlbase.so",
+            "libutils.so",
+            "libnativewindow.so",
+            "vendor.qti.hardware.display.mapper@4.0.so",
+            "android.hardware.graphics.mapper@4.0.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "f81408d1e012634bc4c9090562a0f134"
+          ]
+        }
+      ]
+    },
+    {
+      "release": "https://github.com/K11MCH1/AdrenoToolsDrivers/releases/tag/v690",
+      "url": "https://github.com/K11MCH1/AdrenoToolsDrivers/releases/download/v690/adreno690.adpkg.zip",
+      "provenance": "Maintainer states extracted from Quest 2; repackaged AdrenoTools libraries, not independently matched to a stock vendor image",
+      "archive_sha256": "3a3bca760adce2e18b5542c53e59babaa54745d7abd57e015ebf977402ec81a4",
+      "scope": "Vulkan plus dependencies; no EGL/GLES entry library",
+      "files": [
+        {
+          "path": "notadreno_utils.so",
+          "sha256": "8ae39083ccb7c4ae4788aaf4b642f7070c68f708c9c846a5bd403bd10cf1f15f",
+          "bytes": 105976,
+          "machine": "AArch64",
+          "needed": [
+            "notgsl.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "d81ac4409f74a860f9b9902e53b581dd"
+          ]
+        },
+        {
+          "path": "notdmabufheap.so",
+          "sha256": "9a6b3c768e3f003d7fead021ef4b2e0c57fc098444c837e4eb7aa2035b91f69d",
+          "bytes": 83288,
+          "machine": "AArch64",
+          "needed": [
+            "liblog.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "e3c44249486e1ec887fc8ba92886d7f6"
+          ]
+        },
+        {
+          "path": "notgsl.so",
+          "sha256": "6442894c49be9d8b41c0d0cdbb013d222b3c5e6d76092c011dcf0069cbdadcc6",
+          "bytes": 2236896,
+          "machine": "AArch64",
+          "needed": [
+            "libcutils.so",
+            "liblog.so",
+            "libz.so",
+            "libsync.so",
+            "notdmabufheap.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "6c0f1c01ab20b7ce9396b8ba069b3790"
+          ]
+        },
+        {
+          "path": "notllvm-glnext.so",
+          "sha256": "827c18f688b913adaf5ed46a51861ef2be46d06663c765fc5d44df82e9518e8f",
+          "bytes": 1567176,
+          "machine": "AArch64",
+          "needed": [
+            "notgsl.so",
+            "liblog.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "eac1ce7103e9beb8476152fe85351e00"
+          ]
+        },
+        {
+          "path": "notllvm-qgl.so",
+          "sha256": "b831e0df2e3c3a625cae95b3c0d4f7cbf569479706f4ccd99ca5e60559a5eb7a",
+          "bytes": 19829440,
+          "machine": "AArch64",
+          "needed": [
+            "notgsl.so",
+            "liblog.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "13ebc6d601100dbb1a7261f2722c4dc6"
+          ]
+        },
+        {
+          "path": "vulkan.ad690.so",
+          "sha256": "95d49b79cc43ba2e53cf54ca7cfd6398e34b83dbea389fd91ebaecbeded64457",
+          "bytes": 2795344,
+          "machine": "AArch64",
+          "needed": [
+            "notadreno_utils.so",
+            "notgsl.so",
+            "libz.so",
+            "liblog.so",
+            "notllvm-glnext.so",
+            "libcutils.so",
+            "libhardware.so",
+            "libnativewindow.so",
+            "vendor.qti.hardware.display.mapper@2.0.so",
+            "android.hardware.graphics.mapper@2.0.so",
+            "vendor.qti.hardware.display.mapper@3.0.so",
+            "android.hardware.graphics.mapper@3.0.so",
+            "vendor.qti.hardware.display.mapperextensions@1.1.so",
+            "libhidlbase.so",
+            "libutils.so",
+            "libc++.so",
+            "libc.so",
+            "libm.so",
+            "libdl.so"
+          ],
+          "build_id": [
+            "390b4128a84b066a92f96c9b2744ead3"
+          ]
+        }
+      ]
+    }
+  ],
   "kernel_source": {
     "repository": "https://github.com/facebookincubator/oculus-linux-kernel",
     "branch": "oculus-quest2-kernel-master",
@@ -22,6 +278,9 @@
     "A650 GMEM is 1152 KiB; A680 GMEM is 2048 KiB in the inspected source.",
     "A650 uses a650_sqe/a650_gmu; the generic A680 entry uses a630_sqe/a640_gmu. These are source declarations, not permission to replace Surface firmware.",
     "Local Mesa 26.2.4 assigns A650 gen3/3 CCUs and A680 gen2/4 CCUs, with different tile geometry.",
-    "Current SQ2 uses MSM DRM, not KGSL; frequency changes do not implement the KGSL userspace ABI."
-  ]
+    "Current SQ2 uses MSM DRM, not KGSL; frequency changes do not implement the KGSL userspace ABI.",
+    "v819 notgsl contains DRM_IOCTL_MSM_GET_PARAM/GEM_SUBMIT/SUBMITQUEUE_CLOSE and KGSL paths, plus Adreno 680/690 names. Static strings are not proof of reachable or compatible support.",
+    "v690 has A680/A690 name strings and KGSL paths; no DRM hints were found by the current static scan."
+  ],
+  "next_step": "Prioritize v819 native MSM DRM path investigation before KGSL emulation; resolve Android/QTI mapper dependencies in an isolated process. No driver executed yet."
 }

@@ -23,7 +23,9 @@ def inspect(path, root, readelf):
     hints = sorted({s.decode()[:400] for s in strings
                     if any(k in s.lower() for k in
                            (b'/dev/kgsl', b'/dev/dri', b'/dev/ion', b'/dev/dma_heap',
-                            b'adreno (tm)', b'a680', b'a650', b'0x06080001'))})
+                            b'adreno (tm)', b'a680', b'a650', b'0x06080001',
+                            b'drm_ioctl_msm', b'ioctl_drm_', b'msm_param_',
+                            b'gsl_drm_', b'msm_bo_'))})
     return {
         'path': path.relative_to(root).as_posix(),
         'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data),
@@ -31,6 +33,7 @@ def inspect(path, root, readelf):
         'machine': re.search(r'Machine:\s+([^\n]+)', header).group(1).strip(),
         'needed': re.findall(r'\(NEEDED\).*?\[(.*?)\]', dynamic),
         'soname': re.findall(r'\(SONAME\).*?\[(.*?)\]', dynamic),
+        'build_id': re.findall(r'Build ID:\s+(\w+)', elf('-nW')),
         'undefined_symbols': sorted(set(re.findall(r'\bUND\s+(\S+)', symbols))),
         'hints': hints[:100],
     }
