@@ -44,3 +44,17 @@ NDK Android35 clang `-std=c11 -O2 -Wall -Wextra -Werror` 独立编译烟雾检�
 同一combined-v5和原系统libvulkan，公布family0有4个队列。单队列创建/销毁PASS；双队列（同family、优先级0.5、零扩展/features/pNext、自带默认allocator）在create尚未返回时SIGABRT134。新tombstone为Scudo invalid chunk state，仍在donor0xd241c，和Chrome相同。未提交任何工作，正常Mesa哈希、boot ID与SF/system_server PID保持。原始证据vk-device-one/two/two-crash.txt在out，不能计为修复。
 
 进一步静态检查：d23a4把此前成功状态w28保存到w20；失败释放后d2430恢复该状态。若之前某项成功，最终d295c非零分支会在d296c/d2970/d2974把已释放x23接入对象列表。这意味着修复还必须覆盖成功/失败混合路径，不能简单清零指针或删除free造成泄漏。当前尚未修改donor，仍需完整清理/回调所有权审计与候选控制流验证。
+
+## Vulkan-only 候选：延后释放共享节点
+
+用户要求保留 Mesa EGL/GLES，仅替换系统 Vulkan。`prepare-quest2-vulkan-only.py` 从 combined-v5 固定哈希复制九个 Vulkan 依赖，不包含 donor EGL/GLES 或 EGL wrapper。
+
+`prepare-quest2-vulkan-counter-cleanup.py` 在这个副本上仅修改三处控制流和 RX 尾部 24 字节桩（同时扩展对应段长度）。每个计数器记录失败后恢复前一记录的成功标记，继续遍历；循环结束时，若全部失败才通过原 allocator 分支释放共享 payload/node 一次；若存在完整成功的记录则走原链表持有路径。GSL 回调、返回值、请求队列数量、成功路径与 allocator 选择保持。它不伪造性能计数器支持。
+
+固定候选 Vulkan SHA256：`bcb9b506dc2a4b1c4a53e85c08057d7cb5a0e6e3bd2bd97a90b92de20eb76d42`。输出 `out/quest2-gpu/vulkan-only-counter-v1`，未覆盖原候选。
+
+QEMU 执行实际修改后的 donor 队列循环，将外部 callback/free 和最终退出替换为 mock。1–4 队列、每个记录四种结果（无第二次调用成功、首调用失败、两次成功、第二次失败）、默认/自定义 allocator 共680组全部通过：遍历次数正确，全部失败只释放两对象各一次，存在成功时节点仍有效并由原链表持有。该测试不执行 GPU，也不覆盖 donor 的全部其它分支。
+
+实机：未修复的 Vulkan-only 单队列通过、双队列仍 abort134。修复后双队列通过；四队列连续150次 create/getQueue/destroy 通过，无提交；完整计算/图像/三角形/64² AHB 精确读回通过；独立 ImageReader 窗口12帧 present/native fence/读回通过，最终引用回零。正常 Mesa/boot ID/框架 PID 不变。
+
+一次试验性 probe GOT hook 安装成功但没有捕获实际调用，不作为动态返回值证据，代码已撤下。随后真实应用 logcat 明确出现 `ioctl_drm_perfcounter_select not implemented for DRM`。多队列释放修复已通过上述有限实测，但其余系统集成仍有阻断，见 [QUEST2-VULKAN-ONLY.md](QUEST2-VULKAN-ONLY.md)。

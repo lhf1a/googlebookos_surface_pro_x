@@ -7,5 +7,7 @@ OUT="$ROOT/out/quest2-gpu/vulkan-device"
 mkdir -p "$OUT"
 "$CC" -std=c11 -O2 -Wall -Wextra -Werror "$ROOT/probe/graphics/quest2-vulkan-device.c" \
   -ldl -o "$OUT/quest2-vulkan-device"
-(cd "$OUT";sha256sum quest2-vulkan-device > VULKAN_DEVICE_SHA256SUMS)
+"$CC" -std=c11 -O2 -Wall -Wextra -Werror "$ROOT/probe/graphics/quest2-vulkan-namespace.c" \
+  -o "$OUT/quest2-vulkan-namespace"
+(cd "$OUT";sha256sum quest2-vulkan-device quest2-vulkan-namespace > VULKAN_DEVICE_SHA256SUMS)
 echo QUEST2_VULKAN_DEVICE_BUILD_OK

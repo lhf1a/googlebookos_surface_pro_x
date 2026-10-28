@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+Vulkan-only 最新：已修复候选多队列计数器错误分支重复释放，680组 ARM64 QEMU 检查、实机四队列150轮及基础绘制/AHB/窗口读回通过。真实120秒系统试验保留Mesa EGL/GLES，Chrome仍报pipeline -13，普通APK交换链报无效外部句柄；自动回退已完成，默认仍Mesa，尚未系统替换。见 [QUEST2-VULKAN-ONLY.md](QUEST2-VULKAN-ONLY.md)。
+
 当前范围由用户调整：**保留闭源 EGL/GLES 进展，系统 EGL/GLES 使用 Mesa，仅推进闭源 Vulkan 后端替换。** 不再执行整套闭源桌面切换；图标/状态栏/HWUI 问题留存独立研究。Vulkan 多队列 create 的 Scudo 崩溃仍需修复，不能绕过后宣称系统替换完成。
 
 EGLImage上传新对照：直接上传后finish+DMA同步读取原fd仍全零；PBO上传64²连续150轮通过但小尺寸仍全零，尚非通用修复。诊断参数与边界见 [QUEST2-HWUI.md](QUEST2-HWUI.md) 末节；默认Mesa保持。

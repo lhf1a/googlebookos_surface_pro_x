@@ -14,9 +14,12 @@ int main(void) {
     const char *choice=getenv("SQ2_VK_DEVICE_QUEUES");
     unsigned wanted=1;
     if(choice) {
-        if(!strcmp(choice,"2"))wanted=2;
+        if(strlen(choice)==1&&choice[0]>='2'&&choice[0]<='4')wanted=(unsigned)(choice[0]-'0');
         else if(strcmp(choice,"1"))return 2;
     }
+    unsigned cycles=1;
+    const char *cycle_env=getenv("SQ2_VK_DEVICE_CYCLES");
+    if(cycle_env){char *end;unsigned long n=strtoul(cycle_env,&end,10);if(!*cycle_env||*end||n<1||n>150)return 2;cycles=(unsigned)n;}
     void *loader=dlopen("/system/lib64/libvulkan.so",RTLD_NOW|RTLD_LOCAL);
     if(!loader){fprintf(stderr,"DEVICE_LOADER_FAIL %s\n",dlerror());return 1;}
     PFN_vkGetInstanceProcAddr gipa=(PFN_vkGetInstanceProcAddr)dlsym(loader,"vkGetInstanceProcAddr");
@@ -62,7 +65,7 @@ int main(void) {
     for(uint32_t i=0;i<family_count;i++)printf("DEVICE_FAMILY index=%u count=%u flags=%x timestamp_bits=%u\n",i,qp[i].queueCount,qp[i].queueFlags,qp[i].timestampValidBits);
     VkPhysicalDeviceFeatures supported;features(selected,&supported);
     printf("DEVICE_FEATURES enabled=none supported_robustBufferAccess=%u supported_samplerAnisotropy=%u\n",supported.robustBufferAccess,supported.samplerAnisotropy);
-    float priorities[2]={0.5f,0.5f};VkDeviceQueueCreateInfo queue_info[2];memset(queue_info,0,sizeof(queue_info));
+    float priorities[4]={0.5f,0.5f,0.5f,0.5f};VkDeviceQueueCreateInfo queue_info[4];memset(queue_info,0,sizeof(queue_info));
     uint32_t requested=0,info_count=0;
     for(uint32_t i=0;i<family_count&&requested<wanted;i++) {
         /* Prefer useful advertised families; a video/protected-only family is
@@ -76,6 +79,7 @@ int main(void) {
     }
     if(requested!=wanted){printf("DEVICE_UNSUPPORTED wanted=%u available=%u\n",wanted,requested);exit_code=77;goto done;}
     VkDeviceCreateInfo dc={.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,.queueCreateInfoCount=info_count,.pQueueCreateInfos=queue_info};
+    for(unsigned cycle=0;cycle<cycles;cycle++){
     VkDevice device=VK_NULL_HANDLE;
     printf("DEVICE_CREATE_BEGIN queues=%u infos=%u flags=0 extensions=0 legacy_features=null pnext=null allocator=null\n",requested,info_count);
     result=create_device(selected,&dc,NULL,&device);
@@ -83,8 +87,16 @@ int main(void) {
     if(result!=VK_SUCCESS||!device)goto done;
     PFN_vkDestroyDevice destroy=(PFN_vkDestroyDevice)gdpa(device,"vkDestroyDevice");
     if(!destroy){destroy_device(device,NULL);goto done;}
+    PFN_vkGetDeviceQueue get_queue=(PFN_vkGetDeviceQueue)gdpa(device,"vkGetDeviceQueue");
+    if(!get_queue){destroy(device,NULL);goto done;}
+    for(uint32_t i=0;i<info_count;i++)for(uint32_t q=0;q<queue_info[i].queueCount;q++){
+        VkQueue queue=VK_NULL_HANDLE;get_queue(device,queue_info[i].queueFamilyIndex,q,&queue);
+        if(!queue){destroy(device,NULL);goto done;}
+    }
     destroy(device,NULL);
     printf("DEVICE_DESTROY_DONE queues=%u submits=0 surfaces=0 images=0 status=PASS\n",wanted);
+    }
+    printf("DEVICE_CYCLES_PASS cycles=%u queues=%u\n",cycles,wanted);
     exit_code=0;
 done:
     if(destroy_instance)destroy_instance(instance,NULL);
