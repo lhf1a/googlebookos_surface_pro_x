@@ -148,6 +148,11 @@ static int ahb_image_supported(VkInstance inst, PFN_vkGetInstanceProcAddr gipa,
        !(ip->sampleCounts & VK_SAMPLE_COUNT_1_BIT)) {
         fprintf(stderr,"AHB RGBA image is not importable with the requested dimensions/usage\n");return 1;
     }
+    if(getenv("SQ2_VULKAN_AHB_REEXPORT") &&
+       (!(mp->externalMemoryFeatures & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) ||
+        !(mp->exportFromImportedHandleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID))) {
+        fprintf(stderr,"AHB RGBA re-export not supported by external image properties\n");return 1;
+    }
     return 0;
 }
 
@@ -160,6 +165,7 @@ static int ahb_probe_cycle(VkInstance inst, PFN_vkGetInstanceProcAddr gipa, VkPh
         .usage=AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN|AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT|AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE};
     AHardwareBuffer_Desc actual={0};
     AHardwareBuffer *ahb=NULL;
+    AHardwareBuffer *exported[2]={NULL,NULL};
     VkImage image=VK_NULL_HANDLE;
     VkDeviceMemory allocation=VK_NULL_HANDLE;
     VkImageView view=VK_NULL_HANDLE;
@@ -212,6 +218,9 @@ static int ahb_probe_cycle(VkInstance inst, PFN_vkGetInstanceProcAddr gipa, VkPh
         if(result!=VK_SUCCESS) { fprintf(stderr,"AHB create image: VkResult=%d\n",result);goto cleanup; }
         created=1;
         VkMemoryDedicatedAllocateInfo dedicated={.sType=VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,.image=image};
+        VkExportMemoryAllocateInfo export_info={.sType=VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
+            .handleTypes=VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID};
+        if(getenv("SQ2_VULKAN_AHB_REEXPORT")) dedicated.pNext=&export_info;
         VkImportAndroidHardwareBufferInfoANDROID import={.sType=VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,
             .pNext=&dedicated,.buffer=ahb};
         VkMemoryAllocateInfo memory_info={.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,.pNext=&import,
@@ -322,6 +331,20 @@ static int ahb_probe_cycle(VkInstance inst, PFN_vkGetInstanceProcAddr gipa, VkPh
     } else if(queue_submissions!=submits_before) {
         fprintf(stderr,"Stage-only AHB probe unexpectedly submitted GPU work\n");goto cleanup;
     }
+    if(allocated && getenv("SQ2_VULKAN_AHB_REEXPORT")) {
+        PFN_vkGetMemoryAndroidHardwareBufferANDROID export_ahb=
+            (PFN_vkGetMemoryAndroidHardwareBufferANDROID)gipa(inst,"vkGetMemoryAndroidHardwareBufferANDROID");
+        if(!export_ahb)goto cleanup;
+        VkMemoryGetAndroidHardwareBufferInfoANDROID ei={
+            .sType=VK_STRUCTURE_TYPE_MEMORY_GET_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,.memory=allocation};
+        for(unsigned i=0;i<2;i++) {
+            result=export_ahb(dev,&ei,&exported[i]);
+            if(result!=VK_SUCCESS || !exported[i]) {
+                fprintf(stderr,"AHB_REEXPORT_FAILED result=%d index=%u\n",result,i);goto cleanup;
+            }
+            if(ahb_query_again(dev,exported[i],properties,width,height,&ap,&fp))goto cleanup;
+        }
+    }
     failed=0;
 cleanup:
     if(locked && AHardwareBuffer_unlock(ahb,NULL)) { fprintf(stderr,"AHB cleanup unlock failed\n");failed=1; }
@@ -333,11 +356,18 @@ cleanup:
     /* The retained application reference must survive freeing the import. */
     if(!failed && allocated && ahb_query_again(dev,ahb,properties,width,height,&ap,&fp)) failed=1;
     while(references) { AHardwareBuffer_release(ahb);references--; }
+    /* Each export must survive both VkDeviceMemory and all original app refs. */
+    for(unsigned i=0;i<2;i++)if(exported[i]) {
+        if(!failed && ahb_query_again(dev,exported[i],properties,width,height,&ap,&fp))failed=1;
+        AHardwareBuffer_release(exported[i]);
+    }
+    if(!failed && exported[0] && exported[1])printf("AHB_REEXPORT_OK cycle=%u independent_refs=2 survived_free=1\n",cycle);
     printf("AHB_CYCLE_CLEANUP cycle=%u app_refs=0 images=0 imported_memories=0 gpu_submits=%u result=%s\n",
            cycle,queue_submissions-submits_before,failed?"FAIL":"PASS");
     return failed;
 }
 
+#include "vulkan-ahb-export.h"
 static int ahb_probe(VkInstance inst, PFN_vkGetInstanceProcAddr gipa, VkPhysicalDevice gpu,
                      VkDevice dev, VkQueue queue, VkCommandBuffer cb, VkFence fence,
                      enum ahb_probe_mode mode, unsigned cycles, unsigned width, unsigned height) {
@@ -346,6 +376,10 @@ static int ahb_probe(VkInstance inst, PFN_vkGetInstanceProcAddr gipa, VkPhysical
     if(!properties) { fprintf(stderr,"Missing vkGetAndroidHardwareBufferPropertiesANDROID\n");return 1; }
     unsigned before=queue_submissions;
     for(unsigned cycle=1;cycle<=cycles;cycle++) {
+        if(getenv("SQ2_VULKAN_AHB_NEW_EXPORT")) {
+            if(ahb_export_cycle(inst,gipa,gpu,dev,queue,cb,fence,properties,cycle,width,height))return 1;
+            continue;
+        }
         if(ahb_probe_cycle(inst,gipa,gpu,dev,queue,cb,fence,properties,mode,cycle,width,height)) {
             printf("AHB_SUMMARY mode=%s cycles_passed=%u cycles_requested=%u gpu_submits=%u result=FAIL\n",
                    mode==AHB_PROPERTIES_ONLY?"properties":mode==AHB_IMPORT_ONLY?"import":"readback",

@@ -1,12 +1,24 @@
 # SQ2 开发交接
 
+启动集成完成阶段验证（2026-10-29）：runtime-v8在v7上关闭成功调用统计；新增启动助手、post-fs-data Direct配置、固定哈希打包器与离线测试。独立镜像 `5ba59bd9…` 已通过一次性真实重启，系统自动加载闭源HAL、1.1声明与Direct配置，Mesa EGL保持；SSH公钥重连正常，用户确认桌面/触摸正常。普通APK全屏120帧、计算/图像/光栅读回通过；Wild Life 5859分/35.09 FPS，40秒采样及用户目视正常，结果包SUCCESS。相同镜像已提升默认菜单，原fa64305d… Mesa镜像仍供救援及图形回退入口使用，同镜像还有 `sq2.vulkan=mesa` opt-out。未进行第二次默认入口重启或实机opt-out启动；完整标准一致性/更多格式仍开放，不能称CTS认证。01:24 system ANR另定位到Google提醒同步onStopJob超时，抓栈主线程在AppCompat配置处理，详见QUEST2-VULKAN-ONLY；未禁用用户同步。
+
+颜色格式后续（2026-10-29）：runtime-v7在v5上增加真实RGBX/BGRA/FP16元数据适配，修正donor的BGRA新建导出format0描述。多格式AHB导入/导出、GPU与CPU读回、释放后引用及原窗口/多队列回归通过，尺寸至2880×1920；全屏FP16导入20轮触发25秒限时，仅独立3轮完整通过。临时系统接入时版本XML校正为1.1，PackageManager实测4198400；普通APK全屏120帧和Chrome实际ANGLE/Vulkan网页通过。新增格式交换链和完整CTS仍未验，v7未重跑Wild Life。已手动回退Mesa及原XML，Direct配置移除、测试锁释放，screen_only保持Y；正常启动镜像尚未修改。脚本/精确矩阵见QUEST2-VULKAN-ONLY。
+
 当前目标：保留 Mesa EGL/GLES，仅替换系统 Vulkan 后端。闭源 EGL/GLES 研究保留在分支，不再切换桌面 GLES。
+
+后续进展（2026-10-28）：已定位Wild Life交换链失败为适配层只接受UNORM、拒绝sRGB。版本5实验候选补充sRGB，12帧窗口中间亮度编码读回通过；无Direct配置仍花屏，加同版私有Direct配置后5876 / 35.19 FPS，采样和用户目视正常。已手动回退Mesa、移走临时配置，未持久化。用户允许Vulkan-only关闭120秒回退，新增显式 `--start-manual`；具体边界和复现见QUEST2-VULKAN-ONLY。下文失败记录为修正前历史。
 
 最新进展：多队列重复释放已有候选修复；普通 APK 的外部句柄错误已定位为 `/proc/self/mem` 权限拒绝，改用有边界检查的 `process_vm_readv` 后，2880×1920 三角形完成120帧，截图正常。Chrome可正常打开，前八个被捕获的 Vulkan 管线创建成功，但后续部分管线仍有链接错误，不能称为Chrome整体失败，也不能据网页可见认定全部Vulkan路径通过。
 
-**最新 Wild Life 试验失败**：应用弹出“基准测试运行失败”，没有有效分数；用户要求停止本轮测试并提交、推送当前结果。已恢复默认Mesa EGL/Vulkan哈希，boot ID保持；未写启动镜像、未提升闭源Vulkan默认。详见 [QUEST2-VULKAN-ONLY.md](QUEST2-VULKAN-ONLY.md)。
+**历史 Wild Life 失败（修正前）**：应用曾弹出“基准测试运行失败”；已由上方sRGB + Direct实测更新，保留失败证据见 [QUEST2-VULKAN-ONLY.md](QUEST2-VULKAN-ONLY.md)。
 
-更新时间：2026-10-28。不包含原始日志、网络地址或凭据。
+运行候选后续：runtime-v3 已补充真实RGBA8 AHB新建导出，64²16轮、257×129/2880×1920各3轮GPU读回及释放后双引用存活通过；导入再导出16轮、两种窗口格式及四队列150轮回归通过。早期导出测试漏声明export位，已修正重测，不引用旧结果作为标准通过。系统临时接入后普通APK120帧通过，Chrome可显示网页但GSL报缓存请求无法转换（flags 0x0c0c2600）；该错误在DRM分配函数拒绝分支，日志中的kgsl字样不证明使用KGSL。已回退Mesa并卸载Direct配置，boot/SF保持。更多格式、缓存分配、Chrome历史管线、能力XML与持久化仍开放，详见同页。
+
+独立内存矩阵进一步复现：六类实际公布内存中type2（properties=0xb）4KB合法分配返回-3，其余五类分配通过，只有buffer兼容的type0/4另有GPU读写覆盖。GSL旧DRM缓存转换拒绝0x0c000000，缓存维护入口也不完整；需要建立实际调用关联并补足缓存语义，不能仅放行或偷换type。原始日志/反汇编仍在out，矩阵明确失败，默认系统保持Mesa。
+
+后续缓存适配（2026-10-29）：有界GSL调用跟踪确认type2与Chrome失败均为flags=0x0c0c2600；当前MSM 1.10.0内核实际接受CACHED_COHERENT分配。runtime-v5在固定GSL拒绝分支接入真实硬件一致性缓存，另按真实HOST_CACHED属性为type4选择同一分配模式，未更改公开type/index或伪造cache维护成功。六类内存分配通过，buffer兼容type0/4各150轮4KiB及16轮16MiB GPU读写通过；type2/3仅有CPU映射/cache API覆盖。AHB导入再导出16轮、新建导出16轮、sRGB窗口12帧、普通APK120帧通过。Chrome本次网页采集未再出现原缓存/管线错误，不能覆盖历史所有路径。runtime-v5完成Wild Life 5813分/34.81 FPS，7.1/35.3秒采样正常，用户明确确认“这一轮画面正常”。随后手动回退Mesa、Direct目录恢复为空；boot/SF保持，zygote按计划重启。启动镜像未改，更多格式/能力声明/持久化仍待完成；详情见QUEST2-VULKAN-ONLY。
+
+更新时间：2026-10-29。不包含原始日志、网络地址或凭据。
 
 ## 最近完成：共享存储
 

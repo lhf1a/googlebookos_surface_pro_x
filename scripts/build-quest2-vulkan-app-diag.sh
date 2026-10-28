@@ -10,6 +10,9 @@ case "${1:-}" in
   '') ;;
   --process-read) extra=(-DSQ2_VK_PROCESS_READ);revision=2;;
   --pipeline) extra=(-DSQ2_VK_PROCESS_READ -DSQ2_VK_PIPELINE_DIAGNOSTICS);revision=3;;
+  --image-info) extra=(-DSQ2_VK_PROCESS_READ);revision=4;;
+  --native-srgb) extra=(-DSQ2_VK_PROCESS_READ -DSQ2_VK_NATIVE_SRGB);revision=5;;
+  --ahb-reexport) extra=(-DSQ2_VK_PROCESS_READ -DSQ2_VK_NATIVE_SRGB -DSQ2_VK_AHB_REEXPORT);revision=6;;
   *) exit 2;;
 esac
 OUT="$ROOT/out/quest2-gpu/vulkan-app-diag-v$revision"

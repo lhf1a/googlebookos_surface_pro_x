@@ -58,6 +58,9 @@ static void app_diag(const char *format, ...) {
 extern int sq2_v77_ahb_prepare(const AHardwareBuffer *);
 extern void sq2_v77_ahb_finish(const AHardwareBuffer *);
 extern unsigned sq2_v77_ahb_stats(unsigned *, unsigned *, uint64_t *);
+#ifdef SQ2_VK_CACHED_MEMORY
+extern unsigned sq2_gsl_cached_scope(unsigned);
+#endif
 
 struct Hal { hwvulkan_device_t exposed; hwvulkan_device_t *real; };
 struct Instance {
@@ -85,6 +88,9 @@ struct Device {
     PFN_vkDestroyImage destroy_image;
     PFN_vkBindImageMemory bind_image;
     PFN_vkBindImageMemory2 bind_image2, bind_image2_khr;
+#ifdef SQ2_VK_CACHED_MEMORY
+    uint32_t cached_types;
+#endif
 };
 /* The current Android loader supplies 72 bytes (usage3 and AHB at +56/+64).
  * v77 shallow-copies only its compatible 56-byte prefix. Preserve the complete
@@ -110,6 +116,9 @@ struct Image {
     VkDevice device;
     VkImage handle;
     uint32_t width, height;
+#ifdef SQ2_VK_COLOR_FORMATS
+    VkFormat format;
+#endif
     unsigned eligible, binding, bound, native_attempt, native_succeeded;
     const void *view;
     void *lease;
@@ -138,6 +147,9 @@ EXPORT unsigned sq2_v77_wrapper_stats(unsigned *leases, unsigned *owners, uint64
     return sq2_v77_ahb_stats(leases, owners, bytes);
 }
 static void stats(const char *operation, VkResult result) {
+#ifdef SQ2_VK_QUIET_RUNTIME
+    if (result == VK_SUCCESS) return;
+#endif
     if (result != VK_SUCCESS) app_diag("operation=%s result=%d",operation,(int)result);
     unsigned leases = 0, owners = 0;
     uint64_t bytes = 0;
@@ -358,6 +370,16 @@ static VKAPI_ATTR VkResult VKAPI_CALL wrapped_create_device(VkPhysicalDevice phy
         DP(bind_image2, PFN_vkBindImageMemory2, "vkBindImageMemory2");
         DP(bind_image2_khr, PFN_vkBindImageMemory2, "vkBindImageMemory2KHR");
 #undef DP
+#ifdef SQ2_VK_CACHED_MEMORY
+        PFN_vkGetPhysicalDeviceMemoryProperties query=
+            (PFN_vkGetPhysicalDeviceMemoryProperties)parent.gipa(parent.handle,"vkGetPhysicalDeviceMemoryProperties");
+        VkPhysicalDeviceMemoryProperties mp={0};
+        if(query)query(physical,&mp);
+        if(!query || mp.memoryTypeCount>32) saved.allocate=NULL;
+        else for(unsigned i=0;i<mp.memoryTypeCount;i++)
+            if((mp.memoryTypes[i].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT))==
+                (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) saved.cached_types|=1u<<i;
+#endif
         if (!value || !saved.destroy || !saved.allocate || !saved.free_memory ||
             !saved.create_image || !saved.destroy_image || !saved.bind_image) {
             if (value) parent.destroy_device(value, allocator);
@@ -399,13 +421,25 @@ static VKAPI_ATTR VkResult VKAPI_CALL wrapped_allocate(VkDevice device, const Vk
     *out = VK_NULL_HANDLE;
     if (!device_copy(device, &saved)) return VK_ERROR_INITIALIZATION_FAILED;
     const AHardwareBuffer *buffer = NULL;
+    VkExternalMemoryHandleTypeFlags export_types = 0;
+#ifdef SQ2_VK_BGRA_EXPORT
+    VkImage dedicated_image=VK_NULL_HANDLE;
+#endif
     unsigned count = 0, imports = 0;
     for (const VkBaseInStructure *p = info->pNext; p; p = p->pNext) {
         if (++count > MAX_CHAIN) return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+#ifdef SQ2_VK_BGRA_EXPORT
+        if(p->sType==VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO)
+            dedicated_image=((const VkMemoryDedicatedAllocateInfo*)p)->image;
+#endif
         if (p->sType == VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO &&
             ((const VkExportMemoryAllocateInfo *)p)->handleTypes) {
+#ifdef SQ2_VK_AHB_REEXPORT
+            export_types = ((const VkExportMemoryAllocateInfo *)p)->handleTypes;
+#else
             stats("Allocate-export-unsupported", VK_ERROR_INVALID_EXTERNAL_HANDLE);
             return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+#endif
         }
         if (p->sType == VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_NV &&
             ((const VkExportMemoryAllocateInfoNV *)p)->handleTypes) return VK_ERROR_INVALID_EXTERNAL_HANDLE;
@@ -414,17 +448,52 @@ static VKAPI_ATTR VkResult VKAPI_CALL wrapped_allocate(VkDevice device, const Vk
             buffer = ((const VkImportAndroidHardwareBufferInfoANDROID *)p)->buffer;
         }
     }
-    /* This donor routes a present-but-null import structure toward its own AHB
-     * allocation hook. Export/allocation of donor-created AHBs is unsupported;
-     * reject here rather than enter that unadapted path without a lease. */
-    if (imports && !buffer) {
+    /* Re-export must have been requested at allocation time (01882). New
+     * payloads additionally require the matching allocation-capable adapter. */
+    if (export_types && (export_types !=
+            VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID
+#ifndef SQ2_VK_AHB_ALLOCATE
+            || !buffer
+#endif
+            ))
+        return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+    /* This donor routes a present-but-null import structure toward its AHB
+     * allocation hook. Admit only the explicitly enabled export path. */
+    if (imports && !buffer
+#ifdef SQ2_VK_AHB_ALLOCATE
+            && !export_types
+#endif
+            ) {
         stats("Allocate-null-AHB-unsupported", VK_ERROR_INVALID_EXTERNAL_HANDLE);
         return VK_ERROR_INVALID_EXTERNAL_HANDLE;
     }
     int error = buffer ? sq2_v77_ahb_prepare(buffer) : 0;
     if (error) { VkResult result = prepare_error(error); stats("Allocate-rejected", result); return result; }
     /* Pass the original complete chain and caller's allocator untouched. */
+#ifdef SQ2_VK_BGRA_EXPORT
+    struct Sq2V77AllocationInfo requested={0};
+    if(!buffer && export_types==VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID && dedicated_image) {
+        pthread_mutex_lock(&mutex);
+        for(struct Image *image=images;image;image=image->next)
+            if(image->device==device && image->handle==dedicated_image && image->eligible &&
+               (image->format==VK_FORMAT_B8G8R8A8_UNORM || image->format==VK_FORMAT_B8G8R8A8_SRGB)) {
+                requested=(struct Sq2V77AllocationInfo){5,image->width,image->height};break;
+            }
+        pthread_mutex_unlock(&mutex);
+    }
+    struct Sq2V77AllocationInfo previous_format=sq2_v77_allocation_scope(requested);
+#endif
+#ifdef SQ2_VK_CACHED_MEMORY
+    unsigned previous=sq2_gsl_cached_scope(!buffer && !export_types && info->memoryTypeIndex<32 &&
+        (saved.cached_types&(1u<<info->memoryTypeIndex)));
+#endif
     VkResult result = saved.allocate(device, info, allocator, out);
+#ifdef SQ2_VK_BGRA_EXPORT
+    sq2_v77_allocation_scope(previous_format);
+#endif
+#ifdef SQ2_VK_CACHED_MEMORY
+    sq2_gsl_cached_scope(previous);
+#endif
     if (buffer) sq2_v77_ahb_finish(buffer);
     stats("AllocateMemory", result);
     return result;
@@ -437,10 +506,26 @@ static VKAPI_ATTR void VKAPI_CALL wrapped_free_memory(VkDevice device, VkDeviceM
 }
 static VKAPI_ATTR VkResult VKAPI_CALL wrapped_export(VkDevice device,
         const VkMemoryGetAndroidHardwareBufferInfoANDROID *info, AHardwareBuffer **out) {
+#ifdef SQ2_VK_AHB_REEXPORT
+    struct Device saved;
+    if (!info || !out) return VK_ERROR_INITIALIZATION_FAILED;
+    *out = NULL;
+    if (!device_copy(device, &saved)) return VK_ERROR_INITIALIZATION_FAILED;
+    PFN_vkGetMemoryAndroidHardwareBufferANDROID fn =
+        (PFN_vkGetMemoryAndroidHardwareBufferANDROID)saved.gdpa(device,"vkGetMemoryAndroidHardwareBufferANDROID");
+    if (!fn) return VK_ERROR_EXTENSION_NOT_PRESENT;
+    /* Both imported and enabled allocated AHBs are real platform objects.
+     * The audited export path acquires one
+     * application reference through SQ2NativeBuffer_acquire at 0xdefd4. */
+    VkResult result=fn(device,info,out);
+    stats("GetMemoryAHB-reexport",result);
+    return result;
+#else
     (void)device; (void)info;
     if (out) *out = NULL;
     stats("GetMemoryAHB-export-unsupported", VK_ERROR_INVALID_EXTERNAL_HANDLE);
     return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+#endif
 }
 /* A native node behind an unknown-size prefix cannot be replaced without
  * rewriting caller memory. Reject that path, while preserving every tail byte.
@@ -612,7 +697,19 @@ report:
 static int prepare_native(const struct Device *device, const struct Image *image,
         const struct NativeNode *node, struct NativeNode *copy, const void **view, void **lease) {
     *view = NULL; *lease = NULL;
-    if (!image->eligible || !node->handle || node->format != 1 || node->stride <= 0) {
+#ifdef SQ2_VK_COLOR_FORMATS
+    int format_matches=((node->format==1 || node->format==2) &&
+                    (image->format==VK_FORMAT_R8G8B8A8_UNORM || image->format==VK_FORMAT_R8G8B8A8_SRGB)) ||
+                   (node->format==5 && (image->format==VK_FORMAT_B8G8R8A8_UNORM || image->format==VK_FORMAT_B8G8R8A8_SRGB)) ||
+                   (node->format==22 && image->format==VK_FORMAT_R16G16B16A16_SFLOAT);
+#endif
+    if (!image->eligible || !node->handle ||
+#ifdef SQ2_VK_COLOR_FORMATS
+        !format_matches
+#else
+        node->format != 1
+#endif
+        || node->stride <= 0) {
         app_diag("native_prepare stage=fields eligible=%u handle=%u format=%d stride=%d width=%u height=%u",
                  image->eligible,node->handle!=NULL,node->format,node->stride,image->width,image->height);
         return -EINVAL;
@@ -622,7 +719,13 @@ static int prepare_native(const struct Device *device, const struct Image *image
     int error = sq2_v77_native_prepare(node->handle, view, lease, &actual);
     if (error) { app_diag("native_prepare stage=mapper error=%d",error); return error; }
     if (!*view || !*lease || actual.width != image->width || actual.height != image->height ||
-        actual.layers != 1 || actual.format != 1 || actual.stride != (uint32_t)node->stride ||
+        actual.layers != 1 || actual.format !=
+#ifdef SQ2_VK_COLOR_FORMATS
+        (uint32_t)node->format
+#else
+        1
+#endif
+        || actual.stride != (uint32_t)node->stride ||
         actual.stride < actual.width || !actual.size) {
         app_diag("native_prepare stage=metadata width=%u/%u height=%u/%u format=%u stride=%u/%d size=%llu",
                  actual.width,image->width,actual.height,image->height,actual.format,actual.stride,node->stride,
@@ -648,8 +751,19 @@ static VKAPI_ATTR VkResult VKAPI_CALL wrapped_create_image(VkDevice device, cons
     struct Image *record = calloc(1, sizeof(*record));
     if (!record) return VK_ERROR_OUT_OF_HOST_MEMORY;
     record->device = device; record->width = info->extent.width; record->height = info->extent.height;
+#ifdef SQ2_VK_COLOR_FORMATS
+    record->format=info->format;
+#endif
     record->eligible = info->imageType == VK_IMAGE_TYPE_2D &&
-        info->format == VK_FORMAT_R8G8B8A8_UNORM && info->arrayLayers == 1 && info->mipLevels == 1 &&
+        (info->format == VK_FORMAT_R8G8B8A8_UNORM
+#ifdef SQ2_VK_NATIVE_SRGB
+         || info->format == VK_FORMAT_R8G8B8A8_SRGB
+#endif
+#ifdef SQ2_VK_COLOR_FORMATS
+         || info->format == VK_FORMAT_B8G8R8A8_UNORM || info->format == VK_FORMAT_B8G8R8A8_SRGB
+         || info->format == VK_FORMAT_R16G16B16A16_SFLOAT
+#endif
+        ) && info->arrayLayers == 1 && info->mipLevels == 1 &&
         info->samples == VK_SAMPLE_COUNT_1_BIT && info->extent.depth == 1 &&
         info->extent.width && info->extent.height &&
         !(info->flags & (VK_IMAGE_CREATE_SPARSE_BINDING_BIT | VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT |
@@ -658,6 +772,11 @@ static VKAPI_ATTR VkResult VKAPI_CALL wrapped_create_image(VkDevice device, cons
     VkImageCreateInfo changed = *info;
     struct NativeNode node;
     if (native) {
+        if (!record->eligible)
+            app_diag("native_prepare stage=image-info type=%d format=%d layers=%u mips=%u samples=%u extent=%ux%ux%u flags=%x usage=%x tiling=%d sharing=%d",
+                     info->imageType,info->format,info->arrayLayers,info->mipLevels,
+                     info->samples,info->extent.width,info->extent.height,info->extent.depth,
+                     info->flags,info->usage,info->tiling,info->sharingMode);
         int error = prepare_native(&saved, record, native, &node, &record->view, &record->lease);
         if (error) { free(record); stats("CreateImage-native-rejected", prepare_error(error)); return prepare_error(error); }
         record->native_attempt = 1;

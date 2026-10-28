@@ -19,6 +19,12 @@
 // Native platform entry absent from the public NDK header, present in the
 // platform libnativewindow used by the matched system-loader namespace.
 extern "C" const native_handle_t *AHardwareBuffer_getNativeHandle(const AHardwareBuffer*);
+#ifdef SQ2_VK_BGRA_EXPORT
+static thread_local Sq2V77AllocationInfo allocation_scope={};
+extern "C" Sq2V77AllocationInfo sq2_v77_allocation_scope(Sq2V77AllocationInfo info) {
+    auto previous=allocation_scope;allocation_scope=info;return previous;
+}
+#endif
 
 namespace {
 // Matched v77 libgralloccore validate/constructor: 124 bytes, 2 fds, 26 ints.
@@ -84,25 +90,41 @@ void dispose(const Entry &dead) {
     close(dead.view.fd);
     AHardwareBuffer_release(const_cast<AHardwareBuffer*>(dead.ahb));
 }
+unsigned pixel_bytes(uint32_t format) {
+#ifdef SQ2_VK_COLOR_FORMATS
+    if(format==22)return 8;
+    if(format==2 || format==5)return 4;
+    return format==1?4:0;
+#else
+    (void)format;return 4;
+#endif
+}
 bool color_metadata(const native_handle_t *native,sq2::BufferInfo &b) {
+#ifdef SQ2_VK_COLOR_FORMATS
+    if(!sq2::color_info(native,b) || !sq2::linear_rgba_layout(b) || !pixel_bytes(b.format) ||
+       b.offset || b.fd_size>UINT32_MAX || b.stride/pixel_bytes(b.format)>INT_MAX ||
+       b.plane_size%b.stride || b.plane_size/b.stride>INT_MAX ||
+       b.width>INT_MAX || b.height>INT_MAX)return false;
+#else
     if(!sq2::color_info(native,b) || b.format!=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM ||
        b.fourcc!=0x34324241u || b.sample_bits!=32 || b.offset || b.layers!=1 ||
        (b.usage&AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT) || b.fd_size>UINT32_MAX ||
        b.stride%4 || b.stride/4>INT_MAX || b.plane_size%b.stride ||
        b.plane_size/b.stride>INT_MAX || b.width>b.stride/4 ||
        b.height>b.plane_size/b.stride || b.width>INT_MAX || b.height>INT_MAX)return false;
+#endif
     return true;
 }
 bool metadata(const AHardwareBuffer *ahb,const native_handle_t *native,sq2::BufferInfo &b) {
     if(!color_metadata(native,b))return false;
     AHardwareBuffer_Desc desc={};AHardwareBuffer_describe(ahb,&desc);
     return desc.width==b.width && desc.height==b.height && desc.layers==b.layers &&
-        desc.format==b.format && desc.stride==b.stride/4 && desc.usage==b.usage;
+        desc.format==b.format && desc.stride==b.stride/pixel_bytes(b.format) && desc.usage==b.usage;
 }
 View make_view(const sq2::BufferInfo &b,int fd) {
     View v={};v.version=sizeof(native_handle_t);v.num_fds=2;v.num_ints=26;
     v.fd=fd;v.metadata_fd=-1;v.magic=0x676d736d;v.flags=8;
-    v.width=b.stride/4;v.height=b.plane_size/b.stride;
+    v.width=b.stride/pixel_bytes(b.format);v.height=b.plane_size/b.stride;
     v.unaligned_width=b.width;v.unaligned_height=b.height;
     v.format=b.format;v.original_format=b.format;
     v.layers=1;v.id=b.id;v.usage=b.usage;v.size=b.fd_size;
@@ -202,7 +224,7 @@ extern "C" int sq2_v77_native_prepare(const void *input,const void **view,void *
             *entry={m,imported,make_view(b,fd)};native_bytes+=b.fd_size;
             *view=&entry->view;*lease=entry;
             *info={static_cast<uint32_t>(b.width),static_cast<uint32_t>(b.height),1,b.format,
-                   static_cast<uint32_t>(b.stride/4),b.fd_size};
+                   static_cast<uint32_t>(b.stride/pixel_bytes(b.format)),b.fd_size};
         }
     }
     pthread_mutex_unlock(&mutex);
@@ -257,13 +279,54 @@ extern "C" __attribute__((noinline)) void SQ2NativeBuffer_release(AHardwareBuffe
     entry->owners--;Entry dead=remove_if_idle(entry);pthread_mutex_unlock(&mutex);
     AHardwareBuffer_release(ahb);dispose(dead);
 }
-extern "C" __attribute__((noinline)) int SQ2NativeBuffer_allocate(const AHardwareBuffer_Desc*,AHardwareBuffer **out) {
+extern "C" __attribute__((noinline)) int SQ2NativeBuffer_allocate(const AHardwareBuffer_Desc *desc,AHardwareBuffer **out) {
     uintptr_t site=caller(__builtin_return_address(0));
     if(site!=0x1f76cc)invariant("allocate-caller",site);
     if(out)*out=nullptr;
+#ifdef SQ2_VK_AHB_ALLOCATE
+#ifdef SQ2_VK_BGRA_EXPORT
+    // The pinned donor leaves its export descriptor format zero for BGRA.
+    // Recover it only from the public dedicated image, on this allocation's
+    // thread, with matching dimensions. Never reinterpret an imported buffer.
+    AHardwareBuffer_Desc corrected={};
+    if(desc && !desc->format && allocation_scope.format==5 &&
+       desc->width==allocation_scope.width && desc->height==allocation_scope.height) {
+        corrected=*desc;corrected.format=5;desc=&corrected;
+#ifndef SQ2_VK_QUIET_RUNTIME
+        std::fprintf(stderr,"V77_AHB_BGRA_EXPORT format=0->5 dimensions=%ux%u\n",desc->width,desc->height);
+#endif
+    }
+#endif
+    if(!out || !desc || !desc->width || !desc->height || desc->layers!=1 ||
+#ifdef SQ2_VK_COLOR_FORMATS
+       !pixel_bytes(desc->format) ||
+#else
+       desc->format!=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM ||
+#endif
+       (desc->usage & (AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT | AHARDWAREBUFFER_USAGE_GPU_MIPMAP_COMPLETE)) ||
+       uint64_t(desc->width)*desc->height>limit_bytes/pixel_bytes(desc->format))return -ENOTSUP;
+    AHardwareBuffer *ahb=nullptr;
+    int result=AHardwareBuffer_allocate(desc,&ahb);
+    if(result)return result;
+    if(!ahb)return -ENOMEM;
+    result=sq2_v77_ahb_prepare(ahb);
+    if(result){AHardwareBuffer_release(ahb);return result;}
+    // The successful allocation's initial platform reference is the donor's
+    // owner. The view separately holds prepare's reference; no extra acquire.
+    pthread_mutex_lock(&mutex);
+    Entry *entry=find(ahb);
+    if(!entry || entry->leases!=1 || entry->owners)invariant("allocate-transaction");
+    entry->owners=1;
+    pthread_mutex_unlock(&mutex);
+    sq2_v77_ahb_finish(ahb);
+    *out=ahb;
+    return 0;
+#else
+    (void)desc;
     // Export allocation is explicitly rejected by the outer Vulkan wrapper.
     // An unexpected internal attempt still returns a real allocation failure.
     return -ENOTSUP;
+#endif
 }
 extern "C" int sq2_getmodule(const char *id,const hw_module_t **module) {
     if(!id || !module)return -EINVAL;

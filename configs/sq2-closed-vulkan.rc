@@ -1,0 +1,8 @@
+# Install the donor-specific setting after Android mounts /data and before apps.
+# No daemon, polling, networking or forced framework restart on normal boot.
+on post-fs-data
+    mkdir /data/sq2vk-v77t 0755 root root
+    copy /vendor/etc/sq2-vulkan-closed/qgl_config.txt /data/sq2vk-v77t/qgl_config.txt
+    chown root root /data/sq2vk-v77t/qgl_config.txt
+    chmod 0644 /data/sq2vk-v77t/qgl_config.txt
+    restorecon_recursive /data/sq2vk-v77t

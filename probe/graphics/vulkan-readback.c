@@ -35,7 +35,8 @@
  X(CmdPushConstants) X(CmdDispatch) X(CmdPipelineBarrier) X(QueueSubmit) \
  X(CreateFence) X(DestroyFence) X(ResetFences) X(WaitForFences) \
  X(CreateImage) X(DestroyImage) X(GetImageMemoryRequirements) X(BindImageMemory) \
- X(CmdClearColorImage) X(CmdCopyImageToBuffer) \
+ X(CmdClearColorImage) X(CmdCopyImageToBuffer) X(CmdCopyBuffer) X(CmdFillBuffer) \
+ X(FlushMappedMemoryRanges) X(InvalidateMappedMemoryRanges) \
  X(CreateRenderPass) X(DestroyRenderPass) X(CreateImageView) X(DestroyImageView) \
  X(CreateFramebuffer) X(DestroyFramebuffer) X(CreateGraphicsPipelines) \
  X(CmdBeginRenderPass) X(CmdEndRenderPass) X(CmdClearAttachments) X(CmdDraw)
@@ -58,6 +59,7 @@ static void submit(VkDevice dev, VkQueue queue, VkCommandBuffer cb, VkFence fenc
 }
 #include "vulkan-raster-readback.h"
 #include "vulkan-ahb-readback.h"
+#include "vulkan-memory-types.h"
 int main(int argc,char **argv) {
     int offscreen_only=0,mode_set=0,cycles_set=0,result=0;
     enum ahb_probe_mode ahb_mode=AHB_FULL;
@@ -271,6 +273,10 @@ parsed:
     puts("IMAGE_OK 64x64 optimal-tiled RGBA clear/copy/readback");
     vkDestroyImage(dev,im,NULL); vkFreeMemory(dev,immem,NULL);
     raster_readback(dev,queue,cb,fence,buffer,mapped);
+    if(getenv("SQ2_VULKAN_MEMORY_TYPES")) {
+        result=memory_types_probe(dev,queue,cb,fence);
+        goto cleanup;
+    }
     if(offscreen_only) goto cleanup;
     result=ahb_probe(inst,gipa,gpu,dev,queue,cb,fence,ahb_mode,ahb_cycles,ahb_width,ahb_height);
 cleanup:

@@ -1,12 +1,28 @@
 # 构建与部署
 
+闭源Vulkan启动候选：`build-quest2-vulkan-formats.py --boot-runtime` 生成runtime-v8，功能沿用v7，仅关闭成功调用统计及逐次BGRA导出提示，保留错误/所有权检查。`pack-sq2-closed-vulkan.py BASE BUNDLE OUTPUT --preserve-lab-ssh` 固定当前fa64305d…基线及v8九库哈希，新增独立候选目录与 `/init` 钩子；所有原vendor覆盖文件（含Mesa）、凭据和其它助手保持字节一致，密码SSH addon仍最后。不部署、不操作磁盘，输出拒绝覆盖。
+
+`closed-vulkan-start` 在可写RAM vendor覆盖层就绪、Android init之前核验哈希并接入系统HAL；`sq2.vulkan=mesa`、`sq2.vulkan=0` 或救援模式跳过，保留Mesa。Direct配置由 `sq2-closed-vulkan.rc` 在Android post-fs-data后复制到原私有路径，没有启动daemon/持续日志/网络操作。初始化顺序参考[AOSP init文档](https://android.googlesource.com/platform/system/core/+/refs/heads/main/init/README.md)。此候选尚无CTS认证，首次部署必须独立文件/一次性菜单，保留正常及救援入口，不能因构建成功就提升默认。
+
+离线检查：`SQ2_VULKAN_BOOT_TEST_IMAGE=out/quest2-gpu/boot-runtime-v8.cpio.gz python3 tests/test_closed_vulkan_boot.py`，使用候选中的真实助手，在临时目录验证正常接入、三个回退参数保持原文件、损坏库先拒绝后零修改。测试不抽取密码或修改主机挂载。仍须实机重启验证，完整状态见QUEST2-VULKAN-ONLY。
+
+颜色格式候选：WSL中 `python3 scripts/build-quest2-vulkan-formats.py --bgra-export` 从固定runtime-v5生成runtime-v7（拒绝已有输出）；无参数v6仅为BGRA导出失败的中间诊断。整套九库及Direct配置同步，私有runner选择 `SQ2_VK_RUNTIME=7`。临时系统runner也支持v7并将旧Mesa1.3 XML临时改为真实1.1，开始/回退均刷新zygote；仍不写启动镜像。AHB格式、大小、轮次及超时结果见QUEST2-VULKAN-ONLY的runtime-v7节。不得把新格式AHB读回等同于其交换链或完整CTS通过。
+
 当前目标：保留 Mesa EGL/GLES，仅替换系统 Vulkan 后端。闭源 EGL/GLES 研究保留在分支，不再切换桌面 GLES。
+
+新增诊断候选：`build-quest2-vulkan-app-diag.sh --image-info`（版本4）记录native准入失败参数；`--native-srgb`（版本5）启用有条件的RGBA8 sRGB支持。窗口探针 `SQ2_VULKAN_WINDOW_SRGB=1` 检验线性0.25→sRGB137及alpha。版本5配合私有Direct配置已跑完Wild Life且用户确认正常，但不是默认驱动。系统测试显式 `--start-manual` 关闭120秒自动回退，务必保存输出的手动回退命令；默认 `--start` 保持原策略。详见QUEST2-VULKAN-ONLY。
 
 最新进展：多队列重复释放已有候选修复；普通 APK 的外部句柄错误已定位为 `/proc/self/mem` 权限拒绝，改用有边界检查的 `process_vm_readv` 后，2880×1920 三角形完成120帧，截图正常。Chrome可正常打开，前八个被捕获的 Vulkan 管线创建成功，但后续部分管线仍有链接错误，不能称为Chrome整体失败，也不能据网页可见认定全部Vulkan路径通过。
 
-**最新 Wild Life 试验失败**：应用弹出“基准测试运行失败”，没有有效分数；用户要求停止本轮测试并提交、推送当前结果。已恢复默认Mesa EGL/Vulkan哈希，boot ID保持；未写启动镜像、未提升闭源Vulkan默认。详见 [QUEST2-VULKAN-ONLY.md](QUEST2-VULKAN-ONLY.md)。
+历史Wild Life初始化失败已由上方sRGB + Direct结果更新，原始失败仍保留在 [QUEST2-VULKAN-ONLY.md](QUEST2-VULKAN-ONLY.md)。
+
+`python3 scripts/build-quest2-vulkan-runtime.py` 生成runtime-v2；加 `--ahb-allocate` 生成runtime-v3。输入为固定counter-v1九库；v3还需当前平台链接库 `out/quest2-gpu/platform-link/{libc++,libhardware}.so`，脚本固定其哈希，输出拒绝覆盖。使用NDK和Mesa android_stub/u_gralloc头；生成九库、Direct配置、SHA256SUMS及标明未通过CTS/启动验证的candidate.json。通过 `build-sq2-vulkan-probe.sh` 构建新AHB测试后应更新探针哈希清单，同步可执行文件与清单；不能仅替换清单。测试矩阵、已通过结果和未完成项见同页。
 
 脚本来自迭代实验室，依赖缓存和分阶段产物；全新克隆不能直接生成完整可启动 SSD。不要删除哈希或磁盘身份保护以绕过缺失输入。
+
+缓存适配候选：在固定runtime-v3及平台链接库就绪后，WSL执行 `python3 scripts/prepare-quest2-cached-memory.py --scoped` 生成runtime-v5；不带该参数的v4仅供分阶段诊断。脚本核对GSL指令与全部输入哈希，执行实际缓存选择指令的512组QEMU检查，拒绝已有输出。v5增加私有GSL分配转发和基于真实HOST_CACHED属性的线程局部作用域；不得单独混用库。同步九库、Direct配置及SHA256SUMS，私有runner/临时系统runner选择 `SQ2_VK_RUNTIME=5`。`SQ2_VULKAN_MEMORY_TYPES=1 SQ2_VULKAN_MEMORY_CYCLES=150` 配合私有runner `--offscreen` 验证内存；与AHB、窗口、真实应用测试串行执行。分配跟踪仅限 `SQ2_GSL_ALLOC_TRACE=1` 私有离屏诊断，不能打入正常启动。该候选依赖当前MSM内核实际支持CACHED_COHERENT，尚无持久化安装器，不能宣称所有缓存维护或外部图像已适配。
+
+`bash scripts/build-sq2-msm-cache-probe.sh` 构建独立内核分配探针和清单，任何一种分配失败返回非零；不提交GPU命令，不代替一致性测试。Vulkan矩阵另支持 `SQ2_VULKAN_MEMORY_BYTES=16777216 SQ2_VULKAN_MEMORY_CYCLES=16`，大小必须为4KiB整数倍、范围4KiB至16MiB。重建主探针后同步二进制与LF格式的VULKAN_PROBE_SHA256SUMS；不能用PowerShell默认CRLF清单使文件名多出回车。默认4KiB和16MiB实测结果见QUEST2-VULKAN-ONLY。
 
 实际SF跟踪与配套编译器命名隔离见 [QUEST2-SF-TRACE.md](QUEST2-SF-TRACE.md)。`build-quest2-kmsg.sh`生成有限独立collector，SF试验需先复制到retained /tmp并匹配固定hash；不是正常boot服务。`prepare-quest2-private-compiler.py`生成combined-v4，仅用于`SQ2_COMBINED_REVISION=4`私有回归，尚不可作为桌面安装包。
 

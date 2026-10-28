@@ -1,0 +1,33 @@
+#!/bin/busybox sh
+# Before Android init, after the writable vendor overlay exists. Never touches
+# a physical partition; sq2.vulkan=mesa keeps every original Mesa overlay byte.
+set -eu
+case " $(cat /proc/cmdline) " in
+    *' sq2.vulkan=mesa '*|*' sq2.vulkan=0 '*|*' sq2.rescue=1 '*)
+        echo SQ2_CLOSED_VULKAN_DISABLED
+        exit 0;;
+esac
+source=/etc/sq2-vulkan-closed
+vendor=/newroot/vendor
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+test "$(sha256sum "$vendor/lib64/egl/libEGL_freedreno.so" | cut -d ' ' -f1)" = f16302e33e4f7c8bbaccbe5ab5fd5d19f3279222ee430ace236c4bad237a5434
+test "$(sha256sum "$vendor/lib64/hw/vulkan.freedreno.so" | cut -d ' ' -f1)" = 0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c
+(cd "$source"; sha256sum -c SHA256SUMS)
+test "$(find "$source" -maxdepth 1 -name '*.so' | wc -l)" = 9
+for library in "$source/"*.so;do
+    test ! -e "$vendor/lib64/egl/${library##*/}"
+done
+test ! -e "$vendor/etc/init/sq2-closed-vulkan.rc"
+test ! -e "$vendor/etc/sq2-vulkan-closed"
+# Validation above precedes mutation. Any failure below stops this experimental
+# boot via /init; the untouched normal/rescue entry remains independently usable.
+cp "$source/"*.so "$vendor/lib64/egl/"
+cp "$source/libquest2-vulkan-wrapper.so" "$vendor/lib64/hw/vulkan.freedreno.so"
+mkdir "$vendor/etc/sq2-vulkan-closed"
+cp "$source/qgl_config.txt" "$vendor/etc/sq2-vulkan-closed/"
+cp "$source/vulkan-version.xml" "$vendor/etc/permissions/android.hardware.vulkan.version-1_3.xml"
+cp "$source/sq2-closed-vulkan.rc" "$vendor/etc/init/"
+chmod 755 "$vendor/etc/sq2-vulkan-closed"
+chmod 644 "$vendor/etc/sq2-vulkan-closed/qgl_config.txt" "$vendor/etc/init/sq2-closed-vulkan.rc"
+test "$(sha256sum "$vendor/lib64/egl/libEGL_freedreno.so" | cut -d ' ' -f1)" = f16302e33e4f7c8bbaccbe5ab5fd5d19f3279222ee430ace236c4bad237a5434
+echo 'SQ2_CLOSED_VULKAN_READY: system HAL, Mesa EGL preserved, API 1.1; CTS unverified'

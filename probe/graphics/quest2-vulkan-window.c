@@ -117,7 +117,12 @@ static int consume(AImageReader *reader,unsigned width,unsigned height,unsigned 
         unsigned expected_code=code(cell(x,xb),cell(y,yb),frame,cycle);
         const uint8_t *pixel=data+(size_t)y*(unsigned)row_stride+(size_t)x*4;
         uint8_t expected[4];int mismatch=0;
-        for(unsigned c=0;c<4;c++){expected[c]=((expected_code>>c)&1u)*255u;mismatch|=pixel[c]!=expected[c];}
+        for(unsigned c=0;c<4;c++){
+            unsigned on=(expected_code>>c)&1u;
+            expected[c]=on*((getenv("SQ2_VULKAN_WINDOW_SRGB")&&c<3)?137u:255u);
+            int delta=(int)pixel[c]-expected[c];
+            mismatch|=getenv("SQ2_VULKAN_WINDOW_SRGB")&&c<3 ? (delta < -1 || delta > 1) : delta!=0;
+        }
         if(mismatch) {
             if(bad<8)fprintf(stderr,"VULKAN_WINDOW_MISMATCH cycle=%u frame=%u x=%u y=%u got=%02x,%02x,%02x,%02x expected=%02x,%02x,%02x,%02x\n",
                 cycle,frame,x,y,pixel[0],pixel[1],pixel[2],pixel[3],expected[0],expected[1],expected[2],expected[3]);
@@ -167,10 +172,12 @@ static int run_cycle(VkInstance instance,VkPhysicalDevice physical,VkDevice devi
     formats=calloc(count,sizeof(*formats));REQUIRE(formats,"allocate surface formats");
     VK_REQUIRE(vkGetPhysicalDeviceSurfaceFormatsKHR(physical,surface,&count,formats));
     VkSurfaceFormatKHR format={VK_FORMAT_UNDEFINED,VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
-    for(uint32_t i=0;i<count;i++)if((formats[i].format==VK_FORMAT_R8G8B8A8_UNORM||
+    VkFormat requested_format=getenv("SQ2_VULKAN_WINDOW_SRGB")?VK_FORMAT_R8G8B8A8_SRGB:VK_FORMAT_R8G8B8A8_UNORM;
+    for(uint32_t i=0;i<count;i++)if((formats[i].format==requested_format||
         (count==1&&formats[i].format==VK_FORMAT_UNDEFINED))&&formats[i].colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
-        format=(VkSurfaceFormatKHR){VK_FORMAT_R8G8B8A8_UNORM,formats[i].colorSpace};
-    free(formats);formats=NULL;REQUIRE(format.format!=VK_FORMAT_UNDEFINED,"RGBA8 UNORM / SRGB nonlinear surface format");
+        format=(VkSurfaceFormatKHR){requested_format,formats[i].colorSpace};
+    free(formats);formats=NULL;REQUIRE(format.format!=VK_FORMAT_UNDEFINED,"requested RGBA8 / SRGB nonlinear surface format");
+    fprintf(stderr,"VULKAN_WINDOW_FORMAT=%d\n",requested_format);
     count=0;VK_REQUIRE(vkGetPhysicalDeviceSurfacePresentModesKHR(physical,surface,&count,NULL));
     REQUIRE(count&&count<=256,"present mode count");
     modes=calloc(count,sizeof(*modes));REQUIRE(modes,"allocate present modes");
@@ -257,7 +264,8 @@ static int run_cycle(VkInstance instance,VkPhysicalDevice physical,VkDevice devi
             unsigned w=xb[column+1]-xb[column],h=yb[row+1]-yb[row];if(!w||!h)continue;
             unsigned color=code(column,row,frame,cycle);
             VkClearAttachment clear={.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT,.colorAttachment=0};
-            for(unsigned c=0;c<4;c++)clear.clearValue.color.float32[c]=(color>>c)&1u;
+            for(unsigned c=0;c<4;c++)clear.clearValue.color.float32[c]=((color>>c)&1u)*
+                ((getenv("SQ2_VULKAN_WINDOW_SRGB")&&c<3)?0.25f:1.0f);
             VkClearRect rect={.rect={{(int32_t)xb[column],(int32_t)yb[row]},{w,h}},.baseArrayLayer=0,.layerCount=1};
             vkCmdClearAttachments(command,1,&clear,1,&rect);
         }

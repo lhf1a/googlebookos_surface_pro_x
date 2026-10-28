@@ -10,7 +10,12 @@ case "${SQ2_VK_COUNTER_CLEANUP:-0}" in
 esac
 case "${SQ2_VK_APP_DIAGNOSTICS:-0}" in
     0) ;;
-    1|2) candidate=$home/vulkan-app-diag-v$SQ2_VK_APP_DIAGNOSTICS;;
+    1|2|4|5|6) candidate=$home/vulkan-app-diag-v$SQ2_VK_APP_DIAGNOSTICS;;
+    *) exit 2;;
+esac
+case "${SQ2_VK_RUNTIME:-0}" in
+    0) ;;
+    1|2|3|4|5|6|7|8) test "${SQ2_VK_APP_DIAGNOSTICS:-0}" = 0; candidate=$home/vulkan-runtime-v$SQ2_VK_RUNTIME;;
     *) exit 2;;
 esac
 probe=$home/vulkan-device
@@ -26,6 +31,11 @@ if [ "${1:-}" = --inside ];then
         test "$(sha256sum "$original" | cut -d ' ' -f1)" = "$(sha256sum "/vendor/lib64/egl/${original##*/}" | cut -d ' ' -f1)"
     done
     exec 9<&-
+    if [ "${SQ2_VK_RUNTIME:-0}" != 0 ];then
+        # Both mounts are private to this helper. No global Direct setting.
+        test -d /data/sq2vk-v77t
+        mount --bind "$candidate" /data/sq2vk-v77t
+    fi
     # This bundle deliberately excludes all donor EGL/GLES entry points.
     for library in "$candidate/"*.so;do
         test ! -e "/vendor/lib64/egl/${library##*/}"
@@ -36,6 +46,11 @@ if [ "${1:-}" = --inside ];then
     test "$(sha256sum /vendor/lib64/egl/libEGL_freedreno.so | cut -d ' ' -f1)" = "$expected_egl"
     mount --bind /vendor/lib64/egl/libquest2-vulkan-wrapper.so /vendor/lib64/hw/vulkan.freedreno.so
     echo VULKAN_ONLY_PRIVATE_MESA_EGL_PRESERVED
+    if [ "${SQ2_GSL_ALLOC_TRACE:-0}" = 1 ];then
+        test "$1" = --offscreen
+        exec env -u LD_LIBRARY_PATH LD_PRELOAD="$home/gsl-allocation-trace/libgsl-allocation-trace.so" \
+            SQ2_VULKAN_REJECT_TURNIP=1 "$home/v77-vulkan-probe/vulkan-readback" /system/lib64/libvulkan.so --offscreen-only
+    fi
     case "$1" in
         --device) exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$probe/quest2-vulkan-device";;
         --offscreen) exec env -u LD_PRELOAD -u LD_LIBRARY_PATH SQ2_VULKAN_REJECT_TURNIP=1 "$home/v77-vulkan-probe/vulkan-readback" /system/lib64/libvulkan.so --offscreen-only;;
@@ -52,6 +67,11 @@ check_default(){
     test "$(sha256sum "$root/vendor/lib64/hw/vulkan.freedreno.so" | cut -d ' ' -f1)" = "$expected_vk"
 }
 check_default
+case "${SQ2_GSL_ALLOC_TRACE:-0}" in
+    0) ;;
+    1) test "$1" = --offscreen; (cd "$root$home/gsl-allocation-trace"; sha256sum -c SHA256SUMS);;
+    *) exit 2;;
+esac
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 (cd "$root$candidate"; sha256sum -c SHA256SUMS)
 (cd "$root$probe"; sha256sum -c VULKAN_DEVICE_SHA256SUMS)
