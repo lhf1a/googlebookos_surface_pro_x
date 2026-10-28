@@ -1,5 +1,7 @@
 # 构建与部署
 
+eDP诊断复现：新建隔离源码时 `build-sq2-edp-rates.sh` 同时应用 `patch-sq2-edp-diag.py`；已有隔离源码仅应用一次诊断补丁，再用 `compile-sq2-edp-rates.sh` 编译。需要2.7Gbps对照时，在未加cap的隔离源码上先运行 `set-sq2-edp-control-rate.py STAGE 270000`。`pack-sq2-edp-rates.py REV` 拒绝覆盖已有输出，`prepare-sq2-edp-boot.py REV 2.7` 生成匹配标签的一次性菜单；5.4候选使用标签5.4。`prepare-sq2-edp-stage.py REV PREVIOUS_REV PREVIOUS_CFG_SHA256` 仅生成安装脚本，执行前要求设备磁盘、ESP、root来源、guard、原默认镜像、旧配置及旧addon哈希全部匹配。它在替换后移除已本地备份的旧addon，保持三菜单。安装与重启需显式操作；v5目前仅本地构建，未部署。不要把菜单标签当作实际链路验证。
+
 eDP 速率表候选见 [DISPLAY-REFRESH.md](DISPLAY-REFRESH.md)。`build-sq2-edp-rates.sh` 使用独立 msm 源码副本；无 Module.symvers 时必须执行 `restore-sq2-msm-depends.py` 恢复原模块依赖声明，不能仅验证运行内核已有符号就部署。原始模块须为固定哈希。`pack-sq2-edp-rates.py` 仅改变 msm.ko 和测试用 init 钩子，保留密码 addon 最后；候选尚未通过硬件验证。脚本和安装器是固定阶段输入，不可直接复用到未知镜像或磁盘。
 
 用户于 2026-10-29 要求菜单仅保留闭源 Vulkan、原 Mesa、当前 eDP 调试三个入口，覆盖此前保留独立救援/关机菜单的偏好。默认仍是闭源 Vulkan，测试使用一次性 env 和 240 秒回退。诊断 Wi-Fi 中 flyer-test 不适用于当前环境；后续测试用有界本地日志，不开启这套诊断联网。无引用旧 initramfs 在本地 out 中校验备份后才能从已核验的设备 ESP 删除，不能删除共享镜像。

@@ -1,5 +1,44 @@
 # SQ2 display refresh investigation — 2026-10-29
 
+## V4 training evidence and pending V5 control
+
+V4 adds cached PHY/clock/training/video return codes and early DPCD snapshots,
+without changing PHY voltage, PLL constants or the native 60 Hz timing.
+Module SHA256: `839b5afd74df7eaf6d8a3e891916cf87031906aee61ef1c788a84681fe09b107`.
+The actual boot recorded PHY configure/power/OPP returns 0, training step 2
+return 0, pixel request/readback 355500000 and video-ready return 0.
+Receiver registers independently read back BW_SET=0, LANE_COUNT_SET=0x84,
+RATE_SET=6, lane status 0x77/0x77 and alignment/status 0x81. Thus the initial
+5.4 Gbit/s four-lane training and alignment passed; this does not establish
+stable video output, physical clock measurement, or high-refresh support.
+MSA was MVID=43055/NVID=65400. Software clock reporting was 540 MHz link
+and 355.5 MHz pixel. Encoder vsync samples were 0,9,9,10,10, indicating that
+normal sustained scanout did not follow. Later AUX/debug reads blocked or
+timed out. Repeated diagnostic AUX access is a possible confounder; do not
+attribute that later stall solely to receiver hardware.
+
+Raw evidence was retrieved to ignored out/display-refresh before an explicit
+agent-requested sync/reboot. User subsequently reported the device still
+starting; this latest rollback has not yet been verified over SSH. Do not
+describe that reboot as an autonomous crash or claim desktop recovery yet.
+
+V5 is built locally but NOT deployed or tested. It retains table negotiation,
+caps the isolated candidate to 270000 (original table slot 3), and limits AUX
+snapshots to the first three collector iterations. This control separates
+rate-table negotiation from the faster link/stream path. Module SHA256:
+`bfc7d6459b71091f3c8bfcc4cb41107c5f8d3d102ea800bc10ee07f32bb24caf`.
+Combined initramfs SHA256:
+`3909460384a047f97d3c0fb07f03d0d6a522c06c734928b6ccf23ea482df3ae4`.
+Current device debug entry still references V4; default closed-Vulkan and
+Mesa images are unchanged. Only three menu entries remain. No 90/120 Hz
+mode has been attempted.
+
+The independent 240-second watchdog is separate from the collector so a
+blocked AUX read does not serialize its timer. Normal boot has neither
+collector nor diagnostic Wi-Fi. The one-shot request is consumed by GRUB
+before loading the candidate. Existing kernel, DTB, screen-only guard and
+last credential addon remain preserved.
+
 Final recovery follow-up: after the user reported connectivity restored, SSH
 verified boot_completed=1, original msm SHA256 f69c91e7… matching the full
 pinned original hash, screen_only=Y, default closed-Vulkan command line with

@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+eDP v4诊断（2026-10-29）：初始5.4Gbps×4训练返回0，实读DPCD BW_SET=0、RATE_SET=6、lane状态77/77、对齐81，证明初始训练通过；不证明画面或高刷通过。PHY/OPP/像素时钟/视频ready调用均返回0，但vsync计数0/9/9/10/10停滞，后期AUX读取阻塞。已取回原始日志并主动sync+重启；用户最新反馈仍在启动，尚未复核本轮回退。v5仅本地构建：同一速率表路径限制2.7Gbps/index3、AUX仅前三次采样，待设备恢复后做对照，未部署。当前设备调试项仍v4，正常闭源/Mesa镜像未改。新分支codex/sq2-edp-training-diagnostics；详见DISPLAY-REFRESH。
+
 eDP最终回退补验：用户恢复连接后，SSH已核对原msm完整哈希f69c91e7…、boot_completed=1、screen_only=Y、默认闭源入口无测试/debug参数、一次性env=0。实时链路恢复2.7Gbps×4、2880×1920@60/355500kHz/24bpp；上一轮v3日志已取回out。下文“最后重启后未复核”缺口现已关闭，无新增切换或重启。
 
 eDP v3实测更新（2026-10-29）：恢复模块依赖后已到boot_completed=1/SSH，候选哈希6293fa5d…匹配；驱动读数5.4Gbps×4、仍为2880×1920@60/24bpp，但用户报告黑屏/花屏，DPU持续vblank/commit/frame-done超时。不能称链路画面通过或90/120Hz可用。已保存状态、确认一次性env清零后远程sync+重启，用户确认桌面恢复；最后重启后的SSH未重连，未再次独立核对模块哈希。默认未提升，保留三菜单和已完成EFI清理。详见DISPLAY-REFRESH。
