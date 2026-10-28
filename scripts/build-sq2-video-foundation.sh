@@ -9,18 +9,36 @@ mkdir -p "$O" "$DEST"
 cp "$ROOT/configs/sq2-internal-kernel.config" "$O/.config"
 export ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
 "$K/scripts/config" --file "$O/.config" --module MEDIA_SUPPORT \
-  --enable MEDIA_SUPPORT_FILTER --enable MEDIA_PLATFORM_SUPPORT \
+  --disable MEDIA_SUPPORT_FILTER --enable MEDIA_PLATFORM_SUPPORT \
+  --disable MEDIA_CAMERA_SUPPORT --disable MEDIA_ANALOG_TV_SUPPORT \
+  --disable MEDIA_DIGITAL_TV_SUPPORT --disable MEDIA_RADIO_SUPPORT \
+  --disable MEDIA_SDR_SUPPORT --disable MEDIA_TEST_SUPPORT \
   --module VIDEO_DEV --enable V4L_MEM2MEM_DRIVERS \
   --module VIDEO_QCOM_VENUS --module SM_VIDEOCC_8150 \
   --disable MEDIA_SUBDRV_AUTOSELECT --disable MEDIA_CONTROLLER \
   --disable SND_USB_AUDIO_USE_MEDIA_CONTROLLER
 make -s -C "$K" O="$O" olddefconfig
+# First expansion introduces formerly invisible media symbols. Apply the narrow
+# choice again after they exist, then reject any USB-audio configuration drift.
+"$K/scripts/config" --file "$O/.config" --disable MEDIA_CONTROLLER \
+  --disable SND_USB_AUDIO_USE_MEDIA_CONTROLLER --disable DVB_CORE \
+  --disable MEDIA_USB_SUPPORT --disable MEDIA_PCI_SUPPORT \
+  --disable MEDIA_SUBDRV_AUTOSELECT --disable MEDIA_TUNER \
+  --disable VIDEO_I2C
+make -s -C "$K" O="$O" olddefconfig
+grep -qx '# CONFIG_MEDIA_CONTROLLER is not set' "$O/.config"
+grep -qx '# CONFIG_DVB_CORE is not set' "$O/.config"
+if grep -qx 'CONFIG_SND_USB_AUDIO_USE_MEDIA_CONTROLLER=y' "$O/.config"; then
+  echo 'Refusing USB audio media-controller coupling' >&2
+  exit 1
+fi
 grep -qx 'CONFIG_VIDEO_QCOM_VENUS=m' "$O/.config"
 grep -qx 'CONFIG_BLK_DEV_NVME=y' "$O/.config"
 grep -qx 'CONFIG_FUSE_FS=m' "$O/.config"
 cp "$O/.config" "$DEST/kernel.config"
 "$K/scripts/diffconfig" "$ROOT/configs/sq2-internal-kernel.config" "$O/.config" > "$DEST/config.diff"
 make -s -C "$K" O="$O" -j8 modules_prepare > "$DEST/prepare.log" 2>&1
+make -s -C "$K" O="$O" M=drivers/media clean
 # Missing original Module.symvers: compile success is not an ABI validation.
 make -s -C "$K" O="$O" -j8 M=drivers/media KBUILD_MODPOST_WARN=1 modules > "$DEST/media-build.log" 2>&1
 make -s -C "$K" O="$O" -j8 M=drivers/clk/qcom CONFIG_SM_VIDEOCC_8150=m KBUILD_MODPOST_WARN=1 modules > "$DEST/clock-build.log" 2>&1

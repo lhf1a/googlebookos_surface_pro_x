@@ -1,6 +1,42 @@
 # SQ2 视频硬解适配调查
 
-2026-10-29，用户明确请求补齐硬解。状态：未实现，未更改实机内核、DTB、启动镜像或 codec 配置。
+2026-10-29，用户明确请求补齐硬解。状态：未实现；已临时加载媒体框架、VIDEOCC及其OF overlay，未更改启动镜像或 codec 配置。
+
+最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
+
+## 通用媒体框架首次实机加载
+
+### 固件连续内存实测
+
+`probe/video/sq2_video_memory_probe.c` / `scripts/build-sq2-video-memory-probe.sh` 新增独立分配探针。匹配6.3.8构建，13个未定义符号均匹配当次运行内核__ksymtab；模块SHA256 `d581fe6a5d089d434cb90e6d68cab69bfe5bd118c609445881ee8d04d9b9b2fd`，实机传输哈希一致。显式allow=1及Surface compatible保护，创建无OF/IOMMU/地址转换的临时platform设备，以32位coherent DMA mask调用标准dma_alloc_coherent；不调用SCM、不访问视频寄存器。
+
+实机insmod成功：6MiB分配返回物理/DMA地址均为0xfd000000，1MiB对齐且完整区间低于4GiB；整区0xa5及0两种填值读回一致。函数返回前已dma_free_coherent并注销辅助设备，随后rmmod成功，核对module/sysfs辅助设备均不存在。boot ID仍2f0c17ee…、boot_completed=1、screen_only=Y。原始结果在out/video-decode/memory-probe-result.txt。
+
+这证明本次运行可通过标准DMA接口获取独占连续内存，不证明PAS9允许在此处运行固件；不能硬编码或再次使用已经释放的0xfd000000。后续实际加载必须持有新分配直到远端处理器关闭确认成功，并处理认证失败、恢复和驱动移除。现有Venus core.c在错误清理、remove及恢复路径忽略venus_shutdown返回值，不能直接改为devm分配后自动释放，否则固件关闭失败时存在释放仍被硬件使用内存的风险。固件加载生命周期适配仍待完成；本轮没有启动固件。
+
+固件/时钟进一步核对：临时挂载debugfs只读采样后已卸载，bi_tcxo=19.2MHz、video_pll0=399999902Hz，mvsc/mvs0/mvs1及iris_ahb均注册但enable计数0；这不是频率设置/硬解负载通过。VIDEOCC保持绑定，boot ID不变。
+
+固件判断纠正：不能凭venus-5.2目录名把本机文件认定为SDM845固件。已通过SSH取回实际文件，SHA256 `4e93d34504da96320775476bbd509aa06f985b48fb781d4436c8eb812b929928`，1159200字节，内部版本为 `VIDEO.IR.1.2-00042-PROD-1`，确为Iris1版本字符串。三个LOAD段均可重定位，跨度5MiB，链接基址0x0f500000不是物理加载地址要求。[固定Surface提取脚本](https://github.com/linux-surface/aarch64-firmware/blob/9f07579ee64aba56419cfd0fbbca9f26741edc90/scripts/getfw.py)明确从qcdx8180包提取qcvss8180.mbn并复制到venus-5.2/venus.mbn；这支持现有路径的来源解释，但本地原Windows采集清单缺失，不能独立证明该二进制的OEM来源。应优先验证这份现有固件，而非先替换OnePlus固件；尚未执行PAS认证/启动。
+
+社区OnePlus7TPro固件仓库 `sm8150-linux-mainline/firmware-oneplus-hotdog` 提交 `5e5c534784a848bc39a02c421cc5273d79678fb3` 的venus.mbn：SHA256 `9d4d4b4d26745a89b37847ebcc3a1f96a00d77e5a791bc3cb71a90e5c992bc4b`，1142816字节，内部版本VIDEO.IR.1.2-00035-PROD-1。inspect-sq2-video-firmware.py解析结果同为三个可重定位LOAD段、5MiB跨度。仅离线对照，未验证OEM签名、SQ2认证或兼容性，未发送至设备。
+
+本轮运行态复核boot ID仍为2f0c17ee…、screen_only=Y、VIDEOCC仍绑定。内核启用DMA_CMA，CMA共32MiB、采样空闲约26MiB；但dma_alloc_from_contiguous/cma_alloc等不是运行内核导出，不能直接用独立模块调用。后续可核对无IOMMU辅助设备的标准DMA分配或独立启动预留；CMA空闲量本身不证明满足固件物理地址/认证要求。未占用任何现有保留区。
+
+特别注意：Surface原DTS明确把0x8b700000的5MiB区标为CAMERA，不是视频固件区；不能因大小相符就占用。当前DT没有明确的Venus reserved-memory。下一步需要建立可证明独占的5MiB加载区（重启预留或受控分配并核对SCM约束），并核实SQ2原固件来源，不能用现有未知reserved块冒充空闲内存。此为待完成适配项，不是已判定无法实现。
+
+VIDEOCC首次实机接入（2026-10-29）：内核确认OF_DYNAMIC/OF_OVERLAY及导出可用，改为临时overlay避免改启动盘。`build-sq2-video-clock-overlay.py`从已审计时钟DTB生成嵌入式overlay模块，要求allow=1、本机compatible为microsoft,surface-pro-x、目标节点不存在及三个外部phandle路径匹配。模块76e1340e…，时钟驱动fd6adde7…，传输后完整哈希一致；overlay全部未定义符号匹配运行内核导出。
+
+实机手动加载overlay返回ret=0/id=1，随后insmod videocc-sm8150成功，`/sys/bus/platform/devices/ab00000.clock-controller/driver`实际指向video_cc-sm8150。boot ID未变、boot_completed=1；未写ESP、未重启、未加载视频固件。ueventd最初因临时模块不在其索引而自动加载失败，之后手动加载绑定成功，不应误判为probe失败。模块/overlay仍在运行；不要在时钟驱动仍绑定时卸载overlay，最简单恢复路径为正常重启。此项只证明VIDEOCC probe接入，尚无视频解码帧或Android硬解组件。
+
+VIDEOCC候选：新增 `build-sq2-video-clock-dtb.py`，固定当前a5a25e43… CPU/GPU DTB，仅添加 `/soc@0/clock-controller@ab00000`。参考上游SC8180X节点（Linux提交062dc4693e2c10d77de06f61e6f3faf37c0a8383的sc8180x.dtsi），采用SC8180X+SM8150双compatible、0xab00000/0x10000、RPMH CXO、MMCX域和现有LOW_SVS OPP。当前6.3 GCC在probe直接开启0xb004 VIDEO_AHB和0xb040 VIDEO_XO，尚无新版GCC_VIDEO_AHB_CLK导出；旧VIDEOCC只消费bi_tcxo，故候选不捏造iface时钟ID。需要实机验证该旧驱动组合，不能由上游节点存在推断通过。
+
+已生成out/video-decode/sq2-video-clock.dtb，SHA256 59966cdf5aacfddc2f9023d42285106bf8e339c67218ca9673458e5f1cdbcf41。全树对照验证原节点所有属性及保留内存不变，仅增加上述节点；未部署、未启动，不含解码器资源或固件启动。后续先验证VIDEOCC probe/父时钟/电源域，再接Iris1硬件节点。
+
+2026-10-29：新增 `audit-sq2-video-modules.py`，读取当次运行内核__ksymtab导出，与九个候选模块的未定义符号及候选间依赖做闭包检查，missing=0；这不是完整ABI证明。六个通用模块的vermagic均为6.3.8-sq2-android1 SMP mod_unload aarch64，传输后SHA256与本地一致。
+
+按顺序手动insmod：videodev、videobuf2-common、videobuf2-memops、videobuf2-v4l2、videobuf2-dma-contig、v4l2-mem2mem，六个均返回成功并在/proc/modules为Live。dmesg确认Linux video capture interface v2.00。boot ID前后一致，boot_completed=1，开始前screen_only=Y。模块仅来自retained root的/tmp/sq2-video-framework，未持久化；正常重启不会加载它们。
+
+本轮尚未加载venus-core/decoder/VIDEOCC，未增加设备树节点或启动固件，没有/dev/video解码实例；Android仍没有硬解组件。该实测只关闭了通用V4L2框架可加载性的缺口。原始符号及报告位于out/video-decode，不纳入Git。
 
 ## 已核实
 
@@ -14,6 +50,10 @@
 ## 实现前的具体缺口
 
 ### 当前主线：855参考 + Venus/V4L2 + 开放Codec2
+
+后续推进（2026-10-29）：实机只读确认screen_only=Y、现有venus-5.2/venus.mbn SHA256为4e93d34504da96320775476bbd509aa06f985b48fb781d4436c8eb812b929928，尚未证实该固件适合Iris1。补取同一OnePlus提交的msm_vidc_platform.c、venus_hfi.h、hfi_packetization.c等实际存在文件并更新哈希。sm8150_data明确选择VPU_VERSION_5；venus_hfi初始化消息使用HFI_PACKETIZATION_4XX，同时上电/中断函数选择vpu5_ops。这是区分硬件版本与消息版本的直接证据，不能把VPU5数字简单映射为HFI版本，也不能只添加compatible后套现有v4电源流程。
+
+配置修复：MEDIA_SUPPORT_FILTER使底层配置菜单不可见，原disable被默认值覆盖。现在关闭该过滤、在首次olddefconfig展开后再次禁用MEDIA_CONTROLLER/DVB/USB和PCI媒体驱动/调谐器，强制检查MEDIA_CONTROLLER与USB音频耦合未开启。构建前清理独立media目录产物以免旧模块残留混入清单。此更改仍为compile-only；缺Module.symvers的限制保持。此次没有加载模块、触发固件或修改DTB；不能称为硬件启动尝试通过。
 
 用户选择此路线，Quest闭源材料保留为辅助参考，不再优先接入其服务。已从 LineageOS/android_kernel_oneplus_sm8150 固定提交 `32f26bf34ddf17df8e224ae0703656b9fe0c1a8d` 取得 `sm8150-vidc.dtsi` 和 `venus_hfi.c`，文件哈希见 `configs/sm8150-video-reference.json`。这是OnePlus设备的社区维护下游内核，不能称为Surface官方参考。
 
