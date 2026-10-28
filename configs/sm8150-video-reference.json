@@ -1,0 +1,9 @@
+{
+  "files": {
+    "sm8150-vidc.dtsi": "cfc2051d88bd4d0917a950ebc30b7d1f8d28e4f69156b50c8336146d85aaa627",
+    "venus_hfi.c": "8a9f0b0b78bfa2bf579eebb2720a58c0b0d51ff27da9450ee4f738ae5f0d9888"
+  },
+  "status": "reference-only-not-sq2-resource-validation",
+  "commit": "32f26bf34ddf17df8e224ae0703656b9fe0c1a8d",
+  "repository": "https://github.com/LineageOS/android_kernel_oneplus_sm8150"
+}
