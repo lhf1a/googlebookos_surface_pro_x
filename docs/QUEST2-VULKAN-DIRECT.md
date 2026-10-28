@@ -88,6 +88,10 @@ v819 GSL 的 `parseFile`（`0x1f4538`）搜索 `./<filename>`、`/data/vendor/gp
 
 ### 剩余验证
 
+应用测试准备已完成：`prepare-quest2-wildlife.py --direct` 从固定候选生成独立 `out/quest2-wild-life/direct/runtime`，仅为副本设置 `$ORIGIN` RUNPATH；原对照目录保持独立。生成库、配置和精确匹配 3DMark 的分派器已复制至设备 `wildlife-direct`，全部 SHA256SUMS 实读通过，外部实际配置与候选配置 SHA256 均为 `1f93a7a1446b2e934f12f23aa55514ee41852bf6df7851788d053cbd90e1f008`。
+
+当前临时入口支持 `sh /tmp/run-quest2-wildlife.sh --direct`，沿用原始 Mesa 哈希、screen-only、GPU 温度、boot ID/框架 PID 检查和退出恢复；Direct 模式额外验证实际配置与候选相同。此次仅完成生成、部署和校验，尚未激活分派器或运行完整场景。没有活跃的测试会话需要等待。后续应启动此入口并采样完整 Wild Life 图像，再决定是否继续系统集成。
+
 1. 仅部署这个独立 runtime 和其私有配置，在单独测试进程确认它打开 `/data/sq2vk-test/qgl_config.txt`；保留原 runtime 用于对照。不要把配置写入全局目录或替换 SurfaceFlinger 的库。
 2. 先复用已通过的离屏三角形/多尺寸图像读回；配置读取的日志或跟踪、真实驱动库哈希和像素正确性一起记录。出现 fence 超时/GPU fault 便停止，不原样重复造成黑屏的测试。
 3. 基础读回通过后，再由现有、可撤回的 3DMark 专用选择路径进行 Direct 对照，检查前中后场景画面。Wild Life 跑完分数不是正确渲染的证据。

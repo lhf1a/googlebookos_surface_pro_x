@@ -4,6 +4,12 @@
 set -eu
 pkg=com.futuremark.dmandroid.application
 base=/data/local/tmp/sq2-closed/wildlife
+direct=0
+case "${1:-}" in
+    '') test "$#" -eq 0;;
+    --direct) test "$#" -eq 1;base=/data/local/tmp/sq2-closed/wildlife-direct;direct=1;;
+    *) echo 'usage: run-quest2-wildlife.sh [--direct]' >&2;exit 2;;
+esac
 target=/vendor/lib64/hw/vulkan.freedreno.so
 fallback=/vendor/lib64/hw/vulkan.sq2-mesa-baseline.so
 vendor=/vendor/lib64/sq2-quest2
@@ -15,6 +21,9 @@ test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test "$(hash "$root$target")" = "$expected"
 test -f "$root$base/vulkan.sq2-selector.so"
 (cd "$root$base/runtime";sha256sum -c SHA256SUMS)
+if [ "$direct" = 1 ];then
+    test "$(hash "$root/data/sq2vk-test/qgl_config.txt")" = "$(hash "$root$base/runtime/qgl_config.txt")"
+fi
 sensor=
 for z in /sys/class/thermal/thermal_zone*;do
     case "$(cat "$z/type")" in gpu-thermal-top) sensor=$z/temp;; esac
