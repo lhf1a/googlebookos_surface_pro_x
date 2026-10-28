@@ -39,7 +39,7 @@ namespace sq2 {
 // pointer or an assumed private handle layout. This bounded process-local
 // cache is for the isolated probe; system adoption needs image-lifetime hooks.
 struct AddressMappings {
-    struct Entry {dev_t dev;ino_t ino;uint64_t size;void *base;};
+    struct Entry {dev_t dev;ino_t ino;uint64_t size;void *base;unsigned refs;};
     pthread_mutex_t mutex=PTHREAD_MUTEX_INITIALIZER;
     Entry entries[128]={};unsigned count=0;uint64_t bytes=0;
     ~AddressMappings(){for(unsigned i=0;i<count;i++)munmap(entries[i].base,entries[i].size);}
@@ -50,15 +50,33 @@ struct AddressMappings {
         count=0;bytes=0;
         pthread_mutex_unlock(&mutex);
     }
-    void *get(const BufferInfo &b){
+    unsigned references(){
+        pthread_mutex_lock(&mutex);unsigned refs=0;
+        for(unsigned i=0;i<count;i++)refs+=entries[i].refs;
+        pthread_mutex_unlock(&mutex);return refs;
+    }
+    void release(const BufferInfo &b){
+        struct stat st={};if(fstat(b.fd,&st))return;
+        pthread_mutex_lock(&mutex);
+        for(unsigned i=0;i<count;i++)if(entries[i].dev==st.st_dev&&entries[i].ino==st.st_ino&&entries[i].size==b.fd_size){
+            if(entries[i].refs && --entries[i].refs==0){
+                munmap(entries[i].base,entries[i].size);bytes-=entries[i].size;
+                entries[i]=entries[--count];
+                std::fprintf(stderr,"QTI_ADDRESS_RELEASE remaining=%u\n",count);
+            }
+            break;
+        }
+        pthread_mutex_unlock(&mutex);
+    }
+    void *get(const BufferInfo &b,bool retain=false){
         struct stat st={};if(fstat(b.fd,&st))return nullptr;
         pthread_mutex_lock(&mutex);
         void *base=nullptr;
-        for(unsigned i=0;i<count;i++)if(entries[i].dev==st.st_dev&&entries[i].ino==st.st_ino&&entries[i].size==b.fd_size){base=entries[i].base;break;}
+        for(unsigned i=0;i<count;i++)if(entries[i].dev==st.st_dev&&entries[i].ino==st.st_ino&&entries[i].size==b.fd_size){base=entries[i].base;if(retain)entries[i].refs++;break;}
         if(!base&&count<128&&b.fd_size<=512ull*1024*1024-bytes){
             void *mapped=mmap(nullptr,b.fd_size,PROT_READ|PROT_WRITE,MAP_SHARED,b.fd,0);
             if(mapped!=MAP_FAILED){
-                entries[count++]={st.st_dev,st.st_ino,b.fd_size,mapped};bytes+=b.fd_size;base=mapped;
+                entries[count++]={st.st_dev,st.st_ino,b.fd_size,mapped,retain?1u:0u};bytes+=b.fd_size;base=mapped;
             }
         }
         pthread_mutex_unlock(&mutex);
@@ -69,6 +87,14 @@ static AddressMappings &address_mappings(){static AddressMappings instance;retur
 // Explicit teardown hook. The caller MUST first destroy every image, texture,
 // surface and context and terminate EGL. Not safe for per-image destruction.
 extern "C" void sq2_qti_mapper3_reset_addresses(){address_mappings().reset();}
+extern "C" unsigned sq2_qti_mapper3_address_refs(){return address_mappings().references();}
+extern "C" bool sq2_qti_mapper3_retain_buffer(const native_handle_t *handle){
+    BufferInfo b;return color_info(handle,b)&&b.format==1&&b.fourcc==0x34324241u&&
+        !(b.usage&(1ull<<14))&&address_mappings().get(b,true);
+}
+extern "C" void sq2_qti_mapper3_release_buffer(const native_handle_t *handle){
+    BufferInfo b;if(color_info(handle,b))address_mappings().release(b);
+}
 #endif
 static bool info(void *buffer,BufferInfo &b,const char *operation) {
     bool ok=color_info(static_cast<const native_handle_t*>(buffer),b)&&b.format==1&&

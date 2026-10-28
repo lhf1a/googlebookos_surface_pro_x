@@ -209,6 +209,14 @@ Quest 2 v77 build 51584880050400150 来自第三方固件归档候选，来源�
 
 ## 最新：原配 GLES 的 AHB 五尺寸读回通过
 
+### 后续：native-buffer 引用驱动的映射释放
+
+`quest2-native-buffer-lifetime.h` 新增私有 ANativeWindowBuffer 代理，复制而不改写原对象；仅接受本目标实测的 ARM64 magic/168 字节 ABI。代理持有原对象引用，将自身原子 inc/dec 回调交给 donor，最终 dec 后先释放该缓冲区的桥接映射引用，再释放原对象。原对象存活期间 FD 有效，映射以实际 dev/ino/size 识别。新增 mapper3 retain/release 接口，只有最后一个代理引用释放时才 munmap；没有修改 mapper4 路径。
+
+实测 `SQ2_GLES_NATIVE_PROXY=1 SQ2_GLES_DESTROY_IMAGE_EARLY=1 SQ2_GLES_REPEATS=150`：先销毁 EGLImage，纹理仍绘制三帧并通过 GL/AHB 双重读回，之后删除纹理触发最终 native-buffer dec 和映射回收。再加 `SQ2_GLES_SHARED_IMAGE=1` 创建同一个 AHB 的两个独立 EGLImage/代理，150 轮均断言映射引用先为 2，删除原图像和纹理后仍为 1，销毁另一图像后为 0。三种断言/记录（refs=2、refs=1->0、完整 EGL 拆除时 mappings=0）各实际出现 150 次。最后进程退出 0、框架 PID 不变，boot ID 保持且默认 Mesa 哈希和 screen-only 正常。原始输出在忽略的 native-proxy-early-150.txt、native-shared-150.txt。
+
+这次回收发生在驱动最终 native-buffer 引用回调，不依赖 EGL 全局拆除钩子兜底。但是代理目前仅通过私有读回探针显式使用，尚未接到通用 EGLCreateImage/eglGetProcAddress/窗口交换路径。**同一缓冲区不能混合未经代理和经过代理的活动使用来推断安全释放**；系统集成必须覆盖全部导入与窗口路径。共享 contexts、并发、多平面、同一个 context 长期 churn、失败导入的错误注入仍待验证；未把这一实验作为已完成的系统桌面替换。
+
 ### 后续：同进程 150 次完整 EGL 生命周期
 
 新增仅 mapper3 导出的 `sq2_qti_mapper3_reset_addresses`，在调用方已经销毁全部纹理、EGLImage、surface/context、解除 current 并成功 eglTerminate 后，解除该桥接缓存的真实 CPU mmap 并清零统计。此钩子不能在单个 EGLImage 销毁时调用，不能与其他存活图像/上下文并发使用，也未自动安装到系统 EGL。

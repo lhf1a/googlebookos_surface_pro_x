@@ -10,6 +10,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef SQ2_QUEST2_GLES
+#include "quest2-native-buffer-lifetime.h"
+#endif
 
 static void fail(const char *what) {
     fprintf(stderr, "GLES_READBACK_FAIL %s EGL=0x%x GL=0x%x\n", what, eglGetError(), glGetError());
@@ -80,6 +83,7 @@ static int run_probe(int argc, char **argv) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     AHardwareBuffer *ahb = NULL;
     EGLImageKHR image = EGL_NO_IMAGE_KHR;
+    EGLImageKHR shared_image = EGL_NO_IMAGE_KHR;
     PFNEGLDESTROYIMAGEKHRPROC destroy_image = NULL;
     if (use_ahb) {
         AHardwareBuffer_Desc desc = {.width=width,.height=height,.layers=1,.format=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
@@ -115,9 +119,37 @@ static int run_probe(int argc, char **argv) {
             }
         }
 #endif
+#ifdef SQ2_QUEST2_GLES
+        struct sq2_native_proxy *proxy=NULL;
+        if(getenv("SQ2_GLES_NATIVE_PROXY")){
+            proxy=sq2_native_wrap(native);if(!proxy)fail("native proxy ABI");
+            native=proxy;
+        }
+#endif
         image = create_image(d,EGL_NO_CONTEXT,EGL_NATIVE_BUFFER_ANDROID,native,NULL);
+#ifdef SQ2_QUEST2_GLES
+        if(proxy)sq2_native_dec(proxy);
+#endif
         if (image == EGL_NO_IMAGE_KHR) fail("AHB EGLImage import");
         image_texture(GL_TEXTURE_2D,image);
+#ifdef SQ2_QUEST2_GLES
+        if(getenv("SQ2_GLES_SHARED_IMAGE")){
+            if(!getenv("SQ2_GLES_NATIVE_PROXY"))fail("shared image requires proxy");
+            struct sq2_native_proxy *other=sq2_native_wrap(client(ahb));
+            if(!other)fail("shared native proxy");
+            shared_image=create_image(d,EGL_NO_CONTEXT,EGL_NATIVE_BUFFER_ANDROID,other,NULL);
+            sq2_native_dec(other);
+            if(shared_image==EGL_NO_IMAGE_KHR)fail("shared image import");
+            unsigned (*refs)(void)=(void*)dlsym(RTLD_DEFAULT,"sq2_qti_mapper3_address_refs");
+            if(!refs||refs()!=2)fail("shared image references");
+            puts("SHARED_IMAGE_REFS_OK refs=2");
+        }
+#endif
+        if(getenv("SQ2_GLES_DESTROY_IMAGE_EARLY")){
+            if(!destroy_image(d,image))fail("early image destroy");
+            image=EGL_NO_IMAGE_KHR;
+            puts("EGL_IMAGE_DESTROYED_TEXTURE_RETAINED");
+        }
 #ifdef SQ2_QUEST2_GLES
         printf("QUEST2_GLES_AFTER_IMPORT renderer=%s context=%p expected=%p glerror=0x%x\n",
                glGetString(GL_RENDERER),eglGetCurrentContext(),ctx,glGetError());
@@ -132,7 +164,7 @@ static int run_probe(int argc, char **argv) {
         /* Separate metadata/import validation from the known failing GPU
          * submit path. This result is deliberately not a rendering PASS. */
         glDeleteFramebuffers(1,&fbo);glDeleteTextures(1,&tex);
-        destroy_image(d,image);AHardwareBuffer_release(ahb);
+        if(image!=EGL_NO_IMAGE_KHR)destroy_image(d,image);AHardwareBuffer_release(ahb);
         eglMakeCurrent(d,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);
         if (surface != EGL_NO_SURFACE) eglDestroySurface(d,surface);
         if(!eglDestroyContext(d,ctx)||!eglTerminate(d))fail("import-only EGL teardown");
@@ -205,6 +237,13 @@ static int run_probe(int argc, char **argv) {
     glDeleteFramebuffers(1,&fbo); glDeleteTextures(1,&tex); glDeleteProgram(prog);
     glDeleteShader(vs); glDeleteShader(fs);
     if (image != EGL_NO_IMAGE_KHR) destroy_image(d,image);
+    if(shared_image!=EGL_NO_IMAGE_KHR){
+        glFinish();
+        unsigned (*refs)(void)=(void*)dlsym(RTLD_DEFAULT,"sq2_qti_mapper3_address_refs");
+        if(!refs||refs()!=1)fail("shared survivor reference");
+        if(!destroy_image(d,shared_image)||refs()!=0)fail("shared final release");
+        puts("SHARED_IMAGE_RELEASE_OK refs=1->0");
+    }
     if (ahb) AHardwareBuffer_release(ahb);
     eglMakeCurrent(d,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);
     if (surface != EGL_NO_SURFACE) eglDestroySurface(d,surface);
