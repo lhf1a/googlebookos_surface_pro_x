@@ -4,6 +4,18 @@
 
 ## 输入和输出
 
+## 完整 Wild Life 首次 Direct 对照结果
+
+后续已实际启动 `run-quest2-wildlife.sh --direct`，选择 Wild Life 标准并完成整轮，结果 **5881 分 / 35.22 FPS**。截图在忽略的 `out/quest2-wild-life/direct/`：scene.png 为 12.8 秒，middle.png 为 40.6 秒，两者地形、角色、纹理和光照可辨，未见旧 v819 对照中的黑白横带、粉色噪点；late.png 实际为最终结果页。仅有两张运行场景采样，未逐帧审阅整轮，也未独立复跑。
+
+进程 maps 实读包含 vendor 私有 vulkan-bridge.so、notgsl.so 和 mapper bridge；实际加载目录中的 Vulkan SHA256 为 `7158aaca7b8c2e6f9788a5a31f57518609f505e11cb68cfe660e76a00e81064f`，对应 Direct 候选经过应用副本 `$ORIGIN` RUNPATH 处理后的文件。独立原始候选仍为上述 `3e01f9ac…`，两者不要混淆。温度两秒采样共 94 项，峰值 58.0°C；没有固定频率，也不是受控性能比较。
+
+结果页采集后主动写 stop，运行会话正常结束并输出 MESA_RESTORED，默认 Vulkan 实读完整哈希为 `0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c`。boot ID、system_server/SurfaceFlinger PID 保持，GPU fault/hang 筛选无输出。没有启动镜像更改或后台测试等待。
+
+结论：先前严重花屏在本轮 Direct 的两处采样中消失，支持继续使用此候选验证；不证明 GMEM 根因已修复、其他应用完整兼容或闭源系统替换完成。后续还需复跑及更多场景，再与 GLES 窗口/多平面和系统合成接入一起推进。
+
+## 输入和输出明细
+
 | 输入 | SHA256 |
 | --- | --- |
 | 原始 v819 `vulkan.adreno.so` | `b4b4132c3f6c1092563200686d21933ed83ffab865a1f99edda93218e96e1e27` |

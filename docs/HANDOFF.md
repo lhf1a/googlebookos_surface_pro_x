@@ -14,6 +14,8 @@
 
 ## 当前待办
 
+- Vulkan Direct 完整 Wild Life 首轮完成：5881 / 35.22 FPS，12.8/40.6 秒两张采样正常，先前横带和粉色噪点未见；峰值 58.0°C。真实闭源映射和应用候选哈希已核对，结束已恢复 Mesa，boot/框架 PID 未变。未复跑或逐帧验证，不能宣称完整系统替换；详见 QUEST2-VULKAN-DIRECT 最新结果。
+
 - 闭源 GLES 共享图像已推进：修复 QTI 错读 minigbm handle 的 CPU 基址、mapper3 lock/unlock 保留导入生命周期、物理高度语义后，同一 v77 配套库在 64×64、13×7、257×129、1920×1280、2880×1920 的 shader→glReadPixels→AHB CPU 对照均三帧通过。原 mapper4 逐字未变，正常系统仍是 Mesa。映射缓存仍为进程级有界实验实现，窗口生命周期、多平面和系统合成未完成，不能部署成默认桌面。详见 QUEST2-GPU-RESEARCH 最新章节。
 - 闭源 Vulkan 已按反汇编确认的 RenderMode=Direct 生成独立路径候选；实际配置读取和基础计算/图像/三角形/AHB 读回通过，尚未重新跑 Wild Life，不能称为花屏修复。详见 QUEST2-VULKAN-DIRECT.md。
 
