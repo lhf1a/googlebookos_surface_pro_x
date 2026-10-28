@@ -16,6 +16,7 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -66,7 +67,7 @@ static int q2rb_pointer_field(int mem, uint64_t object, uint64_t offset,
     return 1;
 }
 
-static int q2rb_find_base(uint64_t *base)
+static int q2rb_find_named_base(uint64_t *base, const char *basename)
 {
     FILE *maps = fopen("/proc/self/maps", "re");
     if (!maps) return 0;
@@ -81,7 +82,7 @@ static int q2rb_find_base(uint64_t *base)
         char *path = line + used;
         path[strcspn(path, "\r\n")] = '\0';
         const char *name = strrchr(path, '/');
-        if (!name || strcmp(name + 1, "libGLESv2_adreno.so") || offset ||
+        if (!name || strcmp(name + 1, basename) || offset ||
             perms[0] != 'r' || start >= end)
             continue;
         *base = (uint64_t)start;
@@ -89,6 +90,37 @@ static int q2rb_find_base(uint64_t *base)
     }
     fclose(maps);
     return matches == 1;
+}
+static int q2rb_find_base(uint64_t *base)
+{
+    return q2rb_find_named_base(base, "libGLESv2_adreno.so");
+}
+
+/* Bounded traversal of the fixed v77 UMD merged-sync layout. This is a
+ * read-only diagnostic, never an ownership inference permitting destruction. */
+static void q2rb_sync_tree(int mem, uint64_t root)
+{
+    uint64_t gsl = 0, stack[512], seen[512];
+    unsigned todo = 0, visited = 0, merged = 0, leaves = 0;
+    int valid = q2rb_find_named_base(&gsl, "libgsl.so");
+    if (root) stack[todo++] = root;
+    while (valid && todo) {
+        uint64_t node = stack[--todo] & UINT64_C(0x00ffffffffffffff), words[5];
+        unsigned duplicate = 0;
+        for (unsigned i = 0; i < visited; ++i) if (seen[i] == node) duplicate = 1;
+        if (duplicate) continue;
+        if (visited == 512 || !q2rb_read(mem, node, words, sizeof(words))) { valid = 0; break; }
+        seen[visited++] = node;
+        if ((words[1] & UINT64_C(0x00ffffffffffffff)) == gsl + 0x215088) {
+            uint64_t count = words[3], array = words[2] & UINT64_C(0x00ffffffffffffff);
+            if (!count || count > 512 - todo || !q2rb_read(mem, array, stack + todo, (size_t)count * 8)) {
+                valid = 0; break;
+            }
+            todo += (unsigned)count; ++merged;
+        } else if ((words[1] & UINT64_C(0x00ffffffffffffff)) == gsl + 0x213878) ++leaves;
+        else valid = 0;
+    }
+    printf("QUEST2_PENDING_TREE valid=%d visited=%u merged=%u drm_leaves=%u\n", valid, visited, merged, leaves);
 }
 
 static int q2rb_build_id(int mem, uint64_t base)
@@ -234,6 +266,17 @@ static void quest2_log_readback_settings(void)
            " context_flags_136=0x%08" PRIx32 "\n",
            source, target - base, limits[0], limits[1], context_flags);
     failure = NULL;
+    /* The same fixed real-context ABI carries the pending server-wait sync.
+     * Read only: this must never release or overwrite a donor-owned object. */
+    if (getenv("SQ2_COMPOSITION_FD_DIAGNOSTIC")) {
+        uint64_t pending = 0, words[5] = {0, 0, 0, 0, 0};
+        int readable = q2rb_pointer_field(mem, real, 16296, &pending) &&
+            (!pending || q2rb_read(mem, pending, words, sizeof(words)));
+        printf("QUEST2_PENDING_SYNC readable=%d object=0x%" PRIx64
+               " words=%" PRIx64 ",%" PRIx64 ",%" PRIx64 ",%" PRIx64 ",%" PRIx64 "\n",
+               readable, pending, words[0], words[1], words[2], words[3], words[4]);
+        if (readable) q2rb_sync_tree(mem, pending);
+    }
 done:
     if (failure) {
         printf("QUEST2_READBACK_SETTINGS status=unavailable reason=%s", failure);

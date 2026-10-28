@@ -79,6 +79,10 @@ protected usage位14在RGBA和YUV入口均被明确拒绝，`getMapSecureBufferF
 
 ## 7. 合成探针实测与同步对象阻断点
 
+最新只读实测补充：诊断现复用固定GLES BuildID/指令/TLS检查，读取real-context+16296，并有界遍历匹配GSL的merged-sync结构（最多512节点，不修改任何对象）。连续5轮/10次server-wait，pending树的DRM leaf数严格为1..10，merged节点0..9；每个新root都继续持有上一root。前轮输出已完成mapper CPU锁和像素检查，下一轮仍保留其叶子。证据 `out/quest2-gpu/composition/closed-pending-tree.txt`，DIAGNOSTIC_ONLY/exit3。这把问题进一步定位为上下文pending UMD merge树保留历史fence，而不是EGLSync对象单独未销毁。尚未修补；不能直接关闭叶子FD或绕过GPU等待。
+
+匹配GSL中 `gsl_umd_sync_ops` 位于0x213688，merge实现0x1e6f10；merged对象ops为0x215088，children指针+16、数量+24。实测DRM leaf ops为0x213878。GLES的0x281f70对pending首次clone、后续merge/destroy旧root；clone会增加引用，UMD merge保留children，因此销毁旧root仍可能被新root持有。后续修复应验证提交的引用转移或仅淘汰已完成依赖，保留未完成fence及跨context顺序；不能仅因像素对照通过就清空pending。准备合并GLES/Vulkan时，以v4九库为共享底座，逐字加入最佳GLES候选五个专属库（EGL、GLES1/2、eglSubDriver、EGL wrapper），需同进程两种加载次序验证；尚未生成/部署combined候选。
+
 已实现 `probe/graphics/quest2-composition.cpp` 和 `scripts/build-quest2-composition.sh`，经原系统EGL/GLES及libGLESv1导出入口运行。64×64和2880×1920各单轮的两context、三AHB、多层预乘alpha/平移/裁剪、native fence与全图读回通过，像素最大误差0；QTI映射最终归零。Mesa对照连续3轮通过。
 
 闭源连续运行尚未通过：每轮留下两个已完成的 `anon_inode:sync_file`，FD从12逐轮变14/16/18/20；全部EGL context/display销毁后才释放到8。像素始终正确，不能据此放宽FD稳定检查。5轮与分阶段3轮日志在忽略目录 `out/quest2-gpu/composition/closed-fd-diag5.txt`、`closed-fd-stages.txt`。

@@ -27,6 +27,7 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 #include "quest2-mapper5.h"
+#include "quest2-readback-settings.h"
 
 extern "C" const native_handle_t *AHardwareBuffer_getNativeHandle(const AHardwareBuffer *);
 
@@ -361,6 +362,7 @@ struct Harness {
         if (tracing) CHECK(fd_snapshot("server-after-import", waited), "server fence snapshot");
         EGLBoolean ok = import_only ? EGL_TRUE : wait_sync(display, sync, 0);
         if (tracing) CHECK(fd_snapshot("server-after-wait", waited), "server fence snapshot");
+        if (tracing) quest2_log_readback_settings();
         EGLBoolean destroyed = destroy_sync(display, sync);
         if (tracing) CHECK(fd_snapshot("server-after-destroy", waited), "server fence snapshot");
         CHECK(ok && destroyed, "GPU server wait/destroy imported fence");
