@@ -8,6 +8,11 @@ case "${SQ2_VK_COUNTER_CLEANUP:-0}" in
     1) candidate=$home/vulkan-only-counter-v1;;
     *) exit 2;;
 esac
+case "${SQ2_VK_APP_DIAGNOSTICS:-0}" in
+    0) ;;
+    1|2) candidate=$home/vulkan-app-diag-v$SQ2_VK_APP_DIAGNOSTICS;;
+    *) exit 2;;
+esac
 probe=$home/vulkan-device
 expected_egl=f16302e33e4f7c8bbaccbe5ab5fd5d19f3279222ee430ace236c4bad237a5434
 expected_vk=0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c

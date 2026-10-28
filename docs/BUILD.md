@@ -1,14 +1,10 @@
 # 构建与部署
 
-Vulkan-only 最新：已修复候选多队列计数器错误分支重复释放，680组 ARM64 QEMU 检查、实机四队列150轮及基础绘制/AHB/窗口读回通过。真实120秒系统试验保留Mesa EGL/GLES，Chrome仍报pipeline -13，普通APK交换链报无效外部句柄；自动回退已完成，默认仍Mesa，尚未系统替换。见 [QUEST2-VULKAN-ONLY.md](QUEST2-VULKAN-ONLY.md)。
+当前目标：保留 Mesa EGL/GLES，仅替换系统 Vulkan 后端。闭源 EGL/GLES 研究保留在分支，不再切换桌面 GLES。
 
-当前范围由用户调整：**保留闭源 EGL/GLES 进展，系统 EGL/GLES 使用 Mesa，仅推进闭源 Vulkan 后端替换。** 不再执行整套闭源桌面切换；图标/状态栏/HWUI 问题留存独立研究。Vulkan 多队列 create 的 Scudo 崩溃仍需修复，不能绕过后宣称系统替换完成。
+最新进展：多队列重复释放已有候选修复；普通 APK 的外部句柄错误已定位为 `/proc/self/mem` 权限拒绝，改用有边界检查的 `process_vm_readv` 后，2880×1920 三角形完成120帧，截图正常。Chrome可正常打开，前八个被捕获的 Vulkan 管线创建成功，但后续部分管线仍有链接错误，不能称为Chrome整体失败，也不能据网页可见认定全部Vulkan路径通过。
 
-EGLImage上传新对照：直接上传后finish+DMA同步读取原fd仍全零；PBO上传64²连续150轮通过但小尺寸仍全零，尚非通用修复。诊断参数与边界见 [QUEST2-HWUI.md](QUEST2-HWUI.md) 末节；默认Mesa保持。
-
-最新隔离复现：HWUI仅硬件Bitmap失败；原生EGLImage纹理glTexSubImage2D上传后采样全零，Mesa对照正确，GPU绘制同类源及普通纹理上传正确。另Vulkan单队列通过、两个合法队列即在原Chrome位置Scudo abort，无需提交。两条具体阻断未修复，正常Mesa/boot保持；见 [QUEST2-HWUI.md](QUEST2-HWUI.md) 与 [QUEST2-VK-CREATE-AUDIT.md](QUEST2-VK-CREATE-AUDIT.md)。
-
-最新闭源候选 combined-v5 已补严格 BGRA/RGBX，私有九格式组合/FP16/双API回归通过；真实120秒桌面仍有图标黑块、状态栏横条和应用黑屏，Chrome vkCreateDevice 还有Scudo释放错误。两分钟回退及分时截图已实测，Mesa已恢复，不可提升默认。配套编译器已在实际SystemUI maps确认；后续定位producer/compositor及Chrome创建参数，见 [QUEST2-COLOR.md](QUEST2-COLOR.md)。
+**最新 Wild Life 试验失败**：应用弹出“基准测试运行失败”，没有有效分数；用户要求停止本轮测试并提交、推送当前结果。已恢复默认Mesa EGL/Vulkan哈希，boot ID保持；未写启动镜像、未提升闭源Vulkan默认。详见 [QUEST2-VULKAN-ONLY.md](QUEST2-VULKAN-ONLY.md)。
 
 脚本来自迭代实验室，依赖缓存和分阶段产物；全新克隆不能直接生成完整可启动 SSD。不要删除哈希或磁盘身份保护以绕过缺失输入。
 

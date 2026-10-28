@@ -22,7 +22,25 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/uio.h>
 #include "quest2-v77-native.h"
+#ifdef SQ2_VK_APP_DIAGNOSTICS
+#include <android/log.h>
+#include <stdarg.h>
+#include <stdatomic.h>
+static void app_diag(const char *format, ...) {
+    static atomic_uint messages;
+    if (atomic_fetch_add_explicit(&messages, 1, memory_order_relaxed) >= 96) return;
+    va_list args; va_start(args,format);
+    __android_log_vprint(ANDROID_LOG_INFO,"SQ2VkApp",format,args);
+    va_end(args);
+}
+#else
+#define app_diag(...) ((void)0)
+#endif
+#ifdef SQ2_VK_PIPELINE_DIAGNOSTICS
+#include "quest2-vk-create-trace.h"
+#endif
 
 #define EXPORT __attribute__((visibility("default")))
 #define DONOR "/vendor/lib64/egl/vulkan-v77-bridge.so"
@@ -120,6 +138,7 @@ EXPORT unsigned sq2_v77_wrapper_stats(unsigned *leases, unsigned *owners, uint64
     return sq2_v77_ahb_stats(leases, owners, bytes);
 }
 static void stats(const char *operation, VkResult result) {
+    if (result != VK_SUCCESS) app_diag("operation=%s result=%d",operation,(int)result);
     unsigned leases = 0, owners = 0;
     uint64_t bytes = 0;
     unsigned views = sq2_v77_ahb_stats(&leases, &owners, &bytes);
@@ -306,6 +325,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL wrapped_groups_khr(VkInstance i, uint32_t 
 static VKAPI_ATTR VkResult VKAPI_CALL wrapped_create_device(VkPhysicalDevice physical,
         const VkDeviceCreateInfo *info, const VkAllocationCallbacks *allocator, VkDevice *out) {
     if (!info || !out) return VK_ERROR_INITIALIZATION_FAILED;
+#ifdef SQ2_VK_PIPELINE_DIAGNOSTICS
+    static atomic_uint traces;
+    if (atomic_fetch_add(&traces,1) < 2) sq2_trace_create_device(info,allocator);
+#endif
     *out = VK_NULL_HANDLE;
     struct Instance parent = {0}; unsigned slot;
     pthread_mutex_lock(&mutex);
@@ -458,7 +481,7 @@ static int read_private(uintptr_t address, void *out, size_t size) {
     address = untag(address);
     if (!address || !size || size > 4096 || address > UINTPTR_MAX - size) return 0;
     FILE *maps = fopen("/proc/self/maps", "re");
-    if (!maps) return 0;
+    if (!maps) { app_diag("read_private stage=maps-open errno=%d",errno); return 0; }
     char line[1024], permission[5]; unsigned long long low, high;
     int readable = 0;
     while (fgets(line, sizeof(line), maps)) {
@@ -468,13 +491,25 @@ static int read_private(uintptr_t address, void *out, size_t size) {
         }
     }
     fclose(maps);
-    if (!readable) return 0;
+    if (!readable) { app_diag("read_private stage=range-unreadable size=%zu",size); return 0; }
+#ifdef SQ2_VK_PROCESS_READ
+    /* Read our own mm without opening proc mem, which is root-owned when the
+     * application is nondumpable. Kernel copy returns a short read/error for an
+     * invalidated range; do not turn failed validation into unchecked memcpy. */
+    struct iovec local = {out,size}, remote = {(void *)address,size};
+    ssize_t got;
+    do { got = process_vm_readv(getpid(),&local,1,&remote,1,0); } while (got < 0 && errno == EINTR);
+    if (got != (ssize_t)size) app_diag("read_private stage=process-read size=%zu got=%zd errno=%d",size,got,errno);
+    return got == (ssize_t)size;
+#else
     int fd = open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return 0;
+    if (fd < 0) { app_diag("read_private stage=mem-open errno=%d",errno); return 0; }
     ssize_t got;
     do { got = pread(fd, out, size, (off_t)address); } while (got < 0 && errno == EINTR);
+    if (got != (ssize_t)size) app_diag("read_private stage=mem-read size=%zu got=%zd errno=%d",size,got,errno);
     close(fd);
     return got == (ssize_t)size;
+#endif
 }
 struct NativeNoteCheck { uintptr_t base; unsigned found; };
 static int native_note(struct dl_phdr_info *module, size_t size, void *opaque) {
@@ -518,7 +553,7 @@ static uintptr_t native_donor_base(const struct Device *device) {
      * headers, never the original file offset of its BuildID descriptor. */
     struct NativeNoteCheck note = {base, 0};
     dl_iterate_phdr(native_note, &note);
-    if (!note.found) return 0;
+    if (!note.found) { app_diag("native_donor_base stage=build-id-unavailable"); return 0; }
     /* Original 0f316d03... BuildID and four independent control-flow ranges.
      * Private import-symbol/RUNPATH changes preserve these original bytes. */
     static const struct { uintptr_t offset; unsigned char bytes[16]; } checks[] = {
@@ -577,14 +612,21 @@ report:
 static int prepare_native(const struct Device *device, const struct Image *image,
         const struct NativeNode *node, struct NativeNode *copy, const void **view, void **lease) {
     *view = NULL; *lease = NULL;
-    if (!image->eligible || !node->handle || node->format != 1 || node->stride <= 0 ||
-        !native_donor_base(device)) return -EINVAL;
+    if (!image->eligible || !node->handle || node->format != 1 || node->stride <= 0) {
+        app_diag("native_prepare stage=fields eligible=%u handle=%u format=%d stride=%d width=%u height=%u",
+                 image->eligible,node->handle!=NULL,node->format,node->stride,image->width,image->height);
+        return -EINVAL;
+    }
+    if (!native_donor_base(device)) { app_diag("native_prepare stage=donor-layout"); return -EINVAL; }
     struct Sq2V77NativeInfo actual = {0};
     int error = sq2_v77_native_prepare(node->handle, view, lease, &actual);
-    if (error) return error;
+    if (error) { app_diag("native_prepare stage=mapper error=%d",error); return error; }
     if (!*view || !*lease || actual.width != image->width || actual.height != image->height ||
         actual.layers != 1 || actual.format != 1 || actual.stride != (uint32_t)node->stride ||
         actual.stride < actual.width || !actual.size) {
+        app_diag("native_prepare stage=metadata width=%u/%u height=%u/%u format=%u stride=%u/%d size=%llu",
+                 actual.width,image->width,actual.height,image->height,actual.format,actual.stride,node->stride,
+                 (unsigned long long)actual.size);
         if (*lease) sq2_v77_native_finish(*lease);
         *view = NULL; *lease = NULL;
         return -EINVAL;
@@ -792,6 +834,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL wrapped_bind_image2_khr(VkDevice d, uint32
  * entrypoints. Exported functions below only forward to these static targets. */
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL wrapper_gipa(VkInstance, const char *);
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL wrapper_gdpa(VkDevice, const char *);
+#ifdef SQ2_VK_PIPELINE_DIAGNOSTICS
+#include "quest2-vk-pipeline-trace.h"
+#endif
 static PFN_vkVoidFunction intercept(const char *name) {
 #define MATCH(api, function) if (!strcmp(name, api)) return (PFN_vkVoidFunction)function
     MATCH("vkGetInstanceProcAddr", wrapper_gipa);
@@ -802,6 +847,10 @@ static PFN_vkVoidFunction intercept(const char *name) {
     MATCH("vkEnumeratePhysicalDeviceGroups", wrapped_groups);
     MATCH("vkEnumeratePhysicalDeviceGroupsKHR", wrapped_groups_khr);
     MATCH("vkCreateDevice", wrapped_create_device);
+#ifdef SQ2_VK_PIPELINE_DIAGNOSTICS
+    MATCH("vkCreateShaderModule", traced_create_shader);
+    MATCH("vkCreateGraphicsPipelines", traced_create_graphics);
+#endif
     MATCH("vkDestroyDevice", wrapped_destroy_device);
     MATCH("vkGetAndroidHardwareBufferPropertiesANDROID", wrapped_properties);
     MATCH("vkAllocateMemory", wrapped_allocate);

@@ -4,6 +4,14 @@ set -eu
 umask 077
 root=/proc/1/root
 base=/data/local/tmp/sq2-closed/vulkan-only-counter-v1
+expected_wrapper=1cf8564084cbce59937ba512cd58f26a44bd148c80d306336b1fcb4db1e0ebd7
+case "${SQ2_VK_APP_DIAGNOSTICS:-0}" in
+    0) ;;
+    1) base=/data/local/tmp/sq2-closed/vulkan-app-diag-v1; expected_wrapper=6e8bec46906af85be37fc0c4895a3b9ce22ee2b5cdda618b418701e2b50b95f8;;
+    2) base=/data/local/tmp/sq2-closed/vulkan-app-diag-v2; expected_wrapper=f167c19ee43f62afad20b686508e449b6605dd9e008c8202474c22b309648c7d;;
+    3) base=/data/local/tmp/sq2-closed/vulkan-app-diag-v3; expected_wrapper=02c053b282a76287ca374e07ebe1c02c03ca4563d10c47458b1a0018043780aa;;
+    *) exit 2;;
+esac
 mesa_gl=f16302e33e4f7c8bbaccbe5ab5fd5d19f3279222ee430ace236c4bad237a5434
 mesa_vk=0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c
 candidate_vk=bcb9b506dc2a4b1c4a53e85c08057d7cb5a0e6e3bd2bd97a90b92de20eb76d42
@@ -67,6 +75,7 @@ test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test "$(android /system/bin/getprop sys.boot_completed)" = 1
 check_default
 test "$(hash "$root$base/vulkan-v77-bridge.so")" = "$candidate_vk"
+test "$(hash "$root$base/libquest2-vulkan-wrapper.so")" = "$expected_wrapper"
 (cd "$root$base";sha256sum -c SHA256SUMS)
 test "$(find "$root$base" -maxdepth 1 -name '*.so' | wc -l)" = 9
 test ! -e "$root$base/libquest2-egl-wrapper.so"
