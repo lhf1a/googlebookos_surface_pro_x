@@ -19,6 +19,8 @@ fi
 system_probe=/data/local/tmp/sq2-closed/gles-v77
 visible=/data/local/tmp/sq2-closed/visible
 readpixels=/data/local/tmp/sq2-closed/readpixels
+composition=/data/local/tmp/sq2-closed/composition
+vulkan_window=/data/local/tmp/sq2-closed/vulkan-window
 vulkan=/data/local/tmp/sq2-closed/v77-vulkan-system
 if [ "${SQ2_V77_AHB_VIEW:-}" = 1 ];then
     vulkan=/data/local/tmp/sq2-closed/v77-vulkan-ahb
@@ -35,13 +37,21 @@ if [ "${1:-}" = --inside ];then
     test "$(readlink /proc/self/ns/mnt)" != "$(readlink /proc/1/ns/mnt)"
     # The checked launcher made / recursively private, then mounted this tmpfs.
     test "$(stat -f -c %T /vendor/lib64/egl)" = tmpfs
-    case "${1:-}" in --vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import)
+    case "${1:-}" in --vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create)
         cp "$vulkan/"*.so /vendor/lib64/egl/
         vk_entry=vulkan-v77-bridge.so
         if [ "${SQ2_V77_AHB_VIEW:-}" = 1 ];then vk_entry=libquest2-vulkan-wrapper.so;fi
         mount --bind "/vendor/lib64/egl/$vk_entry" /vendor/lib64/hw/vulkan.freedreno.so
         echo "PRIVATE_VULKAN_NAMESPACE=$(readlink /proc/self/ns/mnt)"
         sha256sum /vendor/lib64/hw/vulkan.freedreno.so
+        if [ "$1" = --vulkan-window-create ];then
+            exec env -u LD_PRELOAD -u LD_LIBRARY_PATH SQ2_VULKAN_REJECT_TURNIP=1 \
+                "$vulkan_window/quest2-vulkan-window" --create-only
+        fi
+        if [ "$1" = --vulkan-window ];then
+            exec env -u LD_PRELOAD -u LD_LIBRARY_PATH SQ2_VULKAN_REJECT_TURNIP=1 \
+                "$vulkan_window/quest2-vulkan-window"
+        fi
         if [ "$1" = --vulkan-offscreen ];then
             exec env -u LD_PRELOAD -u LD_LIBRARY_PATH SQ2_VULKAN_REJECT_TURNIP=1 \
                 "$vulkan_probe/vulkan-readback" /system/lib64/libvulkan.so --offscreen-only
@@ -62,6 +72,9 @@ if [ "${1:-}" = --inside ];then
     ln -s libGLESv1_CM_adreno.so /vendor/lib64/egl/libGLESv1_CM_freedreno.so
     ln -s libGLESv2_adreno.so /vendor/lib64/egl/libGLESv2_freedreno.so
     echo "PRIVATE_EGL_NAMESPACE=$(readlink /proc/self/ns/mnt)"
+    if [ "${1:-}" = --composition ];then
+        exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$composition/quest2-composition"
+    fi
     if [ "${SQ2_GLES_DIRECT:-}" = 1 ] || [ "${SQ2_GLES_GPU_READBACK:-}" = 1 ];then
         test "$(stat -f -c %T /data/vendor)" = tmpfs
         mkdir /data/vendor/gpu
@@ -112,7 +125,7 @@ if [ "${1:-}" = --inside ];then
     fi
     exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$system_probe/gles-readback-system" "$@"
 fi
-case "${1:-}" in ''|--ahb|--window|--yuv|--visible|--readpixels|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import) ;; *) echo 'usage: run-quest2-gles-system.sh [--ahb|--window|--yuv|--visible|--readpixels|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import]' >&2;exit 2;; esac
+case "${1:-}" in ''|--ahb|--window|--yuv|--visible|--readpixels|--composition|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create) ;; *) echo 'usage: run-quest2-gles-system.sh [--ahb|--window|--yuv|--visible|--readpixels|--composition|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create]' >&2;exit 2;; esac
 test "$#" -le 1
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 root=/proc/1/root
@@ -126,12 +139,18 @@ check_mesa
 test "$(nsenter -t 1 -m -r -- /system/bin/getprop ro.hardware.egl)" = freedreno
 (cd "$root$base";sha256sum -c SHA256SUMS;sha256sum -c PROBE_SHA256SUMS)
 (cd "$root$system_probe";sha256sum -c SYSTEM_PROBE_SHA256SUMS)
-case "${1:-}" in --vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import)
+case "${1:-}" in --vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create)
     test "$(nsenter -t 1 -m -r -- /system/bin/getprop ro.hardware.vulkan)" = freedreno
     (cd "$root$vulkan";sha256sum -c SHA256SUMS)
     (cd "$root$vulkan_probe";sha256sum -c VULKAN_PROBE_SHA256SUMS)
 ;; --readpixels)
     (cd "$root$readpixels";sha256sum -c READPIXELS_SHA256SUMS)
+;; --composition)
+    (cd "$root$composition";sha256sum -c COMPOSITION_SHA256SUMS)
+;; esac
+case "${1:-}" in --vulkan-window|--vulkan-window-create)
+    test "${SQ2_V77_AHB_VIEW:-}" = 1
+    (cd "$root$vulkan_window";sha256sum -c VULKAN_WINDOW_SHA256SUMS)
 ;; esac
 if [ "${1:-}" = --visible ];then
     (cd "$root$visible";sha256sum -c VISIBLE_SHA256SUMS)

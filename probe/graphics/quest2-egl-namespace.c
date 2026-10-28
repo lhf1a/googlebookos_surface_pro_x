@@ -8,7 +8,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 int main(int argc,char **argv){
-    if(argc>2||(argc==2&&strcmp(argv[1],"--ahb")&&strcmp(argv[1],"--window")&&strcmp(argv[1],"--yuv")&&strcmp(argv[1],"--visible")&&strcmp(argv[1],"--readpixels")&&strcmp(argv[1],"--vulkan")&&strcmp(argv[1],"--vulkan-offscreen")&&strcmp(argv[1],"--vulkan-properties")&&strcmp(argv[1],"--vulkan-import")))return 2;
+    const char *modes[]={"--ahb","--window","--yuv","--visible","--readpixels","--composition",
+        "--vulkan","--vulkan-offscreen","--vulkan-properties","--vulkan-import",
+        "--vulkan-window","--vulkan-window-create"};
+    int valid=argc==1;
+    if(argc==2)for(unsigned i=0;i<sizeof(modes)/sizeof(modes[0]);i++)if(!strcmp(argv[1],modes[i]))valid=1;
+    if(!valid)return 2;
     struct stat init_ns,self_ns;
     if(geteuid()!=0||stat("/proc/1/ns/mnt",&init_ns)||unshare(CLONE_NEWNS)||
        stat("/proc/self/ns/mnt",&self_ns)||self_ns.st_ino==init_ns.st_ino){

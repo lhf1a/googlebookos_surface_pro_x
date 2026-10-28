@@ -1,10 +1,11 @@
 /* Private v77 Vulkan HAL/AHB import adapter. No dispatchable handle rewriting.
  * Only run with the audited donor in a private vendor mount namespace.
  * Per-device PFNs come from that device's real GDPA, obtained from its owning
- * instance. Unsupported export/raw Android WSI paths fail before donor access.
+ * instance. Native Android WSI uses bounded, privately owned handle views.
  * Vulkan's normal external synchronization of instance/device destruction is
  * required; this table lock is not a substitute for application synchronization.
  */
+#define _GNU_SOURCE
 #define VK_NO_PROTOTYPES
 #define VK_USE_PLATFORM_ANDROID_KHR
 #include <vulkan/vulkan.h>
@@ -12,11 +13,16 @@
 #include <android/hardware_buffer.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <link.h>
 #include <pthread.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include "quest2-v77-native.h"
 
 #define EXPORT __attribute__((visibility("default")))
 #define DONOR "/vendor/lib64/egl/vulkan-v77-bridge.so"
@@ -24,8 +30,9 @@
 #define MAX_PHYSICAL 512
 #define MAX_DEVICES 128
 #define MAX_CHAIN 64
+#define MAX_NATIVE_BATCH 256
 /* Android's private native-buffer header is not part of the NDK. These are
- * extension 11's published structure IDs; no private structure is dereferenced.
+ * extension 11's published structure IDs; the fixed v77 node is checked below.
  * Spec v8 permits NativeBufferANDROID in BindImageMemoryInfo's pNext as well. */
 #define SQ2_NATIVE_BUFFER_ANDROID ((VkStructureType)1000010000)
 #define SQ2_SWAPCHAIN_IMAGE_CREATE_ANDROID ((VkStructureType)1000010001)
@@ -61,6 +68,36 @@ struct Device {
     PFN_vkBindImageMemory bind_image;
     PFN_vkBindImageMemory2 bind_image2, bind_image2_khr;
 };
+/* The current Android loader supplies 72 bytes (usage3 and AHB at +56/+64).
+ * v77 shallow-copies only its compatible 56-byte prefix. Preserve the complete
+ * caller node, including the newer fields, without modifying its tail chain. */
+struct NativeNode {
+    VkStructureType sType;
+    const void *pNext;
+    const void *handle;
+    int32_t stride, format, usage;
+    uint64_t consumer, producer;
+    uint64_t usage3;
+    const AHardwareBuffer *ahb;
+};
+_Static_assert(sizeof(void *) == 8 && sizeof(struct NativeNode) == 72, "current arm64 native ABI");
+_Static_assert(offsetof(struct NativeNode, handle) == 16 &&
+               offsetof(struct NativeNode, stride) == 24 &&
+               offsetof(struct NativeNode, format) == 28 &&
+               offsetof(struct NativeNode, consumer) == 40 &&
+               offsetof(struct NativeNode, usage3) == 56 &&
+               offsetof(struct NativeNode, ahb) == 64, "compatible native node offsets");
+struct Image {
+    struct Image *next;
+    VkDevice device;
+    VkImage handle;
+    uint32_t width, height;
+    unsigned eligible, binding, bound, native_attempt, native_succeeded;
+    const void *view;
+    void *lease;
+};
+static struct Image *images, *quarantined_images;
+static unsigned native_failures;
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static void *library; /* Kept loaded through process exit. */
@@ -72,6 +109,13 @@ static struct Instance instances[MAX_INSTANCES];
 static struct Physical physicals[MAX_PHYSICAL];
 static struct Device devices[MAX_DEVICES];
 
+EXPORT unsigned sq2_v77_wrapper_native_failures(void) {
+    pthread_mutex_lock(&mutex);
+    unsigned result = native_failures;
+    pthread_mutex_unlock(&mutex);
+    return result;
+}
+
 EXPORT unsigned sq2_v77_wrapper_stats(unsigned *leases, unsigned *owners, uint64_t *bytes) {
     return sq2_v77_ahb_stats(leases, owners, bytes);
 }
@@ -79,8 +123,11 @@ static void stats(const char *operation, VkResult result) {
     unsigned leases = 0, owners = 0;
     uint64_t bytes = 0;
     unsigned views = sq2_v77_ahb_stats(&leases, &owners, &bytes);
-    fprintf(stderr, "V77_AHB_WRAPPER operation=%s result=%d views=%u leases=%u owners=%u bytes=%llu\n",
-            operation, (int)result, views, leases, owners, (unsigned long long)bytes);
+    uint64_t native_bytes = 0;
+    unsigned native_views = sq2_v77_native_stats(&native_bytes);
+    fprintf(stderr, "V77_AHB_WRAPPER operation=%s result=%d views=%u leases=%u owners=%u bytes=%llu native_views=%u native_bytes=%llu native_failures=%u\n",
+            operation, (int)result, views, leases, owners, (unsigned long long)bytes,
+            native_views, (unsigned long long)native_bytes, sq2_v77_wrapper_native_failures());
 }
 static VkResult prepare_error(int error) {
     return error == -ENOMEM || error == -ENOSPC ? VK_ERROR_OUT_OF_HOST_MEMORY :
@@ -372,14 +419,177 @@ static VKAPI_ATTR VkResult VKAPI_CALL wrapped_export(VkDevice device,
     stats("GetMemoryAHB-export-unsupported", VK_ERROR_INVALID_EXTERNAL_HANDLE);
     return VK_ERROR_INVALID_EXTERNAL_HANDLE;
 }
-static int raw_android_chain(const void *chain) {
-    unsigned count = 0;
+/* A native node behind an unknown-size prefix cannot be replaced without
+ * rewriting caller memory. Reject that path, while preserving every tail byte.
+ * The marker-only create used by Android's deferred bind remains supported. */
+static int native_chain(const void *chain, int create, const struct NativeNode **native) {
+    unsigned count = 0, markers = 0, bind_aliases = 0;
+    *native = NULL;
     for (const VkBaseInStructure *p = chain; p; p = p->pNext) {
-        if (++count > MAX_CHAIN) return 1;
-        if (p->sType == SQ2_NATIVE_BUFFER_ANDROID || p->sType == SQ2_SWAPCHAIN_IMAGE_CREATE_ANDROID ||
-            p->sType == VK_STRUCTURE_TYPE_IMAGE_SWAPCHAIN_CREATE_INFO_KHR ||
-            p->sType == VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_SWAPCHAIN_INFO_KHR) return 1;
+        if (++count > MAX_CHAIN) return 0;
+        if (p->sType == SQ2_NATIVE_BUFFER_ANDROID) {
+            if ((const void *)p != chain || *native) return 0;
+            *native = (const struct NativeNode *)p;
+        }
+        if (p->sType == SQ2_SWAPCHAIN_IMAGE_CREATE_ANDROID && (!create || ++markers > 1)) return 0;
+        if (p->sType == VK_STRUCTURE_TYPE_IMAGE_SWAPCHAIN_CREATE_INFO_KHR) return 0;
+        /* Current Android libvulkan prepends NativeBufferANDROID to this
+         * original bind tail. v77 skips its unknown 1000060009 sType. Bare KHR
+         * alias binding remains unsupported; do not invent its raw view owner. */
+        if (p->sType == VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_SWAPCHAIN_INFO_KHR &&
+            (create || !*native || ++bind_aliases > 1)) return 0;
+        /* The plane-binding branch reuses the donor descriptor's native-node
+         * slot. It is not a legal part of our non-disjoint, single-plane path. */
+        if (*native && p->sType == VK_STRUCTURE_TYPE_BIND_IMAGE_PLANE_MEMORY_INFO) return 0;
     }
+    return 1;
+}
+static struct Image *image_find_locked(VkDevice device, VkImage handle) {
+    for (struct Image *p = images; p; p = p->next)
+        if (p->device == device && p->handle == handle) return p;
+    return NULL;
+}
+static uintptr_t untag(uintptr_t address) {
+    /* Bionic heap TBI tags were observed in this fixed donor. Do not mask any
+     * other address bits; the resulting complete range must still be readable. */
+    return address & UINT64_C(0x00ffffffffffffff);
+}
+static int read_private(uintptr_t address, void *out, size_t size) {
+    address = untag(address);
+    if (!address || !size || size > 4096 || address > UINTPTR_MAX - size) return 0;
+    FILE *maps = fopen("/proc/self/maps", "re");
+    if (!maps) return 0;
+    char line[1024], permission[5]; unsigned long long low, high;
+    int readable = 0;
+    while (fgets(line, sizeof(line), maps)) {
+        if (sscanf(line, "%llx-%llx %4s", &low, &high, permission) == 3 &&
+            permission[0] == 'r' && address >= low && address + size <= high) {
+            readable = 1; break;
+        }
+    }
+    fclose(maps);
+    if (!readable) return 0;
+    int fd = open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    ssize_t got;
+    do { got = pread(fd, out, size, (off_t)address); } while (got < 0 && errno == EINTR);
+    close(fd);
+    return got == (ssize_t)size;
+}
+struct NativeNoteCheck { uintptr_t base; unsigned found; };
+static int native_note(struct dl_phdr_info *module, size_t size, void *opaque) {
+    (void)size;
+    struct NativeNoteCheck *check = opaque;
+    if ((uintptr_t)module->dlpi_addr != check->base) return 0;
+    static const unsigned char build_id[16] = {
+        0x17,0x9c,0x7a,0x33,0x81,0x68,0x3d,0x68,0x00,0x46,0xce,0x54,0x4b,0x76,0xef,0x30
+    };
+    for (ElfW(Half) i = 0; i < module->dlpi_phnum; ++i) {
+        const ElfW(Phdr) *p = &module->dlpi_phdr[i];
+        if (p->p_type != PT_NOTE || p->p_filesz < sizeof(ElfW(Nhdr)) || p->p_filesz > 4096 ||
+            p->p_vaddr > UINTPTR_MAX - check->base) continue;
+        unsigned char data[4096];
+        if (!read_private(check->base + p->p_vaddr, data, p->p_filesz)) continue;
+        size_t pos = 0, length = (size_t)p->p_filesz;
+        while (pos <= length - sizeof(ElfW(Nhdr))) {
+            ElfW(Nhdr) note;
+            memcpy(&note, data + pos, sizeof(note)); pos += sizeof(note);
+            if (note.n_namesz > length - pos) break;
+            size_t name = pos;
+            pos += ((size_t)note.n_namesz + 3) & ~(size_t)3;
+            if (pos > length || note.n_descsz > length - pos) break;
+            if (note.n_type == NT_GNU_BUILD_ID && note.n_namesz == 4 && note.n_descsz == 16 &&
+                !memcmp(data + name, "GNU", 4) && !memcmp(data + pos, build_id, 16)) check->found = 1;
+            pos += ((size_t)note.n_descsz + 3) & ~(size_t)3;
+        }
+    }
+    return 1;
+}
+static uintptr_t native_donor_base(const struct Device *device) {
+    Dl_info info;
+    if (!dladdr((const void *)device->create_image, &info) || !info.dli_fbase || !info.dli_fname)
+        return 0;
+    const char *name = strrchr(info.dli_fname, '/');
+    if (strcmp(name ? name + 1 : info.dli_fname, "vulkan-v77-bridge.so")) return 0;
+    uintptr_t base = (uintptr_t)info.dli_fbase;
+    if ((uintptr_t)device->create_image != base + 0xd76b0 ||
+        (uintptr_t)device->destroy_image != base + 0xdb128) return 0;
+    /* patchelf relocates PT_NOTE in the private candidate: use loaded program
+     * headers, never the original file offset of its BuildID descriptor. */
+    struct NativeNoteCheck note = {base, 0};
+    dl_iterate_phdr(native_note, &note);
+    if (!note.found) return 0;
+    /* Original 0f316d03... BuildID and four independent control-flow ranges.
+     * Private import-symbol/RUNPATH changes preserve these original bytes. */
+    static const struct { uintptr_t offset; unsigned char bytes[16]; } checks[] = {
+        {0xd76b0, {0xff,0x03,0x07,0xd1,0xfd,0x7b,0x18,0xa9,0xfd,0x03,0x06,0x91,0xfc,0xcb,0x00,0xf9}},
+        {0xdb128, {0x81,0x03,0x00,0xb4,0xff,0x43,0x01,0xd1,0xfd,0x7b,0x04,0xa9,0xfd,0x03,0x01,0x91}},
+        {0x147164, {0x6b,0x62,0x41,0xb9,0xeb,0x01,0x00,0x34,0xf5,0x03,0x1f,0xaa,0x76,0xa2,0x05,0x91}},
+        {0x1f5824, {0x68,0x00,0x90,0x36,0xe0,0x01,0x40,0xf9,0xa0,0x02,0x00,0xb5,0x03,0xe4,0x00,0x6f}}
+    };
+    for (unsigned i = 0; i < sizeof(checks) / sizeof(checks[0]); ++i) {
+        unsigned char actual[16];
+        if (base > UINTPTR_MAX - checks[i].offset ||
+            !read_private(base + checks[i].offset, actual, sizeof(actual)) ||
+            memcmp(actual, checks[i].bytes, sizeof(actual))) return 0;
+    }
+    return base;
+}
+static uint32_t value32(const unsigned char *p, size_t offset) {
+    uint32_t value; memcpy(&value, p + offset, sizeof(value)); return value;
+}
+static uintptr_t valueptr(const unsigned char *p, size_t offset) {
+    uintptr_t value; memcpy(&value, p + offset, sizeof(value)); return untag(value);
+}
+static int native_last_owner(const struct Device *device, const struct Image *image) {
+    uintptr_t base = native_donor_base(device), iv = 0, mv = 0, memory = 0, raw = 0;
+    uint32_t refs = 0, memory_refs = 0, planes = UINT32_MAX, kind = UINT32_MAX;
+    unsigned char object[368], mem[344];
+    const char *reason = "donor-layout-unavailable";
+    int safe = 0;
+    if (!base || !read_private((uintptr_t)image->handle, object, sizeof(object))) goto report;
+    iv = valueptr(object, 0); refs = value32(object, 12);
+    planes = value32(object, 352); kind = value32(object, 288);
+    memory = valueptr(object, 360);
+    reason = "image-layout-or-reference";
+    if (iv != base + 0x2e0d00 || refs != 1 || planes > 1) goto report;
+    /* A failed/never-reached bind may not have created any internal memory.
+     * The unique image can be destroyed while its still-private lease survives. */
+    if (!memory) {
+        reason = "empty-native-memory";
+        safe = image->native_attempt && !image->native_succeeded;
+        goto report;
+    }
+    reason = "memory-layout-unavailable";
+    if (kind != 3 || planes != 1 || !read_private(memory, mem, sizeof(mem))) goto report;
+    mv = valueptr(mem, 0); memory_refs = value32(mem, 12); raw = valueptr(mem, 336);
+    reason = "memory-layout-reference-or-view";
+    if (mv != base + 0x2e17f0 || memory_refs != 1 || raw != untag((uintptr_t)image->view) ||
+        valueptr(mem, 312) || value32(mem, 320) != (uint32_t)SQ2_NATIVE_BUFFER_ANDROID ||
+        valueptr(mem, 104) != valueptr(object, 104)) goto report;
+    reason = "unique-native-owner"; safe = 1;
+report:
+    fprintf(stderr, "V77_WSI_LIFETIME status=%s reason=%s image=%p image_vtable=%p image_refs=%u kind=%u planes=%u memory=%p memory_vtable=%p memory_refs=%u raw=%p view=%p\n",
+            safe ? "READY" : "FAILED", reason, (void *)(uintptr_t)image->handle, (void *)iv,
+            refs, kind, planes, (void *)memory, (void *)mv, memory_refs, (void *)raw, image->view);
+    return safe;
+}
+static int prepare_native(const struct Device *device, const struct Image *image,
+        const struct NativeNode *node, struct NativeNode *copy, const void **view, void **lease) {
+    *view = NULL; *lease = NULL;
+    if (!image->eligible || !node->handle || node->format != 1 || node->stride <= 0 ||
+        !native_donor_base(device)) return -EINVAL;
+    struct Sq2V77NativeInfo actual = {0};
+    int error = sq2_v77_native_prepare(node->handle, view, lease, &actual);
+    if (error) return error;
+    if (!*view || !*lease || actual.width != image->width || actual.height != image->height ||
+        actual.layers != 1 || actual.format != 1 || actual.stride != (uint32_t)node->stride ||
+        actual.stride < actual.width || !actual.size) {
+        if (*lease) sq2_v77_native_finish(*lease);
+        *view = NULL; *lease = NULL;
+        return -EINVAL;
+    }
+    memcpy(copy, node, sizeof(*copy)); copy->handle = *view;
     return 0;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL wrapped_create_image(VkDevice device, const VkImageCreateInfo *info,
@@ -388,34 +598,188 @@ static VKAPI_ATTR VkResult VKAPI_CALL wrapped_create_image(VkDevice device, cons
     if (!info || !out) return VK_ERROR_INITIALIZATION_FAILED;
     *out = VK_NULL_HANDLE;
     if (!device_copy(device, &saved)) return VK_ERROR_INITIALIZATION_FAILED;
-    if (raw_android_chain(info->pNext)) {
+    const struct NativeNode *native;
+    if (!native_chain(info->pNext, 1, &native)) {
         stats("CreateImage-raw-WSI-unsupported", VK_ERROR_INVALID_EXTERNAL_HANDLE);
         return VK_ERROR_INVALID_EXTERNAL_HANDLE;
     }
-    return saved.create_image(device, info, allocator, out);
+    struct Image *record = calloc(1, sizeof(*record));
+    if (!record) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    record->device = device; record->width = info->extent.width; record->height = info->extent.height;
+    record->eligible = info->imageType == VK_IMAGE_TYPE_2D &&
+        info->format == VK_FORMAT_R8G8B8A8_UNORM && info->arrayLayers == 1 && info->mipLevels == 1 &&
+        info->samples == VK_SAMPLE_COUNT_1_BIT && info->extent.depth == 1 &&
+        info->extent.width && info->extent.height &&
+        !(info->flags & (VK_IMAGE_CREATE_SPARSE_BINDING_BIT | VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT |
+                        VK_IMAGE_CREATE_SPARSE_ALIASED_BIT | VK_IMAGE_CREATE_PROTECTED_BIT |
+                        VK_IMAGE_CREATE_DISJOINT_BIT));
+    VkImageCreateInfo changed = *info;
+    struct NativeNode node;
+    if (native) {
+        int error = prepare_native(&saved, record, native, &node, &record->view, &record->lease);
+        if (error) { free(record); stats("CreateImage-native-rejected", prepare_error(error)); return prepare_error(error); }
+        record->native_attempt = 1;
+        changed.pNext = &node;
+    }
+    VkResult result = saved.create_image(device, &changed, allocator, out);
+    if (result == VK_SUCCESS && *out) {
+        record->handle = *out;
+        record->native_succeeded = native != NULL;
+        pthread_mutex_lock(&mutex); record->next = images; images = record; pthread_mutex_unlock(&mutex);
+    } else if (result == VK_SUCCESS && record->lease) {
+        /* A broken success-without-handle contract has no collectible owner.
+         * Do not release a view that the donor may nevertheless have stored. */
+        pthread_mutex_lock(&mutex);
+        ++native_failures; record->next = quarantined_images; quarantined_images = record;
+        pthread_mutex_unlock(&mutex);
+        fprintf(stderr, "V77_WSI_FAILED operation=CreateImage reason=null-success action=retain-lease\n");
+        result = VK_ERROR_INITIALIZATION_FAILED;
+    } else {
+        /* The audited failed constructor synchronously destroys its partial
+         * image before returning, while this temporary view remains alive. */
+        if (record->lease) sq2_v77_native_finish(record->lease);
+        free(record);
+        if (result == VK_SUCCESS) result = VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (native) stats("CreateImage-native", result);
+    return result;
 }
 static VKAPI_ATTR void VKAPI_CALL wrapped_destroy_image(VkDevice device, VkImage image,
         const VkAllocationCallbacks *allocator) {
     struct Device saved;
     if (!device_copy(device, &saved)) return;
-    saved.destroy_image(device, image, allocator); stats("DestroyImage", VK_SUCCESS);
+    struct Image *record = NULL;
+    pthread_mutex_lock(&mutex);
+    struct Image **slot = &images;
+    while (*slot && !((*slot)->device == device && (*slot)->handle == image)) slot = &(*slot)->next;
+    if (*slot) { record = *slot; *slot = record->next; }
+    pthread_mutex_unlock(&mutex);
+    int safe = !record || !record->lease || (!record->binding && native_last_owner(&saved, record));
+    saved.destroy_image(device, image, allocator);
+    if (record) {
+        if (safe) {
+            if (record->lease) sq2_v77_native_finish(record->lease);
+            free(record);
+        } else {
+            /* The void Vulkan destroy API cannot report this safety failure.
+             * Keep the lease, expose a sticky failure counter, and fail probe
+             * verification rather than risking a deferred donor use-after-free. */
+            pthread_mutex_lock(&mutex);
+            ++native_failures; record->next = quarantined_images; quarantined_images = record;
+            pthread_mutex_unlock(&mutex);
+            fprintf(stderr, "V77_WSI_FAILED operation=DestroyImage action=retain-lease\n");
+        }
+    }
+    stats("DestroyImage", VK_SUCCESS);
 }
 static VKAPI_ATTR VkResult VKAPI_CALL wrapped_bind_image(VkDevice device, VkImage image,
         VkDeviceMemory memory, VkDeviceSize offset) {
     struct Device saved;
     if (!device_copy(device, &saved)) return VK_ERROR_INITIALIZATION_FAILED;
-    return saved.bind_image(device, image, memory, offset);
+    pthread_mutex_lock(&mutex);
+    struct Image *record = image_find_locked(device, image);
+    int native = record && (record->lease || record->binding);
+    pthread_mutex_unlock(&mutex);
+    if (native) return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+    VkResult result = saved.bind_image(device, image, memory, offset);
+    if (record && result == VK_SUCCESS) {
+        pthread_mutex_lock(&mutex); record->bound = 1; pthread_mutex_unlock(&mutex);
+    }
+    return result;
 }
 static VkResult bind_image2(VkDevice device, uint32_t count, const VkBindImageMemoryInfo *infos, int khr) {
     struct Device saved;
     if ((count && !infos) || !device_copy(device, &saved)) return VK_ERROR_INITIALIZATION_FAILED;
     PFN_vkBindImageMemory2 fn = khr ? saved.bind_image2_khr : saved.bind_image2;
     if (!fn) return VK_ERROR_EXTENSION_NOT_PRESENT;
-    for (uint32_t i = 0; i < count; ++i) if (raw_android_chain(infos[i].pNext)) {
-        stats("BindImageMemory2-raw-WSI-unsupported", VK_ERROR_INVALID_EXTERNAL_HANDLE);
-        return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+    unsigned natives = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const struct NativeNode *node;
+        if (!native_chain(infos[i].pNext, 0, &node)) return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+        pthread_mutex_lock(&mutex);
+        struct Image *record = image_find_locked(device, infos[i].image);
+        int already_native = record && (record->lease || record->binding);
+        pthread_mutex_unlock(&mutex);
+        if (already_native) return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+        if (node) {
+            if (!record || !record->eligible || record->bound || infos[i].memory || infos[i].memoryOffset)
+                return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+            ++natives;
+        }
     }
-    return fn(device, count, infos);
+    if (!natives) {
+        VkResult result = fn(device, count, infos);
+        /* A failed batch may still bind its earlier entries. Conservatively
+         * prevent later native rebinding of every submitted ordinary image. */
+        pthread_mutex_lock(&mutex);
+        for (uint32_t i = 0; i < count; ++i) {
+            struct Image *record = image_find_locked(device, infos[i].image);
+            if (record) record->bound = 1;
+        }
+        pthread_mutex_unlock(&mutex);
+        return result;
+    }
+    if (count > MAX_NATIVE_BATCH) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    for (uint32_t i = 0; i < count; ++i)
+        for (uint32_t j = 0; j < i; ++j)
+            if (infos[i].image == infos[j].image) return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+    struct Attempt {
+        struct Image *record;
+        struct NativeNode node;
+        const void *view;
+        void *lease;
+    };
+    struct Attempt *attempts = calloc(count, sizeof(*attempts));
+    VkBindImageMemoryInfo *copies = calloc(count, sizeof(*copies));
+    if (!attempts || !copies) { free(attempts); free(copies); return VK_ERROR_OUT_OF_HOST_MEMORY; }
+    memcpy(copies, infos, count * sizeof(*copies));
+    VkResult result = VK_SUCCESS;
+    for (uint32_t i = 0; i < count; ++i) {
+        const struct NativeNode *node;
+        if (!native_chain(infos[i].pNext, 0, &node)) { result = VK_ERROR_INVALID_EXTERNAL_HANDLE; goto cancel; }
+        if (!node) continue;
+        pthread_mutex_lock(&mutex);
+        struct Image *record = image_find_locked(device, infos[i].image);
+        if (record && !record->lease && !record->binding && !record->bound) {
+            record->binding = 1; attempts[i].record = record;
+        }
+        pthread_mutex_unlock(&mutex);
+        if (!attempts[i].record) { result = VK_ERROR_INVALID_EXTERNAL_HANDLE; goto cancel; }
+        int error = prepare_native(&saved, record, node, &attempts[i].node, &attempts[i].view, &attempts[i].lease);
+        if (error) { result = prepare_error(error); goto cancel; }
+        copies[i].pNext = &attempts[i].node;
+    }
+    /* Commit every prepared lease before donor entry. The batch may return on
+     * its first error after storing raw pointers in earlier/partial images. */
+    pthread_mutex_lock(&mutex);
+    for (uint32_t i = 0; i < count; ++i) if (attempts[i].record) {
+        attempts[i].record->view = attempts[i].view;
+        attempts[i].record->lease = attempts[i].lease;
+        attempts[i].record->native_attempt = 1;
+    }
+    pthread_mutex_unlock(&mutex);
+    result = fn(device, count, copies);
+    pthread_mutex_lock(&mutex);
+    for (uint32_t i = 0; i < count; ++i) {
+        struct Image *record = image_find_locked(device, infos[i].image);
+        if (!record) continue;
+        record->binding = 0; record->bound = 1;
+        if (attempts[i].record) record->native_succeeded = result == VK_SUCCESS;
+    }
+    pthread_mutex_unlock(&mutex);
+    free(copies); free(attempts);
+    stats("BindImageMemory2-native", result);
+    return result;
+cancel:
+    for (uint32_t i = 0; i < count; ++i) {
+        if (attempts[i].lease) sq2_v77_native_finish(attempts[i].lease);
+        if (attempts[i].record) {
+            pthread_mutex_lock(&mutex); attempts[i].record->binding = 0; pthread_mutex_unlock(&mutex);
+        }
+    }
+    free(copies); free(attempts);
+    stats("BindImageMemory2-native-prepare-cancel", result);
+    return result;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL wrapped_bind_image2(VkDevice d, uint32_t n, const VkBindImageMemoryInfo *p) {
     return bind_image2(d, n, p, 0);

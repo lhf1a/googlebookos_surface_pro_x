@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include "quest2-mapper5.h"
+#include "quest2-v77-native.h"
 
 // Native platform entry absent from the public NDK header, present in the
 // platform libnativewindow used by the matched system-loader namespace.
@@ -42,8 +43,15 @@ struct Entry {
     const native_handle_t *original=nullptr;
     View view={}; unsigned leases=0, owners=0;
 };
+struct NativeEntry {
+    AIMapper *mapper=nullptr;
+    buffer_handle_t imported=nullptr;
+    View view={};
+};
 pthread_mutex_t mutex=PTHREAD_MUTEX_INITIALIZER;
 Entry entries[128]; uint64_t bytes=0;
+NativeEntry native_entries[128]; uint64_t native_bytes=0;
+constexpr uint64_t limit_bytes=512ull*1024*1024;
 
 [[noreturn]] void invariant(const char *operation,uintptr_t site=0) {
     std::fprintf(stderr,"V77_AHB_INVARIANT operation=%s caller=%zx\n",operation,site);
@@ -76,16 +84,29 @@ void dispose(const Entry &dead) {
     close(dead.view.fd);
     AHardwareBuffer_release(const_cast<AHardwareBuffer*>(dead.ahb));
 }
-bool metadata(const AHardwareBuffer *ahb,const native_handle_t *native,sq2::BufferInfo &b) {
+bool color_metadata(const native_handle_t *native,sq2::BufferInfo &b) {
     if(!sq2::color_info(native,b) || b.format!=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM ||
        b.fourcc!=0x34324241u || b.sample_bits!=32 || b.offset || b.layers!=1 ||
        (b.usage&AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT) || b.fd_size>UINT32_MAX ||
        b.stride%4 || b.stride/4>INT_MAX || b.plane_size%b.stride ||
        b.plane_size/b.stride>INT_MAX || b.width>b.stride/4 ||
        b.height>b.plane_size/b.stride || b.width>INT_MAX || b.height>INT_MAX)return false;
+    return true;
+}
+bool metadata(const AHardwareBuffer *ahb,const native_handle_t *native,sq2::BufferInfo &b) {
+    if(!color_metadata(native,b))return false;
     AHardwareBuffer_Desc desc={};AHardwareBuffer_describe(ahb,&desc);
     return desc.width==b.width && desc.height==b.height && desc.layers==b.layers &&
         desc.format==b.format && desc.stride==b.stride/4 && desc.usage==b.usage;
+}
+View make_view(const sq2::BufferInfo &b,int fd) {
+    View v={};v.version=sizeof(native_handle_t);v.num_fds=2;v.num_ints=26;
+    v.fd=fd;v.metadata_fd=-1;v.magic=0x676d736d;v.flags=8;
+    v.width=b.stride/4;v.height=b.plane_size/b.stride;
+    v.unaligned_width=b.width;v.unaligned_height=b.height;
+    v.format=b.format;v.original_format=b.format;
+    v.layers=1;v.id=b.id;v.usage=b.usage;v.size=b.fd_size;
+    return v;
 }
 }
 
@@ -112,17 +133,12 @@ extern "C" int sq2_v77_ahb_prepare(const AHardwareBuffer *ahb) {
         else entry->leases++;
     }else{
         for(auto &candidate:entries)if(!candidate.ahb){entry=&candidate;break;}
-        if(!entry || b.fd_size>512ull*1024*1024-bytes)result=-ENOSPC;
+        if(!entry || b.fd_size>limit_bytes-bytes-native_bytes)result=-ENOSPC;
         else{
             int fd=fcntl(b.fd,F_DUPFD_CLOEXEC,0);
             if(fd<0)result=-ENOMEM;
             else{
-                View v={};v.version=sizeof(native_handle_t);v.num_fds=2;v.num_ints=26;
-                v.fd=fd;v.metadata_fd=-1;v.magic=0x676d736d;v.flags=8;
-                v.width=b.stride/4;v.height=b.plane_size/b.stride;
-                v.unaligned_width=b.width;v.unaligned_height=b.height;
-                v.format=b.format;v.original_format=b.format;
-                v.layers=1;v.id=b.id;v.usage=b.usage;v.size=b.fd_size;
+                View v=make_view(b,fd);
                 *entry={ahb,native,v,1,0};bytes+=b.fd_size;transferred=true;
             }
         }
@@ -144,12 +160,71 @@ extern "C" const native_handle_t *sq2_v77_original_handle(const native_handle_t 
     for(auto &entry:entries)if(handle==reinterpret_cast<const native_handle_t*>(&entry.view)){
         result=entry.ahb?entry.original:nullptr;break;
     }
+    for(auto &entry:native_entries)if(handle==reinterpret_cast<const native_handle_t*>(&entry.view)){
+        result=entry.imported;break;
+    }
     pthread_mutex_unlock(&mutex);return result;
 }
 extern "C" unsigned sq2_v77_ahb_stats(unsigned *leases,unsigned *owners,uint64_t *size) {
     unsigned count=0,l=0,o=0;pthread_mutex_lock(&mutex);
     for(const auto &entry:entries)if(entry.ahb){count++;l+=entry.leases;o+=entry.owners;}
     if(leases)*leases=l;if(owners)*owners=o;if(size)*size=bytes;
+    pthread_mutex_unlock(&mutex);return count;
+}
+
+// WSI supplies a raw native handle, not an AHardwareBuffer. A private mapper5
+// import keeps its real allocation/FDs alive, independently of the BufferQueue.
+// Each image gets a distinct lease; never mutate the platform handle or borrow
+// an AHB pointer from undocumented GraphicBuffer object offsets.
+extern "C" int sq2_v77_native_prepare(const void *input,const void **view,void **lease,
+                                       Sq2V77NativeInfo *info) {
+    if(!view || !lease || !info)return -EINVAL;
+    *view=nullptr;*lease=nullptr;*info={};
+    const auto *original=sq2_v77_original_handle(static_cast<const native_handle_t*>(input));
+    if(!original)return -EINVAL;
+    AIMapper *m=sq2::mapper5();if(!m)return -ENODEV;
+    buffer_handle_t imported=nullptr;
+    AIMapper_Error imported_status=m->v5.importBuffer(original,&imported);
+    if(imported_status!=AIMAPPER_ERROR_NONE || !imported)return -EINVAL;
+    sq2::BufferInfo b;
+    if(!color_metadata(imported,b)){
+        m->v5.freeBuffer(imported);return -ENOTSUP;
+    }
+    int result=0;
+    pthread_mutex_lock(&mutex);
+    NativeEntry *entry=nullptr;
+    for(auto &candidate:native_entries)if(!candidate.imported){entry=&candidate;break;}
+    if(!entry || b.fd_size>limit_bytes-bytes-native_bytes)result=-ENOSPC;
+    else{
+        int fd=fcntl(b.fd,F_DUPFD_CLOEXEC,0);
+        if(fd<0)result=-ENOMEM;
+        else{
+            *entry={m,imported,make_view(b,fd)};native_bytes+=b.fd_size;
+            *view=&entry->view;*lease=entry;
+            *info={static_cast<uint32_t>(b.width),static_cast<uint32_t>(b.height),1,b.format,
+                   static_cast<uint32_t>(b.stride/4),b.fd_size};
+        }
+    }
+    pthread_mutex_unlock(&mutex);
+    if(result)m->v5.freeBuffer(imported);
+    return result;
+}
+extern "C" void sq2_v77_native_finish(void *lease) {
+    NativeEntry dead;
+    pthread_mutex_lock(&mutex);
+    NativeEntry *found=nullptr;
+    for(auto &entry:native_entries)if(&entry==lease && entry.imported){found=&entry;break;}
+    if(!found)invariant("native-finish-without-lease");
+    dead=*found;native_bytes-=found->view.size;*found={};
+    pthread_mutex_unlock(&mutex);
+    close(dead.view.fd);
+    if(dead.mapper->v5.freeBuffer(dead.imported)!=AIMAPPER_ERROR_NONE)
+        invariant("native-free-import-failed");
+}
+extern "C" unsigned sq2_v77_native_stats(uint64_t *size) {
+    unsigned count=0;pthread_mutex_lock(&mutex);
+    for(const auto &entry:native_entries)if(entry.imported)count++;
+    if(size)*size=native_bytes;
     pthread_mutex_unlock(&mutex);return count;
 }
 

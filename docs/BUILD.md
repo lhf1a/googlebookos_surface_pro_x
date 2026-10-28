@@ -2,6 +2,8 @@
 
 脚本来自迭代实验室，依赖缓存和分阶段产物；全新克隆不能直接生成完整可启动 SSD。不要删除哈希或磁盘身份保护以绕过缺失输入。
 
+v77 Vulkan raw WSI 私有候选构建及实机复现见 [QUEST2-VULKAN-WSI.md](QUEST2-VULKAN-WSI.md)：新增 `build-quest2-vulkan-window.sh` 与 `--vulkan-window-create/--vulkan-window` runner 入口；当前验证版本选择 `SQ2_V77_AHB_VIEW=1 SQ2_V77_AHB_REVISION=4`，探针目录为 `vulkan-window/`。仍需完整同步系统 namespace helper/清单并串行执行，不是正常启动安装器。
+
 ## 环境与输入
 
 Windows PowerShell + WSL Ubuntu 24.04（root），ARM64 GNU 交叉工具链、QEMU user/system、Python 3、Meson/Ninja、cpio/gzip、Git、Android NDK r28c。部分脚本含工作站路径及固定输出目录，迁移需显式调整。

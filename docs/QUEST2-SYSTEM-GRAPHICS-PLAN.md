@@ -77,4 +77,12 @@ protected usage位14在RGBA和YUV入口均被明确拒绝，`getMapSecureBufferF
 
 这一步不需要先实现RGBX/BGRA/FP16，也不能证明Skia完整RenderEngine正确，但可直接补上当前SF明确使用而旧探针缺失的接口与异步混合证据。通过后再用同一合成探针按真实格式元数据逐一扩展RGBX/BGRA，以及视频DATASPACE；若缓存/新采集显示FP16参与实际共享buffer，再增加其路径。最后才考虑带独立恢复措施的一次性SF选择器和真实桌面合成验证，届时仍保留现有minigbm、drm_hwcomposer与正常Mesa入口。Quest 2的下游SDM/HWC不因本GLES成功就成为Surface显示控制器的替代品。
 
-本文件是审计与下一步设计，尚未实现或运行上述新探针。
+## 7. 合成探针实测与同步对象阻断点
+
+已实现 `probe/graphics/quest2-composition.cpp` 和 `scripts/build-quest2-composition.sh`，经原系统EGL/GLES及libGLESv1导出入口运行。64×64和2880×1920各单轮的两context、三AHB、多层预乘alpha/平移/裁剪、native fence与全图读回通过，像素最大误差0；QTI映射最终归零。Mesa对照连续3轮通过。
+
+闭源连续运行尚未通过：每轮留下两个已完成的 `anon_inode:sync_file`，FD从12逐轮变14/16/18/20；全部EGL context/display销毁后才释放到8。像素始终正确，不能据此放宽FD稳定检查。5轮与分阶段3轮日志在忽略目录 `out/quest2-gpu/composition/closed-fd-diag5.txt`、`closed-fd-stages.txt`。
+
+进一步3轮对照：仅CPU等待并关闭生产fence时FD稳定10；CPU等待后照常导入并销毁EGLSync、唯独不调用eglWaitSyncKHR时也稳定10。两项均明确DIAGNOSTIC_ONLY、退出3，不计正常异步路径通过。由此将累积定位至server-wait关联的内部持有，而非单独export/import/destroy或AHB回收。原匹配donor的libEGL仅分派这些调用；GLES wait入口0x271fb8，内部0x281f70管理context+16296的pending GSL sync，首次clone、后续merge并释放旧项。后续应核对该pending对象的提交/清理及引用，尚未证明具体泄漏指令或修复有效。
+
+runner新增 `--composition`。`SQ2_COMPOSITION_WIDTH/HEIGHT/CYCLES` 默认64/64/3；`SQ2_COMPOSITION_FD_SNAPSHOT=1`只增加FD快照。`SQ2_COMPOSITION_FD_DIAGNOSTIC=1`仅允许3–5轮、始终退出3；可另选互斥的 `SQ2_COMPOSITION_FD_CPU_CONTROL=1` 或 `SQ2_COMPOSITION_FD_IMPORT_CONTROL=1` 做上述对照。默认路径仍执行真实GPU server-wait并严格要求FD稳定；CPU等待不能作为长期系统替换方案。
