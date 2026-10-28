@@ -4,8 +4,9 @@
 
 - 完整vendor参考已提取，原18库与新增70项显示组件哈希已核对；来源与ABI差异见 [QUEST2-VENDOR-REFERENCE.md](QUEST2-VENDOR-REFERENCE.md)。尚缺同版system/odm内必要依赖的按需提取和完整内核接口审计，不跨版本随意补库。
 - 原配GLES通过系统加载、RGBA窗口/YUV线性路径和有限可见SF合成；后者是闭源producer + Mesa SF，并非桌面整套替换。
-- 优先解决内部纹理client-memory读回。relay通过，PBO仅部分尺寸通过；有效阈值已读取为FFFFFFFF/0，私有零配置尚无效。见 [QUEST2-READBACK-REFERENCE.md](QUEST2-READBACK-REFERENCE.md)。
-- 之后覆盖RGBX等合成格式、真实视频及SF自身加载，再接同版Vulkan系统路径、持久化与重启。保留正常Mesa入口和所有已验证输入/音频/存储/温控/关屏保护。
+- GLES已修复本轮精确读回矩阵：CPU4/bank15匹配实际布局、PBO优化回退、零面积校验修正后的私有`gles-linked-zero-area`候选，522项读回/错误检查全部通过；上传与采样各10项、YUV两种路径各3帧通过。继续覆盖RGBX/其他格式、实际视频与SF自身，不把RGBA矩阵当成整个系统通过。PBO同步回退的性能影响未量化，零阈值方案已否定。见 [QUEST2-READBACK-REFERENCE.md](QUEST2-READBACK-REFERENCE.md)。
+- 同版Vulkan系统加载器已通过基础计算/图像/三角形；AHB属性失败来自原库直接读取QTI私有handle。先补完整handle视图及引用生命周期，再进行导入/绘制/窗口。见 [QUEST2-V77-VULKAN.md](QUEST2-V77-VULKAN.md)。
+- 后续覆盖RGBX等合成格式、真实视频及SF自身加载、持久化与重启。保留正常Mesa入口和所有已验证输入/音频/存储/温控/关屏保护。
 
 ## P1：3DMark Wild Life 花屏（2026-10-28）
 

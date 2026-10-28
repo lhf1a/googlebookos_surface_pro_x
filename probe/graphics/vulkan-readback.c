@@ -120,7 +120,19 @@ int main(int argc,char **argv) {
         if(tools_dir && (p.driverVersion!=2150838273u || strstr(p.deviceName,"Turnip"))) {
             fprintf(stderr,"Custom v819 driver not active; refusing fallback\n");return 1;
         }
+        if(getenv("SQ2_VULKAN_REJECT_TURNIP") && strstr(p.deviceName,"Turnip")) {
+            fprintf(stderr,"Quest2 probe unexpectedly loaded Turnip\n");return 1;
+        }
         if(p.vendorID==0x5143 && p.deviceType==VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU && strstr(p.deviceName,"680")) gpu=devices[i];
+    }
+    if(getenv("SQ2_VULKAN_REJECT_TURNIP")) {
+        FILE *maps=fopen("/proc/self/maps","r");
+        if(!maps){perror("Vulkan runtime maps");return 1;}
+        char line[2048];
+        while(fgets(line,sizeof(line),maps))
+            if(strstr(line,"r-xp") && (strstr(line,"vulkan") || strstr(line,"libgsl") ||
+               strstr(line,"mapper") || strstr(line,"quest2")))printf("QUEST2_RUNTIME_MAP %s",line);
+        fclose(maps);
     }
     if(!gpu) { fprintf(stderr,"Expected hardware Adreno 680, refusing fallback\n"); return 1; }
     vkGetPhysicalDeviceMemoryProperties(gpu,&memory);

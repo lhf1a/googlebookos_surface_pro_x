@@ -182,12 +182,14 @@ static void quest2_log_readback_settings(void)
     const char *failure = "unique_donor_mapping";
     uint64_t base = 0, dispatch = 0, target = 0, real = 0, settings = 0;
     uint32_t limits[2] = {0, 0};
+    uint32_t context_flags = 0;
     const char *source = "global";
     static const uint32_t global_setup[] = {0x90001849, 0xaa0603f3, 0x912b4129};
     static const uint32_t global_load[] = {0xf9413528};
     static const uint32_t tls_key[] = {0xb9402d20, 0x940bae63, 0xaa0003e8};
     static const uint32_t slot_load[] = {0xf9417909};
     static const uint32_t settings_load[] = {0xf9405668, 0xb9657d0f};
+    static const uint32_t flags_load[] = {0xb9408a7a};
     if (sizeof(void *) != 8 || !q2rb_find_base(&base)) goto done;
     failure = "self_mem_open";
     mem = open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
@@ -199,7 +201,8 @@ static void quest2_log_readback_settings(void)
         !q2rb_words(mem, base + 0xfdec0, global_load, 1) ||
         !q2rb_words(mem, base + 0xfded0, tls_key, 3) ||
         !q2rb_words(mem, base + 0xfdedc, slot_load, 1) ||
-        !q2rb_words(mem, base + 0x1bb880, settings_load, 2)) goto done;
+        !q2rb_words(mem, base + 0x1bb880, settings_load, 2) ||
+        !q2rb_words(mem, base + 0x1bb718, flags_load, 1)) goto done;
     failure = "global_context_read";
     if (!q2rb_pointer_field(mem, base + 0x405ad0, 616, &dispatch)) goto done;
     if (dispatch == UINT64_MAX) {
@@ -220,12 +223,16 @@ static void quest2_log_readback_settings(void)
     if (!q2rb_pointer_field(mem, dispatch, 8, &real)) goto done;
     failure = "settings_pointer_read";
     if (!q2rb_pointer_field(mem, real, 168, &settings)) goto done;
+    failure = "context_flags_read";
+    if (!real || real > INT64_MAX - 140 ||
+        !q2rb_read(mem, real + 136, &context_flags, sizeof(context_flags))) goto done;
     failure = "settings_values_read";
     if (!settings || settings > INT64_MAX - 9604 ||
         !q2rb_read(mem, settings + 9596, limits, sizeof(limits))) goto done;
     printf("QUEST2_READBACK_SETTINGS status=ok source=%s thunk_va=0x%" PRIx64
-           " byte_threshold=%" PRIu32 " percent_threshold=%" PRIu32 "\n",
-           source, target - base, limits[0], limits[1]);
+           " byte_threshold=%" PRIu32 " percent_threshold=%" PRIu32
+           " context_flags_136=0x%08" PRIx32 "\n",
+           source, target - base, limits[0], limits[1], context_flags);
     failure = NULL;
 done:
     if (failure) {

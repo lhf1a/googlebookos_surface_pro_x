@@ -88,6 +88,45 @@ PY
 
 **原厂设置。** `build.prop` 指定 `ro.hardware.egl=adreno`、`ro.hardware.vulkan=adreno`，并包含 Quest 面板方向及显示设置。`init.kona.rc` 在启动阶段删除 `/data/vendor/gpu/esx_config.txt` 和 `qgl_config.txt`，随后允许 `debug.vendor.gpu.*` 属性触发写入。因此不能假定 OTA 自带固定的 Direct/sysmem 配置，也不应照搬 Quest 的屏幕方向、性能计数器和电源策略。
 
+## 新版 OTA 的图形库抽样对照（2026-10-28）
+
+为寻找与现有 AdrenoTools v819.1 包配套的完整 donor，本次查询了[第三方 Quest 2 固件索引](https://cocaine.trade/Quest_2_firmware)，并读取实际 OTA 的 ZIP/payload 元数据与少量 vendor 操作。索引将构建号 `52322490019200150` 标为 v2.9.0、系统版本 `209.0.0.162.1270.1100998751`，Build Date 为 2026-10-27。日期和发布标签来自第三方索引；Build Date 不是经核验的 Meta 官方发布时间，也不构成 OEM 签名认证。
+
+最新候选地址：[q2_52322490019200150.zip](https://files.cocaine.trade/firmware/meta/Quest%202/q2_52322490019200150.zip)。HTTP Range 返回整包长度 `1100907992`；ZIP 内 metadata 声明 `pre-device=hollywood`、`post-build-incremental=52322490019200150`、`post-sdk-level=34`。payload 为 version 2、minor version 0，vendor 没有 old_partition_info，144 个操作全部为 REPLACE_XZ。因此该分区可独立重建，不需要旧分区。未下载完整 OTA 或完整 vendor。
+
+| 最新候选字段 | 已读取的值 |
+| --- | --- |
+| payload.bin 的 ZIP 数据偏移 | 4985；ZIP method 0（stored） |
+| payload manifest 长度 | 86547 字节 |
+| payload 操作数据起始绝对偏移 | 91823 |
+| vendor 压缩数据绝对范围，包含两端 | **1005042106–1098216637**，连续 93174532 字节 |
+| vendor 镜像大小 | 300904448 字节 |
+| vendor SHA256，来自未认证 manifest | `aa75db1108ac48cf7ad1425c9b510f622c8f00906d184c807a0f09c0129c48ba` |
+| ZIP SHA256，第三方索引公布、未整包核验 | `7a3c01369843c3c7c54e7f8da9dd7f11543f36fcebc15b7a1e625d9800e1b604` |
+
+抽样使用只读 ext4 inode/extent 解析，按所需逻辑块请求对应 payload 操作；13 个已取得操作的压缩数据 SHA256 均与该 manifest 一致。文件抽样阶段累计读取 8132068 个网络字节，含 131072 字节的 ZIP/payload 前缀；此前另做过 512 KiB 前缀盘点。解压内容只在内存中用于读取以下三个 ELF，然后与本地已经完整核验的 v77 提取物比较。**三个文件的 SHA256 分别相同；这不代表整个 vendor 相同。** 最新分区大小和 manifest 哈希本来就与 v77 不同，且本次未重建最新完整分区、未核验其整体哈希。
+
+| 镜像内文件 | 两版相同的 SHA256 | Build ID |
+| --- | --- | --- |
+| `/lib64/libgsl.so` | `8971ade1009b02ca49a19cde9a78e324b2f7b868253f614c337105bbb669cfb6` | `5f5544238d5c01cc1e8084e4955fa3de` |
+| `/lib64/hw/vulkan.adreno.so` | `0f316d0331ef5b4ec60d8d3f21a845f47583b14ccaabe54f316e619b9897bd8d` | `179c7a3381683d680046ce544b76ef30` |
+| `/lib64/egl/libGLESv2_adreno.so` | `a0d4d099a67d4a0db54ee6b5cd69e15e1787484128667120c7a90d6ae333b316` | `af16b8ea19e72ea9d26d9bb477003db3` |
+
+实际 GLES 字符串仍为 `V@0819.0`、`GIT@274d25476a`、`Iae7cef94b0`、`Date:04/19/25`；Vulkan 报告相同提交和日期，分支为 `AU_LINUX_ANDROID_LA.UM.9.12.1.11.00.00.890.145`。三个 ELF 的 `.note.android.ident` 均为 API 30。GSL 的实际 DT_NEEDED 仍含 `libion.so`，没有 AdrenoTools 包中那组 DmabufHeap 导入；Vulkan 仍是 mapper2/3 依赖，未新增 mapper4。上述结果是已取得文件的静态证据，不是新 OTA 的设备运行测试。
+
+[AdrenoTools v819.1 原发布](https://github.com/K11MCH1/AdrenoToolsDrivers/releases/tag/v819.1)声明提取自 Quest 2，但未给出可对应的 OTA 构建号。缓存包的 Vulkan 实际提交为 `8c77d53de9 / Ifbd2e5a8c1`，分支 `AU_LINUX_ANDROID_LA.VENDOR.12.3.11.00.00.934.442`，Android ident 为 API 32；它与上述两个 Quest 2 OTA 的库不是同一构建。包内 `notgsl.so` 依赖 `notdmabufheap.so`，并导入 `CreateDmabufHeapBufferAllocator`、`FreeDmabufHeapBufferAllocator`、`MapDmabufHeapNameToIonHeap`、`DmabufHeapAlloc`。这能确认包中存在不同的 dmaheap 接口契约，不能据此推断最新 Quest 2 完整 vendor 已采用该实现，或认定发布者标注错误。
+
+另外两个候选只完成了元数据盘点，不能为其图形库版本背书；v85 的后续文件范围读取遇到网络超时后停止，没有继续下载中间版本：
+
+| 候选 ZIP | vendor 绝对范围，包含两端 | 压缩字节数 / 镜像字节数 | 未认证 manifest 中的 vendor SHA256 |
+| --- | --- | --- | --- |
+| [v77 51584880078600150](https://files.cocaine.trade/firmware/meta/Quest%202/q2_51584880078600150.zip) | 1085695583–1169858478 | 84162896 / 273108992 | `d4ba1c07a40b53954b088aead1e102a82472a67655205d999ec60b552ade2198` |
+| [v85 52056330104200150](https://files.cocaine.trade/firmware/meta/Quest%202/q2_52056330104200150.zip) | 1072167054–1147070537 | 74903484 / 245002240 | `c6a207b9dae433a34b9c2f338ef6b1fe1f1bfa2aa2ed022d223169d8e5c61d42` |
+
+以上范围通过 ZIP 本地头定位 stored payload，再按 `payload_offset + 24 + manifest_size + metadata_signature_size + operation.data_offset` 计算；每项长度取 operation.data_length。重建前仍须逐项验证 Content-Range、操作数据哈希、目标 extents 覆盖和最终分区哈希。现有 `rebuild-quest2-v77-vendor.py` 固定旧 v77 身份，**不能删除其哈希保护后直接套用新候选**。
+
+当前没有取得一套被证实同时包含 v819.1 mapper4/dmaheap 分支及匹配 GLES/GSL 的完整 Quest 2 donor。最新公开候选的三项核心库没有变化，单为这些库更换整个 donor 没有已证实的收益；继续保留已提取 v77 参考与当前适配，独立追踪 v819.1 的确切来源。机器可读盘点保存在本地忽略目录 `out/quest2-gpu/donor-refresh-20261028/findings.json`；没有改变系统驱动、启动镜像或 Surface GPU 固件。
+
 ## 尚缺的同版材料
 
 本 vendor 镜像中未找到 `/lib64/libion.so`、`libadreno_app_profiles.so` 或 `libgpu_tonemapper.so`。其中 `libion.so` 是已观察到的真实依赖；后两者的缺失本身不证明该版本需要它们。若依赖分析确实需要额外文件，应先检查同一 OTA 的 system、system_ext、odm 及其中的 VNDK/APEX，不混入其他发布包的同名库。

@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 int main(int argc,char **argv){
-    if(argc>2||(argc==2&&strcmp(argv[1],"--ahb")&&strcmp(argv[1],"--window")&&strcmp(argv[1],"--yuv")&&strcmp(argv[1],"--visible")))return 2;
+    if(argc>2||(argc==2&&strcmp(argv[1],"--ahb")&&strcmp(argv[1],"--window")&&strcmp(argv[1],"--yuv")&&strcmp(argv[1],"--visible")&&strcmp(argv[1],"--readpixels")&&strcmp(argv[1],"--vulkan")&&strcmp(argv[1],"--vulkan-offscreen")))return 2;
     struct stat init_ns,self_ns;
     if(geteuid()!=0||stat("/proc/1/ns/mnt",&init_ns)||unshare(CLONE_NEWNS)||
        stat("/proc/self/ns/mnt",&self_ns)||self_ns.st_ino==init_ns.st_ino){

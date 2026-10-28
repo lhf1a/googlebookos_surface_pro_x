@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "quest2-readback-settings.h"
+#include "quest2-readback-trace.h"
 static void check(int ok,const char *where){if(!ok){fprintf(stderr,"QUEST2_YUV_FAIL %s EGL=%x GL=%x\n",where,eglGetError(),glGetError());exit(1);}}
 static unsigned option(const char *name,unsigned fallback){const char *s=getenv(name);if(!s)return fallback;char *end;unsigned long v=strtoul(s,&end,0);check(*s&&!*end&&v>0&&v<=4096,"option");return v;}
 static GLuint shader(GLenum type,const char *source){GLuint s=glCreateShader(type);glShaderSource(s,1,&source,NULL);glCompileShader(s);GLint ok;glGetShaderiv(s,GL_COMPILE_STATUS,&ok);check(ok,"shader");return s;}
@@ -43,6 +43,10 @@ int main(void){
     EGLint ca[]={EGL_CONTEXT_CLIENT_VERSION,2,EGL_NONE},pa[]={EGL_WIDTH,16,EGL_HEIGHT,16,EGL_NONE};
     EGLContext context=eglCreateContext(d,config,EGL_NO_CONTEXT,ca);EGLSurface surface=eglCreatePbufferSurface(d,config,pa);
     check(context!=EGL_NO_CONTEXT&&surface!=EGL_NO_SURFACE&&eglMakeCurrent(d,surface,surface,context),"current");
+    if(getenv("SQ2_YUV_TRACE_COPY")){
+        quest2_install_readback_trace(8);
+        check(!atexit(quest2_report_readback_trace),"trace exit report");
+    }
     const char *version=(const char*)glGetString(GL_VERSION);printf("YUV_RENDERER=%s VERSION=%s\n",glGetString(GL_RENDERER),version);
     check(version&&strstr(version,"V@0819.0")&&!strstr(version,"Mesa"),"closed renderer");
     PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC client=(void*)eglGetProcAddress("eglGetNativeClientBufferANDROID");

@@ -35,6 +35,12 @@ build-test3-ssh.sh 要求 SQ2_AUTHORIZED_KEY_FILE 指向自己的公钥；主机
 
 ## 增量打包及安装
 
+Quest 2 v77同版Vulkan：`prepare-quest2-v77-vulkan.py --system-loader --output out/quest2-gpu/v77-vulkan-system`生成七库私有候选，固定原件哈希、mapper3/ION依赖、RUNPATH与未改变的可执行section。同步候选及SHA256SUMS，另将`build-sq2-vulkan-probe.sh`生成的探针与VULKAN_PROBE_SHA256SUMS放入私有`v77-vulkan-probe/`；最新runner的`--vulkan-offscreen`只在私有namespace绑定HAL并通过原系统libvulkan加载。`--vulkan`目前会在AHB属性检查失败，不能放宽校验继续；详细地址证据见QUEST2-V77-VULKAN。没有正常系统安装流程。
+
+精确GLES读回：`build-quest2-readpixels.sh`生成闭源/显式Mesa两种探针与READPIXELS_SHA256SUMS，私有目录`readpixels/`。runner `--readpixels`执行414项矩阵；`SQ2_READPIXELS_WIDTH/HEIGHT`选择单尺寸，`SQ2_READPIXELS_RELAY=1`或`SQ2_READPIXELS_UPLOAD=1`另做五尺寸、两phase的精确采样/上传AHB CPU对照。`SQ2_YUV_TRACE_COPY=1`启用版本受限的进程内CPU传输跟踪，必须只用于无并发donor调用的私有探针，日志留out；不要加入正常启动。
+
+当前最佳私有候选按顺序在WSL生成：`python3 scripts/prepare-quest2-cpu-layout.py --bank-bit 15` → `python3 scripts/prepare-quest2-pbo-copy.py` → `python3 scripts/prepare-quest2-zero-area.py`。每步固定输入哈希并拒绝已有输出；最后一步需aarch64-linux-gnu-gcc、qemu-aarch64，必须通过176组指令检查才输出。最终`gles-linked-zero-area/`和清单同步到设备同名私有目录，runner用`SQ2_GLES_CPU_LAYOUT=4-bank15-zero-area`选择。基础414+1024×128和2048×128各54项共522项全过，上传/采样各10项及YUV回归通过；仍不是正常启动安装器。PBO改走原fallback，性能未量化。`4`、`4-bank15`、`4-bank15-pbo`只用于分阶段对照；`SQ2_GLES_READBACK_POLICY=1`的独立0/0阈值实验失败，不能与CPU布局候选混用。完整证据见QUEST2-READBACK-REFERENCE。
+
 Quest 2同版完整参考：`extract-quest2-v77-reference.py IMAGE NEW_OUT_DIR`先核对固定vendor分区哈希，再以只读debugfs逐个提取普通文件并生成inventory.json；不挂载、不创建镜像内符号链接、不操作设备。`inspect-quest2-graphics-reference.py`现在同时校验原18库与新增70项显示参考，需要先生成`out/quest2-gpu/vendor-reference-v77`。来源和接口边界见 [QUEST2-VENDOR-REFERENCE.md](QUEST2-VENDOR-REFERENCE.md)。
 
 闭源GLES可见窗口：`bash scripts/build-quest2-visible.sh`生成独立dex JAR/JNI库/VISIBLE_SHA256SUMS；只将这三项复制到Android的`/data/local/tmp/sq2-closed/visible/`。同步最新系统探针、namespace helper、SYSTEM_PROBE_SHA256SUMS和`run-quest2-gles-system.sh`后，从retained root运行`sh /proc/1/root/data/local/tmp/sq2-closed/run-quest2-gles-system.sh --visible`。runner先复制zygote classpath，再进入私有挂载空间直接exec app_process；不能在里面调用会重新nsenter PID1的run-android-java。窗口只显示5秒，外部25秒超时，结束完整释放并退出。采样必须等到日志VISIBLE_FRAME，固定启动后2秒可能还没有图像。它验证闭源producer→现有Mesa SF，并不替换SF。
