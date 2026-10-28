@@ -520,6 +520,11 @@
         "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapperextensions/1.1/IQtiMapperExtensions.hal",
         "destination": "hal/vendor/qti/hardware/display/mapperextensions/1.1/IQtiMapperExtensions.hal",
         "decoded_sha256": "9e960ad971bfeb1ccc3102caf0a2d94e95457a1ff9ff0c72156faa94f2500c5d"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapper/3.0/IQtiMapper.hal",
+        "destination": "hal/vendor/qti/hardware/display/mapper/3.0/IQtiMapper.hal",
+        "decoded_sha256": "72889f3c7812efb6e00cd59d17dca3ee392b029eef83622758d206e1e835722c"
       }
     ]
   }

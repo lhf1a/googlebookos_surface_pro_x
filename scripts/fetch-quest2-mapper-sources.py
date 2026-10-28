@@ -44,7 +44,7 @@ for version in ['1.0','1.1','1.2']:
     archive('system/libhidl', f'transport/manager/{version}', f'hal/android/hidl/manager/{version}')
 for path, dest in [('linux-x86/bin/hidl-gen','hidl-gen'), ('linux-x86/lib64/libc++.so','libc++.so')]:
     jobs.append((f'https://android.googlesource.com/platform/prebuilts/build-tools/+/{TOOL}/{path}?format=TEXT', dest, 'b64'))
-for path in ['mapper/4.0/IQtiMapper.hal', 'mapperextensions/1.0/IQtiMapperExtensions.hal',
+for path in ['mapper/3.0/IQtiMapper.hal', 'mapper/4.0/IQtiMapper.hal', 'mapperextensions/1.0/IQtiMapperExtensions.hal',
              'mapperextensions/1.0/types.hal', 'mapperextensions/1.1/IQtiMapperExtensions.hal']:
     jobs.append((f'https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/{QTI}/display/{path}',
                  f'hal/vendor/qti/hardware/display/{path}', 'raw'))

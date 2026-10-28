@@ -1,0 +1,14 @@
+{
+  "build": "51584880050400150",
+  "version": "V@0819.0 GIT@274d25476a",
+  "files": {
+    "egl/libEGL_adreno.so": "c9968473a1065cd7d0fe54e29a843e0bb261548a4c9bf33513cdd10a98832645",
+    "egl/libGLESv1_CM_adreno.so": "553b1a465a9b9f96ae27a1c5c36df2c8f6eacd58c467d6b4042d35ee563d6155",
+    "egl/libGLESv2_adreno.so": "a0d4d099a67d4a0db54ee6b5cd69e15e1787484128667120c7a90d6ae333b316",
+    "egl/eglSubDriverAndroid.so": "958138fb717667e101a94f75c4363491828cf0ff24ccc3ec46ab2b06c653baf4",
+    "libgsl.so": "8971ade1009b02ca49a19cde9a78e324b2f7b868253f614c337105bbb669cfb6",
+    "libadreno_utils.so": "8bca58979c908b1da4b7caf064c65a5b72eb8ae6989a316e63611b2c1597eb57",
+    "libllvm-glnext.so": "64054b91e804c2e021e28bc1225b205cf754a633850c577db445132ed4ea29fb",
+    "libllvm-qgl.so": "e52264451deb74c86e728b3559b99267eb37b1b0a1973f578d584707767ae49a"
+  }
+}

@@ -175,6 +175,34 @@ timeout 30 nsenter -t 1 -m -r -- /system/bin/env \
 
 复现工具：`build-quest2-vulkan-selector.sh` 构建 HMI 分派器；`prepare-quest2-wildlife.py` 校验已有 runtime 哈希并为独立副本设置 `$ORIGIN` RUNPATH。复制 runtime（含 SHA256SUMS）及 selector 到 `/data/local/tmp/sq2-closed/wildlife`，selector 目标名为 `vulkan.sq2-selector.so`。从保留的 initramfs root 运行 `run-quest2-wildlife.sh`，打开 Wild Life 后点击运行；脚本 300 秒自动恢复，80°C 中止，也可创建 `/tmp/sq2-quest2-wildlife.lock/stop` 提前恢复。新测试前必须确认默认 HAL 哈希、仅关屏 guard 和实际 donor 映射，不能只看应用能否出分。原始截图/日志在忽略的 out/quest2-wild-life。
 
+### 2026-10-28 Wild Life 再次实测
+
+沿用同一 v819.1 runtime 和临时进程分派器，实际 maps 再次确认闭源 Vulkan、notgsl 与 mapper 桥接已加载。本轮完成 **6320 分 / 37.85 FPS**；14.1 秒和 42.9 秒场景截图均出现严重黑白横带及粉色噪点，因此仍为渲染失败，分数不作有效性能比较。GPU-top 两秒采样峰值 57.2°C；boot ID、system_server、SurfaceFlinger PID 保持不变。未修改镜像或频率配置。
+
+主动结束临时测试后返回 MESA_RESTORED，默认 HAL 完整哈希恢复为 `0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c`；重新冷启动的 3DMark maps 确认使用该 Mesa 文件，screen-only guard 仍为 Y。本轮截图保存在忽略的 `out/quest2-wild-life/retest/`。本次未重复独立读回或测试其他场景。
+
+## 完整 EGL/GLES donor 与实机进展
+
+Quest 2 v77 build 51584880050400150 来自第三方固件归档候选，来源、HTTP range、ZIP/payload 布局见 `configs/quest2-full-donor-candidate.json`。整包约 1.17 GB；整包慢速下载已终止，改为 vendor 精确范围 84,162,032 字节。131 个 REPLACE_XZ 操作均通过各自哈希，重建 vendor 分区 SHA256 为 `44f90742c03c04037e378860ad493098a369d2bc752aa0d56d14f63ae91b6722`，与固定清单一致。未验证整 ZIP 哈希或厂商签名，不称为已认证 OEM 来源，不能刷入 Surface。
+
+通过 debugfs 只读提取的 lib64 保存在 `out/quest2-gpu/q2-v77/lib64`。`inspect-quest2-payload.py PREFIX --payload-offset 3897` 可重现 payload 清单，字段依据 AOSP update_engine/update_metadata.proto；解析器不是签名验证器。`configs/quest2-gles-v77-inputs.json` 固定 EGL、GLES1/2、Android 子驱动、GSL、adreno_utils 和两套 LLVM 编译器的原始哈希。`prepare-quest2-gles.py` 仅复制这些 GPU 库到私有目录，不携带 donor libc、libui 或整个 vendor。
+
+### 离屏 GLES 已通过，AHB 路径出现 GPU hang
+
+2026-10-28，新增 `build-quest2-gles-probe.sh`，直接链接私有 EGL/GLES；真实 pbuffer + FBO，拒绝 Mesa/软件渲染器。初次 EGL_BAD_ALLOC 定位到两个接口缺口：Android EGL 子驱动使用 QTI mapper3（不是 Vulkan 的 mapper4）；原始 GSL 启动强制 ion_open，而本机仅有 DMA-heap。增加进程局部 mapper3→mapper5 对象，沿用实际 metadata 的 import/free 和线性 RGBA 限制。另一个私有适配器用真实 `/dev/dma_heap/system` 控制 FD 实现 ion_open/close；**ion_alloc_fd 仍明确返回 ENOTSUP**，没有假装完成 ION 分配/安全堆/缓存语义。
+
+此时 EGL 初始化成功。最初着色器阶段崩溃出现在加载系统 libllvm-qgl.so 后；加入相同 donor 的 libllvm-qgl.so 后，该隔离探针通过全部三帧、12,288 像素比较。实际报告 Qualcomm EGL 1.5 / Adreno (TM) 680 / OpenGL ES 3.2 V@0819.0，GIT 274d25476a，日期 04/19/25。该成功仅覆盖普通纹理 FBO，不是 AHB 或桌面通过。
+
+`--ahb` 对照：元数据查询、EGLImage 导入和 framebuffer 检查未报错，但 glReadPixels 留下初始化的 0x5a 数据，CPU 映射首像素为零。设置旧 QTI bit3（PRIV_FLAGS_USES_ION）没有改善，已经撤回。后续加入上下文核对，当前 context 与预期相同；strace 6.15 显示实际 PRIME_FD_TO_HANDLE 和 GEM_INFO 成功，GEM_SUBMIT 后 MSM_WAIT_FENCE 返回 ETIMEDOUT，随后探针停在等待中。工具只跟踪私有进程，未改变内核或系统属性。
+
+之后内核出现 GPU hangcheck/recovery；最后一次可读取的 offending task 为原 Mesa 3DMark UI 的 RenderThread，而非直接标注探针，**不能仅靠该行归咎这个 UI 进程**。框架 PID 当时仍相同，随后 Activity 服务报 Broken pipe，SSH reset/超时。用户确认黑屏/卡住并正在手动重启；没有证据把手动恢复说成板子自主重启。原正常镜像仍为 Mesa，未持久部署任何闭源库。设备恢复前停止 GPU 提交；AHB 原始跟踪在忽略的 `out/quest2-gpu/gles-v77/ahb.strace`。
+
+构建顺序：fetch-quest2-mapper-sources → generate-quest2-mapper-headers → prepare-quest2-gles → build-quest2-gles-probe。新增固定公开 mapper3 定义，mapper4 独立构建仍通过，不覆盖已部署运行库。私有目录及哈希清单准备后，从 retained initramfs root 执行 `run-quest2-gles.sh` 默认只运行离屏；`--ahb` 是已知可能导致 GPU hang 的失败复现，不能作为例行 smoke 或并发测试。加载器 trace preload 仅用于失败诊断，不进入正常测试路径。此脚本新增后尚未整体实机运行，等价的单条 probe 命令已执行如上。
+
 ## 后续范围
 
-当前证明此版本闭源 Vulkan 在 SQ2 MSM 后端可运行，并通过有限共享缓冲区与简单窗口呈现测试；Wild Life 复杂场景已确认严重花屏。尚无 CTS、有效性能对比或长期稳定性结论。系统部署需要定位复杂渲染故障并增加格式/同步/生命周期覆盖，完整 EGL/GLES 还需要另找 donor；不因此切换桌面、伪装 GPU ID 或启动 KGSL 内核移植。
+原 mapper4 桥接在加入条件编译的 mapper3 代码后重建，SHA256 仍为 `3c3e04a3e1a6e1ab19c60f3b6814d1da2f68ffd278fba7b4da7fc3240a07d54f`，逐字未变。新脚本通过 shell/Python 语法检查；mapper3 和原 mapper4 均构建通过。诊断 strace 来源为官方 https://strace.io/files/6.15/strace-6.15.tar.xz ，本地归档 SHA256 `8552dfab08abc22a0f2048c98fd9541fd4d71b6882507952780dab7c7c512f51`；源码和静态产物只在忽略缓存中。
+
+完整系统替换仍未完成：先解决共享图像的导入/地址/同步及 GPU hang，再覆盖多平面与窗口生命周期，然后接系统合成器和重启持久化。Vulkan 的 Wild Life 严重花屏也是独立未解决项，不能因 GLES 离屏通过便替换默认桌面。
+
+离线线索：完整 donor `ioctl_drm_device_getinfo_ext`（VA 0x20bc20）存在 chip 分支，对真实 0x06080001 打印 Unknown GSL device info properties，但这不是其已经导致 hang 的证明，不能伪装为 A650。v819 notgsl.so 的 get_panel_settings（VA 0x206a20）调用 parseFile（0x1f4538），依次尝试 adreno_config.txt、yamato_panel.txt，再查询 YAMATO_FORCE_GMEM_SHL。尚未确定配置字段/路径如何控制 Vulkan sysmem/GMEM；不凭字符串猜测或宣称有效。现有 v819 GSL 使用 DMA-BUF 分配接口，完整 v77 GSL 使用旧 ION 接口，二者 ABI/导入实现的比较待继续。

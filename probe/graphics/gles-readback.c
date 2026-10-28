@@ -25,9 +25,16 @@ static GLuint shader(GLenum type, const char *src) {
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     int use_ahb = argc > 1 && !strcmp(argv[1], "--ahb");
+#ifdef SQ2_QUEST2_GLES
+    /* Qualcomm's Android subdriver does not expose Mesa's platform. Use a
+     * real pbuffer so this check does not depend on surfaceless support. */
+    puts("QUEST2_GLES_STAGE get-display");
+    EGLDisplay d = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+#else
     PFNEGLGETPLATFORMDISPLAYEXTPROC platform = (void *)eglGetProcAddress("eglGetPlatformDisplayEXT");
     if (!platform) fail("eglGetPlatformDisplayEXT");
     EGLDisplay d = platform(use_ahb ? EGL_PLATFORM_ANDROID_KHR : EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL);
+#endif
     EGLint major, minor;
     if (!eglInitialize(d, &major, &minor)) fail("eglInitialize");
     printf("EGL %d.%d vendor=%s version=%s\n", major, minor, eglQueryString(d, EGL_VENDOR), eglQueryString(d, EGL_VERSION));
@@ -38,10 +45,22 @@ int main(int argc, char **argv) {
     EGLint ctxattrs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
     eglBindAPI(EGL_OPENGL_ES_API);
     EGLContext ctx = eglCreateContext(d, cfg, EGL_NO_CONTEXT, ctxattrs);
-    if (ctx == EGL_NO_CONTEXT || !eglMakeCurrent(d, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx)) fail("context");
+    EGLSurface surface = EGL_NO_SURFACE;
+#ifdef SQ2_QUEST2_GLES
+    EGLint pbattrs[] = {EGL_WIDTH, 64, EGL_HEIGHT, 64, EGL_NONE};
+    surface = eglCreatePbufferSurface(d, cfg, pbattrs);
+    if (surface == EGL_NO_SURFACE) fail("pbuffer");
+#endif
+    if (ctx == EGL_NO_CONTEXT || !eglMakeCurrent(d, surface, surface, ctx)) fail("context");
     const char *renderer = (const char *)glGetString(GL_RENDERER);
     printf("GL_VENDOR=%s\nGL_RENDERER=%s\nGL_VERSION=%s\n", glGetString(GL_VENDOR), renderer, glGetString(GL_VERSION));
+#ifdef SQ2_QUEST2_GLES
+    const char *version = (const char *)glGetString(GL_VERSION);
+    if (!renderer || !strstr(renderer,"Adreno (TM) 680") || !version ||
+        !strstr(version,"V@0819.0") || strstr(version,"Mesa")) fail("expected Quest2 V819 A680 renderer");
+#else
     if (!renderer || (!strstr(renderer, "FD680") && !strstr(renderer, "Adreno (TM) 680"))) fail("expected hardware A680 renderer");
+#endif
     GLuint tex, fbo;
     glGenTextures(1, &tex); glBindTexture(GL_TEXTURE_2D, tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -66,6 +85,10 @@ int main(int argc, char **argv) {
         image = create_image(d,EGL_NO_CONTEXT,EGL_NATIVE_BUFFER_ANDROID,client(ahb),NULL);
         if (image == EGL_NO_IMAGE_KHR) fail("AHB EGLImage import");
         image_texture(GL_TEXTURE_2D,image);
+#ifdef SQ2_QUEST2_GLES
+        printf("QUEST2_GLES_AFTER_IMPORT renderer=%s context=%p expected=%p glerror=0x%x\n",
+               glGetString(GL_RENDERER),eglGetCurrentContext(),ctx,glGetError());
+#endif
     } else {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     }
@@ -95,6 +118,16 @@ int main(int argc, char **argv) {
             const unsigned char *p = &pixels[(y*64+x)*4];
             if (memcmp(p,expected,4)) {
                 fprintf(stderr,"frame=%d x=%d y=%d actual=%u,%u,%u,%u expected=%u,%u,%u,%u\n",frame,x,y,p[0],p[1],p[2],p[3],expected[0],expected[1],expected[2],expected[3]);
+                if (ahb) {
+                    void *address=NULL;
+                    int result=AHardwareBuffer_lock(ahb,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,-1,NULL,&address);
+                    fprintf(stderr,"AHB_MISMATCH_CPU_LOCK=%d\n",result);
+                    if (!result && address) {
+                        const unsigned char *cpu=address;
+                        fprintf(stderr,"AHB_MISMATCH_CPU_FIRST=%u,%u,%u,%u\n",cpu[0],cpu[1],cpu[2],cpu[3]);
+                        AHardwareBuffer_unlock(ahb,NULL);
+                    }
+                }
                 fail("pixel mismatch");
             }
         }
@@ -113,6 +146,7 @@ int main(int argc, char **argv) {
     if (image != EGL_NO_IMAGE_KHR) destroy_image(d,image);
     if (ahb) AHardwareBuffer_release(ahb);
     eglMakeCurrent(d,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);
+    if (surface != EGL_NO_SURFACE) eglDestroySurface(d,surface);
     eglDestroyContext(d,ctx); eglTerminate(d);
     puts("GPU_GLES_READBACK_PASS frames=3 pixels=12288");
     if (use_ahb) puts("GPU_GLES_AHB_IMPORT_READBACK_PASS");

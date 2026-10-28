@@ -2,12 +2,21 @@
  * of the isolated donor (or probe preload). No registered service/system HAL changes.
  * Initial scope: unprotected linear RGBA8888 buffers. Other operations fail
  * explicitly; this is not a complete Android mapper implementation. */
+#ifdef SQ2_QTI_MAPPER3
+#include <vendor/qti/hardware/display/mapper/3.0/IQtiMapper.h>
+#else
 #include <vendor/qti/hardware/display/mapper/4.0/IQtiMapper.h>
+#endif
 #include <vendor/qti/hardware/display/mapperextensions/1.1/IQtiMapperExtensions.h>
 #include <cstdio>
 #include "quest2-mapper5.h"
+#ifdef SQ2_QTI_MAPPER3
+namespace am=android::hardware::graphics::mapper::V3_0;
+namespace qm=vendor::qti::hardware::display::mapper::V3_0;
+#else
 namespace am=android::hardware::graphics::mapper::V4_0;
 namespace qm=vendor::qti::hardware::display::mapper::V4_0;
+#endif
 namespace qe=vendor::qti::hardware::display::mapperextensions::V1_0;
 namespace qe1=vendor::qti::hardware::display::mapperextensions::V1_1;
 using android::hardware::Return;
@@ -87,11 +96,17 @@ struct Mapper final : qm::IQtiMapper {
         AIMapper_Error error=m?m->v5.getTransportSize(static_cast<buffer_handle_t>(buffer),&fds,&ints):AIMAPPER_ERROR_NO_RESOURCES;
         cb(static_cast<am::Error>(error),fds,ints);return Void();
     }
+#ifdef SQ2_QTI_MAPPER3
+    Return<void> lock(void*,uint64_t,const Rect&,const hidl_handle&,lock_cb cb) override {cb(am::Error::UNSUPPORTED,nullptr,0,0);return Void();}
+    Return<void> lockYCbCr(void*,uint64_t,const Rect&,const hidl_handle&,lockYCbCr_cb cb) override {cb(am::Error::UNSUPPORTED,{});return Void();}
+#else
     Return<void> lock(void*,uint64_t,const Rect&,const hidl_handle&,lock_cb cb) override {cb(am::Error::UNSUPPORTED,nullptr);return Void();}
+#endif
     Return<void> unlock(void*,unlock_cb cb) override {cb(am::Error::UNSUPPORTED,{});return Void();}
+    Return<void> isSupported(const BufferDescriptorInfo&,isSupported_cb cb) override {cb(am::Error::UNSUPPORTED,false);return Void();}
+#ifndef SQ2_QTI_MAPPER3
     Return<void> flushLockedBuffer(void*,flushLockedBuffer_cb cb) override {cb(am::Error::UNSUPPORTED,{});return Void();}
     Return<am::Error> rereadLockedBuffer(void*) override {return am::Error::UNSUPPORTED;}
-    Return<void> isSupported(const BufferDescriptorInfo&,isSupported_cb cb) override {cb(am::Error::UNSUPPORTED,false);return Void();}
     Return<void> get(void*,const MetadataType&,get_cb cb) override {cb(am::Error::UNSUPPORTED,{});return Void();}
     Return<am::Error> set(void*,const MetadataType&,const hidl_vec<uint8_t>&) override {return am::Error::UNSUPPORTED;}
     Return<void> getFromBufferDescriptorInfo(const BufferDescriptorInfo&,const MetadataType&,getFromBufferDescriptorInfo_cb cb) override {cb(am::Error::UNSUPPORTED,{});return Void();}
@@ -99,6 +114,7 @@ struct Mapper final : qm::IQtiMapper {
     Return<void> dumpBuffer(void*,dumpBuffer_cb cb) override {cb(am::Error::UNSUPPORTED,{});return Void();}
     Return<void> dumpBuffers(dumpBuffers_cb cb) override {cb(am::Error::UNSUPPORTED,{});return Void();}
     Return<void> getReservedRegion(void*,getReservedRegion_cb cb) override {cb(am::Error::UNSUPPORTED,nullptr,0);return Void();}
+#endif
     Return<void> getMapperExtensions(getMapperExtensions_cb cb) override {
         std::fprintf(stderr,"QTI_BRIDGE extensions requested\n");cb(am::Error::NONE,extension());return Void();
     }
@@ -108,7 +124,11 @@ static sp<Mapper> mapper() {static sp<Mapper> instance=new Mapper;return instanc
 
 // Only these three entrypoints are interposed in the isolated probe process.
 sp<am::IMapper> am::IMapper::getService(const std::string&,bool) {
+#ifdef SQ2_QTI_MAPPER3
+    std::fprintf(stderr,"QTI_BRIDGE local mapper3 requested\n");return sq2::mapper();
+#else
     std::fprintf(stderr,"QTI_BRIDGE local mapper4 requested\n");return sq2::mapper();
+#endif
 }
 Return<sp<qm::IQtiMapper>> qm::IQtiMapper::castFrom(const sp<am::IMapper> &parent,bool) {
     if(parent.get()!=sq2::mapper().get())return sp<qm::IQtiMapper>();

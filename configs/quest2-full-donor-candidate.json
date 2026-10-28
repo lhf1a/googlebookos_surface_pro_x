@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-28",
+  "status": "vendor_reconstructed_hash_verified_egl_gles_present",
+  "source": "https://cocaine.trade/Quest_2_firmware",
+  "url": "https://files.cocaine.trade/firmware/meta/Quest%202/q2_51584880050400150.zip",
+  "build": "51584880050400150",
+  "release": "v77",
+  "archive_bytes": 1172543128,
+  "archive_sha256_published": "f09e3a0de4d5c345975b0869d0049a339fba820cb178039287120e7247775e1b",
+  "archive_hash_verified": false,
+  "metadata_signature_verified": false,
+  "payload_offset": 3897,
+  "payload_version": 2,
+  "manifest_bytes": 92248,
+  "payload_data_absolute_offset": 96436,
+  "minor_version": 0,
+  "vendor": {
+    "bytes": 273108992,
+    "manifest_sha256": "44f90742c03c04037e378860ad493098a369d2bc752aa0d56d14f63ae91b6722",
+    "compressed_bytes": 84162032,
+    "archive_range_inclusive": [1085676686, 1169838717],
+    "operations": 131,
+    "operation_type": 8,
+    "requires_old_partition": false,
+    "operation_hashes_verified": true,
+    "image_hash_verified": true,
+    "egl_files_present": ["eglSubDriverAndroid.so", "libEGL_adreno.so", "libGLESv1_CM_adreno.so", "libGLESv2_adreno.so"]
+  },
+  "limits": "Third-party archive candidate, not authenticated OEM provenance. Private GLES 3.2 V0819.0 offscreen readback passed with mapper3 and limited ION-control adaptation. AHB rendering failed and subsequent tests caused GPU hang; not suitable for system replacement. Never flash this OTA or its partitions to Surface."
+}
