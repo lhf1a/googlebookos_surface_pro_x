@@ -46,7 +46,7 @@ def main():
     if args.gsl_dmabuf:
         # Keep the original ELF bytes/SONAME. The loader resolves the libgsl.so
         # NEEDED name through this private file; no global loader changes.
-        for name in ('gles-readback', 'libqti-mapper3-bridge.so', 'PROBE_SHA256SUMS'):
+        for name in ('gles-readback', 'libqti-mapper3-bridge.so', 'libquest2-egl-wrapper.so', 'PROBE_SHA256SUMS'):
             shutil.copyfile(probe_dir / name, output / name)
         # The modern GSL uses its actual DMA-BUF allocator, not the ION shim.
         lines = [line for line in (output / 'PROBE_SHA256SUMS').read_text().splitlines()

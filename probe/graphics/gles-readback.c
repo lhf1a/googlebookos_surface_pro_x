@@ -96,6 +96,9 @@ static int run_probe(int argc, char **argv) {
             if (android_egl) client = (void *)dlsym(android_egl,"eglGetNativeClientBufferANDROID");
         }
         PFNEGLCREATEIMAGEKHRPROC create_image = (void *)eglGetProcAddress("eglCreateImageKHR");
+        if(getenv("SQ2_GLES_DIRECT_CREATE"))create_image=(void*)dlsym(RTLD_DEFAULT,"eglCreateImageKHR");
+        Dl_info create_origin={0};
+        if(create_image && dladdr((void*)create_image,&create_origin))printf("EGL_CREATE_ORIGIN=%s\n",create_origin.dli_fname);
         destroy_image = (void *)eglGetProcAddress("eglDestroyImageKHR");
         PFNGLEGLIMAGETARGETTEXTURE2DOESPROC image_texture = (void *)eglGetProcAddress("glEGLImageTargetTexture2DOES");
         if (!client || !create_image || !destroy_image || !image_texture) fail("AHB EGL extensions");

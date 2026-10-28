@@ -6,6 +6,9 @@ WORK=${SQ2_GRAPHICS_WORK:-/root/.cache/sq2-graphics}
 NDK="$WORK/android-ndk-r28c/toolchains/llvm/prebuilt/linux-x86_64"
 OUT="$ROOT/out/quest2-gpu/gles-v77"
 mkdir -p "$OUT"
+"$NDK/bin/aarch64-linux-android35-clang" -shared -fPIC -O2 -Wall -Wextra -Werror \
+  -I"$WORK/src/mesa-26.2.4/include" "$ROOT/probe/graphics/quest2-egl-wrapper.c" \
+  -ldl -o "$OUT/libquest2-egl-wrapper.so"
 "$NDK/bin/aarch64-linux-android35-clang" -O2 -Wall -Wextra -Werror \
   -DSQ2_QUEST2_GLES -I"$WORK/src/mesa-26.2.4/include" \
   "$ROOT/probe/graphics/gles-readback.c" -Wl,-rpath,'$ORIGIN' \
@@ -33,5 +36,5 @@ VENDOR=${SQ2_ANDROID_VENDOR_LIB64:-/root/.cache/sq2-probe-build/googlebook/vendo
   -l:vendor.qti.hardware.display.mapperextensions@1.1.so \
   -l:android.hardware.graphics.mapper@3.0.so -lhidlbase -lutils -lc++ -llog -ldl \
   -o "$OUT/libqti-mapper3-bridge.so"
-(cd "$OUT"; sha256sum gles-readback libqti-mapper3-bridge.so libquest2-ion-dmaheap.so > PROBE_SHA256SUMS)
+(cd "$OUT"; sha256sum gles-readback libqti-mapper3-bridge.so libquest2-ion-dmaheap.so libquest2-egl-wrapper.so > PROBE_SHA256SUMS)
 echo QUEST2_GLES_PROBE_BUILD_OK

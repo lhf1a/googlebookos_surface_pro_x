@@ -209,6 +209,14 @@ Quest 2 v77 build 51584880050400150 来自第三方固件归档候选，来源�
 
 ## 最新：原配 GLES 的 AHB 五尺寸读回通过
 
+### 后续：独立 EGL KHR 导入包装库
+
+`quest2-egl-wrapper.c` 将 native-buffer 代理接入导出的 eglCreateImageKHR 和包装的 eglGetProcAddress。其他查询转发原配驱动；包装层拒绝的输入通过线程本地 eglGetError 报错，不将不支持的 native handle 静默传给原始强转回退。当前是私有 preload，不是完整可供系统加载的 EGL HAL：EGL 1.5 core 导入、窗口创建/交换路径、全部错误语义和多线程均未完整覆盖。
+
+构建脚本生成 libquest2-egl-wrapper.so 并纳入 PROBE_SHA256SUMS，runner 的 `--egl-wrapper` 显式选择该实验。实机未启用探针的 SQ2_GLES_NATIVE_PROXY；仅包装库创建/持有代理。先通过 eglGetProcAddress 获取 KHR 入口，150 次早销毁图像后的绘制/双重读回/拆除全部通过；再用 SQ2_GLES_DIRECT_CREATE=1 经 dlsym(RTLD_DEFAULT) 找导出入口，同样150次通过。实际入口路径指向私有包装库，映射在最终 native-buffer dec 后释放，拆除时零残留；两组退出0，框架PID保持。输出仅在忽略的 wrapper-proc-150.txt、wrapper-direct-150.txt。
+
+复现：`SQ2_GLES_DESTROY_IMAGE_EARLY=1 SQ2_GLES_REPEATS=150 sh /tmp/run-quest2-gles.sh --egl-wrapper --ahb`。不要再同时打开探针的手工代理，否则会重复包装。此步骤将生命周期逻辑从探针移到独立模块，但仍未替换系统驱动；下一步需要系统 EGL 加载方式、core 入口与 ANativeWindow 路径统一接入。
+
 ### 后续：native-buffer 引用驱动的映射释放
 
 `quest2-native-buffer-lifetime.h` 新增私有 ANativeWindowBuffer 代理，复制而不改写原对象；仅接受本目标实测的 ARM64 magic/168 字节 ABI。代理持有原对象引用，将自身原子 inc/dec 回调交给 donor，最终 dec 后先释放该缓冲区的桥接映射引用，再释放原对象。原对象存活期间 FD 有效，映射以实际 dev/ino/size 识别。新增 mapper3 retain/release 接口，只有最后一个代理引用释放时才 munmap；没有修改 mapper4 路径。
