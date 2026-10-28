@@ -28,6 +28,10 @@
 #include <unistd.h>
 #include "quest2-mapper5.h"
 #include "quest2-readback-settings.h"
+#ifdef SQ2_COMBINED_HARNESS
+extern "C" int quest2_vulkan_window_main(int, char **);
+extern "C" int quest2_combined_audit();
+#endif
 
 extern "C" const native_handle_t *AHardwareBuffer_getNativeHandle(const AHardwareBuffer *);
 
@@ -628,6 +632,15 @@ int main() {
     if (diagnostic) printf("COMPOSITION_DIAGNOSTIC_ONLY fd_growth_continuation=1 maximum_cycles=5 no_validation_pass=1\n");
     Harness h;
     if (!h.start()) return 2;
+#ifdef SQ2_COMBINED_HARNESS
+    if (!strcmp(getenv("SQ2_COMBINED_ORDER"), "vulkan-first") && quest2_combined_audit()) return 1;
+    if (!strcmp(getenv("SQ2_COMBINED_ORDER"), "egl-first")) {
+        char name[]="quest2-combined"; char *arguments[]={name,nullptr};
+        puts("COMBINED_OUTER_LIVE api=EGL nested=Vulkan");
+        if (quest2_vulkan_window_main(1,arguments)) return 1;
+        puts("COMBINED_OUTER_RESUME api=EGL");
+    }
+#endif
     if (snapshots && !fd_snapshot("initialized", 0)) return 2;
     int fd_start = fd_count(), fd_baseline = -1;
     bool ok = fd_start >= 0; unsigned passed = 0, completed = 0, fd_growth_events = 0;

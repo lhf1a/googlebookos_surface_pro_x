@@ -2,6 +2,8 @@
 
 脚本来自迭代实验室，依赖缓存和分阶段产物；全新克隆不能直接生成完整可启动 SSD。不要删除哈希或磁盘身份保护以绕过缺失输入。
 
+14库合并候选及同进程双API探针见 [QUEST2-COMBINED.md](QUEST2-COMBINED.md)。WSL执行 `prepare-quest2-combined.py` 和 `build-quest2-combined.sh`，新runner设 `SQ2_COMBINED=1`、`SQ2_COMBINED_ORDER=egl-first|vulkan-first`，入口 `--combined`。它保留正常Mesa，仅在私有namespace同时绑定两套加载入口。
+
 GLES pending fence候选：WSL执行 `python3 scripts/prepare-quest2-fence-prune.py`，需要已准备的精确zero-area候选、AArch64 GNU工具链和QEMU。输出拒绝覆盖，固定哈希，先检查实际stub指令的五类控制流。私有runner选 `SQ2_GLES_CPU_LAYOUT=4-bank15-fence-prune`；异步多层合成150轮与全屏实测见 [QUEST2-SYSTEM-GRAPHICS-PLAN.md](QUEST2-SYSTEM-GRAPHICS-PLAN.md)。这不是启动镜像安装器。
 
 v77 Vulkan raw WSI 私有候选构建及实机复现见 [QUEST2-VULKAN-WSI.md](QUEST2-VULKAN-WSI.md)：新增 `build-quest2-vulkan-window.sh` 与 `--vulkan-window-create/--vulkan-window` runner 入口；当前验证版本选择 `SQ2_V77_AHB_VIEW=1 SQ2_V77_AHB_REVISION=4`，探针目录为 `vulkan-window/`。仍需完整同步系统 namespace helper/清单并串行执行，不是正常启动安装器。

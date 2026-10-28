@@ -318,6 +318,10 @@ cleanup:
     return result;
 }
 
+#ifdef SQ2_COMBINED_HARNESS
+extern int quest2_composition_c_entry(void);
+extern int quest2_combined_audit(void);
+#endif
 int main(int argc,char **argv) {
     setvbuf(stdout,NULL,_IOLBF,0);
     int create_only=argc==2&&!strcmp(argv[1],"--create-only");
@@ -391,6 +395,14 @@ int main(int argc,char **argv) {
         uint64_t bytes=0;REQUIRE(!native_stats(&bytes)&&!bytes,"native-view registry not empty before test");
     } else puts("VULKAN_WINDOW_STATS visibility=unavailable verification=wrapper-log-required (no second adapter loaded)");
     VkQueue queue=VK_NULL_HANDLE;vkGetDeviceQueue(device,family,0,&queue);REQUIRE(queue,"device queue");
+#ifdef SQ2_COMBINED_HARNESS
+    if(!strcmp(getenv("SQ2_COMBINED_ORDER"),"egl-first")) REQUIRE(!quest2_combined_audit(),"combined binding audit");
+    if(!strcmp(getenv("SQ2_COMBINED_ORDER"),"vulkan-first")) {
+        puts("COMBINED_OUTER_LIVE api=Vulkan nested=EGL");
+        REQUIRE(!quest2_composition_c_entry(),"nested GLES composition");
+        puts("COMBINED_OUTER_RESUME api=Vulkan");
+    }
+#endif
     for(unsigned cycle=0;cycle<cycles;cycle++)if(run_cycle(instance,physical,device,queue,family,width,height,frames,cycle,create_only))goto cleanup;
     result=0;
 cleanup:

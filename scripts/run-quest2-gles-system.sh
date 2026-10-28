@@ -33,11 +33,29 @@ if [ "${SQ2_V77_AHB_VIEW:-}" = 1 ];then
     esac
 fi
 vulkan_probe=/data/local/tmp/sq2-closed/v77-vulkan-probe
+combined_probe=/data/local/tmp/sq2-closed/combined-probe
+if [ "${SQ2_COMBINED:-}" = 1 ];then
+    test -z "${SQ2_GLES_CPU_LAYOUT:-}${SQ2_GLES_DIRECT:-}${SQ2_GLES_GPU_READBACK:-}${SQ2_GLES_READBACK_POLICY:-}"
+    base=/data/local/tmp/sq2-closed/combined-v1
+    vulkan=$base
+    export SQ2_V77_AHB_VIEW=1
+fi
 if [ "${1:-}" = --inside ];then
     shift
     test "$(readlink /proc/self/ns/mnt)" != "$(readlink /proc/1/ns/mnt)"
     # The checked launcher made / recursively private, then mounted this tmpfs.
     test "$(stat -f -c %T /vendor/lib64/egl)" = tmpfs
+    if [ "${SQ2_COMBINED:-}" = 1 ];then
+        cp "$base/"*.so /vendor/lib64/egl/
+        ln -s libquest2-egl-wrapper.so /vendor/lib64/egl/libEGL_freedreno.so
+        ln -s libGLESv1_CM_adreno.so /vendor/lib64/egl/libGLESv1_CM_freedreno.so
+        ln -s libGLESv2_adreno.so /vendor/lib64/egl/libGLESv2_freedreno.so
+        mount --bind /vendor/lib64/egl/libquest2-vulkan-wrapper.so /vendor/lib64/hw/vulkan.freedreno.so
+        echo "PRIVATE_COMBINED_NAMESPACE=$(readlink /proc/self/ns/mnt)"
+        if [ "${1:-}" = --combined ];then
+            exec env -u LD_PRELOAD -u LD_LIBRARY_PATH SQ2_VULKAN_REJECT_TURNIP=1 "$combined_probe/quest2-combined"
+        fi
+    fi
     case "${1:-}" in --vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create)
         cp "$vulkan/"*.so /vendor/lib64/egl/
         vk_entry=vulkan-v77-bridge.so
@@ -69,9 +87,11 @@ if [ "${1:-}" = --inside ];then
             --ahb-cycles "${SQ2_VULKAN_AHB_CYCLES:-1}"
     ;; esac
     cp "$base/"*.so /vendor/lib64/egl/
-    ln -s libquest2-egl-wrapper.so /vendor/lib64/egl/libEGL_freedreno.so
-    ln -s libGLESv1_CM_adreno.so /vendor/lib64/egl/libGLESv1_CM_freedreno.so
-    ln -s libGLESv2_adreno.so /vendor/lib64/egl/libGLESv2_freedreno.so
+    if [ "${SQ2_COMBINED:-}" != 1 ];then
+        ln -s libquest2-egl-wrapper.so /vendor/lib64/egl/libEGL_freedreno.so
+        ln -s libGLESv1_CM_adreno.so /vendor/lib64/egl/libGLESv1_CM_freedreno.so
+        ln -s libGLESv2_adreno.so /vendor/lib64/egl/libGLESv2_freedreno.so
+    fi
     echo "PRIVATE_EGL_NAMESPACE=$(readlink /proc/self/ns/mnt)"
     if [ "${1:-}" = --composition ];then
         exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$composition/quest2-composition"
@@ -126,7 +146,7 @@ if [ "${1:-}" = --inside ];then
     fi
     exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$system_probe/gles-readback-system" "$@"
 fi
-case "${1:-}" in ''|--ahb|--window|--yuv|--visible|--readpixels|--composition|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create) ;; *) echo 'usage: run-quest2-gles-system.sh [--ahb|--window|--yuv|--visible|--readpixels|--composition|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create]' >&2;exit 2;; esac
+case "${1:-}" in ''|--ahb|--window|--yuv|--visible|--readpixels|--composition|--combined|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create) ;; *) echo 'Unsupported system graphics probe mode' >&2;exit 2;; esac
 test "$#" -le 1
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 root=/proc/1/root
@@ -138,7 +158,12 @@ check_mesa(){
 }
 check_mesa
 test "$(nsenter -t 1 -m -r -- /system/bin/getprop ro.hardware.egl)" = freedreno
-(cd "$root$base";sha256sum -c SHA256SUMS;sha256sum -c PROBE_SHA256SUMS)
+(cd "$root$base";sha256sum -c SHA256SUMS; if [ "${SQ2_COMBINED:-}" != 1 ];then sha256sum -c PROBE_SHA256SUMS;fi)
+if [ "${1:-}" = --combined ];then
+    test "${SQ2_COMBINED:-}" = 1
+    test "$(nsenter -t 1 -m -r -- /system/bin/getprop ro.hardware.vulkan)" = freedreno
+    (cd "$root$combined_probe";sha256sum -c COMBINED_PROBE_SHA256SUMS)
+fi
 (cd "$root$system_probe";sha256sum -c SYSTEM_PROBE_SHA256SUMS)
 case "${1:-}" in --vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create)
     test "$(nsenter -t 1 -m -r -- /system/bin/getprop ro.hardware.vulkan)" = freedreno
