@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+eDP v3实测更新（2026-10-29）：恢复模块依赖后已到boot_completed=1/SSH，候选哈希6293fa5d…匹配；驱动读数5.4Gbps×4、仍为2880×1920@60/24bpp，但用户报告黑屏/花屏，DPU持续vblank/commit/frame-done超时。不能称链路画面通过或90/120Hz可用。已保存状态、确认一次性env清零后远程sync+重启，用户确认桌面恢复；最后重启后的SSH未重连，未再次独立核对模块哈希。默认未提升，保留三菜单和已完成EFI清理。详见DISPLAY-REFRESH。
+
 eDP 新分支 `codex/sq2-edp-link-rates`（2026-10-29）：只读 DPCD 确认无 DSC 声明，但 eDP 1.4a 速率表最高 5.4Gbps，旧字段仅2.7Gbps；已补候选协商代码。前两次候选启动因重编 msm 缺失 depends 元数据而未加载，尚未测试到链路；自动回退后桌面/原模块恢复。v3恢复原依赖、有界本地日志，测试中，不能称5.4通过。用户指出诊断Wi-Fi flyer-test已不适用，后续不再使用该配置。用户另明确要求仅保留闭源Vulkan、原Mesa、当前调试三个菜单项，已实施；10个无引用旧initramfs经本地哈希备份后删除，EFI可用1,486,316KiB。默认内核/DTB/闭源与Mesa镜像未改。详见 [DISPLAY-REFRESH.md](DISPLAY-REFRESH.md)。
 
 启动集成完成阶段验证（2026-10-29）：runtime-v8在v7上关闭成功调用统计；新增启动助手、post-fs-data Direct配置、固定哈希打包器与离线测试。独立镜像 `5ba59bd9…` 已通过一次性真实重启，系统自动加载闭源HAL、1.1声明与Direct配置，Mesa EGL保持；SSH公钥重连正常，用户确认桌面/触摸正常。普通APK全屏120帧、计算/图像/光栅读回通过；Wild Life 5859分/35.09 FPS，40秒采样及用户目视正常，结果包SUCCESS。相同镜像已提升默认菜单，原fa64305d… Mesa镜像仍供救援及图形回退入口使用，同镜像还有 `sq2.vulkan=mesa` opt-out。未进行第二次默认入口重启或实机opt-out启动；完整标准一致性/更多格式仍开放，不能称CTS认证。01:24 system ANR另定位到Google提醒同步onStopJob超时，抓栈主线程在AppCompat配置处理，详见QUEST2-VULKAN-ONLY；未禁用用户同步。

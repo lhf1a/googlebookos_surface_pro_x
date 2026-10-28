@@ -1,6 +1,26 @@
 # SQ2 display refresh investigation — 2026-10-29
 
-## Rate-table candidate and first boot test
+## Rate-table candidate and boot tests
+
+**V3 real test reached Android boot_completed=1 and SSH. Candidate module
+hash matched. Driver debug showed capability and selected link 540000,
+four lanes, bw_code 20, lclk 540000000, unchanged 2880×1920@60/355500 kHz/24bpp.
+User reported black/corrupt display. Repeated DPU vblank/commit/frame-done
+timeouts were observed. This is a failed display test, NOT working 5.4-Gbit/s
+output or proof of panel high-refresh support. No raw DPCD lane-status snapshot
+was obtained during this boot.**
+
+When the user asked about force reboot, SSH was available; link state was
+saved to the test's ESP log directory, one-shot env was verified consumed
+(sq2_edp_once=0), then an agent-requested sync + reboot returned toward the
+normal entry. User subsequently confirmed normal desktop/lockscreen recovered.
+SSH to the previously used address did not reconnect during the final checks,
+so the last post-reboot module hash was not independently re-read. The earlier
+two rollbacks had verified original module hashes. Do not label the final
+agent-requested reboot as an autonomous crash. Do not promote v3.
+Next diagnosis must separate clock/MSA/TU/video output from receiver training
+status, with bounded logging and rollback. Do not retry the same black-screen
+candidate as a refresh-rate test.
 
 Work branch: codex/sq2-edp-link-rates. Candidate msm module SHA256
 `c04dcf94f860286d6185947003fa9b5681353681c1d8ecfb9ea5f565e0ad720e`.
@@ -44,7 +64,8 @@ It does not invent CRCs or a Module.symvers. Fixed module hash is
 `6293fa5d5cc3c462b1cee41fbf8a1eadeb6cf7e7055489b7afaf1e5999be88ac`.
 V3 addon hash `46fec013…`, combined image `7ddd4ad6…`; packer now requires
 the dependency field. V3 has bounded local snapshots every 30 seconds for
-at most 240 seconds, no diagnostic Wi-Fi. Hardware validation pending.
+at most 240 seconds, no diagnostic Wi-Fi. Hardware result is the failed
+display test described above.
 
 User subsequently requested exactly three entries: default closed Vulkan,
 original Mesa and current eDP test. Rescue, shutdown and redundant v8 opt-out
