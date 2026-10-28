@@ -3,6 +3,9 @@
 #define main unused_composition_entry
 #include "quest2-composition.cpp"
 #undef main
+#include <sys/mman.h>
+#include <sys/ioctl.h>
+#include <linux/dma-buf.h>
 
 static uint8_t usage_component(unsigned x,unsigned y,unsigned c,unsigned phase) {
     return static_cast<uint8_t>((x*(c*13+7)+y*(c*17+3)+phase*31+c*59)&255);
@@ -25,7 +28,7 @@ struct UsageCycle {
         if(output_handle)sq2::mapper5()->v5.freeBuffer(output_handle);output_handle=nullptr;
         for(auto &buffer:buffers){if(buffer)AHardwareBuffer_release(buffer);buffer=nullptr;}
     }
-    bool run(unsigned w,unsigned height,unsigned phase,uint64_t usage,GLuint pattern,GLuint copy,bool upload) {
+    bool run(unsigned w,unsigned height,unsigned phase,uint64_t usage,GLuint pattern,GLuint copy,bool upload,bool pbo,bool raw) {
         CHECK(h.current(0),"usage context");
         AIMapper *mapper=sq2::mapper5();CHECK(mapper,"usage mapper");
         ARect rect{0,0,static_cast<int32_t>(w),static_cast<int32_t>(height)};
@@ -82,9 +85,32 @@ struct UsageCycle {
             glPixelStorei(GL_UNPACK_ALIGNMENT,1);glPixelStorei(GL_UNPACK_ROW_LENGTH,0);
             glPixelStorei(GL_UNPACK_SKIP_PIXELS,0);glPixelStorei(GL_UNPACK_SKIP_ROWS,0);
             glBindTexture(GL_TEXTURE_2D,textures[0]);
-            glTexSubImage2D(GL_TEXTURE_2D,0,0,0,w,height,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+            GLuint unpack=0;
+            if(pbo){glGenBuffers(1,&unpack);glBindBuffer(GL_PIXEL_UNPACK_BUFFER,unpack);
+                glBufferData(GL_PIXEL_UNPACK_BUFFER,size_t(w)*height*4,pixels,GL_STATIC_DRAW);}
+            glTexSubImage2D(GL_TEXTURE_2D,0,0,0,w,height,GL_RGBA,GL_UNSIGNED_BYTE,pbo?nullptr:pixels);
             GLenum error=glGetError();free(pixels);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER,0);if(unpack)glDeleteBuffers(1,&unpack);
             CHECK(error==GL_NO_ERROR,"usage imported source GL upload");
+            if(raw) {
+                // Diagnostic changes ordering/cache visibility; never count
+                // its eventual GPU result as the unmodified upload path.
+                glFinish();CHECK(glGetError()==GL_NO_ERROR,"diagnostic upload finish");
+                const auto &b=layouts[0];
+                void *mapping=mmap(nullptr,b.fd_size,PROT_READ,MAP_SHARED,b.fd,0);
+                CHECK(mapping!=MAP_FAILED,"diagnostic source mapping");
+                dma_buf_sync sync{DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ};
+                int started=ioctl(b.fd,DMA_BUF_IOCTL_SYNC,&sync);size_t bad=0,nonzero=0;
+                if(!started)for(unsigned y=0;y<height;y++)for(unsigned x=0;x<w;x++)for(unsigned c=0;c<4;c++){
+                    auto value=static_cast<const uint8_t*>(mapping)[b.offset+y*b.stride+x*4+c];
+                    nonzero+=value!=0;bad+=value!=usage_component(x,y,c,phase);
+                }
+                sync.flags=DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ;
+                int ended=started?-1:ioctl(b.fd,DMA_BUF_IOCTL_SYNC,&sync);
+                munmap(mapping,b.fd_size);
+                CHECK(!started&&!ended,"diagnostic DMA read sync");
+                printf("USAGE_RAW_DIAGNOSTIC phase=%u nonzero=%zu bad=%zu bytes=%zu\n",phase,nonzero,bad,size_t(w)*height*4);
+            }
         } else {
             glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,textures[0],0);
             CHECK(glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE,"usage GPU-only source renderable");
@@ -133,6 +159,9 @@ int main() {
        !parameter("SQ2_USAGE_CYCLES",3,150,&cycles))return 2;
     const char *mode=getenv("SQ2_USAGE_UPLOAD");bool upload=mode&&!strcmp(mode,"1");
     if(mode&&!upload)return 2;
+    bool pbo=false,raw=false;
+    if(!flag("SQ2_USAGE_PBO",&pbo)||!flag("SQ2_USAGE_RAW",&raw)||((pbo||raw)&&!upload))return 2;
+    printf("USAGE_UPLOAD_MODE upload=%d pbo=%d raw_diagnostic=%d\n",upload,pbo,raw);
     const char *requested=getenv("SQ2_USAGE_SOURCE");
     if(requested){
         if(!strcmp(requested,"0x10000900"))usage=0x10000900;
@@ -160,12 +189,13 @@ void main(){color=texelFetch(src,ivec2(gl_FragCoord.xy),0);}
     if(!pattern||!copy){if(pattern)glDeleteProgram(pattern);if(copy)glDeleteProgram(copy);return 1;}
     bool ok=true;int baseline=-1;
     for(unsigned phase=0;ok&&phase<cycles;phase++) {
-        UsageCycle test(h);ok=test.run(w,height,phase,usage,pattern,copy,upload);test.cleanup();
+        UsageCycle test(h);ok=test.run(w,height,phase,usage,pattern,copy,upload,pbo,raw);test.cleanup();
         int fds=fd_count();if(!phase)baseline=fds;
         printf("USAGE_FDS phase=%u current=%d baseline=%d\n",phase,fds,baseline);ok=ok&&fds>=0&&fds==baseline;
     }
     glDeleteProgram(pattern);glDeleteProgram(copy);ok=h.cleanup()&&ok;
-    printf("USAGE_%s usage=0x%llx cycles=%u size=%ux%u init=%s\n",ok?"PASS":"FAIL",static_cast<unsigned long long>(usage),cycles,w,height,
+    printf("USAGE_%s usage=0x%llx cycles=%u size=%ux%u init=%s\n",raw?"DIAGNOSTIC":(ok?"PASS":"FAIL"),static_cast<unsigned long long>(usage),cycles,w,height,
         upload?"glTexSubImage2D":"GPU-draw");
+    if(raw){printf("USAGE_DIAGNOSTIC_ONLY pixel_result=%s\n",ok?"PASS":"FAIL");return 3;}
     return ok?0:1;
 }
