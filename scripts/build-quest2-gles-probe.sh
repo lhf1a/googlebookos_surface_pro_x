@@ -22,7 +22,10 @@ patchelf --replace-needed libandroid.so libnativewindow.so "$OUT/gles-readback"
   -o "$OUT/gles-readback-system"
 "$NDK/bin/aarch64-linux-android35-clang" -O2 -Wall -Wextra -Werror \
   "$ROOT/probe/graphics/quest2-egl-namespace.c" -o "$OUT/egl-private-namespace"
-(cd "$OUT"; sha256sum gles-readback-system egl-private-namespace > SYSTEM_PROBE_SHA256SUMS)
+"$NDK/bin/aarch64-linux-android35-clang" -O2 -Wall -Wextra -Werror \
+  "$ROOT/probe/graphics/gles-window.c" -lEGL -lGLESv2 -landroid -lmediandk -ldl \
+  -o "$OUT/gles-window"
+(cd "$OUT"; sha256sum gles-readback-system egl-private-namespace gles-window > SYSTEM_PROBE_SHA256SUMS)
 "$NDK/bin/aarch64-linux-android35-clang" -shared -fPIC -O2 -Wall -Wextra -Werror \
   "$ROOT/probe/graphics/quest2-loader-trace.c" -ldl -o "$OUT/libquest2-loader-trace.so"
 "$NDK/bin/aarch64-linux-android35-clang" -shared -fPIC -O2 -Wall -Wextra -Werror \

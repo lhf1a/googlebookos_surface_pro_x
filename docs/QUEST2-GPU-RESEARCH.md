@@ -294,6 +294,40 @@ GLES 探针新增 `SQ2_GLES_REPEATS=1..200`。每轮独立创建/销毁完整 EG
 
 Vulkan 并行进展见 [QUEST2-VULKAN-DIRECT.md](QUEST2-VULKAN-DIRECT.md)：独立 Direct 配置读取与基础读回通过，Wild Life 尚待新一轮图像正确性验证。
 
+## 原配窗口导入与 BufferQueue 生命周期（2026-10-28 后续）
+
+本阶段仍使用已固定的同一 v77 EGL/GLES/GSL/编译器八库，未改 donor 指令或芯片身份。18 个配套原始库的离线哈希审计重新通过。新增窗口导入反汇编范围也加入 `inspect-quest2-graphics-reference.py`，原始二进制和反汇编仍只保存在忽略目录。
+
+### 原配窗口路径的实际阻断点
+
+最初真实 ANativeWindow 创建后第一帧失败。原 `eglSubDriverAndroid.so` 的 callback VA 0xd3d0 提取 getPrivateFlags 的 bit3；窗口更新路径 0x1054c 的零值分支进入 0x1069c，并打印 `Buffer is not an ION buffer`，之后的正常路径才到 0x106e0 的 EglSubDriverHelperMapMemory。原先全部返回0的兼容实现因此拒绝了真实 fd-backed 像素缓冲区。
+
+仅 SQ2_QTI_MAPPER3 分支现在对已经检查过的单层、线性、无保护 RGBA 缓冲区返回0x8，保留其真实 DMA-BUF fd、长度、偏移和地址。这里是 donor 所需的旧 fd-import 兼容位，**不是声称本机通过 /dev/ion 分配**；压缩、安全及其他 QTI 位仍为0。相同窗口测试随后成功。mapper4 重建哈希仍为 `3c3e04a3e1a6e1ab19c60f3b6814d1da2f68ffd278fba7b4da7fc3240a07d54f`，未改变现有 Vulkan 桥接。旧章节的“private flags 全零”描述仅对应当时离屏检查点。
+
+### 窗口与缓冲区释放
+
+新增 `quest2-native-window-lifetime.h`，严格限定实测 ARM64 ANativeWindow magic/192字节 ABI。代理转发原窗口 query、swap interval、perform、dequeue/queue/cancel；perform 使用 ARM64 tail trampoline 保留可变参数，只替换原窗口指针。原生缓冲区代理保留真实 handle 和原对象引用，成功 queue/cancel 释放 dequeue lease，原库 inc/dec 决定剩余生命周期。64个弱索引槽不保有已排队缓冲区；回收与再次 dequeue 通过互斥锁和非零引用 CAS 避免复活已到零的代理。map 仍有128项/512MiB上限。
+
+包装库覆盖 legacy/core/EXT 窗口创建和 getProcAddress 路由；成功创建时验证原库已持有窗口引用，否则拒绝返回可能悬空的 surface。测试使用 destroy-current 后解除 current 的释放流程，**不测试已销毁 surface 上继续渲染的像素**。早期这种像素断言不成立，已从探针移除；未把它当作驱动故障或修复证据。并发 queue/cancel、失败队列路径、deprecated 回调、同一窗口原地 resize 尚未独立覆盖。
+
+### 实机结果与边界
+
+`gles-window.c` 由正常系统 libEGL/libGLESv2 调用私有 namespace 中的候选；无 LD_PRELOAD/LD_LIBRARY_PATH。ImageReader 提供实际 ANativeWindow/BufferQueue。每轮保留上一帧直到取得下一帧，强制观察两个真实 AHardwareBuffer ID 轮换。前3帧执行完整 glReadPixels；全部帧等待真实 producer fence 后比较消费者 RGBA 像素。消费者在本机为一致的垂直翻转，探针只接受严格正向或垂直翻转两种布局。
+
+| 测试 | 结果 |
+| --- | --- |
+| legacy入口，同一context创建/销毁100个窗口 | 1200帧、1200个真实fence通过；100次映射归零、100次窗口引用归零 |
+| EGL 1.5 core入口，同一context创建/销毁100个窗口 | 1200帧、1200个真实fence通过；100次deferred destroy完成 |
+| legacy，13×7、257×129、1920×1280、2880×1920 | 每尺寸12帧/12fence、两个真实缓冲区，消费者像素全部通过 |
+| 私有linked，core图像共享/错误导入/早销毁后纹理保留 | 150轮、450帧通过，引用2→1→0，显式全局reset前已无剩余映射 |
+| 系统EXT窗口入口 | 未公布EGL_EXT_platform_base，探针返回77，不计通过 |
+
+EXT的 getProcAddress 虽返回系统libEGL地址，直接调用曾得到空surface而无错误；据实际扩展列表新增严格门槛，不静默回退或计为成功。错误导入/共享引用探针需要直接可见的包装库私有符号，故其回归通过 `run-quest2-gles.sh --egl-linked --ahb` 完成；在系统分派入口设置该私有检查会被探针主动拒绝，不代表 GPU 渲染失败。
+
+最终候选包装库 SHA256 `68712421fe8b68de52d39381d678eac2abf4324328fc7d8127894b74cedab389`；linked mapper3 `3c18662fedde14ec88f4f05ed44a94594961224e93c586a125b236f0e8efa0bf`；窗口探针 `a052477da5e05d32c1c6d0628a9812492232c04c5efeedc376bda5a5508481b7`。原始记录在 out/quest2-gpu/gles-linked，早期仅legacy候选在 gles-linked-window-legacy，上一阶段系统离屏候选在 gles-linked-before-window。
+
+所有完成的测试 boot ID 和 system_server/SurfaceFlinger PID 保持，screen-only=Y，默认 Mesa EGL/Vulkan 完整哈希不变，最终筛选 GPU fault/hang 日志无输出。**ImageReader消费不是可见SurfaceFlinger呈现；完整系统替换仍未完成。** 下一步是多平面视频/其他格式、可见应用窗口、合成器、持久化和重启验证。不要把候选直接设为默认桌面。
+
 ## 同一固件配套参考与布局对照（2026-10-28 后续）
 
 用户要求从 Quest 2 固件提取整套 GPU 驱动并直接参考实现。当前主参考统一为上述 v77 vendor，而不是把第三方 Vulkan 重打包与任意 GLES 组合当成原厂整套。`configs/quest2-v77-graphics-reference.json` 新增固定原配 Vulkan、mapper3 实现、gralloc.kona、gralloc core/utils、qdMetaData 及 QTI 接口库哈希；连同既有 EGL/GLES 清单共 18 个文件。它们都来自同一个已校验 vendor 分区。尚未认证 OEM 签名，主机侧抽取文件也不等于这些 HAL 已能在 Surface 加载运行。

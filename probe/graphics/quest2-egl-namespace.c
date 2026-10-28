@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 int main(int argc,char **argv){
-    if(argc>2||(argc==2&&strcmp(argv[1],"--ahb")))return 2;
+    if(argc>2||(argc==2&&strcmp(argv[1],"--ahb")&&strcmp(argv[1],"--window")))return 2;
     struct stat init_ns,self_ns;
     if(geteuid()!=0||stat("/proc/1/ns/mnt",&init_ns)||unshare(CLONE_NEWNS)||
        stat("/proc/self/ns/mnt",&self_ns)||self_ns.st_ino==init_ns.st_ino){
@@ -18,6 +18,6 @@ int main(int argc,char **argv){
         perror("private EGL mount");return 1;
     }
     execl("/system/bin/sh","sh","/data/local/tmp/sq2-closed/run-quest2-gles-system.sh",
-          "--inside",argc==2?"--ahb":NULL,(char*)NULL);
+          "--inside",argc==2?argv[1]:NULL,(char*)NULL);
     perror("private EGL exec");return 1;
 }

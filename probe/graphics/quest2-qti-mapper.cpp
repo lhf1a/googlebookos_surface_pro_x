@@ -132,7 +132,15 @@ struct Extensions final : qe1::IQtiMapperExtensions {
     GETTER(getId, b.id, uint64_t)
     GETTER(getUsageFlags, b.usage, uint64_t)
     GETTER(getFormat, b.format, int32_t)
+#ifdef SQ2_QTI_MAPPER3
+    // v77 op 24 extracts bit 3 and refuses window buffers without it, before
+    // calling its fd/size/offset MapMemory path. For validated minigbm DMA-BUFs
+    // this is a legacy QTI fd-backed-import compatibility bit, not a claim that
+    // allocation used /dev/ion. Keep compression/security/layout bits clear.
+    GETTER(getPrivateFlags, 0x8, int32_t)
+#else
     GETTER(getPrivateFlags, 0, int32_t)
+#endif
 #undef GETTER
     Return<void> getFd(void *buffer,getFd_cb cb) override {
         BufferInfo b;bool ok=info(buffer,b,__func__);

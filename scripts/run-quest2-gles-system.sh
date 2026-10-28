@@ -14,9 +14,12 @@ if [ "${1:-}" = --inside ];then
     ln -s libGLESv1_CM_adreno.so /vendor/lib64/egl/libGLESv1_CM_freedreno.so
     ln -s libGLESv2_adreno.so /vendor/lib64/egl/libGLESv2_freedreno.so
     echo "PRIVATE_EGL_NAMESPACE=$(readlink /proc/self/ns/mnt)"
+    if [ "${1:-}" = --window ];then
+        exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$system_probe/gles-window"
+    fi
     exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$system_probe/gles-readback-system" "$@"
 fi
-case "${1:-}" in ''|--ahb) ;; *) echo 'usage: run-quest2-gles-system.sh [--ahb]' >&2;exit 2;; esac
+case "${1:-}" in ''|--ahb|--window) ;; *) echo 'usage: run-quest2-gles-system.sh [--ahb|--window]' >&2;exit 2;; esac
 test "$#" -le 1
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 root=/proc/1/root

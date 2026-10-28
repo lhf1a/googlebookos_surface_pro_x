@@ -4,7 +4,8 @@
 #pragma once
 #include <stdatomic.h>
 #include <stdbool.h>
-struct sq2_native_proxy {unsigned char bytes[168];void *original;atomic_int refs;void *handle;void (*release)(void*);};
+struct sq2_native_proxy {unsigned char bytes[168];void *original;atomic_int refs;void *handle;void (*release)(void*);
+    void (*on_zero)(struct sq2_native_proxy*,void*);void *owner;};
 static void sq2_native_dec(void *common);
 static void sq2_native_inc(void *common){
     struct sq2_native_proxy *p=common;
@@ -16,6 +17,7 @@ static void sq2_native_dec(void *common){
     int count=atomic_fetch_sub(&p->refs,1)-1;
     fprintf(stderr,"NATIVE_PROXY_DEC refs=%d\n",count);
     if(!count){
+        if(p->on_zero)p->on_zero(p,p->owner);
         p->release(p->handle);
         void (*dec)(void*)=NULL;memcpy(&dec,(char*)p->original+48,sizeof(dec));
         dec(p->original);free(p);

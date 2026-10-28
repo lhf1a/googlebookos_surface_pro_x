@@ -14,6 +14,8 @@
 
 ## 当前待办
 
+- Quest 2 原配 GLES 的 ANativeWindow/BufferQueue 路径已推进：参考 v77 eglSubDriverAndroid 的 flags bit3 判断，mapper3 对已验证的线性 RGBA fd-backed 缓冲区提供该兼容位；新增窗口代理按真实 dequeue/queue/cancel 与 donor 引用释放映射。Android 系统加载器下 legacy/core 两入口各100轮、1200帧精确读回通过，四个额外尺寸至2880×1920各12帧通过；legacy每轮映射/窗口引用均回到零。私有链接的共享图像/错误导入150轮回归通过。系统未公布 EGL_EXT_platform_base，EXT测试明确返回77（不支持，不计通过）。正常 Mesa/boot ID/框架 PID 保持。下一步仍是多平面视频、可见窗口和 SurfaceFlinger；ImageReader BufferQueue 不是桌面呈现证明。详见 QUEST2-GPU-RESEARCH 的「原配窗口导入与 BufferQueue 生命周期」。
+
 - 最新闭源 GLES 已通过 Android 系统加载器：独立 mount namespace 中用系统 libEGL/libGLESv2 加载 v77 包装/桥接/原配库，无 LD_PRELOAD/LD_LIBRARY_PATH。EGL 1.5 core 150 轮、五尺寸线性 RGBA 双重读回与普通离屏路径通过，默认桌面 Mesa、boot ID/框架 PID 均不变。core/KHR 四种私有入口的共享引用与错误导入释放也各150轮通过。下一步是 ANativeWindow 交换、视频多平面、合成器和持久化，完整系统替换仍未完成。详见 QUEST2-GPU-RESEARCH「EGL 1.5 与 Android 系统加载器接入」；以下阶段记录保留历史证据，旧的 core/系统加载未覆盖已由本条更新。
 
 - EGL 包装模块已新增：KHR 原生图像导入的导出符号和 getProcAddress 两入口统一代理；未启用探针手工代理的两组各150次循环实测通过，最终映射零残留。仍是私有 preload，EGL1.5 core、窗口交换与系统加载尚未覆盖，不是已完成系统替换。详见 QUEST2-GPU-RESEARCH。

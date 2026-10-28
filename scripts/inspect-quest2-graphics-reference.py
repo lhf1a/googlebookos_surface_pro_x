@@ -41,6 +41,9 @@ def main():
         'libgrallocutils.so': [(0xb480, 0xb590), (0xff60, 0x100d0)],
         'libadreno_utils.so': [(0x10eb8, 0x10edc)],
         'libgsl.so': [(0x20f260, 0x20f858)],
+        # Window import rejects handles without the legacy fd-backed bit 3;
+        # getter callback 0xd3d0 and consumer branch 0x1054c are paired evidence.
+        'egl/eglSubDriverAndroid.so': [(0xd3d0, 0xd420), (0x104ec, 0x10720)],
     }
     for name, spans in ranges.items():
         for start, end in spans:
