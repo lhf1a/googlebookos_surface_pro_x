@@ -1,5 +1,13 @@
 # SQ2 display refresh investigation — 2026-10-29
 
+Final recovery follow-up: after the user reported connectivity restored, SSH
+verified boot_completed=1, original msm SHA256 f69c91e7… matching the full
+pinned original hash, screen_only=Y, default closed-Vulkan command line with
+no eDP test/debug flags, and consumed sq2_edp_once=0. Live display returned
+to 2.7 Gbit/s × four lanes, 2880×1920@60, 355500 kHz, 24 bpp. This closes
+the post-reboot verification gap recorded below. V3 logs were retrieved into
+ignored out/display-refresh; no new mode switch or reboot was performed.
+
 ## Rate-table candidate and boot tests
 
 **V3 real test reached Android boot_completed=1 and SSH. Candidate module

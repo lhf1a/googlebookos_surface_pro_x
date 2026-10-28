@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+eDP最终回退补验：用户恢复连接后，SSH已核对原msm完整哈希f69c91e7…、boot_completed=1、screen_only=Y、默认闭源入口无测试/debug参数、一次性env=0。实时链路恢复2.7Gbps×4、2880×1920@60/355500kHz/24bpp；上一轮v3日志已取回out。下文“最后重启后未复核”缺口现已关闭，无新增切换或重启。
+
 eDP v3实测更新（2026-10-29）：恢复模块依赖后已到boot_completed=1/SSH，候选哈希6293fa5d…匹配；驱动读数5.4Gbps×4、仍为2880×1920@60/24bpp，但用户报告黑屏/花屏，DPU持续vblank/commit/frame-done超时。不能称链路画面通过或90/120Hz可用。已保存状态、确认一次性env清零后远程sync+重启，用户确认桌面恢复；最后重启后的SSH未重连，未再次独立核对模块哈希。默认未提升，保留三菜单和已完成EFI清理。详见DISPLAY-REFRESH。
 
 eDP 新分支 `codex/sq2-edp-link-rates`（2026-10-29）：只读 DPCD 确认无 DSC 声明，但 eDP 1.4a 速率表最高 5.4Gbps，旧字段仅2.7Gbps；已补候选协商代码。前两次候选启动因重编 msm 缺失 depends 元数据而未加载，尚未测试到链路；自动回退后桌面/原模块恢复。v3恢复原依赖、有界本地日志，测试中，不能称5.4通过。用户指出诊断Wi-Fi flyer-test已不适用，后续不再使用该配置。用户另明确要求仅保留闭源Vulkan、原Mesa、当前调试三个菜单项，已实施；10个无引用旧initramfs经本地哈希备份后删除，EFI可用1,486,316KiB。默认内核/DTB/闭源与Mesa镜像未改。详见 [DISPLAY-REFRESH.md](DISPLAY-REFRESH.md)。
