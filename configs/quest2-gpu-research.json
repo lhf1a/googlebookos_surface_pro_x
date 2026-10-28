@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-28",
+  "branch": "codex/quest2-proprietary-gpu",
+  "baseline_commit": "e1b523c137d187f4ff1d246eef3dfa03a62b2986",
+  "stage": "source_and_interface_audit",
+  "deployed": false,
+  "donor_userspace": null,
+  "kernel_source": {
+    "repository": "https://github.com/facebookincubator/oculus-linux-kernel",
+    "branch": "oculus-quest2-kernel-master",
+    "commit": "e8c2245c4ca511a8208568e713b14500f252c0ec",
+    "version": "4.19.325",
+    "files_sha256": {
+      "Makefile": "caa2978ac92e7f60f2518b2cb7ab635e1dbb6408046361198f1cd007675dc781",
+      "drivers/gpu/msm/adreno-gpulist.h": "43ddb48626efc8af3c1fbccea20f5bffbd6d062c864d278ae54b3286110153d4",
+      "drivers/gpu/msm/Kconfig": "1b07711c022d88d2e76c14ca8cab4765db8ad3384a2f51cbdaa890ca6e4541fb",
+      "include/uapi/linux/msm_kgsl.h": "8aeec9ea5cc0da711d7c590bd03eb5d641a4083b9c4762ca48d5b4425957bc6f"
+    }
+  },
+  "observations": [
+    "Quest 2 public KGSL source contains distinct A650 and A680 core entries; this does not prove closed userspace supports A680.",
+    "A650 GMEM is 1152 KiB; A680 GMEM is 2048 KiB in the inspected source.",
+    "A650 uses a650_sqe/a650_gmu; the generic A680 entry uses a630_sqe/a640_gmu. These are source declarations, not permission to replace Surface firmware.",
+    "Local Mesa 26.2.4 assigns A650 gen3/3 CCUs and A680 gen2/4 CCUs, with different tile geometry.",
+    "Current SQ2 uses MSM DRM, not KGSL; frequency changes do not implement the KGSL userspace ABI."
+  ]
+}
