@@ -1,5 +1,12 @@
 # SQ2 适配待办
 
+## 当前：同版 Quest 2 闭源图形栈接入
+
+- 完整vendor参考已提取，原18库与新增70项显示组件哈希已核对；来源与ABI差异见 [QUEST2-VENDOR-REFERENCE.md](QUEST2-VENDOR-REFERENCE.md)。尚缺同版system/odm内必要依赖的按需提取和完整内核接口审计，不跨版本随意补库。
+- 原配GLES通过系统加载、RGBA窗口/YUV线性路径和有限可见SF合成；后者是闭源producer + Mesa SF，并非桌面整套替换。
+- 优先解决内部纹理client-memory读回。relay通过，PBO仅部分尺寸通过；有效阈值已读取为FFFFFFFF/0，私有零配置尚无效。见 [QUEST2-READBACK-REFERENCE.md](QUEST2-READBACK-REFERENCE.md)。
+- 之后覆盖RGBX等合成格式、真实视频及SF自身加载，再接同版Vulkan系统路径、持久化与重启。保留正常Mesa入口和所有已验证输入/音频/存储/温控/关屏保护。
+
 ## P1：3DMark Wild Life 花屏（2026-10-28）
 
 - 用户报告 Wild Life 可运行完成并生成结果，但测试画面花屏。完成跑分不能作为 Vulkan 渲染正确的证据。

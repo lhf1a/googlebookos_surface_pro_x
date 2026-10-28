@@ -14,6 +14,10 @@
 
 ## 当前待办
 
+- Quest 2 同版参考已进一步补全：完整 v77 vendor 只读提取出906个普通文件（269359659字节），新增70项显示服务/SDM/allocator/配置/固件哈希清单，连同原18库复核通过。提取内容和原始反汇编留在out；只提交工具、清单和说明。见 [QUEST2-VENDOR-REFERENCE.md](QUEST2-VENDOR-REFERENCE.md)。旧ION、QTI mapper3及SDE私有接口仍需适配，A650固件仅离线参考，不替换Surface A680.1固件。
+- 闭源 GLES 可见窗口已实测：私有namespace内app_process + SurfaceControl/JNI直接通过系统EGL生成640×360缓冲区，现有Mesa SurfaceFlinger进行CLIENT合成。两次各300帧；第二次同步首帧后截图的230400像素全部精确匹配，引用/映射归零，boot/框架PID保持。首图截早了，不计画面通过。**这不是SurfaceFlinger本身的闭源替换。** 正常启动和默认Mesa哈希未变。
+- 内部RGBA纹理问题范围已收窄：640×360先画内部纹理、再由GPU采样到线性AHB的双读回通过；640×360 PBO读回通过，但264×136 PBO失败。不能继续把直接client-memory glReadPixels的失败直接等同于内部纹理损坏。新只读诊断核对原库Build ID/指令及实际context后，默认和两键零配置均读到字节阈值FFFFFFFF、比例阈值0；配置尚未解决失败。具体证据见 [QUEST2-READBACK-REFERENCE.md](QUEST2-READBACK-REFERENCE.md)。下一步定位CPU转换描述/路径策略，随后覆盖其他合成格式、SF自身、Vulkan配套加载与持久化。
+
 - 闭源 GLES 多平面新进展：mapper3 按真实 mapper5 PlaneLayouts 解析 YV12/NV12，返回真实 Y/Cb/Cr 地址和步长；格式35仅在证实NV12布局后翻译为QTI具体格式0x109。两格式640×360各30帧，264×136、1280×720、1920×1080、2880×1920各3帧，均经外部YUV纹理→线性RGBA AHB→glReadPixels及CPU读回通过，4×4变色网格最大误差1，释放回零，mapper4哈希不变。**新的整套替换阻断点：原库内部RGBA纹理作为输出时，640×360纯RGB/YUV对照均有损坏；640×384及线性AHB输出通过。** 不能将成功的线性路径等同于内部纹理修复。ESX私有Direct候选配置没有改善此失败；并非已证实GMEM根因。下一步优先查内部纹理的布局/压缩/对齐，随后接可见窗口与SF。lockYCbCr适配已编译但该回调未在此矩阵中独立触发验证。详见 QUEST2-GPU-RESEARCH「YUV多平面与内部纹理阻断点」。
 
 - Quest 2 原配 GLES 的 ANativeWindow/BufferQueue 路径已推进：参考 v77 eglSubDriverAndroid 的 flags bit3 判断，mapper3 对已验证的线性 RGBA fd-backed 缓冲区提供该兼容位；新增窗口代理按真实 dequeue/queue/cancel 与 donor 引用释放映射。Android 系统加载器下 legacy/core 两入口各100轮、1200帧精确读回通过，四个额外尺寸至2880×1920各12帧通过；legacy每轮映射/窗口引用均回到零。私有链接的共享图像/错误导入150轮回归通过。系统未公布 EGL_EXT_platform_base，EXT测试明确返回77（不支持，不计通过）。正常 Mesa/boot ID/框架 PID 保持。下一步仍是多平面视频、可见窗口和 SurfaceFlinger；ImageReader BufferQueue 不是桌面呈现证明。详见 QUEST2-GPU-RESEARCH 的「原配窗口导入与 BufferQueue 生命周期」。

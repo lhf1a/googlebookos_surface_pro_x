@@ -35,6 +35,12 @@ build-test3-ssh.sh 要求 SQ2_AUTHORIZED_KEY_FILE 指向自己的公钥；主机
 
 ## 增量打包及安装
 
+Quest 2同版完整参考：`extract-quest2-v77-reference.py IMAGE NEW_OUT_DIR`先核对固定vendor分区哈希，再以只读debugfs逐个提取普通文件并生成inventory.json；不挂载、不创建镜像内符号链接、不操作设备。`inspect-quest2-graphics-reference.py`现在同时校验原18库与新增70项显示参考，需要先生成`out/quest2-gpu/vendor-reference-v77`。来源和接口边界见 [QUEST2-VENDOR-REFERENCE.md](QUEST2-VENDOR-REFERENCE.md)。
+
+闭源GLES可见窗口：`bash scripts/build-quest2-visible.sh`生成独立dex JAR/JNI库/VISIBLE_SHA256SUMS；只将这三项复制到Android的`/data/local/tmp/sq2-closed/visible/`。同步最新系统探针、namespace helper、SYSTEM_PROBE_SHA256SUMS和`run-quest2-gles-system.sh`后，从retained root运行`sh /proc/1/root/data/local/tmp/sq2-closed/run-quest2-gles-system.sh --visible`。runner先复制zygote classpath，再进入私有挂载空间直接exec app_process；不能在里面调用会重新nsenter PID1的run-android-java。窗口只显示5秒，外部25秒超时，结束完整释放并退出。采样必须等到日志VISIBLE_FRAME，固定启动后2秒可能还没有图像。它验证闭源producer→现有Mesa SF，并不替换SF。
+
+内部纹理读回诊断：`SQ2_YUV_RELAY_OUTPUT=1`增加内部纹理→线性AHB采样；`SQ2_YUV_PBO_READBACK=1`改用像素包缓冲区。这两项是定位工具，PBO小尺寸仍失败。`SQ2_YUV_LOG_READBACK_SETTINGS=1`启用版本/指令受限的只读context阈值记录；`SQ2_GLES_GPU_READBACK=1`在私有/data/vendor tmpfs写两个零阈值候选，最终字段仍为FFFFFFFF/0，没有解决直接读回。不要把这些诊断变量加入正常启动。见 [QUEST2-READBACK-REFERENCE.md](QUEST2-READBACK-REFERENCE.md)。
+
 YUV探针：上述构建另生成 `yuv-info`（只分配并解析元数据）和 `yuv-readback`。系统清单现在包含系统RGBA探针、namespace helper、窗口探针和YUV探针四项，需完整同步。独立入口 `SQ2_YUV_LINEAR_OUTPUT=1 sh /proc/1/root/data/local/tmp/sq2-closed/run-quest2-gles-system.sh --yuv` 默认640×360 YV12三帧；`SQ2_YUV_NV12=1`请求格式35，`SQ2_YUV_FRAMES=30`进行连续创建/销毁，宽高用 SQ2_YUV_WIDTH/HEIGHT（网格要求8的倍数）。不设置 LINEAR_OUTPUT 则使用原库内部RGBA纹理，当前640×360仍失败，必须保留这一对照。`SQ2_GLES_DIRECT=1`只在私有namespace的/data/vendor临时tmpfs中写ESX候选配置，目前未改善该失败，不能当成修复或正常部署配置。
 
 窗口交换探针：`build-quest2-gles-probe.sh` 另生成 `gles-window`，须与 `gles-readback-system`、`egl-private-namespace` 和新的三项 `SYSTEM_PROBE_SHA256SUMS` 一起同步至设备的私有 gles-v77 目录。重新生成并同步 gles-linked 候选（包含窗口代理和 mapper3 fd-backed 兼容位），不能只换探针后使用旧库。运行 `SQ2_WINDOW_ENTRY=core SQ2_WINDOW_CYCLES=100 SQ2_WINDOW_DESTROY_CURRENT=1 sh /proc/1/root/data/local/tmp/sq2-closed/run-quest2-gles-system.sh --window`；legacy入口同样可选，宽高用 SQ2_WINDOW_WIDTH/HEIGHT，默认每轮12帧。通过真实 ImageReader/BufferQueue 校验交换、fence、像素和释放，不创建可见桌面窗口。EXT入口需系统宣告 EGL_EXT_platform_base；本机未宣告，返回77并明确不计通过。所有 GPU 探针串行运行。

@@ -23,11 +23,29 @@ def main():
     for name, digest in files.items():
         if hashlib.sha256((source / name).read_bytes()).hexdigest() != digest:
             raise ValueError('Unexpected firmware library: ' + name)
+    display = json.loads((ROOT / 'configs/quest2-v77-display-reference.json').read_text(encoding='utf-8-sig'))
+    display_root = ROOT / display['reference_root']
+    for name, digest in display['files'].items():
+        path = display_root / name.lstrip('/')
+        if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raise ValueError('Unexpected display reference: ' + name)
     output.mkdir(parents=True, exist_ok=True)
-    report = {'build': '51584880050400150', 'oem_signature_verified': False, 'libraries': {}}
+    report = {'build': '51584880050400150', 'oem_signature_verified': False, 'libraries': {},
+              'display_reference': {'verified_files': len(display['files']), 'elf_dependencies': {}}}
     for name, digest in files.items():
         dynamic = subprocess.check_output(['aarch64-linux-gnu-readelf', '-d', str(source / name)], text=True)
         report['libraries'][name] = {
+            'sha256': digest,
+            'needed': re.findall(r'\(NEEDED\).*\[(.*?)\]', dynamic),
+            'soname': re.findall(r'\(SONAME\).*\[(.*?)\]', dynamic),
+        }
+    for name, digest in display['files'].items():
+        path = display_root / name.lstrip('/')
+        with path.open('rb') as handle:
+            if handle.read(4) != b'\x7fELF':
+                continue
+        dynamic = subprocess.check_output(['aarch64-linux-gnu-readelf', '-d', str(path)], text=True)
+        report['display_reference']['elf_dependencies'][name] = {
             'sha256': digest,
             'needed': re.findall(r'\(NEEDED\).*\[(.*?)\]', dynamic),
             'soname': re.findall(r'\(SONAME\).*\[(.*?)\]', dynamic),
@@ -53,7 +71,7 @@ def main():
                 f'--stop-address={end}', str(source / name)], text=True)
             (output / f'{Path(name).name}-{start:x}.disasm').write_text(text)
     (output / 'inventory.json').write_text(json.dumps(report, indent=2) + '\n')
-    print(f'QUEST2_MATCHED_GRAPHICS_REFERENCE_OK libraries={len(files)}')
+    print(f'QUEST2_MATCHED_GRAPHICS_REFERENCE_OK libraries={len(files)} display_files={len(display["files"])}')
 
 
 if __name__ == '__main__':

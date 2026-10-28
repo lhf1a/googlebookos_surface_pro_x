@@ -330,6 +330,8 @@ EXT的 getProcAddress 虽返回系统libEGL地址，直接调用曾得到空surf
 
 ## YUV多平面与内部纹理阻断点（2026-10-28 后续）
 
+本节原始“内部纹理损坏”判断已由下方「读回路径收窄」更新：relay表明相应内部纹理可以被GPU正确采样，失败更明确地位于读回路径。保留旧记录用于复现，不将它当作已确定的渲染或压缩根因。
+
 新增独立 `quest2-yuv-metadata.h`，保留原 mapper4/single-plane 解码路径不变。mapper3 的新路径严格解析标准 PlaneLayouts 的组件类型、位偏移、步长、尺寸、子采样和实际 fd 大小；拒绝未知格式、保护/压缩、非8位组件、平面重叠和越界。不按 QTI handle 强转，也不把多个平面压成一个 RGBA 平面。支持范围限定为实际 YV12三平面与格式35分配出的NV12两平面，非任意 flexible YUV。
 
 实测640×360元数据：
@@ -367,9 +369,38 @@ EXT的 getProcAddress 虽返回系统libEGL地址，直接调用曾得到空surf
 
 原始数据仅在out/quest2-gpu/gles-linked和gles-linked-yuv-initial；先前窗口检查点已保留于gles-linked-window-adef289。下一步还包括可见窗口、RGBX等合成格式、SurfaceFlinger/应用覆盖、Vulkan系统接入、持久化与重启。当前系统仍为Mesa，完整替换保持未完成。
 
+### 读回路径收窄与原实现参考
+
+新增两个纯诊断模式，原驱动指令未修改：
+
+| 对照 | 实测结果 | 能支持的结论 |
+| --- | --- | --- |
+| 640×360 YV12→内部RGBA→直接client-memory glReadPixels | 首帧16032错误通道，从x2/y82开始；GL/EGL没有报告错误 | 当前直接读回不正确 |
+| 同一内部RGBA再由sampler2D采样到线性AHB（SQ2_YUV_RELAY_OUTPUT=1） | 三帧，glReadPixels和AHB CPU两条oracle均通过，最大误差1 | 此场景内部绘制/纹理采样可正确，不支持直接认定纹理内容损坏 |
+| 640×360 YV12→内部RGBA→PBO（SQ2_YUV_PBO_READBACK=1） | 三帧通过，最大误差1 | 此尺寸PBO路径可用 |
+| 264×136 NV12→内部RGBA→PBO | 首帧7180错误通道，首错x80/y2 | PBO还不是通用绕过；未将其加到系统包装层 |
+
+原始证据为忽略目录中的yuv-relay.txt、yuv-pbo-current.txt、pbo-size-matrix.txt。早期yuv-pbo.txt运行于构建失败后的旧探针，没有PBO标记，不计PBO证据。后续带settings诊断的640×360 PBO三帧复跑也通过。
+
+原配ReadPixels从0x17f698进入0x1bb4e0，CPU转换路径经0x11add0→0x296390→0x2904b8。配置键0x0388d1af、0x3497955d对应字节与百分比阈值；后初始化策略会将字段设为FFFFFFFF/0。私有SQ2_GLES_GPU_READBACK=1写两键0，strace确认原库完整读取配置内容；版本/指令受限的只读context诊断也成功，但默认及候选均最终读出FFFFFFFF/0，像素错误不变。不能把文件存在或已读取称为有效策略切换。具体VA、立即数语义、TBI指针处理和限制见 [QUEST2-READBACK-REFERENCE.md](QUEST2-READBACK-REFERENCE.md)。
+
+这些测试没有关闭温控、改变芯片身份、写正常启动镜像或全局ESX配置。正常Mesa哈希、boot ID及框架PID保持。CPU转换参数/原库初始化校正的因果关系仍待进一步验证。
+
+## 闭源 GLES 可见 SurfaceFlinger 窗口（2026-10-28 后续）
+
+新增独立Java SurfaceControl + JNI探针，在原有私有EGL挂载空间内启动app_process。使用实际Display 0 layer stack，创建位于(64,64)的640×360 RGBA窗口；Surface生成BLASTBufferQueue，GLES以系统libEGL/libGLESv2入口调用同版v77候选，每秒改变蓝色分量，运行5秒后释放并退出。没有重新进入PID1挂载空间，没有安装APK或替换系统SurfaceFlinger。
+
+两次各完成300次绘制/交换，原配GLES V@0819.0、wrapper/GSL/mapper3映射和系统EGL入口均确认。每次结束三个缓冲区映射及窗口引用均回零，boot ID和system_server/SurfaceFlinger PID保持，默认Mesa哈希不变。第一轮在启动后固定2秒截图，尚未采到窗口，不计视觉通过。第二轮等日志VISIBLE_FRAME后截图，左上四色区域可见；对原尺寸截图的230400像素逐个核对，错误像素0、最大通道误差0。
+
+同期SurfaceFlinger dump确认该BLAST层可见、实际640×360 source crop、显示区域(64,64)-(704,424)、CLIENT合成，RenderEngine有三张640×360缓存。对应gralloc使用0x10000900、RGBA8888、modifier0、compressed=false，区别于之前ImageReader的CPU_READ消费路径。该结果是**闭源producer→现有Mesa SF合成**，不是闭源SF/整个桌面已验证，也不是逐帧验证这600帧。
+
+编译SDK为Android35，当前缓存Googlebook系统为Android17/SDK37；隐藏接口已先在其实际framework.jar核对，随后本次现场调用通过。JAR SHA256为c45415945a48828bb4f25db0582797ea1f8788a854b6986ae63a9ee772fa923e，JNI为408a5c5572147db3cc34136146ff63cd5be8d3b8ad1ffc192531c59f2a259b35。原始截图、SF dump、进程映射和日志仅在out/quest2-gpu/visible，二进制不入Git。复现见BUILD的可见窗口流程。
+
 ## 同一固件配套参考与布局对照（2026-10-28 后续）
 
 用户要求从 Quest 2 固件提取整套 GPU 驱动并直接参考实现。当前主参考统一为上述 v77 vendor，而不是把第三方 Vulkan 重打包与任意 GLES 组合当成原厂整套。`configs/quest2-v77-graphics-reference.json` 新增固定原配 Vulkan、mapper3 实现、gralloc.kona、gralloc core/utils、qdMetaData 及 QTI 接口库哈希；连同既有 EGL/GLES 清单共 18 个文件。它们都来自同一个已校验 vendor 分区。尚未认证 OEM 签名，主机侧抽取文件也不等于这些 HAL 已能在 Surface 加载运行。
+
+本次进一步以只读debugfs提取整个vendor的906个普通文件（269359659字节），包含原先未取出的服务、配置、32位库和A650固件；符号链接和特殊文件只记录。新增70项配套显示清单与原18库均复核通过。详细来源、提取命令、ION/SDE/KGSL接口差异、同版缺失依赖及固件边界见 [QUEST2-VENDOR-REFERENCE.md](QUEST2-VENDOR-REFERENCE.md)。该提取不运行原厂服务、不将整个vendor复制到Surface。
 
 可复现提取与审计：
 

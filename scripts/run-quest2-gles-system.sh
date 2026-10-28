@@ -4,6 +4,7 @@
 set -eu
 base=/data/local/tmp/sq2-closed/gles-linked
 system_probe=/data/local/tmp/sq2-closed/gles-v77
+visible=/data/local/tmp/sq2-closed/visible
 if [ "${1:-}" = --inside ];then
     shift
     test "$(readlink /proc/self/ns/mnt)" != "$(readlink /proc/1/ns/mnt)"
@@ -14,13 +15,22 @@ if [ "${1:-}" = --inside ];then
     ln -s libGLESv1_CM_adreno.so /vendor/lib64/egl/libGLESv1_CM_freedreno.so
     ln -s libGLESv2_adreno.so /vendor/lib64/egl/libGLESv2_freedreno.so
     echo "PRIVATE_EGL_NAMESPACE=$(readlink /proc/self/ns/mnt)"
-    if [ "${SQ2_GLES_DIRECT:-}" = 1 ];then
+    if [ "${SQ2_GLES_DIRECT:-}" = 1 ] || [ "${SQ2_GLES_GPU_READBACK:-}" = 1 ];then
         test "$(stat -f -c %T /data/vendor)" = tmpfs
         mkdir /data/vendor/gpu
+        printf '0x0=0x08675309\n' > /data/vendor/gpu/esx_config.txt
+    fi
+    if [ "${SQ2_GLES_DIRECT:-}" = 1 ];then
         # v77 ESX parser: magic header; setting 0x375d04e5 uses the enum table
         # at VA 0x3fabe8 (Direct=0), stored at settings+0x1ee0.
-        printf '0x0=0x08675309\n0x375d04e5=Direct\n' > /data/vendor/gpu/esx_config.txt
+        printf '0x375d04e5=Direct\n' >> /data/vendor/gpu/esx_config.txt
         echo PRIVATE_ESX_DIRECT_CONFIG
+    fi
+    if [ "${SQ2_GLES_GPU_READBACK:-}" = 1 ];then
+        # v77 numeric readback thresholds settings+9596/+9600. Later device
+        # policy can override these; this is an experiment, not a known fix.
+        printf '0x0388d1af=0\n0x3497955d=0\n' >> /data/vendor/gpu/esx_config.txt
+        echo PRIVATE_ESX_GPU_READBACK_CONFIG
     fi
     if [ "${1:-}" = --window ];then
         exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$system_probe/gles-window"
@@ -28,9 +38,14 @@ if [ "${1:-}" = --inside ];then
     if [ "${1:-}" = --yuv ];then
         exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$system_probe/yuv-readback"
     fi
+    if [ "${1:-}" = --visible ];then
+        # Already inside the private namespace: never re-enter PID 1 mounts here.
+        exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "CLASSPATH=$visible/quest2-visible.jar" \
+            /system/bin/app_process /system/bin Sq2Quest2Visible
+    fi
     exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$system_probe/gles-readback-system" "$@"
 fi
-case "${1:-}" in ''|--ahb|--window|--yuv) ;; *) echo 'usage: run-quest2-gles-system.sh [--ahb|--window|--yuv]' >&2;exit 2;; esac
+case "${1:-}" in ''|--ahb|--window|--yuv|--visible) ;; *) echo 'usage: run-quest2-gles-system.sh [--ahb|--window|--yuv|--visible]' >&2;exit 2;; esac
 test "$#" -le 1
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 root=/proc/1/root
@@ -40,6 +55,19 @@ check_mesa
 test "$(nsenter -t 1 -m -r -- /system/bin/getprop ro.hardware.egl)" = freedreno
 (cd "$root$base";sha256sum -c SHA256SUMS;sha256sum -c PROBE_SHA256SUMS)
 (cd "$root$system_probe";sha256sum -c SYSTEM_PROBE_SHA256SUMS)
+if [ "${1:-}" = --visible ];then
+    (cd "$root$visible";sha256sum -c VISIBLE_SHA256SUMS)
+    pid=$(pidof zygote64 | awk '{print $1}')
+    test -n "$pid"
+    # Capture classpaths before entering Android/private mounts. Export only
+    # the existing Android runtime variables, not arbitrary zygote environment.
+    envfile=$(mktemp /tmp/sq2-visible-env.XXXXXX)
+    tr '\000' '\n' < "/proc/$pid/environ" |
+        grep -E '^(ANDROID_ROOT|ANDROID_ASSETS|ANDROID_DATA|ANDROID_STORAGE|ANDROID_ART_ROOT|ANDROID_I18N_ROOT|ANDROID_TZDATA_ROOT|BOOTCLASSPATH|DEX2OATBOOTCLASSPATH)=' > "$envfile"
+    while IFS= read -r entry; do export "$entry"; done < "$envfile"
+    rm -f "$envfile"
+    test -n "${BOOTCLASSPATH:-}"
+fi
 mkdir /tmp/sq2-quest2-gles.lock
 trap 'rmdir /tmp/sq2-quest2-gles.lock' EXIT
 boot=$(cat /proc/sys/kernel/random/boot_id)

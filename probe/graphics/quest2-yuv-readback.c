@@ -2,13 +2,14 @@
  * Only run in the private EGL mount namespace, never switch SurfaceFlinger. */
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES2/gl2.h>
+#include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
 #include <android/hardware_buffer.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "quest2-readback-settings.h"
 static void check(int ok,const char *where){if(!ok){fprintf(stderr,"QUEST2_YUV_FAIL %s EGL=%x GL=%x\n",where,eglGetError(),glGetError());exit(1);}}
 static unsigned option(const char *name,unsigned fallback){const char *s=getenv(name);if(!s)return fallback;char *end;unsigned long v=strtoul(s,&end,0);check(*s&&!*end&&v>0&&v<=4096,"option");return v;}
 static GLuint shader(GLenum type,const char *source){GLuint s=glCreateShader(type);glShaderSource(s,1,&source,NULL);glCompileShader(s);GLint ok;glGetShaderiv(s,GL_COMPILE_STATUS,&ok);check(ok,"shader");return s;}
@@ -81,7 +82,40 @@ int main(void){
         }else glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,NULL);
         glGenFramebuffers(1,&fbo);glBindFramebuffer(GL_FRAMEBUFFER,fbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,output,0);check(glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE,"FBO");
         glViewport(0,0,width,height);glDrawArrays(GL_TRIANGLES,0,3);
-        memset(pixels,0x5a,(size_t)width*height*4);glReadPixels(0,0,width,height,GL_RGBA,GL_UNSIGNED_BYTE,pixels);check(glGetError()==GL_NO_ERROR,"draw/readback");
+        GLuint relay=0,relay_fbo=0,relay_prog=0,relay_fs=0;
+        if(getenv("SQ2_YUV_RELAY_OUTPUT")){
+            check(!output_buffer,"relay requires internal first output");
+            glFinish();check(glGetError()==GL_NO_ERROR,"before relay");
+            AHardwareBuffer_Desc rgba={.width=width,.height=height,.layers=1,.format=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
+                .usage=AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN|AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT};
+            check(!AHardwareBuffer_allocate(&rgba,&output_buffer),"relay allocate");
+            output_image=create(d,EGL_NO_CONTEXT,EGL_NATIVE_BUFFER_ANDROID,client(output_buffer),NULL);
+            check(output_image!=EGL_NO_IMAGE_KHR,"relay import");
+            glGenTextures(1,&relay);glBindTexture(GL_TEXTURE_2D,relay);bind(GL_TEXTURE_2D,output_image);
+            glGenFramebuffers(1,&relay_fbo);glBindFramebuffer(GL_FRAMEBUFFER,relay_fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,relay,0);
+            check(glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE,"relay FBO");
+            relay_fs=shader(GL_FRAGMENT_SHADER,"precision highp float;varying vec2 uv;uniform sampler2D src;void main(){gl_FragColor=texture2D(src,uv);}");
+            relay_prog=glCreateProgram();glAttachShader(relay_prog,vs);glAttachShader(relay_prog,relay_fs);
+            glBindAttribLocation(relay_prog,0,"p");glLinkProgram(relay_prog);glGetProgramiv(relay_prog,GL_LINK_STATUS,&linked);check(linked,"relay link");
+            glUseProgram(relay_prog);glBindTexture(GL_TEXTURE_2D,output);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+            glDrawArrays(GL_TRIANGLES,0,3);puts("YUV_INTERNAL_TEXTURE_RELAY_TO_LINEAR");
+        }
+        memset(pixels,0x5a,(size_t)width*height*4);
+        if(getenv("SQ2_YUV_LOG_READBACK_SETTINGS"))quest2_log_readback_settings();
+        if(getenv("SQ2_YUV_PBO_READBACK")){
+            void *(*map_range)(GLenum,GLintptr,GLsizeiptr,GLbitfield)=(void*)eglGetProcAddress("glMapBufferRange");
+            GLboolean (*unmap)(GLenum)=(void*)eglGetProcAddress("glUnmapBuffer");check(map_range&&unmap,"PBO entrypoints");
+            GLuint pbo;glGenBuffers(1,&pbo);glBindBuffer(GL_PIXEL_PACK_BUFFER,pbo);
+            glBufferData(GL_PIXEL_PACK_BUFFER,(size_t)width*height*4,pixels,GL_STREAM_READ);
+            glReadPixels(0,0,width,height,GL_RGBA,GL_UNSIGNED_BYTE,NULL);check(glGetError()==GL_NO_ERROR,"PBO readback");
+            void *mapped=map_range(GL_PIXEL_PACK_BUFFER,0,(size_t)width*height*4,GL_MAP_READ_BIT);
+            check(mapped!=NULL,"PBO map");memcpy(pixels,mapped,(size_t)width*height*4);
+            check(unmap(GL_PIXEL_PACK_BUFFER),"PBO unmap");glBindBuffer(GL_PIXEL_PACK_BUFFER,0);glDeleteBuffers(1,&pbo);
+            puts("YUV_PBO_READBACK");
+        }else glReadPixels(0,0,width,height,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+        check(glGetError()==GL_NO_ERROR,"draw/readback");
         for(unsigned i=0;i<4;i++){uint8_t *p=pixels+((size_t)(height/2)*width+i*width/4+width/8)*4;printf("YUV_SAMPLE %u=%u,%u,%u,%u\n",i,p[0],p[1],p[2],p[3]);}
         verify(pixels,width*4,width,height,frame,"glReadPixels");
         if(output_buffer){
@@ -90,6 +124,7 @@ int main(void){
             verify(cpu,actual.stride*4,width,height,frame,"AHB_CPU");check(!AHardwareBuffer_unlock(output_buffer,NULL),"output CPU unlock");
         }
         glDeleteFramebuffers(1,&fbo);glDeleteTextures(1,&input);glDeleteTextures(1,&output);
+        if(relay){glDeleteFramebuffers(1,&relay_fbo);glDeleteTextures(1,&relay);glDeleteProgram(relay_prog);glDeleteShader(relay_fs);glUseProgram(prog);}
         if(output_image!=EGL_NO_IMAGE_KHR)check(destroy(d,output_image),"linear output destroy");
         if(output_buffer)AHardwareBuffer_release(output_buffer);
         AHardwareBuffer_release(buffer);
