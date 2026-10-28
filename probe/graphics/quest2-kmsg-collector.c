@@ -22,7 +22,7 @@ static int write_all(int fd,const void *data,size_t size){
 }
 int main(int argc,char **argv){
     if(argc!=4)return 2;
-    char *end;unsigned long seconds=strtoul(argv[2],&end,10);if(*end||seconds<1||seconds>75)return 2;
+    char *end;unsigned long seconds=strtoul(argv[2],&end,10);if(*end||seconds<1||seconds>135)return 2;
     unsigned long limit=strtoul(argv[3],&end,10);if(*end||limit<4096||limit>2097152)return 2;
     int input=open("/dev/kmsg",O_RDONLY|O_NONBLOCK|O_CLOEXEC);if(input<0){perror("open kmsg");return 1;}
     if(lseek(input,0,SEEK_END)<0){perror("seek kmsg");close(input);return 1;}

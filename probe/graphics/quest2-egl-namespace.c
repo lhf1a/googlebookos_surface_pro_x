@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 int main(int argc,char **argv){
-    const char *modes[]={"--ahb","--window","--yuv","--visible","--readpixels","--composition","--combined","--fp16",
+    const char *modes[]={"--ahb","--window","--yuv","--visible","--readpixels","--composition","--combined","--fp16","--color",
         "--vulkan","--vulkan-offscreen","--vulkan-properties","--vulkan-import",
         "--vulkan-window","--vulkan-window-create"};
     int valid=argc==1;

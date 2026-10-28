@@ -1,5 +1,7 @@
 # 构建与部署
 
+最新闭源候选 combined-v5 已补严格 BGRA/RGBX，私有九格式组合/FP16/双API回归通过；真实120秒桌面仍有图标黑块、状态栏横条和应用黑屏，Chrome vkCreateDevice 还有Scudo释放错误。两分钟回退及分时截图已实测，Mesa已恢复，不可提升默认。配套编译器已在实际SystemUI maps确认；后续定位producer/compositor及Chrome创建参数，见 [QUEST2-COLOR.md](QUEST2-COLOR.md)。
+
 脚本来自迭代实验室，依赖缓存和分阶段产物；全新克隆不能直接生成完整可启动 SSD。不要删除哈希或磁盘身份保护以绕过缺失输入。
 
 实际SF跟踪与配套编译器命名隔离见 [QUEST2-SF-TRACE.md](QUEST2-SF-TRACE.md)。`build-quest2-kmsg.sh`生成有限独立collector，SF试验需先复制到retained /tmp并匹配固定hash；不是正常boot服务。`prepare-quest2-private-compiler.py`生成combined-v4，仅用于`SQ2_COMBINED_REVISION=4`私有回归，尚不可作为桌面安装包。

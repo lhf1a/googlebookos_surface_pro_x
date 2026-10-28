@@ -90,23 +90,28 @@ inline bool color_info(const native_handle_t *original,BufferInfo &out) {
     // formats/modifiers must be implemented and tested, never flattened silently.
     out=b;return true;
 }
-// Verified RGBA component order, including the FP16 path required by Skia's
-// startup cache. Keep untested RGBX/BGRA/protected layouts rejected here.
+// Match each Android format to actual DRM/component metadata. RGBX has three
+// components (the X byte is not alpha); BGRA reverses R/B, not the format ID.
 inline bool linear_rgba_layout(const BufferInfo &b) {
-    uint64_t bits=0;
+    uint64_t bits=0;unsigned count=4;
     if(b.format==1&&b.fourcc==0x34324241u&&b.sample_bits==32)bits=8;
+    if(b.format==2&&b.fourcc==0x34324258u&&b.sample_bits==32){bits=8;count=3;}
+    if(b.format==5&&b.fourcc==0x34325241u&&b.sample_bits==32)bits=8;
     if(b.format==22&&b.fourcc==0x48344241u&&b.sample_bits==64)bits=16;
-    if(!bits||b.component_count!=4||b.modifier||b.layers!=1||(b.usage&(1ull<<14))||
+    if(!bits||b.component_count!=count||b.modifier||b.layers!=1||(b.usage&(1ull<<14))||
        b.hsub!=1||b.vsub!=1||b.plane_width!=b.width||b.plane_height!=b.height||
        !b.stride||b.stride%(4*bits/8)||b.offset%(4*bits/8)||
        b.width>b.stride/(4*bits/8)||b.height>b.plane_size/b.stride)return false;
     const uint64_t types[]={1024,2048,4096,1073741824};unsigned found=0;
-    for(const auto &c:b.components) {
-        unsigned i=0;for(;i<4&&c.type!=types[i];++i){}
-        if(i==4||(found&(1u<<i))||c.offset!=i*bits||c.bits!=bits)return false;
+    for(unsigned n=0;n<count;n++) {
+        const auto &c=b.components[n];
+        unsigned i=0;for(;i<count&&c.type!=types[i];++i){}
+        if(i==count)return false;
+        unsigned position=b.format==5&&i<3?2-i:i;
+        if((found&(1u<<i))||c.offset!=position*bits||c.bits!=bits)return false;
         found|=1u<<i;
     }
-    return found==15;
+    return found==((1u<<count)-1);
 }
 }
 #pragma GCC visibility pop

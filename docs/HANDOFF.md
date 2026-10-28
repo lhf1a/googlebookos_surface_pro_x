@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+最新闭源候选 combined-v5 已补严格 BGRA/RGBX，私有九格式组合/FP16/双API回归通过；真实120秒桌面仍有图标黑块、状态栏横条和应用黑屏，Chrome vkCreateDevice 还有Scudo释放错误。两分钟回退及分时截图已实测，Mesa已恢复，不可提升默认。配套编译器已在实际SystemUI maps确认；后续定位producer/compositor及Chrome创建参数，见 [QUEST2-COLOR.md](QUEST2-COLOR.md)。
+
 更新时间：2026-10-28。不包含原始日志、网络地址或凭据。
 
 ## 最近完成：共享存储

@@ -5,10 +5,10 @@ set -eu
 umask 077
 root=/proc/1/root
 base=/data/local/tmp/sq2-closed/combined-v1
-case "${SQ2_COMBINED_REVISION:-1}" in 1) ;; 3) base=/data/local/tmp/sq2-closed/combined-v3;; *) exit 2;; esac
+case "${SQ2_COMBINED_REVISION:-1}" in 1) ;; 3) base=/data/local/tmp/sq2-closed/combined-v3;; 5) base=/data/local/tmp/sq2-closed/combined-v5;; *) exit 2;; esac
 mesa_gl=f16302e33e4f7c8bbaccbe5ab5fd5d19f3279222ee430ace236c4bad237a5434
 mesa_vk=0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c
-kmsg_sha=16cd33754a793e6d8aa7dbf617f48642ead71b1f3ec42796d0d64d7b8bc25e92
+kmsg_sha=83dcdf5d31fdf78f1675cd0c379303096559ada6ffd5e9c42581ec635b106887
 android(){ nsenter -t 1 -m -r -- "$@"; }
 hash(){ sha256sum "$1" | cut -d ' ' -f1; }
 same_inode(){ test "$(stat -c '%d:%i' "$1")" = "$(stat -c '%d:%i' "$2")"; }
@@ -60,6 +60,26 @@ rollback(){
 }
 case "${1:-}" in
     --rollback) test "$#" = 2;rollback "$2";exit;;
+    --screenshots)
+        test "$#" = 2;shot_state=$2
+        case "$shot_state" in /tmp/sq2-sf-trial.[0-9]*.[0-9]*) ;; *) exit 2;; esac
+        shot_stage=$(cat "$shot_state/stage")
+        case "$shot_stage" in /data/local/tmp/sq2-closed/sf-trial.[0-9]*.[0-9]*) ;; *) exit 2;; esac
+        # Separate process: a stuck screencap must not delay the watchdog.
+        # Five attempts, each bounded; early rollback ends further capture.
+        for shot in 1 2 3 4 5;do
+            sleep 12
+            test ! -d "$shot_state/rolling-back" || exit 0
+            test "$(cat "$shot_state/boot")" = "$(cat /proc/sys/kernel/random/boot_id)" || exit 1
+            stamp=$(date +%s)
+            before=$(android /system/bin/pidof surfaceflinger || true)
+            result=0
+            timeout -k 2 8 nsenter -t 1 -m -r -- /system/bin/screencap -p \
+                "$shot_stage/evidence/screen.$shot.png" || result=$?
+            after=$(android /system/bin/pidof surfaceflinger || true)
+            printf 'shot=%s epoch=%s before=%s after=%s exit=%s\n' "$shot" "$stamp" "$before" "$after" "$result"
+        done
+        exit;;
     --watchdog)
         test "$#" = 2;watch_state=$2;last=;changes=0;n=0
         watch_stage=$(cat "$watch_state/stage")
@@ -69,14 +89,20 @@ case "${1:-}" in
         trap 'cp "$watch_state/watchdog.log" "$evidence/watchdog.log" 2>/dev/null || true' EXIT
         cp "$watch_state/boot" "$evidence/boot"
         touch "$watch_state/watchdog-ready"
-        while [ "$n" -lt 12 ];do
+        while [ "$n" -lt 24 ];do
             sleep 5;n=$((n+1))
             current=$(android /system/bin/pidof surfaceflinger || true)
             if [ -n "$current" ] && [ -n "$last" ] && [ "$current" != "$last" ];then changes=$((changes+1));fi
             if [ -n "$current" ];then
                 last=$current
-                grep -E 'lib(EGL|GLES|gsl|qti|quest2)|vulkan' "/proc/$current/maps" > "$evidence/maps.$n" 2>/dev/null || true
+                grep -E 'lib(EGL|GLES|gsl|qti|quest2|q2v77|llvm)|vulkan' "/proc/$current/maps" > "$evidence/maps.$n" 2>/dev/null || true
             fi
+            # Capture actual app linker namespaces too: native probe binding
+            # cannot rule out HWUI resolving a different vendor compiler.
+            for client in $(android /system/bin/pidof com.android.systemui || true);do
+                grep -E 'lib(EGL|GLES|gsl|qti|quest2|q2v77|llvm)|libhwui|vulkan' "/proc/$client/maps" \
+                    > "$evidence/systemui.$n.$client" 2>/dev/null || true
+            done
             printf 'tick=%s sf_pid=%s changes=%s\n' "$n" "$current" "$changes" >> "$evidence/progress"
             cp "$watch_state/watchdog.log" "$evidence/watchdog.log"
             if [ "$changes" -ge 2 ];then echo SF_TRIAL_RESTART_LIMIT;break;fi
@@ -119,7 +145,7 @@ ln -s libquest2-egl-wrapper.so "$root$stage/egl/libEGL_freedreno.so"
 ln -s libGLESv1_CM_adreno.so "$root$stage/egl/libGLESv1_CM_freedreno.so"
 ln -s libGLESv2_adreno.so "$root$stage/egl/libGLESv2_freedreno.so"
 cp "$0" "$state/trial.sh"
-nohup /tmp/quest2-kmsg-collector "$root$stage/evidence/kernel.log" 75 2097152 \
+nohup /tmp/quest2-kmsg-collector "$root$stage/evidence/kernel.log" 135 2097152 \
     > "$root$stage/evidence/collector.stderr" 2>&1 < /dev/null &
 collector=$!
 printf '%s\n' "$collector" > "$state/collector-pid"
@@ -153,4 +179,6 @@ same_inode "$root/vendor/lib64/hw/vulkan.freedreno.so" "$root$stage/egl/libquest
 grep -E ' /vendor/lib64/(egl|hw/vulkan.freedreno.so) ' /proc/1/mountinfo > "$state/trial-mounts"
 android /system/bin/setprop ctl.start surfaceflinger
 android /system/bin/setprop ctl.restart zygote
-printf 'SF_TRIAL_STATE=%s\nSF_TRIAL_STAGE=%s\nSF_TRIAL_WATCHDOG=%s\nSF_TRIAL_ROLLBACK_SECONDS=60\n' "$state" "$stage" "$watchdog"
+nohup sh "$state/trial.sh" --screenshots "$state" > "$root$stage/evidence/screenshots.log" 2>&1 < /dev/null &
+printf '%s\n' "$!" > "$state/screenshot-pid"
+printf 'SF_TRIAL_STATE=%s\nSF_TRIAL_STAGE=%s\nSF_TRIAL_WATCHDOG=%s\nSF_TRIAL_ROLLBACK_SECONDS=120\n' "$state" "$stage" "$watchdog"

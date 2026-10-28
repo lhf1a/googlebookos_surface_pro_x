@@ -1,5 +1,7 @@
 # SQ2 适配待办
 
+最新闭源候选 combined-v5 已补严格 BGRA/RGBX，私有九格式组合/FP16/双API回归通过；真实120秒桌面仍有图标黑块、状态栏横条和应用黑屏，Chrome vkCreateDevice 还有Scudo释放错误。两分钟回退及分时截图已实测，Mesa已恢复，不可提升默认。配套编译器已在实际SystemUI maps确认；后续定位producer/compositor及Chrome创建参数，见 [QUEST2-COLOR.md](QUEST2-COLOR.md)。
+
 ## 当前：同版 Quest 2 闭源图形栈接入
 
 - 最新真实SF证据：关闭预热的诊断轮次可启动闭源SF，桌面BGRA格式5导入失败；普通应用编译器混用系统QGL与Quest2 GLNEXT。已准备combined-v4独立编译器名字并通过私有回归，下一步BGRA/RGBX和真实HWUI绑定验证。独立collector及busy/lazy回退实测有效，设备与两个SystemUI已恢复Mesa；完整桌面/正常预热尚未通过。见 [QUEST2-SF-TRACE.md](QUEST2-SF-TRACE.md)，以下未知挂起记录为此前阶段证据。

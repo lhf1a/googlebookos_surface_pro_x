@@ -34,11 +34,12 @@ if [ "${SQ2_V77_AHB_VIEW:-}" = 1 ];then
 fi
 vulkan_probe=/data/local/tmp/sq2-closed/v77-vulkan-probe
 combined_probe=/data/local/tmp/sq2-closed/combined-probe
+color_probe=/data/local/tmp/sq2-closed/color-probe
 fp16_probe=/data/local/tmp/sq2-closed/fp16-probe
 if [ "${SQ2_COMBINED:-}" = 1 ];then
     test -z "${SQ2_GLES_CPU_LAYOUT:-}${SQ2_GLES_DIRECT:-}${SQ2_GLES_GPU_READBACK:-}${SQ2_GLES_READBACK_POLICY:-}"
     base=/data/local/tmp/sq2-closed/combined-v1
-    case "${SQ2_COMBINED_REVISION:-1}" in 1) ;; 3) base=/data/local/tmp/sq2-closed/combined-v3;; 4) base=/data/local/tmp/sq2-closed/combined-v4;; *) exit 2;; esac
+    case "${SQ2_COMBINED_REVISION:-1}" in 1) ;; 3) base=/data/local/tmp/sq2-closed/combined-v3;; 4) base=/data/local/tmp/sq2-closed/combined-v4;; 5) base=/data/local/tmp/sq2-closed/combined-v5;; *) exit 2;; esac
     vulkan=$base
     export SQ2_V77_AHB_VIEW=1
 fi
@@ -54,6 +55,9 @@ if [ "${1:-}" = --inside ];then
         ln -s libGLESv2_adreno.so /vendor/lib64/egl/libGLESv2_freedreno.so
         mount --bind /vendor/lib64/egl/libquest2-vulkan-wrapper.so /vendor/lib64/hw/vulkan.freedreno.so
         echo "PRIVATE_COMBINED_NAMESPACE=$(readlink /proc/self/ns/mnt)"
+        if [ "${1:-}" = --color ];then
+            exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$color_probe/quest2-color"
+        fi
         if [ "${1:-}" = --fp16 ];then
             exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$fp16_probe/quest2-fp16"
         fi
@@ -151,7 +155,7 @@ if [ "${1:-}" = --inside ];then
     fi
     exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$system_probe/gles-readback-system" "$@"
 fi
-case "${1:-}" in ''|--ahb|--window|--yuv|--visible|--readpixels|--composition|--combined|--fp16|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create) ;; *) echo 'Unsupported system graphics probe mode' >&2;exit 2;; esac
+case "${1:-}" in ''|--ahb|--window|--yuv|--visible|--readpixels|--composition|--combined|--fp16|--color|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create) ;; *) echo 'Unsupported system graphics probe mode' >&2;exit 2;; esac
 test "$#" -le 1
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 root=/proc/1/root
@@ -162,6 +166,10 @@ check_mesa(){
     test "$(sha256sum "$root/vendor/lib64/hw/vulkan.freedreno.so" | cut -d ' ' -f1)" = "$expected_vk"
 }
 check_mesa
+if [ "${1:-}" = --color ];then
+    test "${SQ2_COMBINED:-}" = 1
+    (cd "$root$color_probe";sha256sum -c COLOR_PROBE_SHA256SUMS)
+fi
 if [ "${1:-}" = --fp16 ];then
     test "${SQ2_COMBINED:-}" = 1
     (cd "$root$fp16_probe";sha256sum -c FP16_PROBE_SHA256SUMS)
