@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
 #include "vulkan-compute.h"
 #include "vulkan-raster-vert.h"
 #include "vulkan-raster-frag.h"
@@ -65,10 +66,29 @@ int main(int argc,char **argv) {
     unsigned seconds=seconds_env ? (unsigned)atoi(seconds_env) : 0;
     unsigned iterations=iterations_env ? (unsigned)atoi(iterations_env) : 0;
     if(seconds>60 || iterations>65536) { fprintf(stderr,"Workload out of bounds\n");return 2; }
+    const char *aw=getenv("SQ2_VULKAN_AHB_WIDTH"),*ah=getenv("SQ2_VULKAN_AHB_HEIGHT");
+    unsigned ahb_width=aw?(unsigned)atoi(aw):64,ahb_height=ah?(unsigned)atoi(ah):64;
+    if(!ahb_width || !ahb_height || ahb_width>4096 || ahb_height>4096) {
+        fprintf(stderr,"AHB dimensions out of bounds\n");return 2;
+    }
     uint32_t multiplier=1,addition=0;
     uint32_t words=seconds ? 4096 : 256;
     for(unsigned j=0;j<iterations;j++){multiplier*=1664525u;addition=addition*1664525u+1013904223u;}
-    void *lib=dlopen(argv[1],RTLD_NOW|RTLD_LOCAL);
+    const char *tools_dir=getenv("SQ2_ADRENOTOOLS_DIR");
+    void *lib=NULL;
+    if(tools_dir) {
+        char path[PATH_MAX],driver_dir[PATH_MAX];
+        if(snprintf(path,sizeof(path),"%s/libadrenotools.so",tools_dir)>=(int)sizeof(path) || strlen(argv[1])>=sizeof(driver_dir))return 2;
+        strcpy(driver_dir,argv[1]);char *slash=strrchr(driver_dir,'/');if(!slash)return 2;
+        const char *driver_name=argv[1]+(slash-driver_dir)+1;slash[1]=0;
+        void *tools=dlopen(path,RTLD_NOW|RTLD_LOCAL);
+        typedef void *(*open_t)(int,int,const char*,const char*,const char*,const char*,const char*,void**);
+        open_t open_custom=tools?(open_t)dlsym(tools,"adrenotools_open_libvulkan"):NULL;
+        if(!open_custom){fprintf(stderr,"Adrenotools load failed: %s\n",dlerror());return 1;}
+        // Only DRIVER_CUSTOM; never KGSL mapping import, turbo or file redirection.
+        lib=open_custom(RTLD_NOW|RTLD_LOCAL,1,NULL,tools_dir,driver_dir,driver_name,NULL,NULL);
+        puts("ADRENOTOOLS isolated system loader requested");
+    } else lib=dlopen(argv[1],RTLD_NOW|RTLD_LOCAL);
     if(!lib) { fprintf(stderr,"dlopen: %s\n",dlerror()); return 1; }
     PFN_vkGetInstanceProcAddr gipa=(PFN_vkGetInstanceProcAddr)dlsym(lib,"vk_icdGetInstanceProcAddr");
     if(!gipa) gipa=(PFN_vkGetInstanceProcAddr)dlsym(lib,"vkGetInstanceProcAddr");
@@ -97,6 +117,9 @@ int main(int argc,char **argv) {
     for(uint32_t i=0;i<count;i++) {
         VkPhysicalDeviceProperties p; vkGetPhysicalDeviceProperties(devices[i],&p);
         printf("GPU name=%s vendor=%x device=%x type=%d Vulkan=%u.%u.%u driver=%u\n",p.deviceName,p.vendorID,p.deviceID,p.deviceType,VK_VERSION_MAJOR(p.apiVersion),VK_VERSION_MINOR(p.apiVersion),VK_VERSION_PATCH(p.apiVersion),p.driverVersion);
+        if(tools_dir && (p.driverVersion!=2150838273u || strstr(p.deviceName,"Turnip"))) {
+            fprintf(stderr,"Custom v819 driver not active; refusing fallback\n");return 1;
+        }
         if(p.vendorID==0x5143 && p.deviceType==VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU && strstr(p.deviceName,"680")) gpu=devices[i];
     }
     if(!gpu) { fprintf(stderr,"Expected hardware Adreno 680, refusing fallback\n"); return 1; }
@@ -110,7 +133,7 @@ int main(int argc,char **argv) {
     uint32_t ne=0; CHECK(vkEnumerateDeviceExtensionProperties(gpu,NULL,&ne,NULL));
     VkExtensionProperties *ext=calloc(ne,sizeof(*ext)); if(!ext) return 1;
     CHECK(vkEnumerateDeviceExtensionProperties(gpu,NULL,&ne,ext));
-    for(uint32_t i=0;i<ne;i++) if(strstr(ext[i].extensionName,"android") || strstr(ext[i].extensionName,"swapchain")) printf("EXT %s\n",ext[i].extensionName);
+    for(uint32_t i=0;i<ne;i++) if(getenv("SQ2_VULKAN_ALL_EXTENSIONS") || strstr(ext[i].extensionName,"android") || strstr(ext[i].extensionName,"swapchain")) printf("EXT %s\n",ext[i].extensionName);
     free(ext);
     float priority=1.0;
     VkDeviceQueueCreateInfo qci={.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,.queueFamilyIndex=family,.queueCount=1,.pQueuePriorities=&priority};
@@ -191,7 +214,7 @@ int main(int argc,char **argv) {
     if(offscreen_only) goto cleanup;
     /* Import an Android/minigbm allocation, write on the GPU, read through the
      * mapper CPU lock. This exercises mapper5 metadata and shared-buffer layout. */
-    AHardwareBuffer_Desc desc={.width=64,.height=64,.layers=1,.format=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
+    AHardwareBuffer_Desc desc={.width=ahb_width,.height=ahb_height,.layers=1,.format=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
         .usage=AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN|AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT|AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE};
     AHardwareBuffer *ahb=NULL;
     puts("AHB_STAGE allocate");
@@ -209,6 +232,7 @@ int main(int argc,char **argv) {
     puts("AHB_STAGE create/import/bind");
     VkExternalMemoryImageCreateInfo external={.sType=VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,.handleTypes=VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID};
     imci.pNext=&external; imci.usage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imci.extent=(VkExtent3D){ahb_width,ahb_height,1};
     CHECK(vkCreateImage(dev,&imci,NULL,&im));
     VkMemoryDedicatedAllocateInfo dedicated={.sType=VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,.image=im};
     VkImportAndroidHardwareBufferInfoANDROID import={.sType=VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,.pNext=&dedicated,.buffer=ahb};
@@ -228,10 +252,10 @@ int main(int argc,char **argv) {
     puts("AHB_STAGE CPU lock");
     if(AHardwareBuffer_lock(ahb,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,-1,NULL,&pixels)) return 1;
     AHardwareBuffer_describe(ahb,&desc); uint32_t bad=0;
-    for(uint32_t y=0;y<64;y++) for(uint32_t x=0;x<64;x++) if(((uint32_t*)pixels)[y*desc.stride+x]!=0xff00ff00u)bad++;
+    for(uint32_t y=0;y<ahb_height;y++) for(uint32_t x=0;x<ahb_width;x++) if(((uint32_t*)pixels)[y*desc.stride+x]!=0xff00ff00u)bad++;
     if(AHardwareBuffer_unlock(ahb,NULL)) return 1;
     if(bad){fprintf(stderr,"AHB mismatch pixels=%u\n",bad);return 1;}
-    puts("AHB_OK 64x64 mapper5 import/GPU clear/CPU readback");
+    printf("AHB_OK %ux%u stride=%u mapper5 import/GPU clear/CPU readback\n",ahb_width,ahb_height,desc.stride);
     vkDestroyImage(dev,im,NULL);vkFreeMemory(dev,immem,NULL);AHardwareBuffer_release(ahb);
 cleanup:
     puts("CLEANUP_STAGE resources");

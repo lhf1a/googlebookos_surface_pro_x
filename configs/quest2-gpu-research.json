@@ -2,7 +2,7 @@
   "date": "2026-10-28",
   "branch": "codex/quest2-proprietary-gpu",
   "baseline_commit": "e1b523c137d187f4ff1d246eef3dfa03a62b2986",
-  "stage": "isolated_runtime_offscreen_passed_ahb_failed",
+  "stage": "isolated_vulkan_readback_ahb_and_ordinary_app_wsi_passed",
   "deployed": false,
   "runtime_tests": {
     "kernel": "6.3.8-sq2-android1",
@@ -20,16 +20,57 @@
       "repeat_processes": 3,
       "checked_words_per_round": 4096,
       "alu_iterations_per_word": 4096,
-      "checked_rounds": [11287, 10733, 11827],
+      "checked_rounds": [
+        11287,
+        10733,
+        11827
+      ],
       "peak_sampled_gpu_millicelsius": 51400,
       "clean_process_exit": true,
-      "ahb": "allocation succeeds with system-first libs; donor returns success with format=0 externalFormat=0 allocationSize=0; test fails",
-      "wsi": "not tested; blocked behind invalid AHB metadata"
+      "ahb": "QTI mapper4/extensions bridge to real mapper5: linear RGBA8888 allocation/import/GPU clear/CPU readback passed",
+      "wsi": {
+        "package": "org.surface.sq2.quest2probe",
+        "driver_version": 2150838273,
+        "resolution": [
+          2880,
+          1920
+        ],
+        "swapchain_images": 4,
+        "frames_per_window": 1800,
+        "cold_launches": 2,
+        "window_recreations": 1,
+        "screenshot_checked": true,
+        "fallback_to_turnip_rejected": true,
+        "peak_sampled_gpu_millicelsius": 44000
+      },
+      "ahb_dimensions": [
+        [
+          64,
+          64
+        ],
+        [
+          13,
+          7
+        ],
+        [
+          257,
+          129
+        ],
+        [
+          1920,
+          1280
+        ],
+        [
+          2880,
+          1920
+        ]
+      ],
+      "bridge_scope": "Unprotected, single-layer, single-plane, linear RGBA8888 only; unsupported operations fail explicitly"
     },
     "turnip_control": "same full probe passed, including AHB import/GPU write/CPU readback",
     "board_and_framework_restarts_observed": false,
     "installed_system_driver_changed": false,
-    "limits": "No CTS, performance comparison, long-term stability, application presentation, EGL/GLES or desktop replacement claim"
+    "limits": "No CTS, performance comparison, long-term stability, games, EGL/GLES or desktop replacement claim"
   },
   "donor_userspace": [
     {
@@ -309,5 +350,161 @@
     "v819 notgsl contains DRM_IOCTL_MSM_GET_PARAM/GEM_SUBMIT/SUBMITQUEUE_CLOSE and KGSL paths, plus Adreno 680/690 names. Static strings are not proof of reachable or compatible support.",
     "v690 has A680/A690 name strings and KGSL paths; no DRM hints were found by the current static scan."
   ],
-  "next_step": "Resolve v819 QTI/legacy gralloc versus current minigbm mapper5 metadata and import semantics in isolation. Do not deploy or fake buffer metadata. WSI and ordinary apps remain untested."
+  "next_step": "Research validation complete for isolated Vulkan linear RGBA path. Broader formats, games, CTS and full EGL/GLES donor are separate unfinished production-port work; keep Mesa as system default.",
+  "runtime_artifact_sha256": {
+    "libqti-mapper-bridge.so": "3c3e04a3e1a6e1ab19c60f3b6814d1da2f68ffd278fba7b4da7fc3240a07d54f",
+    "notadreno_utils.so": "2505aacd67b9384c45f45d56aaf90dbb1f7194747813dc48eddf06333f353609",
+    "notdmabufheap.so": "8562807c7e9298c764834be12c155b3d845edc317383cb0e2d85bc5dc74cab8c",
+    "notgsl.so": "9446c108708ed89f72199f992b5b7a1300795b0831adf34c08cb7b61f920daa5",
+    "notllvm-glnext.so": "64cc77b2713d90a996d9dfdfa3784eba1451162e560a55b1d29922eddb127b23",
+    "notllvm-qgl.so": "422b336979995884990721b69954f8768f455a630a8d46f73507a1039aedb96d",
+    "vulkan-bridge.so": "c3563d942c3bd4d7d9c2d33b99eaf9a5af0f145f74cd19f229a432d6d2870ec2"
+  },
+  "build_sources": {
+    "adrenotools": {
+      "repository": "https://github.com/bylaws/libadrenotools",
+      "commit": "8fae8ce254dfc1344527e05301e43f37dea2df80"
+    },
+    "linkernsbypass": {
+      "repository": "https://github.com/bylaws/liblinkernsbypass",
+      "commit": "aa3975893d83ef1bc84c321ec60c65fbf1287887"
+    },
+    "public_interface_inputs": [
+      {
+        "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/base/include.tar.gz",
+        "destination": "include",
+        "decoded_sha256": "327a0743edf1f75eb38bb0fe7fcf19555a56293c61e26070c4f67be6e6b1d530"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/include.tar.gz",
+        "destination": "include",
+        "decoded_sha256": "5f4eb319037f55e7370dbcd43380d845072bcdb52634aac9d3358fa0ea5dbf7d"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/libhwbinder/+archive/android-12.0.0_r1/include.tar.gz",
+        "destination": "include",
+        "decoded_sha256": "aa170bcf19da2e2744961b4163faefa94513a79647f6a90a072ce829f8c13dd6"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/core/+archive/android-12.0.0_r1/libutils/include.tar.gz",
+        "destination": "include",
+        "decoded_sha256": "df29c9427ea6e08c26b3f3230572cf05ce6580abed46ef27700275b1cd841bfe"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/core/+archive/android-12.0.0_r1/libcutils/include.tar.gz",
+        "destination": "include",
+        "decoded_sha256": "213b8d11ca7951985a581fd9b1beb251ee47e7b52ed2e5f2ee4735cb2b079cbb"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/libbase/+archive/android-12.0.0_r1/include.tar.gz",
+        "destination": "include",
+        "decoded_sha256": "4d1d8b6fd8348d9422047198411a3a8caffac326a65d65079690ec15ad80ccf1"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/logging/+archive/android-12.0.0_r1/liblog/include.tar.gz",
+        "destination": "include",
+        "decoded_sha256": "30eebe77c7e7f8d040f1c0c4ba301c40cb402828ece89a04031173a915b6550c"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/core/+archive/android-12.0.0_r1/libsystem/include.tar.gz",
+        "destination": "include",
+        "decoded_sha256": "a3ac20a9815f0596106a15239489bdbf1fee802eb50bafadfe308bc4bd6bc60e"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/libfmq/+archive/android-12.0.0_r1/include.tar.gz",
+        "destination": "include",
+        "decoded_sha256": "16510db6d9eaa47984b7b0f764b6b1fa8ad5fc7b4b7838b35155969cbc292a0a"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/libfmq/+archive/android-12.0.0_r1/base.tar.gz",
+        "destination": "include",
+        "decoded_sha256": "c702854cef8c2a506b0734cb781c730335b6f03eea124ff251eedc67e1ccb94d"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/common/1.0.tar.gz",
+        "destination": "hal/android/hardware/graphics/common/1.0",
+        "decoded_sha256": "07530152561f5c5390eb75e0fe8a7c858a1e41eb230dfe5b7b354fa76496321a"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/common/1.1.tar.gz",
+        "destination": "hal/android/hardware/graphics/common/1.1",
+        "decoded_sha256": "2852288802ef3044b5d7a12c87d4e3ebc5b785657c711c62a467d06eea8d92c3"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/common/1.2.tar.gz",
+        "destination": "hal/android/hardware/graphics/common/1.2",
+        "decoded_sha256": "1cfb156e295f34f0523f4d170d273eaece1352894843c1e92665a13c847011a7"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/2.0.tar.gz",
+        "destination": "hal/android/hardware/graphics/mapper/2.0",
+        "decoded_sha256": "e87611c2890bbff18f7edd776ce794ff7c8a2afb0135e9962e81fc89abb1e580"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/2.1.tar.gz",
+        "destination": "hal/android/hardware/graphics/mapper/2.1",
+        "decoded_sha256": "a0742bcf9296991661b26fbbccba7216617682e928771b6ef551d18988e36d1f"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/3.0.tar.gz",
+        "destination": "hal/android/hardware/graphics/mapper/3.0",
+        "decoded_sha256": "62e2011b1008c106f7d09e64b4389f93a3f6c587ce428bb5f968416ce01d69f5"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/4.0.tar.gz",
+        "destination": "hal/android/hardware/graphics/mapper/4.0",
+        "decoded_sha256": "682c68e85cfe55e7183ee9571f96269f5dae5f5327e8a07548a550ed055e8ddc"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/base/1.0.tar.gz",
+        "destination": "hal/android/hidl/base/1.0",
+        "decoded_sha256": "9a6d292f5533c9bd2283cca1131f7fc975bd0b0adff22a5354cfb97b405117d1"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/manager/1.0.tar.gz",
+        "destination": "hal/android/hidl/manager/1.0",
+        "decoded_sha256": "ae865b76448bcea5d2fd41649c22b3281e29299298ec54f2c20ca3ba96271892"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/manager/1.1.tar.gz",
+        "destination": "hal/android/hidl/manager/1.1",
+        "decoded_sha256": "1cd8a0529a6deb438a0ba967a5e03a382ae8fdecadbf4c2ccfbd88c82e4debc4"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/manager/1.2.tar.gz",
+        "destination": "hal/android/hidl/manager/1.2",
+        "decoded_sha256": "6b9d026c4b7bdafb116218975affdd02a83e23ad3354f824534c7c8b61d2ede3"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/prebuilts/build-tools/+/94dfb8dcf347e4fa1d8fda6b0a9b745a4c1ae0a3/linux-x86/bin/hidl-gen?format=TEXT",
+        "destination": "hidl-gen",
+        "decoded_sha256": "963d5265315fec5a43b434ec0aed933dbbb2ac698d9f97be9da19f963c97ee75"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/prebuilts/build-tools/+/94dfb8dcf347e4fa1d8fda6b0a9b745a4c1ae0a3/linux-x86/lib64/libc++.so?format=TEXT",
+        "destination": "libc++.so",
+        "decoded_sha256": "b4bf6891d676b4679512db9b2a09a57b4a1579cf99e8c5f8edcf90e9e14b3489"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapper/4.0/IQtiMapper.hal",
+        "destination": "hal/vendor/qti/hardware/display/mapper/4.0/IQtiMapper.hal",
+        "decoded_sha256": "f49205d41f011a96c6d238ea69f7b6c9d159809f4ecabef04ca4ccdb195d57b5"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapperextensions/1.0/IQtiMapperExtensions.hal",
+        "destination": "hal/vendor/qti/hardware/display/mapperextensions/1.0/IQtiMapperExtensions.hal",
+        "decoded_sha256": "13eca267916c940ad44e08ee5e43e22bb24fa6afe7f2b824ea9d6c753d17e1d9"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapperextensions/1.0/types.hal",
+        "destination": "hal/vendor/qti/hardware/display/mapperextensions/1.0/types.hal",
+        "decoded_sha256": "b750c6dd2233e7d102f0a4f3d5124e358d134b80dfc86066d84e6f0722615881"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapperextensions/1.1/IQtiMapperExtensions.hal",
+        "destination": "hal/vendor/qti/hardware/display/mapperextensions/1.1/IQtiMapperExtensions.hal",
+        "decoded_sha256": "9e960ad971bfeb1ccc3102caf0a2d94e95457a1ff9ff0c72156faa94f2500c5d"
+      }
+    ]
+  }
 }

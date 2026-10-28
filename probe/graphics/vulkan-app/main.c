@@ -1,7 +1,11 @@
-/* Bounded, ordinary-app Vulkan WSI smoke test. No permissions or driver overrides.
- * Draws 120 frames through Android's system loader then retains the last frame.
+/* Bounded, ordinary-app Vulkan WSI smoke test. No privileged permissions.
+ * System build draws 120 frames; isolated closed build draws 1800 frames.
  * A680 below is the current DT/Mesa ID; SQ2's marketed GPU is Adreno 690.
  */
+#ifdef SQ2_CLOSED_DONOR
+#define _GNU_SOURCE
+#define VK_NO_PROTOTYPES
+#endif
 #define VK_USE_PLATFORM_ANDROID_KHR
 #include <vulkan/vulkan.h>
 #include <android/log.h>
@@ -13,6 +17,12 @@
 #include "triangle-frag.h"
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO,"SQ2Vulkan",__VA_ARGS__)
 #define VK(x) do { VkResult r=(x); if(r!=VK_SUCCESS){LOG("FAIL %s = %d",#x,r); return false;} }while(0)
+#ifdef SQ2_CLOSED_DONOR
+#include "closed-loader.h"
+#define FRAME_LIMIT 1800u
+#else
+#define FRAME_LIMIT 120u
+#endif
 typedef struct {
     VkInstance instance; VkPhysicalDevice gpu; VkDevice device; VkQueue queue;
     VkSurfaceKHR surface; VkSwapchainKHR swapchain; VkExtent2D extent;
@@ -31,6 +41,9 @@ static bool initialize(ANativeWindow *window) {
     for(uint32_t i=0;i<n;i++) {
         VkPhysicalDeviceProperties p; vkGetPhysicalDeviceProperties(devices[i],&p);
         LOG("DEVICE %s api=%u.%u.%u",p.deviceName,VK_VERSION_MAJOR(p.apiVersion),VK_VERSION_MINOR(p.apiVersion),VK_VERSION_PATCH(p.apiVersion));
+#ifdef SQ2_CLOSED_DONOR
+        if(p.driverVersion!=2150838273u || strstr(p.deviceName,"Turnip")){LOG("FAIL custom v819 not active; refusing fallback");return false;}
+#endif
         if(p.vendorID==0x5143 && p.deviceType==VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU && strstr(p.deviceName,"680")) e.gpu=devices[i];
     }
     if(!e.gpu){LOG("FAIL expected hardware A680");return false;}
@@ -110,7 +123,9 @@ static bool draw(void) {
     VkSubmitInfo si={.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,.waitSemaphoreCount=1,.pWaitSemaphores=&e.acquire,.pWaitDstStageMask=&wait,.commandBufferCount=1,.pCommandBuffers=&e.command,.signalSemaphoreCount=1,.pSignalSemaphores=&e.done[i]};VK(vkQueueSubmit(e.queue,1,&si,e.fence));
     VkPresentInfoKHR pi={.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,.waitSemaphoreCount=1,.pWaitSemaphores=&e.done[i],.swapchainCount=1,.pSwapchains=&e.swapchain,.pImageIndices=&i};
     r=vkQueuePresentKHR(e.queue,&pi); if(r!=VK_SUCCESS&&r!=VK_SUBOPTIMAL_KHR){LOG("FAIL present=%d",r);return false;}
-    if(++e.rendered==120)LOG("SQ2_VULKAN_WSI_OK frames=120 hardware=A680");return true;
+    ++e.rendered;
+    if(e.rendered%600u==0)LOG("PRESENT_PROGRESS frames=%u",e.rendered);
+    if(e.rendered==FRAME_LIMIT)LOG("SQ2_VULKAN_WSI_OK frames=%u hardware=A680",e.rendered);return true;
 }
 static void destroy(void) {
     if(e.device){
@@ -125,16 +140,20 @@ static void destroy(void) {
     memset(&e,0,sizeof(e));
 }
 static void command(struct android_app *app,int32_t cmd){
+    LOG("APP_CMD %d",cmd);
     if(cmd==APP_CMD_INIT_WINDOW && app->window){destroy();e.ready=initialize(app->window);}
     if(cmd==APP_CMD_TERM_WINDOW)destroy();
 }
 void android_main(struct android_app *app){
+#ifdef SQ2_CLOSED_DONOR
+    if(!load_closed_driver(app)){LOG("FAIL isolated closed driver loader");return;}
+#endif
     app->onAppCmd=command;
     while(!app->destroyRequested){
         int events;struct android_poll_source *source=NULL;
-        int id=ALooper_pollOnce(e.ready&&e.rendered<120?0:-1,NULL,&events,(void**)&source);
+        int id=ALooper_pollOnce(e.ready&&e.rendered<FRAME_LIMIT?0:-1,NULL,&events,(void**)&source);
         if(id>=0&&source)source->process(app,source);
-        if(e.ready&&e.rendered<120)e.ready=draw();
+        if(e.ready&&e.rendered<FRAME_LIMIT)e.ready=draw();
     }
     destroy();
 }

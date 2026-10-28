@@ -1,6 +1,6 @@
 # Quest 2 闭源 GPU 驱动研究
 
-2026-10-28，分支 `codex/quest2-proprietary-gpu`。用户授权开始研究移植。已完成 donor 下载、静态审计与首轮隔离实机测试：v819.1 经可选 profile 回调规避后，原生 MSM DRM 的计算、图像及三角形读回通过，Android 硬件缓冲区测试失败。尚不能替换系统 Vulkan HAL。未更改 Surface 启动驱动、固件或镜像；沿用最新麦克风/Wild Life/温控/触摸/密码 SSH 基线。
+2026-10-28，分支 `codex/quest2-proprietary-gpu`。已取得两个发布者标注为 Quest 2 提取的 Vulkan 包。v819.1 经可选 profile 规避和进程内 QTI→mapper5 适配后，原生 MSM DRM 计算、图像、三角形、AHardwareBuffer 读回及独立普通 APK 的 2880×1920 窗口呈现通过。不是完整系统驱动替换；没有修改 Surface 启动镜像、固件或正常桌面 Mesa。下文首轮 AHB 失败为历史对照，最新结果见文末。
 
 ## 已取得的证据
 
@@ -101,8 +101,58 @@ timeout 30 nsenter -t 1 -m -r -- /system/bin/env \
 
 三轮实际分别校验 11287、10733、11827 轮，均通过；最高采样 51.4°C。boot ID、system_server 与 SurfaceFlinger PID 全程不变。没有替换当前驱动做性能 A/B，轮数不应当作闭源比 Turnip 快的证据；也不代表长期稳定性、CTS 或 WSI 通过。原始输出保存在忽略的 out/quest2-gpu。
 
-## 下一步
+## 首轮 AHB 故障定位（历史）
 
 进程局部的 `quest2-gralloc-trace.c` 已确认 donor 的 `hw_get_module("gralloc")` 返回成功，模块名称 Graphics Memory Allocator Module、API version=1；不是简单缺少 libhardware/gralloc 文件。`build-quest2-trace.sh` 构建此只转发原调用的观察库，在上述单独 probe 命令中增加 `LD_PRELOAD=/data/local/tmp/sq2-closed/libgralloc-trace.so` 即可，不给系统服务设置 preload。AHB 查询反汇编显示尺寸/格式查询依赖额外 mapper 对象与类型分支；这进一步支持调查 QTI 扩展接入，但尚未实现桥接。
 
-先定位 donor 的 QTI mapper/HIDL 或旧 gralloc 查询与当前 minigbm mapper5 的不兼容，核对 native_handle 元数据与 DMA-BUF 导入。禁止把格式/大小硬编码成期望值来绕过测试；必须取得真实 stride、offset、modifier、分配长度、fence 与所有权语义。AHB 通过后再接系统加载器/独立应用交换链与全分辨率渲染。现阶段不部署桌面替换，不继续 v690 的 KGSL 内核移植。完整 EGL/GLES donor 仍未取得，这两个包仅覆盖 Vulkan。
+此故障随后由下述进程内桥接解决。完整 EGL/GLES donor 仍未取得，这两个包仅覆盖 Vulkan。
+
+## QTI mapper 桥接与普通应用验证
+
+`quest2-qti-mapper.cpp` 使用公开 HIDL 4.0/扩展 1.1 接口定义，提供进程局部对象，将 donor 的尺寸、格式、FD 等查询转为真实 minigbm mapper5 元数据。每次查询先 import 独立 handle，RAII free；返回 FD 借用原始 handle，不返回已释放的复制 FD。64×64 RGBA 的 StandardMetadata allocationSize 为 27756（含附加元数据），像素 DMA-BUF 的 fstat 长度为 16384；QTI getSize 必须与 getFd 对应，不能直接照抄总分配量。
+
+只接受单层、单平面、无保护、modifier=0 的 RGBA8888/AB24。宽度、stride、offset、plane size 来自元数据，像素分配长度来自 FD。未知操作显式 UNSUPPORTED；`getSurfaceMetadata_V1` 在当前路径可以不支持。不是完整 QTI mapper，不支持 YUV、多平面、UBWC、受保护视频或任意颜色格式。系统已有 Mesa 多平面修复保持原样。
+
+桥接库使用平台 `std::__1` ABI，链接本系统 HIDL 库，以 `DF_1_GLOBAL` 和 donor 副本的 DT_NEEDED 加载。早期 LD_PRELOAD 仅用于独立探针；最终 APK 无需全局 preload 或任何系统服务改动。原库 profile 字符串补丁保持，新增独立 SONAME `vulkan-bridge.so`。
+
+实测结果：
+
+- 64×64、13×7、257×129、1920×1280、2880×1920 的 AHB 导入→GPU 写入→CPU 读回通过，包括非对齐宽度；各轮同时完成计算、图像和 8 帧三角形读回。
+- 通过固定版本 libadrenotools 加载隔离的系统 Vulkan loader 后，同一完整探针通过。
+- 普通 NativeActivity 包 `org.surface.sq2.quest2probe`，通过私有目录中的 donor 创建 2880×1920、4 图像 FIFO 交换链，首轮 120 帧通过，截图为清晰彩色三角形。探针核对 driverVersion=2150838273，拒绝 Turnip 回退；实际进程 maps 含 donor 和桥接库。
+- 后续两次冷启动和一次 HOME→返回的窗口销毁/重建，各完整提交 1800 帧，总计 5400 帧；第二次冷启动截图正常。该轮最高 GPU 采样 44°C，boot ID、system_server、SurfaceFlinger PID 均保持不变。固定简单三角形场景，不是游戏压力测试或性能基准。
+
+AdrenoTools 只启用 CUSTOM_DRIVER；不启用 turbo、KGSL 用户映射或文件重定向。应用是单独测试包，不注入其他应用；系统桌面继续使用 Mesa。测试 APK 包含闭源二进制，只保存在忽略的 out/，不发布到仓库。
+
+### 构建与复现
+
+沿用 BUILD.md 的 WSL、NDK r28c、Mesa mapper5 头文件和已提取的本机 vendor 库缓存。额外需要 cmake、ninja、patchelf、glslang-tools、zip、JDK 17。首次准备：
+
+```sh
+python3 scripts/fetch-quest2-mapper-sources.py
+bash scripts/generate-quest2-mapper-headers.sh
+bash scripts/build-quest2-mapper.sh
+python3 scripts/prepare-quest2-runtime.py
+git clone https://github.com/bylaws/libadrenotools upstream/libadrenotools
+git -C upstream/libadrenotools checkout 8fae8ce254dfc1344527e05301e43f37dea2df80
+git -C upstream/libadrenotools submodule update --init --recursive
+bash scripts/build-quest2-adrenotools.sh
+python3 scripts/fetch-sq2-test-sdk.py
+bash scripts/build-sq2-vulkan-probe.sh
+bash scripts/build-quest2-vulkan-app.sh
+```
+
+已有 clone 不重复 clone。构建脚本校验 AdrenoTools 和 linkernsbypass 提交；接口来自 AOSP android-12.0.0_r1 和固定 QTI 公共 HAL 提交。下载缓存记录输入 SHA256；生成头文件、第三方源码与本机 vendor 二进制不进入 Git。`prepare-quest2-runtime.py` 逐个验证原 donor 哈希并输出新的 runtime/hashes.json。复制完整 runtime 到隔离目录 v819，hooks 到同级 hooks，新 readback 为 probe。
+
+```sh
+timeout 30 nsenter -t 1 -m -r -- /system/bin/env \
+  SQ2_ADRENOTOOLS_DIR=/data/local/tmp/sq2-closed/hooks \
+  LD_LIBRARY_PATH=/data/local/tmp/sq2-closed/hooks:/data/local/tmp/sq2-closed/v819:/system/lib64:/vendor/lib64 \
+  /data/local/tmp/sq2-closed/probe /data/local/tmp/sq2-closed/v819/vulkan-bridge.so
+```
+
+`SQ2_VULKAN_AHB_WIDTH/HEIGHT` 可覆盖默认 64，范围 1–4096。不传 `--offscreen-only` 才包含 AHB。将本地 APK 复制到 Android local tmp 后 `pm install -r`；屏幕保持解锁，运行 `scripts/test-quest2-wsi.sh`（保留的 initramfs root）。脚本只操作此测试包，核对 screen-only guard、GPU 温度、boot ID 和框架 PID，冷启动及窗口销毁/重建后分别等待 1800 帧；退出停止测试包并清理临时采集。日志留在忽略目录，不修改长期日志策略。
+
+## 后续范围
+
+当前证明此版本闭源 Vulkan 在 SQ2 MSM 后端可运行，并通过有限共享缓冲区与窗口呈现测试。尚无 CTS、游戏兼容性、性能对比或长期稳定性结论。系统部署需要更多格式/同步/生命周期覆盖，完整 EGL/GLES 还需要另找 donor；不因此切换桌面、伪装 GPU ID 或启动 KGSL 内核移植。
