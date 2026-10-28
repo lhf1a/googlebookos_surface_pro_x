@@ -209,6 +209,14 @@ Quest 2 v77 build 51584880050400150 来自第三方固件归档候选，来源�
 
 ## 最新：原配 GLES 的 AHB 五尺寸读回通过
 
+### 后续：同进程 150 次完整 EGL 生命周期
+
+新增仅 mapper3 导出的 `sq2_qti_mapper3_reset_addresses`，在调用方已经销毁全部纹理、EGLImage、surface/context、解除 current 并成功 eglTerminate 后，解除该桥接缓存的真实 CPU mmap 并清零统计。此钩子不能在单个 EGLImage 销毁时调用，不能与其他存活图像/上下文并发使用，也未自动安装到系统 EGL。
+
+GLES 探针新增 `SQ2_GLES_REPEATS=1..200`。每轮独立创建/销毁完整 EGL 状态，严格检查 context 销毁和 terminate 成功后调用释放钩子；原 Mesa 编译路径不查找此私有函数。实机 `SQ2_GLES_REPEATS=150 sh /tmp/run-quest2-gles.sh --ahb` 完成同一进程 150 次循环、450 帧双重像素读回，150 条释放记录均为一个 16384 字节映射，退出 0，框架 PID 保持。输出在忽略的 `out/quest2-gpu/gles-v77/lifecycle-150-checked.txt`。
+
+这证明完整 EGL 拆除边界能回收映射，不等于长期桌面所需的逐图像/纹理引用计数已经实现。系统 EGL 包装层仍需跟踪共享 EGLImage、纹理引用及窗口生命周期，避免 image 已销毁但 texture 仍引用时过早释放。旧五尺寸矩阵的二进制哈希是历史检查点，本次重建产物以本地 PROBE_SHA256SUMS 为准。
+
 2026-10-28，继续以同一 v77 EGL/GLES、原 GSL 和原编译器组合为主线，未混用 v819 GSL 来取得下列结果。正常系统和启动镜像仍为 Mesa。先在私有进程阻止 GPU 提交并读取命令，再依据真实错误逐项修复。
 
 ### 已定位并修正的三个接口问题

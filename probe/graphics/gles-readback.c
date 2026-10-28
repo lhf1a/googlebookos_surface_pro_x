@@ -28,7 +28,7 @@ static int dimension(const char *name){
     if(!*value||!end||*end||n<1||n>4096){fprintf(stderr,"invalid %s\n",name);exit(2);}
     return (int)n;
 }
-int main(int argc, char **argv) {
+static int run_probe(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     const int width=dimension("SQ2_GLES_WIDTH"),height=dimension("SQ2_GLES_HEIGHT");
     const size_t pixel_bytes=(size_t)width*height*4;
@@ -135,7 +135,7 @@ int main(int argc, char **argv) {
         destroy_image(d,image);AHardwareBuffer_release(ahb);
         eglMakeCurrent(d,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);
         if (surface != EGL_NO_SURFACE) eglDestroySurface(d,surface);
-        eglDestroyContext(d,ctx);eglTerminate(d);
+        if(!eglDestroyContext(d,ctx)||!eglTerminate(d))fail("import-only EGL teardown");
         puts("GPU_GLES_AHB_IMPORT_ONLY_OK no-draw-no-readback");return 0;
     }
     GLuint vs = shader(GL_VERTEX_SHADER, "attribute vec2 p; void main(){gl_Position=vec4(p,0.,1.);}");
@@ -208,12 +208,28 @@ int main(int argc, char **argv) {
     if (ahb) AHardwareBuffer_release(ahb);
     eglMakeCurrent(d,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);
     if (surface != EGL_NO_SURFACE) eglDestroySurface(d,surface);
-    eglDestroyContext(d,ctx); eglTerminate(d);
+    if(!eglDestroyContext(d,ctx)||!eglTerminate(d))fail("EGL teardown");
     free(pixels);
     if(cpu_readback)printf("GPU_GLES_DIRECT_AHB_READBACK_PASS frames=3 pixels=%d glReadPixels-not-tested\n",3*width*height);
     else {
         printf("GPU_GLES_READBACK_PASS frames=3 pixels=%d\n",3*width*height);
         if (use_ahb) puts("GPU_GLES_AHB_IMPORT_READBACK_PASS");
+    }
+    return 0;
+}
+int main(int argc,char **argv){
+    const char *value=getenv("SQ2_GLES_REPEATS");
+    char *end=NULL;long repeats=value?strtol(value,&end,10):1;
+    if(repeats<1||repeats>200||(value&&(!*value||*end))){fprintf(stderr,"invalid SQ2_GLES_REPEATS\n");return 2;}
+    for(long i=0;i<repeats;i++){
+        int result=run_probe(argc,argv);if(result)return result;
+#ifdef SQ2_QUEST2_GLES
+        // run_probe has destroyed all EGL/GL resources before this hook.
+        void (*reset)(void)=(void*)dlsym(RTLD_DEFAULT,"sq2_qti_mapper3_reset_addresses");
+        if(!reset){fprintf(stderr,"missing address teardown hook\n");return 1;}
+        reset();
+#endif
+        if(repeats>1)printf("GLES_LIFECYCLE_OK iteration=%ld total=%ld\n",i+1,repeats);
     }
     return 0;
 }

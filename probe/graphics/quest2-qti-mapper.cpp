@@ -43,6 +43,13 @@ struct AddressMappings {
     pthread_mutex_t mutex=PTHREAD_MUTEX_INITIALIZER;
     Entry entries[128]={};unsigned count=0;uint64_t bytes=0;
     ~AddressMappings(){for(unsigned i=0;i<count;i++)munmap(entries[i].base,entries[i].size);}
+    void reset(){
+        pthread_mutex_lock(&mutex);
+        for(unsigned i=0;i<count;i++)munmap(entries[i].base,entries[i].size);
+        std::fprintf(stderr,"QTI_ADDRESS_RESET mappings=%u bytes=%llu\n",count,static_cast<unsigned long long>(bytes));
+        count=0;bytes=0;
+        pthread_mutex_unlock(&mutex);
+    }
     void *get(const BufferInfo &b){
         struct stat st={};if(fstat(b.fd,&st))return nullptr;
         pthread_mutex_lock(&mutex);
@@ -58,6 +65,10 @@ struct AddressMappings {
         return base?static_cast<char*>(base)+b.offset:nullptr;
     }
 };
+static AddressMappings &address_mappings(){static AddressMappings instance;return instance;}
+// Explicit teardown hook. The caller MUST first destroy every image, texture,
+// surface and context and terminate EGL. Not safe for per-image destruction.
+extern "C" void sq2_qti_mapper3_reset_addresses(){address_mappings().reset();}
 #endif
 static bool info(void *buffer,BufferInfo &b,const char *operation) {
     bool ok=color_info(static_cast<const native_handle_t*>(buffer),b)&&b.format==1&&
@@ -114,8 +125,7 @@ struct Extensions final : qe1::IQtiMapperExtensions {
     Return<void> getRgbDataAddress(void *buffer,getRgbDataAddress_cb cb) override {
 #ifdef SQ2_QTI_MAPPER3
         BufferInfo b;bool ok=info(buffer,b,__func__);
-        static AddressMappings mappings;
-        void *address=ok?mappings.get(b):nullptr;
+        void *address=ok?address_mappings().get(b):nullptr;
         cb(address?qe::Error::NONE:qe::Error::BAD_BUFFER,address);
 #else
         (void)buffer;cb(qe::Error::UNSUPPORTED,nullptr);
