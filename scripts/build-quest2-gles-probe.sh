@@ -16,6 +16,8 @@ patchelf --replace-needed libandroid.so libnativewindow.so "$OUT/gles-readback"
 "$NDK/bin/aarch64-linux-android35-clang" -shared -fPIC -O2 -Wall -Wextra -Werror \
   "$ROOT/probe/graphics/quest2-loader-trace.c" -ldl -o "$OUT/libquest2-loader-trace.so"
 "$NDK/bin/aarch64-linux-android35-clang" -shared -fPIC -O2 -Wall -Wextra -Werror \
+  "$ROOT/probe/graphics/quest2-drm-trace.c" -o "$OUT/libquest2-drm-trace.so"
+"$NDK/bin/aarch64-linux-android35-clang" -shared -fPIC -O2 -Wall -Wextra -Werror \
   "$ROOT/probe/graphics/quest2-ion-dmaheap.c" -o "$OUT/libquest2-ion-dmaheap.so"
 HIDL=${SQ2_QUEST2_WORK:-/root/.cache/sq2-quest2-hidl}
 VENDOR=${SQ2_ANDROID_VENDOR_LIB64:-/root/.cache/sq2-probe-build/googlebook/vendor/lib64}

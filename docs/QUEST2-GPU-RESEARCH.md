@@ -207,6 +207,42 @@ Quest 2 v77 build 51584880050400150 来自第三方固件归档候选，来源�
 
 完整系统替换仍未完成：先解决共享图像的导入/地址/同步及 GPU hang，再覆盖多平面与窗口生命周期，然后接系统合成器和重启持久化。Vulkan 的 Wild Life 严重花屏也是独立未解决项，不能因 GLES 离屏通过便替换默认桌面。
 
+## 最新：原配 GLES 的 AHB 五尺寸读回通过
+
+2026-10-28，继续以同一 v77 EGL/GLES、原 GSL 和原编译器组合为主线，未混用 v819 GSL 来取得下列结果。正常系统和启动镜像仍为 Mesa。先在私有进程阻止 GPU 提交并读取命令，再依据真实错误逐项修复。
+
+### 已定位并修正的三个接口问题
+
+1. `getRgbDataAddress` 未实现时，eglSubDriverAndroid 的回退直接读取 native_handle+84，假设那里是 QTI CPU 基址；本机 minigbm 实际为宽高，64×64 时是 `0x4000000040`。产生的偏移经 49 位掩码后，将实际 IOVA `0x100047000` 变成命令中的 `0x1ffc100046fc0`，与捕获完全吻合。mapper3 现在对验证过的线性 RGBA 缓冲区返回真实 mmap 地址；两次地址查询一致，偏移回到 0，resolve 地址恢复为真实 IOVA。没有伪造 GPU ID、IOVA、私有 flags 或元数据 blob。
+2. 地址修复后，GPU→AHB CPU 的三帧像素检查通过，但 glReadPixels 仍留下 0x5a。确认 donor 调用了未实现的 mapper3 lock/unlock。直接将原 AHB handle 传给 mapper5 lock 又返回 BAD_VALUE；现为每次 CPU lock 创建独立 mapper5 import，保留至匹配 unlock 后再 free。真实 metadata 返回 bpp/stride，acquire fence 复制后转交 mapper5，release fence 在 HIDL 回调期间借用。互斥锁不跨越 fence 等待，活动锁数量有界；非空 fence 和并发锁尚未独立压力验证。
+3. 64×64/全屏通过后，13×7 AHB 像素仍错误，普通纹理的同尺寸正确。minigbm 的 height、plane heightInSamples 是逻辑高度，但 QTI getHeight/getCustomDimensions 描述分配高度；msm 的 RGB 分配实际将高度对齐至 64。mapper3 改用经过整除与 INT32 范围检查的 `plane_size / stride`，getUnalignedHeight 和 ANativeWindowBuffer 仍保留逻辑高度。之后非对齐尺寸也通过。
+
+这些变化仅在 SQ2_QTI_MAPPER3 编译分支启用。原 mapper4 重建 SHA256 仍为 `3c3e04a3e1a6e1ab19c60f3b6814d1da2f68ffd278fba7b4da7fc3240a07d54f`，没有改变既有 Vulkan 桥接。最终私有 mapper3 SHA256 为 `3cc5096eb8981cdebb8e3501adb88faa50932e54c8f353c12a142e64f3353e44`，GLES 探针为 `0978f0e328a4326d1ac5083c7aea612ba95d0f7e37edc37c20a163271bdf7f29`。
+
+### 最终实机矩阵
+
+每项三帧，着色器输出四象限及交替蓝通道；逐像素比较 glReadPixels 的期望结果，再检查 AHB CPU lock 得到的图像与之相同。不是只检查导入或单个首像素。
+
+| 尺寸 | 三帧像素总数 | 结果 |
+| --- | --- | --- |
+| 64×64 | 12288 | 两条读回均通过 |
+| 13×7 | 273 | 两条读回均通过 |
+| 257×129 | 99459 | 两条读回均通过 |
+| 1920×1280 | 7372800 | 两条读回均通过 |
+| 2880×1920 | 16588800 | 两条读回均通过 |
+
+合计 15 帧、24073620 个像素。所有进程返回 0，boot ID 和 system_server/SurfaceFlinger PID 保持；最终筛选 GPU fault/hang 日志无输出，screen-only=Y，默认 Mesa Vulkan 完整哈希保持 `0b36eeba…`。原始跟踪与测试输出仅在忽略的 out/quest2-gpu/gles-v77。
+
+复现为 retained initramfs root 执行 `SQ2_GLES_WIDTH=257 SQ2_GLES_HEIGHT=129 sh /tmp/run-quest2-gles.sh --ahb`；先同步当前构建的库/探针/清单。默认尺寸 64，范围 1–4096，未宣称范围内所有尺寸均已测试。`--ahb-cpu-readback` 是独立 CPU 路径诊断，输出明确注明未覆盖 glReadPixels。
+
+### 诊断和系统接入边界
+
+`quest2-drm-trace.c` 为私有 preload，记录 PRIME/GEM_INFO/submit 参数；`SQ2_DRM_TRACE_NO_SUBMIT=1` 拒绝被识别的 MSM 提交并有界读取第一层/间接命令。该模式下 readback 失败是预期结果，不能计为渲染通过。发现 import-only 的资源清理阶段也会尝试 GPU 提交，因此不能把它描述为零 GPU 命令保证。诊断库不进入常规 runner、应用或镜像。
+
+真实地址映射目前缓存至进程结束，限制 128 个/512 MiB，只适合独立实验，**尚未具备系统长期运行所需的 EGLImage 生命周期释放**。仍只支持已核对的单层、单平面、无压缩/保护的 RGBA8888；窗口交换链、多平面视频、其他颜色格式、SurfaceFlinger、重启持久化和完整复杂场景验证尚未完成。不能把本矩阵等同于闭源系统替换完成。
+
+Vulkan 并行进展见 [QUEST2-VULKAN-DIRECT.md](QUEST2-VULKAN-DIRECT.md)：独立 Direct 配置读取与基础读回通过，Wild Life 尚待新一轮图像正确性验证。
+
 ## 同一固件配套参考与布局对照（2026-10-28 后续）
 
 用户要求从 Quest 2 固件提取整套 GPU 驱动并直接参考实现。当前主参考统一为上述 v77 vendor，而不是把第三方 Vulkan 重打包与任意 GLES 组合当成原厂整套。`configs/quest2-v77-graphics-reference.json` 新增固定原配 Vulkan、mapper3 实现、gralloc.kona、gralloc core/utils、qdMetaData 及 QTI 接口库哈希；连同既有 EGL/GLES 清单共 18 个文件。它们都来自同一个已校验 vendor 分区。尚未认证 OEM 签名，主机侧抽取文件也不等于这些 HAL 已能在 Surface 加载运行。

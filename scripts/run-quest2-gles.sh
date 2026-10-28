@@ -1,7 +1,7 @@
 #!/bin/sh
 # Run from retained initramfs SSH root. Only the private probe sees these libs.
-# Default is offscreen. --ahb reproduces a known GPU-hang failure on this donor;
-# do not use it as a routine smoke test or run concurrently with other GPU tests.
+# Default is offscreen. --ahb requires the current address/lock/physical-height
+# mapper3 fixes; old bridge builds can hang the GPU. Never run GPU tests in parallel.
 set -eu
 base=/data/local/tmp/sq2-closed/gles-v77
 ion=1
@@ -10,7 +10,7 @@ if [ "${1:-}" = --gsl-dmabuf ]; then
     ion=0
     shift
 fi
-case "${1:-}" in ''|--ahb|--ahb-import-only) ;; *) echo 'usage: run-quest2-gles.sh [--gsl-dmabuf] [--ahb|--ahb-import-only]' >&2; exit 2;; esac
+case "${1:-}" in ''|--ahb|--ahb-import-only|--ahb-cpu-readback) ;; *) echo 'usage: run-quest2-gles.sh [--gsl-dmabuf] [--ahb|--ahb-import-only|--ahb-cpu-readback]' >&2; exit 2;; esac
 test "$#" -le 1
 root=/proc/1/root
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y

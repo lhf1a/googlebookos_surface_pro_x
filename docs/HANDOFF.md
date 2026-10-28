@@ -14,6 +14,9 @@
 
 ## 当前待办
 
+- 闭源 GLES 共享图像已推进：修复 QTI 错读 minigbm handle 的 CPU 基址、mapper3 lock/unlock 保留导入生命周期、物理高度语义后，同一 v77 配套库在 64×64、13×7、257×129、1920×1280、2880×1920 的 shader→glReadPixels→AHB CPU 对照均三帧通过。原 mapper4 逐字未变，正常系统仍是 Mesa。映射缓存仍为进程级有界实验实现，窗口生命周期、多平面和系统合成未完成，不能部署成默认桌面。详见 QUEST2-GPU-RESEARCH 最新章节。
+- 闭源 Vulkan 已按反汇编确认的 RenderMode=Direct 生成独立路径候选；实际配置读取和基础计算/图像/三角形/AHB 读回通过，尚未重新跑 Wild Life，不能称为花屏修复。详见 QUEST2-VULKAN-DIRECT.md。
+
 - Quest 2 原配参考已补全：v77 的 18 个 EGL/GLES/Vulkan、mapper/gralloc/metadata 库均固定哈希，新增 vendor 范围重建和离线审计脚本。原配布局函数与实际 minigbm 五尺寸对照通过，64×64 所需长度与实际分配相同，暂不支持空间不足解释；未证明地址/缓存/同步正确。另一个混合 v819 GSL 对照仅通过离屏和 import-only，不能称为原厂完整栈或 AHB 绘制通过。正常镜像仍是 Mesa，详见 QUEST2-GPU-RESEARCH 后续章节。
 
 - 完整 Quest 2 v77 EGL/GLES donor 已取得并固定哈希；闭源 GLES 的 pbuffer/FBO 三帧像素读回通过。mapper3/ION 控制 FD 私有适配后，AHB 导入仍失败并出现 fence 超时、GPU hang，用户确认黑屏后手动重启。重启后自动 SSH 恢复、boot_completed=1、Mesa 哈希和 screen-only guard 正常；pstore 为空。未写启动镜像。不要原样重复 AHB 失败路径或部署桌面，详见 [QUEST2-GPU-RESEARCH.md](QUEST2-GPU-RESEARCH.md)。
