@@ -8,8 +8,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 int main(int argc,char **argv){
-    const char *modes[]={"--ahb","--window","--yuv","--visible","--readpixels","--composition","--combined","--fp16","--color",
-        "--vulkan","--vulkan-offscreen","--vulkan-properties","--vulkan-import",
+    const char *modes[]={"--ahb","--window","--yuv","--visible","--hwui","--readpixels","--composition","--combined","--fp16","--color","--usage",
+        "--vulkan-device","--vulkan","--vulkan-offscreen","--vulkan-properties","--vulkan-import",
         "--vulkan-window","--vulkan-window-create"};
     int valid=argc==1;
     if(argc==2)for(unsigned i=0;i<sizeof(modes)/sizeof(modes[0]);i++)if(!strcmp(argv[1],modes[i]))valid=1;
@@ -19,8 +19,11 @@ int main(int argc,char **argv){
        stat("/proc/self/ns/mnt",&self_ns)||self_ns.st_ino==init_ns.st_ino){
         perror("private EGL namespace");return 1;
     }
+    const char *baseline=getenv("SQ2_HWUI_MESA");
+    int mesa=baseline&&!strcmp(baseline,"1");
+    if(baseline&&(!mesa||argc!=2||strcmp(argv[1],"--hwui")))return 2;
     if(mount(NULL,"/",NULL,MS_REC|MS_PRIVATE,NULL)||
-       mount("tmpfs","/vendor/lib64/egl","tmpfs",MS_NOSUID|MS_NODEV,"size=268435456,mode=755")){
+       (!mesa&&mount("tmpfs","/vendor/lib64/egl","tmpfs",MS_NOSUID|MS_NODEV,"size=268435456,mode=755"))){
         perror("private EGL mount");return 1;
     }
     const char *direct=getenv("SQ2_GLES_DIRECT");

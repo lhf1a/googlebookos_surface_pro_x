@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+最新隔离复现：HWUI仅硬件Bitmap失败；原生EGLImage纹理glTexSubImage2D上传后采样全零，Mesa对照正确，GPU绘制同类源及普通纹理上传正确。另Vulkan单队列通过、两个合法队列即在原Chrome位置Scudo abort，无需提交。两条具体阻断未修复，正常Mesa/boot保持；见 [QUEST2-HWUI.md](QUEST2-HWUI.md) 与 [QUEST2-VK-CREATE-AUDIT.md](QUEST2-VK-CREATE-AUDIT.md)。
+
 最新闭源候选 combined-v5 已补严格 BGRA/RGBX，私有九格式组合/FP16/双API回归通过；真实120秒桌面仍有图标黑块、状态栏横条和应用黑屏，Chrome vkCreateDevice 还有Scudo释放错误。两分钟回退及分时截图已实测，Mesa已恢复，不可提升默认。配套编译器已在实际SystemUI maps确认；后续定位producer/compositor及Chrome创建参数，见 [QUEST2-COLOR.md](QUEST2-COLOR.md)。
 
 更新时间：2026-10-28。不包含原始日志、网络地址或凭据。

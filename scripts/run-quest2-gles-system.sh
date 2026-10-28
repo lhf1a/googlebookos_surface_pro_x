@@ -19,6 +19,7 @@ if [ "${SQ2_GLES_READBACK_POLICY:-}" = 1 ];then
 fi
 system_probe=/data/local/tmp/sq2-closed/gles-v77
 visible=/data/local/tmp/sq2-closed/visible
+hwui=/data/local/tmp/sq2-closed/hwui
 readpixels=/data/local/tmp/sq2-closed/readpixels
 composition=/data/local/tmp/sq2-closed/composition
 vulkan_window=/data/local/tmp/sq2-closed/vulkan-window
@@ -32,8 +33,10 @@ if [ "${SQ2_V77_AHB_VIEW:-}" = 1 ];then
         *) echo 'Unknown private v77 AHB revision' >&2; exit 2 ;;
     esac
 fi
+device_probe=/data/local/tmp/sq2-closed/vulkan-device
 vulkan_probe=/data/local/tmp/sq2-closed/v77-vulkan-probe
 combined_probe=/data/local/tmp/sq2-closed/combined-probe
+usage_probe=/data/local/tmp/sq2-closed/usage-probe
 color_probe=/data/local/tmp/sq2-closed/color-probe
 fp16_probe=/data/local/tmp/sq2-closed/fp16-probe
 if [ "${SQ2_COMBINED:-}" = 1 ];then
@@ -46,6 +49,10 @@ fi
 if [ "${1:-}" = --inside ];then
     shift
     test "$(readlink /proc/self/ns/mnt)" != "$(readlink /proc/1/ns/mnt)"
+    if [ "${1:-}" = --hwui ] && [ "${SQ2_HWUI_MESA:-}" = 1 ];then
+        test "$(sha256sum /vendor/lib64/egl/libEGL_freedreno.so | cut -d ' ' -f1)" = f16302e33e4f7c8bbaccbe5ab5fd5d19f3279222ee430ace236c4bad237a5434
+        exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "CLASSPATH=$hwui/quest2-hwui.jar" /system/bin/app_process /system/bin Sq2Quest2Hwui
+    fi
     # The checked launcher made / recursively private, then mounted this tmpfs.
     test "$(stat -f -c %T /vendor/lib64/egl)" = tmpfs
     if [ "${SQ2_COMBINED:-}" = 1 ];then
@@ -55,11 +62,17 @@ if [ "${1:-}" = --inside ];then
         ln -s libGLESv2_adreno.so /vendor/lib64/egl/libGLESv2_freedreno.so
         mount --bind /vendor/lib64/egl/libquest2-vulkan-wrapper.so /vendor/lib64/hw/vulkan.freedreno.so
         echo "PRIVATE_COMBINED_NAMESPACE=$(readlink /proc/self/ns/mnt)"
+        if [ "${1:-}" = --usage ];then
+            exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$usage_probe/quest2-usage"
+        fi
         if [ "${1:-}" = --color ];then
             exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$color_probe/quest2-color"
         fi
         if [ "${1:-}" = --fp16 ];then
             exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$fp16_probe/quest2-fp16"
+        fi
+        if [ "${1:-}" = --vulkan-device ];then
+            exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$device_probe/quest2-vulkan-device"
         fi
         if [ "${1:-}" = --combined ];then
             exec env -u LD_PRELOAD -u LD_LIBRARY_PATH SQ2_VULKAN_REJECT_TURNIP=1 "$combined_probe/quest2-combined"
@@ -136,9 +149,19 @@ if [ "${1:-}" = --inside ];then
                 "${SQ2_READPIXELS_CAPTURE_HEIGHT:-360}" --path client --no-errors
         fi
         if [ "${SQ2_READPIXELS_RELAY:-}" = 1 ];then
+            if [ -n "${SQ2_READPIXELS_WIDTH:-}" ];then
+                test -n "${SQ2_READPIXELS_HEIGHT:-}"
+                exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$readpixels/quest2-readpixels" --relay-to-ahb \
+                    --size "$SQ2_READPIXELS_WIDTH" "$SQ2_READPIXELS_HEIGHT"
+            fi
             exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$readpixels/quest2-readpixels" --relay-to-ahb
         fi
         if [ "${SQ2_READPIXELS_UPLOAD:-}" = 1 ];then
+            if [ -n "${SQ2_READPIXELS_WIDTH:-}" ];then
+                test -n "${SQ2_READPIXELS_HEIGHT:-}"
+                exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$readpixels/quest2-readpixels" --upload-relay \
+                    --size "$SQ2_READPIXELS_WIDTH" "$SQ2_READPIXELS_HEIGHT"
+            fi
             exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$readpixels/quest2-readpixels" --upload-relay
         fi
         if [ -n "${SQ2_READPIXELS_WIDTH:-}" ];then
@@ -148,6 +171,9 @@ if [ "${1:-}" = --inside ];then
         fi
         exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$readpixels/quest2-readpixels"
     fi
+    if [ "${1:-}" = --hwui ];then
+        exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "CLASSPATH=$hwui/quest2-hwui.jar" /system/bin/app_process /system/bin Sq2Quest2Hwui
+    fi
     if [ "${1:-}" = --visible ];then
         # Already inside the private namespace: never re-enter PID 1 mounts here.
         exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "CLASSPATH=$visible/quest2-visible.jar" \
@@ -155,7 +181,7 @@ if [ "${1:-}" = --inside ];then
     fi
     exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$system_probe/gles-readback-system" "$@"
 fi
-case "${1:-}" in ''|--ahb|--window|--yuv|--visible|--readpixels|--composition|--combined|--fp16|--color|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create) ;; *) echo 'Unsupported system graphics probe mode' >&2;exit 2;; esac
+case "${1:-}" in ''|--ahb|--window|--yuv|--visible|--hwui|--readpixels|--composition|--combined|--fp16|--color|--usage|--vulkan-device|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create) ;; *) echo 'Unsupported system graphics probe mode' >&2;exit 2;; esac
 test "$#" -le 1
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 root=/proc/1/root
@@ -166,6 +192,14 @@ check_mesa(){
     test "$(sha256sum "$root/vendor/lib64/hw/vulkan.freedreno.so" | cut -d ' ' -f1)" = "$expected_vk"
 }
 check_mesa
+if [ "${1:-}" = --vulkan-device ];then
+    test "${SQ2_COMBINED:-}" = 1
+    (cd "$root$device_probe";sha256sum -c VULKAN_DEVICE_SHA256SUMS)
+fi
+if [ "${1:-}" = --usage ];then
+    test "${SQ2_COMBINED:-}" = 1
+    (cd "$root$usage_probe";sha256sum -c USAGE_PROBE_SHA256SUMS)
+fi
 if [ "${1:-}" = --color ];then
     test "${SQ2_COMBINED:-}" = 1
     (cd "$root$color_probe";sha256sum -c COLOR_PROBE_SHA256SUMS)
@@ -195,8 +229,12 @@ case "${1:-}" in --vulkan-window|--vulkan-window-create)
     test "${SQ2_V77_AHB_VIEW:-}" = 1
     (cd "$root$vulkan_window";sha256sum -c VULKAN_WINDOW_SHA256SUMS)
 ;; esac
-if [ "${1:-}" = --visible ];then
-    (cd "$root$visible";sha256sum -c VISIBLE_SHA256SUMS)
+if [ "${1:-}" = --hwui ];then
+    test "${SQ2_COMBINED:-}" = 1
+    (cd "$root$hwui";sha256sum -c HWUI_SHA256SUMS)
+fi
+if [ "${1:-}" = --visible ] || [ "${1:-}" = --hwui ];then
+    if [ "$1" = --visible ];then (cd "$root$visible";sha256sum -c VISIBLE_SHA256SUMS);fi
     pid=$(pidof zygote64 | awk '{print $1}')
     test -n "$pid"
     # Capture classpaths before entering Android/private mounts. Export only
