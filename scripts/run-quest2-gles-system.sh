@@ -10,6 +10,7 @@ if [ -n "${SQ2_GLES_CPU_LAYOUT:-}" ];then
         4-bank15) base=/data/local/tmp/sq2-closed/gles-linked-cpu-layout-bank15 ;;
         4-bank15-pbo) base=/data/local/tmp/sq2-closed/gles-linked-cpu-layout-pbo ;;
         4-bank15-zero-area) base=/data/local/tmp/sq2-closed/gles-linked-zero-area ;;
+        4-bank15-fence-prune) base=/data/local/tmp/sq2-closed/gles-linked-fence-prune ;;
         *) echo 'Unknown private CPU layout candidate' >&2; exit 2 ;;
     esac
 fi

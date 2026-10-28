@@ -79,6 +79,16 @@ protected usage位14在RGBA和YUV入口均被明确拒绝，`getMapSecureBufferF
 
 ## 7. 合成探针实测与同步对象阻断点
 
+### 已验证的完成依赖淘汰候选
+
+`scripts/prepare-quest2-fence-prune.py` 从完整哈希固定的 `gles-linked-zero-area` 生成独立 `gles-linked-fence-prune`。GLES SHA256为 `1d3ba33ea006962766f631362556ffa1b1e05835ceb733285bfbe37e580cce77`。原WaitSync helper的0x281f98改为调用0x3ea2c0 stub，其余既有CPU布局/PBO/空区域修复保持。stub用context原GSL表+800执行 `gsl_syncobj_wait(old,0)`；只有返回0才用表+792释放context持有的旧root并清槽，随后仍执行原clone/merge新依赖。非零（未完成/超时/错误）完全保留旧root，不能直接关闭子FD。没有增加阻塞等待或跳过新GPU依赖。
+
+匹配GSL的wait入口0xc54e0只收对象和32位timeout。DRM leaf wait0x211858把timeout传给sync_wait；UMD merged wait0x1e7b08遍历子项，timeout0为非阻塞查询、全部成功才返回0。新调用点内x19/x20为存活的callee-saved寄存器，后续volatile寄存器重新赋值，stub保存/恢复x29/x30及栈；原helper后续控制流保持。prepare检查输入两份清单、入口指令、RX零padding、段/section范围、仅允许变化字节和最终固定输出hash；先用QEMU执行相同stub的null/complete/pending/error五项，确认timeout始终0、错误不释放，再输出候选。QEMU不是原库或硬件证明。
+
+实际私有system-loader测试：64×64连续150轮通过，450个真实sync_file导出、300次GPU server wait、每轮像素最大误差0，FD始终11，150次QTI引用回零；640×360、2880×1920各3轮同样通过。原414项读回/错误检查、36帧窗口交换、YV12三帧回归通过。日志为忽略目录 `out/quest2-gpu/composition/prune-{first,64-150,640x360,2880x1920,regression-readpixels,regression-window,regression-yuv}.txt`。正常Mesa/boot/框架保持，未写启动镜像。尚未验证真实SF、所有应用、长期压力；此候选允许推进公共库合并及后续桌面切换验证，不能宣称完整系统替换。
+
+复现：WSL仓库根运行 `python3 scripts/prepare-quest2-fence-prune.py`（拒绝已有输出），完整同步候选和新版runner，从retained root执行 `SQ2_GLES_CPU_LAYOUT=4-bank15-fence-prune SQ2_COMPOSITION_CYCLES=150 sh /proc/1/root/data/local/tmp/sq2-closed/run-quest2-gles-system.sh --composition`。默认严格测试，不设置FD诊断/CPU对照变量。以下保留此前定位过程与失败证据。
+
 最新只读实测补充：诊断现复用固定GLES BuildID/指令/TLS检查，读取real-context+16296，并有界遍历匹配GSL的merged-sync结构（最多512节点，不修改任何对象）。连续5轮/10次server-wait，pending树的DRM leaf数严格为1..10，merged节点0..9；每个新root都继续持有上一root。前轮输出已完成mapper CPU锁和像素检查，下一轮仍保留其叶子。证据 `out/quest2-gpu/composition/closed-pending-tree.txt`，DIAGNOSTIC_ONLY/exit3。这把问题进一步定位为上下文pending UMD merge树保留历史fence，而不是EGLSync对象单独未销毁。尚未修补；不能直接关闭叶子FD或绕过GPU等待。
 
 匹配GSL中 `gsl_umd_sync_ops` 位于0x213688，merge实现0x1e6f10；merged对象ops为0x215088，children指针+16、数量+24。实测DRM leaf ops为0x213878。GLES的0x281f70对pending首次clone、后续merge/destroy旧root；clone会增加引用，UMD merge保留children，因此销毁旧root仍可能被新root持有。后续修复应验证提交的引用转移或仅淘汰已完成依赖，保留未完成fence及跨context顺序；不能仅因像素对照通过就清空pending。准备合并GLES/Vulkan时，以v4九库为共享底座，逐字加入最佳GLES候选五个专属库（EGL、GLES1/2、eglSubDriver、EGL wrapper），需同进程两种加载次序验证；尚未生成/部署combined候选。

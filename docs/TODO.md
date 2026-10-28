@@ -2,6 +2,7 @@
 
 ## 当前：同版 Quest 2 闭源图形栈接入
 
+- 已完成GLES pending历史fence淘汰候选的150轮异步合成与全屏回归，见QUEST2-SYSTEM-GRAPHICS-PLAN第7节。接下来以Vulkan v4九库为公共底座，加入fence-prune的五个GLES专属库；先验证同进程EGL→Vulkan、Vulkan→EGL两种加载顺序和真实绑定，再接SurfaceFlinger。独立两进程先后运行不能证明公共库全局状态兼容。
 - v4 raw WSI 的完整节点/租约适配已通过64×64 150周期/1800帧及四尺寸至2880×1920各36帧；引用/字节归零、原AHB回归通过。真实桌面、deferred bind实机、AHB共享/采样/导出和其他格式仍待做，见 [QUEST2-VULKAN-WSI.md](QUEST2-VULKAN-WSI.md)。后文v3“待接raw交换链”为此前阶段记录。
 - 完整vendor参考已提取，原18库与新增70项显示组件哈希已核对；来源与ABI差异见 [QUEST2-VENDOR-REFERENCE.md](QUEST2-VENDOR-REFERENCE.md)。尚缺同版system/odm内必要依赖的按需提取和完整内核接口审计，不跨版本随意补库。
 - 原配GLES通过系统加载、RGBA窗口/YUV线性路径和有限可见SF合成；后者是闭源producer + Mesa SF，并非桌面整套替换。
