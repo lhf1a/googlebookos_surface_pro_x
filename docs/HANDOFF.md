@@ -14,7 +14,7 @@
 
 ## 当前待办
 
-- 完整 Quest 2 v77 EGL/GLES donor 已取得并固定哈希；闭源 GLES 的 pbuffer/FBO 三帧像素读回通过。mapper3/ION 控制 FD 私有适配后，AHB 导入仍失败并出现 fence 超时、GPU hang，用户确认黑屏并正在手动重启；设备恢复尚待确认。未写启动镜像，正常入口仍 Mesa。不要重复运行 AHB 失败路径或部署桌面，详见 [QUEST2-GPU-RESEARCH.md](QUEST2-GPU-RESEARCH.md)。
+- 完整 Quest 2 v77 EGL/GLES donor 已取得并固定哈希；闭源 GLES 的 pbuffer/FBO 三帧像素读回通过。mapper3/ION 控制 FD 私有适配后，AHB 导入仍失败并出现 fence 超时、GPU hang，用户确认黑屏后手动重启。重启后自动 SSH 恢复、boot_completed=1、Mesa 哈希和 screen-only guard 正常；pstore 为空。未写启动镜像。不要原样重复 AHB 失败路径或部署桌面，详见 [QUEST2-GPU-RESEARCH.md](QUEST2-GPU-RESEARCH.md)。
 
 - 闭源 v819.1 Wild Life 已实测：完成 6357 / 38.07 FPS，但前中后段均严重花屏，渲染正确性失败；该成绩不能与有效 Mesa 成绩比较。临时选择器已撤回，原 Mesa 哈希和完整读回复验通过。证据与复现见 [QUEST2-GPU-RESEARCH.md](QUEST2-GPU-RESEARCH.md)。
 

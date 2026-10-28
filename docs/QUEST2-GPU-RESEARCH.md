@@ -201,6 +201,8 @@ Quest 2 v77 build 51584880050400150 来自第三方固件归档候选，来源�
 
 ## 后续范围
 
+手动重启后已重新连接：boot ID 改变，boot_completed=1，新 system_server/SurfaceFlinger PID 可读；默认 Vulkan 完整哈希恢复/保持 `0b36eeba…`，screen-only=Y。pstore 为空，本次启动的筛选日志未见 hangcheck/fault。重启后没有再执行闭源 GPU 负载。离线对比原 libgsl 与 v819.1 notgsl 的全局导出名称集合一致，但这不证明内部结构 ABI 一致；后者此前已通过 Vulkan AHB，是下一步对照候选，尚未混用到 GLES。
+
 原 mapper4 桥接在加入条件编译的 mapper3 代码后重建，SHA256 仍为 `3c3e04a3e1a6e1ab19c60f3b6814d1da2f68ffd278fba7b4da7fc3240a07d54f`，逐字未变。新脚本通过 shell/Python 语法检查；mapper3 和原 mapper4 均构建通过。诊断 strace 来源为官方 https://strace.io/files/6.15/strace-6.15.tar.xz ，本地归档 SHA256 `8552dfab08abc22a0f2048c98fd9541fd4d71b6882507952780dab7c7c512f51`；源码和静态产物只在忽略缓存中。
 
 完整系统替换仍未完成：先解决共享图像的导入/地址/同步及 GPU hang，再覆盖多平面与窗口生命周期，然后接系统合成器和重启持久化。Vulkan 的 Wild Life 严重花屏也是独立未解决项，不能因 GLES 离屏通过便替换默认桌面。
