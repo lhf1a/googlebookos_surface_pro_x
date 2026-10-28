@@ -1,8 +1,45 @@
 # Quest 2 v77 同版 Vulkan 私有候选
 
-状态：**同版 v77 已通过私有系统加载器的基础计算、optimal image 和八帧三角形读回；AHB 属性查询失败，尚未进入 AHB 绘制。** 本文的候选不是已通过 Wild Life 的 v819.1 Direct 包，也不能继承后者的实测结果。正常系统继续使用原 Mesa，未修改启动镜像、内核或固件。
+状态：**同版 v77 已加入私有 AHB 结构与生命周期适配，属性查询和导入/释放各150轮通过；非均匀RGBA图案的GPU→AHB→CPU精确读回通过64×64连续150轮，以及四种额外尺寸至2880×1920各三轮。** WSI、更多格式和整套系统替换仍未完成。本文的候选不是已通过 Wild Life 的 v819.1 Direct 包，也不能继承后者的实测结果。正常系统继续使用原 Mesa，未修改启动镜像、内核或固件。
 
 原件来自已校验的同一个 Quest 2 v77 `vendor.img`。分区和库的固定 SHA256 证明内容与本项目下载/提取清单一致；**未完成 OEM OTA 签名认证**。提取来源、完整显示参考和接口边界见 [QUEST2-VENDOR-REFERENCE.md](QUEST2-VENDOR-REFERENCE.md)。
+
+## 最新：AHB 视图、事务与引用适配
+
+`v77-vulkan-ahb-v3` 保持同版五个GPU库，并加入Vulkan专用mapper3、ION控制、AHB adapter及HAL wrapper，共九库。原 donor 的可执行section未改；只对四个未定义 `AHardwareBuffer_*` 导入等长重命名为 `SQ2NativeBuffer_*`，另把 `hw_get_module` 私有重命名，阻止旧gralloc perform接收兼容视图。具体调用、偏移与所有权证据见 [QUEST2-VULKAN-AHB-LIFETIME.md](QUEST2-VULKAN-AHB-LIFETIME.md)。
+
+- 从真实mapper5 metadata取得RGBA格式、stride、物理高度、fd大小、usage与id，不修改原minigbm handle/AHB。匹配v77布局为124字节、2 fds、26 ints；不能沿用旧108字节头。初期只接受单层、非保护、modifier0、offset0的RGBA8888。
+- Properties/AllocateMemory先取得可失败的事务租约；donor实际acquire转为独立owner引用，最终内部析构的release归还。公开FreeMemory返回不是推测的最后引用点。视图保留独立平台AHB引用和dup pixel fd；base=0，CPU mmap由原donor管理。
+- 专用mapper通过注册表反查view→original；freeBuffer拒绝释放借用view，Vulkan view的RGB/YUV CPU地址接口不建立另一套无人持有的映射。普通GLES mapper3及mapper4的预处理结果与此前逐字一致。
+- HAL wrapper统一系统加载器、GIPA/GDPA入口，保存每实例和每设备的真实分派。原HAL每次calloc144而close=NULL；包装层缓存一个这样的原HAL设备供重开使用，不猜测其释放ABI。最初两版错误强制要求close，初始化失败；v3已修正。GDPA实际存在，未加猜测fallback。
+- 当前明确拒绝全部external-memory export（包括非AHB fd）、空AHB导入节点及raw `VkNativeBufferANDROID`/swapchain create/bind；这些是未完成接口，不是通用Vulkan HAL。一次只支持一个HAL open，最多128实例/设备、128个AHB视图/512MiB；正常Vulkan外部销毁同步仍必需。
+
+v3实际输出哈希：
+
+| 文件 | SHA256 |
+| --- | --- |
+| `vulkan-v77-bridge.so` | `b087293a0a59ce4d4a3ed25dfc29179a920c2fcab31587de3f8489fb481f3cbb` |
+| `libquest2-vulkan-wrapper.so` | `341fe0117ec2e28df72e150e839b97b8b8845fc9ca822e2507f9cd9fffa251c7` |
+| `libquest2-v77-ahb.so` | `9b338e6604248f1ded3e7af7d8f9ec7107279c26a31b0b85ecb028c5dae2fb7f` |
+| `libqti-mapper3-bridge.so` | `ade19efb787641daf1305c1d5787e93cc29029fd1462074455ff3a616979ab75` |
+
+真实设备的系统libvulkan加载v3后，64×64属性为format37、external28、size16384、types0xa，匹配RGBA及真实pixel fd大小。properties150轮每次结束views/leases/owners/bytes都为零；import150轮中实际owner为1，DestroyImage后仍保留，FreeMemory触发真实最终release后150次归零，且仍能查询应用保留的AHB引用。阶段模式未提交GPU工作。基础16×256计算、optimal RGBA、8帧三角形和一次64×64 AHB纯绿CPU精确读回也通过。纯色不能代替布局图案验证。
+
+本地日志在忽略目录 `out/quest2-gpu/v77-vulkan-ahb-v3/{properties-first,properties-150,import-first,import-150,render-first}.txt`。各次boot ID、框架PID和默认Mesa两库哈希前后保持。未将闭源库装入正常启动。以下七库记录与AHB失败是适配前的历史基线。
+
+随后把AHB纯绿检查升级为4×4非均匀attachment-clear网格，内部边界为奇数，RGBA四分量用0/1精确组合，循环改变图案。CPU独立按坐标与真实stride逐字节核对；没有放宽误差容限。探针SHA256为 `bf82fd9000c97b71b6553c76594fed51ac0e0b9be98c97baaf2c411b126b1fab`，v3九库保持原字节：
+
+| AHB尺寸 | stride（像素） | 实测轮数 | 结果 |
+| --- | --- | --- | --- |
+| 64×64 | 64 | 150，另有一次首轮 | 所有RGBA字节正确，150次AHB最终owner/视图归零 |
+| 13×7 | 64 | 3 | 所有RGBA字节正确 |
+| 257×129 | 320 | 3 | 所有RGBA字节正确 |
+| 1920×1280 | 1920 | 3 | 所有RGBA字节正确 |
+| 2880×1920 | 2880 | 3 | 所有RGBA字节正确 |
+
+原始证据为同目录 `grid-64-first.txt`、`grid-64-150.txt`、`grid-WxH.txt`。每次完整探针仍先通过基础compute/optimal image/八帧三角形，再做AHB网格；正常Mesa、boot与框架保持，末尾内核日志采样未发现GPU/SMMU fault，不把有限采样当作长期稳定保证。独立mock/QEMU另验证2432组小尺寸/奇数边界/带padding的oracle及18类资源失败清理；这不替代实机图像结果。属性/import两个阶段仍不创建command buffer或提交GPU任务。
+
+这些结果覆盖线性RGBA的属性、单memory导入、绑定、attachment写入、同步CPU读回与释放，**不覆盖AHB采样纹理、同AHB多个memory、零应用引用、AHB导出或WSI**。当前探针保留额外应用AHB引用，不能把它描述为已经独立验证零应用引用生命周期。下一步接raw native-buffer窗口寿命与真实交换链，同时按 [系统图形接入计划](QUEST2-SYSTEM-GRAPHICS-PLAN.md) 验证GLES多层合成/native fence；最后才进入真实SF替换。
 
 ## 最小私有组合
 

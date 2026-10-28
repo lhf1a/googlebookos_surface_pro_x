@@ -35,6 +35,8 @@ build-test3-ssh.sh 要求 SQ2_AUTHORIZED_KEY_FILE 指向自己的公钥；主机
 
 ## 增量打包及安装
 
+v77 Vulkan AHB适配：先运行 `bash scripts/build-quest2-v77-ahb.sh`（使用已有原件、HIDL和GLES ION构建），再运行 `python3 scripts/prepare-quest2-v77-vulkan.py --system-loader --ahb-view --adapters out/quest2-gpu/v77-ahb-adapters --output out/quest2-gpu/v77-vulkan-ahb-v3`。输出必须是不存在的新目录；当前v3已存在，不要删除旧证据强行覆盖。九库及SHA256SUMS复制到设备同名私有目录；同步新probe、namespace helper及两份对应manifest和runner。设置 `SQ2_V77_AHB_VIEW=1`（当前默认revision3）后用runner `--vulkan-properties` / `--vulkan-import`，两者不提交GPU；`--vulkan`做完整compute/raster和AHB非均匀网格读回。`SQ2_VULKAN_AHB_CYCLES=1..150`选择上述各模式的AHB轮数，`SQ2_VULKAN_AHB_WIDTH/HEIGHT`选择尺寸；测试必须串行。旧v1/v2因wrapper误要求原HAL的close回调而初始化失败，不应作为当前测试入口。原HAL close=NULL已在v3正确缓存处理；见QUEST2-V77-VULKAN与生命周期审计。仍没有正常系统安装器，raw WSI/export尚未支持。
+
 Quest 2 v77同版Vulkan：`prepare-quest2-v77-vulkan.py --system-loader --output out/quest2-gpu/v77-vulkan-system`生成七库私有候选，固定原件哈希、mapper3/ION依赖、RUNPATH与未改变的可执行section。同步候选及SHA256SUMS，另将`build-sq2-vulkan-probe.sh`生成的探针与VULKAN_PROBE_SHA256SUMS放入私有`v77-vulkan-probe/`；最新runner的`--vulkan-offscreen`只在私有namespace绑定HAL并通过原系统libvulkan加载。`--vulkan`目前会在AHB属性检查失败，不能放宽校验继续；详细地址证据见QUEST2-V77-VULKAN。没有正常系统安装流程。
 
 精确GLES读回：`build-quest2-readpixels.sh`生成闭源/显式Mesa两种探针与READPIXELS_SHA256SUMS，私有目录`readpixels/`。runner `--readpixels`执行414项矩阵；`SQ2_READPIXELS_WIDTH/HEIGHT`选择单尺寸，`SQ2_READPIXELS_RELAY=1`或`SQ2_READPIXELS_UPLOAD=1`另做五尺寸、两phase的精确采样/上传AHB CPU对照。`SQ2_YUV_TRACE_COPY=1`启用版本受限的进程内CPU传输跟踪，必须只用于无并发donor调用的私有探针，日志留out；不要加入正常启动。

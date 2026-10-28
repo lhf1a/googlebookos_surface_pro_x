@@ -20,23 +20,42 @@ system_probe=/data/local/tmp/sq2-closed/gles-v77
 visible=/data/local/tmp/sq2-closed/visible
 readpixels=/data/local/tmp/sq2-closed/readpixels
 vulkan=/data/local/tmp/sq2-closed/v77-vulkan-system
+if [ "${SQ2_V77_AHB_VIEW:-}" = 1 ];then
+    vulkan=/data/local/tmp/sq2-closed/v77-vulkan-ahb
+    ahb_revision=${SQ2_V77_AHB_REVISION:-3}
+    case "$ahb_revision" in
+        1) ;;
+        [2-9]) vulkan="$vulkan-v$ahb_revision" ;;
+        *) echo 'Unknown private v77 AHB revision' >&2; exit 2 ;;
+    esac
+fi
 vulkan_probe=/data/local/tmp/sq2-closed/v77-vulkan-probe
 if [ "${1:-}" = --inside ];then
     shift
     test "$(readlink /proc/self/ns/mnt)" != "$(readlink /proc/1/ns/mnt)"
     # The checked launcher made / recursively private, then mounted this tmpfs.
     test "$(stat -f -c %T /vendor/lib64/egl)" = tmpfs
-    case "${1:-}" in --vulkan|--vulkan-offscreen)
+    case "${1:-}" in --vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import)
         cp "$vulkan/"*.so /vendor/lib64/egl/
-        mount --bind /vendor/lib64/egl/vulkan-v77-bridge.so /vendor/lib64/hw/vulkan.freedreno.so
+        vk_entry=vulkan-v77-bridge.so
+        if [ "${SQ2_V77_AHB_VIEW:-}" = 1 ];then vk_entry=libquest2-vulkan-wrapper.so;fi
+        mount --bind "/vendor/lib64/egl/$vk_entry" /vendor/lib64/hw/vulkan.freedreno.so
         echo "PRIVATE_VULKAN_NAMESPACE=$(readlink /proc/self/ns/mnt)"
         sha256sum /vendor/lib64/hw/vulkan.freedreno.so
         if [ "$1" = --vulkan-offscreen ];then
             exec env -u LD_PRELOAD -u LD_LIBRARY_PATH SQ2_VULKAN_REJECT_TURNIP=1 \
                 "$vulkan_probe/vulkan-readback" /system/lib64/libvulkan.so --offscreen-only
         fi
+        if [ "$1" = --vulkan-properties ] || [ "$1" = --vulkan-import ];then
+            stage=--ahb-properties-only
+            if [ "$1" = --vulkan-import ];then stage=--ahb-import-only;fi
+            exec env -u LD_PRELOAD -u LD_LIBRARY_PATH SQ2_VULKAN_REJECT_TURNIP=1 \
+                "$vulkan_probe/vulkan-readback" /system/lib64/libvulkan.so \
+                "$stage" --ahb-cycles "${SQ2_VULKAN_AHB_CYCLES:-1}"
+        fi
         exec env -u LD_PRELOAD -u LD_LIBRARY_PATH SQ2_VULKAN_REJECT_TURNIP=1 \
-            "$vulkan_probe/vulkan-readback" /system/lib64/libvulkan.so
+            "$vulkan_probe/vulkan-readback" /system/lib64/libvulkan.so \
+            --ahb-cycles "${SQ2_VULKAN_AHB_CYCLES:-1}"
     ;; esac
     cp "$base/"*.so /vendor/lib64/egl/
     ln -s libquest2-egl-wrapper.so /vendor/lib64/egl/libEGL_freedreno.so
@@ -93,7 +112,7 @@ if [ "${1:-}" = --inside ];then
     fi
     exec env -u LD_PRELOAD -u LD_LIBRARY_PATH "$system_probe/gles-readback-system" "$@"
 fi
-case "${1:-}" in ''|--ahb|--window|--yuv|--visible|--readpixels|--vulkan|--vulkan-offscreen) ;; *) echo 'usage: run-quest2-gles-system.sh [--ahb|--window|--yuv|--visible|--readpixels|--vulkan|--vulkan-offscreen]' >&2;exit 2;; esac
+case "${1:-}" in ''|--ahb|--window|--yuv|--visible|--readpixels|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import) ;; *) echo 'usage: run-quest2-gles-system.sh [--ahb|--window|--yuv|--visible|--readpixels|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import]' >&2;exit 2;; esac
 test "$#" -le 1
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 root=/proc/1/root
@@ -107,7 +126,7 @@ check_mesa
 test "$(nsenter -t 1 -m -r -- /system/bin/getprop ro.hardware.egl)" = freedreno
 (cd "$root$base";sha256sum -c SHA256SUMS;sha256sum -c PROBE_SHA256SUMS)
 (cd "$root$system_probe";sha256sum -c SYSTEM_PROBE_SHA256SUMS)
-case "${1:-}" in --vulkan|--vulkan-offscreen)
+case "${1:-}" in --vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import)
     test "$(nsenter -t 1 -m -r -- /system/bin/getprop ro.hardware.vulkan)" = freedreno
     (cd "$root$vulkan";sha256sum -c SHA256SUMS)
     (cd "$root$vulkan_probe";sha256sum -c VULKAN_PROBE_SHA256SUMS)

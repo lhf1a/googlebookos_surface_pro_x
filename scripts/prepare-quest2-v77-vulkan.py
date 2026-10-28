@@ -96,7 +96,12 @@ def main():
                         help='Use fixed /vendor/lib64/egl RUNPATH for the private system-loader namespace')
     parser.add_argument('--keep-optional-profile', action='store_true',
                         help='Keep the original ApplyApplicationProfile lookup for a separate comparison')
+    parser.add_argument('--ahb-view', action='store_true',
+                        help='Use private lifetime-managed linear RGBA AHB adapters and Vulkan HAL wrapper')
     args = parser.parse_args()
+    if args.ahb_view and not args.system_loader:
+        parser.error('--ahb-view requires --system-loader; its HAL wrapper has a fixed private donor path')
+    adapter_names = ADAPTERS + (('libquest2-v77-ahb.so', 'libquest2-vulkan-wrapper.so') if args.ahb_view else ())
     runpath = '/vendor/lib64/egl' if args.system_loader else '$ORIGIN'
     source, adapters, output = args.source.resolve(), args.adapters.resolve(), args.output.resolve()
     out_root = (ROOT / 'out').resolve()
@@ -125,7 +130,7 @@ def main():
             parser.error('Invalid adapter build manifest')
         bridge_manifest[name] = checksum
     adapter_data = {}
-    for name in ADAPTERS:
+    for name in adapter_names:
         data = (adapters / name).read_bytes()
         if digest(data) != bridge_manifest.get(name):
             parser.error(f'Adapter hash mismatch: {name}; rebuild the GLES adapters')
@@ -148,6 +153,19 @@ def main():
         if original.count(OLD_PROFILE) != 1:
             parser.error('Unexpected v77 profile symbol layout')
         patched = patch_slot(patched, PROFILE_OFFSET, OLD_PROFILE, NEW_PROFILE)
+    renamed_symbols = {}
+    if args.ahb_view:
+        for suffix in ('getNativeHandle', 'acquire', 'release', 'allocate'):
+            renamed_symbols['AHardwareBuffer_' + suffix] = 'SQ2NativeBuffer_' + suffix
+        renamed_symbols['hw_get_module'] = 'sq2_getmodule'
+        undefined = {line.split()[7] for line in run('readelf', '--dyn-syms', '-W',
+                     source / 'hw/vulkan.adreno.so').splitlines()
+                     if len(line.split()) >= 8 and line.split()[6] == 'UND'}
+        for before, after in renamed_symbols.items():
+            old, new = before.encode() + b'\0', after.encode() + b'\0'
+            if before not in undefined or patched.count(old) != 1:
+                parser.error(f'Expected one undefined donor import string: {before}')
+            patched = patch_slot(patched, patched.index(old), old, new)
     initial_code = {name: code_sections(data) for name, data in (donor_data | adapter_data).items()}
     donor_data[HAL] = patched
 
@@ -195,6 +213,8 @@ def main():
                                  'after': NEW_PROFILE[:-1].decode()}]),
         'executable_sections_unchanged': True, 'source_files_unchanged': True,
         'ion_allocation_supported': False, 'mapper4_included': False,
+        'ahb_view_adapter': args.ahb_view, 'renamed_private_imports': renamed_symbols,
+        'hal_entry': 'libquest2-vulkan-wrapper.so' if args.ahb_view else HAL,
         'executable_section_sha256': initial_code,
         'patchelf_version': run('patchelf', '--version'),
     }

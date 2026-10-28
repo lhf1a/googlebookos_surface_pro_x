@@ -3,6 +3,9 @@
  * Mapper3 scope: unprotected linear RGBA8888, YV12 and verified NV12 buffers.
  * Mapper4 retains its RGBA-only scope. Other operations fail
  * explicitly; this is not a complete Android mapper implementation. */
+#if defined(SQ2_V77_AHB_VIEW) && !defined(SQ2_QTI_MAPPER3)
+#error "SQ2_V77_AHB_VIEW requires SQ2_QTI_MAPPER3"
+#endif
 #ifdef SQ2_QTI_MAPPER3
 #include <vendor/qti/hardware/display/mapper/3.0/IQtiMapper.h>
 #else
@@ -32,6 +35,14 @@ using android::hardware::Void;
 using android::hardware::hidl_handle;
 using android::hardware::hidl_vec;
 using android::sp;
+
+#ifdef SQ2_V77_AHB_VIEW
+// Strong dependency supplied by the private v77 AHB adapter. A registered view
+// resolves to its live original handle; ordinary handles resolve to themselves;
+// rejected/stale views return nullptr. Never fall back to treating a view as a
+// real minigbm handle when its resolver is missing or rejects the lifetime.
+extern "C" const native_handle_t *sq2_v77_original_handle(const native_handle_t*);
+#endif
 
 namespace sq2 {
 #ifdef SQ2_QTI_MAPPER3
@@ -87,6 +98,10 @@ struct AddressMappings {
 };
 static AddressMappings &address_mappings(){static AddressMappings instance;return instance;}
 static bool supported_buffer(const native_handle_t *handle,BufferInfo &b){
+#ifdef SQ2_V77_AHB_VIEW
+    handle=sq2_v77_original_handle(handle);
+    if(!handle)return false;
+#endif
     if(color_info(handle,b)&&b.format==1&&b.fourcc==0x34324241u&&!(b.usage&(1ull<<14)))return true;
     YuvInfo y;YuvLayout layout;
     if(!yuv_info(handle,y,layout))return false;
@@ -104,6 +119,10 @@ extern "C" void sq2_qti_mapper3_release_buffer(const native_handle_t *handle){
 }
 #endif
 static bool info(void *buffer,BufferInfo &b,const char *operation) {
+#ifdef SQ2_V77_AHB_VIEW
+    buffer=const_cast<native_handle_t*>(sq2_v77_original_handle(static_cast<const native_handle_t*>(buffer)));
+    if(!buffer){std::fprintf(stderr,"QTI_BRIDGE %s BAD_BUFFER (rejected v77 view)\n",operation);return false;}
+#endif
     bool ok=color_info(static_cast<const native_handle_t*>(buffer),b)&&b.format==1&&
         b.fourcc==0x34324241u && b.sample_bits==32 && !(b.usage&(1ull<<14)) &&
         b.stride/4<=INT32_MAX && b.width<=INT32_MAX && b.height<=INT32_MAX &&
@@ -172,6 +191,17 @@ struct Extensions final : qe1::IQtiMapperExtensions {
     }
     Return<void> getRgbDataAddress(void *buffer,getRgbDataAddress_cb cb) override {
 #ifdef SQ2_QTI_MAPPER3
+#ifdef SQ2_V77_AHB_VIEW
+        auto *input=static_cast<const native_handle_t*>(buffer);
+        const native_handle_t *original=sq2_v77_original_handle(input);
+        if(!original){cb(qe::Error::BAD_BUFFER,nullptr);return Void();}
+        if(original!=input){
+            // The Vulkan view's base is zero: donor MapMemory owns its mmap.
+            // Do not add a second, unretained AddressMappings cache entry.
+            std::fprintf(stderr,"QTI_BRIDGE getRgbDataAddress v77 view UNSUPPORTED\n");
+            cb(qe::Error::UNSUPPORTED,nullptr);return Void();
+        }
+#endif
         BufferInfo b;bool ok=info(buffer,b,__func__);
         void *address=ok?address_mappings().get(b):nullptr;
         cb(address?qe::Error::NONE:qe::Error::BAD_BUFFER,address);
@@ -185,6 +215,16 @@ struct Extensions final : qe1::IQtiMapperExtensions {
     }
     Return<void> getYuvPlaneInfo(void *buffer,getYuvPlaneInfo_cb cb) override {
 #ifdef SQ2_QTI_MAPPER3
+#ifdef SQ2_V77_AHB_VIEW
+        auto *input=static_cast<const native_handle_t*>(buffer);
+        const native_handle_t *original=sq2_v77_original_handle(input);
+        if(!original){cb(qe::Error::BAD_BUFFER,{});return Void();}
+        if(original!=input){
+            // The private Vulkan view currently admits only linear RGBA.
+            cb(qe::Error::UNSUPPORTED,{});return Void();
+        }
+        buffer=const_cast<native_handle_t*>(original);
+#endif
         YuvInfo b;YuvLayout l;
         bool ok=yuv_info(static_cast<const native_handle_t*>(buffer),b,l);
         char *base=ok?static_cast<char*>(address_mappings().get(b)):nullptr;
@@ -218,15 +258,34 @@ static sp<Extensions> extension() {static sp<Extensions> instance=new Extensions
 struct Mapper final : qm::IQtiMapper {
     Return<void> createDescriptor(const BufferDescriptorInfo&,createDescriptor_cb cb) override {cb(am::Error::UNSUPPORTED,{});return Void();}
     Return<void> importBuffer(const hidl_handle &handle,importBuffer_cb cb) override {
+#ifdef SQ2_V77_AHB_VIEW
+        const native_handle_t *original=sq2_v77_original_handle(handle.getNativeHandle());
+        if(!original){cb(am::Error::BAD_BUFFER,nullptr);return Void();}
+#endif
         AIMapper *m=mapper5();buffer_handle_t imported=nullptr;
+#ifdef SQ2_V77_AHB_VIEW
+        AIMapper_Error error=m?m->v5.importBuffer(original,&imported):AIMAPPER_ERROR_NO_RESOURCES;
+#else
         AIMapper_Error error=m?m->v5.importBuffer(handle.getNativeHandle(),&imported):AIMAPPER_ERROR_NO_RESOURCES;
+#endif
         cb(static_cast<am::Error>(error),const_cast<native_handle_t*>(imported));return Void();
     }
     Return<am::Error> freeBuffer(void *buffer) override {
+#ifdef SQ2_V77_AHB_VIEW
+        auto *input=static_cast<const native_handle_t*>(buffer);
+        const native_handle_t *original=sq2_v77_original_handle(input);
+        // A view borrows an AHB owner's native handle; resolving it does not
+        // transfer mapper ownership. Only actual imported handles may be freed.
+        if(!original || original!=input)return am::Error::BAD_BUFFER;
+#endif
         AIMapper *m=mapper5();return m?static_cast<am::Error>(m->v5.freeBuffer(static_cast<buffer_handle_t>(buffer))):am::Error::NO_RESOURCES;
     }
     Return<am::Error> validateBufferSize(void*,const BufferDescriptorInfo&,uint32_t) override {return am::Error::UNSUPPORTED;}
     Return<void> getTransportSize(void *buffer,getTransportSize_cb cb) override {
+#ifdef SQ2_V77_AHB_VIEW
+        buffer=const_cast<native_handle_t*>(sq2_v77_original_handle(static_cast<const native_handle_t*>(buffer)));
+        if(!buffer){cb(am::Error::BAD_BUFFER,0,0);return Void();}
+#endif
         AIMapper *m=mapper5();uint32_t fds=0,ints=0;
         AIMapper_Error error=m?m->v5.getTransportSize(static_cast<buffer_handle_t>(buffer),&fds,&ints):AIMAPPER_ERROR_NO_RESOURCES;
         cb(static_cast<am::Error>(error),fds,ints);return Void();
@@ -266,6 +325,10 @@ struct Mapper final : qm::IQtiMapper {
             static_cast<unsigned long long>(cpu_usage),region.left,region.top,region.width,region.height);
         BufferInfo b;AIMapper *m=mapper5();
         if(!m){cb(am::Error::NO_RESOURCES,nullptr,0,0);return Void();}
+#ifdef SQ2_V77_AHB_VIEW
+        const native_handle_t *original=sq2_v77_original_handle(static_cast<const native_handle_t*>(buffer));
+        if(!original){cb(am::Error::BAD_BUFFER,nullptr,0,0);return Void();}
+#endif
         if(!info(buffer,b,"mapper3 lock") || b.stride>INT32_MAX){
             cb(am::Error::BAD_BUFFER,nullptr,0,0);return Void();
         }
@@ -295,7 +358,13 @@ struct Mapper final : qm::IQtiMapper {
             cb(am::Error::NO_RESOURCES,nullptr,0,0);return Void();
         }
         buffer_handle_t imported=nullptr;
+#ifdef SQ2_V77_AHB_VIEW
+        // active_locks remains keyed by the caller's buffer (possibly a view),
+        // while its imported member owns the real mapper5 import until unlock.
+        AIMapper_Error error=m->v5.importBuffer(original,&imported);
+#else
         AIMapper_Error error=m->v5.importBuffer(static_cast<buffer_handle_t>(buffer),&imported);
+#endif
         std::fprintf(stderr,"QTI_BRIDGE mapper3 lock import result=%d handle=%p\n",static_cast<int>(error),imported);
         if(error!=AIMAPPER_ERROR_NONE){
             if(fence_fd>=0)close(fence_fd);
@@ -318,7 +387,12 @@ struct Mapper final : qm::IQtiMapper {
     }
     Return<void> lockYCbCr(void *buffer,uint64_t usage,const Rect &region,const hidl_handle &fence,lockYCbCr_cb cb) override {
         YuvInfo b;YuvLayout l;
+#ifdef SQ2_V77_AHB_VIEW
+        const native_handle_t *original=sq2_v77_original_handle(static_cast<const native_handle_t*>(buffer));
+        if(!original || !yuv_info(original,b,l)){cb(am::Error::BAD_BUFFER,{});return Void();}
+#else
         if(!yuv_info(static_cast<const native_handle_t*>(buffer),b,l)){cb(am::Error::BAD_BUFFER,{});return Void();}
+#endif
         return lock(buffer,usage,region,fence,[&](am::Error error,void *data,int32_t,int32_t){
             am::YCbCrLayout result={};
             if(error==am::Error::NONE){

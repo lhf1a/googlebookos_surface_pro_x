@@ -38,10 +38,11 @@
  X(CmdClearColorImage) X(CmdCopyImageToBuffer) \
  X(CreateRenderPass) X(DestroyRenderPass) X(CreateImageView) X(DestroyImageView) \
  X(CreateFramebuffer) X(DestroyFramebuffer) X(CreateGraphicsPipelines) \
- X(CmdBeginRenderPass) X(CmdEndRenderPass) X(CmdDraw)
+ X(CmdBeginRenderPass) X(CmdEndRenderPass) X(CmdClearAttachments) X(CmdDraw)
 #define DECL(n) static PFN_vk##n vk##n;
 FUNCS(DECL)
 static VkPhysicalDeviceMemoryProperties memory;
+static unsigned queue_submissions;
 static uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags flags) {
     for (uint32_t i=0; i<memory.memoryTypeCount; ++i)
         if ((bits & (1u<<i)) && (memory.memoryTypes[i].propertyFlags & flags)==flags) return i;
@@ -50,14 +51,43 @@ static uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags flags) {
 static void submit(VkDevice dev, VkQueue queue, VkCommandBuffer cb, VkFence fence) {
     CHECK(vkEndCommandBuffer(cb));
     VkSubmitInfo si={.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,.commandBufferCount=1,.pCommandBuffers=&cb};
+    queue_submissions++;
     CHECK(vkQueueSubmit(queue,1,&si,fence));
     CHECK(vkWaitForFences(dev,1,&fence,VK_TRUE,10000000000ull));
     CHECK(vkResetFences(dev,1,&fence));
 }
 #include "vulkan-raster-readback.h"
+#include "vulkan-ahb-readback.h"
 int main(int argc,char **argv) {
-    int offscreen_only=argc==3 && !strcmp(argv[2],"--offscreen-only");
-    if(argc!=2 && !offscreen_only) { fprintf(stderr,"usage: vulkan-readback DRIVER_OR_LOADER.so [--offscreen-only]\n"); return 2; }
+    int offscreen_only=0,mode_set=0,cycles_set=0,result=0;
+    enum ahb_probe_mode ahb_mode=AHB_FULL;
+    unsigned ahb_cycles=1;
+    if(argc<2) goto usage;
+    for(int arg=2;arg<argc;arg++) {
+        if(!strcmp(argv[arg],"--offscreen-only")) {
+            if(mode_set) goto usage;
+            offscreen_only=1;mode_set=1;
+        } else if(!strcmp(argv[arg],"--ahb-properties-only") || !strcmp(argv[arg],"--ahb-import-only")) {
+            if(mode_set) goto usage;
+            ahb_mode=!strcmp(argv[arg],"--ahb-properties-only")?AHB_PROPERTIES_ONLY:AHB_IMPORT_ONLY;
+            mode_set=1;
+        } else if(!strcmp(argv[arg],"--ahb-cycles")) {
+            if(cycles_set || ++arg>=argc || !argv[arg][0]) goto usage;
+            unsigned value=0;
+            for(const char *p=argv[arg];*p;p++) {
+                if(*p<'0' || *p>'9' || value>150) goto usage;
+                value=value*10+(unsigned)(*p-'0');
+            }
+            if(!value || value>150) goto usage;
+            ahb_cycles=value;cycles_set=1;
+        } else goto usage;
+    }
+    if(offscreen_only && cycles_set) goto usage;
+    goto parsed;
+usage:
+    fprintf(stderr,"usage: vulkan-readback DRIVER_OR_LOADER.so [--offscreen-only | --ahb-properties-only | --ahb-import-only] [--ahb-cycles 1..150]\n");
+    return 2;
+parsed:
     setvbuf(stdout,NULL,_IOLBF,0);
     /* Optional bounded ALU workload for frequency validation. Defaults retain
      * the original small probe. CPU expectation uses a composed affine map. */
@@ -145,13 +175,31 @@ int main(int argc,char **argv) {
     uint32_t ne=0; CHECK(vkEnumerateDeviceExtensionProperties(gpu,NULL,&ne,NULL));
     VkExtensionProperties *ext=calloc(ne,sizeof(*ext)); if(!ext) return 1;
     CHECK(vkEnumerateDeviceExtensionProperties(gpu,NULL,&ne,ext));
-    for(uint32_t i=0;i<ne;i++) if(getenv("SQ2_VULKAN_ALL_EXTENSIONS") || strstr(ext[i].extensionName,"android") || strstr(ext[i].extensionName,"swapchain")) printf("EXT %s\n",ext[i].extensionName);
+    int has_ahb=0;
+    for(uint32_t i=0;i<ne;i++) {
+        if(!strcmp(ext[i].extensionName,VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME)) has_ahb=1;
+        if(getenv("SQ2_VULKAN_ALL_EXTENSIONS") || strstr(ext[i].extensionName,"android") || strstr(ext[i].extensionName,"swapchain")) printf("EXT %s\n",ext[i].extensionName);
+    }
     free(ext);
+    if(!offscreen_only && !has_ahb) {
+        fprintf(stderr,"AHB extension is not advertised\n");
+        vkDestroyInstance(inst,NULL);
+        if(hal_device && hal_device->close) hal_device->close(hal_device);
+        dlclose(lib);return 1;
+    }
     float priority=1.0;
     VkDeviceQueueCreateInfo qci={.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,.queueFamilyIndex=family,.queueCount=1,.pQueuePriorities=&priority};
     const char *device_ext=VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME;
     VkDeviceCreateInfo dci={.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,.queueCreateInfoCount=1,.pQueueCreateInfos=&qci,.enabledExtensionCount=offscreen_only?0:1,.ppEnabledExtensionNames=&device_ext};
     VkDevice dev; CHECK(vkCreateDevice(gpu,&dci,NULL,&dev));
+    if(ahb_mode!=AHB_FULL) {
+        printf("AHB_STAGE_ONLY mode=%s cycles=%u no_compute_or_raster=1\n",
+               ahb_mode==AHB_PROPERTIES_ONLY?"properties":"import",ahb_cycles);
+        result=ahb_probe(inst,gipa,gpu,dev,VK_NULL_HANDLE,VK_NULL_HANDLE,VK_NULL_HANDLE,
+                         ahb_mode,ahb_cycles,ahb_width,ahb_height);
+        if(queue_submissions) { fprintf(stderr,"Stage-only probe submitted GPU work\n");result=1; }
+        goto cleanup_device;
+    }
     VkQueue queue; vkGetDeviceQueue(dev,family,0,&queue);
     VkBufferCreateInfo bci={.sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,.size=64*64*4,.usage=VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,.sharingMode=VK_SHARING_MODE_EXCLUSIVE};
     VkBuffer buffer; CHECK(vkCreateBuffer(dev,&bci,NULL,&buffer));
@@ -224,51 +272,7 @@ int main(int argc,char **argv) {
     vkDestroyImage(dev,im,NULL); vkFreeMemory(dev,immem,NULL);
     raster_readback(dev,queue,cb,fence,buffer,mapped);
     if(offscreen_only) goto cleanup;
-    /* Import an Android/minigbm allocation, write on the GPU, read through the
-     * mapper CPU lock. This exercises mapper5 metadata and shared-buffer layout. */
-    AHardwareBuffer_Desc desc={.width=ahb_width,.height=ahb_height,.layers=1,.format=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
-        .usage=AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN|AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT|AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE};
-    AHardwareBuffer *ahb=NULL;
-    puts("AHB_STAGE allocate");
-    if(AHardwareBuffer_allocate(&desc,&ahb)) { fprintf(stderr,"AHB allocation failed\n"); return 1; }
-    puts("AHB_STAGE driver properties");
-    PFN_vkGetAndroidHardwareBufferPropertiesANDROID ahb_props=(PFN_vkGetAndroidHardwareBufferPropertiesANDROID)gipa(inst,"vkGetAndroidHardwareBufferPropertiesANDROID");
-    if(!ahb_props) return 1;
-    VkAndroidHardwareBufferFormatPropertiesANDROID fp={.sType=VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID};
-    VkAndroidHardwareBufferPropertiesANDROID ap={.sType=VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID,.pNext=&fp};
-    CHECK(ahb_props(dev,ahb,&ap));
-    printf("AHB_PROPERTIES format=%d external=%llu size=%llu types=%x features=%x\n",
-        fp.format,(unsigned long long)fp.externalFormat,(unsigned long long)ap.allocationSize,
-        ap.memoryTypeBits,fp.formatFeatures);
-    if(fp.format!=VK_FORMAT_R8G8B8A8_UNORM) { fprintf(stderr,"Unexpected AHB VkFormat=%d\n",fp.format); return 1; }
-    puts("AHB_STAGE create/import/bind");
-    VkExternalMemoryImageCreateInfo external={.sType=VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,.handleTypes=VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID};
-    imci.pNext=&external; imci.usage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imci.extent=(VkExtent3D){ahb_width,ahb_height,1};
-    CHECK(vkCreateImage(dev,&imci,NULL,&im));
-    VkMemoryDedicatedAllocateInfo dedicated={.sType=VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,.image=im};
-    VkImportAndroidHardwareBufferInfoANDROID import={.sType=VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,.pNext=&dedicated,.buffer=ahb};
-    mai.pNext=&import; mai.allocationSize=ap.allocationSize; mai.memoryTypeIndex=memory_type(ap.memoryTypeBits,0);
-    CHECK(vkAllocateMemory(dev,&mai,NULL,&immem)); CHECK(vkBindImageMemory(dev,im,immem,0));
-    CHECK(vkResetCommandBuffer(cb,0)); CHECK(vkBeginCommandBuffer(cb,&begin));
-    ib.image=im; ib.srcAccessMask=0; ib.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
-    ib.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED; ib.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,NULL,0,NULL,1,&ib);
-    color=(VkClearColorValue){.float32={0,1,0,1}};
-    vkCmdClearColorImage(cb,im,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,&color,1,&range);
-    ib.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;ib.dstAccessMask=VK_ACCESS_HOST_READ_BIT;
-    ib.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;ib.newLayout=VK_IMAGE_LAYOUT_GENERAL;
-    vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,0,NULL,0,NULL,1,&ib);
-    submit(dev,queue,cb,fence);
-    void *pixels=NULL;
-    puts("AHB_STAGE CPU lock");
-    if(AHardwareBuffer_lock(ahb,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,-1,NULL,&pixels)) return 1;
-    AHardwareBuffer_describe(ahb,&desc); uint32_t bad=0;
-    for(uint32_t y=0;y<ahb_height;y++) for(uint32_t x=0;x<ahb_width;x++) if(((uint32_t*)pixels)[y*desc.stride+x]!=0xff00ff00u)bad++;
-    if(AHardwareBuffer_unlock(ahb,NULL)) return 1;
-    if(bad){fprintf(stderr,"AHB mismatch pixels=%u\n",bad);return 1;}
-    printf("AHB_OK %ux%u stride=%u mapper5 import/GPU clear/CPU readback\n",ahb_width,ahb_height,desc.stride);
-    vkDestroyImage(dev,im,NULL);vkFreeMemory(dev,immem,NULL);AHardwareBuffer_release(ahb);
+    result=ahb_probe(inst,gipa,gpu,dev,queue,cb,fence,ahb_mode,ahb_cycles,ahb_width,ahb_height);
 cleanup:
     puts("CLEANUP_STAGE resources");
     vkDestroyFence(dev,fence,NULL);
@@ -276,6 +280,7 @@ cleanup:
     vkDestroyPipeline(dev,pipeline,NULL); vkDestroyShaderModule(dev,shader,NULL);
     vkDestroyPipelineLayout(dev,pl,NULL); vkDestroyDescriptorSetLayout(dev,sl,NULL);
     vkUnmapMemory(dev,mem); vkDestroyBuffer(dev,buffer,NULL); vkFreeMemory(dev,mem,NULL);
+cleanup_device:
     puts("CLEANUP_STAGE device");
     vkDestroyDevice(dev,NULL);
     puts("CLEANUP_STAGE instance");
@@ -284,5 +289,9 @@ cleanup:
     if(hal_device && hal_device->close) hal_device->close(hal_device);
     puts("CLEANUP_STAGE dlclose");
     dlclose(lib);
-    puts(offscreen_only ? "SQ2_VULKAN_OFFSCREEN_OK (AHB/WSI not tested)" : "SQ2_VULKAN_READBACK_OK"); return 0;
+    if(result) { puts("SQ2_VULKAN_PROBE_FAILED");return result; }
+    puts(offscreen_only ? "SQ2_VULKAN_OFFSCREEN_OK (AHB/WSI not tested)" :
+         ahb_mode==AHB_PROPERTIES_ONLY ? "SQ2_VULKAN_AHB_PROPERTIES_OK (no GPU submissions; import/WSI not tested)" :
+         ahb_mode==AHB_IMPORT_ONLY ? "SQ2_VULKAN_AHB_IMPORT_OK (no GPU submissions; rendering/WSI not tested)" :
+         "SQ2_VULKAN_READBACK_OK");return 0;
 }
