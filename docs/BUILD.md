@@ -37,6 +37,8 @@ build-test3-ssh.sh 要求 SQ2_AUTHORIZED_KEY_FILE 指向自己的公钥；主机
 
 ### 独立 Turnip Vulkan 构建
 
+Quest 2 闭源 donor 的隔离测试不使用 Turnip 打包器。步骤与结果见 [QUEST2-GPU-RESEARCH.md](QUEST2-GPU-RESEARCH.md)：先校验固定 donor，生成单独 profile 规避副本，构建 readback 探针，再复制到 Android local tmp 运行。探针新增真实三角形像素读回，默认保留 AHB；`--offscreen-only` 的通过标记明确不含 AHB/WSI。不可把当前 donor 放入正常启动镜像。
+
 `scripts/build-sq2-turnip.sh` 在 `/root/.cache/sq2-graphics/build-turnip` 独立构建 Android/MSM Turnip，输出 `out/sq2-turnip/runtime/vulkan.freedreno.so`，不覆盖已验证的 GLES。它复用 Mesa 26.2.4 源树、mapper5/multiplane 补丁及 NDK r28c；需要 Python venv 中 Meson、mako/PyYAML、Ninja、Bison/Flex/pkg-config，下载并校验的 libdrm 2.4.133 缓存。mapper5 上游补丁固定至 gbos-vm 提交 3b08ed29a73858644c65f24e06ee2a7cfb7e3774。不是无缓存的一键下载流程。
 
 后续 Wild Life 兼容补丁由 `patch-sq2-turnip-gmem.py` 应用，仅对 A680.1 + 3DMark 选择 sysmem，保留其它应用的 GMEM 路径；这是绕过措施，验证状态见 [WILD-LIFE.md](WILD-LIFE.md)。`pack-sq2-turnip-update.py BASE DRIVER OUTPUT --driver-sha256 HASH` 严格以麦克风基线 9dd3ff7a… 为输入，只替换 Vulkan HAL并保持凭据 addon 最后；不能用首次启用 Vulkan 的旧打包流程覆盖后续音频修复。

@@ -2,8 +2,35 @@
   "date": "2026-10-28",
   "branch": "codex/quest2-proprietary-gpu",
   "baseline_commit": "e1b523c137d187f4ff1d246eef3dfa03a62b2986",
-  "stage": "donor_static_audit_completed",
+  "stage": "isolated_runtime_offscreen_passed_ahb_failed",
   "deployed": false,
+  "runtime_tests": {
+    "kernel": "6.3.8-sq2-android1",
+    "gpu_device_id": "0x06080001",
+    "v690": "CreateInstance -3; /dev/kgsl-3d0 missing",
+    "v819_original": "SIGSEGV in system libadreno_app_profiles ApplyApplicationProfile",
+    "v819_optional_profile_skipped_sha256": "45e88aa1f3181e6b5e768869eee6119d589831ec9ac5a7b0825b6752d48990aa",
+    "v819_modified": {
+      "backend": "MSM DRM /dev/dri/card0",
+      "vulkan_api_reported": "1.1.295",
+      "compute_readback": "passed",
+      "image_clear_copy_readback": "passed",
+      "vertex_fragment_triangle_readback": "8 frames at 64x64 passed",
+      "repeat_seconds_per_process": 10,
+      "repeat_processes": 3,
+      "checked_words_per_round": 4096,
+      "alu_iterations_per_word": 4096,
+      "checked_rounds": [11287, 10733, 11827],
+      "peak_sampled_gpu_millicelsius": 51400,
+      "clean_process_exit": true,
+      "ahb": "allocation succeeds with system-first libs; donor returns success with format=0 externalFormat=0 allocationSize=0; test fails",
+      "wsi": "not tested; blocked behind invalid AHB metadata"
+    },
+    "turnip_control": "same full probe passed, including AHB import/GPU write/CPU readback",
+    "board_and_framework_restarts_observed": false,
+    "installed_system_driver_changed": false,
+    "limits": "No CTS, performance comparison, long-term stability, application presentation, EGL/GLES or desktop replacement claim"
+  },
   "donor_userspace": [
     {
       "release": "https://github.com/K11MCH1/AdrenoToolsDrivers/releases/tag/v819.1",
@@ -282,5 +309,5 @@
     "v819 notgsl contains DRM_IOCTL_MSM_GET_PARAM/GEM_SUBMIT/SUBMITQUEUE_CLOSE and KGSL paths, plus Adreno 680/690 names. Static strings are not proof of reachable or compatible support.",
     "v690 has A680/A690 name strings and KGSL paths; no DRM hints were found by the current static scan."
   ],
-  "next_step": "Prioritize v819 native MSM DRM path investigation before KGSL emulation; resolve Android/QTI mapper dependencies in an isolated process. No driver executed yet."
+  "next_step": "Resolve v819 QTI/legacy gralloc versus current minigbm mapper5 metadata and import semantics in isolation. Do not deploy or fake buffer metadata. WSI and ordinary apps remain untested."
 }

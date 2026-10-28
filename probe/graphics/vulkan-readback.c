@@ -15,6 +15,8 @@
 #include <string.h>
 #include <time.h>
 #include "vulkan-compute.h"
+#include "vulkan-raster-vert.h"
+#include "vulkan-raster-frag.h"
 
 #define CHECK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) { \
     fprintf(stderr, "%s: VkResult=%d\n", #x, r_); exit(1); } } while (0)
@@ -32,7 +34,10 @@
  X(CmdPushConstants) X(CmdDispatch) X(CmdPipelineBarrier) X(QueueSubmit) \
  X(CreateFence) X(DestroyFence) X(ResetFences) X(WaitForFences) \
  X(CreateImage) X(DestroyImage) X(GetImageMemoryRequirements) X(BindImageMemory) \
- X(CmdClearColorImage) X(CmdCopyImageToBuffer)
+ X(CmdClearColorImage) X(CmdCopyImageToBuffer) \
+ X(CreateRenderPass) X(DestroyRenderPass) X(CreateImageView) X(DestroyImageView) \
+ X(CreateFramebuffer) X(DestroyFramebuffer) X(CreateGraphicsPipelines) \
+ X(CmdBeginRenderPass) X(CmdEndRenderPass) X(CmdDraw)
 #define DECL(n) static PFN_vk##n vk##n;
 FUNCS(DECL)
 static VkPhysicalDeviceMemoryProperties memory;
@@ -48,8 +53,10 @@ static void submit(VkDevice dev, VkQueue queue, VkCommandBuffer cb, VkFence fenc
     CHECK(vkWaitForFences(dev,1,&fence,VK_TRUE,10000000000ull));
     CHECK(vkResetFences(dev,1,&fence));
 }
+#include "vulkan-raster-readback.h"
 int main(int argc,char **argv) {
-    if(argc!=2) { fprintf(stderr,"usage: vulkan-readback DRIVER_OR_LOADER.so\n"); return 2; }
+    int offscreen_only=argc==3 && !strcmp(argv[2],"--offscreen-only");
+    if(argc!=2 && !offscreen_only) { fprintf(stderr,"usage: vulkan-readback DRIVER_OR_LOADER.so [--offscreen-only]\n"); return 2; }
     setvbuf(stdout,NULL,_IOLBF,0);
     /* Optional bounded ALU workload for frequency validation. Defaults retain
      * the original small probe. CPU expectation uses a composed affine map. */
@@ -73,8 +80,11 @@ int main(int argc,char **argv) {
             gipa=((hwvulkan_device_t*)hal_device)->GetInstanceProcAddr;
     }
     if(!gipa) { fprintf(stderr,"No Vulkan entrypoint\n"); return 1; }
-    PFN_vkCreateInstance create=(PFN_vkCreateInstance)gipa(VK_NULL_HANDLE,"vkCreateInstance");
-    if(!create) return 1;
+    /* Android HAL exposes global creation directly; a vendor GIPA may not
+     * return vkCreateInstance for a null instance. */
+    PFN_vkCreateInstance create=hal_device ? ((hwvulkan_device_t*)hal_device)->CreateInstance :
+        (PFN_vkCreateInstance)gipa(VK_NULL_HANDLE,"vkCreateInstance");
+    if(!create) { fprintf(stderr,"No vkCreateInstance entrypoint\n"); return 1; }
     VkApplicationInfo app={.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,.pApplicationName="SQ2 hardware readback",.apiVersion=VK_API_VERSION_1_1};
     VkInstanceCreateInfo ici={.sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,.pApplicationInfo=&app};
     VkInstance inst; CHECK(create(&ici,NULL,&inst));
@@ -105,7 +115,7 @@ int main(int argc,char **argv) {
     float priority=1.0;
     VkDeviceQueueCreateInfo qci={.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,.queueFamilyIndex=family,.queueCount=1,.pQueuePriorities=&priority};
     const char *device_ext=VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME;
-    VkDeviceCreateInfo dci={.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,.queueCreateInfoCount=1,.pQueueCreateInfos=&qci,.enabledExtensionCount=1,.ppEnabledExtensionNames=&device_ext};
+    VkDeviceCreateInfo dci={.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,.queueCreateInfoCount=1,.pQueueCreateInfos=&qci,.enabledExtensionCount=offscreen_only?0:1,.ppEnabledExtensionNames=&device_ext};
     VkDevice dev; CHECK(vkCreateDevice(gpu,&dci,NULL,&dev));
     VkQueue queue; vkGetDeviceQueue(dev,family,0,&queue);
     VkBufferCreateInfo bci={.sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,.size=64*64*4,.usage=VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,.sharingMode=VK_SHARING_MODE_EXCLUSIVE};
@@ -177,18 +187,26 @@ int main(int argc,char **argv) {
     for(uint32_t i=0;i<4096;i++) if(mapped[i]!=0xff0000ffu) { fprintf(stderr,"Image mismatch pixel=%u value=%08x\n",i,mapped[i]); return 1; }
     puts("IMAGE_OK 64x64 optimal-tiled RGBA clear/copy/readback");
     vkDestroyImage(dev,im,NULL); vkFreeMemory(dev,immem,NULL);
+    raster_readback(dev,queue,cb,fence,buffer,mapped);
+    if(offscreen_only) goto cleanup;
     /* Import an Android/minigbm allocation, write on the GPU, read through the
      * mapper CPU lock. This exercises mapper5 metadata and shared-buffer layout. */
     AHardwareBuffer_Desc desc={.width=64,.height=64,.layers=1,.format=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
         .usage=AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN|AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT|AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE};
     AHardwareBuffer *ahb=NULL;
+    puts("AHB_STAGE allocate");
     if(AHardwareBuffer_allocate(&desc,&ahb)) { fprintf(stderr,"AHB allocation failed\n"); return 1; }
+    puts("AHB_STAGE driver properties");
     PFN_vkGetAndroidHardwareBufferPropertiesANDROID ahb_props=(PFN_vkGetAndroidHardwareBufferPropertiesANDROID)gipa(inst,"vkGetAndroidHardwareBufferPropertiesANDROID");
     if(!ahb_props) return 1;
     VkAndroidHardwareBufferFormatPropertiesANDROID fp={.sType=VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID};
     VkAndroidHardwareBufferPropertiesANDROID ap={.sType=VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID,.pNext=&fp};
     CHECK(ahb_props(dev,ahb,&ap));
+    printf("AHB_PROPERTIES format=%d external=%llu size=%llu types=%x features=%x\n",
+        fp.format,(unsigned long long)fp.externalFormat,(unsigned long long)ap.allocationSize,
+        ap.memoryTypeBits,fp.formatFeatures);
     if(fp.format!=VK_FORMAT_R8G8B8A8_UNORM) { fprintf(stderr,"Unexpected AHB VkFormat=%d\n",fp.format); return 1; }
+    puts("AHB_STAGE create/import/bind");
     VkExternalMemoryImageCreateInfo external={.sType=VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,.handleTypes=VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID};
     imci.pNext=&external; imci.usage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     CHECK(vkCreateImage(dev,&imci,NULL,&im));
@@ -207,6 +225,7 @@ int main(int argc,char **argv) {
     vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,0,NULL,0,NULL,1,&ib);
     submit(dev,queue,cb,fence);
     void *pixels=NULL;
+    puts("AHB_STAGE CPU lock");
     if(AHardwareBuffer_lock(ahb,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,-1,NULL,&pixels)) return 1;
     AHardwareBuffer_describe(ahb,&desc); uint32_t bad=0;
     for(uint32_t y=0;y<64;y++) for(uint32_t x=0;x<64;x++) if(((uint32_t*)pixels)[y*desc.stride+x]!=0xff00ff00u)bad++;
@@ -214,13 +233,20 @@ int main(int argc,char **argv) {
     if(bad){fprintf(stderr,"AHB mismatch pixels=%u\n",bad);return 1;}
     puts("AHB_OK 64x64 mapper5 import/GPU clear/CPU readback");
     vkDestroyImage(dev,im,NULL);vkFreeMemory(dev,immem,NULL);AHardwareBuffer_release(ahb);
+cleanup:
+    puts("CLEANUP_STAGE resources");
     vkDestroyFence(dev,fence,NULL);
     vkDestroyCommandPool(dev,cmdpool,NULL); vkDestroyDescriptorPool(dev,pool,NULL);
     vkDestroyPipeline(dev,pipeline,NULL); vkDestroyShaderModule(dev,shader,NULL);
     vkDestroyPipelineLayout(dev,pl,NULL); vkDestroyDescriptorSetLayout(dev,sl,NULL);
     vkUnmapMemory(dev,mem); vkDestroyBuffer(dev,buffer,NULL); vkFreeMemory(dev,mem,NULL);
-    vkDestroyDevice(dev,NULL); vkDestroyInstance(inst,NULL);
-    if(hal_device) hal_device->close(hal_device);
+    puts("CLEANUP_STAGE device");
+    vkDestroyDevice(dev,NULL);
+    puts("CLEANUP_STAGE instance");
+    vkDestroyInstance(inst,NULL);
+    puts("CLEANUP_STAGE HAL close");
+    if(hal_device && hal_device->close) hal_device->close(hal_device);
+    puts("CLEANUP_STAGE dlclose");
     dlclose(lib);
-    puts("SQ2_VULKAN_READBACK_OK"); return 0;
+    puts(offscreen_only ? "SQ2_VULKAN_OFFSCREEN_OK (AHB/WSI not tested)" : "SQ2_VULKAN_READBACK_OK"); return 0;
 }

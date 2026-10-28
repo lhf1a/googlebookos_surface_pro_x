@@ -14,6 +14,7 @@
 
 ## 当前待办
 
+- Quest 2 闭源 GPU 研究在 `codex/quest2-proprietary-gpu`：v819.1 隔离实机计算/图像/三角形读回已通过，AHardwareBuffer 元数据失败，不能部署为系统驱动；v690 依赖本机不存在的 KGSL。下载来源、最小可选 profile 补丁、重复测试与下一步见 [QUEST2-GPU-RESEARCH.md](QUEST2-GPU-RESEARCH.md)。当前桌面驱动、镜像及频率未改变。
 - 2026-10-28：麦克风已完成并通过重启实测，详见 [MICROPHONE.md](MICROPHONE.md)。方向传感器、前后摄像头按用户要求暂缓，明确缺口记入 [TODO.md](TODO.md)。Wild Life 花屏已通过 A680.1 + 3DMark 专用 sysmem 兼容补丁缓解并设为默认；重启回归 5264 分 / 31.52 FPS，前中后段采样正常。GMEM 根因、更多应用与长期功耗仍待查，详见 [WILD-LIFE.md](WILD-LIFE.md)。
 - 真正休眠修复暂停；用户改为要求“只关闭屏幕”，具体保护策略见下节。
 - 音频修复已于 2026-10-27 恢复推进：停播/重新开声爆音、音量小、缺低频及声像问题仍开放，见 configs/audio-known-issues.json。
