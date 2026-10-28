@@ -1,5 +1,9 @@
 # 构建与部署
 
+eDP 速率表候选见 [DISPLAY-REFRESH.md](DISPLAY-REFRESH.md)。`build-sq2-edp-rates.sh` 使用独立 msm 源码副本；无 Module.symvers 时必须执行 `restore-sq2-msm-depends.py` 恢复原模块依赖声明，不能仅验证运行内核已有符号就部署。原始模块须为固定哈希。`pack-sq2-edp-rates.py` 仅改变 msm.ko 和测试用 init 钩子，保留密码 addon 最后；候选尚未通过硬件验证。脚本和安装器是固定阶段输入，不可直接复用到未知镜像或磁盘。
+
+用户于 2026-10-29 要求菜单仅保留闭源 Vulkan、原 Mesa、当前 eDP 调试三个入口，覆盖此前保留独立救援/关机菜单的偏好。默认仍是闭源 Vulkan，测试使用一次性 env 和 240 秒回退。诊断 Wi-Fi 中 flyer-test 不适用于当前环境；后续测试用有界本地日志，不开启这套诊断联网。无引用旧 initramfs 在本地 out 中校验备份后才能从已核验的设备 ESP 删除，不能删除共享镜像。
+
 闭源Vulkan启动候选：`build-quest2-vulkan-formats.py --boot-runtime` 生成runtime-v8，功能沿用v7，仅关闭成功调用统计及逐次BGRA导出提示，保留错误/所有权检查。`pack-sq2-closed-vulkan.py BASE BUNDLE OUTPUT --preserve-lab-ssh` 固定当前fa64305d…基线及v8九库哈希，新增独立候选目录与 `/init` 钩子；所有原vendor覆盖文件（含Mesa）、凭据和其它助手保持字节一致，密码SSH addon仍最后。不部署、不操作磁盘，输出拒绝覆盖。
 
 `closed-vulkan-start` 在可写RAM vendor覆盖层就绪、Android init之前核验哈希并接入系统HAL；`sq2.vulkan=mesa`、`sq2.vulkan=0` 或救援模式跳过，保留Mesa。Direct配置由 `sq2-closed-vulkan.rc` 在Android post-fs-data后复制到原私有路径，没有启动daemon/持续日志/网络操作。初始化顺序参考[AOSP init文档](https://android.googlesource.com/platform/system/core/+/refs/heads/main/init/README.md)。此候选尚无CTS认证，首次部署必须独立文件/一次性菜单，保留正常及救援入口，不能因构建成功就提升默认。

@@ -31,7 +31,28 @@ Diagnostic retry was armed with sq2.debug=1 to persist startup logs. The user
 then clarified that its saved diagnostic Wi-Fi profile is flyer-test and is
 not the current network. Do not reuse that association profile for further
 tests. Prefer bounded local boot snapshots and Android-owned saved networking.
-Diagnostic retry result is pending log retrieval after automatic rollback.
+Diagnostic retry also returned automatically to the original module and
+boot_completed=1. Logs identify a pre-training module-load failure: missing
+drm_sched_* and llcc_* exports because the no-Module.symvers build emitted an
+empty .modinfo depends field. Availability of exports on an already running
+system did not ensure their providers would load during boot.
+
+`restore-sq2-msm-depends.py` now restores the hash-verified original dependency
+list `gpu-sched,llcc-qcom,mdt_loader`, checking identical vermagic, unchanged
+code/imports, and that the only added import is built-in of_machine_is_compatible.
+It does not invent CRCs or a Module.symvers. Fixed module hash is
+`6293fa5d5cc3c462b1cee41fbf8a1eadeb6cf7e7055489b7afaf1e5999be88ac`.
+V3 addon hash `46fec013…`, combined image `7ddd4ad6…`; packer now requires
+the dependency field. V3 has bounded local snapshots every 30 seconds for
+at most 240 seconds, no diagnostic Wi-Fi. Hardware validation pending.
+
+User subsequently requested exactly three entries: default closed Vulkan,
+original Mesa and current eDP test. Rescue, shutdown and redundant v8 opt-out
+menu entries were removed at that explicit request. Shared images were retained.
+Ten obsolete/unreferenced initramfs files (1,496,280,091 bytes) were copied to
+ignored out/esp-retired-20261029 and individually SHA256-verified before deletion.
+Deletion completed; ESP available space increased to 1,486,316 KiB (29% used).
+Image/DTB files are not part of that deletion list.
 
 **Latest: raw DPCD reads supersede the earlier 2.7-Gbit/s receiver-maximum
 inference below. DSC is not advertised, but the eDP supported-rate table

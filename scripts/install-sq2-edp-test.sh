@@ -14,21 +14,20 @@ boot=/media/esp/boot/sq2-android1
 efi=/media/esp/EFI/BOOT
 check() { test "$(sha256sum "$1" | cut -d ' ' -f 1)" = "$2"; }
 check "$boot/native-closed-vulkan-v8.cpio.gz" 5ba59bd91c14208442a15792dedff236b0f1789c4d8fe10d00ee50f5e0a4953c
-check "$efi/grub.cfg" 819a8162da843e08c6d01fed3f46ad54910d0cdc6ca9f925680c2062cd8172e6
-check /tmp/edp-rates-v2-addon.cpio.gz c10e9dc952e39e8a96a500f2172c927bdb42c6a29c0257da61752065d34a0153
-check /tmp/grub-edp-test.cfg 371822d312b7b482cce30581304c124b19cbd811da68a559cc20d28dbfe3a8c6
+check "$efi/grub.cfg" edefa4c8b5028c7fe9dcdc31f9d32d1f7427590d0adc735986c573c3273a5248
+check /tmp/edp-rates-v3-addon.cpio.gz 46fec01355da5ffabe3bad55d207dfd801c9eaf87e4da0aa1a6eb7624d5a0209
+check /tmp/grub-edp-test.cfg d7af23a37187494f68fc04d2541b2466d14a6af74bc612eec66e733af9237f63
 check /tmp/sq2-edp-test.env a2c338796ac6d902013a2d3e52c64b32999752b087ba89646aba66578d9dbd3e
-gzip -t /tmp/edp-rates-v2-addon.cpio.gz
-test ! -e "$boot/edp-rates-v2-addon.cpio.gz"
-test ! -e "$efi/grub-before-edp-rates.cfg"
-cp "$efi/grub.cfg" "$efi/grub-before-edp-rates.cfg"
-cp /tmp/edp-rates-v2-addon.cpio.gz "$boot/edp-rates-v2-addon.cpio.gz.new"
+gzip -t /tmp/edp-rates-v3-addon.cpio.gz
+test ! -e "$boot/edp-rates-v3-addon.cpio.gz"
+check "$efi/grub-before-edp-rates.cfg" 819a8162da843e08c6d01fed3f46ad54910d0cdc6ca9f925680c2062cd8172e6
+cp /tmp/edp-rates-v3-addon.cpio.gz "$boot/edp-rates-v3-addon.cpio.gz.new"
 cp /tmp/sq2-edp-test.env "$efi/sq2-edp-test.env.new"
 cp /tmp/grub-edp-test.cfg "$efi/grub.cfg.edp-new"
-check "$boot/edp-rates-v2-addon.cpio.gz.new" c10e9dc952e39e8a96a500f2172c927bdb42c6a29c0257da61752065d34a0153
-check "$efi/grub.cfg.edp-new" 371822d312b7b482cce30581304c124b19cbd811da68a559cc20d28dbfe3a8c6
+check "$boot/edp-rates-v3-addon.cpio.gz.new" 46fec01355da5ffabe3bad55d207dfd801c9eaf87e4da0aa1a6eb7624d5a0209
+check "$efi/grub.cfg.edp-new" d7af23a37187494f68fc04d2541b2466d14a6af74bc612eec66e733af9237f63
 sync
-mv "$boot/edp-rates-v2-addon.cpio.gz.new" "$boot/edp-rates-v2-addon.cpio.gz"
+mv "$boot/edp-rates-v3-addon.cpio.gz.new" "$boot/edp-rates-v3-addon.cpio.gz"
 mv "$efi/sq2-edp-test.env.new" "$efi/sq2-edp-test.env"
 mv "$efi/grub.cfg.edp-new" "$efi/grub.cfg"
 sync
