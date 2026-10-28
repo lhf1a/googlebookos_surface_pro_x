@@ -1,5 +1,38 @@
 # SQ2 display refresh investigation — 2026-10-29
 
+## Rate-table candidate and first boot test
+
+Work branch: codex/sq2-edp-link-rates. Candidate msm module SHA256
+`c04dcf94f860286d6185947003fa9b5681353681c1d8ecfb9ea5f565e0ad720e`.
+The patch is scoped to Surface Pro X eDP, parses the 1.4 rate table, filters
+to PHY-supported standard rates without renumbering receiver slots, writes
+BW_SET=0 plus RATE_SET=index, checks short AUX writes, and uses table-aware
+downshift. It leaves all timings/EDID modes unchanged. Host C boundary tests
+passed with ASan/UBSan; all 608 undefined imports have live exports.
+
+Build uses a dedicated msm source copy, the matching thermal cache/config,
+and an external-module include-path adjustment. Missing Module.symvers is
+explicitly not a full modpost verification. Existing Image/DTB remain intact.
+
+Isolated addon `c10e9dc9…` plus the unchanged default v8 image has combined
+hash `3c5c7621…`. Final-entry audit permits only msm.ko and the test watchdog
+hook in init; credential addon stays last. GRUB consumes its one-shot env
+before boot. A 240-second watchdog reboots unless confirmed. ESP was nearly
+full, so the 1 MB addon is a second initrd argument rather than a duplicate
+196 MB image. Default/rescue entries continue to use the original files.
+
+First boot did not reach a usable desktop/SSH; user observed scrolling boot
+text. User confirmed automatic reboot and normal desktop afterward. Original
+module hash, boot_completed=1 and screen_only=Y were verified on recovery;
+pstore was empty. No candidate link state was obtained: this is NOT a proven
+5.4-Gbit/s training failure or success. Candidate was not promoted.
+
+Diagnostic retry was armed with sq2.debug=1 to persist startup logs. The user
+then clarified that its saved diagnostic Wi-Fi profile is flyer-test and is
+not the current network. Do not reuse that association profile for further
+tests. Prefer bounded local boot snapshots and Android-owned saved networking.
+Diagnostic retry result is pending log retrieval after automatic rollback.
+
 **Latest: raw DPCD reads supersede the earlier 2.7-Gbit/s receiver-maximum
 inference below. DSC is not advertised, but the eDP supported-rate table
 advertises up to 5.4 Gbit/s/lane. Current msm code ignores that table.**
