@@ -16,6 +16,13 @@ mkdir -p "$OUT"
 patchelf --replace-needed libEGL.so libEGL_adreno.so "$OUT/gles-readback"
 patchelf --replace-needed libGLESv2.so libGLESv2_adreno.so "$OUT/gles-readback"
 patchelf --replace-needed libandroid.so libnativewindow.so "$OUT/gles-readback"
+"$NDK/bin/aarch64-linux-android35-clang" -O2 -Wall -Wextra -Werror \
+  -DSQ2_QUEST2_GLES -DSQ2_SYSTEM_EGL -I"$WORK/src/mesa-26.2.4/include" \
+  "$ROOT/probe/graphics/gles-readback.c" -lEGL -lGLESv2 -landroid -ldl \
+  -o "$OUT/gles-readback-system"
+"$NDK/bin/aarch64-linux-android35-clang" -O2 -Wall -Wextra -Werror \
+  "$ROOT/probe/graphics/quest2-egl-namespace.c" -o "$OUT/egl-private-namespace"
+(cd "$OUT"; sha256sum gles-readback-system egl-private-namespace > SYSTEM_PROBE_SHA256SUMS)
 "$NDK/bin/aarch64-linux-android35-clang" -shared -fPIC -O2 -Wall -Wextra -Werror \
   "$ROOT/probe/graphics/quest2-loader-trace.c" -ldl -o "$OUT/libquest2-loader-trace.so"
 "$NDK/bin/aarch64-linux-android35-clang" -shared -fPIC -O2 -Wall -Wextra -Werror \

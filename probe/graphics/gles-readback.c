@@ -31,6 +31,20 @@ static int dimension(const char *name){
     if(!*value||!end||*end||n<1||n>4096){fprintf(stderr,"invalid %s\n",name);exit(2);}
     return (int)n;
 }
+/* Probe adapter only: keep the test's small EGLint lists identical across KHR
+ * and core entry points. The driver wrapper itself forwards EGLAttrib intact. */
+static PFNEGLCREATEIMAGEPROC core_create;
+static PFNEGLDESTROYIMAGEPROC core_destroy;
+static EGLImageKHR create_core_test(EGLDisplay d,EGLContext c,EGLenum t,EGLClientBuffer b,const EGLint *attrs){
+    EGLAttrib wide[33];unsigned i=0;
+    if(attrs){
+        for(;i<32 && attrs[i]!=EGL_NONE;i+=2){wide[i]=attrs[i];wide[i+1]=attrs[i+1];}
+        if(i==32)fail("probe attribute list too long");
+        wide[i]=EGL_NONE;
+    }
+    return (EGLImageKHR)core_create(d,c,t,b,attrs?wide:NULL);
+}
+static EGLBoolean destroy_core_test(EGLDisplay d,EGLImageKHR image){return core_destroy(d,(EGLImage)image);}
 static int run_probe(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     const int width=dimension("SQ2_GLES_WIDTH"),height=dimension("SQ2_GLES_HEIGHT");
@@ -70,6 +84,17 @@ static int run_probe(int argc, char **argv) {
     if (ctx == EGL_NO_CONTEXT || !eglMakeCurrent(d, surface, surface, ctx)) fail("context");
     const char *renderer = (const char *)glGetString(GL_RENDERER);
     printf("GL_VENDOR=%s\nGL_RENDERER=%s\nGL_VERSION=%s\n", glGetString(GL_VENDOR), renderer, glGetString(GL_VERSION));
+#ifdef SQ2_SYSTEM_EGL
+    Dl_info egl_origin={0},gles_origin={0};
+    if(!dladdr((void*)eglInitialize,&egl_origin)||!dladdr((void*)glGetString,&gles_origin)||
+       !strstr(egl_origin.dli_fname,"/system/lib64/libEGL.so")||
+       !strstr(gles_origin.dli_fname,"/system/lib64/libGLESv2.so"))fail("expected platform EGL/GLES entry points");
+    printf("SYSTEM_EGL_ENTRY=%s\nSYSTEM_GLES_ENTRY=%s\n",egl_origin.dli_fname,gles_origin.dli_fname);
+    FILE *maps=fopen("/proc/self/maps","r");char line[1024];
+    if(!maps)fail("read loaded libraries");
+    while(fgets(line,sizeof(line),maps))if(strstr(line,"/egl/") && strstr(line,"r-xp"))printf("DRIVER_MAP %s",line);
+    fclose(maps);
+#endif
 #ifdef SQ2_QUEST2_GLES
     const char *version = (const char *)glGetString(GL_VERSION);
     if (!renderer || !strstr(renderer,"Adreno (TM) 680") || !version ||
@@ -97,13 +122,44 @@ static int run_probe(int argc, char **argv) {
         }
         PFNEGLCREATEIMAGEKHRPROC create_image = (void *)eglGetProcAddress("eglCreateImageKHR");
         if(getenv("SQ2_GLES_DIRECT_CREATE"))create_image=(void*)dlsym(RTLD_DEFAULT,"eglCreateImageKHR");
-        Dl_info create_origin={0};
-        if(create_image && dladdr((void*)create_image,&create_origin))printf("EGL_CREATE_ORIGIN=%s\n",create_origin.dli_fname);
+        void *create_entry=(void*)create_image;
         destroy_image = (void *)eglGetProcAddress("eglDestroyImageKHR");
+        if(getenv("SQ2_GLES_CORE_IMAGE")){
+            core_create=(void*)eglGetProcAddress("eglCreateImage");
+            core_destroy=(void*)eglGetProcAddress("eglDestroyImage");
+            if(getenv("SQ2_GLES_DIRECT_CREATE"))core_create=(void*)dlsym(RTLD_DEFAULT,"eglCreateImage");
+            if(!core_create||!core_destroy)fail("core image entry points");
+            create_entry=(void*)core_create;
+            create_image=create_core_test;destroy_image=destroy_core_test;
+            puts("EGL_CORE_IMAGE_PATH");
+        }
+        Dl_info create_origin={0};
+        if(create_entry && dladdr(create_entry,&create_origin))printf("EGL_CREATE_ORIGIN=%s\n",create_origin.dli_fname);
         PFNGLEGLIMAGETARGETTEXTURE2DOESPROC image_texture = (void *)eglGetProcAddress("glEGLImageTargetTexture2DOES");
         if (!client || !create_image || !destroy_image || !image_texture) fail("AHB EGL extensions");
         EGLClientBuffer native = client(ahb);
 #ifdef SQ2_QUEST2_GLES
+        int has_wrapper=create_origin.dli_fname && strstr(create_origin.dli_fname,"libquest2-egl-wrapper.so");
+        if(has_wrapper && getenv("SQ2_GLES_NATIVE_PROXY"))fail("do not double-wrap native buffers");
+        if(getenv("SQ2_GLES_IMAGE_ERRORS")){
+            if(!has_wrapper)fail("image error test requires wrapper");
+            unsigned (*refs)(void)=(void*)dlsym(RTLD_DEFAULT,"sq2_qti_mapper3_address_refs");
+            if(!refs||refs()!=0)fail("error test initial references");
+            eglGetError();
+            if(create_image(d,ctx,EGL_NATIVE_BUFFER_ANDROID,native,NULL)!=EGL_NO_IMAGE_KHR)
+                fail("native image with context accepted");
+            if(eglGetError()!=EGL_BAD_CONTEXT||refs()!=0||eglGetError()!=EGL_SUCCESS)
+                fail("failed import cleanup/error");
+            /* Older donor error -> local error, and the opposite order. */
+            EGLint unused=0;
+            eglQueryContext(EGL_NO_DISPLAY,EGL_NO_CONTEXT,EGL_CONFIG_ID,&unused);
+            if(create_image(d,EGL_NO_CONTEXT,EGL_NATIVE_BUFFER_ANDROID,NULL,NULL)!=EGL_NO_IMAGE_KHR ||
+               eglGetError()!=EGL_BAD_PARAMETER||eglGetError()!=EGL_SUCCESS)fail("local error precedence");
+            create_image(d,EGL_NO_CONTEXT,EGL_NATIVE_BUFFER_ANDROID,NULL,NULL);
+            eglQueryContext(EGL_NO_DISPLAY,EGL_NO_CONTEXT,EGL_CONFIG_ID,&unused);
+            if(eglGetError()!=EGL_BAD_DISPLAY||eglGetError()!=EGL_SUCCESS)fail("donor error precedence");
+            puts("EGL_IMAGE_ERRORS_RELEASE_OK");
+        }
         if (getenv("SQ2_GLES_TRACE_NATIVE") && native) {
             AHardwareBuffer_Desc actual;AHardwareBuffer_describe(ahb,&actual);
             printf("QUEST2_AHB_DESC w=%u h=%u stride=%u layers=%u format=%u usage=%llu\n",
@@ -129,7 +185,8 @@ static int run_probe(int argc, char **argv) {
             native=proxy;
         }
 #endif
-        image = create_image(d,EGL_NO_CONTEXT,EGL_NATIVE_BUFFER_ANDROID,native,NULL);
+        const EGLint image_attrs[]={EGL_IMAGE_PRESERVED_KHR,EGL_TRUE,EGL_NONE};
+        image = create_image(d,EGL_NO_CONTEXT,EGL_NATIVE_BUFFER_ANDROID,native,image_attrs);
 #ifdef SQ2_QUEST2_GLES
         if(proxy)sq2_native_dec(proxy);
 #endif
@@ -137,11 +194,12 @@ static int run_probe(int argc, char **argv) {
         image_texture(GL_TEXTURE_2D,image);
 #ifdef SQ2_QUEST2_GLES
         if(getenv("SQ2_GLES_SHARED_IMAGE")){
-            if(!getenv("SQ2_GLES_NATIVE_PROXY"))fail("shared image requires proxy");
-            struct sq2_native_proxy *other=sq2_native_wrap(client(ahb));
-            if(!other)fail("shared native proxy");
-            shared_image=create_image(d,EGL_NO_CONTEXT,EGL_NATIVE_BUFFER_ANDROID,other,NULL);
-            sq2_native_dec(other);
+            if(!has_wrapper&&!getenv("SQ2_GLES_NATIVE_PROXY"))fail("shared image requires proxy");
+            struct sq2_native_proxy *other=NULL;
+            EGLClientBuffer second=client(ahb);
+            if(!has_wrapper){other=sq2_native_wrap(second);if(!other)fail("shared native proxy");second=other;}
+            shared_image=create_image(d,EGL_NO_CONTEXT,EGL_NATIVE_BUFFER_ANDROID,second,image_attrs);
+            if(other)sq2_native_dec(other);
             if(shared_image==EGL_NO_IMAGE_KHR)fail("shared image import");
             unsigned (*refs)(void)=(void*)dlsym(RTLD_DEFAULT,"sq2_qti_mapper3_address_refs");
             if(!refs||refs()!=2)fail("shared image references");
@@ -265,7 +323,7 @@ int main(int argc,char **argv){
     if(repeats<1||repeats>200||(value&&(!*value||*end))){fprintf(stderr,"invalid SQ2_GLES_REPEATS\n");return 2;}
     for(long i=0;i<repeats;i++){
         int result=run_probe(argc,argv);if(result)return result;
-#ifdef SQ2_QUEST2_GLES
+#if defined(SQ2_QUEST2_GLES) && !defined(SQ2_SYSTEM_EGL)
         // run_probe has destroyed all EGL/GL resources before this hook.
         void (*reset)(void)=(void*)dlsym(RTLD_DEFAULT,"sq2_qti_mapper3_reset_addresses");
         if(!reset){fprintf(stderr,"missing address teardown hook\n");return 1;}

@@ -14,6 +14,8 @@
 
 ## 当前待办
 
+- 最新闭源 GLES 已通过 Android 系统加载器：独立 mount namespace 中用系统 libEGL/libGLESv2 加载 v77 包装/桥接/原配库，无 LD_PRELOAD/LD_LIBRARY_PATH。EGL 1.5 core 150 轮、五尺寸线性 RGBA 双重读回与普通离屏路径通过，默认桌面 Mesa、boot ID/框架 PID 均不变。core/KHR 四种私有入口的共享引用与错误导入释放也各150轮通过。下一步是 ANativeWindow 交换、视频多平面、合成器和持久化，完整系统替换仍未完成。详见 QUEST2-GPU-RESEARCH「EGL 1.5 与 Android 系统加载器接入」；以下阶段记录保留历史证据，旧的 core/系统加载未覆盖已由本条更新。
+
 - EGL 包装模块已新增：KHR 原生图像导入的导出符号和 getProcAddress 两入口统一代理；未启用探针手工代理的两组各150次循环实测通过，最终映射零残留。仍是私有 preload，EGL1.5 core、窗口交换与系统加载尚未覆盖，不是已完成系统替换。详见 QUEST2-GPU-RESEARCH。
 
 - GLES 引用生命周期新进展：私有 native-buffer 代理已按 donor inc/dec 回收实际映射；早销毁 EGLImage 后纹理继续绘制，以及两个 EGLImage 共享同一 AHB 的 150 轮测试均通过。引用 2→1→0 和最终零残留各150次，框架未重启。代理仍仅接在私有探针，必须接入所有 EGL 导入/窗口路径后才能用于系统，不能混合代理与非代理使用来释放共享映射。详见 QUEST2-GPU-RESEARCH 最新章节。

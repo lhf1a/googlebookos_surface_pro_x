@@ -6,13 +6,19 @@ set -eu
 base=/data/local/tmp/sq2-closed/gles-v77
 ion=1
 wrapper=0
+linked=0
+if [ "${1:-}" = --egl-linked ];then
+    linked=1;ion=0;base=/data/local/tmp/sq2-closed/gles-linked;shift
+fi
 if [ "${1:-}" = --egl-wrapper ];then wrapper=1;shift;fi
 if [ "${1:-}" = --gsl-dmabuf ]; then
+    test "$linked" = 0
     base=/data/local/tmp/sq2-closed/gles-v819-dmabuf
     ion=0
     shift
 fi
-case "${1:-}" in ''|--ahb|--ahb-import-only|--ahb-cpu-readback) ;; *) echo 'usage: run-quest2-gles.sh [--egl-wrapper] [--gsl-dmabuf] [--ahb|--ahb-import-only|--ahb-cpu-readback]' >&2; exit 2;; esac
+test "$((linked + wrapper))" -le 1
+case "${1:-}" in ''|--ahb|--ahb-import-only|--ahb-cpu-readback) ;; *) echo 'usage: run-quest2-gles.sh [--egl-linked | --egl-wrapper] [--gsl-dmabuf] [--ahb|--ahb-import-only|--ahb-cpu-readback]' >&2; exit 2;; esac
 test "$#" -le 1
 root=/proc/1/root
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
@@ -27,6 +33,7 @@ echo "BOOT_BEFORE=$boot"
 nsenter -t 1 -m -r -- /system/bin/pidof system_server surfaceflinger
 result=0
 preload="$base/libqti-mapper3-bridge.so"
+if [ "$linked" = 1 ];then preload=;fi
 if [ "$wrapper" = 1 ];then preload="$base/libquest2-egl-wrapper.so:$preload";fi
 if [ "$ion" = 1 ]; then preload="$base/libquest2-ion-dmaheap.so:$preload";fi
 timeout -k 3 25 nsenter -t 1 -m -r -- /system/bin/env \

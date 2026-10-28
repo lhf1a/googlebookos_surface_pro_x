@@ -35,13 +35,15 @@ build-test3-ssh.sh 要求 SQ2_AUTHORIZED_KEY_FILE 指向自己的公钥；主机
 
 ## 增量打包及安装
 
+Quest 2 闭源 GLES 的最新系统加载验证：运行 `build-quest2-gles-probe.sh` 后，`prepare-quest2-gles-linked.py` 校验固定输入并生成新的私有 ELF 依赖组合（已有输出目录时拒绝覆盖）。`run-quest2-gles-system.sh` 配合编译的 `egl-private-namespace`，只在独立且递归 private 的 mount namespace 中覆盖 EGL 目录，通过原系统 libEGL/libGLESv2 运行 `gles-readback-system`。必须同步 SYSTEM_PROBE_SHA256SUMS，并为系统探针和 namespace helper 设置0755；不写全局 vendor 或启动镜像。具体复制路径、验证结果及缺口见 QUEST2-GPU-RESEARCH 的「EGL 1.5 与 Android 系统加载器接入」。这个流程不是桌面切换/持久化打包器。
+
 ### 独立 Turnip Vulkan 构建
 
 后续 v77 mapper3 修复已让五种线性 RGBA AHB 尺寸通过；必须重建 `build-quest2-gles-probe.sh` 并同步 libqti-mapper3-bridge.so、gles-readback、PROBE_SHA256SUMS，不能用旧桥接跑 `--ahb`。`SQ2_GLES_WIDTH/HEIGHT` 允许 1–4096（默认 64），每尺寸三帧严格像素检查。`--ahb-cpu-readback` 单独验证真实 GPU→AHB CPU 写入，不宣称覆盖 glReadPixels；完整 `--ahb` 同时检查两条读回。`--ahb-import-only` 不调用绘制，但驱动清理可能仍提交命令。新 DRM trace 库仅供私有探针诊断，不能进正常启动；其 no-submit 模式的像素失败是预期结果，不能用作通过证明。Vulkan Direct 候选构建和实测边界见 QUEST2-VULKAN-DIRECT。
 
 Quest 2 同固件参考可用 `rebuild-quest2-v77-vendor.py` 从已下载的 OTA prefix/vendor range 重建仅供解包的镜像；仅允许 out 下的新 .img，验证全部操作与分区哈希，不操作设备。`inspect-quest2-graphics-reference.py` 固定校验 18 个原配图形库并在 out 输出依赖/反汇编。`build-quest2-layout-reference.sh` 构建私有布局查询工具，比较原配 adreno_utils 与当前 minigbm 的真实分配，不调用 EGL 绘制。输入、结果和限制见 QUEST2-GPU-RESEARCH；这组工具不是启动镜像打包器。
 
-完整 Quest 2 v77 EGL/GLES 是独立隔离实验：准备 `out/quest2-gpu/q2-v77/lib64` 的固定输入（`configs/quest2-gles-v77-inputs.json`），运行 `fetch-quest2-mapper-sources.py`、`generate-quest2-mapper-headers.sh`、`prepare-quest2-gles.py`、`build-quest2-gles-probe.sh`。只将生成的私有 `gles-v77` 目录复制到 Android `/data/local/tmp/sq2-closed/`；`run-quest2-gles.sh` 从 retained initramfs root 运行，默认离屏。完整 GLES 三帧读回已通过，但 **`--ahb` 当前可触发 GPU hang**，不要例行执行或直接接入 SurfaceFlinger。原始 ION 库只有控制 FD 适配，分配接口仍返回 ENOTSUP；不是通用 ION→DMA-heap 转换。此增量没有正常启动打包流程，也未替换桌面驱动。完整证据见 QUEST2-GPU-RESEARCH。
+完整 Quest 2 v77 EGL/GLES 是独立隔离实验：准备 `out/quest2-gpu/q2-v77/lib64` 的固定输入（`configs/quest2-gles-v77-inputs.json`），运行 `fetch-quest2-mapper-sources.py`、`generate-quest2-mapper-headers.sh`、`prepare-quest2-gles.py`、`build-quest2-gles-probe.sh`。只将生成的私有 `gles-v77` 目录复制到 Android `/data/local/tmp/sq2-closed/`；`run-quest2-gles.sh` 从 retained initramfs root 运行，默认离屏。旧桥接的 `--ahb` 曾触发 GPU hang；当前地址/锁/物理高度修复及包装层已通过文档中的线性 RGBA 矩阵，不能使用旧二进制原样重试或直接接入 SurfaceFlinger。原始 ION 库只有控制 FD 适配，分配接口仍返回 ENOTSUP；不是通用 ION→DMA-heap 转换。此增量没有正常启动打包流程，也未替换桌面驱动。完整证据见 QUEST2-GPU-RESEARCH。
 
 Quest 2 闭源 donor 的隔离测试不使用 Turnip 打包器。完整步骤、固定来源和边界见 [QUEST2-GPU-RESEARCH.md](QUEST2-GPU-RESEARCH.md)：校验 donor → 构建进程局部 QTI/mapper5 桥接 → prepare-quest2-runtime → 固定 AdrenoTools → 独立 readback 与 APK。线性 RGBA AHB 和普通窗口呈现已通过；`--offscreen-only` 仍明确不含 AHB/WSI。闭源测试 APK 默认 1800 帧，正常 Mesa APK 仍 120 帧。第三方二进制、APK、私钥、日志不进 Git；不可把该实验桥接作为通用系统 mapper 放入正常启动镜像。
 

@@ -209,6 +209,33 @@ Quest 2 v77 build 51584880050400150 来自第三方固件归档候选，来源�
 
 ## 最新：原配 GLES 的 AHB 五尺寸读回通过
 
+### 当前进展：EGL 1.5 与 Android 系统加载器接入
+
+`quest2-egl-wrapper.c` 现在同时代理 EGL 1.5 `eglCreateImage` 与 KHR 入口，包括 `eglGetProcAddress` 返回的函数。core 直接调用原配 donor 的 core 实现，完整保留 `EGLAttrib`，不截断为 EGLint。包装层与 donor 的错误状态按先后顺序返回并清除；同一个 native buffer 不能同时使用包装层和探针手工代理。
+
+私有 preload 的 core/KHR × 直接符号/getProcAddress 四组各完成 150 轮：每轮两个 image 共享同一 AHB，主 image 提前销毁而纹理仍存活，三帧双重逐像素读回，随后引用 2→1→0。每组均有 150 次错误导入回收、150 次共享引用检查及 150 次全局清理零残留。错误测试使用有效 context 导入 native buffer，donor 返回 EGL_BAD_CONTEXT；另外检查本地 NULL 参数错误与 donor 错误的先后覆盖和一次性读取。最初用未知属性测试时，donor 接受了它，不能把上述结果写成全部错误语义/CTS 已通过。
+
+`prepare-quest2-gles-linked.py` 先校验固定原配库及当前构建清单，再在新的 `out/quest2-gpu/gles-linked` 生成独立 ELF 依赖组合：包装库依次依赖 mapper3 桥接、ION 控制 FD 适配和原 EGL；探针改为依赖包装库，私有库设置 `$ORIGIN`。这个路径不再需要 LD_PRELOAD。它也通过 150 轮共享 image/错误释放/早销毁测试，450 帧。原配 GLES/GSL/编译器仍是 v77 同版本，ION 分配本身仍明确不支持。
+
+随后直接验证 Android 自带加载器，未更改全局桌面：
+
+- `quest2-egl-namespace.c` 先创建独立 mount namespace，把 `/` 设为递归 private，再仅在子进程的 `/vendor/lib64/egl` 挂 tmpfs。任一步失败即退出，不向 PID 1 传播挂载。
+- `run-quest2-gles-system.sh` 复制已验证候选并为当前 freedreno 后缀建立私有入口，清除 LD_PRELOAD 与 LD_LIBRARY_PATH；不改属性或启动镜像。`gles-readback-system` 正常链接系统 libEGL/libGLESv2，确认实际 API 入口来自 `/system/lib64/`。
+- EGL 报告 `1.5 Android META-EGL`；GL 报告 Qualcomm、Adreno 680、V0819.0。进程 maps 确认 vendor namespace 内的 EGL 包装库、原配 EGL/GLES/GSL/编译器以及桥接实际加载，不能只凭渲染器字符串推断成功。
+- KHR 单轮、core 同一进程 150 轮（450 帧）通过。core 150 轮每轮提前销毁 image，绘制后由最后的 native-buffer 回调释放映射，共 150 条 remaining=0；这条系统路径没有调用探针的全局映射清理钩子。
+- 经系统加载器，13×7、257×129、1920×1280、2880×1920 另各三帧双重逐像素检查通过，普通非 AHB pbuffer/FBO 三帧也通过。连同 64×64，覆盖此前五尺寸；不是覆盖所有格式。
+
+该次 ELF-linked 包装库 SHA256 为 `8326cb237ffe54dad2513d0db5edb7db1384671f4a17d5206a4b805900a9247d`，系统探针为 `1907a76b620647b972e325ca3b122a5c700ac792b56ace928bd3d02d7ece9cba`。测试结束 boot ID 与两个框架 PID 保持，screen-only=Y，默认 Mesa EGL 为 `f16302e3…`、Vulkan 为 `0b36eeba…`，均未变化；GPU/GMU fault/hang/timeout 日志筛选无输出。原始输出仅在忽略的 out/quest2-gpu/gles-linked 和 gles-v77。
+
+复现：构建 `build-quest2-gles-probe.sh` 后，在 WSL 执行 `python3 scripts/prepare-quest2-gles-linked.py`（拒绝覆盖已有候选）。复制 gles-linked、gles-v77 下的系统探针/namespace helper/SYSTEM_PROBE_SHA256SUMS 和运行脚本至脚本指定的 `/data/local/tmp/sq2-closed`，确认两个可执行文件为 0755。在 retained initramfs root 执行：
+
+```sh
+SQ2_GLES_CORE_IMAGE=1 SQ2_GLES_DESTROY_IMAGE_EARLY=1 SQ2_GLES_REPEATS=150 \
+  sh /proc/1/root/data/local/tmp/sq2-closed/run-quest2-gles-system.sh --ahb
+```
+
+**尚未完成完整系统替换。** 这里只证明系统 EGL 分派与 vendor linker namespace 下的线性 RGBA 离屏导入、绘制和释放。ANativeWindow dequeue/queue/交换链生命周期、多平面视频、SurfaceFlinger 桌面、普通应用覆盖、持久化镜像及重启仍待完成；不能据此把候选提升为正常入口。下文旧的 preload-only、core 未实现与 AHB 失败描述是历史检查点。
+
 ### 后续：独立 EGL KHR 导入包装库
 
 `quest2-egl-wrapper.c` 将 native-buffer 代理接入导出的 eglCreateImageKHR 和包装的 eglGetProcAddress。其他查询转发原配驱动；包装层拒绝的输入通过线程本地 eglGetError 报错，不将不支持的 native handle 静默传给原始强转回退。当前是私有 preload，不是完整可供系统加载的 EGL HAL：EGL 1.5 core 导入、窗口创建/交换路径、全部错误语义和多线程均未完整覆盖。
