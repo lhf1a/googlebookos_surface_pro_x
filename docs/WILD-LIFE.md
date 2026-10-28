@@ -32,6 +32,8 @@ sysmem 指 Vulkan 仍由 GPU 渲染、绕过片上 GMEM 的分块渲染路径，
 
 ## 待继续定位
 
+新增闭源对照：2026-10-28 v819.1 + QTI/mapper5 桥接完成 Wild Life，结果页 6357 / 38.07 FPS，但约 2.3、41.9、55.5 秒截图均严重黑块/粉白横带，**不是有效性能成绩**。实际闭源加载已核实，GPU 采样峰值 57.2°C，无框架/整机重启。测试后恢复原 Mesa 哈希并通过读回；详见 [QUEST2-GPU-RESEARCH.md](QUEST2-GPU-RESEARCH.md)。不以相似花屏直接认定闭源与 Turnip 的根因相同。
+
 - 制作能逐像素校验的 GMEM/MRT/input-attachment 最小复现；区分 tile 布局、load/store、LRZ、CCU 缓存及 render-pass 转换。
 - 上游 [A680 UBWC/macrotile 修正](https://www.mail-archive.com/dri-devel@lists.freedesktop.org/msg504111.html) 要求配套内核 UBWC 查询接口，不能单独写 macrotile 寄存器。当前未回移该系列；禁用 UBWC 未消除本次异常。
 - 对比更多 Vulkan 应用及 Wild Life Extreme；当前应用级 workaround 不代表这些路径已通过。

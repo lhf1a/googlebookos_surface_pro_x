@@ -153,6 +153,28 @@ timeout 30 nsenter -t 1 -m -r -- /system/bin/env \
 
 `SQ2_VULKAN_AHB_WIDTH/HEIGHT` 可覆盖默认 64，范围 1–4096。不传 `--offscreen-only` 才包含 AHB。将本地 APK 复制到 Android local tmp 后 `pm install -r`；屏幕保持解锁，运行 `scripts/test-quest2-wsi.sh`（保留的 initramfs root）。脚本只操作此测试包，核对 screen-only guard、GPU 温度、boot ID 和框架 PID，冷启动及窗口销毁/重建后分别等待 1800 帧；退出停止测试包并清理临时采集。日志留在忽略目录，不修改长期日志策略。
 
+## Wild Life 完整场景测试：未通过渲染正确性
+
+2026-10-28，用户要求实测 3DMark Wild Life。未修改 APK、应用数据、内核、固件或启动镜像。临时 RAM Vulkan HAL 分派器仅精确匹配 `com.futuremark.dmandroid.application`，该进程加载 v819.1，其余转发哈希不变的 Mesa。目标加载失败明确报错，不自动回退。
+
+实际进程 maps 包含 `vulkan-bridge.so`、`notgsl.so`、`libqti-mapper-bridge.so`，日志明确报告 Driver Version 0819.0.1 及独立 vendor 路径。应用 UI 的 GLES 仍使用 Mesa，其日志不能据此误判 Vulkan 回退。driver 的 getinfo_ext/getfeatures/perfcounter 警告仍存在，尚未定位与花屏的因果关系。
+
+| 项目 | 结果 |
+| --- | --- |
+| 测试 | 3DMark 2.7.5093，Wild Life 标准，2560×1440 内部渲染 |
+| GPU | 现有 661 MHz 上限、原温控，不强制固定频率 |
+| 结果页 | 6357 分 / 38.07 FPS，完成整轮 |
+| 场景 | 约 2.3、41.9、55.5 秒采样均为黑块、粉白横带，严重错误 |
+| 温度 | GPU-top 2 秒间隔采样峰值 57.2°C |
+| 稳定性 | boot ID、system_server、SurfaceFlinger PID 不变；检查的 dmesg 未见 GPU fault/hang |
+| 判定 | **渲染失败，成绩不能用作有效性能对比或兼容性通过证明** |
+
+现象类似未使用 sysmem 绕过的 Turnip，但相似截图不能证明根因相同。当前仍应使用已验证的 Mesa/3DMark sysmem 配置，不能据 6357 比 5264 高就声称闭源更快。
+
+测试结束停止 3DMark 并解除临时 HAL 绑定。普通 umount 报 busy，随后仅对该文件绑定执行 lazy detach；默认 Vulkan HAL 恢复为 `0b36eeba…`，系统加载器重新报告 Turnip，计算、图像、三角形及 AHB 读回全部通过。临时库仍在 RAM vendor overlay 和忽略的测试目录，不被正常入口选择，无镜像更改。
+
+复现工具：`build-quest2-vulkan-selector.sh` 构建 HMI 分派器；`prepare-quest2-wildlife.py` 校验已有 runtime 哈希并为独立副本设置 `$ORIGIN` RUNPATH。复制 runtime（含 SHA256SUMS）及 selector 到 `/data/local/tmp/sq2-closed/wildlife`，selector 目标名为 `vulkan.sq2-selector.so`。从保留的 initramfs root 运行 `run-quest2-wildlife.sh`，打开 Wild Life 后点击运行；脚本 300 秒自动恢复，80°C 中止，也可创建 `/tmp/sq2-quest2-wildlife.lock/stop` 提前恢复。新测试前必须确认默认 HAL 哈希、仅关屏 guard 和实际 donor 映射，不能只看应用能否出分。原始截图/日志在忽略的 out/quest2-wild-life。
+
 ## 后续范围
 
-当前证明此版本闭源 Vulkan 在 SQ2 MSM 后端可运行，并通过有限共享缓冲区与窗口呈现测试。尚无 CTS、游戏兼容性、性能对比或长期稳定性结论。系统部署需要更多格式/同步/生命周期覆盖，完整 EGL/GLES 还需要另找 donor；不因此切换桌面、伪装 GPU ID 或启动 KGSL 内核移植。
+当前证明此版本闭源 Vulkan 在 SQ2 MSM 后端可运行，并通过有限共享缓冲区与简单窗口呈现测试；Wild Life 复杂场景已确认严重花屏。尚无 CTS、有效性能对比或长期稳定性结论。系统部署需要定位复杂渲染故障并增加格式/同步/生命周期覆盖，完整 EGL/GLES 还需要另找 donor；不因此切换桌面、伪装 GPU ID 或启动 KGSL 内核移植。

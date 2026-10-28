@@ -2,7 +2,7 @@
   "date": "2026-10-28",
   "branch": "codex/quest2-proprietary-gpu",
   "baseline_commit": "e1b523c137d187f4ff1d246eef3dfa03a62b2986",
-  "stage": "isolated_vulkan_readback_ahb_and_ordinary_app_wsi_passed",
+  "stage": "isolated_probes_passed_wildlife_completed_with_severe_misrendering",
   "deployed": false,
   "runtime_tests": {
     "kernel": "6.3.8-sq2-android1",
@@ -70,7 +70,23 @@
     "turnip_control": "same full probe passed, including AHB import/GPU write/CPU readback",
     "board_and_framework_restarts_observed": false,
     "installed_system_driver_changed": false,
-    "limits": "No CTS, performance comparison, long-term stability, games, EGL/GLES or desktop replacement claim"
+    "limits": "Wild Life rendered incorrectly; no valid performance comparison, CTS, long-term stability, general game compatibility, EGL/GLES or desktop replacement claim",
+    "wild_life": {
+      "date": "2026-10-28",
+      "app_version": "2.7.5093",
+      "driver_reported": "0819.0.1",
+      "driver_loading_verified": true,
+      "gpu_max_hz": 661000000,
+      "completed": true,
+      "displayed_score": 6357,
+      "displayed_average_fps": 38.07,
+      "valid_performance_result": false,
+      "rendering": "Severe black blocks and pink/white horizontal bands at 2.3, 41.9 and 55.5 seconds",
+      "gpu_peak_sampled_millicelsius": 57200,
+      "board_or_framework_restart": false,
+      "default_mesa_restored": true,
+      "post_restore_readback": "compute, image, raster, AHB passed; fresh 3DMark process maps original Mesa inode/hash"
+    }
   },
   "donor_userspace": [
     {
@@ -350,7 +366,7 @@
     "v819 notgsl contains DRM_IOCTL_MSM_GET_PARAM/GEM_SUBMIT/SUBMITQUEUE_CLOSE and KGSL paths, plus Adreno 680/690 names. Static strings are not proof of reachable or compatible support.",
     "v690 has A680/A690 name strings and KGSL paths; no DRM hints were found by the current static scan."
   ],
-  "next_step": "Research validation complete for isolated Vulkan linear RGBA path. Broader formats, games, CTS and full EGL/GLES donor are separate unfinished production-port work; keep Mesa as system default.",
+  "next_step": "Investigate confirmed Wild Life complex-rendering corruption; matching visual symptoms do not establish the same root cause as Turnip GMEM. Keep tested Mesa sysmem workaround as system default. Full EGL/GLES donor still missing.",
   "runtime_artifact_sha256": {
     "libqti-mapper-bridge.so": "3c3e04a3e1a6e1ab19c60f3b6814d1da2f68ffd278fba7b4da7fc3240a07d54f",
     "notadreno_utils.so": "2505aacd67b9384c45f45d56aaf90dbb1f7194747813dc48eddf06333f353609",
