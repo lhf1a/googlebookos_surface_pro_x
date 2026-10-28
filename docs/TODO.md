@@ -2,6 +2,7 @@
 
 ## 当前：同版 Quest 2 闭源图形栈接入
 
+- 最新真实SF证据：关闭预热的诊断轮次可启动闭源SF，桌面BGRA格式5导入失败；普通应用编译器混用系统QGL与Quest2 GLNEXT。已准备combined-v4独立编译器名字并通过私有回归，下一步BGRA/RGBX和真实HWUI绑定验证。独立collector及busy/lazy回退实测有效，设备与两个SystemUI已恢复Mesa；完整桌面/正常预热尚未通过。见 [QUEST2-SF-TRACE.md](QUEST2-SF-TRACE.md)，以下未知挂起记录为此前阶段证据。
 - 当前实际阻断：combined-v3已通过严格FP16布局/采样/写入150轮及RGBA8/Vulkan回归；真实SF第二轮仍黑屏或卡住，用户手动恢复后Mesa正常，pstore/SF tombstone缺失。先增加有限持久化kernel/SF证据并定位挂起，不原样重试全局切换。独立FP16通过不能替代桌面验证；私有ABI隔离和候选边界见 [QUEST2-FP16.md](QUEST2-FP16.md)。
 - 已完成GLES pending历史fence淘汰候选的150轮异步合成与全屏回归，见QUEST2-SYSTEM-GRAPHICS-PLAN第7节。接下来以Vulkan v4九库为公共底座，加入fence-prune的五个GLES专属库；先验证同进程EGL→Vulkan、Vulkan→EGL两种加载顺序和真实绑定，再接SurfaceFlinger。独立两进程先后运行不能证明公共库全局状态兼容。
 - v4 raw WSI 的完整节点/租约适配已通过64×64 150周期/1800帧及四尺寸至2880×1920各36帧；引用/字节归零、原AHB回归通过。真实桌面、deferred bind实机、AHB共享/采样/导出和其他格式仍待做，见 [QUEST2-VULKAN-WSI.md](QUEST2-VULKAN-WSI.md)。后文v3“待接raw交换链”为此前阶段记录。

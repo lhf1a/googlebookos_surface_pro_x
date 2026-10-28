@@ -2,6 +2,8 @@
 
 脚本来自迭代实验室，依赖缓存和分阶段产物；全新克隆不能直接生成完整可启动 SSD。不要删除哈希或磁盘身份保护以绕过缺失输入。
 
+实际SF跟踪与配套编译器命名隔离见 [QUEST2-SF-TRACE.md](QUEST2-SF-TRACE.md)。`build-quest2-kmsg.sh`生成有限独立collector，SF试验需先复制到retained /tmp并匹配固定hash；不是正常boot服务。`prepare-quest2-private-compiler.py`生成combined-v4，仅用于`SQ2_COMBINED_REVISION=4`私有回归，尚不可作为桌面安装包。
+
 FP16候选combined-v3的固定输入、私有helper隔离、build/prepare及运行入口见 [QUEST2-FP16.md](QUEST2-FP16.md)。runner使用`SQ2_COMBINED=1 SQ2_COMBINED_REVISION=3 --fp16`；v2因私有ABI冲突废弃。独立FP16验证通过，第二轮真实SF仍卡住且需手动恢复，当前不可部署为正常镜像。
 
 真实SF临时切换/回退脚本及首轮FP16阻断证据见 [QUEST2-SURFACEFLINGER.md](QUEST2-SURFACEFLINGER.md)。`build-quest2-color-info.sh`构建allocation/metadata-only探针，用于格式1/2/5/22真实component检查；没有GPU提交，不是格式支持证明。不要重复未修正的SF失败候选。

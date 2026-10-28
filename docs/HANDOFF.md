@@ -14,6 +14,7 @@
 
 ## 当前待办
 
+- 新跟踪已把实际阻断缩小：临时关闭预热后，SF以闭源Adreno启动；接入框架后因36×36 BGRA(format5)导入abort，SystemUI/登录app还混用了系统另一版本QGL编译器并SIGSEGV。独立75秒内核证据与busy→lazy回退均取得，boot保持，本轮无需手动重启；显式重启zygote后两个SystemUI实际maps已恢复Mesa。`combined-v4`用独立GLNEXT/QGL名字隔离配套编译器，两顺序/FP16/Vulkan/414读回私有回归过，实际HWUI尚未复验。下一步BGRA/RGBX语义与普通app命名空间绑定；不能以关闭预热或私有探针过关宣称系统替换完成。见 [QUEST2-SF-TRACE.md](QUEST2-SF-TRACE.md)。
 - FP16独立适配已通过：`combined-v3`仅替换mapper3为`e9eaf753…`，保留真实分量与步长校验并隔离私有C++ helper ABI。FP16 384²连续150轮、13×7/全屏各3轮bit一致，RGBA8合成150轮、Vulkan/AHB、414读回和两顺序共存通过。第二次实际SF切换仍黑屏/卡住，用户手动长按恢复，已复核正常Mesa/boot_completed及关屏guard；pstore空、未留SF tombstone，根因尚未确定，不能宣称桌面通过或自主board crash。新watchdog持久化/忙挂载回退尚未设备验证。见 [QUEST2-FP16.md](QUEST2-FP16.md)，不要原样重复全局切换。
 - 首轮真实SurfaceFlinger闭源切换已执行：Skia shader-cache预热要求384×384 RGBA_FP16(format22)，当前桥接拒绝后RenderEngine abort。独立watchdog恢复原Mesa哈希，SSH/框架恢复、boot ID保持；未写启动镜像。真实SF明确证明FP16现为启动必需，不能继续仅凭桌面缓存RGBA排除它。四种color格式真实PlaneLayouts已采集；下一步组件级FP16准入/步长及GPU采样验证，再重试SF。见 [QUEST2-SURFACEFLINGER.md](QUEST2-SURFACEFLINGER.md)。
 - `combined-v1`14库已在同进程同时持有GLES context和Vulkan device，两加载顺序各GLES150轮+VK36帧、全屏各GL3轮+VK36帧全过；公共库唯一实例及13项真实GOT绑定通过，资源最终归零，原AHB回归正常。prepare逐字复制v4九库+fence-prune五专属库，不改任何ELF。见 [QUEST2-COMBINED.md](QUEST2-COMBINED.md)。下一步系统格式/DATASPACE、降低正常日志和真实SF可恢复切换；完整替换与性能功耗尚未验证。默认Mesa/启动镜像保持。

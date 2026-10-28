@@ -51,7 +51,8 @@ extern "C" int quest2_combined_audit() {
     int mem=open("/proc/self/mem",O_RDONLY|O_CLOEXEC); if(mem<0) return 1;
     struct Slot {uintptr_t source; size_t offset; uintptr_t target; const char *name;};
     const char *revision=getenv("SQ2_COMBINED_REVISION");
-    size_t resolver_slot=revision&&!strcmp(revision,"3")?0x1aab0:0x1a660;
+    if(revision&&!strcmp(revision,"4")&&(!module("libq2v77glnext.so")||!module("libq2v77qgl.so")))return 1;
+    size_t resolver_slot=revision&&(!strcmp(revision,"3")||!strcmp(revision,"4"))?0x1aab0:0x1a660;
     const Slot slots[]={{gsl,0x213f60,ion,"ion_open"},{gsl,0x213f68,ion,"ion_close"},
         {gsl,0x213f90,ion,"ion_alloc_fd"},{mapper,resolver_slot,adapter,"sq2_v77_original_handle"},
         {donor,0x2e2be0,adapter,"SQ2NativeBuffer_getNativeHandle"},

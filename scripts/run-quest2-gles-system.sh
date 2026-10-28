@@ -38,7 +38,7 @@ fp16_probe=/data/local/tmp/sq2-closed/fp16-probe
 if [ "${SQ2_COMBINED:-}" = 1 ];then
     test -z "${SQ2_GLES_CPU_LAYOUT:-}${SQ2_GLES_DIRECT:-}${SQ2_GLES_GPU_READBACK:-}${SQ2_GLES_READBACK_POLICY:-}"
     base=/data/local/tmp/sq2-closed/combined-v1
-    case "${SQ2_COMBINED_REVISION:-1}" in 1) ;; 3) base=/data/local/tmp/sq2-closed/combined-v3;; *) exit 2;; esac
+    case "${SQ2_COMBINED_REVISION:-1}" in 1) ;; 3) base=/data/local/tmp/sq2-closed/combined-v3;; 4) base=/data/local/tmp/sq2-closed/combined-v4;; *) exit 2;; esac
     vulkan=$base
     export SQ2_V77_AHB_VIEW=1
 fi
