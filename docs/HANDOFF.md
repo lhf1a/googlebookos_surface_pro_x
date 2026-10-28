@@ -14,6 +14,8 @@
 
 ## 当前待办
 
+- Quest 2 原配参考已补全：v77 的 18 个 EGL/GLES/Vulkan、mapper/gralloc/metadata 库均固定哈希，新增 vendor 范围重建和离线审计脚本。原配布局函数与实际 minigbm 五尺寸对照通过，64×64 所需长度与实际分配相同，暂不支持空间不足解释；未证明地址/缓存/同步正确。另一个混合 v819 GSL 对照仅通过离屏和 import-only，不能称为原厂完整栈或 AHB 绘制通过。正常镜像仍是 Mesa，详见 QUEST2-GPU-RESEARCH 后续章节。
+
 - 完整 Quest 2 v77 EGL/GLES donor 已取得并固定哈希；闭源 GLES 的 pbuffer/FBO 三帧像素读回通过。mapper3/ION 控制 FD 私有适配后，AHB 导入仍失败并出现 fence 超时、GPU hang，用户确认黑屏后手动重启。重启后自动 SSH 恢复、boot_completed=1、Mesa 哈希和 screen-only guard 正常；pstore 为空。未写启动镜像。不要原样重复 AHB 失败路径或部署桌面，详见 [QUEST2-GPU-RESEARCH.md](QUEST2-GPU-RESEARCH.md)。
 
 - 闭源 v819.1 Wild Life 已实测：完成 6357 / 38.07 FPS，但前中后段均严重花屏，渲染正确性失败；该成绩不能与有效 Mesa 成绩比较。临时选择器已撤回，原 Mesa 哈希和完整读回复验通过。证据与复现见 [QUEST2-GPU-RESEARCH.md](QUEST2-GPU-RESEARCH.md)。

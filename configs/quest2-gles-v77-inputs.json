@@ -1,6 +1,10 @@
 {
   "build": "51584880050400150",
   "version": "V@0819.0 GIT@274d25476a",
+  "dmabuf_gsl_candidate": {
+    "notgsl.so": "9446c108708ed89f72199f992b5b7a1300795b0831adf34c08cb7b61f920daa5",
+    "notdmabufheap.so": "8562807c7e9298c764834be12c155b3d845edc317383cb0e2d85bc5dc74cab8c"
+  },
   "files": {
     "egl/libEGL_adreno.so": "c9968473a1065cd7d0fe54e29a843e0bb261548a4c9bf33513cdd10a98832645",
     "egl/libGLESv1_CM_adreno.so": "553b1a465a9b9f96ae27a1c5c36df2c8f6eacd58c467d6b4042d35ee563d6155",

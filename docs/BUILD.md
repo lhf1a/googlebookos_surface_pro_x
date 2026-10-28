@@ -37,6 +37,8 @@ build-test3-ssh.sh 要求 SQ2_AUTHORIZED_KEY_FILE 指向自己的公钥；主机
 
 ### 独立 Turnip Vulkan 构建
 
+Quest 2 同固件参考可用 `rebuild-quest2-v77-vendor.py` 从已下载的 OTA prefix/vendor range 重建仅供解包的镜像；仅允许 out 下的新 .img，验证全部操作与分区哈希，不操作设备。`inspect-quest2-graphics-reference.py` 固定校验 18 个原配图形库并在 out 输出依赖/反汇编。`build-quest2-layout-reference.sh` 构建私有布局查询工具，比较原配 adreno_utils 与当前 minigbm 的真实分配，不调用 EGL 绘制。输入、结果和限制见 QUEST2-GPU-RESEARCH；这组工具不是启动镜像打包器。
+
 完整 Quest 2 v77 EGL/GLES 是独立隔离实验：准备 `out/quest2-gpu/q2-v77/lib64` 的固定输入（`configs/quest2-gles-v77-inputs.json`），运行 `fetch-quest2-mapper-sources.py`、`generate-quest2-mapper-headers.sh`、`prepare-quest2-gles.py`、`build-quest2-gles-probe.sh`。只将生成的私有 `gles-v77` 目录复制到 Android `/data/local/tmp/sq2-closed/`；`run-quest2-gles.sh` 从 retained initramfs root 运行，默认离屏。完整 GLES 三帧读回已通过，但 **`--ahb` 当前可触发 GPU hang**，不要例行执行或直接接入 SurfaceFlinger。原始 ION 库只有控制 FD 适配，分配接口仍返回 ENOTSUP；不是通用 ION→DMA-heap 转换。此增量没有正常启动打包流程，也未替换桌面驱动。完整证据见 QUEST2-GPU-RESEARCH。
 
 Quest 2 闭源 donor 的隔离测试不使用 Turnip 打包器。完整步骤、固定来源和边界见 [QUEST2-GPU-RESEARCH.md](QUEST2-GPU-RESEARCH.md)：校验 donor → 构建进程局部 QTI/mapper5 桥接 → prepare-quest2-runtime → 固定 AdrenoTools → 独立 readback 与 APK。线性 RGBA AHB 和普通窗口呈现已通过；`--offscreen-only` 仍明确不含 AHB/WSI。闭源测试 APK 默认 1800 帧，正常 Mesa APK 仍 120 帧。第三方二进制、APK、私钥、日志不进 Git；不可把该实验桥接作为通用系统 mapper 放入正常启动镜像。

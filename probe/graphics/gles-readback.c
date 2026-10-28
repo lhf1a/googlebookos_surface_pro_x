@@ -24,7 +24,11 @@ static GLuint shader(GLenum type, const char *src) {
 }
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
-    int use_ahb = argc > 1 && !strcmp(argv[1], "--ahb");
+    int import_only = argc > 1 && !strcmp(argv[1], "--ahb-import-only");
+    int use_ahb = import_only || (argc > 1 && !strcmp(argv[1], "--ahb"));
+    if (argc > 2 || (argc == 2 && !use_ahb)) {
+        fprintf(stderr,"usage: %s [--ahb|--ahb-import-only]\n",argv[0]);return 2;
+    }
 #ifdef SQ2_QUEST2_GLES
     /* Qualcomm's Android subdriver does not expose Mesa's platform. Use a
      * real pbuffer so this check does not depend on surfaceless support. */
@@ -95,6 +99,16 @@ int main(int argc, char **argv) {
     glGenFramebuffers(1, &fbo); glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fail("framebuffer");
+    if (import_only) {
+        /* Separate metadata/import validation from the known failing GPU
+         * submit path. This result is deliberately not a rendering PASS. */
+        glDeleteFramebuffers(1,&fbo);glDeleteTextures(1,&tex);
+        destroy_image(d,image);AHardwareBuffer_release(ahb);
+        eglMakeCurrent(d,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);
+        if (surface != EGL_NO_SURFACE) eglDestroySurface(d,surface);
+        eglDestroyContext(d,ctx);eglTerminate(d);
+        puts("GPU_GLES_AHB_IMPORT_ONLY_OK no-draw-no-readback");return 0;
+    }
     GLuint vs = shader(GL_VERTEX_SHADER, "attribute vec2 p; void main(){gl_Position=vec4(p,0.,1.);}");
     GLuint fs = shader(GL_FRAGMENT_SHADER, "precision highp float; uniform float phase; void main(){gl_FragColor=vec4(step(32.,gl_FragCoord.x),step(32.,gl_FragCoord.y),phase,1.);}");
     GLuint prog = glCreateProgram(); glAttachShader(prog, vs); glAttachShader(prog, fs);

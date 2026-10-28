@@ -1,0 +1,17 @@
+{
+  "build": "51584880050400150",
+  "image_sha256": "44f90742c03c04037e378860ad493098a369d2bc752aa0d56d14f63ae91b6722",
+  "purpose": "Matched v77 firmware static reference; not deployed system HALs",
+  "files": {
+    "hw/vulkan.adreno.so": "0f316d0331ef5b4ec60d8d3f21a845f47583b14ccaabe54f316e619b9897bd8d",
+    "hw/android.hardware.graphics.mapper@3.0-impl-qti-display.so": "a2982831beced3d12052dede4d59ed5689a084e007b9e1647ece7a8226367197",
+    "hw/gralloc.kona.so": "2177fac5f1f5f938600eb3dff32c2cc258c2db454f4aae8e3ddd36293ee5ab1b",
+    "libgralloc.qti.so": "ef389547c038695b46567e2a1ad7675936f83a9bc299a8686ba3119feedbf825",
+    "libgralloccore.so": "86ac7bee9e96d06eeaf8edc263c7b9acac41c067e076186a14e6f80706e48e05",
+    "libgrallocutils.so": "0fb5d79eb206bd75d4eb8ae68be04cafe89dc4b0d267567a82a56303023a0724",
+    "libqdMetaData.so": "56b66ffb8bb8f7bb9f4135affa5de826f797223c14d1e6adc65cca92e4a9e6f9",
+    "vendor.qti.hardware.display.allocator@3.0.so": "afb201484e4420540f1c2b5cd33eb44c9c7dcb6d5bcefd96c3d46a41841d4512",
+    "vendor.qti.hardware.display.mapper@3.0.so": "5d767f3e71e9e90f5ffb0c2174eb41e93af1583a4f04499f02047ecb685e5bde",
+    "vendor.qti.hardware.display.mapperextensions@1.1.so": "31620247d56dbf67165b9c14ae905f5718c3b14a3cc2ba75044b77faaef236af"
+  }
+}

@@ -207,4 +207,48 @@ Quest 2 v77 build 51584880050400150 来自第三方固件归档候选，来源�
 
 完整系统替换仍未完成：先解决共享图像的导入/地址/同步及 GPU hang，再覆盖多平面与窗口生命周期，然后接系统合成器和重启持久化。Vulkan 的 Wild Life 严重花屏也是独立未解决项，不能因 GLES 离屏通过便替换默认桌面。
 
+## 同一固件配套参考与布局对照（2026-10-28 后续）
+
+用户要求从 Quest 2 固件提取整套 GPU 驱动并直接参考实现。当前主参考统一为上述 v77 vendor，而不是把第三方 Vulkan 重打包与任意 GLES 组合当成原厂整套。`configs/quest2-v77-graphics-reference.json` 新增固定原配 Vulkan、mapper3 实现、gralloc.kona、gralloc core/utils、qdMetaData 及 QTI 接口库哈希；连同既有 EGL/GLES 清单共 18 个文件。它们都来自同一个已校验 vendor 分区。尚未认证 OEM 签名，主机侧抽取文件也不等于这些 HAL 已能在 Surface 加载运行。
+
+可复现提取与审计：
+
+```sh
+python3 scripts/rebuild-quest2-v77-vendor.py \
+  downloads/quest2-gpu/q2_51584880050400150.zip.part \
+  downloads/quest2-gpu/q2-v77-vendor.compressed.part \
+  out/quest2-gpu/layout-reference/vendor-rebuilt.img
+python3 scripts/inspect-quest2-graphics-reference.py
+bash scripts/build-quest2-layout-reference.sh
+```
+
+重建脚本只接受新建的工作区 out/*.img，拒绝覆盖；固定 full vendor 身份，逐项检查压缩哈希、解压长度、目标 extent 不重叠且全覆盖和最终分区哈希。此次重新执行 131 个操作通过，产物与原分区 SHA256 相同。lib64 仍用 debugfs 从该参考 ext4 镜像只读提取；不把 OTA、分区或整套 HAL 刷到 Surface。审计脚本先校验全部库哈希，再保存 DT_NEEDED 和指定函数反汇编到忽略的 out/quest2-gpu/firmware-reference。
+
+### 固件实现已经确认的细节
+
+- 原 mapper3 的 getPrivateFlags（VA 0xe2b0）读取 QTI handle +24 的 flags；getCustomDimensions（0xd500）调用原配 gralloc 计算。Surface 的 minigbm handle 不能按 QTI 结构直接强转。
+- getSurfaceMetadata_V1（0xea80）调用 getMetaData(handle, 16, destination)。qdMetaData 的该分支在元数据有效时复制 16384 字节；这不是“随便补一个尺寸结构”就能满足的接口。
+- adreno_utils 的 adreno_get_metadata_blob_size（0x10eb8）返回 5528。grallocutils 的资源布局路径调用 adreno_init_memory_layout 和 adreno_get_aligned_gpu_buffer_size；**这个 5528 字节布局 blob 与上述 16384 字节 surface metadata 不是同一契约**。未把它伪造成 getSurfaceMetadata_V1 的成功输出。
+- 原 GSL 导入路径使用 16 字节 GEM_INFO，请求 0xc0106443；v819.1 GSL 使用 24 字节 0xc0186443。本机内核结构含末尾 len/pad。这是已识别的 ABI 差异，不是已证明的故障根因；两者旧记录中的 PRIME 导入和地址查询均曾返回成功。
+
+### 运行原配布局计算，未执行 EGL 绘制
+
+`quest2-layout-reference.cpp` 直接调用已固定的 v77 adreno_utils（实际库路径已打印），保留同版本 GSL，仅使用原有私有 ION 控制 FD 适配。通过当前系统 AHardwareBuffer/minigbm 分配五种尺寸，调用原配函数计算线性 RGBA8、单层/单采样布局，usage=0x333。没有创建 EGL context、没有调用绘制 API，也未更改系统分配器。
+
+| 尺寸 | donor 对齐尺寸 | donor 所需字节 | minigbm 行跨度（字节） | 像素 DMA-BUF 字节 |
+| --- | --- | --- | --- | --- |
+| 64×64 | 64×64 | 16384 | 256 | 16384 |
+| 13×7 | 64×7 | 4096 | 256 | 16384 |
+| 257×129 | 320×129 | 167936 | 1280 | 245760 |
+| 1920×1280 | 1920×1280 | 9830400 | 7680 | 9830400 |
+| 2880×1920 | 2880×1920 | 22118400 | 11520 | 22118400 |
+
+五项布局初始化均返回 0，offset 均为 0，探针完整退出；boot ID 和两个框架 PID 未变。因此这些尺寸不支持“像素分配长度小于 donor 所需长度”的解释，尤其失败的 64×64 尺寸两者完全相同。但这不验证实际 GPU 地址、缓存一致性、命令中的布局字段、隐式/显式 fence 或多平面兼容，也不是 AHB 渲染通过。
+
+### 另外保留的混合 GSL 对照
+
+`prepare-quest2-gles.py --gsl-dmabuf` 只在独立 gles-v819-dmabuf 目录中用固定 v819.1 notgsl/notdmabufheap 替代 GSL；原 v77 库不改。`run-quest2-gles.sh --gsl-dmabuf` 离屏三帧 12288 像素通过；再加 `--ahb-import-only`，完成 AHB/EGLImage/FBO 创建和释放，返回专用 no-draw-no-readback 标记。这两次 boot ID/框架 PID 保持。
+
+这是诊断对照，不是同版本原厂栈，更没有证明 AHB 绘制或系统合成通过。本轮未在此组合执行 `--ahb` 绘制，也未原样重试会挂死的原 v77 AHB 路径。正常启动保持已验证 Mesa；后续以配套固件的地址/布局/同步实现为依据继续定位。
+
 离线线索：完整 donor `ioctl_drm_device_getinfo_ext`（VA 0x20bc20）存在 chip 分支，对真实 0x06080001 打印 Unknown GSL device info properties，但这不是其已经导致 hang 的证明，不能伪装为 A650。v819 notgsl.so 的 get_panel_settings（VA 0x206a20）调用 parseFile（0x1f4538），依次尝试 adreno_config.txt、yamato_panel.txt，再查询 YAMATO_FORCE_GMEM_SHL。尚未确定配置字段/路径如何控制 Vulkan sysmem/GMEM；不凭字符串猜测或宣称有效。现有 v819 GSL 使用 DMA-BUF 分配接口，完整 v77 GSL 使用旧 ION 接口，二者 ABI/导入实现的比较待继续。

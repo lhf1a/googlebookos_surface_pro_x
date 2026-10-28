@@ -3,8 +3,15 @@
 # Default is offscreen. --ahb reproduces a known GPU-hang failure on this donor;
 # do not use it as a routine smoke test or run concurrently with other GPU tests.
 set -eu
-case "${1:-}" in ''|--ahb) ;; *) echo 'usage: run-quest2-gles.sh [--ahb]' >&2; exit 2;; esac
 base=/data/local/tmp/sq2-closed/gles-v77
+ion=1
+if [ "${1:-}" = --gsl-dmabuf ]; then
+    base=/data/local/tmp/sq2-closed/gles-v819-dmabuf
+    ion=0
+    shift
+fi
+case "${1:-}" in ''|--ahb|--ahb-import-only) ;; *) echo 'usage: run-quest2-gles.sh [--gsl-dmabuf] [--ahb|--ahb-import-only]' >&2; exit 2;; esac
+test "$#" -le 1
 root=/proc/1/root
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 expected=0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c
@@ -17,8 +24,10 @@ boot=$(cat /proc/sys/kernel/random/boot_id)
 echo "BOOT_BEFORE=$boot"
 nsenter -t 1 -m -r -- /system/bin/pidof system_server surfaceflinger
 result=0
+preload="$base/libqti-mapper3-bridge.so"
+if [ "$ion" = 1 ]; then preload="$base/libquest2-ion-dmaheap.so:$preload";fi
 timeout -k 3 25 nsenter -t 1 -m -r -- /system/bin/env \
-  LD_PRELOAD="$base/libquest2-ion-dmaheap.so:$base/libqti-mapper3-bridge.so" \
+  LD_PRELOAD="$preload" \
   LD_LIBRARY_PATH="$base:/system/lib64:/vendor/lib64" \
   "$base/gles-readback" "$@" || result=$?
 echo "PROBE_EXIT=$result"
