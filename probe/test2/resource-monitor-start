@@ -1,0 +1,21 @@
+#!/bin/busybox sh
+# Read-only sensor/energy adapters; leave thermal governors and charging intact.
+set -eu
+case " $(cat /proc/cmdline) " in
+    *' sq2.monitor=0 '*|*' sq2.rescue=1 '*|*' sq2.native=smoke '*|*' sq2.native=ssd-smoke '*) exit 0;;
+esac
+root=${1:-/newroot}
+test -f "$root/vendor/etc/thermal_info_config.json"
+cp /etc/sq2-monitor/thermal-info.json "$root/debug_ramdisk/sq2-thermal-info.json"
+chmod 644 "$root/debug_ramdisk/sq2-thermal-info.json"
+mount --bind "$root/debug_ramdisk/sq2-thermal-info.json" "$root/vendor/etc/thermal_info_config.json"
+for n in $(seq 1 10); do
+    [ ! -f /sys/class/power_supply/BAT1/energy_full_design ] || break
+    sleep 1
+done
+if [ ! -d /sys/module/sq2_battery_compat ]; then
+    insmod /etc/sq2-monitor/sq2_battery_compat.ko
+fi
+test -f /sys/class/power_supply/BAT1/charge_now
+test -f /sys/class/power_supply/BAT1/state_of_health
+echo SQ2_RESOURCE_MONITOR_READY

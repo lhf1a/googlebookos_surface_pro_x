@@ -1,17 +1,21 @@
 {
-  "recorded": "2026-10-27",
+  "recorded": "2026-10-28",
   "device": "Surface Pro X SQ2 16GB, replacement 512GB internal NVMe",
   "os": "mica 16471258",
   "kernel": "6.3.8-sq2-android1",
   "sha256": {
-    "deployed_initramfs": "651f3831a0171908d7a9b1054a4c1c2a8fd657c36e79e7e3717674ef6389ecf8",
+    "deployed_initramfs": "fa64305d7400ea3c7d262e3649c90dc4627c74dc7fd6cb563d52adda9d505275",
     "power_connectivity_storage_addon": "8025132addaa217ce0337c3077662bceb99183f670eeaa32904c040f6ea96a32",
     "graphics_only_base": "8d4f493bdf149d448b843358dc6a446d5684a041e24a521045ae8775f25a5269",
     "Image": "e7c7a3e5399a6be93a363afc5f880fea30f17cb8a59f176807d3620f967b7ca8",
-    "dtb": "7a4d1c73cc8d64ffef979edf00e1240bef8bf15678690b7a53c45b72434dda55",
+    "dtb": "a5a25e439be24ffd506d1dc026d4094c6c2add60e56db54900f8e89e30358516",
     "libEGL_freedreno": "f16302e33e4f7c8bbaccbe5ab5fd5d19f3279222ee430ace236c4bad237a5434",
-    "iptsd": "7f03f7f8e54d202c13ced445b5206f0cc70341c61b06cb7aea870b5b830b36c5",
-    "audio_hal": "99e2a62520f4efc062f785ec92ddc63faccbcc6d7d6ba858f28b238e3c5f5836"
+    "iptsd": "e4610813bd86d7506385894db3cf07c61d399cdeec788224d0b9bfa058aae9a3",
+    "audio_hal": "774cd7e731bd5a5fcda6edbde6e97464bd0e04acc1603c3be7b0dbe7a69561ea",
+    "vulkan_freedreno": "0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c",
+    "rescue_dtb": "7a4d1c73cc8d64ffef979edf00e1240bef8bf15678690b7a53c45b72434dda55",
+    "qcom_tsens": "dd85fbf80a366c18866d91834ac1fb2833adba632bbc6bbc46cb7008dbe4d607",
+    "sq2_battery_compat": "d5a759962b6093b176248d6c99bdba12baca3db2722458f02032baf04166a9bd"
   },
   "storage_validation": {
     "emulated_user_0": "MOUNTED",
@@ -23,11 +27,14 @@
   "suspend": "screen_only_guard_verified_power_key_and_lid_tests_user_confirmed_pass",
   "cover_hotplug": "keyboard_and_touchpad_auto_recovery_user_confirmed_pass",
   "touch_startup": "post_framework_reinitialization_user_confirmed_pass",
+  "touch_ghost": "SQ2 46x68 heatmap edge-spike interpolation persisted and verified after a normal board reboot. IPTSd hash matched; operator-confirmed 30-second idle capture had zero touch events/presses. User confirmed corner taps, drag and pinch normal with no automatic clicks after reboot. ARM replay: 3610 idle frames, 3 baseline presses to 0. Two-frame onset experiment removed. Extended observation pending.",
+  "ssh_reboot_validation": "Windows and WSL operator keys both authenticated as root after a normal reboot with password/keyboard-interactive/agent fallback disabled and host verification enabled. WSL native SSH used a local Windows TCP relay due to unavailable direct WSL NAT routing; this validates WSL key authentication, not direct WSL networking.",
   "bluetooth": "ON and OFF preserved across separate reboots; OFF-to-ON and helper reentry passed; final state ON",
-  "normal_boot": "Android owns Wi-Fi; SSH starts after boot_completed. Current local lab addon enables root password authentication and retains public-key access; both verified live. Credential-bearing addon is private. No reboot performed for this update.",
-  "grub": "normal audio, rescue, poweroff; old no-audio second entry removed; default timeout 3 seconds",
-  "audio_tuning": "Mute-before-teardown modules plus pmdown_time=0: user confirmed two ALSA runs, two AAudio runs and two video pause/resume cycles without pops. Startup policy deployed, reboot persistence not yet verified. Low volume/bass/stereo calibration remain open.",
-  "lockscreen": "Startup helper restores default resource after reboot without changing lock/credential choice; final normal reboot and 8-second screen-off/wake verified Keyguard showing=true, inputRestricted=true",
+  "normal_boot": "Android owns Wi-Fi; SSH starts after boot_completed. Current private lab addon retains root password and public-key access. WSL key SSH reconnected after the Wild Life compatibility one-shot reboot; tested image promoted to default without a second reboot.",
+  "grub": "normal audio: CPU schedutil up to 3.1488 GHz + GPU up to 661 MHz + thermal guards; original 514 MHz rescue DTB skips CPU helper; poweroff; timeout 3 seconds; test menu removed",
+  "audio_tuning": "Stock fd219b1058eccc701de685cf59d6578e887c11182d877bb4e6c3a78bfd73e279 transport/pacing retained. Microphone-only address fix produces 774cd7e731bd5a5fcda6edbde6e97464bd0e04acc1603c3be7b0dbe7a69561ea; mounted file and running HAL now match after reboot. Explicit SELinux label/restart/check removes the old inode startup race. Prior playback pacing/MonoPipe experiments are not included. Speaker route/gains and user EQ settings preserved.",
+  "equalizer_ui": "Equalizer314 official v0.0.22-beta installed; APK SHA256 6529e478d4ddc355e15a4179b0c41b0535e38334161a8161c389fb7e30a7724e. Chinese UI verified. User enabled and confirmed improved bass with normal playback. AudioFlinger session-0 DynamicsProcessing enabled and not suspended; output 48 kHz, timestamp rate approximately 1. User subsequently edited five bands (89/143/229/1079/5184 Hz) with boosts up to 10.5 dB and -4 dB preamp; this is distinct from the initial mild preset. Current settings backed up privately and preserved; clipping headroom concern communicated. Reboot auto-restore untested. No HAL or boot-image changes.",
+  "lockscreen": "User retained PIN and selected 30-minute debugging policy. User 10 screen_off_timeout and lock_screen_lock_after_timeout both 1800000 after reboot; credential choice and screen-only guard preserved.",
   "note": "Hashes describe this local deployment; binary images, embedded local credentials and raw logs are not distributed. Not a fresh-clone reproducibility claim.",
   "device_info": {
     "cpu": "Microsoft SQ2 (8 threads)",
@@ -35,5 +42,122 @@
     "manufacturer": "Microsoft",
     "kernel": "6.3.8-sq2-android1 #17 Tue Oct 27 00:00:00 UTC 2026",
     "validation": "Actual Settings CPU/model and Android-version kernel pages visually verified after reboot; custom device name preserved"
+  },
+  "vulkan": {
+    "hardware": "Microsoft SQ2 / Adreno 690; current DT compatible qcom,adreno-680.1",
+    "driver": "Mesa Turnip 26.2.4, MSM, mapper5 import/multiplane fixes and A680.1/3DMark-only sysmem workaround; reports Turnip Adreno (TM) 680 / Vulkan 1.3.354",
+    "runtime": "Boot-persisted vendor/lib64/hw/vulkan.freedreno.so, ro.hardware.vulkan=freedreno; no GLES replacement",
+    "validation": [
+      "Direct HAL and system loader: 16 rounds x 256 compute words, 4096 optimal-tiled RGBA pixels verified",
+      "System loader: Android HardwareBuffer mapper5 import, GPU clear, CPU lock/readback verified",
+      "Ordinary NativeActivity app: two 120-frame runs at 2880x1920; user confirmed visible colored triangle",
+      "SurfaceFlinger/system_server PIDs unchanged; inspected dmesg showed no GPU fault/hang",
+      "After reboot: driver hash/ro.hardware.vulkan and corrected feature XML active; user confirmed desktop/touch/video normal"
+    ],
+    "deployment": "Vulkan permissions parent directory omission fixed and verified after reboot: feature version 4206592 (1.3); donor dEQP feature absent. Matching TSENS module and early init hook deployed. Original image and DTB retained; credential addon last; audio/touch bytes preserved.",
+    "reboot_validated": true,
+    "next_boot": "Default uses the same 661 MHz DTB/initramfs combination just boot-tested via the one-shot entry; rescue retains original 514 MHz DTB. skiagl retained.",
+    "gpu_frequencies_mhz": [
+      177,
+      256,
+      315,
+      405,
+      461,
+      500,
+      514,
+      590,
+      661
+    ],
+    "gpu_max_freq_mhz": 661,
+    "frequency_note": "Added 590/661 MHz at existing TURBO_L1 corner 416; not a copied SC8280XP voltage curve. devfreq reports requested frequency, not independently measured PLL.",
+    "limits": "No CTS conformance, broad game compatibility, sustained performance or OEM frequency-voltage-curve equivalence claim.",
+    "wild_life": "Scoped compatibility workaround deployed: chip 0x06080001 + com.futuremark.dmandroid.application selects existing sysmem rendering. User confirmed fixed 661 MHz sysmem run visually normal. Scoped patch preboot 5279 / 31.61 FPS; reboot run 5264 / 31.52 FPS with normal early/middle/end captured scenes. Post-reboot compute/image/AHB passed. Identical tested image promoted to default, no second reboot. GMEM root cause, other games and sustained power/thermal effects remain open; not a conformance claim."
+  },
+  "gpu_opp": {
+    "scope": "Kernel-side GPU DTB and matching TSENS module update; Image/kernel release/module ABI unchanged",
+    "default_mhz": 661,
+    "rescue_mhz": 514,
+    "590_test": {
+      "seconds": 30,
+      "rounds": 28462,
+      "words_per_round": 4096,
+      "alu_iterations": 4096,
+      "gpu_temperature_c": [
+        41.3,
+        44.4
+      ],
+      "result": "compute/image/AHB pass; framework PIDs stable"
+    },
+    "661_test": {
+      "seconds": 30,
+      "rounds": 26626,
+      "words_per_round": 4096,
+      "alu_iterations": 4096,
+      "gpu_temperature_c": [
+        43.2,
+        45.9
+      ],
+      "result": "compute/image/AHB pass; framework PIDs stable"
+    },
+    "thermal": "TSENS auto-loaded after reboot; gpu-thermal-top available. Passive cooling 75C with 5C hysteresis. Emulated 76C changed cooling state 0->1, removing emulation returned 1->0. Actual physical overheating was not induced.",
+    "operator_feedback": "After 661 MHz boot, desktop, touch and video playback all normal",
+    "persistence": "Tested bundle booted once via one-shot GRUB entry and then promoted to default with identical boot args. No additional reboot after promotion.",
+    "limits": "Short checked workloads are not a controlled performance benchmark. Long-duration/games/battery testing pending."
+  },
+  "cpu_frequency": {
+    "driver": "qcom-cpufreq-hw, original matching module now loaded before Android",
+    "governor": "schedutil",
+    "little_cpus": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "little_khz": [
+      300000,
+      1766400
+    ],
+    "big_cpus": [
+      4,
+      5,
+      6,
+      7
+    ],
+    "big_khz": [
+      825600,
+      3148800
+    ],
+    "fix": "Missing driver activation and missing DT OPP entries for 3072000/3148800 kHz; voltage from the on-device hardware LUT, highest original interconnect vote reused",
+    "validation": "Reboot passed; all eight pinned workers passed 20-second deterministic computation checks. Driver reported 1766400/3148800 kHz under load. Maximum sampled CPU temperature 53.3 C. Framework PIDs and boot ID stable; user confirmed desktop/touch/video normal. WSL public-key SSH reconnected.",
+    "thermal": "Both clusters passive 80 C, hysteresis 5 C; emulated 81 C changed cooling 0->1, capped little 1670400/big 3072000 kHz, returned 1->0 and restored caps after removing emulation.",
+    "persistence": "One-shot boot-tested initramfs/DTB promoted to normal default; no second reboot after promotion. Rescue and sq2.cpufreq=0 skip the helper.",
+    "limits": "Driver frequency is requested hardware LUT state, not independently measured clock. Short test is not long-term stability, battery or performance benchmarking."
+  },
+  "resource_monitor": {
+    "cpu_temperature": "Pixel Thermal HAL maps eight physical CPU sensors; virtual CPU maximum, millidegrees converted to Celsius. GPU-top separately exposed. Kernel cooling preserved.",
+    "battery": "Read-only module adds energy/design-voltage charge estimates, signed power/voltage current, and full/design energy SOH to existing BAT1. Original Surface driver and charging policy unchanged.",
+    "design_energy_wh": 38.2,
+    "full_energy_wh": 28.73,
+    "design_capacity_mah_approx": 5039,
+    "full_capacity_mah_approx": 3790,
+    "state_of_health_percent": 75,
+    "cycle_count": 620,
+    "validation": "Kernel/HAL/UI agree. User unplug: AC=0, Discharging, approximately -1 A. Replug: AC=1, Full, 0 mA. One-shot reboot auto-loaded module/config; CPU/GPU temperatures and capacity/SOH present; user confirmed display normal. Existing CPU governors/limits/cooling and screen-only guard retained.",
+    "persistence": "Tested image promoted to normal default; temporary menu removed; rescue and sq2.monitor=0 skip adapter. No second reboot after promotion.",
+    "limits": "mAh and mA are derived estimates. No battery temperature or manufacturing dates supplied; fault-health remains UNKNOWN. No fake temperature or GOOD health. Not full-cycle capacity calibration or long-term battery validation."
+  },
+  "microphone": {
+    "hardware": "WCD9340 DMIC0/DMIC1, SLIM TX0/TX1 -> MultiMedia2, ALSA CARD_0_DEV_1",
+    "format": "48000 Hz S16 stereo; AudioFlinger converts ordinary mono/16000 Hz clients",
+    "gain_raw": 96,
+    "hal_sha256": "774cd7e731bd5a5fcda6edbde6e97464bd0e04acc1603c3be7b0dbe7a69561ea",
+    "validation": [
+      "Direct ALSA 483328 frames / 10.069 seconds, both channels nonzero, no clipping",
+      "Android AudioRecord 48 kHz stereo and 16 kHz mono recording/playback user confirmed; original diagnostics app also works",
+      "Normal one-shot board reboot: actual HAL hash, CARD_0_DEV_1, DMIC routes verified; user confirmed original diagnostics recording/playback normal"
+    ],
+    "reboot_validated": true,
+    "deployment": "Tested image promoted to normal boot with original menu/rescue retained; no kernel/DTB/graphics/touch changes. Credential addon last. Previous d519b958 image kept locally.",
+    "limits": "No beamforming/AEC, long-call, Bluetooth microphone or certification claims."
   }
 }

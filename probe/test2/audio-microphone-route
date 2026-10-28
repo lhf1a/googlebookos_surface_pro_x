@@ -1,0 +1,32 @@
+#!/bin/busybox sh
+# WCD9340 DMIC0/1 -> DEC0/1 -> SLIM TX0/1 -> MultiMedia2 (card0/dev1).
+# Route only; recording starts when an Android client opens capture.
+set -eu
+export PATH=/bin:/sbin
+grep -q 'Surface-Pro-X' /proc/asound/cards
+mix() { tinymix -D 0 set "$@"; }
+case "${1:-enable}" in
+enable)
+    mix 'MultiMedia2 Mixer SLIMBUS_0_TX' 1
+    mix 'AIF1_CAP Mixer SLIM TX0' 1
+    mix 'AIF1_CAP Mixer SLIM TX1' 1
+    mix 'CDC_IF TX0 MUX' DEC0
+    mix 'CDC_IF TX1 MUX' DEC1
+    mix 'ADC MUX0' DMIC
+    mix 'ADC MUX1' DMIC
+    mix 'DMIC MUX0' DMIC0
+    mix 'DMIC MUX1' DMIC1
+    mix 'DEC0 Volume' 96
+    mix 'DEC1 Volume' 96
+    ;;
+disable)
+    mix 'DMIC MUX0' ZERO
+    mix 'DMIC MUX1' ZERO
+    mix 'CDC_IF TX0 MUX' ZERO
+    mix 'CDC_IF TX1 MUX' ZERO
+    mix 'AIF1_CAP Mixer SLIM TX0' 0
+    mix 'AIF1_CAP Mixer SLIM TX1' 0
+    mix 'MultiMedia2 Mixer SLIMBUS_0_TX' 0
+    ;;
+*) exit 2;;
+esac

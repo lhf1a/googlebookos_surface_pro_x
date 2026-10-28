@@ -1,0 +1,10 @@
+{
+  "name": "SQ2 温和低频",
+  "preamp": -4.0,
+  "channelSideEqEnabled": false,
+  "bands": [
+    {"frequency": 125.0, "gain": 1.0, "filterType": "BELL", "q": 2.0, "enabled": true},
+    {"frequency": 160.0, "gain": 1.5, "filterType": "BELL", "q": 2.0, "enabled": true},
+    {"frequency": 200.0, "gain": 1.0, "filterType": "BELL", "q": 2.0, "enabled": true}
+  ]
+}

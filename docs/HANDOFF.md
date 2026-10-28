@@ -1,6 +1,6 @@
 # SQ2 开发交接
 
-更新时间：2026-10-27。不包含原始日志、网络地址或凭据。
+更新时间：2026-10-28。不包含原始日志、网络地址或凭据。
 
 ## 最近完成：共享存储
 
@@ -14,11 +14,24 @@
 
 ## 当前待办
 
+- 2026-10-28：麦克风已完成并通过重启实测，详见 [MICROPHONE.md](MICROPHONE.md)。方向传感器、前后摄像头按用户要求暂缓，明确缺口记入 [TODO.md](TODO.md)。Wild Life 花屏已通过 A680.1 + 3DMark 专用 sysmem 兼容补丁缓解并设为默认；重启回归 5264 分 / 31.52 FPS，前中后段采样正常。GMEM 根因、更多应用与长期功耗仍待查，详见 [WILD-LIFE.md](WILD-LIFE.md)。
 - 真正休眠修复暂停；用户改为要求“只关闭屏幕”，具体保护策略见下节。
 - 音频修复已于 2026-10-27 恢复推进：停播/重新开声爆音、音量小、缺低频及声像问题仍开放，见 configs/audio-known-issues.json。
-- 蓝牙其他配置文件、LTE 有 SIM 联网、Turnip Vulkan、长期稳定性尚未完成验证；不要默认开始这些新测试。
+- 蓝牙其他配置文件、LTE 有 SIM 联网及长期稳定性尚未完成验证。用户已要求推进 Turnip Vulkan，当前实测与后续范围见图形章节。
 
 ## 关于设备信息
+
+### 资源监控器温度和电池读数（2026-10-28）
+
+用户报告 DiagnosticsPrebuilt 的概览数据不准。实机截图为 CPU 0°C、电池容量 0 mAh、健康度 0%，循环次数 620。内核 CPU TSENS 为 43–44°C；Android 默认 thermal_info_config.json 的 Sensors 数组为空，thermalservice 返回无传感器。BAT1 提供 energy_full_design=38.2 Wh、energy_full≈28.71–28.73 Wh、7.58 V 标称电压，但没有 Android healthd 所需的 charge_full/charge_now 等接口；充电状态、电量、电压和循环次数原本有效。
+
+已新增 SQ2 Thermal HAL 配置：以八个 CPU 核心传感器的最大值作为 CPU 温度，统一毫摄氏度→摄氏度，GPU 单独发布；不添加 HAL 降频控制，保留既有内核温控。独立 sq2_battery_compat 模块为现有 BAT1 增加只读转换属性，保留原驱动、原事件及充电策略。设计容量约 5039 mAh，当前满充约 3790 mAh，健康度 75%；mAh 为能量除以标称电压的估算值。该界面的“电池容量”显示设计容量，当前电流的中文标签为“当前电量”，单位 mA。healthd 的故障健康状态仍 UNKNOWN；没有电池温度、制造日期等硬件信息，不能把缺失值说成真实 0°C，也没有伪造 GOOD 状态。
+
+在线拔下充电器后，用户确认切换到电池供电；内核、Health HAL 和 UI 同步显示 Discharging、AC=0、约 −0.97～−1.06 A，截图为 −1068 mA。重新接上后恢复 Full、AC=1、0 mA，满电时零电流正常。CPU UI 显示 43.6–44.4°C 并随负载更新。制造商容量估计会略随固件更新变化，28.71→28.73 Wh 属于本次实读变化。
+
+通过一次性启动项完成重启：资源助手自动 READY，模块哈希 d5a75996…，Android HAL CPU 读数约 52.9°C、GPU 49°C，电池容量和 75% 健康度自动恢复，用户确认重启后显示正常。CPU 仍为 schedutil、上限 1.7664/3.1488 GHz，CPU/GPU cooling state=0、仅关屏 guard=Y。测试包已设为默认，initramfs d519b958…；Image/DTB 保持 CPU 适配版本，临时菜单移除，旧镜像 e16a7a01… 留在本地 out/cpu-frequency。设为默认后未再次重启。sq2.monitor=0 可跳过此适配，救援入口不执行它。
+
+持久化只改变 /init、新增助手、温度 JSON 与兼容模块；逐条审计确认音频、触摸、图形和凭据内容保持原样。构建缺原始 Module.symvers，8 个未定义符号都已对照运行内核导出并实机加载，不声称完整 modpost 校验。原始截图/日志保存在忽略的 out/resource-monitor；构建流程见 BUILD。
 
 SettingsGoogle 的“型号”读取 Build.MODEL；CPU Info 由 DiagnosticsPrebuilt 的 HardwareInfoProvider 提供，其 DefaultCpuDataSource 读取 Build.SOC_MODEL。原镜像显示 XPS Googlebook，CPU 为 unknown。apply-device-info 在原 Android init 加载属性之前，为现有 build.prop 创建 RAM 文件绑定覆盖：型号 Surface Pro X、品牌/制造商 Microsoft、ro.soc.model=Microsoft SQ2。保留用户设置的设备名称、mica 产品代号、android-desktop 硬件分派、ABI、构建指纹及软件版本，不修改只读 EROFS 镜像。
 
@@ -43,15 +56,73 @@ sq2.rescue=1 自动启用 debug，保留独立救援联网和 SSH；sq2.debug=1 
 
 ## 图形与框架稳定性
 
+最新默认部署为 Wild Life 兼容版 initramfs `fa64305d…`、Turnip `0b36eeba…`；由已验证的麦克风基线 `9dd3ff7a…` 仅替换 Vulkan HAL。一次性重启后自动加载，计算/图像/AHB 与完整 Wild Life 回归通过，随后提升同一镜像为默认并恢复原菜单，未再次重启。Image/DTB、麦克风 HAL `774cd7e7…`、IPTSd、CPU/GPU 温控保持。下文早期版本哈希为历史记录，当前完整哈希以 configs/deployment-status.json 为准。
+
 scripts/patch-mesa-sq2-multiplane.py 修复 mapper5 辅助实例未导入 handle 导致元数据查询失败，以及单平面假设。RAII import/free，读取 FOURCC、modifier、plane layout，支持 1–4 平面并检查偏移/步长，返回原 handle 借用 FD，避免释放后 FD 失效。
 
 此前 YV12 640×360 导入失败触发 SurfaceFlinger GaneshBackendTexture / SkiaRenderEngine::mapExternalTextureBuffer abort；后续 AudioService watchdog 为该轮级联现象，不应把全部重启归因于音频。新 RGBA、YV12/格式 35 GLES 读回通过。无音频视频观察 825 秒、音频开启观察 503 秒，框架 PID 未变化且用户确认有声；这是有限测试，不是长期保证。
 
-保留 vendor.minigbm.debug=nocompression，解决早期文字/动画彩色损坏。Turnip 未验证。源码 probe/graphics/；集成 build-sq2-mesa.sh、build-googlebook-graphics-overlay.py、pack-sq2-stability.sh。
+保留 vendor.minigbm.debug=nocompression，解决早期文字/动画彩色损坏。源码 probe/graphics/；GLES 集成 build-sq2-mesa.sh、build-googlebook-graphics-overlay.py、pack-sq2-stability.sh。
+
+### 2026-10-28 Turnip Vulkan
+
+本机 WSL Ubuntu 24.04 使用固定 Mesa 26.2.4、NDK r28c、MSM 后端构建独立 Turnip HAL，沿用 mapper5 import/multiplane 补丁。驱动 SHA256 为 10b9e7f540311b8148cc88fe1f5c80531a680431539593ce3cd3663d336d0225；构建得到的 libdrm 与正在使用的版本完全相同，无需替换 GLES 或 libdrm。不要使用面向手机 KGSL 的预编译驱动。
+
+硬件商品型号是 **Microsoft SQ2 / Adreno 690**，微软规格确认：https://news.microsoft.com/es-xl/surface-pro-x-fact-sheet/ 。当前设备树 compatible 为 qcom,adreno-680.1，Mesa 走 GPUId(680) 路径并显示 Turnip Adreno (TM) 680；测试日志 A680 指驱动识别路径，不是把 SQ2 硬件改称 680。用户指出 SQ2 为提频变体、最高 661 MHz；本次实机 devfreq 可用频率为 177/256/315/405/461/500/514 MHz，max_freq=514 MHz。661 MHz 尚未启用/验证，需进一步核对 SQ2 对应 OPP、电压及 GMU/时钟配置，不能只改名称或盲目拉高频率。
+
+基线 ro.hardware.vulkan=none，系统加载器最初无物理设备。在线将 HAL 放入 RAM vendor overlay 的 lib64/hw/vulkan.none.so，按现有属性实现临时加载。系统 libvulkan 报告 Vulkan 1.3.354。直接 HAL 和系统加载器均通过 16×256 字计算校验及 64×64 optimal-tiled 图像清除/拷贝/逐像素读回；系统加载器额外通过 AHardwareBuffer 分配、mapper5 导入、GPU 清除、CPU 锁定后 4096 像素校验。
+
+普通应用 org.surface.sq2.vulkanprobe（显示名 SQ2 Vulkan Test）通过系统加载器建立 2880×1920、4 图像交换链，两次各提交 120 帧，用户确认深蓝背景彩色三角形可见。此前黑屏源于锁屏/窗口隐藏，解锁后通过；不归因为 GPU 故障。本轮 SurfaceFlinger/system_server PID 未变，检查的内核日志无 GPU fault/hang。此为有限功能验证，不等于 Vulkan CTS 合规、游戏兼容性或性能保证；未切换桌面的 skiagl 渲染器。
+
+scripts/pack-sq2-vulkan.py 基于当前 aa5d60f4… 镜像，仅增加 Vulkan HAL、修改 ro.hardware.vulkan=freedreno，并用 Vulkan 1.3 feature 替代 donor 的 1.4 宣称、移除未经本端验证的 dEQP 日期宣称。最后条目审计仅允许这五个路径变更；密码 SSH addon 保持最后，触控、音频 HAL/启动助手和 /init 均保持原字节。回滚基线已在忽略的 out/touch-heatmap/native-heatmap.cpio.gz 校验；新镜像 out/sq2-turnip/native-turnip.cpio.gz 哈希为 5a9c9df13e6e2d4116e0b8d4c532c14c073aebc5389f6c9266317d2ab9cd100d。最终部署结果见 configs/deployment-status.json。重启验证尚未完成，当前运行只读属性与 PackageManager 的旧 1.4 宣称要等新镜像正常启动后重新核对。
+
+上述版本的启动验证及频率后续见下一节；后续仍需实际应用兼容性与持续负载验证。
+
+### 2026-10-28 GPU 661 MHz 与温度支持
+
+用户要求参考 8cx Gen 3 完成 SQ2 GPU 频率更新。对照固定 linux-surface b86f786… 与 Linux v6.12 的 SC8280XP 设备树，确认两者分别为 A680.1/SC8180X 和 A690.0/SC8280XP 路径，不能因商品名同为 690 就替换硬件身份、固件或整套电压表。SC8280XP 的 655 MHz/TURBO、690 MHz/TURBO_L1 仅作参考；本端新增 590/661 MHz 均保持原 514 MHz 已使用的 TURBO_L1=416，由本机 command DB/GMU 选择电压，未编造毫伏值。此配对是经有限实机验证的实验配置，尚不是提取出的 OEM 曲线。
+
+`build-sq2-gpu-opp.py` 基于实际部署 DTB 7a4d1c73… 构造增量，原低频表及非目标属性保持。590 MHz 经一次性 GRUB 入口启动并通过 30 秒校验；首次发现无温度节点，未将该轮称为温度验证。检查发现原配置未启用 TSENS（受未启用 QFPROM 的 Kconfig 依赖影响）。重新取得固定内核源码，配置 olddefconfig 前后完全一致，仅构建 qcom_tsens.ko；52 个未定义符号均在目标内核导出表，vermagic 匹配后实机加载成功。模块 SHA256 dd85fbf8…，源码构建缺少原 Module.symvers，不能称为全量 modpost 校验。GPU-top 读数可用，GPU-bottom 未注册，本次不宣称所有热区完整支持。
+
+`pack-sq2-tsens.py` 只增加匹配 TSENS 模块与 /init 的早期加载钩子，在 Android donor 模块加载之前接管。661 MHz DTB 额外添加 GPU-top 75°C passive trip、5°C hysteresis，绑定现有 devfreq cooling；TSENS 加载失败的 661 MHz 启动被阻止，原 DTB 可回退。最终正常启动使用 `sq2-gpu-661-thermal.dtb`（09b6d3a8…），救援仍用原 `sc8180x-surface-pro-x.dtb`（7a4d1c73…）。Image 保持 e7c7a3e5…，内核 release 6.3.8-sq2-android1 及其他模块 ABI 不变；这是内核侧设备树与模块更新，不是替换整个 Image 或升级内核版本。
+
+重启还发现先前 Vulkan delta 缺少 permissions 父目录：文件虽在 cpio 审计中，内核并未成功解包。`pack-sq2-vulkan.py` 现明确写入缺失父目录并增加回归测试。修正与 TSENS 合并后的 initramfs 为 f8fb83358edeead8ac10c53e20b53b06b9e1597ab8268ab345a262a744691f50，密码 SSH addon 保持最后；仅指定图形/热管理路径变化，音频实验未混入，IPTSd 哈希仍为 e4610813…。
+
+最终 661 MHz 组合已经从一次性实验入口重启，随后以相同启动参数提升为默认正常入口，未在提升默认后再重启一次。实机 ro.hardware.vulkan=freedreno，HAL 哈希匹配；PackageManager feature 版本为 4206592（1.3），旧 dEQP 日期宣称已消失。用户确认“已解锁联网，桌面/触摸/视频均正常”，WSL 公钥 SSH 可用，guard=Y。两个测试期间框架 PID 各自保持，检查日志未发现 GPU/GMU fault、hang 或 timeout。
+
+带温度记录的 590 MHz 测试：30 秒，28462 轮，每轮 4096 字、每字 4096 次整数递推，逐字校验通过，GPU-top 41.3–44.4°C。661 MHz 测试：同样 30 秒，26626 轮，43.2–45.9°C；计算、图像及 AHardwareBuffer 读回均通过。轮数受并发应用/CPU 等影响，不是受控性能对比，也不宣称提频性能收益。devfreq 显示请求频率；当前 a6xx_gmu_get_freq 返回缓存值，不能把它称为实测 PLL。
+
+降频规则通过温度模拟验证：模拟 76°C 时 cooling state 从 0 到 1，撤销模拟后回到 0；没有通过实际加热达到高温。结束时 min_freq=177 MHz、max_freq=661 MHz，空闲 cur_freq=177 MHz，模拟温度已撤销。长时间游戏、不同供电条件、实际高温及电池续航仍待验证。
+
+回滚：把正常入口 devicetree 改回原 `sc8180x-surface-pro-x.dtb` 即回到 514 MHz；原救援入口直接使用该 DTB。旧 grub 和 DTB、两轮测试及镜像审计保存在忽略的 out/gpu-opp/，上一版本 initramfs 位于 out/sq2-turnip/native-turnip.cpio.gz。本轮未删除历史备份，ESP 写入均经过盘型号/UUID/标记确认、哈希/gzip、sync 和同卷原子替换。
+
+### CPU 调频适配（2026-10-28，后续已完成）
+
+用户询问 CPU 当前速度和最高频率。发现 qcom-cpufreq-hw.ko 已在 initramfs，但没有加载，/sys/devices/system/cpu/cpufreq 下无 policy。按实际 DTB 和匹配驱动定义，只读读取 0x18323000/0x18325800 的频率 LUT 与请求索引：小核域最高 1.7664 GHz，当前请求 index 12 = 1.6704 GHz；大核域最高 3.1488 GHz，当前请求 index 0 = 825.6 MHz。此为当时请求档位，不是实际周期计数，也不能证明 CPU 自动随负载升至最高频率。未加载 CPU 调频模块或改写 CPU 寄存器；接通调频驱动及负载验证作为独立后续项，不能把本轮 GPU 更新表述为 CPU 性能也已完善。
+
+随后用户明确要求适配 CPU 频率。加载现有匹配模块后建立 policy0（CPU0–3）和 policy4（CPU4–7），但大核只开放到 2995.2 MHz；3072/3148.8 MHz 报 Voltage update failed。核对驱动发现是静态 DT OPP 缺项导致 dev_pm_opp_adjust_voltage 无法更新，并非已证明硬件电压不足。新增这两档并沿用原最高档 interconnect vote，实际电压继续读取本机硬件 LUT；不写入推测电压。
+
+启动前由 cpu-frequency-start 加载模块，默认 schedutil，小核 300000–1766400 kHz、大核 825600–3148800 kHz。新 DTB 同时保留 GPU 661 MHz/75°C 温控，为两个 CPU cluster 新增 80°C 被动降频及 5°C 回差。镜像审计只改变 /init 和新增助手，音频、触摸、图形内容逐字未变；密码 SSH addon 保持最后。
+
+一次性 GRUB 启动验证后，八个绑核进程各运行 20 秒确定性整数递推并全部校验通过，采样显示小核 1.7664 GHz、大核 3.1488 GHz，CPU 最高采样温度 53.3°C。负载结束后观察到较低频率，仍使用 schedutil。两集群分别模拟 81°C，cooling state 0→1，小核上限降至 1670.4 MHz、大核降至 3072 MHz；移除模拟后状态恢复 0、频率上限恢复。未诱发真实过热。用户确认重启后桌面、触摸、视频正常；WSL 公钥 SSH 恢复，框架 PID 在校验期间保持不变。
+
+已将相同测试包设为默认：DTB sq2-cpu-gpu.dtb（a5a25e43…），initramfs e16a7a01…。Image/ABI 不变；原 514 MHz DTB 救援入口跳过 CPU 助手，普通入口也可通过 sq2.cpufreq=0 跳过。一次性测试菜单已移除，提为默认后未再次重启。旧镜像 f8fb8335… 与 GRUB 保留于本地忽略的 out/gpu-opp、out/cpu-frequency；ESP 同卷原子替换后空闲约 221 MiB。此为驱动请求频率与短时正确性验证，不是独立核心时钟测量、长期稳定性或性能/续航基准。
 
 ## 触摸及输入
 
 IPTSd 3.1.1 加 scripts/patch-iptsd-sq2-touch.py 状态/连续性修复。configs/iptsd-sq2.conf 保留 Contacts AspectMax=2.0，触点检测与稳定性阈值默认；用户确认轻点、连续拖动、双指缩放正常且无自动点击。DFT ButtonMinMag=4000 是单独的笔配置。
+
+2026-10-27 后续复现左上角幽灵点击：用户确认未操作的 30 秒采集出现 4 次短促点击，仅 IPTSd 虚拟触摸屏产生事件。临时带原始报告/触点状态记录的守护进程又采得 3 次；ARM 离线重放准确复现其帧号。原始 46×68 热图在 (row,col)=(0,0)、(0,67)、(1,0)、(2,0) 有近饱和尖点，周围未触摸格通常为约 180。高斯拟合偶尔将它们变成 valid/stable 触点。尚不能确定异常来自传感器、固件还是 SPI 传输，不应直接宣称硬件损坏。
+
+两帧起触确认虽能消除第一份录制的点击，在线后仍抓到 2 次，已撤掉该实验。最终 scripts/patch-iptsd-sq2-heatmap.py 只针对 045E:0C21 触摸屏及 46×68 热图，在拟合之前修正上述四格：仅当归一化强度≥239/255 且高于原始邻居中位数超过 40/255 时，用邻居中位数插值。不裁掉屏幕区域，不提高接触检测阈值，不增加起触或抬起等待；其他采样格和硬件不变。
+
+最终版将第一份 3610 帧静置录制的 3 次按下降为 0；同一份真实触摸录制中的左上角/中部输入仍能上报，但不能仅由按下次数证明手势质量。随后用户确认最终在线版本“手势正常，未见自动点击”。两轮在线采集中未再见原来的左上角点击，含其他位置的操作，不能称为两轮完全零输入。IPTSd 连续性及热图夹具测试通过。有限观察不能代替长时间静置、充电/电池条件和重启后的回归。原始录制、临时诊断程序、带凭据的镜像及备份仅放在忽略的 private/out。
+
+本次用本机 WSL Ubuntu 24.04 构建，最终 IPTSd 为 e4610813…；已在 RAM 中运行，并写入当前 ESP 启动镜像 aa5d60f4…，完整哈希见 deployment-status.json。替换前镜像 4ea548ba… 已复制到本机 out/touch-heatmap/native-before-heatmap.cpio.gz 并校验；新镜像 gzip 校验及最后条目审计通过，实际只更换 bin/iptsd，保留新加入的操作者公钥，密码 SSH addon 仍放最后。sync 后同 ESP 原子替换，未重启，boot ID 不变且只关屏 guard=Y。下次自然重启后仍需核对有效二进制及实机手势，不把“写入镜像”表述为“重启验证通过”。
+
+随后按用户要求从正常入口完成整机重启：boot ID 已变化，boot_completed=1，IPTSd 哈希仍为 e4610813…，仅关屏 guard=Y，nohibernate 保留。用户确认未操作的重启后 30 秒采集中，触摸屏及其他被采集输入设备均无事件（timeout 的 Terminated 行不是输入事件）；随后用户确认左上角轻点、连续拖动、双指缩放均正常，也未见自动点击。至此启动持久性及本次有限实机回归通过，长期静置与不同供电条件仍待观察。
+
+本次重启后还分别验证 Windows 与 WSL 操作者密钥：显式禁用 password、keyboard-interactive、agent 回退，仅 publickey 认证，严格校验原主机身份，两者均取得 root。WSL NAT 当时无法直连设备，使用本机 Windows TCP 字节转发后，由 WSL 原生 OpenSSH 和 WSL 自己的私钥完成认证；这不是 WSL 直连网络通过。转发脚本和可复用连接配置在忽略的 private/sq2-ssh/，身份、地址、原始输出不入 Git。
 
 输入节点发布时序/权限修复使 EventHub 接入设备。正常开机可用与休眠后恢复是独立结论，后者未解决。
 
@@ -73,6 +144,14 @@ Wi-Fi 使用内核接口及 Android 通用 HAL 适配：sq2-wifi-driver.c、sq2-
 
 ## 音频
 
+### 当前有效版本：麦克风接入（2026-10-28）
+
+WCD9340 双 DMIC → MultiMedia2 / CARD_0_DEV_1 已打通；策略发布 48 kHz S16 stereo 内置麦克风。通用 HAL 的 XML 转换会把该地址覆盖为 bottom，导致选错 card0/dev0；新增严格限定原始 donor 哈希的单指令补丁，仅跳过 IN_MICROPHONE 的地址覆盖。实际播放/录音传输、pacing、MonoPipe 保持 stock，勿叠加旧实验 patch-sq2-audio-hal.py。
+
+当前实际 HAL 为 774cd7e7…，音频启动助手显式设置可执行标签、重启并检查 /proc/PID/exe，然后刷新 audioserver，消除了“路径已替换、运行仍是旧 inode”的竞态。用户确认 48 kHz 双声道、16 kHz 单声道录音/回放及原诊断应用正常；一次性启动后再次确认诊断录音回放正常。路由及进程哈希在重启后核对一致。不是 AEC/波束成形或全音频认证。
+
+已将实测包 9dd3ff7a… 提为默认，恢复原正常/救援/关机菜单；原 d519b958… 基线保留在本地 out/resource-monitor。只改策略、HAL、音频启动助手和新增麦克风路由四项，内核/DTB/触摸/GLES/Vulkan/温控/电池及凭据不变，凭据 addon 最后。以下旧音频实验记录保留作历史，不能覆盖本节当前状态。完整构建、证据边界见 [MICROPHONE.md](MICROPHONE.md)。
+
 ADSP → SLIM/WCD9340 → SoundWire/双 WSA881x。物理左右均有声；Android AIDL HAL 和 48 kHz S16 stereo policy 已接入。patch-sq2-audio-hal.py 去掉模拟器跳帧逻辑，校验原始/修改后哈希。audio-drivers-start、audio-speaker-route、audio-framework-boot 负责固件、路由、HAL。
 
 调音问题仍开放。历史音频期间发生过整机重启；有限视频观察不能证明所有音频故障已解决。
@@ -84,6 +163,22 @@ ADSP → SLIM/WCD9340 → SoundWire/双 WSA881x。物理左右均有声；Androi
 音频后续对照结论：同一 PCM 流中左/右/左/右均无爆音，分两次开流且间隔 10 秒时第二次开声爆音。新静音模块下将三个音频 link 的 pmdown_time 设为 0 后，直接 ALSA 两遍、同 WAV AAudio 两遍均无爆音且音量接近；用户随后确认实际视频暂停等待 10 秒再恢复两轮也无爆音。audio-framework-boot 已在 HAL 启动前设置此策略，镜像已写入，尚未验证本次策略的重启持久性或长期效果。低频/音量问题未解决。新增 test-sq2-audio-reopen.sh 为临时 A/B 工具，退出会恢复原设置，不能替代启动策略。
 
 此次 ESP 因历史备份占满导致临时镜像写入失败，原启动镜像未受影响。已将本次回滚镜像（fc5e7a7b…）复制到工作站 out/audio-fix-20261027/native-before-audio-pmdown.cpio.gz 并校验完整哈希；只移除 ESP 上该重复备份及本次失败的 .new 文件后完成原子替换。早期 ESP 备份仍保留。下一次更新应先检查可用空间。
+
+### 2026-10-28 播放速率与均衡器 UI
+
+用户报告连续播放破音，随后明确指出播放明显加速。撤回所有临时均衡及音量补偿后仍复现。旧跳过模拟器 pacing 的 HAL（99e2a625…）下，13.5 秒 AAudio WAV 整次调用约 7.27 秒，直接 ALSA 约 13.60 秒；发现 MonoPipe 非阻塞写入可能丢帧但仍确认完整帧数。增加 blocking writer 的实验 HAL（bf89ba97…）只有在核对 /proc/PID/exe 后才确认真正运行，两次同一探针耗时约 15.76/15.87 秒，包含启停开销，尚不能标为速率修复。
+
+用户自行重启后确认“音频已恢复正常”。只读核查发现：实际运行的 HAL 是原版 fd219b1058eccc701de685cf59d6578e887c11182d877bb4e6c3a78bfd73e279，而 /etc 中及 APEX 挂载路径上的文件仍是 99e2a625…；启动时服务提前启动旧 inode 的竞态意味着路径哈希不能代表运行版本。该次正常播放观察中 AudioFlinger 为 48 kHz，timestamp rate 约 1，localSR 约 48001，4096 帧写入耗时约 85 ms。RX7/8 均为 72，无均衡效果链。ESP 镜像仍为 aa5d60f4…；本次未写镜像、未重启 HAL。保留此正常运行状态。
+
+工作区 audio-framework-boot 的 SELinux 标签/强制重启/运行哈希检查及 patch-sq2-audio-hal.py 的 blocking writer 改动仍为未部署实验。**不能把它们直接打包成已验证修复**：强制重启会改变这次实际运行的原版 HAL。后续持久化应先明确选择并复核原版 HAL，而非自动部署实验版本。
+
+用户要求推进系统均衡器并提供 UI。已从 Equalizer314 官方 GitHub release 安装 v0.0.22-beta 至当前用户，APK SHA256 6529e478d4ddc355e15a4179b0c41b0535e38334161a8161c389fb7e30a7724e（与发布资产 digest 一致），包名 com.bearinmind.equalizer314。中文参数式界面实机截图验证。它通过系统 DynamicsProcessing 实现均衡，不替换 HAL；MusicFX 已预装但本次从全局入口启动未留下可用界面。
+
+已保存“SQ2 原声”和“SQ2 温和低频”预设，后者见 configs/sq2-equalizer314.json：125 Hz +1 dB、160 Hz +1.5 dB、200 Hz +1 dB，Q 均为 2，前置 -4 dB。三个 bell 响应会叠加，不能把单段数值当成最终频响；这是保守的相对低频补偿，整体响度可能下降，不是提高扬声器硬件增益。仅授予通知权限，频谱、混响及实验环绕保持关闭。已确认预设在 UI 显示，首次配置保持总电源关闭；等待用户通过底部中央电源按钮开启并反馈。后续仍需验证实际 effect chain、播放速度、听感和重启恢复，不把安装 UI 等同于均衡有效。
+
+随后用户开启并反馈“低频改善且播放正常”。只读复核 AudioFlinger 全局 session 0 存在一条 DynamicsProcessing 效果链，Enabled=y、Suspended=n，控制客户端为 Equalizer314；输出 48 kHz，timestamp rate=1.00001、localSR≈48000.4。HAL 仍为原版 fd219b10…，boot ID 未变。证明此次实际视频的均衡已挂接及速率正常，重启自动恢复仍未验证。
+
+注意：听感确认时用户已手动编辑为五段曲线（约 229 Hz/+8.41 dB、143 Hz/+9.79 dB、89 Hz/+10.50 dB、1079 Hz/+6.03 dB、5184 Hz/+3.56 dB），前置仍 -4 dB、自动增益与 limiter 关闭；不能把此次听感归因于 configs/sq2-equalizer314.json 的最初三段预设。保留用户设置未覆盖，实读 XML 和效果链快照备份于忽略的 out/audio-bass/eq314-user-confirmed.xml、eq314-active-audioflinger.txt。已告知频段叠加可能超过前置余量，若大音量破音先降低前置增益。后续不要自动重放初始化脚本覆盖用户调音。
 
 ## 合盖、电源与休眠（暂停）
 
@@ -112,6 +207,8 @@ SSAM 状态来自 01:0e:01:00:01/state。patch-sq2-lid.py 将 closed 映射 SW_L
 用户已要求当前实验设备允许 root 密码 SSH，保留公钥登录。原 Dropbear 编译时禁用了密码认证，现另建带静态 libcrypt 的服务端，使用原主机密钥。2222 临时端口及正式 22 端口均通过禁用客户端密钥/agent 的密码认证，id -u 返回 0；公钥连接仍工作。shadow 与明文测试输入仅保存在忽略的 private/out，不进入仓库。启动镜像追加本地密码 SSH addon，重打包注意保留最后覆盖顺序，详见 BUILD。密码变更后若需跨重启保留，须重新保存本地 shadow 并打包；诊断根文件系统内直接 passwd 只修改当前 RAM。
 
 ### 无密码锁屏
+
+2026-10-28 调试期间用户已自行添加 PIN，随后将自动锁定延迟调整为 30 分钟，并明确继续保留该策略用于 GPU 调试。实读 user 10 的 lock_screen_lock_after_timeout=1800000。随后将 screen_off_timeout 从 120000 延长到 1800000，避免两分钟关屏打断测试；两项均为 30 分钟，不等于完全禁用锁屏。保留 PIN，不清除凭据。临时“不锁屏”资源/启动助手实验已撤回，原 Sq2Lockscreen overlay 恢复启用；以下为先前无密码锁屏适配历史。
 
 当前用户 10 未设置 PIN/密码，关屏亮屏直接进入桌面。镜像的 android:bool/config_disableLockscreenByDefault 为 true；单独执行 lock_settings set-disabled false 未恢复锁屏。已创建 com.android.shell:Sq2Lockscreen fabricated overlay，将该资源覆盖为 false，并对用户 0/10 启用，再显式启用当前用户锁屏。
 

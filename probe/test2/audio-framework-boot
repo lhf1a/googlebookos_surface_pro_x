@@ -1,5 +1,5 @@
 #!/bin/busybox sh
-# Experimental physical audio startup. Remove sq2.audio=1 in GRUB to bypass.
+# Physical SQ2 audio. Stock transfer/pacing with microphone address correction.
 set -eu
 export PATH=/bin:/sbin
 grep -q 'sq2.audio=1' /proc/cmdline
@@ -27,6 +27,7 @@ for node in /dev/snd/*; do
     [ ! -c "$node" ] || { chown 1000:1005 "$node"; chmod 660 "$node"; }
 done
 audio-speaker-route enable
+audio-microphone-route enable
 # With the mute-before-SoundWire-teardown modules, do not leave DAPM powered
 # after the PCM stream is removed. ALSA and AAudio repeated-open probes passed;
 # arbitrary application pause/resume remains a separate listening check.
@@ -38,6 +39,30 @@ done
 mkdir -p /proc/1/root/debug_ramdisk/sq2-audio
 cp /etc/sq2-audio/audio-hal /proc/1/root/debug_ramdisk/sq2-audio/audio-hal
 chmod 755 /proc/1/root/debug_ramdisk/sq2-audio/audio-hal
+# Android init rejects an executable with a tmpfs label even in permissive mode.
+# Apply the same executable type as the stock APEX audio/effect HAL services.
+android /system/bin/chcon u:object_r:hal_audio_default_exec:s0 /debug_ramdisk/sq2-audio/audio-hal
 android /system/bin/mount --bind /debug_ramdisk/sq2-audio/audio-hal "$target"
-android /system/bin/setprop ctl.start vendor.audio-hal-aidl
-echo 'AUDIO_READY: physical stereo, conservative gain; audio crash root cause unresolved'
+# Restart after binding: service-manager requests may have started an old inode
+# again while drivers were initialized. Check the executable actually running.
+android /system/bin/setprop ctl.restart vendor.audio-hal-aidl
+expected_hal=$(sha256sum /etc/sq2-audio/audio-hal)
+expected_hal=${expected_hal%% *}
+started=0
+for n in $(seq 1 30); do
+    if [ "$(android /system/bin/getprop init.svc.vendor.audio-hal-aidl)" = running ]; then
+        pid=$(android /system/bin/pidof android.hardware.audio.service-aidl.example 2>/dev/null || true)
+        case "$pid" in
+        ''|*[!0-9]*) ;;
+        *)
+            actual_hal=$(sha256sum "/proc/$pid/exe" 2>/dev/null || true)
+            if [ "${actual_hal%% *}" = "$expected_hal" ]; then started=1; break; fi
+            ;;
+        esac
+    fi
+    sleep 1
+done
+[ "$started" = 1 ] || { echo 'AUDIO_FAILED: intended audio HAL not running; inspect init SELinux labels and executable hash'; exit 1; }
+# Reopen the framework against the final HAL/policy, not a boot-time old inode.
+android /system/bin/setprop ctl.restart audioserver
+echo 'AUDIO_READY: SQ2 speakers and DMIC0/1, stock transport with mic address fix'

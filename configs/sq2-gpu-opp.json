@@ -1,0 +1,25 @@
+{
+  "device": "Microsoft SQ2 / Surface Pro X (Adreno 690 marketed name)",
+  "compatible": "qcom,adreno-680.1",
+  "baseline_max_hz": 514000000,
+  "experimental_added_hz": [590000000, 661000000],
+  "experimental_opp_level": 416,
+  "level_name": "RPMH_REGULATOR_LEVEL_TURBO_L1",
+  "voltage_policy": "Retain the existing highest firmware corner; do not program a guessed millivolt value. The target command DB advertises this level. Existing lower OPPs stay unchanged.",
+  "provenance": {
+    "sq2_device_tree": "https://github.com/linux-surface/kernel/blob/b86f786594dc9e53c57fcfa2aa58ada9541506bb/arch/arm64/boot/dts/qcom/sc8180x.dtsi",
+    "gen3_reference": "https://github.com/torvalds/linux/blob/v6.12/arch/arm64/boot/dts/qcom/sc8280xp.dtsi",
+    "comparison": "SC8280XP uses a separate A690.0 GPU/GMU path; its 655 MHz TURBO and 690 MHz TURBO_L1 entries are reference only. This is not proof that its lower-corner curve applies to SQ2.",
+    "target_661_mhz": "Operator-specified SQ2 maximum. This frequency-to-corner pairing is experimental, not an extracted OEM voltage curve."
+  },
+  "thermal_policy": {
+    "module": "qcom_tsens.ko for 6.3.8-sq2-android1, loaded before Android init",
+    "sensor": "gpu-thermal-top",
+    "passive_millidegrees": 75000,
+    "hysteresis_millidegrees": 5000,
+    "cooling": "Existing MSM devfreq cooling device, all states",
+    "load_test_stop_millidegrees": 80000,
+    "missing_sensor": "Load-test script refuses to proceed; 661 MHz boot refuses a failed TSENS module load."
+  },
+  "limits": "Short functional/load tests do not establish OEM voltage equivalence, long-term stability or measured physical PLL frequency. a6xx_gmu_get_freq returns a cached requested frequency. See deployment-status.json for actual test/deployment results."
+}
