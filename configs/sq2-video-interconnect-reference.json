@@ -52,6 +52,7 @@
   "compact_table_followup": {
     "consumer_sha256": "218b69085a587c231b76da07f95b3fef28b3100ecf9b7a7c1d12d6a260729650",
     "table_header_bytes": 24,
+    "operator_observation": "User confirmed whole-device unresponsiveness and manual restart recovery underway; boot/recovery not yet independently revalidated",
     "result": "Connection lost; native sq2-hfi-compact-976c.kmsg pending retrieval; no comparison result yet"
   },
   "static_firmware_evidence": {

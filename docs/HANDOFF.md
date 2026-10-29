@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+操作者确认（2026-10-29）：用户已明确反馈24字节表头对照后“整机无响应，正在重启恢复”。这次是用户执行的长按恢复，不应记录为自主崩溃或自动恢复。当前重启完成、桌面/guard及新boot ID尚待只读复核，SSH仍在标识交换前关闭；不要复跑该测试，先恢复默认入口并取回sq2-hfi-compact-976c.kmsg。启动盘未改，完整硬解未完成。
+
 最新离线协议证据（2026-10-29）：SSH仍在主机标识前closed，compact日志未取回，本轮无设备侧重试。新增inspect-sq2-video-firmware-protocol.py对固定SQ2固件校验六组ARM指令：实际用table+8的qhdr0_offset、stride56、CPU/DSP邮箱偏移、bit15启用/清除、空队列rx_req=1，以及CTRL_STATUS bit0可早于队列解析。故状态1不是队列DMA或完整启动证明，不应盲改表头/IRQ位。新hfi_empty_ping=1先将初始cmd.rx_req设0，空通知后观察固件写成1（且r/w=0），再继续SYS_INIT；406a979b…候选编译/边界/事务/导出审计通过，未部署。保留默认288表头及HANA关闭恢复候选；先设备恢复/取compact日志，再验证完整退出与真实共享队列访问。无解码帧/Android组件，未改启动盘。见VIDEO-DECODE。
 
 最新HFI控制启动通过（2026-10-29）：已取回19ed…完整试验日志，PAS auth0/protect0后到queue-status before，随后进入邮箱快照读取前失联。新boot976cc99e…下203943ae…只写邮箱候选实测九次发布完成，CTRL_STATUS=1；SYS_INIT已发，但cmd_r=0/w=3、msg_w=0，3秒后-110。真实shutdown0、队列解除映射、三ICC清零、全部资源回收/refcnt0，boot/PID2295/2106保持。这是控制启动通过，仍无SYS_INIT回复或解码帧。随后218b6908…的24字节表头单变量对照再次失联，**sq2-hfi-compact-976c.kmsg尚待取回，不能认定进入队列阶段，禁止重跑该完整流程。** 源码核对发现HANA=0x50100000在参考驱动的固件卸载/停钟后还会脉冲桥接，旧探针仅恢复初始复位位漏了这步；已补版本限定post_reset，PAS关闭失败仍保留所有资源，编译/审计通过，未部署。先恢复/取最后日志再决定下一次测试；未改启动盘。见VIDEO-DECODE。

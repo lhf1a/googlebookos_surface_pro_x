@@ -6,6 +6,8 @@
 
 ## 固件静态协议证据与共享队列判据（2026-10-29）
 
+用户随后明确确认compact对照后整机无响应，正在手动重启恢复；当前尚无新boot ID/桌面恢复复核，SSH仍closed。将本次恢复按操作者操作记录，不当成自主崩溃或自动恢复；不复跑原compact完整流程。
+
 设备SSH仍在交换主机标识前closed，尚不能读取compact对照最后日志；本轮没有重新部署或启动VPU。为减少盲目对照，离线分析固定4e93d345…SQ2固件的ARM32可执行LOAD段，以原始程序头虚拟地址定位、固件自己的HFI_QueueGetQHdr字符串引用及ARM指令交叉核对。原始固件、临时ELF包装和反汇编只留忽略的out。新 `inspect-sq2-video-firmware-protocol.py` 只接受完整固定哈希，校验ELF布局和所列指令字/BL目标，再生成out/video-decode/firmware-analysis/protocol.json；不执行固件，不连设备，不读设备MMIO。它是固定二进制的静态证据采集，不是ARM仿真或运行跟踪。
 
 六条证据：①固件队列查找从table+8读取qhdr0_offset再加到table指针，而非固定跳过24字节；②队列header步长为56；③CPU/DSP getter分别读取固件虚拟MMIO E00D2054/E00D2034，与现有邮箱偏移一致；④固件会给E00DF010启用bit15，处理器写0x8000到E00DF01C清除它；⑤空队列分支比较read/write后写queue+0x20为1（rx_req）；⑥一条初始化路径先调用CTRL_STATUS bit0 setter，再等待QTBL_INFO并查找队列header。地址是固件虚拟地址，未据此新增AP寄存器访问。
