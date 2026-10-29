@@ -49,10 +49,16 @@ def main():
             shutil.copyfile(f, args.output / f.name)
     shutil.copyfile(ROOT / 'probe/video/venus-iris1.h', args.output / 'venus-iris1.h')
     shutil.copyfile(ROOT / 'probe/video/sq2-venus-dma.h', args.output / 'sq2-venus-dma.h')
+    for name in ('sq2-venus-platform.c', 'sq2-venus-platform.h', 'sq2-venus-lifetime.h'):
+        shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
+    with (args.output / 'Makefile').open('a') as f:
+        f.write('\nvenus-core-objs += sq2-venus-platform.o\n')
     core = (src / 'core.h').read_text()
     core = replace(core, 'struct venus_core {',
-                   'struct sq2_venus_fw;\nstruct venus_core {\n'
-                   '\tstruct sq2_venus_fw *sq2_fw_owner;\n\tbool sq2_boot_attempted;')
+                   'struct sq2_venus_fw;\nstruct sq2_venus_platform;\nstruct venus_core {\n'
+                   '\tstruct sq2_venus_platform *sq2_platform;\n'
+                   '\tstruct sq2_venus_fw *sq2_fw_owner;\n'
+                   '\tbool sq2_boot_attempted, sq2_secure_active;')
     core = replace(core, '\tenum hfi_version hfi_version;\n',
                    '\t/* VPU hardware is independent of HFI packet version. */\n'
                    '\tbool iris1;\n\tbool sq2_windows_hfi;\n\tenum hfi_version hfi_version;\n')
@@ -144,6 +150,7 @@ def main():
     if args.firmware_lease:
         fw = replace(fw, '#include "venus-iris1.h"',
                      '#include "venus-iris1.h"\n#include "sq2-venus-fw.h"\n'
+                     '#include "sq2-venus-platform.h"\n'
                      '#include "venus-sq2-firmware.h"')
         fw = replace(fw, '\tif (!IS_ENABLED(CONFIG_QCOM_MDT_LOADER) ||',
                      '\tif (IS_SQ2_HFI(core))\n\t\treturn venus_sq2_boot(core);\n\n'
@@ -166,6 +173,7 @@ def main():
                 'sq2_dma': 'exact 2300/2320/2340 SID + singleton DMA group; saved/restored 32bit mask and bus limit; UC alignment and every-page translation checked',
                 'firmware_lease_dispatch_compiled': args.firmware_lease,
                 'sq2_platform_probe_blocked': True,
+                'platform_owner': 'compiled independent core/MMIO/IRQ/device/module owner; firmware begin/end hooks connected; platform probe/power/reset/ICC pending',
                 'input_sha256': HASHES,
                 'output_sha256': {f.name: hashlib.sha256(f.read_bytes()).hexdigest()
                                   for f in sorted(args.output.iterdir()) if f.is_file()}}

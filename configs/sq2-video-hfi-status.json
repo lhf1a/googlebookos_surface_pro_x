@@ -133,7 +133,7 @@
     }
   },
   "same_boot_restart": "second firmware start in one OS boot left CTRL_STATUS 0; clean-boot first start succeeded; root cause open",
-  "next_executable_action": "Implement independently owned SQ2 platform resources (core/HFI/IRQ/power/reset) with PAS shutdown-failure quarantine across probe/recovery/remove; PAS dispatch is compiled but SQ2 probe explicitly refuses until this exists. Preserve no-second-firmware-start in bootbcd0. Then V4L2 actual buffers/frames and open Codec2 capability alignment.",
+  "next_executable_action": "Move verified ICC/domain/reset/clock acquisition and reverse cleanup into independent SQ2 platform owner, preserving all on unconfirmed PAS stop; then wire core.c probe/recovery/remove and V4L2. Keep explicit probe block until ownership complete; no second firmware start in bootbcd0. Android Codec2 and full capability alignment remain required.",
   "not_verified": [
     "V4L2 decode API",
     "Android hardware MediaCodec",
@@ -225,5 +225,23 @@
     "repeat_boot": "per-core rejected, not board-global across module reload",
     "tests": "8 fault combinations, 3 invalid platform cases, generated source opt-in/probe block, ARM64 modules",
     "pending": "independent core/HFI/IRQ/power resource quarantine; explicit probe refusal remains"
+  },
+  "venus_platform_owner_candidate": {
+    "status": "compiled-not-loaded-probe-still-blocked",
+    "resources": [
+      "core heap",
+      "MMIO region and mapping",
+      "IRQ initially disabled",
+      "device reference",
+      "module reference"
+    ],
+    "PAS_hooks": "secure_begin before boot; secure_end after owner stop; sticky quarantine masks IRQ and blocks release",
+    "tests": "actual C with mocked kernel providers: 6 acquisition failures, pin counts, quarantine, successful release; ASan/UBSan; ARM64 compile",
+    "remaining": [
+      "ICC/power/reset/clock ownership",
+      "probe/recovery/remove dispatch",
+      "hardware resource tests"
+    ],
+    "prior_test_error": "host compiler misleading-indentation exit1, corrected and all tests exit0"
   }
 }
