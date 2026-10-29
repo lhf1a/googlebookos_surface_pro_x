@@ -1,5 +1,7 @@
 # 构建与部署
 
+分阶段消费者：`bash scripts/build-sq2-iris1-phase.sh`，可用SQ2_IDENTIFY_STAGE选新的构建目录。它只绑定已有私有节点，不创建/移除overlay或VIDEOCC；默认仍不启域/时钟/MMIO，必须以独立有界kmsg和实际probe_result判断。`python3 scripts/build-sq2-videocc-sw-domains.py --stage NEW_DIR` 只生成固定源码的两codec GDSC软件控制候选，不改时钟检查/频率，不安装。该差异通过三域六时钟启停实测，但HW_CTRL运行期交接未实现，不能部署长期默认。热卸载时钟提供者后读pm_genpd_summary曾陷入内核循环，禁止复用该过程；下一次需干净启动直接加载候选，保留启动盘原样。桥接reset/HFI/PAS/Android接入仍开放。
+
 Iris1独立识别探针：`python3 scripts/build-sq2-iris1-identify.py --stage NEW_DIR` 固定out/video-decode/running-base.dtb的be17f33f…身份，使用dtc/fdtget/fdtput构建临时overlay及模块。删去__symbols__导出但保留本地引用重定位，以兼容当前无symbols启动树。v3导致一次用户手动恢复，不能原样重复；v4新增逐步标记、默认0域/0时钟/不读MMIO，仅编译未测。禁止据overlay/符号检查通过认定电源或版本可读。下次先独立运行有界kmsg采集和远程逐步标记；不要无日志重复上电。新overlay模块驻留到重启，旧VIDEOCC/overlay拆卸曾有OF引用泄漏警告。具体失败/恢复见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
 
 PAS内存所有权部分候选：`SQ2_IRIS1_STAGE=/root/.cache/sq2-video-iris1-lease-v2/venus SQ2_IRIS1_DEST=out/video-decode/iris1-lease-v2 bash scripts/build-sq2-venus-iris1.sh --firmware-lease` 在新目录编译独立事务层，先运行ASan/UBSan故障注入和寄存器mock。新目录必须不存在；状态/源码哈希记录在candidate.json。该层尚无启用调用点，不能用它单独启动固件；core/HFI资源在关闭失败时的整体保留仍待适配。不得将主机故障注入说成实机PAS故障验证。

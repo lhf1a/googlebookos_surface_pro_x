@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+最新分阶段视频实测（2026-10-29）：独立有界kmsg确认0资源、三GDSC、GCC三AXI和MVSC时钟可申请/启停回收；原VIDEOCC在VCODEC时钟真实报stuck-off/-16并正常回收。仅将两codec域暂留软件PM控制（不改频率、不跳过halt检查）的候选24ed5d48…，三域六时钟的实际probe_result=0，回收计数0。未读VPU MMIO/未执行PAS。**后续全局pm_genpd_summary读取陷入不可杀内核循环，Android/SSH仍活；sync后默认受控重启已实核恢复：boot b7730aab…、boot_completed=1、screen_only=Y，临时模块/节点/任务清除，pstore空。不要热卸载GDSC提供者或重读该汇总。** 下一次干净启动直接加载私有候选，先补下游桥接reset流程，再读寄存器。前次v3整机无响应的根因仍未证明。详见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
+
 最新视频试验失败（2026-10-29）：独立VIDEOCC+GDSC/clock/version探针v3测试后用户确认整机无响应，手动长按重启恢复。未获版本/清理结果，具体阻塞阶段未知，不要原样重试；无PAS/HFI/固件启动或启动盘写入。恢复后SSH实核新boot9435bddc…、boot_completed=1、screen_only=Y、PID2242/2098、pstore空，临时模块/节点已清除，用户确认桌面恢复。v4仅本地编译，默认0域/0时钟/不读MMIO并加逐步标记；下次需先独立有界kmsg采集、逐条命令标记，从零上电阶段定位。SSH本次用ecdh-sha2-nistp256/aes128-ctr连通，主机校验和原身份保持。见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
 
 固件寿命续接（2026-10-29）：独立PAS9内存事务/所有者已编入私有候选（`--firmware-lease`），真实调用前标记secure touch，load/auth失败也需成功shutdown才释放；失败隔离同时持有DMA、独立设备和模块引用，禁止重试/重分配。16种主机故障组合及100次正常复用的ASan/UBSan检查通过，编译通过；**无启用调用点、未执行PAS**。core.c错误/恢复/remove仍释放HFI及devm资源，需整体处理后才能接入，不要只替换固件分配。目标仍为实机解码与Android组件，详见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。

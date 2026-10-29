@@ -4,6 +4,20 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## 分阶段资源实测与提前硬件交接阻断（2026-10-29）
+
+在9435bddc…同一boot上，先验证有限独立kmsg collector（83dcdf5d…）的进程、KMSG_READY和实际smoke记录，再运行v4的0域/0时钟/不读MMIO阶段。三个电源域及六时钟引用获取/回收通过，boot_completed=1、screen_only=Y、PID2242/2098保持。collector使用O_DSYNC写私有/data临时文件，120秒/2MiB上限，主动停止后KMSG_END完整；日志已取回忽略目录。
+
+新增消费者单独编译模式 `SQ2_IDENTIFY_EXISTING` / `build-sq2-iris1-phase.sh`，保留overlay/VIDEOCC，使用driver_override把已经完成零资源测试的节点转交给sq2-iris1-phase。消费者的probe内所有资源在返回前回收，可按阶段卸载消费者，不拆时钟提供者。新只读probe_result参数报告实际probe结果；insmod为0仅证明driver注册，不证明probe成功。
+
+原VIDEOCC（fd6adde7…）分阶段实测：1、2、3个域的上电和下电均返回0；三GCC AXI时钟和MVSC主核时钟使能及释放通过。加入第五个VCODEC时钟时，内核报告 `video_cc_mvs0_core_clk status stuck at 'off'`，clk_prepare_enable返回-16，回收返回-16；没有读取VPU MMIO，设备保持响应。有限collector完整记录了时钟warning和调用栈。此错误可正常返回，不能据此认定它就是上一轮v3整机无响应的根因。
+
+核对固定下游venus_hfi.c：其__venus_power_on在时钟开启后才__enable_hw_power_collapse；当前6.3 gdsc_enable对HW_CTRL域在返回前即打开硬件触发，可能在固件尚未提供硬件票时提前掉电。新增 `build-sq2-videocc-sw-domains.py`，固定原videocc源码119d847a…，只把vcodec0/1_gdsc的HW_CTRL改为0。保留真实时钟halt检查、不伪造成功、不改时钟频率、寄存器地址或reset。它暂留软件PM控制，**没有实现固件运行后的HW_CTRL交接或验证长期功耗**。
+
+候选VIDEOCC模块24ed5d48…和带probe_result的消费者263415c4…均传输全哈希匹配，符号闭包missing=0。旧消费者卸载后切换时钟提供者（overlay未动），三域+六时钟、不读MMIO的实际probe_result=0；每次使能、反向关闭/下电和最终回收均有独立日志，全部返回0。这验证了当前启动前条件下的软件控制差异，非固件/解码或全驱动成功。消费者随后卸载；clk_summary确认七个video/GCC相关分支enable/prepare计数均0（包含未开启的IRIS_AHB），idle报告19.2MHz不能当作活动解码频率。
+
+后续读取全局pm_genpd_summary时，cat进程陷入R态内核循环，SIGKILL未退出；Android/SSH仍响应。不能称临时GDSC提供者热卸载生命周期已安全，且不能再次读取该汇总或仅凭模块引用0热替换提供者。已保存日志、sync后发起默认入口受控重启清理；随后SSH复核新boot b7730aab…、boot_completed=1、screen_only=Y、PID2263/2102，旧诊断任务和所有临时视频模块/节点已清除，pstore空。默认闭源Vulkan启动参数保持，未改启动盘；本次重启是操作者执行的受控清理，不是自主崩溃或自动回退。桌面目视未另行确认。下一次在干净启动后直接加载软件控制候选，避免先加载/热卸载旧GDSC提供者。下游VPU5还在使能时钟前执行AHB→AXI桥接reset assert/deassert（150–250µs间隔），尚未适配；必须先核对桥接reset/总线时钟，再读VPU寄存器。没有执行MMIO、PAS认证、固件启动或真实解码。
+
 ## 首次电源/版本识别试验失败（2026-10-29）
 
 为独立核实资源接入，新增 `sq2_iris1_identify.c` / `build-sq2-iris1-identify.py`，从本次运行FDT（be17f33f…，与文件形式DTB哈希不同）生成VIDEOCC加私有identify消费者的临时overlay。三路GCC AXI时钟使用SC8180X真实ID227/225/226，VIDEOCC使用4/2/3，三个GDSC使用0/1/2；寄存器申请限定0xaa00000+1MiB，不覆盖ab00000 VIDEOCC。数值以固定sdmshrike下游及当前内核头/驱动交叉核对，尚未取得SQ2实际版本读数。没有固件、SCM、HFI、IRQ或reset写入。

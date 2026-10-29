@@ -9,8 +9,10 @@
 #include <linux/pm_runtime.h>
 #include <linux/clk.h>
 #include <linux/io.h>
+#ifndef SQ2_IDENTIFY_EXISTING
 static bool check_ref(const char *path, u32 ph);
 #include "overlay.h"
+#endif
 static bool allow;
 module_param(allow, bool, 0400);
 static unsigned int power_domains;
@@ -19,8 +21,12 @@ static unsigned int enable_clocks;
 module_param(enable_clocks, uint, 0400);
 static bool read_registers;
 module_param(read_registers, bool, 0400);
+#ifndef SQ2_IDENTIFY_EXISTING
 static int overlay_id = -1;
+#endif
 static bool measured;
+static int probe_result = -EINPROGRESS;
+module_param(probe_result, int, 0444);
 
 static int identify(struct platform_device *pdev)
 {
@@ -131,6 +137,8 @@ cleanup:
 unmap:
  iounmap(base);
  if (ret != -EPROBE_DEFER)
+  probe_result = ret;
+ if (ret != -EPROBE_DEFER)
   pr_info("SQ2_IRIS1_IDENTIFY resources_released ret=%d\n", ret);
  return ret;
 }
@@ -139,8 +147,13 @@ static const struct of_device_id matches[] = {
 };
 static struct platform_driver driver = {
  .probe = identify,
+#ifdef SQ2_IDENTIFY_EXISTING
+ .driver = { .name = "sq2-iris1-phase", .of_match_table = matches },
+#else
  .driver = { .name = "sq2-iris1-identify", .of_match_table = matches },
+#endif
 };
+#ifndef SQ2_IDENTIFY_EXISTING
 static bool check_ref(const char *path, u32 ph)
 {
  struct device_node *n = of_find_node_by_path(path);
@@ -148,10 +161,13 @@ static bool check_ref(const char *path, u32 ph)
  of_node_put(n);
  return ok;
 }
+#endif
 static int __init start(void)
 {
  struct device_node *n;
+#ifndef SQ2_IDENTIFY_EXISTING
  int ret;
+#endif
  if (!allow || !of_machine_is_compatible("microsoft,surface-pro-x"))
   return -EPERM;
  if (power_domains > 3 || enable_clocks > 6 ||
@@ -159,6 +175,12 @@ static int __init start(void)
      (read_registers && (power_domains != 3 || enable_clocks != 6)))
   return -EINVAL;
  n = of_find_node_by_path("/soc@0/clock-controller@ab00000");
+#ifdef SQ2_IDENTIFY_EXISTING
+ if (!n)
+  return -ENODEV;
+ of_node_put(n);
+ return platform_driver_register(&driver);
+#else
  if (n) { of_node_put(n); return -EEXIST; }
  if (!check_overlay_refs())
   return -EINVAL;
@@ -176,7 +198,15 @@ static int __init start(void)
  __module_get(THIS_MODULE);
  pr_info("SQ2_IRIS1_IDENTIFY overlay=%d resident_until_reboot\n", overlay_id);
  return 0;
+#endif
 }
 module_init(start);
+#ifdef SQ2_IDENTIFY_EXISTING
+static void __exit stop(void)
+{
+ platform_driver_unregister(&driver);
+}
+module_exit(stop);
+#endif
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("SQ2 temporary power/clock identity probe; no video firmware");
