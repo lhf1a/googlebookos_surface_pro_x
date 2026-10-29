@@ -94,7 +94,8 @@ static int venus_sq2_probe(struct platform_device *pdev,
  core->sq2_public = true;
  /* Keep firmware/power resident. Child PM callbacks are intentionally empty
   * while the real parent owner holds all seven clocks and three domains. */
- pm_runtime_set_active(core->dev);
+ ret = pm_runtime_set_active(core->dev);
+ if (ret) goto fail;
  pm_runtime_enable(core->dev);
  core->sq2_pm_enabled = true;
  core->sq2_children = true; /* also depopulate partial population on error */
@@ -108,6 +109,10 @@ fail:
   if (core->sq2_children) {
    of_platform_depopulate(core->dev);
    core->sq2_children = false;
+  }
+  if (core->sq2_pm_enabled) {
+   pm_runtime_disable(core->dev);
+   core->sq2_pm_enabled = false;
   }
   dev_err(core->dev, "SQ2 probe=%d stop=%d; independent owner retained\n", ret, stop);
   return ret;

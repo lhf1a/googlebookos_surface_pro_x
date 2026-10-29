@@ -133,7 +133,7 @@
     }
   },
   "same_boot_restart": "second firmware start in one OS boot left CTRL_STATUS 0; clean-boot first start succeeded; root cause open",
-  "next_executable_action": "Fault-test the compiled independent core dispatcher (probe errors, terminal IRQ error and remove); add pinned SQ2 resources and decoder-only DT node, and validate V4L2 buffer DMA bounds before activation. Then fresh-boot V4L2 frame test and Android open Codec2. No second firmware start in bootbcd0; no SoC match or runtime opt-in yet.",
+  "next_executable_action": "Add pinned SQ2 Venus resources and decoder-only DT node, validate V4L2 DMA buffer bounds, and audit concurrent terminal error/buffer teardown before hardware activation. Independent dispatcher host faults now tested and PM failure bugs fixed. Then fresh-boot V4L2 frames and Android open Codec2. Do not restart firmware in bootbcd0.",
   "not_verified": [
     "V4L2 decode API",
     "Android hardware MediaCodec",
@@ -261,5 +261,25 @@
     "runtime_PM": "resident power, FW auto-collapse disabled, parent suspend rejected",
     "tests": "ARM64 compile; three generated-source regression tests; existing component mock fault tests",
     "not_tested": "dispatcher runtime fault injection or hardware"
+  },
+  "venus_core_fault_tests": {
+    "status": "host-actual-entry-code-with-mocked-providers",
+    "probe_fault_positions": 11,
+    "fixed": [
+      "check pm_runtime_set_active return",
+      "disable runtime PM on failed child population"
+    ],
+    "same_input_baseline_modified_rollback": "pm_enabled 1/0/1, ret=-5, children=0, retained=1; all executable exit0",
+    "other_cases": [
+      "PAS failure keeps resources",
+      "terminal error no firmware restart",
+      "remove retains published core",
+      "default opt-in rejection"
+    ],
+    "not_proven": [
+      "concurrent IRQ/error/removal",
+      "hardware resource lifetime",
+      "Android decode"
+    ]
   }
 }
