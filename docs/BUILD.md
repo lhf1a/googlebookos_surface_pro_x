@@ -1,5 +1,7 @@
 # 构建与部署
 
+Iris1独立识别探针：`python3 scripts/build-sq2-iris1-identify.py --stage NEW_DIR` 固定out/video-decode/running-base.dtb的be17f33f…身份，使用dtc/fdtget/fdtput构建临时overlay及模块。删去__symbols__导出但保留本地引用重定位，以兼容当前无symbols启动树。v3导致一次用户手动恢复，不能原样重复；v4新增逐步标记、默认0域/0时钟/不读MMIO，仅编译未测。禁止据overlay/符号检查通过认定电源或版本可读。下次先独立运行有界kmsg采集和远程逐步标记；不要无日志重复上电。新overlay模块驻留到重启，旧VIDEOCC/overlay拆卸曾有OF引用泄漏警告。具体失败/恢复见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
+
 PAS内存所有权部分候选：`SQ2_IRIS1_STAGE=/root/.cache/sq2-video-iris1-lease-v2/venus SQ2_IRIS1_DEST=out/video-decode/iris1-lease-v2 bash scripts/build-sq2-venus-iris1.sh --firmware-lease` 在新目录编译独立事务层，先运行ASan/UBSan故障注入和寄存器mock。新目录必须不存在；状态/源码哈希记录在candidate.json。该层尚无启用调用点，不能用它单独启动固件；core/HFI资源在关闭失败时的整体保留仍待适配。不得将主机故障注入说成实机PAS故障验证。
 
 Iris1 HFI部分候选：在foundation构建目录就绪后执行 `bash scripts/build-sq2-venus-iris1.sh`。默认在 `/root/.cache/sq2-video-iris1/venus` 生成源码副本，拒绝覆盖已有候选；可用 `SQ2_IRIS1_STAGE` 选另一个新目录。固定源文件哈希，先运行实际helper的ASan/UBSan mock，再构建core/dec/enc，日志和清单在 `out/video-decode/iris1-hfi`。该候选没有SC8180X match/资源表，不是可安装解码器；不要据符号闭包通过就加载固件。完整限制见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。

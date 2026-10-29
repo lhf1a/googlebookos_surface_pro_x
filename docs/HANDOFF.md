@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+最新视频试验失败（2026-10-29）：独立VIDEOCC+GDSC/clock/version探针v3测试后用户确认整机无响应，手动长按重启恢复。未获版本/清理结果，具体阻塞阶段未知，不要原样重试；无PAS/HFI/固件启动或启动盘写入。恢复后SSH实核新boot9435bddc…、boot_completed=1、screen_only=Y、PID2242/2098、pstore空，临时模块/节点已清除，用户确认桌面恢复。v4仅本地编译，默认0域/0时钟/不读MMIO并加逐步标记；下次需先独立有界kmsg采集、逐条命令标记，从零上电阶段定位。SSH本次用ecdh-sha2-nistp256/aes128-ctr连通，主机校验和原身份保持。见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
+
 固件寿命续接（2026-10-29）：独立PAS9内存事务/所有者已编入私有候选（`--firmware-lease`），真实调用前标记secure touch，load/auth失败也需成功shutdown才释放；失败隔离同时持有DMA、独立设备和模块引用，禁止重试/重分配。16种主机故障组合及100次正常复用的ASan/UBSan检查通过，编译通过；**无启用调用点、未执行PAS**。core.c错误/恢复/remove仍释放HFI及devm资源，需整体处理后才能接入，不要只替换固件分配。目标仍为实机解码与Android组件，详见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
 
 Iris1 HFI续接（2026-10-29）：固定下游vidc_hfi_io.h哈希，新增独立iris1资源标志及CPU时钟、DSP镜像队列、IRQ掩码适配候选，保持HFI4xx和原平台表。隔离编译core/dec/enc及ASan/UBSan mock通过，三模块对同boot运行导出的符号闭包missing=0；未部署或添加SC8180X match。电源/reset/资源验证、低端IOVA保留和固件关闭失败的内存寿命仍开放；没有硬件解码帧/Android组件。见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。

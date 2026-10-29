@@ -4,6 +4,18 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## 首次电源/版本识别试验失败（2026-10-29）
+
+为独立核实资源接入，新增 `sq2_iris1_identify.c` / `build-sq2-iris1-identify.py`，从本次运行FDT（be17f33f…，与文件形式DTB哈希不同）生成VIDEOCC加私有identify消费者的临时overlay。三路GCC AXI时钟使用SC8180X真实ID227/225/226，VIDEOCC使用4/2/3，三个GDSC使用0/1/2；寄存器申请限定0xaa00000+1MiB，不覆盖ab00000 VIDEOCC。数值以固定sdmshrike下游及当前内核头/驱动交叉核对，尚未取得SQ2实际版本读数。没有固件、SCM、HFI、IRQ或reset写入。
+
+离线合并确认本地GDSC引用准确，移除新增两节点后原树全部属性与保留区逐字语义不变。新模块预检missing=0。旧临时VIDEOCC/overlay引用计数均0，按先驱动后overlay顺序移除；该卸载仍出现OF node refcount泄漏警告，不能称清理完全，后续避免重复拆装旧overlay。第一候选6c3988f0…被Linux 6.3以“symbols in overlay, but not in live tree”拒绝，未进入探针；已临时恢复旧模块。修正为去除导出__symbols__、保留__local_fixups__后的v3（7004d8af…）再次测试。
+
+**v3测试后SSH失去响应，用户确认整机无响应并手动长按重启恢复。** 主机测试连接最终reset，未捕获任何SQ2_IRIS1_IDENTIFY结果，未取得硬件版本或回收通过证据。原串行远程命令缺少逐步输出，不能确认卡在旧模块拆卸、新overlay、GDSC、时钟、MMIO还是回收；不能把计划执行的步骤当作已执行。未调用视频PAS/启动固件，未写ESP、镜像或codec配置。不能原样重复v3。
+
+用户确认桌面恢复后，已用保留主机校验/用户密钥的SSH复核：新boot ID9435bddc…，boot_completed=1，screen_only=Y，system_server/SF PID2242/2098，pstore为空，临时iris1/VIDEOCC/overlay模块及VIDEOCC节点均不在；正常闭源Vulkan启动参数保持。这是用户恢复操作，不是自动恢复通过。默认curve25519/chacha SSH握手曾reset，显式选服务端支持的ecdh-sha2-nistp256/aes128-ctr后连通；未改SSH服务/凭据/主机校验，不据此判断握手故障根因。
+
+诊断v4（cd5ef936…）仅本地编译：增加每个资源申请、上电/下电、时钟开关、MMIO前后标记；默认power_domains=0、enable_clocks=0、read_registers=false。必须显式选择阶段，禁止非法组合；read需要三域六时钟全开。新overlay固定驻留至重启，不能强制rmmod。该版本未传输/执行，不是已修复候选。下一次实机需先运行独立主机端有界kmsg采集并给每条远程命令加开始/结束标记，从不进行上电/MMIO的阶段定位，再决定下一步。原始报告/日志留out/video-decode/iris1-identify；core/HFI清理问题保持开放，独立探针没有解决整个Venus驱动的寿命管理。
+
 ## PAS固件内存事务层（2026-10-29，未接入调用）
 
 新增 `sq2-fw-transaction.h` 和 `sq2-venus-fw.c/.h`，随 `--firmware-lease` 编入隔离venus-core。该实现尚无启用的调用点，**不是可加载/启动SQ2 VPU的完整适配**。它提供固定固件校验、独立辅助DMA设备、低4GiB/1MiB对齐的6MiB分配、PAS9 load/auth/shutdown及内存所有权策略；全局单例加mutex序列化，不借用core的devm生命周期。正常持有或隔离时都保留模块引用。启动前检查Surface compatible、SCM可用/PAS9支持、固定固件SHA256/ELF与固定MDT源码版本。
