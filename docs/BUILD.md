@@ -1,5 +1,7 @@
 # 构建与部署
 
+独立HFI队列：`build-sq2-hfi-overlay.py --stage NEW_DIR --videocc-phandle LIVE_VALUE`只给已绑定VIDEOCC增加独立SMMU消费者（默认不装）；必须与live树合并核对，不能用raw FDT推测运行期phandle。`SQ2_IDENTIFY_STAGE=NEW_DIR bash scripts/build-sq2-iris1-phase.sh --hfi`加入专用compatible检查、DMA/队列库和ASan/UBSan ring边界测试。`dma_probe=1`只做分配/映射/CPU读回并释放，与电源/固件参数互斥。`hfi_handshake=1`需要完整桥接/三域/六时钟/AHB/200MHz/read_registers/boot_firmware/pil_gap；`protect_iova=1`只允许该模式，按固定sdmshrike虚拟地址池设置VPU保护阈值。首轮控制启动超时并安全回收；保护调用后扩展TZ读回导致失联，新源码已去除TZ阈值/reset读取。**禁止使用65709696…旧候选，禁止非安全读取e1020..e1034；修订候选尚未部署，不是硬解安装器。** 继续使用独立有界collector、实际probe_result及真实PAS关闭结果；失败关闭时保留全部队列/映射。见VIDEO-DECODE。
+
 PIL窗口与私有内存owner：`build-sq2-scm-trace.sh` 在新的SQ2_SCM_TRACE_STAGE构建有界只读观察器和GET_MEM_AREA query；固定三份SCM源码/头ABI。`build-sq2-iris1-phase.sh --firmware` 现链接query库，额外固定Surface板级DTS哈希。`pil_gap=1 inspect_gap=1` 只在零域/零时钟/不读寄存器条件下检查独占申请、映射及释放，不写数据；真正加载须另选boot_firmware、pil_gap及完整桥接/AHB/200MHz条件。地址不可参数化，只允许已有板级文档空隙中的固定6MiB，并复核live SCM/DT/资源树。私有加载/认证/关闭通过，未持久化或覆盖V4L2/HFI。不要将新owner应用于CAMERA或其它reserved区；明细见VIDEO-DECODE及sq2-video-pil-memory-reference.json。
 
 桥接/PAS消费者：新overlay提供四reset与额外AHB；`build-sq2-iris1-phase.sh --firmware` 才链接PAS事务层，固定MDT源码哈希并运行故障注入，默认所有危险阶段仍关闭。新目录通过SQ2_IDENTIFY_STAGE选择。reset_bridge需要三域，enable_ahb需要三域且至少三AXI时钟；read_registers要求完整桥接/AHB/六时钟；core_hz仅允许200000000并核对±1kHz，boot_firmware要求以上全部条件和实读版本5010002f。guard与实际probe_result必须复核；insmod成功不等于probe成功。实际试验在PAS mem_setup以-22停止，shutdown/回收通过，未到认证。不要据此持久化或更换未知加载区；完整结果和运行态在VIDEO-DECODE。

@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+最新HFI续接（2026-10-29）：独立SMMU消费者SID1300/mask60、DMA-FQ唯一peer、3MiB IOVAdfc00000及768页映射/CPU读回/解除映射实测通过，不是VPU DMA。首轮PAS仍全部0，HFI CTRL_STATUS始终0、-110，未发SYS_INIT；真实shutdown及全部资源回收通过。第二轮mem_protect_video_var返回0，随后扩展诊断在读完e3000后失联，下一个计划读e1020（TZ阈值）；不得复用65709696…二进制或非安全读取e1020..e1034。源码已移除阈值/reset读取，新候选仅编译/符号审计及ring边界ASan/UBSan通过，未部署。SSH后来读到新boot861e77bc…、Android就绪、guardY、PID2293/2110、临时模块清除、pstore空；本轮恢复方式/桌面确认尚待用户答复。未改启动盘。下一步有界collector下验证安全诊断和保护设置后的真实HFI启动，无解码帧或Android硬解。见VIDEO-DECODE。
+
 最新视频PAS通过（2026-10-29）：只读SCM窗口查询实返8b700000..9ab00000，旧fd000000在外；Surface原DTS明确记录8bd80000..8d800000 image-loader空隙。新私有pil_gap仅在该空隙固定申请8c000000..8c600000，检查live SCM窗口、无System RAM/DT reserved重叠、generic reserved父项及无其它资源owner，先无写入claim测试，再实机init_image/mem_setup/auth_and_reset/shutdown全部0，raw安全返回也0。不是占CAMERA或未知保留块；记录configs/sq2-video-pil-memory-reference.json。消费者/trace/辅助设备/owner已回收，boot/PID/guard保持；**还无HFI响应/解码帧/Android组件，目标继续进行。** 下一步SMMU合法IOVA和SYS_INIT握手。原日志out忽略，软件VIDEOCC/overlay保持临时驻留，禁止热卸载提供者/全局genpd汇总。见VIDEO-DECODE。
 
 最新视频bring-up（2026-10-29）：干净boot b7730aab…直接用软件控制VIDEOCC，已实测桥接四reset状态/顺序/恢复、AHB及六时钟，实际读取VPU版本5010002f、mask1f6、ctrl0；200MHz档驱动报200000097Hz并可恢复19.2MHz。实际PAS加载已到mem_setup：init_image返回0后mem_setup拒绝本次独占DMA区fd000000/5MiB跨度，-22；未到auth/未启动固件。真实shutdown返回0，DMA/设备及全部消费者资源已回收、消费者卸载；boot/PID保持、guardY。支持查询对PAS9和已运行PAS1/18/4全false，现仅作诊断，不虚报成功。下一步查SCM加载内存契约，不占CAMERA/未知reserved区。overlay与软件VIDEOCC临时驻留，不热卸载或读全局pm_genpd_summary。见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。

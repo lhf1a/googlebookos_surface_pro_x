@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* One-shot powered identification; optional separately compiled PAS trial.
- * No HFI or IRQ. PAS trial owns all resources until confirmed shutdown.
+ * Optional polled HFI trial. PAS owns all resources until confirmed shutdown.
  * Optional reset sequencing restores original reset states on exit.
  * The overlay and driver stay resident until reboot; all probe resources unwind.
  */
@@ -18,6 +18,9 @@
 #include <linux/regmap.h>
 #ifdef SQ2_IDENTIFY_FIRMWARE
 #include "sq2-venus-fw.h"
+#endif
+#ifdef SQ2_IDENTIFY_HFI
+#include "sq2-iris1-hfi.h"
 #endif
 #ifndef SQ2_IDENTIFY_EXISTING
 static bool check_ref(const char *path, u32 ph);
@@ -43,6 +46,12 @@ static bool pil_gap;
 module_param(pil_gap, bool, 0400);
 static bool inspect_gap;
 module_param(inspect_gap, bool, 0400);
+static bool dma_probe;
+module_param(dma_probe, bool, 0400);
+static bool hfi_handshake;
+module_param(hfi_handshake, bool, 0400);
+static bool protect_iova;
+module_param(protect_iova, bool, 0400);
 #ifndef SQ2_IDENTIFY_EXISTING
 static int overlay_id = -1;
 #endif
@@ -117,8 +126,24 @@ static int identify(struct platform_device *pdev)
  int i, ret, npd = 0, nclk = 0, nenabled = 0, npowered = 0;
  u32 version, mask, status;
 
+#ifdef SQ2_IDENTIFY_HFI
+ struct sq2_hfi_transport *hfi = NULL;
+ /* driver_override from an earlier private consumer must never redirect
+  * this driver to the non-IOMMU identity node.
+  */
+ if (!of_device_is_compatible(pdev->dev.of_node, "microsoft,sq2-iris1-hfi"))
+  return -ENODEV;
+#endif
  if (measured)
   return -EBUSY;
+#ifdef SQ2_IDENTIFY_HFI
+ if (dma_probe) {
+  ret = sq2_hfi_dma_probe(&pdev->dev);
+  probe_result = ret;
+  measured = true;
+  return ret;
+ }
+#endif
  pr_info("SQ2_IRIS1_IDENTIFY phase=probe_begin pd=%u clk=%u read=%d\n",
          power_domains, enable_clocks, read_registers);
  res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -260,6 +285,12 @@ static int identify(struct platform_device *pdev)
 #ifdef SQ2_IDENTIFY_FIRMWARE
  if (boot_firmware && !ret) {
   if (version != 0x5010002f) { ret = -ENODEV; goto cleanup; }
+#ifdef SQ2_IDENTIFY_HFI
+  if (hfi_handshake) {
+   ret = sq2_hfi_prepare(&pdev->dev, &hfi);
+   if (ret) goto cleanup;
+  }
+#endif
   saved_cgc = readl(base + 0xe2010);
   saved_config = readl(base + 0xe2000);
   config_changed = true;
@@ -270,7 +301,13 @@ static int identify(struct platform_device *pdev)
   pr_info("SQ2_IRIS1_IDENTIFY phase=firmware_boot_end ret=%d owner=%d\n", ret, !!fw_owner);
   if (fw_owner) {
    int shutdown;
-   if (!ret) usleep_range(20000, 25000);
+   if (!ret) {
+#ifdef SQ2_IDENTIFY_HFI
+    if (hfi) ret = sq2_hfi_run(hfi, base, protect_iova);
+    else
+#endif
+     usleep_range(20000, 25000);
+   }
    pr_info("SQ2_IRIS1_IDENTIFY phase=firmware_shutdown_begin\n");
    shutdown = sq2_venus_fw_shutdown(&fw_owner);
    pr_info("SQ2_IRIS1_IDENTIFY phase=firmware_shutdown_end ret=%d owner=%d\n", shutdown, !!fw_owner);
@@ -278,8 +315,11 @@ static int identify(struct platform_device *pdev)
     /* No devm resources here. The globally owned firmware module pin,
      * registered overlay/devices, raw clock/reset references, powered
      * domains and MMIO reservation all survive. Never unwind after an
-     * unconfirmed stop. No HFI queues or application buffers were created.
+     * unconfirmed stop. HFI queues also survive; no application buffers exist.
      */
+#ifdef SQ2_IDENTIFY_HFI
+    if (hfi) sq2_hfi_quarantine(hfi);
+#endif
     probe_result = shutdown;
     measured = true;
     pr_err("SQ2_IRIS1_IDENTIFY QUARANTINED_ALL_RESOURCES reboot_required\n");
@@ -290,6 +330,12 @@ static int identify(struct platform_device *pdev)
 #endif
  measured = true;
 cleanup:
+#ifdef SQ2_IDENTIFY_HFI
+ if (hfi) {
+  int finish = sq2_hfi_finish(hfi);
+  if (!ret) ret = finish;
+ }
+#endif
 #ifdef SQ2_IDENTIFY_FIRMWARE
  if (config_changed) {
   writel(saved_config, base + 0xe2000);
@@ -352,7 +398,11 @@ unmap:
  return ret;
 }
 static const struct of_device_id matches[] = {
+#ifdef SQ2_IDENTIFY_HFI
+ { .compatible = "microsoft,sq2-iris1-hfi" }, {}
+#else
  { .compatible = "microsoft,sq2-iris1-identify" }, {}
+#endif
 };
 static struct platform_driver driver = {
  .probe = identify,
@@ -392,6 +442,14 @@ static int __init start(void)
      (inspect_gap && (!pil_gap || boot_firmware || read_registers ||
                       power_domains || enable_clocks || reset_bridge || enable_ahb || core_hz)))
   return -EINVAL;
+ if (dma_probe && (power_domains || enable_clocks || reset_bridge ||
+                   read_registers || enable_ahb || core_hz || boot_firmware || pil_gap || inspect_gap || hfi_handshake))
+  return -EINVAL;
+ if (hfi_handshake && (!boot_firmware || !pil_gap)) return -EINVAL;
+ if (protect_iova && !hfi_handshake) return -EINVAL;
+#ifndef SQ2_IDENTIFY_HFI
+ if (dma_probe || hfi_handshake) return -EOPNOTSUPP;
+#endif
 #ifndef SQ2_IDENTIFY_FIRMWARE
  if (boot_firmware || pil_gap || inspect_gap)
   return -EOPNOTSUPP;

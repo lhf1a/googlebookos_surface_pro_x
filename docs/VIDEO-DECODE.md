@@ -4,6 +4,22 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## 独立SMMU队列与首次HFI等待（2026-10-29）
+
+当前分支fetch/prune后没有远端新增提交；保留既有本地适配。新增 `build-sq2-hfi-overlay.py` 只建立独立 `iris1-hfi@aa00000` 消费者，引用已绑定的软件VIDEOCC，不替换/卸载提供者。SMMU为本机 `/soc@0/iommu@15000000`，SID/mask取固定sdmshrike DTS的0x1300/0x60，fwspec编码00601300；启动时核对GCC/SMMU/VIDEOCC实际phandle。原raw FDT中overlay重定位后的phandle与live不完全相同，本轮使用live树合并检查：删掉新增HFI节点后的规范化树与原live树相同。overlay模块57424c5a…自pin直到重启，不允许热拆。
+
+纯DMA阶段不启动VPU：独立group13、唯一peer，domain_type=b (DMA-FQ)，限定32位且end<=e0000000、起点>=25800000、1MiB对齐。实际3MiB IOVAdfc00000，768页全部可查到物理地址，物理页可高于4GiB；CPU a5/zero读回通过，释放后首IOVA翻译为0。这里只证明主机分配/映射，不是VPU DMA。首个版本因旧identify节点残留driver_override误匹配而提前消费measured，真实HFI节点返回-16；增加compatible硬检查、清除旧override后，DMA v2实际probe_result=0。
+
+`sq2-iris1-hfi.c` 按固定下游ARM64 queue table（288字节）、三条56字节header及各819200字节ring建立有界传输；不暴露主机指针。复用3MiB DMA区、DSP镜像队列及4KiB SFR。`hfi_handshake=1`要求完整三域/桥接/AHB/六时钟、200MHz、固定版本、PIL gap及PAS固件启动；保持原IRQ mask，以轮询等待控制启动及SYS_INIT回复。所有队列和映射都需等真实PAS关闭成功才释放；关闭失败则连同既有固件/clock/reset/PM/MMIO资源保留直到重启。尚未覆盖标准Venus core/remove或外部帧缓冲寿命。
+
+首轮消费者7024cb52…：DMA、mdt_load、auth_and_reset均0，但CTRL_STATUS在1秒内始终0，实际probe_result=-110。未发SYS_INIT，尚无任何固件消息。随后PAS shutdown=0、owner清除，DMA首IOVA已解除映射，CPU配置/频率/reset/时钟/电源全部回收，refcnt0。boot b7730aab…与PID2263/2102保持。该失败不是握手通过或解码功能。
+
+第二轮65709696…新增下游同值的 `qcom_scm_mem_protect_video_var(0,25800000,1000000,24800000)` 和扩展寄存器诊断。有限O_DSYNC collector的持久日志证明保护调用ret0、CPU_STATUSe2014=0、resete3000=0；下一个计划读取为TZ阈值e1020，随后SSH失去响应，日志在上述点结束且无KMSG_END。**不能复用该二进制；对TZ拥有的e1020..e1034非安全MMIO读取很可能阻塞总线，但未证明具体硬件机制。** 新源码已移除全部阈值/reset诊断读取，并为保留的非安全诊断逐次添加BEGIN/END。不得因为主机源码中存在非TZ启动分支的寄存器定义，就在PAS安全启动后读取它们。
+
+之后只读SSH核对到新boot861e77bc…、boot_completed=1、screen_only=Y、nohibernate、PID2293/2110；临时视频模块已清除，pstore空。已请求用户确认桌面状态/恢复操作，尚未收到本轮答复，不将其称为自主崩溃或自动恢复。没有更改ESP、默认镜像、codec配置或用户凭据。原始三轮日志取回out/video-decode/iris1-phase，失败二进制保留在忽略的WSL构建缓存。
+
+队列生产者数据不可信：共享parser检查索引、包长、对齐、可用字数及环绕，ASan/UBSan通过448组环绕/未完整提交组合及12300种长度（含边界），但不是固件真实回复证明。移除TZ读回后的新候选编译及live导出闭包通过，**尚未部署验证**；下次仅从干净boot直接装软件VIDEOCC，先独立有限collector，禁止阈值读回/热卸载提供者/全局genpd汇总，再验证有保护设置的真实HFI启动。完整硬解目标仍未完成。
+
 ## PAS认证/复位与关闭首次实测通过（2026-10-29）
 
 只读有界kretprobe观察器 `sq2_scm_trace.c` 核对实际qcom_scm_call描述符、SMCCC调用和返回，不改寄存器/参数/返回值，仅insmod中的PAS9和只读MEM_AREA，最多各32次。原fd000000失败重现的原始结果为mem_setup `a0=0xffcfffba`，而非直接的通用EINVAL；Linux默认将未知厂商错误映射成-22，具体符号含义未确认。实际convention=ARM64，函数号42000202、参数9/fd000000/500000正确，排除了本次ABI/参数截断解释。PAS9支持查询本身返回a0=0/a1=0，应区别于查询调用失败。所有探针missed=0，随后卸载。
