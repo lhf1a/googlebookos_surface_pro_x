@@ -12,6 +12,32 @@ KERNEL = Path('/root/.cache/sq2-thermal/kernel')
 
 @unittest.skipUnless(KERNEL.exists(), 'pinned WSL kernel tree required')
 class VenusTransport(unittest.TestCase):
+    def test_independent_core_dispatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'entry'
+            cmd = [sys.executable, str(ROOT / 'scripts/prepare-sq2-venus-iris1.py'),
+                   '--output', str(dest), '--platform-entry']
+            rejected = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertFalse(dest.exists())
+            subprocess.run(cmd + ['--firmware-lease'], check=True)
+            core = (dest / 'core.c').read_text()
+            entry = (dest / 'venus-sq2-core.h').read_text()
+            self.assertLess(core.index('return venus_sq2_probe(pdev, res);'),
+                            core.index('core = devm_kzalloc'))
+            self.assertIn('return venus_sq2_remove(pdev);', core)
+            self.assertIn('venus_sq2_stop_core(core);', core)
+            self.assertIn('if (!sq2_platform_allow) return -EOPNOTSUPP;', entry)
+            self.assertNotIn('.sq2_windows_hfi =', core)
+            self.assertEqual(entry.count('ret = venus_boot(core);'), 1)
+            worker = entry[entry.index('static void venus_sq2_error'):entry.index('static int venus_sq2_remove')]
+            self.assertNotIn('ret = venus_boot', worker)
+            self.assertNotIn('schedule_delayed_work(', worker)
+            self.assertLess(entry.index('ret = hfi_core_init(core);'),
+                            entry.index('ret = of_platform_populate'))
+            self.assertIn('if (stop || core->sq2_public)', entry)
+            self.assertIn('false : venus_fw_low_power_mode', (dest / 'hfi_venus.c').read_text())
+
     def test_pas_dispatch_is_opt_in_and_probe_is_blocked(self):
         with tempfile.TemporaryDirectory() as tmp:
             for lease in (False, True):

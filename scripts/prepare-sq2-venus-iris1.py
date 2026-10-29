@@ -31,7 +31,11 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--firmware-lease', action='store_true',
                    help='compile PAS owner and SQ2 firmware dispatch (platform probe still blocked)')
+    p.add_argument('--platform-entry', action='store_true',
+                   help='compile opt-in independent core entry; requires firmware lease; no SoC match added')
     args = p.parse_args()
+    if args.platform_entry and not args.firmware_lease:
+        p.error('--platform-entry requires --firmware-lease')
     src = args.kernel / 'drivers/media/platform/qcom/venus'
     for name, digest in HASHES.items():
         if hashlib.sha256((src / name).read_bytes()).hexdigest() != digest:
@@ -59,6 +63,7 @@ def main():
                    'struct sq2_venus_fw;\nstruct sq2_venus_platform;\nstruct venus_core {\n'
                    '\tstruct sq2_venus_platform *sq2_platform;\n'
                    '\tstruct sq2_venus_fw *sq2_fw_owner;\n'
+                   '\tbool sq2_public, sq2_children, sq2_pm_enabled;\n'
                    '\tbool sq2_boot_attempted, sq2_secure_active;')
     core = replace(core, '\tenum hfi_version hfi_version;\n',
                    '\t/* VPU hardware is independent of HFI packet version. */\n'
@@ -73,6 +78,33 @@ def main():
                        '\t/* PAS callsites are compile-tested; devres quarantine is pending. */\n'
                        '\tif (IS_SQ2_HFI(core))\n\t\treturn -EOPNOTSUPP;\n\n'
                        '\tmutex_init(&core->pm_lock);')
+    if args.platform_entry:
+        shutil.copyfile(ROOT / 'probe/video/venus-sq2-core.h', args.output / 'venus-sq2-core.h')
+        platform = replace(platform, 'static int venus_probe(struct platform_device *pdev)',
+                           '#include "venus-sq2-core.h"\n\nstatic int venus_probe(struct platform_device *pdev)')
+        platform = replace(platform, '\tcore = devm_kzalloc(dev, sizeof(*core), GFP_KERNEL);',
+                           '\tconst struct venus_resources *res = of_device_get_match_data(dev);\n\n'
+                           '\tif (res && res->sq2_windows_hfi)\n\t\treturn venus_sq2_probe(pdev, res);\n\n'
+                           '\tcore = devm_kzalloc(dev, sizeof(*core), GFP_KERNEL);')
+        platform = replace(platform, '\tdisable_irq_nosync(core->irq);\n\tschedule_delayed_work',
+                           '\tif (IS_SQ2_HFI(core)) {\n'
+                           '\t\tschedule_delayed_work(&core->work, 0);\n\t\treturn;\n\t}\n'
+                           '\tdisable_irq_nosync(core->irq);\n\tschedule_delayed_work')
+        platform = replace(platform, '\tret = pm_runtime_get_sync(dev);\n\tWARN_ON(ret < 0);',
+                           '\tif (IS_SQ2_HFI(core))\n\t\treturn venus_sq2_remove(pdev);\n\n'
+                           '\tret = pm_runtime_get_sync(dev);\n\tWARN_ON(ret < 0);')
+        platform = replace(platform, '\tpm_runtime_get_sync(core->dev);\n\tvenus_shutdown(core);',
+                           '\tif (IS_SQ2_HFI(core)) {\n'
+                           '\t\tcancel_delayed_work_sync(&core->work);\n'
+                           '\t\tvenus_sq2_stop_core(core);\n\t\treturn;\n\t}\n'
+                           '\tpm_runtime_get_sync(core->dev);\n\tvenus_shutdown(core);')
+        platform = replace(platform, '\tret = hfi_core_suspend(core);',
+                           '\tif (IS_SQ2_HFI(core))\n\t\treturn -EBUSY;\n'
+                           '\tret = hfi_core_suspend(core);')
+        platform = replace(platform, '\tret = icc_set_bw(core->video_path, kbps_to_icc(20000), 0);',
+                           '\tif (IS_SQ2_HFI(core))\n'
+                           '\t\treturn test_bit(0, &core->sys_error) ? -EIO : 0;\n'
+                           '\tret = icc_set_bw(core->video_path, kbps_to_icc(20000), 0);')
     (args.output / 'core.c').write_text(platform)
     hfi = (src / 'hfi_venus.c').read_text()
     hfi = replace(hfi, '#include <linux/slab.h>',
@@ -139,6 +171,9 @@ def main():
     hfi = replace(hfi, '\tvenus_interface_queues_release(hdev);',
                   '\tvenus_interface_queues_release(hdev);\n'
                   '\tsq2_venus_dma_restore(core->dev, &hdev->sq2_dma);')
+    hfi = replace(hfi, '\tret = venus_sys_set_power_control(hdev, venus_fw_low_power_mode);',
+                  '\tret = venus_sys_set_power_control(hdev, IS_SQ2_HFI(hdev->core) ?\n'
+                  '\t\tfalse : venus_fw_low_power_mode);')
     (args.output / 'hfi_venus.c').write_text(hfi)
     fw = (src / 'firmware.c').read_text()
     fw = replace(fw, '#include "hfi_venus_io.h"', '#include "hfi_venus_io.h"\n#include "venus-iris1.h"')
@@ -149,6 +184,11 @@ def main():
                  '\tret = venus_load_fw(core, fwpath, &mem_phys, &mem_size);')
     (args.output / 'firmware.c').write_text(fw)
     if args.firmware_lease:
+        fw = replace(fw, 'int venus_set_hw_state(struct venus_core *core, bool resume)\n{\n\tint ret;',
+                     'int venus_set_hw_state(struct venus_core *core, bool resume)\n{\n\tint ret;\n\n'
+                     '\t/* Independent owner already holds hardware powered; no stock SCM state call. */\n'
+                     '\tif (IS_SQ2_HFI(core))\n'
+                     '\t\treturn resume && core->sq2_secure_active ? 0 : -EBUSY;')
         fw = replace(fw, '#include "venus-iris1.h"',
                      '#include "venus-iris1.h"\n#include "sq2-venus-fw.h"\n'
                      '#include "sq2-venus-platform.h"\n'
@@ -174,6 +214,8 @@ def main():
                 'sq2_dma': 'exact 2300/2320/2340 SID + singleton DMA group; saved/restored 32bit mask and bus limit; UC alignment and every-page translation checked',
                 'firmware_lease_dispatch_compiled': args.firmware_lease,
                 'sq2_platform_probe_blocked': True,
+                'independent_platform_entry_compiled': args.platform_entry,
+                'platform_entry_guard': 'no SoC match; sq2_platform_allow defaults false; published owner retained on removal',
                 'platform_owner': 'compiled independent core/MMIO/IRQ/power/reset/ICC owner; firmware begin/end hooks connected; platform probe/recovery/remove pending',
                 'input_sha256': HASHES,
                 'output_sha256': {f.name: hashlib.sha256(f.read_bytes()).hexdigest()
