@@ -1,5 +1,5 @@
 {
-  "status": "votes-release-and-staged-power-reset-clocks-verified-HFI-unresolved",
+  "status": "votes-release-and-control-init-verified-queue-DMA-unverified",
   "kernel_source": {
     "repository": "https://github.com/linux-surface/kernel",
     "commit": "b86f786594dc9e53c57fcfa2aa58ada9541506bb",
@@ -53,6 +53,19 @@
     "consumer_sha256": "218b69085a587c231b76da07f95b3fef28b3100ecf9b7a7c1d12d6a260729650",
     "table_header_bytes": 24,
     "result": "Connection lost; native sq2-hfi-compact-976c.kmsg pending retrieval; no comparison result yet"
+  },
+  "static_firmware_evidence": {
+    "script": "scripts/inspect-sq2-video-firmware-protocol.py",
+    "status": "six instruction groups checked against pinned SQ2 firmware; no device access",
+    "findings": ["queue headers located using table.qhdr0_offset", "56-byte queue-header stride", "documented CPU/DSP mailbox offsets", "H2A bit15 enabled and cleared by firmware", "empty-queue reader writes rx_req=1", "CTRL_STATUS bit0 may precede shared-queue parsing"],
+    "limit": "Does not prove either host layout fully accepted at runtime, notification delivery or firmware DMA"
+  },
+  "empty_queue_probe_candidate": {
+    "module_sha256": "406a979b3b29209a2f805426f7c82ea8a0dcbefe8870824ec9135d2989a5dab2",
+    "status": "compile-and-symbol-preflight-only-not-deployed",
+    "parameter": "hfi_empty_ping=1",
+    "criterion": "Host initialized cmd.rx_req=0; observe firmware change to 1 with cmd read/write both 0, then send actual SYS_INIT",
+    "limit": "Not yet observed; timeout is absence of this marker, not proof of no firmware memory accesses"
   },
   "limits": ["No claim that voting alone fixes board loss: trace delays changed too", "No firmware SYS_INIT reply or decoded frame", "No persistent deployment", "No original Module.symvers or full ABI validation"]
 }

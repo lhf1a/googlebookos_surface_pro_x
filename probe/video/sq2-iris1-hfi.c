@@ -41,6 +41,7 @@ struct sq2_hfi_transport {
  u32 *ring[3];
  void __iomem *base;
  bool configured;
+ bool empty_ping;
  u32 header_bytes, table_bytes;
  unsigned int trace_delay_ms;
 };
@@ -54,7 +55,8 @@ static int count_peer(struct device *dev, void *data)
  ++*(unsigned int *)data;
  return 0;
 }
-int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out, bool compact_table)
+int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out,
+                    bool compact_table, bool empty_ping)
 {
  struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
  struct iommu_fwspec *spec = dev_iommu_fwspec_get(dev);
@@ -78,6 +80,7 @@ int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out, bool com
  ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
  if (!ctx) return -ENOMEM;
  ctx->dev = dev; ctx->domain = domain;
+ ctx->empty_ping = empty_ping;
  /* The original Venus protocol has six u32 fields (24 bytes). The pinned
   * later downstream driver extends this with an opaque host cookie/name.
   * Compare both documented host layouts; do not assume the SQ2 Windows
@@ -125,7 +128,7 @@ int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out, bool com
   q->type = 0x01010000 | off;
   q->words = QUEUE_WORDS;
   q->rx_wm = q->tx_wm = 1;
-  q->rx_req = off == 2 ? 0 : 1;
+  q->rx_req = (off == 2 || (!off && empty_ping)) ? 0 : 1;
  }
  *(u32 *)(ctx->cpu + SFR_OFFSET) = SZ_4K;
  dma_wmb();
@@ -184,6 +187,33 @@ static void hfi_trace_barrier(struct sq2_hfi_transport *ctx)
 {
  if (ctx->trace_delay_ms) msleep(ctx->trace_delay_ms);
 }
+static int ping_empty_queue(struct sq2_hfi_transport *ctx)
+{
+ u32 request;
+ unsigned int i;
+ /* Host initialized cmd.rx_req to zero and does not modify it afterwards.
+  * The pinned firmware's empty-queue path (VA 2f098..2f09c) writes one.
+  * Observing this transition is direct shared-queue write evidence. It is
+  * stronger than CTRL_STATUS=1, which firmware sets before queue parsing.
+  * This diagnostic uses only the documented bit15 doorbell, no MMIO reads.
+  */
+ pr_info("SQ2_HFI_EMPTY_PING begin host_initial_rx_req=0 NO_PACKET\n");
+ usleep_range(20000, 25000);
+ writel(BIT(15), ctx->base + 0xdf018);
+ for (i = 0; i < 250; i++) {
+  dma_rmb();
+  request = READ_ONCE(ctx->q[0]->rx_req);
+  if (request) {
+   u32 read = READ_ONCE(ctx->q[0]->read), write = READ_ONCE(ctx->q[0]->write);
+   pr_info("SQ2_HFI_EMPTY_PING rx_req=%u polls=%u cmd_r=%u cmd_w=%u\n", request, i,
+           read, write);
+   return request == 1 && !read && !write ? 0 : -EPROTO;
+  }
+  usleep_range(1000, 1500);
+ }
+ pr_info("SQ2_HFI_EMPTY_PING timeout rx_req=0 NO_OBSERVED_FIRMWARE_QUEUE_WRITE\n");
+ return -ETIMEDOUT;
+}
 int sq2_hfi_run(struct sq2_hfi_transport *ctx, void __iomem *base, bool protect_iova,
                 unsigned int trace_delay_ms)
 {
@@ -235,6 +265,10 @@ int sq2_hfi_run(struct sq2_hfi_transport *ctx, void __iomem *base, bool protect_
  queue_status(ctx, "boot_result");
  if (ret) return ret;
  if (status & 0xfe) return -EIO;
+ if (ctx->empty_ping) {
+  ret = ping_empty_queue(ctx);
+  if (ret) return ret;
+ }
  ctx->ring[0][0] = 12;
  ctx->ring[0][1] = 0x10001;
  ctx->ring[0][2] = 1; /* HFI_VIDEO_ARCH_OX */
@@ -287,6 +321,6 @@ void sq2_hfi_quarantine(struct sq2_hfi_transport *ctx)
 int sq2_hfi_dma_probe(struct device *dev)
 {
  struct sq2_hfi_transport *ctx = NULL;
- int ret = sq2_hfi_prepare(dev, &ctx, false);
+ int ret = sq2_hfi_prepare(dev, &ctx, false, false);
  return ret ? ret : sq2_hfi_finish(ctx);
 }

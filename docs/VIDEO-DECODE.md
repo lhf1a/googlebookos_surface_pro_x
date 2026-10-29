@@ -4,6 +4,16 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## 固件静态协议证据与共享队列判据（2026-10-29）
+
+设备SSH仍在交换主机标识前closed，尚不能读取compact对照最后日志；本轮没有重新部署或启动VPU。为减少盲目对照，离线分析固定4e93d345…SQ2固件的ARM32可执行LOAD段，以原始程序头虚拟地址定位、固件自己的HFI_QueueGetQHdr字符串引用及ARM指令交叉核对。原始固件、临时ELF包装和反汇编只留忽略的out。新 `inspect-sq2-video-firmware-protocol.py` 只接受完整固定哈希，校验ELF布局和所列指令字/BL目标，再生成out/video-decode/firmware-analysis/protocol.json；不执行固件，不连设备，不读设备MMIO。它是固定二进制的静态证据采集，不是ARM仿真或运行跟踪。
+
+六条证据：①固件队列查找从table+8读取qhdr0_offset再加到table指针，而非固定跳过24字节；②队列header步长为56；③CPU/DSP getter分别读取固件虚拟MMIO E00D2054/E00D2034，与现有邮箱偏移一致；④固件会给E00DF010启用bit15，处理器写0x8000到E00DF01C清除它；⑤空队列分支比较read/write后写queue+0x20为1（rx_req）；⑥一条初始化路径先调用CTRL_STATUS bit0 setter，再等待QTBL_INFO并查找队列header。地址是固件虚拟地址，未据此新增AP寄存器访问。
+
+这些指令说明不能仅因原Venus表头24字节就判定后期288布局有错，也不支持盲改通知位。它们还收紧上一节的结论：**实测CTRL_STATUS=1证明控制初始化已推进，但该状态可早于共享队列解析，不能当作VPU DMA/完整启动完成。** 尚未取得任何SYS_INIT回复或解码帧；其它格式校验、实际走到的分支及DMA映射仍需实机证据，动态offset并不证明所有布局约束已覆盖。
+
+新增opt-in `hfi_empty_ping=1` 仅用于完整hfi_handshake条件：把初始cmd.rx_req设为0，控制初始化后等待20–25ms、发送一次已确认的bit15空队列通知，再最多250次以1–1.5ms间隔观察。主机之后不写这个字段；只有rx_req变为1且cmd_r/cmd_w仍0才记为共享队列写入证据，随后继续真实SYS_INIT。超时记录“未观察到固件队列写入”并进入既有真实PAS关闭/HANA恢复，不能假定固件完全未访问内存。非法值或非空索引报EPROTO；没有伪造应答或修改固件。候选406a979b…主机ring/事务测试、编译、运行内核导出闭包通过，**尚未部署，不能声称此判据已在设备上通过**。下一步仍先恢复SSH并取回compact日志，验证完整退出，再用此判据区分通知/队列访问与命令处理。
+
 ## 只写邮箱后的控制启动与命令未消费（2026-10-29）
 
 只读SSH后来连接到新boot976cc99e…，Android就绪、guardY/nohibernate、PID2295/2106、临时模块清除、pstore空；恢复方法仍无用户答复，不称自动恢复。已取回19ed…native文件：最后到PAS auth_end=0、firmware_boot_end=0/owner1、protect=0、SFR before=4096/0/空队列。固定fa09…源码下一步就是邮箱快照readl循环，再发布队列；故失联范围比此前缩小，但异步collector仍不能证明具体指令。禁止复用快照读回版本。

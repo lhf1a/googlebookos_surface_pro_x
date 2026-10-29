@@ -1,5 +1,7 @@
 # 构建与部署
 
+固定固件静态检查：`python3 scripts/inspect-sq2-video-firmware-protocol.py` 对out/test2/firmware/qcom/venus-5.2/venus.mbn只读校验完整哈希、ELF32 ARM及六组协议指令，报告在out/video-decode/firmware-analysis/protocol.json；不执行/部署固件，不等于硬件DMA验证。新消费者的 `hfi_empty_ping=1` 只允许完整HFI模式，以初始rx_req=0和固件空队列写1作为直接共享队列写入判据，再继续SYS_INIT；编译/预检通过，尚未实测。CTRL_STATUS=1可早于队列解析，不能算完整HFI成功；不要在未取compact日志时重试或改猜测的IRQ位。见VIDEO-DECODE。
+
 HFI控制启动与表头对照：只写邮箱候选已实测CTRL_STATUS=1，但SYS_INIT未消费，仍非硬解通过。`hfi_compact_table=1`仅在hfi_handshake模式比较原24字节表头与后期288字节扩展，默认保持288；环及SFR仍在同一独占3MiB范围。首轮24字节实测连接中断，原日志未取回，不能解释成该布局失败。新消费者构建还固定参考venus_hfi.c哈希；固件调用后且真实停止确认成功、时钟关闭后，对本机HANA版本脉冲四路桥接，再恢复初态/关域/撤销ICC，保留所有原始错误及post_reset日志。这个退出补齐仅编译未部署，不是已验证的二次启动修复。当前先取回sq2-hfi-compact-976c.kmsg；不要连续重试。见VIDEO-DECODE。
 
 ICC前置请求：`build-sq2-hfi-overlay.py --stage NEW_DIR --videocc-phandle LIVE_VALUE --with-interconnects` 固定6.3 SC8180X驱动/绑定头哈希，添加cpu-cfg、video-mem、firmware-mem路径；不修改已有provider。`--hfi`消费者用 `allow=1 vote_interconnects=1 icc_probe=1` 独立检验三条请求及撤销，不上电/reset/MMIO/PAS。此阶段已实测0。带 `trace_delay_ms=100` 的三域桥接、六时钟/AHB/版本读取也实测0；延迟只让独立collector有机会落盘，不是总线挂死的超时保障。完整HFI随后仍失联、日志待取，不可称已修复。后续候选已删去所有额外MMIO/邮箱快照读回，只按下游写邮箱，确认PAS关闭后将独占邮箱清零再释放映射；增加邮箱写入前后标记与有界延迟。新版本仅编译/符号审计，禁止重用旧全流程二进制，先取回sq2-icc-only-19ed.kmsg定位。见VIDEO-DECODE及sq2-video-interconnect-reference.json。

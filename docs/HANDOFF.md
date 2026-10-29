@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+最新离线协议证据（2026-10-29）：SSH仍在主机标识前closed，compact日志未取回，本轮无设备侧重试。新增inspect-sq2-video-firmware-protocol.py对固定SQ2固件校验六组ARM指令：实际用table+8的qhdr0_offset、stride56、CPU/DSP邮箱偏移、bit15启用/清除、空队列rx_req=1，以及CTRL_STATUS bit0可早于队列解析。故状态1不是队列DMA或完整启动证明，不应盲改表头/IRQ位。新hfi_empty_ping=1先将初始cmd.rx_req设0，空通知后观察固件写成1（且r/w=0），再继续SYS_INIT；406a979b…候选编译/边界/事务/导出审计通过，未部署。保留默认288表头及HANA关闭恢复候选；先设备恢复/取compact日志，再验证完整退出与真实共享队列访问。无解码帧/Android组件，未改启动盘。见VIDEO-DECODE。
+
 最新HFI控制启动通过（2026-10-29）：已取回19ed…完整试验日志，PAS auth0/protect0后到queue-status before，随后进入邮箱快照读取前失联。新boot976cc99e…下203943ae…只写邮箱候选实测九次发布完成，CTRL_STATUS=1；SYS_INIT已发，但cmd_r=0/w=3、msg_w=0，3秒后-110。真实shutdown0、队列解除映射、三ICC清零、全部资源回收/refcnt0，boot/PID2295/2106保持。这是控制启动通过，仍无SYS_INIT回复或解码帧。随后218b6908…的24字节表头单变量对照再次失联，**sq2-hfi-compact-976c.kmsg尚待取回，不能认定进入队列阶段，禁止重跑该完整流程。** 源码核对发现HANA=0x50100000在参考驱动的固件卸载/停钟后还会脉冲桥接，旧探针仅恢复初始复位位漏了这步；已补版本限定post_reset，PAS关闭失败仍保留所有资源，编译/审计通过，未部署。先恢复/取最后日志再决定下一次测试；未改启动盘。见VIDEO-DECODE。
 
 最新ICC/复位续接（2026-10-29）：768d0e3修订候选在boot861e77bc…再次失联，但取回native日志只到reset_deassert axi结束（377.420876s），未到时钟/PAS/HFI；不能归因为诊断寄存器。后只读确认新boot19edba8b…、Android/guard就绪，恢复方式仍未获用户确认。已按下游补上复位前ICC请求；三条路径真实解析/请求/清零全0，随后带trace_delay_ms=100的三域四reset、AHB六时钟/版本200MHz阶段均0并回收，PID2273/2079保持。完整HFI试验随后连接再次超时，**最新native sq2-icc-only-19ed.kmsg尚未取回，不要重跑fa09f750…全流程，先恢复/取日志。** 新203943ae…候选移除全部额外MMIO及邮箱快照读取，仅保留下游控制状态轮询，关闭成功后清零独占邮箱，增加逐次写入前的collector等待；仅本地编译/导出审计，未部署。没有解码帧或Android硬解，未改启动盘。固件来源已核对为SQ2原qcvss8180.mbn同字节，目录venus-5.2是原提取脚本命名。见VIDEO-DECODE、sq2-video-interconnect-reference.json。

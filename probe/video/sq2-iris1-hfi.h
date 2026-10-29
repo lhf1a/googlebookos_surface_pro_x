@@ -3,7 +3,8 @@
 #define SQ2_IRIS1_HFI_H
 struct device;
 struct sq2_hfi_transport;
-int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out, bool compact_table);
+int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out,
+                    bool compact_table, bool empty_ping);
 int sq2_hfi_run(struct sq2_hfi_transport *ctx, void __iomem *base, bool protect_iova,
                 unsigned int trace_delay_ms);
 int sq2_hfi_finish(struct sq2_hfi_transport *ctx);
