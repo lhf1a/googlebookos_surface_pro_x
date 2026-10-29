@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+最新恢复与新日志待取（2026-10-29）：SSH已核对用户恢复后的boot76f0f9ca…、Android就绪、guardY/nohibernate、PID2264/2082、临时视频模块清空、pstore空。compact原日志已取回：只有ready/运行期噪声/smoke（602.714066s），没有新消费者日志或KMSG_END；原主机输出确认rmmod完成并打印COMPACT_BEGIN，但不能判断卡在模块注册、probe早期ICC获取还是后续尚未落盘步骤，不能据此否定24字节布局。已增加driver_register/probe_enter/ICC get前后标记。新5a967ca3…候选在干净boot上仅加载一次（默认288表头、empty_ping及HANA退出恢复），连接再次超时，**sq2-hfi-empty-76f0.kmsg待取，未取得共享队列写入/回复/退出结果**。不再启动VPU，先恢复并读取这份逐步日志确定实际阻塞阶段；未改启动盘。
+
 操作者确认（2026-10-29）：用户已明确反馈24字节表头对照后“整机无响应，正在重启恢复”。这次是用户执行的长按恢复，不应记录为自主崩溃或自动恢复。当前重启完成、桌面/guard及新boot ID尚待只读复核，SSH仍在标识交换前关闭；不要复跑该测试，先恢复默认入口并取回sq2-hfi-compact-976c.kmsg。启动盘未改，完整硬解未完成。
 
 最新离线协议证据（2026-10-29）：SSH仍在主机标识前closed，compact日志未取回，本轮无设备侧重试。新增inspect-sq2-video-firmware-protocol.py对固定SQ2固件校验六组ARM指令：实际用table+8的qhdr0_offset、stride56、CPU/DSP邮箱偏移、bit15启用/清除、空队列rx_req=1，以及CTRL_STATUS bit0可早于队列解析。故状态1不是队列DMA或完整启动证明，不应盲改表头/IRQ位。新hfi_empty_ping=1先将初始cmd.rx_req设0，空通知后观察固件写成1（且r/w=0），再继续SYS_INIT；406a979b…候选编译/边界/事务/导出审计通过，未部署。保留默认288表头及HANA关闭恢复候选；先设备恢复/取compact日志，再验证完整退出与真实共享队列访问。无解码帧/Android组件，未改启动盘。见VIDEO-DECODE。

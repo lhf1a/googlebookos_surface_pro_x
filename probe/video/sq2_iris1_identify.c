@@ -75,7 +75,10 @@ static struct icc_bulk_data icc_paths[] = {
 static int icc_acquire(struct device *dev)
 {
  int i, ret;
+ pr_info("SQ2_IRIS1_ICC get_begin device=%s\n", dev_name(dev));
+ if (trace_delay_ms) msleep(trace_delay_ms);
  ret = of_icc_bulk_get(dev, ARRAY_SIZE(icc_paths), icc_paths);
+ pr_info("SQ2_IRIS1_ICC get_end ret=%d\n", ret);
  if (ret) return ret;
  for (i = 0; i < ARRAY_SIZE(icc_paths); i++) {
   if (!icc_paths[i].path) { ret = -ENODEV; goto put; }
@@ -204,6 +207,8 @@ static int identify(struct platform_device *pdev)
  int i, ret, npd = 0, nclk = 0, nenabled = 0, npowered = 0;
  u32 version, mask, status;
 
+ pr_info("SQ2_IRIS1_IDENTIFY phase=probe_enter device=%s\n", dev_name(&pdev->dev));
+ trace_barrier();
 #ifdef SQ2_IDENTIFY_HFI
  struct sq2_hfi_transport *hfi = NULL;
  bool icc_owned = false;
@@ -543,9 +548,7 @@ static bool check_ref(const char *path, u32 ph)
 static int __init start(void)
 {
  struct device_node *n;
-#ifndef SQ2_IDENTIFY_EXISTING
  int ret;
-#endif
  if (!allow || !of_machine_is_compatible("microsoft,surface-pro-x"))
   return -EPERM;
  if (power_domains > 3 || enable_clocks > 6 ||
@@ -586,7 +589,11 @@ static int __init start(void)
  if (!n)
   return -ENODEV;
  of_node_put(n);
- return platform_driver_register(&driver);
+ pr_info("SQ2_IRIS1_IDENTIFY phase=driver_register_begin\n");
+ trace_barrier();
+ ret = platform_driver_register(&driver);
+ pr_info("SQ2_IRIS1_IDENTIFY phase=driver_register_end ret=%d probe_result=%d\n", ret, probe_result);
+ return ret;
 #else
  if (n) { of_node_put(n); return -EEXIST; }
  if (!check_overlay_refs())

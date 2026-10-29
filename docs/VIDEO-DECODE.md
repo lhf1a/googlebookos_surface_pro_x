@@ -4,6 +4,12 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## compact日志取回与新注册阶段诊断（2026-10-29）
+
+SSH恢复后已实核boot76f0f9ca…、boot_completed=1、screen_only=Y/nohibernate、PID2264/2082；临时视频模块清空、pstore空，默认闭源入口保持。此为用户已确认整机卡死后的手动恢复，非自主崩溃或自动回退。compact日志已复制至out/video-decode/iris1-phase/hfi-compact-976c-kmsg.txt：共48条筛选日志，只有collector ready、正常系统噪声及602.714066s smoke，末尾603.361033s，无新消费者日志/结束标记。原主机输出已越过rmmod、打印SQ2_HFI_COMPACT_BEGIN，故已到新insmod，但218b…代码只在ICC bulk get成功后才打印路径，缺少注册/probe初始标记；不能由缺日志判定具体调用或表头有效性，也不能确认HANA退出恢复就是本轮根因。
+
+新增driver_register前后、probe_enter及ICC get前后标记，并使用既有100ms trace等待。新候选5a967ca3…与四模块当次live导出missing=0、传输哈希完全匹配。有限collector `/data/local/tmp/sq2-hfi-empty-76f0.kmsg` ready/存活/smoke已验证；从干净启动直接装软件VIDEOCC及两个驻留overlay，只加载一次新消费者，使用默认288表头、完整ICC/桥接/AHB/六时钟/200MHz/PAS/protect和empty_ping。insmod连接随后超时，第二个只读连接closed。**没有probe_result、固件队列写入、SYS_INIT或完整退出恢复证据；新逐步日志尚待取回。** 未写ESP、默认镜像或codec配置。已停止设备侧操作并询问当前桌面状态；不要继续完整加载或热拆提供者，先恢复并读取该日志确定注册/ICC/电源/固件的实际阻塞位置。
+
 ## 固件静态协议证据与共享队列判据（2026-10-29）
 
 用户随后明确确认compact对照后整机无响应，正在手动重启恢复；当前尚无新boot ID/桌面恢复复核，SSH仍closed。将本次恢复按操作者操作记录，不当成自主崩溃或自动恢复；不复跑原compact完整流程。
