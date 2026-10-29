@@ -14,10 +14,12 @@
 #endif
 #include "sq2-venus-platform.h"
 #include "sq2-venus-lifetime.h"
+#include "sq2-venus-power.h"
 
 struct sq2_venus_platform {
  struct venus_core core;
  struct sq2_venus_lifetime lifetime;
+ struct sq2_venus_power *power;
  resource_size_t start, size;
  bool region, irq_requested, irq_enabled;
 };
@@ -92,7 +94,22 @@ int sq2_venus_platform_irq(struct sq2_venus_platform *o, bool enable)
 
 int sq2_venus_platform_secure_begin(struct sq2_venus_platform *o)
 {
+ if (!o || !sq2_venus_power_ready(o->power)) return -ENODEV;
  return o ? sq2_venus_lifetime_begin(&o->lifetime) : -EINVAL;
+}
+
+int sq2_venus_platform_power_on(struct sq2_venus_platform *o)
+{
+ if (!o || !sq2_venus_lifetime_releasable(&o->lifetime)) return -EBUSY;
+ return sq2_venus_power_on(o->core.dev, o->core.base, &o->power);
+}
+
+int sq2_venus_platform_power_off(struct sq2_venus_platform *o)
+{
+ if (!o || !sq2_venus_lifetime_releasable(&o->lifetime) || o->core.sq2_fw_owner)
+  return -EBUSY;
+ sq2_venus_platform_irq(o, false);
+ return sq2_venus_power_off(&o->power, o->core.sq2_boot_attempted);
 }
 
 int sq2_venus_platform_secure_end(struct sq2_venus_platform *o, int pas_status)
@@ -114,7 +131,7 @@ int sq2_venus_platform_release(struct sq2_venus_platform **owner)
  o = *owner;
  if (!o) return 0;
  if (!sq2_venus_lifetime_releasable(&o->lifetime) ||
-     o->core.priv || o->core.sq2_fw_owner)
+     o->core.priv || o->core.sq2_fw_owner || o->power)
   return -EBUSY;
  sq2_venus_platform_irq(o, false);
  free_irq(o->core.irq, &o->core);

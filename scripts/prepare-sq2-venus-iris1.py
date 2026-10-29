@@ -49,10 +49,11 @@ def main():
             shutil.copyfile(f, args.output / f.name)
     shutil.copyfile(ROOT / 'probe/video/venus-iris1.h', args.output / 'venus-iris1.h')
     shutil.copyfile(ROOT / 'probe/video/sq2-venus-dma.h', args.output / 'sq2-venus-dma.h')
-    for name in ('sq2-venus-platform.c', 'sq2-venus-platform.h', 'sq2-venus-lifetime.h'):
+    for name in ('sq2-venus-platform.c', 'sq2-venus-platform.h', 'sq2-venus-lifetime.h',
+                 'sq2-venus-power.c', 'sq2-venus-power.h'):
         shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
     with (args.output / 'Makefile').open('a') as f:
-        f.write('\nvenus-core-objs += sq2-venus-platform.o\n')
+        f.write('\nvenus-core-objs += sq2-venus-platform.o sq2-venus-power.o\n')
     core = (src / 'core.h').read_text()
     core = replace(core, 'struct venus_core {',
                    'struct sq2_venus_fw;\nstruct sq2_venus_platform;\nstruct venus_core {\n'
@@ -168,12 +169,12 @@ def main():
                     'ccflags-y += -DSQ2_PIL_QUERY_LIBRARY -I$(srctree)/drivers/firmware\n')
     manifest = {'status': 'compile-only-no-platform-match-no-hardware-validation',
                 'sq2_transport': 'explicit inactive flag; coherent 16MiB UC; bounded IOVA; SFR view; CPU-only mailboxes; no VERSION write',
-                'remaining': ['platform power/reset', 'core/HFI/IRQ/devres quarantine across probe/recovery/remove',
+                'remaining': ['core probe/recovery/remove dispatch and runtime PM adaptation',
                               'V4L2 buffer address validation and runtime', 'Android Codec2'],
                 'sq2_dma': 'exact 2300/2320/2340 SID + singleton DMA group; saved/restored 32bit mask and bus limit; UC alignment and every-page translation checked',
                 'firmware_lease_dispatch_compiled': args.firmware_lease,
                 'sq2_platform_probe_blocked': True,
-                'platform_owner': 'compiled independent core/MMIO/IRQ/device/module owner; firmware begin/end hooks connected; platform probe/power/reset/ICC pending',
+                'platform_owner': 'compiled independent core/MMIO/IRQ/power/reset/ICC owner; firmware begin/end hooks connected; platform probe/recovery/remove pending',
                 'input_sha256': HASHES,
                 'output_sha256': {f.name: hashlib.sha256(f.read_bytes()).hexdigest()
                                   for f in sorted(args.output.iterdir()) if f.is_file()}}

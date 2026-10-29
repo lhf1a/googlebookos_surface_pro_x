@@ -12,6 +12,8 @@ int sq2_venus_platform_alloc(struct platform_device *pdev,
 struct venus_core *sq2_venus_platform_core(struct sq2_venus_platform *owner);
 int sq2_venus_platform_irq(struct sq2_venus_platform *owner, bool enable);
 int sq2_venus_platform_secure_begin(struct sq2_venus_platform *owner);
+int sq2_venus_platform_power_on(struct sq2_venus_platform *owner);
+int sq2_venus_platform_power_off(struct sq2_venus_platform *owner);
 int sq2_venus_platform_secure_end(struct sq2_venus_platform *owner, int pas_status);
 /* Release requires confirmed PAS stop AND prior HFI/firmware cleanup.
  * Power/reset/ICC owner must also be released before this final operation.

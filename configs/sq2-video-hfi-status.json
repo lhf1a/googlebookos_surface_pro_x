@@ -133,7 +133,7 @@
     }
   },
   "same_boot_restart": "second firmware start in one OS boot left CTRL_STATUS 0; clean-boot first start succeeded; root cause open",
-  "next_executable_action": "Move verified ICC/domain/reset/clock acquisition and reverse cleanup into independent SQ2 platform owner, preserving all on unconfirmed PAS stop; then wire core.c probe/recovery/remove and V4L2. Keep explicit probe block until ownership complete; no second firmware start in bootbcd0. Android Codec2 and full capability alignment remain required.",
+  "next_executable_action": "Wire independent SQ2 owner into real core.c probe, error handling and remove, with runtime PM avoiding unverified firmware restart; power/reset/ICC code now compiled and mock tested. Retain probe block until complete path reviewed. Then fresh-boot V4L2 buffers/frames and open Codec2 integration/full capability alignment. No second firmware start in bootbcd0.",
   "not_verified": [
     "V4L2 decode API",
     "Android hardware MediaCodec",
@@ -243,5 +243,13 @@
       "hardware resource tests"
     ],
     "prior_test_error": "host compiler misleading-indentation exit1, corrected and all tests exit0"
+  },
+  "venus_power_owner_candidate": {
+    "status": "compiled-mock-tested-not-loaded",
+    "sequence": "ICC -> domains -> resets -> 7 clocks -> 200MHz/HANA check",
+    "teardown": "config/rate restore -> clocks off -> HANA bridge pulse -> reset restore -> domains off -> ICC clear",
+    "PAS_guard": "active/quarantined rejects power-off; power reference blocks platform release",
+    "tests": "actual C with mock providers: 40 failure positions unwind; order; restore failure retains powered resources; owner integration; ARM64 compile",
+    "remaining": "core probe/error/remove and runtime PM dispatch; device verification"
   }
 }

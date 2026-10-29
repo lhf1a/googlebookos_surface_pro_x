@@ -8,6 +8,7 @@
 #include <stdint.h>
 #define SQ2_VENUS_PLATFORM_HOST_TEST
 #define GFP_KERNEL 0
+#define __iomem
 #define THIS_MODULE NULL
 #define IORESOURCE_MEM 1
 #define IRQF_TRIGGER_HIGH 1
@@ -17,7 +18,14 @@ typedef uint64_t resource_size_t;
 struct device { int dummy; };
 struct platform_device { struct device dev; };
 struct resource { resource_size_t start,end; };
-struct venus_core { struct device *dev; int irq; void *base,*priv,*sq2_fw_owner,*sq2_platform; };
+struct venus_core { struct device *dev; int irq; void *base,*priv,*sq2_fw_owner,*sq2_platform; bool sq2_boot_attempted; };
+struct sq2_venus_power { bool ready; };
+static struct sq2_venus_power power;
+bool sq2_venus_power_ready(struct sq2_venus_power *p) {return p && p->ready;}
+int sq2_venus_power_on(struct device *d,void *base,struct sq2_venus_power **p)
+{(void)d;(void)base;if(*p)return -EBUSY;power.ready=true;*p=&power;return 0;}
+int sq2_venus_power_off(struct sq2_venus_power **p,bool attempted)
+{(void)attempted;*p=NULL;power.ready=false;return 0;}
 static struct resource resource={0xaa00000,0xaafffff};
 static int fail,step,heap,modules,devices,regions,maps,irqs,enabled;
 static int fault(void) { return ++step==fail; }
@@ -72,22 +80,30 @@ int main(void)
  assert(!sq2_venus_platform_irq(o,true)&&enabled==1);
  assert(!sq2_venus_platform_irq(o,true)&&enabled==1);
  assert(sq2_venus_platform_release(&o)==-EBUSY);
+ assert(sq2_venus_platform_secure_begin(o)==-ENODEV);
+ assert(!sq2_venus_platform_power_on(o));
  assert(!sq2_venus_platform_secure_begin(o));
+ assert(sq2_venus_platform_power_off(o)==-EBUSY);
  assert(sq2_venus_platform_secure_end(o,-ETIMEDOUT)==-ETIMEDOUT&&!enabled);
  assert(sq2_venus_platform_irq(o,true)==-EBUSY);
  o->core.priv=NULL;
  assert(sq2_venus_platform_release(&o)==-EBUSY);
  assert(sq2_venus_platform_secure_end(o,0)==-ETIMEDOUT);
+ assert(sq2_venus_platform_power_off(o)==-EBUSY && o->power);
  assert(heap==1&&modules==1&&devices==1&&regions==1&&maps==1&&irqs==1);
  /* Test-only simulated reboot, not an API or driver recovery path. */
  o->lifetime=(struct sq2_venus_lifetime){0};
+ assert(!sq2_venus_platform_power_off(o));
  assert(!sq2_venus_platform_release(&o)&&!o);empty();
  step=0;assert(!sq2_venus_platform_alloc(&p,&o));
+ assert(!sq2_venus_platform_power_on(o));
  assert(!sq2_venus_platform_secure_begin(o));
  assert(!sq2_venus_platform_secure_end(o,0));
  o->core.sq2_fw_owner=&p;
  assert(sq2_venus_platform_release(&o)==-EBUSY);
  o->core.sq2_fw_owner=NULL;
+ assert(sq2_venus_platform_release(&o)==-EBUSY);
+ assert(!sq2_venus_platform_power_off(o));
  assert(!sq2_venus_platform_release(&o));empty();
  puts("SQ2_PLATFORM_OWNER_PASS: actual owner code; 6 acquisition failures unwind; quarantine pins all resources and masks IRQ; successful stop permits final release");
  return 0;

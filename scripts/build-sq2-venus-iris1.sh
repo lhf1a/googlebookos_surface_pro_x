@@ -9,6 +9,9 @@ DEST=${SQ2_IRIS1_DEST:-"$ROOT/out/video-decode/iris1-hfi"}
 mkdir -p "$DEST"
 python3 "$ROOT/scripts/prepare-sq2-venus-iris1.py" --kernel "$K" --output "$STAGE" "$@"
 gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  "$ROOT/tests/sq2_venus_power_test.c" -o "$STAGE/power-test"
+"$STAGE/power-test" | tee "$DEST/power-test.txt"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
   "$ROOT/tests/sq2_venus_platform_test.c" -o "$STAGE/owner-test"
 "$STAGE/owner-test" | tee "$DEST/owner-test.txt"
 gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
