@@ -4,6 +4,16 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## PAS固件内存事务层（2026-10-29，未接入调用）
+
+新增 `sq2-fw-transaction.h` 和 `sq2-venus-fw.c/.h`，随 `--firmware-lease` 编入隔离venus-core。该实现尚无启用的调用点，**不是可加载/启动SQ2 VPU的完整适配**。它提供固定固件校验、独立辅助DMA设备、低4GiB/1MiB对齐的6MiB分配、PAS9 load/auth/shutdown及内存所有权策略；全局单例加mutex序列化，不借用core的devm生命周期。正常持有或隔离时都保留模块引用。启动前检查Surface compatible、SCM可用/PAS9支持、固定固件SHA256/ELF与固定MDT源码版本。
+
+事务在调用可能触及secure world的load之前标记TOUCHED。load或auth失败均尝试shutdown；仅shutdown返回0才擦除/释放DMA、注销辅助设备并释放模块引用。shutdown失败保留内存/设备/模块、记录原错误并进入QUARANTINED，后续start/stop不再调用PAS或复用地址；全局所有者不含core指针，能够在上层遗失句柄时继续持有隔离分配。隔离恢复限定重启，不把失败当成已停止。成功shutdown才允许下一次重新分配，原启动错误与shutdown错误分别保留。
+
+主机故障注入直接使用生产事务头，覆盖分配/load/auth/shutdown的全部16种成功失败组合：任何secure touch后都由独立oracle要求先确认shutdown才能release；检查隔离后拒绝重试、无双重释放，及100次正常启动/关闭复用。ASan/UBSan通过；Iris1寄存器mock同时通过。隔离模块编译通过，缺原Module.symvers及完整ABI证明的限制保持。日志/候选清单在 `out/video-decode/iris1-lease-v2/`，未传到实机或执行PAS。
+
+**尚未把该层接进venus_boot/shutdown。** 原core.c的probe错误清理、恢复、remove会继续释放HFI队列和devm资源；仅保留固件DMA不足以证明整个VPU关闭失败时安全，不能简单接入或用remove返回错误来阻止内核的devres释放。下一步必须一并处理这些资源及设备移除语义，再补SQ2资源表/电源域/IOVA边界，最后启动固件。实机仅只读复核，boot ID仍2f0c17ee…、PID2220/2046、boot_completed=1、screen_only=Y。
+
 ## Iris1 HFI差异候选（2026-10-29，未部署）
 
 固定OnePlus下游提交补取 `drivers/media/platform/msm/vidc/vidc_hfi_io.h`，SHA256 ebc34f34…，已加入参考清单。与原venus_hfi.c核对：VPU5和sdmshrike均使用4xx消息，CPU CS/IC及wrapper基址沿用旧布局；独立差异包括时钟使能后CPU_CGC_DIS/CLOCK_CONFIG清零、没有CVP时DSP QTBL/UC镜像CPU队列、保留无关位的中断掩码读改写（仅清0x14）。不是Iris2/v6寄存器布局。

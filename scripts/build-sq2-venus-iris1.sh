@@ -5,9 +5,12 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 K=${SQ2_VIDEO_KERNEL:-/root/.cache/sq2-thermal/kernel}
 O=${SQ2_VIDEO_BUILD:-/root/.cache/sq2-video-foundation/build}
 STAGE=${SQ2_IRIS1_STAGE:-/root/.cache/sq2-video-iris1/venus}
-DEST="$ROOT/out/video-decode/iris1-hfi"
+DEST=${SQ2_IRIS1_DEST:-"$ROOT/out/video-decode/iris1-hfi"}
 mkdir -p "$DEST"
-python3 "$ROOT/scripts/prepare-sq2-venus-iris1.py" --kernel "$K" --output "$STAGE"
+python3 "$ROOT/scripts/prepare-sq2-venus-iris1.py" --kernel "$K" --output "$STAGE" "$@"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  "$ROOT/tests/sq2_fw_transaction_test.c" -o "$STAGE/transaction-test"
+"$STAGE/transaction-test" | tee "$DEST/transaction-test.txt"
 gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
   -I "$STAGE" "$ROOT/tests/sq2_venus_iris1_test.c" -o "$STAGE/mock-test"
 "$STAGE/mock-test" | tee "$DEST/mock-test.txt"

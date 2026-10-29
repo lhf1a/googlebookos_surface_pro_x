@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+固件寿命续接（2026-10-29）：独立PAS9内存事务/所有者已编入私有候选（`--firmware-lease`），真实调用前标记secure touch，load/auth失败也需成功shutdown才释放；失败隔离同时持有DMA、独立设备和模块引用，禁止重试/重分配。16种主机故障组合及100次正常复用的ASan/UBSan检查通过，编译通过；**无启用调用点、未执行PAS**。core.c错误/恢复/remove仍释放HFI及devm资源，需整体处理后才能接入，不要只替换固件分配。目标仍为实机解码与Android组件，详见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
+
 Iris1 HFI续接（2026-10-29）：固定下游vidc_hfi_io.h哈希，新增独立iris1资源标志及CPU时钟、DSP镜像队列、IRQ掩码适配候选，保持HFI4xx和原平台表。隔离编译core/dec/enc及ASan/UBSan mock通过，三模块对同boot运行导出的符号闭包missing=0；未部署或添加SC8180X match。电源/reset/资源验证、低端IOVA保留和固件关闭失败的内存寿命仍开放；没有硬件解码帧/Android组件。见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
 
 视频硬解续接（2026-10-29）：`codex/sq2-video-decode` 在30aee11基础上新增固定固件MDT copy-only探针。现有4e93d345…固件在新分配低4GiB/1MiB对齐的6MiB连续DMA内存中，三个LOAD段/5MiB跨度逐段复制及BSS读回实机通过；内存/辅助设备已释放、模块已卸载，无allow参数负测被拒绝。23个未定义符号匹配运行导出，boot ID及system_server/SF PID保持、boot_completed=1、screen_only=Y。未调用SCM/PAS、未启动VPU，没有解码帧或MediaCodec硬解；下一步仍为Iris1电源/HFI和关闭失败时的内存保留策略。未写启动镜像或codec配置，详见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。

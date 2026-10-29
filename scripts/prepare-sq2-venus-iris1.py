@@ -29,11 +29,18 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--kernel', type=Path, default=Path('/root/.cache/sq2-thermal/kernel'))
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--firmware-lease', action='store_true',
+                   help='compile the independent PAS memory owner (no enabled caller)')
     args = p.parse_args()
     src = args.kernel / 'drivers/media/platform/qcom/venus'
     for name, digest in HASHES.items():
         if hashlib.sha256((src / name).read_bytes()).hexdigest() != digest:
             raise ValueError('source hash mismatch: ' + name)
+    if args.firmware_lease:
+        loader = args.kernel / 'drivers/soc/qcom/mdt_loader.c'
+        if hashlib.sha256(loader.read_bytes()).hexdigest() != \
+                '5dd1d028daafe8006400ca50bc6b7ec54a933521f0f6f1c672445e92a9c3d30b':
+            raise ValueError('MDT loader source hash mismatch')
     if args.output.exists():
         raise ValueError('output exists; preserve earlier candidates')
     args.output.mkdir(parents=True)
@@ -71,7 +78,14 @@ def main():
                  '\t\tvenus_iris1_clock_config(core);\n\t}\n\n'
                  '\tret = venus_load_fw(core, fwpath, &mem_phys, &mem_size);')
     (args.output / 'firmware.c').write_text(fw)
+    if args.firmware_lease:
+        for name in ('sq2-fw-transaction.h', 'sq2-venus-fw.h', 'sq2-venus-fw.c',
+                     'sq2_video_fw_layout.h'):
+            shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
+        with (args.output / 'Makefile').open('a') as f:
+            f.write('\nvenus-core-objs += sq2-venus-fw.o\n')
     manifest = {'status': 'compile-only-no-platform-match-no-hardware-validation',
+                'firmware_lease_compiled_without_callsite': args.firmware_lease,
                 'input_sha256': HASHES,
                 'output_sha256': {f.name: hashlib.sha256(f.read_bytes()).hexdigest()
                                   for f in sorted(args.output.iterdir()) if f.is_file()}}
