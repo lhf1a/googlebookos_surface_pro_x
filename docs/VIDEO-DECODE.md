@@ -4,6 +4,22 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## 桥接复位、实际版本与PAS内存设置阻断（2026-10-29）
+
+在干净boot b7730aab…中直接加载软件PM VIDEOCC24ed5d48…，没有加载/卸载旧GDSC提供者。新增consumer overlay reset描述，对应SC8180X GCC的41/42/43及VIDEOCC0，并显式提供IRIS_AHB时钟；保持原六时钟顺序，AHB在三AXI之后、三core之前启用，逆序关闭。`reset_bridge` / `enable_ahb`默认关闭，读寄存器必须显式同时开启三域、六时钟、桥接reset和AHB。
+
+首轮复位状态读取因6.3 qcom_reset_ops没有status回调返回-524，未执行电源/复位写入。增加只针对这四个已核对reset的regmap读取：核对DT reset ID、provider compatible和物理reg范围，从现有绑定provider取得regmap、读实际bit2，保留provider引用至读取完成，不推测初态。四个初态均为deasserted。随后三域上电、四reset按下游顺序assert、usleep_range(150,250)、同顺序deassert、原状态恢复和下电通过；该等待是调度范围，日志实际间隔可更长。再做桥接reset+AHB+六时钟全流程，probe_result=0、所有回收阶段返回0。
+
+首次真实VPU MMIO读取通过：版本 `0x5010002f`（major5/minor0x10/step0x2f）、mask `0x1f6`、ctrl `0`。寄存器区为0xaa00000+1MiB，不覆盖VIDEOCC；没有触发整机无响应。三个core的初始驱动报告频率19.2MHz，GCC分支的rate=0是无父频率模型，不应当成真实停钟。随后只选择已有200MHz频率表档位，报告200000097Hz；初版精确相等检查误判-34，已收紧为标称值±1kHz校验并继续报告实值。复验读版本及恢复19.2MHz通过，不是PLL物理测频或性能测试，也未改OPP/电压。
+
+新增消费者 `--firmware` 独立编译路径，链接既有固定固件/非devm内存事务层；`boot_firmware`默认false，须同时选择固定版本、桥接reset、AHB、三域六时钟和200MHz。它没有HFI/IRQ/用户缓冲区：若关闭失败，固件事务的全局所有者/模块pin及原overlay共同保留DMA、原始clock/reset/PM引用、虚拟设备和MMIO占用，直接返回绑定状态而不进入清理，限定重启恢复；成功停止才恢复CPU clock配置、频率、reset并释放资源。主机事务故障注入仍通过；这是私有bring-up的资源持有策略，不是已解决整个标准Venus/V4L2的remove生命周期。
+
+支持查询先阻断启动：PAS9及对照PAS1/18/4均返回false，然而三个PAS remoteproc状态均running。该布尔包装同时折叠查询错误/调用不可用，不能判定PAS9不可用。对照原Venus的实际加载路径，将支持查询保留为诊断而非硬门槛；所有实际load/auth/shutdown错误仍原样返回，未伪造成功。保留首次-95预检查结果供审计。
+
+随后实际加载试验（消费者eef6389e…，完整哈希传输匹配、当次导出missing=0）分配独占6MiB DMA物理区0xfd000000，并通过固件大小、SHA256和ELF校验。qcom_mdt_load返回-22，日志明确为 `error -22 setting up firmware`；按固定5dd1d028… MDT源码控制流，说明PAS init_image返回0，随后PAS mem_setup拒绝了本次物理区/5MiB跨度。**没有到auth_and_reset，没有固件运行或解码帧。** 随后的真实PAS shutdown返回0，DMA擦除/释放和辅助设备注销通过，owner=NULL；频率/CPU clock配置/reset/时钟/电源均回收，probe_result=-22。此地址已释放，不能复用或认为安全固件接受它。
+
+试验后消费者refcnt=0并正常卸载，辅助内存设备不存在。boot ID仍b7730aab…、boot_completed=1、screen_only=Y、PID2263/2102保持；无重启/ESP/正常启动镜像/codec配置修改。软件VIDEOCC与自pin overlay保持临时驻留、域/时钟没有消费者持有；不要热卸载提供者或读全局pm_genpd_summary。有界collector均正常结束，完整日志在out/video-decode/iris1-phase（含query-real-kmsg.txt）。下一步核实SCM mem_setup契约/可接受的独占加载区，不借用CAMERA/未知保留内存，不把init_image成功当作认证或固件启动通过。
+
 ## 分阶段资源实测与提前硬件交接阻断（2026-10-29）
 
 在9435bddc…同一boot上，先验证有限独立kmsg collector（83dcdf5d…）的进程、KMSG_READY和实际smoke记录，再运行v4的0域/0时钟/不读MMIO阶段。三个电源域及六时钟引用获取/回收通过，boot_completed=1、screen_only=Y、PID2242/2098保持。collector使用O_DSYNC写私有/data临时文件，120秒/2MiB上限，主动停止后KMSG_END完整；日志已取回忽略目录。

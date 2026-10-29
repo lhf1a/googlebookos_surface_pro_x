@@ -1,5 +1,7 @@
 # 构建与部署
 
+桥接/PAS消费者：新overlay提供四reset与额外AHB；`build-sq2-iris1-phase.sh --firmware` 才链接PAS事务层，固定MDT源码哈希并运行故障注入，默认所有危险阶段仍关闭。新目录通过SQ2_IDENTIFY_STAGE选择。reset_bridge需要三域，enable_ahb需要三域且至少三AXI时钟；read_registers要求完整桥接/AHB/六时钟；core_hz仅允许200000000并核对±1kHz，boot_firmware要求以上全部条件和实读版本5010002f。guard与实际probe_result必须复核；insmod成功不等于probe成功。实际试验在PAS mem_setup以-22停止，shutdown/回收通过，未到认证。不要据此持久化或更换未知加载区；完整结果和运行态在VIDEO-DECODE。
+
 分阶段消费者：`bash scripts/build-sq2-iris1-phase.sh`，可用SQ2_IDENTIFY_STAGE选新的构建目录。它只绑定已有私有节点，不创建/移除overlay或VIDEOCC；默认仍不启域/时钟/MMIO，必须以独立有界kmsg和实际probe_result判断。`python3 scripts/build-sq2-videocc-sw-domains.py --stage NEW_DIR` 只生成固定源码的两codec GDSC软件控制候选，不改时钟检查/频率，不安装。该差异通过三域六时钟启停实测，但HW_CTRL运行期交接未实现，不能部署长期默认。热卸载时钟提供者后读pm_genpd_summary曾陷入内核循环，禁止复用该过程；下一次需干净启动直接加载候选，保留启动盘原样。桥接reset/HFI/PAS/Android接入仍开放。
 
 Iris1独立识别探针：`python3 scripts/build-sq2-iris1-identify.py --stage NEW_DIR` 固定out/video-decode/running-base.dtb的be17f33f…身份，使用dtc/fdtget/fdtput构建临时overlay及模块。删去__symbols__导出但保留本地引用重定位，以兼容当前无symbols启动树。v3导致一次用户手动恢复，不能原样重复；v4新增逐步标记、默认0域/0时钟/不读MMIO，仅编译未测。禁止据overlay/符号检查通过认定电源或版本可读。下次先独立运行有界kmsg采集和远程逐步标记；不要无日志重复上电。新overlay模块驻留到重启，旧VIDEOCC/overlay拆卸曾有OF引用泄漏警告。具体失败/恢复见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。

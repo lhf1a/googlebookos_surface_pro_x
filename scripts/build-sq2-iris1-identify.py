@@ -70,8 +70,10 @@ dts = f'''/dts-v1/;
     reg = <0 0xaa00000 0 0x100000>;
     power-domains = <&vid 0>, <&vid 1>, <&vid 2>;
     clocks = <0x{gcc:x} 227>, <0x{gcc:x} 225>, <0x{gcc:x} 226>,
-             <&vid 4>, <&vid 2>, <&vid 3>;
-    clock-names = "axic", "axi0", "axi1", "core", "vcodec", "cvp";
+             <&vid 4>, <&vid 2>, <&vid 3>, <&vid 0>;
+    clock-names = "axic", "axi0", "axi1", "core", "vcodec", "cvp", "ahb";
+    resets = <0x{gcc:x} 41>, <&vid 0>, <0x{gcc:x} 42>, <0x{gcc:x} 43>;
+    reset-names = "axi", "core", "axi0", "axi1";
     status = "okay";
    }};
   }};

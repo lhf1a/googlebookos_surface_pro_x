@@ -101,6 +101,7 @@ static int sq2_fw_alloc(void *ctx)
   ret = -ENODEV;
   goto free;
  }
+ pr_info("SQ2_VENUS_FW phase=allocated phys=%pa bytes=%u\n", &fw->phys, SQ2_FW_LIMIT);
  return 0;
 free:
  dma_free_coherent(dev, SQ2_FW_LIMIT, fw->cpu, fw->dma);
@@ -113,16 +114,28 @@ unregister:
 static int sq2_fw_load(void *ctx)
 {
  struct sq2_venus_fw *fw = ctx;
- return qcom_mdt_load(&fw->pdev->dev, fw->image, image_name, 9,
-                      fw->cpu, fw->phys, SQ2_FW_LIMIT, NULL);
+ int ret;
+ pr_info("SQ2_VENUS_FW phase=mdt_load_begin\n");
+ ret = qcom_mdt_load(&fw->pdev->dev, fw->image, image_name, 9,
+                    fw->cpu, fw->phys, SQ2_FW_LIMIT, NULL);
+ pr_info("SQ2_VENUS_FW phase=mdt_load_end ret=%d\n", ret);
+ return ret;
 }
 static int sq2_fw_auth(void *ctx)
 {
- return qcom_scm_pas_auth_and_reset(9);
+ int ret;
+ pr_info("SQ2_VENUS_FW phase=auth_begin\n");
+ ret = qcom_scm_pas_auth_and_reset(9);
+ pr_info("SQ2_VENUS_FW phase=auth_end ret=%d\n", ret);
+ return ret;
 }
 static int sq2_fw_pas_stop(void *ctx)
 {
- return qcom_scm_pas_shutdown(9);
+ int ret;
+ pr_info("SQ2_VENUS_FW phase=pas_shutdown_begin\n");
+ ret = qcom_scm_pas_shutdown(9);
+ pr_info("SQ2_VENUS_FW phase=pas_shutdown_end ret=%d\n", ret);
+ return ret;
 }
 static void sq2_fw_release(void *ctx)
 {
@@ -133,6 +146,7 @@ static void sq2_fw_release(void *ctx)
  fw->cpu = NULL;
  fw->pdev = NULL;
  module_put(THIS_MODULE);
+ pr_info("SQ2_VENUS_FW phase=memory_released\n");
 }
 static const struct sq2_fw_operations sq2_fw_ops = {
  .alloc = sq2_fw_alloc, .load = sq2_fw_load, .start = sq2_fw_auth,
@@ -142,13 +156,20 @@ static const struct sq2_fw_operations sq2_fw_ops = {
 int sq2_venus_fw_boot(struct device *dev, struct sq2_venus_fw **out)
 {
  struct sq2_venus_fw *fw;
+ bool supported;
  int ret;
  if (!out || *out || !of_machine_is_compatible("microsoft,surface-pro-x"))
   return -EINVAL;
  if (!qcom_scm_is_available())
   return -EPROBE_DEFER;
- if (!qcom_scm_pas_supported(9))
-  return -EOPNOTSUPP;
+ supported = qcom_scm_pas_supported(9);
+ pr_info("SQ2_VENUS_FW phase=support_query pas9=%d adsp1=%d cdsp18=%d mpss4=%d\n",
+         supported, qcom_scm_pas_supported(1), qcom_scm_pas_supported(18),
+         qcom_scm_pas_supported(4));
+ /* Advisory only: on this Surface all four queries report false although
+  * PAS-backed ADSP/CDSP/MPSS are running. Like stock Venus, rely on the real
+  * load/auth return values; never convert unsupported/error to success.
+  */
  mutex_lock(&sq2_fw_lock);
  if (sq2_fw_owner) {
   ret = -EBUSY;
