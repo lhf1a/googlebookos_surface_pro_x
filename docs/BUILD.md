@@ -1,5 +1,7 @@
 # 构建与部署
 
+AIDL 实验入口：`scripts/prepare-sq2-c2-aidl-headers.py` 使用已克隆的硬件接口/原生框架缓存与 SDK35 aidl，必须同时生成版本和 hash 方法；`scripts/build-sq2-c2-aidl-service.py` 构建独立 store，依赖已采集的设备库。无参数仅本地枚举，`--serve` 尝试正常 default1 注册；`--serve-local` 仅用于有界实验 Binder 客户端测试，不是正式 VINTF/MediaCodec 接入，禁止默认开机启用。客户端源码 `probe/video/sq2-c2-aidl-client-test.cpp`。
+
 独立 C2 实验组件：`probe/video/sq2-c2-v4l2-component.h` 使用真实 C2Work/C2BlockPool 与 `sq2-v4l2-session.h`；测试入口 `sq2-c2-component-test.cpp` 无参数只释放对象，带参数才运行向量测试。当前仅独立进程验证，不安装服务；构建入口 `python3 scripts/build-sq2-c2-component-test.py` 校验固定 AOSP 提交及本机四库哈希；需要已准备的 NDK、平台 libc++ 头副本和测试向量。完整命令见本地 `out/video-decode/codec2-integration/component-backend/build.txt`。后续须补依赖自动准备、异步输出、完整参数/能力和 AIDL/MediaCodec 验证，不能当作成品部署。
 
 V4L2 runner新增 `--dmabuf /dev/video0`：system dma_heap为输入和输出提供进口fd，显式DMA_BUF_SYNC，沿用严格六帧CRC/EOS检查；无模块装载/固件重启。已在同boot驻留原生core验证，证据 `out/video-decode/venus-transport/dmabuf-frames`。`tests/test_sq2_v4l2_runner.py` 覆盖fd生命周期与分配失败清理；不是gralloc/Codec2实现。

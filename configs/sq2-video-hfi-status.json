@@ -522,5 +522,21 @@
     "mediacodec_registered": false,
     "capability_alignment_complete": false,
     "evidence": "out/video-decode/codec2-integration/component-backend/VERIFICATION.txt"
+  },
+  "aidl_store_experiment": {
+    "normal_registration_status": -3,
+    "local_only_registration_status": 0,
+    "remote_version": 2,
+    "remote_hash": "2f7448ba8211c5cd1de7bd6c17fe7c5fd034ebbe",
+    "remote_list_count": 1,
+    "remote_create_interface": true,
+    "remote_get_configurable": true,
+    "client_exit": 0,
+    "service_bounded_exit": 124,
+    "service_removed_after_test": true,
+    "vintf_instance_declared": false,
+    "mediacodec_target_create": false,
+    "software_control_create": true,
+    "evidence": "out/video-decode/codec2-integration/aidl-store/local-live.txt"
   }
 }
