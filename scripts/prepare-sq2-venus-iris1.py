@@ -51,8 +51,9 @@ def main():
     core = (src / 'core.h').read_text()
     core = replace(core, '\tenum hfi_version hfi_version;\n',
                    '\t/* VPU hardware is independent of HFI packet version. */\n'
-                   '\tbool iris1;\n\tenum hfi_version hfi_version;\n')
+                   '\tbool iris1;\n\tbool sq2_windows_hfi;\n\tenum hfi_version hfi_version;\n')
     core = replace(core, '#define IS_V4(core)',
+                   '#define IS_SQ2_HFI(core) ((core)->res->sq2_windows_hfi)\n'
                    '#define IS_IRIS1(core) ((core)->res->iris1)\n#define IS_V4(core)')
     # Keep all pre-existing SoC tables unchanged (zero-initialized iris1=false).
     (args.output / 'core.h').write_text(core)
@@ -66,9 +67,45 @@ def main():
                   '\tif (IS_IRIS1(hdev->core))\n\t\tvenus_iris1_clock_config(hdev->core);\n'
                   '\tvenus_set_registers(hdev);')
     hfi = replace(hfi, '\tret = venus_boot_core(hdev);',
-                  '\tif (IS_IRIS1(hdev->core))\n'
+                  '\tif (IS_IRIS1(hdev->core) && !IS_SQ2_HFI(hdev->core))\n'
                   '\t\tvenus_iris1_dsp_map(hdev->core, hdev->ifaceq_table.da, SHARED_QSIZE);\n\n'
                   '\tret = venus_boot_core(hdev);')
+    # SQ2 has one coherent UC allocation: SFR is a view, not a second owner.
+    hfi = replace(hfi, '\tdesc->attrs = DMA_ATTR_WRITE_COMBINE;',
+                  '\tdesc->attrs = IS_SQ2_HFI(hdev->core) ? 0 : DMA_ATTR_WRITE_COMBINE;')
+    hfi = replace(hfi, '\tvenus_free(hdev, &hdev->sfr);',
+                  '\tif (!IS_SQ2_HFI(hdev->core))\n\t\tvenus_free(hdev, &hdev->sfr);')
+    hfi = replace(hfi, '\tret = venus_alloc(hdev, &desc, ALIGNED_QUEUE_SIZE);',
+                  '\tret = venus_alloc(hdev, &desc, IS_SQ2_HFI(hdev->core) ?\n'
+                  '\t\tSQ2_VENUS_UC_BYTES : ALIGNED_QUEUE_SIZE);')
+    hfi = replace(hfi, '\thdev->ifaceq_table = desc;',
+                  '\tif (IS_SQ2_HFI(hdev->core)) {\n'
+                  '\t\tif (!venus_sq2_uc_valid(desc.da, desc.size)) {\n'
+                  '\t\t\tvenus_free(hdev, &desc);\n\t\t\treturn -ERANGE;\n\t\t}\n'
+                  '\t\tmemset(desc.kva, 0, desc.size);\n\t}\n'
+                  '\thdev->ifaceq_table = desc;')
+    hfi = replace(hfi, '\tret = venus_alloc(hdev, &desc, ALIGNED_SFR_SIZE);',
+                  '\tif (IS_SQ2_HFI(hdev->core)) {\n'
+                  '\t\tdesc = hdev->ifaceq_table;\n'
+                  '\t\tdesc.da += ALIGNED_QUEUE_SIZE;\n'
+                  '\t\tdesc.kva += ALIGNED_QUEUE_SIZE;\n'
+                  '\t\tdesc.size = ALIGNED_SFR_SIZE;\n\t\tret = 0;\n'
+                  '\t} else {\n\t\tret = venus_alloc(hdev, &desc, ALIGNED_SFR_SIZE);\n\t}')
+    start = '\twritel(hdev->ifaceq_table.da, cpu_cs_base + UC_REGION_ADDR);'
+    end = '\t\twritel(hdev->sfr.da, cpu_cs_base + SFR_ADDR);'
+    legacy = hfi[hfi.index(start):hfi.index(end) + len(end)]
+    hfi = replace(hfi, legacy,
+                  '\tif (IS_SQ2_HFI(hdev->core)) {\n'
+                  '\t\tvenus_sq2_cpu_map(hdev->core, hdev->ifaceq_table.da, hdev->sfr.da);\n'
+                  '\t} else {\n' + legacy + '\n\t}')
+    hfi = replace(hfi, '\twritel(1, cpu_cs_base + CPU_CS_SCIACMDARG3);',
+                  '\tif (!IS_SQ2_HFI(hdev->core))\n'
+                  '\t\twritel(1, cpu_cs_base + CPU_CS_SCIACMDARG3);')
+    hfi = replace(hfi, '\thdev = kzalloc(sizeof(*hdev), GFP_KERNEL);',
+                  '\t/* No implicit activation on existing HFI4 platforms. */\n'
+                  '\tif (IS_SQ2_HFI(core) && (!IS_IRIS1(core) || !IS_V4(core)))\n'
+                  '\t\treturn -EINVAL;\n\n'
+                  '\thdev = kzalloc(sizeof(*hdev), GFP_KERNEL);')
     (args.output / 'hfi_venus.c').write_text(hfi)
     fw = (src / 'firmware.c').read_text()
     fw = replace(fw, '#include "hfi_venus_io.h"', '#include "hfi_venus_io.h"\n#include "venus-iris1.h"')
@@ -86,6 +123,9 @@ def main():
             f.write('\nvenus-core-objs += sq2-venus-fw.o sq2_pil_mem_query.o\n'
                     'ccflags-y += -DSQ2_PIL_QUERY_LIBRARY -I$(srctree)/drivers/firmware\n')
     manifest = {'status': 'compile-only-no-platform-match-no-hardware-validation',
+                'sq2_transport': 'explicit inactive flag; coherent 16MiB UC; bounded IOVA; SFR view; CPU-only mailboxes; no VERSION write',
+                'remaining': ['platform power/reset', 'PAS ownership callsites and quarantine',
+                              'exact SID and DMA aperture setup', 'V4L2 runtime', 'Android Codec2'],
                 'firmware_lease_compiled_without_callsite': args.firmware_lease,
                 'input_sha256': HASHES,
                 'output_sha256': {f.name: hashlib.sha256(f.read_bytes()).hexdigest()

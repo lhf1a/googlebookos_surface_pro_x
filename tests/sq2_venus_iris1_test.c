@@ -10,11 +10,11 @@ typedef uint32_t u32;
 #include "hfi_venus_io.h"
 static unsigned char regs[0x100000];
 static unsigned int n;
-static struct { unsigned int addr; u32 value; } writes[5];
+static struct { unsigned int addr; u32 value; } writes[6];
 struct venus_core { unsigned char *wrapper_base, *cpu_cs_base; };
 static void writel(u32 val, unsigned char *p)
 {
- assert(n < 5);
+ assert(n < 6);
  writes[n].addr = p - regs;
  writes[n++].value = val;
 }
@@ -35,6 +35,23 @@ int main(void)
  assert(venus_iris1_irq_mask(0xffffffff) == 0xffffffeb);
  for (mask = 0; mask < 1024; mask++)
   assert(venus_iris1_irq_mask(mask) == (mask & ~0x14U));
+ n = 0;
+ venus_sq2_cpu_map(&core, 0xbf000000, 0xbf259000);
+ assert(n == 6);
+ assert(writes[0].addr == 0xd2064 && writes[0].value == 0xbf000000);
+ assert(writes[1].addr == 0xd2068 && writes[1].value == 0x1000000);
+ assert(writes[2].addr == 0xd2054 && writes[2].value == 0xbf000000);
+ assert(writes[3].addr == 0xd2050 && writes[3].value == 1);
+ assert(writes[4].addr == 0xd205c && writes[4].value == 0xbf259000);
+ assert(writes[5].addr == 0xd2060 && writes[5].value == 0);
+ assert(venus_sq2_uc_valid(0xbf000000, 0x1000000));
+ assert(venus_sq2_uc_valid(0x25800000, 0x1000000));
+ assert(!venus_sq2_uc_valid(0xbf000001, 0x1000000));
+ assert(!venus_sq2_uc_valid(0x257fffff, 0x1000000));
+ assert(!venus_sq2_uc_valid(0x100000000ULL, 0x1000000));
+ assert(!venus_sq2_uc_valid(0xffffffffffffffffULL, 0x1000000));
+ assert(!venus_sq2_uc_valid(0xbf000000, 0));
+ puts("SQ2_UC_MOCK_PASS: six CPU-only writes; 7 aperture/size boundary checks");
  puts("IRIS1_MOCK_PASS: clock and DSP register addresses/order; 1024 masks preserve unrelated bits");
  return 0;
 }

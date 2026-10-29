@@ -133,7 +133,7 @@
     }
   },
   "same_boot_restart": "second firmware start in one OS boot left CTRL_STATUS 0; clean-boot first start succeeded; root cause open",
-  "next_executable_action": "Port the verified Iris1 clock/reset/PAS ownership, exact SIDs/IOVA and CPU-only mailbox behavior into the existing Venus/V4L2 preparation pipeline; compile and audit before loading. Then integrate open Codec2 and reconcile per-codec capabilities with firmware and real-frame tests; do not advertise software decoding as hardware. Do not restart firmware again in bootbcd0.",
+  "next_executable_action": "Integrate exact SIDs/DMA aperture and verified power/reset/PAS owner into Venus, covering core.c failure/recovery/remove quarantine before adding platform match. Transport preparation compiled, not loaded. Then V4L2 actual frames and open Codec2 capability alignment. Do not restart firmware again in bootbcd0.",
   "not_verified": [
     "V4L2 decode API",
     "Android hardware MediaCodec",
@@ -190,5 +190,18 @@
     "level_reference_sha256": "4bead9f299b7186d0af4cb40802dd4257e58553fed87186502bbfb12db169e45",
     "maxima_are_joint_constraints": true,
     "no_AV1_hardware_declaration": true
+  },
+  "venus_transport_candidate": {
+    "status": "compiled-not-loaded-no-platform-match",
+    "flag": "sq2_windows_hfi",
+    "implemented": [
+      "CPU-only six mailboxes",
+      "no VERSION or DSP mirror write",
+      "single coherent 16MiB UC allocation",
+      "SFR borrowed view, no double free",
+      "IOVA range rejection"
+    ],
+    "tests": "ARM64 core/dec/enc compile; ASan/UBSan MMIO and boundary; generated source legacy isolation; exact patch and rollback",
+    "ABI_validation": "not complete: original Module.symvers missing"
   }
 }
