@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+SQ1参考采集与SQ2日志续接（2026-10-29）：已核验用户提供的SQ1 SSH指纹并公钥登录，确认为Surface Pro X/SQ1/ARM64/Windows22631管理员。只读导出5包、95设备资源、8张校验和有效ACPI；取回71文件全部哈希通过，原始包仅private。SQ1的qcdx包与原SQ2新版Windows包共有34文件全相同，固件为79版891997ec…；当前Android实测仍用42版4e93d345…，未替换。SQ1 DSDT/IORT给出VIDEO引擎4以及指向SMMU15000000的2300/2320/2340等映射，与当前从sdmshrike继承的1300/mask60及高IOVA有差异；须离线核对本机SID/保护范围，不能盲搬或宣称根因。旧empty-76f0日志已取回，九次邮箱写完后最后为HFI_BOOT begin，无状态/队列/关闭结果，不再是注册/ICC未知。当前只读boot39906e2a…、Android1、guardY/nohibernate、PID2295/2104、临时模块清空/pstore空；恢复方式未确认，保留用户此前“桌面触摸正常”，不得称整机冻结或自主重启。本轮无新VPU试验/启动盘修改。详见SQ1-VIDEO-REFERENCE；下一步离线核对Windows同字节驱动的SID/IOVA和HFI配置，完整硬解仍未完成。
+
 最新恢复与新日志待取（2026-10-29）：SSH已核对用户恢复后的boot76f0f9ca…、Android就绪、guardY/nohibernate、PID2264/2082、临时视频模块清空、pstore空。compact原日志已取回：只有ready/运行期噪声/smoke（602.714066s），没有新消费者日志或KMSG_END；原主机输出确认rmmod完成并打印COMPACT_BEGIN，但不能判断卡在模块注册、probe早期ICC获取还是后续尚未落盘步骤，不能据此否定24字节布局。已增加driver_register/probe_enter/ICC get前后标记。新5a967ca3…候选在干净boot上仅加载一次（默认288表头、empty_ping及HANA退出恢复），连接再次超时，**sq2-hfi-empty-76f0.kmsg待取，未取得共享队列写入/回复/退出结果**。不再启动VPU，先恢复并读取这份逐步日志确定实际阻塞阶段；未改启动盘。
 
 操作者确认（2026-10-29）：用户已明确反馈24字节表头对照后“整机无响应，正在重启恢复”。这次是用户执行的长按恢复，不应记录为自主崩溃或自动恢复。当前重启完成、桌面/guard及新boot ID尚待只读复核，SSH仍在标识交换前关闭；不要复跑该测试，先恢复默认入口并取回sq2-hfi-compact-976c.kmsg。启动盘未改，完整硬解未完成。

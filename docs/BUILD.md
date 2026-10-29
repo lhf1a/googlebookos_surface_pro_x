@@ -1,5 +1,7 @@
 # 构建与部署
 
+SQ1/SQ2 Windows只读视频参考采集：管理员原生64位PowerShell执行 `scripts/Collect-SurfaceVideoReference.ps1 -ExpectedProcessor SQ1 -CheckOnly` 先核对型号，再去掉CheckOnly并给新的OutputDirectory。默认仅导出图形/相关平台驱动、PnP资源及白名单ACPI，排除许可证/凭据；不改旧Collect-SQ2型号保护，不安装驱动、不重启。只在子进程需要时使用ExecutionPolicy Bypass，不改持久策略；归档必须留private并按manifest逐项核验。SQ1实测及与SQ2同字节驱动/SID差异的证据边界见SQ1-VIDEO-REFERENCE.md；不是Android硬解安装器。
+
 固定固件静态检查：`python3 scripts/inspect-sq2-video-firmware-protocol.py` 对out/test2/firmware/qcom/venus-5.2/venus.mbn只读校验完整哈希、ELF32 ARM及六组协议指令，报告在out/video-decode/firmware-analysis/protocol.json；不执行/部署固件，不等于硬件DMA验证。新消费者的 `hfi_empty_ping=1` 只允许完整HFI模式，以初始rx_req=0和固件空队列写1作为直接共享队列写入判据，再继续SYS_INIT；编译/预检通过，尚未实测。CTRL_STATUS=1可早于队列解析，不能算完整HFI成功；不要在未取compact日志时重试或改猜测的IRQ位。见VIDEO-DECODE。
 
 HFI控制启动与表头对照：只写邮箱候选已实测CTRL_STATUS=1，但SYS_INIT未消费，仍非硬解通过。`hfi_compact_table=1`仅在hfi_handshake模式比较原24字节表头与后期288字节扩展，默认保持288；环及SFR仍在同一独占3MiB范围。首轮24字节实测连接中断，原日志未取回，不能解释成该布局失败。新消费者构建还固定参考venus_hfi.c哈希；固件调用后且真实停止确认成功、时钟关闭后，对本机HANA版本脉冲四路桥接，再恢复初态/关域/撤销ICC，保留所有原始错误及post_reset日志。这个退出补齐仅编译未部署，不是已验证的二次启动修复。当前先取回sq2-hfi-compact-976c.kmsg；不要连续重试。见VIDEO-DECODE。

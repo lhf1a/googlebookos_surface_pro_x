@@ -4,6 +4,12 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## 最新：SQ1 Windows 参考与 empty 日志取回
+
+已完成用户新增SQ1设备的只读驱动/ACPI采集及全部manifest验证。SQ1 qcdx与此前SQ2新版包共有34文件全部同字节，79版固件不是当前Android实测42版。更重要的是本机Windows DSDT/IORT给出VIDEO引擎4、SMMU15000000、SID2300/2320/2340等映射，和当前sdmshrike来源1300/mask60存在待核对差异；不得以CPU映射读回替代实际VPU DMA。非安全IOVA/保护范围也须同时核对，暂不盲改或重试。详见[SQ1-VIDEO-REFERENCE](SQ1-VIDEO-REFERENCE.md)。
+
+旧empty-76f0日志已取回：注册/probe/ICC并未停住，PAS auth0/protect0，九次邮箱写入都有END，最后为540.670400s的HFI_BOOT begin；没有下一条控制状态/共享队列或shutdown结果。不能从collector最后一条确定具体MMIO阻塞点。当前只读boot39906e2a…、Android1、guardY/nohibernate、PID2295/2104，临时模块清空/pstore空，恢复方式未确认；用户此前已确认SSH中断时桌面/触摸正常。本轮未复跑VPU或重启，以下待取状态均为历史记录。
+
 ## compact日志取回与新注册阶段诊断（2026-10-29）
 
 SSH恢复后已实核boot76f0f9ca…、boot_completed=1、screen_only=Y/nohibernate、PID2264/2082；临时视频模块清空、pstore空，默认闭源入口保持。此为用户已确认整机卡死后的手动恢复，非自主崩溃或自动回退。compact日志已复制至out/video-decode/iris1-phase/hfi-compact-976c-kmsg.txt：共48条筛选日志，只有collector ready、正常系统噪声及602.714066s smoke，末尾603.361033s，无新消费者日志/结束标记。原主机输出已越过rmmod、打印SQ2_HFI_COMPACT_BEGIN，故已到新insmod，但218b…代码只在ICC bulk get成功后才打印路径，缺少注册/probe初始标记；不能由缺日志判定具体调用或表头有效性，也不能确认HANA退出恢复就是本轮根因。
