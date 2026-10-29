@@ -1,5 +1,7 @@
 # 构建与部署
 
+PIL窗口与私有内存owner：`build-sq2-scm-trace.sh` 在新的SQ2_SCM_TRACE_STAGE构建有界只读观察器和GET_MEM_AREA query；固定三份SCM源码/头ABI。`build-sq2-iris1-phase.sh --firmware` 现链接query库，额外固定Surface板级DTS哈希。`pil_gap=1 inspect_gap=1` 只在零域/零时钟/不读寄存器条件下检查独占申请、映射及释放，不写数据；真正加载须另选boot_firmware、pil_gap及完整桥接/AHB/200MHz条件。地址不可参数化，只允许已有板级文档空隙中的固定6MiB，并复核live SCM/DT/资源树。私有加载/认证/关闭通过，未持久化或覆盖V4L2/HFI。不要将新owner应用于CAMERA或其它reserved区；明细见VIDEO-DECODE及sq2-video-pil-memory-reference.json。
+
 桥接/PAS消费者：新overlay提供四reset与额外AHB；`build-sq2-iris1-phase.sh --firmware` 才链接PAS事务层，固定MDT源码哈希并运行故障注入，默认所有危险阶段仍关闭。新目录通过SQ2_IDENTIFY_STAGE选择。reset_bridge需要三域，enable_ahb需要三域且至少三AXI时钟；read_registers要求完整桥接/AHB/六时钟；core_hz仅允许200000000并核对±1kHz，boot_firmware要求以上全部条件和实读版本5010002f。guard与实际probe_result必须复核；insmod成功不等于probe成功。实际试验在PAS mem_setup以-22停止，shutdown/回收通过，未到认证。不要据此持久化或更换未知加载区；完整结果和运行态在VIDEO-DECODE。
 
 分阶段消费者：`bash scripts/build-sq2-iris1-phase.sh`，可用SQ2_IDENTIFY_STAGE选新的构建目录。它只绑定已有私有节点，不创建/移除overlay或VIDEOCC；默认仍不启域/时钟/MMIO，必须以独立有界kmsg和实际probe_result判断。`python3 scripts/build-sq2-videocc-sw-domains.py --stage NEW_DIR` 只生成固定源码的两codec GDSC软件控制候选，不改时钟检查/频率，不安装。该差异通过三域六时钟启停实测，但HW_CTRL运行期交接未实现，不能部署长期默认。热卸载时钟提供者后读pm_genpd_summary曾陷入内核循环，禁止复用该过程；下一次需干净启动直接加载候选，保留启动盘原样。桥接reset/HFI/PAS/Android接入仍开放。

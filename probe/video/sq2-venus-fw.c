@@ -11,6 +11,9 @@
 #include <linux/firmware.h>
 #include <linux/mutex.h>
 #include <linux/sizes.h>
+#include <linux/io.h>
+#include <linux/ioport.h>
+#include <linux/of_address.h>
 #include <linux/firmware/qcom/qcom_scm.h>
 #include <linux/soc/qcom/mdt_loader.h>
 #include <crypto/hash.h>
@@ -18,6 +21,7 @@
 #include "sq2_video_fw_layout.h"
 #include "sq2-fw-transaction.h"
 #include "sq2-venus-fw.h"
+#include "sq2-pil-region.h"
 
 struct sq2_venus_fw {
  struct sq2_fw_transaction tx;
@@ -26,6 +30,8 @@ struct sq2_venus_fw {
  void *cpu;
  dma_addr_t dma;
  phys_addr_t phys;
+ bool pil_gap;
+ struct resource region;
 };
 /* This owner and module pin outlive a failed core probe or driver teardown.
  * One PAS9 owner per board; failed shutdown blocks all further boot attempts.
@@ -33,6 +39,78 @@ struct sq2_venus_fw {
 static DEFINE_MUTEX(sq2_fw_lock);
 static struct sq2_venus_fw *sq2_fw_owner;
 static const char image_name[] = "qcom/venus-5.2/venus.mbn";
+
+/* Fixed Surface source marks 8bd80000..8d800000 free for the image loader.
+ * Claim only a 6MiB aligned subset. Query window alone is never sufficient.
+ */
+static int sq2_fw_claim_gap(struct sq2_venus_fw *fw)
+{
+ struct device_node *root, *np;
+ struct resource r;
+ phys_addr_t start, end;
+ const phys_addr_t base = 0x8c000000, limit = base + SQ2_FW_LIMIT;
+ int i, count, ret;
+ ret = sq2_pil_get_bounds(&start, &end);
+ if (ret) return ret;
+ if (start != 0x8b700000 || end != 0x9ab00000 || base < start || limit > end)
+  return -ERANGE;
+ if (region_intersects(base, SQ2_FW_LIMIT, IORESOURCE_SYSTEM_RAM, IORES_DESC_NONE) != REGION_DISJOINT)
+  return -EBUSY;
+ root = of_find_node_by_path("/reserved-memory");
+ if (!root) return -EINVAL;
+ for_each_child_of_node(root, np) {
+  count = of_property_count_u32_elems(np, "reg");
+  if (count <= 0 || count % 4) { ret = -EINVAL; goto node_fail; }
+  for (i = 0; i < count / 4; i++) {
+   if (of_address_to_resource(np, i, &r)) { ret = -EINVAL; goto node_fail; }
+   if (r.start < limit && r.end >= base) { ret = -EBUSY; goto node_fail; }
+  }
+ }
+ of_node_put(root);
+ fw->region.start = base;
+ fw->region.end = limit - 1;
+ fw->region.name = "sq2-video-fw-lab";
+ fw->region.flags = IORESOURCE_MEM | IORESOURCE_BUSY;
+ ret = insert_resource(&iomem_resource, &fw->region);
+ if (ret) return ret;
+ /* No existing owner may be wrapped or nested under. Require the exact
+  * generic UEFI reserved window, not an arbitrary reserved block.
+  */
+ if (fw->region.child || !fw->region.parent ||
+     strcmp(fw->region.parent->name, "reserved") ||
+     fw->region.parent->start != start || fw->region.parent->end != end - 1) {
+  remove_resource(&fw->region);
+  return -EBUSY;
+ }
+ fw->cpu = memremap(base, SQ2_FW_LIMIT, MEMREMAP_WC);
+ if (!fw->cpu) { remove_resource(&fw->region); return -ENOMEM; }
+ fw->phys = base;
+ pr_info("SQ2_VENUS_FW gap_claimed phys=%pa bytes=%u; DT/IORESOURCE owners excluded\n",
+         &fw->phys, SQ2_FW_LIMIT);
+ return 0;
+node_fail:
+ of_node_put(np);
+ of_node_put(root);
+ return ret;
+}
+static void sq2_fw_unmap_gap(struct sq2_venus_fw *fw)
+{
+ memunmap(fw->cpu);
+ remove_resource(&fw->region);
+ fw->cpu = NULL;
+}
+int sq2_venus_fw_probe_gap(void)
+{
+ struct sq2_venus_fw *fw;
+ int ret;
+ fw = kzalloc(sizeof(*fw), GFP_KERNEL);
+ if (!fw) return -ENOMEM;
+ ret = sq2_fw_claim_gap(fw);
+ if (!ret) sq2_fw_unmap_gap(fw);
+ pr_info("SQ2_VENUS_FW gap_probe ret=%d NO_MEMORY_WRITES_NO_LOAD\n", ret);
+ kfree(fw);
+ return ret;
+}
 
 static int sq2_fw_check_image(const struct firmware *fw)
 {
@@ -84,6 +162,11 @@ static int sq2_fw_alloc(void *ctx)
  ret = dma_coerce_mask_and_coherent(dev, DMA_BIT_MASK(32));
  if (ret)
   goto unregister;
+ if (fw->pil_gap) {
+  ret = sq2_fw_claim_gap(fw);
+  if (ret) goto unregister;
+  goto pin;
+ }
  fw->cpu = dma_alloc_coherent(dev, SQ2_FW_LIMIT, &fw->dma, GFP_KERNEL | __GFP_NOWARN);
  if (!fw->cpu) {
   ret = -ENOMEM;
@@ -95,16 +178,18 @@ static int sq2_fw_alloc(void *ctx)
   ret = -ERANGE;
   goto free;
  }
- memset(fw->cpu, 0, SQ2_FW_LIMIT);
+pin:
  /* A quarantine must keep the module and auxiliary DMA device alive too. */
  if (!try_module_get(THIS_MODULE)) {
   ret = -ENODEV;
   goto free;
  }
+ memset(fw->cpu, 0, SQ2_FW_LIMIT);
  pr_info("SQ2_VENUS_FW phase=allocated phys=%pa bytes=%u\n", &fw->phys, SQ2_FW_LIMIT);
  return 0;
 free:
- dma_free_coherent(dev, SQ2_FW_LIMIT, fw->cpu, fw->dma);
+ if (fw->pil_gap) sq2_fw_unmap_gap(fw);
+ else dma_free_coherent(dev, SQ2_FW_LIMIT, fw->cpu, fw->dma);
  fw->cpu = NULL;
 unregister:
  platform_device_unregister(fw->pdev);
@@ -118,6 +203,7 @@ static int sq2_fw_load(void *ctx)
  pr_info("SQ2_VENUS_FW phase=mdt_load_begin\n");
  ret = qcom_mdt_load(&fw->pdev->dev, fw->image, image_name, 9,
                     fw->cpu, fw->phys, SQ2_FW_LIMIT, NULL);
+ if (!ret) wmb(); /* Complete WC segment writes before secure authentication. */
  pr_info("SQ2_VENUS_FW phase=mdt_load_end ret=%d\n", ret);
  return ret;
 }
@@ -141,7 +227,9 @@ static void sq2_fw_release(void *ctx)
 {
  struct sq2_venus_fw *fw = ctx;
  memzero_explicit(fw->cpu, SQ2_FW_LIMIT);
- dma_free_coherent(&fw->pdev->dev, SQ2_FW_LIMIT, fw->cpu, fw->dma);
+ wmb();
+ if (fw->pil_gap) sq2_fw_unmap_gap(fw);
+ else dma_free_coherent(&fw->pdev->dev, SQ2_FW_LIMIT, fw->cpu, fw->dma);
  platform_device_unregister(fw->pdev);
  fw->cpu = NULL;
  fw->pdev = NULL;
@@ -153,7 +241,7 @@ static const struct sq2_fw_operations sq2_fw_ops = {
  .stop = sq2_fw_pas_stop, .release = sq2_fw_release,
 };
 
-int sq2_venus_fw_boot(struct device *dev, struct sq2_venus_fw **out)
+int sq2_venus_fw_boot(struct device *dev, struct sq2_venus_fw **out, bool pil_gap)
 {
  struct sq2_venus_fw *fw;
  bool supported;
@@ -180,6 +268,7 @@ int sq2_venus_fw_boot(struct device *dev, struct sq2_venus_fw **out)
   ret = -ENOMEM;
   goto unlock;
  }
+ fw->pil_gap = pil_gap;
  ret = request_firmware_direct(&fw->image, image_name, dev);
  if (ret)
   goto free;

@@ -39,6 +39,10 @@ static unsigned long core_hz;
 module_param(core_hz, ulong, 0400);
 static bool boot_firmware;
 module_param(boot_firmware, bool, 0400);
+static bool pil_gap;
+module_param(pil_gap, bool, 0400);
+static bool inspect_gap;
+module_param(inspect_gap, bool, 0400);
 #ifndef SQ2_IDENTIFY_EXISTING
 static int overlay_id = -1;
 #endif
@@ -147,6 +151,13 @@ static int identify(struct platform_device *pdev)
   pr_info("SQ2_IRIS1_IDENTIFY phase=clk_get_end name=%s\n", names[i]);
   nclk++;
  }
+#ifdef SQ2_IDENTIFY_FIRMWARE
+ if (inspect_gap) {
+  ret = sq2_venus_fw_probe_gap();
+  measured = true;
+  goto cleanup;
+ }
+#endif
  if (enable_ahb) {
   ahb = clk_get(&pdev->dev, "ahb");
   if (IS_ERR(ahb)) {
@@ -255,7 +266,7 @@ static int identify(struct platform_device *pdev)
   writel(0, base + 0xe2010);
   writel(0, base + 0xe2000);
   pr_info("SQ2_IRIS1_IDENTIFY phase=firmware_boot_begin\n");
-  ret = sq2_venus_fw_boot(&pdev->dev, &fw_owner);
+  ret = sq2_venus_fw_boot(&pdev->dev, &fw_owner, pil_gap);
   pr_info("SQ2_IRIS1_IDENTIFY phase=firmware_boot_end ret=%d owner=%d\n", ret, !!fw_owner);
   if (fw_owner) {
    int shutdown;
@@ -377,8 +388,12 @@ static int __init start(void)
      (core_hz && (core_hz != 200000000 || !read_registers)) ||
      (boot_firmware && (!read_registers || core_hz != 200000000)))
   return -EINVAL;
+ if ((pil_gap && !boot_firmware && !inspect_gap) ||
+     (inspect_gap && (!pil_gap || boot_firmware || read_registers ||
+                      power_domains || enable_clocks || reset_bridge || enable_ahb || core_hz)))
+  return -EINVAL;
 #ifndef SQ2_IDENTIFY_FIRMWARE
- if (boot_firmware)
+ if (boot_firmware || pil_gap || inspect_gap)
   return -EOPNOTSUPP;
 #endif
  n = of_find_node_by_path("/soc@0/clock-controller@ab00000");

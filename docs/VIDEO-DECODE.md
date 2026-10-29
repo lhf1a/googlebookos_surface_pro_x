@@ -4,7 +4,21 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
-## 桥接复位、实际版本与PAS内存设置阻断（2026-10-29）
+## PAS认证/复位与关闭首次实测通过（2026-10-29）
+
+只读有界kretprobe观察器 `sq2_scm_trace.c` 核对实际qcom_scm_call描述符、SMCCC调用和返回，不改寄存器/参数/返回值，仅insmod中的PAS9和只读MEM_AREA，最多各32次。原fd000000失败重现的原始结果为mem_setup `a0=0xffcfffba`，而非直接的通用EINVAL；Linux默认将未知厂商错误映射成-22，具体符号含义未确认。实际convention=ARM64，函数号42000202、参数9/fd000000/500000正确，排除了本次ABI/参数截断解释。PAS9支持查询本身返回a0=0/a1=0，应区别于查询调用失败。所有探针missed=0，随后卸载。
+
+从固定EDK2参考头取得公开TZ_PIL_GET_MEM_AREA（PIL cmd9/arginfo1/spare0，只读）；Linux6.3无公开wrapper，`sq2_pil_mem_query.c`在固定私有SCM原型下短暂解析入口地址，移除查址probe后正常调用SCM驱动，由原驱动处理convention、锁、waitq及重试，不另发裸SMC。实机返回 `[0x8b700000,0x9ab00000)`，raw a0=0/a1=start/a2=end。此范围不是所有权授予，包含CAMERA/WLAN/MPSS/ADSP/CDSP等。原fd000000 DMA分配在窗口外，不能用于此固件加载。来源、路径、固定哈希及限制见configs/sq2-video-pil-memory-reference.json。
+
+固定Surface DTS还明确记录Windows/ACPI观察到的image-loader空隙8bd80000..8d800000；它是社区维护者原始观测，不是OEM规范。私有 `pil_gap=1` 只从该已命名空隙选固定6MiB `[0x8c000000,0x8c600000)`，**不碰8b700000 CAMERA、WLAN或其它已分配reserved块**。每次使用前重查SCM窗口；拒绝System RAM相交、任何live DT reserved-memory节点重叠、非完整generic UEFI reserved父资源、既有子资源包裹/嵌套。通过内核资源树建立独占owner后才memremap WC，不把窗口整体或任意reserved当空闲。第一次inspect_gap检查只申请/映射/释放，不写物理内存、不加载固件，实机返回0且资源项消失。
+
+独立消费者15c65409…随后以固定本机固件4e93d345…执行真实PAS加载：物理8c000000、独占6MiB、镜像跨度5MiB，init_image=0、mem_setup=0、MDT复制=0、auth_and_reset=0，20–25ms短等待后shutdown=0。有界独立kmsg及只读跟踪同时记录上述四个安全调用原始a0/a1均0，missed=0；实际probe_result=0。WC写入在认证前有wmb，关闭确认后清零、wmb、解除映射和释放资源owner，不释放成普通Linux页。频率/CPU clock配置/reset及所有时钟/电源引用恢复。
+
+**尚无HFI响应、解码帧或Android硬解组件。** 这是实际PAS认证/复位接口及关闭通过，不是完整VPU协议、V4L2或Codec2通过。当前独占owner仅为私有实验，尚无持久化DTB/镜像安装流程；今后正常适配还需专用内存描述与生命周期，不能直接复制成系统安装器。原标准Venus core的完整资源清理缺口仍开放；私有测试没有HFI/IRQ或外部帧缓冲，因此只覆盖其自身资源。
+
+结束后消费者refcnt=0，消费者/trace均卸载，辅助内存设备及sq2-video-fw-lab资源不存在；native collector以timeout正常结束并保存完整日志。boot仍b7730aab…、boot_completed=1、screen_only=Y、PID2263/2102保持，无重启或启动盘/codec变更。软件VIDEOCC/自pin overlay仍临时驻留，不热卸载或读全局pm_genpd_summary。下一步建立非安全SMMU/合法IOVA和HFI队列，取得真实SYS_INIT响应，再推进V4L2帧和Android接入。原始日志仍只在out/video-decode。
+
+## 桥接复位、实际版本与PAS内存设置阻断（2026-10-29，以下为已解决的地址阻断历史）
 
 在干净boot b7730aab…中直接加载软件PM VIDEOCC24ed5d48…，没有加载/卸载旧GDSC提供者。新增consumer overlay reset描述，对应SC8180X GCC的41/42/43及VIDEOCC0，并显式提供IRIS_AHB时钟；保持原六时钟顺序，AHB在三AXI之后、三core之前启用，逆序关闭。`reset_bridge` / `enable_ahb`默认关闭，读寄存器必须显式同时开启三域、六时钟、桥接reset和AHB。
 

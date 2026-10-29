@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+最新视频PAS通过（2026-10-29）：只读SCM窗口查询实返8b700000..9ab00000，旧fd000000在外；Surface原DTS明确记录8bd80000..8d800000 image-loader空隙。新私有pil_gap仅在该空隙固定申请8c000000..8c600000，检查live SCM窗口、无System RAM/DT reserved重叠、generic reserved父项及无其它资源owner，先无写入claim测试，再实机init_image/mem_setup/auth_and_reset/shutdown全部0，raw安全返回也0。不是占CAMERA或未知保留块；记录configs/sq2-video-pil-memory-reference.json。消费者/trace/辅助设备/owner已回收，boot/PID/guard保持；**还无HFI响应/解码帧/Android组件，目标继续进行。** 下一步SMMU合法IOVA和SYS_INIT握手。原日志out忽略，软件VIDEOCC/overlay保持临时驻留，禁止热卸载提供者/全局genpd汇总。见VIDEO-DECODE。
+
 最新视频bring-up（2026-10-29）：干净boot b7730aab…直接用软件控制VIDEOCC，已实测桥接四reset状态/顺序/恢复、AHB及六时钟，实际读取VPU版本5010002f、mask1f6、ctrl0；200MHz档驱动报200000097Hz并可恢复19.2MHz。实际PAS加载已到mem_setup：init_image返回0后mem_setup拒绝本次独占DMA区fd000000/5MiB跨度，-22；未到auth/未启动固件。真实shutdown返回0，DMA/设备及全部消费者资源已回收、消费者卸载；boot/PID保持、guardY。支持查询对PAS9和已运行PAS1/18/4全false，现仅作诊断，不虚报成功。下一步查SCM加载内存契约，不占CAMERA/未知reserved区。overlay与软件VIDEOCC临时驻留，不热卸载或读全局pm_genpd_summary。见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
 
 最新分阶段视频实测（2026-10-29）：独立有界kmsg确认0资源、三GDSC、GCC三AXI和MVSC时钟可申请/启停回收；原VIDEOCC在VCODEC时钟真实报stuck-off/-16并正常回收。仅将两codec域暂留软件PM控制（不改频率、不跳过halt检查）的候选24ed5d48…，三域六时钟的实际probe_result=0，回收计数0。未读VPU MMIO/未执行PAS。**后续全局pm_genpd_summary读取陷入不可杀内核循环，Android/SSH仍活；sync后默认受控重启已实核恢复：boot b7730aab…、boot_completed=1、screen_only=Y，临时模块/节点/任务清除，pstore空。不要热卸载GDSC提供者或重读该汇总。** 下一次干净启动直接加载私有候选，先补下游桥接reset流程，再读寄存器。前次v3整机无响应的根因仍未证明。详见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。

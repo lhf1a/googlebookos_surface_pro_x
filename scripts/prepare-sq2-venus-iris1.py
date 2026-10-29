@@ -80,10 +80,11 @@ def main():
     (args.output / 'firmware.c').write_text(fw)
     if args.firmware_lease:
         for name in ('sq2-fw-transaction.h', 'sq2-venus-fw.h', 'sq2-venus-fw.c',
-                     'sq2_video_fw_layout.h'):
+                     'sq2_video_fw_layout.h', 'sq2_pil_mem_query.c', 'sq2-pil-region.h'):
             shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
         with (args.output / 'Makefile').open('a') as f:
-            f.write('\nvenus-core-objs += sq2-venus-fw.o\n')
+            f.write('\nvenus-core-objs += sq2-venus-fw.o sq2_pil_mem_query.o\n'
+                    'ccflags-y += -DSQ2_PIL_QUERY_LIBRARY -I$(srctree)/drivers/firmware\n')
     manifest = {'status': 'compile-only-no-platform-match-no-hardware-validation',
                 'firmware_lease_compiled_without_callsite': args.firmware_lease,
                 'input_sha256': HASHES,
