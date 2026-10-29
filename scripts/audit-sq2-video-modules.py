@@ -3,6 +3,7 @@
 
 This is a preflight, not ABI or hardware validation. Never loads modules.
 """
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -24,7 +25,15 @@ REL = [
 
 
 def main():
-    capture = ROOT / 'out/video-decode/running-kallsyms.txt'
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--module', type=Path, action='append',
+                        help='audit only these modules instead of the foundation set')
+    parser.add_argument('--capture', type=Path,
+                        default=ROOT / 'out/video-decode/running-kallsyms.txt')
+    parser.add_argument('--output', type=Path,
+                        default=ROOT / 'out/video-decode/module-preflight.json')
+    args = parser.parse_args()
+    capture = args.capture
     live = capture.read_text(encoding='utf-8-sig').splitlines()
     assert live[0].strip() == 'Y', 'screen-only guard capture missing'
     exports = {line.split()[2].removeprefix('__ksymtab_') for line in live
@@ -32,8 +41,9 @@ def main():
     assert len(exports) > 1000, 'invalid live kernel export capture'
     modules = {}
     owners = {}
-    for rel in REL:
-        p = BUILD / rel
+    for p in (args.module or [BUILD / rel for rel in REL]):
+        if p.name in modules:
+            raise ValueError('duplicate module name: ' + p.name)
         symbols = subprocess.check_output(['aarch64-linux-gnu-nm', str(p)], text=True).splitlines()
         exported = {s.split()[-1].removeprefix('__ksymtab_') for s in symbols
                     if s.split()[-1].startswith('__ksymtab_')}
@@ -51,7 +61,7 @@ def main():
         item['candidate_dependencies'] = sorted({owners[s] for s in item['undefined'] if s in owners})
         missing.update(item['missing'])
         print(name, 'missing=' + str(len(item['missing'])), 'dependencies=' + ','.join(item['candidate_dependencies']))
-    output = ROOT / 'out/video-decode/module-preflight.json'
+    output = args.output
     output.write_text(json.dumps({'status': 'missing-symbols' if missing else 'symbol-closure-only',
         'live_capture_sha256': hashlib.sha256(capture.read_bytes()).hexdigest(),
         'modules': modules, 'missing': sorted(missing)}, indent=2) + '\n')

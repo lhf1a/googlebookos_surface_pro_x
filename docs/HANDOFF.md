@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+视频硬解续接（2026-10-29）：`codex/sq2-video-decode` 在30aee11基础上新增固定固件MDT copy-only探针。现有4e93d345…固件在新分配低4GiB/1MiB对齐的6MiB连续DMA内存中，三个LOAD段/5MiB跨度逐段复制及BSS读回实机通过；内存/辅助设备已释放、模块已卸载，无allow参数负测被拒绝。23个未定义符号匹配运行导出，boot ID及system_server/SF PID保持、boot_completed=1、screen_only=Y。未调用SCM/PAS、未启动VPU，没有解码帧或MediaCodec硬解；下一步仍为Iris1电源/HFI和关闭失败时的内存保留策略。未写启动镜像或codec配置，详见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
+
 eDP最终回退补验：用户恢复连接后，SSH已核对原msm完整哈希f69c91e7…、boot_completed=1、screen_only=Y、默认闭源入口无测试/debug参数、一次性env=0。实时链路恢复2.7Gbps×4、2880×1920@60/355500kHz/24bpp；上一轮v3日志已取回out。下文“最后重启后未复核”缺口现已关闭，无新增切换或重启。
 
 eDP v3实测更新（2026-10-29）：恢复模块依赖后已到boot_completed=1/SSH，候选哈希6293fa5d…匹配；驱动读数5.4Gbps×4、仍为2880×1920@60/24bpp，但用户报告黑屏/花屏，DPU持续vblank/commit/frame-done超时。不能称链路画面通过或90/120Hz可用。已保存状态、确认一次性env清零后远程sync+重启，用户确认桌面恢复；最后重启后的SSH未重连，未再次独立核对模块哈希。默认未提升，保留三菜单和已完成EFI清理。详见DISPLAY-REFRESH。

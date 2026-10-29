@@ -1,5 +1,7 @@
 # 构建与部署
 
+视频固件copy-only探针：先在固定内核归档恢复的 `/root/.cache/sq2-thermal/kernel` 执行 `bash scripts/build-sq2-video-foundation.sh`，再执行 `bash scripts/build-sq2-video-firmware-stage.sh`。后者先运行主机ELF边界测试，固定MDT源码哈希，再构建独立模块，输出到 `out/video-decode/firmware-stage/`，不连接或安装设备。可用 `SQ2_VIDEO_KERNEL` / `SQ2_VIDEO_BUILD` 显式选择对应源码/构建目录；缺原Module.symvers，仍需对当次实机导出审计。`audit-sq2-video-modules.py --module out/video-decode/firmware-stage/sq2_video_firmware_stage.ko --output out/video-decode/firmware-stage/preflight.json` 使用含screen_only=Y的当次kallsyms采集。传输后核对完整哈希、vermagic与固件哈希，再临时insmod allow=1；返回前已释放内存及设备，结束rmmod并检查残留。无PAS调用或VPU启动，不能作为硬解安装器；实测和限制见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
+
 eDP 速率表候选见 [DISPLAY-REFRESH.md](DISPLAY-REFRESH.md)。`build-sq2-edp-rates.sh` 使用独立 msm 源码副本；无 Module.symvers 时必须执行 `restore-sq2-msm-depends.py` 恢复原模块依赖声明，不能仅验证运行内核已有符号就部署。原始模块须为固定哈希。`pack-sq2-edp-rates.py` 仅改变 msm.ko 和测试用 init 钩子，保留密码 addon 最后；候选尚未通过硬件验证。脚本和安装器是固定阶段输入，不可直接复用到未知镜像或磁盘。
 
 用户于 2026-10-29 要求菜单仅保留闭源 Vulkan、原 Mesa、当前 eDP 调试三个入口，覆盖此前保留独立救援/关机菜单的偏好。默认仍是闭源 Vulkan，测试使用一次性 env 和 240 秒回退。诊断 Wi-Fi 中 flyer-test 不适用于当前环境；后续测试用有界本地日志，不开启这套诊断联网。无引用旧 initramfs 在本地 out 中校验备份后才能从已核验的设备 ESP 删除，不能删除共享镜像。

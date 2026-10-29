@@ -4,6 +4,22 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## 固件搬运与读回实测（2026-10-29）
+
+继续自远端 `codex/sq2-video-decode` 的 `30aee11`。当前工作站缺少上一轮thermal/video缓存，已从SHA256为275f05c5…的既有内核归档恢复独立 `/root/.cache/sq2-thermal/kernel`，重建foundation；没有构建或替换正常启动Image。
+
+新增 `sq2_video_firmware_stage.c`、共享ELF校验头和 `build-sq2-video-firmware-stage.sh`。只接受Surface compatible、显式allow=1和现有1159200字节/4e93d345…固件；任何MDT调用前核对完整SHA256及ELF32 ARM、小端、紧接ELF头的程序头表、重定位标志、源范围、非重叠加载区和6MiB上限。此限制对应当前6.3 MDT解析器的实际假设，非通用ELF加载器。构建固定MDT源码哈希5dd1d028…，拒绝直接SCM/auth依赖，调用 `qcom_mdt_load_no_init`，不调用PAS初始化。
+
+模块SHA256 `03c0cd37aa61a29c0a008be8de1c149655846e851933810e42f18940c833a57b`；23个未定义符号全部匹配当次运行内核导出，vermagic为6.3.8-sq2-android1 SMP mod_unload aarch64。符号闭包不代替完整ABI验证，原Module.symvers缺失限制保持。`audit-sq2-video-modules.py --module ... --output ...` 可单独审计探针而不覆盖foundation报告。
+
+实机传输哈希匹配后，insmod allow=1返回0。新分配6MiB标准DMA内存，物理地址0xfd200000（本次值，已释放，不能复用）；三个LOAD段、5MiB跨度的数据逐段比对和BSS全零检查通过，MDT返回的重定位基址也匹配。辅助设备无OF/IOMMU/DMA转换，DMA地址等于物理地址，1MiB对齐且完整区间低于4GiB。返回前擦除并释放分配、注销辅助设备；随后rmmod返回0，两项sysfs均不存在。不带allow参数的独立负向加载返回EPERM，未创建设备或保留模块。
+
+前后boot ID均2f0c17ee…，system_server/SF PID均2220/2046，boot_completed=1、screen_only=Y，VIDEOCC保持绑定。未写ESP、启动镜像、设备树或Android codec配置，没有重启。完整预检和日志留在忽略的 `out/video-decode/firmware-stage/`。
+
+主机C测试覆盖合法重定位/BSS/hash段排除、截断头表、错误架构/字节序、非连续程序头、超长段表、源溢出、filesz>memsz、段重叠、32位地址溢出、超大跨度、无可加载段和非重定位段，全部通过。边界校验测试与实机copy/readback是不同证据。
+
+**没有调用PAS初始化、认证或启动，也没有HFI或解码帧。** 本次只补齐真实固件搬运/读回证据；不能直接给现有Venus加devm分配后启动。下一步仍需完成Iris1电源/HFI/资源适配及固件关闭失败时的分配保留、恢复和remove策略。已释放的连续内存地址不是可永久占用的reserved-memory。
+
 ## 通用媒体框架首次实机加载
 
 ### 固件连续内存实测
