@@ -8,6 +8,19 @@ STAGE=${SQ2_IRIS1_STAGE:-/root/.cache/sq2-video-iris1/venus}
 DEST=${SQ2_IRIS1_DEST:-"$ROOT/out/video-decode/iris1-hfi"}
 mkdir -p "$DEST"
 python3 "$ROOT/scripts/prepare-sq2-venus-iris1.py" --kernel "$K" --output "$STAGE" "$@"
+python3 "$ROOT/tests/test_sq2_vdec_buf_done.py" "$STAGE" --strict | tee "$DEST/buf-done-test.txt"
+python3 "$ROOT/tests/test_sq2_stop_sequence.py" "$STAGE" --strict | tee "$DEST/stop-sequence-test.txt"
+python3 "$ROOT/tests/test_sq2_session_end.py" "$STAGE" --strict | tee "$DEST/session-end-test.txt"
+gcc -Wall -Wextra -Werror -fsanitize=address,undefined -fno-pie -no-pie -pthread \
+  "$ROOT/tests/sq2_venus_callback_test.c" -o "$STAGE/callback-test"
+"$STAGE/callback-test" | tee "$DEST/callback-test.txt"
+python3 "$ROOT/tests/test_sq2_venus_resume.py" "$STAGE/hfi_venus.c" --strict \
+  | tee "$DEST/resume-test.txt"
+python3 "$ROOT/tests/test_sq2_venus_internal_release.py" "$STAGE/helpers.c" --strict \
+  | tee "$DEST/internal-release-test.txt"
+gcc -Wall -Wextra -Werror -fsanitize=address,undefined -fno-pie -no-pie -pthread \
+  "$ROOT/tests/sq2_venus_vb2_test.c" -o "$STAGE/vb2-test"
+"$STAGE/vb2-test" | tee "$DEST/vb2-test.txt"
 gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
   "$ROOT/tests/sq2_venus_buffer_test.c" -o "$STAGE/buffer-test"
 "$STAGE/buffer-test" | tee "$DEST/buffer-test.txt"

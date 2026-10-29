@@ -72,7 +72,7 @@ if a.venus_decoder:
     dsdt = ROOT / 'out/video-decode/sq1-reference-analysis/sq1-dsdt.dsl'
     assert hashlib.sha256(dsdt.read_bytes()).hexdigest() == '9d033e8d650e27f0f7e67b98addc388927d5abe80b99cd800dcda6e88d22e544'
     assert prop('/', 'interrupt-parent') == '1'
-    irq_child = 'interrupts = <0 174 4>; video-decoder { compatible = "qcom,venus-decoder"; };'
+    irq_child = 'interrupts = <0 174 4>; video-decoder { compatible = "venus-decoder"; };'
 dts = f'''/dts-v1/;
 /plugin/;
 / {{ fragment@0 {{ target-path = "/soc@0";

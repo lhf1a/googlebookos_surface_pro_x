@@ -6,11 +6,16 @@ Hardware resource/power and firmware lifetime support are still required.
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 HASHES = {
+    'hfi.c': '1abde9036d7abb7660051233f8d419b495cd3b2dee17b116f69261c65bbef87f',
+    'hfi_msgs.c': '4d7f073f9087f6df7d1ec4cb518240fac1b409ba5150fdc1694f0bcc9327b9eb',
+    'helpers.h': '99f376ae359a2ad6f3560404ccf8f5dc5721fba48fce81cdd1b1a14a399200a6',
+    'vdec.c': '97185064d66075a4ac104915df31c97310f4e8f892aa8cd6f63ce29c87a34c98',
     'core.c': '48f33e0a262e3e70ab3e65cf0ffded6e451a52f5f41c5cf8179cf4da2fd8e922',
     'core.h': '38cfa27196a5204c7250b11ed140821751f6ee8af980715a0ba06db81aabd590',
     'hfi_venus.c': '8323b3366c1044eef997b27f3215d38a8526e56fb3c25b0e0a2fff551ac06064',
@@ -60,16 +65,27 @@ def main():
     shutil.copyfile(ROOT / 'probe/video/sq2-venus-dma.h', args.output / 'sq2-venus-dma.h')
     shutil.copyfile(ROOT / 'probe/video/sq2-venus-buffer.h', args.output / 'sq2-venus-buffer.h')
     for name in ('sq2-venus-platform.c', 'sq2-venus-platform.h', 'sq2-venus-lifetime.h',
-                 'sq2-venus-power.c', 'sq2-venus-power.h'):
+                 'sq2-venus-power.c', 'sq2-venus-power.h', 'sq2-venus-retire.c',
+                 'sq2-venus-retire.h', 'venus-sq2-vb2.h', 'venus-sq2-intbuf.h',
+                 'venus-sq2-callback.h', 'venus-sq2-session-end.h'):
         shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
     with (args.output / 'Makefile').open('a') as f:
-        f.write('\nvenus-core-objs += sq2-venus-platform.o sq2-venus-power.o\n')
+        f.write('\nvenus-core-objs += sq2-venus-platform.o sq2-venus-power.o sq2-venus-retire.o\n')
     core = (src / 'core.h').read_text()
+    core = replace(core, 'struct venus_inst {',
+                   'struct venus_inst {\n\tatomic_t sq2_callbacks;\n\tbool sq2_closing;\n'
+                   '\tstruct completion sq2_end_done;\n\tu32 sq2_end_error;\n'
+                   '\tstruct sq2_venus_scope *sq2_scope;\n'
+                   '\tbool sq2_end_sent, sq2_end_confirmed;')
     core = replace(core, 'struct venus_core {',
                    'struct sq2_venus_fw;\nstruct sq2_venus_platform;\nstruct venus_core {\n'
                    '\tstruct sq2_venus_platform *sq2_platform;\n'
                    '\tstruct sq2_venus_fw *sq2_fw_owner;\n'
                    '\tbool sq2_public, sq2_children, sq2_pm_enabled;\n'
+                   '\tstruct mutex sq2_retire_lock;\n'
+                   '\tunsigned long sq2_vb2_bytes;\n'
+                   '\tstruct list_head sq2_retired;\n'
+                   '\tbool sq2_dma_stopped;\n'
                    '\tbool sq2_boot_attempted, sq2_secure_active;')
     core = replace(core, '\tenum hfi_version hfi_version;\n',
                    '\t/* VPU hardware is independent of HFI packet version. */\n'
@@ -79,7 +95,145 @@ def main():
                    '#define IS_IRIS1(core) ((core)->res->iris1)\n#define IS_V4(core)')
     # Keep all pre-existing SoC tables unchanged (zero-initialized iris1=false).
     (args.output / 'core.h').write_text(core)
+    vdec = (src / 'vdec.c').read_text()
+    # The SQ2 VB2 owner takes an independent exporter reference. dma_buf_put
+    # is exported in DMA_BUF; missing Module.symvers can hide this at modpost.
+    vdec += '\nMODULE_IMPORT_NS(DMA_BUF);\n'
+    # A zero-length LAST buffer is the drain terminator, not a decoded frame.
+    # Preserve legacy behavior and the later DATACORRUPT/DROP error checks.
+    vdec = replace(vdec, '\t\tif (!bytesused)\n\t\t\tstate = VB2_BUF_STATE_ERROR;',
+                   '\t\tif (!bytesused && (!IS_SQ2_HFI(inst->core) ||\n'
+                   '\t\t    !(vbuf->flags & V4L2_BUF_FLAG_LAST)))\n'
+                   '\t\t\tstate = VB2_BUF_STATE_ERROR;')
+    trace = '''
+static bool sq2_stage_trace;
+module_param(sq2_stage_trace, bool, 0400);
+static atomic_t sq2_stage_records = ATOMIC_INIT(0);
+static void sq2_vdec_trace(struct venus_inst *inst, const char *stage, int ret)
+{
+ if (!sq2_stage_trace || !IS_SQ2_HFI(inst->core)) return;
+ if (!atomic_add_unless(&sq2_stage_records, 1, 128)) return;
+ dev_info(inst->core->dev, "SQ2_VDEC_STAGE %s ret=%d\\n", stage, ret);
+}
+'''
+    vdec = replace(vdec, '#include "pm_helpers.h"', '#include "pm_helpers.h"\n' + trace)
+    # Observe the first unfinished native path without adding MMIO, delays,
+    # retries or changing any call/return value. Explicit opt-in, max 128 logs.
+    for first, last, calls in (
+        ('static int vdec_session_init(', 'static int vdec_num_buffers(', (
+            ('session_init', 'ret = venus_helper_session_init(inst);'),
+            ('input_resolution', 'ret = venus_helper_set_input_resolution(inst, frame_width_min(inst),\n\t\t\t\t\t\tframe_height_min(inst));'))),
+        ('static int vdec_num_buffers(', 'static int vdec_queue_setup(', (
+            ('input_bufreq', 'ret = venus_helper_get_bufreq(inst, HFI_BUFFER_INPUT, &bufreq);'),
+            ('output_bufreq', 'ret = venus_helper_get_bufreq(inst, HFI_BUFFER_OUTPUT, &bufreq);'))),
+        ('static int vdec_queue_setup(', 'static int vdec_verify_conf(', (
+            ('queue_pm_get', 'ret = vdec_pm_get(inst);'),
+            ('queue_session', 'ret = vdec_session_init(inst);'),
+            ('queue_counts', 'ret = vdec_num_buffers(inst, &in_num, &out_num);'),
+            ('queue_pm_put', 'ret = vdec_pm_put(inst, false);'))),
+    ):
+        begin, finish = vdec.index(first), vdec.index(last)
+        part = vdec[begin:finish]
+        for stage, call in calls:
+            part = replace(part, '\t' + call,
+                           f'\tsq2_vdec_trace(inst, "{stage}_begin", 0);\n\t' + call +
+                           f'\n\tsq2_vdec_trace(inst, "{stage}_end", ret);')
+        vdec = vdec[:begin] + part + vdec[finish:]
+    start, end = vdec.index('static void vdec_stop_streaming('), vdec.index('static void vdec_session_release(')
+    section = replace(vdec[start:end], '\tinst->session_error = 0;',
+                      '\tif (IS_SQ2_HFI(inst->core)) {\n'
+                      '\t\tif (ret || test_bit(0, &inst->core->sys_error))\n'
+                      '\t\t\tinst->session_error = true;\n'
+                      '\t} else inst->session_error = 0;')
+    vdec = vdec[:start] + section + vdec[end:]
+    start, end = vdec.index('static int vdec_start_streaming('), vdec.index('static void vdec_cancel_dst_buffers(')
+    section = replace(vdec[start:end], '\tmutex_lock(&inst->lock);',
+                      '\tmutex_lock(&inst->lock);\n'
+                      '\tif (IS_SQ2_HFI(inst->core) && (inst->session_error ||\n'
+                      '\t    test_bit(0, &inst->core->sys_error))) {\n'
+                      '\t\tret = -EIO;\n\t\tgoto error;\n\t}\n')
+    vdec = vdec[:start] + section + vdec[end:]
+    start, end = vdec.index('static void vdec_session_release('), vdec.index('static int vdec_buf_init(')
+    section = vdec[start:end]
+    anchor = '\tabort = (ret && ret != -EINVAL) ? 1 : 0;'
+    if section.count(anchor) != 5:
+        raise ValueError('expected five session-release error decisions')
+    section = section.replace(anchor,
+                              '\tif (IS_SQ2_HFI(core)) abort |= (ret && ret != -EINVAL);\n'
+                              '\telse abort = (ret && ret != -EINVAL) ? 1 : 0;')
+    vdec = vdec[:start] + section + vdec[end:]
+    pos = vdec.index('static int vdec_close(')
+    vdec = vdec[:pos] + replace(vdec[pos:], '\tvdec_pm_get(inst);',
+                               '\tsq2_callback_close_begin(inst);\n\tvdec_pm_get(inst);')
+    vdec = replace(vdec, '\thfi_session_destroy(inst);\n\tmutex_destroy(&inst->lock);',
+                   '\thfi_session_destroy(inst);\n'
+                   '\tvenus_helper_sq2_retire_buffers(inst);\n'
+                   '\tmutex_destroy(&inst->lock);')
+    vdec = replace(vdec, '#include "pm_helpers.h"',
+                   '#include "pm_helpers.h"\n#include "venus-sq2-vb2.h"\n#include "venus-sq2-callback.h"')
+    for queue in ('src_vq', 'dst_vq'):
+        vdec = replace(vdec, f'\t{queue}->mem_ops = &vb2_dma_contig_memops;',
+                       f'\t{queue}->mem_ops = IS_SQ2_HFI(inst->core) ?\n'
+                       '\t\t&sq2_vb2_memops : &vb2_dma_contig_memops;')
+    (args.output / 'vdec.c').write_text(vdec)
+    session = (src / 'hfi.c').read_text()
+    session = replace(session, 'static u32 to_codec_type(',
+                      '#include "venus-sq2-session-end.h"\n\nstatic u32 to_codec_type(')
+    session = replace(session, '#include "core.h"',
+                      '#include "core.h"\n#include "sq2-venus-retire.h"\n#include "venus-sq2-callback.h"')
+    session = replace(session, '\tinit_completion(&inst->done);',
+                      '\tatomic_set(&inst->sq2_callbacks, 0);\n'
+                      '\tinst->sq2_closing = false;\n'
+                      '\tinit_completion(&inst->sq2_end_done);\n'
+                      '\tinst->sq2_end_sent = inst->sq2_end_confirmed = false;\n'
+                      '\tinit_completion(&inst->done);')
+    session = replace(session, '\tinst->hfi_codec = to_codec_type(pixfmt);',
+                      '\tif (IS_SQ2_HFI(core)) {\n'
+                      '\t\tif (inst->sq2_end_sent && !inst->sq2_end_confirmed) return -EIO;\n'
+                      '\t\tret = sq2_venus_scope_begin(inst);\n\t\tif (ret) return ret;\n'
+                      '\t\tinst->sq2_end_sent = inst->sq2_end_confirmed = false;\n\t}\n'
+                      '\tinst->hfi_codec = to_codec_type(pixfmt);')
+    start = session.index('int hfi_session_deinit(')
+    end = session.index('EXPORT_SYMBOL_GPL(hfi_session_deinit);', start)
+    section = replace(session[start:end], '\tint ret;',
+                      '\tint ret;\n\n\tif (IS_SQ2_HFI(inst->core)) return sq2_session_end(inst);')
+    session = session[:start] + section + session[end:]
+    start = session.index('void hfi_session_destroy(')
+    end = session.index('EXPORT_SYMBOL_GPL(hfi_session_destroy);', start)
+    section = replace(session[start:end], '\tmutex_unlock(&core->lock);',
+                      '\tmutex_unlock(&core->lock);\n\tsq2_callback_drain(inst);\n'
+                      '\tif (IS_SQ2_HFI(core)) sq2_venus_scope_drop(inst);')
+    session = session[:start] + section + session[end:]
+    (args.output / 'hfi.c').write_text(session)
+    msgs = (src / 'hfi_msgs.c').read_text()
+    start = msgs.index('static void hfi_session_end_done(')
+    end = msgs.index('static void hfi_session_abort_done(', start)
+    section = replace(msgs[start:end], '\tinst->error = pkt->error_type;',
+                      '\tif (IS_SQ2_HFI(core)) {\n'
+                      '\t\tinst->sq2_end_error = pkt->error_type;\n'
+                      '\t\tcomplete(&inst->sq2_end_done);\n\t\treturn;\n\t}\n'
+                      '\tinst->error = pkt->error_type;')
+    msgs = msgs[:start] + section + msgs[end:]
+    # Include after packet constants have been declared.
+    pos = msgs.index('struct hfi_done_handler')
+    msgs = msgs[:pos] + '#include "venus-sq2-callback.h"\n\n' + msgs[pos:]
+    msgs = replace(msgs, 'to_instance(struct venus_core *core, u32 session_id)',
+                   'to_instance(struct venus_core *core, u32 session_id, u32 packet)')
+    msgs = replace(msgs, '\t\tif (hash32_ptr(inst) == session_id) {',
+                   '\t\tif (hash32_ptr(inst) == session_id) {\n'
+                   '\t\t\tif (!sq2_callback_get(inst, packet)) break;')
+    msgs = replace(msgs, 'to_instance(core, pkt->shdr.session_id);',
+                   'to_instance(core, pkt->shdr.session_id, hdr->pkt_type);')
+    msgs = replace(msgs, '\thandler->done(core, inst, hdr);',
+                   '\thandler->done(core, inst, hdr);\n\tsq2_callback_put(inst);')
+    msgs = replace(msgs, '\tif (inst->ops->flush_done)',
+                   '\tif (inst->ops->flush_done &&\n'
+                   '\t    (!IS_SQ2_HFI(core) || !READ_ONCE(inst->sq2_closing)))')
+    (args.output / 'hfi_msgs.c').write_text(msgs)
     platform = (src / 'core.c').read_text()
+    platform = replace(platform, '\t\tinst->ops->event_notify(inst, EVT_SESSION_ERROR, NULL);',
+                       '\t\tif (!IS_SQ2_HFI(core) || !READ_ONCE(inst->sq2_closing))\n'
+                       '\t\t\tinst->ops->event_notify(inst, EVT_SESSION_ERROR, NULL);')
     platform = replace(platform, '\tmutex_init(&core->pm_lock);',
                        '\t/* PAS callsites are compile-tested; devres quarantine is pending. */\n'
                        '\tif (IS_SQ2_HFI(core))\n\t\treturn -EOPNOTSUPP;\n\n'
@@ -186,10 +340,90 @@ def main():
     hfi = replace(hfi, '\tret = venus_sys_set_power_control(hdev, venus_fw_low_power_mode);',
                   '\tret = venus_sys_set_power_control(hdev, IS_SQ2_HFI(hdev->core) ?\n'
                   '\t\tfalse : venus_fw_low_power_mode);')
+    start = hfi.index('static int venus_core_deinit(')
+    end = hfi.index('static int venus_core_ping(', start)
+    section = replace(hfi[start:end], '\tvenus_set_state(hdev, VENUS_STATE_DEINIT);',
+                      '\tif (IS_SQ2_HFI(core)) {\n'
+                      '\t\tmutex_lock(&hdev->lock);\n'
+                      '\t\thdev->state = VENUS_STATE_DEINIT;\n'
+                      '\t\thdev->suspended = true;\n'
+                      '\t\thdev->power_enabled = false;\n'
+                      '\t\tmutex_unlock(&hdev->lock);\n\t\treturn 0;\n\t}\n'
+                      '\tvenus_set_state(hdev, VENUS_STATE_DEINIT);')
+    hfi = hfi[:start] + section + hfi[end:]
+    start = hfi.index('static int venus_resume(')
+    end = hfi.index('static int venus_suspend_1xx(', start)
+    section = replace(hfi[start:end], '\tif (!hdev->suspended)',
+                      '\t/* Serialize against terminal deinit before any power/MMIO access. */\n'
+                      '\tif (IS_SQ2_HFI(core) && (!venus_is_valid_state(hdev) ||\n'
+                      '\t    test_bit(0, &core->sys_error))) {\n'
+                      '\t\tret = -EIO;\n\t\tgoto unlock;\n\t}\n\n'
+                      '\tif (!hdev->suspended)')
+    hfi = hfi[:start] + section + hfi[end:]
     (args.output / 'hfi_venus.c').write_text(hfi)
     helpers = (src / 'helpers.c').read_text()
+    start, end = helpers.index('int venus_helper_free_dpb_bufs('), helpers.index('EXPORT_SYMBOL_GPL(venus_helper_free_dpb_bufs);')
+    section = replace(helpers[start:end], '\t\tif (buf->owned_by == FIRMWARE)',
+                      '\t\tif (buf->owned_by == FIRMWARE &&\n'
+                      '\t\t    (!IS_SQ2_HFI(inst->core) ||\n'
+                      '\t\t     !sq2_venus_scope_ended(inst, &buf->sq2_retired)))')
+    helpers = helpers[:start] + section + helpers[end:]
+    # Bind at actual publication, not allocation: VB2 objects can survive END.
+    for begin, finish, anchor, entry in (
+        ('int venus_helper_queue_dpb_bufs(', 'EXPORT_SYMBOL_GPL(venus_helper_queue_dpb_bufs);',
+         '\t\tret = hfi_session_process_buf(inst, &fdata);', '&buf->sq2_retired'),
+        ('session_process_buf(struct venus_inst *inst,', 'static bool is_dynamic_bufmode(',
+         '\tret = hfi_session_process_buf(inst, &fdata);', 'vb->planes[0].mem_priv'),
+    ):
+        start, end = helpers.index(begin), helpers.index(finish)
+        section = replace(helpers[start:end], anchor,
+                          '\tif (IS_SQ2_HFI(inst->core)) {\n'
+                          f'\t\tret = sq2_venus_scope_bind(inst, {entry});\n'
+                          '\t\tif (ret) return ret;\n\t}\n' + anchor)
+        helpers = helpers[:start] + section + helpers[end:]
+    start, end = helpers.index('static int intbufs_set_buffer('), helpers.index('static int intbufs_unset_buffers(')
+    section = replace(helpers[start:end], '\t\tret = hfi_session_set_buffers(inst, &bd);',
+                      '\t\tif (IS_SQ2_HFI(core)) {\n'
+                      '\t\t\tret = sq2_venus_scope_bind(inst, &buf->sq2_retired);\n'
+                      '\t\t\tif (ret) goto dma_free;\n\t\t}\n'
+                      '\t\tret = hfi_session_set_buffers(inst, &bd);')
+    section = replace(section, 'dma_free:\n',
+                      'dma_free:\n\tif (IS_SQ2_HFI(core) && buf->sq2_retired.scope) {\n'
+                      '\t\tsq2_intbuf_retire(inst, buf);\n\t\treturn ret;\n\t}\n')
+    helpers = helpers[:start] + section + helpers[end:]
+    helper_h = (src / 'helpers.h').read_text()
+    helper_h = replace(helper_h, '\n#endif',
+                       '\nvoid venus_helper_sq2_retire_buffers(struct venus_inst *inst);\n#endif')
+    (args.output / 'helpers.h').write_text(helper_h)
+    helpers = replace(helpers, 'struct intbuf {',
+                      'struct intbuf {\n\tstruct sq2_venus_retired sq2_retired;\n'
+                      '\tstruct venus_core *sq2_core;\n\tunsigned long sq2_charged;\n'
+                      '\tstruct device *sq2_dev;')
+    helpers = replace(helpers, 'bool venus_helper_check_codec(',
+                      '#include "venus-sq2-intbuf.h"\n\nbool venus_helper_check_codec(')
+    helpers = replace(helpers, '\tida_free(&inst->dpb_ids, buf->dpb_out_tag);',
+                      '\tif (IS_SQ2_HFI(inst->core)) {\n'
+                      '\t\t/* Do not recycle a tag still visible to live firmware. */\n'
+                      '\t\tsq2_intbuf_retire(inst, buf);\n\t\treturn;\n\t}\n'
+                      '\tida_free(&inst->dpb_ids, buf->dpb_out_tag);')
+    # An unsuccessful RELEASE_BUFFERS is not a DMA ownership transfer.
+    # Keep the failed buffer and the unprocessed tail linked, and preserve the
+    # first error. This does not replace the pending global PAS/VB2 quarantine.
+    for begin, finish in (
+        ('static int intbufs_unset_buffers(', 'static const unsigned int intbuf_types_1xx'),
+        ('int venus_helper_intbufs_realloc(', 'EXPORT_SYMBOL_GPL(venus_helper_intbufs_realloc);'),
+    ):
+        start, end = helpers.index(begin), helpers.index(finish)
+        section = replace(helpers[start:end],
+                          '\t\tret = hfi_session_unset_buffers(inst, &bd);',
+                          '\t\tret = hfi_session_unset_buffers(inst, &bd);\n'
+                          '\t\tif (IS_SQ2_HFI(inst->core) && ret)\n'
+                          '\t\t\treturn ret; /* no confirmed release: retain DMA and list entry */\n'
+                          '\t\tif (IS_SQ2_HFI(inst->core)) {\n'
+                          '\t\t\tsq2_intbuf_retire(inst, buf);\n\t\t\tcontinue;\n\t\t}')
+        helpers = helpers[:start] + section + helpers[end:]
     helpers = replace(helpers, '#include "core.h"',
-                      '#include "core.h"\n#include "sq2-venus-buffer.h"')
+                      '#include "core.h"\n#include "sq2-venus-buffer.h"\n#include "sq2-venus-retire.h"')
     helpers = replace(helpers, '\t\tbuf->owned_by = DRIVER;',
                       '\t\tif (IS_SQ2_HFI(inst->core) && !sq2_venus_buffer_valid(buf->da, buf->size)) {\n'
                       '\t\t\tdma_free_attrs(dev, buf->size, buf->va, buf->da, buf->attrs);\n'
@@ -227,7 +461,16 @@ def main():
                       '\t                             vb->planes[0].data_offset))\n'
                       '\t\treturn -EINVAL;\n'
                       '\tif (V4L2_TYPE_IS_OUTPUT(vb->vb2_queue->type)) {')
-    (args.output / 'helpers.c').write_text(before + prepare)
+    helpers = before + prepare
+    helpers, alloc_count = re.subn(
+        r'dma_alloc_attrs\(dev, buf->size, &buf->da, GFP_KERNEL,\s*buf->attrs\)',
+        'sq2_intbuf_alloc(inst, buf)', helpers)
+    helpers, free_count = re.subn(
+        r'dma_free_attrs\((?:dev|inst->core->dev), buf->size, buf->va, buf->da,\s*buf->attrs\)',
+        'sq2_intbuf_dma_free(inst, buf)', helpers)
+    if (alloc_count, free_count) != (2, 6):
+        raise ValueError(f'internal DMA site counts: {alloc_count}/{free_count}')
+    (args.output / 'helpers.c').write_text(helpers)
     fw = (src / 'firmware.c').read_text()
     fw = replace(fw, '#include "hfi_venus_io.h"', '#include "hfi_venus_io.h"\n#include "venus-iris1.h"')
     fw = replace(fw, '\tret = venus_load_fw(core, fwpath, &mem_phys, &mem_size);',

@@ -12,6 +12,13 @@ KERNEL = Path('/root/.cache/sq2-thermal/kernel')
 
 @unittest.skipUnless(KERNEL.exists(), 'pinned WSL kernel tree required')
 class VenusTransport(unittest.TestCase):
+    def test_decoder_overlay_matches_pinned_driver(self):
+        driver = (KERNEL / 'drivers/media/platform/qcom/venus/vdec.c').read_text()
+        overlay = (ROOT / 'scripts/build-sq2-hfi-overlay.py').read_text()
+        self.assertIn('.compatible = "venus-decoder"', driver)
+        self.assertIn('video-decoder { compatible = "venus-decoder"; };', overlay)
+        self.assertNotIn('compatible = "qcom,venus-decoder"', overlay)
+
     def test_lab_resources_and_buffer_checks(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / 'resources'
@@ -28,6 +35,66 @@ class VenusTransport(unittest.TestCase):
             self.assertIn('.cp_size = 0x25800000', res)
             self.assertNotIn('0x70800000', res)
             self.assertEqual(helpers.count('!sq2_venus_buffer_valid('), 4)
+            self.assertEqual(helpers.count('ret = sq2_venus_scope_bind('), 3)
+            self.assertEqual(helpers.count('sq2_intbuf_alloc(inst, buf)'), 2)
+            self.assertEqual(helpers.count('sq2_intbuf_dma_free(inst, buf)'), 6)
+            self.assertNotIn('dma_alloc_attrs(', helpers)
+            self.assertNotIn('dma_free_attrs(', helpers)
+            self.assertIn('!sq2_venus_scope_ended(inst, &buf->sq2_retired)', helpers)
+            self.assertIn('sq2_venus_scope_bind(inst, vb->planes[0].mem_priv)', helpers)
+            session_end = (dest / 'venus-sq2-session-end.h').read_text()
+            self.assertLess(session_end.index('inst->sq2_end_confirmed = true;'), session_end.index('sq2_venus_scope_end(inst);'))
+            vdec = (dest / 'vdec.c').read_text()
+            self.assertEqual(vdec.count('MODULE_IMPORT_NS(DMA_BUF);'), 1)
+            self.assertIn('if (!bytesused && (!IS_SQ2_HFI(inst->core) ||', vdec)
+            self.assertEqual(vdec.count('sq2_vdec_trace(inst, "'), 16)
+            trace = vdec[vdec.index('static bool sq2_stage_trace;'):vdec.index('\n\n/*', vdec.index('static bool sq2_stage_trace;'))]
+            harness = '''#include <stdbool.h>
+#include <stdio.h>
+#include <assert.h>
+typedef int atomic_t;
+#define ATOMIC_INIT(x) (x)
+#define module_param(a,b,c)
+struct core { bool sq2; int dev; };
+struct venus_inst { struct core *core; };
+#define IS_SQ2_HFI(c) ((c)->sq2)
+static unsigned logs;
+static bool atomic_add_unless(int *v,int n,int limit) { if (*v==limit) return false; *v+=n; return true; }
+#define dev_info(dev,fmt,stage,ret) do { (void)(dev); (void)(fmt); (void)(stage); (void)(ret); logs++; } while (0)
+''' + trace + '''
+int main(void) {
+ struct core c={.sq2=true}; struct venus_inst i={.core=&c};
+ sq2_vdec_trace(&i,"off",0); assert(logs==0 && sq2_stage_records==0);
+ sq2_stage_trace=true; c.sq2=false;
+ sq2_vdec_trace(&i,"legacy",0); assert(logs==0 && sq2_stage_records==0);
+ c.sq2=true; for(int n=0;n<1000;n++) sq2_vdec_trace(&i,"test",-5);
+ assert(logs==128 && sq2_stage_records==128);
+ puts("STAGE_TRACE_PASS default-off legacy-zero saturated-128"); return 0;
+}
+'''
+            (dest / 'trace-test.c').write_text(harness)
+            subprocess.run(['gcc', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
+                            '-fno-pie', '-no-pie', str(dest / 'trace-test.c'), '-o', str(dest / 'trace-test')], check=True)
+            subprocess.run([str(dest / 'trace-test')], check=True)
+            start_path = vdec[vdec.index('static int vdec_start_streaming('):vdec.index('static void vdec_cancel_dst_buffers(')]
+            self.assertLess(start_path.index('inst->session_error ||'), start_path.index('vdec_start_capture(inst)'))
+            self.assertEqual(vdec.count('if (IS_SQ2_HFI(core)) abort |='), 5)
+            self.assertEqual(vdec.count('&sq2_vb2_memops : &vb2_dma_contig_memops;'), 2)
+            close = vdec[vdec.index('static int vdec_close('):vdec.index('static const struct v4l2_file_operations')]
+            self.assertLess(close.index('sq2_callback_close_begin(inst);'), close.index('v4l2_m2m_ctx_release('))
+            msgs = (dest / 'hfi_msgs.c').read_text()
+            self.assertIn('if (!sq2_callback_get(inst, packet)) break;', msgs)
+            self.assertIn('handler->done(core, inst, hdr);\n\tsq2_callback_put(inst);', msgs)
+            session = (dest / 'hfi.c').read_text()
+            destroy = session[session.index('void hfi_session_destroy('):session.index('EXPORT_SYMBOL_GPL(hfi_session_destroy);')]
+            self.assertLess(destroy.index('list_del_init('), destroy.index('sq2_callback_drain(inst);'))
+            self.assertLess(destroy.index('mutex_unlock('), destroy.index('sq2_callback_drain(inst);'))
+            self.assertLess(close.index('hfi_session_destroy(inst);'), close.index('venus_helper_sq2_retire_buffers(inst);'))
+            self.assertLess(close.index('venus_helper_sq2_retire_buffers(inst);'), close.index('kfree(inst);'))
+            dpb = helpers[helpers.index('static void free_dpb_buf('):helpers.index('int venus_helper_queue_dpb_bufs(')]
+            self.assertLess(dpb.index('sq2_intbuf_retire(inst, buf);'), dpb.index('ida_free('))
+            self.assertIn('return;', dpb[:dpb.index('ida_free(')])
+            self.assertIn('sq2_venus_retire_stopped(core);', (dest / 'venus-sq2-core.h').read_text())
             self.assertIn('!sq2_venus_payload_valid(', helpers)
             section = helpers[helpers.index('int venus_helper_vb2_buf_init('):]
             self.assertLess(section.index('!sq2_venus_buffer_valid('), section.index('buf->dma_addr ='))

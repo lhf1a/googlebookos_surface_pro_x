@@ -7,6 +7,7 @@
 #ifndef VENUS_SQ2_CORE_H
 #define VENUS_SQ2_CORE_H
 #include "sq2-venus-platform.h"
+#include "sq2-venus-retire.h"
 static bool sq2_platform_allow;
 module_param(sq2_platform_allow, bool, 0400);
 static const struct venus_pm_ops sq2_resident_pm_ops = {0};
@@ -22,6 +23,7 @@ static int venus_sq2_stop_core(struct venus_core *core)
  ret = venus_shutdown(core);
  mutex_unlock(&core->lock);
  if (ret) return ret; /* firmware, HFI and powered platform remain owned */
+ sq2_venus_retire_stopped(core);
  return sq2_venus_platform_power_off(core->sq2_platform);
 }
 
@@ -70,6 +72,7 @@ static int venus_sq2_probe(struct platform_device *pdev,
  core->pm_ops = &sq2_resident_pm_ops;
  mutex_init(&core->lock);
  mutex_init(&core->pm_lock);
+ sq2_venus_retire_init(core);
  INIT_LIST_HEAD(&core->instances);
  INIT_DELAYED_WORK(&core->work, venus_sq2_error);
  init_waitqueue_head(&core->sys_err_done);

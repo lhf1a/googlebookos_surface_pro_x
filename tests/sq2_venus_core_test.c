@@ -13,6 +13,9 @@ static void mock_log(const char *fmt,...) {(void)fmt;}
 #define HFI_VERSION_4XX 4
 #define VIDC_SESSION_TYPE_DEC 2
 #define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
+typedef int refcount_t;
+#define SQ2_VENUS_RETIRE_HOST_TEST
+struct list_head { struct list_head *next, *prev; };
 struct work_struct { int unused; };
 struct delayed_work { struct work_struct work; };
 struct device { void *of_node; };
@@ -32,6 +35,10 @@ struct venus_core {
 struct sq2_venus_platform {struct venus_core core;};
 static struct sq2_venus_platform owner;
 static int step,fail,allocated,power,hfi,irq,children,pm,boots,stop_error,stops,cancelled;
+static int retired_drained;
+void sq2_venus_retire_init(struct venus_core *c) {(void)c; retired_drained=0;}
+void sq2_venus_retire_stopped(struct venus_core *c)
+{(void)c;assert(!irq && !stop_error);retired_drained++;}
 static const int venus_core_ops=0;
 static int bad(void){return ++step==fail;}
 static void mutex_lock(int *p){(void)p;}static void mutex_unlock(int *p){(void)p;}
@@ -92,10 +99,12 @@ int main(int argc,char **argv)
  reset();p.data=NULL;fail=5;stop_error=-ETIMEDOUT;
  assert(venus_sq2_probe(&p,&r)==-EIO);
  assert(allocated&&power&&hfi&&!irq&&boots==1);
+ assert(!retired_drained);
  reset();p.data=NULL;fail=0;
  assert(!venus_sq2_probe(&p,&r)&&children&&pm&&irq);
  venus_sq2_error(&owner.core.work.work);
  assert(boots==1&&!power&&!irq&&allocated&&hfi);
+ assert(retired_drained==1);
  assert(!venus_sq2_remove(&p)&&!children&&!pm&&allocated&&hfi);
  reset();p.data=NULL;fail=0;sq2_platform_allow=false;
  assert(venus_sq2_probe(&p,&r)==-EOPNOTSUPP&&!allocated&&step==0);

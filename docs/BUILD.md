@@ -1,5 +1,11 @@
 # 构建与部署
 
+独立 C2 实验组件：`probe/video/sq2-c2-v4l2-component.h` 使用真实 C2Work/C2BlockPool 与 `sq2-v4l2-session.h`；测试入口 `sq2-c2-component-test.cpp` 无参数只释放对象，带参数才运行向量测试。当前仅独立进程验证，不安装服务；构建入口 `python3 scripts/build-sq2-c2-component-test.py` 校验固定 AOSP 提交及本机四库哈希；需要已准备的 NDK、平台 libc++ 头副本和测试向量。完整命令见本地 `out/video-decode/codec2-integration/component-backend/build.txt`。后续须补依赖自动准备、异步输出、完整参数/能力和 AIDL/MediaCodec 验证，不能当作成品部署。
+
+V4L2 runner新增 `--dmabuf /dev/video0`：system dma_heap为输入和输出提供进口fd，显式DMA_BUF_SYNC，沿用严格六帧CRC/EOS检查；无模块装载/固件重启。已在同boot驻留原生core验证，证据 `out/video-decode/venus-transport/dmabuf-frames`。`tests/test_sq2_v4l2_runner.py` 覆盖fd生命周期与分配失败清理；不是gralloc/Codec2实现。
+
+原生V4L2实验runner：用aarch64-linux-gnu-gcc -static并加-I out/video-decode/h264-vector构建probe/video/sq2-v4l2-decode-test.c。--format-only仅设置格式；--buffers-only追加REQBUFS/QUERYBUF/mmap但不QBUF/STREAMON，两者均close。默认模式才尝试六帧，曾实机失联，不能默认重跑；配置ioctl日志须重定向Android持久/data目录并保留fsync。tests/test_sq2_v4l2_runner.py以实际main+wrapped syscalls验证不送帧边界，不是硬件证明。venus-dec的sq2_stage_trace=1仅显式诊断、最多128条；默认关闭。新boot仅一次PAS，不热卸clock/overlay；本机已有resident core时不要运行freshboot装载脚本。
+
 真实H264帧探针：`build-sq2-h264-test-vector.py --out NEW_DIR`用ffmpeg/libx264生成6帧320x240 baseline Annex-B及独立NV12参考/CRC；构建设置`SQ2_HFI_DECODE_VECTOR=.../sq2-h264-vector.h`，同一`build-sq2-iris1-phase.sh --hfi`会固定header dfe3c475…并额外测试dec helper。模块需显式hfi_decode=1且hfi_session/hfi_caps/完整HFI条件成立，默认不解码；bufreq/输入/UBWC-DPB/线性OUTPUT2及scratch都在独立coherent DMA内，直到真实PAS停止后才释放。21c883a3…已实测6/6 Y/UV CRC一致；合成dec19项、caps40项、ring/事务测试通过，缺Module.symvers的审计边界不变。只允许每boot第一次固件启动，不卸载提供者。
 
 离线证据与能力对齐：先用parse-sq2-hfi-caps.py解析本轮raw kmsg，再运行`report-sq2-video-capabilities.py --caps CAPS_JSON --kmsg KMSG --vector VECTOR_JSON --android MEDIA_PLAYER_TXT --output NEW_JSON`。核对全部六帧唯一/尺寸/两个CRC、EOS及关闭标记，拒绝缺失/不一致，报告固件声明与Android实际枚举，不自动改XML。六种decoder的紧凑声明矩阵在configs/sq2-video-decoder-capabilities.json；只有H264小向量验证，不代表上限、其它编码或Android组件已通过。
