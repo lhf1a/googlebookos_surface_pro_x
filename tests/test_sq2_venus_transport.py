@@ -12,6 +12,27 @@ KERNEL = Path('/root/.cache/sq2-thermal/kernel')
 
 @unittest.skipUnless(KERNEL.exists(), 'pinned WSL kernel tree required')
 class VenusTransport(unittest.TestCase):
+    def test_pas_dispatch_is_opt_in_and_probe_is_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for lease in (False, True):
+                dest = Path(tmp) / str(lease)
+                cmd = [sys.executable, str(ROOT / 'scripts/prepare-sq2-venus-iris1.py'),
+                       '--output', str(dest)]
+                if lease:
+                    cmd.append('--firmware-lease')
+                subprocess.run(cmd, check=True)
+                fw = (dest / 'firmware.c').read_text()
+                core = (dest / 'core.c').read_text()
+                self.assertEqual('return venus_sq2_boot(core);' in fw, lease)
+                self.assertEqual('return venus_sq2_shutdown(core);' in fw, lease)
+                self.assertIn('if (IS_SQ2_HFI(core))\n\t\treturn -EOPNOTSUPP;', core)
+                self.assertNotIn('.sq2_windows_hfi =', core)
+                if lease:
+                    self.assertLess(fw.index('return venus_sq2_boot(core);'),
+                                    fw.index('ret = venus_load_fw(core,'))
+                    self.assertIn('core->sq2_boot_attempted = true;',
+                                  (dest / 'venus-sq2-firmware.h').read_text())
+
     def test_generated_transport_and_legacy_isolation(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / 'venus'

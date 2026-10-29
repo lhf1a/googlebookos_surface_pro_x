@@ -133,7 +133,7 @@
     }
   },
   "same_boot_restart": "second firmware start in one OS boot left CTRL_STATUS 0; clean-boot first start succeeded; root cause open",
-  "next_executable_action": "Integrate verified power/reset and PAS ownership into Venus with explicit shutdown-failure quarantine across core.c probe failure, error recovery and remove; stock path ignores shutdown result and restarts, so do not enable platform match yet. Then validate V4L2 imported-buffer bounds, actual frames and open Codec2. No second firmware start in bootbcd0.",
+  "next_executable_action": "Implement independently owned SQ2 platform resources (core/HFI/IRQ/power/reset) with PAS shutdown-failure quarantine across probe/recovery/remove; PAS dispatch is compiled but SQ2 probe explicitly refuses until this exists. Preserve no-second-firmware-start in bootbcd0. Then V4L2 actual buffers/frames and open Codec2 capability alignment.",
   "not_verified": [
     "V4L2 decode API",
     "Android hardware MediaCodec",
@@ -216,5 +216,14 @@
     "ownership": "mask/coherent/bus-limit saved, restored after all UC allocations released or create failure",
     "tests": "ASan/UBSan; 4096 missing-page fault positions; two full maps; identity/group/mask failure restoration; generated-source regression",
     "limitation": "host mocked DMA only, not a hardware DMA test; V4L2 buffer imports not yet validated"
+  },
+  "venus_pas_candidate": {
+    "status": "compiled-dispatch-no-device-probe",
+    "dispatch": "venus_boot/venus_shutdown SQ2 flag and --firmware-lease",
+    "original_boot_errors_preserved": true,
+    "protection_failure_shutdown": "owner retains memory on failure; original protection error returned",
+    "repeat_boot": "per-core rejected, not board-global across module reload",
+    "tests": "8 fault combinations, 3 invalid platform cases, generated source opt-in/probe block, ARM64 modules",
+    "pending": "independent core/HFI/IRQ/power resource quarantine; explicit probe refusal remains"
   }
 }

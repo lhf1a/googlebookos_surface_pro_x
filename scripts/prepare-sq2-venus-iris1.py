@@ -30,7 +30,7 @@ def main():
     p.add_argument('--kernel', type=Path, default=Path('/root/.cache/sq2-thermal/kernel'))
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--firmware-lease', action='store_true',
-                   help='compile the independent PAS memory owner (no enabled caller)')
+                   help='compile PAS owner and SQ2 firmware dispatch (platform probe still blocked)')
     args = p.parse_args()
     src = args.kernel / 'drivers/media/platform/qcom/venus'
     for name, digest in HASHES.items():
@@ -50,6 +50,9 @@ def main():
     shutil.copyfile(ROOT / 'probe/video/venus-iris1.h', args.output / 'venus-iris1.h')
     shutil.copyfile(ROOT / 'probe/video/sq2-venus-dma.h', args.output / 'sq2-venus-dma.h')
     core = (src / 'core.h').read_text()
+    core = replace(core, 'struct venus_core {',
+                   'struct sq2_venus_fw;\nstruct venus_core {\n'
+                   '\tstruct sq2_venus_fw *sq2_fw_owner;\n\tbool sq2_boot_attempted;')
     core = replace(core, '\tenum hfi_version hfi_version;\n',
                    '\t/* VPU hardware is independent of HFI packet version. */\n'
                    '\tbool iris1;\n\tbool sq2_windows_hfi;\n\tenum hfi_version hfi_version;\n')
@@ -58,6 +61,12 @@ def main():
                    '#define IS_IRIS1(core) ((core)->res->iris1)\n#define IS_V4(core)')
     # Keep all pre-existing SoC tables unchanged (zero-initialized iris1=false).
     (args.output / 'core.h').write_text(core)
+    platform = (src / 'core.c').read_text()
+    platform = replace(platform, '\tmutex_init(&core->pm_lock);',
+                       '\t/* PAS callsites are compile-tested; devres quarantine is pending. */\n'
+                       '\tif (IS_SQ2_HFI(core))\n\t\treturn -EOPNOTSUPP;\n\n'
+                       '\tmutex_init(&core->pm_lock);')
+    (args.output / 'core.c').write_text(platform)
     hfi = (src / 'hfi_venus.c').read_text()
     hfi = replace(hfi, '#include <linux/slab.h>',
                   '#include <linux/slab.h>\n#include <linux/iommu.h>\n#include "sq2-venus-dma.h"')
@@ -133,18 +142,30 @@ def main():
                  '\tret = venus_load_fw(core, fwpath, &mem_phys, &mem_size);')
     (args.output / 'firmware.c').write_text(fw)
     if args.firmware_lease:
+        fw = replace(fw, '#include "venus-iris1.h"',
+                     '#include "venus-iris1.h"\n#include "sq2-venus-fw.h"\n'
+                     '#include "venus-sq2-firmware.h"')
+        fw = replace(fw, '\tif (!IS_ENABLED(CONFIG_QCOM_MDT_LOADER) ||',
+                     '\tif (IS_SQ2_HFI(core))\n\t\treturn venus_sq2_boot(core);\n\n'
+                     '\tif (!IS_ENABLED(CONFIG_QCOM_MDT_LOADER) ||')
+        fw = replace(fw, 'int venus_shutdown(struct venus_core *core)\n{\n\tint ret;',
+                     'int venus_shutdown(struct venus_core *core)\n{\n\tint ret;\n\n'
+                     '\tif (IS_SQ2_HFI(core))\n\t\treturn venus_sq2_shutdown(core);')
+        (args.output / 'firmware.c').write_text(fw)
         for name in ('sq2-fw-transaction.h', 'sq2-venus-fw.h', 'sq2-venus-fw.c',
-                     'sq2_video_fw_layout.h', 'sq2_pil_mem_query.c', 'sq2-pil-region.h'):
+                     'sq2_video_fw_layout.h', 'sq2_pil_mem_query.c', 'sq2-pil-region.h',
+                     'venus-sq2-firmware.h'):
             shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
         with (args.output / 'Makefile').open('a') as f:
             f.write('\nvenus-core-objs += sq2-venus-fw.o sq2_pil_mem_query.o\n'
                     'ccflags-y += -DSQ2_PIL_QUERY_LIBRARY -I$(srctree)/drivers/firmware\n')
     manifest = {'status': 'compile-only-no-platform-match-no-hardware-validation',
                 'sq2_transport': 'explicit inactive flag; coherent 16MiB UC; bounded IOVA; SFR view; CPU-only mailboxes; no VERSION write',
-                'remaining': ['platform power/reset', 'PAS ownership callsites and quarantine',
+                'remaining': ['platform power/reset', 'core/HFI/IRQ/devres quarantine across probe/recovery/remove',
                               'V4L2 buffer address validation and runtime', 'Android Codec2'],
                 'sq2_dma': 'exact 2300/2320/2340 SID + singleton DMA group; saved/restored 32bit mask and bus limit; UC alignment and every-page translation checked',
-                'firmware_lease_compiled_without_callsite': args.firmware_lease,
+                'firmware_lease_dispatch_compiled': args.firmware_lease,
+                'sq2_platform_probe_blocked': True,
                 'input_sha256': HASHES,
                 'output_sha256': {f.name: hashlib.sha256(f.read_bytes()).hexdigest()
                                   for f in sorted(args.output.iterdir()) if f.is_file()}}
