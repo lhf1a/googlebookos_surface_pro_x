@@ -51,6 +51,8 @@ static bool dma_probe;
 module_param(dma_probe, bool, 0400);
 static bool hfi_handshake;
 module_param(hfi_handshake, bool, 0400);
+static bool hfi_compact_table;
+module_param(hfi_compact_table, bool, 0400);
 static bool protect_iova;
 module_param(protect_iova, bool, 0400);
 /* Allow the independent O_DSYNC collector to commit each BEGIN marker before
@@ -101,6 +103,29 @@ static int icc_release(void)
 static void trace_barrier(void)
 {
  if (trace_delay_ms) msleep(trace_delay_ms);
+}
+static int bridge_pulse(struct reset_control **resets,
+                        const char * const *names, const char *stage)
+{
+ int i, ret;
+ for (i = 0; i < 4; i++) {
+  pr_info("SQ2_IRIS1_IDENTIFY phase=%s_assert_begin name=%s\n", stage, names[i]);
+  trace_barrier();
+  ret = reset_control_assert(resets[i]);
+  pr_info("SQ2_IRIS1_IDENTIFY phase=%s_assert_end name=%s ret=%d\n", stage, names[i], ret);
+  if (ret) return ret;
+  trace_barrier();
+ }
+ usleep_range(150, 250);
+ for (i = 0; i < 4; i++) {
+  pr_info("SQ2_IRIS1_IDENTIFY phase=%s_deassert_begin name=%s\n", stage, names[i]);
+  trace_barrier();
+  ret = reset_control_deassert(resets[i]);
+  pr_info("SQ2_IRIS1_IDENTIFY phase=%s_deassert_end name=%s ret=%d\n", stage, names[i], ret);
+  if (ret) return ret;
+  trace_barrier();
+ }
+ return 0;
 }
 #ifndef SQ2_IDENTIFY_EXISTING
 static int overlay_id = -1;
@@ -169,6 +194,7 @@ static int identify(struct platform_device *pdev)
  struct sq2_venus_fw *fw_owner = NULL;
  u32 saved_cgc = 0, saved_config = 0;
  bool config_changed = false;
+ bool firmware_attempted = false;
 #endif
  static const char * const names[] = {"axic", "axi0", "axi1", "core", "vcodec", "cvp"};
  void __iomem *base;
@@ -292,23 +318,8 @@ static int identify(struct platform_device *pdev)
  }
  if (reset_bridge) {
   reset_changed = true;
-  for (i = 0; i < 4; i++) {
-   pr_info("SQ2_IRIS1_IDENTIFY phase=reset_assert_begin name=%s\n", reset_names[i]);
-   trace_barrier();
-   ret = reset_control_assert(resets[i]);
-   pr_info("SQ2_IRIS1_IDENTIFY phase=reset_assert_end name=%s ret=%d\n", reset_names[i], ret);
-   if (ret) goto cleanup;
-   trace_barrier();
-  }
-  usleep_range(150, 250);
-  for (i = 0; i < 4; i++) {
-   pr_info("SQ2_IRIS1_IDENTIFY phase=reset_deassert_begin name=%s\n", reset_names[i]);
-   trace_barrier();
-   ret = reset_control_deassert(resets[i]);
-   pr_info("SQ2_IRIS1_IDENTIFY phase=reset_deassert_end name=%s ret=%d\n", reset_names[i], ret);
-   if (ret) goto cleanup;
-   trace_barrier();
-  }
+  ret = bridge_pulse(resets, reset_names, "reset");
+  if (ret) goto cleanup;
  }
  for (i = 0; i < enable_clocks; i++) {
   pr_info("SQ2_IRIS1_IDENTIFY phase=clk_on_begin name=%s\n", names[i]);
@@ -369,7 +380,7 @@ static int identify(struct platform_device *pdev)
   if (hfi_handshake) {
    pr_info("SQ2_IRIS1_IDENTIFY phase=hfi_prepare_begin\n");
    trace_barrier();
-   ret = sq2_hfi_prepare(&pdev->dev, &hfi);
+   ret = sq2_hfi_prepare(&pdev->dev, &hfi, hfi_compact_table);
    pr_info("SQ2_IRIS1_IDENTIFY phase=hfi_prepare_end ret=%d\n", ret);
    trace_barrier();
    if (ret) goto cleanup;
@@ -382,6 +393,7 @@ static int identify(struct platform_device *pdev)
   writel(0, base + 0xe2000);
   pr_info("SQ2_IRIS1_IDENTIFY phase=firmware_boot_begin\n");
   trace_barrier();
+  firmware_attempted = true;
   ret = sq2_venus_fw_boot(&pdev->dev, &fw_owner, pil_gap);
   pr_info("SQ2_IRIS1_IDENTIFY phase=firmware_boot_end ret=%d owner=%d\n", ret, !!fw_owner);
   trace_barrier();
@@ -446,6 +458,19 @@ cleanup:
   clk_disable_unprepare(clks[nenabled]);
   pr_info("SQ2_IRIS1_IDENTIFY phase=clk_off_end name=%s\n", names[nenabled]);
  }
+#ifdef SQ2_IDENTIFY_FIRMWARE
+ /* Pinned downstream __venus_power_off(true) pulses the bridge after clocks
+  * are disabled for VERSION_HANA=0x50100000. Merely restoring deasserted
+  * initial bits omits this recovery. Only do it after a confirmed PAS stop;
+  * the shutdown-failure path above keeps all resources and never gets here.
+  * Domains and interconnect votes remain held throughout the pulse.
+  */
+ if (firmware_attempted && reset_changed && (version & ~0xffffU) == 0x50100000) {
+  int recover = bridge_pulse(resets, reset_names, "post_reset");
+  pr_info("SQ2_IRIS1_IDENTIFY phase=post_reset_end ret=%d hfi_ret=%d\n", recover, ret);
+  if (recover) ret = recover;
+ }
+#endif
  if (reset_changed) {
   for (i = 0; i < 4; i++) {
    int restore = reset_states[i] ? reset_control_assert(resets[i]) :
@@ -539,6 +564,7 @@ static int __init start(void)
   return -EINVAL;
  if (hfi_handshake && (!boot_firmware || !pil_gap || !vote_interconnects)) return -EINVAL;
  if (protect_iova && !hfi_handshake) return -EINVAL;
+ if (hfi_compact_table && !hfi_handshake) return -EINVAL;
  if (trace_delay_ms > 100 || (trace_delay_ms && !reset_bridge)) return -EINVAL;
  if (icc_probe && (!vote_interconnects || power_domains || enable_clocks ||
                    reset_bridge || enable_ahb || read_registers || core_hz ||

@@ -41,6 +41,7 @@ struct sq2_hfi_transport {
  u32 *ring[3];
  void __iomem *base;
  bool configured;
+ u32 header_bytes, table_bytes;
  unsigned int trace_delay_ms;
 };
 static struct sq2_hfi_transport *quarantined;
@@ -53,7 +54,7 @@ static int count_peer(struct device *dev, void *data)
  ++*(unsigned int *)data;
  return 0;
 }
-int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out)
+int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out, bool compact_table)
 {
  struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
  struct iommu_fwspec *spec = dev_iommu_fwspec_get(dev);
@@ -77,6 +78,13 @@ int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out)
  ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
  if (!ctx) return -ENOMEM;
  ctx->dev = dev; ctx->domain = domain;
+ /* The original Venus protocol has six u32 fields (24 bytes). The pinned
+  * later downstream driver extends this with an opaque host cookie/name.
+  * Compare both documented host layouts; do not assume the SQ2 Windows
+  * firmware accepts the later extension, even with qhdr0 advertised.
+  */
+ ctx->header_bytes = compact_table ? 24 : sizeof(struct qtable);
+ ctx->table_bytes = ctx->header_bytes + 3 * sizeof(struct qheader);
  ctx->saved_limit = dev->bus_dma_limit;
  ctx->saved_mask = dma_get_mask(dev);
  ctx->saved_coherent = dev->coherent_dma_mask;
@@ -103,17 +111,17 @@ int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out)
          spec->ids[0], domain->type, peers, &ctx->dma, size, pages, &first, &last, ret);
  if (ret) goto free;
  table = ctx->cpu;
- table->size = TABLE_BYTES;
- table->qhdr0 = sizeof(*table);
+ table->size = ctx->table_bytes;
+ table->qhdr0 = ctx->header_bytes;
  table->qhdr_size = sizeof(struct qheader);
  table->num_q = table->active_q = 3;
- strscpy(table->name, "sq2_hfi_private", sizeof(table->name));
+ if (!compact_table) strscpy(table->name, "sq2_hfi_private", sizeof(table->name));
  for (off = 0; off < 3; off++) {
-  struct qheader *q = ctx->cpu + sizeof(*table) + off * sizeof(*q);
+  struct qheader *q = ctx->cpu + ctx->header_bytes + off * sizeof(*q);
   ctx->q[off] = q;
-  ctx->ring[off] = ctx->cpu + TABLE_BYTES + off * QUEUE_BYTES;
+  ctx->ring[off] = ctx->cpu + ctx->table_bytes + off * QUEUE_BYTES;
   q->status = 1;
-  q->start = ctx->dma + TABLE_BYTES + off * QUEUE_BYTES;
+  q->start = ctx->dma + ctx->table_bytes + off * QUEUE_BYTES;
   q->type = 0x01010000 | off;
   q->words = QUEUE_WORDS;
   q->rx_wm = q->tx_wm = 1;
@@ -217,8 +225,8 @@ int sq2_hfi_run(struct sq2_hfi_transport *ctx, void __iomem *base, bool protect_
   hfi_trace_barrier(ctx);
  }
  dma_wmb();
- pr_info("SQ2_HFI_BOOT begin iova=%pad uc_bytes=%u table_bytes=%zu header=%zu IRQ_MASK_UNCHANGED\n",
-         &ctx->dma, REGION_SIZE, (size_t)TABLE_BYTES, sizeof(struct qtable));
+ pr_info("SQ2_HFI_BOOT begin iova=%pad uc_bytes=%u table_bytes=%u header=%u IRQ_MASK_UNCHANGED\n",
+         &ctx->dma, REGION_SIZE, ctx->table_bytes, ctx->header_bytes);
  hfi_trace_barrier(ctx);
  writel(1, base + 0xd2048);
  writel(1, base + 0xd2058);
@@ -279,6 +287,6 @@ void sq2_hfi_quarantine(struct sq2_hfi_transport *ctx)
 int sq2_hfi_dma_probe(struct device *dev)
 {
  struct sq2_hfi_transport *ctx = NULL;
- int ret = sq2_hfi_prepare(dev, &ctx);
+ int ret = sq2_hfi_prepare(dev, &ctx, false);
  return ret ? ret : sq2_hfi_finish(ctx);
 }

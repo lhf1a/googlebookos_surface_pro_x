@@ -15,6 +15,7 @@ if [ "${1:-}" = --firmware ] || [ "${1:-}" = --hfi ]; then
   echo '5dd1d028daafe8006400ca50bc6b7ec54a933521f0f6f1c672445e92a9c3d30b  /root/.cache/sq2-thermal/kernel/drivers/soc/qcom/mdt_loader.c' | sha256sum -c -
   echo 'cb7eeaf5ca930748bd427d1eb6d293d8c6a2a31c314bb137e68f673302d67c77  /root/.cache/sq2-thermal/kernel/arch/arm64/boot/dts/qcom/sc8180x-surface-pro-x.dts' | sha256sum -c -
   echo '307e464afa0d4c5a6d029a2e706c6a07d9a5d67322916c7716bb00973d4b1074  /root/.cache/sq2-thermal/kernel/drivers/firmware/qcom_scm.h' | sha256sum -c -
+  echo '8a9f0b0b78bfa2bf579eebb2720a58c0b0d51ff27da9450ee4f738ae5f0d9888  /root/.cache/sq2-video-reference/venus_hfi.c' | sha256sum -c -
   cp "$ROOT/probe/video/sq2_iris1_identify.c" "$STAGE/identify.c"
   cp "$ROOT/probe/video/"{sq2-venus-fw.c,sq2-venus-fw.h,sq2-fw-transaction.h,sq2_video_fw_layout.h,sq2_pil_mem_query.c,sq2-pil-region.h} "$STAGE/"
   printf 'obj-m += sq2_iris1_phase.o\nsq2_iris1_phase-objs := identify.o sq2-venus-fw.o sq2_pil_mem_query.o\nccflags-y += -DSQ2_IDENTIFY_EXISTING -DSQ2_IDENTIFY_FIRMWARE -DSQ2_PIL_QUERY_LIBRARY -I$(srctree)/drivers/firmware\n' > "$STAGE/Makefile"

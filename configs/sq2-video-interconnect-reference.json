@@ -30,7 +30,29 @@
     "version": "0x5010002f",
     "core_reported_hz": 200000097,
     "cleanup": "All three tested stages returned 0 and cleared all three votes; same boot and framework PIDs",
-    "full_HFI_result": "Connection lost; native collector file pending retrieval; no verified response or cleanup for this trial"
+    "full_HFI_result": "fa09f750 trial connection lost; recovered native log reaches PAS auth=0, protection=0 and queue-status before mailbox snapshots. It does not establish a reply or cleanup."
+  },
+  "write_only_followup": {
+    "boot_id": "976cc99e-919c-46cc-8ea6-940847b93dca",
+    "consumer_sha256": "203943ae2225f5b385f14548153928589965cc928a1be1326a21e7063d5aa44b",
+    "table_header_bytes": 288,
+    "all_nine_mailbox_writes_completed": true,
+    "control_status": "0x1",
+    "SYS_INIT_sent": true,
+    "command_read_words": 0,
+    "command_write_words": 3,
+    "message_write_words": 0,
+    "probe_result": -110,
+    "PAS_shutdown": 0,
+    "first_queue_IOVA_unmapped": true,
+    "three_votes_cleared": true,
+    "module_refcount": 0,
+    "framework_pids_unchanged": true
+  },
+  "compact_table_followup": {
+    "consumer_sha256": "218b69085a587c231b76da07f95b3fef28b3100ecf9b7a7c1d12d6a260729650",
+    "table_header_bytes": 24,
+    "result": "Connection lost; native sq2-hfi-compact-976c.kmsg pending retrieval; no comparison result yet"
   },
   "limits": ["No claim that voting alone fixes board loss: trace delays changed too", "No firmware SYS_INIT reply or decoded frame", "No persistent deployment", "No original Module.symvers or full ABI validation"]
 }

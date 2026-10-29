@@ -4,6 +4,20 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## 只写邮箱后的控制启动与命令未消费（2026-10-29）
+
+只读SSH后来连接到新boot976cc99e…，Android就绪、guardY/nohibernate、PID2295/2106、临时模块清除、pstore空；恢复方法仍无用户答复，不称自动恢复。已取回19ed…native文件：最后到PAS auth_end=0、firmware_boot_end=0/owner1、protect=0、SFR before=4096/0/空队列。固定fa09…源码下一步就是邮箱快照readl循环，再发布队列；故失联范围比此前缩小，但异步collector仍不能证明具体指令。禁止复用快照读回版本。
+
+只写候选203943ae…/ICC overlay cb2e3434…在当次运行导出missing=0、传输全哈希匹配后，有限collector ready/存活/smoke通过。三域/桥接/AHB/六时钟与200MHz均启用，固定SQ2固件加载/认证0、虚拟保护设置0。逐次九个邮箱写入BEGIN/END全部完成：CPU UC/QTBL/SFR/MMAP与DSP镜像。**HFI CTRL_STATUS首次实返00000001，控制启动等待ret0。** Host不写这个状态寄存器；这关闭了此前“控制状态始终0”的阻断，尚非完整HFI命令或解码通过。
+
+随后实际发布SYS_INIT `{12,10001,1}`、cmd_w=3、通知bit15；轮询约3秒，cmd_r仍0、msg_w仍0、SFR首字仍0，无回复，最终probe_result=-110。真实PAS shutdown=0、固件内存释放、队列首IOVA解除映射、频率/reset/时钟/电源回收、三ICC请求清零均成功，refcnt0；boot976c…、PID2295/2106保持。完整native文件正常KMSG_END timeout并已取回out/video-decode/iris1-phase/hfi-writeonly-976c-kmsg.txt。无SYS_INIT回复、硬件解码帧、V4L2实例或Android组件。
+
+为对照协议布局，增加opt-in hfi_compact_table：固定6.3 Venus的原表头只有6个u32/24字节；后期下游扩展为288字节并包含主机cookie/name。两者均使用56字节队列header，环大小及总分配/SFR边界不变，qhdr0/size及start地址按实际布局调整，不写入主机指针。默认保留288，不据此假定SQ2 firmware的具体兼容性。
+
+218b6908…候选只改为24字节表头、其余条件同上一轮，从已确认关闭的消费者卸载后重载，连接中断。原native文件 `/data/local/tmp/sq2-hfi-compact-976c.kmsg` 尚未取回；最后SSH closed/timeout。没有probe_result/阶段/回收证据，**不能把它判为24字节布局失败，也不能原样重试。** 已请求用户确认桌面/恢复，待设备可读后先取日志。
+
+离线查到另一处真实源码差异：固定venus_hfi.c的VERSION_HANA=`0x50100000`正好匹配本机屏蔽step的版本。`__unload_fw`在subsystem_put及队列释放后调用 `__venus_power_off(true)`；该路径停钟后 `__unprepare_ahb2axi_bridge` 再assert四reset、150–250µs、deassert四reset，之后才关闭GDSC。旧探针只恢复进入时已deassert的位，漏了这次恢复脉冲。新源码用同一bridge_pulse实现启动与post_reset，只在尝试过固件且匹配HANA、停止确认且时钟已关闭的清理路径执行；ICC/域及reset引用继续持有。PAS关闭失败仍直接隔离并跳过全部清理，不在未确认停止时复位或释放。新build固定此参考文件哈希；主机边界/事务测试、编译及导出闭包通过，**尚未部署，不能称已修复重复启动或清楚本轮中断原因。** 下一步先恢复/取日志，然后验证完整退出流程，随后再作表头/通知对照。
+
 ## 干净启动复位阻塞与ICC前置请求（2026-10-29）
 
 修订候选7c155fb7…在boot861e77bc…重试再次失联。之后取回native `sq2-hfi-safe-861e.kmsg`，最后记录为377.420876s的reset_deassert axi结束；未到时钟/PAS/HFI。因此本轮不能归因为扩展诊断、保护调用或队列，也不能把collector最后一条直接称为精确的阻塞指令：其落盘与内核执行有时差。新源码移除全部额外MMIO诊断；对下游只写不读的邮箱，也不再为了“保存状态”擅自读回。独占VPU/固件确认停止后清零本消费者邮箱，地址解除映射后不保留悬空队列指针。逐步trace_delay_ms=0..100只用于给独立O_DSYNC collector落盘机会，不保证能中止一个已卡住的MMIO访问。

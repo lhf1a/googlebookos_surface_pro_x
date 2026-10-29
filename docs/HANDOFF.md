@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+最新HFI控制启动通过（2026-10-29）：已取回19ed…完整试验日志，PAS auth0/protect0后到queue-status before，随后进入邮箱快照读取前失联。新boot976cc99e…下203943ae…只写邮箱候选实测九次发布完成，CTRL_STATUS=1；SYS_INIT已发，但cmd_r=0/w=3、msg_w=0，3秒后-110。真实shutdown0、队列解除映射、三ICC清零、全部资源回收/refcnt0，boot/PID2295/2106保持。这是控制启动通过，仍无SYS_INIT回复或解码帧。随后218b6908…的24字节表头单变量对照再次失联，**sq2-hfi-compact-976c.kmsg尚待取回，不能认定进入队列阶段，禁止重跑该完整流程。** 源码核对发现HANA=0x50100000在参考驱动的固件卸载/停钟后还会脉冲桥接，旧探针仅恢复初始复位位漏了这步；已补版本限定post_reset，PAS关闭失败仍保留所有资源，编译/审计通过，未部署。先恢复/取最后日志再决定下一次测试；未改启动盘。见VIDEO-DECODE。
+
 最新ICC/复位续接（2026-10-29）：768d0e3修订候选在boot861e77bc…再次失联，但取回native日志只到reset_deassert axi结束（377.420876s），未到时钟/PAS/HFI；不能归因为诊断寄存器。后只读确认新boot19edba8b…、Android/guard就绪，恢复方式仍未获用户确认。已按下游补上复位前ICC请求；三条路径真实解析/请求/清零全0，随后带trace_delay_ms=100的三域四reset、AHB六时钟/版本200MHz阶段均0并回收，PID2273/2079保持。完整HFI试验随后连接再次超时，**最新native sq2-icc-only-19ed.kmsg尚未取回，不要重跑fa09f750…全流程，先恢复/取日志。** 新203943ae…候选移除全部额外MMIO及邮箱快照读取，仅保留下游控制状态轮询，关闭成功后清零独占邮箱，增加逐次写入前的collector等待；仅本地编译/导出审计，未部署。没有解码帧或Android硬解，未改启动盘。固件来源已核对为SQ2原qcvss8180.mbn同字节，目录venus-5.2是原提取脚本命名。见VIDEO-DECODE、sq2-video-interconnect-reference.json。
 
 最新HFI续接（2026-10-29）：独立SMMU消费者SID1300/mask60、DMA-FQ唯一peer、3MiB IOVAdfc00000及768页映射/CPU读回/解除映射实测通过，不是VPU DMA。首轮PAS仍全部0，HFI CTRL_STATUS始终0、-110，未发SYS_INIT；真实shutdown及全部资源回收通过。第二轮mem_protect_video_var返回0，随后扩展诊断在读完e3000后失联，下一个计划读e1020（TZ阈值）；不得复用65709696…二进制或非安全读取e1020..e1034。源码已移除阈值/reset读取，新候选仅编译/符号审计及ring边界ASan/UBSan通过，未部署。SSH后来读到新boot861e77bc…、Android就绪、guardY、PID2293/2110、临时模块清除、pstore空；本轮恢复方式/桌面确认尚待用户答复。未改启动盘。下一步有界collector下验证安全诊断和保护设置后的真实HFI启动，无解码帧或Android硬解。见VIDEO-DECODE。
