@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lab-only AVC bring-up envelope. Not full SQ2 capabilities or CTS evidence. -->
+<MediaCodecs>
+    <Decoders>
+        <MediaCodec name="c2.sq2.avc.experimental" type="video/avc" rank="512">
+            <!-- Qualcomm-compatible AVC name requested for player compatibility.
+                 Resolves to our Codec2 component, not an OEM OMX implementation.
+                 This alias does not advertise any additional codec capabilities. -->
+            <Alias name="OMX.qcom.video.decoder.avc" />
+            <Limit name="size" min="320x240" max="3840x2160" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="concurrent-instances" max="1" />
+        </MediaCodec>
+        <!-- Experimental HEVC Main path; Main10 is not yet implemented. -->
+        <MediaCodec name="c2.sq2.hevc.experimental" type="video/hevc" rank="512">
+            <Alias name="OMX.qcom.video.decoder.hevc" />
+            <Limit name="size" min="320x240" max="3840x2160" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="concurrent-instances" max="1" />
+        </MediaCodec>
+        <!-- VPx 8-bit lab candidates; profile 2 / 10-bit remains unimplemented. -->
+        <MediaCodec name="c2.sq2.vp8.experimental" type="video/x-vnd.on2.vp8" rank="512">
+            <Alias name="OMX.qcom.video.decoder.vp8" />
+            <Limit name="size" min="320x240" max="3840x2160" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="concurrent-instances" max="1" />
+        </MediaCodec>
+        <MediaCodec name="c2.sq2.vp9.experimental" type="video/x-vnd.on2.vp9" rank="512">
+            <Alias name="OMX.qcom.video.decoder.vp9" />
+            <Limit name="size" min="320x240" max="3840x2160" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="concurrent-instances" max="1" />
+        </MediaCodec>
+    </Decoders>
+</MediaCodecs>

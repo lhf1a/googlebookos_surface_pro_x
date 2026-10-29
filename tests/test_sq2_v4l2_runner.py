@@ -57,7 +57,18 @@ int main(void){char *format[]={"runner","--format-only","/dev/test"};assert(runn
 '''
 with tempfile.TemporaryDirectory() as tmp:
  d=Path(tmp);(d/'test.c').write_text(HARNESS)
+ # Stage-boundary tests never decode pixels; do not depend on private out/ data.
+ (d/'sq2-h264-vector.h').write_text('''
+#define SQ2_VEC_W 320
+#define SQ2_VEC_H 240
+#define SQ2_VEC_FRAMES 6
+#define SQ2_VEC_SHA256 "host-stage-fixture-not-a-media-vector"
+static const u8 sq2_vec_stream[6]={1,2,3,4,5,6};
+static const u32 sq2_vec_au[7]={0,1,2,3,4,5,6};
+static const u32 sq2_vec_crc_y[6]={0};
+static const u32 sq2_vec_crc_uv[6]={0};
+''')
  flags=['gcc','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie']
- subprocess.run(flags+['-Dmain=runner_main','-I',str(ROOT/'out/video-decode/h264-vector'),'-c',str(ROOT/'probe/video/sq2-v4l2-decode-test.c'),'-o',str(d/'runner.o')],check=True)
+ subprocess.run(flags+['-Dmain=runner_main','-I',str(d),'-c',str(ROOT/'probe/video/sq2-v4l2-decode-test.c'),'-o',str(d/'runner.o')],check=True)
  subprocess.run(flags+[str(d/'test.c'),str(d/'runner.o')]+['-Wl,--wrap='+x for x in ['open','close','fsync','mmap','munmap','ioctl','poll']]+['-o',str(d/'test')],check=True)
  subprocess.run([str(d/'test')],check=True)

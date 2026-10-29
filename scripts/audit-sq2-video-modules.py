@@ -33,15 +33,20 @@ def main():
     parser.add_argument('--output', type=Path,
                         default=ROOT / 'out/video-decode/module-preflight.json')
     args = parser.parse_args()
+    paths = args.module or [BUILD / rel for rel in REL]
+    replacing = {p.stem.replace('-', '_') for p in paths}
     capture = args.capture
     live = capture.read_text(encoding='utf-8-sig').splitlines()
     assert live[0].strip() == 'Y', 'screen-only guard capture missing'
+    # A resident module's old exports cannot satisfy its replacement's audit.
     exports = {line.split()[2].removeprefix('__ksymtab_') for line in live
-               if len(line.split()) >= 3 and line.split()[2].startswith('__ksymtab_')}
+               if len(line.split()) >= 3 and line.split()[2].startswith('__ksymtab_')
+               and not (len(line.split()) >= 4 and
+                        line.split()[3].strip('[]') in replacing)}
     assert len(exports) > 1000, 'invalid live kernel export capture'
     modules = {}
     owners = {}
-    for p in (args.module or [BUILD / rel for rel in REL]):
+    for p in paths:
         if p.name in modules:
             raise ValueError('duplicate module name: ' + p.name)
         symbols = subprocess.check_output(['aarch64-linux-gnu-nm', str(p)], text=True).splitlines()

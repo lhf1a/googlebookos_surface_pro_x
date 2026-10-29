@@ -1,0 +1,10 @@
+# Private lab service only; installed together with the opt-in VINTF fragment.
+# kernel domain matches the current SSH experiment, not production policy.
+service sq2-c2-experimental /vendor/bin/sq2-c2-experimental --serve
+    class hal
+    user root
+    group root system camera
+    seclabel u:r:kernel:s0
+    setenv LD_LIBRARY_PATH /system/lib64:/apex/com.android.media.swcodec/lib64:/vendor/lib64
+    interface aidl android.hardware.media.c2.IComponentStore/default1
+    oneshot

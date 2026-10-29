@@ -12,6 +12,7 @@ import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 HASHES = {
+    'hfi_parser.c': '87153ebed2807a08efc1ecd7bf531be3d0d0aff3dca6e136c7fd4091bdf2a327',
     'hfi.c': '1abde9036d7abb7660051233f8d419b495cd3b2dee17b116f69261c65bbef87f',
     'hfi_msgs.c': '4d7f073f9087f6df7d1ec4cb518240fac1b409ba5150fdc1694f0bcc9327b9eb',
     'helpers.h': '99f376ae359a2ad6f3560404ccf8f5dc5721fba48fce81cdd1b1a14a399200a6',
@@ -62,6 +63,17 @@ def main():
         if f.is_file() and (f.suffix in ('.c', '.h') or f.name == 'Makefile'):
             shutil.copyfile(f, args.output / f.name)
     shutil.copyfile(ROOT / 'probe/video/venus-iris1.h', args.output / 'venus-iris1.h')
+    for name in ('sq2-hfi-properties.h', 'venus-sq2-capabilities.h', 'venus-sq2-frame-sizes.h',
+                 'venus-sq2-vp9-eos.h'):
+        shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
+    parser = (src / 'hfi_parser.c').read_text()
+    parser = replace(parser, '#include "hfi_parser.h"',
+                     '#include "hfi_parser.h"\n#include "venus-sq2-capabilities.h"')
+    parser += ('\nu32 venus_sq2_hfi_capabilities(struct venus_core *core, void *buf, u32 size, u32 count)\n'
+               '{\n\treturn venus_sq2_parse_capabilities(core, buf, size, count);\n}\n')
+    (args.output / 'hfi_parser.c').write_text(parser)
+    with (args.output / 'hfi_parser.h').open('a') as f:
+        f.write('\nu32 venus_sq2_hfi_capabilities(struct venus_core *core, void *buf, u32 size, u32 count);\n')
     shutil.copyfile(ROOT / 'probe/video/sq2-venus-dma.h', args.output / 'sq2-venus-dma.h')
     shutil.copyfile(ROOT / 'probe/video/sq2-venus-buffer.h', args.output / 'sq2-venus-buffer.h')
     for name in ('sq2-venus-platform.c', 'sq2-venus-platform.h', 'sq2-venus-lifetime.h',
@@ -96,6 +108,28 @@ def main():
     # Keep all pre-existing SoC tables unchanged (zero-initialized iris1=false).
     (args.output / 'core.h').write_text(core)
     vdec = (src / 'vdec.c').read_text()
+    # Append: vdec_init_instance pins existing array indices for AVC and NV12.
+    anchor = '\t\t.pixfmt = V4L2_PIX_FMT_HEVC,\n\t\t.num_planes = 1,\n\t\t.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,\n\t\t.flags = V4L2_FMT_FLAG_DYN_RESOLUTION,'
+    vdec = replace(vdec, anchor, anchor + '\n\t}, {\n\t\t.pixfmt = V4L2_PIX_FMT_P010,\n'
+                   '\t\t.num_planes = 1,\n\t\t.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,')
+    anchor = '\tif (V4L2_TYPE_IS_CAPTURE(type) && fmt[i].pixfmt == V4L2_PIX_FMT_QC10C &&'
+    vdec = replace(vdec, anchor,
+                   '\tif (fmt[i].pixfmt == V4L2_PIX_FMT_P010 &&\n'
+                   '\t    (!IS_SQ2_HFI(inst->core) || inst->bit_depth != VIDC_BITDEPTH_10))\n'
+                   '\t\treturn NULL;\n\n' + anchor)
+    anchor = '\t\t\tvalid = venus_helper_check_format(inst, fmt[i].pixfmt);'
+    vdec = replace(vdec, anchor, anchor + '\n\t\t\tif (fmt[i].pixfmt == V4L2_PIX_FMT_P010 &&\n'
+                   '\t\t\t    (!IS_SQ2_HFI(inst->core) || inst->bit_depth != VIDC_BITDEPTH_10))\n'
+                   '\t\t\t\tvalid = false;')
+    vdec = replace(vdec, '\t\tpfmt[0].bytesperline = ALIGN(pixmp->width, 128);',
+                   '\t\tpfmt[0].bytesperline = pixmp->pixelformat == V4L2_PIX_FMT_P010 ?\n'
+                   '\t\t\tALIGN(pixmp->width * 2, 256) : ALIGN(pixmp->width, 128);')
+    vdec = replace(vdec, '#include "hfi_parser.h"',
+                   '#include "hfi_parser.h"\n#include "venus-sq2-frame-sizes.h"')
+    anchor = '\tif (fsize->index)\n\t\treturn -EINVAL;'
+    vdec = replace(vdec, anchor,
+                   '\tif (IS_SQ2_HFI(inst->core) && fmt->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)\n'
+                   '\t\treturn venus_sq2_enum_sizes(inst->core, fsize);\n\n' + anchor)
     # The SQ2 VB2 owner takes an independent exporter reference. dma_buf_put
     # is exported in DMA_BUF; missing Module.symvers can hide this at modpost.
     vdec += '\nMODULE_IMPORT_NS(DMA_BUF);\n'
@@ -206,6 +240,24 @@ static void sq2_vdec_trace(struct venus_inst *inst, const char *stage, int ret)
     session = session[:start] + section + session[end:]
     (args.output / 'hfi.c').write_text(session)
     msgs = (src / 'hfi_msgs.c').read_text()
+    msgs = replace(msgs, '#include "hfi_parser.h"',
+                   '#include "hfi_parser.h"\n#include "venus-sq2-vp9-eos.h"')
+    anchor = '\t\terror = pkt->error_type;\n\t} else {\n\t\terror = HFI_ERR_SESSION_INVALID_PARAMETER;'
+    msgs = replace(msgs, anchor,
+                   '\t\terror = pkt->error_type;\n'
+                   '\t\thfi_flags = venus_sq2_vp9_eos_flags(\n'
+                   '\t\t\tIS_SQ2_HFI(core) && inst->hfi_codec == HFI_VIDEO_CODEC_VP9,\n'
+                   '\t\t\terror, filled_len, offset, hfi_flags);\n'
+                   '\t} else {\n\t\terror = HFI_ERR_SESSION_INVALID_PARAMETER;')
+    # Only SYS_INIT_DONE carries the complete capability table. Session init
+    # keeps upstream handling; its shorter payload must not replace core caps.
+    anchor = '\terror = hfi_parser(core, inst, pkt->data, rem_bytes);'
+    if msgs.count(anchor) != 2:
+        raise ValueError('expected system and session capability parser calls')
+    msgs = msgs.replace(anchor,
+        '\tif (IS_SQ2_HFI(core))\n'
+        '\t\terror = venus_sq2_hfi_capabilities(core, pkt->data, rem_bytes, pkt->num_properties);\n'
+        '\telse\n\t' + anchor, 1)
     start = msgs.index('static void hfi_session_end_done(')
     end = msgs.index('static void hfi_session_abort_done(', start)
     section = replace(msgs[start:end], '\tinst->error = pkt->error_type;',
@@ -362,6 +414,17 @@ static void sq2_vdec_trace(struct venus_inst *inst, const char *stage, int ret)
     hfi = hfi[:start] + section + hfi[end:]
     (args.output / 'hfi_venus.c').write_text(hfi)
     helpers = (src / 'helpers.c').read_text()
+    anchor = '\tcase V4L2_PIX_FMT_NV12:\n\t\treturn HFI_COLOR_FORMAT_NV12;'
+    helpers = replace(helpers, anchor, '\tcase V4L2_PIX_FMT_P010:\n\t\treturn HFI_COLOR_FORMAT_P010;\n' + anchor)
+    anchor = '\tif (ubwc) {\n\t\tubwc_fmt = fmt | HFI_COLOR_FORMAT_UBWC_BASE;'
+    helpers = replace(helpers, anchor,
+                      '\t/* SQ2 advertises TP10 UBWC DPB + linear P010 output2. */\n'
+                      '\tif (IS_SQ2_HFI(core) && fmt == HFI_COLOR_FORMAT_P010) {\n'
+                      '\t\tif (!find_fmt_from_caps(caps, HFI_BUFFER_OUTPUT, HFI_COLOR_FORMAT_YUV420_TP10_UBWC) ||\n'
+                      '\t\t    !find_fmt_from_caps(caps, HFI_BUFFER_OUTPUT2, HFI_COLOR_FORMAT_P010))\n'
+                      '\t\t\treturn -EINVAL;\n'
+                      '\t\t*out_fmt = HFI_COLOR_FORMAT_YUV420_TP10_UBWC;\n'
+                      '\t\t*out2_fmt = HFI_COLOR_FORMAT_P010;\n\t\treturn 0;\n\t}\n\n' + anchor)
     start, end = helpers.index('int venus_helper_free_dpb_bufs('), helpers.index('EXPORT_SYMBOL_GPL(venus_helper_free_dpb_bufs);')
     section = replace(helpers[start:end], '\t\tif (buf->owned_by == FIRMWARE)',
                       '\t\tif (buf->owned_by == FIRMWARE &&\n'

@@ -18,8 +18,31 @@
 #include <linux/dma-buf.h>
 typedef uint32_t u32;
 typedef uint8_t u8;
+#ifdef SQ2_MPEG2_VECTOR
+#include "sq2-mpeg2-vector.h"
+#define SQ2_INPUT_CODEC SQ2_VEC_CODEC
+#elif defined(SQ2_VPX_VECTOR)
+#include "sq2-vpx-vector.h"
+#define SQ2_INPUT_CODEC SQ2_VEC_CODEC
+#elif defined(SQ2_HEVC_VECTOR)
+#include "sq2-hevc-vector.h"
+#define SQ2_INPUT_CODEC V4L2_PIX_FMT_HEVC
+#else
 #include "sq2-h264-vector.h"
+#define SQ2_INPUT_CODEC V4L2_PIX_FMT_H264
+#endif
 #define MAXBUF 32
+#ifndef SQ2_VEC_BYTES_PER_SAMPLE
+#define SQ2_VEC_BYTES_PER_SAMPLE 1
+#endif
+#if SQ2_VEC_BYTES_PER_SAMPLE == 2
+#define SQ2_OUTPUT_CODEC V4L2_PIX_FMT_P010
+#elif SQ2_VEC_BYTES_PER_SAMPLE == 1
+#define SQ2_OUTPUT_CODEC V4L2_PIX_FMT_NV12
+#else
+#error "Unsupported sample size"
+#endif
+#define SQ2_ROW_BYTES (SQ2_VEC_W * SQ2_VEC_BYTES_PER_SAMPLE)
 struct queue { unsigned type,n,memory,size; void *ptr[MAXBUF]; size_t len[MAXBUF]; int dmafd[MAXBUF]; int on; };
 static int fd=-1;
 static int heap=-1;
@@ -77,6 +100,21 @@ static int start(struct queue *q){printf("STREAMON_BEGIN type=%u\n",q->type);if(
 static int end(struct queue *q){int failed=0;if(q->on){printf("STREAMOFF_BEGIN type=%u\n",q->type);if(x(VIDIOC_STREAMOFF,&q->type,"STREAMOFF"))failed=1;else q->on=0;printf("STREAMOFF_DONE type=%u failed=%d\n",q->type,failed);}for(unsigned i=0;i<q->n;i++){if(q->ptr[i]&&munmap(q->ptr[i],q->len[i]))failed=1;if(q->memory==V4L2_MEMORY_DMABUF&&q->dmafd[i]>=0){if(close(q->dmafd[i]))failed=1;q->dmafd[i]=-1;}}return failed;}
 int main(int argc,char **argv){
  setbuf(stdout,NULL);
+ if(argc==3&&!strcmp(argv[1],"--reference-test")){
+  FILE *ref=fopen(argv[2],"rb");if(!ref)return 1;
+  const unsigned stride=(SQ2_ROW_BYTES+255)&~255u,scan=(SQ2_VEC_H+31)&~31u;
+  const size_t uv=(size_t)stride*scan,bytes=uv+(size_t)stride*((SQ2_VEC_H+1)/2);
+  u8 *p=malloc(bytes);if(!p){fclose(ref);return 1;}int bad=0;
+  for(unsigned n=0;n<SQ2_VEC_FRAMES&&!bad;n++){
+   memset(p,0xa5,bytes);
+   for(unsigned row=0;row<SQ2_VEC_H;row++)if(fread(p+(size_t)row*stride,1,SQ2_ROW_BYTES,ref)!=SQ2_ROW_BYTES)bad=1;
+   for(unsigned row=0;row<SQ2_VEC_H/2;row++)if(fread(p+uv+(size_t)row*stride,1,SQ2_ROW_BYTES,ref)!=SQ2_ROW_BYTES)bad=1;
+   if(crc_rows(p,stride,SQ2_ROW_BYTES,SQ2_VEC_H)!=sq2_vec_crc_y[n]||
+      crc_rows(p+uv,stride,SQ2_ROW_BYTES,SQ2_VEC_H/2)!=sq2_vec_crc_uv[n])bad=1;
+  }
+  if(fgetc(ref)!=EOF)bad=1;
+  free(p);fclose(ref);printf("PADDED_REFERENCE_TEST bytes_per_sample=%u result=%d\n",SQ2_VEC_BYTES_PER_SAMPLE,bad);return bad;
+ }
  if(argc==2&&!strcmp(argv[1],"--self-test")){
   const u8 s[]="123456789";u32 c=crc_rows(s,9,9,1);printf("CRC_SELF_TEST=%08x vector_bytes=%zu frames=%u\n",c,sizeof(sq2_vec_stream),SQ2_VEC_FRAMES);return c!=0xcbf43926U;
  }
@@ -98,8 +136,9 @@ int main(int argc,char **argv){
  if(strcmp((char*)c.driver,"qcom-venus")){fprintf(stderr,"wrong driver\n");goto done;}
  printf("VECTOR_SHA256=%s\n",SQ2_VEC_SHA256);
  struct v4l2_event_subscription sub={.type=V4L2_EVENT_SOURCE_CHANGE};if(x(VIDIOC_SUBSCRIBE_EVENT,&sub,"SUB_SOURCE"))goto done;sub.type=V4L2_EVENT_EOS;if(x(VIDIOC_SUBSCRIBE_EVENT,&sub,"SUB_EOS"))goto done;
- struct v4l2_format f={.type=out.type};f.fmt.pix_mp.width=SQ2_VEC_W;f.fmt.pix_mp.height=SQ2_VEC_H;f.fmt.pix_mp.pixelformat=V4L2_PIX_FMT_H264;f.fmt.pix_mp.field=V4L2_FIELD_NONE;
+ struct v4l2_format f={.type=out.type};f.fmt.pix_mp.width=SQ2_VEC_W;f.fmt.pix_mp.height=SQ2_VEC_H;f.fmt.pix_mp.pixelformat=SQ2_INPUT_CODEC;f.fmt.pix_mp.field=V4L2_FIELD_NONE;
  if(x(VIDIOC_S_FMT,&f,"S_FMT_OUTPUT"))goto done;
+ if(f.fmt.pix_mp.pixelformat!=SQ2_INPUT_CODEC){fprintf(stderr,"codec substitution refused\n");goto done;}
  out.size=f.fmt.pix_mp.plane_fmt[0].sizeimage;
  if(format_only){puts("FORMAT_ONLY_DONE_NO_BUFFERS_NO_FRAMES");result=0;goto done;}
  if(allocq(&out,SQ2_VEC_FRAMES)||out.n<SQ2_VEC_FRAMES)goto done;
@@ -109,12 +148,12 @@ int main(int argc,char **argv){
  if(start(&out))goto done;
  while(!source&&ms()<deadline){struct v4l2_event e={0};if(!ioctl(fd,VIDIOC_DQEVENT,&e)){printf("EVENT type=%u changes=%u\n",e.type,e.u.src_change.changes);if(e.type==V4L2_EVENT_SOURCE_CHANGE)source=1;}else if(errno!=EAGAIN&&errno!=ENOENT){perror("DQEVENT");goto done;}if(!source){struct pollfd p={fd,POLLPRI,0};poll(&p,1,100);}}
  if(!source){fprintf(stderr,"SOURCE_CHANGE_TIMEOUT\n");goto done;}
- memset(&f,0,sizeof(f));f.type=cap.type;if(x(VIDIOC_G_FMT,&f,"G_FMT_CAPTURE"))goto done;if(f.fmt.pix_mp.pixelformat!=V4L2_PIX_FMT_NV12){f.fmt.pix_mp.pixelformat=V4L2_PIX_FMT_NV12;if(x(VIDIOC_S_FMT,&f,"S_FMT_CAPTURE"))goto done;}
+ memset(&f,0,sizeof(f));f.type=cap.type;if(x(VIDIOC_G_FMT,&f,"G_FMT_CAPTURE"))goto done;if(f.fmt.pix_mp.pixelformat!=SQ2_OUTPUT_CODEC){f.fmt.pix_mp.pixelformat=SQ2_OUTPUT_CODEC;if(x(VIDIOC_S_FMT,&f,"S_FMT_CAPTURE"))goto done;}
  unsigned stride=f.fmt.pix_mp.plane_fmt[0].bytesperline,scan=f.fmt.pix_mp.height;
  cap.size=f.fmt.pix_mp.plane_fmt[0].sizeimage;
  struct v4l2_selection sel={.type=V4L2_BUF_TYPE_VIDEO_CAPTURE,.target=V4L2_SEL_TGT_COMPOSE};if(x(VIDIOC_G_SELECTION,&sel,"G_SELECTION"))goto done;
  printf("CAPTURE fourcc=%08x width=%u height=%u stride=%u size=%u crop=%d,%d,%u,%u\n",f.fmt.pix_mp.pixelformat,f.fmt.pix_mp.width,scan,stride,f.fmt.pix_mp.plane_fmt[0].sizeimage,sel.r.left,sel.r.top,sel.r.width,sel.r.height);
- if(f.fmt.pix_mp.pixelformat!=V4L2_PIX_FMT_NV12||f.fmt.pix_mp.num_planes!=1||sel.r.left||sel.r.top||sel.r.width!=SQ2_VEC_W||sel.r.height!=SQ2_VEC_H||stride<SQ2_VEC_W||scan<SQ2_VEC_H||stride>8192||scan>8192){fprintf(stderr,"unexpected geometry\n");goto done;}
+ if(f.fmt.pix_mp.pixelformat!=SQ2_OUTPUT_CODEC||f.fmt.pix_mp.num_planes!=1||sel.r.left||sel.r.top||sel.r.width!=SQ2_VEC_W||sel.r.height!=SQ2_VEC_H||stride<SQ2_ROW_BYTES||scan<SQ2_VEC_H||stride>16384||scan>8192){fprintf(stderr,"unexpected geometry\n");goto done;}
  struct v4l2_control ctrl={.id=V4L2_CID_MIN_BUFFERS_FOR_CAPTURE};if(x(VIDIOC_G_CTRL,&ctrl,"MIN_CAPTURE"))goto done;
  if(ctrl.value<1||ctrl.value>28)goto done;
  if(graphic_fds&&(stride!=384||scan!=256||cap.size!=159744)){fprintf(stderr,"C2 geometry mismatch\n");goto done;}
@@ -129,9 +168,9 @@ int main(int argc,char **argv){
   if(!ioctl(fd,VIDIOC_DQBUF,&b)){
    printf("CAPTURE_DONE index=%u bytes=%u offset=%u flags=%x timestamp=%ld.%06ld\n",b.index,p.bytesused,p.data_offset,b.flags,(long)b.timestamp.tv_sec,(long)b.timestamp.tv_usec);
    if(b.index>=cap.n||p.bytesused>cap.len[b.index]||p.data_offset>p.bytesused||(b.flags&V4L2_BUF_FLAG_ERROR))goto done;
-   if(p.bytesused>p.data_offset){size_t uv=(size_t)stride*scan;size_t need=uv+(SQ2_VEC_H/2-1)*stride+SQ2_VEC_W;if(need>p.bytesused-p.data_offset){fprintf(stderr,"short frame\n");goto done;}
+   if(p.bytesused>p.data_offset){size_t uv=(size_t)stride*scan;size_t need=uv+(SQ2_VEC_H/2-1)*stride+SQ2_ROW_BYTES;if(need>p.bytesused-p.data_offset){fprintf(stderr,"short frame\n");goto done;}
     if(cpu_sync(&cap,b.index,DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ))goto done;
-    u8 *data=(u8*)cap.ptr[b.index]+p.data_offset;u32 y=crc_rows(data,stride,SQ2_VEC_W,SQ2_VEC_H),uvcrc=crc_rows(data+uv,stride,SQ2_VEC_W,SQ2_VEC_H/2);int match=-1;
+    u8 *data=(u8*)cap.ptr[b.index]+p.data_offset;u32 y=crc_rows(data,stride,SQ2_ROW_BYTES,SQ2_VEC_H),uvcrc=crc_rows(data+uv,stride,SQ2_ROW_BYTES,SQ2_VEC_H/2);int match=-1;
     if(cpu_sync(&cap,b.index,DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ))goto done;
     for(unsigned i=0;i<SQ2_VEC_FRAMES;i++)if(y==sq2_vec_crc_y[i]&&uvcrc==sq2_vec_crc_uv[i]&&!(mask&(1U<<i))){match=i;break;}
     printf("FRAME crc_y=%08x crc_uv=%08x match=%d\n",y,uvcrc,match);if(match<0)goto done;mask|=1U<<match;frames++;
