@@ -16,6 +16,7 @@ HASHES = {
     'hfi_venus.c': '8323b3366c1044eef997b27f3215d38a8526e56fb3c25b0e0a2fff551ac06064',
     'hfi_venus_io.h': '767743e0ef215aca2fb39470cd3777c8880b14f9ceb41c220ed423c96caf4b7e',
     'firmware.c': 'abd83c9fd854784ddec523bc21d941f3ee5373ca587f19c838e52375cc7c8e71',
+    'helpers.c': '86da60ed9373989f7edac92a0d6c375631cae98c4cf8a370d2158382370a1377',
 }
 
 
@@ -33,9 +34,13 @@ def main():
                    help='compile PAS owner and SQ2 firmware dispatch (platform probe still blocked)')
     p.add_argument('--platform-entry', action='store_true',
                    help='compile opt-in independent core entry; requires firmware lease; no SoC match added')
+    p.add_argument('--sq2-resources', action='store_true',
+                   help='add only microsoft,sq2-venus-lab match; requires platform entry; runtime allow still defaults false')
     args = p.parse_args()
     if args.platform_entry and not args.firmware_lease:
         p.error('--platform-entry requires --firmware-lease')
+    if args.sq2_resources and not args.platform_entry:
+        p.error('--sq2-resources requires --platform-entry')
     src = args.kernel / 'drivers/media/platform/qcom/venus'
     for name, digest in HASHES.items():
         if hashlib.sha256((src / name).read_bytes()).hexdigest() != digest:
@@ -53,6 +58,7 @@ def main():
             shutil.copyfile(f, args.output / f.name)
     shutil.copyfile(ROOT / 'probe/video/venus-iris1.h', args.output / 'venus-iris1.h')
     shutil.copyfile(ROOT / 'probe/video/sq2-venus-dma.h', args.output / 'sq2-venus-dma.h')
+    shutil.copyfile(ROOT / 'probe/video/sq2-venus-buffer.h', args.output / 'sq2-venus-buffer.h')
     for name in ('sq2-venus-platform.c', 'sq2-venus-platform.h', 'sq2-venus-lifetime.h',
                  'sq2-venus-power.c', 'sq2-venus-power.h'):
         shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
@@ -105,6 +111,12 @@ def main():
                            '\tif (IS_SQ2_HFI(core))\n'
                            '\t\treturn test_bit(0, &core->sys_error) ? -EIO : 0;\n'
                            '\tret = icc_set_bw(core->video_path, kbps_to_icc(20000), 0);')
+    if args.sq2_resources:
+        shutil.copyfile(ROOT / 'probe/video/venus-sq2-resources.h', args.output / 'venus-sq2-resources.h')
+        platform = replace(platform, 'static const struct of_device_id venus_dt_match[] = {',
+                           '#include "venus-sq2-resources.h"\n'
+                           'static const struct of_device_id venus_dt_match[] = {\n'
+                           '\t{ .compatible = "microsoft,sq2-venus-lab", .data = &sq2_lab_res },')
     (args.output / 'core.c').write_text(platform)
     hfi = (src / 'hfi_venus.c').read_text()
     hfi = replace(hfi, '#include <linux/slab.h>',
@@ -175,6 +187,47 @@ def main():
                   '\tret = venus_sys_set_power_control(hdev, IS_SQ2_HFI(hdev->core) ?\n'
                   '\t\tfalse : venus_fw_low_power_mode);')
     (args.output / 'hfi_venus.c').write_text(hfi)
+    helpers = (src / 'helpers.c').read_text()
+    helpers = replace(helpers, '#include "core.h"',
+                      '#include "core.h"\n#include "sq2-venus-buffer.h"')
+    helpers = replace(helpers, '\t\tbuf->owned_by = DRIVER;',
+                      '\t\tif (IS_SQ2_HFI(inst->core) && !sq2_venus_buffer_valid(buf->da, buf->size)) {\n'
+                      '\t\t\tdma_free_attrs(dev, buf->size, buf->va, buf->da, buf->attrs);\n'
+                      '\t\t\tret = -ERANGE;\n\t\t\tgoto fail;\n\t\t}\n'
+                      '\t\tbuf->owned_by = DRIVER;')
+    helpers = replace(helpers, '\t\tif (id < 0) {\n\t\t\tret = id;',
+                      '\t\tif (id < 0) {\n'
+                      '\t\t\tif (IS_SQ2_HFI(inst->core))\n'
+                      '\t\t\t\tdma_free_attrs(dev, buf->size, buf->va, buf->da, buf->attrs);\n'
+                      '\t\t\tret = id;')
+    start = helpers.index('static int intbufs_set_buffer(')
+    end = helpers.index('static int intbufs_unset_buffers(')
+    section = replace(helpers[start:end], '\t\tmemset(&bd, 0, sizeof(bd));',
+                      '\t\tif (IS_SQ2_HFI(core) && !sq2_venus_buffer_valid(buf->da, buf->size)) {\n'
+                      '\t\t\tret = -ERANGE;\n\t\t\tgoto dma_free;\n\t\t}\n'
+                      '\t\tmemset(&bd, 0, sizeof(bd));')
+    helpers = helpers[:start] + section + helpers[end:]
+    helpers = replace(helpers, '\tbuf->size = vb2_plane_size(vb, 0);',
+                      '\tif (IS_SQ2_HFI(inst->core) && (vb->num_planes != 1 ||\n'
+                      '\t    !sq2_venus_buffer_valid(vb2_dma_contig_plane_dma_addr(vb, 0),\n'
+                      '\t                            vb2_plane_size(vb, 0))))\n'
+                      '\t\treturn -ERANGE;\n'
+                      '\tbuf->size = vb2_plane_size(vb, 0);')
+    anchor = 'int venus_helper_vb2_buf_prepare(struct vb2_buffer *vb)'
+    pos = helpers.index(anchor)
+    before, prepare = helpers[:pos], helpers[pos:]
+    prepare = replace(prepare, '\tif (V4L2_TYPE_IS_OUTPUT(vb->vb2_queue->type)) {',
+                      '\tif (IS_SQ2_HFI(inst->core) && (vb->num_planes != 1 ||\n'
+                      '\t    !sq2_venus_buffer_valid(vb2_dma_contig_plane_dma_addr(vb, 0),\n'
+                      '\t                            vb2_plane_size(vb, 0))))\n'
+                      '\t\treturn -ERANGE;\n'
+                      '\tif (IS_SQ2_HFI(inst->core) && V4L2_TYPE_IS_OUTPUT(vb->type) &&\n'
+                      '\t    !sq2_venus_payload_valid(vb2_plane_size(vb, 0),\n'
+                      '\t                             vb2_get_plane_payload(vb, 0),\n'
+                      '\t                             vb->planes[0].data_offset))\n'
+                      '\t\treturn -EINVAL;\n'
+                      '\tif (V4L2_TYPE_IS_OUTPUT(vb->vb2_queue->type)) {')
+    (args.output / 'helpers.c').write_text(before + prepare)
     fw = (src / 'firmware.c').read_text()
     fw = replace(fw, '#include "hfi_venus_io.h"', '#include "hfi_venus_io.h"\n#include "venus-iris1.h"')
     fw = replace(fw, '\tret = venus_load_fw(core, fwpath, &mem_phys, &mem_size);',
@@ -207,7 +260,8 @@ def main():
         with (args.output / 'Makefile').open('a') as f:
             f.write('\nvenus-core-objs += sq2-venus-fw.o sq2_pil_mem_query.o\n'
                     'ccflags-y += -DSQ2_PIL_QUERY_LIBRARY -I$(srctree)/drivers/firmware\n')
-    manifest = {'status': 'compile-only-no-platform-match-no-hardware-validation',
+    manifest = {'status': ('compile-only-explicit-lab-match-no-hardware-validation' if args.sq2_resources
+                           else 'compile-only-no-platform-match-no-hardware-validation'),
                 'sq2_transport': 'explicit inactive flag; coherent 16MiB UC; bounded IOVA; SFR view; CPU-only mailboxes; no VERSION write',
                 'remaining': ['core probe/recovery/remove dispatch and runtime PM adaptation',
                               'V4L2 buffer address validation and runtime', 'Android Codec2'],
@@ -215,7 +269,8 @@ def main():
                 'firmware_lease_dispatch_compiled': args.firmware_lease,
                 'sq2_platform_probe_blocked': True,
                 'independent_platform_entry_compiled': args.platform_entry,
-                'platform_entry_guard': 'no SoC match; sq2_platform_allow defaults false; published owner retained on removal',
+                'platform_entry_guard': 'SQ2 lab match only when explicitly requested; sq2_platform_allow defaults false; published owner retained on removal',
+                'sq2_lab_match_compiled': args.sq2_resources,
                 'platform_owner': 'compiled independent core/MMIO/IRQ/power/reset/ICC owner; firmware begin/end hooks connected; platform probe/recovery/remove pending',
                 'input_sha256': HASHES,
                 'output_sha256': {f.name: hashlib.sha256(f.read_bytes()).hexdigest()

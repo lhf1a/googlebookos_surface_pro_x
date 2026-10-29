@@ -133,7 +133,7 @@
     }
   },
   "same_boot_restart": "second firmware start in one OS boot left CTRL_STATUS 0; clean-boot first start succeeded; root cause open",
-  "next_executable_action": "Add pinned SQ2 Venus resources and decoder-only DT node, validate V4L2 DMA buffer bounds, and audit concurrent terminal error/buffer teardown before hardware activation. Independent dispatcher host faults now tested and PM failure bugs fixed. Then fresh-boot V4L2 frames and Android open Codec2. Do not restart firmware in bootbcd0.",
+  "next_executable_action": "Audit and fix concurrent terminal error/streamoff and PAS-stop-failure lifetime for internal and V4L2 user/DMA-BUF buffers; address checks and lab resource/decoder overlay are compiled. Then fresh-boot IRQ/SYS_INIT/V4L2 real frames and Android open Codec2 capability alignment. Do not load alongside current resident HFI node or restart firmware in bootbcd0.",
   "not_verified": [
     "V4L2 decode API",
     "Android hardware MediaCodec",
@@ -281,5 +281,33 @@
       "hardware resource lifetime",
       "Android decode"
     ]
+  },
+  "venus_lab_resources": {
+    "status": "compiled-not-loaded",
+    "match": "microsoft,sq2-venus-lab, explicit --sq2-resources only",
+    "SCM_protection": [
+      "0",
+      "0x25800000",
+      "0x1000000",
+      "0x24800000"
+    ],
+    "decoder_overlay": "out/video-decode/venus-decoder-overlay/overlay.dtbo",
+    "IRQ": "SPI174 from SQ1 GSI206 and SM8150 reference, SQ2 delivery unverified",
+    "overlay_module_sha256": "84fe8162b8c96f4ddd35a4aaabe8b3b3e7d07c92f89f48eb918600343b13dd2d",
+    "children": [
+      "video-decoder"
+    ],
+    "no_current_boot_load": true
+  },
+  "venus_buffer_bounds": {
+    "sites": [
+      "DPB allocation",
+      "internal allocation",
+      "vb2 init",
+      "vb2 prepare"
+    ],
+    "checks": "full-width address/size before HFI narrowing; payload offset<=used<=length",
+    "tests": "10 boundary cases; 8192 lengths x6 checks, ASan/UBSan",
+    "not_proven": "concurrent buffer ownership and firmware-stop-failure safety"
   }
 }

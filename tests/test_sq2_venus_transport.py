@@ -12,6 +12,26 @@ KERNEL = Path('/root/.cache/sq2-thermal/kernel')
 
 @unittest.skipUnless(KERNEL.exists(), 'pinned WSL kernel tree required')
 class VenusTransport(unittest.TestCase):
+    def test_lab_resources_and_buffer_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'resources'
+            cmd = [sys.executable, str(ROOT / 'scripts/prepare-sq2-venus-iris1.py'),
+                   '--output', str(dest), '--sq2-resources']
+            rejected = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertFalse(dest.exists())
+            subprocess.run(cmd + ['--firmware-lease', '--platform-entry'], check=True)
+            core = (dest / 'core.c').read_text()
+            helpers = (dest / 'helpers.c').read_text()
+            res = (dest / 'venus-sq2-resources.h').read_text()
+            self.assertIn('"microsoft,sq2-venus-lab", .data = &sq2_lab_res', core)
+            self.assertIn('.cp_size = 0x25800000', res)
+            self.assertNotIn('0x70800000', res)
+            self.assertEqual(helpers.count('!sq2_venus_buffer_valid('), 4)
+            self.assertIn('!sq2_venus_payload_valid(', helpers)
+            section = helpers[helpers.index('int venus_helper_vb2_buf_init('):]
+            self.assertLess(section.index('!sq2_venus_buffer_valid('), section.index('buf->dma_addr ='))
+
     def test_independent_core_dispatch(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / 'entry'

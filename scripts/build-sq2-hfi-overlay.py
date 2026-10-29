@@ -18,7 +18,11 @@ p.add_argument('--with-interconnects', action='store_true',
                help='add SC8180X config, video DDR and firmware DDR paths')
 p.add_argument('--windows-reference', action='store_true',
                help='explicit candidate: exact 2300/2320/2340 SIDs, compact table and 16MiB UC; not a default deployment')
+p.add_argument('--venus-decoder', action='store_true',
+               help='explicit lab Venus node with decoder-only child and reference SPI174; not hardware IRQ validation')
 a = p.parse_args()
+if a.venus_decoder and not (a.windows_reference and a.with_interconnects):
+    p.error('--venus-decoder requires --windows-reference --with-interconnects')
 assert 0 < a.videocc_phandle < 2**32
 base = ROOT / 'out/video-decode/running-base.dtb'
 assert hashlib.sha256(base.read_bytes()).hexdigest() == 'be17f33fbc8545a356f26b8f7a4c4abbd0a58e33a6401c81b18de260773058ef'
@@ -57,14 +61,24 @@ if a.with_interconnects:
       <0x{mmss:x} 7 3 0x{mc:x} 1 3>, <0x{mmss:x} 9 3 0x{mc:x} 1 3>;
    interconnect-names = "cpu-cfg", "video-mem", "firmware-mem";'''
 a.stage.mkdir(parents=True, exist_ok=False)
-dest = ROOT / 'out/video-decode/hfi-overlay'
+dest = ROOT / ('out/video-decode/venus-decoder-overlay' if a.venus_decoder else 'out/video-decode/hfi-overlay')
 dest.mkdir(exist_ok=True)
+node = 'venus-sq2' if a.venus_decoder else 'iris1-hfi'
+compatible = 'microsoft,sq2-venus-lab' if a.venus_decoder else 'microsoft,sq2-iris1-hfi'
+irq_child = ''
+if a.venus_decoder:
+    # SQ1 ACPI GSI206 and pinned SM8150 SPI174 agree (206 - 32).
+    # Reference only: polled SQ2 decode has not established IRQ delivery yet.
+    dsdt = ROOT / 'out/video-decode/sq1-reference-analysis/sq1-dsdt.dsl'
+    assert hashlib.sha256(dsdt.read_bytes()).hexdigest() == '9d033e8d650e27f0f7e67b98addc388927d5abe80b99cd800dcda6e88d22e544'
+    assert prop('/', 'interrupt-parent') == '1'
+    irq_child = 'interrupts = <0 174 4>; video-decoder { compatible = "qcom,venus-decoder"; };'
 dts = f'''/dts-v1/;
 /plugin/;
 / {{ fragment@0 {{ target-path = "/soc@0";
  __overlay__ {{ #address-cells = <2>; #size-cells = <2>;
-  iris1-hfi@aa00000 {{
-   compatible = "microsoft,sq2-iris1-hfi";
+  {node}@aa00000 {{
+   compatible = "{compatible}";
    reg = <0 0xaa00000 0 0x100000>;
    iommus = {iommu_property};
    {reference_property}
@@ -76,6 +90,7 @@ dts = f'''/dts-v1/;
    reset-names = "axi", "core", "axi0", "axi1";
    {icc_properties}
    status = "okay";
+   {irq_child}
   }};
  }};
 }}; }};
@@ -115,6 +130,15 @@ MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("SQ2 temporary dedicated video SMMU consumer; no firmware");
 '''
 refs = [(gcc_path, gcc), (smmu_path, smmu), ('/soc@0/clock-controller@ab00000', vid)] + icc_refs
+if a.venus_decoder:
+    c = c.replace('CHECKS', 'CHECKS\n { u32 parent;\n'
+                  ' n = of_find_node_by_path("/");\n'
+                  ' ret = n ? of_property_read_u32(n, "interrupt-parent", &parent) : -ENODEV;\n'
+                  ' of_node_put(n); if (ret || parent != 1) return -EINVAL; }')
+    c = c.replace('n = of_find_node_by_path("/soc@0/iris1-hfi@aa00000");',
+                  'n = of_find_node_by_path("/soc@0/venus-sq2@aa00000");\n'
+                  ' if (n) { of_node_put(n); return -EEXIST; }\n'
+                  ' n = of_find_node_by_path("/soc@0/iris1-hfi@aa00000");')
 c = c.replace('CHECKS', '\n'.join(f'if (!check("{path}", {ph})) return -EINVAL;' for path, ph in refs))
 (a.stage / 'sq2_hfi_overlay.c').write_text(c)
 (a.stage / 'Makefile').write_text('obj-m += sq2_hfi_overlay.o\n')
@@ -129,5 +153,7 @@ b = (a.stage / 'sq2_hfi_overlay.ko').read_bytes()
     'module_sha256': hashlib.sha256(b).hexdigest(), 'references': refs,
     'sid': ['0x2300', '0x2320', '0x2340'] if a.windows_reference else ['0x1300'],
     'mask': '0' if a.windows_reference else '0x60',
-    'windows_reference': a.windows_reference, 'interconnects': a.with_interconnects}, indent=2) + '\n')
+    'windows_reference': a.windows_reference, 'interconnects': a.with_interconnects,
+    'venus_decoder_only': a.venus_decoder,
+    'irq_evidence': 'SQ1 GSI206 / pinned SM8150 SPI174; not SQ2 live IRQ proof' if a.venus_decoder else None}, indent=2) + '\n')
 print(hashlib.sha256(b).hexdigest())

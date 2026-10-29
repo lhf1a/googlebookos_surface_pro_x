@@ -9,6 +9,9 @@ DEST=${SQ2_IRIS1_DEST:-"$ROOT/out/video-decode/iris1-hfi"}
 mkdir -p "$DEST"
 python3 "$ROOT/scripts/prepare-sq2-venus-iris1.py" --kernel "$K" --output "$STAGE" "$@"
 gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  "$ROOT/tests/sq2_venus_buffer_test.c" -o "$STAGE/buffer-test"
+"$STAGE/buffer-test" | tee "$DEST/buffer-test.txt"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
   "$ROOT/tests/sq2_venus_core_test.c" -o "$STAGE/core-test"
 "$STAGE/core-test" | tee "$DEST/core-test.txt"
 gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
@@ -37,4 +40,4 @@ make -s -C "$K" O="$O" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
   > "$DEST/build.log" 2>&1
 cp "$STAGE"/*.ko "$STAGE/candidate.json" "$DEST/"
 (cd "$DEST" && sha256sum ./*.ko > SHA256SUMS)
-echo 'COMPILE_ONLY: partial Iris1 HFI adapter; no match table, power, firmware lifetime or decode validation'
+echo 'COMPILE_ONLY: experimental Iris1 adapter; inspect candidate.json for opt-in stages; no device or Android decode validation'
