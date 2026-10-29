@@ -20,6 +20,17 @@
   "explicitly_claimed_test_region": ["0x8c000000", "0x8c600000"],
   "checks": ["Surface compatible", "live SCM bounds", "no System RAM intersection", "no live DT reserved-memory overlap", "exact generic UEFI reserved parent", "no nested or wrapped resource owner"],
   "firmware_sha256": "4e93d34504da96320775476bbd509aa06f985b48fb781d4436c8eb812b929928",
+  "firmware_provenance": {
+    "repository": "https://github.com/linux-surface/aarch64-firmware",
+    "commit": "9f07579ee64aba56419cfd0fbbca9f26741edc90",
+    "original_path": "firmware/qcom/msft/surface/pro-x-sq2/qcvss8180.mbn",
+    "copied_path": "firmware/qcom/venus-5.2/venus.mbn",
+    "extract_script": "scripts/getfw.py",
+    "extract_script_git_blob_sha256": "ec791f37030ce4b147e8eaa11cf3f89591ff2b9e90daeffa30ed4ed56d18f0ac",
+    "version": "VIDEO.IR.1.2-00042-PROD-1",
+    "verified": "Original SQ2 path, copied path and tested firmware have identical bytes; getfw.py copies qcvss8180.mbn to the historical venus-5.2 directory",
+    "limit": "This does not verify runtime HFI compatibility or successful decoding"
+  },
   "verified_returns": {"init_image": 0, "mem_setup": 0, "auth_and_reset": 0, "shutdown": 0},
   "not_verified": ["HFI response", "nonsecure SMMU and frame buffers", "decoded pixels", "Android MediaCodec", "persistent deployment", "runtime hardware power-collapse handoff"]
 }

@@ -16,6 +16,7 @@
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/regmap.h>
+#include <linux/interconnect.h>
 #ifdef SQ2_IDENTIFY_FIRMWARE
 #include "sq2-venus-fw.h"
 #endif
@@ -52,6 +53,55 @@ static bool hfi_handshake;
 module_param(hfi_handshake, bool, 0400);
 static bool protect_iova;
 module_param(protect_iova, bool, 0400);
+/* Allow the independent O_DSYNC collector to commit each BEGIN marker before
+ * a potentially blocking bus access. Diagnostics only, never a hang timeout.
+ */
+static unsigned int trace_delay_ms;
+module_param(trace_delay_ms, uint, 0400);
+static bool vote_interconnects;
+module_param(vote_interconnects, bool, 0400);
+static bool icc_probe;
+module_param(icc_probe, bool, 0400);
+#ifdef SQ2_IDENTIFY_HFI
+static struct icc_bulk_data icc_paths[] = {
+ { .name = "cpu-cfg", .avg_bw = 1000, .peak_bw = 1000 },
+ { .name = "video-mem", .avg_bw = 0, .peak_bw = 304000 },
+ { .name = "firmware-mem", .avg_bw = 0, .peak_bw = 304000 },
+};
+static int icc_acquire(struct device *dev)
+{
+ int i, ret;
+ ret = of_icc_bulk_get(dev, ARRAY_SIZE(icc_paths), icc_paths);
+ if (ret) return ret;
+ for (i = 0; i < ARRAY_SIZE(icc_paths); i++) {
+  if (!icc_paths[i].path) { ret = -ENODEV; goto put; }
+  pr_info("SQ2_IRIS1_ICC path=%s resolved=%s avg=%u peak=%u kBps\n",
+          icc_paths[i].name, icc_get_name(icc_paths[i].path),
+          icc_paths[i].avg_bw, icc_paths[i].peak_bw);
+ }
+ ret = icc_bulk_set_bw(ARRAY_SIZE(icc_paths), icc_paths);
+ pr_info("SQ2_IRIS1_ICC vote_ret=%d BEFORE_POWER_RESET\n", ret);
+ if (!ret) return 0;
+put:
+ icc_bulk_put(ARRAY_SIZE(icc_paths), icc_paths);
+ return ret;
+}
+static int icc_release(void)
+{
+ int i, ret, first = 0;
+ for (i = ARRAY_SIZE(icc_paths) - 1; i >= 0; i--) {
+  ret = icc_set_bw(icc_paths[i].path, 0, 0);
+  pr_info("SQ2_IRIS1_ICC clear=%s ret=%d\n", icc_paths[i].name, ret);
+  if (ret && !first) first = ret;
+ }
+ icc_bulk_put(ARRAY_SIZE(icc_paths), icc_paths);
+ return first;
+}
+#endif
+static void trace_barrier(void)
+{
+ if (trace_delay_ms) msleep(trace_delay_ms);
+}
 #ifndef SQ2_IDENTIFY_EXISTING
 static int overlay_id = -1;
 #endif
@@ -128,6 +178,7 @@ static int identify(struct platform_device *pdev)
 
 #ifdef SQ2_IDENTIFY_HFI
  struct sq2_hfi_transport *hfi = NULL;
+ bool icc_owned = false;
  /* driver_override from an earlier private consumer must never redirect
   * this driver to the non-IOMMU identity node.
   */
@@ -137,6 +188,19 @@ static int identify(struct platform_device *pdev)
  if (measured)
   return -EBUSY;
 #ifdef SQ2_IDENTIFY_HFI
+ if (vote_interconnects) {
+  ret = icc_acquire(&pdev->dev);
+  if (ret) { probe_result = ret; return ret; }
+  icc_owned = true;
+  if (icc_probe) {
+   msleep(100);
+   ret = icc_release();
+   measured = true;
+   probe_result = ret;
+   pr_info("SQ2_IRIS1_ICC probe_ret=%d NO_POWER_NO_MMIO_NO_FIRMWARE\n", ret);
+   return ret;
+  }
+ }
  if (dma_probe) {
   ret = sq2_hfi_dma_probe(&pdev->dev);
   probe_result = ret;
@@ -147,11 +211,19 @@ static int identify(struct platform_device *pdev)
  pr_info("SQ2_IRIS1_IDENTIFY phase=probe_begin pd=%u clk=%u read=%d\n",
          power_domains, enable_clocks, read_registers);
  res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
- if (!res || res->start != 0xaa00000 || resource_size(res) != 0x100000)
+ if (!res || res->start != 0xaa00000 || resource_size(res) != 0x100000) {
+#ifdef SQ2_IDENTIFY_HFI
+  if (icc_owned) icc_release();
+#endif
   return -EINVAL;
+ }
  base = ioremap(res->start, resource_size(res));
- if (!base)
+ if (!base) {
+#ifdef SQ2_IDENTIFY_HFI
+  if (icc_owned) icc_release();
+#endif
   return -ENOMEM;
+ }
  if (!request_mem_region(res->start, resource_size(res), "sq2-iris1-identify")) {
   ret = -EBUSY;
   goto unmap;
@@ -210,35 +282,43 @@ static int identify(struct platform_device *pdev)
  }
  for (i = 0; i < power_domains; i++) {
   pr_info("SQ2_IRIS1_IDENTIFY phase=pd_on_begin index=%d\n", i);
+  trace_barrier();
   ret = pm_runtime_resume_and_get(pd[i]);
   pr_info("SQ2_IRIS1_IDENTIFY phase=pd_on_end index=%d ret=%d\n", i, ret);
   if (ret < 0)
    goto cleanup;
   npowered++;
+  trace_barrier();
  }
  if (reset_bridge) {
   reset_changed = true;
   for (i = 0; i < 4; i++) {
    pr_info("SQ2_IRIS1_IDENTIFY phase=reset_assert_begin name=%s\n", reset_names[i]);
+   trace_barrier();
    ret = reset_control_assert(resets[i]);
    pr_info("SQ2_IRIS1_IDENTIFY phase=reset_assert_end name=%s ret=%d\n", reset_names[i], ret);
    if (ret) goto cleanup;
+   trace_barrier();
   }
   usleep_range(150, 250);
   for (i = 0; i < 4; i++) {
    pr_info("SQ2_IRIS1_IDENTIFY phase=reset_deassert_begin name=%s\n", reset_names[i]);
+   trace_barrier();
    ret = reset_control_deassert(resets[i]);
    pr_info("SQ2_IRIS1_IDENTIFY phase=reset_deassert_end name=%s ret=%d\n", reset_names[i], ret);
    if (ret) goto cleanup;
+   trace_barrier();
   }
  }
  for (i = 0; i < enable_clocks; i++) {
   pr_info("SQ2_IRIS1_IDENTIFY phase=clk_on_begin name=%s\n", names[i]);
+  trace_barrier();
   ret = clk_prepare_enable(clks[i]);
   pr_info("SQ2_IRIS1_IDENTIFY phase=clk_on_end name=%s ret=%d\n", names[i], ret);
   if (ret)
    goto cleanup;
   nenabled++;
+  trace_barrier();
   if (i == 2 && ahb) {
    pr_info("SQ2_IRIS1_IDENTIFY phase=ahb_on_begin\n");
    ret = clk_prepare_enable(ahb);
@@ -287,7 +367,11 @@ static int identify(struct platform_device *pdev)
   if (version != 0x5010002f) { ret = -ENODEV; goto cleanup; }
 #ifdef SQ2_IDENTIFY_HFI
   if (hfi_handshake) {
+   pr_info("SQ2_IRIS1_IDENTIFY phase=hfi_prepare_begin\n");
+   trace_barrier();
    ret = sq2_hfi_prepare(&pdev->dev, &hfi);
+   pr_info("SQ2_IRIS1_IDENTIFY phase=hfi_prepare_end ret=%d\n", ret);
+   trace_barrier();
    if (ret) goto cleanup;
   }
 #endif
@@ -297,13 +381,15 @@ static int identify(struct platform_device *pdev)
   writel(0, base + 0xe2010);
   writel(0, base + 0xe2000);
   pr_info("SQ2_IRIS1_IDENTIFY phase=firmware_boot_begin\n");
+  trace_barrier();
   ret = sq2_venus_fw_boot(&pdev->dev, &fw_owner, pil_gap);
   pr_info("SQ2_IRIS1_IDENTIFY phase=firmware_boot_end ret=%d owner=%d\n", ret, !!fw_owner);
+  trace_barrier();
   if (fw_owner) {
    int shutdown;
    if (!ret) {
 #ifdef SQ2_IDENTIFY_HFI
-    if (hfi) ret = sq2_hfi_run(hfi, base, protect_iova);
+    if (hfi) ret = sq2_hfi_run(hfi, base, protect_iova, trace_delay_ms);
     else
 #endif
      usleep_range(20000, 25000);
@@ -391,6 +477,12 @@ cleanup:
  release_mem_region(res->start, resource_size(res));
 unmap:
  iounmap(base);
+#ifdef SQ2_IDENTIFY_HFI
+ if (icc_owned) {
+  int clear = icc_release();
+  if (!ret) ret = clear;
+ }
+#endif
  if (ret != -EPROBE_DEFER)
   probe_result = ret;
  if (ret != -EPROBE_DEFER)
@@ -445,10 +537,16 @@ static int __init start(void)
  if (dma_probe && (power_domains || enable_clocks || reset_bridge ||
                    read_registers || enable_ahb || core_hz || boot_firmware || pil_gap || inspect_gap || hfi_handshake))
   return -EINVAL;
- if (hfi_handshake && (!boot_firmware || !pil_gap)) return -EINVAL;
+ if (hfi_handshake && (!boot_firmware || !pil_gap || !vote_interconnects)) return -EINVAL;
  if (protect_iova && !hfi_handshake) return -EINVAL;
+ if (trace_delay_ms > 100 || (trace_delay_ms && !reset_bridge)) return -EINVAL;
+ if (icc_probe && (!vote_interconnects || power_domains || enable_clocks ||
+                   reset_bridge || enable_ahb || read_registers || core_hz ||
+                   boot_firmware || pil_gap || inspect_gap || dma_probe || hfi_handshake))
+  return -EINVAL;
+ if (vote_interconnects && (dma_probe || inspect_gap)) return -EINVAL;
 #ifndef SQ2_IDENTIFY_HFI
- if (dma_probe || hfi_handshake) return -EOPNOTSUPP;
+ if (dma_probe || hfi_handshake || vote_interconnects || icc_probe) return -EOPNOTSUPP;
 #endif
 #ifndef SQ2_IDENTIFY_FIRMWARE
  if (boot_firmware || pil_gap || inspect_gap)

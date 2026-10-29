@@ -27,7 +27,7 @@ struct qheader {
 };
 #define TABLE_BYTES (sizeof(struct qtable) + 3 * sizeof(struct qheader))
 #define SFR_OFFSET ALIGN(TABLE_BYTES + 3 * QUEUE_BYTES, SZ_4K)
-static const u32 saved_offsets[] = {
+static const u32 mailbox_offsets[] = {
  0xd2064, 0xd2068, 0xd2054, 0xd2050, 0xd205c, 0xd2060,
  0xd2034, 0xd2038, 0xd203c, 0xd2048, 0xd2058,
 };
@@ -40,8 +40,8 @@ struct sq2_hfi_transport {
  struct qheader *q[3];
  u32 *ring[3];
  void __iomem *base;
- u32 saved[ARRAY_SIZE(saved_offsets)];
  bool configured;
+ unsigned int trace_delay_ms;
 };
 static struct sq2_hfi_transport *quarantined;
 static_assert(sizeof(struct qtable) == 288);
@@ -160,64 +160,71 @@ static int receive(struct sq2_hfi_transport *ctx, unsigned int index, bool *done
  return 1;
 }
 
-static void diagnose(struct sq2_hfi_transport *ctx, const char *stage)
+static void queue_status(struct sq2_hfi_transport *ctx, const char *stage)
 {
- static const u32 offsets[] = {
-  /* Do not read TZ-owned e1020..e1034 protection thresholds or reset.
-   * Secure PAS boot delegates those to firmware. A diagnostic threshold
-   * read after e3000 was followed by board loss; recovery requires reboot.
-   */
-  0xe2014, 0xe000c, 0xe0010, 0xd2048, 0xd2050,
-  0xd2054, 0xd2058, 0xd2064, 0xd2068, 0xdf008, 0xdf010,
- };
- unsigned int i;
- for (i = 0; i < ARRAY_SIZE(offsets); i++) {
-  u32 value;
-  pr_info("SQ2_HFI_DIAG_BEGIN stage=%s offset=%x\n", stage, offsets[i]);
-  value = readl(ctx->base + offsets[i]);
-  pr_info("SQ2_HFI_DIAG stage=%s offset=%x value=%08x\n", stage, offsets[i], value);
- }
+ /* CPU-owned queue memory only. No extra MMIO diagnostics: neither the
+  * TZ thresholds nor the VPU-private interrupt controller may be readable
+  * by the application CPU after PAS authentication. Do not expand reads
+  * from register definitions alone; they may be used only by non-TZ boot.
+  */
  dma_rmb();
  pr_info("SQ2_HFI_SFR stage=%s size=%u first=%08x msg_w=%u dbg_w=%u\n", stage,
          *(u32 *)(ctx->cpu + SFR_OFFSET), *(u32 *)(ctx->cpu + SFR_OFFSET + 4),
          READ_ONCE(ctx->q[1]->write), READ_ONCE(ctx->q[2]->write));
 }
-int sq2_hfi_run(struct sq2_hfi_transport *ctx, void __iomem *base, bool protect_iova)
+static void hfi_trace_barrier(struct sq2_hfi_transport *ctx)
 {
+ if (ctx->trace_delay_ms) msleep(ctx->trace_delay_ms);
+}
+int sq2_hfi_run(struct sq2_hfi_transport *ctx, void __iomem *base, bool protect_iova,
+                unsigned int trace_delay_ms)
+{
+ const u32 mailbox_values[] = {
+  ctx->dma, REGION_SIZE, ctx->dma, 1, ctx->dma + SFR_OFFSET, 0,
+  ctx->dma, ctx->dma, REGION_SIZE,
+ };
  u32 status;
  bool done = false;
  int ret, i;
+ static_assert(ARRAY_SIZE(mailbox_values) + 2 == ARRAY_SIZE(mailbox_offsets));
+ if (trace_delay_ms > 100) return -EINVAL;
+ ctx->trace_delay_ms = trace_delay_ms;
  ctx->base = base;
  if (protect_iova) {
   /* Exact sdmshrike namespace from pinned nonsecure and secure_non_pixel
    * virtual-addr-pools. This programs VPU virtual thresholds, not RAM ownership.
    */
   pr_info("SQ2_HFI_PROTECT_BEGIN\n");
+  hfi_trace_barrier(ctx);
   ret = qcom_scm_mem_protect_video_var(0, 0x25800000, 0x1000000, 0x24800000);
   pr_info("SQ2_HFI_PROTECT cp=0..25800000 nonpixel=1000000+24800000 ret=%d\n", ret);
   if (ret) return ret;
+  hfi_trace_barrier(ctx);
  }
- diagnose(ctx, "before");
- for (i = 0; i < ARRAY_SIZE(saved_offsets); i++)
-  ctx->saved[i] = readl(base + saved_offsets[i]);
+ queue_status(ctx, "before");
+ /* The downstream AP path writes these mailboxes but does not read them.
+  * Do not read write-only or protected mailbox registers to save state.
+  * This private exclusive owner clears its pointers after confirmed stop.
+  */
  ctx->configured = true;
- writel(ctx->dma, base + 0xd2064);
- writel(REGION_SIZE, base + 0xd2068);
- writel(ctx->dma, base + 0xd2054);
- writel(1, base + 0xd2050);
- writel(ctx->dma + SFR_OFFSET, base + 0xd205c);
- writel(0, base + 0xd2060);
- writel(ctx->dma, base + 0xd2034);
- writel(ctx->dma, base + 0xd2038);
- writel(REGION_SIZE, base + 0xd203c);
+ pr_info("SQ2_HFI_MAILBOX_PUBLISH_BEGIN\n");
+ hfi_trace_barrier(ctx);
+ for (i = 0; i < ARRAY_SIZE(mailbox_values); i++) {
+  pr_info("SQ2_HFI_MAILBOX_WRITE_BEGIN offset=%x value=%08x\n", mailbox_offsets[i], mailbox_values[i]);
+  hfi_trace_barrier(ctx);
+  writel(mailbox_values[i], base + mailbox_offsets[i]);
+  pr_info("SQ2_HFI_MAILBOX_WRITE_END offset=%x\n", mailbox_offsets[i]);
+  hfi_trace_barrier(ctx);
+ }
  dma_wmb();
  pr_info("SQ2_HFI_BOOT begin iova=%pad uc_bytes=%u table_bytes=%zu header=%zu IRQ_MASK_UNCHANGED\n",
          &ctx->dma, REGION_SIZE, (size_t)TABLE_BYTES, sizeof(struct qtable));
+ hfi_trace_barrier(ctx);
  writel(1, base + 0xd2048);
  writel(1, base + 0xd2058);
  ret = readl_poll_timeout(base + 0xd204c, status, status != 0, 1000, 1000000);
  pr_info("SQ2_HFI_BOOT status=%08x ret=%d\n", status, ret);
- diagnose(ctx, "boot_result");
+ queue_status(ctx, "boot_result");
  if (ret) return ret;
  if (status & 0xfe) return -EIO;
  ctx->ring[0][0] = 12;
@@ -249,10 +256,10 @@ int sq2_hfi_finish(struct sq2_hfi_transport *ctx)
  int i, ret = 0;
  if (!ctx) return 0;
  if (ctx->configured) {
-  for (i = 0; i < ARRAY_SIZE(saved_offsets); i++)
-   writel(ctx->saved[i], ctx->base + saved_offsets[i]);
+  for (i = 0; i < ARRAY_SIZE(mailbox_offsets); i++)
+   writel(0, ctx->base + mailbox_offsets[i]);
   writel(1, ctx->base + 0xd201c);
-  writel(readl(ctx->base + 0xe000c), ctx->base + 0xe0014);
+  writel(0x14, ctx->base + 0xe0014); /* Owned CPU/watchdog pending bits. */
  }
  dma_free_coherent(ctx->dev, REGION_SIZE, ctx->cpu, ctx->dma);
  if (iommu_iova_to_phys(ctx->domain, ctx->dma)) ret = -EIO;

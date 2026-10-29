@@ -1,0 +1,36 @@
+{
+  "status": "votes-release-and-staged-power-reset-clocks-verified-HFI-unresolved",
+  "kernel_source": {
+    "repository": "https://github.com/linux-surface/kernel",
+    "commit": "b86f786594dc9e53c57fcfa2aa58ada9541506bb",
+    "files": {
+      "drivers/interconnect/qcom/sc8180x.c": "8d9eb593a423bca8c0f41d3ecaa57d80d970c2a9d8c70a832090ddbc06c2abdd",
+      "include/dt-bindings/interconnect/qcom,sc8180x.h": "243abe325ef75647ae41ed3c866c6c6429306bd549c0e066ebdcdc42f59b76fb"
+    }
+  },
+  "bandwidth_reference": {
+    "repository": "https://github.com/LineageOS/android_kernel_oneplus_sm8150",
+    "commit": "32f26bf34ddf17df8e224ae0703656b9fe0c1a8d",
+    "config_vote": "sdmshrike-vidc.dtsi bus_cnoc: min/max 1000 kBps",
+    "firmware_vote": "sdmshrike.dtsi pil_venus proxy: average 0, peak 304000 kBps",
+    "limit": "Minimum bring-up/proxy votes; not a decoder performance bandwidth table"
+  },
+  "paths": [
+    {"name": "cpu-cfg", "from": "gem_noc:MASTER_AMPSS_M0=0", "to": "config_noc:SLAVE_VENUS_CFG=54", "avg_kBps": 1000, "peak_kBps": 1000},
+    {"name": "video-mem", "from": "mmss_noc:MASTER_VIDEO_P0=7", "to": "mc_virt:SLAVE_EBI_CH0=1", "avg_kBps": 0, "peak_kBps": 304000},
+    {"name": "firmware-mem", "from": "mmss_noc:MASTER_VIDEO_PROC=9 (mas_qxm_venus_arm9)", "to": "mc_virt:SLAVE_EBI_CH0=1", "avg_kBps": 0, "peak_kBps": 304000}
+  ],
+  "runtime": {
+    "boot_id": "19edba8b-b882-460b-a2b7-5d0a31e875b4",
+    "tested_consumer_sha256": "fa09f750a674a97705ddd58942426a2ac8a24a487455949fe586c2358e98f74f",
+    "tested_overlay_sha256": "cb2e343468740ff56f11e9f9ae2f69c7fa703ef32117ed67be64fe2eaaff8236",
+    "vote_only_result": 0,
+    "power_reset_result_with_100ms_trace_delays": 0,
+    "clock_ahb_version_result_with_100ms_trace_delays": 0,
+    "version": "0x5010002f",
+    "core_reported_hz": 200000097,
+    "cleanup": "All three tested stages returned 0 and cleared all three votes; same boot and framework PIDs",
+    "full_HFI_result": "Connection lost; native collector file pending retrieval; no verified response or cleanup for this trial"
+  },
+  "limits": ["No claim that voting alone fixes board loss: trace delays changed too", "No firmware SYS_INIT reply or decoded frame", "No persistent deployment", "No original Module.symvers or full ABI validation"]
+}

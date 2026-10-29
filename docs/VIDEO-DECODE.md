@@ -4,6 +4,24 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## 干净启动复位阻塞与ICC前置请求（2026-10-29）
+
+修订候选7c155fb7…在boot861e77bc…重试再次失联。之后取回native `sq2-hfi-safe-861e.kmsg`，最后记录为377.420876s的reset_deassert axi结束；未到时钟/PAS/HFI。因此本轮不能归因为扩展诊断、保护调用或队列，也不能把collector最后一条直接称为精确的阻塞指令：其落盘与内核执行有时差。新源码移除全部额外MMIO诊断；对下游只写不读的邮箱，也不再为了“保存状态”擅自读回。独占VPU/固件确认停止后清零本消费者邮箱，地址解除映射后不保留悬空队列指针。逐步trace_delay_ms=0..100只用于给独立O_DSYNC collector落盘机会，不保证能中止一个已卡住的MMIO访问。
+
+随后只读确认新boot19edba8b…、Android就绪、guardY、PID2273/2079、pstore空且临时模块清除。SSH ecdh曾closed/reset；以同一操作者密钥、原主机校验及curve25519-sha256/aes128-ctr连通。未改服务/凭据；本轮新boot的恢复方式尚未获用户答复，不能认定自主崩溃或自动恢复。
+
+离线对照固定下游 `__venus_power_on`：它先 `__vote_buses`，再启GDSC和桥接reset；旧私有探针漏了总线请求。已有SC8180X interconnect为内建并已绑定。根据固定6.3 sc8180x.c/绑定头建立三条真实路径：APSS→VENUS_CFG、VIDEO_P0→EBI、VIDEO_PROC（venus_arm9）→EBI。配置路径1000/1000 kBps；两条DDR路径0/304000 kBps，取自sdmshrike cnoc及PIL代理请求。它们是bring-up请求，不是完整运行期性能表；不改CPU/GPU频率或电压。
+
+新增overlay选项 `--with-interconnects`，固定原驱动/绑定头哈希，运行时复核各provider phandle。消费者 `vote_interconnects` 在电源/reset前请求；按标准ICC路径撤销，不改其他消费者请求。固件关闭失败时与其它资源一起保留路径/投票到重启。独立 `icc_probe=1` 禁止混入电源/reset/时钟/MMIO/固件/DMA参数，申请、100ms持有后清零/释放，真实probe_result判断通过。
+
+测试overlay cb2e3434…及消费者fa09f750…完整传输哈希/当次导出闭包匹配；有限collector ready/存活/smoke均实核。三阶段实测：①三条路径解析到mas_acm_apps-slv_qhs_venus_cfg、mas_qxm_venus0-slv_ebi、mas_qxm_venus_arm9-slv_ebi，请求及反向清零均0；②三域/四reset，不开时钟/不读MMIO/不启固件，带100ms trace等待，完整申请和回收0；③完整桥接/AHB/六时钟、200MHz档200000097Hz，实际version5010002f/mask1f6/ctrl0，回收/撤销请求均0。三个阶段boot19ed…、PID2273/2079保持。**ICC请求和trace等待同时改变，不能单独归因或宣称已根治失联。** 配置/证据边界见configs/sq2-video-interconnect-reference.json，主机分阶段结果已存out。
+
+随后相同候选加入boot_firmware/pil_gap/hfi_handshake/protect_iova的完整试验，连接再次超时，未取得probe_result或回收通过证据。native文件仍为 `/data/local/tmp/sq2-icc-only-19ed.kmsg`，最后一次SSH仍closed/timeout；**当前完整试验的最终阻塞阶段未知，必须先恢复并取回日志，不重复全流程。** collector主机SSH句柄已因超时终止，不能据此认定设备侧collector正常完成。无已验证SYS_INIT回复/解码帧；默认盘/镜像/codec配置未改。
+
+新候选203943ae…增加固件/队列阶段及每次邮箱写入前后的有界trace等待，彻底移除邮箱快照及额外寄存器读取；主机边界/事务测试、编译与运行导出闭包通过，未部署。仍需真实固件握手、V4L2帧和Android接入，完整目标未完成。
+
+固件来源补证：固定linux-surface/aarch64-firmware 9f07579e…中的 `firmware/qcom/msft/surface/pro-x-sq2/qcvss8180.mbn`、历史 `firmware/qcom/venus-5.2/venus.mbn`、本次实测文件三者SHA256均4e93d345…；同提交getfw.py的git blob SHA256 ec791f37…，明确从SQ2 qcdx8180驱动取qcvss8180并原字节复制到venus-5.2目录。其内嵌版本VIDEO.IR.1.2-00042-PROD-1。因此不能仅按目录名把它误判成SDM845通用5.2固件；这条来源证据仍不是HFI运行兼容性证明，不替换成venus-5.4或其它SoC二进制。固定信息见sq2-video-pil-memory-reference.json。
+
 ## 独立SMMU队列与首次HFI等待（2026-10-29）
 
 当前分支fetch/prune后没有远端新增提交；保留既有本地适配。新增 `build-sq2-hfi-overlay.py` 只建立独立 `iris1-hfi@aa00000` 消费者，引用已绑定的软件VIDEOCC，不替换/卸载提供者。SMMU为本机 `/soc@0/iommu@15000000`，SID/mask取固定sdmshrike DTS的0x1300/0x60，fwspec编码00601300；启动时核对GCC/SMMU/VIDEOCC实际phandle。原raw FDT中overlay重定位后的phandle与live不完全相同，本轮使用live树合并检查：删掉新增HFI节点后的规范化树与原live树相同。overlay模块57424c5a…自pin直到重启，不允许热拆。
