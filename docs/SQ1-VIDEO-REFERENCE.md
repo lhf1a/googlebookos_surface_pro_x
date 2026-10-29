@@ -43,6 +43,20 @@ ACPICA iasl 20230628 对DSDT/IORT离线反编译均exit=0；另用有界二进�
 
 下一步：离线交叉核对同字节Windows驱动的页表/引擎选择和现有SQ2板级参考，再形成可审计的SID/IOVA候选；采用真实共享队列写入/回复作为硬件门槛，而非控制状态1。仍需硬件帧、Android MediaCodec及实际应用播放，完整硬解未完成。
 
+## Windows 初始化指令已钉住（续接）
+
+新增`inspect-sq2-windows-video-reference.py`，严格固定上述14369cb4…驱动和acfe9033…IORT哈希，只解析PE/ACPI，不执行二进制或访问设备。SQ1新导出驱动和原SQ2保存驱动分别运行，产生完全相同结果。
+
+- `VedHfiReset`失败路径字符串的代码交叉引用指向直接调用`0x1402f5d54 → 0x140301e68`。该初始化函数在`0x140301ed0..1ef0`将version=0/size=192、qhdr0=24/qhdr_size=56、num_q=3/active_q=3实际存到表头。因此24字节布局现在有同字节Windows主机驱动的直接指令证据；原compact设备试验仍无完成结果，不能倒推为已验证。
+- `0x140301f04..1f3c`分别算ring设备地址为table地址+192+index×engine_ring_bytes，queue header指针为table+24+index×56。ring大小仍来自engine字段，本轮没有把它冒称为已确定常量。
+- `0x1402f61cc`装入`0x01000000`，`0x1402f6330..6334`写共享区域大小；`0x1402f68c8`常量表为d2068/a0068。该Windows路径共享区大小是16MiB，而当前Android私有探针是3MiB。这不是16MiB为所有Linux固件所必需的证明。
+- UC基址表达式在`0x1402f61ec..6200`为`u32(object+36)+u32(object+40)-16MiB`，object来自`*(engine+184)`。把该object字段解释为ACPI非安全页表的起点/长度仍需追踪解析入口；不能据此直接设置固定物理地址。
+- `0x1402f6398..63a0`向CTRL_INIT写1，常量表区分d2048/a0048，后续为CTRL_STATUS轮询。未对所有其它寄存器访问作不存在性断言。
+
+六项指令/布局检查和十项IORT映射核对全部通过。另执行9项检查：两个独立驱动输入结果一致；错误驱动/IORT哈希、非ARM64 PE、错误qhdr0写指令、坏ACPI checksum、越界mapping均拒绝；已有报告不可覆盖。结构/指令负例仅在测试内重绑hash，正式工具没有放宽固定输入。测试夹具首次误用空patch.multiple导致exit1，已改nullcontext并重跑全部通过，不是被测硬件失败。报告和原始反汇编仍在忽略的`out/video-decode/sq1-reference-analysis/`。
+
+本步是有效进展：把队列表头/区域大小从猜测提升为可重复的主机写指令证据，但SID编码语义及SQ2实际stream仍未硬件证实。下一可执行步骤是创建显式、可回退的2300参考SID候选，**先独立DMA分配/映射/解除映射，不启动VPU、不加载固件或读MMIO**；不得静默替换正常启动配置。该阶段只排除主机侧映射错误，仍需随后真实共享队列响应、解码帧、MediaCodec和应用播放。
+
 ## SQ2 待取日志已取回，本轮没有新VPU试验
 
 旧`/data/local/tmp/sq2-hfi-empty-76f0.kmsg`已取回至`out/video-decode/sq1-reference-analysis/sq2-log-retrieval.stdout.txt`。日志证实注册、probe、ICC获取已越过，PAS auth=0/protect=0，九次邮箱写入全部有结束标记。最后一条为540.670400s的`SQ2_HFI_BOOT begin`；没有CTRL状态、empty marker、SYS_INIT或关闭结果，也没有KMSG_END。该位置之后的源码顺序为trace等待、CTRL_INIT写、VERSION写、CTRL_STATUS读；落盘最后一条不能定位精确阻塞指令，不能把未出现结果记为失败返回或安全回收。

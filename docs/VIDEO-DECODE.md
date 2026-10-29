@@ -6,6 +6,8 @@
 
 ## 最新：SQ1 Windows 参考与 empty 日志取回
 
+续接已增加严格哈希/指令检查器：同字节Windows驱动实际写table头24/stride56/总表192/三队列，以及UC_REGION_SIZE=16MiB；CTRL_INIT写1。SQ1、原SQ2两输入结果一致，六项指令检查、十映射核对、9项正负例通过，仍不是设备运行验证。下一步建立显式2300参考SID的独立无上电DMA候选，先验证主机侧映射/解除映射；不改变正常启动SID、不重复旧全流程，不把更换队列表头当作已修复。见SQ1-VIDEO-REFERENCE后续节。
+
 已完成用户新增SQ1设备的只读驱动/ACPI采集及全部manifest验证。SQ1 qcdx与此前SQ2新版包共有34文件全部同字节，79版固件不是当前Android实测42版。更重要的是本机Windows DSDT/IORT给出VIDEO引擎4、SMMU15000000、SID2300/2320/2340等映射，和当前sdmshrike来源1300/mask60存在待核对差异；不得以CPU映射读回替代实际VPU DMA。非安全IOVA/保护范围也须同时核对，暂不盲改或重试。详见[SQ1-VIDEO-REFERENCE](SQ1-VIDEO-REFERENCE.md)。
 
 旧empty-76f0日志已取回：注册/probe/ICC并未停住，PAS auth0/protect0，九次邮箱写入都有END，最后为540.670400s的HFI_BOOT begin；没有下一条控制状态/共享队列或shutdown结果。不能从collector最后一条确定具体MMIO阻塞点。当前只读boot39906e2a…、Android1、guardY/nohibernate、PID2295/2104，临时模块清空/pstore空，恢复方式未确认；用户此前已确认SSH中断时桌面/触摸正常。本轮未复跑VPU或重启，以下待取状态均为历史记录。

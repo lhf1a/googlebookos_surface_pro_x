@@ -1,5 +1,7 @@
 # 构建与部署
 
+Windows参考指令检查：`python3 scripts/inspect-sq2-windows-video-reference.py --driver PRIVATE_QCDXKM8180_SYS --iort PRIVATE_SQ1_IORT_DAT --output NEW_JSON`。输入严格限14369cb4…驱动及acfe9033…IORT；输出拒绝覆盖。固定检查24/56/192队列表、UC16MiB及基址表达式、CTRL_INIT写1和十项视频相关IORT映射。SQ1/SQ2保存驱动分别通过且结果相同，9项正负例检查通过；只读离线，不部署、不证明固件DMA/硬件帧。证据地址及语义边界见SQ1-VIDEO-REFERENCE。
+
 SQ1/SQ2 Windows只读视频参考采集：管理员原生64位PowerShell执行 `scripts/Collect-SurfaceVideoReference.ps1 -ExpectedProcessor SQ1 -CheckOnly` 先核对型号，再去掉CheckOnly并给新的OutputDirectory。默认仅导出图形/相关平台驱动、PnP资源及白名单ACPI，排除许可证/凭据；不改旧Collect-SQ2型号保护，不安装驱动、不重启。只在子进程需要时使用ExecutionPolicy Bypass，不改持久策略；归档必须留private并按manifest逐项核验。SQ1实测及与SQ2同字节驱动/SID差异的证据边界见SQ1-VIDEO-REFERENCE.md；不是Android硬解安装器。
 
 固定固件静态检查：`python3 scripts/inspect-sq2-video-firmware-protocol.py` 对out/test2/firmware/qcom/venus-5.2/venus.mbn只读校验完整哈希、ELF32 ARM及六组协议指令，报告在out/video-decode/firmware-analysis/protocol.json；不执行/部署固件，不等于硬件DMA验证。新消费者的 `hfi_empty_ping=1` 只允许完整HFI模式，以初始rx_req=0和固件空队列写1作为直接共享队列写入判据，再继续SYS_INIT；编译/预检通过，尚未实测。CTRL_STATUS=1可早于队列解析，不能算完整HFI成功；不要在未取compact日志时重试或改猜测的IRQ位。见VIDEO-DECODE。
