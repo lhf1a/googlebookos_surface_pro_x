@@ -38,7 +38,9 @@
     "baseline_1300_mask60": "16MiB; 4096 pages mapped/unmapped; CPU pattern pass; overlay/module removed",
     "modified_exact_windows_SIDs": "16MiB; 4096 pages mapped/unmapped; CPU pattern pass; overlay/module removed",
     "rollback": "baseline hash restored; same results",
-    "is_VPU_DMA_proof": false
+    "is_VPU_DMA_proof": false,
+    "overlay_cleanup_limit": "sysfs node disappeared and removal API returned0, but all three standalone removals emitted OF reference-count/memory-leak warnings; not clean kernel lifetime verification",
+    "reuse_policy": "do not repeat standalone hot-removal tests; builder defaults to refusal; use resident HFI overlay"
   },
   "attribution_limit": "SID/table/UC/mailbox changes tested together; no single-variable root-cause claim",
   "runtime_state": "software VIDEOCC and two overlays resident until reboot; no active test consumer; normal boot image unchanged",

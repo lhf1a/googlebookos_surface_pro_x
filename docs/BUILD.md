@@ -2,7 +2,7 @@
 
 已实测Windows HFI profile：`build-sq2-hfi-overlay.py --windows-reference --with-interconnects --videocc-phandle LIVE --stage NEW_DIR`显式选三条精确2300/2320/2340 SID及属性；没有选项时保留legacy1300/mask60。`build-sq2-iris1-phase.sh --hfi`消费者按该属性使用24/192表和16MiB UC，将IOVA限于原Android与Windows推断非安全池交集，不改SCM阈值。只发布CPU邮箱，并给CTRL_INIT写、VERSION写（仅legacy）及状态轮询分别打标。93cd5b7d…+a8e7c9ff…实际SYS_INIT成功和真实关闭/回收0，非帧解码/MediaCodec。窗口、参数与运行状态见VIDEO-DECODE、configs/sq2-video-hfi-status.json；每次build覆盖out固定目的前先保留旧候选。不能热卸载VIDEOCC/overlay。
 
-独立SID主机DMA对照：`python3 scripts/build-sq2-video-dma-reference.py --profile legacy-1300|windows-2300 --smmu-phandle LIVE --stage NEW --output NEW`，输入/输出目录必须全新；模块显式allow=1，只有独立SMMU消费者，无电源/时钟/MMIO/PAS，内部测量后注销driver并移除自己的无资源overlay。两profile和哈希回滚副本均实测16MiB/4096页映射与全页解除映射0；不带allow实际EPERM且不留状态。它只证明主机DMA，不是实际SID线路证明；真实VPU通信证据另见HFI成功记录。
+独立SID主机DMA对照源码仅保留取证。两profile及哈希回滚副本实测16MiB/4096页映射与全页解除映射0，但overlay移除API虽0却产生OF引用计数/泄漏告警，未修复；不可重复热拆。builder现默认拒绝，只有取证重建显式`--allow-known-overlay-lifetime-warning`才可生成；不得把此开关当作修复或常规执行入口。后续使用已驻留HFI overlay的dma_probe，避免该拆除路径。真实VPU通信证据另见HFI成功记录。
 
 Windows参考指令检查：`python3 scripts/inspect-sq2-windows-video-reference.py --driver PRIVATE_QCDXKM8180_SYS --iort PRIVATE_SQ1_IORT_DAT --output NEW_JSON`。输入严格限14369cb4…驱动及acfe9033…IORT；输出拒绝覆盖。固定检查24/56/192队列表、UC16MiB及基址表达式、CTRL_INIT写1和十项视频相关IORT映射。SQ1/SQ2保存驱动分别通过且结果相同，9项正负例检查通过；只读离线，不部署、不证明固件DMA/硬件帧。证据地址及语义边界见SQ1-VIDEO-REFERENCE。
 

@@ -6,6 +6,8 @@
 
 ## 首次真实共享队列与 SYS_INIT 通过（2026-10-29）
 
+**清理边界补正**：完整DMA raw日志中三次独立overlay拆除均出现`OF: ERROR: memory leak`，首次还有refcount underflow/saturation WARN，尽管API返回0、sysfs节点和模块消失。这不是“完全清理通过”；仅4096页DMA映射/解除映射及CPU读回成立。保留日志，禁止再热拆该独立路径，builder默认拒绝，未修复引用寿命。后续用已驻留的HFI overlay，不卸载提供者。本boot发生过这些WARN，当前SSH/框架正常不等于长期稳定。以下exit0/removed均指实际返回值及可见节点状态，不覆盖此限制。
+
 本轮不再猜表头或重跑原1300全流程。先构建独立无电源/时钟/MMIO/PAS的`SQ2_DMA_REFERENCE`：legacy1300/mask60与精确2300/2320/2340三SID用相同16MiB、IOVA上限c0000000。原基线、修改版、通过自含ROLLBACK.sh恢复的另一个副本三者实际insmod均exit0；IOVA均bf000000、独立group唯一peer、4096页映射/两种CPU填值检查/4096页解除映射均通过，消费者driver/overlay在测量结束时清理，随后rmmod0。不带allow负例实际EPERM且无节点/模块残留。第一次collector烟雾标记被现有过滤器排除，脚本在任何insmod之前退出1；确认原collector17282已timeout终止后改用SQ2_KMSG_SMOKE前缀，第二份日志完成。不是一次硬件失败重试。旧/新profile主机侧都能映射，故不能靠此结果判断真实VPU SID。
 
 随后将证据接到显式`--windows-reference` HFI候选。该属性路径限定三条精确SID（mask均0），24字节表头/192字节整表/三条56字节qheader，UC16MiB且IOVA落在原Android池与Windows推断池的交集25800000..c0000000。保留原SCM保护设置；只写CPU的六个邮箱，省去下游DSP镜像和该Windows路径未用的VERSION写；原legacy路径默认不变。新增CTRL_INIT写前/后、VERSION写前/后和CTRL_STATUS轮询前的标记，不增加受保护MMIO读取。HFI区域仍需真实PAS停止后才能释放，失败仍quarantine；清理只清实际发布过的邮箱及已写控制项。

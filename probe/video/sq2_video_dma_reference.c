@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* One-shot host DMA test. No VPU power, clocks, MMIO, firmware or device DMA. */
+/* Historical one-shot host DMA test. No VPU power/clocks/MMIO/firmware.
+ * Live 6.3 overlay removal returned0 but emitted OF refcount/leak warnings.
+ * Keep for evidence/reproduction only; use the resident HFI DMA path instead.
+ * This source does not claim to repair that overlay lifetime defect.
+ */
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>

@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+独立DMA清理告警补正（2026-10-29）：审阅完整raw日志发现baseline/modified/rollback三次of_overlay_remove虽返回0、sysfs节点消失，却均有OF引用计数/内存泄漏告警，首次另有refcount saturation WARN。4096页DMA映射/解除映射证据有效，但不能称kernel lifetime完全清理；不再重复该热拆路径。独立builder默认拒绝，源码仅保留取证；未修复其引用寿命。HFI路径使用驻留overlay、不热拆，后续沿已成功传输推进能力体/session/真实帧。本boot曾出现诊断WARN，不能冒称无内核告警或长期稳定；不要因SSH/桌面仍正常就抹去该限制。
+
 **首次真实HFI成功（2026-10-29）**：独立16MiB DMA对照已实测legacy1300/mask60、精确2300/2320/2340及哈希回滚副本，均4096页映射/CPU读回/全部解除映射、overlay/module清理0。随后显式Windows HFI profile（同三SID、24/192表、16MiB UC/IOVAbf000000、只写CPU邮箱、跳过该路径未用VERSION写；SCM保护范围不变）在原42版固件4e93d345…上实返CTRL40000001、空队列rx_req0→1、SYS_INIT命令r/w3/3、3112字节回复/error0/properties75、msg r/w778/778。PAS关闭0、队列解除映射、HANA退出桥接脉冲0、ICC/时钟/域回收0，消费者refcnt0后已卸载。boot39906e2a…、PID2295/2104、Android1/guardY保持，正常镜像不变。提供者与两overlay仍驻留，不热拆。93cd5b7d…消费者及a8e7c9ff…overlay已实测；这是实际VPU共享队列通信，不是解码帧/Android组件。组合测试不能单独归因SID。**下一未完成动作：有界提取/解析SYS_INIT能力体，然后真实H264 session创建/销毁与帧解码；不要重做已完成的DMA/采集门槛或退回旧1300全流程。** 见configs/sq2-video-hfi-status.json和VIDEO-DECODE。
 
 Windows初始化静态门槛通过（2026-10-29）：inspect-sq2-windows-video-reference.py固定14369cb4…驱动/acfe9033…IORT，SQ1和原SQ2输入结果一致，六项指令检查及十映射核对通过，9项正负例检查通过。直接指令确认Windows表头24/总表192、qheader56/3队列；UC大小16MiB，基址为对象两个u32字段和减16MiB（字段语义仍需追踪）；CTRL_INIT写1。不是设备compact/16MiB通过。上一轮为progress，本轮无VPU/固件/设备状态改动。下一未完成动作：建立显式2300参考SID的独立DMA候选并验证分配/映射/解除映射，先不接电源/时钟/MMIO/PAS，正常启动配置不变；不要退回重复收集或凭静态结果宣称硬解。详见SQ1-VIDEO-REFERENCE。

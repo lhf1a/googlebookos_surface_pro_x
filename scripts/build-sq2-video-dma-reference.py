@@ -12,7 +12,11 @@ p.add_argument('--stage', type=Path, required=True)
 p.add_argument('--output', type=Path, required=True)
 p.add_argument('--smmu-phandle', type=lambda value: int(value, 0), required=True)
 p.add_argument('--profile', choices=['legacy-1300', 'windows-2300'], required=True)
+p.add_argument('--allow-known-overlay-lifetime-warning', action='store_true',
+               help='forensic rebuild only: tested overlay removal produced OF refcount/leak warnings; prefer resident HFI DMA probe')
 a = p.parse_args()
+if not a.allow_known_overlay_lifetime_warning:
+    p.error('Diagnostic rebuild disabled: overlay removal returned0 but produced OF refcount/leak warnings. Use the proven resident HFI DMA probe; do not repeat hot-removal tests.')
 if not 0 < a.smmu_phandle < 2**32:
     p.error('SMMU phandle must be a nonzero u32 from the current live tree')
 if a.output.exists() or a.stage.exists():
