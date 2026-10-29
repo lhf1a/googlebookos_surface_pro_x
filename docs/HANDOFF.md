@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+**首次真实H264帧验证通过（2026-10-29）**：接续既有未提交decode候选，修正runner collector240s/4MiB非法参数（原进程12064已消失、无日志/模块，尚未固件启动），收紧bufreq多属性/尾部残片/超容量检查及分配大小溢出保护。21c883a3…在干净bootbcd0a17e…首次固件启动，实际解出320x240 Constrained Baseline level1.3的6个I/P帧，12个Y/UV CRC全部等于ffmpeg独立参考，verified6/6/mismatch0、EBD7无错、EOS1；STOP/RELEASE/SESSION_END/PAS关闭及全资源回收0，rmmod0。boot、PID2201/1973、guardY保持，pstore空、无SMMU fault/WARN。正常镜像未改，提供者与overlay驻留，不热拆、不在此boot二次启动固件。用户目标已扩展“Android可用并对齐硬件能力”：configs/sq2-video-decoder-capabilities.json逐codec区分固件声明与实测；Android media.player仍只有软件视频decoder。**下一动作：把已验证平台/PAS owner/SID/IOVA/邮箱行为接入现有Venus/V4L2准备链，先编译审计，再开放Codec2与逐codec能力对齐。不要继续只做私有向量或改XML冒充Android硬解。** 见VIDEO-DECODE新首节。
+
 **首次H264解码session往返（2026-10-29）**：正常重启到干净boot44c03275…，本boot首次固件启动下994a00f5…实测SYS_INIT 75属性、SESSION_INIT/END（cookie53513201）均error0，全部关闭/回收0、rmmod0，boot/PID1976/2304、guardY保持，无fault/pstore。离线parse-sq2-hfi-caps.py逐条解析75条=声明数、774/774字；H264解码OUTPUT仅NV12_UBWC，OUTPUT2含线性NV12，96..8192。不是帧解码。同boot第二次固件启动失败，热重启开放：每boot只启动一次固件。**下一动作：session内属性设置/缓冲区需求查询→分配缓冲区→已知H264码流→验证输出像素。** 见VIDEO-DECODE首节。
 
 session候选实测（2026-10-29）：boot39906e2a…内单次运行994a00f5…，到CTRL_STATUS前与成功轮相同，但控制状态保持0、SFR空，-110；新caps/session代码未到达。PAS关闭及全部回收0、rmmod0，boot/PID/guard保持、无SMMU fault、pstore空。这是同boot第二次固件启动，重复上电稳定性开放；不要在本boot重试。**下一动作：用户同意后正常重启，干净boot首次固件启动只跑一次run-hfi-session.sh。** 见VIDEO-DECODE首节。

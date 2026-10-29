@@ -1,5 +1,9 @@
 # 构建与部署
 
+真实H264帧探针：`build-sq2-h264-test-vector.py --out NEW_DIR`用ffmpeg/libx264生成6帧320x240 baseline Annex-B及独立NV12参考/CRC；构建设置`SQ2_HFI_DECODE_VECTOR=.../sq2-h264-vector.h`，同一`build-sq2-iris1-phase.sh --hfi`会固定header dfe3c475…并额外测试dec helper。模块需显式hfi_decode=1且hfi_session/hfi_caps/完整HFI条件成立，默认不解码；bufreq/输入/UBWC-DPB/线性OUTPUT2及scratch都在独立coherent DMA内，直到真实PAS停止后才释放。21c883a3…已实测6/6 Y/UV CRC一致；合成dec19项、caps40项、ring/事务测试通过，缺Module.symvers的审计边界不变。只允许每boot第一次固件启动，不卸载提供者。
+
+离线证据与能力对齐：先用parse-sq2-hfi-caps.py解析本轮raw kmsg，再运行`report-sq2-video-capabilities.py --caps CAPS_JSON --kmsg KMSG --vector VECTOR_JSON --android MEDIA_PLAYER_TXT --output NEW_JSON`。核对全部六帧唯一/尺寸/两个CRC、EOS及关闭标记，拒绝缺失/不一致，报告固件声明与Android实际枚举，不自动改XML。六种decoder的紧凑声明矩阵在configs/sq2-video-decoder-capabilities.json；只有H264小向量验证，不代表上限、其它编码或Android组件已通过。
+
 HFI能力体/session候选：同一`build-sq2-iris1-phase.sh --hfi`现额外复制sq2-hfi-caps.h并运行tests/sq2_hfi_caps_test.c；ring测试增加整包复制/生产者写入。消费者参数`hfi_caps=1`需hfi_handshake，`hfi_session=1`需hfi_caps；默认不启用。build会覆盖out/video-decode/iris1-phase，先备份旧候选。已在干净boot首次固件启动实测SESSION_INIT/END error0；同boot第二次固件启动失败，故每boot只跑一次。离线解析：`python3 -I scripts/parse-sq2-hfi-caps.py KMSG --output NEW_JSON`，拒绝覆盖输出，遇未知属性即停止；只读日志，不连设备。
 
 已实测Windows HFI profile：`build-sq2-hfi-overlay.py --windows-reference --with-interconnects --videocc-phandle LIVE --stage NEW_DIR`显式选三条精确2300/2320/2340 SID及属性；没有选项时保留legacy1300/mask60。`build-sq2-iris1-phase.sh --hfi`消费者按该属性使用24/192表和16MiB UC，将IOVA限于原Android与Windows推断非安全池交集，不改SCM阈值。只发布CPU邮箱，并给CTRL_INIT写、VERSION写（仅legacy）及状态轮询分别打标。93cd5b7d…+a8e7c9ff…实际SYS_INIT成功和真实关闭/回收0，非帧解码/MediaCodec。窗口、参数与运行状态见VIDEO-DECODE、configs/sq2-video-hfi-status.json；每次build覆盖out固定目的前先保留旧候选。不能热卸载VIDEOCC/overlay。

@@ -62,6 +62,11 @@ static bool hfi_caps;
 module_param(hfi_caps, bool, 0400);
 static bool hfi_session;
 module_param(hfi_session, bool, 0400);
+/* Decode the built-in pinned H264 vector inside that session and compare
+ * each OUTPUT2 NV12 frame CRC with the software reference. Needs --decode build.
+ */
+static bool hfi_decode;
+module_param(hfi_decode, bool, 0400);
 static bool protect_iova;
 module_param(protect_iova, bool, 0400);
 /* Allow the independent O_DSYNC collector to commit each BEGIN marker before
@@ -395,7 +400,7 @@ static int identify(struct platform_device *pdev)
    pr_info("SQ2_IRIS1_IDENTIFY phase=hfi_prepare_begin\n");
    trace_barrier();
    ret = sq2_hfi_prepare(&pdev->dev, &hfi, hfi_compact_table, hfi_empty_ping,
-                         hfi_caps, hfi_session);
+                         hfi_caps, hfi_session, hfi_decode);
    pr_info("SQ2_IRIS1_IDENTIFY phase=hfi_prepare_end ret=%d\n", ret);
    trace_barrier();
    if (ret) goto cleanup;
@@ -579,7 +584,8 @@ static int __init start(void)
  if (protect_iova && !hfi_handshake) return -EINVAL;
  if (hfi_compact_table && !hfi_handshake) return -EINVAL;
  if (hfi_empty_ping && !hfi_handshake) return -EINVAL;
- if ((hfi_caps && !hfi_handshake) || (hfi_session && !hfi_caps)) return -EINVAL;
+ if ((hfi_caps && !hfi_handshake) || (hfi_session && !hfi_caps) ||
+     (hfi_decode && !hfi_session)) return -EINVAL;
  if (trace_delay_ms > 100 || (trace_delay_ms && !reset_bridge)) return -EINVAL;
  if (icc_probe && (!vote_interconnects || power_domains || enable_clocks ||
                    reset_bridge || enable_ahb || read_registers || core_hz ||

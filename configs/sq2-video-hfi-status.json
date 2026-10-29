@@ -1,5 +1,5 @@
 {
-  "status": "SYS_INIT-and-shared-queue-DMA-verified-not-decoding",
+  "status": "H264-six-real-frames-CRC-verified-not-Android-hardware-ready",
   "verified_on": "2026-10-29",
   "boot_id": "39906e2a-ade5-4e41-984f-e7ef6d063588",
   "firmware_sha256": "4e93d34504da96320775476bbd509aa06f985b48fb781d4436c8eb812b929928",
@@ -7,8 +7,16 @@
   "hfi_overlay_sha256": "a8e7c9ff853d83e32fa1b8c21bfeae172e5ba7fc918f2f9f40d98bff5ab9e522",
   "profile": {
     "explicit_overlay_option": "--windows-reference",
-    "encoded_smmu_ids": ["0x2300", "0x2320", "0x2340"],
-    "masks": [0, 0, 0],
+    "encoded_smmu_ids": [
+      "0x2300",
+      "0x2320",
+      "0x2340"
+    ],
+    "masks": [
+      0,
+      0,
+      0
+    ],
     "allocation_bytes": 16777216,
     "iova": "0xbf000000",
     "table_header_bytes": 24,
@@ -20,13 +28,22 @@
   },
   "observed": {
     "control_status": "0x40000001",
-    "empty_queue_rx_req_transition": [0, 1],
-    "command_read_and_write_words": [3, 3],
+    "empty_queue_rx_req_transition": [
+      0,
+      1
+    ],
+    "command_read_and_write_words": [
+      3,
+      3
+    ],
     "reply_bytes": 3112,
     "reply_type": "0x20001",
     "reply_error": 0,
     "reported_property_count": 75,
-    "message_read_and_write_words": [778, 778],
+    "message_read_and_write_words": [
+      778,
+      778
+    ],
     "PAS_shutdown": 0,
     "queue_unmapped": true,
     "HANA_post_shutdown_reset": 0,
@@ -43,7 +60,7 @@
     "reuse_policy": "do not repeat standalone hot-removal tests; builder defaults to refusal; use resident HFI overlay"
   },
   "attribution_limit": "SID/table/UC/mailbox changes tested together; no single-variable root-cause claim",
-  "runtime_state": "software VIDEOCC and two overlays resident until reboot; no active test consumer; normal boot image unchanged",
+  "runtime_state": "Current bootbcd0: software VIDEOCC and two overlays resident; decode consumer removed after successful PAS stop; normal boot image unchanged. No further firmware start this boot.",
   "session_candidate": {
     "consumer_sha256": "994a00f500e0dec6a18ac12979f829a4b57594e5da42aa0293db4ffe9083db9e",
     "module_params": "hfi_caps=1 hfi_session=1 on top of the verified Windows-reference HFI parameters",
@@ -66,21 +83,112 @@
     "boot_id": "44c03275-f670-43b7-8a1a-d3b5d93937f5",
     "first_firmware_start_of_boot": true,
     "sys_init_properties": 75,
-    "session_init": {"codec": "H264", "domain": "decoder", "cookie": "0x53513201", "error": 0},
-    "session_end": {"error": 0},
-    "queue_indices_final": {"cmd": [11, 11], "msg": [788, 788]},
+    "session_init": {
+      "codec": "H264",
+      "domain": "decoder",
+      "cookie": "0x53513201",
+      "error": 0
+    },
+    "session_end": {
+      "error": 0
+    },
+    "queue_indices_final": {
+      "cmd": [
+        11,
+        11
+      ],
+      "msg": [
+        788,
+        788
+      ]
+    },
     "PAS_shutdown": 0,
     "resources_released": 0,
     "consumer_removed": true,
     "log_sha256": "579c379d2bdabc357ab785c381f4a5bee14a1316d967b50121656872d17e9e39",
-    "offline_parse": {"records": 75, "body_words_consumed": [774, 774],
-                       "decoders": ["H264", "MPEG1", "MPEG2", "VP8", "HEVC", "VP9"],
-                       "h264_decoder_output": ["NV12_UBWC"],
-                       "h264_decoder_output2": ["NV12_UBWC", "NV12", "NV21"],
-                       "h264_decoder_frame": "96..8192 x 96..8192",
-                       "values_are_firmware_declared_not_decode_tested": true}
+    "offline_parse": {
+      "records": 75,
+      "body_words_consumed": [
+        774,
+        774
+      ],
+      "decoders": [
+        "H264",
+        "MPEG1",
+        "MPEG2",
+        "VP8",
+        "HEVC",
+        "VP9"
+      ],
+      "h264_decoder_output": [
+        "NV12_UBWC"
+      ],
+      "h264_decoder_output2": [
+        "NV12_UBWC",
+        "NV12",
+        "NV21"
+      ],
+      "h264_decoder_frame": "96..8192 x 96..8192",
+      "values_are_firmware_declared_not_decode_tested": true
+    }
   },
   "same_boot_restart": "second firmware start in one OS boot left CTRL_STATUS 0; clean-boot first start succeeded; root cause open",
-  "next_executable_action": "Inside a session: set frame size/output format properties and query buffer requirements, then allocate input/output buffers, submit a known H264 bitstream and verify output pixels; keep one firmware start per OS boot until restart is diagnosed",
-  "not_verified": ["capability body semantics", "session creation", "decoded frame pixels", "V4L2 decoder", "Android MediaCodec", "application playback", "persistent installation", "repeated power-cycle stability"]
+  "next_executable_action": "Port the verified Iris1 clock/reset/PAS ownership, exact SIDs/IOVA and CPU-only mailbox behavior into the existing Venus/V4L2 preparation pipeline; compile and audit before loading. Then integrate open Codec2 and reconcile per-codec capabilities with firmware and real-frame tests; do not advertise software decoding as hardware. Do not restart firmware again in bootbcd0.",
+  "not_verified": [
+    "V4L2 decode API",
+    "Android hardware MediaCodec",
+    "application playback",
+    "HEVC/VP8/VP9/MPEG1/MPEG2 actual frames",
+    "4K/8K and declared upper limits",
+    "10-bit/secure decode",
+    "performance/concurrency/power",
+    "persistent installation",
+    "same-boot firmware restart"
+  ],
+  "objective": "适配Andorid可用的硬件解码器，对齐硬件解码器的能力",
+  "decoded_frames_verified": {
+    "boot_id": "bcd0a17e-2a88-4c10-8856-14ee10c67cce",
+    "first_firmware_start_of_boot": true,
+    "module_sha256": "21c883a3e41e8bcb36d2f9ad6c93c428094419417736d518312fadff7c2d4bb4",
+    "stream_sha256": "94c7974ef28247aa1d15f6e9e88a01a7ea1d382718983bbc1bfe0b5d8cd03dc1",
+    "log_sha256": "0c9727c94a48dce2a5f671f430980ec2cc3e6ec9be663ab5e1180c7c3e6be778",
+    "codec": "H264",
+    "profile": "Constrained Baseline",
+    "level": "1.3",
+    "width": 320,
+    "height": 240,
+    "frames": 6,
+    "output": "linear NV12 via OUTPUT2",
+    "plane_crc_matches": 12,
+    "mismatched_frames": 0,
+    "EOS": true,
+    "stop": 0,
+    "release_resources": 0,
+    "session_end": 0,
+    "PAS_shutdown": 0,
+    "resources_released": 0,
+    "consumer_removed": true,
+    "system_server": 2201,
+    "surfaceflinger": 1973,
+    "screen_only": "Y",
+    "pstore_empty": true,
+    "captured_SMMU_faults_and_WARNs": 0,
+    "frame_evidence_checker_cases": 8
+  },
+  "capability_alignment": {
+    "matrix": "configs/sq2-video-decoder-capabilities.json",
+    "firmware_declared_decoders": [
+      "H264",
+      "MPEG1",
+      "MPEG2",
+      "VP8",
+      "HEVC",
+      "VP9"
+    ],
+    "Android_hardware_decoder_entries_observed": 0,
+    "H264_declared_level": "0x20000 = level6 in pinned downstream vidc_hfi_helper.h",
+    "level_reference_sha256": "4bead9f299b7186d0af4cb40802dd4257e58553fed87186502bbfb12db169e45",
+    "maxima_are_joint_constraints": true,
+    "no_AV1_hardware_declaration": true
+  }
 }

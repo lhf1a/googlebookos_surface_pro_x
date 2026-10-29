@@ -28,6 +28,16 @@ if [ "${1:-}" = --firmware ] || [ "${1:-}" = --hfi ]; then
       "$ROOT/tests/sq2_hfi_caps_test.c" -o "$STAGE/caps-test"
     "$STAGE/caps-test" | tee "$DEST/caps-test.txt"
     printf '\nsq2_iris1_phase-objs += sq2-iris1-hfi.o\nccflags-y += -DSQ2_IDENTIFY_HFI\n' >> "$STAGE/Makefile"
+    if [ -n "${SQ2_HFI_DECODE_VECTOR:-}" ]; then
+      # Pinned output of build-sq2-h264-test-vector.py (stream 94c7974e...).
+      echo "dfe3c4753f7a510f59cfeab5be2926d008e27620336ca56da25e474fa9c60919  $SQ2_HFI_DECODE_VECTOR" | sha256sum -c -
+      cp "$SQ2_HFI_DECODE_VECTOR" "$STAGE/sq2-h264-vector.h"
+      cp "$ROOT/probe/video/sq2-hfi-dec.h" "$STAGE/"
+      gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+        "$ROOT/tests/sq2_hfi_dec_test.c" -o "$STAGE/dec-test"
+      "$STAGE/dec-test" | tee "$DEST/dec-test.txt"
+      printf 'ccflags-y += -DSQ2_HFI_DECODE\n' >> "$STAGE/Makefile"
+    fi
   fi
   gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
     "$ROOT/tests/sq2_fw_transaction_test.c" -o "$STAGE/transaction-test"

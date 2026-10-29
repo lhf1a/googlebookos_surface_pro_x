@@ -4,6 +4,40 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+用户随后扩展目标为“适配Andorid可用的硬件解码器，对齐硬件解码器的能力”。需逐codec对齐固件申报、真实解码验证和Android API暴露；不能用软件decoder或XML条目冒充硬件，也不能把单个小向量提升为4K/8K/10bit/所有profile的验证。
+
+## 首次真实 H264 输出帧 CRC 验证（2026-10-29）
+
+接续工作区既有decode候选和已生成向量，不重新做能力/session门槛。原runner用240秒/4MiB超出现有collector135秒/2MiB上限，collector退出2，runner kill12064失败、无日志/视频模块/固件启动；先确认该进程与旧shell均已结束，当前bootbcd0a17e…仍干净。修正为120秒/2MiB，保留旧失败输出；另对bufreq强制单属性、完整8字记录、禁止静默裁剪超过输出容量的条目，对DMA PAGE_ALIGN前先限大小。未把原runner错误当成硬件失败。
+
+候选21c883a3e41e8bcb36d2f9ad6c93c428094419417736d518312fadff7c2d4bb4构建及实际运行导出闭包missing0；ASan/UBSan下dec19项、caps40项、ring完整复制/写入/长度与fw transaction通过。固定向量为ffmpeg testsrc2、320x240、30fps、6帧、Constrained Baseline level1.3、无B帧、单线程编码/AUD，Annex-B11383字节SHA94c7974e…；将同一码流独立软件解成NV12，参考SHA7ac308a7…，头文件仅含码流/访问单元偏移/CRC，不含参考像素或CPU H264解码器。
+
+在本boot首次固件启动，完整HFI+caps+session+hfi_decode=1执行一次：设置输入320x240、workmode1/core1、OUTPUT UBWC DPB、OUTPUT2线性NV12；查询需求后设置7输入/18DPB/18OPB，分配scratch/persist等。LOAD_RESOURCES/START error0，送6个访问单元与空EOS，固件sequence change报320x240，再CONTINUE及FTB。收到7个EBD/error0，6个非空线性输出加EOS；每帧可见320x240 Y和320x120 UV以stride384/Y scan256读取，与独立参考的CRC逐一相等：
+
+| 帧 | Y CRC | UV CRC |
+|---|---|---|
+|0|a63b3e27|4ef614e1|
+|1|6452bebf|8f399579|
+|2|2a48def8|22e352f2|
+|3|ce9219cd|1af7f368|
+|4|3d294bd1|a1e0a7c1|
+|5|0d29a183|15abb8c1|
+
+`SQ2_HFI_DEC_RESULT ret=0 verified=6/6 mismatched=0 ebd=7 ebd_err=0 fbd_out=7 fbd_empty=1 fbd_err=0 eos=1 seq=1000001 320x240`。STOP/RELEASE_RESOURCES、内部缓冲区release和SESSION_END均0，session_open0；PAS shutdown0/owner0之后才释放所有decode缓冲区与队列；HANA桥接/时钟/域/ICC回收0，probe_result0、消费者rmmod0。bootbcd0…、system_server2201/SF1973保持，guardY/nohibernate、Android1、pstore空，无SMMU fault/WARN。原始日志已取回，SHA0c9727c94a48dce2a5f671f430980ec2cc3e6ec9be663ab5e1180c7c3e6be778。提供者/两个overlay保持驻留；本boot不要再启动固件。
+
+这是实际硬件解码的12个可见平面CRC通过，不是只见FBD或改索引。但只有此H264点，未测B帧/长视频/seek/并发/上限/性能；空FBD的尺寸元数据无意义，不把其未初始化字段当成帧。未创建/dev/video或Android硬件组件。
+
+## 能力对齐：固件声明、私有帧与Android枚举分离
+
+本轮能力体仍75记录/774字全部解析。新report-sq2-video-capabilities.py独立比对六帧唯一性、尺寸、实得与打印期望CRC均须等于vector.json，再核对EOS和真实关闭标记；8个正负例覆盖缺帧/改CRC/尺寸/关闭/EOS及Android硬软分类。输出capability-alignment.json和紧凑configs/sq2-video-decoder-capabilities.json，逐项保留六种decoder的格式、宽高/宏块/速率联合限制和profile/level原始值。
+
+- 固件声明H264、MPEG1/2、VP8、HEVC、VP9；实测帧只有上述H264小向量。MPEG1 Android MIME映射仍待确定，不丢弃此声明、不伪造组件。
+- H264 OUTPUT只报NV12_UBWC，OUTPUT2含NV12_UBWC/NV12/NV21，已实测NV12。8K宽高与480fps是分别申报的上限，必须同时满足宏块/秒、宏块/帧等限制，不能写成“8K480已支持”。
+- 补证：固定下游vidc_hfi_helper.h（SHA4bead9f2…、configs/sm8150-video-reference.json）明确定义HFI_H264_LEVEL_6=0x20000，因此该level值名称现在有来源；只是固件申报，不是本轮level6码流实测。6.3头只有至5.2，不盲套Android枚举。
+- Android实际service list有AIDL Codec2 default/software，media.player枚举视频均c2.android软件项、hw-accelerated0。最初查询media.codec返回不存在，不能解释成没有任何Codec2服务；已改查实际media.player/store registry。无/dev/video、未接硬件V4L2/C2。AV1/APV软件项存在，不在该固件硬件声明里，不发布为硬解。
+
+下一步转入正式Venus/V4L2平台后端与开放Codec2：复用本轮正确SID/IOVA、CPU邮箱、PAS所有权及缓冲寿命，先编译/审计再受控实测，随后对齐每种codec的profile/level/输出格式/联合上限、真实流及Android能力查询/应用播放。热重启仍未修复，应让核心长期持有固件避免每个会话重复PAS启停，并另验证完整remove/错误路径；不通过正常启动配置或XML假声明绕过。完整用户目标保持未完成。
+
 ## 首次真实H264解码session创建/销毁及完整能力体（2026-10-29）
 
 用户批准后经sync和Android正常重启到干净boot44c03275…（guardY/nohibernate、boot_completed1、PID1976/2304、无视频模块/节点、pstore空）。重新传输六文件全哈希匹配后只运行一次run-hfi-session.sh：重装软件VIDEOCC、identify overlay和HFI overlay，集成DMA门槛probe_result0并卸载；随后本boot首次固件启动，994a00f5…完整参数加hfi_caps=1/hfi_session=1。
