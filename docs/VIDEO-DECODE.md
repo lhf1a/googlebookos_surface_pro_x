@@ -4,6 +4,37 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## 首次真实H264解码session创建/销毁及完整能力体（2026-10-29）
+
+用户批准后经sync和Android正常重启到干净boot44c03275…（guardY/nohibernate、boot_completed1、PID1976/2304、无视频模块/节点、pstore空）。重新传输六文件全哈希匹配后只运行一次run-hfi-session.sh：重装软件VIDEOCC、identify overlay和HFI overlay，集成DMA门槛probe_result0并卸载；随后本boot首次固件启动，994a00f5…完整参数加hfi_caps=1/hfi_session=1。
+
+```
+SQ2_HFI_BOOT status=40000001 ret=0           SFR first=74696e49("Init")
+SQ2_HFI_EMPTY_PING rx_req=1 polls=0 cmd_r=0 cmd_w=0
+SQ2_HFI_SYS_INIT_REPLY error=0 properties=75  (3112 bytes)
+SQ2_HFI_SESSION_INIT_DONE id=53513201 error=0 properties=0 bytes=24
+SQ2_HFI_SESSION_END_DONE id=53513201 error=0
+SQ2_HFI_DONE reply=1 ret=0 session_open=0 cmd_r=11 cmd_w=11 msg_r=788 msg_w=788
+```
+
+固件按cookie回应了H264解码SESSION_INIT/SESSION_END，均error0；无SYS_ERROR事件/调试消息。之后PAS shutdown0/owner0、队列首IOVA解除映射、19.2MHz恢复、HANA桥接脉冲0、reset恢复、三域off0、三ICC清零、resources_released0、probe_result0，消费者rmmod0。boot/PID保持，dmesg无SMMU fault/WARN，pstore空。日志out/video-decode/hfi-session/hfi-session-44c0.kmsg（579c379d…）。
+
+新增离线 `scripts/parse-sq2-hfi-caps.py`：只读kmsg的98行RAW，要求行连续、包头0x20001、尾部只有零填充，按固定6.3 HFI4xx载荷布局逐条解析，遇未知属性即停止不猜长度。结果**75条记录正好等于固件声明的75个属性，774/774体字全部消费**，作为布局独立一致性检查；末条0x1016按下游名TME_VERSION_SUPPORTED，仅因恰剩1字推断长度。解码器：H264、MPEG1、MPEG2、VP8、HEVC、VP9；编码器：H264、VP8、HEVC及未命名0x8000。H264解码组：OUTPUT仅NV12_UBWC，OUTPUT2为NV12_UBWC/NV12/NV21；宽高96..8192、mbs_per_frame≤138240、mbs_per_second≤3888000、帧率≤480、码率≤220000000、max_workmodes1..3、videocores1；profile 0x1/0x2/0x4/0x20/0x40，level字段0x20000（超过6.3头文件列出的5.2=0x10000，含义未核实）。这些是固件申报值，未经实际解码验证。结果JSON在hfi-session/caps-44c0.json。
+
+**边界：** 这是真实VPU会话协议往返，不是解码：未设置缓冲区需求、未送码流、无输出帧、无V4L2/MediaCodec/应用播放。对照上一轮：同一OS boot内第二次固件启动CTRL_STATUS保持0，而干净boot首次启动成功；两次观察支持“重复上电/热重启未解决”，根因未定。实际适配须暂按每boot一次固件启动处理，或另行诊断热重启。下一步：session内SET_PROPERTY（帧尺寸/输出格式）及GET_PROPERTY缓冲区需求，再分配输入/输出缓冲区、送一段已知H264码流并验证输出帧像素；OUTPUT只申报UBWC，线性NV12需经OUTPUT2。
+
+## session候选单次实测：同boot第二次固件启动未进入控制状态（2026-10-29）
+
+用户批准后在仍为boot39906e2a…（guardY、Android1、PID2104/2295、提供者与两overlay驻留、无消费者、pstore空）上只运行一次run-hfi-session.sh；六文件传输哈希匹配，collector ready/smoke通过。994a00f5…带原Windows-reference全部参数加hfi_caps=1/hfi_session=1。DMA16MiB/IOVAbf000000、PAS boot0/owner1、protect0、六个邮箱、CTRL_INIT写入与此前成功轮逐条相同；但CTRL_STATUS在1秒内保持0（成功轮为40000001），SFR首字仍0（成功轮为"Init"74696e49），msg_w/dbg_w0，ret-110。**新代码只在SYS_INIT回复后执行，本轮未到达；没有取得能力体RAW、session或帧，不能据此评价新阶段。** 随后真实PAS shutdown0/owner0、队列解除映射、HANA桥接脉冲0、reset恢复、三域off0、三ICC清零、resources_released=-110（即HFI超时码，回收本身均0），消费者rmmod0。之后boot/PID/guard保持，dmesg无SMMU fault/WARN，pstore空，无辅助设备残留。完整日志out/video-decode/hfi-session/hfi-session-3990.kmsg（c459be3f…）。
+
+这是本boot内第二次PAS启动该固件（第一次即成功的SYS_INIT轮，已正常shutdown）。**同boot重复上电不能复现控制启动，符合此前“未验证多次上电稳定性”的开放项**；单次观察不能区分安全侧PAS状态、未覆盖的HW_CTRL/GDSC残留或其它热重启条件，不作根因结论，也不在本boot重试。下一步：经用户同意后正常重启，在干净boot上作为首次固件启动只运行一次同一脚本（脚本会重新装提供者并先做DMA门槛）；热重启问题另作诊断项。
+
+## 能力体捕获与H264 session候选（2026-10-29，后已实测，见首节）
+
+在已实测的Windows-reference传输上新增两个opt-in阶段，默认行为不变：`hfi_caps=1`（需hfi_handshake）将SYS_INIT回复整包有界复制出共享环（含环绕、复制后复核长度字），以8字/行`SQ2_HFI_CAPS_RAW`原样记录，供离线解析；同时按固定6.3 hfi_parser.c的逐字扫描语义汇总CODEC_SUPPORTED dec/enc掩码、MAX_SESSIONS、CODEC_MASK中覆盖H264解码的条目数及其他属性命中数。扫描计数沿用上游启发式，载荷字恰好等于属性ID也会计入，不是逐属性schema；末尾无足够载荷的命中记truncated、不越界读取。`hfi_session=1`（需hfi_caps）仅在dec掩码含H264时发送SESSION_INIT `{20,10007,53513201,2,2}`（VIDC_SESSION_TYPE_DEC/HFI_VIDEO_CODEC_H264，固定私有cookie），等待0x20006且核对session id/error，再发SESSION_END并等待0x20007。不设置缓冲区、不发送码流、不解码帧。等待期间消费SYS_DEBUG（只打印有界可打印摘录）与EVENT_NOTIFY，SYS_ERROR事件直接中止；随后仍走已验证的真实PAS关闭/HANA桥接/回收，关闭失败仍整体隔离。SYS_INIT命令改用同一有界生产者写入（r=w=0时与原写法字节相同）。
+
+主机ASan/UBSan：环复制/写入672+3584组（全部起点/长度/占用、环绕、复制中长度被改、空间不足不写入）、原448组环绕与12300种长度、caps解析40例（合成数据，非固件输出）及固件事务16组合全过。候选`994a00f500e0dec6a18ac12979f829a4b57594e5da42aa0293db4ffe9083db9e`，对boot39906e2a…实采导出missing=0、vermagic匹配；mixed-declaration警告为原有代码位置。旧93cd5b7d…候选已备份于out/video-decode/hfi-session/previous-out，新候选及单次运行脚本在hfi-session/session-v1与run-hfi-session.sh。**尚未部署或实测；没有能力体语义、session创建或解码帧证据。** 下一步：确认设备状态后只运行一次该脚本，取回日志离线解析能力体；session通过后才进入缓冲区要求/码流/输出帧。
+
 ## 首次真实共享队列与 SYS_INIT 通过（2026-10-29）
 
 **清理边界补正**：完整DMA raw日志中三次独立overlay拆除均出现`OF: ERROR: memory leak`，首次还有refcount underflow/saturation WARN，尽管API返回0、sysfs节点和模块消失。这不是“完全清理通过”；仅4096页DMA映射/解除映射及CPU读回成立。保留日志，禁止再热拆该独立路径，builder默认拒绝，未修复引用寿命。后续用已驻留的HFI overlay，不卸载提供者。本boot发生过这些WARN，当前SSH/框架正常不等于长期稳定。以下exit0/removed均指实际返回值及可见节点状态，不覆盖此限制。

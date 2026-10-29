@@ -20,10 +20,13 @@ if [ "${1:-}" = --firmware ] || [ "${1:-}" = --hfi ]; then
   cp "$ROOT/probe/video/"{sq2-venus-fw.c,sq2-venus-fw.h,sq2-fw-transaction.h,sq2_video_fw_layout.h,sq2_pil_mem_query.c,sq2-pil-region.h} "$STAGE/"
   printf 'obj-m += sq2_iris1_phase.o\nsq2_iris1_phase-objs := identify.o sq2-venus-fw.o sq2_pil_mem_query.o\nccflags-y += -DSQ2_IDENTIFY_EXISTING -DSQ2_IDENTIFY_FIRMWARE -DSQ2_PIL_QUERY_LIBRARY -I$(srctree)/drivers/firmware\n' > "$STAGE/Makefile"
   if [ "${1:-}" = --hfi ]; then
-    cp "$ROOT/probe/video/"{sq2-iris1-hfi.c,sq2-iris1-hfi.h,sq2-hfi-ring.h} "$STAGE/"
+    cp "$ROOT/probe/video/"{sq2-iris1-hfi.c,sq2-iris1-hfi.h,sq2-hfi-ring.h,sq2-hfi-caps.h} "$STAGE/"
     gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
       "$ROOT/tests/sq2_hfi_ring_test.c" -o "$STAGE/ring-test"
     "$STAGE/ring-test" | tee "$DEST/ring-test.txt"
+    gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+      "$ROOT/tests/sq2_hfi_caps_test.c" -o "$STAGE/caps-test"
+    "$STAGE/caps-test" | tee "$DEST/caps-test.txt"
     printf '\nsq2_iris1_phase-objs += sq2-iris1-hfi.o\nccflags-y += -DSQ2_IDENTIFY_HFI\n' >> "$STAGE/Makefile"
   fi
   gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \

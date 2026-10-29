@@ -1,5 +1,11 @@
 # SQ2 开发交接
 
+**首次H264解码session往返（2026-10-29）**：正常重启到干净boot44c03275…，本boot首次固件启动下994a00f5…实测SYS_INIT 75属性、SESSION_INIT/END（cookie53513201）均error0，全部关闭/回收0、rmmod0，boot/PID1976/2304、guardY保持，无fault/pstore。离线parse-sq2-hfi-caps.py逐条解析75条=声明数、774/774字；H264解码OUTPUT仅NV12_UBWC，OUTPUT2含线性NV12，96..8192。不是帧解码。同boot第二次固件启动失败，热重启开放：每boot只启动一次固件。**下一动作：session内属性设置/缓冲区需求查询→分配缓冲区→已知H264码流→验证输出像素。** 见VIDEO-DECODE首节。
+
+session候选实测（2026-10-29）：boot39906e2a…内单次运行994a00f5…，到CTRL_STATUS前与成功轮相同，但控制状态保持0、SFR空，-110；新caps/session代码未到达。PAS关闭及全部回收0、rmmod0，boot/PID/guard保持、无SMMU fault、pstore空。这是同boot第二次固件启动，重复上电稳定性开放；不要在本boot重试。**下一动作：用户同意后正常重启，干净boot首次固件启动只跑一次run-hfi-session.sh。** 见VIDEO-DECODE首节。
+
+能力体/H264 session候选（2026-10-29，已在同boot二次启动实测，未到达新阶段）：消费者新增opt-in `hfi_caps=1`（整包有界复制SYS_INIT回复、原样RAW日志与上游逐字扫描汇总）和 `hfi_session=1`（仅在dec掩码含H264时SESSION_INIT/END一次，无缓冲区/码流/帧）。环复制/写入、caps解析及事务主机ASan/UBSan通过，`994a00f5…`对39906e2a…导出missing=0。未部署，无session或解码证据。**下一未完成动作：确认设备boot/驻留提供者后只跑一次out/video-decode/hfi-session/run-hfi-session.sh并取回日志；不要重复已验证的DMA/SYS_INIT门槛。** 见VIDEO-DECODE首节。
+
 独立DMA清理告警补正（2026-10-29）：审阅完整raw日志发现baseline/modified/rollback三次of_overlay_remove虽返回0、sysfs节点消失，却均有OF引用计数/内存泄漏告警，首次另有refcount saturation WARN。4096页DMA映射/解除映射证据有效，但不能称kernel lifetime完全清理；不再重复该热拆路径。独立builder默认拒绝，源码仅保留取证；未修复其引用寿命。HFI路径使用驻留overlay、不热拆，后续沿已成功传输推进能力体/session/真实帧。本boot曾出现诊断WARN，不能冒称无内核告警或长期稳定；不要因SSH/桌面仍正常就抹去该限制。
 
 **首次真实HFI成功（2026-10-29）**：独立16MiB DMA对照已实测legacy1300/mask60、精确2300/2320/2340及哈希回滚副本，均4096页映射/CPU读回/全部解除映射、overlay/module清理0。随后显式Windows HFI profile（同三SID、24/192表、16MiB UC/IOVAbf000000、只写CPU邮箱、跳过该路径未用VERSION写；SCM保护范围不变）在原42版固件4e93d345…上实返CTRL40000001、空队列rx_req0→1、SYS_INIT命令r/w3/3、3112字节回复/error0/properties75、msg r/w778/778。PAS关闭0、队列解除映射、HANA退出桥接脉冲0、ICC/时钟/域回收0，消费者refcnt0后已卸载。boot39906e2a…、PID2295/2104、Android1/guardY保持，正常镜像不变。提供者与两overlay仍驻留，不热拆。93cd5b7d…消费者及a8e7c9ff…overlay已实测；这是实际VPU共享队列通信，不是解码帧/Android组件。组合测试不能单独归因SID。**下一未完成动作：有界提取/解析SYS_INIT能力体，然后真实H264 session创建/销毁与帧解码；不要重做已完成的DMA/采集门槛或退回旧1300全流程。** 见configs/sq2-video-hfi-status.json和VIDEO-DECODE。

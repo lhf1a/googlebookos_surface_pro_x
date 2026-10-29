@@ -1,5 +1,7 @@
 # 构建与部署
 
+HFI能力体/session候选：同一`build-sq2-iris1-phase.sh --hfi`现额外复制sq2-hfi-caps.h并运行tests/sq2_hfi_caps_test.c；ring测试增加整包复制/生产者写入。消费者参数`hfi_caps=1`需hfi_handshake，`hfi_session=1`需hfi_caps；默认不启用。build会覆盖out/video-decode/iris1-phase，先备份旧候选。已在干净boot首次固件启动实测SESSION_INIT/END error0；同boot第二次固件启动失败，故每boot只跑一次。离线解析：`python3 -I scripts/parse-sq2-hfi-caps.py KMSG --output NEW_JSON`，拒绝覆盖输出，遇未知属性即停止；只读日志，不连设备。
+
 已实测Windows HFI profile：`build-sq2-hfi-overlay.py --windows-reference --with-interconnects --videocc-phandle LIVE --stage NEW_DIR`显式选三条精确2300/2320/2340 SID及属性；没有选项时保留legacy1300/mask60。`build-sq2-iris1-phase.sh --hfi`消费者按该属性使用24/192表和16MiB UC，将IOVA限于原Android与Windows推断非安全池交集，不改SCM阈值。只发布CPU邮箱，并给CTRL_INIT写、VERSION写（仅legacy）及状态轮询分别打标。93cd5b7d…+a8e7c9ff…实际SYS_INIT成功和真实关闭/回收0，非帧解码/MediaCodec。窗口、参数与运行状态见VIDEO-DECODE、configs/sq2-video-hfi-status.json；每次build覆盖out固定目的前先保留旧候选。不能热卸载VIDEOCC/overlay。
 
 独立SID主机DMA对照源码仅保留取证。两profile及哈希回滚副本实测16MiB/4096页映射与全页解除映射0，但overlay移除API虽0却产生OF引用计数/泄漏告警，未修复；不可重复热拆。builder现默认拒绝，只有取证重建显式`--allow-known-overlay-lifetime-warning`才可生成；不得把此开关当作修复或常规执行入口。后续使用已驻留HFI overlay的dma_probe，避免该拆除路径。真实VPU通信证据另见HFI成功记录。

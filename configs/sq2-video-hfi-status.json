@@ -44,6 +44,43 @@
   },
   "attribution_limit": "SID/table/UC/mailbox changes tested together; no single-variable root-cause claim",
   "runtime_state": "software VIDEOCC and two overlays resident until reboot; no active test consumer; normal boot image unchanged",
-  "next_executable_action": "Add bounded SYS_INIT capability-body capture/parser, then create and destroy a real H264 decode session using the proven transport; retain firmware-stop ownership rules",
+  "session_candidate": {
+    "consumer_sha256": "994a00f500e0dec6a18ac12979f829a4b57594e5da42aa0293db4ffe9083db9e",
+    "module_params": "hfi_caps=1 hfi_session=1 on top of the verified Windows-reference HFI parameters",
+    "host_tests": "ring copy/write 672+3584, ring parse 448+12300, caps parser 40 synthetic, firmware transaction 16 combinations; ASan/UBSan",
+    "symbol_closure_against_boot": "39906e2a-ade5-4e41-984f-e7ef6d063588 missing=0",
+    "deployed": true,
+    "trial_same_boot_second_firmware_start": {
+      "boot_id": "39906e2a-ade5-4e41-984f-e7ef6d063588",
+      "control_status": "0x00000000",
+      "sfr_first_word": "0x00000000",
+      "result": -110,
+      "new_stages_reached": false,
+      "PAS_shutdown": 0,
+      "resources_released_all_steps": 0,
+      "consumer_removed": true,
+      "log_sha256": "c459be3f0d3a35c3d1578ef28ce0498fc17e82cc172b1c4da7b876c64d1508aa"
+    }
+  },
+  "session_verified": {
+    "boot_id": "44c03275-f670-43b7-8a1a-d3b5d93937f5",
+    "first_firmware_start_of_boot": true,
+    "sys_init_properties": 75,
+    "session_init": {"codec": "H264", "domain": "decoder", "cookie": "0x53513201", "error": 0},
+    "session_end": {"error": 0},
+    "queue_indices_final": {"cmd": [11, 11], "msg": [788, 788]},
+    "PAS_shutdown": 0,
+    "resources_released": 0,
+    "consumer_removed": true,
+    "log_sha256": "579c379d2bdabc357ab785c381f4a5bee14a1316d967b50121656872d17e9e39",
+    "offline_parse": {"records": 75, "body_words_consumed": [774, 774],
+                       "decoders": ["H264", "MPEG1", "MPEG2", "VP8", "HEVC", "VP9"],
+                       "h264_decoder_output": ["NV12_UBWC"],
+                       "h264_decoder_output2": ["NV12_UBWC", "NV12", "NV21"],
+                       "h264_decoder_frame": "96..8192 x 96..8192",
+                       "values_are_firmware_declared_not_decode_tested": true}
+  },
+  "same_boot_restart": "second firmware start in one OS boot left CTRL_STATUS 0; clean-boot first start succeeded; root cause open",
+  "next_executable_action": "Inside a session: set frame size/output format properties and query buffer requirements, then allocate input/output buffers, submit a known H264 bitstream and verify output pixels; keep one firmware start per OS boot until restart is diagnosed",
   "not_verified": ["capability body semantics", "session creation", "decoded frame pixels", "V4L2 decoder", "Android MediaCodec", "application playback", "persistent installation", "repeated power-cycle stability"]
 }
