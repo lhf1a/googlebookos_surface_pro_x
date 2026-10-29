@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+Iris1 HFI续接（2026-10-29）：固定下游vidc_hfi_io.h哈希，新增独立iris1资源标志及CPU时钟、DSP镜像队列、IRQ掩码适配候选，保持HFI4xx和原平台表。隔离编译core/dec/enc及ASan/UBSan mock通过，三模块对同boot运行导出的符号闭包missing=0；未部署或添加SC8180X match。电源/reset/资源验证、低端IOVA保留和固件关闭失败的内存寿命仍开放；没有硬件解码帧/Android组件。见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
+
 视频硬解续接（2026-10-29）：`codex/sq2-video-decode` 在30aee11基础上新增固定固件MDT copy-only探针。现有4e93d345…固件在新分配低4GiB/1MiB对齐的6MiB连续DMA内存中，三个LOAD段/5MiB跨度逐段复制及BSS读回实机通过；内存/辅助设备已释放、模块已卸载，无allow参数负测被拒绝。23个未定义符号匹配运行导出，boot ID及system_server/SF PID保持、boot_completed=1、screen_only=Y。未调用SCM/PAS、未启动VPU，没有解码帧或MediaCodec硬解；下一步仍为Iris1电源/HFI和关闭失败时的内存保留策略。未写启动镜像或codec配置，详见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
 
 eDP最终回退补验：用户恢复连接后，SSH已核对原msm完整哈希f69c91e7…、boot_completed=1、screen_only=Y、默认闭源入口无测试/debug参数、一次性env=0。实时链路恢复2.7Gbps×4、2880×1920@60/355500kHz/24bpp；上一轮v3日志已取回out。下文“最后重启后未复核”缺口现已关闭，无新增切换或重启。

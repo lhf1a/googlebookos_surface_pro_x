@@ -4,6 +4,16 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## Iris1 HFI差异候选（2026-10-29，未部署）
+
+固定OnePlus下游提交补取 `drivers/media/platform/msm/vidc/vidc_hfi_io.h`，SHA256 ebc34f34…，已加入参考清单。与原venus_hfi.c核对：VPU5和sdmshrike均使用4xx消息，CPU CS/IC及wrapper基址沿用旧布局；独立差异包括时钟使能后CPU_CGC_DIS/CLOCK_CONFIG清零、没有CVP时DSP QTBL/UC镜像CPU队列、保留无关位的中断掩码读改写（仅清0x14）。不是Iris2/v6寄存器布局。
+
+新增 `prepare-sq2-venus-iris1.py` 和 `build-sq2-venus-iris1.sh`：固定core.c/core.h/firmware.c/hfi_venus.c/io头哈希，在新目录复制源码并添加独立 `iris1` 资源标志；HFI仍要求4xx。封装于 `probe/video/venus-iris1.h`，在初始firmware boot前和后续HFI恢复时配置CPU时钟，在原CPU队列映射后镜像DSP队列，在boot_core中单独处理IRQ mask。原平台match/resource表逐字不变，所有既有平台的iris1默认为false，**没有可匹配SC8180X的新设备描述，尚不能驱动本机解码器**。其余Iris1电源/reset/互联、DMA IOVA边界和固件寿命仍未完成，不能直接装载并添加新节点尝试解码。
+
+隔离编译得到venus-core/dec/enc三模块。首次core SHA256 add55d36…（随后输入清单增加core.c保护，不改变驱动源码）；缺原Module.symvers，modpost警告已保留。对同boot的实机导出做三模块符号闭包检查missing=0，不能当作完整ABI或硬件通过。未传输或加载这些候选，默认系统未变。产物/编译日志/预检在 `out/video-decode/iris1-hfi/`。
+
+ASan/UBSan主机mock直接编译候选实际helper和原寄存器头，检查五次写入的完整地址/值/顺序，以及1024组掩码保留无关位；通过。具体地址由固定下游头独立核对。此项只验证软件寄存器序列，未在SQ2上执行，也不证明整个HFI协议可用。sdmshrike DTS与sm8150同样声明0xaa00000/0x200000、SPI174和非安全SID0x1300/mask0x60；该社区下游文件尚不是SQ2实测资源证明。
+
 ## 固件搬运与读回实测（2026-10-29）
 
 继续自远端 `codex/sq2-video-decode` 的 `30aee11`。当前工作站缺少上一轮thermal/video缓存，已从SHA256为275f05c5…的既有内核归档恢复独立 `/root/.cache/sq2-thermal/kernel`，重建foundation；没有构建或替换正常启动Image。

@@ -1,5 +1,6 @@
 {
   "files": {
+    "vidc_hfi_io.h": "ebc34f34143b19ca365fe995903db8dc6df411c89de14273bd992ce61e99c705",
     "sdmshrike-vidc.dtsi": "643302a49133d7b2bf859ae0f0b2064a15940034afca085476a9ee3f02229e07",
     "hfi_packetization.c": "fac94b6ee38b1a1f0fbfe564cb8c02b7c66735f044e8efee687d57d43ac20ef3",
     "vidc_hfi_api.h": "d50e1494f2ca46ac17bf47a39bfe37aa2de3944c4d29778a4741f196793fc690",
