@@ -133,7 +133,7 @@
     }
   },
   "same_boot_restart": "second firmware start in one OS boot left CTRL_STATUS 0; clean-boot first start succeeded; root cause open",
-  "next_executable_action": "Integrate exact SIDs/DMA aperture and verified power/reset/PAS owner into Venus, covering core.c failure/recovery/remove quarantine before adding platform match. Transport preparation compiled, not loaded. Then V4L2 actual frames and open Codec2 capability alignment. Do not restart firmware again in bootbcd0.",
+  "next_executable_action": "Integrate verified power/reset and PAS ownership into Venus with explicit shutdown-failure quarantine across core.c probe failure, error recovery and remove; stock path ignores shutdown result and restarts, so do not enable platform match yet. Then validate V4L2 imported-buffer bounds, actual frames and open Codec2. No second firmware start in bootbcd0.",
   "not_verified": [
     "V4L2 decode API",
     "Android hardware MediaCodec",
@@ -203,5 +203,18 @@
     ],
     "tests": "ARM64 core/dec/enc compile; ASan/UBSan MMIO and boundary; generated source legacy isolation; exact patch and rollback",
     "ABI_validation": "not complete: original Module.symvers missing"
+  },
+  "venus_dma_candidate": {
+    "status": "compiled-not-loaded-no-platform-match",
+    "exact_sids": [
+      "0x2300",
+      "0x2320",
+      "0x2340"
+    ],
+    "domain": "DMA API; singleton IOMMU group",
+    "window": "0x25800000..0xc0000000 exclusive upper bound; UC 1MiB aligned",
+    "ownership": "mask/coherent/bus-limit saved, restored after all UC allocations released or create failure",
+    "tests": "ASan/UBSan; 4096 missing-page fault positions; two full maps; identity/group/mask failure restoration; generated-source regression",
+    "limitation": "host mocked DMA only, not a hardware DMA test; V4L2 buffer imports not yet validated"
   }
 }

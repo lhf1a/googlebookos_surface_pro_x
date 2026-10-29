@@ -48,6 +48,7 @@ def main():
         if f.is_file() and (f.suffix in ('.c', '.h') or f.name == 'Makefile'):
             shutil.copyfile(f, args.output / f.name)
     shutil.copyfile(ROOT / 'probe/video/venus-iris1.h', args.output / 'venus-iris1.h')
+    shutil.copyfile(ROOT / 'probe/video/sq2-venus-dma.h', args.output / 'sq2-venus-dma.h')
     core = (src / 'core.h').read_text()
     core = replace(core, '\tenum hfi_version hfi_version;\n',
                    '\t/* VPU hardware is independent of HFI packet version. */\n'
@@ -58,6 +59,10 @@ def main():
     # Keep all pre-existing SoC tables unchanged (zero-initialized iris1=false).
     (args.output / 'core.h').write_text(core)
     hfi = (src / 'hfi_venus.c').read_text()
+    hfi = replace(hfi, '#include <linux/slab.h>',
+                  '#include <linux/slab.h>\n#include <linux/iommu.h>\n#include "sq2-venus-dma.h"')
+    hfi = replace(hfi, '\tstruct venus_core *core;\n',
+                  '\tstruct venus_core *core;\n\tstruct sq2_venus_dma sq2_dma;\n')
     hfi = replace(hfi, '#include "firmware.h"', '#include "firmware.h"\n#include "venus-iris1.h"')
     hfi = replace(hfi, '\tif (IS_V6(hdev->core)) {\n\t\tmask_val = readl(wrapper_base + WRAPPER_INTR_MASK);',
                   '\tif (IS_IRIS1(hdev->core)) {\n'
@@ -80,8 +85,9 @@ def main():
                   '\t\tSQ2_VENUS_UC_BYTES : ALIGNED_QUEUE_SIZE);')
     hfi = replace(hfi, '\thdev->ifaceq_table = desc;',
                   '\tif (IS_SQ2_HFI(hdev->core)) {\n'
-                  '\t\tif (!venus_sq2_uc_valid(desc.da, desc.size)) {\n'
-                  '\t\t\tvenus_free(hdev, &desc);\n\t\t\treturn -ERANGE;\n\t\t}\n'
+                  '\t\tret = sq2_venus_dma_check_uc(hdev->core->dev, desc.da, desc.size);\n'
+                  '\t\tif (ret) {\n'
+                  '\t\t\tvenus_free(hdev, &desc);\n\t\t\treturn ret;\n\t\t}\n'
                   '\t\tmemset(desc.kva, 0, desc.size);\n\t}\n'
                   '\thdev->ifaceq_table = desc;')
     hfi = replace(hfi, '\tret = venus_alloc(hdev, &desc, ALIGNED_SFR_SIZE);',
@@ -106,6 +112,17 @@ def main():
                   '\tif (IS_SQ2_HFI(core) && (!IS_IRIS1(core) || !IS_V4(core)))\n'
                   '\t\treturn -EINVAL;\n\n'
                   '\thdev = kzalloc(sizeof(*hdev), GFP_KERNEL);')
+    hfi = replace(hfi, '\tret = venus_interface_queues_init(hdev);',
+                  '\tif (IS_SQ2_HFI(core)) {\n'
+                  '\t\tret = sq2_venus_dma_begin(core->dev, &hdev->sq2_dma);\n'
+                  '\t\tif (ret)\n\t\t\tgoto err_kfree;\n\t}\n'
+                  '\tret = venus_interface_queues_init(hdev);')
+    hfi = replace(hfi, 'err_kfree:\n\tkfree(hdev);',
+                  'err_kfree:\n\tsq2_venus_dma_restore(core->dev, &hdev->sq2_dma);\n'
+                  '\tmutex_destroy(&hdev->lock);\n\tkfree(hdev);')
+    hfi = replace(hfi, '\tvenus_interface_queues_release(hdev);',
+                  '\tvenus_interface_queues_release(hdev);\n'
+                  '\tsq2_venus_dma_restore(core->dev, &hdev->sq2_dma);')
     (args.output / 'hfi_venus.c').write_text(hfi)
     fw = (src / 'firmware.c').read_text()
     fw = replace(fw, '#include "hfi_venus_io.h"', '#include "hfi_venus_io.h"\n#include "venus-iris1.h"')
@@ -125,7 +142,8 @@ def main():
     manifest = {'status': 'compile-only-no-platform-match-no-hardware-validation',
                 'sq2_transport': 'explicit inactive flag; coherent 16MiB UC; bounded IOVA; SFR view; CPU-only mailboxes; no VERSION write',
                 'remaining': ['platform power/reset', 'PAS ownership callsites and quarantine',
-                              'exact SID and DMA aperture setup', 'V4L2 runtime', 'Android Codec2'],
+                              'V4L2 buffer address validation and runtime', 'Android Codec2'],
+                'sq2_dma': 'exact 2300/2320/2340 SID + singleton DMA group; saved/restored 32bit mask and bus limit; UC alignment and every-page translation checked',
                 'firmware_lease_compiled_without_callsite': args.firmware_lease,
                 'input_sha256': HASHES,
                 'output_sha256': {f.name: hashlib.sha256(f.read_bytes()).hexdigest()

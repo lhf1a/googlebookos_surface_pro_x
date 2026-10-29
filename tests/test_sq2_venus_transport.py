@@ -24,7 +24,11 @@ class VenusTransport(unittest.TestCase):
             self.assertIn('if (!IS_SQ2_HFI(hdev->core))\n\t\tvenus_free(hdev, &hdev->sfr);', hfi)
             self.assertIn('if (IS_IRIS1(hdev->core) && !IS_SQ2_HFI(hdev->core))', hfi)
             self.assertIn('if (!IS_SQ2_HFI(hdev->core))\n\t\twritel(1, cpu_cs_base + CPU_CS_SCIACMDARG3);', hfi)
-            self.assertIn('!venus_sq2_uc_valid(desc.da, desc.size)', hfi)
+            self.assertIn('sq2_venus_dma_check_uc(hdev->core->dev, desc.da, desc.size)', hfi)
+            self.assertIn('sq2_venus_dma_begin(core->dev, &hdev->sq2_dma)', hfi)
+            self.assertEqual(hfi.count('sq2_venus_dma_restore(core->dev, &hdev->sq2_dma);'), 2)
+            self.assertLess(hfi.index('venus_interface_queues_release(hdev);'),
+                            hfi.index('sq2_venus_dma_restore(core->dev, &hdev->sq2_dma);'))
             self.assertNotIn('.sq2_windows_hfi =', (dest / 'core.c').read_text())
             manifest = json.loads((dest / 'candidate.json').read_text())
             self.assertIn('no-platform-match', manifest['status'])
