@@ -16,6 +16,8 @@ p.add_argument('--videocc-phandle', type=lambda s: int(s, 0), required=True,
                help='actual current live VIDEOCC phandle, checked again by module')
 p.add_argument('--with-interconnects', action='store_true',
                help='add SC8180X config, video DDR and firmware DDR paths')
+p.add_argument('--windows-reference', action='store_true',
+               help='explicit candidate: exact 2300/2320/2340 SIDs, compact table and 16MiB UC; not a default deployment')
 a = p.parse_args()
 assert 0 < a.videocc_phandle < 2**32
 base = ROOT / 'out/video-decode/running-base.dtb'
@@ -29,6 +31,9 @@ assert 'qcom,sc8180x-smmu-500' in prop(smmu_path, 'compatible', 's').split()
 gcc = int(prop(gcc_path, 'phandle'), 16)
 smmu = int(prop(smmu_path, 'phandle'), 16)
 vid = a.videocc_phandle
+iommu_property = (f'<0x{smmu:x} 0x2300 0>, <0x{smmu:x} 0x2320 0>, <0x{smmu:x} 0x2340 0>'
+                  if a.windows_reference else f'<0x{smmu:x} 0x1300 0x60>')
+reference_property = 'microsoft,windows-hfi-reference;' if a.windows_reference else ''
 icc_refs = []
 icc_properties = ''
 if a.with_interconnects:
@@ -61,7 +66,8 @@ dts = f'''/dts-v1/;
   iris1-hfi@aa00000 {{
    compatible = "microsoft,sq2-iris1-hfi";
    reg = <0 0xaa00000 0 0x100000>;
-   iommus = <0x{smmu:x} 0x1300 0x60>;
+   iommus = {iommu_property};
+   {reference_property}
    power-domains = <0x{vid:x} 0>, <0x{vid:x} 1>, <0x{vid:x} 2>;
    clocks = <0x{gcc:x} 227>, <0x{gcc:x} 225>, <0x{gcc:x} 226>,
             <0x{vid:x} 4>, <0x{vid:x} 2>, <0x{vid:x} 3>, <0x{vid:x} 0>;
@@ -121,5 +127,7 @@ b = (a.stage / 'sq2_hfi_overlay.ko').read_bytes()
 (dest / 'overlay.dtbo').write_bytes(blob)
 (dest / 'candidate.json').write_text(json.dumps({'status': 'build-only-no-SMMU-or-firmware-proof',
     'module_sha256': hashlib.sha256(b).hexdigest(), 'references': refs,
-    'sid': '0x1300', 'mask': '0x60', 'interconnects': a.with_interconnects}, indent=2) + '\n')
+    'sid': ['0x2300', '0x2320', '0x2340'] if a.windows_reference else ['0x1300'],
+    'mask': '0' if a.windows_reference else '0x60',
+    'windows_reference': a.windows_reference, 'interconnects': a.with_interconnects}, indent=2) + '\n')
 print(hashlib.sha256(b).hexdigest())

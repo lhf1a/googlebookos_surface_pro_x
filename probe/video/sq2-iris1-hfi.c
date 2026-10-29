@@ -9,6 +9,7 @@
 #include <linux/iopoll.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/of.h>
 #include <linux/firmware/qcom/qcom_scm.h>
 #include "sq2-iris1-hfi.h"
 #include "sq2-hfi-ring.h"
@@ -42,6 +43,9 @@ struct sq2_hfi_transport {
  void __iomem *base;
  bool configured;
  bool empty_ping;
+ bool windows_reference, ctrl_started, version_written;
+ size_t bytes;
+ unsigned int mailbox_count;
  u32 header_bytes, table_bytes;
  unsigned int trace_delay_ms;
 };
@@ -62,7 +66,8 @@ int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out,
  struct iommu_fwspec *spec = dev_iommu_fwspec_get(dev);
  struct iommu_group *group;
  unsigned int peers = 0, pages = 0;
- const size_t size = REGION_SIZE;
+ bool windows_reference = of_property_read_bool(dev->of_node, "microsoft,windows-hfi-reference");
+ const size_t size = windows_reference ? 16 * SZ_1M : REGION_SIZE;
  struct sq2_hfi_transport *ctx;
  struct qtable *table;
  phys_addr_t first = 0, last = 0;
@@ -70,7 +75,9 @@ int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out,
  int ret;
 
  if (!out || *out || quarantined || !domain || !(domain->type & __IOMMU_DOMAIN_DMA_API) || !spec ||
-     spec->num_ids != 1 || spec->ids[0] != 0x00601300)
+     (windows_reference ? (spec->num_ids != 3 || spec->ids[0] != 0x2300 ||
+                            spec->ids[1] != 0x2320 || spec->ids[2] != 0x2340) :
+                          (spec->num_ids != 1 || spec->ids[0] != 0x00601300)))
   return -ENODEV;
  group = iommu_group_get(dev);
  if (!group) return -ENODEV;
@@ -80,6 +87,9 @@ int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out,
  ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
  if (!ctx) return -ENOMEM;
  ctx->dev = dev; ctx->domain = domain;
+ ctx->windows_reference = windows_reference;
+ ctx->bytes = size;
+ compact_table |= windows_reference;
  ctx->empty_ping = empty_ping;
  /* The original Venus protocol has six u32 fields (24 bytes). The pinned
   * later downstream driver extends this with an opaque host cookie/name.
@@ -93,11 +103,16 @@ int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out,
  ctx->saved_coherent = dev->coherent_dma_mask;
  ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
  if (ret) goto restore;
- dev->bus_dma_limit = min_t(u64, ctx->saved_limit ?: U64_MAX, 0xdfffffff);
+ dev->bus_dma_limit = min_t(u64, ctx->saved_limit ?: U64_MAX,
+                           windows_reference ? 0xbfffffff : 0xdfffffff);
  ctx->cpu = dma_alloc_coherent(dev, size, &ctx->dma, GFP_KERNEL | __GFP_NOWARN);
  if (!ctx->cpu) { ret = -ENOMEM; goto restore; }
  ret = -ERANGE;
- if (ctx->dma < 0x25800000 || ctx->dma + size > 0xe0000000ULL || !IS_ALIGNED(ctx->dma, SZ_1M))
+ /* Reference allocation lies in the intersection of the existing Android
+  * nonsecure pool and the inferred Windows pool. Do not change SCM thresholds.
+  */
+ if (ctx->dma < 0x25800000 || ctx->dma + size >
+     (windows_reference ? 0xc0000000ULL : 0xe0000000ULL) || !IS_ALIGNED(ctx->dma, SZ_1M))
   goto free;
  for (off = 0; off < size; off += PAGE_SIZE) {
   phys_addr_t phys = iommu_iova_to_phys(domain, ctx->dma + off);
@@ -118,6 +133,8 @@ int sq2_hfi_prepare(struct device *dev, struct sq2_hfi_transport **out,
  table->qhdr0 = ctx->header_bytes;
  table->qhdr_size = sizeof(struct qheader);
  table->num_q = table->active_q = 3;
+ pr_info("SQ2_HFI_PROFILE windows_reference=%d ids=%u bytes=%zu header=%u table=%u\n",
+         windows_reference, spec->num_ids, ctx->bytes, ctx->header_bytes, ctx->table_bytes);
  if (!compact_table) strscpy(table->name, "sq2_hfi_private", sizeof(table->name));
  for (off = 0; off < 3; off++) {
   struct qheader *q = ctx->cpu + ctx->header_bytes + off * sizeof(*q);
@@ -218,8 +235,8 @@ int sq2_hfi_run(struct sq2_hfi_transport *ctx, void __iomem *base, bool protect_
                 unsigned int trace_delay_ms)
 {
  const u32 mailbox_values[] = {
-  ctx->dma, REGION_SIZE, ctx->dma, 1, ctx->dma + SFR_OFFSET, 0,
-  ctx->dma, ctx->dma, REGION_SIZE,
+  ctx->dma, ctx->bytes, ctx->dma, 1, ctx->dma + SFR_OFFSET, 0,
+  ctx->dma, ctx->dma, ctx->bytes,
  };
  u32 status;
  bool done = false;
@@ -247,19 +264,37 @@ int sq2_hfi_run(struct sq2_hfi_transport *ctx, void __iomem *base, bool protect_
  ctx->configured = true;
  pr_info("SQ2_HFI_MAILBOX_PUBLISH_BEGIN\n");
  hfi_trace_barrier(ctx);
- for (i = 0; i < ARRAY_SIZE(mailbox_values); i++) {
+ /* The pinned Windows reset/queue functions publish CPU mailboxes, without
+  * the downstream DSP mirror. Keep the legacy protocol unchanged by default.
+  */
+ for (i = 0; i < (ctx->windows_reference ? 6 : ARRAY_SIZE(mailbox_values)); i++) {
   pr_info("SQ2_HFI_MAILBOX_WRITE_BEGIN offset=%x value=%08x\n", mailbox_offsets[i], mailbox_values[i]);
   hfi_trace_barrier(ctx);
   writel(mailbox_values[i], base + mailbox_offsets[i]);
+  ctx->mailbox_count++;
   pr_info("SQ2_HFI_MAILBOX_WRITE_END offset=%x\n", mailbox_offsets[i]);
   hfi_trace_barrier(ctx);
  }
  dma_wmb();
  pr_info("SQ2_HFI_BOOT begin iova=%pad uc_bytes=%u table_bytes=%u header=%u IRQ_MASK_UNCHANGED\n",
-         &ctx->dma, REGION_SIZE, ctx->table_bytes, ctx->header_bytes);
+         &ctx->dma, (u32)ctx->bytes, ctx->table_bytes, ctx->header_bytes);
  hfi_trace_barrier(ctx);
+ pr_info("SQ2_HFI_CTRL_INIT_WRITE_BEGIN\n");
+ hfi_trace_barrier(ctx);
+ ctx->ctrl_started = true;
  writel(1, base + 0xd2048);
- writel(1, base + 0xd2058);
+ pr_info("SQ2_HFI_CTRL_INIT_WRITE_END\n");
+ hfi_trace_barrier(ctx);
+ if (!ctx->windows_reference) {
+  pr_info("SQ2_HFI_VERSION_WRITE_BEGIN\n");
+  hfi_trace_barrier(ctx);
+  ctx->version_written = true;
+  writel(1, base + 0xd2058);
+  pr_info("SQ2_HFI_VERSION_WRITE_END\n");
+  hfi_trace_barrier(ctx);
+ }
+ pr_info("SQ2_HFI_CTRL_STATUS_POLL_BEGIN\n");
+ hfi_trace_barrier(ctx);
  ret = readl_poll_timeout(base + 0xd204c, status, status != 0, 1000, 1000000);
  pr_info("SQ2_HFI_BOOT status=%08x ret=%d\n", status, ret);
  queue_status(ctx, "boot_result");
@@ -298,12 +333,14 @@ int sq2_hfi_finish(struct sq2_hfi_transport *ctx)
  int i, ret = 0;
  if (!ctx) return 0;
  if (ctx->configured) {
-  for (i = 0; i < ARRAY_SIZE(mailbox_offsets); i++)
+  for (i = 0; i < ctx->mailbox_count; i++)
    writel(0, ctx->base + mailbox_offsets[i]);
+  if (ctx->ctrl_started) writel(0, ctx->base + 0xd2048);
+  if (ctx->version_written) writel(0, ctx->base + 0xd2058);
   writel(1, ctx->base + 0xd201c);
   writel(0x14, ctx->base + 0xe0014); /* Owned CPU/watchdog pending bits. */
  }
- dma_free_coherent(ctx->dev, REGION_SIZE, ctx->cpu, ctx->dma);
+ dma_free_coherent(ctx->dev, ctx->bytes, ctx->cpu, ctx->dma);
  if (iommu_iova_to_phys(ctx->domain, ctx->dma)) ret = -EIO;
  pr_info("SQ2_HFI_DMA freed first_iova_unmapped=%d ret=%d\n",
          !iommu_iova_to_phys(ctx->domain, ctx->dma), ret);

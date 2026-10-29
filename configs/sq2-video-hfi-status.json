@@ -1,0 +1,47 @@
+{
+  "status": "SYS_INIT-and-shared-queue-DMA-verified-not-decoding",
+  "verified_on": "2026-10-29",
+  "boot_id": "39906e2a-ade5-4e41-984f-e7ef6d063588",
+  "firmware_sha256": "4e93d34504da96320775476bbd509aa06f985b48fb781d4436c8eb812b929928",
+  "consumer_sha256": "93cd5b7d99636d30e524ec6632a50153302c99d015889839e3254d1e945b399c",
+  "hfi_overlay_sha256": "a8e7c9ff853d83e32fa1b8c21bfeae172e5ba7fc918f2f9f40d98bff5ab9e522",
+  "profile": {
+    "explicit_overlay_option": "--windows-reference",
+    "encoded_smmu_ids": ["0x2300", "0x2320", "0x2340"],
+    "masks": [0, 0, 0],
+    "allocation_bytes": 16777216,
+    "iova": "0xbf000000",
+    "table_header_bytes": 24,
+    "table_bytes": 192,
+    "queue_header_bytes": 56,
+    "cpu_mailboxes_only": true,
+    "legacy_SCM_protection_thresholds_unchanged": true,
+    "legacy_profile_preserved_without_property": true
+  },
+  "observed": {
+    "control_status": "0x40000001",
+    "empty_queue_rx_req_transition": [0, 1],
+    "command_read_and_write_words": [3, 3],
+    "reply_bytes": 3112,
+    "reply_type": "0x20001",
+    "reply_error": 0,
+    "reported_property_count": 75,
+    "message_read_and_write_words": [778, 778],
+    "PAS_shutdown": 0,
+    "queue_unmapped": true,
+    "HANA_post_shutdown_reset": 0,
+    "resources_released": 0,
+    "consumer_removed": true,
+    "boot_and_framework_PIDs_unchanged": true
+  },
+  "host_dma_control": {
+    "baseline_1300_mask60": "16MiB; 4096 pages mapped/unmapped; CPU pattern pass; overlay/module removed",
+    "modified_exact_windows_SIDs": "16MiB; 4096 pages mapped/unmapped; CPU pattern pass; overlay/module removed",
+    "rollback": "baseline hash restored; same results",
+    "is_VPU_DMA_proof": false
+  },
+  "attribution_limit": "SID/table/UC/mailbox changes tested together; no single-variable root-cause claim",
+  "runtime_state": "software VIDEOCC and two overlays resident until reboot; no active test consumer; normal boot image unchanged",
+  "next_executable_action": "Add bounded SYS_INIT capability-body capture/parser, then create and destroy a real H264 decode session using the proven transport; retain firmware-stop ownership rules",
+  "not_verified": ["capability body semantics", "session creation", "decoded frame pixels", "V4L2 decoder", "Android MediaCodec", "application playback", "persistent installation", "repeated power-cycle stability"]
+}

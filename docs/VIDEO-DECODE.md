@@ -4,6 +4,31 @@
 
 最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
 
+## 首次真实共享队列与 SYS_INIT 通过（2026-10-29）
+
+本轮不再猜表头或重跑原1300全流程。先构建独立无电源/时钟/MMIO/PAS的`SQ2_DMA_REFERENCE`：legacy1300/mask60与精确2300/2320/2340三SID用相同16MiB、IOVA上限c0000000。原基线、修改版、通过自含ROLLBACK.sh恢复的另一个副本三者实际insmod均exit0；IOVA均bf000000、独立group唯一peer、4096页映射/两种CPU填值检查/4096页解除映射均通过，消费者driver/overlay在测量结束时清理，随后rmmod0。不带allow负例实际EPERM且无节点/模块残留。第一次collector烟雾标记被现有过滤器排除，脚本在任何insmod之前退出1；确认原collector17282已timeout终止后改用SQ2_KMSG_SMOKE前缀，第二份日志完成。不是一次硬件失败重试。旧/新profile主机侧都能映射，故不能靠此结果判断真实VPU SID。
+
+随后将证据接到显式`--windows-reference` HFI候选。该属性路径限定三条精确SID（mask均0），24字节表头/192字节整表/三条56字节qheader，UC16MiB且IOVA落在原Android池与Windows推断池的交集25800000..c0000000。保留原SCM保护设置；只写CPU的六个邮箱，省去下游DSP镜像和该Windows路径未用的VERSION写；原legacy路径默认不变。新增CTRL_INIT写前/后、VERSION写前/后和CTRL_STATUS轮询前的标记，不增加受保护MMIO读取。HFI区域仍需真实PAS停止后才能释放，失败仍quarantine；清理只清实际发布过的邮箱及已写控制项。
+
+候选消费者93cd5b7d99636d30e524ec6632a50153302c99d015889839e3254d1e945b399c、overlay a8e7c9ff853d83e32fa1b8c21bfeae172e5ba7fc918f2f9f40d98bff5ab9e522在fresh stage编译，ASan/UBSan ring边界和firmware transaction通过，全部未定义符号匹配当次运行导出；缺原Module.symvers的警告模式不是完整ABI证明。保留软件VIDEOCC24ed5d48…及原identify overlay f4945659…；实际live VIDEOCC phandle仍b5，加载前核对。传输四模块全哈希匹配，120秒/2MiB独立collector ready/存活/烟雾验证后，先集成DMA-only阶段返回probe_result0/header24/table192/16MiB并解除映射，卸载消费者；再对新Windows profile只执行一次完整握手。
+
+实测（原42版4e93d345…固件未替换）：
+
+```
+SQ2_HFI_BOOT status=40000001 ret=0
+SQ2_HFI_EMPTY_PING rx_req=1 polls=0 cmd_r=0 cmd_w=0
+SQ2_HFI_SYS_INIT_SENT words=3
+SQ2_HFI_RX q=1 bytes=3112 type=20001 word2=0 r=0 w=778
+SQ2_HFI_SYS_INIT_REPLY error=0 properties=75
+SQ2_HFI_DONE reply=1 cmd_r=3 cmd_w=3 msg_r=778 msg_w=778 status=40000001
+```
+
+主机将rx_req初始化0且之后不写1，固件实际写成1；命令被消费且回复包头、长度/索引边界通过。这已是VPU共享队列通信，不再只是CPU pattern或状态寄存器1。但75个property的内容尚未完整保存/解析，也未创建decode session。
+
+真实PAS shutdown0/owner0、固件内存释放、队列首IOVA解除映射、19.2MHz恢复、六时钟/AHB退出、HANA固件停止后的四桥接assert/deassert全0，原reset状态恢复、三域off0、三ICC清零0、resources_released0，最终probe_result0/refcnt0，核对日志后消费者rmmod0。独立collector以signal正常落盘KMSG_END，elapsed13239ms；原始日志已取回out/video-decode/sid-reference。boot39906e2a…、system_server2295/SF2104保持，Android1/guardY/nohibernate保持。软件VIDEOCC和两个驻留overlay仍留在本boot，不热拆；没有写ESP/启动镜像/Android codec配置。
+
+**边界与下一步**：SID、表头、UC大小和邮箱路径组合一起验证，不能把成功单独归因某一项；也未验证多次上电稳定性。下一步保留这套已验证传输，增加有界SYS_INIT能力体复制/解析及真实H264解码session创建/销毁，继而真实输出帧和V4L2/MediaCodec/应用播放。不得以握手通过标记完整硬解完成。结构化状态见configs/sq2-video-hfi-status.json；补丁、可执行自含回滚、字节重建验证及三角色字面输出见out/video-decode/sid-reference/VERIFICATION.txt（原SQ1采集角色继续保留）。
+
 ## 最新：SQ1 Windows 参考与 empty 日志取回
 
 续接已增加严格哈希/指令检查器：同字节Windows驱动实际写table头24/stride56/总表192/三队列，以及UC_REGION_SIZE=16MiB；CTRL_INIT写1。SQ1、原SQ2两输入结果一致，六项指令检查、十映射核对、9项正负例通过，仍不是设备运行验证。下一步建立显式2300参考SID的独立无上电DMA候选，先验证主机侧映射/解除映射；不改变正常启动SID、不重复旧全流程，不把更换队列表头当作已修复。见SQ1-VIDEO-REFERENCE后续节。
