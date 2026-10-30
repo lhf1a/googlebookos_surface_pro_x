@@ -148,6 +148,37 @@ def verify_display_profiles(manifest, layout, image):
     print('PASS: packed display defaults, stock rescue and both payload hashes')
 
 
+def verify_usb_bluetooth(manifest, layout, image, required=False):
+    policy = manifest.get('usb_bluetooth')
+    if policy is None:
+        if required:
+            raise ValueError('Image has no default USB/Bluetooth policy')
+        return
+    if policy.get('schema') != 1 or policy.get('enabled') is not True:
+        raise ValueError('Unsupported USB/Bluetooth policy')
+    spec = importlib.util.spec_from_file_location('usb_payload',
+        Path(__file__).resolve().with_name('sq2-usb-boot-payload.py'))
+    usb = importlib.util.module_from_spec(spec); spec.loader.exec_module(usb)
+    esp = next(p for p in layout['partitions'] if p['name'] == 'SQ2PROBE')
+    def packed(name):
+        return subprocess.check_output(['mtype', '-i', f'{image}@@{esp["offset"]}', '::/'+name])
+    menu = packed('EFI/BOOT/grub.cfg')
+    if usb.sha(menu) != policy.get('menu_sha256'):
+        raise ValueError('USB/Bluetooth menu hash mismatch')
+    usb.validate_menu(menu)
+    base = packed('boot/sq2-android1/'+usb.BASE)
+    if (usb.sha(base) != policy.get('initramfs_sha256')
+            or manifest.get('boot_payload_sha256', {}).get(usb.BASE) != usb.sha(base)):
+        raise ValueError('Packed USB/Bluetooth initramfs hash mismatch')
+    import gzip
+    c_spec = importlib.util.spec_from_file_location('cpio',
+        Path(__file__).resolve().with_name('pack-sq2-vulkan.py'))
+    c = importlib.util.module_from_spec(c_spec); c_spec.loader.exec_module(c)
+    if usb.verify(c.entries(gzip.decompress(base)), Path(__file__).resolve().parents[1]) != policy.get('source_sha256'):
+        raise ValueError('Packed USB/Bluetooth sources differ from policy')
+    print('PASS: packed default USB storage/audio and Bluetooth input payload')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--manifest', required=True, type=Path)
@@ -156,6 +187,7 @@ def main():
     p.add_argument('--device', help='Otherwise select interactively from safe USB disks')
     p.add_argument('--execute', action='store_true', help='Destructive installation; default is preview')
     p.add_argument('--require-hardware-video', action='store_true', help='Reject legacy images without default hardware decoding')
+    p.add_argument('--require-usb-bluetooth', action='store_true', help='Reject images without default USB storage/audio and Bluetooth input')
     p.add_argument('--confirm-erase', help='Exact device-bound confirmation printed by preview; otherwise prompt')
     a = p.parse_args()
     m = json.loads(a.manifest.read_text()); layout = json.loads(a.layout.read_text())
@@ -163,6 +195,7 @@ def main():
         raise ValueError('Image/manifest/layout size mismatch')
     verify_hardware_video(m, layout, a.image, a.require_hardware_video)
     verify_display_profiles(m, layout, a.image)
+    verify_usb_bluetooth(m, layout, a.image, a.require_usb_bluetooth)
     disks = [d for d in inventory() if safe_disk(d)]
     for i, d in enumerate(disks):
         print(i, d['name'], d['model'], d['serial'], d['size'])

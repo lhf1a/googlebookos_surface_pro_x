@@ -1,5 +1,16 @@
 # 构建与部署
 
+### USB 存储/音频与蓝牙输入默认集成（2026-10-30）
+
+`build-source-boot.py` 默认通过 `sq2-usb-boot-payload.py` 纳入已实机验证的 USB early stage、portable-only fstab、USB 音频策略与 `IModule/usb` 声明，以及当前 `bluetooth-framework-boot` 和 `bluetooth-input-watch`。输出 audit 必须含 `usb_functions_included=true`、`bluetooth_input_included=true` 及逐文件源码 SHA；原 HAL774cd7e7…、凭据最后顺序不变。不需要再手工向默认源码镜像追加 USB/蓝牙 addon。
+
+`build-source-disk.py` 拒绝载荷缺失或与源码/audit 不一致的启动包；正常入口自动启用 `sq2.usb=experimental`，救援显式 `sq2.usb=0`，保留手动 opt-out。两种显示档位均如此。manifest 新增 `usb_bluetooth`，绑定实际菜单和公共 initramfs 哈希。`deploy-experimental-usb.py --require-usb-bluetooth` 在磁盘枚举/确认/写入前读取镜像内真实 ESP，校验菜单、完整载荷哈希和 USB/蓝牙源文件；旧镜像可显式拒绝，NVMe/身份/容量/擦盘确认保护不放宽。旧 update-boot 不允许覆写这种 manifest。
+
+补充回归：正确区分 unittest 与4个接收命令行参数的专项脚本后，53项 unittest 执行（3项按环境跳过）其余通过，4专项分别传入正确参数均exit0。首次直接 discover 将 `discover` 当专项输入路径的4项导入错误保留在私有日志，不通过改无关测试掩盖。
+
+实际默认完整启动包构建：`out/usb-c-20261030/default-build-v1`，initramfs SHA `e60274406682fc6a583b62441090474dbc2d424d51991440aed21ffa13614df6`。8 项 USB/集成测试、3 项蓝牙测试、5 项显示测试和 3 项视频菜单测试通过；真实普通文件 FAT ESP 装入新载荷后，生产用视频/显示/USB蓝牙三个部署前校验通过。该 ESP fixture 不是重新生成128GB整盘镜像或烧录；通用新启动包未替换现机。现机此前已测 USB+蓝牙组合和默认重启保持，证据范围见 USB-FUNCTIONS、BLUETOOTH-INPUT、HANDOFF。
+
+**禁止 `ctl.restart vold` 验证修复**：现用 init rc 的 `reboot_on_failure` 会触发 `reboot,vold-failed`。更新应走独立候选与正常启动；任何挂载失败都不格式化 userdata。私有产物/日志不提交。
 ### 蓝牙 UHID 输入节点修正（2026-10-30）
 
 `bluetooth-input-watch` 在新建蓝牙 UHID bus0005 的 event 节点上，修复 devtmpfs/ueventd 与 EventHub 的打开时序：发布前 root:input 0660、input_device 标签，按 sysfs 身份去重。仅处理这类节点，不放宽全局权限、不改配对或用户开关；`bluetooth-framework-boot`在复用 transport 时也保证启动单实例。source-boot、pack-googlebook-internal-ssd 和 pack-sq2-power-connectivity 均包含该脚本。

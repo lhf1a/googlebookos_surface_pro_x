@@ -1,0 +1,26 @@
+#!/bin/busybox sh
+# Early paired USB enablement; no service restart, userdata mount or formatting.
+set -eu
+export PATH=/bin:/sbin
+cmdline=$(cat /proc/cmdline)
+case " $cmdline " in *' sq2.rescue=1 '*|*' sq2.usb=0 '*) exit 0;; esac
+case " $cmdline " in *' sq2.usb=experimental '*) ;; *) exit 0;; esac
+test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+source=/etc/sq2-usb
+(cd "$source"; sha256sum -c SHA256SUMS)
+policy=/newroot/vendor/etc/audio_policy_configuration.xml
+manifest=/newroot/vendor/etc/vintf/manifest/sq2-usb-audio.xml
+test "$(sha256sum "$policy" | cut -d ' ' -f1)" = 7b5981137bcf324d1f66d331a134a4facbba758622c4567ec310eb7b26719022
+test "$(sha256sum /etc/fstab.sq2-native | cut -d ' ' -f1)" = 2c0aa7b770bac99ced399ee3eae578f99712271353dc51ecfc0aa31d75718e47
+test ! -e "$manifest"
+test -d "${manifest%/*}"
+# Negative card-slot bitmasks exclude card0 for every USB device slot.
+/bin/modprobe snd_usb_audio index=-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2
+cp "$source/storage.fstab" /etc/fstab.sq2-native
+cp "$source/audio_policy_configuration.xml" "$policy"
+chmod 644 /etc/fstab.sq2-native "$policy"
+cp "$source/manifest.xml" "$manifest.new"
+chmod 644 "$manifest.new"
+mv "$manifest.new" "$manifest"
+echo SQ2_USB_STAGED_NO_FORMAT_CARD0_RESERVED

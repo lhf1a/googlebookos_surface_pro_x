@@ -47,6 +47,9 @@ def main():
     video_spec=importlib.util.spec_from_file_location('video_payload',R/'scripts/sq2-video-boot-payload.py')
     video=importlib.util.module_from_spec(video_spec);video_spec.loader.exec_module(video)
     init=video.integrate(R,c,put,init)
+    usb_spec=importlib.util.spec_from_file_location('usb_payload',R/'scripts/sq2-usb-boot-payload.py')
+    usb=importlib.util.module_from_spec(usb_spec);usb_spec.loader.exec_module(usb)
+    init=usb.integrate(R,put,init)
     put('init', init, 0o100755)
     # Refresh existing shell helpers from repository; include new boot helpers.
     helpers = {Path(n).name for n in before if n.startswith('bin/') and (R/'probe/test2'/Path(n).name).is_file() and before[n][1].startswith(b'#!')}
@@ -111,6 +114,7 @@ def main():
     assert all(after[n]==value for n,value in delta.items())
     assert all(after[n]==value for n,value in before.items() if n not in delta)
     assert after['etc/shadow']==before['etc/shadow'] and after['bin/dropbear']==before['bin/dropbear']
+    usb_hashes=usb.verify(after,R)
     addon=display.build_addon(result,c,module,edid)
     image=(R/'out/screen-only/Image').read_bytes()
     assert b'SQ2 screen-only policy: system suspend blocked' in image
@@ -121,6 +125,8 @@ def main():
                 ghost_touch_fix=False,password_addon_last=True,changed=sorted(delta),
                 hardware_boot_tested=False,hardware_decode_included=True,
                 video_payload_sha256=video.PAYLOAD_SHA,
+                usb_functions_included=True,bluetooth_input_included=True,
+                usb_bluetooth_source_sha256=usb_hashes,
                 display_profile=args.display_profile,display_profiles=list(display.PROFILES),
                 display_stock_module_sha256=display.STOCK_SHA,display_edp65_module_sha256=display.MODULE_SHA,
                 display_edp65_edid_sha256=display.EDID_SHA,display_addon_sha256=sha(addon),

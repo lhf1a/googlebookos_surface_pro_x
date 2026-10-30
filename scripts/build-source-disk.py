@@ -40,6 +40,12 @@ if __name__ == '__main__':
     display_spec=importlib.util.spec_from_file_location('display_payload',R/'scripts/sq2-display-boot-payload.py')
     display=importlib.util.module_from_spec(display_spec);display_spec.loader.exec_module(display)
     audit=json.loads((b.O/'build-audit.json').read_text())
+    usb_spec=importlib.util.spec_from_file_location('usb_payload',R/'scripts/sq2-usb-boot-payload.py')
+    usb=importlib.util.module_from_spec(usb_spec);usb_spec.loader.exec_module(usb)
+    if (audit.get('usb_functions_included') is not True
+            or audit.get('bluetooth_input_included') is not True
+            or usb.verify(entries,R)!=audit.get('usb_bluetooth_source_sha256')):
+        raise ValueError('Default USB/Bluetooth payload missing or differs from build audit')
     profile=audit['display_profile']
     b.IMAGE_NAME='sq2-display-'+profile+'-experimental-128.img'
     if args.display_profile is not None and args.display_profile != profile:
@@ -53,7 +59,7 @@ if __name__ == '__main__':
         raise ValueError('Display addon is not the exact pinned delta')
     menu=(R/'configs/grub-source.cfg').read_text()
     generated=b.O/'grub-hardware-video.cfg'
-    generated.write_text(display.default_menu(video.default_menu(menu),profile),encoding='utf-8',newline='\n')
+    generated.write_text(display.default_menu(usb.default_menu(video.default_menu(menu)),profile),encoding='utf-8',newline='\n')
     display_policy=display.policy(generated.read_bytes(),base,addon,profile)
     b.GRUB=generated
     b.BOOT_FILES+=(display.ADDON,'sc8180x-surface-pro-x-rescue.dtb')
@@ -66,4 +72,5 @@ if __name__ == '__main__':
     manifest['hardware_video']={'enabled':True,'schema':1,
         'menu_sha256':hashlib.sha256(generated.read_bytes()).hexdigest()}
     manifest['display_profiles']=display_policy
+    manifest['usb_bluetooth']=usb.policy(generated.read_bytes(),base,entries,R)
     manifest_path.write_text(json.dumps(manifest,indent=2)+'\n')

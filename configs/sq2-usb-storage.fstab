@@ -1,0 +1,9 @@
+# Development RAM userdata. System/vendor/product are already mounted read-only
+# by the SQ2 USB bootstrap. No physical block-device or removable-media entries.
+/dev/block/by-name/userdata /data ext4 rw,nodev,noatime,nosuid wait,latemount
+/dev/block/by-name/misc /misc emmc defaults defaults
+
+# USB discovery only; never match internal NVMe or add format/adoptable flags.
+/devices/platform/soc@0/a6f8800.usb/a600000.usb/xhci-hcd.*.auto/usb* auto auto defaults voldmanaged=usb0:auto
+/devices/platform/soc@0/a8f8800.usb/a800000.usb/xhci-hcd.*.auto/usb* auto auto defaults voldmanaged=usb1:auto
+/devices/platform/soc@0/a4f8800.usb/a400000.dwc3/xhci-hcd.*.auto/usb* auto auto defaults voldmanaged=usb2:auto
