@@ -1,0 +1,94 @@
+--- a/kernel/drivers/bluetooth/btqca.c
++++ b/kernel/drivers/bluetooth/btqca.c
+@@ -227,9 +227,9 @@
+ }
+ EXPORT_SYMBOL_GPL(qca_send_pre_shutdown_cmd);
+ 
+-static void qca_tlv_check_data(struct hci_dev *hdev,
++static int qca_tlv_check_data(struct hci_dev *hdev,
+ 			       struct qca_fw_config *config,
+-		u8 *fw_data, enum qca_btsoc_type soc_type)
++		u8 *fw_data, size_t fw_size, enum qca_btsoc_type soc_type)
+ {
+ 	const u8 *data;
+ 	u32 type_len;
+@@ -239,6 +239,7 @@
+ 	struct tlv_type_patch *tlv_patch;
+ 	struct tlv_type_nvm *tlv_nvm;
+ 	uint8_t nvm_baud_rate = config->user_baud_rate;
++	u8 type;
+ 
+ 	config->dnld_mode = QCA_SKIP_EVT_NONE;
+ 	config->dnld_type = QCA_SKIP_EVT_NONE;
+@@ -292,21 +293,48 @@
+ 		break;
+ 
+ 	case TLV_TYPE_NVM:
++		/* WCN399x NVM contains type-2/type-3 sets inside type 4.
++		 * Backport the container handling from upstream a112d3c72a22.
++		 * Bound every tag before changing the private download copy.
++		 */
++		if (fw_size < sizeof(*tlv))
++			return -EINVAL;
+ 		tlv = (struct tlv_type_hdr *)fw_data;
+-
+ 		type_len = le32_to_cpu(tlv->type_len);
+-		length = (type_len >> 8) & 0x00ffffff;
+-
+-		BT_DBG("TLV Type\t\t : 0x%x", type_len & 0x000000ff);
++		length = type_len >> 8;
++		type = type_len & 0xff;
++		if (length > fw_size - sizeof(*tlv))
++			return -EINVAL;
++		if (type == 4) {
++			if (length < sizeof(*tlv))
++				return -EINVAL;
++			fw_size = length;
++			tlv++;
++			type_len = le32_to_cpu(tlv->type_len);
++			length = type_len >> 8;
++			type = type_len & 0xff;
++			if (length > fw_size - sizeof(*tlv))
++				return -EINVAL;
++		}
++		if (type != 2)
++			return -EINVAL;
++		BT_DBG("TLV Type\t\t : 0x%x", type);
+ 		BT_DBG("Length\t\t : %d bytes", length);
+ 
+ 		idx = 0;
+ 		data = tlv->data;
+ 		while (idx < length) {
++			if (length - idx < sizeof(*tlv_nvm))
++				return -EINVAL;
+ 			tlv_nvm = (struct tlv_type_nvm *)(data + idx);
+ 
+ 			tag_id = le16_to_cpu(tlv_nvm->tag_id);
+ 			tag_len = le16_to_cpu(tlv_nvm->tag_len);
++			if (tag_len > length - idx - sizeof(*tlv_nvm))
++				return -EINVAL;
++			if ((tag_id == EDL_TAG_ID_HCI && tag_len < 3) ||
++			    (tag_id == EDL_TAG_ID_DEEP_SLEEP && tag_len < 1))
++				return -EINVAL;
+ 
+ 			/* Update NVM tags as needed */
+ 			switch (tag_id) {
+@@ -342,6 +370,7 @@
+ 		BT_ERR("Unknown TLV type %d", config->type);
+ 		break;
+ 	}
++	return 0;
+ }
+ 
+ static int qca_tlv_send_segment(struct hci_dev *hdev, int seg_size,
+@@ -492,7 +521,9 @@
+ 	memcpy(data, fw->data, size);
+ 	release_firmware(fw);
+ 
+-	qca_tlv_check_data(hdev, config, data, soc_type);
++	ret = qca_tlv_check_data(hdev, config, data, size, soc_type);
++	if (ret)
++		goto out;
+ 
+ 	segment = data;
+ 	remain = size;

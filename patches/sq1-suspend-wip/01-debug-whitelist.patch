@@ -1,0 +1,49 @@
+--- a/kernel/kernel/power/suspend.c
++++ b/kernel/kernel/power/suspend.c
+@@ -62,6 +62,24 @@
+ module_param_named(screen_only, sq2_screen_only, bool, 0444);
+ MODULE_PARM_DESC(screen_only, "Reject system suspend; display blanking only");
+ 
++/* Explicit diagnostic boot only. Real s2idle stays blocked with screen_only=1. */
++static bool sq2_screen_only_test;
++module_param_named(screen_only_test, sq2_screen_only_test, bool, 0444);
++MODULE_PARM_DESC(screen_only_test, "Allow bounded PM test stages, not real sleep");
++
++/* Called with system_transition_mutex held: pm_test_store uses the same lock. */
++static bool sq2_screen_only_test_allowed(suspend_state_t state)
++{
++#ifdef CONFIG_PM_DEBUG
++	return sq2_screen_only_test && state == PM_SUSPEND_TO_IDLE &&
++		(pm_test_level == TEST_FREEZER || pm_test_level == TEST_DEVICES ||
++		 pm_test_level == TEST_PLATFORM);
++#else
++	return false;
++#endif
++}
++
++
+ static const struct platform_suspend_ops *suspend_ops;
+ static const struct platform_s2idle_ops *s2idle_ops;
+ static DECLARE_SWAIT_QUEUE_HEAD(s2idle_wait_head);
+@@ -576,6 +594,12 @@
+ 	if (!mutex_trylock(&system_transition_mutex))
+ 		return -EBUSY;
+ 
++	if (sq2_screen_only && !sq2_screen_only_test_allowed(state)) {
++		error = -EOPNOTSUPP;
++		goto Unlock;
++	}
++
++
+ 	if (state == PM_SUSPEND_TO_IDLE)
+ 		s2idle_begin();
+ 
+@@ -620,7 +644,7 @@
+ {
+ 	int error;
+ 
+-	if (sq2_screen_only) {
++	if (sq2_screen_only && !sq2_screen_only_test) {
+ 		pr_warn_ratelimited("SQ2 screen-only policy: system suspend blocked\n");
+ 		return -EOPNOTSUPP;
+ 	}

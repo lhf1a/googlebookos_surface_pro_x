@@ -1,0 +1,55 @@
+{
+  "format": 1,
+  "status": "experimental checkpoint; real sleep/wake unverified",
+  "entries": [
+    {
+      "patch": "01-debug-whitelist.patch",
+      "target": "kernel/kernel/power/suspend.c",
+      "before_sha256": "0ccf48971d8c6b1ab2aa77ba9a4d78ad5909e3cbc4539ea5af4d8124cc412462",
+      "after_sha256": "5273a2010fa1f831cbf0c224c22cc4d98195a698e67d9f19a8a84dbe10c137cb",
+      "patch_sha256": "9d0ef1a7ef70066bd61daa6022dd2d4220d86e6efdc858fe0271fee33de0d449"
+    },
+    {
+      "patch": "02-device-prefix.patch",
+      "target": "kernel/drivers/base/power/main.c",
+      "before_sha256": "c970bfa16e7a5daafda6c21bdab6e582c261f27811dd7b31632027905cf9e4e4",
+      "after_sha256": "a15b61eb0c1bab3de4cb69f0d4890190b2d761ec31733c3ecdded577654e5adf",
+      "patch_sha256": "cf4d778878ad865d479d6246b6e5bd21d9e41d9e7a11a8fcd013206bbc841313"
+    },
+    {
+      "patch": "03-prefix-policy.patch",
+      "target": "kernel/kernel/power/suspend.c",
+      "before_sha256": "5273a2010fa1f831cbf0c224c22cc4d98195a698e67d9f19a8a84dbe10c137cb",
+      "after_sha256": "f8e7c8338786235eb3dd334090015acf13785baf0707e7825fd7124f9985aedd",
+      "patch_sha256": "1de99baeb9c672c9cc36b1a6c77fe681f01077331305ada3ff03e678feb24eb1"
+    },
+    {
+      "patch": "04-single-owner-trial.patch",
+      "target": "kernel/kernel/power/suspend.c",
+      "before_sha256": "f8e7c8338786235eb3dd334090015acf13785baf0707e7825fd7124f9985aedd",
+      "after_sha256": "88174ab9e26e517a89b9e08d1a43e101e05744a66ab8cf41a8c8aa221517477c",
+      "patch_sha256": "be022de40b0888a57dff807648b48bacb049c8594e88823aee81da3c8c81acfc"
+    },
+    {
+      "patch": "05-qca-nvm-container.patch",
+      "target": "kernel/drivers/bluetooth/btqca.c",
+      "before_sha256": "d71980c8b496ad7cd6d8d9752bb6f9ad80d87cba5162616848b996edc1d0d1ce",
+      "after_sha256": "35d6fc3c6c2994997b02e8c9fa2008ad1de61a7b62256ef6efb4afcaec4a002f",
+      "patch_sha256": "62a77e3bc72b30255d12fcb1b1a703ce5b3f1b3fc03dfd6c4b87a96fa436c1e5"
+    },
+    {
+      "patch": "06-hci-user-handoff.patch",
+      "target": "probe/sq2-hci-bridge.c",
+      "before_sha256": "18d67565b887a19d409f6771bff0f716747e67a6e5e77d3d6874fed80b58d3fa",
+      "after_sha256": "34b79f2882a294f1fe0aec466e01e795e92bf896f50ed41d211eff2fadaa1e97",
+      "patch_sha256": "218c87c0ba3b129bc010dafd511c1f588bb61ad47f3fc38d5da7f888f9f8da31"
+    },
+    {
+      "patch": "07-prompt-hci-bind.patch",
+      "target": "probe/bluetooth-framework-boot",
+      "before_sha256": "779384f029aeca94729998098bcea40f37fee5777e8192df5cf969476ae27d31",
+      "after_sha256": "cff7d3e7eadd25c2f671de81911c07f75da5a459a51f0179e2749a3f326a2c3e",
+      "patch_sha256": "33e4d9c7f80eaae4582ba2fac18a601c827f53b1088abd4123cdb46ab0590576"
+    }
+  ]
+}

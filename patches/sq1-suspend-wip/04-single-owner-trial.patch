@@ -1,0 +1,81 @@
+--- a/kernel/kernel/power/suspend.c
++++ b/kernel/kernel/power/suspend.c
+@@ -30,6 +30,8 @@
+ #include <trace/events/power.h>
+ #include <linux/compiler.h>
+ #include <linux/moduleparam.h>
++#include <linux/jiffies.h>
++#include <linux/sched.h>
+ 
+ #include "power.h"
+ 
+@@ -74,6 +76,59 @@
+ 	return sq2_screen_only_test && state == PM_SUSPEND_TO_IDLE &&
+ 		(pm_test_level == TEST_FREEZER || pm_test_level == TEST_DEVICES ||
+ 		 pm_test_level == TEST_PLATFORM);
++#else
++	return false;
++#endif
++}
++
++
++/* Explicit one-shot lab trial. Normal screen-only boots remain protected.
++ * Only the writing task can consume its token, within five seconds. Both
++ * arming and consumption are serialized by system_transition_mutex.
++ */
++static bool sq1_screen_only_trial;
++module_param_named(screen_only_trial, sq1_screen_only_trial, bool, 0444);
++static int sq1_trial_pid;
++static unsigned long sq1_trial_deadline;
++
++static int sq1_trial_set(const char *val, const struct kernel_param *kp)
++{
++	unsigned int flags;
++	int pid, ret;
++
++	ret = kstrtoint(val, 0, &pid);
++	if (ret)
++		return ret;
++	if (pid < 0 || (pid && pid != task_pid_nr(current)))
++		return -EINVAL;
++	if (!sq2_screen_only || !sq2_screen_only_test || !sq1_screen_only_trial)
++		return -EPERM;
++	flags = lock_system_sleep();
++	sq1_trial_pid = pid;
++	sq1_trial_deadline = jiffies + 5 * HZ;
++	unlock_system_sleep(flags);
++	return 0;
++}
++
++static const struct kernel_param_ops sq1_trial_ops = {
++	.set = sq1_trial_set,
++	.get = param_get_int,
++};
++module_param_cb(trial_pid, &sq1_trial_ops, &sq1_trial_pid, 0600);
++
++static bool sq1_trial_take(suspend_state_t state)
++{
++#ifdef CONFIG_PM_DEBUG
++	if (!sq1_screen_only_trial || !sq2_screen_only_test ||
++	    state != PM_SUSPEND_TO_IDLE || pm_test_level != TEST_NONE ||
++	    !sq1_trial_pid || sq1_trial_pid != task_pid_nr(current))
++		return false;
++	/* Consume even an expired token: it can never authorize a later sleep. */
++	sq1_trial_pid = 0;
++	if (time_after(jiffies, sq1_trial_deadline))
++		return false;
++	pr_info("SQ1_TRIAL_CONSUMED pid=%d guard_retained=1\n", task_pid_nr(current));
++	return true;
+ #else
+ 	return false;
+ #endif
+@@ -608,7 +663,8 @@
+ 	if (!mutex_trylock(&system_transition_mutex))
+ 		return -EBUSY;
+ 
+-	if (sq2_screen_only && !sq2_screen_only_test_allowed(state)) {
++	if (sq2_screen_only && !sq2_screen_only_test_allowed(state) &&
++	    !sq1_trial_take(state)) {
+ 		error = -EOPNOTSUPP;
+ 		goto Unlock;
+ 	}
