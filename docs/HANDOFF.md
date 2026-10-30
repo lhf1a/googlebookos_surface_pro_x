@@ -933,3 +933,12 @@ grep fuse /proc/filesystems
 故障同时比较 boot ID、框架 PID 和日志，不只看开机动画。存储回归需实际应用操作，不只 root 写 /data。
 
 本地 out/ 保留镜像、备份和证据，private/ 保留身份及凭据，均不入 Git。公开仓库保留可复用测试程序，不保留原始日志。部署哈希见 configs/deployment-status.json。
+
+
+### 2026-10-30 SQ2 GPU700/432 纳入默认构建（离线）
+
+用户明确要求把700MHz/corner432加入默认构建并提交主线，离线操作，不改现机。此前661/432与700/432完成Android启动，700实读boot fcda7cff…、max700、liveDT level432、guardY、45.1C；700/432未做负载或长期稳定性验证。737/432、775/432、850/432启动失败，不纳入默认。850完整日志最早GPU_SET握手超时，随后ringbuffer0/9与初始化-22，不能等同电压不足。现机默认仍原661/416；本轮没有SSH、部署或重启。
+
+默认构建用sq2-gpu-boot-payload.py从固定a5a25e43…重现700/432精确DTB6db562c2…；仅661的corner改432并新增700/432，原CPU/温控/身份/固件保留。原514MHz DTB7a4d1c73…独立救援。build-source-boot输出两份DTB并记录audit；build-source-disk与deploy-experimental-usb分别校验菜单/载荷/manifest，拒绝陈旧或篡改文件。不含更高失败档位，也不宣称SQ1兼容。保留主线最新扬声器修复，以及USB/蓝牙/硬解/显示/凭据顺序等既有集成。原始日志、实验脚本与镜像均留忽略out，详见out/gpu-681-700/700-432/default-build-integration；不提交私有产物。
+
+离线验证完成：6项GPU专项、合计64项测试（本地真实boot输入启用，0跳过）及4个接收参数的专项检查全部通过；完整默认boot构建成功，normal DTB6db562c2…/rescue7a4d1c73…，initramfs9bb36431…（含最新扬声器unity RX，私有SSH最后）。512MiB普通文件FAT ESP fixture中，两种显示默认均通过硬解、显示、USB蓝牙和GPU四组实际载荷校验；不是128GB整盘构建或烧录。使用已提交版GPU基础helper独立重现默认DTB成功，不依赖本地未提交高频生成器改动。离线四角色661/416→700/432→回滚661/416全exit0且恢复原hash。未连接SQ2；现机默认保持不变。错误与修正保留在忽略的验证日志，不通过改动无关测试掩盖。

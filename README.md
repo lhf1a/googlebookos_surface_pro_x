@@ -28,7 +28,7 @@ Updated **2026-10-30** · ✅ Available · ⭕️ Partially available · ❌ Una
 | Closed Qualcomm graphics | ⭕️ | Some paths usable; full-system compatibility incomplete |
 | Internal display | ⭕️ | Native 60 Hz; optional device-specific ~65 Hz profile |
 | External USB-C DisplayPort | ❌ | DP / AltMode integration incomplete |
-| CPU & GPU frequency scaling | ✅ | CPU up to 1.7664 / 3.1488 GHz; GPU up to 661 MHz |
+| CPU & GPU frequency scaling | ✅ | CPU up to 1.7664 / 3.1488 GHz; SQ2 GPU default 700 MHz (RPMh432) |
 | Thermal management | ✅ | CPU / GPU temperature monitoring and passive cooling |
 | Battery & resource monitor | ⭕️ | Capacity/current/SOH available; capacity estimated, battery temperature unavailable |
 | RTC | ✅ | System clock support |

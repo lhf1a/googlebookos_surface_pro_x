@@ -179,6 +179,27 @@ def verify_usb_bluetooth(manifest, layout, image, required=False):
     print('PASS: packed default USB storage/audio and Bluetooth input payload')
 
 
+def verify_gpu_profile(manifest, layout, image):
+    policy = manifest.get('gpu_profile')
+    if policy is None:  # Legacy images retain their existing checks.
+        return
+    spec = importlib.util.spec_from_file_location('gpu_payload',
+        Path(__file__).resolve().with_name('sq2-gpu-boot-payload.py'))
+    gpu = importlib.util.module_from_spec(spec); spec.loader.exec_module(gpu)
+    esp = next(p for p in layout['partitions'] if p['name'] == 'SQ2PROBE')
+    def packed(name):
+        return subprocess.check_output(['mtype', '-i', f'{image}@@{esp["offset"]}', '::/'+name])
+    menu = packed('EFI/BOOT/grub.cfg')
+    normal = packed('boot/sq2-android1/'+gpu.NORMAL)
+    rescue = packed('boot/sq2-android1/'+gpu.RESCUE)
+    if gpu.policy(menu, normal, rescue) != policy:
+        raise ValueError('Packed GPU profile differs from manifest')
+    for name, data in ((gpu.NORMAL, normal), (gpu.RESCUE, rescue)):
+        if manifest.get('boot_payload_sha256', {}).get(name) != gpu.sha(data):
+            raise ValueError('Packed GPU DTB differs from boot payload manifest')
+    print('PASS: packed SQ2 GPU700/432 default and514 rescue')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--manifest', required=True, type=Path)
@@ -196,6 +217,7 @@ def main():
     verify_hardware_video(m, layout, a.image, a.require_hardware_video)
     verify_display_profiles(m, layout, a.image)
     verify_usb_bluetooth(m, layout, a.image, a.require_usb_bluetooth)
+    verify_gpu_profile(m, layout, a.image)
     disks = [d for d in inventory() if safe_disk(d)]
     for i, d in enumerate(disks):
         print(i, d['name'], d['model'], d['serial'], d['size'])

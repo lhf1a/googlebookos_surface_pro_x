@@ -23,11 +23,19 @@ def main():
     parser.add_argument('--edp-module',type=Path,default=R/'out/display-refresh/msm-edp-rates.ko',
                         help='Hash-pinned tested V6 module; both profiles are packaged')
     parser.add_argument('--edp-edid',type=Path,default=R/'out/display-refresh/default65-r2/sq2-native65.bin')
+    parser.add_argument('--gpu-baseline',type=Path,default=O/'sc8180x-surface-pro-x.dtb',
+                        help='Pinned SQ2 CPU/661 baseline; emits boot-tested700/432 default')
+    parser.add_argument('--gpu-rescue',type=Path,default=O/'sc8180x-surface-pro-x-rescue.dtb')
     args=parser.parse_args()
     output=args.output
     output.parent.mkdir(parents=True,exist_ok=True)
-    if any((output.parent/n).exists() for n in (output.name,display.ADDON,'build-audit.json')):
+    gpu_spec=importlib.util.spec_from_file_location('gpu_payload',R/'scripts/sq2-gpu-boot-payload.py')
+    gpu=importlib.util.module_from_spec(gpu_spec);gpu_spec.loader.exec_module(gpu)
+    if any((output.parent/n).exists() for n in (output.name,display.ADDON,'build-audit.json',gpu.NORMAL,gpu.RESCUE)):
         raise ValueError('Refusing existing output/addon/audit; use a fresh directory')
+    gpu_normal=gpu.build(args.gpu_baseline.read_bytes())
+    gpu_rescue=args.gpu_rescue.read_bytes()
+    gpu_profile=gpu.verify(gpu_normal,gpu_rescue)
     module=args.edp_module.read_bytes();edid=args.edp_edid.read_bytes()
     display.require_hash(module,display.MODULE_SHA,'cached-only V6 msm')
     display.require_hash(edid,display.EDID_SHA,'native65 EDID')
@@ -125,8 +133,10 @@ def main():
     with output.open('xb') as f: f.write(result)
     with (output.parent/display.ADDON).open('xb') as f: f.write(addon)
     shutil.copyfile(R/'out/screen-only/Image',output.parent/'Image')
+    for name,data in ((gpu.NORMAL,gpu_normal),(gpu.RESCUE,gpu_rescue)):
+        with (output.parent/name).open('xb') as f: f.write(data)
     report=dict(base_sha256=sha(base),initramfs_sha256=sha(result),Image_sha256=sha(image),
-                ghost_touch_fix=False,password_addon_last=True,changed=sorted(delta),
+                ghost_touch_fix=False,password_addon_last=True,changed=sorted(delta),gpu_profile=gpu_profile,
                 hardware_boot_tested=False,hardware_decode_included=True,
                 video_payload_sha256=video.PAYLOAD_SHA,
                 usb_functions_included=True,bluetooth_input_included=True,

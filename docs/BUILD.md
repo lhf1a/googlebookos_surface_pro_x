@@ -1,5 +1,16 @@
 # 构建与部署
 
+### SQ2 GPU 默认构建：700 MHz / RPMh432（2026-10-30）
+
+`build-source-boot.py` 默认从固定 CPU+661/416 DTB（a5a25e43…）重现已启动的700/432 DTB（6db562c2…），输出 `sc8180x-surface-pro-x.dtb`；661与700两档均为corner432，其余原档位、CPU OPP、内存保留及GPU75°C/5°C、CPU80°C/5°C温控不变。独立 `sc8180x-surface-pro-x-rescue.dtb` 仍为原514 MHz（7a4d1c73…）。此默认为SQ2专用，不宣称兼容SQ1；不包含737/775/850/880档位。
+
+输入路径可用 `--gpu-baseline BASE.dtb --gpu-rescue RESCUE.dtb` 指定，但必须匹配固定哈希；输出需全新目录。需要WSL的python3-libfdt，不连接设备或写物理盘。boot audit包含gpu_profile；disk builder验证后才生成普通镜像文件，manifest绑定实际菜单和两份DTB，部署器在枚举磁盘前再次读取ESP验证。USB/蓝牙、硬解、显示选项和最新扬声器unity RX修复继续保留，SSH凭据仍最后。
+
+700/432仅完成SQ2 Android启动及实时DT档位确认，尚未做负载/长期稳定性验证；432不是毫伏。旧700/416的短测不能代替本组合验证。此处改变的是以后默认构建，本轮不修改现机ESP默认、不重启、不提升实机默认入口。
+
+验证：`python3 -m unittest discover -s tests -p 'test_sq2_gpu_default_build.py' -v`；真实DTB重现及打包测试需要本地固定输入。默认构建仍包含原有专有二进制输入，不是无缓存全源码AOSP构建。
+
+
 ### 内置扬声器默认 +12 dB（2026-10-30）
 
 默认构建显式包含当前 audio-speaker-route：RX7/RX8=84/84（0 dB，较原值 +12 dB）。打包后检查有效脚本与源码一致，audit 新增 speaker_rx_raw、speaker_rx_db、speaker_gain_change_db、speaker_route_sha256。保留原 PA/麦克风/HAL/端口策略；详见 [SPEAKER-LOUDNESS.md](SPEAKER-LOUDNESS.md)。

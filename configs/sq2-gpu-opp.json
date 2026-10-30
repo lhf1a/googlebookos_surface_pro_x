@@ -2,10 +2,13 @@
   "device": "Microsoft SQ2 / Surface Pro X (Adreno 690 marketed name)",
   "compatible": "qcom,adreno-680.1",
   "baseline_max_hz": 514000000,
-  "experimental_added_hz": [590000000, 661000000],
+  "experimental_added_hz": [
+    590000000,
+    661000000
+  ],
   "experimental_opp_level": 416,
   "level_name": "RPMH_REGULATOR_LEVEL_TURBO_L1",
-  "voltage_policy": "Retain the existing highest firmware corner; do not program a guessed millivolt value. The target command DB advertises this level. Existing lower OPPs stay unchanged.",
+  "voltage_policy": "Legacy 590/661 generation retains corner416. The default SQ2 profile requests432 at661/700; all lower OPPs remain unchanged. These are firmware corners, not guessed millivolt values.",
   "provenance": {
     "sq2_device_tree": "https://github.com/linux-surface/kernel/blob/b86f786594dc9e53c57fcfa2aa58ada9541506bb/arch/arm64/boot/dts/qcom/sc8180x.dtsi",
     "gen3_reference": "https://github.com/torvalds/linux/blob/v6.12/arch/arm64/boot/dts/qcom/sc8280xp.dtsi",
@@ -21,5 +24,13 @@
     "load_test_stop_millidegrees": 80000,
     "missing_sensor": "Load-test script refuses to proceed; 661 MHz boot refuses a failed TSENS module load."
   },
-  "limits": "Short functional/load tests do not establish OEM voltage equivalence, long-term stability or measured physical PLL frequency. a6xx_gmu_get_freq returns a cached requested frequency. See deployment-status.json for actual test/deployment results."
+  "limits": "Short functional/load tests do not establish OEM voltage equivalence, long-term stability or measured physical PLL frequency. a6xx_gmu_get_freq returns a cached requested frequency. See deployment-status.json for actual test/deployment results.",
+  "default_max_hz": 700000000,
+  "default_opp_level": 432,
+  "default_661_opp_level": 432,
+  "default_dtb_sha256": "6db562c2a28c82ca66a1e87b98d7c63c32c5a84f909917c8435fdc3fc19fef25",
+  "default_device": "SQ2 only",
+  "rescue_max_hz": 514000000,
+  "default_build": "scripts/build-source-boot.py automatically emits pinned700/432 and separate514 rescue DTBs; disk build and deployment verify both hashes.",
+  "default_validation": "SQ2 Android boot confirmed at700/432. Load and long-term stability not yet tested. Do not conflate with earlier700/416 tests. RPMh432 is a corner code, not mV."
 }

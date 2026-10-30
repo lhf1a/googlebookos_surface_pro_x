@@ -40,6 +40,11 @@ if __name__ == '__main__':
     display_spec=importlib.util.spec_from_file_location('display_payload',R/'scripts/sq2-display-boot-payload.py')
     display=importlib.util.module_from_spec(display_spec);display_spec.loader.exec_module(display)
     audit=json.loads((b.O/'build-audit.json').read_text())
+    gpu_spec=importlib.util.spec_from_file_location('gpu_payload',R/'scripts/sq2-gpu-boot-payload.py')
+    gpu=importlib.util.module_from_spec(gpu_spec);gpu_spec.loader.exec_module(gpu)
+    gpu_normal=(b.O/gpu.NORMAL).read_bytes();gpu_rescue=(b.O/gpu.RESCUE).read_bytes()
+    if gpu.verify(gpu_normal,gpu_rescue)!=audit.get('gpu_profile'):
+        raise ValueError('GPU profile missing or differs from boot build audit')
     usb_spec=importlib.util.spec_from_file_location('usb_payload',R/'scripts/sq2-usb-boot-payload.py')
     usb=importlib.util.module_from_spec(usb_spec);usb_spec.loader.exec_module(usb)
     if (audit.get('usb_functions_included') is not True
@@ -61,6 +66,7 @@ if __name__ == '__main__':
     generated=b.O/'grub-hardware-video.cfg'
     generated.write_text(display.default_menu(usb.default_menu(video.default_menu(menu)),profile),encoding='utf-8',newline='\n')
     display_policy=display.policy(generated.read_bytes(),base,addon,profile)
+    gpu_policy=gpu.policy(generated.read_bytes(),gpu_normal,gpu_rescue)
     b.GRUB=generated
     b.BOOT_FILES+=(display.ADDON,'sc8180x-surface-pro-x-rescue.dtb')
     for n in ('sq2-ssd-layout','sq2-ssd-partitions','sq2-ssd-super-slices'):
@@ -73,4 +79,5 @@ if __name__ == '__main__':
         'menu_sha256':hashlib.sha256(generated.read_bytes()).hexdigest()}
     manifest['display_profiles']=display_policy
     manifest['usb_bluetooth']=usb.policy(generated.read_bytes(),base,entries,R)
+    manifest['gpu_profile']=gpu_policy
     manifest_path.write_text(json.dumps(manifest,indent=2)+'\n')
