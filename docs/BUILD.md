@@ -1,5 +1,17 @@
 # 构建与部署
 
+4K P010预算候选：sq2-video-memory.h单独给原生P010 32MiB单帧/384MiB池，NV12及输入/缓存原限制保留。`sq2_v4l2_session_test.cpp`沿用本页ASan/UBSan编译命令，新增4K/EOS/超预算/部分分配失败清理。`build-sq2-hevc-test-vector.py --bit-depth 10 --size 3840x2160 --out NEW`生成六帧独立参考；`build-sq2-c2-component-test.py --codec hevc-main10 --vector-dir NEW --output-dir NEW_BUILD`编译对应harness。六帧4K CRC已实机通过，不能代表4K60；服务候选9608a1f3…尚未部署。`bash scripts/build-sq2-video-app.sh 3840x2160 hevc-main10 60`已产出600帧APK，未运行，见HANDOFF。
+
+独立allocator回退计时器：`wsl -u root -- python3 tests/test_sq2_allocator_watchdog.py`验证实际shell恢复/拒绝逻辑。设备使用保留initramfs的`setsid /bin/sh SCRIPT observe|restore`，不得在Android根执行；observe5秒无修改，restore45秒恢复已知旧launcher并重启服务。必须先看到READY且PID存活再切换。按mode+boot创建唯一data目录，拒绝复用。实机已在框架/Wi-Fi中断时独立恢复，仍非任意故障保证。restore模式只认识249da7ca…旧launcher；新增restore-scoped模式只认识c859a014…新launcher，两者各用独立run目录。另有restore-main10模式180秒，识别同一scoped哈希并用独立目录，供应用测试；三模式12项主机检查及实际定时恢复通过。完整日志用独立initramfs timeout90的nsenter logcat及ulimit限制，raw文件保持out/data私有。实测ulimit -f8192为4MiB，框架启动噪声可提前截断，不能只凭logger消失称90秒完整；sample-sq2-allocator-start.sh另存三次PID/maps/注册状态。
+
+launcher隔离诊断：prepare-sq2-allocator-registration-probe.py 的 `--needed-stub` 将诊断副本的libm依赖改为libs.so（无verneed引用），stub需以 `-Wl,-soname,libs.so -Wl,--no-as-needed -lm` 编译，保留LIBBINDER_NDK34导出版本。禁止使用旧liblog替代试验产物。sq2-allocator-isolated-probe.c用NDK Android35 clang及-Wall/-Wextra/-Werror构建。设备staging及三项固定哈希见HANDOFF；执行前必须校验原launcher、不可注册的诊断ELF及候选库，绝不可把正常原exe放到isolated-hw/sq2-allocator-original。helper只隔离mount及复现UID/组/ambient能力，不能代替init服务验证；空挂载点需存在，不能让bind传播到父命名空间。
+
+实际 allocator 注册前诊断：`python3 scripts/prepare-sq2-allocator-registration-probe.py ORIGINAL NEW` 固定7f394d70…原exe并改名唯一注册导入；哈希拒绝/禁止覆盖检查通过。用NDK Android35 clang `-shared -fPIC -Wall -Wextra -Werror probe/video/sq2-allocator-registration-probe.c -Wl,--version-script=MAP -o libsq2_registration_probe.so`，MAP为 `LIBBINDER_NDK34 { global: SQ2_allocator_probe_registration; local: *; };`。readelf必须确认副本只有新注册导入、无原AServiceManager_addServiceWithFlags。运行仅使用诊断副本，timeout15，并显式LD_PRELOAD该stub；不带stub必须链接失败。原版/候选库路径作独立对照，stub拦截后立即退出，绝不把副本安装成HAL或改为转发真实注册。实机边界见HANDOFF。
+
+独立 gralloc 初始化探针：使用 NDK r28c 的 aarch64-linux-android35-clang++，参数 `-std=c++17 -Wall -Wextra -Werror -nostdinc++ -nostdlib++ -isystem /root/.cache/sq2-c2-platform-libcxx-headers probe/video/sq2-gralloc-init-probe.cpp out/video-decode/codec2-integration/libc++.so -ldl -o out/video-decode/minigbm-p010/gralloc-init-probe`。运行参数为指定完整库路径及可选 `--system`；后者 root 启动后降为已观察的1000/1003/1026，不保留能力。原版用 vendor/system 库路径，候选把其私有目录放在 LD_LIBRARY_PATH 首位。仅验证 donor driver 初始化，无 Binder 注册；不是完整 allocator 服务启动或显示测试。
+
+分配器候选回退：`wsl -u root -- python3 tests/test_sq2_allocator_restore.py` 在隔离主机目录测试实际 `probe/video/restore-sq2-allocator.sh` 的四条恢复/拒绝路径。设备恢复连接后须先核对 boot、服务、目标和备份的完整 SHA；脚本仅适用于 HANDOFF 中 249da7ca… RAM launcher 与 7f394d70…原版，需在 Android 根命名空间用 root 执行。原版已在位时不重启，未知文件拒绝；候选恢复会通过 allocator 的 onrestart 影响 SurfaceFlinger，须先保存当前取证。工具未部署、未实机验证，不写 ESP 或全局 mapper。
+
 会话P010主机测试：`g++ -std=c++17 -fsanitize=address,undefined -fno-pie -no-pie -Iprobe/video tests/sq2_v4l2_session_test.cpp -Wl,--wrap=open,--wrap=close,--wrap=mmap,--wrap=munmap,--wrap=poll,--wrap=ioctl -o TEST`后运行。覆盖NV12/P010生命周期与异常geometry/payload，非实机证明。open末尾显式P010参数仅用于未来10-bit消费者，现C2默认仍NV12；预算未扩大。
 
 P010 helper离线验证：`python3 tests/test_sq2_p010_selection.py /root/.cache/sq2-video-p010-v3/venus`提取候选实际C函数并结合已记录固件格式表做ASan/UBSan测试，覆盖HEVC/VP9 P010成功、缺格式拒绝、其它codec拒绝、NV12不变、默认数组索引及真实P010 sizeimage。4K P010为25067520B，当前16MiB单帧限制仍需端到端适配；此测试不是硬件通过。
@@ -251,3 +263,15 @@ C2早期声明候选：probe/test2/video-codec-manifest-stage尚未接入/init�
 NDK MediaCodec帧验证：sq2-mediacodec-frames.c需链接libmediandk及设备system/lib64/libbinder_ndk.so并启动Binder线程池。测试向量头在私有out/video-decode/ndk-vector；使用原SHA94c7974e…码流，不将恢复的二进制提交。参考生成：ffmpeg -nostdin -v error -i clip.h264 -pix_fmt nv12 -f rawvideo ref.nv12。取回明确来自同轮日志的六个sq2-ndk-frame-N.bin，运行python3 scripts/verify-sq2-mediacodec-frames.py FRAME_DIR REF_NV12；仅适用日志确认320x240/stride320/slice240/color19的六帧I420。不能用旧残留文件代替失败轮输出。2026-10-29硬件和软件实际比较通过；独立--csd后续试验失联，恢复取证前不要重跑。
 
 普通APK视频测试：WSL bash scripts/build-sq2-video-app.sh，生成out/video-decode/player-app/sq2-video-test.apk及10秒300帧AVC baseline asset。签名材料仅private/sq2-video。默认显式选择实验codec，Intent字符串codec可选c2.android.avc.decoder作对照；--user取am get-current-user。test-c2-player.sh需实验服务/native已就绪且专用媒体XML不存在，临时广告/刷新媒体列表、播放/截图/检查回调后回退。应用按PTS限render-ahead，不能据其通过宣称组件bufferpool背压无缺陷。APK保持屏幕亮仅在测试Activity存活期间，runner结束force-stop撤销。
+
+P010独立候选：`pack-sq2-video-capabilities.py BASE /root/.cache/sq2-video-p010-v3/venus NEW --revision p010` 固定已审计eb2a8725…/ce3366cd…模块，仅改native core/dec/manifest。仍需独立启动与P010六帧像素验证；打包不部署、不重启，Android owner保持旧版，不宣称Main10应用可用。
+
+裁剪修复候选：`--revision p010-crop` 对应stage `/root/.cache/sq2-video-p010-crop/venus`、固定bb835d4d…/f57dbf81…。`gcc -Wall -Wextra -Werror -fsanitize=address,undefined -fno-pie -no-pie -Iprobe/video tests/sq2_crop_test.c -o TEST` 验证实际裁剪保留helper的边界；源变化后的同尺寸capture格式切换保留有效crop，其余保持原语义。现场Main10像素结果另见HANDOFF，不以主机检查代替实机。
+
+P010行距修正：`--revision p010-stride` 固定stage `/root/.cache/sq2-video-p010-stride/venus` 的a5f2bcc5…/66e9c26a…模块。线性P010 bytesperline使用128字节对齐；sizeimage保留原较大分配上限。Main10原生六帧与8bit回归已通过，Android10bit尚未接入。原生runner `--dump-first NEW_FILE /dev/videoN` 是最多1MiB的首帧诊断，默认DMABUF、拒绝覆盖、读同步/fsync，不放宽任何成功判定，原始数据留out/private。
+
+P010分配验证：`python3 scripts/build-sq2-c2-component-test.py --allocator-test` 输出allocator-check/interface-test（不覆盖组件二进制），Android用同一Codec2库路径运行`--p010`。320宽的三个高度要求10bit/16bit容器/rightShift6，写图案后unmap/remap逐sample校验；默认不带参数保留原8bit分配诊断。此检查不打开硬件解码器、不宣称Surface可显示10bit。
+
+独立Main10组件：`python3 scripts/build-sq2-c2-component-test.py --codec hevc-main10` 使用hevc-main10-vector与P010显式构造选择，输出component-hevc-main10/interface-test；`--frames` 在已驻留后端运行，六帧按真实C2平面重组P010校验。默认AVC继续NV12。此harness不完成MediaCodec profile/像素格式协商，注册store能力保持原状。
+
+P010显示分配候选：`python3 scripts/prepare-sq2-minigbm-map-cache.py --p010-scanout`，再以`SQ2_MINIGBM_STAGE=/root/.cache/sq2-video-minigbm-p010 SQ2_MINIGBM_OUT=out/video-decode/minigbm-p010 bash scripts/build-sq2-minigbm-map-cache.sh`构建独立产物。真实CHIP_ID0x06080001限定linear P010的SCANOUT组合，不修改UBWC/其它芯片。sq2-minigbm-p010-probe.c按stage drv.h用NDK C编译、链接dl，参数为库绝对路径和render节点；只做分配释放，不安装或显示。只读DRM plane清单可用aarch64-linux-gnu-gcc -static -I/usr/aarch64-linux-gnu/include/drm编译sq2-drm-plane-formats.c。

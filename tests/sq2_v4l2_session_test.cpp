@@ -6,6 +6,7 @@
 #include <map>
 static unsigned submits,returns,frames,allocs,releases,closes,captureQueued;
 static bool ten;static unsigned invalid;
+static bool large;static unsigned largeCount=13,largeBytes=25067520;
 static bool eventSent,drained,frameSent,lastSent,failReplacement;
 static uint64_t token;static unsigned seenLength;static unsigned char seen[32];
 static std::map<unsigned,void*> mappings;
@@ -23,11 +24,11 @@ extern "C" int __wrap_ioctl(int,unsigned long op,...){va_list ap;va_start(ap,op)
  case VIDIOC_QUERYBUF:{auto b=(v4l2_buffer*)arg;b->m.planes[0].length=4096;b->m.planes[0].m.mem_offset=b->index*4096;return 0;}
  case VIDIOC_QBUF:{auto b=(v4l2_buffer*)arg;if(b->type==V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE){submits++;token=uint64_t(b->timestamp.tv_sec)*1000000+b->timestamp.tv_usec;seenLength=b->m.planes[0].bytesused;assert(seenLength<=sizeof(seen));memcpy(seen,mappings[b->index*4096],seenLength);}else captureQueued++;return 0;}
  case VIDIOC_DQEVENT:if(!eventSent){eventSent=true;((v4l2_event*)arg)->type=V4L2_EVENT_SOURCE_CHANGE;return 0;}errno=ENOENT;return -1;
- case VIDIOC_G_FMT:{auto f=(v4l2_format*)arg;f->fmt.pix_mp.pixelformat=ten&&invalid!=2?V4L2_PIX_FMT_P010:V4L2_PIX_FMT_NV12;f->fmt.pix_mp.num_planes=1;f->fmt.pix_mp.height=4;f->fmt.pix_mp.plane_fmt[0].bytesperline=ten&&invalid!=1?8:4;f->fmt.pix_mp.plane_fmt[0].sizeimage=invalid==3?47:4096;return 0;}
- case VIDIOC_G_SELECTION:{auto s=(v4l2_selection*)arg;s->r.width=s->r.height=4;return 0;}
- case VIDIOC_G_CTRL:((v4l2_control*)arg)->value=1;return 0;
+ case VIDIOC_G_FMT:{auto f=(v4l2_format*)arg;if(large){auto& p=f->fmt.pix_mp;p.pixelformat=ten?V4L2_PIX_FMT_P010:V4L2_PIX_FMT_NV12;p.num_planes=1;p.height=2176;p.plane_fmt[0].bytesperline=7680;p.plane_fmt[0].sizeimage=largeBytes;return 0;}f->fmt.pix_mp.pixelformat=ten&&invalid!=2?V4L2_PIX_FMT_P010:V4L2_PIX_FMT_NV12;f->fmt.pix_mp.num_planes=1;f->fmt.pix_mp.height=4;f->fmt.pix_mp.plane_fmt[0].bytesperline=ten&&invalid!=1?8:4;f->fmt.pix_mp.plane_fmt[0].sizeimage=invalid==3?47:4096;return 0;}
+ case VIDIOC_G_SELECTION:{auto s=(v4l2_selection*)arg;s->r.width=large?3840:4;s->r.height=large?2160:4;return 0;}
+ case VIDIOC_G_CTRL:((v4l2_control*)arg)->value=large?largeCount-4:1;return 0;
  case VIDIOC_DQBUF:{auto b=(v4l2_buffer*)arg;if(b->type==V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE){if(returns<submits){returns++;b->index=0;return 0;}}
- else if(!frameSent){frameSent=true;b->index=0;b->m.planes[0].bytesused=invalid==4?47:ten?48:24;b->timestamp.tv_sec=token/1000000;b->timestamp.tv_usec=token%1000000;return 0;}
+ else if(!frameSent){frameSent=true;b->index=0;b->m.planes[0].bytesused=large?25067520:invalid==4?47:ten?48:24;b->timestamp.tv_sec=token/1000000;b->timestamp.tv_usec=token%1000000;return 0;}
  else if(drained&&!lastSent){lastSent=true;b->index=1;b->flags=V4L2_BUF_FLAG_LAST;return 0;}errno=EAGAIN;return -1;}
  case VIDIOC_DECODER_CMD:drained=true;return 0;
  }fprintf(stderr,"unexpected ioctl=%lu\n",op);abort();}
@@ -64,5 +65,27 @@ int main(){
   assert(!s.close()&&closes==1&&mappings.empty()&&allocs==releases);
  }
  puts("P010_STRIDE_SUBSTITUTION_SHORT_ALLOCATION_SHORT_PAYLOAD_REFUSED");
+ large=true;
+ for(unsigned scenario=0;scenario<5;scenario++) {
+  ten=scenario!=4; invalid=0; largeCount=scenario==1?17:13;
+  largeBytes=scenario==2?32u*1024*1024+1:25067520;
+  eventSent=drained=frameSent=lastSent=false;
+  submits=returns=frames=allocs=releases=closes=captureQueued=0;
+  Sq2V4L2Session s;
+  auto allocate=[&](const Sq2Geometry& g,Sq2CaptureBuffer& b){
+   if(scenario==3&&allocs==6)return -ENOMEM;
+   assert(g.width==3840&&g.height==2160&&g.bytes==25067520&&g.count==13);
+   allocs++;b={30,g.bytes,std::shared_ptr<void>(new int,[](void* p){releases++;delete (int*)p;})};return 0;
+  };
+  auto deliver=[](Sq2DecodedFrame f){assert(f.bytes==25067520&&f.geometry.format==V4L2_PIX_FMT_P010);frames++;};
+  assert(!s.open("/dev/mock",V4L2_PIX_FMT_HEVC,3840,2160,allocate,deliver,true,ten?V4L2_PIX_FMT_P010:V4L2_PIX_FMT_NV12));
+  const uint8_t payload[]={1};assert(!s.submit(payload,1,1));
+  const int result=s.pump(0);
+  if(scenario==0){assert(!result&&frames==1&&allocs==13);assert(!s.requestDrain());assert(!s.pump(0)&&s.state()==Sq2V4L2Session::State::Ended);}
+  else {assert(result==(scenario==1?-EOVERFLOW:scenario==3?-ENOMEM:-EINVAL));assert(!frames);if(scenario!=3)assert(!allocs);else assert(allocs==6);}
+  assert(!s.close()&&closes==1&&mappings.empty()&&allocs==releases);
+ }
+ puts("P010_4K_POOL_EOS_BUDGET_AND_PARTIAL_ALLOCATION_CLEANUP_PASS");
+
 
 }

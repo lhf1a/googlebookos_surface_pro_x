@@ -1,5 +1,159 @@
 # SQ2 开发交接
 
+**2026-10-30 保存检查点：4K Main10独立C2六帧通过，4K60 APK构建完成未测试**：新增sq2-video-memory.h，原生P010单帧32MiB/池384MiB，NV12仍16MiB/192MiB，压缩输入和可选import/map缓存上限不变。session协商/queue及C2 dma_heap分配共用格式对应上限。P010当前不进入仅NV12的mapper缓存，不能把增大native池当作性能优化。主机ASan/UBSan测试覆盖4K P010 13槽成功/EOS、17槽超预算、单帧越界、分配第7槽失败后全部回收及NV12旧限制，原生命周期/错误/重用测试也通过。
+
+HEVC向量脚本新增--size 320x240/1920x1080/3840x2160，P010样本检查改array避免巨量Python整数；默认小向量行为保持。组件harness按向量尺寸复制/算CRC/配置接口，4K等待60秒；builder新增--vector-dir/--output-dir保留旧产物。生成hevc-main10-4k-vector为3840x2160、真10bit、6帧无B帧，独立FFmpeg P010参考。新C2服务本地构建SHA9608a1f372af6f86676819c560e03c2cc3649b011e2eb921afB6AB1E6C8A5E5E（大小写无关），**尚未替换运行owner e7da7db7…**；默认AVC harness新源码编译通过，尚未新实机回归。
+
+同boot b621a7ac…驻留native，仅运行独立/data/local/tmp/sq2-c2-main10-4k-test --frames，没有重新启动PAS或切换allocator。4K六帧Y/UV CRC全匹配，C2_RESULT done7/mask3f/eos1/errors0，C2_STOP0/C2_RELEASE0/CLIENT_BUFFERS_RELEASED、TEST_EXIT0。结果保存在out/video-decode/hevc-main10-4k-vector/sq2-c2-main10-4k-result.txt。collector20204有smoke并完整结束120000ms/234records/15846B，已取回同目录。此为root独立C2+gralloc大帧正确性，不是普通Surface4K10bit或60fps性能证明。
+
+4K60 Main10普通APK已构建完成（exec78479正常exit0，无待轮询任务），目录out/video-decode/player-app-3840x2160-hevc-main10-60fps；600帧/真yuv420p10le/Main10/3B帧。尚未上传安装，当前设备测试APK仍Main8 4K60。下一步先备份并部署新owner、为本boot新的allocator测试窗口加唯一label和固定恢复保护，再测4K60 Main10普通应用；已有restore-main10-b621…目录已使用，不得覆盖。当前allocator原版7f394d70…、C2 wrapper bdf11d60…/owner e7da…、native驻留，正常入口未改、临时XML已撤销。其余格式/联合约束/持久化仍待完成。
+
+**2026-10-30 Main10普通应用通过，Main8 4K60回归通过**：重新核对BC711/1000215216、ESP B027-0512/marker、data UUID4f46d2ec…、loop0 p3/root来源、菜单d1ae9af6…和p010-stride镜像e519556b…后，仅原子替换一次性env（d762d0a0…），旧env备份before-main10-scoped，主动Android reboot。新boot **b621a7ac-3cc8-4d0b-8933-6faf4a7c9082**，guardY/boot_completed1，core a5f2bcc5…/dec66e9c26a…匹配。首次用户切换期间SSH短暂断开，同boot恢复；collector6338 smoke确认后本boot仅一次lab-start成功。不得重跑PAS。
+
+data owner e7da7db7…、private-probe bdf11d60…、C2 mapper eb31d402…哈希均核对；将RAM /vendor/bin/sq2-c2-experimental替换为private-probe，chmod755/chcon hal_codec2_default_exec，rc仍root/kernel域，重启服务running。正式allocator原exe7f394d70…另存backup，候选lib22f7e4c2…及scoped launcher c859a014…恢复到RAM；新增watchdog restore-main10模式180秒、新hash固定、独立目录，三模式12项主机测试通过。watchdog14886 READY后才切换allocator，默认服务found，C2仍running；新应用collector18663另行启动且smoke落盘。
+
+普通UID1010254运行hevc-main10-small，自动选c2.sq2.hevc.experimental，hardware=true/profiles2/format_supported=true，profile2/Main10、320x240/30/300帧。结果 **300输入/输出/渲染、9962ms、EOS/realtime/pass=true、STOP_OK/RELEASE_OK/RESTORED**。晚帧截图人工查看有彩色渐变斜纹测试图案；不是HDR或逐像素证明。完整目录out/video-decode/hevc-main10-vector/sq2-player-hevc-main10-small-b621a7ac-3cc8-4d0b-8933-6faf4a7c9082已取回。这是首次普通应用Surface Main10链路通过，不能扩展为4K10bit能力。
+
+同一候选仍运行期间安装已有HEVC Main8 3840x2160/60 APK，hevc-4k60普通应用自动选同组件，**600输入/输出/渲染、9978ms、EOS/realtime/pass=true、STOP_OK/RELEASE_OK/RESTORED**；结果/截图目录同上hevc-4k60已取回。当前测试APK为Main8 4K60。AVC在本轮组合下尚未新回归。
+
+boot collector完整KMSG_END120000ms/366records/27201B，app collector完整KMSG_END120000ms/287records/20647B，覆盖两次播放结束，均已取回hevc-main10-vector/sq2-main10-scoped-*；app未见venus/HFI/BUG/Oops/panic/OVERRUN记录，但有audit限流，不能称全量无错误。临时XML已撤销。180秒watchdog最终ORIGINAL_RESTORED/RESTART_REQUESTED，原allocator7f394d70…running/default found，boot不变；用户10唤醒/跳过锁屏、timeout2147483646恢复。C2实验wrapper和native仍驻留，allocator已回原版，因此再次Main10 Surface测试前需重新布置已验证候选和新的独立回退窗口，不可直接重复本boot同名证据目录。
+
+剩余范围：Main10 4K/60端到端内存预算（native4K P01025067520B高于当前16MiB限制）、VP9 profile2、MPEG适配、联合尺寸/吞吐约束、AVC回归及正常启动持久化仍未完成。不得把本轮小尺寸Main10+8bit4K60拼成4K60 Main10通过。
+
+**2026-10-30 收窄LD路径后真实allocator服务注册通过，定时恢复通过**：watchdog新增restore-scoped模式，仅识别新c859a014…，独立run目录保留旧证据。两模式恢复/原版/no-unknown/坏备份8项主机检查通过；Android手动restore也增加新hash白名单。新sample-sq2-allocator-start.sh从initramfs做三次有界只读PID/exe/maps/service check取证。
+
+重核boot6e42d2b5…/guardY/boot_completed1/原版exe及backup7f394d70…/candidate22f7e4c2…后上传新launcher并校验c859a014…；logger17008、watchdog17009、sampler17010先启动，READY及活跃确认后原子换入launcher并restart。快照第一项为旧PID32438，第二/三项为候选PID17456，exe为sq2-allocator-original，maps明确候选专用目录libminigbm与/system/lib64/libbinder{,_ndk}，两次IAllocator/default均found；SSH实际可连、服务running/boot_completed1。由此验证本轮收窄路径解决了默认服务注册问题，不是Main10呈现或长期运行证明。
+
+45秒后定时器仍按计划恢复原版，日志ORIGINAL_RESTORED/RESTART_REQUESTED；boot未变，原exe完整SHA7f394d70…，默认服务found/running。用户10唤醒/跳过锁屏、timeout2147483646再次恢复。logger17008已无/proc项，快照和logcat已取回out/video-decode/minigbm-p010/allocator-scoped-*。两轮logcat实际均达到4194304字节限制而截断，**并非完整90秒窗口**；旧retry覆盖到回退后，新scoped覆盖候选启动及约14秒后。后续应区分窗口timeout与文件限额，并保留独立快照/回退证据；threadpool0警告在成功候选中仍出现，不能单凭该警告判断卡死。
+
+当前运行原版分配器，candidate库及backup在RAM vendor保留；新launcher在data。正常入口无驻留native，下一步进入已验证的p010-stride实验入口（必须重新核对ESP身份/一次性env），恢复新C2 owner及scoped allocator，进行Main10普通APK，并回归Main8/AVC。不把注册通过当作Main10普通应用成功，也不取消P010/4K内存上限问题。正常启动持久化仍未完成。
+
+**2026-10-30 有界真实服务诊断自动恢复；发现LD路径改变Binder依赖**：新增sq2-allocator-watchdog.sh（initramfs根、root cgroup、setsid）及实际脚本隔离恢复测试test_sq2_allocator_watchdog.py。root/Android共用mnt namespace但根inode不同，已修正前置检查；observe空跑PID26321完成，无框架重启。主机restore/unchanged/unknown/bad-backup四项通过。正式试验先备份原exe7f394d70…到vendor/bin/hw/sq2-allocator-original，并准备candidate22f7e4c2…；独立logcat进程30059（timeout90、ulimit-f8192）及watchdog30060（45秒）确认活跃/READY后，才原子切换旧launcher249da7ca…并ctl.restart。
+
+再次断网，但45秒后watchdog在Android框架之外恢复原exe并请求restart，SSH恢复；日志明确ORIGINAL_RESTORED/RESTART_REQUESTED，boot仍6e42d2b5…，新原版allocator PID32438/running/hash7f394d70…，boot_completed1。用户10已切回、唤醒/跳过锁屏、timeout2147483646恢复。没有主动重启整板。watchdog已结束，logger30059的/proc条目也已不存在；90秒日志完整取回out/video-decode/minigbm-p010/allocator-retry-logcat.txt。原始日志不得提交。
+
+日志候选PID30493已经打印Minigbm AIDL allocator starting up，随后libbinder.BackendUnifiedServiceManager在IAllocator/default路径报threadpool0；SF持续等待默认服务直到回退。未见候选明确链接失败，不能再归类为未能执行main。关键对照：正常allocator maps的Binder来自/system/lib64，旧launcher把/vendor/lib64:/system/lib64加入LD_LIBRARY_PATH后，--list选了/vendor/lib64/libbinder.so并改变namespace共享依赖；可能导致注册路径异常，但尚未证明唯一因果。只设候选目录的--list恢复system Binder，同时仍选candidate+vendor donor。
+
+已将sq2-allocator-launch.c收窄LD_LIBRARY_PATH为/vendor/lib64/sq2-p010-allocator；新编译allocator-launch-scoped SHA c859a01459841b8e7a8caff77981dd5d4bd30f13311c0f50e12bc07e6c7416b1，尚未上传或真实服务验证。旧launcher产物保留用于取证，禁止再次作为新候选使用。下一轮先给恢复脚本/定时器添加新hash的明确白名单和相应测试，采用新的唯一run目录（本boot restore目录已经存在，当前脚本会拒绝重跑），验证新候选后才有界切换。不能绕过重跑保护或让timer误拒新hash。Main10应用仍未通过。
+
+**2026-10-30 原launcher隔离执行链通过**：新增 sq2-allocator-isolated-probe.c，root创建独立mount namespace并递归MS_PRIVATE，将data中的isolated-hw绑定到该进程的/vendor/bin/hw，将候选目录绑定到/vendor/lib64/sq2-p010-allocator。随后降为uid1000/gid1003/supp1026，设置有效/许可/继承及ambient SYS_NICE，执行原SHA249da7ca…launcher；原launcher设置LD_LIBRARY_PATH并清LD_PRELOAD，执行对应backup路径的诊断ELF。15秒alarm继承至exec，不注册默认服务。未复制SELinux域/完整cap bounding/task profile/init管理语义，不应称为init启动等价。
+
+prepare脚本新增--needed-stub，仅对私有诊断ELF把无版本依赖的libm.so改为libs.so，stub自身DT_NEEDED保留libm；注册导入仍是不可转发的SQ2专用符号。有效诊断ELF SHA3925d62d98df3776b1717f7fc602a1f8261e3dd80a7d6f2cd64010ce25a5a75d。第一版改liblog的方式破坏verneed而被linker拒绝，8f13b3…产物废弃，不是实际allocator故障证据。正式helper/有效副本执行输出ISOLATED_LAUNCH、REGISTRATION_INTERCEPTED valid1/flags1/uid1000、exit0；allocator/SF/system_server仍2016/2049/2327，原服务exe仍7f394d70…。全局vendor只新增一个空的sq2-p010-allocator挂载点目录，库/可执行文件替换全在子进程私有namespace，退出即消失；data staging保留。
+
+该结果没有复现原服务失败。后续若做真实注册/服务切换，必须先补initramfs侧独立定时恢复及完整stderr/logcat采集，回退不得依赖Android框架或Wi-Fi；不要把本次诊断通过作为直接重试实时切换的依据。Main10普通应用仍未通过，正常启动能力不变。
+
+**2026-10-30 实际 allocator 注册前诊断通过，未触碰正式服务**：先取回并验证原exe7f394d70…，readelf确认实际版本唯一注册导入为 AServiceManager_addServiceWithFlags@LIBBINDER_NDK34（与参考源码旧API有差异）。新增 prepare-sq2-allocator-registration-probe.py，固定原exe哈希，只在私有副本将该导入等长填充改名为 SQ2_allocator_probe_registration；拒绝未知输入/覆盖输出。产物SHA ecb8480ca33c834d16a69d4e98bf347ff5ff210b0cf6ad4f137f2a7a61cd4f30，readelf核验原注册导入已不存在。
+
+probe/video/sq2-allocator-registration-probe.c提供专用符号，精确检查非空binder和默认allocator实例名，打印后_exit，不调用/转发真实注册。DSO以LIBBINDER_NDK34版本导出，仅用于诊断副本。实机没有LD_PRELOAD时副本明确CANNOT LINK/exit1（无法意外落回真实注册）；加载stub后，原版和候选22f7e4c2…两套LD_LIBRARY_PATH均REGISTRATION_INTERCEPTED valid1/flags1/uid0/exit0。每项timeout15秒，原allocator/SF/system_server PID2016/2049/2327前后不变。未替换正常HAL、未重启框架、没有新native/PAS操作。
+
+这验证实际程序在root直接启动时已完成注册前初始化，不等同init服务的UID/能力/SELinux/命名空间、原launcher exec链或真实注册成功。候选不能因此发布。下一步复核原launcher路径与init环境；仍须保留不能注册的诊断副本，不得把正常原exe当作该副本执行。Main10 Surface问题尚未解决。
+
+**2026-10-30 分配器注册前 driver 初始化独立对照通过**：当前 boot6e42d2b5…，正常 allocator/SF/system_server 为2016/2049/2327。新增 probe/video/sq2-gralloc-init-probe.cpp，以 RTLD_NOW dlopen 指定库并通过准确导出 _ZN19cros_gralloc_driver12get_instanceEv 调用 donor 的 std::shared_ptr<cros_gralloc_driver> 返回接口；只使用不完整类型/shared_ptr 控制块，不读私有对象布局、不注册 Binder、不运行 allocator main。15秒 alarm，释放客户端引用，保留 DSO 到进程退出以匹配 donor 的静态 singleton 生命周期。
+
+原版与 candidate22f7e4c2…分别在 root 下 GRALLOC_INIT_OK=1/exit0；随后 --system 在 dlopen 前降为 uid1000/gid1003/supplementary1026（实读正式进程），两者同样成功。未保留 SYS_NICE、未复制 init SELinux 域/命名空间/exec 链，因此不是完整服务启动等价测试。正式三进程 PID 前后不变，未替换图形服务。依赖能枚举、get_instance 能初始化，仍不能证明启动 launcher/实际服务注册或 Surface 呈现成功；下一步需取实际 exec/注册前诊断，避免重复实时替换。探针产物和设备路径均在 minigbm-p010/sq2-p010-gralloc 下。
+
+**2026-10-30 黑屏反馈后已恢复正常启动，取回切换日志**：用户确认此前切换后卡住或黑屏。随后只读连接成功，boot ID 为 6e42d2b5-99ab-4d9b-9769-92e6d3dc5d03，boot_completed=1，screen_only=Y，cmdline 保留 nohibernate、正常 closed Vulkan 入口；本轮未发送 reboot。allocator 服务 running，原 exe 完整 SHA 7f394d7082735401e0a2cdc9fbcb010edef49a4d703366a9a73ef295eeb919da，全局 mapper c1a5708286a42723d1ea8640d08e2486948c382a1531a08173cee1f77a25c283。RAM 候选已回退，无需运行恢复脚本。开始当前用户为0，已将用户0和10的 screen_off_timeout 设为2147483646，并 switch-user 10、WAKEUP、dismiss-keyguard；实读当前用户10。未修改凭据或休眠保护。
+
+旧持久 collector 已取回 out/video-decode/minigbm-p010/allocator-switch-kernel.log，104515字节，KMSG_END timeout/120000ms/597records/104434payload bytes。日志证实 allocator onrestart 执行了 restart surfaceflinger，原 SF1998 被杀，新 SF29784 启动，zygote也重启；随后持续约两分钟无法找到 IAllocator/default，Wi-Fi 记录本机主动 DEAUTH_LEAVING。因此先前命令至少到达 allocator restart，不能继续写成全部步骤均未知；候选实际加载库/失败原因仍缺证。持续的内核collector也表明这不是已证实的瞬间内核硬挂。audit 丢失/限流存在，不能以没有错误记录排除故障。
+
+不重试实时服务替换。只执行 linker64 --list（不运行服务 main）：原 allocator 配合 data 目录候选 LD_LIBRARY_PATH 可枚举到 candidate、vendor donor 及完整依赖，launcher 自身依赖也可枚举；这不是 init UID/能力/命名空间下的实际启动验证，也不能证明符号重定位或注册通过。当前32个 tombstone 的 Cmdline 均为已有 init/trusty/gscd，没有保留 allocator tombstone；不能据此排除先前 allocator 崩溃。下一步需设计不触碰正在运行默认服务的启动/注册前诊断并保留 stderr，定位真实服务启动失败，再安排受控呈现测试。Main10独立分配与原生六帧结论保留，普通应用及4K10bit仍未通过。
+
+**2026-10-30 分配器恢复工具就绪，设备仍不可达**：后续多次 SSH 到 192.168.8.194 超时，工作站邻居表该地址为 Incomplete，无法确认当前 boot、服务状态或候选是否落地；不据此推断整机崩溃，也不扫描其它设备冒认目标。上一切换 session98048 已终止，不存在待轮询的运行任务。
+
+新增 `probe/video/restore-sq2-allocator.sh`，仅在 root、screen_only=Y、目标精确匹配已知 launcher 249da7ca…且备份匹配原版 7f394d70…时，复制到临时文件、复核完整 SHA、sync、原子恢复目标，再重启 vendor.graphics.allocator。目标已经是原版时不重启；未知目标或损坏备份拒绝。全局 mapper 不动。`tests/test_sq2_allocator_restore.py` 在隔离目录执行实际脚本，restore/already/unknown/bad-backup 四项通过。这是主机逻辑验证，脚本尚未上传或实机执行。
+
+恢复连接后先读取 boot ID、服务状态和目标/备份哈希及进程 maps，再决定是否执行回退；若已经正常重启，RAM 候选可能已消失，不应重复切换。还需核对当前用户的 screen_off_timeout（上次已验证为 2147483646），保留手动关屏及内核 guard。Main10 普通应用仍未通过，不能把离线回退验证当成硬解完成。
+
+**2026-10-30 allocator服务候选切换命令未返回，SSH暂不可达**：实际init rc服务vendor.graphics.allocator，user system/group graphics drmrpc，seclabel hal_graphics_allocator_default，只有SYS_NICE，onrestart restart surfaceflinger。因此未用需要SYS_ADMIN的私有mount方案，改为专用原生launcher只对exec的allocator设置LD_LIBRARY_PATH=/vendor/lib64/sq2-p010-allocator:/vendor/lib64:/system/lib64，unset LD_PRELOAD/SQ2_VIDEO_MAP_CACHE；全局库路径不替换。原exe SHA7f394d7082735401e0a2cdc9fbcb010edef49a4d703366a9a73ef295eeb919da，全局lib c1a57082…，exe/lib标签均tmpfs。操作前SF1998/system_server2140，boot38e9e63c…。
+
+launcher源码probe/video/sq2-allocator-launch.c、产物minigbm-p010/allocator-launch SHA249da7cae6e999059e0e03a14728b7249681a9c2ecbf57751e8ded4ed276e02e，上传data/sq2-p010-gralloc。独立collector sq2-p010-allocator-switch-kernel.log smoke和candidate22f7e4c2…校验输出已收到。随后发出的set-e链计划：备份原exe到/vendor/bin/hw/sq2-allocator-original及/data/local/tmp/sq2-p010-gralloc/allocator-original；在RAM vendor/lib64/sq2-p010-allocator放candidate；原子替换服务exe为launcher；ctl.restart vendor.graphics.allocator；sleep4后输出服务/PIDs。**exec session98048随后以Connection reset/exit1结束，仅收到smoke/hash，后续步骤完成情况未知。** 新SSH连接超时，尚无服务/PID/画面确认。不要重发切换命令、不要擅自重启；98048已终止，先读设备状态。已询问用户当前屏幕状态，待答。
+
+恢复后先核对实际exe/backup/服务pid的maps，确认是否只allocator加载新库（SF应仍全局c1a57082…），以及bootID判断框架重启还是板重启。若服务失败，核验原exe备份hash后原子恢复服务路径并ctl.restart vendor.graphics.allocator；全局库本来未变，无需替换全局mapper。重启会清RAM vendor候选，但本轮未主动发reboot。不得把命令发出当成部署成功或把网络断开解释成Main10硬件不支持。
+
+**2026-10-30 P010显示usage独立分配候选通过，未替换全局服务**：新增只读sq2-drm-plane-formats.c，O_RDONLY打开card0、仅fd级UNIVERSAL_PLANES/GETPLANERESOURCES/GETPLANE，无master/framebuffer/modeset。实际四个视频plane33/39/45/51均公布P010，另外四个RGB plane没有；固定内核dpu_plane_format_mod_supported接受linear。不能把格式枚举当成实际scanout呈现通过。
+
+minigbm固定源msm.c SHA991257af…只在SC_7280给P010添加SCANOUT；新增sq2-minigbm-p010.h以DRM_MSM_GET_PARAM读真实CHIP_ID，仅0x06080001允许增加LINEAR_METADATA/P010的BO_USE_SCANOUT，不定义SC7280、不改其它格式/UBWC/GPU身份。prepare-sq2-minigbm-map-cache.py --p010-scanout生成独立/root/.cache/sq2-video-minigbm-p010，保留原映射缓存补丁；builder新增SQ2_MINIGBM_STAGE/OUT变量，原默认路径保持。候选out/video-decode/minigbm-p010/libminigbm_gralloc.so SHA22f7e4c2bd76338519964d3e67d2392e4e7e35aeb5904fb2b6c0fa393603ce2c。
+
+新增sq2-minigbm-p010-probe.c独立dlopen指定库，renderD128上请求SW_READ/WRITE_OFTEN+TEXTURE+SCANOUT P010320x240，仅分配/释放无渲染命令。boot38e9e63c…旧全局库得到SUPPORTED0/ALLOCATED0/exit3，新候选SUPPORTED1/ALLOCATED1/RELEASED/exit0。原始结果与DRM格式清单取回out/video-decode/minigbm-p010。设备候选及allocate-probe在/data/local/tmp/sq2-p010-gralloc；未bind、未替换/重启allocator或SurfaceFlinger，默认服务/全局mapper仍原样。
+
+下一步检查allocator init rc/实际库与donor依赖，准备仅allocator进程私有mount namespace覆盖的候选启动及回退，保持系统其它图形进程库不变，然后Main10普通APK重新测试。已有C2私有mapper仍eb31d402…，owner e7da…，XML已撤销；切勿把独立分配成功称为Surface或Main10播放通过。
+
+**2026-10-30 Main10普通应用失败定位到Surface分配usage**：boot38e9e63c…。重核旧启动服务4e7d98a7…、data owner67b326ca…、private-probe bdf11d60…/mapper eb31d402…后，备份data/sq2-c2-owner-before-main10（67b3）及sq2-c2-service-before-main10（4e7d），停止服务、以e7da7db7d9442a21105cb3c8044dae128365ba35ee77d41a5ec1e21068a535b9替换data owner，并将private-probe复制到RAM vendor服务入口；恢复标签/start，running。全局mapper未变。新服务只RAM，正常镜像未改。
+
+安装Main10小APK，runner新增hevc-main10-small，独立collector smoke后临时XML运行。普通UID1010254自动选c2.sq2.hevc.experimental、profiles2/format_supported=true、Main10 profile2/CSD2387；原生捕获11buffer成功，但无输出即MediaCodec NO_MEMORY，STOP_ERROR/RELEASE_AFTER_STOP_ERROR；runner完成RESTORED、XML撤销，服务仍running。完整目录out/video-decode/hevc-main10-vector/sq2-player-hevc-main10-small-38e9e63c-19ab-4f53-95fb-25413f559844。
+
+完整logcat明确：全局android.hardware.graphics.allocator-service.minigbm拒绝YCBCR_P010/DRM_P010 usage0x933（CPU read/write + GPU_TEXTURE + COMPOSER_OVERLAY）；GraphicBufferAllocator alloc320x240/format54失败，C2IgbaBuffer allocation transaction failed。不是native解码失败，也不是默认CPU-only allocator不支持P010。私有mapper仅影响服务import，不改变全局allocator进程。源码msm.c P010在texture_source_formats中，BO_USE_SCANOUT只在SC_7280编译条件给P010增加；当前SQ2不能盲开SC7280或冒充其它GPU。下一步核对实际DRM平面/P010与客户端合成分配策略，或以受控C2非Surface池交付验证真实GPU导入；保持既有图形fix，不因usage拒绝判整个Main10不支持。大段init子进程crash日志是已有trusty服务噪声，未据此断言板重启。
+
+全量logcat和collector已取回out（含原始日志不提交）；当前collector完整收尾需核对。当前APK为Main10、owner为e7da、wrapper bdf11d60，XML已撤销。普通应用未通过，界面/flush/4K10bit尚待继续；不发布永久能力。
+
+**2026-10-30 Main10配置自动选择P010并通过六帧**：Sq2DecodeInterface新增HEVC Main10 profile与由profile计算的output pixel format（Main10=0x36，Main=0x23；其它codec常量0x23）。组件移除显式构造format覆盖，每次打开会话查询picture-size+pixel-format，据此选择native P010/NV12；因此flush后重新打开也重新查询，但尚未实测flush。独立harness通过config_vb配置Main10并确认P010，不再靠构造参数绕过接口。
+
+设备参数测试Main10->Main切换pixel随之变化，VPx拒绝不支持profile/AVC与尺寸/pool检查通过，参数数11。随后普通组件Main10协商测试MAIN10_PROFILE_SELECTS_P010、done7/mask3f/eos1/errors0、六CRC匹配、停止释放0/客户端buffers释放、exit0。两份日志已取回hevc-main10-vector/sq2-c2-main10-{parameters,negotiation}-result.txt；仍独立root harness，不是普通APK/Surface。
+
+新store本地产物SHAe7da7db7d9442a21105cb3c8044dae128365ba35ee77d41a5ec1e21068a535b9（未上传/替换服务）。build-sq2-video-app.sh新增hevc-main10：真10bit geq源、libx265 Main10/3B帧，生成player-app-hevc-main10/sq2-video-test.apk；vector.json核验Main 10/yuv420p10le/300帧（320x240/30），尚未安装。下一步先备份/恢复新boot的私有wrapper+owner并临时XML测试普通APK，再Main8/AVC回归；不可假定此前RAM wrapper仍存在。Main10小尺寸路径已验证，但当前16MiB预算不支持4K10bit，未发布正常启动能力。接口候选现在含Main10，上线前仍须处理尺寸联合约束/预算，不能把本地编译当成全尺寸支持。
+
+**2026-10-30 Android C2 Main10六帧像素通过，AVC回归通过**：Sq2C2V4L2Component新增末尾显式outputFormat参数（缺省NV12，注册store旧调用不变），传给native session。P010输出使用HAL0x36，验证实际geometry/fourcc、2字节行宽/有效payload、gralloc10bit/16bit/shift6/非大端/采样和步长；按源stride和目标rowInc/colInc逐sample复制16bit，不做8bit缩减。旧8bit优化复制路径保留；16MiB单帧/192MiB预算未扩大，4K10bit仍未支持。
+
+build-sq2-c2-component-test.py新增--codec hevc-main10，使用已验证原生Main10向量并显式P010输出；harness按C2平面语义重组P010，与独立参考六帧Y/UV CRC比较。boot38e9e63c…运行/data/local/tmp/sq2-c2-main10-test --frames：done7/mask3f/eos1/errors0，六帧匹配，queue/stop/release0、CLIENT_BUFFERS_RELEASED、exit0。按相同新组件源码重编AVC默认NV12回归也done7/mask3f/eos1/errors0、停止/释放0、exit0。完整结果已取回out/video-decode/hevc-main10-vector/sq2-c2-main10-frames-result.txt和sq2-c2-p010-avc-result.txt。
+
+**这是独立root C2组件+真实硬件+真实gralloc验证，不是普通UID MediaCodec/Surface/Main10能力声明。** 当前接口仍只广告HEVC Main，测试通过构造参数明确选择P010，不假称完成profile协商；运行store未替换。下一步将Main10参数与输出pixel format/自动选择贯通，验证配置/flush/重建，再普通APK；VP9 profile2、4K10bit预算、MPEG及持久化仍开放。没有重启/重初始化native或更改正常入口。
+
+**2026-10-30 Android P010 allocator实机通过**：sq2-c2-allocator-test.cpp新增显式--p010（默认0x23旧分支保持），通过平台Codec2 allocator分配HAL_PIXEL_FORMAT_YCBCR_P010=0x36，验证3平面/10bit/allocated16/rightShift6/非大端/行列步长/采样边界，然后写带10bit低位的不同YUV图案、unmap/remap并逐sample读回。build-sq2-c2-component-test.py新增--allocator-test独立输出allocator-check/interface-test，固定头与库校验保持，不覆盖组件产物。
+
+设备boot38e9e63c… Android全局原mapper（非私有缓存wrapper）运行exit0，320x240/256/288均P010_10BIT_REMAP_READBACK_OK/RELEASE_DONE。实际布局：Y row768/col2，U/V row768/col4；10/16/shift6；240和256高UVoffset196608/196610、分配307200B；288高UVoffset221184/221186、分配344064B。因此C2图像stride768与native P010 stride640不同，后续必须逐行/按plane布局复制，不能整块memcpy。只验证分配映射与读回，不是C2解码/Surface显示/Main10广告。
+
+探针/data/local/tmp/sq2-c2-p010-allocator，结果sq2-p010-allocator-result.txt已取回out/video-decode/hevc-main10-vector。原生后端未新增解码命令、未重启PAS。下一步给Sq2C2V4L2Component加明确P010输出选择和16bit样本复制，先独立Main10 C2六帧参考harness再启普通应用；注册store/接口目前仍8bit，不提前广告。当前未提交变更继续保留。
+
+**2026-10-30 Main10原生六帧通过，NV12回归通过**：新boot38e9e63c-19ab-4f53-95fb-25413f559844/boot_completed1，core a5f2bcc5…/dec66e9c26a…匹配；独立sq2-p010-stride-boot-kernel.log smoke后本boot仅一次lab-start成功。user10/唤醒/跳过锁屏/timeout2147483646已恢复，guard由lab-start校验Y。
+
+原decode-test-crop --dmabuf（不dump、不改严格检查）Main10六帧Y/UV CRC全匹配mask3f，6输入归还、drain1/LAST1/ret0，双STREAMOFF0/CLOSE_DONE，TEST_EXIT0。捕获P010 320x256、stride640、crop320x240，有效payload245760；原较大sizeimage294912保留。随后新编译decode-test-nv12对原8bit HEVC六帧同样mask3f、全部输入/EOS/停止/关闭通过，exit0。两套结果/native-start和当时collector已取回out/video-decode/hevc-main10-vector/sq2-p010-stride-*.txt/log；collector完整收尾还需取回。**只证明原生320x240 Main10完整解码与8bit回归，不证明AndroidMain10、4K10bit、长片或完整能力对齐。** 当前Android服务仍镜像旧版，67b3owner没有重启后重新部署；下一步验证C2 P010分配布局，再接入10bit图像复制/参数与普通应用。现有allocator探针probe/video/sq2-c2-allocator-test.cpp只测0x23，需要独立新增P010分支；本地minigbm msm.c已有P010支持，实际allocator仍待测。
+
+**2026-10-30 P010行距修正一次性重启已发出**：新增pack revision p010-stride固定a5f2bcc5…/66e9c26a…模块；镜像out/video-decode/boot-candidate/capabilities-p010-stride.cpio.gz SHAe519556b0d5e5aa7ccb98772ef58fceee6fad2647f905cf85a914cab58a60b7b。打包审计仅core/dec/manifest改变且密码addon最后。boot31cf07bf…期间重核BC711/ESP UUID/marker/data UUID/root backing、once0、ESP余517660KiB后上传；设备SHA及gzip -t通过，sync后原子改名native-c2-capabilities-p010-stride.cpio.gz。菜单备份grub.cfg.before-p010-stride（旧7c03e5a6…），新菜单d1ae9af6f9dc4c7e54d8fd37fda108e36f130393394f303b72661f95ad156e06，仅实验initrd路径变化。备份once0并核验d762d0a0…后原子设once1，sync并主动Android reboot，session36909，等待新boot确认，不重复重启。
+
+上一轮两个collector完整取回hevc-main10-vector，layout日志KMSG_END timeout120013ms/290records/20130bytes。新编译8bit HEVC runner decode-test-nv12已上传/data/local/tmp，Main10用已在设备的decode-test-crop（不dump），两者严格CRC。下一步新boot核验哈希/guard/boot_completed，独立collector后只一次lab-start，然后Main10六帧完整及NV12回归。Android10bit尚未接入；本地minigbm msm.c已经列出P010 texture-source/分配支持，仍需实机allocator/C2布局检查。
+
+**2026-10-30 P010首帧逐字节参考匹配，行距修正候选已编译**：boot仍31cf07bf…，已有日志无venus会话错误、上轮双STREAMOFF/CLOSE返回，未重启PAS。在独立新collector smoke后用新增--dump-first NEW_FILE /dev/video0做一次受限诊断：最多1MiB、O_EXCL/O_NOFOLLOW、DMA_READ同步、fsync，仅保存首个有效payload，不改变原geometry/CRC判定。实际保存245760字节，仍short-frame/exit1、双STREAMOFF0/CLOSE_DONE。原始payload及result已取回hevc-main10-vector；按stride640/Yscan256提取可见Y/UV，与独立FFmpeg ref.p010第0帧**全部230400字节相同**，CRC582aa82b/350913a6；stride640/scan240不匹配，768布局无法放入有效payload。结果含原始/参考SHA在p010-first-layout.json；只是首帧，不是六帧/EOS或AndroidMain10通过。
+
+本地固定kernel的drivers/gpu/drm/msm/disp/dpu1/msm_media_info.h SHA88ee1ae38078035cc96ee064e370ae4389333f6c0ce3135a83d9d0c87a543a9a，VENUS_Y_STRIDE/UV_STRIDE线性P010为ALIGN(width*2,128)，P010_UBWC才256；Yscan32/UVscan16。prepare脚本已将暴露仅SQ2的P010 bytesperline修正为128对齐，分配sizeimage仍保守沿用原256对齐预算，不改其他格式。新stage/root/.cache/sq2-video-p010-stride/venus编译完成session59170 exit0，core a5f2bcc54b0ec523c8df886f1675f4dbb9c934c9756e373028bbe307f4d1af0f、dec66e9c26a9602a7d01a4f0f4d74110967f7aa90af85d449a24bfa16a2c1315a47，符号missing0。尚未添加pack revision/打包/部署。下一步新独立镜像启动后完整六帧Main10 CRC+EOS，再做NV12回归；AndroidP010路径仍待实现。runner原有主机阶段/回收测试通过，新dump路径实机只验证本次小payload，不代表所有故障分支已测。
+
+**2026-10-30 裁剪修复实机生效，Main10首帧布局仍失败**：新boot31cf07bf-f0b2-4a66-8163-96550013d9c5/boot_completed1，core bb835d4d…/dec f57dbf81…匹配。独立collector sq2-p010-crop-boot-kernel.log smoke后本boot仅一次lab-start成功。user10/唤醒/跳过锁屏/timeout2147483646已恢复。首次decode-test-crop --dmabuf输出CROP_BEFORE_FORMAT=320x240，S_FMT(P010)后crop仍320x240，裁剪修复通过实机；capture宽320高256、stride768、size294912。捕获10buffer/STREAMON成功，返回input0及首个capture bytes245760/offset0/flags4008，但严格need校验报short frame，未作CRC，exit1；两个STREAMOFF0、CLOSE_DONE。
+
+不能称Main10解码通过。245760与报告stride768/scan256的布局不一致；可能P010实际stride/scanlines或固件bytesused定义，需有界采集真实buffer并与独立P010参考比较，不能直接忽略short-frame或猜stride上线。完整result/native-start/当时collector取回out/video-decode/hevc-main10-vector；collector收尾待取。当前native仍驻留，没再试、没热卸，Android服务旧版。下一步先看已有日志/代码，必要时独立新启动做一次有界帧布局取证。
+
+**2026-10-30 裁剪保留候选已编译/打包，正在上传**：新增venus-sq2-crop.h，在SQ2且reconfig（SOURCE_CHANGE已到）、捕获队列、协商存储宽高未变、原裁剪非空/非负且边界有效时，vdec_s_fmt保留固件crop；其它情况仍重置。tests/sq2_crop_test.c在ASan/UBSan覆盖实测320x240-in-320x256、非零offset、尺寸改变、非SQ2/非捕获/无reconfig、负值/空/越界/UINT32_MAX。runner新增G_SELECTION前置日志使旧mock缺ioctl，已补只读selection fixture，资源/阶段测试通过。
+
+新stage/root/.cache/sq2-video-p010-crop/venus编译通过；core bb835d4da5faa9282c98dbb02083fbf4738dbef4d2a2ff1b83f5538b681ef6ce，dec f57dbf811968e4ac03f21b3b917c093ee0f2155276cc0d91038fc214a7dec79d，符号审计missing0，格式helper、640停止序列、10END案例通过。打包--revision p010-crop输出capabilities-p010-crop.cpio.gz SHA500f153b46ae0e62ce9b3764c9e710040afa9a45db79312265dea2dd308e8410，仅core/dec/manifest变化、密码addon最后。当前boot仍85c96f2e…；身份/ESP/UUID/marker/root backing重核通过，ESP余711396KiB。旧collector完整取回KMSG_END timeout120001ms/334records/25321bytes。新镜像SCP session40568已完成；设备端SHA/gzip校验通过，sync后原子改名。备份grub.cfg.before-p010-crop及sq2-c2-test.env.before-p010-crop，核验新菜单/once文件后原子替换、sync并主动Android reboot（session48944）。待新boot确认，不重复发reboot。准备菜单out/video-decode/boot-candidate/grub.p010-crop.cfg SHA7c03e5a64261cc95ffc4915b9f5d11cdfce2d84f75f5406549b78f2ec1c0c117，仅实验initrd路径改变。
+
+**2026-10-30 P010新启动成功；Main10发现S_FMT裁剪覆盖**：新boot85c96f2e-d1ab-412d-ad9f-2c68c018b7d3、boot_completed1、guardY，core eb2a8725…/dec ce3366cd…匹配。独立sq2-p010-boot-kernel.log smoke通过后，本boot仅一次video-decoder-lab-start成功；禁止重跑/热卸。已切user10、WAKEUP/dismiss-keyguard并设timeout2147483646。当前Android服务为启动镜像旧版，未重新部署owner67b3。
+
+Main10六帧--dmabuf首次试验exit1：source change成功，P010 S_FMT接受（fourcc30313050、320x256、stride768、size294912），但crop320x256与向量320x240不符，拒绝在capture STREAMON前继续；输出STREAMOFF0/CLOSE_DONE。没有硬件帧验证通过。runner新增G_SELECTION_BEFORE_FORMAT日志，重新编译decode-test-crop作第二次有界试验（不重启PAS）：**切换格式前crop0,0,320,240，S_FMT(P010)后变0,0,320,256**，同样干净关闭。确认是vdec_s_fmt无条件inst->crop=对齐后width/height覆盖，不是固件最初报错；现有严格尺寸检查保持。
+
+完整两轮结果和native-start已取回out/video-decode/hevc-main10-vector/sq2-p010-{main10,crop}-result.txt等，collector已取回（收尾需核对），发现退出后的invalid session/no valid instance消息（pkt221007/21001）；CLOSE_DONE只证明用户态关闭返回，不证明固件无迟到消息。当前boot不继续帧测试，后续用修复候选独立新启动。下一步修改SQ2捕获格式切换：source change后仅在存储尺寸不变且已有crop有效时保留固件crop，保留初始化/其它平台原语义；增加真实helper边界检查、新stage编译/符号审计/打包，再独立重启验证P010六帧。不能在驻留模块上直接热替换，也不能用忽略crop/换256高向量代替修复。
+
+**2026-10-30 P010一次性启动已发出**：SSH自行恢复，仍boot59af714a…/guardY。重新核对BC711/ESP UUID及marker/data UUID/root backing，ESP余905132KiB。候选已上传临时路径并在设备sha1808a39f…及gzip -t通过，sync后原子改名/media/esp/boot/sq2-android1/native-c2-capabilities-p010.cpio.gz。仅实验入口initrd路径由v3改为p010，默认正常入口不变；菜单备份grub.cfg.before-p010（69e016c5…），新菜单d47afa2057dbd15797ecf296aa191e940d9ce39a9111146f76b5f88224c2b867。once=0备份sq2-c2-test.env.before-p010，上传once=1核验d762d0a0…后原子替换并sync。已通过Android reboot发出主动重启（exec session4758），尚待新boot确认，不重复发reboot。
+
+重新编译的静态Main10 runner out/video-decode/hevc-main10-vector/decode-test-p010通过QEMU padded-reference（2字节/sample），已上传Android/data/local/tmp同名，尚未执行。新boot先验证core eb2a8725…/dec ce3366cd…、boot_completed和screen_only，再启动独立collector并仅一次video-decoder-lab-start；不可沿用上一boot的PAS状态或热卸。随后有界六帧Main10实际CRC/EOS/关闭，再做NV12回归。Android服务重启后回到镜像旧版，RAM owner/private-wrapper需要后续重新部署，不假定67b326ca仍在运行。
+
+**2026-10-30 P010候选打包完成，未部署**：有效stage仍/root/.cache/sq2-video-p010-v3/venus；core eb2a8725c3dd82ab168dfa668fc4871d4e5feae07ac5b437480bbe62a046e8c4，dec ce3366cd67a9f7e4b16c2b875475fd0d2656c5fb4be242adb25ce55244450301。从当前设备新采集guardY+kallsyms，audit-sq2-video-modules.py排除被替换resident模块旧exports后，两模块missing=0；这仅符号闭包，不是ABI/硬件证明。实际helper ASan/UBSan六codec格式选择与默认索引检查再次通过。
+
+pack-sq2-video-capabilities.py新增显式--revision p010及上述固定hash，保留1/3选择；新私有产物out/video-decode/boot-candidate/capabilities-p010.cpio.gz SHA1808a39f88c1f67984ad6770070194e178221eca6bf9711d50c85d1ba60ccb3a。完整解压/last-entry-wins审计只变core/dec/SHA256SUMS，密码addon最后，Android owner不变。尚未上传、改菜单或重启。设备曾成功读取BC711/1000215216sectors、ESP UUID B027-0512/marker SQ2-INTERNAL-512-20261027、data UUID4f46d2ec…、loop0 backing p3、root erofs/data p1、菜单hash69e016c5…和once=0；紧接着df及SCP读取连接超时，不能把早先成功当作部署完成。grub.before-p010.cfg不存在，后续生成菜单因缺输入退出，没有任何设备写入。下轮先复查连接/状态再做部署前身份核对。P010原生向量尚未实机，不能广告Main10。
+
+**2026-10-30 VP8 4K30普通应用通过**：同boot59af714a…/owner67b326ca…，vp8-4k自动选择c2.sq2.vp8.experimental，hardware/format_supported=true；3840x2160/30、300输入/输出/渲染，9962ms，EOS/realtime/pass=true、STOP_OK/RELEASE_OK/RESTORED。目录已取回out/video-decode/vpx-app/sq2-player-vp8-4k-59af714a-4cfe-4017-9ce0-d1656715c923。构建session45611已完成，当前APK为VP8 4K30。该轮沿用仍在120秒窗口内的sq2-vp9-4k60-kernel.log（测试结束时uptime约925秒，collector起点约824秒），现已取回完整日志，KMSG_END timeout120000ms、245records/17664bytes；无KMSG_OVERRUN，未见venus/hfi/BUG/Oops/panic记录（有audit限流，不能据此推断所有日志无缺失）。收尾XML_REMOVED、服务running。不测试VP8 4K60：32400宏块/帧乘60超出固件1036800宏块/秒；不是把VP9的吞吐复制给VP8。接下来优先补P010原生候选启动/10bit和剩余MPEG适配，正常启动持久化仍未完成。
+
+**2026-10-30 VP9 4K60普通应用通过**：同boot59af714a…/owner67b326ca…，profile0 3840x2160/60普通UID自动选择c2.sq2.vp9.experimental，hardware/format_supported=true；600输入/输出/渲染，10056ms，EOS/realtime/pass=true，STOP_OK/RELEASE_OK/RESTORED。完整结果/截图已取回out/video-decode/vpx-app/sq2-player-vp9-4k60-59af714a-4cfe-4017-9ce0-d1656715c923，人工检查late截图有测试图案；不是逐像素校验或长片稳定性认证。收尾boot不变、XML_REMOVED。上一轮4K30 collector已确认KMSG_END timeout120000ms/255records/18171bytes；4K60独立collector的smoke已验证，120秒结束后仍需取回完整日志。60fps构建session82952已正常完成；当前APK为VP9 4K60。下一项VP8 4K30构建正在运行（核对当前会话），还未实机运行。
+
+**2026-10-30 VP9 4K30应用通过、新owner VP8回归通过**：boot仍59af714a…，owner67b326ca…，普通UID1010254自动选择硬件组件。vp8-small3（320x240/30）与vp9-4k（3840x2160/30、VP9 profile0）均300输入/输出/渲染、9963ms、EOS/realtime/pass=true，STOP_OK/RELEASE_OK/RESTORED。结果和截图已取回out/video-decode/vpx-app下各同名boot目录；收尾XML_REMOVED、服务running、boot未变。4K结果不是60fps、10bit或长片证明。独立sq2-vp9-4k-kernel.log有smoke标记，120秒有界collector，完整收尾仍需取回核对。下一项VP9 4K60 APK构建已启动，exec session82952，输出player-app-3840x2160-vp9-60fps；先轮询现有handle，不重复启动构建。尚未上传或测试60fps APK。调试screen_off_timeout再次实读2147483646、guardY。
+
+**2026-10-30 新用户偏好与VPx普通应用通过**：用户已移除PIN，明确调试期间可跳过锁屏，并要求不自动关屏。已在新boot以am switch-user 10、WAKEUP、wm dismiss-keyguard进入用户10，不清除凭据。screen_off_timeout设2147483646ms（约24.8天），避免旧lab-keep-awake仅对2147483647的两分钟迁移；复查值保持。覆盖此前30分钟调试偏好；手动关屏和suspend.screen_only=Y不变。用户还明确固件不支持就丢弃，见能力文档。
+
+此前c939c2e已提交并推送origin/codex/sq2-video-decode，随后确认正常bootd4bb6f99…/boot_completed1/无native。完整复核NVMe/ESP/root/菜单69e016c5…/v3镜像72a6037f…后仅置一次env并主动重启，当前boot **59af714a-4cfe-4017-9ce0-d1656715c923**，env已清0、core50afdd91…正确。独立collector smoke后本boot仅首次lab-start成功，不能重跑或热卸。
+
+新四组件owner372c024b…先通过HEVC4K60普通APK回归：600输入/输出/渲染，9977ms，EOS/STOP/RELEASE/RESTORED。VP8首轮测试APK因WebM没有KEY_FRAME_RATE而NPE，未进入硬解；build脚本现生成fps.txt，APK验证容器若有帧率则与固定测试元数据一致，否则采用元数据，禁止猜实际文件帧率。vp8-small2自动选择hardware=true，300帧9965ms、EOS/STOP/RELEASE通过。
+
+VP9首轮自动选中但9字节CSD被组件拒绝；对照本地固定AOSP C2SoftVpxDec，改为有界消费VPx容器CSD，不拼接到硬件帧：拒EOS、多buffer/多block、映射错误及超过1MiB。新owner **67b326ca19b2c949078ba6bcdb13926db5e0a214f1c1c1775a40f26673446c44** 已RAM部署（前版备份sq2-c2-owner-vpx-before-csd，旧双组件备份sq2-c2-owner-before-vpx）。vp9-small2普通UID自动选择hardware=true/format_supported=true，300输入/输出/渲染9969ms，EOS/realtime/pass=true、STOP_OK/RELEASE_OK/RESTORED。VP8/VP9均320x240/profile0，不是4K/10bit/长片认证；VP8通过版本为CSD改动前，后续需回归新版本。
+
+本轮启动日志、完整APK结果/截图/日志和collector取回out/video-decode/vpx-app；collector确认KMSG_END timeout120000ms，收尾XML_REMOVED、boot保持。当前APK为修复帧率的VP9版。默认启动镜像不变，新owner/private wrapper仅RAM；无新MPEG2或P010硬件测试。此次提交后的源码/文档改动尚未提交。
+
 **2026-10-30 会话层P010适配，仅主机测试**：Sq2V4L2Session::open新增末尾outputFormat参数（缺省NV12，所有旧调用保持），P010仅允许HEVC/VP9；Sq2Geometry新增实际format，捕获协商核对返回fourcc不可静默降8bit。可见尺寸/字节stride/sizeimage采用64bit边界计算，拒绝奇数YUV420尺寸、P010奇数字节stride、短分配和短输出payload。单帧16MiB/总192MiB限制未扩大，4K P010仍不接受。Android C2未请求P010，图像复制与profile广告仍8bit。
 
 tests/sq2_v4l2_session_test.cpp在ASan/UBSan下覆盖NV12/P010两组payload/token/EOS、replacement失败后客户端引用保留、100帧复用5次分配、close/release；额外拒绝错误stride、驱动替换格式、47B短分配和47B短帧，并检查零交付/无映射泄漏。四组件store重新编译通过，out/aidl-store/interface-test已被新版覆盖，**设备上的2bea9691…候选仍旧，不能把新本地产物与旧哈希混用**。没有上传或替换设备服务。SSH仍超时，正常重启是否完成未知，仍待用户屏幕状态回应。

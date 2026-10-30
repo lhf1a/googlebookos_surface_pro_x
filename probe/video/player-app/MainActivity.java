@@ -70,8 +70,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 case "video/x-vnd.on2.vp9": hardwareName="c2.sq2.vp9.experimental"; break;
                 default: throw new IllegalArgumentException("unsupported test MIME: "+mime);
             }
-            int fps=format.getInteger(MediaFormat.KEY_FRAME_RATE);
+            int fps;
+            try(java.io.BufferedReader reader=new java.io.BufferedReader(new java.io.InputStreamReader(getAssets().open("fps.txt"),StandardCharsets.US_ASCII))){
+                fps=Integer.parseInt(reader.readLine());
+            }
             if(fps!=30&&fps!=60)throw new IllegalArgumentException("unsupported test frame rate");
+            if(format.containsKey(MediaFormat.KEY_FRAME_RATE)&&format.getInteger(MediaFormat.KEY_FRAME_RATE)!=fps)
+                throw new IllegalArgumentException("container/test frame rate mismatch");
+            format.setInteger(MediaFormat.KEY_FRAME_RATE,fps);
             if("auto".equals(name)){
                 MediaCodecList list=new MediaCodecList(MediaCodecList.ALL_CODECS);
                 for(MediaCodecInfo candidate:list.getCodecInfos())if(candidate.getName().equals(hardwareName)){

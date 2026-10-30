@@ -40,6 +40,7 @@ int __wrap_ioctl(int fd,unsigned long op,...){va_list args;va_start(args,op);voi
  case VIDIOC_STREAMON:assert(data_mode);start++;return 0;
  case VIDIOC_STREAMOFF:assert(data_mode);off++;return 0;
  case VIDIOC_DQEVENT:assert(data_mode);events++;if(events<3){errno=events==1?ENOENT:EAGAIN;return -1;}((struct v4l2_event*)p)->type=V4L2_EVENT_SOURCE_CHANGE;return 0;
+ case VIDIOC_G_SELECTION:{assert(data_mode);struct v4l2_selection *s=p;assert(s->type==V4L2_BUF_TYPE_VIDEO_CAPTURE&&s->target==V4L2_SEL_TGT_COMPOSE);s->r=(struct v4l2_rect){0,0,320,240};return 0;}
  case VIDIOC_G_FMT:assert(data_mode);gfmt++;errno=EINVAL;return -1;
  }fprintf(stderr,"UNEXPECTED_IOCTL=%lx\n",op);abort();
 }

@@ -1,6 +1,7 @@
 #pragma once
 // Stateful V4L2 session. No vector data, module loading, firmware or service control.
 #include <linux/videodev2.h>
+#include "sq2-video-memory.h"
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -37,7 +38,7 @@ private:
  int stream(unsigned type,bool on){return call(on?VIDIOC_STREAMON:VIDIOC_STREAMOFF,&type);}
  int queueCapture(unsigned i,bool allocate=true){
   auto& slot=capture_[i];if(allocate){int r=allocate_(geometry_,slot);if(r)return r;}
-  if(slot.fd<0||!slot.owner||slot.bytes<geometry_.bytes||slot.bytes>16*1024*1024)return -EINVAL;
+  if(slot.fd<0||!slot.owner||slot.bytes<geometry_.bytes||slot.bytes>sq2CaptureFrameLimit(outputFormat_))return -EINVAL;
   v4l2_plane p{};p.length=slot.bytes;p.m.fd=slot.fd;
   v4l2_buffer b{};b.type=V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;b.memory=V4L2_MEMORY_DMABUF;b.index=i;b.length=1;b.m.planes=&p;
   return call(VIDIOC_QBUF,&b);
@@ -53,15 +54,15 @@ private:
   if(p.num_planes!=1||p.pixelformat!=outputFormat_||s.r.left||s.r.top||!s.r.width||!s.r.height||
      (s.r.width&1)||(s.r.height&1)||s.r.width>8192||rowBytes>p.plane_fmt[0].bytesperline||
      s.r.height>p.height||p.height>8192||p.plane_fmt[0].bytesperline>16384||
-     p.plane_fmt[0].bytesperline%sampleBytes||p.plane_fmt[0].sizeimage>16*1024*1024)return -EINVAL;
+     p.plane_fmt[0].bytesperline%sampleBytes||p.plane_fmt[0].sizeimage>sq2CaptureFrameLimit(outputFormat_))return -EINVAL;
   const uint64_t minimumBytes=uint64_t(p.plane_fmt[0].bytesperline)*(p.height+s.r.height/2-1)+rowBytes;
   if(minimumBytes>p.plane_fmt[0].sizeimage)return -EINVAL;
   v4l2_control ctrl{};ctrl.id=V4L2_CID_MIN_BUFFERS_FOR_CAPTURE;if((r=call(VIDIOC_G_CTRL,&ctrl)))return r;
   if(ctrl.value<1||ctrl.value>28)return -EINVAL;
   v4l2_requestbuffers req{};req.type=f.type;req.memory=V4L2_MEMORY_DMABUF;req.count=ctrl.value+4;if((r=call(VIDIOC_REQBUFS,&req)))return r;
-  // HEVC uses more reference/capture slots than the AVC baseline. Keep a
-  // separate bounded native pool large enough for 13 aligned 4K NV12 frames.
-  if(!req.count||req.count>32||uint64_t(req.count)*p.plane_fmt[0].sizeimage>192*1024*1024)return -EOVERFLOW;
+  // Keep a bounded native pool; P010 doubles the per-sample storage.
+  // 13 aligned 4K P010 frames require about 311 MiB.
+  if(!req.count||req.count>32||uint64_t(req.count)*p.plane_fmt[0].sizeimage>sq2CapturePoolLimit(outputFormat_))return -EOVERFLOW;
   geometry_={s.r.width,s.r.height,p.plane_fmt[0].bytesperline,p.height,p.plane_fmt[0].sizeimage,req.count,outputFormat_};capture_.resize(req.count);
   for(unsigned i=0;i<req.count;i++)if((r=queueCapture(i)))return r;
   if((r=stream(f.type,true)))return r;capOn_=true;source_=true;return 0;

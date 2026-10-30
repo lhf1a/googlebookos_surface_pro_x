@@ -4,6 +4,8 @@
 No B frames in this first native-session probe. This is not a 4K60 benchmark.
 """
 import argparse
+import array
+import sys
 import hashlib
 import json
 import subprocess
@@ -14,16 +16,18 @@ from pathlib import Path
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--out', type=Path, required=True)
+    ap.add_argument('--size', choices=('320x240','1920x1080','3840x2160'), default='320x240')
     ap.add_argument('--bit-depth',type=int,choices=(8,10),default=8)
     args = ap.parse_args()
     args.out.mkdir(exist_ok=False)
     ten=args.bit_depth==10
     sample_bytes=2 if ten else 1
-    frame_bytes=115200*sample_bytes; y_bytes=76800*sample_bytes
+    width,height=map(int,args.size.split('x'))
+    frame_bytes=width*height*3//2*sample_bytes; y_bytes=width*height*sample_bytes
     profile='main10' if ten else 'main'
     output_format='p010le' if ten else 'nv12'
     clip, ref = args.out / 'clip.hevc', args.out / ('ref.p010' if ten else 'ref.nv12')
-    source='testsrc2=size=320x240:rate=60'
+    source=f'testsrc2=size={args.size}:rate=60'
     if ten:
         source+=",format=yuv420p10le,geq=lum='mod(X*7+Y*3+N*19,1024)':cb='mod(X*5+Y*11+N*13,1024)':cr='mod(X*13+Y*7+N*17,1024)'"
     def run(cmd):
@@ -40,7 +44,8 @@ def main():
     if info['profile']!=('Main 10' if ten else 'Main') or info['pix_fmt']!=('yuv420p10le' if ten else 'yuv420p'):
         raise ValueError('encoded profile/depth mismatch')
     if ten:
-        samples=[int.from_bytes(raw[i:i+2],'little') for i in range(0,len(raw),2)]
+        samples=array.array('H'); samples.frombytes(raw)
+        if sys.byteorder!='little': samples.byteswap()
         if any(v&63 for v in samples) or not any((v>>6)&3 for v in samples):
             raise ValueError('invalid P010 packing or missing 10-bit detail')
     starts = []
@@ -60,7 +65,7 @@ def main():
              zlib.crc32(raw[n*frame_bytes+y_bytes:(n+1)*frame_bytes])) for n in range(6)]
     lines = [f'/* Generated HEVC {profile}, six frames, no B frames. */',
              f'#define SQ2_VEC_BYTES_PER_SAMPLE {sample_bytes}',
-             '#define SQ2_VEC_W 320', '#define SQ2_VEC_H 240', '#define SQ2_VEC_FRAMES 6',
+             f'#define SQ2_VEC_W {width}', f'#define SQ2_VEC_H {height}', '#define SQ2_VEC_FRAMES 6',
              f'#define SQ2_VEC_SHA256 "{hashlib.sha256(data).hexdigest()}"']
     for name, values in [('au', bounds), ('crc_y', [c[0] for c in crcs]),
                          ('crc_uv', [c[1] for c in crcs])]:
@@ -71,7 +76,7 @@ def main():
     lines.append('};')
     (args.out / 'sq2-hevc-vector.h').write_text('\n'.join(lines)+'\n')
     (args.out / 'vector.json').write_text(json.dumps(dict(codec='hevc', profile=info['profile'],bit_depth=args.bit_depth,reference_format=output_format,
-        width=320, height=240, fps=60, frames=6, bframes=0, access_units=bounds,
+        width=width, height=height, fps=60, frames=6, bframes=0, access_units=bounds,
         stream_sha256=hashlib.sha256(data).hexdigest(),
         reference_sha256=hashlib.sha256(raw).hexdigest(), crcs=crcs), indent=2)+'\n')
 

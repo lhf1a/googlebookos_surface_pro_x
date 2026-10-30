@@ -11,7 +11,7 @@
             <Limit name="alignment" value="2x2" />
             <Limit name="concurrent-instances" max="1" />
         </MediaCodec>
-        <!-- Experimental HEVC Main path; Main10 is not yet implemented. -->
+        <!-- Experimental HEVC Main/Main10 path; 10-bit large-buffer limits remain under test. -->
         <MediaCodec name="c2.sq2.hevc.experimental" type="video/hevc" rank="512">
             <Alias name="OMX.qcom.video.decoder.hevc" />
             <Limit name="size" min="320x240" max="3840x2160" />

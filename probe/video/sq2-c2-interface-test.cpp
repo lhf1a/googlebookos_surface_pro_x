@@ -17,11 +17,25 @@ int main(){
   assert(p.profile==(codec==Sq2Codec::Vp8?C2Config::PROFILE_VP8_0:C2Config::PROFILE_VP9_0));
   printf("VPX_PROFILE_ACCEPT_REJECT_PASS %s\n",sq2CodecInfo(codec).name);
  }
+ {
+  auto impl=std::make_shared<Sq2DecodeInterface>(reflector,96,4096,96,4096,Sq2Codec::Hevc);
+  android::SimpleC2Interface<Sq2DecodeInterface> hi(sq2CodecInfo(Sq2Codec::Hevc).name,0,impl);
+  C2StreamPixelFormatInfo::output pixel(0u);std::vector<std::unique_ptr<C2Param>> heap;
+  assert(hi.query_vb({&pixel},{},C2_MAY_BLOCK,&heap)==C2_OK&&pixel.value==0x23);
+  for(auto profile:{C2Config::PROFILE_HEVC_MAIN_10,C2Config::PROFILE_HEVC_MAIN}){
+   C2StreamProfileLevelInfo::input p(0u,profile,C2Config::LEVEL_HEVC_MAIN_1);
+   std::vector<std::unique_ptr<C2SettingResult>> failures;
+   assert(hi.config_vb({&p},C2_MAY_BLOCK,&failures)==C2_OK&&failures.empty());
+   heap.clear();assert(hi.query_vb({&pixel},{},C2_MAY_BLOCK,&heap)==C2_OK);
+   assert(pixel.value==(profile==C2Config::PROFILE_HEVC_MAIN_10?0x36u:0x23u));
+  }
+  puts("HEVC_PROFILE_PIXEL_ROUNDTRIP_PASS");
+ }
  // Explicit test fixture bounds, not a substitute for a device capability query.
  auto impl=std::make_shared<Sq2DecodeInterface>(reflector,320,640,240,480);
  android::SimpleC2Interface<Sq2DecodeInterface> intf("c2.sq2.avc.decoder.experimental",0,impl);
  std::vector<std::shared_ptr<C2ParamDescriptor>> supported;
- auto ret=intf.querySupportedParams_nb(&supported);printf("SUPPORTED ret=%d count=%zu\n",ret,supported.size());assert(ret==C2_OK&&supported.size()==10);
+ auto ret=intf.querySupportedParams_nb(&supported);printf("SUPPORTED ret=%d count=%zu\n",ret,supported.size());assert(ret==C2_OK&&supported.size()==11);
  C2StreamProfileLevelInfo::input profile(0u,C2Config::PROFILE_UNUSED,C2Config::LEVEL_UNUSED);
  std::vector<std::unique_ptr<C2Param>> profileHeap;
  ret=intf.query_vb({&profile},{},C2_MAY_BLOCK,&profileHeap);

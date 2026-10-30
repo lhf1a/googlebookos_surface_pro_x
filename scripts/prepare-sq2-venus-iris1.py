@@ -64,7 +64,7 @@ def main():
             shutil.copyfile(f, args.output / f.name)
     shutil.copyfile(ROOT / 'probe/video/venus-iris1.h', args.output / 'venus-iris1.h')
     for name in ('sq2-hfi-properties.h', 'venus-sq2-capabilities.h', 'venus-sq2-frame-sizes.h',
-                 'venus-sq2-vp9-eos.h'):
+                 'venus-sq2-vp9-eos.h', 'venus-sq2-crop.h'):
         shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
     parser = (src / 'hfi_parser.c').read_text()
     parser = replace(parser, '#include "hfi_parser.h"',
@@ -123,13 +123,24 @@ def main():
                    '\t\t\t\tvalid = false;')
     vdec = replace(vdec, '\t\tpfmt[0].bytesperline = ALIGN(pixmp->width, 128);',
                    '\t\tpfmt[0].bytesperline = pixmp->pixelformat == V4L2_PIX_FMT_P010 ?\n'
-                   '\t\t\tALIGN(pixmp->width * 2, 256) : ALIGN(pixmp->width, 128);')
+                   '\t\t\tALIGN(pixmp->width * 2, 128) : ALIGN(pixmp->width, 128);')
     vdec = replace(vdec, '#include "hfi_parser.h"',
-                   '#include "hfi_parser.h"\n#include "venus-sq2-frame-sizes.h"')
+                   '#include "hfi_parser.h"\n#include "venus-sq2-frame-sizes.h"\n#include "venus-sq2-crop.h"')
     anchor = '\tif (fsize->index)\n\t\treturn -EINVAL;'
     vdec = replace(vdec, anchor,
                    '\tif (IS_SQ2_HFI(inst->core) && fmt->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)\n'
                    '\t\treturn venus_sq2_enum_sizes(inst->core, fsize);\n\n' + anchor)
+    # Preserve SOURCE_CHANGE crop only for a same-size capture negotiation.
+    anchor = '\tu32 pixfmt_out = 0, pixfmt_cap = 0;'
+    vdec = replace(vdec, anchor, anchor + '\n\tbool keep_crop;')
+    anchor = '\tinst->width = format.fmt.pix_mp.width;\n\tinst->height = format.fmt.pix_mp.height;\n\tinst->crop.top = 0;\n\tinst->crop.left = 0;\n\tinst->crop.width = inst->width;\n\tinst->crop.height = inst->height;'
+    vdec = replace(vdec, anchor,
+                   '\tkeep_crop = venus_sq2_keep_crop(inst, f->type,\n'
+                   '\t\tformat.fmt.pix_mp.width, format.fmt.pix_mp.height);\n'
+                   '\tinst->width = format.fmt.pix_mp.width;\n'
+                   '\tinst->height = format.fmt.pix_mp.height;\n'
+                   '\tif (!keep_crop) {\n\t\tinst->crop.top = 0;\n\t\tinst->crop.left = 0;\n'
+                   '\t\tinst->crop.width = inst->width;\n\t\tinst->crop.height = inst->height;\n\t}')
     # The SQ2 VB2 owner takes an independent exporter reference. dma_buf_put
     # is exported in DMA_BUF; missing Module.symvers can hide this at modpost.
     vdec += '\nMODULE_IMPORT_NS(DMA_BUF);\n'

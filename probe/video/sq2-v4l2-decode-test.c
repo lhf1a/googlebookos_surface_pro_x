@@ -90,6 +90,21 @@ static int allocq(struct queue *q,unsigned count){
  }
  printf("ALLOC type=%u count=%u bytes=%zu\n",q->type,q->n,total);return 0;
 }
+/* Explicit local evidence only: one bounded payload, never overwrite a file.
+ * This does not change any decode/geometry/CRC acceptance criterion. */
+static int dump_first(const char *path,struct queue *q,unsigned i,size_t offset,size_t bytes){
+ if(!bytes||bytes>1024*1024||offset>q->len[i]||bytes>q->len[i]-offset)return -1;
+ int target=open(path,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);
+ if(target<0){perror("dump open");return -1;}
+ int bad=cpu_sync(q,i,DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ),synced=!bad;
+ size_t done=0;
+ while(!bad&&done<bytes){ssize_t n=write(target,(u8*)q->ptr[i]+offset+done,bytes-done);if(n<0&&errno==EINTR)continue;if(n<=0){bad=1;break;}done+=(size_t)n;}
+ if(synced&&cpu_sync(q,i,DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ))bad=1;
+ if(fsync(target))bad=1;
+ if(close(target))bad=1;
+ printf("DUMP_FIRST bytes=%zu written=%zu result=%d\n",bytes,done,bad);
+ return bad;
+}
 static int put(struct queue *q,unsigned i,unsigned bytes){
  struct v4l2_plane p={.length=q->len[i],.bytesused=bytes};struct v4l2_buffer b={.type=q->type,.memory=q->memory,.index=i,.length=1,.m.planes=&p};
  if(q->memory==V4L2_MEMORY_DMABUF)p.m.fd=q->dmafd[i];
@@ -122,8 +137,9 @@ int main(int argc,char **argv){
  int buffers_only=argc==3&&!strcmp(argv[1],"--buffers-only");
  int queue_only=argc==3&&!strcmp(argv[1],"--queue-only");
  graphic_fds=argc==3&&!strcmp(argv[1],"--graphic-fds");
- int dmabuf=graphic_fds||(argc==3&&!strcmp(argv[1],"--dmabuf"));
- if(argc!=2&&!format_only&&!buffers_only&&!queue_only&&!dmabuf){fprintf(stderr,"usage: %s [--format-only|--buffers-only|--queue-only|--dmabuf] /dev/videoN | --self-test\n",argv[0]);return 2;}
+ const char *dump_path=argc==4&&!strcmp(argv[1],"--dump-first")?argv[2]:NULL;
+ int dmabuf=dump_path||graphic_fds||(argc==3&&!strcmp(argv[1],"--dmabuf"));
+ if(argc!=2&&!format_only&&!buffers_only&&!queue_only&&!dmabuf){fprintf(stderr,"usage: %s [--format-only|--buffers-only|--queue-only|--dmabuf] /dev/videoN | --dump-first NEW_FILE /dev/videoN | --self-test\n",argv[0]);return 2;}
  struct queue out={.type=V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE},cap={.type=V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE};int result=1,source=0,eos=0,stop=0;unsigned returned=0,mask=0,frames=0;long long deadline=ms()+20000;
  out.memory=cap.memory=dmabuf?V4L2_MEMORY_DMABUF:V4L2_MEMORY_MMAP;
  for(unsigned i=0;i<MAXBUF;i++)out.dmafd[i]=cap.dmafd[i]=-1;
@@ -148,6 +164,9 @@ int main(int argc,char **argv){
  if(start(&out))goto done;
  while(!source&&ms()<deadline){struct v4l2_event e={0};if(!ioctl(fd,VIDIOC_DQEVENT,&e)){printf("EVENT type=%u changes=%u\n",e.type,e.u.src_change.changes);if(e.type==V4L2_EVENT_SOURCE_CHANGE)source=1;}else if(errno!=EAGAIN&&errno!=ENOENT){perror("DQEVENT");goto done;}if(!source){struct pollfd p={fd,POLLPRI,0};poll(&p,1,100);}}
  if(!source){fprintf(stderr,"SOURCE_CHANGE_TIMEOUT\n");goto done;}
+ struct v4l2_selection before_format={.type=V4L2_BUF_TYPE_VIDEO_CAPTURE,.target=V4L2_SEL_TGT_COMPOSE};
+ if(x(VIDIOC_G_SELECTION,&before_format,"G_SELECTION_BEFORE_FORMAT"))goto done;
+ printf("CROP_BEFORE_FORMAT=%d,%d,%u,%u\n",before_format.r.left,before_format.r.top,before_format.r.width,before_format.r.height);
  memset(&f,0,sizeof(f));f.type=cap.type;if(x(VIDIOC_G_FMT,&f,"G_FMT_CAPTURE"))goto done;if(f.fmt.pix_mp.pixelformat!=SQ2_OUTPUT_CODEC){f.fmt.pix_mp.pixelformat=SQ2_OUTPUT_CODEC;if(x(VIDIOC_S_FMT,&f,"S_FMT_CAPTURE"))goto done;}
  unsigned stride=f.fmt.pix_mp.plane_fmt[0].bytesperline,scan=f.fmt.pix_mp.height;
  cap.size=f.fmt.pix_mp.plane_fmt[0].sizeimage;
@@ -168,6 +187,7 @@ int main(int argc,char **argv){
   if(!ioctl(fd,VIDIOC_DQBUF,&b)){
    printf("CAPTURE_DONE index=%u bytes=%u offset=%u flags=%x timestamp=%ld.%06ld\n",b.index,p.bytesused,p.data_offset,b.flags,(long)b.timestamp.tv_sec,(long)b.timestamp.tv_usec);
    if(b.index>=cap.n||p.bytesused>cap.len[b.index]||p.data_offset>p.bytesused||(b.flags&V4L2_BUF_FLAG_ERROR))goto done;
+   if(dump_path&&p.bytesused>p.data_offset){if(dump_first(dump_path,&cap,b.index,p.data_offset,p.bytesused-p.data_offset))goto done;dump_path=NULL;}
    if(p.bytesused>p.data_offset){size_t uv=(size_t)stride*scan;size_t need=uv+(SQ2_VEC_H/2-1)*stride+SQ2_ROW_BYTES;if(need>p.bytesused-p.data_offset){fprintf(stderr,"short frame\n");goto done;}
     if(cpu_sync(&cap,b.index,DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ))goto done;
     u8 *data=(u8*)cap.ptr[b.index]+p.data_offset;u32 y=crc_rows(data,stride,SQ2_ROW_BYTES,SQ2_VEC_H),uvcrc=crc_rows(data+uv,stride,SQ2_ROW_BYTES,SQ2_VEC_H/2);int match=-1;

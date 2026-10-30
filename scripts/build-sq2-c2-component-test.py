@@ -2,12 +2,18 @@ from pathlib import Path
 import subprocess,hashlib
 import argparse
 parser=argparse.ArgumentParser()
-parser.add_argument('--codec', choices=('avc','vp8','vp9'), default='avc')
+parser.add_argument('--codec', choices=('avc','vp8','vp9','hevc-main10'), default='avc')
+parser.add_argument('--vector-dir', type=Path)
+parser.add_argument('--output-dir', type=Path)
+parser.add_argument('--allocator-test', action='store_true')
 args=parser.parse_args()
+if args.allocator_test and args.codec!='avc':parser.error('--allocator-test does not use --codec')
 r=Path(__file__).resolve().parents[1];d=r/'out/video-decode/codec2-integration';o=d/('component-backend' if args.codec=='avc' else 'component-'+args.codec);ndk=Path('/root/.cache/sq2-graphics/android-ndk-r28c/toolchains/llvm/prebuilt/linux-x86_64');av=Path('/root/.cache/sq2-codec2-av-reference/media/codec2')
 # Build only against the pinned headers and copied runtime libraries verified in this lab.
 if subprocess.check_output(['git','-C','/root/.cache/sq2-codec2-av-reference','rev-parse','HEAD'],text=True).strip()!='e2f098935447ca4945946de5cb69db843fe3f003':
  raise SystemExit('Codec2 header revision mismatch')
+if args.allocator_test:o=d/'allocator-check'
+if args.output_dir:o=args.output_dir.resolve()
 o.mkdir(parents=True,exist_ok=True)
 if hashlib.sha256((d/'libcodec2_soft_common.so').read_bytes()).hexdigest()!='32ddd7d492e17d367346ff82c5a0a48cc47c073e4f15af7624f344e0d3a595bb': raise SystemExit('runtime library mismatch: libcodec2_soft_common.so')
 if hashlib.sha256((d/'libcodec2_vndk.so').read_bytes()).hexdigest()!='7ee32cb2032677152148260095e348289f96c89ee40a6f3bd77e12d41fdcb105': raise SystemExit('runtime library mismatch: libcodec2_vndk.so')
@@ -29,5 +35,10 @@ cmd += ['-I',str(r/'out/video-decode/h264-vector'),str(r/'probe/video/sq2-c2-com
 cmd+=['-llog','-landroid']
 if args.codec!='avc':
  cmd[cmd.index(str(r/'out/video-decode/h264-vector'))]=str(r/'out/video-decode'/f'{args.codec}-vector')
- cmd+=['-DSQ2_VPX_VECTOR']
+ cmd+=['-DSQ2_HEVC_VECTOR' if args.codec=='hevc-main10' else '-DSQ2_VPX_VECTOR']
+if args.vector_dir:
+ if args.codec!='hevc-main10' or args.allocator_test:parser.error('--vector-dir requires --codec hevc-main10')
+ cmd[cmd.index(str(r/'out/video-decode/hevc-main10-vector'))]=str(args.vector_dir.resolve())
+if args.allocator_test:
+ cmd[cmd.index(str(r/'probe/video/sq2-c2-component-test.cpp'))]=str(r/'probe/video/sq2-c2-allocator-test.cpp')
 p=subprocess.run(cmd,capture_output=True,text=True);(o/'build.txt').write_text(repr(cmd)+'\n'+p.stdout+p.stderr+'\nexit='+str(p.returncode));print(p.stdout,p.stderr);raise SystemExit(p.returncode)

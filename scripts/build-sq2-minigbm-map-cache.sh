@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-S=/root/.cache/sq2-video-minigbm-map-cache
+S=${SQ2_MINIGBM_STAGE:-/root/.cache/sq2-video-minigbm-map-cache}
 W=/root/.cache/sq2-graphics
 N="$W/android-ndk-r28c/toolchains/llvm/prebuilt/linux-x86_64/bin"
 D="$W/src/mesa-26.2.4/subprojects/libdrm-2.4.133"
-OUT="$ROOT/out/video-decode/minigbm-map-cache"
+OUT=${SQ2_MINIGBM_OUT:-"$ROOT/out/video-decode/minigbm-map-cache"}
 LIB="$ROOT/out/video-decode/map-cache-libs"
 mkdir -p "$OUT/obj"
 echo '1ab63ce8e7197086f5213a354fa5da34d68e842243c7eb5b8aa911071815d319  libminigbm_gralloc_donor.so' | (cd "$LIB"; sha256sum -c -)

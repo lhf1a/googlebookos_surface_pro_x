@@ -13,6 +13,7 @@ class Sq2DecodeInterface final : public C2InterfaceHelper {
  std::shared_ptr<C2StreamPictureSizeInfo::output> size;
  std::shared_ptr<C2PortBlockPoolsTuning::output> pools;
  std::shared_ptr<C2StreamProfileLevelInfo::input> profileLevel;
+ std::shared_ptr<C2StreamPixelFormatInfo::output> pixelFormat;
  std::shared_ptr<C2PortMediaTypeSetting::input> inputMime;
  std::shared_ptr<C2PortMediaTypeSetting::output> outputMime;
  std::shared_ptr<C2PortActualDelayTuning::output> outputDelay;
@@ -22,6 +23,10 @@ class Sq2DecodeInterface final : public C2InterfaceHelper {
    auto error=C2R(C2SettingResultBuilder::BadValue(v.F(v.v.profile)));
    v.set().profile=old.v.profile;v.set().level=old.v.level;return error;
   }
+  return C2R::Ok();
+ }
+ static C2R calculatePixel(bool,C2P<C2StreamPixelFormatInfo::output>& v,const C2P<C2StreamProfileLevelInfo::input>& profile){
+  v.set().value=profile.v.profile==C2Config::PROFILE_HEVC_MAIN_10?0x36:0x23;
   return C2R::Ok();
  }
  static C2R setPools(bool,C2P<C2PortBlockPoolsTuning::output>&){return C2R::Ok();}
@@ -64,7 +69,7 @@ public:
   }else if(codec==Sq2Codec::Hevc){
    addParameter(DefineParam(profileLevel,C2_PARAMKEY_PROFILE_LEVEL)
     .withDefault(new C2StreamProfileLevelInfo::input(0u,C2Config::PROFILE_HEVC_MAIN,C2Config::LEVEL_HEVC_MAIN_5_1))
-    .withFields({C2F(profileLevel,profile).oneOf({C2Config::PROFILE_HEVC_MAIN}),
+    .withFields({C2F(profileLevel,profile).oneOf({C2Config::PROFILE_HEVC_MAIN,C2Config::PROFILE_HEVC_MAIN_10}),
      C2F(profileLevel,level).oneOf({C2Config::LEVEL_HEVC_MAIN_1,C2Config::LEVEL_HEVC_MAIN_2,
       C2Config::LEVEL_HEVC_MAIN_2_1,C2Config::LEVEL_HEVC_MAIN_3,C2Config::LEVEL_HEVC_MAIN_3_1,
       C2Config::LEVEL_HEVC_MAIN_4,C2Config::LEVEL_HEVC_MAIN_4_1,C2Config::LEVEL_HEVC_MAIN_5,
@@ -80,6 +85,13 @@ public:
      C2Config::LEVEL_AVC_4,C2Config::LEVEL_AVC_4_1,C2Config::LEVEL_AVC_4_2,
      C2Config::LEVEL_AVC_5,C2Config::LEVEL_AVC_5_1,C2Config::LEVEL_AVC_5_2})})
    .withSetter(setProfileLevel).build());
+  if(codec==Sq2Codec::Hevc){
+   addParameter(DefineParam(pixelFormat,C2_PARAMKEY_PIXEL_FORMAT)
+    .withDefault(new C2StreamPixelFormatInfo::output(0u,0x23))
+    .withFields({C2F(pixelFormat,value).oneOf({0x23u,0x36u})})
+    .calculatedAs(calculatePixel,profileLevel).build());
+  }else addParameter(DefineParam(pixelFormat,C2_PARAMKEY_PIXEL_FORMAT)
+   .withConstValue(new C2StreamPixelFormatInfo::output(0u,0x23)).build());
   addParameter(DefineParam(kind,C2_PARAMKEY_COMPONENT_KIND).withConstValue(new C2ComponentKindSetting(C2Component::KIND_DECODER)).build());
   addParameter(DefineParam(domain,C2_PARAMKEY_COMPONENT_DOMAIN).withConstValue(new C2ComponentDomainSetting(C2Component::DOMAIN_VIDEO)).build());
   addParameter(DefineParam(input,C2_PARAMKEY_INPUT_STREAM_BUFFER_TYPE).withConstValue(new C2StreamBufferTypeSetting::input(0u,C2BufferData::LINEAR)).build());

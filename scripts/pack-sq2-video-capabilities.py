@@ -21,6 +21,21 @@ MODULES_V3 = {
     'venus-core.ko': '50afdd9164eb9eb4c2f7882871045dcdd52c88ef0f32e219ab875c6251ea644b',
     'venus-dec.ko': '257ffcd19294a3a16ddb667a20ed3ae0196471b206de947c4ed8e1f0fb585d92',
 }
+MODULES_P010 = {
+    'venus-core.ko': 'eb2a8725c3dd82ab168dfa668fc4871d4e5feae07ac5b437480bbe62a046e8c4',
+    'venus-dec.ko': 'ce3366cd67a9f7e4b16c2b875475fd0d2656c5fb4be242adb25ce55244450301',
+}
+
+MODULES_P010_CROP = {
+    'venus-core.ko': 'bb835d4da5faa9282c98dbb02083fbf4738dbef4d2a2ff1b83f5538b681ef6ce',
+    'venus-dec.ko': 'f57dbf811968e4ac03f21b3b917c093ee0f2155276cc0d91038fc214a7dec79d',
+}
+
+MODULES_P010_STRIDE = {
+    'venus-core.ko': 'a5f2bcc54b0ec523c8df886f1675f4dbb9c934c9756e373028bbe307f4d1af0f',
+    'venus-dec.ko': '66e9c26a9602a7d01a4f0f4d74110967f7aa90af85d449a24bfa16a2c1315a47',
+}
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -29,9 +44,9 @@ def main():
     p.add_argument('base',type=Path)
     p.add_argument('modules',type=Path)
     p.add_argument('output',type=Path)
-    p.add_argument('--revision', choices=('1','3'), default='1')
+    p.add_argument('--revision', choices=('1','3','p010','p010-crop','p010-stride'), default='1')
     a=p.parse_args()
-    modules = MODULES_V3 if a.revision == '3' else MODULES
+    modules = {'1': MODULES, '3': MODULES_V3, 'p010': MODULES_P010, 'p010-crop': MODULES_P010_CROP, 'p010-stride': MODULES_P010_STRIDE}[a.revision]
     if a.output.exists():raise ValueError('output exists')
     spec=importlib.util.spec_from_file_location('cpio',Path(__file__).with_name('pack-sq2-vulkan.py'))
     c=importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
