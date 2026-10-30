@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """Prepare one-shot GRUB files locally; no disk writes or device connection."""
 from pathlib import Path
-import hashlib, subprocess, json, re
+import hashlib, subprocess, json, re, sys
 root=Path(__file__).resolve().parents[1]
 out=root/'out/display-refresh'
 base=(root/'out/quest2-gpu/boot-runtime-v8.cpio.gz').read_bytes()
-combined=(out/'native-edp-rates-v3.cpio.gz').read_bytes()
+revision=int(sys.argv[1]) if len(sys.argv)>1 else 4
+rate_label=sys.argv[2] if len(sys.argv)>2 else '5.4'
+assert rate_label in ('2.7', '5.4')
+assert 4 <= revision <= 20
+combined=(out/f'native-edp-rates-v{revision}.cpio.gz').read_bytes()
 assert combined.startswith(base)
-assert hashlib.sha256(combined).hexdigest()==json.loads((out/'native-edp-rates-v3.cpio.audit.json').read_text())['output_sha256']
-addon=out/'edp-rates-v3-addon.cpio.gz'
+assert hashlib.sha256(combined).hexdigest()==json.loads((out/f'native-edp-rates-v{revision}.cpio.audit.json').read_text())['output_sha256']
+addon=out/f'edp-rates-v{revision}-addon.cpio.gz'
 if not addon.exists(): addon.write_bytes(combined[len(base):])
 assert addon.read_bytes()==combined[len(base):]
 original=(out/'grub-before.cfg').read_text()
@@ -28,10 +32,10 @@ fi
 start=original.index("menuentry '1.")
 end=original.index('\n}',start)+2
 entry=original[start:end]
-entry=entry.replace("'1. Googlebook OS - SQ2 NVMe + audio + closed Vulkan' --id sq2-internal", "'3. SQ2 eDP 5.4Gbps test - 60Hz' --id sq2-edp-test")
+entry=entry.replace("'1. Googlebook OS - SQ2 NVMe + audio + closed Vulkan' --id sq2-internal", f"'3. SQ2 eDP {rate_label}Gbps test - 60Hz' --id sq2-edp-test")
 assert '--id sq2-edp-test' in entry
 entry=entry.replace('sq2.audio=1 ', 'sq2.audio=1 sq2.edp_test=1 ')
-entry=entry.replace('initrd /boot/sq2-android1/native-closed-vulkan-v8.cpio.gz', 'initrd /boot/sq2-android1/native-closed-vulkan-v8.cpio.gz /boot/sq2-android1/edp-rates-v3-addon.cpio.gz')
+entry=entry.replace('initrd /boot/sq2-android1/native-closed-vulkan-v8.cpio.gz', f'initrd /boot/sq2-android1/native-closed-vulkan-v8.cpio.gz /boot/sq2-android1/edp-rates-v{revision}-addon.cpio.gz')
 menus=re.findall(r'^menuentry [^\n]+\{\n.*?^\}',original,re.M|re.S)
 closed=next(m for m in menus if '--id sq2-internal {' in m)
 mesa=next(m for m in menus if '--id sq2-mesa-fallback {' in m)

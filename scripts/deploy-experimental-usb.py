@@ -15,6 +15,7 @@ from pathlib import Path
 import shutil
 import stat
 import subprocess
+import importlib.util
 
 
 def run(*cmd):
@@ -118,6 +119,35 @@ def verify_hardware_video(manifest, layout, image, required=False):
     print('PASS: packed default hardware video menu and rescue policy')
 
 
+def verify_display_profiles(manifest, layout, image):
+    policy = manifest.get('display_profiles')
+    if policy is None:
+        return
+    spec = importlib.util.spec_from_file_location('display_payload',
+        Path(__file__).resolve().with_name('sq2-display-boot-payload.py'))
+    display = importlib.util.module_from_spec(spec); spec.loader.exec_module(display)
+    if (policy.get('schema') != 1 or policy.get('stock_module_sha256') != display.STOCK_SHA
+            or policy.get('edp65_module_sha256') != display.MODULE_SHA
+            or policy.get('edp65_edid_sha256') != display.EDID_SHA
+            or policy.get('password_addon_last') is not True):
+        raise ValueError('Unsupported display policy')
+    esp = next(p for p in layout['partitions'] if p['name'] == 'SQ2PROBE')
+    def packed(name):
+        return subprocess.check_output(['mtype', '-i', f'{image}@@{esp["offset"]}', '::/'+name])
+    menu = packed('EFI/BOOT/grub.cfg')
+    if display.sha(menu) != policy.get('menu_sha256'):
+        raise ValueError('Display menu hash mismatch')
+    display.validate_menu(menu, policy.get('default'))
+    hashes = policy.get('boot_payload_sha256', {})
+    if set(hashes) != {display.BASE, display.ADDON}:
+        raise ValueError('Missing display payload hashes')
+    for name, expected in hashes.items():
+        if (manifest.get('boot_payload_sha256', {}).get(name) != expected
+                or display.sha(packed('boot/sq2-android1/'+name)) != expected):
+            raise ValueError('Packed display payload hash mismatch: '+name)
+    print('PASS: packed display defaults, stock rescue and both payload hashes')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--manifest', required=True, type=Path)
@@ -132,6 +162,7 @@ def main():
     if not a.image.is_file() or a.image.stat().st_size != m['image_bytes'] or m['image_bytes'] != layout['image_bytes']:
         raise ValueError('Image/manifest/layout size mismatch')
     verify_hardware_video(m, layout, a.image, a.require_hardware_video)
+    verify_display_profiles(m, layout, a.image)
     disks = [d for d in inventory() if safe_disk(d)]
     for i, d in enumerate(disks):
         print(i, d['name'], d['model'], d['serial'], d['size'])

@@ -16,9 +16,21 @@ sha = lambda b: hashlib.sha256(b).hexdigest()
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,default=O/'native-combined-initramfs.cpio.gz')
-    output=parser.parse_args().output
+    display_spec=importlib.util.spec_from_file_location('display_payload',R/'scripts/sq2-display-boot-payload.py')
+    display=importlib.util.module_from_spec(display_spec);display_spec.loader.exec_module(display)
+    parser.add_argument('--display-profile',choices=display.PROFILES,default=display.DEFAULT,
+                        help='GRUB default: tested experimental 5.4-65 (default) or stock panel/link 2.7-60')
+    parser.add_argument('--edp-module',type=Path,default=R/'out/display-refresh/msm-edp-rates.ko',
+                        help='Hash-pinned tested V6 module; both profiles are packaged')
+    parser.add_argument('--edp-edid',type=Path,default=R/'out/display-refresh/default65-r2/sq2-native65.bin')
+    args=parser.parse_args()
+    output=args.output
     output.parent.mkdir(parents=True,exist_ok=True)
-    if output.exists(): raise ValueError('Refusing existing output')
+    if any((output.parent/n).exists() for n in (output.name,display.ADDON,'build-audit.json')):
+        raise ValueError('Refusing existing output/addon/audit; use a fresh directory')
+    module=args.edp_module.read_bytes();edid=args.edp_edid.read_bytes()
+    display.require_hash(module,display.MODULE_SHA,'cached-only V6 msm')
+    display.require_hash(edid,display.EDID_SHA,'native65 EDID')
     base = (R/'out/password-ssh/combined.cpio.gz').read_bytes()
     assert sha(base) == '651f3831a0171908d7a9b1054a4c1c2a8fd657c36e79e7e3717674ef6389ecf8'
     before = c.entries(gzip.decompress(base)); delta = {}
@@ -99,14 +111,19 @@ def main():
     assert all(after[n]==value for n,value in delta.items())
     assert all(after[n]==value for n,value in before.items() if n not in delta)
     assert after['etc/shadow']==before['etc/shadow'] and after['bin/dropbear']==before['bin/dropbear']
+    addon=display.build_addon(result,c,module,edid)
     image=(R/'out/screen-only/Image').read_bytes()
     assert b'SQ2 screen-only policy: system suspend blocked' in image
     with output.open('xb') as f: f.write(result)
+    with (output.parent/display.ADDON).open('xb') as f: f.write(addon)
     shutil.copyfile(R/'out/screen-only/Image',output.parent/'Image')
     report=dict(base_sha256=sha(base),initramfs_sha256=sha(result),Image_sha256=sha(image),
                 ghost_touch_fix=False,password_addon_last=True,changed=sorted(delta),
                 hardware_boot_tested=False,hardware_decode_included=True,
                 video_payload_sha256=video.PAYLOAD_SHA,
+                display_profile=args.display_profile,display_profiles=list(display.PROFILES),
+                display_stock_module_sha256=display.STOCK_SHA,display_edp65_module_sha256=display.MODULE_SHA,
+                display_edp65_edid_sha256=display.EDID_SHA,display_addon_sha256=sha(addon),
                 proprietary_libraries='pinned binary inputs, not source-built')
     (output.parent/'build-audit.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps({k:v for k,v in report.items() if k!='changed'}))
