@@ -1,0 +1,80 @@
+{
+  "status": "votes-release-and-control-init-verified-queue-DMA-unverified",
+  "kernel_source": {
+    "repository": "https://github.com/linux-surface/kernel",
+    "commit": "b86f786594dc9e53c57fcfa2aa58ada9541506bb",
+    "files": {
+      "drivers/interconnect/qcom/sc8180x.c": "8d9eb593a423bca8c0f41d3ecaa57d80d970c2a9d8c70a832090ddbc06c2abdd",
+      "include/dt-bindings/interconnect/qcom,sc8180x.h": "243abe325ef75647ae41ed3c866c6c6429306bd549c0e066ebdcdc42f59b76fb"
+    }
+  },
+  "bandwidth_reference": {
+    "repository": "https://github.com/LineageOS/android_kernel_oneplus_sm8150",
+    "commit": "32f26bf34ddf17df8e224ae0703656b9fe0c1a8d",
+    "config_vote": "sdmshrike-vidc.dtsi bus_cnoc: min/max 1000 kBps",
+    "firmware_vote": "sdmshrike.dtsi pil_venus proxy: average 0, peak 304000 kBps",
+    "limit": "Minimum bring-up/proxy votes; not a decoder performance bandwidth table"
+  },
+  "paths": [
+    {"name": "cpu-cfg", "from": "gem_noc:MASTER_AMPSS_M0=0", "to": "config_noc:SLAVE_VENUS_CFG=54", "avg_kBps": 1000, "peak_kBps": 1000},
+    {"name": "video-mem", "from": "mmss_noc:MASTER_VIDEO_P0=7", "to": "mc_virt:SLAVE_EBI_CH0=1", "avg_kBps": 0, "peak_kBps": 304000},
+    {"name": "firmware-mem", "from": "mmss_noc:MASTER_VIDEO_PROC=9 (mas_qxm_venus_arm9)", "to": "mc_virt:SLAVE_EBI_CH0=1", "avg_kBps": 0, "peak_kBps": 304000}
+  ],
+  "runtime": {
+    "boot_id": "19edba8b-b882-460b-a2b7-5d0a31e875b4",
+    "tested_consumer_sha256": "fa09f750a674a97705ddd58942426a2ac8a24a487455949fe586c2358e98f74f",
+    "tested_overlay_sha256": "cb2e343468740ff56f11e9f9ae2f69c7fa703ef32117ed67be64fe2eaaff8236",
+    "vote_only_result": 0,
+    "power_reset_result_with_100ms_trace_delays": 0,
+    "clock_ahb_version_result_with_100ms_trace_delays": 0,
+    "version": "0x5010002f",
+    "core_reported_hz": 200000097,
+    "cleanup": "All three tested stages returned 0 and cleared all three votes; same boot and framework PIDs",
+    "full_HFI_result": "fa09f750 trial connection lost; recovered native log reaches PAS auth=0, protection=0 and queue-status before mailbox snapshots. It does not establish a reply or cleanup."
+  },
+  "write_only_followup": {
+    "boot_id": "976cc99e-919c-46cc-8ea6-940847b93dca",
+    "consumer_sha256": "203943ae2225f5b385f14548153928589965cc928a1be1326a21e7063d5aa44b",
+    "table_header_bytes": 288,
+    "all_nine_mailbox_writes_completed": true,
+    "control_status": "0x1",
+    "SYS_INIT_sent": true,
+    "command_read_words": 0,
+    "command_write_words": 3,
+    "message_write_words": 0,
+    "probe_result": -110,
+    "PAS_shutdown": 0,
+    "first_queue_IOVA_unmapped": true,
+    "three_votes_cleared": true,
+    "module_refcount": 0,
+    "framework_pids_unchanged": true
+  },
+  "compact_table_followup": {
+    "consumer_sha256": "218b69085a587c231b76da07f95b3fef28b3100ecf9b7a7c1d12d6a260729650",
+    "table_header_bytes": 24,
+    "operator_observation": "User confirmed whole-device unresponsiveness and manual restart recovery underway; boot/recovery not yet independently revalidated",
+    "result": "Recovered after manual restart: native log has smoke and system noise only, no new consumer markers. Host printed COMPACT_BEGIN after rmmod. Precise registration/probe stage unknown; no layout comparison result."
+  },
+  "static_firmware_evidence": {
+    "script": "scripts/inspect-sq2-video-firmware-protocol.py",
+    "status": "six instruction groups checked against pinned SQ2 firmware; no device access",
+    "findings": ["queue headers located using table.qhdr0_offset", "56-byte queue-header stride", "documented CPU/DSP mailbox offsets", "H2A bit15 enabled and cleared by firmware", "empty-queue reader writes rx_req=1", "CTRL_STATUS bit0 may precede shared-queue parsing"],
+    "limit": "Does not prove either host layout fully accepted at runtime, notification delivery or firmware DMA"
+  },
+  "empty_queue_probe_candidate": {
+    "module_sha256": "406a979b3b29209a2f805426f7c82ea8a0dcbefe8870824ec9135d2989a5dab2",
+    "status": "compile-and-symbol-preflight-only-not-deployed",
+    "parameter": "hfi_empty_ping=1",
+    "criterion": "Host initialized cmd.rx_req=0; observe firmware change to 1 with cmd read/write both 0, then send actual SYS_INIT",
+    "limit": "Not yet observed; timeout is absence of this marker, not proof of no firmware memory accesses"
+  },
+  "registration_trace_followup": {
+    "module_sha256": "5a967ca3c204e89ddeaeec764a16cd3d0dd539ab75538b16cab7ac94e69ef059",
+    "boot_id": "76f0f9ca-2c1e-4f84-a8d8-0f77e75f22a6",
+    "one_consumer_load_in_fresh_boot": true,
+    "table_header_bytes": 288,
+    "empty_ping_enabled": true,
+    "result": "Connection timed out; native sq2-hfi-empty-76f0.kmsg pending retrieval. No firmware queue-write, reply or cleanup result yet."
+  },
+  "limits": ["No claim that voting alone fixes board loss: trace delays changed too", "No firmware SYS_INIT reply or decoded frame", "No persistent deployment", "No original Module.symvers or full ABI validation"]
+}

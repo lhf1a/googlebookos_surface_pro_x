@@ -1,0 +1,1110 @@
+{
+  "status": "firmware-declared-not-validated-performance",
+  "source_log_sha256": "579c379d2bdabc357ab785c381f4a5bee14a1316d967b50121656872d17e9e39",
+  "source_parser": "scripts/parse-sq2-hfi-caps.py",
+  "packet_bytes": 3112,
+  "properties": 75,
+  "body_words": 774,
+  "decoders": [
+    {
+      "codec": "H264",
+      "limits": {
+        "mbs_per_second": {
+          "min": 1,
+          "max": 3888000,
+          "step": 1
+        },
+        "framerate": {
+          "min": 1,
+          "max": 480,
+          "step": 1
+        },
+        "frame_width": {
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "frame_height": {
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "mbs_per_frame": {
+          "min": 1,
+          "max": 138240,
+          "step": 1
+        },
+        "bitrate": {
+          "min": 1,
+          "max": 220000000,
+          "step": 1
+        },
+        "max_workmodes": {
+          "min": 1,
+          "max": 3,
+          "step": 1
+        },
+        "scale_x": {
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "scale_y": {
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "max_videocores": {
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "profile_levels_raw": [
+        {
+          "profile": 32,
+          "level": 131072
+        },
+        {
+          "profile": 64,
+          "level": 131072
+        },
+        {
+          "profile": 2,
+          "level": 131072
+        },
+        {
+          "profile": 4,
+          "level": 131072
+        },
+        {
+          "profile": 1,
+          "level": 131072
+        }
+      ],
+      "output_formats": {
+        "output": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          }
+        ],
+        "output2": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          },
+          {
+            "format": "NV12",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          },
+          {
+            "format": "NV21",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "codec": "MPEG1",
+      "limits": {
+        "max_videocores": {
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "profile_levels_raw": [],
+      "output_formats": {
+        "output": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          }
+        ],
+        "output2": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          },
+          {
+            "format": "NV12",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          },
+          {
+            "format": "NV21",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "codec": "MPEG2",
+      "limits": {
+        "mbs_per_second": {
+          "min": 1,
+          "max": 244800,
+          "step": 1
+        },
+        "framerate": {
+          "min": 1,
+          "max": 30,
+          "step": 1
+        },
+        "frame_width": {
+          "min": 96,
+          "max": 1920,
+          "step": 1
+        },
+        "frame_height": {
+          "min": 96,
+          "max": 1920,
+          "step": 1
+        },
+        "mbs_per_frame": {
+          "min": 1,
+          "max": 8160,
+          "step": 1
+        },
+        "bitrate": {
+          "min": 1,
+          "max": 40000000,
+          "step": 1
+        },
+        "max_workmodes": {
+          "min": 1,
+          "max": 1,
+          "step": 1
+        },
+        "scale_x": {
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "scale_y": {
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "max_videocores": {
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "profile_levels_raw": [
+        {
+          "profile": 1,
+          "level": 4
+        },
+        {
+          "profile": 2,
+          "level": 4
+        }
+      ],
+      "output_formats": {
+        "output": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          }
+        ],
+        "output2": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          },
+          {
+            "format": "NV12",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          },
+          {
+            "format": "NV21",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "codec": "VP8",
+      "limits": {
+        "mbs_per_second": {
+          "min": 1,
+          "max": 1036800,
+          "step": 1
+        },
+        "framerate": {
+          "min": 1,
+          "max": 240,
+          "step": 1
+        },
+        "frame_width": {
+          "min": 96,
+          "max": 4096,
+          "step": 1
+        },
+        "frame_height": {
+          "min": 96,
+          "max": 4096,
+          "step": 1
+        },
+        "mbs_per_frame": {
+          "min": 1,
+          "max": 36864,
+          "step": 1
+        },
+        "bitrate": {
+          "min": 1,
+          "max": 100000000,
+          "step": 1
+        },
+        "max_workmodes": {
+          "min": 1,
+          "max": 3,
+          "step": 1
+        },
+        "scale_x": {
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "scale_y": {
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "max_videocores": {
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "profile_levels_raw": [
+        {
+          "profile": 1,
+          "level": 1
+        },
+        {
+          "profile": 1,
+          "level": 2
+        },
+        {
+          "profile": 1,
+          "level": 4
+        },
+        {
+          "profile": 1,
+          "level": 8
+        }
+      ],
+      "output_formats": {
+        "output": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          }
+        ],
+        "output2": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          },
+          {
+            "format": "NV12",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          },
+          {
+            "format": "NV21",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "codec": "HEVC",
+      "limits": {
+        "mbs_per_second": {
+          "min": 1,
+          "max": 3888000,
+          "step": 1
+        },
+        "framerate": {
+          "min": 1,
+          "max": 480,
+          "step": 1
+        },
+        "frame_width": {
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "frame_height": {
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "mbs_per_frame": {
+          "min": 1,
+          "max": 138240,
+          "step": 1
+        },
+        "bitrate": {
+          "min": 1,
+          "max": 220000000,
+          "step": 1
+        },
+        "max_workmodes": {
+          "min": 1,
+          "max": 3,
+          "step": 1
+        },
+        "scale_x": {
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "scale_y": {
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "max_videocores": {
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "profile_levels_raw": [
+        {
+          "profile": 1,
+          "level": 536871936
+        },
+        {
+          "profile": 2,
+          "level": 536871936
+        }
+      ],
+      "output_formats": {
+        "output": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          },
+          {
+            "format": "YUV420_TP10_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 256,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 256,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              }
+            ]
+          }
+        ],
+        "output2": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          },
+          {
+            "format": "NV12",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          },
+          {
+            "format": "NV21",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          },
+          {
+            "format": "P010",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          },
+          {
+            "format": "YUV420_TP10_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 256,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 256,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "codec": "VP9",
+      "limits": {
+        "mbs_per_second": {
+          "min": 1,
+          "max": 3888000,
+          "step": 1
+        },
+        "framerate": {
+          "min": 1,
+          "max": 480,
+          "step": 1
+        },
+        "frame_width": {
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "frame_height": {
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "mbs_per_frame": {
+          "min": 1,
+          "max": 138240,
+          "step": 1
+        },
+        "bitrate": {
+          "min": 1,
+          "max": 220000000,
+          "step": 1
+        },
+        "max_workmodes": {
+          "min": 1,
+          "max": 3,
+          "step": 1
+        },
+        "scale_x": {
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "scale_y": {
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "max_videocores": {
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "profile_levels_raw": [
+        {
+          "profile": 1,
+          "level": 2048
+        },
+        {
+          "profile": 4,
+          "level": 2048
+        }
+      ],
+      "output_formats": {
+        "output": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          },
+          {
+            "format": "YUV420_TP10_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 256,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 256,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              }
+            ]
+          }
+        ],
+        "output2": [
+          {
+            "format": "NV12_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 4096
+              }
+            ]
+          },
+          {
+            "format": "NV12",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          },
+          {
+            "format": "NV21",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          },
+          {
+            "format": "P010",
+            "planes": [
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 32,
+                "alignment": 256
+              },
+              {
+                "stride_multiple": 128,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 256
+              }
+            ]
+          },
+          {
+            "format": "YUV420_TP10_UBWC",
+            "planes": [
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 256,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 64,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              },
+              {
+                "stride_multiple": 256,
+                "max_stride": 8192,
+                "min_height_multiple": 16,
+                "alignment": 4096
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "limitations": [
+    "Per-axis and frame-rate maxima are joint constraints, not arbitrary combinations.",
+    "MPEG1 has no per-format size/profile entries in this packet; do not inherit MPEG2 limits silently.",
+    "Profile and level values retain raw HFI encoding until each mapping is verified.",
+    "This file is evidence, not an Android advertisement or runtime override."
+  ]
+}

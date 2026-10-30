@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Consumer only: never creates/removes the VIDEOCC overlay/provider.
+# Bind via driver_override after the existing zero-power probe has completed.
+set -Eeuo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+STAGE=${SQ2_IDENTIFY_STAGE:-/root/.cache/sq2-iris1-phase}
+DEST="$ROOT/out/video-decode/iris1-phase"
+case "${1:-}" in
+  ''|--firmware|--hfi) ;;
+  *) echo 'Expected optional --firmware or --hfi' >&2; exit 2 ;;
+esac
+mkdir "$STAGE"
+mkdir -p "$DEST"
+if [ "${1:-}" = --firmware ] || [ "${1:-}" = --hfi ]; then
+  echo '5dd1d028daafe8006400ca50bc6b7ec54a933521f0f6f1c672445e92a9c3d30b  /root/.cache/sq2-thermal/kernel/drivers/soc/qcom/mdt_loader.c' | sha256sum -c -
+  echo 'cb7eeaf5ca930748bd427d1eb6d293d8c6a2a31c314bb137e68f673302d67c77  /root/.cache/sq2-thermal/kernel/arch/arm64/boot/dts/qcom/sc8180x-surface-pro-x.dts' | sha256sum -c -
+  echo '307e464afa0d4c5a6d029a2e706c6a07d9a5d67322916c7716bb00973d4b1074  /root/.cache/sq2-thermal/kernel/drivers/firmware/qcom_scm.h' | sha256sum -c -
+  echo '8a9f0b0b78bfa2bf579eebb2720a58c0b0d51ff27da9450ee4f738ae5f0d9888  /root/.cache/sq2-video-reference/venus_hfi.c' | sha256sum -c -
+  cp "$ROOT/probe/video/sq2_iris1_identify.c" "$STAGE/identify.c"
+  cp "$ROOT/probe/video/"{sq2-venus-fw.c,sq2-venus-fw.h,sq2-fw-transaction.h,sq2_video_fw_layout.h,sq2_pil_mem_query.c,sq2-pil-region.h} "$STAGE/"
+  printf 'obj-m += sq2_iris1_phase.o\nsq2_iris1_phase-objs := identify.o sq2-venus-fw.o sq2_pil_mem_query.o\nccflags-y += -DSQ2_IDENTIFY_EXISTING -DSQ2_IDENTIFY_FIRMWARE -DSQ2_PIL_QUERY_LIBRARY -I$(srctree)/drivers/firmware\n' > "$STAGE/Makefile"
+  if [ "${1:-}" = --hfi ]; then
+    cp "$ROOT/probe/video/"{sq2-iris1-hfi.c,sq2-iris1-hfi.h,sq2-hfi-ring.h,sq2-hfi-caps.h} "$STAGE/"
+    gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+      "$ROOT/tests/sq2_hfi_ring_test.c" -o "$STAGE/ring-test"
+    "$STAGE/ring-test" | tee "$DEST/ring-test.txt"
+    gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+      "$ROOT/tests/sq2_hfi_caps_test.c" -o "$STAGE/caps-test"
+    "$STAGE/caps-test" | tee "$DEST/caps-test.txt"
+    printf '\nsq2_iris1_phase-objs += sq2-iris1-hfi.o\nccflags-y += -DSQ2_IDENTIFY_HFI\n' >> "$STAGE/Makefile"
+    if [ -n "${SQ2_HFI_DECODE_VECTOR:-}" ]; then
+      # Pinned output of build-sq2-h264-test-vector.py (stream 94c7974e...).
+      echo "dfe3c4753f7a510f59cfeab5be2926d008e27620336ca56da25e474fa9c60919  $SQ2_HFI_DECODE_VECTOR" | sha256sum -c -
+      cp "$SQ2_HFI_DECODE_VECTOR" "$STAGE/sq2-h264-vector.h"
+      cp "$ROOT/probe/video/sq2-hfi-dec.h" "$STAGE/"
+      gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+        "$ROOT/tests/sq2_hfi_dec_test.c" -o "$STAGE/dec-test"
+      "$STAGE/dec-test" | tee "$DEST/dec-test.txt"
+      printf 'ccflags-y += -DSQ2_HFI_DECODE\n' >> "$STAGE/Makefile"
+    fi
+  fi
+  gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+    "$ROOT/tests/sq2_fw_transaction_test.c" -o "$STAGE/transaction-test"
+  "$STAGE/transaction-test" | tee "$DEST/transaction-test.txt"
+else
+  cp "$ROOT/probe/video/sq2_iris1_identify.c" "$STAGE/sq2_iris1_phase.c"
+  printf 'obj-m += sq2_iris1_phase.o\nccflags-y += -DSQ2_IDENTIFY_EXISTING\n' > "$STAGE/Makefile"
+fi
+make -s -C /root/.cache/sq2-thermal/kernel \
+  O=/root/.cache/sq2-video-foundation/build ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+  M="$STAGE" KBUILD_MODPOST_WARN=1 modules > "$DEST/build.log" 2>&1
+cp "$STAGE/sq2_iris1_phase.ko" "$DEST/"
+(cd "$DEST" && sha256sum sq2_iris1_phase.ko > SHA256SUMS)
+echo 'BUILD_ONLY: default zero-power/no-MMIO; stages require a separate bounded collector'

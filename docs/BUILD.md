@@ -1,5 +1,124 @@
 # 构建与部署
 
+### 2026-10-30 默认硬解构建与部署
+
+`python3 scripts/build-source-boot.py --output NEW/native-combined-initramfs.cpio.gz` 默认纳入已验证硬解，拒绝覆盖输出；仍需要本地固定hash原生模块、固件、运行包等二进制输入，并非纯源码公共构建。`python3 scripts/build-source-disk.py` 生成含正常硬解开关和禁用硬解救援入口的菜单，校验源码XML与载荷；只生成镜像文件，不操作物理磁盘。
+
+`python3 scripts/deploy-experimental-usb.py --manifest MANIFEST --layout LAYOUT --image IMAGE --require-hardware-video` 默认为预览；先校验镜像内菜单hash/启用与救援策略，再走原USB身份/容量/确认流程。实际写盘仍需原有--execute和设备绑定确认；严禁用于现有SQ2 userdata修复或工作站NVMe。带hardware_video策略的manifest禁止用旧build-googlebook-ssd --update-boot覆盖菜单。新脚本主机测试通过，未在本轮执行全盘写入。
+
+现有SQ2采用已验证runtime-v1+小型caps addon，避免ESP空间不足及通用SQ1构建的非视频差异。该组合正常重启后四格式600帧1080p60通过，随后只把菜单default改为相同已测入口；原入口保留。输出能力VP8 4K60拒绝，1080p60/4K30允许；高通OEM名称保持，HDR专项暂停。新增默认构建产物不能未经设备差异审查直接覆盖其它已验证修复。
+
+默认源码安装构建现通过`scripts/sq2-video-boot-payload.py`导入固定SHA12f1c0d5…的视频载荷，只允许native模块、运行包、固件及三个helper，不复制其init/凭据。先构建上述已审计视频候选；`python3 scripts/build-source-boot.py --output OUT/native-combined-initramfs.cpio.gz`生成完整候选且不覆盖既有文件，审计包含hardware_decode_included=true，仍需硬件验证。源码脚本保留原安装流程触摸/图形选择，不应将这条通用镜像当作当前SQ2非视频配置相同的升级镜像。
+
+`build-source-disk.py`在组装前检查视频载荷与源码XML一致，从既有菜单生成grub-hardware-video.cfg；正常入口加入sq2.video.c2=experimental和sq2.video.autostart=1，救援不启用，sq2.video=0显式禁用优先。默认菜单测试`python3 tests/test_sq2_video_default_menu.py`及runtime_boot opt-out测试通过；生成/部署磁盘的USB身份与容量保护不变。镜像及部署实测状态见HANDOFF，不把主机测试记作设备通过。
+
+runtime-v1启动候选：`python3 scripts/pack-sq2-c2-runtime-boot.py LAB_IMAGE RUNTIME.tar NEW.cpio.gz`固定e519实验镜像及de2d运行包，保留last-entry-wins和私有SSH最后，脚本不部署。`python3 tests/test_sq2_runtime_boot.py`运行安装/复用/拒绝与开机opt-out的隔离主机测试。自动后端启动需同时包含`sq2.video.c2=experimental sq2.video.autostart=1`；无新flag仍不启动固件，rescue退出。早期stage不访问data，HAL wrapper仅在Android挂载data后校验/安装运行包。8b6c1f9a…候选已一次性启动及四格式1080p60验证通过，VP9约4.3Mbps的4K60流亦通过；默认入口尚未提升，完整能力/长期稳定性不是已完成项。
+
+版本化SDR运行包：`python3 scripts/pack-sq2-c2-runtime.py SERVICE MAPPER OUTPUT.tar`，固定已测service27161e41…/mapper eb31d402…，NDK构建私有启动器，不下载、不部署、不启动固件。目标路径/data/vendor/sq2-codec2/v1，start.sh支持--serve或--names-test并核验hash；输出存在拒绝。`python3 tests/test_sq2_c2_runtime.py`覆盖输出防覆盖及未知二进制拒绝。运行包实机VP9验证见HANDOFF；开机/VINTF/模块启动尚未整合，旧pack-sq2-c2-experiment.py仍固定旧service，不可把新tar直接当initramfs。
+
+# 当前范围（2026-10-30）
+
+用户要求跳过HDR相关能力。暂停HDR/HDR10、P010直接输出及Main10性能专项，保留历史构建和证据；下方相关命令仅作历史参考，不自动继续实机测试。SDR VPx吞吐补测素材：`bash scripts/build-sq2-video-app.sh 1920x1080 vp9 60`，要求实际确认profile0/yuv420p/600帧/60fps及APK签名；此步骤只生成素材，不代表硬件吞吐通过。
+
+
+capture补槽背压候选沿用`sq2_v4l2_session_test.cpp`静态交叉编译/QEMU命令，新增EAGAIN恢复/关闭/真ENOMEM/重复DQ/EOS及owner保留测试。默认service构建通过但未部署；四角色同测试baseline/rollback SIGABRT、modified0只是主机mock。首次capture配置仍不等待可用池槽，未增加输出事件线程，不可据此判定普通Surface4K60已通过。
+
+直接P010候选仅显式进程环境`SQ2_P010_DIRECT=1`启用，常规service构建默认仍复制；在布局/同buffer fd/容量/预算全部匹配后才进口，session必须不复用客户端帧。首轮只交付6个C2帧后fetch失败映射ENOMEM；新增DIRECT_FETCH_FAILED日志尚未实测。不能默认部署或宣称4K60通过。旧试验已恢复，用户随后外部重启，新boot无native视频节点；先定位输出池背压，再安排新硬件窗口，见HANDOFF。
+
+P010行复制候选：`aarch64-linux-gnu-g++ -std=c++17 -O2 -Wall -Wextra -Werror -static -Iprobe/video tests/sq2_p010_copy_test.cpp -o TEST && qemu-aarch64 TEST`检验行复制/特殊布局fallback及padding；之后`python3 scripts/build-sq2-c2-aidl-service.py`。6e4209d9…实机普通Surface出帧有性能改善但4K60仍失败，不能默认部署。36.225498Mbps/Main10/4K60向量和独立包在out/video-decode/main10-4k60-vbv35；当前通用build-sq2-video-app.sh仍未加入VBV约束，不应重复生成无约束素材并冒充同一测试。
+
+watchdog可选第二参数为独立测试label：`sq2-allocator-watchdog.sh restore-main10 main10-4k60-a`；仅允许1..48位字母数字下划线连字符，证据路径附加该label，重复仍拒绝。省略时保持旧目录。新增`python3 tests/test_sq2_allocator_labels.py`，并继续运行原watchdog/restore测试。新label不延长180秒恢复窗口，也不允许覆盖旧证据；设备observe模式5秒无修改已通过，恢复分支本轮仅主机回归。
+
+4K P010预算候选：sq2-video-memory.h单独给原生P010 32MiB单帧/384MiB池，NV12及输入/缓存原限制保留。`sq2_v4l2_session_test.cpp`沿用本页ASan/UBSan编译命令，新增4K/EOS/超预算/部分分配失败清理。`build-sq2-hevc-test-vector.py --bit-depth 10 --size 3840x2160 --out NEW`生成六帧独立参考；`build-sq2-c2-component-test.py --codec hevc-main10 --vector-dir NEW --output-dir NEW_BUILD`编译对应harness。六帧4K CRC已实机通过，不能代表4K60；服务候选9608a1f3…尚未部署。`bash scripts/build-sq2-video-app.sh 3840x2160 hevc-main10 60`已产出600帧APK，未运行，见HANDOFF。
+
+独立allocator回退计时器：`wsl -u root -- python3 tests/test_sq2_allocator_watchdog.py`验证实际shell恢复/拒绝逻辑。设备使用保留initramfs的`setsid /bin/sh SCRIPT observe|restore`，不得在Android根执行；observe5秒无修改，restore45秒恢复已知旧launcher并重启服务。必须先看到READY且PID存活再切换。按mode+boot创建唯一data目录，拒绝复用。实机已在框架/Wi-Fi中断时独立恢复，仍非任意故障保证。restore模式只认识249da7ca…旧launcher；新增restore-scoped模式只认识c859a014…新launcher，两者各用独立run目录。另有restore-main10模式180秒，识别同一scoped哈希并用独立目录，供应用测试；三模式12项主机检查及实际定时恢复通过。完整日志用独立initramfs timeout90的nsenter logcat及ulimit限制，raw文件保持out/data私有。实测ulimit -f8192为4MiB，框架启动噪声可提前截断，不能只凭logger消失称90秒完整；sample-sq2-allocator-start.sh另存三次PID/maps/注册状态。
+
+launcher隔离诊断：prepare-sq2-allocator-registration-probe.py 的 `--needed-stub` 将诊断副本的libm依赖改为libs.so（无verneed引用），stub需以 `-Wl,-soname,libs.so -Wl,--no-as-needed -lm` 编译，保留LIBBINDER_NDK34导出版本。禁止使用旧liblog替代试验产物。sq2-allocator-isolated-probe.c用NDK Android35 clang及-Wall/-Wextra/-Werror构建。设备staging及三项固定哈希见HANDOFF；执行前必须校验原launcher、不可注册的诊断ELF及候选库，绝不可把正常原exe放到isolated-hw/sq2-allocator-original。helper只隔离mount及复现UID/组/ambient能力，不能代替init服务验证；空挂载点需存在，不能让bind传播到父命名空间。
+
+实际 allocator 注册前诊断：`python3 scripts/prepare-sq2-allocator-registration-probe.py ORIGINAL NEW` 固定7f394d70…原exe并改名唯一注册导入；哈希拒绝/禁止覆盖检查通过。用NDK Android35 clang `-shared -fPIC -Wall -Wextra -Werror probe/video/sq2-allocator-registration-probe.c -Wl,--version-script=MAP -o libsq2_registration_probe.so`，MAP为 `LIBBINDER_NDK34 { global: SQ2_allocator_probe_registration; local: *; };`。readelf必须确认副本只有新注册导入、无原AServiceManager_addServiceWithFlags。运行仅使用诊断副本，timeout15，并显式LD_PRELOAD该stub；不带stub必须链接失败。原版/候选库路径作独立对照，stub拦截后立即退出，绝不把副本安装成HAL或改为转发真实注册。实机边界见HANDOFF。
+
+独立 gralloc 初始化探针：使用 NDK r28c 的 aarch64-linux-android35-clang++，参数 `-std=c++17 -Wall -Wextra -Werror -nostdinc++ -nostdlib++ -isystem /root/.cache/sq2-c2-platform-libcxx-headers probe/video/sq2-gralloc-init-probe.cpp out/video-decode/codec2-integration/libc++.so -ldl -o out/video-decode/minigbm-p010/gralloc-init-probe`。运行参数为指定完整库路径及可选 `--system`；后者 root 启动后降为已观察的1000/1003/1026，不保留能力。原版用 vendor/system 库路径，候选把其私有目录放在 LD_LIBRARY_PATH 首位。仅验证 donor driver 初始化，无 Binder 注册；不是完整 allocator 服务启动或显示测试。
+
+分配器候选回退：`wsl -u root -- python3 tests/test_sq2_allocator_restore.py` 在隔离主机目录测试实际 `probe/video/restore-sq2-allocator.sh` 的四条恢复/拒绝路径。设备恢复连接后须先核对 boot、服务、目标和备份的完整 SHA；脚本仅适用于 HANDOFF 中 249da7ca… RAM launcher 与 7f394d70…原版，需在 Android 根命名空间用 root 执行。原版已在位时不重启，未知文件拒绝；候选恢复会通过 allocator 的 onrestart 影响 SurfaceFlinger，须先保存当前取证。工具未部署、未实机验证，不写 ESP 或全局 mapper。
+
+会话P010主机测试：`g++ -std=c++17 -fsanitize=address,undefined -fno-pie -no-pie -Iprobe/video tests/sq2_v4l2_session_test.cpp -Wl,--wrap=open,--wrap=close,--wrap=mmap,--wrap=munmap,--wrap=poll,--wrap=ioctl -o TEST`后运行。覆盖NV12/P010生命周期与异常geometry/payload，非实机证明。open末尾显式P010参数仅用于未来10-bit消费者，现C2默认仍NV12；预算未扩大。
+
+P010 helper离线验证：`python3 tests/test_sq2_p010_selection.py /root/.cache/sq2-video-p010-v3/venus`提取候选实际C函数并结合已记录固件格式表做ASan/UBSan测试，覆盖HEVC/VP9 P010成功、缺格式拒绝、其它codec拒绝、NV12不变、默认数组索引及真实P010 sizeimage。4K P010为25067520B，当前16MiB单帧限制仍需端到端适配；此测试不是硬件通过。
+
+P010原生候选：当前prepare脚本生成新stage带SQ2限定P010/TP10-UBWC路径；仅/root/.cache/sq2-video-p010-v3/venus编译版本有效，前两版格式索引错误废弃。尚未打包/部署或做新实机符号审计。以Main10 header构建原生runner时自动选择P010；`decode-test --reference-test ref.p010`可在QEMU验证双字节行宽与padding。默认8-bit同样支持此参考检查。Android C2输出尚未扩展10bit，不得用此候选直接提升系统能力。
+
+Main10素材：`python3 scripts/build-sq2-hevc-test-vector.py --bit-depth 10 --out NEW`生成真实10-bit低位图样、Main10码流、ref.p010和CRC。默认8-bit输入/参考保持不变。现NV12 runner会编译拒绝10-bit header；须先实现P010原生输出与byte stride校验，不可直接喂给旧runner或作为硬解通过证据。
+
+MPEG2事件诊断：sample-hfi-events.sh只采既有HFI消息1秒，不提交硬件工作，已确认0x1008 unsupported-setting事件洪泛。sample-mpeg2-first-error.sh是尚未实跑的下一轮诊断，必须干净native启动及独立有界collector先就绪，首个该错误自动停trace以保留此前set_property记录。当前坏会话已发正常入口重启，恢复状态见HANDOFF，不要继续当前会话重试。
+
+MPEG2原生向量：`python3 scripts/build-sq2-mpeg2-test-vector.py --out NEW [--size 320x256]`，缺省320x240；用`-DSQ2_MPEG2_VECTOR -INEW`编译sq2-v4l2-decode-test.c。严格保留尺寸/CRC检查。两个尺寸均未通过，320x240缺裁剪，320x256无输出且close未确认；不要在当前驻留会话继续重试。sample-mpeg2-geometry.sh只采集固定HFI事件结构标量、独立trace instance/25秒timeout，详见HANDOFF。
+
+VPx组件像素测试：`python3 scripts/build-sq2-c2-component-test.py --codec vp8|vp9`分别输出codec2-integration/component-vp8或component-vp9/interface-test；缺省AVC保持component-backend。使用独立原生向量与实际C2GraphicView布局重组NV12校验。设备Android namespace内、已有resident后端时，以既有LD_LIBRARY_PATH运行`--decode`（外层30秒timeout）。VP8/VP9与AVC均六帧CRC/EOS/stop/release通过；不能据此宣称普通APK路径通过。
+
+VPx Android候选：`python3 scripts/build-sq2-c2-aidl-service.py`构建四组件store；`--interface-test`构建独立parameter-test（不覆盖store二进制），检查VPx profile接受/拒绝及AVC/尺寸/pool回归。`bash scripts/build-sq2-video-app.sh 320x240 vp8|vp9`生成WebM资产的300帧APK，runner对应vp8-small/vp9-small。当前仅设备store和参数检查通过，未替换运行owner、未播放VPx；完整能力范围仍待扩展，不得提升默认镜像。
+
+能力v3：prepare-sq2-venus-iris1.py生成新目录时包含逐codec尺寸枚举和严格限定的SQ2 VP9空EOS处理。`gcc -Wall -Wextra -Werror -fsanitize=address,undefined -fno-pie -no-pie -Iprobe/video tests/sq2_vp9_eos_test.c -o TEST`验证实际helper的错误保留。`sample-vp9-eos.sh packet`仅用于驻留native下的一次有界取证，输出拒绝覆盖，退出移除专用kprobe/trace instance。`pack-sq2-video-capabilities.py BASE /root/.cache/sq2-video-caps-v3/venus NEW --revision 3`固定本轮模块hash；缺省revision1保留原候选。v3尚未实机加载，不能视为VP9已修复；见HANDOFF。
+
+VPx原生向量：`python3 scripts/build-sq2-vpx-test-vector.py --codec vp8|vp9 --out NEW`，`aarch64-linux-gnu-gcc -O2 -static -DSQ2_VPX_VECTOR -INEW probe/video/sq2-v4l2-decode-test.c -o NEW/decode-test`。IVF逐包验证尺寸/PTS/边界后剥离容器，输出头含真实码流与参考CRC。现阶段VP8完整通过，VP9像素通过但EOS错误，见HANDOFF；禁止只因像素匹配忽略EOS错误标记。
+
+能力候选增量打包：`python3 scripts/pack-sq2-video-capabilities.py out/video-decode/boot-candidate/experimental.cpio.gz /root/.cache/sq2-video-caps/venus OUTPUT.cpio.gz`。固定a5038428…基线和已审计模块哈希，只覆盖core/dec及其SHA256SUMS，所有其它最终条目不变，密码SSH addon最后。产物仍为私有实验镜像，脚本不部署、不重启；旧C2启动服务保持原版，新Android owner/mapper未由此持久化。现场身份和一次性启动回退须另行核对，不能复用USB写盘脚本。
+
+能力解析候选：prepare-sq2-venus-iris1.py现在把真实SYS_INIT能力解析限定到SQ2分支，要求完整属性计数并事务式发布。`gcc -Wall -Wextra -Werror -fsanitize=address,undefined -fno-pie -no-pie -Iprobe/video -Itests/sq2_caps_host tests/sq2_caps_transaction_test.c -o TEST`，`TEST sys-init.bin`验证实际表；同编译参数构建sq2_hfi_properties_test.c验证walker。sys-init.bin是parse-sq2-hfi-caps.py的load()返回字按little-endian u32保存，留在out，不提交原始日志。候选stage /root/.cache/sq2-video-caps/venus编译通过，仅编译；缺Module.symvers的modpost警告仍需实机导出闭包核对，禁止热卸现有native/PAS。
+
+HEVC实验：`python3 scripts/build-sq2-hevc-test-vector.py --out NEW`生成6帧Main无B帧及独立NV12参考；`aarch64-linux-gnu-gcc -O2 -static -DSQ2_HEVC_VECTOR -INEW probe/video/sq2-v4l2-decode-test.c -o NEW/decode-test`，只在已有resident native后端运行，不重新启动PAS。`bash scripts/build-sq2-video-app.sh SIZE hevc [30|60]`生成10秒、300/600帧含B帧APK；test-c2-player.sh标签hevc-small/hevc-4k60/b/c自动选择HEVC组件。Main10尚未接入。部署/结果以HANDOFF最新记录为准，旧打包器尚未更新新双组件/私有mapper，不能直接打包发布。
+
+AVC profile实验：build-sq2-video-app.sh SIZE [baseline|main|high]，Main/High带B帧，输出目录带profile后缀；vector.json保存实际profile/level和帧型。build-sq2-h264-test-vector.py --out NEW --profile high生成6帧显示序参考及解码序PTS；新版sq2-mediacodec-frames.c兼容旧header并使用新PTS。私有缓存当前16项/192MiB，详见HANDOFF，旧128MiB描述为历史。
+
+私有映射缓存候选：先`python3 scripts/prepare-sq2-minigbm-map-cache.py`（新stage拒绝覆盖），再`bash scripts/build-sq2-minigbm-map-cache.sh`。依赖固定minigbm源码及out/video-decode/map-cache-libs中的本机donor/libdrm/libcutils；仅donor目前固定哈希，未作为公共可复现构建发布。产物不安装。sq2-map-cache-private.c通过新mount namespace隔离bind库，参数0/1运行allocation-only probe；--serve仅用于实验C2，要求/data/local/tmp/sq2-c2-owner具有执行位且匹配已测hash，不能作为正式启动发布。禁止用LD_PRELOAD跨sphal共享候选，实测会缺retain符号。当前私有内存A/B成功，真实4K和完整同步/资源生命周期回归仍待测，见HANDOFF。
+
+AIDL 实验入口：`scripts/prepare-sq2-c2-aidl-headers.py` 使用已克隆的硬件接口/原生框架缓存与 SDK35 aidl，必须同时生成版本和 hash 方法；`scripts/build-sq2-c2-aidl-service.py` 构建独立 store，依赖已采集的设备库。无参数仅本地枚举，`--serve` 尝试正常 default1 注册；`--serve-local` 仅用于有界实验 Binder 客户端测试，不是正式 VINTF/MediaCodec 接入，禁止默认开机启用。客户端源码 `probe/video/sq2-c2-aidl-client-test.cpp`。
+
+独立 C2 实验组件：`probe/video/sq2-c2-v4l2-component.h` 使用真实 C2Work/C2BlockPool 与 `sq2-v4l2-session.h`；测试入口 `sq2-c2-component-test.cpp` 无参数只释放对象，带参数才运行向量测试。当前仅独立进程验证，不安装服务；构建入口 `python3 scripts/build-sq2-c2-component-test.py` 校验固定 AOSP 提交及本机四库哈希；需要已准备的 NDK、平台 libc++ 头副本和测试向量。完整命令见本地 `out/video-decode/codec2-integration/component-backend/build.txt`。后续须补依赖自动准备、异步输出、完整参数/能力和 AIDL/MediaCodec 验证，不能当作成品部署。
+
+V4L2 runner新增 `--dmabuf /dev/video0`：system dma_heap为输入和输出提供进口fd，显式DMA_BUF_SYNC，沿用严格六帧CRC/EOS检查；无模块装载/固件重启。已在同boot驻留原生core验证，证据 `out/video-decode/venus-transport/dmabuf-frames`。`tests/test_sq2_v4l2_runner.py` 覆盖fd生命周期与分配失败清理；不是gralloc/Codec2实现。
+
+原生V4L2实验runner：用aarch64-linux-gnu-gcc -static并加-I out/video-decode/h264-vector构建probe/video/sq2-v4l2-decode-test.c。--format-only仅设置格式；--buffers-only追加REQBUFS/QUERYBUF/mmap但不QBUF/STREAMON，两者均close。默认模式才尝试六帧，曾实机失联，不能默认重跑；配置ioctl日志须重定向Android持久/data目录并保留fsync。tests/test_sq2_v4l2_runner.py以实际main+wrapped syscalls验证不送帧边界，不是硬件证明。venus-dec的sq2_stage_trace=1仅显式诊断、最多128条；默认关闭。新boot仅一次PAS，不热卸clock/overlay；本机已有resident core时不要运行freshboot装载脚本。
+
+真实H264帧探针：`build-sq2-h264-test-vector.py --out NEW_DIR`用ffmpeg/libx264生成6帧320x240 baseline Annex-B及独立NV12参考/CRC；构建设置`SQ2_HFI_DECODE_VECTOR=.../sq2-h264-vector.h`，同一`build-sq2-iris1-phase.sh --hfi`会固定header dfe3c475…并额外测试dec helper。模块需显式hfi_decode=1且hfi_session/hfi_caps/完整HFI条件成立，默认不解码；bufreq/输入/UBWC-DPB/线性OUTPUT2及scratch都在独立coherent DMA内，直到真实PAS停止后才释放。21c883a3…已实测6/6 Y/UV CRC一致；合成dec19项、caps40项、ring/事务测试通过，缺Module.symvers的审计边界不变。只允许每boot第一次固件启动，不卸载提供者。
+
+离线证据与能力对齐：先用parse-sq2-hfi-caps.py解析本轮raw kmsg，再运行`report-sq2-video-capabilities.py --caps CAPS_JSON --kmsg KMSG --vector VECTOR_JSON --android MEDIA_PLAYER_TXT --output NEW_JSON`。核对全部六帧唯一/尺寸/两个CRC、EOS及关闭标记，拒绝缺失/不一致，报告固件声明与Android实际枚举，不自动改XML。六种decoder的紧凑声明矩阵在configs/sq2-video-decoder-capabilities.json；只有H264小向量验证，不代表上限、其它编码或Android组件已通过。
+
+HFI能力体/session候选：同一`build-sq2-iris1-phase.sh --hfi`现额外复制sq2-hfi-caps.h并运行tests/sq2_hfi_caps_test.c；ring测试增加整包复制/生产者写入。消费者参数`hfi_caps=1`需hfi_handshake，`hfi_session=1`需hfi_caps；默认不启用。build会覆盖out/video-decode/iris1-phase，先备份旧候选。已在干净boot首次固件启动实测SESSION_INIT/END error0；同boot第二次固件启动失败，故每boot只跑一次。离线解析：`python3 -I scripts/parse-sq2-hfi-caps.py KMSG --output NEW_JSON`，拒绝覆盖输出，遇未知属性即停止；只读日志，不连设备。
+
+已实测Windows HFI profile：`build-sq2-hfi-overlay.py --windows-reference --with-interconnects --videocc-phandle LIVE --stage NEW_DIR`显式选三条精确2300/2320/2340 SID及属性；没有选项时保留legacy1300/mask60。`build-sq2-iris1-phase.sh --hfi`消费者按该属性使用24/192表和16MiB UC，将IOVA限于原Android与Windows推断非安全池交集，不改SCM阈值。只发布CPU邮箱，并给CTRL_INIT写、VERSION写（仅legacy）及状态轮询分别打标。93cd5b7d…+a8e7c9ff…实际SYS_INIT成功和真实关闭/回收0，非帧解码/MediaCodec。窗口、参数与运行状态见VIDEO-DECODE、configs/sq2-video-hfi-status.json；每次build覆盖out固定目的前先保留旧候选。不能热卸载VIDEOCC/overlay。
+
+独立SID主机DMA对照源码仅保留取证。两profile及哈希回滚副本实测16MiB/4096页映射与全页解除映射0，但overlay移除API虽0却产生OF引用计数/泄漏告警，未修复；不可重复热拆。builder现默认拒绝，只有取证重建显式`--allow-known-overlay-lifetime-warning`才可生成；不得把此开关当作修复或常规执行入口。后续使用已驻留HFI overlay的dma_probe，避免该拆除路径。真实VPU通信证据另见HFI成功记录。
+
+Windows参考指令检查：`python3 scripts/inspect-sq2-windows-video-reference.py --driver PRIVATE_QCDXKM8180_SYS --iort PRIVATE_SQ1_IORT_DAT --output NEW_JSON`。输入严格限14369cb4…驱动及acfe9033…IORT；输出拒绝覆盖。固定检查24/56/192队列表、UC16MiB及基址表达式、CTRL_INIT写1和十项视频相关IORT映射。SQ1/SQ2保存驱动分别通过且结果相同，9项正负例检查通过；只读离线，不部署、不证明固件DMA/硬件帧。证据地址及语义边界见SQ1-VIDEO-REFERENCE。
+
+SQ1/SQ2 Windows只读视频参考采集：管理员原生64位PowerShell执行 `scripts/Collect-SurfaceVideoReference.ps1 -ExpectedProcessor SQ1 -CheckOnly` 先核对型号，再去掉CheckOnly并给新的OutputDirectory。默认仅导出图形/相关平台驱动、PnP资源及白名单ACPI，排除许可证/凭据；不改旧Collect-SQ2型号保护，不安装驱动、不重启。只在子进程需要时使用ExecutionPolicy Bypass，不改持久策略；归档必须留private并按manifest逐项核验。SQ1实测及与SQ2同字节驱动/SID差异的证据边界见SQ1-VIDEO-REFERENCE.md；不是Android硬解安装器。
+
+固定固件静态检查：`python3 scripts/inspect-sq2-video-firmware-protocol.py` 对out/test2/firmware/qcom/venus-5.2/venus.mbn只读校验完整哈希、ELF32 ARM及六组协议指令，报告在out/video-decode/firmware-analysis/protocol.json；不执行/部署固件，不等于硬件DMA验证。新消费者的 `hfi_empty_ping=1` 只允许完整HFI模式，以初始rx_req=0和固件空队列写1作为直接共享队列写入判据，再继续SYS_INIT；编译/预检通过，尚未实测。CTRL_STATUS=1可早于队列解析，不能算完整HFI成功；不要在未取compact日志时重试或改猜测的IRQ位。见VIDEO-DECODE。
+
+HFI控制启动与表头对照：只写邮箱候选已实测CTRL_STATUS=1，但SYS_INIT未消费，仍非硬解通过。`hfi_compact_table=1`仅在hfi_handshake模式比较原24字节表头与后期288字节扩展，默认保持288；环及SFR仍在同一独占3MiB范围。首轮24字节实测连接中断，原日志未取回，不能解释成该布局失败。新消费者构建还固定参考venus_hfi.c哈希；固件调用后且真实停止确认成功、时钟关闭后，对本机HANA版本脉冲四路桥接，再恢复初态/关域/撤销ICC，保留所有原始错误及post_reset日志。这个退出补齐仅编译未部署，不是已验证的二次启动修复。当前先取回sq2-hfi-compact-976c.kmsg；不要连续重试。见VIDEO-DECODE。
+
+ICC前置请求：`build-sq2-hfi-overlay.py --stage NEW_DIR --videocc-phandle LIVE_VALUE --with-interconnects` 固定6.3 SC8180X驱动/绑定头哈希，添加cpu-cfg、video-mem、firmware-mem路径；不修改已有provider。`--hfi`消费者用 `allow=1 vote_interconnects=1 icc_probe=1` 独立检验三条请求及撤销，不上电/reset/MMIO/PAS。此阶段已实测0。带 `trace_delay_ms=100` 的三域桥接、六时钟/AHB/版本读取也实测0；延迟只让独立collector有机会落盘，不是总线挂死的超时保障。完整HFI随后仍失联、日志待取，不可称已修复。后续候选已删去所有额外MMIO/邮箱快照读回，只按下游写邮箱，确认PAS关闭后将独占邮箱清零再释放映射；增加邮箱写入前后标记与有界延迟。新版本仅编译/符号审计，禁止重用旧全流程二进制，先取回sq2-icc-only-19ed.kmsg定位。见VIDEO-DECODE及sq2-video-interconnect-reference.json。
+
+独立HFI队列：`build-sq2-hfi-overlay.py --stage NEW_DIR --videocc-phandle LIVE_VALUE`只给已绑定VIDEOCC增加独立SMMU消费者（默认不装）；必须与live树合并核对，不能用raw FDT推测运行期phandle。`SQ2_IDENTIFY_STAGE=NEW_DIR bash scripts/build-sq2-iris1-phase.sh --hfi`加入专用compatible检查、DMA/队列库和ASan/UBSan ring边界测试。`dma_probe=1`只做分配/映射/CPU读回并释放，与电源/固件参数互斥。`hfi_handshake=1`需要完整桥接/三域/六时钟/AHB/200MHz/read_registers/boot_firmware/pil_gap；`protect_iova=1`只允许该模式，按固定sdmshrike虚拟地址池设置VPU保护阈值。首轮控制启动超时并安全回收；保护调用后扩展TZ读回导致失联，新源码已去除TZ阈值/reset读取。**禁止使用65709696…旧候选，禁止非安全读取e1020..e1034；修订候选尚未部署，不是硬解安装器。** 继续使用独立有界collector、实际probe_result及真实PAS关闭结果；失败关闭时保留全部队列/映射。见VIDEO-DECODE。
+
+PIL窗口与私有内存owner：`build-sq2-scm-trace.sh` 在新的SQ2_SCM_TRACE_STAGE构建有界只读观察器和GET_MEM_AREA query；固定三份SCM源码/头ABI。`build-sq2-iris1-phase.sh --firmware` 现链接query库，额外固定Surface板级DTS哈希。`pil_gap=1 inspect_gap=1` 只在零域/零时钟/不读寄存器条件下检查独占申请、映射及释放，不写数据；真正加载须另选boot_firmware、pil_gap及完整桥接/AHB/200MHz条件。地址不可参数化，只允许已有板级文档空隙中的固定6MiB，并复核live SCM/DT/资源树。私有加载/认证/关闭通过，未持久化或覆盖V4L2/HFI。不要将新owner应用于CAMERA或其它reserved区；明细见VIDEO-DECODE及sq2-video-pil-memory-reference.json。
+
+桥接/PAS消费者：新overlay提供四reset与额外AHB；`build-sq2-iris1-phase.sh --firmware` 才链接PAS事务层，固定MDT源码哈希并运行故障注入，默认所有危险阶段仍关闭。新目录通过SQ2_IDENTIFY_STAGE选择。reset_bridge需要三域，enable_ahb需要三域且至少三AXI时钟；read_registers要求完整桥接/AHB/六时钟；core_hz仅允许200000000并核对±1kHz，boot_firmware要求以上全部条件和实读版本5010002f。guard与实际probe_result必须复核；insmod成功不等于probe成功。实际试验在PAS mem_setup以-22停止，shutdown/回收通过，未到认证。不要据此持久化或更换未知加载区；完整结果和运行态在VIDEO-DECODE。
+
+分阶段消费者：`bash scripts/build-sq2-iris1-phase.sh`，可用SQ2_IDENTIFY_STAGE选新的构建目录。它只绑定已有私有节点，不创建/移除overlay或VIDEOCC；默认仍不启域/时钟/MMIO，必须以独立有界kmsg和实际probe_result判断。`python3 scripts/build-sq2-videocc-sw-domains.py --stage NEW_DIR` 只生成固定源码的两codec GDSC软件控制候选，不改时钟检查/频率，不安装。该差异通过三域六时钟启停实测，但HW_CTRL运行期交接未实现，不能部署长期默认。热卸载时钟提供者后读pm_genpd_summary曾陷入内核循环，禁止复用该过程；下一次需干净启动直接加载候选，保留启动盘原样。桥接reset/HFI/PAS/Android接入仍开放。
+
+Iris1独立识别探针：`python3 scripts/build-sq2-iris1-identify.py --stage NEW_DIR` 固定out/video-decode/running-base.dtb的be17f33f…身份，使用dtc/fdtget/fdtput构建临时overlay及模块。删去__symbols__导出但保留本地引用重定位，以兼容当前无symbols启动树。v3导致一次用户手动恢复，不能原样重复；v4新增逐步标记、默认0域/0时钟/不读MMIO，仅编译未测。禁止据overlay/符号检查通过认定电源或版本可读。下次先独立运行有界kmsg采集和远程逐步标记；不要无日志重复上电。新overlay模块驻留到重启，旧VIDEOCC/overlay拆卸曾有OF引用泄漏警告。具体失败/恢复见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
+
+PAS内存所有权部分候选：`SQ2_IRIS1_STAGE=/root/.cache/sq2-video-iris1-lease-v2/venus SQ2_IRIS1_DEST=out/video-decode/iris1-lease-v2 bash scripts/build-sq2-venus-iris1.sh --firmware-lease` 在新目录编译独立事务层，先运行ASan/UBSan故障注入和寄存器mock。新目录必须不存在；状态/源码哈希记录在candidate.json。该层尚无启用调用点，不能用它单独启动固件；core/HFI资源在关闭失败时的整体保留仍待适配。不得将主机故障注入说成实机PAS故障验证。
+
+Iris1 HFI部分候选：在foundation构建目录就绪后执行 `bash scripts/build-sq2-venus-iris1.sh`。默认在 `/root/.cache/sq2-video-iris1/venus` 生成源码副本，拒绝覆盖已有候选；可用 `SQ2_IRIS1_STAGE` 选另一个新目录。固定源文件哈希，先运行实际helper的ASan/UBSan mock，再构建core/dec/enc，日志和清单在 `out/video-decode/iris1-hfi`。该候选没有SC8180X match/资源表，不是可安装解码器；不要据符号闭包通过就加载固件。完整限制见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
+
+视频固件copy-only探针：先在固定内核归档恢复的 `/root/.cache/sq2-thermal/kernel` 执行 `bash scripts/build-sq2-video-foundation.sh`，再执行 `bash scripts/build-sq2-video-firmware-stage.sh`。后者先运行主机ELF边界测试，固定MDT源码哈希，再构建独立模块，输出到 `out/video-decode/firmware-stage/`，不连接或安装设备。可用 `SQ2_VIDEO_KERNEL` / `SQ2_VIDEO_BUILD` 显式选择对应源码/构建目录；缺原Module.symvers，仍需对当次实机导出审计。`audit-sq2-video-modules.py --module out/video-decode/firmware-stage/sq2_video_firmware_stage.ko --output out/video-decode/firmware-stage/preflight.json` 使用含screen_only=Y的当次kallsyms采集。传输后核对完整哈希、vermagic与固件哈希，再临时insmod allow=1；返回前已释放内存及设备，结束rmmod并检查残留。无PAS调用或VPU启动，不能作为硬解安装器；实测和限制见 [VIDEO-DECODE.md](VIDEO-DECODE.md)。
+
+eDP 速率表候选见 [DISPLAY-REFRESH.md](DISPLAY-REFRESH.md)。`build-sq2-edp-rates.sh` 使用独立 msm 源码副本；无 Module.symvers 时必须执行 `restore-sq2-msm-depends.py` 恢复原模块依赖声明，不能仅验证运行内核已有符号就部署。原始模块须为固定哈希。`pack-sq2-edp-rates.py` 仅改变 msm.ko 和测试用 init 钩子，保留密码 addon 最后；候选尚未通过硬件验证。脚本和安装器是固定阶段输入，不可直接复用到未知镜像或磁盘。
+
+用户于 2026-10-29 要求菜单仅保留闭源 Vulkan、原 Mesa、当前 eDP 调试三个入口，覆盖此前保留独立救援/关机菜单的偏好。默认仍是闭源 Vulkan，测试使用一次性 env 和 240 秒回退。诊断 Wi-Fi 中 flyer-test 不适用于当前环境；后续测试用有界本地日志，不开启这套诊断联网。无引用旧 initramfs 在本地 out 中校验备份后才能从已核验的设备 ESP 删除，不能删除共享镜像。
+
 闭源Vulkan启动候选：`build-quest2-vulkan-formats.py --boot-runtime` 生成runtime-v8，功能沿用v7，仅关闭成功调用统计及逐次BGRA导出提示，保留错误/所有权检查。`pack-sq2-closed-vulkan.py BASE BUNDLE OUTPUT --preserve-lab-ssh` 固定当前fa64305d…基线及v8九库哈希，新增独立候选目录与 `/init` 钩子；所有原vendor覆盖文件（含Mesa）、凭据和其它助手保持字节一致，密码SSH addon仍最后。不部署、不操作磁盘，输出拒绝覆盖。
 
 `closed-vulkan-start` 在可写RAM vendor覆盖层就绪、Android init之前核验哈希并接入系统HAL；`sq2.vulkan=mesa`、`sq2.vulkan=0` 或救援模式跳过，保留Mesa。Direct配置由 `sq2-closed-vulkan.rc` 在Android post-fs-data后复制到原私有路径，没有启动daemon/持续日志/网络操作。初始化顺序参考[AOSP init文档](https://android.googlesource.com/platform/system/core/+/refs/heads/main/init/README.md)。此候选尚无CTS认证，首次部署必须独立文件/一次性菜单，保留正常及救援入口，不能因构建成功就提升默认。
@@ -161,3 +280,37 @@ python3 scripts/test-iptsd-sq2-heatmap.py /root/.cache/sq2-probe-build/iptsd-3.1
 ```
 
 PowerShell 脚本通过 parser 检查；设备验证另见交接文档，不把语法/QEMU 检查等同于硬件通过。
+
+C2早期声明候选：probe/test2/video-codec-manifest-stage尚未接入/init或镜像。仅sq2.video.c2=experimental启用，rescue优先退出，要求screen_only=Y、RAM vendor overlay及目标不存在；用临时文件原子安装default1 AIDLv2声明。测试python3 -m unittest discover -s tests -p test_sq2_c2_manifest_stage.py -v运行实际helper（只替换路径至临时目录），覆盖默认/关闭/rescue、有效XML、guard/overlay失败、拒绝覆盖。**不得单独部署声明：应配套可启动的系统Binder服务，再做一次性启动测试，避免框架发现声明后等待不存在的服务。** 此候选不声称MediaCodec可用，不自动启固件、不改正常入口。
+
+上述早期helper现已扩展为声明、service二进制、configs/sq2-c2-experimental.rc成套安装；先核验/etc/sq2-c2-experimental/SHA256SUMS及目标不存在，再写RAM overlay，声明最后原子发布。实验rc使用已知kernel域/root（仅实验室），class hal/oneshot、系统优先LD_LIBRARY_PATH、正常--serve，不使用--serve-local。服务失败不无限重启。私有bundle在out/video-decode/codec2-integration/boot-service，service SHA4e7d98a7…与设备原候选一致。测试fixture补齐bundle/目录，三组测试通过；尚未打包部署或验证init启动/SELinux/MediaCodec。现机getenforce实际Enforcing，尽管cmdline含permissive/enforcing=0；不可仅凭启动参数推断策略状态。正式部署前须验证实验域在init下可用，及新启动后恢复原生Venus后端的可复现步骤。
+
+已从当前a101设备/tmp/sq2-eos-a101取回15文件到out/video-decode/recovered-native，原SHA256SUMS逐文件全通过。新增video-decoder-lab-start从其真实加载顺序提取：仅experimental参数启用，要求Android完成/guardY/固定内核及固件，拒绝resident核心/provider，mkdir串行化并在overlay触发probe前标记本boot已尝试PAS；不热卸载，不运行测试向量，不持续日志。新助手仅语法检查，尚未接入/init或部署；须与独立有界collector及一次性启动回退一起测试，不能替代已通过的run-eos.sh证据。启动包需要包含完整已核验native目录；C2服务注册不依赖/dev/video0，但实际配置/解码须等待后端ready。
+
+完整C2实验镜像：scripts/pack-sq2-c2-experiment.py BASE SERVICE_BUNDLE NATIVE_BUNDLE OUTPUT固定当前默认5ba59bd9…，校验已恢复服务4e7d98a7…及native SHA256SUMS；仅增加实验文件与早期init钩子，原有文件除init外字节保持，密码SSH addon最后。当前out/video-decode/boot-candidate/experimental.cpio.gz SHA256 a503842819c41206b6018cf34cd00e7b17b138f56e7c5b78db42c5ab9a5e0e9a，gzip及最终条目审计通过，未部署/启动。sq2.video.c2=experimental才发布服务/声明；后端刻意不自动启动，开机后以独立有界collector调用video-decoder-lab-start，每boot仅一次PAS。接下来需验证设备身份/ESP空间、备份菜单和设置一次性回退，再测试真实init注册/发现；仍非MediaCodec可用完成。
+
+NDK MediaCodec帧验证：sq2-mediacodec-frames.c需链接libmediandk及设备system/lib64/libbinder_ndk.so并启动Binder线程池。测试向量头在私有out/video-decode/ndk-vector；使用原SHA94c7974e…码流，不将恢复的二进制提交。参考生成：ffmpeg -nostdin -v error -i clip.h264 -pix_fmt nv12 -f rawvideo ref.nv12。取回明确来自同轮日志的六个sq2-ndk-frame-N.bin，运行python3 scripts/verify-sq2-mediacodec-frames.py FRAME_DIR REF_NV12；仅适用日志确认320x240/stride320/slice240/color19的六帧I420。不能用旧残留文件代替失败轮输出。2026-10-29硬件和软件实际比较通过；独立--csd后续试验失联，恢复取证前不要重跑。
+
+普通APK视频测试：WSL bash scripts/build-sq2-video-app.sh，生成out/video-decode/player-app/sq2-video-test.apk及10秒300帧AVC baseline asset。签名材料仅private/sq2-video。默认显式选择实验codec，Intent字符串codec可选c2.android.avc.decoder作对照；--user取am get-current-user。test-c2-player.sh需实验服务/native已就绪且专用媒体XML不存在，临时广告/刷新媒体列表、播放/截图/检查回调后回退。应用按PTS限render-ahead，不能据其通过宣称组件bufferpool背压无缺陷。APK保持屏幕亮仅在测试Activity存活期间，runner结束force-stop撤销。
+
+P010独立候选：`pack-sq2-video-capabilities.py BASE /root/.cache/sq2-video-p010-v3/venus NEW --revision p010` 固定已审计eb2a8725…/ce3366cd…模块，仅改native core/dec/manifest。仍需独立启动与P010六帧像素验证；打包不部署、不重启，Android owner保持旧版，不宣称Main10应用可用。
+
+裁剪修复候选：`--revision p010-crop` 对应stage `/root/.cache/sq2-video-p010-crop/venus`、固定bb835d4d…/f57dbf81…。`gcc -Wall -Wextra -Werror -fsanitize=address,undefined -fno-pie -no-pie -Iprobe/video tests/sq2_crop_test.c -o TEST` 验证实际裁剪保留helper的边界；源变化后的同尺寸capture格式切换保留有效crop，其余保持原语义。现场Main10像素结果另见HANDOFF，不以主机检查代替实机。
+
+P010行距修正：`--revision p010-stride` 固定stage `/root/.cache/sq2-video-p010-stride/venus` 的a5f2bcc5…/66e9c26a…模块。线性P010 bytesperline使用128字节对齐；sizeimage保留原较大分配上限。Main10原生六帧与8bit回归已通过，Android10bit尚未接入。原生runner `--dump-first NEW_FILE /dev/videoN` 是最多1MiB的首帧诊断，默认DMABUF、拒绝覆盖、读同步/fsync，不放宽任何成功判定，原始数据留out/private。
+
+P010分配验证：`python3 scripts/build-sq2-c2-component-test.py --allocator-test` 输出allocator-check/interface-test（不覆盖组件二进制），Android用同一Codec2库路径运行`--p010`。320宽的三个高度要求10bit/16bit容器/rightShift6，写图案后unmap/remap逐sample校验；默认不带参数保留原8bit分配诊断。此检查不打开硬件解码器、不宣称Surface可显示10bit。
+
+独立Main10组件：`python3 scripts/build-sq2-c2-component-test.py --codec hevc-main10` 使用hevc-main10-vector与P010显式构造选择，输出component-hevc-main10/interface-test；`--frames` 在已驻留后端运行，六帧按真实C2平面重组P010校验。默认AVC继续NV12。此harness不完成MediaCodec profile/像素格式协商，注册store能力保持原状。
+
+P010显示分配候选：`python3 scripts/prepare-sq2-minigbm-map-cache.py --p010-scanout`，再以`SQ2_MINIGBM_STAGE=/root/.cache/sq2-video-minigbm-p010 SQ2_MINIGBM_OUT=out/video-decode/minigbm-p010 bash scripts/build-sq2-minigbm-map-cache.sh`构建独立产物。真实CHIP_ID0x06080001限定linear P010的SCANOUT组合，不修改UBWC/其它芯片。sq2-minigbm-p010-probe.c按stage drv.h用NDK C编译、链接dl，参数为库绝对路径和render节点；只做分配释放，不安装或显示。只读DRM plane清单可用aarch64-linux-gnu-gcc -static -I/usr/aarch64-linux-gnu/include/drm编译sq2-drm-plane-formats.c。
+
+
+## 2026-10-30 幽灵触控统一构建选项
+
+IPTSd 的状态/连续性修复与边缘热图尖峰修复共同组成一套幽灵触控方案。
+WSL 构建：python3 scripts/build-test3-iptsd.py --ghost-touch-fix on（默认），或 --ghost-touch-fix off；不提供单独启用其中一项的选项。
+on 同时应用两个补丁及 AspectMax=2.0 配置；off 使用全新原版源码、不应用两项补丁，配置保留独立笔 DFT 设置、触点采用上游默认。开关不影响已部署设备。
+两种产物分别为 out/test2/iptsd 与 out/test2/iptsd-no-ghost-fix；成功构建后包含 iptsd.conf 和带二进制/配置哈希的 build-options.json。
+后续 bash scripts/build-touch-fixup.sh BUNDLE 必须传入相应目录（默认 on 目录）；打包器校验清单并使用配套二进制与配置，旧缓存缺清单则拒绝。
+本轮仅做离线选项与语法验证，不代表新二进制构建或实机验证通过，硬盘部署脚本仍待完成。
