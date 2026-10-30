@@ -1,4 +1,5 @@
 #pragma once
+#include "sq2-p010-copy.h"
 // Experimental in-process adapter. Not registered and not a complete MediaCodec implementation.
 #include <android/log.h>
 #define SQ2_SESSION_TRACE(stage) __android_log_print(ANDROID_LOG_INFO,"SQ2C2Lifecycle","CLOSE_STAGE %s",stage)
@@ -21,10 +22,12 @@
 class Sq2C2V4L2Component final:public android::SimpleC2Component {
  struct Lease {
   int fd=-1;void* mapping=MAP_FAILED;size_t bytes=0;
+  std::shared_ptr<C2GraphicBlock> graphic;
   ~Lease(){if(mapping!=MAP_FAILED)munmap(mapping,bytes);if(fd>=0)::close(fd);}
   int sync(uint64_t flags){dma_buf_sync s{};s.flags=flags;int r;do{r=ioctl(fd,DMA_BUF_IOCTL_SYNC,&s);}while(r<0&&errno==EINTR);return r<0?-errno:0;}
  };
  Sq2V4L2Session session_;std::shared_ptr<C2BlockPool> pool_;const uint32_t codec_;uint32_t outputFormat_=V4L2_PIX_FMT_NV12;
+ bool directP010_=false;
  Sq2AvcConfig config_,configured_;bool collectingConfig_=false;
  std::set<uint64_t> outputInodes_;
  // Import references retain allocator objects, never BufferQueue block ownership
@@ -62,6 +65,36 @@ class Sq2C2V4L2Component final:public android::SimpleC2Component {
  int allocate(const Sq2Geometry& g,Sq2CaptureBuffer& out){
   auto lease=std::make_shared<Lease>();
   if(!g.bytes||g.bytes>sq2CaptureFrameLimit(g.format))return -EINVAL;
+  if(directP010_){
+   if(g.format!=V4L2_PIX_FMT_P010||!pool_)return -EINVAL;
+   auto status=pool_->fetchGraphicBlock(g.width,g.height,0x36,
+       C2MemoryUsage{C2MemoryUsage::CPU_READ|C2MemoryUsage::CPU_WRITE},&lease->graphic);
+   if(status!=C2_OK){
+    __android_log_print(ANDROID_LOG_ERROR,"SQ2C2Lifecycle","DIRECT_FETCH_FAILED c2_status=%d pool=%llu capture_count=%u",int(status),(unsigned long long)pool_->getLocalId(),g.count);
+    if(status==C2_BLOCKING)return -EAGAIN;
+    return status==C2_NO_MEMORY?-ENOMEM:-EIO;
+   }
+   { // map().get() waits the acquisition fence; scoped view unlocks before QBUF.
+    auto view=lease->graphic->map().get();if(view.error()!=C2_OK)return -EIO;
+    auto l=view.layout();auto p=view.data();
+    if(l.type!=C2PlanarLayout::TYPE_YUV||l.numPlanes!=3)return -ENOTSUP;
+    for(unsigned i=0;i<3;++i){const auto& v=l.planes[i];
+     if(!p[i]||v.bitDepth!=10||v.allocatedDepth!=16||v.rightShift!=6||v.endianness==C2PlaneInfo::BIG_END||
+        v.rowInc!=int(g.stride)||v.colInc!=(i?4:2)||v.colSampling!=(i?2u:1u)||v.rowSampling!=(i?2u:1u))return -ENOTSUP;
+    }
+    if(uintptr_t(p[1])!=uintptr_t(p[0])+uint64_t(g.stride)*g.scanlines||uintptr_t(p[2])!=uintptr_t(p[1])+2||l.planes[0].offset!=0)return -ENOTSUP;
+   }
+   auto handle=android::UnwrapNativeCodec2GrallocHandle(lease->graphic->handle());
+   if(!handle)return -EINVAL;
+   struct stat y{},uv{};bool valid=handle->numFds>=2&&fstat(handle->data[0],&y)==0&&fstat(handle->data[1],&uv)==0&&y.st_dev==uv.st_dev&&y.st_ino==uv.st_ino;
+   auto bytes=valid?lseek(handle->data[0],0,SEEK_END):-1;
+   if(bytes>=0)lseek(handle->data[0],0,SEEK_SET);
+   if(bytes<g.bytes||bytes>int64_t(sq2CaptureFrameLimit(g.format))||uint64_t(bytes)*g.count>sq2CapturePoolLimit(g.format)){free(handle);return -EINVAL;}
+   lease->fd=fcntl(handle->data[0],F_DUPFD_CLOEXEC,0);free(handle);if(lease->fd<0)return -errno;
+   lease->bytes=size_t(bytes);
+   __android_log_print(ANDROID_LOG_INFO,"SQ2C2Lifecycle","DIRECT_P010 fd=%d bytes=%zu inode=%llu count=%u",lease->fd,lease->bytes,(unsigned long long)y.st_ino,g.count);
+   out={lease->fd,lease->bytes,lease};return 0;
+  }
   int heap=::open("/dev/dma_heap/system",O_RDWR|O_CLOEXEC);if(heap<0)return -errno;
   dma_heap_allocation_data data{};data.len=g.bytes;data.fd_flags=O_RDWR|O_CLOEXEC;
   int r;do{r=ioctl(heap,DMA_HEAP_IOCTL_ALLOC,&data);}while(r<0&&errno==EINTR);
@@ -89,6 +122,13 @@ class Sq2C2V4L2Component final:public android::SimpleC2Component {
   uint64_t rowBytes=uint64_t(g.width)*sampleBytes;
   uint64_t uv=uint64_t(g.stride)*g.scanlines;
   if(g.format!=outputFormat_||frame.offset||!g.width||!g.height||(g.width&1)||(g.height&1)||rowBytes>g.stride||uv+uint64_t(g.stride)*(g.height/2)>lease->bytes||uv+uint64_t(g.stride)*(g.height/2-1)+rowBytes>frame.bytes){complete(frame.token,{},C2_CORRUPTED);return;}
+  if(lease->graphic){
+   // DQBUF completes device writes. Never requeue this lease: the session replaces
+   // it, while the shared graphic block remains owned by the downstream client.
+   ++timedFrames_;
+   complete(frame.token,C2Buffer::CreateGraphicBuffer(lease->graphic->share(C2Rect(g.width,g.height),C2Fence())),C2_OK);
+   return;
+  }
   std::shared_ptr<C2GraphicBlock> output;
   auto begin=Clock::now();
   if(!pool_||pool_->fetchGraphicBlock(g.width,g.height,ten?0x36:0x23,C2MemoryUsage{C2MemoryUsage::CPU_READ|C2MemoryUsage::CPU_WRITE},&output)!=C2_OK){complete(frame.token,{},C2_NO_MEMORY);return;}
@@ -118,14 +158,9 @@ class Sq2C2V4L2Component final:public android::SimpleC2Component {
      auto pixelsBegin=Clock::now();
      auto yEnd=pixelsBegin;
      if(ten){
-      // Native P010 and gralloc can have different row strides and UV offsets.
-      for(unsigned plane=0;plane<3;plane++){
-       const auto& l=layout.planes[plane];unsigned w=plane?g.width/2:g.width,h=plane?g.height/2:g.height;
-       for(unsigned y=0;y<h;y++)for(unsigned x=0;x<w;x++){
-        const uint8_t* from=src+(plane?uv:0)+size_t(y)*g.stride+(plane?4*x+2*(plane-1):2*x);
-        memcpy(p[plane]+size_t(y)*l.rowInc+size_t(x)*l.colInc,from,2);
-       }
-      }
+       size_t rows[3],cols[3];uint8_t* planes[3];
+       for(unsigned plane=0;plane<3;++plane){rows[plane]=layout.planes[plane].rowInc;cols[plane]=layout.planes[plane].colInc;planes[plane]=p[plane];}
+       sq2_copy_p010(src,g.stride,uv,g.width,g.height,planes,rows,cols);
      }else{
      for(unsigned y=0;y<g.height;y++){
       if(layout.planes[0].colInc==1)sq2_copy_row(p[0]+size_t(y)*layout.planes[0].rowInc,src+size_t(y)*g.stride,g.width);
@@ -213,8 +248,10 @@ public:
    if(intf()->query_vb({&size,&pixel},{},C2_MAY_BLOCK,&params)!=C2_OK){failPending();current_=nullptr;return;}
    if(pixel.value!=0x23&&pixel.value!=0x36){failPending();current_=nullptr;return;}
    outputFormat_=pixel.value==0x36?V4L2_PIX_FMT_P010:V4L2_PIX_FMT_NV12;
+   const char* direct=getenv("SQ2_P010_DIRECT");
+   directP010_=outputFormat_==V4L2_PIX_FMT_P010&&direct&&!strcmp(direct,"1");
    pool_=pool;
-   int r=session_.open("/dev/video0",codec_,size.width,size.height,[this](const Sq2Geometry& g,Sq2CaptureBuffer& b){return allocate(g,b);},[this](Sq2DecodedFrame f){deliver(std::move(f));},true,outputFormat_);
+   int r=session_.open("/dev/video0",codec_,size.width,size.height,[this](const Sq2Geometry& g,Sq2CaptureBuffer& b){return allocate(g,b);},[this](Sq2DecodedFrame f){deliver(std::move(f));},!directP010_,outputFormat_);
    if(r){failPending();current_=nullptr;return;}
   }
   int r=0;

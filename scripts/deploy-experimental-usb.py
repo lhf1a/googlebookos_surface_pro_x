@@ -81,6 +81,43 @@ def confirm_erase(selected, supplied=None):
         raise ValueError('Erase confirmation mismatch; no disk writes permitted')
 
 
+def validate_video_menu(menu, policy):
+    if policy.get('schema') != 1 or policy.get('enabled') is not True:
+        raise ValueError('Unsupported hardware video policy')
+    if hashlib.sha256(menu).hexdigest() != policy.get('menu_sha256'):
+        raise ValueError('Hardware video menu hash mismatch')
+    normal = rescue = 0
+    for line in menu.decode('utf-8').splitlines():
+        tokens = line.split()
+        if not tokens or tokens[0] != 'linux':
+            continue
+        enabled = {'sq2.video.c2=experimental', 'sq2.video.autostart=1'}
+        if 'sq2.rescue=1' in tokens:
+            rescue += 1
+            if any(t.startswith(('sq2.video.c2=', 'sq2.video.autostart=')) for t in tokens):
+                raise ValueError('Rescue enables video')
+        elif 'sq2.video=0' not in tokens:
+            normal += 1
+            if not enabled.issubset(tokens):
+                raise ValueError('Normal entry lacks hardware video flags')
+    if not normal or not rescue:
+        raise ValueError('Hardware video requires enabled normal and safe rescue entries')
+
+
+def verify_hardware_video(manifest, layout, image, required=False):
+    policy = manifest.get('hardware_video')
+    if policy is None:
+        if required:
+            raise ValueError('Image has no hardware video deployment policy')
+        return
+    esp = next(p for p in layout['partitions'] if p['name'] == 'SQ2PROBE')
+    # Read the packed image, not a possibly stale external grub.cfg. No mounts/writes.
+    menu = subprocess.check_output(['mtype', '-i', f'{image}@@{esp["offset"]}',
+                                    '::/EFI/BOOT/grub.cfg'])
+    validate_video_menu(menu, policy)
+    print('PASS: packed default hardware video menu and rescue policy')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--manifest', required=True, type=Path)
@@ -88,11 +125,13 @@ def main():
     p.add_argument('--image', required=True, type=Path, help='Linux path to the prepared image')
     p.add_argument('--device', help='Otherwise select interactively from safe USB disks')
     p.add_argument('--execute', action='store_true', help='Destructive installation; default is preview')
+    p.add_argument('--require-hardware-video', action='store_true', help='Reject legacy images without default hardware decoding')
     p.add_argument('--confirm-erase', help='Exact device-bound confirmation printed by preview; otherwise prompt')
     a = p.parse_args()
     m = json.loads(a.manifest.read_text()); layout = json.loads(a.layout.read_text())
     if not a.image.is_file() or a.image.stat().st_size != m['image_bytes'] or m['image_bytes'] != layout['image_bytes']:
         raise ValueError('Image/manifest/layout size mismatch')
+    verify_hardware_video(m, layout, a.image, a.require_hardware_video)
     disks = [d for d in inventory() if safe_disk(d)]
     for i, d in enumerate(disks):
         print(i, d['name'], d['model'], d['serial'], d['size'])

@@ -3,6 +3,15 @@
 set -eu
 mode=${1:-}
 case "$mode" in observe) delay=5 ;; restore|restore-scoped) delay=45 ;; restore-main10) delay=180 ;; *) exit 2 ;; esac
+# Optional per-attempt label preserves prior evidence on the same boot.
+# No label retains the original path and collision refusal.
+suffix=
+[ "$#" -le 2 ] || exit 2
+if [ "$#" -eq 2 ]; then
+ case "$2" in ''|*[!a-zA-Z0-9_-]*) exit 2 ;; esac
+ [ "${#2}" -le 48 ] || exit 2
+ suffix=-$2
+fi
 [ "$(id -u)" = 0 ]
 [ "$(cat /sys/module/suspend/parameters/screen_only)" = Y ]
 [ "$(stat -c %d:%i /)" != "$(stat -c %d:%i /proc/1/root/.)" ]
@@ -10,7 +19,7 @@ while IFS=: read -r hierarchy controllers group; do
  [ "$group" = / ]
 done </proc/self/cgroup
 boot=$(cat /proc/sys/kernel/random/boot_id)
-run=/proc/1/root/data/local/tmp/sq2-allocator-watch-$mode-$boot
+run=/proc/1/root/data/local/tmp/sq2-allocator-watch-$mode-$boot$suffix
 mkdir "$run"
 exec >"$run/watchdog.log" 2>&1
 echo "$$" >"$run/pid"

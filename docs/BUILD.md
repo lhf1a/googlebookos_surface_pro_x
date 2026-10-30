@@ -1,5 +1,34 @@
 # 构建与部署
 
+### 2026-10-30 默认硬解构建与部署
+
+`python3 scripts/build-source-boot.py --output NEW/native-combined-initramfs.cpio.gz` 默认纳入已验证硬解，拒绝覆盖输出；仍需要本地固定hash原生模块、固件、运行包等二进制输入，并非纯源码公共构建。`python3 scripts/build-source-disk.py` 生成含正常硬解开关和禁用硬解救援入口的菜单，校验源码XML与载荷；只生成镜像文件，不操作物理磁盘。
+
+`python3 scripts/deploy-experimental-usb.py --manifest MANIFEST --layout LAYOUT --image IMAGE --require-hardware-video` 默认为预览；先校验镜像内菜单hash/启用与救援策略，再走原USB身份/容量/确认流程。实际写盘仍需原有--execute和设备绑定确认；严禁用于现有SQ2 userdata修复或工作站NVMe。带hardware_video策略的manifest禁止用旧build-googlebook-ssd --update-boot覆盖菜单。新脚本主机测试通过，未在本轮执行全盘写入。
+
+现有SQ2采用已验证runtime-v1+小型caps addon，避免ESP空间不足及通用SQ1构建的非视频差异。该组合正常重启后四格式600帧1080p60通过，随后只把菜单default改为相同已测入口；原入口保留。输出能力VP8 4K60拒绝，1080p60/4K30允许；高通OEM名称保持，HDR专项暂停。新增默认构建产物不能未经设备差异审查直接覆盖其它已验证修复。
+
+默认源码安装构建现通过`scripts/sq2-video-boot-payload.py`导入固定SHA12f1c0d5…的视频载荷，只允许native模块、运行包、固件及三个helper，不复制其init/凭据。先构建上述已审计视频候选；`python3 scripts/build-source-boot.py --output OUT/native-combined-initramfs.cpio.gz`生成完整候选且不覆盖既有文件，审计包含hardware_decode_included=true，仍需硬件验证。源码脚本保留原安装流程触摸/图形选择，不应将这条通用镜像当作当前SQ2非视频配置相同的升级镜像。
+
+`build-source-disk.py`在组装前检查视频载荷与源码XML一致，从既有菜单生成grub-hardware-video.cfg；正常入口加入sq2.video.c2=experimental和sq2.video.autostart=1，救援不启用，sq2.video=0显式禁用优先。默认菜单测试`python3 tests/test_sq2_video_default_menu.py`及runtime_boot opt-out测试通过；生成/部署磁盘的USB身份与容量保护不变。镜像及部署实测状态见HANDOFF，不把主机测试记作设备通过。
+
+runtime-v1启动候选：`python3 scripts/pack-sq2-c2-runtime-boot.py LAB_IMAGE RUNTIME.tar NEW.cpio.gz`固定e519实验镜像及de2d运行包，保留last-entry-wins和私有SSH最后，脚本不部署。`python3 tests/test_sq2_runtime_boot.py`运行安装/复用/拒绝与开机opt-out的隔离主机测试。自动后端启动需同时包含`sq2.video.c2=experimental sq2.video.autostart=1`；无新flag仍不启动固件，rescue退出。早期stage不访问data，HAL wrapper仅在Android挂载data后校验/安装运行包。8b6c1f9a…候选已一次性启动及四格式1080p60验证通过，VP9约4.3Mbps的4K60流亦通过；默认入口尚未提升，完整能力/长期稳定性不是已完成项。
+
+版本化SDR运行包：`python3 scripts/pack-sq2-c2-runtime.py SERVICE MAPPER OUTPUT.tar`，固定已测service27161e41…/mapper eb31d402…，NDK构建私有启动器，不下载、不部署、不启动固件。目标路径/data/vendor/sq2-codec2/v1，start.sh支持--serve或--names-test并核验hash；输出存在拒绝。`python3 tests/test_sq2_c2_runtime.py`覆盖输出防覆盖及未知二进制拒绝。运行包实机VP9验证见HANDOFF；开机/VINTF/模块启动尚未整合，旧pack-sq2-c2-experiment.py仍固定旧service，不可把新tar直接当initramfs。
+
+# 当前范围（2026-10-30）
+
+用户要求跳过HDR相关能力。暂停HDR/HDR10、P010直接输出及Main10性能专项，保留历史构建和证据；下方相关命令仅作历史参考，不自动继续实机测试。SDR VPx吞吐补测素材：`bash scripts/build-sq2-video-app.sh 1920x1080 vp9 60`，要求实际确认profile0/yuv420p/600帧/60fps及APK签名；此步骤只生成素材，不代表硬件吞吐通过。
+
+
+capture补槽背压候选沿用`sq2_v4l2_session_test.cpp`静态交叉编译/QEMU命令，新增EAGAIN恢复/关闭/真ENOMEM/重复DQ/EOS及owner保留测试。默认service构建通过但未部署；四角色同测试baseline/rollback SIGABRT、modified0只是主机mock。首次capture配置仍不等待可用池槽，未增加输出事件线程，不可据此判定普通Surface4K60已通过。
+
+直接P010候选仅显式进程环境`SQ2_P010_DIRECT=1`启用，常规service构建默认仍复制；在布局/同buffer fd/容量/预算全部匹配后才进口，session必须不复用客户端帧。首轮只交付6个C2帧后fetch失败映射ENOMEM；新增DIRECT_FETCH_FAILED日志尚未实测。不能默认部署或宣称4K60通过。旧试验已恢复，用户随后外部重启，新boot无native视频节点；先定位输出池背压，再安排新硬件窗口，见HANDOFF。
+
+P010行复制候选：`aarch64-linux-gnu-g++ -std=c++17 -O2 -Wall -Wextra -Werror -static -Iprobe/video tests/sq2_p010_copy_test.cpp -o TEST && qemu-aarch64 TEST`检验行复制/特殊布局fallback及padding；之后`python3 scripts/build-sq2-c2-aidl-service.py`。6e4209d9…实机普通Surface出帧有性能改善但4K60仍失败，不能默认部署。36.225498Mbps/Main10/4K60向量和独立包在out/video-decode/main10-4k60-vbv35；当前通用build-sq2-video-app.sh仍未加入VBV约束，不应重复生成无约束素材并冒充同一测试。
+
+watchdog可选第二参数为独立测试label：`sq2-allocator-watchdog.sh restore-main10 main10-4k60-a`；仅允许1..48位字母数字下划线连字符，证据路径附加该label，重复仍拒绝。省略时保持旧目录。新增`python3 tests/test_sq2_allocator_labels.py`，并继续运行原watchdog/restore测试。新label不延长180秒恢复窗口，也不允许覆盖旧证据；设备observe模式5秒无修改已通过，恢复分支本轮仅主机回归。
+
 4K P010预算候选：sq2-video-memory.h单独给原生P010 32MiB单帧/384MiB池，NV12及输入/缓存原限制保留。`sq2_v4l2_session_test.cpp`沿用本页ASan/UBSan编译命令，新增4K/EOS/超预算/部分分配失败清理。`build-sq2-hevc-test-vector.py --bit-depth 10 --size 3840x2160 --out NEW`生成六帧独立参考；`build-sq2-c2-component-test.py --codec hevc-main10 --vector-dir NEW --output-dir NEW_BUILD`编译对应harness。六帧4K CRC已实机通过，不能代表4K60；服务候选9608a1f3…尚未部署。`bash scripts/build-sq2-video-app.sh 3840x2160 hevc-main10 60`已产出600帧APK，未运行，见HANDOFF。
 
 独立allocator回退计时器：`wsl -u root -- python3 tests/test_sq2_allocator_watchdog.py`验证实际shell恢复/拒绝逻辑。设备使用保留initramfs的`setsid /bin/sh SCRIPT observe|restore`，不得在Android根执行；observe5秒无修改，restore45秒恢复已知旧launcher并重启服务。必须先看到READY且PID存活再切换。按mode+boot创建唯一data目录，拒绝复用。实机已在框架/Wi-Fi中断时独立恢复，仍非任意故障保证。restore模式只认识249da7ca…旧launcher；新增restore-scoped模式只认识c859a014…新launcher，两者各用独立run目录。另有restore-main10模式180秒，识别同一scoped哈希并用独立目录，供应用测试；三模式12项主机检查及实际定时恢复通过。完整日志用独立initramfs timeout90的nsenter logcat及ulimit限制，raw文件保持out/data私有。实测ulimit -f8192为4MiB，框架启动噪声可提前截断，不能只凭logger消失称90秒完整；sample-sq2-allocator-start.sh另存三次PID/maps/注册状态。
@@ -275,3 +304,13 @@ P010分配验证：`python3 scripts/build-sq2-c2-component-test.py --allocator-t
 独立Main10组件：`python3 scripts/build-sq2-c2-component-test.py --codec hevc-main10` 使用hevc-main10-vector与P010显式构造选择，输出component-hevc-main10/interface-test；`--frames` 在已驻留后端运行，六帧按真实C2平面重组P010校验。默认AVC继续NV12。此harness不完成MediaCodec profile/像素格式协商，注册store能力保持原状。
 
 P010显示分配候选：`python3 scripts/prepare-sq2-minigbm-map-cache.py --p010-scanout`，再以`SQ2_MINIGBM_STAGE=/root/.cache/sq2-video-minigbm-p010 SQ2_MINIGBM_OUT=out/video-decode/minigbm-p010 bash scripts/build-sq2-minigbm-map-cache.sh`构建独立产物。真实CHIP_ID0x06080001限定linear P010的SCANOUT组合，不修改UBWC/其它芯片。sq2-minigbm-p010-probe.c按stage drv.h用NDK C编译、链接dl，参数为库绝对路径和render节点；只做分配释放，不安装或显示。只读DRM plane清单可用aarch64-linux-gnu-gcc -static -I/usr/aarch64-linux-gnu/include/drm编译sq2-drm-plane-formats.c。
+
+
+## 2026-10-30 幽灵触控统一构建选项
+
+IPTSd 的状态/连续性修复与边缘热图尖峰修复共同组成一套幽灵触控方案。
+WSL 构建：python3 scripts/build-test3-iptsd.py --ghost-touch-fix on（默认），或 --ghost-touch-fix off；不提供单独启用其中一项的选项。
+on 同时应用两个补丁及 AspectMax=2.0 配置；off 使用全新原版源码、不应用两项补丁，配置保留独立笔 DFT 设置、触点采用上游默认。开关不影响已部署设备。
+两种产物分别为 out/test2/iptsd 与 out/test2/iptsd-no-ghost-fix；成功构建后包含 iptsd.conf 和带二进制/配置哈希的 build-options.json。
+后续 bash scripts/build-touch-fixup.sh BUNDLE 必须传入相应目录（默认 on 目录）；打包器校验清单并使用配套二进制与配置，旧缓存缺清单则拒绝。
+本轮仅做离线选项与语法验证，不代表新二进制构建或实机验证通过，硬盘部署脚本仍待完成。

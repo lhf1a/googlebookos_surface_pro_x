@@ -5,7 +5,7 @@ Stock firmware/userspace and proprietary Qualcomm libraries are binary inputs,
 not falsely claimed to be compiled from source. Never writes physical disks.
 """
 from pathlib import Path
-import gzip, hashlib, importlib.util, json, subprocess, zlib, shutil
+import argparse, gzip, hashlib, importlib.util, json, subprocess, zlib, shutil
 
 R = Path(__file__).resolve().parents[1]
 O = R/'out/source-boot'
@@ -14,7 +14,10 @@ c = importlib.util.module_from_spec(spec); spec.loader.exec_module(c)
 sha = lambda b: hashlib.sha256(b).hexdigest()
 
 def main():
-    output = O/'native-combined-initramfs.cpio.gz'
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output',type=Path,default=O/'native-combined-initramfs.cpio.gz')
+    output=parser.parse_args().output
+    output.parent.mkdir(parents=True,exist_ok=True)
     if output.exists(): raise ValueError('Refusing existing output')
     base = (R/'out/password-ssh/combined.cpio.gz').read_bytes()
     assert sha(base) == '651f3831a0171908d7a9b1054a4c1c2a8fd657c36e79e7e3717674ef6389ecf8'
@@ -29,6 +32,9 @@ def main():
     anchor = b'apply-device-info > /logs/device-info.txt 2>&1 || fail device-info\n'
     assert init.count(anchor) == 1 and b'closed-vulkan-start' not in init
     init = init.replace(anchor, b'closed-vulkan-start > /logs/closed-vulkan.txt 2>&1 || fail closed-vulkan-overlay\n'+anchor)
+    video_spec=importlib.util.spec_from_file_location('video_payload',R/'scripts/sq2-video-boot-payload.py')
+    video=importlib.util.module_from_spec(video_spec);video_spec.loader.exec_module(video)
+    init=video.integrate(R,c,put,init)
     put('init', init, 0o100755)
     # Refresh existing shell helpers from repository; include new boot helpers.
     helpers = {Path(n).name for n in before if n.startswith('bin/') and (R/'probe/test2'/Path(n).name).is_file() and before[n][1].startswith(b'#!')}
@@ -96,11 +102,13 @@ def main():
     image=(R/'out/screen-only/Image').read_bytes()
     assert b'SQ2 screen-only policy: system suspend blocked' in image
     with output.open('xb') as f: f.write(result)
-    shutil.copyfile(R/'out/screen-only/Image',O/'Image')
+    shutil.copyfile(R/'out/screen-only/Image',output.parent/'Image')
     report=dict(base_sha256=sha(base),initramfs_sha256=sha(result),Image_sha256=sha(image),
                 ghost_touch_fix=False,password_addon_last=True,changed=sorted(delta),
-                hardware_boot_tested=False,proprietary_libraries='pinned binary inputs, not source-built')
-    (O/'build-audit.json').write_text(json.dumps(report,indent=2)+'\n')
+                hardware_boot_tested=False,hardware_decode_included=True,
+                video_payload_sha256=video.PAYLOAD_SHA,
+                proprietary_libraries='pinned binary inputs, not source-built')
+    (output.parent/'build-audit.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps({k:v for k,v in report.items() if k!='changed'}))
 
 if __name__=='__main__': main()

@@ -2,11 +2,22 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import hashlib
 
 spec = importlib.util.spec_from_file_location('deploy', Path(__file__).resolve().parents[1]/'scripts/deploy-experimental-usb.py')
 d = importlib.util.module_from_spec(spec); spec.loader.exec_module(d)
 
 class Preflight(unittest.TestCase):
+    def test_video_policy(self):
+        menu=b'linux /Image sq2.video.c2=experimental sq2.video.autostart=1\nlinux /Image sq2.rescue=1\n'
+        policy=dict(schema=1,enabled=True,menu_sha256=hashlib.sha256(menu).hexdigest())
+        d.validate_video_menu(menu,policy)
+        with self.assertRaises(ValueError):d.validate_video_menu(menu+b'#change',policy)
+        for bad in (menu.replace(b'sq2.video.autostart=1',b''),menu.replace(b'sq2.rescue=1',b'sq2.rescue=1 sq2.video.autostart=1')):
+            with self.assertRaises(ValueError):
+                d.validate_video_menu(bad,dict(policy,menu_sha256=hashlib.sha256(bad).hexdigest()))
+        with self.assertRaises(ValueError):d.verify_hardware_video({}, {}, None, True)
+
     def test_confirmation(self):
         disk = dict(name='/dev/FIXTURE', serial='SERIAL', size=128, model='fixture')
         token = 'ERASE ["/dev/FIXTURE","SERIAL",128]'

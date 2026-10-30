@@ -19,22 +19,23 @@ public:
  C2String getName()const override{return "sq2.experimental";}
  c2_status_t createInterface(C2String name,std::shared_ptr<C2ComponentInterface>* out)override{
   const Sq2CodecInfo* info=nullptr;
-  for(const auto& candidate:sq2Codecs)if(name==candidate.name)info=&candidate;
+  for(const auto& candidate:sq2Codecs)if(sq2CodecMatches(candidate,name.c_str()))info=&candidate;
   if(!info){out->reset();return C2_NOT_FOUND;}
   // Current 8-bit buffer envelope; firmware's larger sizes require more work.
   auto impl=std::make_shared<Sq2DecodeInterface>(reflector_,96,4096,96,4096,info->codec);
-  *out=std::make_shared<android::SimpleC2Interface<Sq2DecodeInterface>>(name.c_str(),0,impl);return C2_OK;
+  *out=std::make_shared<android::SimpleC2Interface<Sq2DecodeInterface>>(info->name,0,impl);return C2_OK;
  }
  c2_status_t createComponent(C2String name,std::shared_ptr<C2Component>* out)override{
   std::shared_ptr<C2ComponentInterface> i;auto ret=createInterface(name,&i);
   if(ret){out->reset();return ret;}
-  for(const auto& info:sq2Codecs)if(name==info.name){*out=std::make_shared<Sq2C2V4L2Component>(i,info.codec);return C2_OK;}
+  for(const auto& info:sq2Codecs)if(sq2CodecMatches(info,name.c_str())){*out=std::make_shared<Sq2C2V4L2Component>(i,info.codec);return C2_OK;}
   out->reset();return C2_NOT_FOUND;
  }
  std::vector<std::shared_ptr<const C2Component::Traits>> listComponents()override{
   std::vector<std::shared_ptr<const C2Component::Traits>> result;
   for(const auto& info:sq2Codecs){
    auto t=std::make_shared<C2Component::Traits>();t->name=info.name;
+   t->aliases.push_back(sq2CodecAlias(info.codec));
    t->domain=C2Component::DOMAIN_VIDEO;t->kind=C2Component::KIND_DECODER;
    t->rank=512;t->mediaType=info.mime;t->owner=getName();result.push_back(t);
   }
@@ -48,6 +49,22 @@ public:
  c2_status_t querySupportedValues_sm(std::vector<C2FieldSupportedValuesQuery>& f)const override{return params_.querySupportedValues(f,C2_MAY_BLOCK);}
 };
 int main(int argc,char** argv){
+ if(argc==2&&!strcmp(argv[1],"--names-test")){
+  Sq2Store store;
+  for(const auto& info:sq2Codecs){
+   for(const char* name:{info.name,sq2CodecAlias(info.codec)}){
+    std::shared_ptr<C2ComponentInterface> intf;
+    if(store.createInterface(name,&intf)!=C2_OK||intf->getName()!=info.name)return 6;
+    std::shared_ptr<C2Component> component;
+    if(store.createComponent(name,&component)!=C2_OK||!component)return 7;
+    printf("NAME_OK requested=%s canonical=%s\n",name,intf->getName().c_str());
+   }
+   std::shared_ptr<C2ComponentInterface> rejected;
+   if(store.createInterface(C2String(sq2CodecAlias(info.codec))+".secure",&rejected)!=C2_NOT_FOUND)return 8;
+  }
+  for(const auto& t:store.listComponents())if(t->aliases.size()!=1)return 9;
+  puts("NAMES_PASS codecs=4 names=8 secure_rejected=4 no_decode=1");return 0;
+ }
  setvbuf(stdout,nullptr,_IONBF,0);struct sigaction sa{};sa.sa_sigaction=crash;sa.sa_flags=SA_SIGINFO;sigaction(SIGSEGV,&sa,nullptr);ABinderProcess_setThreadPoolMaxThreadCount(4);ABinderProcess_startThreadPool();
  using Store=aidl::android::hardware::media::c2::utils::ComponentStore;
  static_assert(sizeof(Store)==352,"device provider wrapper size differs");

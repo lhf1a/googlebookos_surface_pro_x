@@ -21,6 +21,11 @@
         <!-- VPx 8-bit lab candidates; profile 2 / 10-bit remains unimplemented. -->
         <MediaCodec name="c2.sq2.vp8.experimental" type="video/x-vnd.on2.vp8" rank="512">
             <Alias name="OMX.qcom.video.decoder.vp8" />
+            <!-- HFI decoder caps: 16x16 macroblocks; joint rate limit, not measured throughput. -->
+            <Limit name="block-size" value="16x16" />
+            <Limit name="block-count" range="1-36864" />
+            <Limit name="blocks-per-second" range="1-1036800" />
+            <Limit name="frame-rate" range="1-240" />
             <Limit name="size" min="320x240" max="3840x2160" />
             <Limit name="alignment" value="2x2" />
             <Limit name="concurrent-instances" max="1" />

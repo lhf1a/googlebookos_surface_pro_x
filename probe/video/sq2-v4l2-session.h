@@ -31,17 +31,18 @@ private:
  struct Input {void* ptr=nullptr;size_t bytes=0;bool busy=false;};
  int fd_=-1,error_=0;bool outOn_=false,capOn_=false,source_=false,drainRequested_=false,reuseCapture_=false;
  State state_=State::Closed;std::vector<Input> input_;std::vector<Sq2CaptureBuffer> capture_;
+ std::vector<bool> refill_;
  uint32_t outputFormat_=V4L2_PIX_FMT_NV12;
  Sq2Geometry geometry_{};Allocate allocate_;Deliver deliver_;
  int call(unsigned long op,void* arg){int r;do{r=ioctl(fd_,op,arg);}while(r<0&&errno==EINTR);return r<0?-errno:0;}
  int fail(int e){SQ2_SESSION_ERROR(e);error_=e;state_=State::Failed;return e;}
  int stream(unsigned type,bool on){return call(on?VIDIOC_STREAMON:VIDIOC_STREAMOFF,&type);}
  int queueCapture(unsigned i,bool allocate=true){
-  auto& slot=capture_[i];if(allocate){int r=allocate_(geometry_,slot);if(r)return r;}
+  auto& slot=capture_[i];if(allocate&&!slot.owner){Sq2CaptureBuffer next;int r=allocate_(geometry_,next);if(r)return r;slot=std::move(next);}
   if(slot.fd<0||!slot.owner||slot.bytes<geometry_.bytes||slot.bytes>sq2CaptureFrameLimit(outputFormat_))return -EINVAL;
   v4l2_plane p{};p.length=slot.bytes;p.m.fd=slot.fd;
   v4l2_buffer b{};b.type=V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;b.memory=V4L2_MEMORY_DMABUF;b.index=i;b.length=1;b.m.planes=&p;
-  return call(VIDIOC_QBUF,&b);
+  int r=call(VIDIOC_QBUF,&b);if(!r)refill_[i]=false;return r;
  }
  int configureCapture(){
   if(source_)return -ENOTSUP; // Dynamic source changes require a later explicit reconfiguration path.
@@ -63,7 +64,7 @@ private:
   // Keep a bounded native pool; P010 doubles the per-sample storage.
   // 13 aligned 4K P010 frames require about 311 MiB.
   if(!req.count||req.count>32||uint64_t(req.count)*p.plane_fmt[0].sizeimage>sq2CapturePoolLimit(outputFormat_))return -EOVERFLOW;
-  geometry_={s.r.width,s.r.height,p.plane_fmt[0].bytesperline,p.height,p.plane_fmt[0].sizeimage,req.count,outputFormat_};capture_.resize(req.count);
+  geometry_={s.r.width,s.r.height,p.plane_fmt[0].bytesperline,p.height,p.plane_fmt[0].sizeimage,req.count,outputFormat_};capture_.resize(req.count);refill_.assign(req.count,false);
   for(unsigned i=0;i<req.count;i++)if((r=queueCapture(i)))return r;
   if((r=stream(f.type,true)))return r;capOn_=true;source_=true;return 0;
  }
@@ -102,6 +103,11 @@ public:
  int pump(int timeoutMs){
   if(state_==State::Failed)return error_;if(state_!=State::Running&&state_!=State::Draining)return -EPIPE;
   if(timeoutMs<0||timeoutMs>1000)return -EINVAL;
+  // A downstream client may still own the returned graphic block. Retry vacant
+  // slots once per pump, without recycling that client's pixels or busy-waiting.
+  for(unsigned i=0;i<refill_.size();++i)if(refill_[i]){
+   int r=queueCapture(i,!reuseCapture_);if(r&&r!=-EAGAIN)return fail(r);
+  }
   pollfd pfd{fd_,short(POLLIN|POLLPRI),0};int pr;do{pr=poll(&pfd,1,timeoutMs);}while(pr<0&&errno==EINTR);if(pr<0)return fail(-errno);
   for(unsigned n=0;n<32;n++){v4l2_event e{};int r=call(VIDIOC_DQEVENT,&e);if(r==-EAGAIN||r==-ENOENT)break;if(r)return fail(r);if(e.type==V4L2_EVENT_SOURCE_CHANGE&&(r=configureCapture()))return fail(r);}
   for(unsigned n=0;n<input_.size();n++){v4l2_plane p{};v4l2_buffer b{};b.type=V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;b.memory=V4L2_MEMORY_MMAP;b.length=1;b.m.planes=&p;int r=call(VIDIOC_DQBUF,&b);if(r==-EAGAIN)break;if(r)return fail(r);if(b.index>=input_.size()||!input_[b.index].busy||(b.flags&V4L2_BUF_FLAG_ERROR))return fail(-EIO);input_[b.index].busy=false;}
@@ -109,16 +115,18 @@ public:
   if(drainRequested_&&!busy&&state_==State::Running){v4l2_decoder_cmd cmd{};cmd.cmd=V4L2_DEC_CMD_STOP;int r=call(VIDIOC_DECODER_CMD,&cmd);if(r)return fail(r);state_=State::Draining;}
   if(capOn_)for(unsigned n=0;n<capture_.size();n++){
    v4l2_plane p{};v4l2_buffer b{};b.type=V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;b.memory=V4L2_MEMORY_DMABUF;b.length=1;b.m.planes=&p;int r=call(VIDIOC_DQBUF,&b);if(r==-EAGAIN)break;if(r)return fail(r);
-   if(b.index>=capture_.size()||p.bytesused>capture_[b.index].bytes||p.data_offset>p.bytesused||(b.flags&V4L2_BUF_FLAG_ERROR)||b.timestamp.tv_sec<0||b.timestamp.tv_usec<0||b.timestamp.tv_usec>=1000000)return fail(-EIO);
+   if(b.index>=capture_.size()||refill_[b.index]||p.bytesused>capture_[b.index].bytes||p.data_offset>p.bytesused||(b.flags&V4L2_BUF_FLAG_ERROR)||b.timestamp.tv_sec<0||b.timestamp.tv_usec<0||b.timestamp.tv_usec>=1000000)return fail(-EIO);
    auto buffer=reuseCapture_?capture_[b.index]:std::move(capture_[b.index]);
+   if(!reuseCapture_)capture_[b.index]={};
+   refill_[b.index]=true;
    if(p.bytesused>p.data_offset){
     const uint64_t rowBytes=uint64_t(geometry_.width)*(geometry_.format==V4L2_PIX_FMT_P010?2:1);
     const uint64_t minimumBytes=uint64_t(geometry_.stride)*(geometry_.scanlines+geometry_.height/2-1)+rowBytes;
     if(minimumBytes>p.bytesused-p.data_offset)return fail(-EIO);
     deliver_({std::move(buffer),geometry_,uint64_t(b.timestamp.tv_sec)*1000000+uint64_t(b.timestamp.tv_usec),p.bytesused,p.data_offset,b.flags});
    }
-   if(b.flags&V4L2_BUF_FLAG_LAST){state_=State::Ended;break;}
-   if((r=queueCapture(b.index,!reuseCapture_)))return fail(r);
+   if(b.flags&V4L2_BUF_FLAG_LAST){refill_[b.index]=false;state_=State::Ended;break;}
+   r=queueCapture(b.index,!reuseCapture_);if(r&&r!=-EAGAIN)return fail(r);
   }
   return 0;
  }
@@ -128,6 +136,6 @@ public:
    for(auto& i:input_)if(i.ptr&&munmap(i.ptr,i.bytes)&&!result)result=-errno;
    SQ2_SESSION_TRACE("fd-close");if(::close(fd_)&&!result)result=-errno;SQ2_SESSION_TRACE("fd-closed");
   }
-  fd_=-1;input_.clear();SQ2_SESSION_TRACE("capture-release");capture_.clear();SQ2_SESSION_TRACE("capture-released");allocate_={};deliver_={};outOn_=capOn_=source_=drainRequested_=false;state_=State::Closed;error_=0;return result;
+  fd_=-1;input_.clear();SQ2_SESSION_TRACE("capture-release");capture_.clear();refill_.clear();SQ2_SESSION_TRACE("capture-released");allocate_={};deliver_={};outOn_=capOn_=source_=drainRequested_=false;state_=State::Closed;error_=0;return result;
  }
 };

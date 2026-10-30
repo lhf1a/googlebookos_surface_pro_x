@@ -65,6 +65,38 @@ int main(){
   assert(!s.close()&&closes==1&&mappings.empty()&&allocs==releases);
  }
  puts("P010_STRIDE_SUBSTITUTION_SHORT_ALLOCATION_SHORT_PAYLOAD_REFUSED");
+ for(bool depth:{false,true})for(unsigned scenario=0;scenario<5;++scenario){
+  ten=depth;invalid=0;large=false;
+  eventSent=drained=frameSent=lastSent=false;
+  submits=returns=frames=allocs=releases=closes=captureQueued=0;
+  unsigned blockedAttempts=0;bool blocked=true,fatal=false;
+  std::shared_ptr<void> held;Sq2V4L2Session s;
+  auto allocate=[&](const Sq2Geometry& g,Sq2CaptureBuffer& b){
+   if(allocs==5){++blockedAttempts;if(fatal)return -ENOMEM;if(blocked)return -EAGAIN;}
+   allocs++;b={30,g.bytes,std::shared_ptr<void>(new int(42),[](void* p){releases++;delete (int*)p;})};return 0;
+  };
+  auto deliver=[&](Sq2DecodedFrame f){++frames;held=f.buffer.owner;};
+  assert(!s.open("/dev/mock",ten?V4L2_PIX_FMT_HEVC:V4L2_PIX_FMT_H264,4,4,allocate,deliver,false,ten?V4L2_PIX_FMT_P010:V4L2_PIX_FMT_NV12));
+  const uint8_t data[]={1};assert(!s.submit(data,1,7));
+  assert(!s.pump(0)&&s.state()==Sq2V4L2Session::State::Running);
+  assert(frames==1&&held&&allocs==5&&captureQueued==5&&blockedAttempts==1);
+  for(unsigned n=0;n<3;++n)assert(!s.pump(0));
+  assert(blockedAttempts==4&&frames==1&&captureQueued==5&&releases==0);
+  assert(*static_cast<int*>(held.get())==42);
+  if(scenario==0){
+   blocked=false;assert(!s.pump(0));assert(allocs==6&&captureQueued==6&&frames==1);
+   assert(!s.requestDrain()&&!s.pump(0)&&s.state()==Sq2V4L2Session::State::Ended);
+  }else if(scenario==2){
+   fatal=true;assert(s.pump(0)==-ENOMEM&&s.state()==Sq2V4L2Session::State::Failed);
+  }else if(scenario==3){
+   frameSent=false;assert(s.pump(0)==-EIO&&frames==1); // Duplicate DQ of vacant slot.
+  }else if(scenario==4){
+   assert(!s.requestDrain()&&!s.pump(0)&&s.state()==Sq2V4L2Session::State::Ended);
+  }
+  assert(!s.close()&&mappings.empty()&&releases==allocs-1);
+  held.reset();assert(releases==allocs);
+ }
+ puts("CAPTURE_BACKPRESSURE_RETRY_EOS_CLOSE_FATAL_AND_CLIENT_OWNERSHIP_PASS");
  large=true;
  for(unsigned scenario=0;scenario<5;scenario++) {
   ten=scenario!=4; invalid=0; largeCount=scenario==1?17:13;

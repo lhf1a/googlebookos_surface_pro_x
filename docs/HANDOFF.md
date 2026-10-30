@@ -1,5 +1,139 @@
 # SQ2 开发交接
 
+**2026-10-30 硬解收尾：重启回归通过，默认构建/部署已集成**：boot d9339db8…自动启动原生后端及AIDL服务，screen_only=Y，四个高通OEM alias均由普通APK发现。AVC/HEVC/VP8/VP9各600帧1080p60，输入/输出/渲染完整，EOS/realtime/pass=true，9977/9978/9978/9980ms，STOP/RELEASE通过。VP8新鲜查询1080p60/4K30=true、4K60=false；首次切用户后Activity暂未就绪的失败日志保留，未把旧结果当新结果。
+
+当前SQ2只提升已实测runtime8b6c1f9a…+addonfb1831a9…的菜单默认项至sq2-c2-test；原正常/原Mesa入口及镜像全部保留。已核对BC711容量、ESP B027-0512、data UUID、marker、原菜单和载荷hash，sync原子替换；新菜单SHA e1fe29c57b99f8bf8d5502ee8c63b2ee5e241eda7c5bca0eafc44dc950eb4e1f，备份grub.cfg.before-default-video。一次标记已消费0，提升后未额外重启；运行的正是此前正常重启通过的同一组合。没有将含不同SQ1触摸策略的通用f749镜像覆盖当前SQ2。
+
+build-source-boot默认包含硬解；build-source-disk生成正常启用/救援禁用菜单并在manifest写入hardware_video策略和菜单hash。deploy-experimental-usb在磁盘选择之前读取镜像内真实菜单校验，可用--require-hardware-video拒绝旧镜像；旧build-googlebook-ssd --update-boot拒绝硬解manifest，防止退回旧菜单。USB身份/原生NVMe拒绝保持。默认完整boot构建通过；本轮没有重新制作/烧录整盘镜像，公共无私有二进制的完全可复现构建仍非本次交付。
+
+主机部署4/default-menu3/XML2/runtime-boot3/runtime-package3、OEM别名、allocator标签测试通过；P010 copy和V4L2 session ASan/UBSan测试通过（初次缺host g++，安装后重跑exit0）。证据沿用out/video-decode/vp8-limits四角色及reboot-capabilities-fresh.txt、sq2-caps-addon-boot-play-d933-r2、promote-default-result.txt。BASELINE/MODIFIED/ROLLBACK的VP8 4K60=true/false/true，最终false。Bilibili剩余权益问题用户已定位；HDR继续暂停，不宣称任意高码率/长期稳定性。此记录随硬解收尾提交，音频未跟踪文件不纳入；Git合并结果以实际提交记录为准。
+
+**2026-10-30 默认源码构建已纳入硬解，部署/合并未完成**：新增scripts/sq2-video-boot-payload.py固定读取已审计12f1c0d5…候选，白名单导入etc/sq2-video-native、etc/sq2-c2-runtime-boot和固定hash Venus固件，helper从当前源码读取；不导入别的init/凭据。build-source-boot.py默认集成早期stage及post-boot后台hook，新增--output防覆盖。实际完整构建out/video-decode/default-build/native-combined-initramfs.cpio.gz SHA f749c61c7f7b28173497cc211ff44a4cffe1b480d26515fea6ff99bc619883b8，审计hardware_decode_included=true/password_addon_last=true/hardware_boot_tested=false。
+
+build-source-disk.py加入视频载荷/源码XML前置校验，生成grub-hardware-video.cfg（不再直接使用旧未跟踪菜单）；正常入口自动flags、救援不启用，三个启动helper新增sq2.video=0优先退出。default_menu三测试/runtime_boot三组/boot_codec_xml两测试和diff-check通过。尚未生成新整盘镜像或部署。注意通用源码安装流程原有ghost_touch_fix=False等非视频配置属于另一路SQ1安装工作，不能将f749完整镜像直接覆盖当前SQ2而回退其触摸等已验证修复；当前SQ2应基于其现用已审计镜像仅更新视频载荷/开关来做重启回归。
+
+下一步补部署清单对默认硬解菜单/载荷的一致性校验及实测，再以当前SQ2原非视频状态保留的独立候选启动验证VP8能力/四格式自动播放/高通别名，必要正常入口提升并保留救援；完成后审查硬解文件单独提交、合并main。当前仍未commit/merge/push，不混入音频文件。四角色沿用vp8-limits并延续ledger；原Android BASELINE4K60true/MODIFIEDfalse/ROLLBACKtrue已完成，不重复固件测试替代缺失部署验证。
+
+**2026-10-30 用户新增交付要求：默认构建/部署、提交并合并主分支**：完成后仅提交硬解相关改动并合并main；独立音频未跟踪文件保持，不混入私有产物。已git fetch origin；当前codex/sq2-video-decode HEAD81b72a6，origin/main9f4f426，尚未提交/合并。用户新要求取代仅修VP8后收尾的旧边界，默认构建与部署验证也是完成条件。
+
+已将实机验证VP8 XML候选整合configs/sq2-media-codecs-c2.xml；pack-sq2-c2-runtime-boot.py新增boot_codec_xml读取源码配置并固定校验5bfe57fa…，顶层boot XML独立于旧de2d runtime.tar，保持/data/vendor/sq2-codec2/v1不可变文件与hash不变。新tests/test_sq2_boot_codec_xml.py两项校验/拒绝测试、runtime_boot三组、codec_names及git diff --check通过。独立镜像out/video-decode/vp8-limits/boot-vp8-limits.cpio.gz SHA12f1c0d506d5dc654461e07bba96869ad601bf493e2b56d1ffc3ad3c64a299fc打包审计通过，私有SSH仍最后，尚未上传/启动。
+
+下一步将运行包/原生模块/固件与早期注册、post-boot自动启动复用进scripts/build-source-boot.py默认路径，更新build-source-disk.py菜单生成/部署输入检查，正常入口启用、救援入口不启用，并保留opt-out；不削弱USB/NVMe磁盘身份保护。注意源码启动包目前源base651f…，不能简单假设包含实验native bundle；lab-start依赖etc/sq2-video-native清单及venus-5.2/venus.mbn。现build-source-disk.py直接使用out/source-boot/grub.cfg，需避免未跟踪旧菜单漏掉硬解开关。之后构建完整候选、设备安全部署/重启查询和播放回归，再提交合并；不要提前标完成。
+
+**2026-10-30 VP8联合限制真实Android查询通过，尚未持久化**：先确认boot c1c87f3e/guardY、media PID2321、资源管理器无活动codec、设备XML原SHA1e9c4b56…。运行out/video-decode/vp8-limits/device-check.sh仅替换vendor RAM overlay的media_codecs_c2.xml并重启init服务media（不是C2/native/PAS），同一普通capsquery APK执行BASELINE/MODIFIED/ROLLBACK/FINAL：VP8 3840x2160@60依次true/false/true/false，1080p60和4K30全部true，rollback原hash和final候选5bfe57fa…hash通过。整个脚本exit0、boot不变、guardY、C2服务running，未重启固件。四阶段结果和原XML已取回vp8-limits/sq2-vp8-limits-c1c8，四角色VERIFICATION追加字面日志。当前设备overlay保留候选；本机原configs及启动镜像未改，重启会丢失修正，不能标完成。下一步只将已验证XML整合独立启动候选并验证持久化，保留原runtime二进制与userdata不可变包，不修改其清单造成安装拒绝；现pack-sq2-c2-runtime-boot.py从旧runtime.tar取XML，需要有明确且验证过的顶层XML覆盖路径。然后按用户最新收尾边界完成，不扩展HDR/新格式。
+
+**2026-10-30 用户确认账号权益冻结，收尾边界更新**：Bilibili剩余高画质码流问题由用户确认账号权益暂时冻结；停止该方向请求/响应追踪，不绕过权益。此前4K菜单缓存修复及应用自行重检测true保留。仅本机准备过分析依赖，未安装/运行设备注入服务。用户随后表示“解决后已经可以视为完成”：按当前剩余VP8联合能力误报修正并验证后收尾，不自动扩展新格式/8K/HDR专项；不能将尚未部署的候选算完成。
+
+VP8 XML候选out/video-decode/vp8-limits/MODIFIED_FILE.xml仅为原配置副本，增加16x16 block-size、block-count1-36864、blocks-per-second1-1036800、frame-rate1-240，原configs/sq2-media-codecs-c2.xml未改，其他codec/高通别名/HDR未改。来源caps-bcd0.json完整解析中VP8 decoder capabilities，不使用encoder值。初版证据脚本误读其他property的entries导致KeyError max/exit1，已限定capabilities后修正。同一check.py主机验证BASELINE/ROLLBACK缺联合限值exit1，MODIFIED边界算术exit0，4K30/32允许、33/60拒绝，1080p60允许；rollback hash及patch重建一致。四角色同目录DIFF_FILE.patch/VERIFICATION.txt/ROLLBACK.sh均回读。仅XML算术验证，尚非Android解析或实机播放验证。下一步验证Android读取候选后VP8 4K60=false且4K30/1080p60=true，再整合部署/持久化；现runtime/native不重跑PAS、不卸载。
+
+**2026-10-30 HD剩余4K播放问题已缩小到解码前码流选择**：回读13:03切换日志，SetUserQn=120，但IJK收到的HEVC列表仅quality80/64/32/16，streaminfo videos=4/cur_video_id80，输出size1920x1080；并未看到4K码流进入解码器。13:06正常VIEW重新进入同BV，play view request success后仍同四档，自动选64/1280x720。不能用这轮推断4K硬解失败，也不能仅凭IJK规范化列表断言服务器没有返回4K。APK PlayViewRepository通过q13.a构造fnval，后者静态代码在isSupport4K时OR128；单类反编译部分不完整，不代表实际请求bits已确认。下一步区分原始PlayView返回与客户端过滤，限采集qn/fnval/codec/尺寸等元数据，不提取账号密钥/绕过权限。boot c1c87f3e及guardY保持，本轮未改设备配置；证据cache-refresh/stream-selection.txt、reenter-log.txt及延续VERIFICATION.txt。
+
+**2026-10-30 Bilibili HD 4K菜单恢复，实际4K播放未确认**：tv.danmaku.bilibilihd 2.0.1/2001100，BV1NGZtBwELa同机Chrome显示4K而HD最高1080P高码率。已安装APK静态检查定位IjkOptionsHelper.isSupport4K：已有pref_key_is_ijkplayer_support_4k时永久复用BLKV缓存，只有缺键才检测HEVC 3840x2160/6Mbps。设备缓存该键false、HEVC enable最新true；普通APK能力查询HEVC4K为true且HD实际使用硬解。备份原75c4583b…到/data/local/tmp/sq2-bili-4k-cache-backup-c1c8/baseline.blkv，仅将这一键等长重命名为old__key…使缓存失效，保留其他键/账号/下载；不是强制写true。停止并重开HD后应用自行重新检测写true，截图确认4K超高清选项恢复。boot c1c87f3e/guardY，未重载固件、改启动盘或测试HDR。
+
+证据out/video-decode/bilibilihd/DIAGNOSIS.txt及cache-refresh四角色MODIFIED_FILE.blkv/DIFF_FILE.patch/VERIFICATION.txt/ROLLBACK.sh；同一文件检查BASELINE=false/MODIFIED=MISSING_REPROBE/ROLLBACK=false均exit0，rollback hash一致，binary patch重建通过；这是副本测试不是三次实机播放。实际重检测REPROBED.blkv=true。随后点4K，日志请求qn120，但后续截图仍1080P、视频size1920x1080，伴网络-1001/timeouts；不能称4K播放通过，尚未隔离请求/流选择/自适应回退/解码重配环节。PID5794 UID1010250资源名c2.sq2.hevc.experimental，播放器遥测名称OMX.qcom.video.decoder.hevc。下一步追踪qn120实际流与回退原因，再继续联合能力限制和完整SDR适配；保留当前runtime，不重跑PAS。原始APK/账号相关日志/BLKV只留out不入Git。
+
+**2026-10-30 runtime-v1 VP9 4K60 SDR普通应用通过**：同boot c1c87f3e/guardY，直接使用启动镜像自动运行的服务/native，不临时替换任何后端或声明。新增独立sdrnames.vp9fourk APK（UID1010261），FFprobe实际Profile0/yuv420p/3840x2160/60fps/600帧，容器平均码率4303921bps（不是高码率压力流）。普通APP报告format_supported/hardware=true/software=false，自动选c2.sq2.vp9.experimental，输出3840x2160，600输入/输出/渲染、EOS/realtime/pass true、elapsed10112ms（沿用10秒+500ms门槛），STOP_OK/RELEASE_OK。
+
+600帧copy_sync2625536us（DMA_SYNC784940us），IMPORT_RELEASE4/50184192B、SESSION_CLOSED0；boot不变、服务继续running、未重新PAS。证据out/video-decode/vp9-4k60-runtime（fixture/APK、sq2-vp9-4k60-runtime-c1c8结果/logcat/截图、timing.txt）。此结果补齐VP9 profile0当前测试流的4K60组合，不能推出任意码率/分辨率/长期稳定性；VP8高分辨率、联合限制及未实现格式仍需继续。正常默认入口未提升，HDR继续跳过。
+
+**2026-10-30 runtime-v1一次性启动与四格式自动播放通过**：重新核对BC711/1000215216、ESP B027-0512/marker、data UUID4f46…及loop0/p3，ESP余323916KiB足够199149026B候选。上传独立native-c2-runtime-v1.cpio.gz.new，设备SHA8b6c1f9a…/gzip通过后sync原子改名。旧菜单/env备份grub.cfg.before-runtime-v1、sq2-c2-test.env.before-runtime-v1；仅实验入口换新initrd并加sq2.video.autostart=1，菜单SHA28ab2b494d5fc5f7e0750162b5d229ee08d737ff6a7a23cf002c8b9411f200f8，默认sq2-internal保持。once1校验d762后原子设置并正常reboot；初次SSH超时后再次检查恢复，没有重复重启。
+
+新boot c1c87f3e-d69d-4e8a-9d33-e40e4f867a5b、guardY/boot_completed1、实验服务running。早期stage全部校验OK且DATA_UNTOUCHED，后台自动lab-start清单/固件校验通过、SQ2_NATIVE_VIDEO_READY、/dev/video0存在、PAS marker为新boot；未手动装载模块/替换服务。一次标记消费为0。切换user10/唤醒后直接运行既有四APK，均hardware=true/software=false/format_supported=true、自动选中对应C2、600输入输出渲染、EOS/realtime/pass true、STOP_OK/RELEASE_OK，AVC/HEVC/VP8/VP9耗时9979/9979/9979/9976ms。此次测试不再创建/撤销临时媒体XML，也不替换运行服务；验证的是镜像自带路径。
+
+证据out/video-decode/runtime-v1：deploy.txt、boot-stage.txt、auto-native.txt、sq2-runtime-v1-boot-play-c1c8。补充四角色MODIFIED_FILE.cfg/DIFF_FILE.patch/VERIFICATION.txt/ROLLBACK.sh对菜单副本执行同语义检查，BASELINE autostart=False/MODIFIED True/ROLLBACK False均exit0，patch重建及恢复hash一致；不是三次实机启动。原qcom-names四角色保留。默认正常镜像尚未提升，当前已启动的实验服务/native保持运行；不要重跑PAS。下一步检查正常启动提升的范围与回退并继续能力联合约束；完整能力和长期稳定性仍未完成，HDR跳过。
+
+**2026-10-30 runtime-v1独立启动候选已打包，未上传/启动**：实查实验initramfs，早期video-codec-manifest-stage发生于userdata尚未挂载时，不能在此写/data。设备init.rc确认post-fs-data先于on boot/class_start hal。新增video-runtime-stage只在vendor RAM overlay布置不可变运行包/安装器、原AIDL default1 rc/VINTF及媒体XML；vendor wrapper在HAL启动时先运行安装器，要求实际/data ext4挂载及guardY，校验镜像内固定hash，已有v1必须逐项匹配不可变manifest/拒绝符号链接，不覆盖未知版本；缺失才暂存校验后原子改名。无格式化/主动挂载userdata。
+
+新增video-runtime-framework-boot在retained initramfs后台等待Android boot_completed和服务running，只有experimental及新增sq2.video.autostart=1同时存在才调用既有lab-start；rescue/no flag直接退出，once目录和既有PAS guard保留，不卸载/重试固件。未增加网络、密码、休眠或全局mapper变化。pack-sq2-c2-runtime-boot.py以已审计e519实验镜像+de2d运行包为固定输入，生成out/video-decode/runtime-v1/boot-v1.cpio.gz，SHA8b6c1f9a83aee85cf86aca4342147ee50bd43fb37e17d8f3a9750a759761484b。完整解压last-entry-wins审计仅13条运行包/两个helper/init变化，其余内容保留，私有密码SSH addon仍最后；含凭据的镜像保持out，不提交。
+
+tests/test_sq2_runtime_boot.py三组主机测试通过，实际执行安装器fresh/existing、guardN/未挂载/损坏tar/篡改既有版本/父目录symlink拒绝，以及启动helper缺flag/rescue无操作。非真实启动证明，early-stage和首次启动时序仍待设备验证。本轮没有写ESP、重启或PAS。下一步重新核对设备磁盘/ESP/当前菜单与空间，上传独立候选，实验入口添加autostart旗标并保持默认入口/回退，再一次性正常重启验证自动注册/native启动/普通APK；不能把打包通过记为重启通过。
+
+**2026-10-30 版本化SDR运行包已实机验证，未接入开机**：新增pack-sq2-c2-runtime.py及sq2-c2-runtime-launch.c，将已测owner27161e41fb7aaba13a851ee14d9168da75568dc98b3ec21e2a14db954c602ee5、私有缓存库eb31d402…、四格式高通Alias XML和启动器打成独立tar。输入服务/库固定SHA拒绝未知版本，拒绝覆盖输出，逐项回读归档；两次构建得到相同SHA de2d825b34e09158076cf6b14f5777d0f843d6f5cc782d3961d7b2a6531b7f50。三项主机拒绝测试通过。包不含密钥/密码，不操作设备、VINTF或固件。
+
+设备root专用/data/vendor/sq2-codec2/v1已暂存此包（父目录0700），start.sh每次校验全部载荷、guardY，启动器建立私有mount namespace、绑定包内mapper、设置MAP_CACHE=1、清除P010_DIRECT/LD_PRELOAD并exec包内service。--names-test实机8名称通过/4secure拒绝。随后同boot50ec已有native，用包内路径临时启动服务/提供XML，VP9普通APK自动选中硬件，1080p60/600输入输出渲染/9978ms/EOS/realtime/pass true、STOP_OK/RELEASE_OK；mountinfo确认来自版本化目录。原service4e7d和全局mapper c1a57082恢复/保持，XML_REMOVED，无PAS重载。
+
+产物out/video-decode/runtime-v1/runtime.tar及同目录设备检查、播放证据；原qcom-names四角色ledger继续扩展，原host BASELINE1/MODIFIED0/ROLLBACK1不变。该包解决运行时依赖散落在临时测试文件的问题，但未修改initramfs/默认启动：下一步需把版本化运行包与早期VINTF/媒体声明、一次性native启动时序整合为新的独立启动候选并审计回滚，不能直接宣称重启后可用。现有v1目录已存在，后续必须验证/复用或换新版本，不能盲目覆盖。
+
+**2026-10-30 四格式自动选择及HEVC一分钟循环通过**：同boot50ec、已驻留native，未重载固件。复用前轮四个普通APK/1080p60/8-bit素材，改codec=auto：AVC High、HEVC Main、VP8、VP9均报告hardware=true/software=false/format_supported=true，AUTO_SELECTED分别为对应c2.sq2.*.experimental；各600输入/输出/渲染、EOS/realtime/pass true、STOP_OK/RELEASE_OK，耗时9978/9980/9977/9979ms。显式高通别名和自动选择两条路径均有证据，但自动选择返回Codec2 canonical名，不谎称已将canonical改成OMX。
+
+随后同会话HEVC Main以loops6重复10秒片段，3600输入/输出/渲染、59980ms、EOS/realtime/pass true，STOP_OK/RELEASE_OK，原实验服务4e7d98a7…恢复、全局mapper c1a57082…未变、XML_REMOVED、guardY。此为60秒循环/时间戳拼接验证，不是独立长片、小时级稳定性或多会话压力认证。脚本按严格结果断言退出，未放宽门槛。证据out/video-decode/qcom-sdr-matrix/sq2-qcom-auto-matrix-50ec、sq2-qcom-hevc-loop-50ec和auto-kernel.log/loop-final.txt；原qcom-names四角色ledger延续，主机名称BASELINE1/MODIFIED0/ROLLBACK1保持。接下来需补可重复部署/正常启动持久化及联合能力边界，不再重复已通过的同一短片检查充当完整适配。
+
+**2026-10-30 四种高通原版名称的普通应用1080p60验证已齐**：同boot50ec/native驻留/guardY，不重载固件。新增独立包sdrnames.avc/hevc/vp8，实际UID1010258/1010259/1010260；FFprobe逐帧核验素材均1920x1080/60fps/yuv420p/600帧，分别AVC High、HEVC Main、VP8 profile0，签名验证及user10安装成功，保留原包和数据。首轮WSL内联shell变量传递丢失导致意外生成默认baseline素材，后续期望High文件不存在的ffprobe exit1；已改用保存的Python subprocess参数数组逐项构建，错误素材未用于本轮测试。
+
+collector8621确认READY、独立脚本8915复用私有eb31映射缓存和新名称owner，三个普通APK显式使用OMX.qcom.video.decoder.avc/hevc/vp8：各600输入/输出/渲染、EOS/realtime/pass均true，分别9978/9979/9979ms，STOP_OK/RELEASE_OK、三个CODEC_PASS及TESTS_FINISHED。结合上轮VP9 9981ms，四种原版名称均已完成普通UID的1080p60测试APK播放；不是所有第三方APP、4K边界、长片或完整生命周期认证。恢复原service4e7d98a7…、全局mapper c1a57082…不变、XML_REMOVED，native仍驻留，禁止重复PAS。
+
+证据out/video-decode/qcom-sdr-matrix：三个fixture.json/APK、sq2-qcom-sdr-matrix-50ec中的结果/logcat/截图及final-state。原qcom-names四角色保留并扩展ledger，主机名称BASELINE1/MODIFIED0/ROLLBACK1不变。后续优先将已验证服务/私有启动器/声明纳入可重复实验部署，补App枚举/自动选择、长播放和联合能力边界；正常启动持久化仍未完成，HDR继续跳过。
+
+**2026-10-30 VP9高通名1080p60实时通过（私有映射缓存对照）**：同boot50ec/guardY/native驻留，不再PAS。重新核对私有库eb31d4022c97e1ac70e4b396eeb7c5599d1f904730bbdd241704a6929bc967a8与历史已测缓存版本一致，全局库c1a57082…未改。仅复制现有sq2-map-cache-private.c并将exec目标指向已验证的新命名owner，NDK构建私有启动器；不改变缓存算法、预算或同步。独立collector26307确认READY后运行相同APK/1920x1080 VP9 profile0 60fps码流/高通名称，服务26575 mountinfo确认私有bind而非全局替换。
+
+普通UID1010257以OMX.qcom.video.decoder.vp9显式播放：600输入/输出/渲染，EOS/realtime/pass均true、9981ms、STOP_OK/RELEASE_OK。与上一轮无缓存13984ms失败保持同一门槛。600帧copy_sync由8756477us降到662502us，其中DMA_SYNC193052us、Y319645us/UV148325us；IMPORT_RELEASE count7/22020096B、SESSION_CLOSED result0。不是“零复制”，也不证明4K60/所有APP/其它codec。全局库原hash、原实验服务4e7d98a7…和临时XML清理均核验，未重启、未重载固件。证据out/video-decode/qcom-vp9-app/sq2-qcom-vp9-cache-50ec及cache-timing.txt，源原件未改。下一步把已验证私有启动条件纳入可重复部署，并依次验证AVC/HEVC/VP8高通名称的普通应用播放及更高尺寸/长播放；HDR继续跳过。
+
+**2026-10-30 高通VP9名称普通应用真实播放：功能完成，1080p60实时性失败**：同boot50ec46b7、guardY，独立包org.surface.sq2.videotest.sdrnames安装user10，保留原测试包/数据；素材为既有VP9 profile0/yuv420p/1920x1080/60fps/600帧。独立collector19347 READY及smoke确认后本boot仅一次lab-start成功（core a5f2bcc5…/dec66e9c26a…），没有重载固件。data wrapper新命名服务+临时XML窗口，普通UID1010257显式CREATE OMX.qcom.video.decoder.vp9并START同名，实际输出1920x1080，600输入/输出/渲染、EOS true、STOP_OK/RELEASE_OK；elapsed13984ms、realtime=false、pass=false，不得记1080p60通过。截图已查看，完整彩条测试图，不代替逐像素验证。
+
+OUTPUT_TIMING frames600：fetch694203us/map88905us/copy_sync8756477us/unmap42821us；PIXELS y5739553us/uv2875018us，输出复制是主要已观察开销。此窗口未使用旧私有map-cache wrapper，只用了data可执行路径；不能把既有4K优化结果直接移植为本轮性能结论。下一步核对既有缓存映射候选与当前后端CPU访问属性，再做同码流对照，仍保留600帧/实时门槛。原实验service4e7d98a7…恢复、临时XML移除、boot不变，native当前驻留，禁止再次lab-start/PAS。证据out/video-decode/qcom-vp9-app（stages/result/logcat/frame/native/kernel/final-state），原qcom-names四角色ledger已追加；主机名称基线1/修改0/回滚1不变。其余三个高通名称普通应用播放尚待验证，HDR仍跳过。
+
+**2026-10-30 高通别名已通过真实MediaCodec创建/释放，尚未播放**：重新核对磁盘/ESP/菜单及镜像后，备份一次env到sq2-c2-test.env.before-sdr-names，原子设置once1；首条重启因PowerShell末尾CR导致路径reboot\r不存在（exit1），随后纠正命令正常重启，非自主崩溃。新boot50ec46b7-22ac-4efc-ae2a-853d5596237a、guardY、boot_completed1、实验AIDL服务running，一次标记已消费为0。本boot没有执行lab-start/PAS，也没有视频节点。
+
+名称窗口a把新ELF直接放vendor，因linker namespace缺libicu.so服务停止，创建超时124；主动终止脚本并恢复原service hash4e7d98a7cbb4621cfada47bacd9f75250d542aab40d1543df369d532ff640b89。窗口b纠正为vendor shell wrapper执行data中的同一候选，并在测试前确认服务running；原XML四别名未改。真实AMediaCodec_createCodecByName对AVC/HEVC/VP8/VP9的c2.sq2旧名和OMX.qcom原版名共8项均nonnull、delete0、exit0；logcat对应8次CCodec分配正确canonical组件，非旧OEM OMX实现。无configure/start/视频帧，尚不证明普通UID应用播放、MediaCodecList别名展示或吞吐。两轮都持久日志及trap恢复，窗口b收尾原service hash一致、XML_REMOVED、PAS_NOT_ATTEMPTED、guardY，boot不变。
+
+证据out/video-decode/qcom-names/framework-a.txt、framework-b.txt、framework-b-logcat.txt、final-state.txt；原四角色已重新打开，VERIFICATION.txt追加本轮证据，原host BASELINE1/MODIFIED0/ROLLBACK1不变。下一步复用此boot实验注册环境，先独立collector再仅一次lab-start，使用data wrapper新服务做显式高通名的普通APK SDR播放；不可重复走vendor ELF链接失败路径，不启用P010专项。
+
+**2026-10-30 高通原版名称兼容候选**：用户要求所有已验证解码器名称与原版高通一致。实查设备vendor XML的非secure AVC/HEVC/VP8/VP9名称分别为OMX.qcom.video.decoder.avc/hevc/vp8/vp9。现有实验XML已列出四个Alias，但store此前只接受c2.sq2.*。现sq2-codecs.h增加sq2CodecAlias/sq2CodecMatches，store的Traits.aliases、createInterface、createComponent均接受对应高通名；返回接口保留Codec2 canonical名及旧测试名兼容。不新增secure/MPEG/HDR能力，不把此自研后端称为OEM OMX实现。
+
+服务构建通过；设备独立--names-test验证四组共8个名称均能创建interface/component，4个secure名称拒绝，NAMES_PASS/exit0，无Binder注册、无固件启动、无视频解码。尚未验证MediaCodecList公开别名、createByCodecName全链路及不同APP，不能称部署完成。tests/test_sq2_codec_names.py从现有XML读取别名，交叉编译实际header解析逻辑，覆盖旧主名、别名、错codec和secure拒绝；同测试BASELINE1/MODIFIED0/ROLLBACK1，patch重建及还原字节一致。补充四角色out/video-decode/qcom-names：MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh（目标为包含两个源文件的副本目录）；原角色保留。下一步在已审计实验入口使用新service与既有XML，验证Android名称发现和显式高通名播放，再继续SDR吞吐。
+
+**2026-10-30 用户更新目标：跳过 HDR 相关能力**：后续硬解适配继续推进 SDR，不再推进 HDR/HDR10、P010直接输出及Main10性能专项；已有实现、失败证据和回滚保留，不删除或宣称修复。10-bit与HDR不等价，本次暂停专项不代表修改已存在的profile声明或硬件能力。此条优先于下方历史记录的P010“下一步”。
+
+**SDR接续启动审计与runner已完成**：只读重新核对BC711/1000215216、ESP B027-0512/marker SQ2-INTERNAL-512-20261027、data UUID4f46d2ec-323e-486e-b473-fc2adc0849ba、loop0 backing p3及一次env=0。设备菜单d1ae9af6…未变；取回正常镜像5ba59bd91c14208442a15792dedff236b0f1789c4d8fe10d00ee50f5e0a4953c及实验镜像e519556b0d5e5aa7ccb98772ef58fceee6fad2647f905cf85a914cab58a60b7b，完整hash/gzip及last-entry-wins比较成功。最终差异仅23个新增视频目录/文件和init的一处video-codec-manifest-stage调用，其余正常功能（含私有SSH文件）不变。证据out/video-decode/sdr-boot-audit/comparison.json；镜像仅私有out，不提交。没有写ESP、没有重启、没有PAS。
+
+原test-c2-player.sh保持不变，副本out/video-decode/sdr-vp9-1080p60/MODIFIED_FILE.sh新增vp9-1080p60允许标签及600帧实时/EOS验收分支，不把它套用300帧判定。该目录DIFF_FILE.patch/VERIFICATION.txt/ROLLBACK.sh为补充四角色，原venus-transport及p010-backpressure角色保留；同sh -n检查BASELINE/MODIFIED/ROLLBACK均0、patch重建和还原hash一致，非硬件解码验证。下一可执行步骤：再次确认设备当前boot/一次env后，备份并原子设置既有一次性实验入口，再正常重启进入已审计镜像；启动后先核对模块hash、guard及独立collector，之后每boot仅一次lab-start。复用NV12/原allocator，不恢复P010专项。APK仍未安装，须先核对签名或沿用独立包名，不能卸载原应用数据。
+
+本轮只读实查设备仍为5e25567a-6282-42ac-a81e-d9e5c01773b3、screen_only=Y、nohibernate，正常启动未含sq2.video.c2=experimental，无video节点及实验C2服务状态；未重新启动固件或改启动盘。SDR接续先补VP8/VP9高分辨率与吞吐验证（既有普通APK证据仅320x240），随后覆盖生命周期/长播放及正常启动集成；不能把AVC/HEVC通过替代VPx验证。MPEG和联合尺寸/帧率约束仍未完成。已用现有构建器生成VP9 SDR APK，ffprobe完整计帧确认Profile 0/yuv420p/1920x1080/60fps/600帧，签名验证通过；SHA256为88c08757af6bbc178423204a9624488dc04d1ca05970f6255f76a971fa60160b，产物out/video-decode/player-app-1920x1080-vp9-60fps/sq2-video-test.apk。尚未安装或实机播放，不代表硬件吞吐通过。
+
+**2026-10-30 直接输出背压离线修复候选，未实机**：按固定frameworks/av源码核对C2IgbaBlockPool与C2BufferQueueBlockPool，未可用槽/等待fence可返回C2_BLOCKING，不能统一当物理ENOMEM。组件现在C2_BLOCKING映射-EAGAIN、C2_NO_MEMORY保留-ENOMEM、其余-EIO，并保留原始C2状态日志；这修复错误分类，但上轮真实C2状态未记录，不能反推六帧失败必为BLOCKING。
+
+sq2-v4l2-session.h新增refill_逐槽状态：DQ交付后不复用客户端owner；分配新lease用局部临时对象，失败不污染槽；EAGAIN保留空槽，后续每次pump重试一次，不重复交付、不自旋、不重排入队客户端像素。QBUF成功才清空refill；收到空槽的重复DQ返回EIO；close清空待补槽。NV12固定复用模式保留，真正ENOMEM仍sticky失败，LAST/EOS不要求补回已结束槽。首次configureCapture分配遇阻塞仍fail-fast；组件尚无独立输出事件线程、长阻塞调度/outputDelay联合协商未完成，不能宣称完整背压已解决。
+
+扩展实际头的syscall mock：NV12/P010暂阻3轮后恢复、持续阻塞时close、EAGAIN后真实ENOMEM、空槽重复DQ、阻塞时EOS、客户端保留lease及释放计数均通过，旧固定100帧/4K池预算/部分分配回收也通过。四角色out/video-decode/p010-backpressure：同新增测试、同无参数输入，BASELINE/ROLLBACK在暂阻断言处SIGABRT（Python returncode -6），MODIFIED0；patch重建和rollback源hash一致。禁core输出，不是实机三态。默认服务构建SHA55099296565fc4b731827c3b683a32f3785575c23668ae1321ec5a6b6ecb6889，未部署。本轮未操作设备、未启动固件。下一步在重新核对当前启动入口/设备状态后，通过原始C2状态与池额度日志验证直接输出，仍保留原allocator及row owner恢复路径。
+
+**2026-10-30 P010直接输出候选：布局匹配，6帧后分配失败；用户确认随后外部重启**：独立C2分配器4K探针实测P010 3840x2160及3840x2176均25079808B、stride7680、UVoffset16711680/16711682，3840x2208为25448448B、UVoffset16957440/16957442；三尺寸10bit写入/重映射读回均通过，PROBE_EXIT0后原allocator恢复。证据out/video-decode/p010-layout-4k/live.txt。原生4K size25067520/UV7680*2176，与2160高gralloc实际对齐容量相容，但不代表任意布局可直接进口。
+
+sq2-c2-v4l2-component.h新增默认关闭的SQ2_P010_DIRECT=1分支：fetchGraphicBlock后map等待acquire，逐项校验P010深度/采样/stride/UV偏移/plane0offset，scope结束解锁；核实两fd同inode/dev、实际容量及池预算，dup fd并用Lease持有graphic。session reuseCapture=false，DQ后交付share，再另取新lease，禁止覆盖客户端持有帧；NV12及默认copy路径保持。基线C2AllocatorGralloc源码unmap使用同步GraphicBufferMapper::unlock；实际平台/复杂fence及失败矩阵仍须继续验证，不是通用零复制保证。替换lease/close/client ownership等现有session QEMU测试通过。
+
+显式试验owner1dbc6c64…（仅本地生成服务源码注入env，常规builder不注入）在旧b621同boot测试：自动选中并START/OUTPUT_FORMAT，C2日志OUTPUT_TIMING frames=6、copy_sync_us=0，随后SESSION_ERROR errno=-12。应用STOP_ERROR/RELEASE_AFTER_STOP_ERROR，未达到600帧或实时性。底层两次session close记录result0及capture-released；完整stage记录RUN_EXIT1、RESTORE_EXIT0和OWNER_RESTORED，旧row owner6e4209d9…已恢复。原失败码将所有fetchGraphicBlock状态折为ENOMEM，**不能据此断言物理内存耗尽**；现已补DIRECT_FETCH_FAILED真实c2_status/pool/capture_count日志，编译通过尚未实机。下一步检查C2输出池额度/等待背压及outputDelay=8与capture队列数量的关系，不能直接放大队列或重启固件重试。
+
+SSH曾卡ECDH/关闭；后使用严格主机校验的ecdh-sha2-nistp256重新连通，但此时boot已变5e25567a-6282-42ac-a81e-d9e5c01773b3。用户明确确认“手动或其他任务重启”，不得记为自主崩溃；用户此前确认桌面触摸正常。当前guardY、无/dev/video*、实验C2服务未运行、data owner为row6e4209d9…，本轮没有在新boot装载固件。旧collector以signal结束53061ms/234records/19358B，不能称完整120秒。后续须重新核对启动入口与硬件状态，优先离线处理背压问题。
+
+四角色补充out/video-decode/p010-direct：BASELINE/MODIFIED/ROLLBACK均实际构建并在新boot无参数本地枚举4组件exit0，rollback源字节hash一致；不注册Binder/不打开视频，不代表三次硬解。原venus-transport角色保留并扩展ledger。阶段日志/应用日志/collector已取回，完整适配目标仍未完成。
+
+**2026-10-30 4K60 Main10真实Surface出帧，性能不通过；P010行复制有改善**：用户最新目标明确允许直接操作Surface并跳过锁屏，保留screen-only/nohibernate，不代表允许真正休眠。原93.42Mbps向量保留。首次VBV40000/40000样本因初始CPB仍有41.397495Mbps平均码率，没有部署；另存out/video-decode/main10-4k60-vbv35，VBV35000/35000、Main-tier5.1、真yuv420p10le、3840x2160/60、600帧/3B，实测36.225498Mbps。使用同签名独立org.surface.sq2.videotest.main10 APK更新user10，未更改原应用。
+
+同boot b621a7ac/guardY、9608 owner/c859 allocator在独立watchdog窗口实测：自动选c2.sq2.hevc.experimental、hardware=true、format_supported=true，成功START/OUTPUT_FORMAT；25秒期限146输出/渲染、152输入，eos=false/realtime=false/pass=false，STOP_OK/RELEASE_OK。计时149帧copy_sync22367937us，主要问题转为输出复制性能，不是发现拒绝。门槛首次switch-user10过早返回Failed，随后确认可用时切换成功，必须以actual-user10判断，不只凭命令调用过。完整run脚本持久日志、独立恢复计时器保留。
+
+修改sq2-c2-v4l2-component.h的deliver() P010分支，新增sq2-p010-copy.h：已验证深度/stride/capacity后，Y连续16bit及UV交错相邻2字节的布局使用现有sq2_copy_row的NEON行复制；其它有效平面布局保留逐样本fallback，不改变NV12、同步、所有权或广告。tests/sq2_p010_copy_test.cpp以参考逐样本结果比较整块内存，覆盖planar/UV/VU/列跨度、未对齐、padding及3840宽；aarch64静态/QEMU通过。新owner SHA6e4209d90a711fbb7d6ac8ecd49340156ca273e0a99d0a299b3415c1ccbe90ed构建通过。
+
+同样APK/码流的第二窗口main10-4k60-row，collector11871/watchdog11981，普通UID1010255自动选中，真实布局rows7680/cols2,4,4/UVdelta2；25秒235输入、229输出/渲染，仍eos=false/realtime=false/pass=false，STOP_OK/RELEASE_OK、RUN_EXIT1、RESTORE_EXIT0。233帧copy_sync20875873us，其中DMA_SYNC498503us、像素复制20376543us；约87ms/帧复制仍不够60fps。晚帧截图有完整彩色渐变斜纹，非逐像素/HDR证明。不能把性能改善说成4K60通过。
+
+两轮结束均恢复原allocator7f394d70…，row watchdog最终ORIGINAL_ALREADY_PRESENT_NO_RESTART；XML已撤销、current-user10、surfaceflinger running、boot未变、guardY，正常入口未改、未重启PAS。当前data owner保留6e4209d9…运行，backup before-row为9608。collector完整120001ms/396records/32526B取回。补充四角色out/video-decode/p010-row-copy，BASELINE/MODIFIED/ROLLBACK同无参数store本地枚举count4/exit0，恢复源hash一致；不是三次硬解。真实性能对照只有146→229帧两轮。下一步实查gralloc P010容量/UV偏移与native capture几何，设计保留所有权/栅栏的直接DMABUF输出或消除复制的路径；不可盲目取消容量检查、扩大广告或放宽realtime门槛。High-tier、其它codec/联合约束及正常启动持久化仍未完成。
+
+**2026-10-30 Main10 4K60发现拒绝已定位到码率；纠正上一轮服务缺席判断**：重新核对kernel.log，surfaceflinger29821已在候选窗口启动，并正常访问allocator；上轮查询误用大写SurfaceFlinger造成假阴性，不能据此认定服务启动故障。init子进程崩溃在切换前已经存在。恢复原版后surfaceflinger9048的重启也与手动allocator恢复吻合。此前“框架状态异常”并非已证实根因。
+
+本轮b窗口使用setsid+持久xtrace，collector2735/watchdog2822 READY后复用已核验9608 owner/c859 allocator，无PAS。首次稳定门槛的am get-current-user在activity暂未就绪时失败，set-e提前退出；没有重新切换allocator，另行确认system_server/surfaceflinger两PID及user10后，才继续同窗口播放器。普通应用实际得到CAPABILITY hardware=true/profiles2/format_supported=false，AUTO_SELECTED null，PLAYER_EXIT1，XML清理RESTORED，没有开始解码。随后手动恢复allocator7f…；180秒watchdog确认ORIGINAL_ALREADY_PRESENT_NO_RESTART。owner现保留9608候选running（不是默认启动部署）。
+
+增加仅测试APK的格式/VideoCapabilities输出，原版allocator下再做发现诊断：c尝试因框架恢复后current-user0、包只安装user10而未启动，恢复user10后的d尝试实际输出INPUT_FORMAT bitrate/max-bitrate93424830、3840x2160/60/profile2/level65536；VIDEO_LIMITS bitrate=[1,40000000] size_rate=true，format_supported=false。本机FFmpeg trace_headers确认码流general_tier_flag=0、general_level_idc=153，ffprobe确认Main10/yuv420p10le/600帧、93.42483Mbps。故当前测试素材未约束码率，与Main-tier5.1声明的40Mbps不匹配；不能归为4K60硬件吞吐失败。下一步在保留原不匹配向量证据的前提下生成有VBV约束的Main-tier5.1完整4K60 Main10流，再测自动发现/Surface；High-tier/更高码率必须单独依据固件能力和实测对齐，不可直接抬高广告。普通应用Main10 4K60仍未通过。
+
+原四角色和main10-4k60-run补充角色保留、ledger追加；该补充BASELINE/MODIFIED/ROLLBACK仍是shell语法均0及还原哈希一致，不是硬件三态对照。证据同目录capability-result.txt及b/d持久阶段日志。下一次稳定门槛必须容忍am/pidof瞬时失败、核实两个进程和user10；此为诊断脚本缺陷，不是decoder能力问题。
+
+**2026-10-30 Main10 4K60窗口在播放前中止，已恢复**：核对安装包证书不同（原4524c6f3…、本机13879b22…），以独立包名org.surface.sq2.videotest.main10重新打包/签名并为user10安装成功，未覆盖/卸载原应用。第一次签名相对路径多一层导致exit1，修正后验证0。测试脚本副本改独立包名和hevc-main10-4k60-a，仍要求600输入/输出/渲染和realtime/EOS。原脚本未改。
+
+同boot b621a7ac/guardY，collector29594 smoke与watchdog29685 restore-main10 main10-4k60-a READY后，备份e7da owner并临时换9608、scoped allocator c859（库22f7）。此轮新增执行了allocator restorecon；不能直接归因，但与前次成功部署不同。allocator/C2曾running，框架重启期间SurfaceFlinger缺席，临时播放器进入清理且没有result.txt，未取得任何本轮解码结果。SSH旧连接失去后续输出，但新连接一直可用；远端测试脚本已不存在，故结束本地残留SSH，不重启测试。临时XML已撤销，logcat30539已停止。不得把缺result当作4K60性能失败或固件崩溃。
+
+已手动恢复allocator（7f394d70…hash一致），后180秒watchdog记录ORIGINAL_ALREADY_PRESENT_NO_RESTART；owner也从本轮备份恢复e7da7db7…并重启实验C2。恢复后system_server9259、surfaceflinger9048，截图确实显示桌面；boot不变、未重新PAS、未写启动盘。collector完整120000ms/415records/33110B已取回，但过滤器未保留init service/exec错误，现有日志中的Trusty/TPM循环崩溃不能归因于本次解码。证据out/video-decode/main10-4k60-run；补充四角色仅shell语法BASELINE/MODIFIED/ROLLBACK均0，回滚字节一致，非三次硬解；原四角色ledger已追加。下一步先补有界init错误采集和框架稳定门槛，查清服务窗口失败，再用新的独立label重试，不能盲目重复allocator切换。保留独立测试APK供后续使用。
+
+**2026-10-30 本机同步后的接续检查点**：解码器分支从c19ba9b快进至65c1662，保留本机四个未跟踪音频文件，未纳入本轮。实查设备仍b621a7ac-3cc8-4d0b-8933-6faf4a7c9082、guardY/boot_completed1，allocator原版7f394d70…，C2 wrapper bdf11d60…仍running，没有重新PAS或切换服务。本机重新构建C2服务得到与检查点完全一致的9608a1f3…；本机缺失的4K60 Main10 APK已重新构建并签名验证通过，SHA256 cd406bac4017d2e32be05f5dbe0d7d0acbcbc859b99965ea77a662b0855ee4c3，600帧/Main10/yuv420p10le/3B帧。此机新生成私有测试签名，安装前须核对设备已有测试包证书，不能盲目覆盖或卸载清数据。APK尚未上传/安装/播放。
+
+watchdog新增可选第二参数label（1..48字符，仅字母数字下划线连字符），形成同boot独立证据目录，保留无label旧路径和mkdir拒绝覆盖。tests/test_sq2_allocator_labels.py同一输入BASELINE退出1（第二个不同标签仍撞旧目录）、MODIFIED退出0（不同标签独立、重复拒绝、非法/空/过长拒绝）、ROLLBACK退出1；patch重建和还原SHA一致。原12项watchdog和5项restore保护回归通过；QEMU静态会话测试含4K P010预算/EOS/失败回收通过，非本轮硬解实测。设备仅运行新脚本observe labels-20261030-a，5秒后OBSERVE_FINISHED_NO_CHANGE、allocator哈希不变。补充证据out/video-decode/allocator-labels，原venus-transport四角色仍保留并扩展ledger。下一步核对测试包签名、加入Main10 4K60播放器独立label/600帧断言，再用新label恢复窗口部署已构建owner并做有界Surface测试；当前未证明4K60 Main10普通应用通过。
+
 **2026-10-30 保存检查点：4K Main10独立C2六帧通过，4K60 APK构建完成未测试**：新增sq2-video-memory.h，原生P010单帧32MiB/池384MiB，NV12仍16MiB/192MiB，压缩输入和可选import/map缓存上限不变。session协商/queue及C2 dma_heap分配共用格式对应上限。P010当前不进入仅NV12的mapper缓存，不能把增大native池当作性能优化。主机ASan/UBSan测试覆盖4K P010 13槽成功/EOS、17槽超预算、单帧越界、分配第7槽失败后全部回收及NV12旧限制，原生命周期/错误/重用测试也通过。
 
 HEVC向量脚本新增--size 320x240/1920x1080/3840x2160，P010样本检查改array避免巨量Python整数；默认小向量行为保持。组件harness按向量尺寸复制/算CRC/配置接口，4K等待60秒；builder新增--vector-dir/--output-dir保留旧产物。生成hevc-main10-4k-vector为3840x2160、真10bit、6帧无B帧，独立FFmpeg P010参考。新C2服务本地构建SHA9608a1f372af6f86676819c560e03c2cc3649b011e2eb921afB6AB1E6C8A5E5E（大小写无关），**尚未替换运行owner e7da7db7…**；默认AVC harness新源码编译通过，尚未新实机回归。
