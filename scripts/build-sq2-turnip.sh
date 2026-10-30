@@ -44,7 +44,7 @@ pkg_config_libdir = '$WORK/pkgconfig'
 EOF
 if [ ! -f "$WORK/build-turnip/build.ninja" ]; then
   meson setup "$WORK/build-turnip" "$SRC" --cross-file "$WORK/turnip-aarch64.cross" \
-    --buildtype=release --wrap-mode=nofallback -Dforce_fallback_for=libdrm \
+    --buildtype=release --wrap-mode=nofallback -Dforce_fallback_for=libdrm -Dallow-fallback-for=libdrm \
     -Dplatforms=android -Dplatform-sdk-version=35 -Dandroid-stub=true \
     -Dandroid-libbacktrace=disabled -Dllvm=disabled -Dglx=disabled -Dgbm=disabled \
     -Dvideo-codecs= -Dgallium-va=disabled -Dzstd=disabled -Dexpat=disabled \
