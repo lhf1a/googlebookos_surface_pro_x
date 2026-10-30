@@ -16,5 +16,12 @@ MODIFIED 退出0，进入 Touchscreen 模式。完整记录留在忽略的 out/t
 未扩大热图补丁原有的 045E:0C21/46x68 适用范围。
 
 回归：python3 tests/test_surface_touch_device_ids.py。
-本次修改未重建或重新写入设备启动包；当前设备触控仍是临时启动。
-重新构建、自然重启及关屏后恢复需要后续验证。
+随后用户授权写入 SQ1 启动镜像：pack-surface-touch-ids.py 基于实机
+82979058…镜像，仅追加两个助手的变更，完整 last-entry-wins 审计通过，
+IPTSd 仍为无幽灵补丁的5c0fd552…，密码SSH addon仍最后。
+新镜像SHA256为c5c64cda4095f081ce3ff42eaa3e2b4a3aba03ceae2f93364b5e8639b0a04769。
+核对Toshiba128GB NVMe、ESP/data UUID、marker、系统盘来源及guardY后，
+备份旧文件至ESP同目录的native-combined-initramfs.cpio.gz.before-0996-20261030，
+gzip/hash检查、sync后在同目录重命名替换。新旧文件哈希均匹配，
+Image/DTB/GRUB不变，boot ID不变，未主动重启或格式化。
+下次自然重启自动启动触控及关屏后恢复仍需验证。
