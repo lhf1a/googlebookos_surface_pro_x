@@ -1,5 +1,33 @@
 # SQ2 开发交接
 
+**2026-10-30 带宽/降分辨率小对照：未测出带宽极限，已同boot恢复65**：用户先要求完整Android70测试。一次性入口实际启动88d5ec48…，5.4×4、DRM2880×1920@70/414750kHz、Android70、guardY均匹配，但用户明确画面/操作异常，不算通过；一次标记消费0，菜单恢复37bdce73…，用户手动恢复后adab52a4…实际65/Android就绪复核。没有自动恢复重启或热卸显示驱动。
+
+用户随后提出2.7×4有效带宽假说，明确选择“固定70Hz降低真实输出分辨率”。已说明原生65按时序预算9.24288Gbps已高于8.64，不能从花屏直接认定硬门槛。新增软件EDID矩阵8c66f21b…，原生65保留首选，另列2560×1706@59.998135（283160kHz/预算6.79584Gbps）、同分辨率@69.999237（330360kHz/7.92864）、2700×1800@69.998662（366170kHz/8.78808）。只需一次矩阵候选启动；原init/base/Image/DTB/模块080cceff及凭据保持，原60/救援及默认65保留，无自动重启。Android cmd实机help支持临时STORE_MODE=false；get-active-display-mode虽列help但实际Unknown command，已改用dumpsys+真实DRM读回，未重复执行切换。
+
+矩阵boot59556813-0cf8-4d11-90d7-056c6928ebc7，Android识别4模式，初始原生65。用set-user-preferred-display-mode 2560 1706 59.998135 0 false切真实KMS：Android2560×1706/59.998135、DRM2560×1706@60/283160、display ON、pixel读回283160000、链路540000×4；用户明确“2560×1706是黑屏”。此负对照预算6.79584<8.64仍失败，不能把黑屏当超2.7×4的带宽证据；本内屏非原生时序/视频传输配置混杂尚未排除，**带宽极限与70Hz最高可用分辨率未确定**。按控制门槛停止，后两个低分辨率70模式仅枚举、未执行，不原样继续逼近。
+
+reset-user-preferred-display-mode 0 exit0，在同boot595…恢复DRM原生65/385120、Android64.99915、临时偏好null、guardY，用户确认“已恢复正常”。system_server/SF仍2222/2030，未重启框架或整机。已按盘身份/双UUID/root/hash/一次标记0校验，备份并原子恢复原5入口菜单37bdce73…，默认65/原60/Mesa/救援/关机保留；多模式仅当前启动驻留，下次默认仍单65。build-sq2-bandwidth-edid.py仅软件EDID、保持原生首选并替换3描述符为测试DTD，不写EEPROM；1项时序单测通过，原四角色control-v5复用，矩阵副本1/4/1模式、原生首选均64.999156、校验0、rollback65 hash/重建通过。out/display-refresh/bandwidth-test含方案/安装/控制失败/恢复证据，未入Git；新建status.json记录此失败控制与下一步约束，不自动重启或继续降分辨率。外部跳帧/物理链路吞吐仍未测。
+
+**2026-10-30 默认65真实重启验证通过（短时）**：用户要求自动重启验证。第一次主动重启到4fb46847…，c754模块匹配/5.4Gbps×4/Android完成/用户确认桌面触摸正常，但实际DRM和Android仍60Hz，不能算65通过。已定位dp_drm.c对eDP不设置DRM_BRIDGE_OP_MODES，内置CONFIG_DRM_PANEL_EDP=y的panel_edp_get_modes直接读取EDID，跳过原MSM get_modes补丁；原源码主机测试不能证明该真实路径。该失败尝试及模块/源补丁保留为历史，不再作为有效65机制。
+
+R2改用已启用CONFIG_DRM_LOAD_EDID_FIRMWARE的标准覆盖：只有默认65入口增加`drm.edid_firmware=eDP-1:edid/sq2-native65.bin`，不写屏幕EEPROM。以原128字节EDID14528fbf…生成软件副本，仅改DTD像素时钟、软件范围上限和校验，共偏移54/55/78/81/127；原生时序总量/极性及其他信息不动。EDID以10kHz表示时钟，385120kHz对应64.999156Hz（标称65），不是伪称精确385125。覆盖文件SHA83101509…，恢复已验证V6模块080cceff…，addon52767797…只改msm并新增EDID文件/父目录，原init/Image/DTB/base c5及凭据最后保持，无自动重启/回退钩子。
+
+R2身份/hash校验、备份grub-before-default65-r2.cfg及原子替换后第二次主动重启到9fac091e-49cf-4015-bd2f-fa4321693745；实际cmdline/参数、固件文件与生效EDID均匹配83101509…，模块080cceff…匹配。DRM活动2880×1920@65、clock385120，链路540000×4，驱动像素读回385120000，Android默认/支持/渲染64.99915Hz，Android完成、SF/HWC running、guardY/nohibernate通过。约275秒复核同boot、system_server/SF PIDs2190/2022未变。新菜单SHA37bdce73bb6c96410579e5099da8adf87acba9614564bf1d935e24927dac1356，默认仍sq2-edp-default65；原四个60Hz/救援/关机入口无EDID覆盖且保留。本轮共两次明确主动验证重启，无自动循环；当前不再重启。**用户随后明确确认修正后这一轮画面、触摸和操作正常；外部不跳帧和长期稳定性仍未验证**。
+
+有效源码/模块回到cached-only V6，原四角色同路径继续：MODIFIED_FILE.c/DIFF为实际部署V6（原错误get_modes为V7_DEFAULT65_UNREACHED补充归档），主机BASELINE/MODIFIED/ROLLBACK诊断AUX3/0/3、速率540000/index6，均exit0，恢复hash及补丁重建通过。default65-r2下EDID_BASELINE/sq2-native65/EDID_DIFF.json/EDID_ROLLBACK.sh/EDID_VERIFICATION扩展同一证据集，副本基线/修改/回退60/64.999156/60Hz校验和0、源hash恢复、逐字节重建通过；非三次物理启动。build-sq2-edp-edid65.py两项主机测试覆盖字节范围/保留原输入/拒绝覆盖及错误EDID，无私有原始EDID入Git。默认构建工具链并未全局启用65，仅此已识别设备的独立入口；未commit/push。
+
+**2026-10-30 用户已要求5.4Gbps×4/65Hz设为默认，菜单已安装但新开机未验证**：用户随后明确尽量减少重启、可手动恢复，后续候选不含自动整机重启钩子。65Hz色条目视正常、130vblank/2.003758秒，原生回60成功，但显示服务恢复中SSH中断，之后415bc01d…原模块/Android复核；不能把此当完整65Hz桌面通过。无自动重启候选597ee8…保持原init，只替换V6模块。在5bbae357…单次接管中70Hz140vblank/2.000437秒/用户目视正常，75Hz150vblank/2.003712秒但用户报告异常；两档原生回60均成功。保留测试FB至Android接管时软件工具exit0、服务/活动60读回通过，但用户桌面仍异常，随后用户手动恢复，9bff4bf2…原msm f69c91e7…、guardY、Android完成复核。不能称桌面恢复修复或75Hz通过，不再自动重启。
+
+最新默认65使用新独立模块c754e4142b796143cc92ddc02bb1ea25879d0029ef952663394fec0c30245798，源码7ec1c028…；只在SurfaceProX/eDP/本机LGD0555+LP129WT112684/至少5.4×4且原始完整60Hz时序匹配时，将get_modes的clock355500改385125并保留preferred。EDID/时序总量/极性/PHY参数不写改。标准drm_probe_helper在get_modes后重算crtcinfo，未放宽原依赖/导入检查，608导出闭包通过，无完整Module.symvers限制仍在。原base c5c64cda…不动；addon7cd97a1b…最终条目只改msm，init完全不变、密码SSH addon最后、无自动重启或联网/持续日志。
+
+已按磁盘序列号/ESP marker/双UUID/root来源/guard及载荷hash校验，备份当前菜单grub-before-default65-manual.cfg后sync原子安装。实读默认项sq2-edp-default65，菜单完整SHA246fa9fdd86c558c9b83586849df7665369f14d220e36fd154f3189a439de9e6，五入口含新增默认65及原Qualcomm60/Mesa60/救援/关机，原四入口字节/行为不改；原始60菜单备份a7cc581f…保留。当前仍9bff4bf2…原模块正常60，**没有额外重启；完整Android65Hz开机、稳定性/跳帧待用户下次手动启动验证**。若异常手动选原Qualcomm入口，不热卸DRM/蓝牙或格式化。四角色仍control-v5同路径，最新MODIFIED/DIFF已更新为default65；真实get_modes主机BASELINE/MODIFIED/ROLLBACK clock355500/385125/355500及七种范围检查均exit0，恢复hash/patch重建通过。菜单副本默认项60/65/60、入口4/5/4及GRUB语法均exit0。out/display-refresh/default65保留安装/回读/审计；不提交私有镜像日志，本轮未commit/push。
+
+**2026-10-30 eDP现机可行性测试与回退已完成**：独立worktree/原诊断分支，现机为另一块Toshiba128GB SSD及LGD_DV1.0面板，不能复用旧512GB固定身份安装器。保留其实际c5c64cda…默认镜像、Image/DTB/凭据与正常/Mesa/救援/关机四入口。V5限速2.7Gbps速率表对照实机BW_SET0/RATE_SET3/训练通过，用户确认正常；自动回退后原msm哈希复核。V6仅去除诊断AUX读，能力/训练读保留；源码7d87f794…/模块080cceff…/现机独立combined45bdb3e9…，608导出闭包和原依赖/last-entry-wins/密码addon最后通过，仍无完整Module.symvers验证。实机5.4Gbps×4、60Hz正常且用户确认，不能据此断言同一改动修复旧机V4。
+
+原生KMS先跑60基线并恢复桌面，再90Hz：533250kHz、180vblank/2.005761秒、驱动时钟读回匹配；用户最初反馈异常，随后明确90Hz持续色条阶段正常，不仅是最后60回退帧。只算短时可行性，未集成Android90模式、未做外部跳帧/长期稳定性。120首次SSH失败且无runner目录，不计有效测试；独立重测eac96f1b…实际711000kHz、240vblank/2.003816秒，但用户持续异常，恢复60的KMS返回E2BIG。持久日志明确uptime93.99测试exit1、139.78独立75秒watchdog因缺恢复标记重启，非定时器提前打断成功测试。最终02596cb6…原msm f69c91e7…完整hash/Android完成/guardY/活动2880x1920@60复核，用户确认桌面恢复；原四入口菜单按身份/hash核验后sync原子恢复为a7cc581f…，默认c5镜像始终未改，无需额外重启。
+
+新增patch-sq2-edp-cached-diag.py重现精确V6/拒绝二次应用；sq2-edp-mode-test.c是显式实验工具，非开机项；时序/参数主机ASan/UBSan测试通过，真实硬件结果独立记录。120原时序禁止原样重试；下一步若用户继续，先查E2BIG驱动拒绝位置/接收端时序约束，并为90补外部不跳帧及Android可恢复模式集成，不自动提升默认。证据在忽略的out/display-refresh，四角色仍control-v5同路径，最新源副本/补丁为cached-only V6，V5源/diff作为补充保留；主机BASELINE/MODIFIED/ROLLBACK诊断AUX调用3/0/3、速率均540000/index6、exit0、恢复hash及补丁重建通过。详见DISPLAY-REFRESH，原始日志/镜像不入Git，本轮未commit/push。
+
 v4回退后补验：推送诊断分支后SSH已恢复，新boot ID、boot_completed=1、screen_only=Y、原msm完整哈希f69c91e7…均已核对，用户随后确认桌面/锁屏恢复，关闭下文“未复核回退”的缺口；v5仍未部署。
 
 eDP v4诊断（2026-10-29）：初始5.4Gbps×4训练返回0，实读DPCD BW_SET=0、RATE_SET=6、lane状态77/77、对齐81，证明初始训练通过；不证明画面或高刷通过。PHY/OPP/像素时钟/视频ready调用均返回0，但vsync计数0/9/9/10/10停滞，后期AUX读取阻塞。已取回原始日志并主动sync+重启；用户最新反馈仍在启动，尚未复核本轮回退。v5仅本地构建：同一速率表路径限制2.7Gbps/index3、AUX仅前三次采样，待设备恢复后做对照，未部署。当前设备调试项仍v4，正常闭源/Mesa镜像未改。新分支codex/sq2-edp-training-diagnostics；详见DISPLAY-REFRESH。

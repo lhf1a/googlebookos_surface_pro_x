@@ -1,5 +1,270 @@
 # SQ2 display refresh investigation — 2026-10-29
 
+## Latest: Android70 failed visually; lower-resolution control also black
+
+User requested full Android70 output, not just KMS color bars. A software EDID
+70 mode at414750kHz was one-shot booted as `88d5ec48…`: DRM and Android70,
+5.4×4, effective EDID485249ff…, V6 module080cceff…, guardY, completed Android,
+SF/HWC running. User reported abnormal screen/operation. This is **not a pass**.
+The65 default was not promoted to70. One-shot consumed0; original65 menu was
+restored. User manually recovered, independently verified boot `adab52a4…`
+with real65/385120 and Android ready. No autonomous crash or successful70
+desktop is inferred from the software report.
+
+User then explicitly selected fixed70Hz/lower **real output resolution** to
+test a suspected2.7×4 bandwidth ceiling. The hypothesis is not established:
+2.7×4 has nominal8.64Gbit/s payload with8b/10b coding, while the working native65
+mode has a9.24288Gbit/s pixel-clock×24 timing budget. Driver-reported5.4×4 is
+not an external physical-link throughput measurement; visible output alone
+does not prove no skipped frames. Timing budgets below are not measured payload.
+
+`build-sq2-bandwidth-edid.py` builds a software-only matrix from verified65
+EDID83101509…. Native65 stays first/preferred; the other three descriptors
+become test DTDs. No panel EEPROM write. Matrix EDID8c66f21b…, addon590b1419…,
+temporary six-entry menua490d132…; init/base/kernel/DTB unchanged, credentials
+last, no automatic reboot hook. One-shot request consumed before loading.
+
+| Mode | Pixel clock kHz | RGB24 timing budget Gbit/s | Observation |
+|---|---:|---:|---|
+| Native2880×1920@64.999156 |385120|9.24288|Working baseline and restored mode|
+|2560×1706@59.998135 control|283160|6.79584|Real Android/KMS switched; user explicitly said black screen|
+|2560×1706@69.999237|330360|7.92864|Enumerated only; not attempted after control failed|
+|2700×1800@69.998662|366170|8.78808|Enumerated only; not attempted after control failed|
+
+Matrix boot `59556813-0cf8-4d11-90d7-056c6928ebc7` exposed all4 Android modes.
+Actual `cmd display` help supports nonpersistent `STORE_MODE=false`; use that,
+not `wm size`. Control command was
+`cmd display set-user-preferred-display-mode 2560 1706 59.998135 0 false`.
+Android reported real2560×1706/59.998135, DRM active2560×1706@60/283160,
+pixel readback283160000 and link540000×4. Display state was explicitly ON before
+the user's black-screen confirmation, so idle screen-off was not counted as
+the mode failure. `get-active-display-mode` was advertised in help but returned
+Unknown command; snapshot was corrected to dumpsys+DRM without repeating setter.
+
+The below8.64 budget control still failed. Therefore black output is **not
+sufficient evidence of exceeding a2.7×4 capacity limit**. Non-native timing
+acceptance or that mode's video-transport configuration is still a confounder.
+Neither a physical bandwidth ceiling nor a highest working resolution at70Hz
+was established. Do not report the unexecuted70 modes as failed/passed, and do
+not continue narrowing a throughput threshold from this invalid control.
+
+`cmd display reset-user-preferred-display-mode 0` returned0 and restored
+native65 in the same boot. Verified DRM385120, Android64.99915, user preference
+null, screen_onlyY; user confirmed normal output again. system_server/SF
+PIDs2222/2030 remained, with no service/board restart between mode switches.
+Temporary matrix menu was backed up and atomically restored to the original
+five-entry65 default, full hash37bdce73…. Matrix EDID remains only in the current
+boot; next normal boot uses the original single65 EDID. No extra reboot issued.
+
+Same four-role paths under `control-v5/` are retained; `bandwidth-test/` extends
+the ledger with the EDID delta/rollback65, mode1/4/1 copy transaction, all
+checksums0 and exact restored hash/reconstruction, plus the real65→black
+low-resolution60→normal65 cycle. Source AUX3/0/3 and rate540000 remain unchanged
+host results. Builder DTD timing/polarity unit test passed. Raw EDID, packages,
+device logs and private credentials remain ignored; none is published to Git.
+
+## Current default65 R2: reboot software and user confirmation passed (short run)
+
+User explicitly requested reboot verification. First reboot `4fb46847…`
+loaded the expected c754 module and5.4×4, but DRM and Android remained60Hz.
+The user confirmed that desktop/touch were normal in that60Hz boot. Inspection
+identified the missed path: eDP bridge does not set DRM_BRIDGE_OP_MODES and
+built-in `panel_edp_get_modes` supplies EDID modes directly. The earlier MSM
+get_modes host test did not exercise the real eDP boot callback. That approach
+is archived, not described as a working65Hz mechanism.
+
+R2 uses the kernel's existing DRM firmware-EDID path, scoped to eDP-1 only in
+the default65 entry: `drm.edid_firmware=eDP-1:edid/sq2-native65.bin`. It writes
+no panel EEPROM. `build-sq2-edp-edid65.py ORIGINAL OUTPUT` builds a software
+override from the verified128-byte physical EDID. Only bytes54/55 (DTD clock),
+78/81 (software mode-range proposal) and127 (checksum) change. Original data,
+geometry, porches, polarities and all other fields are preserved. These range
+values are an override proposal, not an OEM capability claim. The base EDID's
+10kHz clock granularity yields385120kHz /64.999156Hz, nominal65Hz. No false
+exact385125 encoding is used.
+
+R2 module is the already verified cached-only V6 `080cceff…`, not the missed
+c754 callback candidate. Addon
+`527677975b09c31a7aeb100f7cee85058e68020b96abb5f4785ec3a169522040`
+changes only msm plus the EDID file/parent directory. Original init, kernel,
+DTB and c5 baseline remain unchanged; lab SSH credential addon remains last.
+No automatic reboot/rollback hook or normal-boot diagnostic networking/logging
+is introduced. Original four60Hz/Mesa/rescue/shutdown entries remain unchanged
+and have no EDID override. Installed default65 menu SHA256:
+`37bdce73bb6c96410579e5099da8adf87acba9614564bf1d935e24927dac1356`.
+
+Second user-requested corrective reboot `9fac091e-49cf-4015-bd2f-fa4321693745`
+confirmed the cmdline/DRM firmware parameter. Installed firmware and effective
+connector EDID both SHA256
+`83101509b096d6ddfc83e96bd08917d4989f78b80e2549489bd12f8d14e5a014`.
+Observed active DRM2880x1920@65/385120kHz, selected5.4Gbit/s×4, pixel clock
+driver readback385120000, Android default/supported/render/vsync64.99915Hz,
+boot_completed1, SF/HWC running, screen_onlyY/nohibernate. At uptime275s the
+same boot and system_server/SF PIDs2190/2022 remained. These are driver/software
+readbacks, not external physical clock or no-skipping measurements. **The user
+subsequently explicitly confirmed normal screen, touch and operation in this
+corrected second boot**. No further
+reboot is scheduled; long-term stability/power and external frame skipping are
+not verified. This is device-local experimental boot configuration, not global
+default-build integration.
+
+The original four-role paths are reused for the effective cached-only V6
+source; the failed V7 get_modes source/diff is supplemental history. Source
+BASELINE/MODIFIED/ROLLBACK diagnostic AUX counts3/0/3, all exit0, restored hash
+and patch reconstruction match. `default65-r2/` extends the ledger with EDID
+BASELINE/MODIFIED/ROLLBACK60/64.999156/60Hz, checksums0 and exact binary-patch
+reconstruction/rollback hash. These are copy tests, not three device boots.
+The builder's two host tests cover exact allowed-byte delta, unchanged source,
+no overwrite and incorrect-panel/timing/checksum rejection. Raw EDID, binary
+packages, reboot logs and private credentials remain ignored, not in Git.
+
+## Latest: user-requested default65 installed, not yet boot-verified
+
+The user explicitly requested 5.4-Gbit/s × 4 / 65 Hz as the default, overriding
+the earlier test-only boundary. They also requested fewer reboots and manual
+recovery: no automatic board-reboot hook is included in subsequent candidates.
+
+65-Hz color bars were user-confirmed normal; 130 vblanks took 2.003758 s and
+native60 restoration succeeded. Android display-service handoff then lost SSH;
+recovery to the original module was verified afterward. In manual-recovery
+boot `5bbae357…`, 70 and75 were tested in one DRM session with native60 between
+them: 140/150 vblanks took 2.000437/2.003712 s. User confirmed70 normal and75
+abnormal. Software handoff reported success with the test framebuffer retained
+until Android takeover, but the user still reported an abnormal desktop.
+Therefore it is **not a validated desktop-recovery fix**, nor is75 a pass.
+User manually recovered to boot `9bff4bf2…`, original msm, guardY and completed
+Android. Do not label that manual recovery an autonomous crash.
+
+`patch-sq2-edp-default65.py STAGE` accepts the exact cached-only V6 source and
+adds a scoped preferred-mode adjustment in `dp_panel_get_modes`. It requires
+SurfaceProX, eDP, LGD0555 / `LP129WT112684`, four lanes and rate-table maximum
+at least540000; only the exact original355500-kHz/3000×1975 native timing and
+polarities are eligible. It changes pixel clock to385125kHz, not EDID bytes or
+porches/PHY parameters. DRM probe helper recomputes crtcinfo after get_modes.
+Source SHA256 `7ec1c028…`; module
+`c754e4142b796143cc92ddc02bb1ea25879d0029ef952663394fec0c30245798`.
+Original dependency/import guard remains; all608 imports have live exports,
+still not a full Module.symvers/modpost validation.
+
+Independent addon `7cd97a1b…` is based on the unchanged current `c5c64cda…`
+image. Last-entry audit changes only msm; init/kernel/DTB and other files stay
+unchanged, lab credential addon last. Original four menu entries remain byte
+identical. Added default entry `sq2-edp-default65` uses the original base plus
+the new addon. There is no one-shot/env override in this final default menu.
+
+Identified-device backup, gzip/hash checks, sync and atomic installation passed.
+Installed GRUB full SHA256:
+`246fa9fdd86c558c9b83586849df7665369f14d220e36fd154f3189a439de9e6`.
+Readback confirms default65 and five entries, retaining Qualcomm original60,
+Mesa60, rescue and shutdown. **No reboot was issued for this installation**:
+current boot remains `9bff4bf2…` with original module/60Hz. Full Android65 boot,
+frame skipping and stability remain unverified until a later user-controlled
+boot. If abnormal, choose original Qualcomm60; do not overwrite that fallback.
+
+The same four-role files under `out/display-refresh/control-v5/` are updated to
+this latest source candidate; earlier V5/V6 and native-probe records are retained
+as supplements. Actual extracted get_modes host tests observe native clock
+BASELINE/MODIFIED/ROLLBACK355500/385125/355500kHz, all exit0; wrong connector,
+link, panel, machine, timing and missingEDID remain unchanged. Original hash
+and patch reconstruction match. Supplemental menu-copy checks observe default
+Qualcomm/default65/Qualcomm with4/5/4 entries and successful GRUB syntax checks.
+These host tests are not physical Android65 boot evidence. Private inputs,
+package audit, installation stdout and readback stay in ignored
+`out/display-refresh/default65/`.
+
+## 2026-10-30: current-device V5/V6 and direct KMS feasibility tests
+
+The current test device is a separately identified Surface Pro X / Microsoft
+SQ2, with a Toshiba 128-GB SSD and a different ESP/data identity from the old
+512-GB lab device. **Do not run the old fixed-identity installer on it or remove
+its checks.** Its EDID is LGD product 0x0555, text `LGD_DV1.0_` /
+`LP129WT112684`, 128 bytes with valid checksum, native 2880x1920@60, range
+30–60 Hz and 360-MHz maximum pixel clock. Receiver reads independently confirm
+the same eDP rate-table slots through 5.4 Gbit/s, four lanes, and no advertised
+DSC/FEC. The local current boot-image baseline is `c5c64cda…`; it is not the
+old `5ba59bd9…` image. Kernel, DTB, non-display files and the final lab SSH addon
+are preserved. Original Qualcomm/Mesa/rescue/shutdown menu entries are retained.
+
+- **V5 2.7-Gbit/s table control:** rebuilt module exactly matches
+  `bfc7d6459b71091f3c8bfcc4cb41107c5f8d3d102ea800bc10ee07f32bb24caf`.
+  Actual boot `2b4136a0…` had Android completed, guard Y, BW_SET=0,
+  RATE_SET=3, lane status 77/77, aligned, native 60 Hz. User confirmed normal
+  display/operation. The consumed one-shot request returned to original msm
+  `f69c91e7…` and normal Android in boot `5ddeed58…`.
+- **V6 cached-only diagnostics:** `patch-sq2-edp-cached-diag.py STAGE`
+  removes only diagnostic AUX reads from `sq2_edp_diag_snapshot`; capability
+  and training transactions remain. It accepts pinned isolated V4/V5 source
+  hashes and rejects repeat/unknown inputs. Uncapped V6 source hash
+  `7d87f794…`, module
+  `080cceff71f5b6168bfc89ed372a48e4ac783cf09fa9500f573411651a54f263`.
+  Dependencies restored from the original module; all 608 undefined imports
+  have live exports. Missing Module.symvers remains a full-modpost limitation.
+  Current-base combined image `45bdb3e9…`, addon `873bf364…`; last-entry audit
+  changes only msm and test init hook, credential addon last.
+- **V6 5.4-Gbit/s / 60 Hz:** boot `746b84ba…`, module hash matched,
+  training/PHY/OPP/pixel/video return codes zero, selected link 540000 × 4,
+  pixel clock 355500000, user confirmed normal desktop/operation. This is a
+  current-device result, **not proof that removing AUX reads alone fixes the
+  old device's V4 failure**. Boot-default image was not promoted.
+- **90-Hz KMS test:** after a successful 60-Hz tool/control/recovery test,
+  stopped only SurfaceFlinger/composer, used an isolated dumb-buffer color-bar
+  framebuffer and original timing totals/polarities, pixel clock 533250 kHz.
+  KMS returned 0; 180 vblanks took 2.005761 s; cached driver and clock-tree
+  readback report 90 Hz / 533250000 Hz / 5.4 Gbit/s × 4. User initially
+  reported abnormal/black output, then explicitly clarified that the sustained
+  **90-Hz** color-bar window became normal, not merely its final 60-Hz restore.
+  Native60 restore and Android services succeeded in the same boot. This is
+  short probe/visual feasibility, not Android 90-Hz mode integration, extended
+  stability or external optical frame-skipping verification.
+- **120-Hz first dispatch:** SSH failed and no persistent runner directory
+  exists; cannot establish that the switch began. Subsequent normal boot
+  `3739d506…` matched original msm and guard Y. Do not call that an observed
+  120-Hz mode failure or confidently attribute its reboot to a specific timer.
+- **120-Hz isolated retry:** new V6 boot `eac96f1b…`, before the original boot
+  watchdog deadline, no earlier KMS timers. Phase records are synchronized to
+  ESP, with a persistent restore marker and explicit watchdog cancellation.
+  KMS set 711000 kHz returned 0; 240 vblanks took 2.003816 s. User reported
+  sustained black/corrupt/flickering output. Native60 KMS restore returned
+  `-1 / errno=7 (E2BIG)`; SSH then timed out. This timing is **not usable**.
+  Persistent phases prove MODE_TEST_RETURNED_EXIT_1 at uptime 93.99 s,
+  then WATCHDOG_FIRED_RESTORED_MARKER_ABSENT at 139.78 s (armed 64.78 s).
+  Thus fallback followed failed restore, not premature interruption of a
+  successful 120-Hz test. Do not retry this timing unchanged.
+  Recovery verified in boot `02596cb6…`: original msm full hash matched,
+  Android completed, guard Y, active 2880x1920@60 / 355500 kHz; user confirmed
+  desktop restored. Original four-entry GRUB was atomically restored and
+  re-read with original full hash
+  `a7cc581f87992b328426c8be1ac724635061957106b132d061e22aa03a205805`.
+  Current default image/kernel/DTB remain unchanged; experimental files and
+  backups are retained but no test request is active. No further reboot was
+  needed for menu restoration. E2BIG's exact driver rejection site and the
+  receiver's 120-Hz limitation are not yet isolated.
+
+At 24 bpp and unchanged 3000×1975 timing totals, 90/120 Hz need
+12.798/17.064 Gbit/s and 533.25/711 MHz pixel clocks. Both fit the nominal
+17.28-Gbit/s HBR2 payload ceiling arithmetically (120 has only 1.25% margin),
+but exceed this EDID's 60-Hz / 360-MHz declaration. Software acceptance and
+vblank alone do not establish receiver scanout or no dropped frames. No
+voltage, panel firmware, DSC capability or permanent EDID changes were made.
+
+Native probe: `probe/graphics/sq2-edp-mode-test.c`. Compile statically with
+`aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -Werror -I/usr/include/libdrm`.
+`--inspect` is read-only; `60|90|120` are explicit lab modes, never boot hooks.
+Do not run a mode without a separately armed restore/reboot watchdog and
+stopped display services. After a successful run restart composer/SF and
+independently inspect active native60. `tests/sq2_edp_mode_timing_test.c`
+checks exact totals/polarities/clocks and rejection before DRM open, with host
+ASan/UBSan; it does not operate hardware.
+
+Ignored evidence: `out/display-refresh/`, including current-base backups,
+V5/V6 audits, device logs and KMS stdout. The same four-role set is retained
+under `control-v5/`: latest MODIFIED_FILE/DIFF describe cached-only V6, prior
+V5 cap source/diff remain supplemental, VERIFICATION is append-only, and
+ROLLBACK.sh embeds pristine source bytes. Actual-function host tests observe
+diagnostic AUX call counts BASELINE/MODIFIED/ROLLBACK = 3/0/3 with unchanged
+rate 540000/index6, all exit0; restored hash and patch reconstruction match.
+This source transaction is distinct from the physical-device tests above.
+
 ## V4 training evidence and pending V5 control
 
 Subsequent rollback verification: SSH reconnected, boot_completed=1,
