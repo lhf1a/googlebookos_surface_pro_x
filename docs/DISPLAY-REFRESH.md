@@ -1,5 +1,27 @@
 # SQ2 display refresh investigation — 2026-10-29
 
+## Conclusion committed / build-profile integration — 2026-10-30
+
+The selected experimental default remains **5.4Gbps×4 / native ~65Hz**.
+Full Android, touch and operation passed the user's short observation after the
+correct software-EDID boot. Stock panel/link **2.7Gbps×4 / native60** remains a
+separate selectable default and rescue path. `--display-profile 5.4-65|2.7-60`
+sets the image's next-boot default, not a live Android display toggle.
+
+The common initramfs retains the pinned original msm; only the 65 entry appends
+V6 module080cceff… and EDID83101509… plus the original credential member last.
+Stock/rescue never reference that addon or an EDID override. No EEPROM write,
+automatic reboot, bandwidth-capacity claim or unrelated driver retuning is added.
+The tracked menu template, exact payload delta and packed-image deployment policy
+are covered by host tests. This integration is not a new device boot test.
+
+Full Android70 failed visually;75/120 were not usable,90 only had a short standalone
+colorbar observation. The2560×1706@60 negative control was black despite a lower
+timing budget, and native65 recovered in the same boot. **No physical bandwidth
+ceiling or maximum usable resolution at70Hz was established.** Do not add these
+failed/inconclusive candidates to normal boot. Long-term stability, power and
+external frame-skipping measurements remain pending. Build usage is in BUILD.md.
+
 ## Latest: Android70 failed visually; lower-resolution control also black
 
 User requested full Android70 output, not just KMS color bars. A software EDID

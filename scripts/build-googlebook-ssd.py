@@ -15,6 +15,7 @@ DATA_UUID = '71ff412e-9b60-41ab-8975-6266bb795851'
 ESP_UUID = 'B026-1027'
 BOOT = R / 'out/android-test'
 GRUB = R / 'configs/grub-ssd.cfg'
+BOOT_FILES = ('Image','sc8180x-surface-pro-x.dtb','native-combined-initramfs.cpio.gz')
 IMAGE_NAME = 'googlebook-sq2-ssd.img'
 spec = importlib.util.spec_from_file_location('gpt', R/'scripts/inspect-recovery.py')
 gpt = importlib.util.module_from_spec(spec); spec.loader.exec_module(gpt)
@@ -171,7 +172,7 @@ def build():
     (tree/'SQ2-SSD-ID.txt').write_text(ID+'\n')
     (tree/'SQ2-PROBE-MEDIA.txt').write_text('SQ2 external SSD persistent Googlebook development system\n')
     shutil.copyfile(O/'layout.json',tree/'ssd-layout.json')
-    for name in ('Image','sc8180x-surface-pro-x.dtb','native-combined-initramfs.cpio.gz'):
+    for name in BOOT_FILES:
         shutil.copyfile(BOOT/name,tree/'boot/sq2-android1'/name)
     fat=C/'esp.fat'
     with fat.open('wb') as f:f.truncate(parts['SQ2PROBE']['bytes'])
@@ -190,7 +191,7 @@ def build():
     result=dict(image=str(image),windows_image=windows_export(image),image_bytes=SIZE,identity=ID,extents=records,written_bytes=sum(e['bytes'] for e in records),
                 source_sha256=expected,physical_partitions=len(plan['partitions']),gpt_verified=True,logical_a_hashes_verified=True,
                 userdata_bytes=parts['userdata']['bytes'],ota_supported=False,
-                boot_payload_sha256={n:sha(tree/'boot/sq2-android1'/n) for n in ('Image','sc8180x-surface-pro-x.dtb','native-combined-initramfs.cpio.gz')})
+                boot_payload_sha256={n:sha(tree/'boot/sq2-android1'/n) for n in BOOT_FILES})
     (O/'image-manifest.json').write_text(json.dumps(result,indent=2)+'\n')
     print('PASS: physical GPT, original super, persistent userdata and ARM64 EFI prepared', flush=True)
 
@@ -200,7 +201,7 @@ if __name__=='__main__':
         manifest=json.loads((O/'image-manifest.json').read_text())
         plan=json.loads((O/'layout.json').read_text())
         if a.update_boot:
-            if manifest.get('hardware_video'):
+            if manifest.get('hardware_video') or manifest.get('display_profiles'):
                 raise ValueError('Use build-source-disk.py to rebuild hardware-video images; legacy update would drop the verified menu')
             esp=next(p for p in plan['partitions'] if p['name']=='SQ2PROBE')
             fat=f"{manifest['image']}@@{esp['offset']}"

@@ -1,5 +1,13 @@
 # SQ2 开发交接
 
+**2026-10-30 eDP 结论提交与主线构建整合**：保留原生 5.4Gbps×4/约65Hz 为用户
+选择的实验默认；`build-source-boot.py --display-profile 2.7-60` 可改选原面板
+2.7Gbps×4/60Hz 默认。两档始终分离：common 使用原 msm，65 entry 才追加固定
+V6+软件 EDID addon；60/救援不带覆盖，SSH 凭据 addon 仍最后。源码跟踪菜单、
+boot audit、镜像 manifest 与部署前 packed-ESP 校验相连，不放宽磁盘保护，
+不部署/重启现机。详见 BUILD 当前节及 DISPLAY-REFRESH；禁止把后续70Hz异常
+或非原生黑屏推导为已测得物理带宽上限，也不把旧 get_modes 失败补丁用于默认。
+
 **2026-10-30 带宽/降分辨率小对照：未测出带宽极限，已同boot恢复65**：用户先要求完整Android70测试。一次性入口实际启动88d5ec48…，5.4×4、DRM2880×1920@70/414750kHz、Android70、guardY均匹配，但用户明确画面/操作异常，不算通过；一次标记消费0，菜单恢复37bdce73…，用户手动恢复后adab52a4…实际65/Android就绪复核。没有自动恢复重启或热卸显示驱动。
 
 用户随后提出2.7×4有效带宽假说，明确选择“固定70Hz降低真实输出分辨率”。已说明原生65按时序预算9.24288Gbps已高于8.64，不能从花屏直接认定硬门槛。新增软件EDID矩阵8c66f21b…，原生65保留首选，另列2560×1706@59.998135（283160kHz/预算6.79584Gbps）、同分辨率@69.999237（330360kHz/7.92864）、2700×1800@69.998662（366170kHz/8.78808）。只需一次矩阵候选启动；原init/base/Image/DTB/模块080cceff及凭据保持，原60/救援及默认65保留，无自动重启。Android cmd实机help支持临时STORE_MODE=false；get-active-display-mode虽列help但实际Unknown command，已改用dumpsys+真实DRM读回，未重复执行切换。

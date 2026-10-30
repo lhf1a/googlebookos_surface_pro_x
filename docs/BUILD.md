@@ -1,5 +1,59 @@
 # 构建与部署
 
+### 2026-10-30 eDP 构建开关（当前）
+
+`build-source-boot.py --display-profile {5.4-65,2.7-60}` 选择新镜像的 GRUB 默认入口；
+默认 `5.4-65`，沿用用户已确认的实验选择。`2.7-60` 是原面板时序/链路配置，
+不是声称整个 Android 移植镜像为官方系统。两种构建都包含两档可选入口、原 Mesa
+入口、60 Hz 救援和关机；此开关是**构建/下次启动选择**，不是 Android 热切换。
+
+```sh
+# 在 Linux/WSL，使用全新输出目录；两档均需要下列已验证二进制输入。
+python3 scripts/build-source-boot.py --output out/display-build-65/native-combined-initramfs.cpio.gz --display-profile 5.4-65
+# 若希望官方 2.7Gbps×4 / 60Hz 成为默认入口：
+python3 scripts/build-source-boot.py --output out/display-build-60/native-combined-initramfs.cpio.gz --display-profile 2.7-60
+```
+
+固定输入为原模块 `f69c91e7…`（原 base 内）、cached-only V6 模块 `080cceff…`
+及 native65 EDID `83101509…`；缺失/不匹配即停止，不下载替代物。可通过
+`--edp-module MODULE.ko --edp-edid sq2-native65.bin` 指定本地输入。
+默认路径分别为 `out/display-refresh/msm-edp-rates.ko` 和
+`out/display-refresh/default65-r2/sq2-native65.bin`。EDID 可用
+`build-sq2-edp-edid65.py` 从本机已验证原 EDID 生成；不写 EEPROM。
+全新隔离源码运行 `build-sq2-edp-rates.sh` 现在依次应用 rates、diag、cached-only
+补丁，复用编译/依赖元数据修复；已有隔离源码不要重复补丁，不使用失败的
+`patch-sq2-edp-default65.py` get_modes 方案。重建产物仍须通过固定 hash/ABI 门槛。
+
+common initramfs 保留原 msm/物理 EDID；仅 65 Hz 入口通过第二个 initrd
+`display-edp65-addon.cpio.gz` 覆盖模块并提供软件 EDID，添加
+`drm.edid_firmware=eDP-1:edid/sq2-native65.bin`。addon 最后重复原 SSH
+凭据 member，并按解包后的 last-entry-wins 核对精确 delta、init 不变和凭据不变。
+60 Hz 与救援完全不引用 addon/EDID。保留 `suspend.screen_only=1 nohibernate`，
+不添加自动重启、网络诊断或恢复定时器。输出包含密码 addon，必须留在忽略目录。
+
+镜像构建前将当前已审计的普通/救援 DTB 放到对应 boot 目录；原有 recovery、布局、
+原生/闭源运行包等固定输入仍必需，未宣称纯公共源码构建。随后：
+
+```sh
+python3 scripts/build-source-disk.py --boot-dir out/display-build-65 --cache-dir /root/.cache/sq2-display-build-65 --display-profile 5.4-65
+```
+
+仅生成普通稀疏镜像文件，不操作磁盘；默认档必须与 build-audit.json 一致。
+菜单从跟踪的 `configs/grub-source.cfg` 生成，不再使用旧未跟踪菜单。
+image-manifest.json 绑定两档、默认档、原/实验模块/EDID、menu 和两载荷 hash。
+deploy-experimental-usb.py 在枚举目标盘前验证镜像内菜单及两载荷；原 USB/NVMe
+拒绝和设备绑定确认未放宽。旧 update-boot 禁止覆盖带 display_profiles 的镜像。
+本次集成不自动安装到现有设备，也不重启设备。
+
+当前实测：原生 65 Hz 的完整 Android 桌面/触摸短时通过；完整 Android 70 Hz
+异常；2560×1706@60 黑屏、同 boot 恢复 65 正常。未确定带宽极限，不包含 70/75/
+90/120 Hz 或低分辨率实验入口；长期稳定、功耗及外部跳帧测量仍待验证。
+
+验证命令：`python3 -m unittest discover -s tests -p test_sq2_display_boot_payload.py -v`；
+另跑 deploy、video_default_menu、edp_edid65、bandwidth_edid 五组定向测试。
+若直接 discover 所有 test_*.py，旧的四个独立脚本需要其各自源码/二进制位置参数，
+不是可无参数导入的 unittest；不要把这种调用错误当成驱动测试结果。
+
 最新带宽小对照见DISPLAY-REFRESH：完整Android70实际输出但用户确认异常，默认65未改。用户选固定70Hz降真实输出分辨率后，`build-sq2-bandwidth-edid.py`生成首选原生65+低分辨率60/70对照的临时EDID，保留默认65/原60/救援，1次矩阵启动，无自动重启。2560×1706@60实际DRM283160kHz（预算6.79584Gbps<8.64）仍用户确认黑屏，因此未执行后续70模式、未测出带宽极限。Android临时模式用`cmd display set-user-preferred-display-mode ... 0 false`，非wm size；`reset-user-preferred-display-mode 0`已在同boot恢复65、偏好null，用户确认正常。菜单已恢复37bdce73…五入口，下次默认单65；不要据此原样继续降低分辨率逼近带宽，先排除非原生时序支持/视频传输配置混杂。新builder1项单测通过，原builder现兼容`--hz 70`（默认65不变），3项测试通过；仅此实验设备，未集成公共默认构建。
 
 **当前默认65用EDID覆盖，不是下面历史MSM get_modes方案。** 第一次重启实际仍60，因内置panel-edp绕过MSM get_modes。现以`python3 scripts/build-sq2-edp-edid65.py ORIGINAL.bin NEW.bin`生成软件EDID副本（不写EEPROM），仅默认65入口加`drm.edid_firmware=eDP-1:edid/sq2-native65.bin`；原60/救援入口不加。已启用CONFIG_DRM_LOAD_EDID_FIRMWARE，包含在独立addon的lib/firmware/edid并保留父目录，使用已验证V6模块080cceff…；原init/内核/DTB/base/SSH凭据不变、无自动重启。实际R2重启9fac091e…DRM65/385120kHz、链路5.4×4、Android64.99915、guardY/启动完成通过，用户明确确认这一轮画面/触摸/操作正常，不跳帧/长期稳定未验证。EDID10kHz精度导致标称65实际64.999156，不伪造精确65。新菜单37bdce73…/addon52767797…/覆盖EDID83101509…；旧c754 get_modes仅保留失败研究记录。`python3 -m unittest discover -s tests -p test_sq2_edp_edid65.py -v`两测试通过。详见DISPLAY-REFRESH当前节及忽略的out/display-refresh/default65-r2。
