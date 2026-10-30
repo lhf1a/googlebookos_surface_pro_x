@@ -1,38 +1,61 @@
 # Googlebook OS on Surface Pro X SQ2
 
-Surface Pro X（SQ2 / 8cx Gen 2、16 GB）上的实验性裸机移植。基于 mica Googlebook OS 恢复镜像 build **16471258**（Android 17）、linux-surface 衍生内核 **6.3.8-sq2-android1**、Freedreno GLES 及设备适配层。此系统运行 Android 框架，不是 ChromeOS Flex。
+**English** | [简体中文](README.zh-CN.md)
 
-当前使用已替换的 **512 GB 内置 NVMe**：UEFI → ARM64 GRUB → 自定义 initramfs → 原 Android init。正常音频入口默认，等待 3 秒；另有独立救援和关机入口。原第 2 项无音频启动已删除。
+An Android-based Googlebook OS port for **Surface Pro X SQ2 / Snapdragon 8cx Gen 2**. Based on mica **16471258 (Android 17)** and Linux **6.3.8-sq2-android1**. This is **not ChromeOS Flex**.
 
-## 当前进度（2026-10-28）
+## Feature status
 
-| 子系统 | 实测状态 |
-| --- | --- |
-| 桌面 / GLES | 已进入桌面；RGBA、YV12/多平面读回通过；视频触发的 SurfaceFlinger 导入崩溃已修复，经过有限时长观察 |
-| 共享存储 | **已修复**：启动前加载 FUSE；用户 0/10 卷 MOUNTED；用户确认 Files 和 Chrome 下载正常 |
-| Wi-Fi | 由 Android 管理已保存网络；不等待内核阶段联网，Android 启动后自动提供公钥 SSH；救援入口保留调试网络 |
-| 蓝牙 | 已显示名称并配对；修复启动卡在开启中，ON/OFF 状态跨重启保留已验证；其他配置文件待验证 |
-| 触摸 / 键盘 / 触控板 | 启动后重初始化触控；键盘盖热插拔自动恢复已实测；幽灵点击热图修正已通过重启、30 秒静置零触摸及用户手势检查，长期观察待完成 |
-| 扬声器 | Android 播放有声；结束约 10 秒后爆音、缺低频、声像偏右待优化 |
-| 内置麦克风 | DMIC0/1 已接入 Android；48 kHz 双声道、16 kHz 单声道录音/回放和原诊断应用通过，重启后用户再次确认正常 |
-| 方向传感器 / 前后摄像头 | 底层设备尚未枚举，按用户要求暂缓；驱动/固件缺口及后续步骤见 TODO |
-| 电池 / RTC | 电池驱动已接入；监控器容量、健康度和充放电电流适配已通过拔插及重启验证；CPU 温度接入 Android HAL，电荷容量为能量/标称电压换算值，电池温度尚无硬件读数 |
-| CPU 调频 | 已接通 schedutil 自动调频：小核 0.3–1.7664 GHz、大核 0.8256–3.1488 GHz；重启及八核 20 秒计算校验通过，80°C 被动降频已验证，长期稳定性/续航待测 |
-| 合盖 / 电源键 | 仅关屏策略下，电源键与合盖/开盖恢复显示、触摸和键盘已实测；真正睡眠恢复未解决 |
-| 休眠策略 | **仅关闭屏幕**：内核阻止系统 suspend，禁用 hibernation；真正休眠修复仍暂停，关屏期间系统继续运行 |
-| Vulkan / GPU 调频 | Turnip Vulkan 1.3、计算/图像/AHardwareBuffer 读回及三角形通过；默认 661 MHz 上限、75°C 温控，救援 514 MHz。Wild Life 专用 sysmem 兼容补丁已持久化，重启回归 5264 分 / 31.52 FPS、采样画面正常；GMEM 根因及更多游戏/长期验证待完成 |
-| LTE | 无 SIM，仅驱动探测 |
+Updated **2026-10-30** · ✅ Available · ⭕️ Partially available · ❌ Unavailable or not confirmed
 
-## 开发入口
+| Feature | Status | Notes |
+| --- | :---: | --- |
+| NVMe boot & persistent storage | ✅ | ARM64 UEFI / GRUB |
+| Android desktop & GLES | ⭕️ | Desktop usable; graphics compatibility remains limited |
+| Shared storage & downloads | ✅ | Files and Chrome downloads |
+| USB storage | ✅ | FAT32 portable storage; other filesystems/devices not guaranteed |
+| USB audio | ✅ | USB-C EarPods playback, microphone and automatic routing |
+| Wi-Fi | ✅ | Saved networks managed by Android |
+| SSH | ✅ | Automatic public-key access after Android starts |
+| Bluetooth | ⭕️ | Pairing and saved ON/OFF state; HID compatibility still limited |
+| Touchscreen | ✅ | Multitouch and edge ghost-touch fixes |
+| Keyboard cover & touchpad | ✅ | Hotplug recovery |
+| Built-in speakers | ⭕️ | Playback available; stop-pop and sound quality need improvement |
+| Built-in microphone | ✅ | Stereo/mono recording and playback |
+| Hardware video decoding | ⭕️ | AVC / HEVC / VP8 / VP9 SDR; resolution/profile limits apply |
+| HDR video | ❌ | Not supported as a complete application feature |
+| Vulkan & games | ⭕️ | Turnip Vulkan 1.3; application-specific compatibility limits |
+| Closed Qualcomm graphics | ⭕️ | Some paths usable; full-system compatibility incomplete |
+| Internal display | ⭕️ | Native 60 Hz; optional device-specific ~65 Hz profile |
+| External USB-C DisplayPort | ❌ | DP / AltMode integration incomplete |
+| CPU & GPU frequency scaling | ✅ | CPU up to 1.7664 / 3.1488 GHz; GPU up to 661 MHz |
+| Thermal management | ✅ | CPU / GPU temperature monitoring and passive cooling |
+| Battery & resource monitor | ⭕️ | Capacity/current/SOH available; capacity estimated, battery temperature unavailable |
+| RTC | ✅ | System clock support |
+| Power key & lid screen-off | ✅ | Screen-off only; system continues running |
+| Suspend / hibernation | ❌ | Disabled; true suspend/resume unresolved |
+| Orientation sensors | ❌ | Not available |
+| Built-in cameras | ❌ | Not available |
+| LTE | ❌ | Usability not confirmed |
 
-- [交接说明](docs/HANDOFF.md)：补丁、证据边界、待办及现场检查。
-- [构建与部署](docs/BUILD.md)：工具链、脚本关系和缓存依赖。
-- [适配待办](docs/TODO.md)：GMEM 花屏根因、更多应用兼容性；方向传感器与前后摄像头暂缓。
-- [Wild Life 调试](docs/WILD-LIFE.md)：对照证据、限定范围的兼容补丁及重启回归。
-- [麦克风适配](docs/MICROPHONE.md)：DMIC 路由、HAL 地址修正、普通应用测试与持久化。
-- [来源及发布范围](docs/PROVENANCE.md)：固定版本和未发布的输入。
-- [Agent 工作约定](AGENTS.md)：后续开发的当前约束。
+Availability is scoped to the documented SQ2 configuration, not every peripheral or application. Long-term stability and battery life remain open work.
 
-仓库保存补丁生成器、适配源码、配置和可复用诊断工具。**不是开箱即用安装镜像，也不是全新克隆一键构建的发行版**。脚本含早期 USB 实验路径及特定磁盘保护条件，运行前确认阶段和目标盘。
+## Build & documentation
 
-恢复镜像、固件、构建产物、SSH 密钥（含公钥）、Wi-Fi 凭据及原始测试日志均不发布。实验系统保留 root、调试内核和 permissive 配置；生产安全、硬件密钥及安全启动适配未完成。
+Default source builds include **hardware video, USB storage/audio and Bluetooth input fixes**, with separate normal/rescue policies and selectable display profiles.
+
+- [Build & deployment](docs/BUILD.md) · [Current handoff](docs/HANDOFF.md) · [Open work](docs/TODO.md)
+- [USB storage/audio](docs/USB-FUNCTIONS.md) · [Bluetooth input](docs/BLUETOOTH-INPUT.md) · [Microphone](docs/MICROPHONE.md)
+- [Video decoding](docs/VIDEO-DECODE.md) · [Codec limits](docs/VIDEO-CAPABILITY-ALIGNMENT.md)
+- [Graphics compatibility](docs/WILD-LIFE.md) · [Closed graphics](docs/QUEST2-GPU-RESEARCH.md) · [Display profiles](docs/DISPLAY-REFRESH.md)
+- [Sources & redistribution](docs/PROVENANCE.md) · [Contributor instructions](AGENTS.md)
+
+Most detailed engineering documents are currently in Chinese. This repository contains adaptation source, configurations and build tools—**not a ready-to-install image or a clean-clone one-command build**. Pinned proprietary images, firmware and local dependencies are required and are not redistributed.
+
+## Safety
+
+- Never format userdata to repair mounting or blindly reuse an installer on another disk/device.
+- Keep normal/rescue boot paths and the screen-only suspend guard. Do not hot-restart `vold` on this port.
+- Generic build profiles and existing device deployments can differ; read BUILD before replacing boot files.
+- Root/debug/permissive lab builds are not production-secure systems. Secure boot and hardware-backed security integration are incomplete.
+- Keys, credentials, proprietary binaries, disk images and raw logs stay out of Git. Components retain their respective licenses.
