@@ -1,5 +1,9 @@
 # 构建与部署
 
+### 内置扬声器默认 +12 dB（2026-10-30）
+
+默认构建显式包含当前 audio-speaker-route：RX7/RX8=84/84（0 dB，较原值 +12 dB）。打包后检查有效脚本与源码一致，audit 新增 speaker_rx_raw、speaker_rx_db、speaker_gain_change_db、speaker_route_sha256。保留原 PA/麦克风/HAL/端口策略；详见 [SPEAKER-LOUDNESS.md](SPEAKER-LOUDNESS.md)。
+
 ### USB 存储/音频与蓝牙输入默认集成（2026-10-30）
 
 `build-source-boot.py` 默认通过 `sq2-usb-boot-payload.py` 纳入已实机验证的 USB early stage、portable-only fstab、USB 音频策略与 `IModule/usb` 声明，以及当前 `bluetooth-framework-boot` 和 `bluetooth-input-watch`。输出 audit 必须含 `usb_functions_included=true`、`bluetooth_input_included=true` 及逐文件源码 SHA；原 HAL774cd7e7…、凭据最后顺序不变。不需要再手工向默认源码镜像追加 USB/蓝牙 addon。

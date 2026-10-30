@@ -20,7 +20,7 @@ Updated **2026-10-30** · ✅ Available · ⭕️ Partially available · ❌ Una
 | Bluetooth | ⭕️ | Pairing and saved ON/OFF state; HID compatibility still limited |
 | Touchscreen | ✅ | Multitouch and edge ghost-touch fixes |
 | Keyboard cover & touchpad | ✅ | Hotplug recovery |
-| Built-in speakers | ⭕️ | Playback available; stop-pop and sound quality need improvement |
+| Built-in speakers | ✅ | User-verified loudness, stereo and stop/start; default RX 0 dB (+12 dB versus original) |
 | Built-in microphone | ✅ | Stereo/mono recording and playback |
 | Hardware video decoding | ⭕️ | AVC / HEVC / VP8 / VP9 SDR; resolution/profile limits apply |
 | HDR video | ❌ | Not supported as a complete application feature |

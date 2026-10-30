@@ -1,5 +1,7 @@
 # SQ2 开发交接
 
+**2026-10-30 内置扬声器问题已解决，默认 +12 dB**：用户选择 RX7/RX8 原始控制值 84/84（0 dB，相比原72/72提高12 dB），确认听感很好，并在获准重启后明确确认设备正常启动、已播放音频、响度正确，声音问题已解决。仅默认音频路由改变，PA/成对端口/HAL/固件/均衡及其他启动入口保留。已原子部署默认入口增量；首次重启 SSH 观察超时，后续验证依据用户确认，不冒称独立 SSH 读回。默认源码构建已显式纳入并审计该脚本，完整构建通过；不复刻 Dolby，也不宣称 Windows 实际调音曲线完全一致。详见 [SPEAKER-LOUDNESS.md](SPEAKER-LOUDNESS.md)。提交和推送以 Git 记录为准。
+
 **2026-10-30 用户要求 USB/蓝牙提交主线并默认构建集成**：当前工作分支已为 main，蓝牙补丁344feb0原已在主线。新增默认 USB/蓝牙 payload 集成与源码/audit校验，build-source-boot真实完整构建 initramfs e6027440…通过（包含两补丁，私有SSH最后），默认磁盘菜单正常启用USB/救援禁用，并在manifest/实际packed-ESP部署前校验载荷及源码SHA。8USB/默认集成+3蓝牙+5显示+3视频菜单测试、普通文件FAT ESP装入真实新包后的三类生产校验通过；没有制作128GB整盘/烧录/重启现机，现机已测默认8abfe…保持。通用源码构建的既有显示/触控选择不变，不能把此整包当成现机无差异升级。源代码提交仅USB/默认构建及相关文档测试，不混入独立音频、REA或私有产物；具体提交/推送结果以Git实测记录为准。原四角色out/usb-c-20261030保留，default-integration补充源码副本基线USB未接线/修改接线/回滚未接线（蓝牙一直在），原hash恢复、patch重建通过；不把这三阶段副本检查记为三次实机启动。
 **2026-10-30 USB 存储与 USB 音频完成默认启动回归**：FAT32 外接盘已进入 vold PUBLIC 卷，用户确认 Files 读写；USB-C EarPods 播放左右与录音回放确认正确。独立 addon46896b1f…先在 boot2bdc…一次性启动通过，再提升默认并在 boot8abfe…正常重启通过，耳机预插仍 card1、内置 card0。标准 APK 不指定 preferred device 时仍自动走 USB（type22）：左右192000帧、录音240000sample/5202ms并回放240000帧；用户确认默认重启后热插拔 U 盘仍正常。guardY、双 emulated MOUNTED、HAL774cd7e7…及C2服务保留，测试应用已停止。只为三 USB 控制器补 voldmanaged portable 规则，成套早期加载USB音频模块/策略/VINTF；不改内置mic/SoundWire/增益或传输，不格式化userdata。DP不在此完成范围。见 docs/USB-FUNCTIONS.md。
 

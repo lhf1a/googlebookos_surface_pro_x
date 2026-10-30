@@ -1,16 +1,16 @@
 #!/bin/busybox sh
 # Board-specific WCD9340 -> SoundWire -> WSA881x stereo speaker route.
 # Based on ajacocks' SQ2 UCM v6, issue 21. No speaker protection feedback yet.
-# RX7/RX8 digital gains are deliberately capped at raw 72 (-12 dB), since
-# the 6.3 WSA driver may reset PA gain on power-up. Do not raise PA gain.
+# RX7/RX8 default raw 84 (0 dB): user-selected +12 dB over original 72.
+# Keep the stock PA startup behavior and paired ports. Do not raise PA gain.
 set -eu
 export PATH=/bin:/sbin
 grep -q 'Surface-Pro-X' /proc/asound/cards
 mix() { tinymix -D 0 set "$@"; }
 case "${1:-enable}" in
 enable)
-    mix 'RX7 Digital Volume' 72
-    mix 'RX8 Digital Volume' 72
+    mix 'RX7 Digital Volume' 84
+    mix 'RX8 Digital Volume' 84
     mix 'SLIMBUS_0_RX Audio Mixer MultiMedia1' 1
     mix 'SLIM RX0 MUX' AIF1_PB
     mix 'SLIM RX1 MUX' AIF1_PB

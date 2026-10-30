@@ -53,7 +53,7 @@ def main():
     put('init', init, 0o100755)
     # Refresh existing shell helpers from repository; include new boot helpers.
     helpers = {Path(n).name for n in before if n.startswith('bin/') and (R/'probe/test2'/Path(n).name).is_file() and before[n][1].startswith(b'#!')}
-    helpers |= {'cpu-frequency-start','resource-monitor-start','audio-microphone-route','prepare-native-ssd','ssh-framework-boot',
+    helpers |= {'cpu-frequency-start','resource-monitor-start','audio-speaker-route','audio-microphone-route','prepare-native-ssd','ssh-framework-boot',
                 'bluetooth-input-watch','touch-services','refresh-iptsd-input-nodes','touch-framework-ready','touch-resume-watch'}
     for name in sorted(helpers):
         body = source('probe/test2/'+name)
@@ -115,6 +115,10 @@ def main():
     assert all(after[n]==value for n,value in before.items() if n not in delta)
     assert after['etc/shadow']==before['etc/shadow'] and after['bin/dropbear']==before['bin/dropbear']
     usb_hashes=usb.verify(after,R)
+    audio_route=source('probe/test2/audio-speaker-route')
+    assert after['bin/audio-speaker-route']==(0o100755,audio_route)
+    for channel in (7,8):
+        assert audio_route.count(f"mix 'RX{channel} Digital Volume' 84\n".encode())==1
     addon=display.build_addon(result,c,module,edid)
     image=(R/'out/screen-only/Image').read_bytes()
     assert b'SQ2 screen-only policy: system suspend blocked' in image
@@ -127,6 +131,8 @@ def main():
                 video_payload_sha256=video.PAYLOAD_SHA,
                 usb_functions_included=True,bluetooth_input_included=True,
                 usb_bluetooth_source_sha256=usb_hashes,
+                speaker_rx_raw=[84,84],speaker_rx_db=0,speaker_gain_change_db=12,
+                speaker_route_sha256=sha(audio_route),
                 display_profile=args.display_profile,display_profiles=list(display.PROFILES),
                 display_stock_module_sha256=display.STOCK_SHA,display_edp65_module_sha256=display.MODULE_SHA,
                 display_edp65_edid_sha256=display.EDID_SHA,display_addon_sha256=sha(addon),
