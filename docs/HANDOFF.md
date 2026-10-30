@@ -1,5 +1,13 @@
 # SQ2 开发交接
 
+**2026-10-30 独立干净编译并实机测试通过（未提升默认）**：用户要求全新编译并在本机测试。独立kernel-out从空目录编译Image/标准模块，补齐窄media基础模块配置后严格modpost通过，再编译当前Venus、C2和私有mapper。内核源为本机已打补丁归档（无.git，完整文件hash另存）；闭源Android/Qualcomm固件、已调优DTB及非视频专用外置模块复用，不能宣称全AOSP/闭源固件源码重编。保留screen_only、nohibernate、原SQ2触摸/音频/热管理等配置，不使用SQ1通用镜像。
+
+产物out/clean-sq2-20261030：Image SHA12a9b126…，clean-initramfs.cpio.gz SHAca554ed4…/174836845B；ESP空间不足，因此部署10.85MB clean-addon.cpio.gz（f7a95828…），验证其叠加旧runtime+caps后与完整新包最终条目完全相同。私有SSH仍最后，未删旧镜像、未格式化。一次性入口sq2-clean-test，原默认sq2-c2-test不变，菜单备份grub.cfg.before-clean-20261030。
+
+实机boot3150bf4f…确认新Image-clean-20261030，Android1/C2running/guardY/native-ready；新immutable运行目录/data/vendor/sq2-codec2/clean-20261030，service27161e41…、mappera64adec5…与产物匹配，v1不覆盖。四格式1080p60各600帧9979/9981/9978/9978ms，EOS/realtime/pass=true，STOP/RELEASE通过；VP9 SDR4K60既有约4.3Mbps向量600帧10095ms通过。普通APK查询四高通alias均在，VP8 4K60false/4K30与1080p60true。CPUmax1.7664/3.1488GHz、GPU661MHz、FUSE挂载、BAT1属性通过；桌面截图正常，不代替触摸/听音/长期稳定性。一次标记已消费0，下次正常重启回旧默认。HDR未测。
+
+基线首轮在280输出时Surface取消并停止报错，用户随后确认不操作，独立重试四格式通过；错误日志保留。编译依赖与modpost纠正、objcopy改写ELF容器及历史mapper从原tar恢复的记录均在TEST_RESULTS.txt。四角色沿用vp8-limits，新增transaction仅补充菜单基线/修改/回滚副本验证，非三次硬件启动。此次构建/测试记录随本次main提交保存；私有构建产物和原始日志留在out，不纳入Git。
+
 **2026-10-30 硬解收尾：重启回归通过，默认构建/部署已集成**：boot d9339db8…自动启动原生后端及AIDL服务，screen_only=Y，四个高通OEM alias均由普通APK发现。AVC/HEVC/VP8/VP9各600帧1080p60，输入/输出/渲染完整，EOS/realtime/pass=true，9977/9978/9978/9980ms，STOP/RELEASE通过。VP8新鲜查询1080p60/4K30=true、4K60=false；首次切用户后Activity暂未就绪的失败日志保留，未把旧结果当新结果。
 
 当前SQ2只提升已实测runtime8b6c1f9a…+addonfb1831a9…的菜单默认项至sq2-c2-test；原正常/原Mesa入口及镜像全部保留。已核对BC711容量、ESP B027-0512、data UUID、marker、原菜单和载荷hash，sync原子替换；新菜单SHA e1fe29c57b99f8bf8d5502ee8c63b2ee5e241eda7c5bca0eafc44dc950eb4e1f，备份grub.cfg.before-default-video。一次标记已消费0，提升后未额外重启；运行的正是此前正常重启通过的同一组合。没有将含不同SQ1触摸策略的通用f749镜像覆盖当前SQ2。
