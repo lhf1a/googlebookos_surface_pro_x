@@ -51,7 +51,7 @@ def main():
     # Refresh existing shell helpers from repository; include new boot helpers.
     helpers = {Path(n).name for n in before if n.startswith('bin/') and (R/'probe/test2'/Path(n).name).is_file() and before[n][1].startswith(b'#!')}
     helpers |= {'cpu-frequency-start','resource-monitor-start','audio-microphone-route','prepare-native-ssd','ssh-framework-boot',
-                'touch-services','refresh-iptsd-input-nodes','touch-framework-ready','touch-resume-watch'}
+                'bluetooth-input-watch','touch-services','refresh-iptsd-input-nodes','touch-framework-ready','touch-resume-watch'}
     for name in sorted(helpers):
         body = source('probe/test2/'+name)
         subprocess.run(['sh','-n'], input=body, check=True)

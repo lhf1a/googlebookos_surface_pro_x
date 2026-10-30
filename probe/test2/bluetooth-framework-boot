@@ -4,6 +4,23 @@ set -eu
 export PATH=/bin:/sbin
 android() { timeout 10 nsenter -t 1 -m -r -- /system/bin/"$@"; }
 
+# The BLE HID stack disconnects if EventHub misses the initial node-open race.
+# Start once, including when this helper reuses an already-owned HCI transport.
+start_input_watch() {
+    test -x /bin/bluetooth-input-watch || { echo BT_INPUT_WATCH_MISSING; return 1; }
+    if [ -r /run/sq2-bt-input-watch.pid ]; then
+        watcher=$(cat /run/sq2-bt-input-watch.pid)
+        case "$watcher" in
+            ''|*[!0-9]*) ;;
+            *) if kill -0 "$watcher" 2>/dev/null &&
+                  grep -q '/bin/bluetooth-input-watch' "/proc/$watcher/cmdline" 2>/dev/null; then return 0; fi ;;
+        esac
+    fi
+    /bin/bluetooth-input-watch > /logs/bluetooth-input-watch.txt 2>&1 < /dev/null &
+    echo "$!" > /run/sq2-bt-input-watch.pid
+}
+start_input_watch
+
 # Do not bring an already-owned controller down if this helper is rerun.
 if [ -r /run/sq2-bt-bridge.pid ]; then
     previous=$(cat /run/sq2-bt-bridge.pid)

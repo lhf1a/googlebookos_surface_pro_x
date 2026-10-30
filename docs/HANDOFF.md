@@ -1,5 +1,13 @@
 # SQ2 开发交接
 
+**2026-10-30 蓝牙鼠标输入修正已固化（未做本轮重启验证）**：MX Master 3S (046d:b034) BLE 加密成功，但 EventHub 在 devtmpfs 新建 event22 后先于权限就绪打开，报 Permission denied；UHID_CLOSE 后约2秒 ready timeout，Android 主动断链并禁用 HID policy。临时重发布后同 boot db6105fb… 的 EventHub/InputReader 已识别 enabled CURSOR/EXTERNAL、MOUSE 与双滚轮，加密连接保持。用户报告已连接；15秒采集没有操作事件，不能代替移动/按键/滚轮的用户确认。
+
+用户随后要求固化并提交主分支。新增 bluetooth-input-watch，只选择 /devices/virtual/misc/uhid/0005:* 输入节点，按 sysfs 身份去重并在发布前设 root:input 0660 与 input_device 标签；失败不替换节点，重查设备身份避免重用 eventN。bluetooth-framework-boot 在复用或创建 transport 前启动单实例 watcher，不写 bluetooth_on、不清配对、不卸载 QCA。通用 source-boot 与两个既有打包入口纳入新 helper；原 cover/触摸脚本未改。不是持续采集原始输入日志。
+
+现机另已正常启动到 2bdc010d…（此前 USB 测试入口，不归因为异常）。本轮核对 BC711/CYA5N050012105J77/1000215216、marker、ESP B027-0512、data 4f46…、system_a erofs 根和 guardY 后安装 640707B 独立 addon 3ecfc42e…，只覆盖两个蓝牙脚本，私有 SSH member 仍最后。原 runtime+caps、clean、USB 三种组合 last-entry-wins 审计仅此两项变化，init/音频/显示/模块/凭据不变。菜单仅这三项 initrd 追加 addon，默认 sq2-c2-test 不变；原 normal/Mesa 回退不改。菜单新 SHA6b47af12…，原 a4f93c00… 保存在 ESP EFI/BOOT/grub.cfg.before-bluetooth-input-v1；sync/hash/gzip/原子替换通过。未使用另一台显示实验机的65Hz菜单覆盖本机。
+
+同一 helper 已装入现机 RAM，连续调用两次均 TRANSPORT_ALREADY_READY，watcher10218 单实例、bridge6583 不变、boot 未变。没有重启整机/框架、改 userdata 或测试休眠。三项自动测试含真实 watcher 的 root 文件系统 fixture（标签命令仅 mock）、过滤/失败保留/去重、打包精确 delta/凭据/拒绝及构建接线。原四角色 out/bluetooth-mxmaster 保留：BASELINE root:root0600、不处理；MODIFIED root:input0660、重发布；ROLLBACK root:root0600、不处理，均exit0/恢复hash一致。后续仍需正常重启后连接与真实移动/按键/滚轮验证。见 BLUETOOTH-INPUT.md；不宣称其它蓝牙 profile 或长期稳定性通过。
+
 **2026-10-30 eDP 结论提交与主线构建整合**：保留原生 5.4Gbps×4/约65Hz 为用户
 选择的实验默认；`build-source-boot.py --display-profile 2.7-60` 可改选原面板
 2.7Gbps×4/60Hz 默认。两档始终分离：common 使用原 msm，65 entry 才追加固定

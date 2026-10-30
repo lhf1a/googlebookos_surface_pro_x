@@ -1,5 +1,15 @@
 # 构建与部署
 
+### 蓝牙 UHID 输入节点修正（2026-10-30）
+
+`bluetooth-input-watch` 在新建蓝牙 UHID bus0005 的 event 节点上，修复 devtmpfs/ueventd 与 EventHub 的打开时序：发布前 root:input 0660、input_device 标签，按 sysfs 身份去重。仅处理这类节点，不放宽全局权限、不改配对或用户开关；`bluetooth-framework-boot`在复用 transport 时也保证启动单实例。source-boot、pack-googlebook-internal-ssd 和 pack-sq2-power-connectivity 均包含该脚本。
+
+现机增量：`python3 scripts/pack-sq2-bluetooth-input.py BASE NEW-addon.cpio.gz --expected-base-sha256 HASH`。拒绝未知蓝牙 helper、未知 base hash、已有输出和凭据不在最后的 base；只新增 watcher、替换蓝牙启动助手，并重复原本地 SSH member 至最后。产物含私有凭据，留在 out；不入 Git。必须审计实际所有 initrd 的合并顺序，不能直接覆盖别的设备镜像。
+
+本机已安装 addon 至默认 Codec2、clean 和 USB 测试入口，原回退入口未改，未在本轮重启。回退菜单使用本机 ESP `EFI/BOOT/grub.cfg.before-bluetooth-input-v1`，先核对设备身份/原新hash，再同ESP临时文件、sync和原子替换；不要格式化 userdata。在线 watcher 需另行停止或正常重启回退，菜单恢复本身不撤销 RAM 进程。
+
+验证：`python3 -m unittest discover -s tests -p test_sq2_bluetooth_input.py -v`；文件系统 fixture 的 mknod/chown 部分需 Linux root，SELinux 标签命令 mock 不算实机策略验证。设备安装/实测边界见 BLUETOOTH-INPUT 与 HANDOFF。
+
 ### 2026-10-30 eDP 构建开关（当前）
 
 `build-source-boot.py --display-profile {5.4-65,2.7-60}` 选择新镜像的 GRUB 默认入口；
