@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Isolated partial adapter only. No platform match, device access or installation.
+set -Eeuo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+K=${SQ2_VIDEO_KERNEL:-/root/.cache/sq2-thermal/kernel}
+O=${SQ2_VIDEO_BUILD:-/root/.cache/sq2-video-foundation/build}
+STAGE=${SQ2_IRIS1_STAGE:-/root/.cache/sq2-video-iris1/venus}
+DEST=${SQ2_IRIS1_DEST:-"$ROOT/out/video-decode/iris1-hfi"}
+mkdir -p "$DEST"
+python3 "$ROOT/scripts/prepare-sq2-venus-iris1.py" --kernel "$K" --output "$STAGE" "$@"
+python3 "$ROOT/tests/test_sq2_vdec_buf_done.py" "$STAGE" --strict | tee "$DEST/buf-done-test.txt"
+python3 "$ROOT/tests/test_sq2_stop_sequence.py" "$STAGE" --strict | tee "$DEST/stop-sequence-test.txt"
+python3 "$ROOT/tests/test_sq2_session_end.py" "$STAGE" --strict | tee "$DEST/session-end-test.txt"
+gcc -Wall -Wextra -Werror -fsanitize=address,undefined -fno-pie -no-pie -pthread \
+  "$ROOT/tests/sq2_venus_callback_test.c" -o "$STAGE/callback-test"
+"$STAGE/callback-test" | tee "$DEST/callback-test.txt"
+python3 "$ROOT/tests/test_sq2_venus_resume.py" "$STAGE/hfi_venus.c" --strict \
+  | tee "$DEST/resume-test.txt"
+python3 "$ROOT/tests/test_sq2_venus_internal_release.py" "$STAGE/helpers.c" --strict \
+  | tee "$DEST/internal-release-test.txt"
+gcc -Wall -Wextra -Werror -fsanitize=address,undefined -fno-pie -no-pie -pthread \
+  "$ROOT/tests/sq2_venus_vb2_test.c" -o "$STAGE/vb2-test"
+"$STAGE/vb2-test" | tee "$DEST/vb2-test.txt"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  "$ROOT/tests/sq2_venus_buffer_test.c" -o "$STAGE/buffer-test"
+"$STAGE/buffer-test" | tee "$DEST/buffer-test.txt"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  "$ROOT/tests/sq2_venus_core_test.c" -o "$STAGE/core-test"
+"$STAGE/core-test" | tee "$DEST/core-test.txt"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  "$ROOT/tests/sq2_venus_power_test.c" -o "$STAGE/power-test"
+"$STAGE/power-test" | tee "$DEST/power-test.txt"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  "$ROOT/tests/sq2_venus_platform_test.c" -o "$STAGE/owner-test"
+"$STAGE/owner-test" | tee "$DEST/owner-test.txt"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  "$ROOT/tests/sq2_venus_lifetime_test.c" -o "$STAGE/lifetime-test"
+"$STAGE/lifetime-test" | tee "$DEST/lifetime-test.txt"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  "$ROOT/tests/sq2_venus_firmware_test.c" -o "$STAGE/firmware-test"
+"$STAGE/firmware-test" | tee "$DEST/firmware-test.txt"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  "$ROOT/tests/sq2_venus_dma_test.c" -o "$STAGE/dma-test"
+"$STAGE/dma-test" | tee "$DEST/dma-test.txt"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  "$ROOT/tests/sq2_fw_transaction_test.c" -o "$STAGE/transaction-test"
+"$STAGE/transaction-test" | tee "$DEST/transaction-test.txt"
+gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  -I "$STAGE" "$ROOT/tests/sq2_venus_iris1_test.c" -o "$STAGE/mock-test"
+"$STAGE/mock-test" | tee "$DEST/mock-test.txt"
+make -s -C "$K" O="$O" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+  M="$STAGE" CONFIG_VIDEO_QCOM_VENUS=m KBUILD_MODPOST_WARN=1 modules \
+  > "$DEST/build.log" 2>&1
+cp "$STAGE"/*.ko "$STAGE/candidate.json" "$DEST/"
+(cd "$DEST" && sha256sum ./*.ko > SHA256SUMS)
+echo 'COMPILE_ONLY: experimental Iris1 adapter; inspect candidate.json for opt-in stages; no device or Android decode validation'

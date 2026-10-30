@@ -1,11 +1,11 @@
 #!/bin/busybox sh
-# Keep the observed SQ2 SPI device open through IPTSd during input enumeration.
+# Keep the supported Surface Pro X SPI device open during input enumeration.
 if [ -r /run/iptsd.pid ] && kill -0 "$(cat /run/iptsd.pid)" 2>/dev/null; then exit 0; fi
 mkdir -p /logs
 [ -c /dev/uinput ] || { echo 'UINPUT_MISSING: kernel must enable INPUT_MISC and INPUT_UINPUT' > /logs/touch-service.txt; exit 1; }
 for d in /sys/class/hidraw/hidraw*; do
     [ -r "$d/device/uevent" ] || continue
-    grep -qi '^HID_ID=001C:0000045E:00000C21$' "$d/device/uevent" || continue
+    grep -qEi '^HID_ID=001C:0000045E:0000(0C21|0996)$' "$d/device/uevent" || continue
     node=/dev/$(basename "$d")
     echo "Checking SQ2 touchscreen $node" > /logs/touch-service.txt
     cp "$d/device/report_descriptor" /logs/touch-report-descriptor.bin 2>/dev/null

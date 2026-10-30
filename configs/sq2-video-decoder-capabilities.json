@@ -1,0 +1,491 @@
+{
+  "status": "firmware-declared-versus-verified-not-Android-hardware-ready",
+  "hardware_frame_scope": "H264 Constrained Baseline level1.3/320x240/6 I-P frames/linear NV12 OUTPUT2",
+  "hardware_log_sha256": "0c9727c94a48dce2a5f671f430980ec2cc3e6ec9be663ab5e1180c7c3e6be778",
+  "decoders": [
+    {
+      "codec": "H264",
+      "mime": "video/avc",
+      "private_frames_verified": true,
+      "Android_hardware_component_present": false,
+      "declared_caps": {
+        "mbs_per_second": {
+          "type": "mbs_per_second",
+          "min": 1,
+          "max": 3888000,
+          "step": 1
+        },
+        "framerate": {
+          "type": "framerate",
+          "min": 1,
+          "max": 480,
+          "step": 1
+        },
+        "frame_width": {
+          "type": "frame_width",
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "frame_height": {
+          "type": "frame_height",
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "mbs_per_frame": {
+          "type": "mbs_per_frame",
+          "min": 1,
+          "max": 138240,
+          "step": 1
+        },
+        "bitrate": {
+          "type": "bitrate",
+          "min": 1,
+          "max": 220000000,
+          "step": 1
+        },
+        "max_workmodes": {
+          "type": "max_workmodes",
+          "min": 1,
+          "max": 3,
+          "step": 1
+        },
+        "scale_x": {
+          "type": "scale_x",
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "scale_y": {
+          "type": "scale_y",
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "max_videocores": {
+          "type": "max_videocores",
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "declared_formats": {
+        "output": [
+          "NV12_UBWC"
+        ],
+        "output2": [
+          "NV12_UBWC",
+          "NV12",
+          "NV21"
+        ]
+      },
+      "declared_profile_levels_raw": [
+        {
+          "profile": 32,
+          "level": 131072
+        },
+        {
+          "profile": 64,
+          "level": 131072
+        },
+        {
+          "profile": 2,
+          "level": 131072
+        },
+        {
+          "profile": 4,
+          "level": 131072
+        },
+        {
+          "profile": 1,
+          "level": 131072
+        }
+      ]
+    },
+    {
+      "codec": "MPEG1",
+      "mime": null,
+      "private_frames_verified": false,
+      "Android_hardware_component_present": false,
+      "declared_caps": {
+        "max_videocores": {
+          "type": "max_videocores",
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "declared_formats": {
+        "output": [
+          "NV12_UBWC"
+        ],
+        "output2": [
+          "NV12_UBWC",
+          "NV12",
+          "NV21"
+        ]
+      },
+      "declared_profile_levels_raw": []
+    },
+    {
+      "codec": "MPEG2",
+      "mime": "video/mpeg2",
+      "private_frames_verified": false,
+      "Android_hardware_component_present": false,
+      "declared_caps": {
+        "mbs_per_second": {
+          "type": "mbs_per_second",
+          "min": 1,
+          "max": 244800,
+          "step": 1
+        },
+        "framerate": {
+          "type": "framerate",
+          "min": 1,
+          "max": 30,
+          "step": 1
+        },
+        "frame_width": {
+          "type": "frame_width",
+          "min": 96,
+          "max": 1920,
+          "step": 1
+        },
+        "frame_height": {
+          "type": "frame_height",
+          "min": 96,
+          "max": 1920,
+          "step": 1
+        },
+        "mbs_per_frame": {
+          "type": "mbs_per_frame",
+          "min": 1,
+          "max": 8160,
+          "step": 1
+        },
+        "bitrate": {
+          "type": "bitrate",
+          "min": 1,
+          "max": 40000000,
+          "step": 1
+        },
+        "max_workmodes": {
+          "type": "max_workmodes",
+          "min": 1,
+          "max": 1,
+          "step": 1
+        },
+        "scale_x": {
+          "type": "scale_x",
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "scale_y": {
+          "type": "scale_y",
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "max_videocores": {
+          "type": "max_videocores",
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "declared_formats": {
+        "output": [
+          "NV12_UBWC"
+        ],
+        "output2": [
+          "NV12_UBWC",
+          "NV12",
+          "NV21"
+        ]
+      },
+      "declared_profile_levels_raw": [
+        {
+          "profile": 1,
+          "level": 4
+        },
+        {
+          "profile": 2,
+          "level": 4
+        }
+      ]
+    },
+    {
+      "codec": "VP8",
+      "mime": "video/x-vnd.on2.vp8",
+      "private_frames_verified": false,
+      "Android_hardware_component_present": false,
+      "declared_caps": {
+        "mbs_per_second": {
+          "type": "mbs_per_second",
+          "min": 1,
+          "max": 1036800,
+          "step": 1
+        },
+        "framerate": {
+          "type": "framerate",
+          "min": 1,
+          "max": 240,
+          "step": 1
+        },
+        "frame_width": {
+          "type": "frame_width",
+          "min": 96,
+          "max": 4096,
+          "step": 1
+        },
+        "frame_height": {
+          "type": "frame_height",
+          "min": 96,
+          "max": 4096,
+          "step": 1
+        },
+        "mbs_per_frame": {
+          "type": "mbs_per_frame",
+          "min": 1,
+          "max": 36864,
+          "step": 1
+        },
+        "bitrate": {
+          "type": "bitrate",
+          "min": 1,
+          "max": 100000000,
+          "step": 1
+        },
+        "max_workmodes": {
+          "type": "max_workmodes",
+          "min": 1,
+          "max": 3,
+          "step": 1
+        },
+        "scale_x": {
+          "type": "scale_x",
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "scale_y": {
+          "type": "scale_y",
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "max_videocores": {
+          "type": "max_videocores",
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "declared_formats": {
+        "output": [
+          "NV12_UBWC"
+        ],
+        "output2": [
+          "NV12_UBWC",
+          "NV12",
+          "NV21"
+        ]
+      },
+      "declared_profile_levels_raw": [
+        {
+          "profile": 1,
+          "level": 1
+        },
+        {
+          "profile": 1,
+          "level": 2
+        },
+        {
+          "profile": 1,
+          "level": 4
+        },
+        {
+          "profile": 1,
+          "level": 8
+        }
+      ]
+    },
+    {
+      "codec": "HEVC",
+      "mime": "video/hevc",
+      "private_frames_verified": false,
+      "Android_hardware_component_present": false,
+      "declared_caps": {
+        "mbs_per_second": {
+          "type": "mbs_per_second",
+          "min": 1,
+          "max": 3888000,
+          "step": 1
+        },
+        "framerate": {
+          "type": "framerate",
+          "min": 1,
+          "max": 480,
+          "step": 1
+        },
+        "frame_width": {
+          "type": "frame_width",
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "frame_height": {
+          "type": "frame_height",
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "mbs_per_frame": {
+          "type": "mbs_per_frame",
+          "min": 1,
+          "max": 138240,
+          "step": 1
+        },
+        "bitrate": {
+          "type": "bitrate",
+          "min": 1,
+          "max": 220000000,
+          "step": 1
+        },
+        "max_workmodes": {
+          "type": "max_workmodes",
+          "min": 1,
+          "max": 3,
+          "step": 1
+        },
+        "scale_x": {
+          "type": "scale_x",
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "scale_y": {
+          "type": "scale_y",
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "max_videocores": {
+          "type": "max_videocores",
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "declared_formats": {
+        "output": [
+          "YUV420_TP10_UBWC"
+        ],
+        "output2": [
+          "P010",
+          "YUV420_TP10_UBWC"
+        ]
+      },
+      "declared_profile_levels_raw": [
+        {
+          "profile": 1,
+          "level": 536871936
+        },
+        {
+          "profile": 2,
+          "level": 536871936
+        }
+      ]
+    },
+    {
+      "codec": "VP9",
+      "mime": "video/x-vnd.on2.vp9",
+      "private_frames_verified": false,
+      "Android_hardware_component_present": false,
+      "declared_caps": {
+        "mbs_per_second": {
+          "type": "mbs_per_second",
+          "min": 1,
+          "max": 3888000,
+          "step": 1
+        },
+        "framerate": {
+          "type": "framerate",
+          "min": 1,
+          "max": 480,
+          "step": 1
+        },
+        "frame_width": {
+          "type": "frame_width",
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "frame_height": {
+          "type": "frame_height",
+          "min": 96,
+          "max": 8192,
+          "step": 1
+        },
+        "mbs_per_frame": {
+          "type": "mbs_per_frame",
+          "min": 1,
+          "max": 138240,
+          "step": 1
+        },
+        "bitrate": {
+          "type": "bitrate",
+          "min": 1,
+          "max": 220000000,
+          "step": 1
+        },
+        "max_workmodes": {
+          "type": "max_workmodes",
+          "min": 1,
+          "max": 3,
+          "step": 1
+        },
+        "scale_x": {
+          "type": "scale_x",
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "scale_y": {
+          "type": "scale_y",
+          "min": 4096,
+          "max": 65536,
+          "step": 1
+        },
+        "max_videocores": {
+          "type": "max_videocores",
+          "min": 1,
+          "max": 1,
+          "step": 1
+        }
+      },
+      "declared_formats": {
+        "output": [
+          "YUV420_TP10_UBWC"
+        ],
+        "output2": [
+          "P010",
+          "YUV420_TP10_UBWC"
+        ]
+      },
+      "declared_profile_levels_raw": [
+        {
+          "profile": 1,
+          "level": 2048
+        },
+        {
+          "profile": 4,
+          "level": 2048
+        }
+      ]
+    }
+  ],
+  "limits": "Individual firmware maxima are coupled; only the listed frame scope is tested. MPEG1 Android MIME mapping unresolved; AV1/APV remain software, not declared by this firmware."
+}

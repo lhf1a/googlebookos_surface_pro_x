@@ -1,0 +1,26 @@
+#!/bin/busybox sh
+# Paired early registration. Android owns the later userdata mount.
+set -eu
+cmdline=$(cat /proc/cmdline)
+case " $cmdline " in *' sq2.video=0 '*) exit 0;; esac
+case " $cmdline " in *' sq2.rescue=1 '*) exit 0;; esac
+case " $cmdline " in *' sq2.video.c2=experimental '*) ;; *) exit 0;; esac
+test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+source=/etc/sq2-c2-runtime-boot
+(cd "$source"; sha256sum -c SHA256SUMS)
+test ! -e /newroot/vendor/etc/media_codecs_c2.xml
+test ! -e /newroot/vendor/bin/sq2-c2-experimental
+test ! -e /newroot/vendor/etc/init/sq2-c2-experimental.rc
+test ! -e /newroot/vendor/etc/vintf/manifest/sq2-c2-experimental.xml
+test ! -e /newroot/vendor/etc/sq2-codec2
+mkdir /newroot/vendor/etc/sq2-codec2
+for name in runtime.tar runtime.sha256 runtime-files.sha256 install.sh; do
+    cp "$source/$name" /newroot/vendor/etc/sq2-codec2/
+done
+cp "$source/media_codecs_c2.xml" /newroot/vendor/etc/media_codecs_c2.xml
+cp "$source/service.rc" /newroot/vendor/etc/init/sq2-c2-experimental.rc
+cp "$source/manifest.xml" /newroot/vendor/etc/vintf/manifest/sq2-c2-experimental.xml
+cp "$source/service.sh" /newroot/vendor/bin/sq2-c2-experimental
+chmod 755 /newroot/vendor/bin/sq2-c2-experimental
+echo SQ2_RUNTIME_BOOT_STAGED_DATA_UNTOUCHED

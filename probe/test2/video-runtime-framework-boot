@@ -1,0 +1,18 @@
+#!/bin/busybox sh
+# Retained initramfs; opt-in once-per-boot native startup, never unload/retry PAS.
+set -eu
+export PATH=/bin:/sbin
+cmdline=$(cat /proc/cmdline)
+case " $cmdline " in *' sq2.video=0 '*) exit 0;; esac
+case " $cmdline " in *' sq2.rescue=1 '*) exit 0;; esac
+case " $cmdline " in *' sq2.video.c2=experimental '*) ;; *) exit 0;; esac
+case " $cmdline " in *' sq2.video.autostart=1 '*) ;; *) exit 0;; esac
+test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
+mkdir /tmp/sq2-runtime-boot-once
+for n in $(seq 1 240); do
+    if [ "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null || true)" = 1 ]; then break; fi
+    sleep 1
+done
+test "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed)" = 1
+test "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop init.svc.sq2-c2-experimental)" = running
+exec /bin/video-decoder-lab-start

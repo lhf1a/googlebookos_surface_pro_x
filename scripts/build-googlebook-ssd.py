@@ -200,6 +200,8 @@ if __name__=='__main__':
         manifest=json.loads((O/'image-manifest.json').read_text())
         plan=json.loads((O/'layout.json').read_text())
         if a.update_boot:
+            if manifest.get('hardware_video'):
+                raise ValueError('Use build-source-disk.py to rebuild hardware-video images; legacy update would drop the verified menu')
             esp=next(p for p in plan['partitions'] if p['name']=='SQ2PROBE')
             fat=f"{manifest['image']}@@{esp['offset']}"
             for n in ('Image','sc8180x-surface-pro-x.dtb','native-combined-initramfs.cpio.gz'):

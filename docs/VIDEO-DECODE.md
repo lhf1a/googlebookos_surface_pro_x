@@ -1,6 +1,336 @@
 # SQ2 视频硬解适配调查
 
-2026-10-29，用户明确请求补齐硬解。状态：未实现，未更改实机内核、DTB、启动镜像或 codec 配置。
+最新：HEVC 4K60 Main、含449个B帧的600帧素材已在普通APK自动选中新组件并完成600输出/渲染，9978ms、EOS/STOP/RELEASE/RESTORED。native capture有界预算由128MiB增至192MiB解决本轮EOVERFLOW。完整固件能力对齐仍未完成，见[能力对照表](VIDEO-CAPABILITY-ALIGNMENT.md)和HANDOFF最新状态。
+
+**2026-10-30**：最新完整运行态见HANDOFF顶部。Bilibili已通过OMX.qcom.video.decoder.avc别名实际1080p硬解，菜单仍无4K。HEVC原生6帧参考CRC通过，Android自动选择Main 8-bit、320×240含B帧300帧实时播放通过；4K60首轮失败，已定位适配层EOVERFLOW，native capture预算候选尚待实测。用户要求对齐固件全部格式、分辨率/profile/位深和吞吐，不能止于AVC/HEVC或XML声明。
+
+**AVC Main/High、B帧及4K自动选择通过（2026-10-29，最新）**：普通APK的1080p Main/High各300帧均完整输出/渲染、约9.96秒，PTS严格递增，EOS/STOP/RELEASE正常。High素材含141个B帧。新增--profile main/high六帧向量，ffprobe coded_picture_number建立解码序→显示PTS映射；High向量ce117e50…含3个B帧，Surface/CSD输出6帧逐字节等于独立FFmpeg NV12参考，修改缓存前后各通过一次。证据out/video-decode/high-bframes-vector/{frames,final-frames}。
+
+4K High首轮4输入0输出：复制到V4L2后未归还框架输入缓冲，等待重排输出造成入口阻塞；process提交/泵完成后clear input.buffers（V4L2已有独立复制），新增C2PortActualDelayTuning::output=8。修复后指定组件300帧9960ms通过。随后接口发布Constrained Baseline/Main/High三项，High10仍拒绝；10参数、level5.1/High接受/High10拒绝及pool往返实机通过。自动选择首轮在第9个输出allocation触及旧8项import上限，错误返回NO_MEMORY；改有界LRU后完整300帧但14.899秒，缓存轮换拖慢，不记成功。
+
+最终import和私有minigbm缓存协调为最多16项/192MiB、单allocation16MiB；import按最近使用淘汰，仍仅持独立AHB引用、不持queue block/CPU lock，超大或不可测大小跳过优化。主机实际unmap/destroy ASan/UBSan覆盖10000次复用、16×12MiB项数边界、12×16MiB字节边界及31次最终释放通过。新私有库eb31d4022c97e1ac70e4b396eeb7c5599d1f904730bbdd241704a6929bc967a8；旧b673保存在设备sq2-map-cache/libminigbm_gralloc-128.so。原stage/helper已更新，构建仍使用该固定stage；不要误把之前128MiB构建当当前版本。
+
+最终自动选择4K High：hardware=true/software=false/profiles=3/format_supported=true，300输入/输出/渲染，9964ms，EOS/realtime/pass=true、STOP/RELEASE/RESTORED；9个唯一输出，结束释放9项112914432B，copy+sync1.621秒。当前RAM owner9a556a2c3ada89e53d476d7aa71d712ec52e265ae8b891d96d122379de7bc62b、wrapper bdf11d60…；全局minigbm仍c1a57082…。APK d076bfe3…为4K High版。日志成功和失败全取回out/video-decode/profile-playback；最终collector KMSG_END timeout120000ms、无运行collector，XML_REMOVED、boot3944/PID1978/2246/guardY保持。未更改默认启动镜像，native/PAS不重复装卸。
+
+下一步：实际Bilibili接入、其它codec能力对齐及实验包持久化/重启回归。上述只是指定合成码流验证，非所有AVC工具/长片/最大重排深度认证；不能将完成AVC测试标为整个硬解目标完成。输出delay=8是当前有界实验值，尚未按SPS动态推导。设备NDK frames探针已换成High向量e3f88650…，后续比较必须用high-bframes-vector/ref.nv12，不能误用原baseline参考。
+
+**自动选择4K30通过（2026-10-29，最新）**：普通APK通过MediaCodecList查询，hardware=true/software=false、Constrained Baseline profile一项、format_supported=true，findDecoderForFormat自动选中c2.sq2.avc.experimental；3840x2160/30fps/300帧输入、输出、渲染全部完成，9960ms，EOS/realtime/pass=true，STOP_OK/RELEASE_OK/RESTORED。这仍是合成AVC测试，不代表Bilibili、Main/High、HEVC/VP9或默认启动完成。
+
+首轮自动枚举在VideoCapabilities.updateLimits抛出Range上下界异常并触发JNI SIGABRT，仅测试APK崩溃；设备boot39441275-d887-4e17-a774-9e1fad93cdd3、框架PID1978/2246未变，用户确认屏幕可操作。接口补齐profile/level与input video/avc、output video/raw MIME。只公布Constrained Baseline、最高level5.2；起初仅接受5.2导致configure拒绝框架传入5.1，补齐标准较低level后通过。接口实机9参数、5.1接受、High拒绝、尺寸错误回退及block pool往返通过；不把level范围视作每档性能认证。XML实验尺寸更新到320x240–3840x2160。
+
+当前RAM owner SHA516f682393e6db1fadaa17b800b730cc1fcefdeb8967036964efa417f047d73e，私有wrapper/mapper不变，全局minigbm SHA c1a57082…保持。新APK be5bcfee…支持codec=auto；runner新增auto标签并读取全部logcat buffer（此前默认buffer日志为空）。最新完整证据已取回out/video-decode/auto-selection/；collector smoke通过，显式停止后KMSG_END reason=signal/52613ms，XML_REMOVED、guardY、boot/PID保持。当前正常启动镜像未改，native/PAS保持驻留，不重复装卸。下一步真实应用与其它profile验证、补齐持久化包及重启回归；目标仍未完成。
+
+后续4K回归：flush保留并重送SPS/PPS，普通APK从60帧跳至4.933333秒同步点后完成212输出/渲染、EOS/stop/release，7000ms；旧测试精确5秒断言错误已修正。再同一decoder会话重复10秒资产6次，输入PTS递增，1800帧完整显示、59961ms实时、4个唯一输出缓冲、全部import释放。只是一分钟AVC baseline/单次seek回归，尚不代表B站或全部能力完成。记录见out/video-decode/{seek,long-play}及HANDOFF。
+
+**4K30实验播放通过**：有界AHardwareBuffer独立import引用配合私有minigbm映射缓存，普通APK3840x2160/30fps/300帧在9962ms完整输出/渲染，EOS/STOP/RELEASE通过，realtime=true。六帧Surface/CSD像素仍全字节匹配。引用只保留allocation，不保留BufferQueue block所有权或CPU锁；停止释放4个import共50184192B。复制加同步从16.909s降到1.129s。此为单轮10秒AVC baseline测试，长期、seek/flush、其它codec/profile及B站/默认启动仍未完成。当前候选与取证状态见HANDOFF顶部。
+
+映射缓存实验：默认关闭的MSM/NV12/RW缓存引用候选，限制16项/128MiB并保持原解锁和BO销毁；主机实际unmap/destroy抽取测试10000复用/边界/最终释放通过。独立私有namespace allocation-only A/B重映射首写从35.5ms/2025faults降至0.86ms/0faults，字节正确。真实C2服务验证候选库及环境确已生效，但4K300帧20971ms仍不实时；下一步核对每帧import对象销毁是否使缓存失效，尚未确认此假设。未改全局mapper或启动镜像，详见HANDOFF最新状态。
+
+最新映射结论：真实300帧输出仅3个DMA-BUF inode，pool17/allocator20，输出复用已成立。独立同一graphic allocation反复unmap/map，每次8.29MB写入重现2025 minor faults和35–40ms；映射内写入约0.7ms/0faults。固定minigbm455b745…的MSM后端未实现bo_flush，unlock经drv_bo_flush_or_unmap撤销映射；内核逐页fault插入。下一步针对映射生命周期修复并保持同步/最终释放，尚未部署mapper修改。当前4K300帧20952ms，仍非实时。证据out/video-decode/output-mapping，详细运行态见HANDOFF顶部。
+
+2026-10-29输出内存定位：新增sq2-c2-memory-probe.cpp仅分配system heap及C2 graphic，不开video设备。8.29MB、8轮复制全字节正确；gralloc首次写41.207ms，后续约0.7ms，DMA源读约0.53ms。首次访问开销已观察，但尚未证明底层原因。新增可配置C2PortBlockPoolsTuning::output，参数往返实机通过，4K300帧21034ms仍不实时，pool实际复用尚待核对。测试后SSH短时超时；用户确认屏幕正常，连接恢复且boot/框架PID未变，不能记为新黑屏。详细日志out/video-decode/output-pool，当前状态见HANDOFF。
+
+最新复制路径对照：真实NV12布局已命中原memcpy分支；平面/反序色度NEON候选及显式向量整行复制均未改善4K。向量版300帧22253ms，复制加同步18.166s，其中同步0.242s、亮度12.347s、色度5.576s，全部帧/渲染/EOS/释放完成但实时性失败。向量helper主机ASan/UBSan及ARM64 QEMU边界检查通过；实机Surface六帧字节匹配通过。当前候选7d178dfa…仅RAM部署，下一步定位源读与目标写的内存映射吞吐；不能把微优化构建通过称为性能修复。详细证据路径和设备状态见HANDOFF顶部。
+
+2026-10-29，用户明确请求补齐硬解。当前实验路径已实现H264硬件解码、Android MediaCodec调用及普通APK的1080p30播放；4K尚不实时，完整能力对齐与正常启动默认接入未完成。以下按阶段保留历史记录，最新状态见HANDOFF。
+
+固定capture池候选保留驱动session END前的DMA映射退休隔离，避免每帧更换native capture造成回收积累；硬件解码后CPU复制到独立C2输出。1080p300帧/渲染/EOS/stop/release全通过，9963ms，video fd close约7ms；Surface六帧独立CSD与参考像素逐字节一致。4K300帧完整但耗时22295ms，旧pass=true仅是完整性，不能视作实时播放通过。
+
+后续累计计时候选ae0f01160a605fa8138a4504bc4e5ae98d2df940e71d88efee545e37bb5f53dc已在同boot RAM部署：4K300帧用22230ms，新APK正确报告pass=false/realtime=false，EOS/STOP/RELEASE通过。300帧总fetch282678us、map90130us、copy+DMA同步18175883us、unmap33575us；主要耗时在复制/同步区间，尚未分离两者，不能归咎硬件解码速度或直接提高VPU时钟。9个12546048B固定capture，fd close约12ms。证据out/video-decode/fixed-capture/2160p-timing。测试XML撤销、应用停止、collector结束，boot3944与PID1978/2246保持，默认启动镜像未改。
+
+最新目标：在Android上实现硬件解码器可用，完成标准为真实硬件解码帧验证、Android MediaCodec可枚举和调用、应用实际播放；只有内核模块加载不算完成。
+
+用户随后扩展目标为“适配Andorid可用的硬件解码器，对齐硬件解码器的能力”。需逐codec对齐固件申报、真实解码验证和Android API暴露；不能用软件decoder或XML条目冒充硬件，也不能把单个小向量提升为4K/8K/10bit/所有profile的验证。
+
+## 首次真实 H264 输出帧 CRC 验证（2026-10-29）
+
+接续工作区既有decode候选和已生成向量，不重新做能力/session门槛。原runner用240秒/4MiB超出现有collector135秒/2MiB上限，collector退出2，runner kill12064失败、无日志/视频模块/固件启动；先确认该进程与旧shell均已结束，当前bootbcd0a17e…仍干净。修正为120秒/2MiB，保留旧失败输出；另对bufreq强制单属性、完整8字记录、禁止静默裁剪超过输出容量的条目，对DMA PAGE_ALIGN前先限大小。未把原runner错误当成硬件失败。
+
+候选21c883a3e41e8bcb36d2f9ad6c93c428094419417736d518312fadff7c2d4bb4构建及实际运行导出闭包missing0；ASan/UBSan下dec19项、caps40项、ring完整复制/写入/长度与fw transaction通过。固定向量为ffmpeg testsrc2、320x240、30fps、6帧、Constrained Baseline level1.3、无B帧、单线程编码/AUD，Annex-B11383字节SHA94c7974e…；将同一码流独立软件解成NV12，参考SHA7ac308a7…，头文件仅含码流/访问单元偏移/CRC，不含参考像素或CPU H264解码器。
+
+在本boot首次固件启动，完整HFI+caps+session+hfi_decode=1执行一次：设置输入320x240、workmode1/core1、OUTPUT UBWC DPB、OUTPUT2线性NV12；查询需求后设置7输入/18DPB/18OPB，分配scratch/persist等。LOAD_RESOURCES/START error0，送6个访问单元与空EOS，固件sequence change报320x240，再CONTINUE及FTB。收到7个EBD/error0，6个非空线性输出加EOS；每帧可见320x240 Y和320x120 UV以stride384/Y scan256读取，与独立参考的CRC逐一相等：
+
+| 帧 | Y CRC | UV CRC |
+|---|---|---|
+|0|a63b3e27|4ef614e1|
+|1|6452bebf|8f399579|
+|2|2a48def8|22e352f2|
+|3|ce9219cd|1af7f368|
+|4|3d294bd1|a1e0a7c1|
+|5|0d29a183|15abb8c1|
+
+`SQ2_HFI_DEC_RESULT ret=0 verified=6/6 mismatched=0 ebd=7 ebd_err=0 fbd_out=7 fbd_empty=1 fbd_err=0 eos=1 seq=1000001 320x240`。STOP/RELEASE_RESOURCES、内部缓冲区release和SESSION_END均0，session_open0；PAS shutdown0/owner0之后才释放所有decode缓冲区与队列；HANA桥接/时钟/域/ICC回收0，probe_result0、消费者rmmod0。bootbcd0…、system_server2201/SF1973保持，guardY/nohibernate、Android1、pstore空，无SMMU fault/WARN。原始日志已取回，SHA0c9727c94a48dce2a5f671f430980ec2cc3e6ec9be663ab5e1180c7c3e6be778。提供者/两个overlay保持驻留；本boot不要再启动固件。
+
+这是实际硬件解码的12个可见平面CRC通过，不是只见FBD或改索引。但只有此H264点，未测B帧/长视频/seek/并发/上限/性能；空FBD的尺寸元数据无意义，不把其未初始化字段当成帧。未创建/dev/video或Android硬件组件。
+
+## 能力对齐：固件声明、私有帧与Android枚举分离
+
+本轮能力体仍75记录/774字全部解析。新report-sq2-video-capabilities.py独立比对六帧唯一性、尺寸、实得与打印期望CRC均须等于vector.json，再核对EOS和真实关闭标记；8个正负例覆盖缺帧/改CRC/尺寸/关闭/EOS及Android硬软分类。输出capability-alignment.json和紧凑configs/sq2-video-decoder-capabilities.json，逐项保留六种decoder的格式、宽高/宏块/速率联合限制和profile/level原始值。
+
+- 固件声明H264、MPEG1/2、VP8、HEVC、VP9；实测帧只有上述H264小向量。MPEG1 Android MIME映射仍待确定，不丢弃此声明、不伪造组件。
+- H264 OUTPUT只报NV12_UBWC，OUTPUT2含NV12_UBWC/NV12/NV21，已实测NV12。8K宽高与480fps是分别申报的上限，必须同时满足宏块/秒、宏块/帧等限制，不能写成“8K480已支持”。
+- 补证：固定下游vidc_hfi_helper.h（SHA4bead9f2…、configs/sm8150-video-reference.json）明确定义HFI_H264_LEVEL_6=0x20000，因此该level值名称现在有来源；只是固件申报，不是本轮level6码流实测。6.3头只有至5.2，不盲套Android枚举。
+- Android实际service list有AIDL Codec2 default/software，media.player枚举视频均c2.android软件项、hw-accelerated0。最初查询media.codec返回不存在，不能解释成没有任何Codec2服务；已改查实际media.player/store registry。无/dev/video、未接硬件V4L2/C2。AV1/APV软件项存在，不在该固件硬件声明里，不发布为硬解。
+
+下一步转入正式Venus/V4L2平台后端与开放Codec2：复用本轮正确SID/IOVA、CPU邮箱、PAS所有权及缓冲寿命，先编译/审计再受控实测，随后对齐每种codec的profile/level/输出格式/联合上限、真实流及Android能力查询/应用播放。热重启仍未修复，应让核心长期持有固件避免每个会话重复PAS启停，并另验证完整remove/错误路径；不通过正常启动配置或XML假声明绕过。完整用户目标保持未完成。
+
+## 首次真实H264解码session创建/销毁及完整能力体（2026-10-29）
+
+用户批准后经sync和Android正常重启到干净boot44c03275…（guardY/nohibernate、boot_completed1、PID1976/2304、无视频模块/节点、pstore空）。重新传输六文件全哈希匹配后只运行一次run-hfi-session.sh：重装软件VIDEOCC、identify overlay和HFI overlay，集成DMA门槛probe_result0并卸载；随后本boot首次固件启动，994a00f5…完整参数加hfi_caps=1/hfi_session=1。
+
+```
+SQ2_HFI_BOOT status=40000001 ret=0           SFR first=74696e49("Init")
+SQ2_HFI_EMPTY_PING rx_req=1 polls=0 cmd_r=0 cmd_w=0
+SQ2_HFI_SYS_INIT_REPLY error=0 properties=75  (3112 bytes)
+SQ2_HFI_SESSION_INIT_DONE id=53513201 error=0 properties=0 bytes=24
+SQ2_HFI_SESSION_END_DONE id=53513201 error=0
+SQ2_HFI_DONE reply=1 ret=0 session_open=0 cmd_r=11 cmd_w=11 msg_r=788 msg_w=788
+```
+
+固件按cookie回应了H264解码SESSION_INIT/SESSION_END，均error0；无SYS_ERROR事件/调试消息。之后PAS shutdown0/owner0、队列首IOVA解除映射、19.2MHz恢复、HANA桥接脉冲0、reset恢复、三域off0、三ICC清零、resources_released0、probe_result0，消费者rmmod0。boot/PID保持，dmesg无SMMU fault/WARN，pstore空。日志out/video-decode/hfi-session/hfi-session-44c0.kmsg（579c379d…）。
+
+新增离线 `scripts/parse-sq2-hfi-caps.py`：只读kmsg的98行RAW，要求行连续、包头0x20001、尾部只有零填充，按固定6.3 HFI4xx载荷布局逐条解析，遇未知属性即停止不猜长度。结果**75条记录正好等于固件声明的75个属性，774/774体字全部消费**，作为布局独立一致性检查；末条0x1016按下游名TME_VERSION_SUPPORTED，仅因恰剩1字推断长度。解码器：H264、MPEG1、MPEG2、VP8、HEVC、VP9；编码器：H264、VP8、HEVC及未命名0x8000。H264解码组：OUTPUT仅NV12_UBWC，OUTPUT2为NV12_UBWC/NV12/NV21；宽高96..8192、mbs_per_frame≤138240、mbs_per_second≤3888000、帧率≤480、码率≤220000000、max_workmodes1..3、videocores1；profile 0x1/0x2/0x4/0x20/0x40，level字段0x20000（超过6.3头文件列出的5.2=0x10000，含义未核实）。这些是固件申报值，未经实际解码验证。结果JSON在hfi-session/caps-44c0.json。
+
+**边界：** 这是真实VPU会话协议往返，不是解码：未设置缓冲区需求、未送码流、无输出帧、无V4L2/MediaCodec/应用播放。对照上一轮：同一OS boot内第二次固件启动CTRL_STATUS保持0，而干净boot首次启动成功；两次观察支持“重复上电/热重启未解决”，根因未定。实际适配须暂按每boot一次固件启动处理，或另行诊断热重启。下一步：session内SET_PROPERTY（帧尺寸/输出格式）及GET_PROPERTY缓冲区需求，再分配输入/输出缓冲区、送一段已知H264码流并验证输出帧像素；OUTPUT只申报UBWC，线性NV12需经OUTPUT2。
+
+## session候选单次实测：同boot第二次固件启动未进入控制状态（2026-10-29）
+
+用户批准后在仍为boot39906e2a…（guardY、Android1、PID2104/2295、提供者与两overlay驻留、无消费者、pstore空）上只运行一次run-hfi-session.sh；六文件传输哈希匹配，collector ready/smoke通过。994a00f5…带原Windows-reference全部参数加hfi_caps=1/hfi_session=1。DMA16MiB/IOVAbf000000、PAS boot0/owner1、protect0、六个邮箱、CTRL_INIT写入与此前成功轮逐条相同；但CTRL_STATUS在1秒内保持0（成功轮为40000001），SFR首字仍0（成功轮为"Init"74696e49），msg_w/dbg_w0，ret-110。**新代码只在SYS_INIT回复后执行，本轮未到达；没有取得能力体RAW、session或帧，不能据此评价新阶段。** 随后真实PAS shutdown0/owner0、队列解除映射、HANA桥接脉冲0、reset恢复、三域off0、三ICC清零、resources_released=-110（即HFI超时码，回收本身均0），消费者rmmod0。之后boot/PID/guard保持，dmesg无SMMU fault/WARN，pstore空，无辅助设备残留。完整日志out/video-decode/hfi-session/hfi-session-3990.kmsg（c459be3f…）。
+
+这是本boot内第二次PAS启动该固件（第一次即成功的SYS_INIT轮，已正常shutdown）。**同boot重复上电不能复现控制启动，符合此前“未验证多次上电稳定性”的开放项**；单次观察不能区分安全侧PAS状态、未覆盖的HW_CTRL/GDSC残留或其它热重启条件，不作根因结论，也不在本boot重试。下一步：经用户同意后正常重启，在干净boot上作为首次固件启动只运行一次同一脚本（脚本会重新装提供者并先做DMA门槛）；热重启问题另作诊断项。
+
+## 能力体捕获与H264 session候选（2026-10-29，后已实测，见首节）
+
+在已实测的Windows-reference传输上新增两个opt-in阶段，默认行为不变：`hfi_caps=1`（需hfi_handshake）将SYS_INIT回复整包有界复制出共享环（含环绕、复制后复核长度字），以8字/行`SQ2_HFI_CAPS_RAW`原样记录，供离线解析；同时按固定6.3 hfi_parser.c的逐字扫描语义汇总CODEC_SUPPORTED dec/enc掩码、MAX_SESSIONS、CODEC_MASK中覆盖H264解码的条目数及其他属性命中数。扫描计数沿用上游启发式，载荷字恰好等于属性ID也会计入，不是逐属性schema；末尾无足够载荷的命中记truncated、不越界读取。`hfi_session=1`（需hfi_caps）仅在dec掩码含H264时发送SESSION_INIT `{20,10007,53513201,2,2}`（VIDC_SESSION_TYPE_DEC/HFI_VIDEO_CODEC_H264，固定私有cookie），等待0x20006且核对session id/error，再发SESSION_END并等待0x20007。不设置缓冲区、不发送码流、不解码帧。等待期间消费SYS_DEBUG（只打印有界可打印摘录）与EVENT_NOTIFY，SYS_ERROR事件直接中止；随后仍走已验证的真实PAS关闭/HANA桥接/回收，关闭失败仍整体隔离。SYS_INIT命令改用同一有界生产者写入（r=w=0时与原写法字节相同）。
+
+主机ASan/UBSan：环复制/写入672+3584组（全部起点/长度/占用、环绕、复制中长度被改、空间不足不写入）、原448组环绕与12300种长度、caps解析40例（合成数据，非固件输出）及固件事务16组合全过。候选`994a00f500e0dec6a18ac12979f829a4b57594e5da42aa0293db4ffe9083db9e`，对boot39906e2a…实采导出missing=0、vermagic匹配；mixed-declaration警告为原有代码位置。旧93cd5b7d…候选已备份于out/video-decode/hfi-session/previous-out，新候选及单次运行脚本在hfi-session/session-v1与run-hfi-session.sh。**尚未部署或实测；没有能力体语义、session创建或解码帧证据。** 下一步：确认设备状态后只运行一次该脚本，取回日志离线解析能力体；session通过后才进入缓冲区要求/码流/输出帧。
+
+## 首次真实共享队列与 SYS_INIT 通过（2026-10-29）
+
+**清理边界补正**：完整DMA raw日志中三次独立overlay拆除均出现`OF: ERROR: memory leak`，首次还有refcount underflow/saturation WARN，尽管API返回0、sysfs节点和模块消失。这不是“完全清理通过”；仅4096页DMA映射/解除映射及CPU读回成立。保留日志，禁止再热拆该独立路径，builder默认拒绝，未修复引用寿命。后续用已驻留的HFI overlay，不卸载提供者。本boot发生过这些WARN，当前SSH/框架正常不等于长期稳定。以下exit0/removed均指实际返回值及可见节点状态，不覆盖此限制。
+
+本轮不再猜表头或重跑原1300全流程。先构建独立无电源/时钟/MMIO/PAS的`SQ2_DMA_REFERENCE`：legacy1300/mask60与精确2300/2320/2340三SID用相同16MiB、IOVA上限c0000000。原基线、修改版、通过自含ROLLBACK.sh恢复的另一个副本三者实际insmod均exit0；IOVA均bf000000、独立group唯一peer、4096页映射/两种CPU填值检查/4096页解除映射均通过，消费者driver/overlay在测量结束时清理，随后rmmod0。不带allow负例实际EPERM且无节点/模块残留。第一次collector烟雾标记被现有过滤器排除，脚本在任何insmod之前退出1；确认原collector17282已timeout终止后改用SQ2_KMSG_SMOKE前缀，第二份日志完成。不是一次硬件失败重试。旧/新profile主机侧都能映射，故不能靠此结果判断真实VPU SID。
+
+随后将证据接到显式`--windows-reference` HFI候选。该属性路径限定三条精确SID（mask均0），24字节表头/192字节整表/三条56字节qheader，UC16MiB且IOVA落在原Android池与Windows推断池的交集25800000..c0000000。保留原SCM保护设置；只写CPU的六个邮箱，省去下游DSP镜像和该Windows路径未用的VERSION写；原legacy路径默认不变。新增CTRL_INIT写前/后、VERSION写前/后和CTRL_STATUS轮询前的标记，不增加受保护MMIO读取。HFI区域仍需真实PAS停止后才能释放，失败仍quarantine；清理只清实际发布过的邮箱及已写控制项。
+
+候选消费者93cd5b7d99636d30e524ec6632a50153302c99d015889839e3254d1e945b399c、overlay a8e7c9ff853d83e32fa1b8c21bfeae172e5ba7fc918f2f9f40d98bff5ab9e522在fresh stage编译，ASan/UBSan ring边界和firmware transaction通过，全部未定义符号匹配当次运行导出；缺原Module.symvers的警告模式不是完整ABI证明。保留软件VIDEOCC24ed5d48…及原identify overlay f4945659…；实际live VIDEOCC phandle仍b5，加载前核对。传输四模块全哈希匹配，120秒/2MiB独立collector ready/存活/烟雾验证后，先集成DMA-only阶段返回probe_result0/header24/table192/16MiB并解除映射，卸载消费者；再对新Windows profile只执行一次完整握手。
+
+实测（原42版4e93d345…固件未替换）：
+
+```
+SQ2_HFI_BOOT status=40000001 ret=0
+SQ2_HFI_EMPTY_PING rx_req=1 polls=0 cmd_r=0 cmd_w=0
+SQ2_HFI_SYS_INIT_SENT words=3
+SQ2_HFI_RX q=1 bytes=3112 type=20001 word2=0 r=0 w=778
+SQ2_HFI_SYS_INIT_REPLY error=0 properties=75
+SQ2_HFI_DONE reply=1 cmd_r=3 cmd_w=3 msg_r=778 msg_w=778 status=40000001
+```
+
+主机将rx_req初始化0且之后不写1，固件实际写成1；命令被消费且回复包头、长度/索引边界通过。这已是VPU共享队列通信，不再只是CPU pattern或状态寄存器1。但75个property的内容尚未完整保存/解析，也未创建decode session。
+
+真实PAS shutdown0/owner0、固件内存释放、队列首IOVA解除映射、19.2MHz恢复、六时钟/AHB退出、HANA固件停止后的四桥接assert/deassert全0，原reset状态恢复、三域off0、三ICC清零0、resources_released0，最终probe_result0/refcnt0，核对日志后消费者rmmod0。独立collector以signal正常落盘KMSG_END，elapsed13239ms；原始日志已取回out/video-decode/sid-reference。boot39906e2a…、system_server2295/SF2104保持，Android1/guardY/nohibernate保持。软件VIDEOCC和两个驻留overlay仍留在本boot，不热拆；没有写ESP/启动镜像/Android codec配置。
+
+**边界与下一步**：SID、表头、UC大小和邮箱路径组合一起验证，不能把成功单独归因某一项；也未验证多次上电稳定性。下一步保留这套已验证传输，增加有界SYS_INIT能力体复制/解析及真实H264解码session创建/销毁，继而真实输出帧和V4L2/MediaCodec/应用播放。不得以握手通过标记完整硬解完成。结构化状态见configs/sq2-video-hfi-status.json；补丁、可执行自含回滚、字节重建验证及三角色字面输出见out/video-decode/sid-reference/VERIFICATION.txt（原SQ1采集角色继续保留）。
+
+## 最新：SQ1 Windows 参考与 empty 日志取回
+
+续接已增加严格哈希/指令检查器：同字节Windows驱动实际写table头24/stride56/总表192/三队列，以及UC_REGION_SIZE=16MiB；CTRL_INIT写1。SQ1、原SQ2两输入结果一致，六项指令检查、十映射核对、9项正负例通过，仍不是设备运行验证。下一步建立显式2300参考SID的独立无上电DMA候选，先验证主机侧映射/解除映射；不改变正常启动SID、不重复旧全流程，不把更换队列表头当作已修复。见SQ1-VIDEO-REFERENCE后续节。
+
+已完成用户新增SQ1设备的只读驱动/ACPI采集及全部manifest验证。SQ1 qcdx与此前SQ2新版包共有34文件全部同字节，79版固件不是当前Android实测42版。更重要的是本机Windows DSDT/IORT给出VIDEO引擎4、SMMU15000000、SID2300/2320/2340等映射，和当前sdmshrike来源1300/mask60存在待核对差异；不得以CPU映射读回替代实际VPU DMA。非安全IOVA/保护范围也须同时核对，暂不盲改或重试。详见[SQ1-VIDEO-REFERENCE](SQ1-VIDEO-REFERENCE.md)。
+
+旧empty-76f0日志已取回：注册/probe/ICC并未停住，PAS auth0/protect0，九次邮箱写入都有END，最后为540.670400s的HFI_BOOT begin；没有下一条控制状态/共享队列或shutdown结果。不能从collector最后一条确定具体MMIO阻塞点。当前只读boot39906e2a…、Android1、guardY/nohibernate、PID2295/2104，临时模块清空/pstore空，恢复方式未确认；用户此前已确认SSH中断时桌面/触摸正常。本轮未复跑VPU或重启，以下待取状态均为历史记录。
+
+## compact日志取回与新注册阶段诊断（2026-10-29）
+
+SSH恢复后已实核boot76f0f9ca…、boot_completed=1、screen_only=Y/nohibernate、PID2264/2082；临时视频模块清空、pstore空，默认闭源入口保持。此为用户已确认整机卡死后的手动恢复，非自主崩溃或自动回退。compact日志已复制至out/video-decode/iris1-phase/hfi-compact-976c-kmsg.txt：共48条筛选日志，只有collector ready、正常系统噪声及602.714066s smoke，末尾603.361033s，无新消费者日志/结束标记。原主机输出已越过rmmod、打印SQ2_HFI_COMPACT_BEGIN，故已到新insmod，但218b…代码只在ICC bulk get成功后才打印路径，缺少注册/probe初始标记；不能由缺日志判定具体调用或表头有效性，也不能确认HANA退出恢复就是本轮根因。
+
+新增driver_register前后、probe_enter及ICC get前后标记，并使用既有100ms trace等待。新候选5a967ca3…与四模块当次live导出missing=0、传输哈希完全匹配。有限collector `/data/local/tmp/sq2-hfi-empty-76f0.kmsg` ready/存活/smoke已验证；从干净启动直接装软件VIDEOCC及两个驻留overlay，只加载一次新消费者，使用默认288表头、完整ICC/桥接/AHB/六时钟/200MHz/PAS/protect和empty_ping。insmod连接随后超时，第二个只读连接closed。**没有probe_result、固件队列写入、SYS_INIT或完整退出恢复证据；新逐步日志尚待取回。** 未写ESP、默认镜像或codec配置。已停止设备侧操作并询问当前桌面状态；不要继续完整加载或热拆提供者，先恢复并读取该日志确定注册/ICC/电源/固件的实际阻塞位置。
+
+## 固件静态协议证据与共享队列判据（2026-10-29）
+
+用户随后明确确认compact对照后整机无响应，正在手动重启恢复；当前尚无新boot ID/桌面恢复复核，SSH仍closed。将本次恢复按操作者操作记录，不当成自主崩溃或自动恢复；不复跑原compact完整流程。
+
+设备SSH仍在交换主机标识前closed，尚不能读取compact对照最后日志；本轮没有重新部署或启动VPU。为减少盲目对照，离线分析固定4e93d345…SQ2固件的ARM32可执行LOAD段，以原始程序头虚拟地址定位、固件自己的HFI_QueueGetQHdr字符串引用及ARM指令交叉核对。原始固件、临时ELF包装和反汇编只留忽略的out。新 `inspect-sq2-video-firmware-protocol.py` 只接受完整固定哈希，校验ELF布局和所列指令字/BL目标，再生成out/video-decode/firmware-analysis/protocol.json；不执行固件，不连设备，不读设备MMIO。它是固定二进制的静态证据采集，不是ARM仿真或运行跟踪。
+
+六条证据：①固件队列查找从table+8读取qhdr0_offset再加到table指针，而非固定跳过24字节；②队列header步长为56；③CPU/DSP getter分别读取固件虚拟MMIO E00D2054/E00D2034，与现有邮箱偏移一致；④固件会给E00DF010启用bit15，处理器写0x8000到E00DF01C清除它；⑤空队列分支比较read/write后写queue+0x20为1（rx_req）；⑥一条初始化路径先调用CTRL_STATUS bit0 setter，再等待QTBL_INFO并查找队列header。地址是固件虚拟地址，未据此新增AP寄存器访问。
+
+这些指令说明不能仅因原Venus表头24字节就判定后期288布局有错，也不支持盲改通知位。它们还收紧上一节的结论：**实测CTRL_STATUS=1证明控制初始化已推进，但该状态可早于共享队列解析，不能当作VPU DMA/完整启动完成。** 尚未取得任何SYS_INIT回复或解码帧；其它格式校验、实际走到的分支及DMA映射仍需实机证据，动态offset并不证明所有布局约束已覆盖。
+
+新增opt-in `hfi_empty_ping=1` 仅用于完整hfi_handshake条件：把初始cmd.rx_req设为0，控制初始化后等待20–25ms、发送一次已确认的bit15空队列通知，再最多250次以1–1.5ms间隔观察。主机之后不写这个字段；只有rx_req变为1且cmd_r/cmd_w仍0才记为共享队列写入证据，随后继续真实SYS_INIT。超时记录“未观察到固件队列写入”并进入既有真实PAS关闭/HANA恢复，不能假定固件完全未访问内存。非法值或非空索引报EPROTO；没有伪造应答或修改固件。候选406a979b…主机ring/事务测试、编译、运行内核导出闭包通过，**尚未部署，不能声称此判据已在设备上通过**。下一步仍先恢复SSH并取回compact日志，验证完整退出，再用此判据区分通知/队列访问与命令处理。
+
+## 只写邮箱后的控制启动与命令未消费（2026-10-29）
+
+只读SSH后来连接到新boot976cc99e…，Android就绪、guardY/nohibernate、PID2295/2106、临时模块清除、pstore空；恢复方法仍无用户答复，不称自动恢复。已取回19ed…native文件：最后到PAS auth_end=0、firmware_boot_end=0/owner1、protect=0、SFR before=4096/0/空队列。固定fa09…源码下一步就是邮箱快照readl循环，再发布队列；故失联范围比此前缩小，但异步collector仍不能证明具体指令。禁止复用快照读回版本。
+
+只写候选203943ae…/ICC overlay cb2e3434…在当次运行导出missing=0、传输全哈希匹配后，有限collector ready/存活/smoke通过。三域/桥接/AHB/六时钟与200MHz均启用，固定SQ2固件加载/认证0、虚拟保护设置0。逐次九个邮箱写入BEGIN/END全部完成：CPU UC/QTBL/SFR/MMAP与DSP镜像。**HFI CTRL_STATUS首次实返00000001，控制启动等待ret0。** Host不写这个状态寄存器；这关闭了此前“控制状态始终0”的阻断，尚非完整HFI命令或解码通过。
+
+随后实际发布SYS_INIT `{12,10001,1}`、cmd_w=3、通知bit15；轮询约3秒，cmd_r仍0、msg_w仍0、SFR首字仍0，无回复，最终probe_result=-110。真实PAS shutdown=0、固件内存释放、队列首IOVA解除映射、频率/reset/时钟/电源回收、三ICC请求清零均成功，refcnt0；boot976c…、PID2295/2106保持。完整native文件正常KMSG_END timeout并已取回out/video-decode/iris1-phase/hfi-writeonly-976c-kmsg.txt。无SYS_INIT回复、硬件解码帧、V4L2实例或Android组件。
+
+为对照协议布局，增加opt-in hfi_compact_table：固定6.3 Venus的原表头只有6个u32/24字节；后期下游扩展为288字节并包含主机cookie/name。两者均使用56字节队列header，环大小及总分配/SFR边界不变，qhdr0/size及start地址按实际布局调整，不写入主机指针。默认保留288，不据此假定SQ2 firmware的具体兼容性。
+
+218b6908…候选只改为24字节表头、其余条件同上一轮，从已确认关闭的消费者卸载后重载，连接中断。原native文件 `/data/local/tmp/sq2-hfi-compact-976c.kmsg` 尚未取回；最后SSH closed/timeout。没有probe_result/阶段/回收证据，**不能把它判为24字节布局失败，也不能原样重试。** 已请求用户确认桌面/恢复，待设备可读后先取日志。
+
+离线查到另一处真实源码差异：固定venus_hfi.c的VERSION_HANA=`0x50100000`正好匹配本机屏蔽step的版本。`__unload_fw`在subsystem_put及队列释放后调用 `__venus_power_off(true)`；该路径停钟后 `__unprepare_ahb2axi_bridge` 再assert四reset、150–250µs、deassert四reset，之后才关闭GDSC。旧探针只恢复进入时已deassert的位，漏了这次恢复脉冲。新源码用同一bridge_pulse实现启动与post_reset，只在尝试过固件且匹配HANA、停止确认且时钟已关闭的清理路径执行；ICC/域及reset引用继续持有。PAS关闭失败仍直接隔离并跳过全部清理，不在未确认停止时复位或释放。新build固定此参考文件哈希；主机边界/事务测试、编译及导出闭包通过，**尚未部署，不能称已修复重复启动或清楚本轮中断原因。** 下一步先恢复/取日志，然后验证完整退出流程，随后再作表头/通知对照。
+
+## 干净启动复位阻塞与ICC前置请求（2026-10-29）
+
+修订候选7c155fb7…在boot861e77bc…重试再次失联。之后取回native `sq2-hfi-safe-861e.kmsg`，最后记录为377.420876s的reset_deassert axi结束；未到时钟/PAS/HFI。因此本轮不能归因为扩展诊断、保护调用或队列，也不能把collector最后一条直接称为精确的阻塞指令：其落盘与内核执行有时差。新源码移除全部额外MMIO诊断；对下游只写不读的邮箱，也不再为了“保存状态”擅自读回。独占VPU/固件确认停止后清零本消费者邮箱，地址解除映射后不保留悬空队列指针。逐步trace_delay_ms=0..100只用于给独立O_DSYNC collector落盘机会，不保证能中止一个已卡住的MMIO访问。
+
+随后只读确认新boot19edba8b…、Android就绪、guardY、PID2273/2079、pstore空且临时模块清除。SSH ecdh曾closed/reset；以同一操作者密钥、原主机校验及curve25519-sha256/aes128-ctr连通。未改服务/凭据；本轮新boot的恢复方式尚未获用户答复，不能认定自主崩溃或自动恢复。
+
+离线对照固定下游 `__venus_power_on`：它先 `__vote_buses`，再启GDSC和桥接reset；旧私有探针漏了总线请求。已有SC8180X interconnect为内建并已绑定。根据固定6.3 sc8180x.c/绑定头建立三条真实路径：APSS→VENUS_CFG、VIDEO_P0→EBI、VIDEO_PROC（venus_arm9）→EBI。配置路径1000/1000 kBps；两条DDR路径0/304000 kBps，取自sdmshrike cnoc及PIL代理请求。它们是bring-up请求，不是完整运行期性能表；不改CPU/GPU频率或电压。
+
+新增overlay选项 `--with-interconnects`，固定原驱动/绑定头哈希，运行时复核各provider phandle。消费者 `vote_interconnects` 在电源/reset前请求；按标准ICC路径撤销，不改其他消费者请求。固件关闭失败时与其它资源一起保留路径/投票到重启。独立 `icc_probe=1` 禁止混入电源/reset/时钟/MMIO/固件/DMA参数，申请、100ms持有后清零/释放，真实probe_result判断通过。
+
+测试overlay cb2e3434…及消费者fa09f750…完整传输哈希/当次导出闭包匹配；有限collector ready/存活/smoke均实核。三阶段实测：①三条路径解析到mas_acm_apps-slv_qhs_venus_cfg、mas_qxm_venus0-slv_ebi、mas_qxm_venus_arm9-slv_ebi，请求及反向清零均0；②三域/四reset，不开时钟/不读MMIO/不启固件，带100ms trace等待，完整申请和回收0；③完整桥接/AHB/六时钟、200MHz档200000097Hz，实际version5010002f/mask1f6/ctrl0，回收/撤销请求均0。三个阶段boot19ed…、PID2273/2079保持。**ICC请求和trace等待同时改变，不能单独归因或宣称已根治失联。** 配置/证据边界见configs/sq2-video-interconnect-reference.json，主机分阶段结果已存out。
+
+随后相同候选加入boot_firmware/pil_gap/hfi_handshake/protect_iova的完整试验，连接再次超时，未取得probe_result或回收通过证据。native文件仍为 `/data/local/tmp/sq2-icc-only-19ed.kmsg`，最后一次SSH仍closed/timeout；**当前完整试验的最终阻塞阶段未知，必须先恢复并取回日志，不重复全流程。** collector主机SSH句柄已因超时终止，不能据此认定设备侧collector正常完成。无已验证SYS_INIT回复/解码帧；默认盘/镜像/codec配置未改。
+
+新候选203943ae…增加固件/队列阶段及每次邮箱写入前后的有界trace等待，彻底移除邮箱快照及额外寄存器读取；主机边界/事务测试、编译与运行导出闭包通过，未部署。仍需真实固件握手、V4L2帧和Android接入，完整目标未完成。
+
+固件来源补证：固定linux-surface/aarch64-firmware 9f07579e…中的 `firmware/qcom/msft/surface/pro-x-sq2/qcvss8180.mbn`、历史 `firmware/qcom/venus-5.2/venus.mbn`、本次实测文件三者SHA256均4e93d345…；同提交getfw.py的git blob SHA256 ec791f37…，明确从SQ2 qcdx8180驱动取qcvss8180并原字节复制到venus-5.2目录。其内嵌版本VIDEO.IR.1.2-00042-PROD-1。因此不能仅按目录名把它误判成SDM845通用5.2固件；这条来源证据仍不是HFI运行兼容性证明，不替换成venus-5.4或其它SoC二进制。固定信息见sq2-video-pil-memory-reference.json。
+
+## 独立SMMU队列与首次HFI等待（2026-10-29）
+
+当前分支fetch/prune后没有远端新增提交；保留既有本地适配。新增 `build-sq2-hfi-overlay.py` 只建立独立 `iris1-hfi@aa00000` 消费者，引用已绑定的软件VIDEOCC，不替换/卸载提供者。SMMU为本机 `/soc@0/iommu@15000000`，SID/mask取固定sdmshrike DTS的0x1300/0x60，fwspec编码00601300；启动时核对GCC/SMMU/VIDEOCC实际phandle。原raw FDT中overlay重定位后的phandle与live不完全相同，本轮使用live树合并检查：删掉新增HFI节点后的规范化树与原live树相同。overlay模块57424c5a…自pin直到重启，不允许热拆。
+
+纯DMA阶段不启动VPU：独立group13、唯一peer，domain_type=b (DMA-FQ)，限定32位且end<=e0000000、起点>=25800000、1MiB对齐。实际3MiB IOVAdfc00000，768页全部可查到物理地址，物理页可高于4GiB；CPU a5/zero读回通过，释放后首IOVA翻译为0。这里只证明主机分配/映射，不是VPU DMA。首个版本因旧identify节点残留driver_override误匹配而提前消费measured，真实HFI节点返回-16；增加compatible硬检查、清除旧override后，DMA v2实际probe_result=0。
+
+`sq2-iris1-hfi.c` 按固定下游ARM64 queue table（288字节）、三条56字节header及各819200字节ring建立有界传输；不暴露主机指针。复用3MiB DMA区、DSP镜像队列及4KiB SFR。`hfi_handshake=1`要求完整三域/桥接/AHB/六时钟、200MHz、固定版本、PIL gap及PAS固件启动；保持原IRQ mask，以轮询等待控制启动及SYS_INIT回复。所有队列和映射都需等真实PAS关闭成功才释放；关闭失败则连同既有固件/clock/reset/PM/MMIO资源保留直到重启。尚未覆盖标准Venus core/remove或外部帧缓冲寿命。
+
+首轮消费者7024cb52…：DMA、mdt_load、auth_and_reset均0，但CTRL_STATUS在1秒内始终0，实际probe_result=-110。未发SYS_INIT，尚无任何固件消息。随后PAS shutdown=0、owner清除，DMA首IOVA已解除映射，CPU配置/频率/reset/时钟/电源全部回收，refcnt0。boot b7730aab…与PID2263/2102保持。该失败不是握手通过或解码功能。
+
+第二轮65709696…新增下游同值的 `qcom_scm_mem_protect_video_var(0,25800000,1000000,24800000)` 和扩展寄存器诊断。有限O_DSYNC collector的持久日志证明保护调用ret0、CPU_STATUSe2014=0、resete3000=0；下一个计划读取为TZ阈值e1020，随后SSH失去响应，日志在上述点结束且无KMSG_END。**不能复用该二进制；对TZ拥有的e1020..e1034非安全MMIO读取很可能阻塞总线，但未证明具体硬件机制。** 新源码已移除全部阈值/reset诊断读取，并为保留的非安全诊断逐次添加BEGIN/END。不得因为主机源码中存在非TZ启动分支的寄存器定义，就在PAS安全启动后读取它们。
+
+之后只读SSH核对到新boot861e77bc…、boot_completed=1、screen_only=Y、nohibernate、PID2293/2110；临时视频模块已清除，pstore空。已请求用户确认桌面状态/恢复操作，尚未收到本轮答复，不将其称为自主崩溃或自动恢复。没有更改ESP、默认镜像、codec配置或用户凭据。原始三轮日志取回out/video-decode/iris1-phase，失败二进制保留在忽略的WSL构建缓存。
+
+队列生产者数据不可信：共享parser检查索引、包长、对齐、可用字数及环绕，ASan/UBSan通过448组环绕/未完整提交组合及12300种长度（含边界），但不是固件真实回复证明。移除TZ读回后的新候选编译及live导出闭包通过，**尚未部署验证**；下次仅从干净boot直接装软件VIDEOCC，先独立有限collector，禁止阈值读回/热卸载提供者/全局genpd汇总，再验证有保护设置的真实HFI启动。完整硬解目标仍未完成。
+
+## PAS认证/复位与关闭首次实测通过（2026-10-29）
+
+只读有界kretprobe观察器 `sq2_scm_trace.c` 核对实际qcom_scm_call描述符、SMCCC调用和返回，不改寄存器/参数/返回值，仅insmod中的PAS9和只读MEM_AREA，最多各32次。原fd000000失败重现的原始结果为mem_setup `a0=0xffcfffba`，而非直接的通用EINVAL；Linux默认将未知厂商错误映射成-22，具体符号含义未确认。实际convention=ARM64，函数号42000202、参数9/fd000000/500000正确，排除了本次ABI/参数截断解释。PAS9支持查询本身返回a0=0/a1=0，应区别于查询调用失败。所有探针missed=0，随后卸载。
+
+从固定EDK2参考头取得公开TZ_PIL_GET_MEM_AREA（PIL cmd9/arginfo1/spare0，只读）；Linux6.3无公开wrapper，`sq2_pil_mem_query.c`在固定私有SCM原型下短暂解析入口地址，移除查址probe后正常调用SCM驱动，由原驱动处理convention、锁、waitq及重试，不另发裸SMC。实机返回 `[0x8b700000,0x9ab00000)`，raw a0=0/a1=start/a2=end。此范围不是所有权授予，包含CAMERA/WLAN/MPSS/ADSP/CDSP等。原fd000000 DMA分配在窗口外，不能用于此固件加载。来源、路径、固定哈希及限制见configs/sq2-video-pil-memory-reference.json。
+
+固定Surface DTS还明确记录Windows/ACPI观察到的image-loader空隙8bd80000..8d800000；它是社区维护者原始观测，不是OEM规范。私有 `pil_gap=1` 只从该已命名空隙选固定6MiB `[0x8c000000,0x8c600000)`，**不碰8b700000 CAMERA、WLAN或其它已分配reserved块**。每次使用前重查SCM窗口；拒绝System RAM相交、任何live DT reserved-memory节点重叠、非完整generic UEFI reserved父资源、既有子资源包裹/嵌套。通过内核资源树建立独占owner后才memremap WC，不把窗口整体或任意reserved当空闲。第一次inspect_gap检查只申请/映射/释放，不写物理内存、不加载固件，实机返回0且资源项消失。
+
+独立消费者15c65409…随后以固定本机固件4e93d345…执行真实PAS加载：物理8c000000、独占6MiB、镜像跨度5MiB，init_image=0、mem_setup=0、MDT复制=0、auth_and_reset=0，20–25ms短等待后shutdown=0。有界独立kmsg及只读跟踪同时记录上述四个安全调用原始a0/a1均0，missed=0；实际probe_result=0。WC写入在认证前有wmb，关闭确认后清零、wmb、解除映射和释放资源owner，不释放成普通Linux页。频率/CPU clock配置/reset及所有时钟/电源引用恢复。
+
+**尚无HFI响应、解码帧或Android硬解组件。** 这是实际PAS认证/复位接口及关闭通过，不是完整VPU协议、V4L2或Codec2通过。当前独占owner仅为私有实验，尚无持久化DTB/镜像安装流程；今后正常适配还需专用内存描述与生命周期，不能直接复制成系统安装器。原标准Venus core的完整资源清理缺口仍开放；私有测试没有HFI/IRQ或外部帧缓冲，因此只覆盖其自身资源。
+
+结束后消费者refcnt=0，消费者/trace均卸载，辅助内存设备及sq2-video-fw-lab资源不存在；native collector以timeout正常结束并保存完整日志。boot仍b7730aab…、boot_completed=1、screen_only=Y、PID2263/2102保持，无重启或启动盘/codec变更。软件VIDEOCC/自pin overlay仍临时驻留，不热卸载或读全局pm_genpd_summary。下一步建立非安全SMMU/合法IOVA和HFI队列，取得真实SYS_INIT响应，再推进V4L2帧和Android接入。原始日志仍只在out/video-decode。
+
+## 桥接复位、实际版本与PAS内存设置阻断（2026-10-29，以下为已解决的地址阻断历史）
+
+在干净boot b7730aab…中直接加载软件PM VIDEOCC24ed5d48…，没有加载/卸载旧GDSC提供者。新增consumer overlay reset描述，对应SC8180X GCC的41/42/43及VIDEOCC0，并显式提供IRIS_AHB时钟；保持原六时钟顺序，AHB在三AXI之后、三core之前启用，逆序关闭。`reset_bridge` / `enable_ahb`默认关闭，读寄存器必须显式同时开启三域、六时钟、桥接reset和AHB。
+
+首轮复位状态读取因6.3 qcom_reset_ops没有status回调返回-524，未执行电源/复位写入。增加只针对这四个已核对reset的regmap读取：核对DT reset ID、provider compatible和物理reg范围，从现有绑定provider取得regmap、读实际bit2，保留provider引用至读取完成，不推测初态。四个初态均为deasserted。随后三域上电、四reset按下游顺序assert、usleep_range(150,250)、同顺序deassert、原状态恢复和下电通过；该等待是调度范围，日志实际间隔可更长。再做桥接reset+AHB+六时钟全流程，probe_result=0、所有回收阶段返回0。
+
+首次真实VPU MMIO读取通过：版本 `0x5010002f`（major5/minor0x10/step0x2f）、mask `0x1f6`、ctrl `0`。寄存器区为0xaa00000+1MiB，不覆盖VIDEOCC；没有触发整机无响应。三个core的初始驱动报告频率19.2MHz，GCC分支的rate=0是无父频率模型，不应当成真实停钟。随后只选择已有200MHz频率表档位，报告200000097Hz；初版精确相等检查误判-34，已收紧为标称值±1kHz校验并继续报告实值。复验读版本及恢复19.2MHz通过，不是PLL物理测频或性能测试，也未改OPP/电压。
+
+新增消费者 `--firmware` 独立编译路径，链接既有固定固件/非devm内存事务层；`boot_firmware`默认false，须同时选择固定版本、桥接reset、AHB、三域六时钟和200MHz。它没有HFI/IRQ/用户缓冲区：若关闭失败，固件事务的全局所有者/模块pin及原overlay共同保留DMA、原始clock/reset/PM引用、虚拟设备和MMIO占用，直接返回绑定状态而不进入清理，限定重启恢复；成功停止才恢复CPU clock配置、频率、reset并释放资源。主机事务故障注入仍通过；这是私有bring-up的资源持有策略，不是已解决整个标准Venus/V4L2的remove生命周期。
+
+支持查询先阻断启动：PAS9及对照PAS1/18/4均返回false，然而三个PAS remoteproc状态均running。该布尔包装同时折叠查询错误/调用不可用，不能判定PAS9不可用。对照原Venus的实际加载路径，将支持查询保留为诊断而非硬门槛；所有实际load/auth/shutdown错误仍原样返回，未伪造成功。保留首次-95预检查结果供审计。
+
+随后实际加载试验（消费者eef6389e…，完整哈希传输匹配、当次导出missing=0）分配独占6MiB DMA物理区0xfd000000，并通过固件大小、SHA256和ELF校验。qcom_mdt_load返回-22，日志明确为 `error -22 setting up firmware`；按固定5dd1d028… MDT源码控制流，说明PAS init_image返回0，随后PAS mem_setup拒绝了本次物理区/5MiB跨度。**没有到auth_and_reset，没有固件运行或解码帧。** 随后的真实PAS shutdown返回0，DMA擦除/释放和辅助设备注销通过，owner=NULL；频率/CPU clock配置/reset/时钟/电源均回收，probe_result=-22。此地址已释放，不能复用或认为安全固件接受它。
+
+试验后消费者refcnt=0并正常卸载，辅助内存设备不存在。boot ID仍b7730aab…、boot_completed=1、screen_only=Y、PID2263/2102保持；无重启/ESP/正常启动镜像/codec配置修改。软件VIDEOCC与自pin overlay保持临时驻留、域/时钟没有消费者持有；不要热卸载提供者或读全局pm_genpd_summary。有界collector均正常结束，完整日志在out/video-decode/iris1-phase（含query-real-kmsg.txt）。下一步核实SCM mem_setup契约/可接受的独占加载区，不借用CAMERA/未知保留内存，不把init_image成功当作认证或固件启动通过。
+
+## 分阶段资源实测与提前硬件交接阻断（2026-10-29）
+
+在9435bddc…同一boot上，先验证有限独立kmsg collector（83dcdf5d…）的进程、KMSG_READY和实际smoke记录，再运行v4的0域/0时钟/不读MMIO阶段。三个电源域及六时钟引用获取/回收通过，boot_completed=1、screen_only=Y、PID2242/2098保持。collector使用O_DSYNC写私有/data临时文件，120秒/2MiB上限，主动停止后KMSG_END完整；日志已取回忽略目录。
+
+新增消费者单独编译模式 `SQ2_IDENTIFY_EXISTING` / `build-sq2-iris1-phase.sh`，保留overlay/VIDEOCC，使用driver_override把已经完成零资源测试的节点转交给sq2-iris1-phase。消费者的probe内所有资源在返回前回收，可按阶段卸载消费者，不拆时钟提供者。新只读probe_result参数报告实际probe结果；insmod为0仅证明driver注册，不证明probe成功。
+
+原VIDEOCC（fd6adde7…）分阶段实测：1、2、3个域的上电和下电均返回0；三GCC AXI时钟和MVSC主核时钟使能及释放通过。加入第五个VCODEC时钟时，内核报告 `video_cc_mvs0_core_clk status stuck at 'off'`，clk_prepare_enable返回-16，回收返回-16；没有读取VPU MMIO，设备保持响应。有限collector完整记录了时钟warning和调用栈。此错误可正常返回，不能据此认定它就是上一轮v3整机无响应的根因。
+
+核对固定下游venus_hfi.c：其__venus_power_on在时钟开启后才__enable_hw_power_collapse；当前6.3 gdsc_enable对HW_CTRL域在返回前即打开硬件触发，可能在固件尚未提供硬件票时提前掉电。新增 `build-sq2-videocc-sw-domains.py`，固定原videocc源码119d847a…，只把vcodec0/1_gdsc的HW_CTRL改为0。保留真实时钟halt检查、不伪造成功、不改时钟频率、寄存器地址或reset。它暂留软件PM控制，**没有实现固件运行后的HW_CTRL交接或验证长期功耗**。
+
+候选VIDEOCC模块24ed5d48…和带probe_result的消费者263415c4…均传输全哈希匹配，符号闭包missing=0。旧消费者卸载后切换时钟提供者（overlay未动），三域+六时钟、不读MMIO的实际probe_result=0；每次使能、反向关闭/下电和最终回收均有独立日志，全部返回0。这验证了当前启动前条件下的软件控制差异，非固件/解码或全驱动成功。消费者随后卸载；clk_summary确认七个video/GCC相关分支enable/prepare计数均0（包含未开启的IRIS_AHB），idle报告19.2MHz不能当作活动解码频率。
+
+后续读取全局pm_genpd_summary时，cat进程陷入R态内核循环，SIGKILL未退出；Android/SSH仍响应。不能称临时GDSC提供者热卸载生命周期已安全，且不能再次读取该汇总或仅凭模块引用0热替换提供者。已保存日志、sync后发起默认入口受控重启清理；随后SSH复核新boot b7730aab…、boot_completed=1、screen_only=Y、PID2263/2102，旧诊断任务和所有临时视频模块/节点已清除，pstore空。默认闭源Vulkan启动参数保持，未改启动盘；本次重启是操作者执行的受控清理，不是自主崩溃或自动回退。桌面目视未另行确认。下一次在干净启动后直接加载软件控制候选，避免先加载/热卸载旧GDSC提供者。下游VPU5还在使能时钟前执行AHB→AXI桥接reset assert/deassert（150–250µs间隔），尚未适配；必须先核对桥接reset/总线时钟，再读VPU寄存器。没有执行MMIO、PAS认证、固件启动或真实解码。
+
+## 首次电源/版本识别试验失败（2026-10-29）
+
+为独立核实资源接入，新增 `sq2_iris1_identify.c` / `build-sq2-iris1-identify.py`，从本次运行FDT（be17f33f…，与文件形式DTB哈希不同）生成VIDEOCC加私有identify消费者的临时overlay。三路GCC AXI时钟使用SC8180X真实ID227/225/226，VIDEOCC使用4/2/3，三个GDSC使用0/1/2；寄存器申请限定0xaa00000+1MiB，不覆盖ab00000 VIDEOCC。数值以固定sdmshrike下游及当前内核头/驱动交叉核对，尚未取得SQ2实际版本读数。没有固件、SCM、HFI、IRQ或reset写入。
+
+离线合并确认本地GDSC引用准确，移除新增两节点后原树全部属性与保留区逐字语义不变。新模块预检missing=0。旧临时VIDEOCC/overlay引用计数均0，按先驱动后overlay顺序移除；该卸载仍出现OF node refcount泄漏警告，不能称清理完全，后续避免重复拆装旧overlay。第一候选6c3988f0…被Linux 6.3以“symbols in overlay, but not in live tree”拒绝，未进入探针；已临时恢复旧模块。修正为去除导出__symbols__、保留__local_fixups__后的v3（7004d8af…）再次测试。
+
+**v3测试后SSH失去响应，用户确认整机无响应并手动长按重启恢复。** 主机测试连接最终reset，未捕获任何SQ2_IRIS1_IDENTIFY结果，未取得硬件版本或回收通过证据。原串行远程命令缺少逐步输出，不能确认卡在旧模块拆卸、新overlay、GDSC、时钟、MMIO还是回收；不能把计划执行的步骤当作已执行。未调用视频PAS/启动固件，未写ESP、镜像或codec配置。不能原样重复v3。
+
+用户确认桌面恢复后，已用保留主机校验/用户密钥的SSH复核：新boot ID9435bddc…，boot_completed=1，screen_only=Y，system_server/SF PID2242/2098，pstore为空，临时iris1/VIDEOCC/overlay模块及VIDEOCC节点均不在；正常闭源Vulkan启动参数保持。这是用户恢复操作，不是自动恢复通过。默认curve25519/chacha SSH握手曾reset，显式选服务端支持的ecdh-sha2-nistp256/aes128-ctr后连通；未改SSH服务/凭据/主机校验，不据此判断握手故障根因。
+
+诊断v4（cd5ef936…）仅本地编译：增加每个资源申请、上电/下电、时钟开关、MMIO前后标记；默认power_domains=0、enable_clocks=0、read_registers=false。必须显式选择阶段，禁止非法组合；read需要三域六时钟全开。新overlay固定驻留至重启，不能强制rmmod。该版本未传输/执行，不是已修复候选。下一次实机需先运行独立主机端有界kmsg采集并给每条远程命令加开始/结束标记，从不进行上电/MMIO的阶段定位，再决定下一步。原始报告/日志留out/video-decode/iris1-identify；core/HFI清理问题保持开放，独立探针没有解决整个Venus驱动的寿命管理。
+
+## PAS固件内存事务层（2026-10-29，未接入调用）
+
+新增 `sq2-fw-transaction.h` 和 `sq2-venus-fw.c/.h`，随 `--firmware-lease` 编入隔离venus-core。该实现尚无启用的调用点，**不是可加载/启动SQ2 VPU的完整适配**。它提供固定固件校验、独立辅助DMA设备、低4GiB/1MiB对齐的6MiB分配、PAS9 load/auth/shutdown及内存所有权策略；全局单例加mutex序列化，不借用core的devm生命周期。正常持有或隔离时都保留模块引用。启动前检查Surface compatible、SCM可用/PAS9支持、固定固件SHA256/ELF与固定MDT源码版本。
+
+事务在调用可能触及secure world的load之前标记TOUCHED。load或auth失败均尝试shutdown；仅shutdown返回0才擦除/释放DMA、注销辅助设备并释放模块引用。shutdown失败保留内存/设备/模块、记录原错误并进入QUARANTINED，后续start/stop不再调用PAS或复用地址；全局所有者不含core指针，能够在上层遗失句柄时继续持有隔离分配。隔离恢复限定重启，不把失败当成已停止。成功shutdown才允许下一次重新分配，原启动错误与shutdown错误分别保留。
+
+主机故障注入直接使用生产事务头，覆盖分配/load/auth/shutdown的全部16种成功失败组合：任何secure touch后都由独立oracle要求先确认shutdown才能release；检查隔离后拒绝重试、无双重释放，及100次正常启动/关闭复用。ASan/UBSan通过；Iris1寄存器mock同时通过。隔离模块编译通过，缺原Module.symvers及完整ABI证明的限制保持。日志/候选清单在 `out/video-decode/iris1-lease-v2/`，未传到实机或执行PAS。
+
+**尚未把该层接进venus_boot/shutdown。** 原core.c的probe错误清理、恢复、remove会继续释放HFI队列和devm资源；仅保留固件DMA不足以证明整个VPU关闭失败时安全，不能简单接入或用remove返回错误来阻止内核的devres释放。下一步必须一并处理这些资源及设备移除语义，再补SQ2资源表/电源域/IOVA边界，最后启动固件。实机仅只读复核，boot ID仍2f0c17ee…、PID2220/2046、boot_completed=1、screen_only=Y。
+
+## Iris1 HFI差异候选（2026-10-29，未部署）
+
+固定OnePlus下游提交补取 `drivers/media/platform/msm/vidc/vidc_hfi_io.h`，SHA256 ebc34f34…，已加入参考清单。与原venus_hfi.c核对：VPU5和sdmshrike均使用4xx消息，CPU CS/IC及wrapper基址沿用旧布局；独立差异包括时钟使能后CPU_CGC_DIS/CLOCK_CONFIG清零、没有CVP时DSP QTBL/UC镜像CPU队列、保留无关位的中断掩码读改写（仅清0x14）。不是Iris2/v6寄存器布局。
+
+新增 `prepare-sq2-venus-iris1.py` 和 `build-sq2-venus-iris1.sh`：固定core.c/core.h/firmware.c/hfi_venus.c/io头哈希，在新目录复制源码并添加独立 `iris1` 资源标志；HFI仍要求4xx。封装于 `probe/video/venus-iris1.h`，在初始firmware boot前和后续HFI恢复时配置CPU时钟，在原CPU队列映射后镜像DSP队列，在boot_core中单独处理IRQ mask。原平台match/resource表逐字不变，所有既有平台的iris1默认为false，**没有可匹配SC8180X的新设备描述，尚不能驱动本机解码器**。其余Iris1电源/reset/互联、DMA IOVA边界和固件寿命仍未完成，不能直接装载并添加新节点尝试解码。
+
+隔离编译得到venus-core/dec/enc三模块。首次core SHA256 add55d36…（随后输入清单增加core.c保护，不改变驱动源码）；缺原Module.symvers，modpost警告已保留。对同boot的实机导出做三模块符号闭包检查missing=0，不能当作完整ABI或硬件通过。未传输或加载这些候选，默认系统未变。产物/编译日志/预检在 `out/video-decode/iris1-hfi/`。
+
+ASan/UBSan主机mock直接编译候选实际helper和原寄存器头，检查五次写入的完整地址/值/顺序，以及1024组掩码保留无关位；通过。具体地址由固定下游头独立核对。此项只验证软件寄存器序列，未在SQ2上执行，也不证明整个HFI协议可用。sdmshrike DTS与sm8150同样声明0xaa00000/0x200000、SPI174和非安全SID0x1300/mask0x60；该社区下游文件尚不是SQ2实测资源证明。
+
+## 固件搬运与读回实测（2026-10-29）
+
+继续自远端 `codex/sq2-video-decode` 的 `30aee11`。当前工作站缺少上一轮thermal/video缓存，已从SHA256为275f05c5…的既有内核归档恢复独立 `/root/.cache/sq2-thermal/kernel`，重建foundation；没有构建或替换正常启动Image。
+
+新增 `sq2_video_firmware_stage.c`、共享ELF校验头和 `build-sq2-video-firmware-stage.sh`。只接受Surface compatible、显式allow=1和现有1159200字节/4e93d345…固件；任何MDT调用前核对完整SHA256及ELF32 ARM、小端、紧接ELF头的程序头表、重定位标志、源范围、非重叠加载区和6MiB上限。此限制对应当前6.3 MDT解析器的实际假设，非通用ELF加载器。构建固定MDT源码哈希5dd1d028…，拒绝直接SCM/auth依赖，调用 `qcom_mdt_load_no_init`，不调用PAS初始化。
+
+模块SHA256 `03c0cd37aa61a29c0a008be8de1c149655846e851933810e42f18940c833a57b`；23个未定义符号全部匹配当次运行内核导出，vermagic为6.3.8-sq2-android1 SMP mod_unload aarch64。符号闭包不代替完整ABI验证，原Module.symvers缺失限制保持。`audit-sq2-video-modules.py --module ... --output ...` 可单独审计探针而不覆盖foundation报告。
+
+实机传输哈希匹配后，insmod allow=1返回0。新分配6MiB标准DMA内存，物理地址0xfd200000（本次值，已释放，不能复用）；三个LOAD段、5MiB跨度的数据逐段比对和BSS全零检查通过，MDT返回的重定位基址也匹配。辅助设备无OF/IOMMU/DMA转换，DMA地址等于物理地址，1MiB对齐且完整区间低于4GiB。返回前擦除并释放分配、注销辅助设备；随后rmmod返回0，两项sysfs均不存在。不带allow参数的独立负向加载返回EPERM，未创建设备或保留模块。
+
+前后boot ID均2f0c17ee…，system_server/SF PID均2220/2046，boot_completed=1、screen_only=Y，VIDEOCC保持绑定。未写ESP、启动镜像、设备树或Android codec配置，没有重启。完整预检和日志留在忽略的 `out/video-decode/firmware-stage/`。
+
+主机C测试覆盖合法重定位/BSS/hash段排除、截断头表、错误架构/字节序、非连续程序头、超长段表、源溢出、filesz>memsz、段重叠、32位地址溢出、超大跨度、无可加载段和非重定位段，全部通过。边界校验测试与实机copy/readback是不同证据。
+
+**没有调用PAS初始化、认证或启动，也没有HFI或解码帧。** 本次只补齐真实固件搬运/读回证据；不能直接给现有Venus加devm分配后启动。下一步仍需完成Iris1电源/HFI/资源适配及固件关闭失败时的分配保留、恢复和remove策略。已释放的连续内存地址不是可永久占用的reserved-memory。
+
+## 通用媒体框架首次实机加载
+
+### 固件连续内存实测
+
+`probe/video/sq2_video_memory_probe.c` / `scripts/build-sq2-video-memory-probe.sh` 新增独立分配探针。匹配6.3.8构建，13个未定义符号均匹配当次运行内核__ksymtab；模块SHA256 `d581fe6a5d089d434cb90e6d68cab69bfe5bd118c609445881ee8d04d9b9b2fd`，实机传输哈希一致。显式allow=1及Surface compatible保护，创建无OF/IOMMU/地址转换的临时platform设备，以32位coherent DMA mask调用标准dma_alloc_coherent；不调用SCM、不访问视频寄存器。
+
+实机insmod成功：6MiB分配返回物理/DMA地址均为0xfd000000，1MiB对齐且完整区间低于4GiB；整区0xa5及0两种填值读回一致。函数返回前已dma_free_coherent并注销辅助设备，随后rmmod成功，核对module/sysfs辅助设备均不存在。boot ID仍2f0c17ee…、boot_completed=1、screen_only=Y。原始结果在out/video-decode/memory-probe-result.txt。
+
+这证明本次运行可通过标准DMA接口获取独占连续内存，不证明PAS9允许在此处运行固件；不能硬编码或再次使用已经释放的0xfd000000。后续实际加载必须持有新分配直到远端处理器关闭确认成功，并处理认证失败、恢复和驱动移除。现有Venus core.c在错误清理、remove及恢复路径忽略venus_shutdown返回值，不能直接改为devm分配后自动释放，否则固件关闭失败时存在释放仍被硬件使用内存的风险。固件加载生命周期适配仍待完成；本轮没有启动固件。
+
+固件/时钟进一步核对：临时挂载debugfs只读采样后已卸载，bi_tcxo=19.2MHz、video_pll0=399999902Hz，mvsc/mvs0/mvs1及iris_ahb均注册但enable计数0；这不是频率设置/硬解负载通过。VIDEOCC保持绑定，boot ID不变。
+
+固件判断纠正：不能凭venus-5.2目录名把本机文件认定为SDM845固件。已通过SSH取回实际文件，SHA256 `4e93d34504da96320775476bbd509aa06f985b48fb781d4436c8eb812b929928`，1159200字节，内部版本为 `VIDEO.IR.1.2-00042-PROD-1`，确为Iris1版本字符串。三个LOAD段均可重定位，跨度5MiB，链接基址0x0f500000不是物理加载地址要求。[固定Surface提取脚本](https://github.com/linux-surface/aarch64-firmware/blob/9f07579ee64aba56419cfd0fbbca9f26741edc90/scripts/getfw.py)明确从qcdx8180包提取qcvss8180.mbn并复制到venus-5.2/venus.mbn；这支持现有路径的来源解释，但本地原Windows采集清单缺失，不能独立证明该二进制的OEM来源。应优先验证这份现有固件，而非先替换OnePlus固件；尚未执行PAS认证/启动。
+
+社区OnePlus7TPro固件仓库 `sm8150-linux-mainline/firmware-oneplus-hotdog` 提交 `5e5c534784a848bc39a02c421cc5273d79678fb3` 的venus.mbn：SHA256 `9d4d4b4d26745a89b37847ebcc3a1f96a00d77e5a791bc3cb71a90e5c992bc4b`，1142816字节，内部版本VIDEO.IR.1.2-00035-PROD-1。inspect-sq2-video-firmware.py解析结果同为三个可重定位LOAD段、5MiB跨度。仅离线对照，未验证OEM签名、SQ2认证或兼容性，未发送至设备。
+
+本轮运行态复核boot ID仍为2f0c17ee…、screen_only=Y、VIDEOCC仍绑定。内核启用DMA_CMA，CMA共32MiB、采样空闲约26MiB；但dma_alloc_from_contiguous/cma_alloc等不是运行内核导出，不能直接用独立模块调用。后续可核对无IOMMU辅助设备的标准DMA分配或独立启动预留；CMA空闲量本身不证明满足固件物理地址/认证要求。未占用任何现有保留区。
+
+特别注意：Surface原DTS明确把0x8b700000的5MiB区标为CAMERA，不是视频固件区；不能因大小相符就占用。当前DT没有明确的Venus reserved-memory。下一步需要建立可证明独占的5MiB加载区（重启预留或受控分配并核对SCM约束），并核实SQ2原固件来源，不能用现有未知reserved块冒充空闲内存。此为待完成适配项，不是已判定无法实现。
+
+VIDEOCC首次实机接入（2026-10-29）：内核确认OF_DYNAMIC/OF_OVERLAY及导出可用，改为临时overlay避免改启动盘。`build-sq2-video-clock-overlay.py`从已审计时钟DTB生成嵌入式overlay模块，要求allow=1、本机compatible为microsoft,surface-pro-x、目标节点不存在及三个外部phandle路径匹配。模块76e1340e…，时钟驱动fd6adde7…，传输后完整哈希一致；overlay全部未定义符号匹配运行内核导出。
+
+实机手动加载overlay返回ret=0/id=1，随后insmod videocc-sm8150成功，`/sys/bus/platform/devices/ab00000.clock-controller/driver`实际指向video_cc-sm8150。boot ID未变、boot_completed=1；未写ESP、未重启、未加载视频固件。ueventd最初因临时模块不在其索引而自动加载失败，之后手动加载绑定成功，不应误判为probe失败。模块/overlay仍在运行；不要在时钟驱动仍绑定时卸载overlay，最简单恢复路径为正常重启。此项只证明VIDEOCC probe接入，尚无视频解码帧或Android硬解组件。
+
+VIDEOCC候选：新增 `build-sq2-video-clock-dtb.py`，固定当前a5a25e43… CPU/GPU DTB，仅添加 `/soc@0/clock-controller@ab00000`。参考上游SC8180X节点（Linux提交062dc4693e2c10d77de06f61e6f3faf37c0a8383的sc8180x.dtsi），采用SC8180X+SM8150双compatible、0xab00000/0x10000、RPMH CXO、MMCX域和现有LOW_SVS OPP。当前6.3 GCC在probe直接开启0xb004 VIDEO_AHB和0xb040 VIDEO_XO，尚无新版GCC_VIDEO_AHB_CLK导出；旧VIDEOCC只消费bi_tcxo，故候选不捏造iface时钟ID。需要实机验证该旧驱动组合，不能由上游节点存在推断通过。
+
+已生成out/video-decode/sq2-video-clock.dtb，SHA256 59966cdf5aacfddc2f9023d42285106bf8e339c67218ca9673458e5f1cdbcf41。全树对照验证原节点所有属性及保留内存不变，仅增加上述节点；未部署、未启动，不含解码器资源或固件启动。后续先验证VIDEOCC probe/父时钟/电源域，再接Iris1硬件节点。
+
+2026-10-29：新增 `audit-sq2-video-modules.py`，读取当次运行内核__ksymtab导出，与九个候选模块的未定义符号及候选间依赖做闭包检查，missing=0；这不是完整ABI证明。六个通用模块的vermagic均为6.3.8-sq2-android1 SMP mod_unload aarch64，传输后SHA256与本地一致。
+
+按顺序手动insmod：videodev、videobuf2-common、videobuf2-memops、videobuf2-v4l2、videobuf2-dma-contig、v4l2-mem2mem，六个均返回成功并在/proc/modules为Live。dmesg确认Linux video capture interface v2.00。boot ID前后一致，boot_completed=1，开始前screen_only=Y。模块仅来自retained root的/tmp/sq2-video-framework，未持久化；正常重启不会加载它们。
+
+本轮尚未加载venus-core/decoder/VIDEOCC，未增加设备树节点或启动固件，没有/dev/video解码实例；Android仍没有硬解组件。该实测只关闭了通用V4L2框架可加载性的缺口。原始符号及报告位于out/video-decode，不纳入Git。
 
 ## 已核实
 
@@ -14,6 +344,10 @@
 ## 实现前的具体缺口
 
 ### 当前主线：855参考 + Venus/V4L2 + 开放Codec2
+
+后续推进（2026-10-29）：实机只读确认screen_only=Y、现有venus-5.2/venus.mbn SHA256为4e93d34504da96320775476bbd509aa06f985b48fb781d4436c8eb812b929928，尚未证实该固件适合Iris1。补取同一OnePlus提交的msm_vidc_platform.c、venus_hfi.h、hfi_packetization.c等实际存在文件并更新哈希。sm8150_data明确选择VPU_VERSION_5；venus_hfi初始化消息使用HFI_PACKETIZATION_4XX，同时上电/中断函数选择vpu5_ops。这是区分硬件版本与消息版本的直接证据，不能把VPU5数字简单映射为HFI版本，也不能只添加compatible后套现有v4电源流程。
+
+配置修复：MEDIA_SUPPORT_FILTER使底层配置菜单不可见，原disable被默认值覆盖。现在关闭该过滤、在首次olddefconfig展开后再次禁用MEDIA_CONTROLLER/DVB/USB和PCI媒体驱动/调谐器，强制检查MEDIA_CONTROLLER与USB音频耦合未开启。构建前清理独立media目录产物以免旧模块残留混入清单。此更改仍为compile-only；缺Module.symvers的限制保持。此次没有加载模块、触发固件或修改DTB；不能称为硬件启动尝试通过。
 
 用户选择此路线，Quest闭源材料保留为辅助参考，不再优先接入其服务。已从 LineageOS/android_kernel_oneplus_sm8150 固定提交 `32f26bf34ddf17df8e224ae0703656b9fe0c1a8d` 取得 `sm8150-vidc.dtsi` 和 `venus_hfi.c`，文件哈希见 `configs/sm8150-video-reference.json`。这是OnePlus设备的社区维护下游内核，不能称为Surface官方参考。
 
@@ -51,3 +385,109 @@
 参考：[AOSP v4l2_codec2](https://android.googlesource.com/platform/external/v4l2_codec2/)、[上游 SC8180X DTS](https://github.com/torvalds/linux/blob/master/arch/arm64/boot/dts/qcom/sc8180x.dtsi)、[上游 Venus](https://github.com/torvalds/linux/blob/master/drivers/media/platform/qcom/venus/core.c)。后两者是可变参考，不是已固定/测试的补丁输入。
 
 原始日志含用户与播放签名信息，不纳入 Git。其它工作产生的 DISPLAY-REFRESH 和 eDP 未跟踪文件保持不动。
+
+## 服务发现运行态复核（2026-10-29）
+
+拉取c19ba9b后，在同boot a101c096…复核/dev/video0、guardY、Android boot_completed1。新增只读probe/video/sq2-c2-discovery-probe.c，直接调用服务管理器的forEachDeclaredInstance/isDeclared/checkService，不注册、不等待或启动服务。实机返回声明仅default/software，两者declared=1/registered=1；default1为0/0。这是服务管理器实际视图，补足仅检查XML文件的证据。实验store无参数运行在设置swcodec apex/vendor/system库路径后再次返回STORE_STATUS0、LOCAL_LIST count1；首次缺库错误发生于链接器，未运行组件。
+
+构建使用NDK r28c aarch64-linux-android35-clang -Wall -Wextra -Werror，链接从当前设备取得的libbinder_ndk.so并加-Wl,--allow-shlib-undefined（平台API未包含在公开NDK stub中）；没有完整AOSP缓存依赖。运行在Android mount/root命名空间。未改VINTF、重启servicemanager、注册实验服务或重启固件。下一步仍需实现可回滚声明/发现刷新，再验证MediaCodec创建及解码；本探针返回0仅表示查询完成，不表示硬解集成成功。
+
+## 临时VINTF实验及库路径混淆（待消除）
+
+新增probe/video/test-c2-vintf-live.sh，仅允许RAM vendor overlay、guardY、目标文件不存在，退出删除临时fragment。两次有界正常--serve均REGISTER_STATUS0；第二次独立客户端list/createInterface/configurable成功，timeout124结束。没有重启任何系统服务或固件。
+
+但不能据此宣称正式注册通过：脚本在注册前设置包含/vendor/lib64的LD_LIBRARY_PATH，之后同一discovery probe返回声明0项且原default/software不可见，而实验default1可见。退出该环境后的独立查询立即恢复原default/software声明/注册正常、default1缺失，PID1209/1968/2172保持。这提示库搜索路径可能选择了另一Binder运行时/服务上下文，必须通过maps与Binder设备FD核实；不是已经证明VINTF刷新成功。临时fragment已删除，实验服务已退出；原始输出out/video-decode/codec2-integration/vintf-live.txt。下一步隔离服务专属依赖，确保客户端和store均使用系统Binder运行时，再测试正式MediaCodec发现。不要重启servicemanager来掩盖此差异。
+
+## Binder域混淆已实证纠正
+
+discovery probe增加自身maps及binder FD输出。vendor优先路径确实加载/vendor/lib64/libbinder.so且打开/dev/binderfs/vndbinder；系统默认或system优先路径加载/system/lib64/libbinder.so并打开/dev/binderfs/binder。因此此前REGISTER_STATUS0和跨进程接口成功发生在错误Binder域，不能作为系统Codec2注册证据，也不能据空列表推断原服务短暂消失。
+
+test-c2-vintf-live.sh已修正为/system/lib64:/apex/com.android.media.swcodec/lib64:/vendor/lib64。相同临时fragment实验下，系统声明前中后均仅default/software，正常store注册exit5，客户端SERVICE_ABSENT/exit2，原服务始终可见。fragment退出删除。证据out/video-decode/codec2-integration/vintf-system-binder.txt。该实验明确排除了“只追加RAM XML即可热发现”的方案；下一步需准备早期VINTF声明和受控框架/启动刷新，同时保留故障回退，不能继续在vndbinder上验证MediaCodec。
+
+## C2一次性启动已部署，等待重连
+
+已核对BC711/CYA5N050012105J77、ESP p6/B027-0512及SQ2-INTERNAL-512-20261027、root system_a、userdata UUID，ESP余量约1.4GiB。将a5038428…镜像经.new传输、完整hash/gzip校验、sync+mv安装为native-c2-experimental.cpio.gz。原菜单保存到本地out/video-decode/boot-candidate/grub-before.cfg及ESP EFI/BOOT/grub.before-c2.cfg。只替换第三调试入口为sq2-c2-test，默认闭源/Mesa入口保持；独立1024字节sq2-c2-test.env在加载候选前清sq2_c2_once=0。已sync并通过Android reboot正常重启；旧SSH断开。当前重连192.168.8.194超时，不能宣称启动成功或板级崩溃；需要继续核对设备/网络。没有执行新boot的PAS加载。若候选启动失败，下一次正常启动应回原默认；暂不要重复触发实验标记。
+
+## 实验启动与系统Binder发现已通过（434055bb）
+
+SSH恢复，新boot434055bb-bc2e-4d36-ac82-26dcf31228e8，Android完成1、guardY；early helper两文件hash通过并STAGED。init.svc.sq2-c2-experimental=running，系统Binder probe实际列出default/default1/software，三者均declared1/registered1，maps系统libbinder且FD=/dev/binderfs/binder；一次性env已清0。这一轮才是真实系统域发现成功。原系统PID2001/2179。
+
+随后独立120秒/2MiB collector ready/smoke后，首次运行/bin/video-decoder-lab-start成功，所有native文件及固件hash一致，/dev/video0及qcom-venus查询正常，未重启PAS或热拆provider。新probe/video/sq2-mediacodec-create.c以公开NDK35/libmediandk编译，无自定义库搜索路径；实验组件返回NULL/exit2，软件c2.android.avc.decoder返回nonnull/delete0。日志Codec2Client已显示default1，但MediaCodec codec info查找返回-2；不能称硬解MediaCodec成功，下一步参数/媒体能力列表构建。禁止用服务发现代替解码。当前候选仍运行，默认下一启动回原闭源入口；驻留core/provider不可热卸。
+
+## 媒体XML列表准入定位
+
+对照Codec2InfoBuilder.cpp，真实traits若不在parser codec map则continue。设备ro.media.xml_variant.codecs=_hamoa，不能只改media_codecs.xml。新增configs/sq2-media-codecs-c2.xml，实验范围仅320x240 AVC/并发1，不宣称完整硬件能力。两次临时XML实验（普通XML追加后恢复；专用media_codecs_c2.xml创建后删除）均仍create NULL/-2。尚未刷新系统media.codeclist.generator/mediaserver缓存，不能从此否定XML必要性；下一步追查当前设备生成器/缓存及对应解析路径，再有界刷新媒体服务。原XML已恢复，专用文件已移除，未修改持久镜像。软件创建对照nonnull/delete0。
+
+## MediaCodec创建/configure/start首次通过
+
+新增test-c2-media-refresh.sh，临时专用XML后只重启init服务media以刷新列表，退出删除XML并再次刷新。4340同boot首次CREATE nonnull/DELETE0；追加--configure后320x240 AVC的CONFIGURE/START/STOP/DELETE全0，软件创建对照也通过。日志实际Created component [c2.sq2.avc.experimental]，MediaCodecListGenerator重新生成列表。此前NULL的直接阻断是XML+缓存，不能再称服务发现失败。原生核心与PAS未重启，system_server/SF保持2001/2179，媒体服务PID按实验改变。两轮均RESTORED，专用XML已删除。证据media-refresh.txt/media-configure.txt。
+
+尚未通过MediaCodec送入任何压缩帧；输出format中媒体类型等缺项仍存在，不能把空生命周期成功当作解码通过。下一步构建有界NDK入队/出队测试，使用同一六帧向量核对实际输出、EOS及CRC，再补类型/缓冲参数和Surface路径。
+
+## NDK送帧首测未取得结果，待查框架重启
+
+新增sq2-mediacodec-frames.c（12秒循环/外层20秒timeout，输入队列逐AU+EOS，输出边界检查并落盘，尚不声称CRC通过）。因主机缺ffmpeg先从已校验v4l2-decode-test的具名rodata符号恢复原码流及AU边界，流SHA94c7974ef28247aa1d15f6e9e88a01a7ea1d382718983bbc1bfe0b5d8cd03dc1与旧记录一致。ffmpeg随后已安装完成，可独立生成参考。
+
+test-c2-media-refresh.sh --frames输出MEDIA_PID25557后没有CONFIGURE/QUEUE/OUTPUT，本次SSH后续断开，工具exit1。重连boot仍434055bb、Android1、system_server2001，SF已从2179变27412，mediaserver27616；实验store仍running，临时XML不存在且脚本进程已结束。不能称送帧成功，也不能推断板级重启或确定VPU触发；需要检查生成器/创建阶段及框架日志。已取全buffer末6000行到out/video-decode/codec2-integration/ndk-failure-logcat.txt，不重复测试。
+
+## 送帧探针的软件对照同样失败
+
+回查上轮保存日志发现仅保留较晚6000行，被Trusty/TPM后台失败淹没，没有上次SF变化或探针创建阶段证据，不能作根因结论。新增CREATE_BEGIN/END与CONFIGURE_BEGIN，输出直接落设备/data/local/tmp，外层timeout -k 3 20。使用同一恢复码流测试系统c2.android.avc.decoder：创建/configure/start0，四AU共5039/1365/1463/1315字节queue0，但12秒内无输出、无输入继续可用，TRANSPORT sent4 frames0 eos0/exit5。boot4340和system_server2001/SF27412/media27616保持。这使下一步转为先验证探针CSD/输入协议与软件通路，而非重复硬件实验。该轮未修改XML/重启服务；实际日志sq2-ndk-software.stdout/stderr保留设备。像素/EOS未通过。
+
+## MediaCodec硬件六帧输出逐字节通过；CSD后续试验待取证
+
+独立NDK客户端补ABinderProcess_startThreadPool，并链接设备系统libbinder_ndk后，软件对照六AU+空EOS全部完成，输出六帧I420，每帧115200字节。此前无回调不能作为硬件故障证据。FFmpeg将SHA94c7974e…原H264解码为NV12参考；将输出I420的U/V交织后逐字节比较，六帧完全匹配。
+
+同boot434055bb运行临时XML/媒体缓存刷新硬件试验，显式c2.sq2.avc.experimental创建/configure/start为0，输入六AU+EOS，输出PTS 0/33333/66666/99999/133332/166665，空EOS199998。TRANSPORT sent7 frames6 eos1 failed0、EXPERIMENT_EXIT0、软件创建对照0、RESTORED。取回全部六帧后独立参考比较同样全字节一致；Y/UV CRC依次a63b3e27/4ef614e1、6452bebf/8f399579、2a48def8/22e352f2、ce9219cd/1af7f368、3d294bd1/a1e0a7c1、0d29a183/15abb8c1。证据out/video-decode/ndk-vector/hardware-output。该成功限定于in-band SPS/PPS、320x240 AVC六帧、NDK ByteBuffer输出，不证明Surface、B站、4K或其它codec。
+
+随后尝试--frames --csd：客户端另外设置csd-0/1，原AU保留in-band配置（不是纯avcC去头码流）。日志重定向/data/local/tmp/sq2-hardware-csd.log；本地尚无内容，SSH reset后重连timeout，ping不可达。未取得该轮退出状态/输出/回退证据，禁止把它记录为成功或确定的VPU崩溃。恢复后先取该日志、boot ID和进程状态，确认临时XML已清理，再决定修复；不要重复这轮实验或重新PAS。当前组件还未单独处理C2 FLAG_CODEC_CONFIG，配置work被当普通图像送入后端且可能没有对应输出，需调查完成语义，但不能据源码直接断定失联根因。
+
+新增scripts/verify-sq2-mediacodec-frames.py，硬件和软件两组实际输出均通过。早期VINTF helper三项fixture测试通过。Windows python命令无可用解释器，验证改用WSL python3。测试runner新增-k 3超时强制退出、可选第二参数--csd；实验返回码现在传回调用者而非被后续日志命令覆盖（返回码改动未再次实机测试）。运行期间日志落盘由外层重定向完成。
+
+## 独立CSD完成语义修订候选（未部署）
+
+设备继续SSH超时，不能取得上轮CSD日志。离线恢复frameworks/av固定e2f098935447ca4945946de5cb69db843fe3f003；C2Work.h明确FLAG_CODEC_CONFIG只含配置而无access unit。原适配器无该分支，把配置work放进等图像回调的pending集合。新增sq2-avc-config.h及组件分支：配置复制到1MiB有界缓存后立即完成空输出，不打开硬件session；下一AU与缓存拼接后送V4L2，提交成功才消费配置，EAGAIN/失败保留；stop/reset/flush清除缓存，拒绝config+EOS和无效配置输入。仅Annex-B配置，不是avcC转换或完整C2InitData实现。
+
+主机g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined运行tests/sq2_avc_config_test.cpp通过，覆盖SPS/PPS顺序、下一AU拼接、EAGAIN后重试、成功消费、无配置直接提交、1MiB边界、空输入与清除。此测试覆盖实际缓存helper，不覆盖C2 Binder/组件生命周期。当前缺原平台C++头和设备Codec2链接库，完整组件尚未重新编译，更未替换设备服务；不能声称已修复失联或播放器支持。保持已通过六帧的设备二进制不变。恢复连接后首先取证和确认XML清理，再恢复构建依赖并做完整构建、C2生命周期测试，最后才运行新候选的独立CSD测试。
+
+## 恢复后CSD配置work实机验证
+
+新boot1486cdb1，guardY/nohibernate、Android1，system_server2058/SF2350；正常闭源入口没有experimental参数，实验service/XML/video0均不存在。旧CSD日志0字节，pstore空，不能确认原测试进入了MediaCodec或硬件；用户卡住/黑屏观察保留，但不把CSD源码缺口称作卡死根因。恢复后Trusty/gscd/init子进程tombstone已覆盖此前时间窗口。
+
+六份设备链接库已取回，其中组件构建脚本的四份固定哈希全部通过。注意libcodec2.so取system（65ff181b…）、libcodec2_vndk.so取vendor（7ee32cb2…），同名APEX/system库哈希不同，不能混用。NDK C++头复制到私有cache后仅__config_site命名空间__ndk1改__1，原NDK未改。原mapper头归档fetch因hash mismatch退出，未放宽校验；改从同Android12 tag Git恢复core1d37c449…、logging37cb6ed4…、base5d87ea13…，组件构建脚本验证HEAD后加入路径。完整组件候选编译通过。
+
+sq2-c2-component-test.cpp新增--config-only：两项FLAG_CODEC_CONFIG work使用不透明16字节输入，检查异步回调result/processed/ordinal、无图像/EOS、stop/release。没有声称输入是合法SPS/PPS；这里验证配置work生命周期。实际正常系统无video0情况下两回调0、done2/mask0/eos0/errors0，stop/release0、exit0；前后boot及2058/2350不变。日志保存在component-backend/config-only.log。候选未安装到AIDL服务，真实CSD+AU、Surface和应用测试仍待完成。
+
+## AIDL候选恢复与纯独立CSD软件基线
+
+hardware/interfaces固定1a56e38e…、frameworks/native固定4f463a6b…已恢复，prepare生成144个头，HardwareBuffer.aidl本次SHA287035e1d41954725d17f0729fa6c163dac80e0cd8980653720366dc2a9b71e9（该下载仍引用main，后续应固定）。补充固定Android12 libhidl ef7cca7d…/libhwbinder d45db455…；AIDL构建脚本按实际HEAD校验头路径。修订服务完整构建通过，上传为/data/local/tmp/sq2-c2-aidl-csd；只运行无参数Store本地自检，status0/list1/exit0，未注册服务或更换启动镜像。
+
+sq2-mediacodec-frames.c新增--csd-stripped：取原向量Annex-B SPS/PPS为csd-0/1，并从每个AU剔除NAL7/8。修复配置扫描对终末startcode的边界判断。首AU5039->5002，独立SPS28/PPS9。系统软件组件配置/start0、六帧及空EOS全部正确，六帧115200B I420转换NV12后逐字节匹配参考。证据ndk-vector/software-csd-stripped，进程2058/2350保持。该探针可区分配置缓存生效与原AU中重复配置回退；新硬件服务尚未实测此模式。正常boot1486无video0，下一步仍需实验启动、核验新服务hash、独立有界持久collector再一次加载后端；不要使用旧--csd试验代替这项验证。
+
+## 独立CSD与Surface硬件端到端通过（3944）
+
+本轮先核对BC711 NVMe SK hynix512GB/CYA5N050012105J77、ESP p6 B027-0512、SQ2-INTERNAL-512-20261027、userdata p1 4f46d2ec…及mapper/system_a根。既有实验镜像a5038428…未修改；备份环境块后用grub-editenv生成一次性env（SHA d762d0a0…），复制/比较/sync/原子替换并正常reboot。新boot39441275-d887-4e17-a774-9e1fad93cdd3，Android1/guardY/PID1978/2246，env已归0。新CSD服务8382c98d…在停止空闲旧服务后原子替换RAM vendor并启动，核验哈希一致。镜像内服务仍旧4e7d98a7…，下次实验启动需明确更新，不可混淆。
+
+独立120秒/2MiB kmsg采集验证ready及SQ2_KMSG_SMOKE后执行本boot唯一一次后端加载，native/firmware哈希通过、video0就绪。test-c2-media-refresh.sh --frames --csd-stripped输出六帧及EOS，exit0，软件创建对照0，RESTORED，六帧复制本地并与FFmpeg全字节一致。collector41秒signal结束，boot/PID保持。日志及帧在ndk-vector/hardware-csd-stripped。测试runner新增阶段sync，客户端创建/configure/start/input入队前后fsync stdout，减少异常后仅见空日志的可能。
+
+NDK探针进一步新增--surface-csd：YUV_420_888 AImageReader、CPU_READ_OFTEN、最多8图像，取ANativeWindow配置MediaCodec，真实输出release(render=true)，获取AImage三平面，核对crop/尺寸/数据长度/stride并复制为紧密I420。先软件对照六帧/EOS及全字节参考通过，再在同boot驻留后端上进行一次硬件Surface轮（没有重启PAS）。硬件六次OUTPUT size1、六张实际AImage、时间戳依次0/33333000/66666000/99999000/133332000/166665000，320x240、crop0,0,320,240；EOS size0，TRANSPORT sent7 frames6 eos1 failed0，exit0。六张图像全字节匹配参考，十二CRC与旧native一致。独立collector31秒signal结束，检索无fault/panic/smmu/HFI错误，XML已删除/缓存刷新，PID1978/2246与boot不变。证据ndk-vector/{software-surface,hardware-surface}。
+
+这证明Android Surface消费者图形队列可接收硬件帧，不是屏幕可见播放、零拷贝性能、长视频或4K证明。ImageReader运行于实验进程，正式APK权限/选择codec/SurfaceView还需验证。原黑屏轮没有阶段日志，不能从本轮成功反推出当时根因。当前默认正常启动项不变，实验provider/core驻留到下次重启，禁止热卸或重新PAS。
+
+## 普通APK SurfaceView播放与排队差异
+
+新增无权限请求的org.surface.sq2.videotest APK，使用Java MediaExtractor获取MP4 csd/时间戳，MediaCodec指定c2.sq2.avc.experimental，输出到可见SurfaceView。片源由FFmpeg testsrc2生成AVC baseline 320x240/30fps/10秒300帧，存于APK asset。构建/签名使用已有SDK工具，私有debug key在private/sq2-video，不入Git。应用结果落私有files/result.txt并fsync，不读取video设备节点。当前真实活动用户为10，UID1010254；先误查user0文件不存在，随后通过am get-current-user/logcat确认，未改用户数据。
+
+首版软件300帧全部渲染；硬件同片源300帧/EOS全解出，但0.94秒内全部交给Surface，仅59渲染回调，截图提前显示第298帧。此结果不作为播放通过。应用随后增加按PTS限提前10ms的提交节奏，软件与硬件同程序对照均约10秒、inputs300/outputs300/rendered300/eos=true/cancelled=false、RESULT pass=true及RELEASE_OK。硬件每30帧约1秒递增，最终9964ms；截图可见第211帧/7.033秒测试图，早晚截图变化。该应用节流不是组件缓冲池背压修复，系统软件与实验组件的默认池行为差异仍开放。不要把用户看到图样说成用户确认画质。
+
+test-c2-player.sh仅临时广告XML并刷新media，按实际当前用户启动目标APK，两个时间点screencap，检查全部300渲染回调及EOS/release，退出force-stop测试APK撤销KEEP_SCREEN_ON、删除XML并刷新media。实际paced轮exit0/RESTORED；独立collector正常signal结束，boot3944、guardY、PID1978/2246保持，无PAS重新加载。证据out/video-decode/player-app/{hardware-unpaced,hardware-paced}，软件paced结果也保存在后者。这只验证显式选择下的320x240 AVC可见播放；第三方自动选择、codec profile/allocator/pool参数、HD/4K/长播放/seek/flush/持久默认仍待完成。
+
+## 尺寸能力枚举、720p通过与1080p关闭超时
+
+只读sq2-v4l2-capabilities.c在现有video0执行QUERYCAP/ENUM_FRAMESIZES/QUERYCTRL/QUERYMENU，不提交码流。H264 type3、min96x96/max4096x4096/step1x1，profile菜单0/1/2/4/15/16。据此扩大实验AIDL接口范围（步进仍2，保留NV12限制）；不将枚举结果称为全codec/全profile验证。组件候选c2a1ea9a…已RAM替换，原镜像未改。build-sq2-video-app.sh接受320x240/1280x720/1920x1080/3840x2160，后3种产物独立目录，仍300帧baseline30fps，实际只测到1080p。
+
+720p临时XML最大1280x720，普通UID1010254应用完整300输入/300输出/300渲染、EOS及release通过，9963ms，截图正常测试图。证据player-app-1280x720/hardware。1080p首轮同样300/300/300和EOS，但释放报CodecException；不能把RESULT pass=true（仅播放阶段）当整轮成功，runner因缺RELEASE_OK返回1并清理XML。后续改APK无论stop成功与否都尝试release，细分STOP_BEGIN/STOP_OK/STOP_ERROR及RELEASE_BEGIN，输出CodecException错误码/diagnostic/recoverable/transient，不隐藏失败。
+
+增加SQ2C2Lifecycle日志及session.close分阶段标记（host头默认为no-op）。诊断候选8a38ae24…的onStop起点21:51:41.984，框架21:51:45.284报UNKNOWN_ERROR，session.close于45.740才成功返回；pid/boot未变。进一步候选24cc2408…定位21:54:02.331 capture streamoff，02.331 output streamoff，02.332 input unmap，02.334 fd-close，06.027 fd-closed，06.031 capture-released。耗时主要在close(/dev/video0)，不是图形lease析构；此次300输出/299渲染，stop错误-2147483648，后续release执行成功，但不计整轮通过。保留图形队列首帧丢弃现象，不放宽全部渲染断言。
+
+过滤logcat后台-f写入在终止时只保留4096字节缓冲，已补清理前logcat -d过滤快照，并单独及时读取SQ2C2Lifecycle/MediaCodec/SQ2VideoTest。证据player-app-1920x1080/{hardware,close-trace}，最后close-summary和kernel日志已取回。collector正常结束，无固件重载/热卸，XML已删除、应用已停止，boot3944/PID1978/2246保持。运行服务现为24cc2408…，源码及构建脚本均保留诊断。下一步优先采样fdclose期间内核线程栈，检查vdec_close的v4l2_m2m_ctx_release/vb2释放/hfi_session_destroy/PM，而不是猜测SMMU或调高MediaCodec超时。4K尚未实测。

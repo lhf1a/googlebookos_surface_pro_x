@@ -1,0 +1,38 @@
+#!/bin/busybox sh
+# Candidate early-init hook, after vendor overlay and before native-handoff.
+# Installs the paired private lab service and declaration together.
+set -eu
+cmdline=$(cat /proc/cmdline)
+case " $cmdline " in *' sq2.rescue=1 '*) exit 0;; esac
+case " $cmdline " in *' sq2.video.c2=experimental '*) ;; *) exit 0;; esac
+test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+target=/newroot/vendor/etc/vintf/manifest/sq2-c2-experimental.xml
+test -d "${target%/*}"
+test ! -e "$target"
+test ! -e "$target.new"
+source=/etc/sq2-c2-experimental
+binary=/newroot/vendor/bin/sq2-c2-experimental
+rc=/newroot/vendor/etc/init/sq2-c2-experimental.rc
+test ! -e "$binary"
+test ! -e "$rc"
+(cd "$source"; sha256sum -c SHA256SUMS)
+test -d /newroot/vendor/bin
+test -d /newroot/vendor/etc/init
+trap 'rm -f "$target.new"' EXIT
+cp "$source/service" "$binary"
+chmod 755 "$binary"
+cp "$source/service.rc" "$rc"
+chmod 644 "$rc"
+cat > "$target.new" <<'EOF'
+<manifest version="2.0" type="device">
+ <hal format="aidl">
+  <name>android.hardware.media.c2</name>
+  <version>2</version>
+  <fqname>IComponentStore/default1</fqname>
+ </hal>
+</manifest>
+EOF
+chmod 644 "$target.new"
+mv "$target.new" "$target"
+echo SQ2_C2_EXPERIMENTAL_MANIFEST_STAGED

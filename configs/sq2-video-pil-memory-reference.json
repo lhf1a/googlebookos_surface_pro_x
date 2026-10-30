@@ -1,0 +1,36 @@
+{
+  "status": "private-lab-PAS-boot-shutdown-verified-not-HFI-or-decoding",
+  "board_source": {
+    "repository": "https://github.com/linux-surface/kernel",
+    "commit": "b86f786594dc9e53c57fcfa2aa58ada9541506bb",
+    "path": "arch/arm64/boot/dts/qcom/sc8180x-surface-pro-x.dts",
+    "sha256": "cb7eeaf5ca930748bd427d1eb6d293d8c6a2a31c314bb137e68f673302d67c77",
+    "documented_free_image_loader_gap": ["0x8bd80000", "0x8d800000"],
+    "provenance_limit": "Maintainer's Windows/ACPI/registry observations; not an OEM specification"
+  },
+  "scm_abi_reference": {
+    "repository": "https://github.com/edk2-porting/edk2-msm",
+    "commit": "e1952621f419f8db60ed28271264e1b5184c571d",
+    "path": "Silicon/Qualcomm/QcomPkg/Include/Protocol/scm_sip_interface.h",
+    "sha256": "ace9bf9b6f2adbe8657d380a87f0504a72705060ce0b3e90044b43e1d30f6ca8",
+    "get_mem_area": {"service": 2, "command": 9, "arginfo": 1, "spare": 0},
+    "provenance_limit": "Qualcomm interface header carried by community EDK2 port; verified against live call"
+  },
+  "live_allowed_window_exclusive_end": ["0x8b700000", "0x9ab00000"],
+  "explicitly_claimed_test_region": ["0x8c000000", "0x8c600000"],
+  "checks": ["Surface compatible", "live SCM bounds", "no System RAM intersection", "no live DT reserved-memory overlap", "exact generic UEFI reserved parent", "no nested or wrapped resource owner"],
+  "firmware_sha256": "4e93d34504da96320775476bbd509aa06f985b48fb781d4436c8eb812b929928",
+  "firmware_provenance": {
+    "repository": "https://github.com/linux-surface/aarch64-firmware",
+    "commit": "9f07579ee64aba56419cfd0fbbca9f26741edc90",
+    "original_path": "firmware/qcom/msft/surface/pro-x-sq2/qcvss8180.mbn",
+    "copied_path": "firmware/qcom/venus-5.2/venus.mbn",
+    "extract_script": "scripts/getfw.py",
+    "extract_script_git_blob_sha256": "ec791f37030ce4b147e8eaa11cf3f89591ff2b9e90daeffa30ed4ed56d18f0ac",
+    "version": "VIDEO.IR.1.2-00042-PROD-1",
+    "verified": "Original SQ2 path, copied path and tested firmware have identical bytes; getfw.py copies qcvss8180.mbn to the historical venus-5.2 directory",
+    "limit": "This does not verify runtime HFI compatibility or successful decoding"
+  },
+  "verified_returns": {"init_image": 0, "mem_setup": 0, "auth_and_reset": 0, "shutdown": 0},
+  "not_verified": ["HFI response", "nonsecure SMMU and frame buffers", "decoded pixels", "Android MediaCodec", "persistent deployment", "runtime hardware power-collapse handoff"]
+}

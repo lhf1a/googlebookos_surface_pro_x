@@ -1,7 +1,23 @@
 {
   "files": {
+    "vidc_hfi.h": "e49f9783546e52a94cb211a84e70054e8e62c2d3e833b8dd75ec3d95104a1ba9",
+    "vidc_hfi_helper.h": "4bead9f299b7186d0af4cb40802dd4257e58553fed87186502bbfb12db169e45",
+    "sdmshrike.dtsi": "be75adf2edcabca6deb9c98e557ad28bc8a9c60d97f298cc92623acff2b8260b",
+    "sm8150.dtsi": "2ac35d2a922c8c6165711d14f58b8825ff23130697c848a6c1b8a362b17a045c",
+    "videocc-sm8150.c": "a09dc6bf668eee2ceb6d1a3e0acdec2f94403bb4c57676adccfd16ef9cbe4b64",
+    "vidc_hfi_io.h": "ebc34f34143b19ca365fe995903db8dc6df411c89de14273bd992ce61e99c705",
+    "sdmshrike-vidc.dtsi": "643302a49133d7b2bf859ae0f0b2064a15940034afca085476a9ee3f02229e07",
+    "hfi_packetization.c": "fac94b6ee38b1a1f0fbfe564cb8c02b7c66735f044e8efee687d57d43ac20ef3",
+    "vidc_hfi_api.h": "d50e1494f2ca46ac17bf47a39bfe37aa2de3944c4d29778a4741f196793fc690",
     "sm8150-vidc.dtsi": "cfc2051d88bd4d0917a950ebc30b7d1f8d28e4f69156b50c8336146d85aaa627",
-    "venus_hfi.c": "8a9f0b0b78bfa2bf579eebb2720a58c0b0d51ff27da9450ee4f738ae5f0d9888"
+    "msm_vidc_platform.c": "a043dfbc357bdfd8d9c8c9928100e5c4875c6107f9c188c7baec7387946accec",
+    "venus_hfi.c": "8a9f0b0b78bfa2bf579eebb2720a58c0b0d51ff27da9450ee4f738ae5f0d9888",
+    "venus_hfi.h": "84246b4317b6c87f4fc9ad7787ae93f2f555c8025ca5df93597d495dcab35556"
+  },
+  "extra_source_paths": {
+    "sdmshrike.dtsi": "arch/arm64/boot/dts/qcom/sdmshrike.dtsi",
+    "sm8150.dtsi": "arch/arm64/boot/dts/qcom/sm8150.dtsi",
+    "videocc-sm8150.c": "drivers/clk/qcom/videocc-sm8150.c"
   },
   "status": "reference-only-not-sq2-resource-validation",
   "commit": "32f26bf34ddf17df8e224ae0703656b9fe0c1a8d",
