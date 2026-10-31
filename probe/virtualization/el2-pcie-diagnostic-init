@@ -1,0 +1,39 @@
+#!/bin/sh
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+exec </dev/console >/dev/console 2>&1
+export PATH=/bin
+mkdir -p /sys/kernel/debug
+mount -t debugfs debugfs /sys/kernel/debug
+for n in $(seq 1 45); do [ ! -b /dev/nvme0n1 ] || break; sleep 1; done
+echo 0 > /proc/sys/kernel/printk
+printf '\033[2J\033[H=== SQ2 FULL EL2: PCIe/NVMe diagnosis ===\n'
+uname -a
+printf 'HOST_CPUS='; grep -c '^processor' /proc/cpuinfo
+printf 'SCREEN_ONLY='; cat /sys/module/suspend/parameters/screen_only
+printf '\nPCIe / NVMe / dependency logs:\n'
+dmesg | grep -i -E 'pcie|pci 000|nvme|defer|smmu|iommu|failed.*(regulator|clock|phy)|probe.*fail' | tail -50
+printf '\nDEFERRED DEVICES:\n'
+cat /sys/kernel/debug/devices_deferred
+printf '\nPCIe platform driver:\n'
+for d in /sys/bus/platform/devices/*pci* /sys/bus/platform/devices/15000000.iommu /sys/bus/platform/devices/1c1c000.phy-wrapper; do
+ echo "$d"; readlink "$d/driver"
+ for link in "$d"/supplier:*; do
+  [ -e "$link" ] || continue
+  supplier=$(readlink -f "$link/supplier")
+  echo "supplier=$supplier"
+  readlink "$supplier/driver"
+ done
+done
+printf '\nPCI bus devices:\n'
+ls /sys/bus/pci/devices
+printf '\nNVMe nodes (no mounts):\n'
+ls -l /dev/nvme*
+printf '\nKVM execution:\n'
+/kvm-arm64-witness
+printf 'KVM_WITNESS_EXIT=%s\n' "$?"
+printf '\nDiagnostic display for 120 seconds, then reboot original default.\n'
+sleep 120
+reboot -f
+while :; do sleep 60; done

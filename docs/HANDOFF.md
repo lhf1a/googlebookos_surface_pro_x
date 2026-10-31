@@ -1867,3 +1867,5 @@ com.android.settings/.development.PageAgnosticNotificationService。
 **2026-10-31 SQ2实机/dev/kvm与guest验证通过（用户屏幕确认）**：用户对v2明确反馈‘出现/dev/kvm且PASS、EXIT=0’。这是隔离EL2 tiny内核、单vCPU MMIO42实际执行通过；非QEMU替代，非临时系统SSH日志。收到报告后SSH恢复检查超时，本次恢复仍待确认，不能把先前bd429ef0…归到本次。正常默认/救援保留，无休眠/追加重测。Android正常内核、多核、外设与AVF终端仍未验证。
 
 **2026-10-31 KVM实机PASS后正常系统恢复已核验**：用户确认恢复，SSH读回bootffa7053f…、原baseline60 Mesa2.7-60、boot_completed1、guardY/nohibernate；菜单f7244134…与Mesa持久默认不变。完成/dev/kvm单vCPU验证及恢复闭环，没有追加实验。
+
+**2026-10-31 完整EL2内核8核/KVM通过，但NVMe未通过**：照片确认HOST_CPUS8、全CPU EL2、KVM PASS/EXIT0，同时/dev/nvme不存在；PCIe1c18000延迟probe。初版诊断遗漏tail，已修正新initramfs e743de2a…并增加SMMU/supplier信息。用户要求后续一次性GRUB自动选项：已装消费成功才选测试的白名单机制，默认Mesa不变，菜单6ef2e1f7…，fullram请求一次已发起重启，等待新照片与请求消费核验。完整Android KVM内核/331匹配模块及175744446B启动包仅本地准备，含实验性RAM Secretkeeper声明隐藏及protected_vm=0；未部署Android入口、未启动终端。详见SQ1-EL2-PREPARATION.md。

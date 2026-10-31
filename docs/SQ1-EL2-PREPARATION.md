@@ -268,3 +268,113 @@ boot_completed1, screen_onlyY/nohibernate. Menu f7244134… and persistent defau
 sq2-baseline60-mesa unchanged. No extra reboot or experiment. Evidence:
 out/el2-kvm/after-hardware-pass-recovery.txt. /dev/kvm requested gate and subsequent
 normal-system recovery both completed; automatic-vs-manual recovery not inferred.
+
+### Photo correction and PCIe diagnostic follow-up
+
+User initially selected NVMe-present answer, then supplied a clear photo and
+clarified no NVMe logs. Photo confirms HOST_CPUS8, all CPUs started at EL2,
+KVM VHE and guest MMIO42 PASS/EXIT0, BUT `ls: /dev/nvme*: No such file or directory`
+at about10.6s. NVMe enumeration is NOT passed. Original photo saved privately in
+out/el2-android/fullram/operator-screen-nvme-missing.jpg. Never interpret the initial
+multiple-choice answer as stronger than the supplied direct evidence.
+PCIe/QMP PHY/GCC/RPMH/interconnect/NVMe dependencies are built-in, not missing
+modules. Normal recovered boot6406bb24… has1c18000.pci bound toqcom-pcie and
+0002:00:00.0/01:00.0. Experiment cause remains unknown (early snapshot, deferral,
+EL2 PCIe ownership or other failure). Full Android payload not launched yet.
+Updated RAM initramfs f19ebf18… waits up to45s, suppresses kernel-console mixing,
+prints PCIe/NVMe/deferred/platform/PCI bus diagnostics and KVM result, waits120s
+then reboots. All hashes passed; third normal reboot/manual fullram selection
+requested. No disks mounted by test. Waiting for diagnostic screen result.
+
+User now authorizes one-shot GRUB diagnostics without manual selection in future.
+Prepared consume-before-load generator, none armed yet; install after normal
+recovery, keep persistent default and enter candidate only if save_env succeeds.
+
+## Full Android kernel / terminal preparation (not boot-tested yet)
+
+Built separate full Android6.3.8 Image/modules using a COPY of the prepared
+sq2-ksunext source (existing memfd/audio/Bluetooth/screen-only fixes retained).
+KSU explicitly disabled for this baseline test. Enabled KVM/PREEMPT_NOTIFIERS,
+VSOCKETS and VHOST_VSOCK; original NVMe/FUSE/thermal paths retained. Full modules
+build produced Module.symvers. Initial build failed because cpio was missing for
+IKHEADERS; installed cpio then full build passed. A copied KSU default initially
+enabled itself, corrected before successful build. No such intermediate boot.
+
+GPU6.3 code did not honor disabled zap-shader status; experimental source now
+returns ENODEV for an unavailable child, allowing the existing non-zap path.
+This does not change normal enabled-zap behavior. Full RAM SMP8 QEMU passed;
+physical full RAM user/photo confirms8 CPUs/allEL2/KVM guestPASS but NVMe missing.
+Do NOT mark complete Android boot or PCIe/NVMe working.
+
+Offline full Android initramfs175744446B assembled from all SIX currently deployed
+baseline+BT+touch addons (preserving current per-device calibration/userdata),
+replacing331 modules with same-build stripped modules. Battery adapter rebuilt
+against full symvers, TSENS separately rebuilt against same full kernel headers.
+Original non-video effective modules all replaced; old experimental Venus/native
+modules retained but candidate must pass sq2.video=0 and no experimental-video
+flag to prevent loading incompatible modules. Rebuilt subset module dependency
+metadata; effective-entry comparison passed; original SSH credential member last.
+
+Experimental el2-terminal-stage requires guardY,/dev/kvm,/dev/vhost-vsock and RAM
+vendor overlay; hides only the unavailable Trusty Secretkeeper VINTF declaration,
+then runs KVM witness. /data and credentials untouched. Experimental build.prop
+advertises protected_vm.supported=0 (only ordinary KVM). This is not hardware-
+backed security support. Existing terminal Debian payload is already present in
+user10 files/linux, but AVF and terminal have NOT been started on new kernel.
+Candidate is still LOCAL ONLY until PCIe/NVMe diagnostic gate passes.
+
+## One-shot diagnostics installed
+
+User requested future diagnostics without manual selection. Generator
+scripts/prepare-sq2-el2-once.py creates1024B GRUB env and appends whitelist-only
+consume-before-load block; candidate selected only if save_env clears request.
+Persistent default remains baseline60 Mesa. Installed after verifying normal boot
+f091ffcd…/diskUUIDs/root; menu6ef2e1f7…, backup before-el2-once-20261031 is
+da0497db…. Requestfullram env92407f5d… armed once. Updated diagnostic initramfs
+e743de2a… includes missing tail applet and prints SMMU + supplier driver links.
+Old photo showed PCIe1c18000 deferred, noPCI bus, noNVMe, and missingtail; thus no
+PCI/SMMU failure diagnosis can be inferred from that missing log pipeline.
+New normal reboot requested, automatic test screen/consumption result pending.
+No Android test candidate launched, no suspend test or default promotion.
+
+## SMMU mismatch diagnosed and bounded pool candidate passed RAM test
+
+New photo from automatic diagnostic identifies apps SMMU15000000:127 context
+banks but only106 DT context IRQs, driver refuses probe; PCIe1c18000 waits for it.
+This explains PCI/NVMe absence at the driver-dependency level. Normal kernel log
+ring no longer contains early SMMU messages; fresh normal inventory/dmesg saved
+privately, not treated as EL2 logs. Normal recovery6922ba24… and once=none verified.
+
+User requests skipping additional boundary tests to speed lab experiments; complied
+(no new offline boundary-test suite). Added opt-in patch/helper for EXACT SC8180X
+apps SMMU15000000, EL2,127CB/106IRQ/0S2-only. Physical bank count/reset remains127;
+bitmap reserves106..126 permanently, domain allocation uses only IRQ-backed0..105;
+num_context_irqs never expanded beyond allocated IRQ array. Standard strict failure
+remains unless experimentalDT property present. IOMMU translation remains enabled;
+no fabricated IRQs, identity bypass or chip substitution. Wiring/fault-path behavior
+beyond the present successful workload remains unverified.
+
+New Image8ded0238…/DTB41217ae3… installed only in fullRAM test directory with
+previous files backed up. Kernel build passed; same-config modules unchanged ABI.
+One-shot fullram requested and rebooted. User reports PCI and NVMe now both appear,
+KVM remains PASS. This is operator confirmation; actual rootfs reads and Android
+boot not yet tested. Separate Android candidate uses same kernel/DT and matched
+modules; preparing it while RAM test waits120s then returns to default.
+
+## Android one-shot payload ready
+
+After RAM NVMe success normal recovery94a64dbd… guardY/completed1 confirmed;
+no additional manual confirmation required for already authorized lab continuation.
+Prepared EFI/SQ2EL2Android with Image8ded0238… + scoped DTB41217ae3… and complete
+Android initramfs. Matched modules331, same config; previous current BT/touch addon
+files and credential member preserved. Candidate commandline sq2.video=0,
+sq2.el2=experimental, Mesa2.7-60, nohibernate/screen_only and saved WiFi flow.
+KVM stage requires video off to keep old experimental Venus modules unloaded.
+
+Found old boot-kmsg forks and ignores SIGTERM, so wrapping timeout would NOT bound
+logging. Fixed before deployment: new foreground collector caps180s/8MiB, caller
+backgrounds it; no fork, no ignored termination signal. Candidate-only ESP logging,
+not normal boot. Final initramfs180495815B (level3 gzip); raw pack-audit.json tracks
+all replacements. Static ARM64 collector compiled -Werror. No extra boundary test
+suite per user instruction; syntax, build, file/hash/credential checks retained.
+Android candidate not yet booted at this record; first-boot result still pending.
