@@ -22,25 +22,33 @@ inline void repair_sq2_heatmap(const DeviceInfo &info, Image<f64> &image)
         image.rows() != 46 || image.cols() != 68)
         return;
     // Use the original neighborhood for every repair, without cascading changes.
-    const Image<f64> original = image;
     constexpr std::array<std::pair<int, int>, 4> cells {{{0, 0}, {0, 67}, {1, 0}, {2, 0}}};
-    for (const auto &[row, col] : cells) {
+    std::array<f64, cells.size()> repaired {};
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        const auto [row, col] = cells[i];
+        const f64 value = image(row, col);
+        repaired[i] = value;
+        // Most frames need no repair. Avoid even gathering their neighbors.
+        if (value < 239.0 / 255.0)
+            continue;
         std::array<f64, 8> neighbors {};
         std::size_t count = 0;
         for (int y = std::max(0, row - 1); y <= row + 1; ++y)
             for (int x = std::max(0, col - 1); x <= std::min(67, col + 1); ++x)
                 if (y != row || x != col)
-                    neighbors[count++] = original(y, x);
+                    neighbors[count++] = image(y, x);
         std::nth_element(neighbors.begin(),
                          neighbors.begin() + static_cast<std::ptrdiff_t>(count / 2),
                          neighbors.begin() + static_cast<std::ptrdiff_t>(count));
         const f64 median = neighbors[count / 2];
         // Only interpolate near-saturated positive spikes with weak neighbors.
         // Real contact support in neighboring electrodes remains in the heatmap.
-        if (original(row, col) >= 239.0 / 255.0 &&
-            original(row, col) - median > 40.0 / 255.0)
-            image(row, col) = median;
+        if (value >= 239.0 / 255.0 && value - median > 40.0 / 255.0)
+            repaired[i] = median;
     }
+    // Commit only after all reads, so adjacent repairs never feed each other.
+    for (std::size_t i = 0; i < cells.size(); ++i)
+        image(cells[i].first, cells[i].second) = repaired[i];
 }
 } // namespace iptsd::core
 ''')

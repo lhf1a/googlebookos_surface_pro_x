@@ -1,0 +1,9 @@
+serial terminfo lvm mdraid1x mdraid09 gcry_sha256 gcry_sha1 gcry_rijndael
+luks cryptodisk procfs archelp http tftp reiserfs jfs xfs ext2 btrfs zstd
+raid6rec diskfilter linux fdt lzopio loadenv disk fat test sleep search
+search_fs_uuid search_fs_file search_label reboot png password_pbkdf2
+gcry_sha512 pbkdf2 part_gpt part_msdos part_apple minicmd jpeg iso9660
+fshelp halt gzio gcry_crc gfxmenu video_colors trig bitmap_scale gfxterm
+bitmap font true echo configfile normal terminal crypto gettext chain
+efinet net priority_queue bufio datetime cat extcmd boot all_video efi_gop
+video video_fb probe

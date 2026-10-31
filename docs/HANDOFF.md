@@ -1,5 +1,902 @@
 # SQ2 开发交接
 
+**2026-10-31 首次校准加入可选拇指优化并部署**：用户明确要求在首次启动
+测试中发现问题后才启用。默认配置SizeMax=2.0；42点校准+5点检查后加入边缘
+单拇指持续慢拖3×5秒，最后轻点/拖动/双指人工确认。提前UP仅提示“提前抬起或
+意外断触”，不自动归因或开补丁；用户可重测或选择2.4cm，启用后必须重测再保存。
+另有“仅检查拇指”入口，沿用原坐标，不必重做42点。跳过保留原选项，取消/超时
+恢复原结果；已启用仍异常时不继续扩大尺寸。ThumbCheck纯Java负责手势状态。
+
+profile增加可选ContactSizeMax，仅允许2.0/2.4；旧7字段结果默认2.0。新neutral
+显式2.0，root校验后追加Contacts段。新保存同时绑定设备与坐标；改变尺寸不改变
+坐标映射、检测阈值、AspectMax、连续性或热图补丁。实际shell预览/取消/超时/
+保存重启、Java手势与坐标不变性及native非法值测试均通过，共10项相关测试。
+APK安装包含dex编译，实机一次超过旧15秒导致helper退出；安装等待单独放宽到
+120秒，普通Android查询仍15秒，且未保存试用的180秒恢复机制不变。
+
+本机先前2.4cm已获用户实测确认，因此将b20281a7…的坐标完整保留，只追加
+ContactSizeMax=2.4，迁移profile为59f305f0…，旧结果另备份；当前有效配置2.4，
+通用base配置2.0。完整构建6581cd0e…，触控新构建ee383f30…，但当前运行
+iptsd仍40a5f0fd…，本轮未替换运行二进制或重启。仅部署4文件（config、APK、
+profile工具、helper），addon da735bdd…，最后凭据member完整保留。默认构建
+含另一agent同期4KB相关文件，本轮不部署这些文件。两基线入口追加
+touch-firstboot-thumb-v1.cpio.gz，Mesa默认/回退不变；菜单2cce07b4…，备份
+grub.cfg.before-touch-firstboot-thumb-v1。硬件盘/ESP/data/root身份、gzip/hash、
+原子替换均通过。helper安装Success、当前context/profile及有效2.4配置已核对；
+实机界面检查了欢迎页→仅检查拇指→已启用说明→模拟提前抬起提示→返回取消，
+没有保存模拟结果。此为注入事件的界面检查，不能替代真人触控回归。
+启动自动弹出、新增向导的真人完整流程及本轮重启尚未验证。
+产物/审计在忽略out/touch-thumb-20261031/firstboot-{full-v2,deploy}。
+
+**2026-10-31 拇指边缘快速重复点击：一次尺寸判定中断已定位，2.4cm实测通过**：
+用户最初称两个触点，首次单进程采集后澄清“按了很多次，最边缘大拇指会有
+快速临近的两次点击，只有一个触点”。本轮是自由复现，不能按原计划8手势
+标注，更没有已确认的双指对照。原始iptsd_045E_0C21_1793440444.bin共2387帧，
+最大raw contact数和实际MT槽均1；53次按下、22个小于250ms的UP→DOWN间隔。
+多数间隔raw contact消失、热图峰下降，尚不能区分用户抬手/出界和传感器丢失。
+明确一处f2071–2079在同一连续热图触点中size超2cm（最大2.356cm），valid变0，
+随后恢复形成约100ms的重复按下；aspect未超2，因此不是两个接触簇或校准复制。
+
+离线对照SizeMax2.4与2.5结果相同：恢复47个上报帧，53次按下变52次；不应称
+已解决所有重复点击。旧13562帧4份录制完全不新增上报，含历史空闲3610帧0触点。
+阈值40/36、AspectMax2、连续性、即时起落、四点热图及已保存校准不变；没有
+增加释放延时/防抖。随后用户确认临时2.4cm“慢拖正常，轻点和双指也正常”。
+试验录制1809帧，22次按下，无小于250ms的UP→DOWN、无无效接触；双指区间
+230帧原始双指、223帧上报双指。实际手势不完全对应原计划次数/时长，不扩大结论。
+原服务40a5f0fd…已恢复，show_touches恢复null、测试APP关闭。先安装config-only
+touch-size24-v1（29278e88…），随后按用户新要求改成上节按设备保存的可选项。
+
+忽略目录out/touch-thumb-20261031保存录制、analysis/gaps/size-comparison。
+session-size24.sh准备/tmp/touch-thumb-size24，临时单进程诊断用现有eaabb2f7…
+binary，只追加Contacts SizeMax=2.4，最多1800秒/stop后wait回收并恢复/bin/iptsd。
+测试已结束，当前没有临时采集或第二个HID读者。4KB工作由另一agent推进，
+不自行重启设备或覆盖其文件。
+
+**2026-10-31 首次启动校准已安装，用户确认检查通过、拖动正常、已保存**：用户要求按
+不同屏幕在首次启动校准；通用默认profile已改为恒等，不再分发本机v2数值。
+新增probe/touch-calibration（APK、Java拟合/逆变换、native严格profile工具）、
+touch-calibration-boot、构建集成和两份测试。现有连续性/热图/阈值不变。
+向导42次（3组×7点×2次）+5点检查+拖动确认保存，已有补偿先逆变换，避免
+重复叠加。保存前仅临时应用，取消/180秒超时恢复；完整文件按硬件摘要绑定。
+新设备可跳过，之后在应用列表打开“触屏校准”。Android未完成启动或原触控
+初始化未结束时等待；不读取第二个hidraw、不改锁屏/网络、不持续采集输入。
+
+Java拟合/逆变换及非法profile、native校验/设备隔离/安全发布、实际shell沙箱
+首启/保存/再次启动/超时/跳过测试通过；默认触控及完整包d9d2b1fd…构建通过。
+Meson偶发WSL zip时间戳未来1–2秒，构建器仅针对Clock skew detected显式重试。
+实际addon6f75ff8f…与完整包有效条目逐项一致，仅8个预期触控/启动条目变化，
+凭据member仍最后。仅两基线入口追加touch-firstboot-v1.cpio.gz，原可用及
+救援入口保留；新菜单da8e624c…，原菜单备份grub.cfg.before-touch-firstboot-v1。
+
+已将用户确认的v2参数迁移到/data/vendor/sq2-touch-calibration/<identity>.profile，
+本机profile b4a3e2e4…（摘要在忽略out/touch-calibration/deploy/audit.json）；
+运行态helper已安装/启动，当前iptsd仍40a5f0fd…，合成配置ea6584a7…保持原
+曲线，APK3ba2215f…已安装到user10。正式新包iptsd为eaf7c38e…，下一次启动
+才加载；本轮未重启，以免打断另一agent的4KB告警排查。不要重复修改4KB通知。
+boot仍a384f5c1…、Mesa、guardY。向导欢迎页截图已检查，界面完整、context正常；
+用户已选择“现在完整测试”。随后实机收到preview和save并返回OK，profile
+更新为b20281a7…，合成配置001f5045…；两者所有校准字段逐项一致。iptsd
+PID28796仍正常，日志确认加载/run/iptsd-calibrated.conf，无待处理请求，boot
+未变。用户随后明确反馈“检查通过，拖动正常，已保存”，本轮完整向导实机
+操作与保存验证完成；尚未做重启后自动加载及新设备首次自动弹出实测。原v2参数
+保留在忽略deploy/migrate.profile及设备/tmp/touch-firstboot/migrate.profile。
+若反馈异常，先恢复原v2，不让用户反复重做42点。代码与产物未提交Git。
+部署、测量和截图位于忽略out/touch-calibration；尚无本轮重启后的自动加载实测。
+
+**2026-10-31 校准v2已持久部署，Mesa重启后用户确认正常**：用户反馈
+“左侧明显改善，其他位置和拖动正常”。将已测试v2曲线提升到默认配置，
+--touch-calibration默认on，连续性+四点热图仍默认on。默认触控交叉编译通过，
+iptsd40a5f0fd…、配置9943809d…；完整默认构建4f223373…，所有有效条目与
+现机基线+蓝牙v2+校准v2组合完全相同。新addon eacf319c…仅覆盖bin/iptsd和
+etc/iptsd.conf，私有SSH凭据member仍最后。原标准构建首次遇WSL时钟偏移，
+重试通过；整包构建须显式--edp-edid out/dual-boot-65-700/input/sq2-native65.bin
+（原默认路径缺文件），显示实际默认仍2.7-60，未启用65Hz。
+
+核对NVMe序列/容量、ESP marker、ESP/data UUID及root loop来源后，gzip/hash、
+sync及原子替换已通过。仅两基线入口追加touch-calibration-v2.cpio.gz，
+Mesa仍默认；原可用/救援入口和文件均保留。菜单备份
+/media/esp/EFI/BOOT/grub.cfg.before-touch-calibration-v2（28806fcb…）；新菜单
+9df50955…，addon位于/boot/sq2-baseline60-20261031。临时诊断已结束并确认
+原进程2210ac0a…恢复、show_touches恢复null；raw证据已取回忽略目录。
+正常重启后boot为a384f5c1-da7e-479b-b562-6412e52ba67f，Mesa/2.7-60、
+boot_completed1、guardY。实际/bin/iptsd PID6674及配置hash分别40a5f0fd…、
+9943809d…，均匹配构建；show_touches为null，无临时采集进程。蓝牙桥接
+65bef26e…、helper6bbe379a…保持，TRANSPORT_READY、保存开关1、crash0；
+本轮没有另做蓝牙输入测量。用户随后确认“桌面、边缘点击和拖动均正常”。
+此次只在Mesa完成重启实测；高通入口引用相同触控addon，但未另重启测试。
+持续空闲误触/长时间精度与其它设备不据此保证；原幽灵修复仍保留。
+部署证据out/touch-edge-20261031/deploy/after-reboot.txt及audit.json；完整包
+与addon逐项比对full-build-comparison.json。当前默认v2及设备部署已完成。
+
+**2026-10-31 左边校准v2临时测试，等待实际按钮反馈**：用户确认v1右/下
+“明显改善，中心拖动也正常”，随后报告左边同样偏移。12次左边测量已完成，
+忽略目录calibration-left.csv；第0点明显滑动（X9→263px），排除。左中部
+1%位置X约9、目标28.8px；3%位置X41–67、目标86.4px；8%位置基本正常。
+左上角X平均83、目标86.4，主要Y偏高约19px，不能整条左边统一平移。
+
+v2增加左侧X单调曲线，并用CalibrationXTop及CalibrationTopStart/End在
+Y10%到30%平滑混合，避免左中部修正误推左上角。Y顶部补偿在12%内渐退，
+中心恒等，右/下沿用v1曲线（配置改为6位小数，误差小于0.01px）；仅输出
+坐标变换，不改检测/连续性/热图修复/阈值。INI行长须小于200字节；首次v2
+9位小数配置因行过长被解析器拒绝，已缩短并重新通过真实加载及回放检查。
+曲线/非法配置、实际TouchDevice ARM/QEMU单多点与混合区域测试通过；
+13562帧回放检测和稳定性完全相同，历史空闲3610帧零触点。训练数据左1%
+横向残差约1px、左3%约8–14px，不能代替独立实机验证。
+
+当前已确认SESSION_READY，运行/tmp/touch-calibration-v2/session.sh，最多1800秒或stop恢复
+原版；二进制eaabb2f7…、profile3901b0b2…，普通候选02e0ae96…。临时显示
+触点圆点，退出恢复原null。v1退出发现子进程未wait导致touch-services误判
+旧PID仍活而没有重启原服务；已手动恢复并核对原2210ac0a…，v2脚本已补
+终止、wait回收及恢复exe路径校验。不要仅凭ORIGINAL_TOUCH_RESTORED字样判定。
+实际PID22372、exe哈希及user10 show_touches=1已核对；已发实际按钮反馈问题。
+原/bin/iptsd、配置、EFI未改；Mesa默认及所有回退保留，无板级重启。
+
+默认构建器已接入--touch-calibration on|off（默认on），与ghost模式独立；
+当前跟踪profile仍是用户验证的v1，v2仅忽略目录候选，待反馈后再提升。
+默认v1触控构建曾通过，后续v2源码更新使其header manifest过期，须重编；
+尚未持久部署校准。out/touch-edge-20261031/prepare-deploy.py及deploy中v1
+准备产物未上传，不能直接用作v2部署。下一步收实际左/左上按钮、跨区拖动
+及右/下回归反馈，再定稿、重编和审计部署，凭据member须最后。
+
+**2026-10-31 用户要求改走校准补偿，v1临时加载等待真实按钮反馈**：用户最新
+“通过校准补偿的方式解决”；同时澄清印象中Windows没有偏移，但目前没有可用
+同条件Windows对照，不能称硬件故障。原生单点6次对照已完成并恢复原iptsd：
+底97%Y偏低36.0/28.2/22.6px，底99%约-2.4px；原生模式不是多点替代方案。
+其余side report中0x12有稀疏坐标样字段，但没有底97%对应数据，不据此替换算法。
+
+新增scripts/patch-iptsd-sq2-calibration.py及probe/test2/sq2-touch-calibration.hpp：
+配置[Touchscreen] CalibrationX/Y，归一化input:output分段线性单调曲线，空值
+恒等、0/1端点固定、斜率0.2..6；仅045E:0C21且metadata46x68触屏生效。
+只在TouchDevice发出ST/MT坐标时应用，检测/稳定性/接触连续性/热图修复/触笔
+不变。这是校准路径，不是之前未部署的centroid/bounded-edge拟合实验。
+v1 profile在忽略目录out/touch-edge-20261031/calibration-v1.conf，由重复测量
+拟合；X<=.96、Y<=.94恒等，当前只校右/下，左/上无足够重复标定数据。
+底97/99原始坐标重叠，合并校准点作折中：训练数据97%误差约49降20px，99%
+约10变-19px；不能称独立验证通过或完全恢复丢失坐标差别。
+
+真实TouchDevice ARM/QEMU录制sink测试通过：单/多点坐标一致、事件序列/即刻
+起落/连续性及设备范围不变。曲线解析/单调/非法配置测试通过；13562帧4份录制
+回放检测与稳定性逐项不变，含历史空闲3610帧零触点。普通构建4c196a16…、
+临时诊断720c5266…、profile3810e28d…；尚未改标准构建器或设备持久启动载荷。
+现在/tmp/touch-calibration-v1/session.sh启动临时校准服务，最多1800秒或stop
+标记恢复原/bin/iptsd；临时开启user10 show_touches便于看圆点，退出恢复原null。
+准备核对SESSION_READY后请用户试原来右/下小按钮；不再要求整轮靶点。
+结束时须读取真实反馈、核对恢复/决定持久化；当前默认Mesa及原可用回退未改。
+
+**2026-10-31 原生单点坐标对照准备启动，用户已准备好**：最外沿7点文件已
+自动完成并恢复原版；第0中心发生于诊断开始前，排除，第1–6点有同步raw。
+底99%原版误差约+9px，centroid候选变为-23至-30px，故不采用/不部署该候选。
+右99%原版X约2870（靶点2851.2）。证据touch-edge-limit，raw1793432958.bin。
+原始HID录制发现0x40/6字节报告：bit0接触、LE16 X/Y、范围0..32767，描述符
+与event7 BTN_TOUCH/ABS_X/Y一致；元数据transform对角408.791/405.756，平移0，
+与原(cols-1,rows-1)归一化相符，无证据支持全屏仿射标定错误。0x40在进入raw
+模式前出现，raw模式中未伴随输出，不能声称可同时直接替代多点位置。
+
+用户同意并准备原生单点对照。忽略目录edge-native.cpp临时程序读取同一hidraw，
+报告5设0，解析0x40并通过现有虚拟触屏发单点DOWN/UP；临时EVIOCGRAB event7
+防原始节点重复响应，验证节点名及X/Y范围，退出自动释放。Runner仅在独立缓存
+中放行0x40；native解码真实13报告（含release）逐项对照通过，AArch64二进制
+1b3e337f…，不是默认iptsd替换。脚本/tmp/touch-native-control/session.sh，最多
+1800秒，APP points-native-control.csv为底97%3次+底99%3次，完成6点即自动
+恢复原多点服务。原bin/config/EFI未改，screen_only仍Y。下一步核对SESSION_READY
+再提示用户开始；此对照没有热图和正常多点语义，绝不能提升为默认功能。
+
+**2026-10-31 同步采集已成功；边界候选仅离线，最外沿7点采集待完成**：用户
+在window30采集期间完成剩余8点，时间戳与190帧热图、getevent对应；完成后
+自动恢复/bin/iptsd hash2210ac0a…、配置c7f31ec9…并核验，APP已先关闭。
+确认无空闲FRAME不代表失败，此传感器本次从真实点击开始输出；不要再只凭
+READY后无连续空闲帧判定采集故障。证据out/touch-edge-20261031/touch-edge-window30，
+有效raw为iptsd_045E_0C21_1793432315.bin（680356字节），较早1076字节文件无效。
+points.csv第0点发生于原版，排除；第1至8点有同步热图。底97%三次输入热图
+第44/45行逐列相同（抽查10帧均68/68），原拟合y约44.8、报告屏幕Y1910附近。
+Android坐标与该拟合一致，尚不能将重复数据的来源断言为固件或硬件故障。
+
+离线zero-border卷积候选仍偏低30–34px且减少valid/stable帧，未采用。
+离线centroid候选仅对46x68、触点边界到最后行、末行强度达原activation且
+末两行完全相同的情况，用去掉重复末行的原neutral图局部质量中心替代Y；
+不改X/形状/阈值。该录制底97%三次偏差由约48px降至3.65/9.42/9.52px，
+有效稳定帧14/12/9不变；两中心、三下92%点全部不变。但该方法可能导致真正
+最外沿不可达，尚不能部署；当前代码只是忽略目录的离线假设，也还没加产品ID
+范围保护，绝不能直接进默认构建。现在准备/tmp/touch-edge-limit原算法录制：
+7点（中心1、底99%3、右99%3），APP文件points-edge-limit.csv，1800秒或完成
+7点自动恢复。用于评估候选边缘可达性及右边是否同类，未部署坐标修正。
+
+**2026-10-31 中心一次发生于5分钟窗口结束后，采集等待延长**：用户报告从
+1/9变2/9，但down_time_ms=5600854，前一诊断在约5202秒已结束并恢复原服务；
+因此仍没有该点击的同步热图，不能据此称采集可用或触控失败。与用户说明窗口
+错开，保留APP当前2/9进度，启用/tmp/touch-edge-window30：原算法和配置不变，
+最多等待1800秒，APP累计9点完成即复制points.csv并自动恢复原服务。ready-uptime
+和points-before.csv区分原版首点与后续诊断期间的数据；后续只做剩余8点，
+不要重新索要整轮。真实点击期间能否出热图仍待验证；若不响应，touch目录stop
+立即恢复。show_touches为原null，原默认与启动载荷未改；不需设备重启。
+
+**2026-10-31 离线排除四点热图补丁直接改变已录底缘触点**：同一份有效四边
+原始录制分别用当前算法与仅移除repair_sq2_heatmap调用的本机构建回放，按帧
+匹配底缘触点（忽略新增的上角噪声触点和tracking ID），31个底缘有效帧的
+坐标、大小、aspect、stable/valid逐项完全相同。noquirk-bottom-comparison.json
+记录31/31；不代表其它触点或全部录制相同，也不证明其它算法步骤无问题。
+无补丁回放重新出现额外上角触点，未向设备部署或关闭幽灵触控修复。
+
+**2026-10-31 同步采集入口正在等待一次中心点击验证**：补充初始化后延迟3秒
+的诊断程序仍仅READY、无空闲FRAME，自动恢复原服务；但这一观察本身不能证明
+实际点击也无输出，须排除空闲停流。已告知用户，并启动一次明确的中心点击
+验证：/tmp/touch-edge-live-check，原算法/配置不变，仅单进程录制，先只点一次
+看APP从1/9变2/9，已发异步问题，尚待回答。最多300秒或points-edge-synced.csv
+达到9点后自动恢复原服务；未改/bin/iptsd或EFI。此文件本轮重新开始，上一轮
+无同步热图的9点已备份为calibration-repeat9-unsynced.csv，不能混淆。
+若无响应应及时touch该目录stop并核对恢复，勿让用户重复做整轮。
+
+**2026-10-31 9点已完成但不具备同步热图，勿误用**：再次收到用户“已完成”。
+应用时间戳显示这9点在第二次采集失败并恢复原iptsd后发生，仅可作原版坐标复测。
+底97%三次Y误差+48.135/+46.252/+49.229px，再次复现偏移；index3虽然显示
+下92%靶点，实际坐标仍在中心，属于落点/切换时机不匹配，不能作为92%映射样本。
+私有文件calibration-repeat9-unsynced.csv。已向用户说明同步采集未成功、暂不
+继续点击，关闭测量APP恢复原界面；临时show_touches已经恢复null。采集器两次
+仅DIAG_READY、无FRAME，均已自动恢复原服务，运行hash2210ac0a…核对。正在
+验证仅诊断程序的打开设备后等待复位稳定，不改触控算法/配置/启动载荷。
+
+**2026-10-31 18点重复测量确认下边缘非均匀偏移，尚未修复**：用户已完成。
+下边85%/92%/97%三个位置各3次，平均Y误差分别-2.96/+10.59/+48.82px；
+97%位置三个误差48.535/48.901/49.034px，实际触点稳定靠到Y1911附近而靶点
+Y1862.4。右边同三档X均差-17.06/-13.65/+38.63px，最外档单次误差
++72.98/+54.90/-11.99px，变异明显，不能据此统一缩放全屏。
+私有证据calibration-edge-repeat.csv。先前热图离线回放显示底缘拟合有外移，
+但没有当时准确靶点位置，仍不足以证明算法根因。用户已同意并准备再做9点
+靶点+热图同步（中心、下92%、下97%各3次）。首次单进程采集初始化有READY
+但无FRAME，已停止并恢复原服务，未要求用户在该状态点击；正在通过原服务
+同样的check-device预检重试，成功标准增加持续FRAME而非仅READY。
+同步APP文件points-edge-synced.csv含down_time_ms可与CLOCK_MONOTONIC匹配；
+会在9点完成或300秒期限后恢复原服务。诊断启动问题不能记为设备漏点结果。
+
+**2026-10-31 边缘点击调查转向坐标偏移；重复靶点测量待用户完成**：当前仍为
+Mesa boot ee9daa19…，原双补丁 iptsd 2210ac0a… 与配置 c7f31ec9… 均已恢复并核对，
+未改默认构建、启动载荷或重启。用户从“小按钮无反应”进一步确认触点圆点偏离
+按钮，点偏下按钮时圆点出现在最边缘。10点全屏靶点采集已完成：下方92%位置
+平均Y偏低38.1px；其它点偏移不一致，两次中心X误差分别-33.5/+2.4px。尚不能
+据此证明统一缩放、拟合外推或边界截断是根因，未盲目应用坐标修正。
+Android触屏raw 9600×7200到2880×1920、rotation0、affine identity、无IDC；
+源码拟合坐标按(cols-1,rows-1)归一化，uinput输出前clamp到[0,1]，这是路径事实，
+不是此问题的因果证明。现在 org.surface.sq2.touchtest 临时测量APP在前台，测
+下边和右边85%/92%/97%位置各3次、共18次；只记录应用坐标，不另开hidraw。
+结果在Android用户10的该包files/points-edge-repeat.csv；首轮points.csv保留。
+show_touches原值null已恢复（删除临时设置），本轮APP也不显示红点以减少追点。
+测量结束后应停止/移除该临时APP；其keep-screen-on只在前台有效，未改锁屏延时。
+
+此前四边采集须按修正事实解释：首次并开hidraw诊断扰动触控，连中心也无响应，
+原服务恢复后用户确认正常；禁止再次以第二个hidraw读取器并行采集。后续单进程
+诊断成功，用户实际操作为3次中心预试+20次四边，未做最后5次中心；共23次应有
+点击，基线形成22次（3中心+19边缘），不能把未做的中心5次记为漏点。
+同录制40/32轮廓阈值离线恢复漏掉的左边一次、历史确认空闲样本仍无触点；临时
+实机40/32仍被用户报告小按钮漏点，已撤销。该实机轮后用户继续操作按钮，不能
+称作30秒空闲误触验证。AspectMax放宽会放行启动边缘噪声，未采用；正常40/36、
+AspectMax2、即时起落、连续性与四点热图修复继续保留。源码/录制/测量证据均在
+忽略目录out/touch-edge-20261031，不纳入Git。优化尚未完成，不宣称已修好。
+
+**2026-10-31 蓝牙启动v2在Mesa重启后ON，用户确认连接和输入正常**：新boot
+ee9daa19-aaa9-4e62-8bdb-ba5b322cf8a4，cmdline仍Mesa/2.7-60，guardY、completed1。
+bridge实际运行exe65bef26e…、helper6bbe379a…、watcher7f73748b…、iptsd2210ac0a…
+核对。TRANSPORT_READY及PTY建立，ready=1；BluetoothManager从SYSTEM_BOOT
+BLE_TURNING_ON至ON用12.896秒，crash0，原3个配对及bluetooth_on=1保留。
+重复调用helper后bridge6840、watcher817、boot均不变且仍ON；无强制用户开关。
+完整默认构建669d0475…与已部署基线+addon所有有效条目完全一致；蓝牙5项、
+source-boot5项、USB4项测试通过。用户随后确认“已回到桌面”及蓝牙“连接和输入
+都正常”，本轮启动、连接和实际输入验证完成；保持Mesa默认及原可用回退入口。
+不把一次恢复解释为所有QCA超时的根因已经证明或长期稳定性通过；未验证其它
+蓝牙profile。证据after-runtime/idempotence.txt及用户反馈，未追加重启。
+
+**2026-10-31 蓝牙启动v2候选已安装，重启验证待恢复连接**：用户要求先实际修蓝牙。
+原Mesa boot fbd3cb3d…持续两小时仍ready0、bridge退出EBUSY。一次受控HCIDEVUP
+probe再次QCA版本超时；180秒timeout后结束，未卸载transport/清配对/强制开关。
+候选去掉bridge绑定前无条件HCIDEVDOWN，改为直接等待HCI_USER接管内核AUTO_OFF
+控制器（EBUSY/EAGAIN最多300次）；helper新建/复用桥接统一等待420秒并明确输出
+退出/超时，不再复用尚未建PTY的桥接时直接放弃。尚不能证明这已解决QCA超时根因。
+bridge65bef26e…、helper6bbe379a…，真实C启动的mock-syscall测试和helper迟到/退出/
+超时fixture、旧输入watcher测试通过。source-boot新增从源码静态编译bridge，避免
+后续只刷新脚本却继承旧二进制；完整默认构建669d0475…通过，保留60Hz及双触控。
+身份/ESP/data/root/guard核验后安装c86610dc…独立addon，仅覆盖这两个文件，原凭据
+member仍最后。仅高通/Mesa基线initrd追加addon，原可用/救援入口未变；Mesa仍默认。
+菜单28806fcb…；备份EFI/BOOT/grub.cfg.before-bluetooth-startup-v2为b395bcd1…。
+svc power reboot未改变boot，随后setprop sys.powerctl reboot请求后SSH断开；正在
+等待用户屏幕状态与新boot验证。勿把断线当成功，也不要宣称蓝牙恢复。
+私有构建/审计/安装/回退菜单位于out/bluetooth-recovery-20261031。
+
+**2026-10-31 双触控基线保留Mesa默认；蓝牙初始化失败待修**：高通与Mesa均由用户
+确认桌面、单击和拖动正常。按“保持在mesa版本”将持久默认设为sq2-baseline60-mesa，
+菜单SHA b395bcd1…，原SQ2 USB storage and audio及文件继续保留回退。当前Mesa
+boot fbd3cb3d-8896-4556-a8f7-3ac49e8671ea未再重启；运行iptsd2210ac0a…，
+60Hz/270000×4、GPU700档、audio READY/HAL774cd7e7…、双FUSE及guardY已核对。
+这仅确认已检查项目，不代表蓝牙等全功能通过。
+
+用户随后报告蓝牙不可用。对原可用入口固定device-base与新基线按last-entry-wins
+比对：蓝牙helper、input watcher、bridge、HAL/rc、QCA固件及蓝牙模块均相同；
+init蓝牙启动调用保留。当前实际helper/bridge/HAL/三个核心模块哈希也匹配。
+本轮不是此前BLE HID输入权限修复漏包。现场QCA读版本失败(-110)、0xfc00命令
+超时，重试后hardware error0x40；bridge初期阻塞于HCIDEVDOWN -> hci_dev_close
+-> cancel_work_sync，随后进入HCI_USER等待setup。/dev/sq2-bt-h4未建立、ready=0，
+Android BLE_TURNING_ON。helper等待150秒后已退出；bridge的120次bind重试不覆盖
+此前阻塞的ioctl，且helper退出后没有自动发布迟到transport的机制。这是已确认的
+失败链与恢复缺口，尚未确定控制器为何超时，不能宣称硬件损坏或Mesa导致。
+部署时遗漏蓝牙实机回归；本轮仅采集/核对，未卸载transport、强制开关或重启。
+证据out/baseline60-on-20261031/bluetooth-{payload-audit.json,runtime.txt}。
+
+**2026-10-31 两项触控补丁版高通通过，Mesa验证中**：旧基线四载荷已校验备份并
+原子替换，原菜单另存grub.cfg.before-baseline60-on-20261031，当前回退文件未改。
+高通boot2e5abfab-4e73-4025-b4fa-f4739f96f7a1，用户确认桌面/单击/拖动正常；
+iptsd实际进程exe2210ac0a…、270000×4/2880×1920@60、GPU700档、guardY和
+completed1通过。第一次查询在音频helper完成前看到stock HAL fd219b10…，随后
+同boot AUDIO_READY及HAL774cd7e7…确认切换完成，不能将首次早期快照当音频回退。
+qcom-runtime.txt/qcom-audio-ready.txt保存证据。已由agent正常reboot进入Mesa
+一次验证，待用户及SSH结果；持久默认仍原入口，尚未提升新高通默认。
+
+**2026-10-31 按最新默认重建双入口，触控两补丁版部署中**：用户授权重新编译并
+替换之前高通/Mesa默认构建，保留当前可用版本回退。无参数触控构建on通过，
+iptsd2210ac0a…；主线source-boot默认2.7-60/700MHz，采用本机固定device-base，
+initramfs706c76a4…；与前次edge-only基线解包逐条比对，仅bin/iptsd变化，音频等
+其他有效条目完全一致。Image/DTB仍已验证e7c7a3e5…/6db562c2…，救援514保留。
+本机身份/UUID/root/guard、原菜单aac75804…、原EFI d39ea7f8…及旧基线四文件
+哈希均核对，旧基线本地副本已验证备份。将原子替换/boot/sq2-baseline60-20261031
+四文件，不触及当前回退/boot/sq2-android1；保留原六入口及原GRUB，不启用按键
+候选。新一次菜单23097a39…、最终高通默认菜单e2445025…，上传中尚未重启。
+审计/构建/安装脚本out/baseline60-on-20261031；待高通/Mesa实机核验后提升默认。
+
+**2026-10-31 默认构建恢复接触状态连续性，未部署设备**：用户最新要求重新在
+默认构建加入连续性补丁。build-test3-iptsd.py和build-source-boot.py默认选on，
+同时应用patch-iptsd-sq2-touch.py与优化后的heatmap补丁；build-touch-fixup.sh默认
+回到out/test2/iptsd。edge-only/off显式选项保留，未改现有连续性实现、阈值或增加
+两帧等待。无参数触控交叉编译及QEMU --help通过，真实on产物通过source-boot
+模式/源码指纹/二进制/config校验；选项专项及5项bundle单测通过。日志与构建元数据
+留out/touch-default-on-20261031。此轮没有连接、替换或重启设备，现机仍为此前
+用户确认恢复的原默认版本；不自动重新启用60Hz新基线或GRUB按键候选。
+
+**2026-10-31 已重启到基线部署前原版本，SSH核验完成**：boot
+75c7d013-813c-4ef9-b768-cf2969443670，Android completed1，原路径/sq2-android1/
+参数，无grub_buttons测试标记；菜单aac75804…、EFI d39ea7f8…均匹配部署前。
+原iptsd文件及运行进程exe均e4610813…，config c7f31ec9…、msm f69c91e7…，GPU
+最高可用661MHz（不是新基线700），guardY/nohibernate保留。原默认仍sq2-usb-test。
+已完成用户要求的恢复/重启；本轮基线和GRUB候选不再活动，无后续测试待启动。
+用户随后确认“已恢复原桌面”，与SSH核验一致；日志rollback-runtime.txt。
+
+**2026-10-31 用户要求恢复基线部署前版本，已恢复默认并重启中**：GRUB实体测试
+boot6bf37446-f4d9-487e-9ffd-b9d419f7a9d6、cmdline含sq2.grub_buttons=test1、
+Android completed1，证实独立候选实际加载；用户报告“电源键正常，音量键无效”。
+尚未实现全部按键功能，不提升EFI、不继续原始键码采集：用户随后明确要求恢复
+默认并重启到基线之前版本，该请求覆盖继续开发计划。按身份/guard和12个原启动
+载荷哈希核验后，恢复菜单aac75804…（默认sq2-usb-test/原SQ2 USB storage and
+audio）、原EFI d39ea7f8…保持；原c2/USB/GPU700及buttons once均0。菜单切换
+前另存grub.cfg.before-user-baseline-rollback。已sync并由agent正常Android请求
+重启，原桌面和新boot待核验。60Hz基线与GRUB候选文件暂留磁盘但不在活动菜单，
+勿自动再启用；源码更改未回滚/提交。恢复脚本out/baseline60-20261031/rollback-original.sh。
+
+**2026-10-31 GRUB实体按键候选一次性启动中**：新脚本固定Surface GRUB commit
+71402fac…/gnulib9f48fb99…；console仅在Unicode=0时映射0x80/0x81/0x102为
+Up/Down/Enter。实际新旧C翻译器契约检查通过，普通键行为不变；重新交叉编译
+EFI41c4239a…/1458176B，ARM64 QEMU直接启动和原EFI chainload两项通过。
+设备原EFI d39ea7f8…未改；备份BOOTAA64.before-buttons.EFI及grub.cfg.before-buttons
+（菜单69607b83…）。独立/EFI/SQ2Buttons含候选及30秒测试菜单721c857d…，每个
+Linux命令附sq2.grub_buttons=test1用于确认路径。主菜单6541512b…、一次env
+d7f842ef…先消费再chainload，持久默认高通基线；已从bootd1c5ece3…由agent请求
+正常Android reboot，用户实体按键结果和新boot待确认。成功后方可考虑替换默认EFI，
+失败可恢复原菜单，勿声称软件键码测试已证明固件输入。详见BUILD及忽略的
+out/grub-buttons-20261031/部署脚本、审计、两个QEMU日志。
+
+**2026-10-31 60Hz基线部署完成，转入GRUB实体按键工作**：默认高通再次正常启动，
+bootd1c5ece3-db45-4394-b90e-49a36fbf94e4、completed1、guardY、cmdline基线路径/
+2.7-60/closed、iptsd63f0eed6…、菜单69607b83…、闭源READY匹配。此前高通/Mesa
+两轮均已由用户确认桌面和触控正常。原文件/救援均保留，没有默认65Hz诊断。
+用户新增要求GRUB音量上下选择、电源确认；当前BOOTAA64.EFI为原linux-surface
+fedora-39-1 SHA d39ea7f8…/1449984B，下一步核查EFI键码翻译并独立候选验证，
+不要用Android按键映射冒充GRUB支持。
+
+**2026-10-31 高通/Mesa 60Hz基线均用户确认正常，高通默认已安装**：Mesa boot
+d292913d-e102-4739-b547-09abc033feea，用户确认桌面和触控正常；实际60Hz、
+270000×4/2880×1920，iptsd进程exe63f0eed6…、msm f69c91e7…，Turnip实际
+runtime0b36eeba…且闭源helper DISABLED，completed1/guardY，GPU700档可见。
+仅用户0已挂载FUSE（此轮未宣称用户10活动）；日志mesa-runtime.txt。正常菜单
+69607b83…已原子安装，默认sq2-baseline60-qcom；Mesa一次性env确认已消费为0。
+当前从Mesa由agent请求正常Android重启，待核验默认高通新boot。原六入口及文件
+完整保留，另有新高通/Mesa/514MHz救援和关机，ESP余356MiB；未执行旧入口清理。
+65Hz/高速研究按用户要求停止，所有失败诊断候选均未并入本基线。
+
+**2026-10-31 60Hz高通基线通过，Mesa一次性启动验证中**：高通boot
+845f7d56-9f62-4422-9fd0-3848518e8de6，用户确认桌面/单击/拖动正常。实读
+dp_debug与DRM为2880×1920、60Hz/355500kHz、270000×4；原msm f69c91e7…，
+运行中iptsd进程exe SHA63f0eed6…与本轮构建匹配，config c7f31ec9…。GPU提供
+700MHz，CPU schedutil及1.7664/3.1488GHz上限、guardY/nohibernate保留，Android
+completed1，用户0/10 emulated FUSE均挂载，resource monitor READY，闭源Vulkan
+wrapper4dee0a10…/READY。仅验证启动/用户短时操作，不替代游戏、音频及长期测试。
+原菜单已在ESP备份为grub.cfg.before-baseline60-20261031，原入口文件保留。
+菜单a1e38b28…持久默认暂仍原入口，Mesa env a381cde3…原子安装后由agent请求
+正常Android reboot；待Mesa实机核验后提升高通基线默认。日志qcom-runtime.txt。
+
+**2026-10-31 用户终止高速链路路线，部署60Hz/2.7基线中**：用户明确要求放弃
+65Hz/5.4排查，按60Hz/2.7编译含触控改动的基线并部署本机。不要继续历史建议中的
+高速实验。主线构建默认已改2.7-60；edge-only重新交叉编译SHA63f0eed6…，原
+touch.hpp哈希仍与上游相同，仅热图补丁793074f9…，正常阈值/即时接触释放保留。
+启动包fb5f064f…、原Image e7c7a3e5…、GPU700/432 DTB6db562c2…、救援514
+DTB7a4d1c73…；音频/麦克风/USB/蓝牙/视频/SSD与凭据last-entry-wins已核验。
+out/baseline60-20261031含新构建、部署审计和旧菜单备份。显示/触控bundle/视频
+helper/USB/GPU共23项单测通过；触控选项专项脚本通过。首次误用discover运行
+专项脚本、及不存在的USB测试文件名已纠正，未改代码掩盖测试调用错误。
+独立目录上传四载荷；不部署65Hz addon，不改原入口文件。一次性菜单a1e38b28…
+保留原默认，候选高通/Mesa/救援+关机；待实机启动核验后才提升新高通默认。
+已核对512GB BC711序列CYA5N050012105J77、ESP B027-0512、marker、data UUID
+和loop0->p3、guardY。原菜单aac75804…已下载备份，当前尚未重启。
+
+**2026-10-31 V19结束，原桌面恢复且正常HPD对照完成**：用户确认已恢复原桌面；
+SSH实读boot02ccf481-2983-402c-ad1c-4c45db838302、原msm f69c91e7…、原菜单
+aac75804…、Android completed1、screen_only=Y/nohibernate全部匹配。使用同一
+4ee6e2ad…只读GPIO采样模块，1018840us内20000次全部high，low0/transitions0，
+最大采样间隔261us；采样后卸载成功，boot未变且completed1。日志位于忽略目录
+out/dual-boot-65-700/hpd-sample/original-control.txt。正常运行与V17失败后395次
+跳变存在差异，但两者所处阶段不同；不能将停流后脉冲证明为首次黑屏原因。
+V17/V19均未并入默认，无候选待启动，原可用入口/文件保留。65Hz仍未修复；
+下一轮应在首次出流期间采样HPD并核对视频/TU/MSA，尚无厂商固件硬限制证据。
+
+**2026-10-31 V19仍黑屏，IRQ事件未在首次停流前出现，恢复原入口中**：boot
+4f79ed92…/msmbdc79154…匹配，用户确认仍黑屏；17.263秒IRQ_SERVICE enabled，
+17.374秒stream与40.605秒idle前HPDstatus40000000/mask2，但没有IRQ_SERVICE
+event或预算耗尽记录。不能声称现有handler已实际处理脉冲，亦不能把停流后的
+脉冲直接当首次黑屏根因。读取已修正：0x100/16=00840001010101100110010000000000，
+0x110/6=000000000006；前后相同，BW0/lane84/TP0/ASSR1/rate_slot6符合预期，
+0x200/8仍0100777781001111→0100777781011111。原菜单aac75804…恢复，日志已
+下载irq-v19-4f79ed92…；sync后agent SysRq请求回原日常入口，新boot/桌面待确认。
+V17/V19未并入默认。下一步须提前到首个stream期间采样HPD与视频流/TU状态，
+区分首次无画面与之后的HPD恢复死锁，不要继续将二者当同一个已证实原因。
+
+**2026-10-31 V18训练状态未丢锁，V19接通有预算的IRQ_HPD处理路径**：V18 boot
+4655fabe…/msm0fe406bb…匹配，用户仍黑屏。DPCD200/8首次出流0100777781001111，
+停流前0100777781011111：service IRQ vector0、lane77/77且align1，LINK_STATUS_UPDATED
+置位；sink status从0变1。不能据此称持续无误码/画面正常或固件锁定。配置0x100
+单次22字节因驱动native AUX最大16而返回-EINVAL，是诊断代码错误，已改16+6字节。
+原菜单恢复，日志下载。V19基于V16+修正快照（无V17），仅Surface Pro X eDP且
+internal_hpd=false时，在成功plug/training后启用IRQ_HPD bit，在unplug前mask；
+不启用PLUG/UNPLUG/REPLUG，复用现有ISR/event/attention处理。实验仅允许32次
+有效处理，超额mask并清队列，防持续风暴；这不是默认长期方案或已验证修复。
+候选msmbdc79154…/PHY47e435ce…，614imports/归档delta/gzip/GRUB/shell通过，
+V6缓存还原。menu228cc3cf…、addon3ccf1196…，备份before-irq-v19；sync后agent
+SysRq启动中，实际boot/画面待核验。原可用入口/文件完整保留。
+
+**2026-10-31 V17重启HPD无效，但只读GPIO采样抓到持续短脉冲，V18读取接收端状态**：
+V17 boot0154b70e…/msm5973f4a3…匹配，用户仍黑屏。40.674秒rearm前HPD2，
+rearm后0再2，随后hpd_wait/-110，故单独HPD enable重启无效，不并入默认。
+原菜单已恢复。新增probe/graphics/sq2_hpd_sample.c只读TLMM GPIO10：固定验证
+Surface Pro X/chip3100000.pinctrl/base544/ngpio191，既不request也不改mux/方向，
+20000次50us间隔，周期性cond_resched，一次约1秒；模块4ee6e2ad…、14imports及
+vermagic核验后临时加载并卸载。实际1022096us内high16959/low3041、395边沿，
+最长high4443us/low820us、最大采样gap658us，边沿约每5.2ms一组，低约0.8ms。
+采样前后HPDstatus均20000000且boot未变。不是示波器，不保证捕获所有短脉冲，
+但已否定“GPIO持续高”的前一假设；应检查接收端为什么反复触发短脉冲。
+
+V18 patch-sq2-edp-sink-status.py基于V16（无V17），仅在HPD已经ready时，于
+stream_enable_end和bridge_before_idle读取DPCD0x200/8及0x100/22；最多4组，
+不写寄存器/ack，不跳过HPD。额外AUX读取可能改变接收端状态/时序，需承认局限。
+模块0fe406bb…/PHY47e435ce…，总614 imports、归档delta/gzip/GRUB/shell通过；
+addon33109534…、menubbaf7471…，备份before-sink-v18。初次安装命令因SCP尚未
+完成而在打开脚本处安全退出；等传输退出0后重跑并全部核验成功，再sync+agent
+SysRq启动。结果待核验；原可用入口和文件保留，V6缓存还原。
+
+**2026-10-31 V16发现TLMM输入高而HPD状态pending，V17候选启动中**：高速boot
+0086b5e5…、msmfac0a792…/PHY47e435ce…实际匹配，用户确认黑屏。第二次PHY init
+完成，所采集配置与低速一致（pd7d/modefc/aux1=13/aux2=24/aux5=26/aux8=37/
+bias17），HPD ctrl1/ref10013/time0=03e986a0/time1=61a807d0/aux11也相同，但status
+20000000不恢复。重要补充：DT将GPIO10复用为edp_hot，pinctrl-msm debug代码读取
+的是TLMM输入位；现场两侧采样均gpio10 in high func1，gpio130 enable out high，
+panel runtime active。核验live DT AUX基址ae9a200、AHB/AUX时钟开启后，单次只读
+devmem32读取ae9a200/204/218=1/20000000/10013，并重采GPIO仍高。不是示波器
+连续波形，不能排除毛刺或内部采样问题，但不支持简单“面板一直拉低HPD”。
+原始证据已保存reinit-v16-0086b5e5…的hpd-gpio-live/gpio-final及启动日志。
+
+V17 patch-sq2-edp-hpd-rearm.py隔离实验：仅Surface Pro X/eDP/保存rate>=540000/
+PHY reinit后status2时，把已开启HPD_CTRL bit0清除后读回，再恢复原值并读回；
+保留其他位、计时器、HPD等待、PHY、电压及初次/低速行为，不是绕过就绪检查。
+精确生成C的scope/寄存器位保持检查通过，模块5973f4a3…，同观测PHY47e435ce…，
+总614 imports/ABI/归档delta/gzip/GRUB/shell核验通过；V6全局缓存还原。
+菜单163040aa…、addon147fdb34…，before-hpd-rearm-v17备份原菜单。已sync后由agent
+SysRq发起候选启动，不是自动回退；实际新boot/结果待核验，未提升默认。
+
+**2026-10-31 V16低速对照通过，启动高速对照**：boot0b2a8b6c…，实读低速msm
+e26f7741…/PHY47e435ce…，用户确认正常桌面；实际270000×4/60、两次train0。
+HPD ctrl1/ref10013/time0=03e986a0/time1=61a807d0/aux11全程保持，mask0。
+PHY reset后参数回默认，下一init完整恢复pd7d/modefc/aux1=13/aux2=24/aux5=26/
+aux8=37/bias17；HPD恢复4并成功出流。日志下载reinit270-v16-0b2a8b6c…。
+原菜单恢复后部署相同观测的5.4对照reinit-v16（仅速率cap不同），msmfac0a792…，
+同PHY，menua5997094…、addon45028abc…，备份before-reinit-v16。正常Android
+reboot已发出，高速结果待核验。当前原入口/文件完整，未改默认或刷固件。
+
+**2026-10-31 V16重新初始化寄存器对照开始**：用户要求继续研究厂商固件/高速
+链路恢复问题。新增patch-sq2-edp-reinit-trace.py，基于固定V14及原PHY源码，
+仅添加有上限的HPD控制/计时/status/mask/AUX/reset寄存器读取，以及PHY成功
+init后、power_off前、exit前配置读取；不写寄存器、不增加AUX或延时，删除标记
+块逐字还原输入。读取前控制器core时钟有效，PHY仅在init成功后/exit之前读取。
+日志可能改变时序；这不是修复。PHY模块47e435ce…两组共用，低速msm e26f7741…，
+高速fac0a792…，仅rate cap270000一行不同；总614 imports均匹配记录的设备导出，
+vermagic/归档delta/gzip/GRUB/shell核验通过，缺原Module.symvers仍非完整modpost。
+V6全局msm缓存已还原。先启动reinit270-v16低速对照，menu6cbea50f…、addon98969a48…，
+原菜单before-reinit270-v16、六入口和文件保留；ESP余700.9MiB。正常Android reboot
+已发出，结果待核验。高速reinit-v16包仅准备在本地，尚未部署。
+
+**2026-10-31 本组测试结束，原日常桌面恢复已双重确认**：用户确认已恢复桌面；
+SSH实读booteaab734c-c2d1-4eb0-ac81-7c819fdd8d61、原启动参数、Android completed1、
+guardY/nohibernate、原msm f69c91e7…、原菜单aac75804…全部匹配。当前不运行V15
+诊断版，无新测试待启动。V13/V14失败未并入默认；V15仅作2.7对照，不提升默认。
+本组关键结论：SW reset后HPD pending在正常2.7同样发生，差异是5.4之后无法
+恢复ready；MX单项修改无效。65Hz根因/修复仍未完成，后续应比较重初始化后的
+HPD控制/计时与PHY AUX状态，见DISPLAY-REFRESH顶部，不直接删reset或跳过HPD。
+
+**2026-10-31 V15用户确认正常，排除“SW reset后pending本身异常”**：boot
+7f593dce-e3fd-492a-986c-20590550e39b，实读msm71adb0b9…、270000×4/60、两次
+train_ret0、completed1、guardY；用户确认正常桌面。39.220477秒mainlink关后4，
+39.221510秒SW reset后2，其余时钟/PHY关后均2，与失败V14相同；39.273394秒
+下一plug仍2，但39.361566秒read_sink_caps前恢复4，39.587188秒stream再次成功。
+因此SW reset后的4→2是正常对照中也存在的瞬态，不能删除reset作为已证实修复。
+差异是5.4无法在重新初始化后恢复HPD就绪。仅凭软件字段不能区分HPD采样/PHY
+配置/面板状态，更不能定论面板体质或物理带宽上限；首次画面也尚无证据证明可见。
+原菜单aac75804…已恢复，日志保存off270-v15/off270-v15-7f593dce…；由正常
+对照桌面发起Android reboot返回原日常入口，新boot待核验。所有可用入口/文件保留。
+
+**2026-10-31 V14后原链已核验，启动V15低速同粒度对照**：恢复bootdc65080b…，
+原msm f69c91e7…、菜单aac75804…、Android completed=1。V15在V14基础只增加
+此前验证过的rate cap270000一行，dp_panel.c逐字等于旧rate270-control，其他
+显示源相同；没有V11/V13修复叠加。目标检验SW reset后HPD=2是否正常瞬态，
+避免把正常复位副作用误判成根因。msm71adb0b9…，addon f7eb6f10…，menu6fb96591…，
+608 imports/归档delta/GRUB/gzip/shell验证通过，V6全局缓存还原。备份
+before-off270-v15，日志off270-v15-BOOT。已从原入口正常Android reboot，
+结果待核验；保留原可用入口，不宣称65Hz已修复。
+
+**2026-10-31 V14将首次HPD状态变化定位到SW reset，恢复原入口中**：实际boot
+2f333dd2-291c-40fa-93f9-c3112c294836、msm9694f4c6…、completed=1，用户仍确认
+黑屏。38.165597秒after_mainlink_off为4；38.166623秒after_sw_reset为2，后续
+pixel clocks/OPP/link clocks/phy_power_off均2，PHY exit前后也2。下次plug为0，
+caps时2，继续hpd_wait/-110。排除了“必须等PHY断电才开始状态变化”的解释；
+但正常SW reset也可能暂时令HPD pending，尚无同粒度2.7对照，不能把这一状态
+变化直接等同根因，不能声称面板物理掉线。需查复位后的HPD配置/恢复流程。
+日志已下载off-v14/off-v14-2f333dd2…；原菜单aac75804…已原子恢复，原文件保留。
+agent再次sync后SysRq请求回原入口，实际恢复boot/画面待核验。没有屏幕开关测试。
+
+**2026-10-31 V13后恢复已核验，V14细分关闭步骤诊断已部署**：用户确认回到桌面，
+boot7d0cc62b…实读原msm f69c91e7…、原菜单aac75804…、completed=1、guardY。
+V14回到V12配置（不带V13 MX、不带V11状态修复），在dp_ctrl_off中分别记录
+mainlink关闭、SW reset、pixel clocks、OPP归零、link clocks、phy_power_off后，
+以及phy_exit前HPD状态。只读现有HPD accessor，最多96条，不增加AUX/延时/写寄存器；
+去掉诊断标记块逐字还原V12输入。此关闭路径保留core/AUX时钟。诊断不是修复。
+msm9694f4c6…，addon aa2875ae…，菜单8e14fee1…，608 imports与V12一致，
+vermagic/打包delta/gzip/GRUB/shell检查通过；V6全局缓存还原。备份before-off-v14，
+一次性env独立，原入口和文件保留。由正常原桌面发起Android reboot进入候选，
+日志off-v14-BOOT，实际启动/用户画面结果待确认。ESP剩余734.6MiB。
+
+**2026-10-30 V13 MX对照仍黑屏，原菜单已恢复并请求重启**：boot
+a60e2e10-0bec-4063-b422-b06fdcb65035，cmdline=5.4-60-mx，实读msm6597bfd7…；
+live DT power-domains确为<0x22 9>，genpd也将aec2a00.phy列于mx，修改实际生效。
+用户确认黑屏/异常，Android completed=1。17.404秒stream结束HPD=4；40.319秒
+idle前4、40.323秒idle后4、40.341秒disable前4；40.346秒PHY关闭路径后2，
+下一plug瞬时0、caps时2，之后AUX仍phase=hpd_wait/-110。因此单独MX映射修正
+没有解决本机故障，不提升默认；控制器reset/关时钟/PHY关闭子步骤仍需细分。
+HPD字段不是物理引脚实测，首次训练成功也不证明有可见画面。
+完整有限日志已下载out/dual-boot-65-700/mx-v13/hpd-phase-v12-a60e2e10…。
+硬件身份/UUID/root/guard核验通过，原菜单aac75804…原子恢复；可用入口和文件
+保留。随后agent在sync后明确发起SysRq应急重启到原入口，不是自动回退/自主
+崩溃。恢复后的新boot/桌面尚待核验。未做屏幕开关或真正休眠测试。
+
+**2026-10-30 V12确定HPD在关闭路径变为pending，V13单项DTB候选已部署**：
+V12 boote2f93fb1…、实读msm6597bfd7…；17.20秒stream结束hpd_hw=4，38.337秒
+idle前=4，38.344秒idle后=4，38.359秒post_disable/disable前仍4；38.361秒
+display_after_phy_off变2，后续plug/caps始终2并卡HPD等待。这是控制器状态字段
+从CONNECTED变PENDING，不是测量到物理HPD引脚电平，也未区分ctrl reset与PHY
+power-off/exit子步骤。未证实第一次视频实际可见。日志已下载，原菜单已恢复。
+
+核对发现实际DTB/live tree的eDP PHY power-domains=<0x65 0>指向MDSS_GDSC。
+上游24e98cb3d5e2c86565680e00008a794b4eac0040（2024-01合入）明确修正为RPMh MX。
+scripts/build-sq2-edp-mx-dtb.py仅接受现机700DTB6db562c2…，全量属性比较确认
+唯一变化为/soc@0/phy@aec2a00/power-domains→<0x22 9>，不增加电压/OPP/频率，
+所有CPU/GPU/温控/设备身份不变。新DTBf68b564e…，此修正是否解决本机待实测。
+
+V13菜单5084081b…、env29b49447…；复用V12 addon cfd1c1e9…及相同msm/PHY、
+原生60Hz，唯一功能变量是DTB属性。新DTB独立文件sc8180x-edp-mx-v13.dtb，
+原菜单备份before-mx-v13，原六入口/原DTB保留。日志仍是hpd-phase-v12-BOOT，
+须按cmdline sq2.display=5.4-60-mx区分，不因日志名前缀误判候选。准备sync后
+由agent发起SysRq重启，不是自动回退；结果待核验。
+
+**2026-10-30 V11仍失败；准备V12读取HPD硬件状态**：V11 boot44019a13…日志
+证明40.295秒普通post_disable进入CONNECTED，停用后40.550秒从DISPLAY_OFF
+重新enable，人工unplug已消除；但41.052秒起训练写地址0x100仍在hpd_wait返回
+-110。用户确认黑屏后手动恢复原入口，不是自主崩溃；当前boot32eb7c2f…已核对
+原msm/Android completed/guardY，原菜单aac75804…也已恢复。应急SysRq确实
+发起过V11启动，但不能把随后用户手动恢复说成自动恢复。V11不并入默认。
+
+V12基于V10（不叠加V11）只增加现有dp_catalog_link_is_connected只读状态访问：
+首次stream结束、bridge发送idle前后、post_disable/PHY关闭前后。HPD状态字段
+移位后的connected bit为4。目标区分首次5.4视频期间已失去HPD与停流/PHY关闭
+导致的HPD变化，不增加AUX读写、不改变HPD检查。此访问读取现有core clock
+仍开启路径中的HPD状态寄存器，非原V6完全cached-only的快照；须如实区别。
+模块6597bfd7…、addon cfd1c1e9…、菜单e5b64b14…；608导入/vermagic/依赖、
+归档delta和shell/GRUB校验通过，V6全局缓存还原。一次性候选目录hpd-phase-v12，
+原入口保留，待启动/回读；不声称上述两候选已解决黑屏。
+
+**2026-10-30 V10定位到HPD等待阶段，V11状态转换候选准备启动**：V10 boot
+60e64b46…实读模块7a59e2ba…；初次能力/训练AUX均成功（lane7777/aligned），
+17.33秒训练0，38.401秒进入unplug handler，38.412秒display_disable，38.58秒
+再次read_sink_caps，之后32次500ms超时明确为phase=hpd_wait，尚未进入FIFO。
+期间未记录D3请求，故不能将-110等同实际总线不回复，旧D0唤醒解释不符合本轮。
+用户未留意首次画面，不能补记“从未显示”。日志已完整下载，V10菜单已恢复。
+
+进一步源码核对：dp_bridge_post_disable对eDP无条件调用unplug handler，使
+普通停用变成DISCONNECTED，再enable时先读能力；这条人工路径与日志吻合，
+但V10未直接记录调用者/硬件HPD电平，不能说已证实物理HPD掉线。V11隔离
+patch-sq2-edp-modeset-state.py仅Surface Pro X eDP取消普通停用中的人工unplug，
+仅DISCONNECTED首次plug；保留DISPLAY_OFF→PHY init→强制retrain原路径，
+不绕过HPD、不改PHY/时序/电压/频率，沿用V10观测。参考上游2022-06讨论
+https://lkml.iu.edu/2206.3/00689.html；原作者未称它修复所有显示损坏，本机需实测。
+
+真实bridge函数mock验证首次连接/普通停用恢复/强制训练/真断开/非目标通过。
+首轮测试夹具把clock设到错误结构字段导致断言失败，修正夹具后通过，未为通过
+测试改驱动。ARM msm9e942c8c…、608 imports/依赖/vermagic通过，默认V6缓存还原。
+addon07e067d4…、菜单c8a0f21f…、env4ea74a04…；原菜单备份before-modeset-v11，
+六个可用入口及文件保留。因多轮常规reboot未能从黑屏完成，计划先sync后手动
+发起内核SysRq应急reboot进入一次性候选；不是自动watchdog或自主崩溃。
+候选仍为5.4×4/原生60，目录out/dual-boot-65-700/modeset-v11，结果待确认。
+
+**2026-10-30 V10启停/AUX阶段诊断已部署，准备一次性启动**：用户要求继续推进。
+基于原V6未限速驱动、原PHY、原生60Hz，隔离patch-sq2-edp-transition-trace.py
+仅加入日志/计数，删除标记块后逐文件还原固定输入；不含V7/V8/V9行为补丁，
+不新增AUX或MMIO探测。记录现有native AUX交易的HPD等待/FIFO/完成阶段、返回值
+及至多8有效字节（最多256条），显示状态/启停（128条）、D0/D3请求（128次）。
+目标是区分-110来自HPD就绪等待还是实际AUX传输，并关联驱动主动关闭与接收端
+失联顺序，不能将此诊断称为修复。日志可能影响时序，需要保留这一实验限制。
+
+ARM msm7a59e2ba…、608 imports与V6完全相同、vermagic/依赖核验通过；全局
+V6缓存已还原。addon cb31e78a…，菜单d2582df1…，独立一次性env3fee5ea2…，
+原菜单备份grub.cfg.before-transition-v10，六个可用入口/文件完整保留。沿用
+V2 common/GPU700，有限日志目录transition-v10-BOOT，无自动reboot watchdog，
+无屏幕开关测试。产物/安装恢复脚本在out/dual-boot-65-700/transition-v10。
+
+**2026-10-30 V9后原启动链恢复已核验**：用户报告需要手动恢复后，SSH实读新
+boote7e7f5fb…、原SQ2 USB/audio启动参数、boot_completed=1、screen_only=Y、
+原msm f69c91e7…与原菜单aac75804…均匹配。失败测试入口已撤下，可用文件完整
+保留。不能把用户手动恢复记作自动回退成功；恢复后的桌面尚未再次获得视觉
+反馈。此次只做只读核验，没有再次重启或显示开关。显示记录已在DISPLAY-REFRESH
+顶部单列本512GB/MP1.0设备，避免误用另一128GB/DV1.0设备的65Hz成功结论。
+
+**2026-10-30 V9传统协议5.4/60仍失败，已发起原入口恢复**：bootba32cc6c…
+实读msm c93ca5cf…与候选一致；初始bw_before=10、use_rate_set=0、rate540000，
+确认实际选择legacy协议，不是退回2.7。17.43秒训练0，54.47秒DPCD重读-110，
+后续pixel/link时钟均关闭，Android completed=1；用户确认仍黑屏/异常。因此
+简单保留传统协议不能修复本机5.4输出，此补丁标注失败且不并入默认构建。
+它与V6同时改变lane写入顺序，不能视为所有协议时序组合都被排除。
+
+关键对照：同V6代码仅限速2.7/60已由用户确认正常；5.4/60使用速率表或传统
+协议均失败。后续重点是5.4主链路运行、流启停/再次训练与接收端状态，而不是
+继续改65Hz EDID。不能断言硬件损坏/带宽硬上限。MSA数值43055/65400的比例
+与355500/540000一致；这仅排除明显比例错误，不证明所有时钟/TU配置正确。
+Unexpected DP AUX IRQ 0x01000000也出现在正常2.7两次训练，不能单独归因。
+cached test_requested=512实际是DS_PORT_STATUS_CHANGED，正常2.7最早快照亦512，
+后续128；不能将缓存字段名当作面板正在请求测试模式或直接当作故障触发证据。
+
+V9日志已SCP保存到out/dual-boot-65-700/protocol-v9；校验设备后原子恢复菜单
+aac75804…并核对成功，23:14左右经Android正常reboot回原入口。此时恢复桌面/
+新boot待确认。原入口/文件完整保留，本轮没有关屏/亮屏测试或自动watchdog。
+
+**2026-10-30 2.7速率表对照通过；正在测试V9协议兼容性**：用户明确确认
+rate270-control正常桌面。boot4fb88d48…实读msm9998fe2d…、270000×4/原生60Hz、
+SF16666667ns、guardY、Android completed；两次训练均0，38.94秒第二次成功，
+后续pixel/link时钟均开启，未见上述DPCD失败。有限日志已取回，原菜单已恢复。
+这排除了“速率表补丁在任何速率都失败”，尚未区分5.4的电气链路与配置切换。
+
+新隔离scripts/patch-sq2-edp-protocol.py基于上游2025-12-18 v2协议选择：读取
+初始LINK_BW_SET，非零保留legacy协议、零保留LINK_RATE_SET；不再强制清零
+BW_SET切协议。保留能力表最大值/PHY原实现/原生60Hz，非table路径原样。读取
+失败回到原能力路径，写入短传输/错误均检查。真实C reader/writer mock测试
+覆盖选择、slot6、lane顺序、短写/超时、fallback/非目标；ARM构建、608导入闭包、
+vermagic、依赖与最终last-entry-wins审核通过，非硬件修复结论。
+上游来源https://lkml.iu.edu/hypermail/linux/kernel/2512.2/03295.html；其中传统
+方式虽保留，5.4仍来自面板速率表，传统MAX_LINK_RATE仅声明2.7，是否兼容
+本面板需要实测，不能预先保证。V9不会提升默认，也不修改全局V6缓存模块。
+
+V9 msm c93ca5cf…，addon2565bd5a…，菜单2fb04f7c…；路径protocol-v9，独立
+一次性env、有限cached日志，无关屏/亮屏、无自动重启定时器。原菜单备份
+grub.cfg.before-protocol-v9，原六入口及文件保留。测试结果待核验。
+
+**2026-10-30 23:03 同驱动2.7×4/60速率表对照已发起**：用户要求继续排查。
+隔离stage sq2-edp-rate270-control从V6复制，经逐C/H文件比较，唯一源码变化为
+dp_panel.c在解析速率表前将limit限制270000；保留LINK_RATE_SET协商，不引入
+V7/V8或65Hz EDID。模块9998fe2d…，608 imports与V6相同、vermagic/依赖恢复
+通过，速率表边界C测试通过；全局缓存msm-edp-rates.ko已恢复V6原件。
+addon a736ead0…、临时菜单68d89387…、独立一次性env6111c0d0…；原菜单
+aac75804…备份为grub.cfg.before-rate270-control，六入口与所有文件保留。
+基础包/700DTB/PHY同上轮5.4×4/60，仅显示驱动限速；有限日志使用cached-only
+debug，无额外诊断AUX读取。上次watchdog实际未恢复画面，本轮不启动该定时器，
+只启动有限collector；不声称自动回退可靠。23:03正常重启已发出，等待画面/SSH。
+本地产物与安装/恢复脚本在out/dual-boot-65-700/rate270-control。
+
+**2026-10-30 带宽对照失败，已恢复原入口**：本轮boot38481d04…日志已完整取回
+out/dual-boot-65-700/bandwidth60。实测为原生2880×1920@60、355500kHz、24bpp，
+5.4Gbps×4（rate table index6），不是65Hz覆盖残留。16.97秒训练返回0，初期
+pixel355.5MHz/link540MHz时钟开启；54.43秒DPCD读取-110，后期时钟计数均0，
+train_attempts仍1，Android boot_completed=1。用户确认仍黑屏，不能将训练成功
+或DRM active=1视为画面正常。原2.7×4/60正常，而5.4×4/60与65均失败，说明
+故障不以65Hz时序为必要条件；高链路速率/速率表协商/驱动切换路径仍需区分，
+不能据此认定面板体质差、5.4Gbps硬件不支持或已定位PHY根因。
+
+按24bpp像素时钟预算，60Hz为8.532Gbps，65Hz为9.24288Gbps；2.7×4在8b/10b
+编码后理论8.64Gbps，5.4×4为17.28Gbps。65确实超出原链路预算，但本次更高
+链路的60Hz对照也未通过，故不能解释为单纯容量不足，更没有验证跑满带宽。
+下一步若继续隔离，应先保持候选代码相同、限制2.7×4/60，以区分速率表协议
+改动与高频率效应；不要继续叠加猜测性65Hz补丁或自动发起相同黑屏测试。
+
+watchdog记录到240秒调用reboot syscall，但用户仍黑屏并准备手动恢复；不能
+称自动回退成功，也不能仅据SSH中断认定内核崩溃。恢复后实读boot26c59326…、
+原USB/audio启动参数、boot_completed=1、screen_only=Y。已校验设备序列号、
+ESP/data UUID与root来源，原子恢复菜单aac75804…，撤下本次测试入口；可用
+六入口/文件均保留，没有继续清理EFI或提升失败候选。恢复后的画面尚无用户
+再次确认；没有执行关屏/亮屏或新候选重启。
+
+**2026-10-30 用户授权带宽验证：5.4×4/原生60Hz对照已发起**：先实读当前正常
+boot bfeb9fff…：2.7×4、2880×1920@60、355500kHz、24bpp，pixel/link时钟
+均开启，SF周期16666667ns。新一次性sq2-bandwidth60沿用V2 common0673bacb…、
+GPU700 DTB6db562c2…与V6 msm5fcd28a9…，PHY保持原1abbb9bd…，去掉65Hz
+EDID/软件覆盖，不包含失败V7/V8补丁。与原V2/65候选主要显示变量是恢复原生60
+时序；不是在原661默认上仅改一个文件。原菜单所有入口/文件保留。
+
+仅msm+有限诊断助手/init覆盖，私有凭据仍最后；addon f0ae0eae…，临时菜单
+ca76847d…，原菜单aac75804…另存grub.cfg.before-bandwidth60。最后条目精确
+delta、无EDID、shell/GRUB及设备身份/hash/gzip审计通过。独立诊断watchdog延至
+240秒，dry-run通过，不声称实际自动重启验证。22:48发出正常重启，结果待核对。
+日志目录logs/bandwidth60-BOOT，本地产物out/dual-boot-65-700/bandwidth60。
+目标是分离链路与刷新率影响；即使60Hz通过也不等于跑满17.28Gbps有效容量，
+更不代表65Hz已经恢复。禁止在本轮重复关屏/亮屏故障采集。
+
+**2026-10-30 V8后已恢复连接并取回日志**：用户报告正在启动后，只读SSH确认
+boot bfeb9fff…、boot_completed=1、原菜单aac75804…、guardY。上轮phy-v8-939f566b…
+日志及watchdog记录已SCP下载到out/dual-boot-65-700/phy-v8，均exit0；watchdog
+confirmed elapsed=115，证明本轮已取消，不把后来连接重置归因为此自动回退。
+此次没有显示开关、候选部署或重启。用户补充另一台SQ1可以65Hz；既有EDID记录
+分别LGD_DV1.0与本机LGD_MP1.0，同产品ID/型号不等于面板版本完全一致。
+面板/固件差异是合理待验证因素，仍不能断言个体体质或硬件故障；链路与时序
+尚未在本机独立对照，不把另一台成功推广到本机。
+
+**2026-10-30 V8也未修复，当前等待恢复连接**：本轮boot939f566b…，实读PHY哈希
+b7966ee5…及SQ2_EDP_PHY_SC8180X_V2 enabled，确认候选实际加载。用户仍报告
+黑屏；54秒DPCD重读-110，训练次数1，eDP pixel/link时钟计数0，Android启动完成。
+上游信号表回移不能解释为本机黑屏已修复，不并入默认构建。V7/V8两候选均失败。
+
+已远程取消本轮回退计时以采集状态（确认文件仅用于接管，不是画面通过），保存
+Android/SF/DRM/clock/DP快照到ESP logs/phy-v8-939f566b…；**尚未下载本轮日志**。
+已校验并原子恢复菜单aac75804…，原六入口/文件全保留。随后在guardY下仅做
+cmd power sleep→input KEYCODE_WAKEUP的显示路径采集，临时drm.debug=0x100，
+SSH连接被重置；此时没有另发整机reboot。不能把中断直接记作整机崩溃或自动回退。
+采集shell可能未完成，所以debug参数恢复和screen-cycle.txt落盘均未确认；参数
+仅RAM，下次正常启动恢复原值。已请用户若仍黑屏手动关机再开，选原USB/audio。
+下一步先确认boot/菜单/guard并取回ESP日志，不重复屏幕开关或同条件65Hz启动。
+
+**2026-10-30 PHY V8候选已启动测试，结果待确认**：V7撤回后已SSH核验恢复boot
+f5c4ab3f…，原入口/菜单aac75804…、boot_completed=1、guardY。进一步发现6.3
+phy-qcom-edp的SC8180X match data为空，set_voltages直接返回；上游2026年专门
+补充SC8180X独立v2摆幅/预加重表及v3 LDO（低速0x81/HBR2 0x41）。当前隔离
+patch-sq2-edp-phy-sc8180x.py将该支持回移，仅Surface Pro X+sc8180x-edp-phy
+启用；不改变芯片身份、外部供电、PLL、AUX、65Hz时序或其他设备配置。
+上游依据见linux-phy 2026-April/030558.html、030505.html，以及Torvalds commit
+3a2976df778a9af95e91f7ff88008b4517ddc658的phy-qcom-edp.c；不是SC8280XP参数。
+
+V8仅替换PHY（b7966ee5…），恢复原V6 msm5fcd28a9…，不包含失败D0补丁。
+两项测试通过，其中真实setter的模拟MMIO覆盖16组合、非法拒绝、2/4lane LDO及
+非目标路径；ARM构建、32导出闭包/vermagic、原依赖为空和last-entry-wins通过。
+未完整modpost、尚无实机成功结论。与原65候选相比有效差异为PHY及有限诊断助手，
+原凭据仍最后；addon ae1ebf7c…，临时菜单68a05769…，独立phy-v8一次性env。
+保留六个可用入口及默认；约22:34发出本轮重启，后续需先核验画面与实际时钟，
+失败即恢复原菜单。日志目录为/media/esp/logs/phy-v8-BOOT；watchdog继续复用
+V7二进制/确认文件路径，不能误把文件名中的V7当本轮显示驱动版本。
+
+**2026-10-30 后续V7早唤醒实验仍失败，已发起原入口恢复**：用户要求继续排查、
+保留可用启动项。核对源码发现流关闭会请求D3，而重启链路先读能力、后请求D0；
+旧drm_dp_dpcd_read还会先probe REV。隔离patch-sq2-edp-wake.py仅对Surface Pro X
+已发现过的eDP接收端，在能力重读前直接发送D0，最多三次，错误正常传播。
+主机编译执行真实C helper的成功/重试/超时/短传输/设备范围测试通过；ARM模块
+f775fc8c…构建、608导出闭包及仅dp_panel源文件变化校验通过，不是完整modpost。
+
+一次性V7 boot a2e76356…中用户确认仍黑屏，并补充从未看到系统画面。
+约84秒SQ2_EDP_WAKE attempts=3 rc=-110，提前D0也未恢复AUX。后续SSH可达、
+boot_completed=1；DRM软件状态2880×1920@65、SF周期15384815ns，但实际eDP
+pixel/link时钟enable/prepare计数均0，训练次数仍1。刷新率/初次训练返回成功
+不能证明物理输出。三次底层超时会延长启动；此实验不并入默认构建，也不标修复。
+当前证据未确定首次黑屏根因，不能直接称面板不支持65Hz；下一步需隔离链路与
+时序因素，避免继续叠加猜测性补丁或重复同条件启动。
+
+原六入口和所有有效文件保留，仅追加V7 addon/menu。旧全局sync前置回退改为
+独立静态诊断watchdog，2秒dry-run日志通过；实际运行到178秒因SSH恢复后远程
+接管而取消（confirmed只表示取消计时，非画面通过），未执行自动重启，故仍不能
+宣称自动回退实测成功，也未查明上一轮定时器失效原因。有限采集增补Android、
+DRM、clock及SF日志，均下载到out/dual-boot-65-700/wake-v7。
+
+已在失败boot内核验并原子恢复原菜单aac75804…，撤下V7入口；SSH发出正常
+Android重启，连接被重置。用户随后报告“正在启动”，恢复桌面/新boot仍待确认。
+没有删旧启动项、没有提升65Hz或触控候选默认。V7源码与测试仅供复现失败假设。
+
+**2026-10-30 双65Hz候选再次黑屏后已手动恢复，原菜单已核验还原**：以下早期
+“等待恢复”状态已过期。当前boot为5c0b4e92…，Android boot_completed=1、
+screen_only=Y，原菜单SHA aac75804…恢复成功，默认仍SQ2 USB storage and audio。
+失败的65Hz入口不再出现在菜单；候选文件仍保留，EFI空闲946440KiB（约924MiB）。
+未继续删除任何已引用的旧启动文件，未执行双入口finalize，Mesa65尚未测试。
+
+60Hz/700MHz对照boot6ed551eb…启动成功，用户确认恢复，GPU最大频率读回700MHz，
+SurfaceFlinger周期16666667ns。65Hz第二轮使用修正视频helper覆盖问题的v2 common
+0673bacb…和原display-addon ba0fa829…，boot037ecada…仍被用户确认为黑屏。
+自动重启未被用户观察到，最终由用户手动恢复；不能把该定时器当可靠回退保障。
+
+已取回该失败boot的32份有限内核快照（至约138秒）及启动助手日志，证明黑屏期间
+内核继续运行，不是已证实的内核死锁。约17秒eDP训练540000×4、像素时钟385120000
+及video_ready的返回码均为0，但约55秒重新读取DPCD超时-110；成功的60Hz采集中
+未见该错误。SurfaceFlinger已启动，bootanim约96秒退出。不能由寄存器返回成功
+推导画面正常，也不能由DPCD超时直接断言面板不支持65Hz或已经找到根因。
+失败boot附近的system_server ANR已取回，主线程在包签名证书解析，不是显示死锁
+的直接证据。原始日志留out/dual-boot-65-700，不提交。自动回退失败原因仍未确认。
+
+构建中另修复一个独立问题：video.integrate映射的video-runtime-stage曾被通用
+helper刷新循环用同名旧video-codec-manifest-stage覆盖。现在排除video.HELPERS，
+最终verify_helpers校验实际路径/权限/源码。3项针对性测试通过，v2失败启动日志
+显示SQ2_RUNTIME_BOOT_STAGED_DATA_UNTOUCHED，证明新stage已运行；不是65Hz修复。
+当前恢复的旧启动项仍运行原IPTSd；edge-only已经是源码构建默认及候选内容，
+不能声称已提升为当前设备默认。下一步先隔离显示模块/链路与时序因素，并补足
+可留存的Android显示日志及回退故障证据；没有新证据不要重复同一黑屏启动。
+out内早期deployment.json/finalize.sh仍引用v1哈希，后续若部署必须重新生成并核验。
+
+**2026-10-30 双65Hz/700构建已上传，高通候选黑屏，等待手动恢复，禁止继续清理**：
+用户要求edge-only设默认，并只保留高通/Mesa两个65Hz/700入口。builder/启动打包/
+touch-fixup已默认edge-only，on保留双补丁、off全关。主线仍6337fae（已fetch），
+本地变更尚未提交；此前commit因未配置Git作者失败，未伪造身份。现机已有完整
+ESP备份out/dual-boot-65-700/backup/esp，810文件/2073711233B全部与远端SHA匹配。
+六份旧菜单未引用的capabilities/experimental镜像逐个再核验后删除，释放
+1189519452B，EFI空闲从65728KiB到1227384KiB；原默认入口文件全部保留。
+
+通过主线build-source-boot新增固定现机基线732f23fe…入口，构建base40012129…、
+display-addon ba0fa829…、Image e7c7a3e5…（复用已验证内核）、DTB6db562c2…
+700/432。edge-only aff15109…，USB/BT/音频/硬解/凭据审计通过。V6显示模块
+重新编译5fcd28a9…、dp_panel.c7d87f794…、608导出闭包通过，无完整modpost；
+现机原EDID0feb26c6…生成65Hz daf892fa…。Turnip重编同原0b36eeba…；高通
+专有库/原Mesa GLES保留，不声称全内核或闭源源码重编。主机触控5、显示5、GPU6、
+USB4、视频XML2/runtime3等测试通过。
+
+文件已原子部署/media/esp/boot/sq2-dual65-700（四文件），设备端SHA/gzip通过。
+原菜单追加两个候选及sq2-dual65.env一次性选择，旧default=sq2-usb-test保留，
+先选择qcom并主动Android reboot。重启后SSH192.168.8.194持续超时，用户明确
+报告黑屏或画面异常。已请用户长按关机重开，若有菜单选原SQ2 USB storage and
+audio。一次性env设计为加载候选前消费，但尚未重新读回，不能断言已消费或已恢复。
+当前真实boot/画面/服务未知；没有再尝试Mesa或删除剩余旧启动文件。
+
+下一步先恢复原启动并核对boot/guard/旧服务；恢复后撤销候选菜单默认实验选择、
+取pstore/可用日志。不能将另一台LGD_DV面板65Hz成功推广到本机LGD_MP1.0，
+也不能仅凭源码/符号一致判定重编msm实机可用。最终双入口菜单和finalize.sh仅
+在out/dual-boot-65-700本地准备，**未执行**；不要在两候选未通过前执行。
+
+**2026-10-30 用户授权仅边缘热图的单次对照已执行并恢复**：新增IPTSd builder
+实验edge-only模式，独立新源码只打优化热图补丁；touch.hpp实际/上游SHA均
+ea2ce098…，保持原配置c7f31ec9…与AspectMax2。完整AArch64编译/QEMU --help及
+选项测试通过，候选aff15109…上传并实读运行PID10320/hash，Android输入节点
+enabled。启动check-device第一次短报文错误，经既有一次重试成功；不掩盖该记录。
+独立setsid脚本保留hidraw FD、固定原版/候选hash、guard/boot/设备检查、EXIT回退，
+运行120秒后自动恢复。采集仅87行、一段约166ms的单指移动，DOWN/UP与tracking
+起止一致，没有本片段中的按钮状态中断。用户随后明确反馈“响应更快”，作为本次
+主观对照结果；尚无端到端毫秒测量，多指/长期防误触及断触情况仍未充分验证。
+原版PID21289/exe与/bin/iptsd恢复e4610813…，
+配置c7f31ec9…、boot fcda7cff…、guardY均不变；ORIGINAL_RESTORED已确认。
+未改ESP/启动镜像/默认选项，原始证据留out/touch-latency/iptsd-edge-only-trial-20261030。
+
+**2026-10-30 触控热图优化及完整启动构建开关**：用户要求用当前优化替换主线
+补丁，并可选择是否加入。四点修复改为先计算再统一写回，移除整图复制，保留
+045E:0C21/46×68、原始邻域和阈值；连续性逻辑不变。build-source-boot新增
+--ghost-touch-fix on|off，默认on，与build-test3-iptsd保持一致；不再固定取off
+产物。产物清单新增补丁源码SHA，启动构建拒绝旧补丁/错模式/损坏文件/不同配置，
+audit记录实际模式和清单。两种完整IPTSd均重新编译及QEMU --help通过，真实
+bundle经启动构建选择器验证通过。5项bundle拒绝/选择测试、选项脚本、2项设备
+匹配测试及AArch64热图2000组等价/连续性回归通过。尚未部署新IPTSd。
+
+用户先前要求65Hz/700MHz高通与Mesa两启动项并清理EFI仍待完成。已fetch确认
+origin/main6337fae，ESP为BC711/CYA5N050012105J77、B027-0512，data4f46d2ec…，
+loop0来自p3、screen_only=Y；当前ESP仅约64MiB空闲。完整ESP已SCP取到
+out/dual-boot-65-700/backup/esp（传输exit0，但尚未逐文件核对远端hash），没有
+删除或改菜单、没有重启。out/dual-boot-65-700/source是6337fae独立检出，未包含
+本轮触控更改，后续须更新才可用于新构建。主线build-source-boot所需source-boot、
+password-ssh基线及vp8-limits等私有输入本机部分缺失，须按固定hash恢复，不得
+绕过输入门槛或用通用SQ1无补丁镜像覆盖SQ2。
+
 **2026-10-30 内置扬声器问题已解决，默认 +12 dB**：用户选择 RX7/RX8 原始控制值 84/84（0 dB，相比原72/72提高12 dB），确认听感很好，并在获准重启后明确确认设备正常启动、已播放音频、响度正确，声音问题已解决。仅默认音频路由改变，PA/成对端口/HAL/固件/均衡及其他启动入口保留。已原子部署默认入口增量；首次重启 SSH 观察超时，后续验证依据用户确认，不冒称独立 SSH 读回。默认源码构建已显式纳入并审计该脚本，完整构建通过；不复刻 Dolby，也不宣称 Windows 实际调音曲线完全一致。详见 [SPEAKER-LOUDNESS.md](SPEAKER-LOUDNESS.md)。提交和推送以 Git 记录为准。
 
 **2026-10-30 用户要求 USB/蓝牙提交主线并默认构建集成**：当前工作分支已为 main，蓝牙补丁344feb0原已在主线。新增默认 USB/蓝牙 payload 集成与源码/audit校验，build-source-boot真实完整构建 initramfs e6027440…通过（包含两补丁，私有SSH最后），默认磁盘菜单正常启用USB/救援禁用，并在manifest/实际packed-ESP部署前校验载荷及源码SHA。8USB/默认集成+3蓝牙+5显示+3视频菜单测试、普通文件FAT ESP装入真实新包后的三类生产校验通过；没有制作128GB整盘/烧录/重启现机，现机已测默认8abfe…保持。通用源码构建的既有显示/触控选择不变，不能把此整包当成现机无差异升级。源代码提交仅USB/默认构建及相关文档测试，不混入独立音频、REA或私有产物；具体提交/推送结果以Git实测记录为准。原四角色out/usb-c-20261030保留，default-integration补充源码副本基线USB未接线/修改接线/回滚未接线（蓝牙一直在），原hash恢复、patch重建通过；不把这三阶段副本检查记为三次实机启动。
@@ -942,3 +1839,14 @@ grep fuse /proc/filesystems
 默认构建用sq2-gpu-boot-payload.py从固定a5a25e43…重现700/432精确DTB6db562c2…；仅661的corner改432并新增700/432，原CPU/温控/身份/固件保留。原514MHz DTB7a4d1c73…独立救援。build-source-boot输出两份DTB并记录audit；build-source-disk与deploy-experimental-usb分别校验菜单/载荷/manifest，拒绝陈旧或篡改文件。不含更高失败档位，也不宣称SQ1兼容。保留主线最新扬声器修复，以及USB/蓝牙/硬解/显示/凭据顺序等既有集成。原始日志、实验脚本与镜像均留忽略out，详见out/gpu-681-700/700-432/default-build-integration；不提交私有产物。
 
 离线验证完成：6项GPU专项、合计64项测试（本地真实boot输入启用，0跳过）及4个接收参数的专项检查全部通过；完整默认boot构建成功，normal DTB6db562c2…/rescue7a4d1c73…，initramfs9bb36431…（含最新扬声器unity RX，私有SSH最后）。512MiB普通文件FAT ESP fixture中，两种显示默认均通过硬解、显示、USB蓝牙和GPU四组实际载荷校验；不是128GB整盘构建或烧录。使用已提交版GPU基础helper独立重现默认DTB成功，不依赖本地未提交高频生成器改动。离线四角色661/416→700/432→回滚661/416全exit0且恢复原hash。未连接SQ2；现机默认保持不变。错误与修正保留在忽略的验证日志，不通过改动无关测试掩盖。
+
+## 2026-10-31：关闭4KB页面通用模式通知
+用户要求禁用反复出现的4KB警告。实机通知确认来源为
+com.android.settings/.development.PageAgnosticNotificationService，
+标题“正在使用 4KB 页面通用模式”，不是应用16KB兼容警告。
+通过pm disable --user 0及--user 10持久禁用该单独组件；force-stop
+系统用户0的Settings清除已发布通知，dumpsys notification确认对应
+NotificationRecord已消失。未重启，boot仍a384f5c1…；未改内核页大小、
+应用兼容属性或启动镜像。重启后尚未实测；组件状态由PackageManager持久保存。
+恢复可对两个用户执行pm default-state --user USER
+com.android.settings/.development.PageAgnosticNotificationService。

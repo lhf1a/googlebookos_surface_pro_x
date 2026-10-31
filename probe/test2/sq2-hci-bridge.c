@@ -46,17 +46,19 @@ int main(int argc, char **argv) {
         puts("SQ2_HCI_UP: real controller initialized by kernel");
         close(hci); return 0;
     }
-    if (ioctl(hci,HCIDEVDOWN,dev)<0 && errno!=EALREADY) die("HCIDEVDOWN");
     struct sockaddr_hci addr={AF_BLUETOOTH,(uint16_t)dev,1};
     /* Kernel setup is asynchronous; hci0 existing does not mean HCI_SETUP
-     * has cleared. Bound the wait instead of exiting permanently on EBUSY.
+     * has cleared. Never issue HCIDEVDOWN before binding: it cancels/waits
+     * for setup and closes a controller we are about to reopen. HCI_USER
+     * accepts an initialized AUTO_OFF controller without that extra reset.
      * Do not unload/reset the live QCA UART driver to retry this bind.
      */
+    printf("SQ2_HCI_WAIT_SETUP hci%ld (no forced close)\n", dev);
     for (unsigned attempt=0;;attempt++) {
         if (bind(hci,(struct sockaddr *)&addr,sizeof(addr))==0) break;
-        if ((errno!=EBUSY && errno!=EAGAIN) || attempt>=119)
+        if ((errno!=EBUSY && errno!=EAGAIN) || attempt>=299)
             die("HCI_USER bind");
-        if (attempt%10==0) fprintf(stderr,"HCI_USER waiting for kernel setup (%u/120)\n",attempt+1);
+        if (attempt%10==0) fprintf(stderr,"HCI_USER waiting for kernel setup (%u/300)\n",attempt+1);
         sleep(1);
     }
     int master=posix_openpt(O_RDWR|O_NOCTTY|O_CLOEXEC);

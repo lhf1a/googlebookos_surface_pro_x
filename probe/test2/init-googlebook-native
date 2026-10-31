@@ -200,6 +200,9 @@ if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
     fi
     lockscreen-framework-boot > /logs/lockscreen-framework-boot.txt 2>&1 &
     page-mode-notification-setup > /logs/page-mode-notification-setup.txt 2>&1 &
+    if [ -x /bin/touch-calibration-boot ]; then
+        touch-calibration-boot > /logs/touch-calibration-boot.txt 2>&1 &
+    fi
     if [ -x /bin/power-input-boot ]; then
         power-input-boot > /logs/power-input-boot.txt 2>&1 &
     fi

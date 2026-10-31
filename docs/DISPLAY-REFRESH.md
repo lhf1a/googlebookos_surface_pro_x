@@ -1,5 +1,185 @@
 # SQ2 display refresh investigation — 2026-10-29
 
+## 2026-10-31: high-rate investigation stopped at user request
+
+The user explicitly abandoned this route and requested a60Hz/2.7Gbps baseline
+including the edge-only touch change. Do not resume high-rate experiments from
+the historical next-step suggestions below without a new request. The builder
+default is now2.7-60; the device baseline menu excludes the65Hz addon and all
+V7–V19 diagnostic candidates. Deployment/validation state is in HANDOFF.md.
+
+## 2026-10-31: repeated short HPD pulses after failure; primary video failure unresolved
+
+V16 compares the same bounded controller/PHY observations at2.7 and5.4.
+The user confirms2.7 normal and5.4 black. After reinit, all sampled PHY AUX
+configuration matches (PD7d, MODEfc, AUX1=13/AUX2=24/AUX5=26/AUX8=37/BIAS17).
+Controller HPD_CTRL=1, REFTIMER=10013, EVENT_TIME0=03e986a0,
+EVENT_TIME1=61a807d0, AUX_CTRL=11 also match. PHY init completes, but the
+high-rate controller remains pending. This is not an exhaustive register comparison.
+
+After validating the live DT AUX region and enabled core/AUX clocks, bounded
+read-only MMIO checks corroborate pending status with TLMM GPIO10 reading high
+and panel enable GPIO130 high. The GPIO debug implementation reads the input
+bit; however, these snapshots do not establish a continuously high input.
+V17's scoped HPD enable toggle executes (pending→disconnected→pending) but
+does not fix readiness or output.
+
+A one-second read-only TLMM sampler then exposes the missing temporal detail:
+20000 samples over1022096us,395 transitions, high16959/low3041, longest high
+4443us/low820us, max sampling gap658us. Pulses recur about every5.2ms. The
+module does not request GPIO ownership or change mux/direction/value and was
+unloaded afterward. This is software sampling, not an oscilloscope; sub-sample
+pulses remain possible. The observed short pulses are consistent with IRQ_HPD.
+Qualcomm's [upstream explanation](https://lkml.rescloud.iu.edu/2204.3/02130.html)
+describes100ms continuous-high connection detection and short-low IRQ handling.
+Repeated pulses explain why a freshly reset detector cannot regain ready,
+but their cause and onset relative to first video remain unresolved.
+
+V18 captures sink status before reset with HPD ready:0x200/8 is
+0100777781001111 just after first stream and0100777781011111 before idle.
+Lane lock/equalization/alignment bits remain set; service IRQ vector is0.
+Its22-byte configuration read incorrectly exceeded this driver's16-byte native
+AUX limit and returned-EINVAL; that diagnostic bug was corrected in V19.
+V19 confirms0x100/16=00840001010101100110010000000000 and
+0x110/6=000000000006 at both points (rate table slot6, ASSR enabled).
+
+V19 enables only IRQ_HPD on the target eDP path, masks it before unplug and
+caps experimental handling at32 events. User still reports black. The mask
+is2 while streaming, but no handler events appear before the first teardown.
+Thus the late pulse train may be secondary to stopping the link; enabling
+the handler has not demonstrated a repair. V17/V19 are failed isolated
+candidates, not default patches. The next useful observation is HPD sampling
+during the first stream plus video/TU validation, rather than attributing the
+initial black picture to the later readiness deadlock or to a firmware lock.
+
+Raw logs/manifests remain under ignored `out/dual-boot-65-700/` in
+`reinit270-v16`, `reinit-v16`, `hpd-rearm-v17`, `hpd-sample`, `sink-v18`, `irq-v19`.
+Original menu/files are retained; newest recovery state is in HANDOFF.md.
+
+Recovery is confirmed by the user and SSH: boot02ccf481… runs the original
+msm f69c91e7… and menu aac75804…, Android completed1, screen_only=Y/nohibernate.
+The identical read-only GPIO sampler on this working desktop records20000
+high/0 low/0 transitions over1018840us, max gap261us. It was unloaded and the
+boot ID remained unchanged. Evidence: `hpd-sample/original-control.txt`.
+This contrasts with V17's395 transitions, but compares steady normal output
+with a failed post-teardown state, not matching first-stream windows. It does
+not establish which event caused the initial black screen or a vendor lock.
+No candidate is pending boot; the original working entries remain available.
+
+## 2026-10-30 late: failure localized to the display shutdown/restart path
+
+**V15 control changes the interpretation of V14:** with the same instrumentation
+and only the previously tested rate cap270000 added, the user confirms a normal
+desktop (boot7f593dce…, msm71adb0b9…). Two training sequences succeed. HPD also
+changes4→2 at software reset (39.221510s), remains2 through clocks/PHY shutdown,
+and is still2 at the next plug handler. Before the next capability read at
+39.361566s it has returned to4, and the next stream succeeds at39.587188s.
+Thus pending immediately after reset is present in a working control too.
+The differential failure is recovery of HPD readiness after5.4 operation, not
+the mere4→2 transition. Do not remove software reset on the assumption that
+V14 proved it defective. Host HPD sampling, PHY configuration and panel state
+remain unresolved; no physical HPD measurement has been made.
+
+Next discriminating observation: compare controller HPD_CTRL/REFTIMER/status
+and the PHY AUX initialization state after host_phy_init in matching2.7/5.4
+runs, using bounded driver reads with the required clocks enabled. Do not
+bypass the HPD guard or increase voltage as a substitute for this comparison.
+Upstream commit993a2adc6e2e94a0a7b5bfc054eda90ac95f62c3 explicitly notes that
+controller software reset does not reset programmable registers to defaults
+([upstream explanation](https://cos.googlesource.com/third_party/kernel/+/93f7d2a7fcf33e77285db44b512eb5a8e4657fe7));
+therefore reprogramming HPD after reset is a hypothesis, not an established fix.
+
+V14 on2026-10-31 splits that window (boot2f333dd2…, msm9694f4c6…). HPD is4
+after mainlink disable at38.165597s, then2 immediately after software reset
+at38.166623s. Pixel/link clocks and PHY power have not yet been disabled.
+The remaining off/PHY-exit steps keep2; the next capability read still times
+out waiting for HPD. User confirms black output. This localizes the first
+observed state change, but a software reset may legitimately produce a transient
+pending state. The subsequent V15 control above confirms this same transient,
+so it does not prove software reset is intrinsically wrong or that removing it is a fix.
+V14 only adds bounded existing status reads/logging; removing its marked blocks
+reproduces V12 source byte for byte. The original menu was restored afterward.
+
+On the same 512-GB / LGD_MP1.0 device, V10 phase logging distinguishes an
+HPD-ready wait timeout from an AUX FIFO transaction timeout. Initial 5.4×4
+training succeeds; after the display stop/start transition, requests return
+-110 before reaching the FIFO. No intervening D3 command was recorded.
+The eDP bridge calls its unplug handler during ordinary post-disable, so that
+handler's name alone does not establish a physical disconnect.
+
+V11 removes this artificial unplug only for the target device and preserves
+DISPLAY_OFF/retraining. The intended state sequence was observed, but training
+writes still timed out in the HPD wait and the user reported black output.
+It remains an isolated failed candidate, not a default patch. The subsequent
+return to the original entry was the user's manual reboot, not an autonomous crash.
+
+V12 reads the existing controller HPD status at bounded transition points:
+stream enabled, before idle, after idle and before display shutdown all report4;
+after the combined controller-off/PHY-exit path it reports2. These values are
+controller state (connected/pending), not measurements of the physical HPD pin.
+The trace does not yet separate software reset, clock removal and PHY shutdown.
+
+V13 changes only the eDP PHY power-domain DT property from MDSS_GDSC to RPMh MX,
+following upstream commit24e98cb3d5e2c86565680e00008a794b4eac0040. Live DT and
+genpd confirm the new mapping; boot a60e2e10… uses msm6597bfd7… and native60.
+The user still reports black output. At40.341s HPD is4 before disable, and at
+40.346s it is2 after the combined off path; subsequent AUX requests again fail
+in hpd_wait. Thus this single upstream correction does not fix this device.
+Neither these traces nor the earlier successful training establish a panel
+hardware limit or visible initial frames. Diagnostic logging can affect timing.
+
+Candidate artifacts and raw logs remain under ignored
+`out/dual-boot-65-700/{transition-v10,modeset-v11,hpd-phase-v12,mx-v13}`.
+Original menu aac75804… and all referenced files were preserved and restored
+after V13. Recovery status is recorded at the top of HANDOFF.md. Further tracing
+should split the combined off path before changing link/PHY behavior again.
+
+## 2026-10-30 evening: 512-GB SQ2 / LGD_MP1.0 remains limited to verified 60 Hz
+
+These results concern the 512-GB BC711 device with ESP B027-0512 and panel
+LGD_MP1.0, not the separate 128-GB / LGD_DV1.0 device in the earlier success
+reports below. The working six-entry menu and all referenced files are retained;
+65-Hz candidates have not been promoted on this device.
+
+| Control | Actual link / timing | Result |
+| --- | --- | --- |
+| Original driver | 2.7 Gbit/s ×4 / native60 | Working baseline |
+| V6 with only rate cap changed, msm9998fe2d… | 2.7 Gbit/s ×4 / native60, table slot3 | User confirmed normal desktop; two successful training sequences; clocks remain enabled |
+| Uncapped V6, msm5fcd28a9… | 5.4 Gbit/s ×4 / native60, table slot6 | User confirmed black/abnormal output; initial training returns0; DPCD timeout at54.43s; later clocks disabled |
+| V9 protocol compatibility, msmc93ca5cf… | 5.4 Gbit/s ×4 / native60, legacy selection | User confirmed black/abnormal output; initial training returns0; DPCD timeout at54.47s; later clocks disabled |
+
+The successful capped V6 control and failing uncapped control share the common
+V2 image, GPU700 DTB, original PHY, native EDID and cached-only diagnostics.
+Their only display source difference is the rate cap. This narrows the failure
+to operation/configuration at5.4; it does not establish a defective panel,
+a physical bandwidth ceiling or a PHY root cause. Software training success
+is not proof of displayed frames. The 65-Hz timing is not necessary to trigger
+the failure. There was no screen-off/on test in these controls.
+
+V9 is an isolated, rejected hypothesis retained in
+`scripts/patch-sq2-edp-protocol.py`, not a default build patch. Following
+[upstream protocol-selection work](https://lkml.iu.edu/hypermail/linux/kernel/2512.2/03295.html),
+it preserves nonzero LINK_BW_SET instead of forcibly clearing it to select
+LINK_RATE_SET. The log confirms initial BW_SET=10 and use_rate_set=0 at540000;
+there was no fallback to2.7. The actual C reader/writer mock test passes protocol
+selection, slot retention, lane ordering, short/failed writes and non-target
+fallback. Hardware still fails. Because the candidate also changes the lane
+write order, this does not exhaust every protocol sequencing possibility.
+
+MSA43055/65400 has the expected355500/540000 ratio; that does not validate the
+entire clock/TU path. The unexpected AUX IRQ warning also occurs during both
+successful2.7 training sequences. The debug field named `test_requested` is
+actually cached sink_request;512 means DS_PORT_STATUS_CHANGED and appears in
+early successful2.7 snapshots too. Neither observation is an isolated root cause.
+
+Logs/manifests remain under ignored `out/dual-boot-65-700/{bandwidth60,rate270-control,protocol-v9}`.
+V9 was withdrawn by atomically restoring menuaac75804… before requesting normal
+Android reboot. User still saw black and was asked to recover manually; consult
+the newest HANDOFF entry for final recovery status. The prior watchdog failed
+to restore a usable display, so these two new controls did not launch it.
+Next work should capture the initial stream transition and link loss without
+additional diagnostic AUX reads, rather than promote an unverified65-Hz image.
+
 ## Conclusion committed / build-profile integration — 2026-10-30
 
 The selected experimental default remains **5.4Gbps×4 / native ~65Hz**.

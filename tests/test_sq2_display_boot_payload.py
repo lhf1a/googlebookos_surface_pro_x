@@ -35,7 +35,7 @@ class Profiles(unittest.TestCase):
         good=d.default_menu(MENU)
         for bad in (good.replace('nohibernate',''),good.replace('suspend.screen_only=1',''),
                     good.replace(d.OVERRIDE,''),good.replace(' '+d.BOOT+d.ADDON,''),
-                    good.replace('set default=sq2-display-65','set default=sq2-qcom'),
+                    good.replace('set default=sq2-qcom','set default=sq2-display-65'),
                     good.replace('sq2.rescue=1','sq2.rescue=1 '+d.OVERRIDE),
                     good.replace('sq2.display=2.7-60','sq2.display=2.7-60 sq2.display=5.4-65'),
                     good+'linux /Image\n'):

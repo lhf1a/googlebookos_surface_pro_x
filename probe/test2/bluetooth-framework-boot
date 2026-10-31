@@ -21,15 +21,34 @@ start_input_watch() {
 }
 start_input_watch
 
+publish_transport() {
+    # Kernel retries can outlast the old 150-second helper deadline. Reuse
+    # this wait on rerun too, instead of abandoning a still-starting bridge.
+    for n in $(seq 1 420); do
+        if ! kill -0 "$bridge" 2>/dev/null; then
+            echo SQ2_BLUETOOTH_BRIDGE_EXITED
+            return 1
+        fi
+        if [ -L /dev/sq2-bt-h4 ] && [ -c /dev/sq2-bt-h4 ]; then
+            android setprop vendor.sq2.bluetooth.ready 1
+            echo SQ2_BLUETOOTH_TRANSPORT_READY
+            return 0
+        fi
+        sleep 1
+    done
+    echo SQ2_BLUETOOTH_TRANSPORT_TIMEOUT
+    # Never reset or spawn another owner while a kernel call may be stuck.
+    return 1
+}
+
 # Do not bring an already-owned controller down if this helper is rerun.
 if [ -r /run/sq2-bt-bridge.pid ]; then
     previous=$(cat /run/sq2-bt-bridge.pid)
     case "$previous" in ''|*[!0-9]*) exit 1;; esac
     if [ "$(cat /proc/$previous/comm 2>/dev/null || true)" = sq2-hci-bridge ]; then
-        test -c /dev/sq2-bt-h4 || { echo BRIDGE_ALREADY_STARTING; exit 1; }
-        android setprop vendor.sq2.bluetooth.ready 1
-        echo SQ2_BLUETOOTH_TRANSPORT_ALREADY_READY
-        exit 0
+        bridge=$previous
+        publish_transport
+        exit $?
     fi
 fi
 if [ -L /dev/sq2-bt-h4 ]; then rm /dev/sq2-bt-h4; fi
@@ -59,13 +78,4 @@ sleep 3
 nohup /bin/sq2-hci-bridge 0 /dev/sq2-bt-h4 > /logs/bluetooth-bridge.txt 2>&1 < /dev/null &
 bridge=$!
 echo "$bridge" > /run/sq2-bt-bridge.pid
-for n in $(seq 1 150); do
-    [ -L /dev/sq2-bt-h4 ] && break
-    kill -0 "$bridge" || exit 1
-    sleep 1
-done
-test -L /dev/sq2-bt-h4
-test -c /dev/sq2-bt-h4
-kill -0 "$bridge"
-android setprop vendor.sq2.bluetooth.ready 1
-echo SQ2_BLUETOOTH_TRANSPORT_READY
+publish_transport

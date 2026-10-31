@@ -1,5 +1,196 @@
 # 构建与部署
 
+### 2026-10-31：首次启动按本机校准
+
+首次向导现加入边缘拇指检查：3次持续5秒慢拖，随后轻点、拖动和双指确认。
+默认`[Contacts] SizeMax=2.0`；若出现意外断触/重复点击，用户可选择启用2.4cm
+优化并重测，通过后随本机profile保存。提前抬手不会自动开补丁。已校准设备可
+从“仅检查拇指”进入，保留现有坐标；取消/超时恢复原选项。当前SQ2的2.4cm
+试验已获用户确认慢拖、轻点、双指正常，因此本机保留2.4，新设备仍从2.0开始。
+`ContactSizeMax`仅接受2.0/2.4，旧profile缺字段时视作2.0；工具生成的Contacts
+段覆盖通用base。APK安装单独允许120秒完成dex编译，其余查询仍有15秒超时。
+
+默认 `--touch-calibration on` 现在只包含恒等坐标和校准支持，不再把某台SQ2
+的测量值用于所有设备。完整构建加入“触屏校准”APK、严格profile校验工具和
+`touch-calibration-boot`。后者在Android完成启动及原触控初始化后加载本机
+参数；没有结果时打开可跳过的向导，应用列表保留重新校准入口。
+
+向导按中部X、中部Y、顶部X各7个位置、每处两次采样，共42次；随后试用并
+检查5点、拇指慢拖和普通/双指操作，用户确认才保存。测量会逆变换已有补偿，避免重复叠加校准。
+落点过远、明显滑动、重复差异过大、非单调或斜率越界均拒绝；原始位置重叠时
+合并拟合节点，不伪造已丢失的分辨率。不能保证任意屏幕缺陷都可由该模型修复。
+试用180秒未保存、取消或正常退出服务时恢复原参数；重启只加载已保存的结果。
+
+本机文件保存在Android `/data/vendor/sq2-touch-calibration/<identity>.profile`，
+identity为主板UUID、eDP EDID及HID描述符的组合摘要。文件只有校准值、拇指选项及身份，
+不记录持续触摸；换板/换屏不套用旧值。`/run/iptsd-calibrated.conf`为当次合成
+配置，所有触控服务重启沿用它。当前支持范围仍为045E:0C21 / 46×68，未扩大
+到其它控制器；`sq2.calibration=0`跳过向导服务，救援启动同样跳过。
+
+`scripts/build-touch-calibration.py` 需要JDK、AArch64 g++及本机Android SDK；
+`SQ2_ANDROID_SDK`可指定含android-35/android.jar和android-15构建工具的根目录。
+签名密钥默认保存在忽略的private/touch-calibration，使用
+`SQ2_CALIBRATION_KEYSTORE`可指定自己的密钥；后续升级需保留同一签名。
+完整构建从源码编译并记录APK/工具/脚本hash；私有密钥、profile及日志不得提交。
+本机v2参数迁移后保持原补偿，启动addon及运行态已安装。实机向导随后生成并
+保存了本机新结果，已核对与当前有效配置一致；用户确认检查通过、拖动正常、
+已保存。重启自动加载和新设备首次弹出尚待实机验证，详见HANDOFF。
+
+### 2026-10-31：SQ2触屏坐标校准实验
+
+`patch-iptsd-sq2-calibration.py` 添加 `[Touchscreen] CalibrationX/CalibrationY`，
+格式为归一化 `输入:输出` 点对，以空格分隔；空字符串为恒等映射。曲线须以
+`0:0` 开始、`1:1` 结束，严格单调，局部斜率在0.2到6之间，最多16点。
+只对045E:0C21、46×68元数据的触屏输出坐标生效，ST/MT一致；不改检测或
+时间稳定性、接触状态、热图修复和触笔。未经验证的曲线会导致空间偏差，
+不同设备不能直接继承本机标定值。
+
+可选 `CalibrationXTop` 定义顶部X曲线，在原始Y的 `CalibrationTopStart`
+到 `CalibrationTopEnd`（默认0.1/0.3）区间与基础X曲线平滑混合；空值关闭。
+使用6位小数即可，配置每行须小于200字节（固定inih解析器限制）。
+
+两个默认构建器已支持 `--touch-calibration on|off`，默认on，与幽灵触控
+补丁选项独立。当时跟踪profile为v2（现已改为上节的本机保存），用户已确认左侧改善、其他位置及拖动
+正常，右/下v1先前也已确认。源包选择校验manifest、补丁、header及完整配置；
+改源码或profile后须重编触控。默认触控和完整启动包已重编，现机两基线入口
+已持久安装小addon并保留回退；Mesa重启后真实运行hash匹配，用户确认桌面、
+边缘点击和拖动正常。高通入口未另做本轮启动实测。原始测量与私有构建
+位于忽略目录 `out/touch-edge-20261031`，不可提交。
+
+### 2026-10-31：蓝牙桥接启动修正
+
+`build-source-boot.py` 通过 `sq2-bluetooth-boot-payload.py` 从当前源码编译静态
+AArch64 HCI bridge（依赖 `aarch64-linux-gnu-gcc`），记录源码/二进制哈希，
+不再只刷新蓝牙脚本却继承底包中的桥接二进制。桥接直接等待HCI_USER接管，取消
+绑定前无条件HCIDEVDOWN；helper等待迟到PTY并在复用启动中的桥接时继续等待，
+输出明确退出/超时。保留Android保存的蓝牙开关、配对数据库及输入权限watcher。
+
+本机以独立小addon部署，仅覆盖bridge/helper且私有凭据member仍最后；完整默认
+构建与基线+addon的有效条目相同。Mesa重启后服务ON、重复helper不重建桥接通过。
+用户随后确认回到桌面、蓝牙连接和实际输入均正常；保持Mesa默认及原可用回退。
+多次重启稳定性及其它蓝牙profile仍未验证，详细证据见HANDOFF。
+
+### 2026-10-31：双触控基线部署与验证范围
+
+默认on（连续性+边缘热图）、60Hz/2.7Gbps、GPU700/432已部署到高通/Mesa入口，
+两者桌面与触控均经用户确认。按最新选择保持Mesa并设置持久默认，原可用入口
+保留回退，详见HANDOFF。蓝牙载荷与原可用device-base逐项相同且运行文件匹配，
+但本轮Mesa启动出现QCA读取版本超时及HAL未就绪；蓝牙实机回归未通过。
+不得用打包一致性或桌面/触控通过代替蓝牙功能验证。
+
+### 2026-10-31：默认触控重新包含接触状态连续性
+
+按用户最新要求，`build-test3-iptsd.py`、`build-source-boot.py` 默认
+`--ghost-touch-fix on`，同时应用接触状态连续性和四点边缘热图修复。
+`build-touch-fixup.sh` 默认使用对应的 `out/test2/iptsd` 产物。
+仍可显式选择 `edge-only` 或 `off`。沿用现有连续性补丁，不增加两帧起触等待、
+释放延时或高检测阈值。此次是默认构建调整，不部署或重启当前原版本设备。
+
+### 2026-10-31：GRUB实体按键候选
+
+实机结果：候选确实启动进入Android，用户确认电源确认有效、音量键无效。
+用户随后要求恢复基线部署前版本，已恢复原EFI/菜单，停止此路线；该补丁不是
+完整可用功能，不并入标准EFI输入或默认部署，不自行重启继续采集。
+
+`scripts/build-sq2-grub-buttons.sh NEW_OUTPUT_DIRECTORY` 在独立WSL缓存中构建
+linux-surface/grub `71402fac6df4af0c06fea69aec6cf4907a1234e0`（Fedora39/GRUB2.06），
+保留该分支的Surface加载支持。构建脚本只产生文件，不操作设备。需要本地固定归档：
+
+- `downloads/grub-surface-71402fac.tar.gz`，SHA632b1285…，来自
+  `https://codeload.github.com/linux-surface/grub/tar.gz/71402fac6df4af0c06fea69aec6cf4907a1234e0`。
+- `downloads/gnulib-9f48fb99.tar.gz`，SHA00a25a5c…，来自
+  `https://codeload.github.com/coreutils/gnulib/tar.gz/9f48fb992a3d7e96610c4ce8be969cff2d61a01b`。
+
+完整归档哈希在构建脚本中固定；依赖见脚本头部。模块列表来自
+[linux-surface/grub-image-aarch64](https://github.com/linux-surface/grub-image-aarch64/blob/master/modules.txt)，
+存于 `configs/grub-sq2-modules.txt`。`patch-sq2-grub-buttons.py` 仅接受原console.c
+SHAd6f77523…，添加Unicode为0时的UEFI扫描码0x80→Up、0x81→Down、0x102→Enter；
+修改后SHAdca64b2f…。正常键盘、F3+CR兼容分支、EFI普通/扩展输入路径均保留。
+键码来自EDK2 SimpleTextInEx；这不保证具体固件会发送这些键码，必须实机验证。
+
+`test-sq2-grub-buttons.py ORIGINAL_SOURCE` 编译实际新旧翻译函数，检查所有16位
+扫描码的字符样本及三个特殊扫描码的全部16位Unicode输入，拒绝未知/重复补丁。
+本轮候选EFI SHA41c4239a…，主机契约检查、QEMU ARM64 UEFI直接启动和原EFI
+chainload候选两项通过；不能代替物理按键和真实内核启动测试。临时产物/日志位于
+忽略的out/grub-buttons-20261031。原EFI d39ea7f8…及原菜单先备份，候选通过独立
+EFI/SQ2Buttons目录及预消费一次性env启动，原BOOTAA64.EFI暂不替换。实机状态
+以HANDOFF最新记录为准；标准镜像输入的EFI哈希不因候选构建自动放宽。
+
+### 2026-10-31：当前SQ2回归60Hz基线
+
+本节构建出的高通/Mesa两入口均曾经用户确认桌面与触控正常；随后按用户要求
+撤回本机活动默认，恢复部署前的SQ2 USB storage and audio及原GRUB。保留构建
+源码/产物不代表现机仍在新基线上，实际状态看HANDOFF顶部。
+
+该轮用户停止65Hz/高速链路路线，构建默认改为 `2.7-60`，当时触控默认
+`edge-only`（四点边缘热图修复，不含接触状态连续性补丁）。通用构建器仍可显式
+选择历史 `5.4-65`，但本机基线部署菜单不引用该覆盖包；旧测试结果不能用于
+宣称本机高刷可用。GPU沿用700/432，独立救援514；现有可用启动项保留。
+
+本轮使用 `build-test3-iptsd.py --ghost-touch-fix edge-only` 重新编译触控，
+随后使用以下命令组装基线：
+
+```sh
+python3 scripts/build-source-boot.py \
+  --device-base out/dual-boot-65-700/input/deployed-base.cpio.gz \
+  --ghost-touch-fix edge-only --display-profile 2.7-60 \
+  --edp-edid out/dual-boot-65-700/input/sq2-native65.bin \
+  --output out/baseline60-20261031/build/native-combined-initramfs.cpio.gz
+```
+
+保留已验证Image及固定二进制依赖，不声称从源码重编高通闭源库或整个Android。
+构建器产生的65Hz addon仅留本地，部署仅Image、公共initramfs、普通及救援DTB。
+现机部署另核验磁盘序列/ESP marker/UUID/root来源及SSH凭据last-entry-wins。
+实机结果以HANDOFF最新记录为准。
+
+### 触控补丁构建选项（2026-10-31更新）
+
+`build-test3-iptsd.py` 与 `build-source-boot.py` 均接受
+`--ghost-touch-fix edge-only|on|off`，默认 `on`，包含接触状态连续性与优化后的
+四点热图修复。`edge-only` 仅包含热图修复；`off` 均不应用，使用最小 DFT 配置。
+045E:0996 的基本启动支持独立于此开关；四点热图修复仍仅作用于 045E:0C21/46×68。
+
+```sh
+python3 scripts/build-test3-iptsd.py --ghost-touch-fix on
+python3 scripts/build-source-boot.py --ghost-touch-fix on --display-profile 2.7-60 --output out/NEW/native-combined-initramfs.cpio.gz
+```
+
+关闭时两条命令都改为 `off`。三种产物分别位于 `out/test2/iptsd-edge-only`、
+`out/test2/iptsd` 和 `out/test2/iptsd-no-ghost-fix`。启动构建校验模式、二进制/配置 SHA256，
+以及补丁源码 SHA256；补丁更新后必须重新编译，不会默默打包旧版二进制。
+选择及校验元数据写入 `build-audit.json`。旧产物缺少源码指纹时也须重新编译。
+此前用户确认单次edge-only对照主观响应更快并将其设为默认；最新要求已恢复on默认。
+优化是去掉整图复制，不新增等待帧；实机微基准不代表端到端响应提升。
+
+edge-only构建验证 touch.hpp 与固定上游归档逐字一致，在清单记录原始/实际源码
+哈希，不应用接触状态连续性修复。build-touch-fixup当前默认选择on产物。
+
+### 现机双启动项构建输入
+
+`build-source-boot.py --device-base PATH` 支持已逐文件核验的当前SQ2启动链，
+仅接受SHA732f23fe…（runtime-v1、caps、USB、蓝牙、扬声器五归档原顺序拼接）。
+视频runtime de2d825b…/XML来自该基线，XML必须匹配主线；现机SSD配置及SSH
+凭据保留。未指定时仍使用原651f3831…私有基线，未开放任意基础镜像。
+
+此次V6由独立 `/root/.cache/sq2-dual65-v6` 重新应用三个主线eDP补丁，dp_panel.c
+为7d87f794…；`SQ2_EDP_STAGE=... bash scripts/compile-sq2-edp-rates.sh`构建
+msm SHA5fcd28a9…，原vermagic及608导入均匹配运行内核导出。沿用无原始
+Module.symvers的依赖元数据恢复流程，不声称完整modpost验证。白名单同时保留
+原080cceff…模块。当前设备原生EDID为0feb26c6…（LGD_MP1.0），由主线脚本仅改
+五字节生成65Hz的daf892fa…；原83101509…另一面板实例继续保留。构建审计记录
+实际模块/EDID哈希，不能把另一设备的身份/序列号替换进本机。
+
+此次主线启动构建复用已验证Image e7c7a3e5…及专有高通库；显示模块和Turnip
+重新编译（Turnip同原0b36eeba…），不是两份全新Linux内核或高通闭源源码重编。
+高通与Mesa共用Image、DTB、initramfs及65Hz addon，仅图形选择参数不同。
+
+实机限制：本机LGD_MP1.0的上述重建模块/EDID组合两次65Hz启动均被用户确认
+黑屏，第二次日志记录DPCD重读超时；60Hz/700MHz对照启动通过。哈希白名单仅
+约束构建输入，不表示该组合已经通过显示验证。原可用菜单已恢复，两个65Hz入口
+尚未提升为默认，剩余旧启动项清理未执行；不要套用另一面板实例的成功结论。
+视频helper集成后须保留目标名到源码名映射，通用同名刷新不可覆盖video.HELPERS；
+最终verify_helpers检查三项有效脚本，避免把旧stage打回新runtime包。
+
 ### SQ2 GPU 默认构建：700 MHz / RPMh432（2026-10-30）
 
 `build-source-boot.py` 默认从固定 CPU+661/416 DTB（a5a25e43…）重现已启动的700/432 DTB（6db562c2…），输出 `sc8180x-surface-pro-x.dtb`；661与700两档均为corner432，其余原档位、CPU OPP、内存保留及GPU75°C/5°C、CPU80°C/5°C温控不变。独立 `sc8180x-surface-pro-x-rescue.dtb` 仍为原514 MHz（7a4d1c73…）。此默认为SQ2专用，不宣称兼容SQ1；不包含737/775/850/880档位。
@@ -39,7 +230,7 @@
 ### 2026-10-30 eDP 构建开关（当前）
 
 `build-source-boot.py --display-profile {5.4-65,2.7-60}` 选择新镜像的 GRUB 默认入口；
-默认 `5.4-65`，沿用用户已确认的实验选择。`2.7-60` 是原面板时序/链路配置，
+默认 `2.7-60`（2026-10-31回归基线），即原面板时序/链路配置，
 不是声称整个 Android 移植镜像为官方系统。两种构建都包含两档可选入口、原 Mesa
 入口、60 Hz 救援和关机；此开关是**构建/下次启动选择**，不是 Android 热切换。
 

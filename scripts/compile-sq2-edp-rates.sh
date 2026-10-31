@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=/root/.cache/sq2-thermal
-STAGE=/root/.cache/sq2-edp-rates
+STAGE=${SQ2_EDP_STAGE:-/root/.cache/sq2-edp-rates}
 cp "$WORK/kernel/drivers/gpu/drm/"*.h "$STAGE/drivers/gpu/drm/"
 python3 - "$STAGE/drivers/gpu/drm/msm/Makefile" <<'PY'
 from pathlib import Path

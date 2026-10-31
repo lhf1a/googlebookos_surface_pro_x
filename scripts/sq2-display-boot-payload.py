@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Pinned Pro-X display profiles; software EDID only, never EEPROM or disk I/O.
 
-Keep the common initramfs stock. Only the 65Hz entry appends the tested module
+Keep the common initramfs stock. Only the 65Hz entry appends the pinned module
 and EDID, followed by the original credential member (last-entry-wins).
+Input hashes are not hardware validation: the rebuilt LGD_MP1.0 combination
+has blackscreen failures; see docs/HANDOFF.md before deploying it.
 """
 import gzip
 import hashlib
@@ -10,10 +12,12 @@ import re
 import zlib
 
 PROFILES = ('5.4-65', '2.7-60')
-DEFAULT = '5.4-65'
+DEFAULT = '2.7-60'
 STOCK_SHA = 'f69c91e754e2a0d66cd195549d970973ed81b4c6f1bbfcbc3723f80a26414633'
 MODULE_SHA = '080cceff71f5b6168bfc89ed372a48e4ac783cf09fa9500f573411651a54f263'
+REBUILT_MODULE_SHA = '5fcd28a9392fdddc8d049de6af83c541ad04cb36e9654bba183e97c90cec28f7'
 EDID_SHA = '83101509b096d6ddfc83e96bd08917d4989f78b80e2549489bd12f8d14e5a014'
+SQ2_EDID_SHA = 'daf892faf914fa3eeef4818f587c63ca234a2c267c5fae5c9cd6ccdfc47683fa'
 MODULE = 'lib/modules/6.3.8-sq2-android1/kernel/drivers/gpu/drm/msm/msm.ko'
 EDID = 'lib/firmware/edid/sq2-native65.bin'
 BASE = 'native-combined-initramfs.cpio.gz'
@@ -28,11 +32,19 @@ def require_hash(blob, expected, label):
         raise ValueError('Unverified '+label)
 
 
+def verify_module(module):
+    if sha(module) not in (MODULE_SHA, REBUILT_MODULE_SHA):
+        raise ValueError('Unverified cached-only V6 msm')
+
+def verify_edid(edid):
+    if sha(edid) not in (EDID_SHA, SQ2_EDID_SHA):
+        raise ValueError('Unverified native65 EDID')
+
 def build_addon(base, cpio, module, edid):
     before = cpio.entries(gzip.decompress(base))
     require_hash(before[MODULE][1], STOCK_SHA, 'stock msm (60Hz fallback)')
-    require_hash(module, MODULE_SHA, 'cached-only V6 msm')
-    require_hash(edid, EDID_SHA, 'native65 EDID')
+    verify_module(module)
+    verify_edid(edid)
     if EDID in before:
         raise ValueError('Common initramfs must not contain the 65Hz override')
     rest, credential = base, None
@@ -154,10 +166,12 @@ def validate_menu(menu, profile):
         raise ValueError('Unparsed linux command')
 
 
-def policy(menu, base, addon, profile):
+def policy(menu, base, addon, profile, module=None, edid=None):
     validate_menu(menu, profile)
+    if module is not None: verify_module(module)
+    if edid is not None: verify_edid(edid)
     return dict(schema=1, default=profile, menu_sha256=sha(menu),
-                stock_module_sha256=STOCK_SHA, edp65_module_sha256=MODULE_SHA,
-                edp65_edid_sha256=EDID_SHA, password_addon_last=True,
+                stock_module_sha256=STOCK_SHA, edp65_module_sha256=sha(module) if module is not None else MODULE_SHA,
+                edp65_edid_sha256=sha(edid) if edid is not None else EDID_SHA, password_addon_last=True,
                 boot_payload_sha256={BASE: sha(base), ADDON: sha(addon)},
                 hardware_boot_tested=False)

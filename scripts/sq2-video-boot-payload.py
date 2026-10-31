@@ -8,6 +8,12 @@ HELPERS={'video-codec-manifest-stage':'video-runtime-stage',
          'video-runtime-framework-boot':'video-runtime-framework-boot',
          'video-decoder-lab-start':'video-decoder-lab-start'}
 
+def verify_helpers(entries, root):
+    for dest, source in HELPERS.items():
+        expected=(root/'probe/test2'/source).read_bytes().replace(b'\r\n',b'\n')
+        if entries.get('bin/'+dest)!=(0o100755,expected):
+            raise ValueError('Runtime video helper overwritten or missing: '+dest)
+
 def default_menu(text):
     lines=[]; normal=0; rescue=0
     for line in text.splitlines():
@@ -27,12 +33,14 @@ def default_menu(text):
     if not normal or not rescue:raise ValueError('normal and rescue entries required')
     return '\n'.join(lines)+'\n'
 
-def integrate(root, cpio, put, init):
-    path=root/'out/video-decode/vp8-limits/boot-vp8-limits.cpio.gz'
+def integrate(root, cpio, put, init, path=None, expected_sha=PAYLOAD_SHA):
+    path=path or root/'out/video-decode/vp8-limits/boot-vp8-limits.cpio.gz'
     blob=path.read_bytes()
-    if hashlib.sha256(blob).hexdigest()!=PAYLOAD_SHA:
+    if hashlib.sha256(blob).hexdigest()!=expected_sha:
         raise ValueError('unverified video payload')
     entries=cpio.entries(gzip.decompress(blob))
+    if entries['etc/sq2-c2-runtime-boot/media_codecs_c2.xml'][1] != (root/'configs/sq2-media-codecs-c2.xml').read_bytes().replace(b'\r\n',b'\n'):
+        raise ValueError('Video payload XML differs from current source')
     names={n for n in entries if n.startswith(('etc/sq2-video-native/', 'etc/sq2-c2-runtime-boot/'))}
     fw='lib/firmware/qcom/venus-5.2/venus.mbn'
     if hashlib.sha256(entries[fw][1]).hexdigest()!=FIRMWARE_SHA:

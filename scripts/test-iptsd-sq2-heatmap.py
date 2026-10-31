@@ -12,8 +12,24 @@ with tempfile.TemporaryDirectory(prefix='sq2-heatmap-test-') as td:
 #include <core/generic/sq2-heatmap.hpp>
 #include <cassert>
 #include <iostream>
+#include <random>
 using namespace iptsd;
 using namespace iptsd::core;
+// Original full-copy implementation: independent behavioral oracle.
+void reference(Image<f64> &image) {
+    const Image<f64> original = image;
+    for (const auto [row,col] : std::array<std::pair<int,int>,4>{{{0,0},{0,67},{1,0},{2,0}}}) {
+        std::array<f64,8> neighbors {};
+        std::size_t n=0;
+        for(int y=std::max(0,row-1);y<=row+1;++y)
+            for(int x=std::max(0,col-1);x<=std::min(67,col+1);++x)
+                if(y!=row || x!=col) neighbors[n++]=original(y,x);
+        std::nth_element(neighbors.begin(),neighbors.begin()+n/2,neighbors.begin()+n);
+        const auto median=neighbors[n/2];
+        if(original(row,col)>=239.0/255.0 && original(row,col)-median>40.0/255.0)
+            image(row,col)=median;
+    }
+}
 int main() {
     DeviceInfo info; info.vendor=0x045e; info.product=0x0c21;
     info.type=ipts::Device::Type::Touchscreen;
@@ -42,6 +58,18 @@ int main() {
     auto weak=Image<f64>::Constant(46,68,75.0/255.0).eval();
     weak(0,0)=200.0/255.0; before=weak;
     repair_sq2_heatmap(info,weak); assert(weak.isApprox(before));
+    // Compare all cells exactly, including adjacent spikes and threshold values.
+    std::mt19937 random(0x0c21);
+    for(int frame=0;frame<2000;++frame) {
+        Image<f64> input(46,68);
+        for(int y=0;y<46;++y) for(int x=0;x<68;++x)
+            input(y,x)=(random()%256)/255.0;
+        input(0,0)=(238+frame%3)/255.0;
+        auto expected=input;
+        reference(expected);
+        repair_sq2_heatmap(info,input);
+        assert((input.array()==expected.array()).all());
+    }
     std::cout << "PASS: edge-spike repair, supported corner touch, unchanged interior, device/geometry guards\n";
 }
 ''')

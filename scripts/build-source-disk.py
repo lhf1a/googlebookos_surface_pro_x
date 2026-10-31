@@ -65,7 +65,8 @@ if __name__ == '__main__':
     menu=(R/'configs/grub-source.cfg').read_text()
     generated=b.O/'grub-hardware-video.cfg'
     generated.write_text(display.default_menu(usb.default_menu(video.default_menu(menu)),profile),encoding='utf-8',newline='\n')
-    display_policy=display.policy(generated.read_bytes(),base,addon,profile)
+    display_policy=display.policy(generated.read_bytes(),base,addon,profile,
+                                  effective[display.MODULE][1],effective[display.EDID][1])
     gpu_policy=gpu.policy(generated.read_bytes(),gpu_normal,gpu_rescue)
     b.GRUB=generated
     b.BOOT_FILES+=(display.ADDON,'sc8180x-surface-pro-x-rescue.dtb')

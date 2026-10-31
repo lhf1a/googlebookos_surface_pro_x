@@ -35,6 +35,9 @@ for d in /sys/class/hidraw/hidraw*; do
     fi
     [ "$checked" -eq 0 ] || exit 1
     # Parent retains FD 3 during startup; the daemon owns its own HID handle.
+    if [ -f /run/iptsd-calibrated.conf ]; then
+        export IPTSD_CONFIG_FILE=/run/iptsd-calibrated.conf
+    fi
     iptsd "$node" 3>&- > /logs/iptsd.txt 2>&1 &
     echo "$!" > /run/iptsd.pid
     sleep 4
