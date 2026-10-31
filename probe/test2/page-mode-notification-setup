@@ -1,0 +1,25 @@
+#!/bin/busybox sh
+# One-time per-userdata setup. PackageManager retains component disabled state.
+set -eu
+export PATH=/bin:/sbin
+android() { timeout 10 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+for n in $(seq 1 240); do
+    if [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = 1 ]; then break; fi
+    sleep 1
+done
+[ "$(android getprop sys.boot_completed)" = 1 ] || exit 1
+state=/proc/1/root/data/vendor/sq2-page-mode-notification
+[ ! -f "$state/done-v1" ] || exit 0
+mkdir -p "$state"
+# Avoid concurrent first-run setup. Never mark a failed attempt complete.
+mkdir /run/sq2-page-mode-notification-lock 2>/dev/null || exit 0
+trap 'rmdir /run/sq2-page-mode-notification-lock' EXIT
+users=$(android pm list users | sed -n 's/.*UserInfo{\([0-9][0-9]*\):.*/\1/p')
+[ -n "$users" ] || exit 1
+for user_id in $users; do
+    android pm disable --user "$user_id" \
+        com.android.settings/.development.PageAgnosticNotificationService
+done
+printf '%s\n' "$users" > "$state/done-v1.tmp"
+mv "$state/done-v1.tmp" "$state/done-v1"
+echo SQ2_PAGE_MODE_NOTIFICATION_SETUP_COMPLETE

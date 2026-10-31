@@ -199,6 +199,7 @@ if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
         ssh-framework-boot > /logs/ssh-framework-boot.txt 2>&1 &
     fi
     lockscreen-framework-boot > /logs/lockscreen-framework-boot.txt 2>&1 &
+    page-mode-notification-setup > /logs/page-mode-notification-setup.txt 2>&1 &
     if [ -x /bin/power-input-boot ]; then
         power-input-boot > /logs/power-input-boot.txt 2>&1 &
     fi

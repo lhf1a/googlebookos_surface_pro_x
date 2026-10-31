@@ -20,7 +20,7 @@ mkdir -p "$S/etc/googlebook-security/lib64/egl"
 # Include the tested multi-plane mapper fix in subsequent complete SSD images.
 cp "$ROOT/out/sq2-graphics/runtime/libEGL_freedreno.so" "$S/etc/googlebook-security/lib64/egl/"
 cp "$ROOT/probe/test2/init-googlebook-native" "$S/init"
-for name in audio-framework-boot audio-speaker-route lockscreen-framework-boot ssh-framework-boot prepare-native-ssd apply-security-overlay apply-device-info audio-drivers-start collect-audio-crash test-speaker-readiness lab-input-posture lab-keep-awake lab-local-setup skip-google-setup wifi-framework-boot wifi-rollback bluetooth-framework-boot bluetooth-input-watch power-input-boot refresh-sq2-power-input-nodes cover-input-watch touch-framework-ready touch-resume-watch test-sq2-pm-stage; do
+for name in audio-framework-boot audio-speaker-route lockscreen-framework-boot page-mode-notification-setup ssh-framework-boot prepare-native-ssd apply-security-overlay apply-device-info audio-drivers-start collect-audio-crash test-speaker-readiness lab-input-posture lab-keep-awake lab-local-setup skip-google-setup wifi-framework-boot wifi-rollback bluetooth-framework-boot bluetooth-input-watch power-input-boot refresh-sq2-power-input-nodes cover-input-watch touch-framework-ready touch-resume-watch test-sq2-pm-stage; do
     cp "$ROOT/probe/test2/$name" "$S/bin/"
     sh -n "$S/bin/$name"
 done
