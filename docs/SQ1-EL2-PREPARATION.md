@@ -242,3 +242,22 @@ replacement and all five manifest hashes passed (initial CRLF manifest corrected
 Second normal reboot/manual selection requested; result pending. No /dev/kvm
 hardware-success claim yet. Physical disk identity/UUID/root were checked before
 installation; no suspend tests. Raw evidence out/el2-kvm/.
+
+## Hardware /dev/kvm gate passed (operator observation)
+
+User explicitly reports for v2 manual SQ2 RAM test: "出现 /dev/kvm 且 PASS、EXIT=0".
+This meets the requested hardware gate: on the isolated EL2 Linux6.3.8 test,
+/dev/kvm was created and the single ARM64 vCPU executed the exact MMIO42 guest
+witness with exit0. This result is operator-observed screen output, not an SSH
+capture of the temporary RAM system. The init intentionally provides no network
+or persistent disk writes. QEMU success is separate supporting software validation.
+
+A fresh SSH recovery check after receiving the report timed out. Recovery after
+this reported test is pending; the earlier bd429ef0 normal boot cannot be assigned
+to this test without chronology evidence. Candidate init waits90seconds then calls
+reboot; if it remains stopped, manual power-cycle/original boot is required.
+
+Scope: single CPU/maxcpus1, tiny kernel, no disks/Android/GPU/audio/remoteproc/USB.
+No evidence yet for SMP, normal Android kernel compatibility, full AVF Linux
+Terminal, VSOCK/Secretkeeper/attestation or peripheral preservation in EL2.
+Normal persistent Mesa default and rescue remain. No suspend or repeat tests.
