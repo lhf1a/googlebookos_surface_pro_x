@@ -1861,3 +1861,5 @@ com.android.settings/.development.PageAgnosticNotificationService。
 **2026-10-31 SQ2 EL2接管测试出现绿条**：用户明确报告顶部绿条并停住。固定sltest12e5a3e9…代码在HVC1/EL2寄存器访问后画绿条，支持SQ2+SQ1签名TCB单CPU接管成功；无数值CurrentEL/多核/KVM/Linux启动证明。已告知长按关机再回原Mesa，一次SSH检查超时，恢复boot尚待确认；没有再启动实验或做休眠测试。
 
 **2026-10-31 SQ2 EL2绿条后已恢复高通**：boot049964bb…，原baseline60/closed Vulkan READY、boot_completed1、guardY核对，菜单5f69fe5d…未变；用户手选高通，持久Mesa默认不变。新增单vCPU最小KVM MMIO42探针，静态ARM64 -Werror编译通过；现内核按预期/dev/kvm缺失退出1，未启动guest/未再重启。下步仍需独立SC8180X EL2内核/DT准备。
+
+**2026-10-31 /dev/kvm实机推进仍待第二次画面结果**：已构建RAM-only最小KVM内核Image1a6c86d9…和initramfs63100b9e…；QEMU EL2内核创建/dev/kvm并执行guest MMIO42 PASS/EXIT0。实机首轮EFI chainloader unknown error，未进Linux；用户恢复后bootfaf4eb80…，v2启动器4efc6b7b…自行安装DTB并显示阶段错误，第二次正常重启已请求。一次后续SSH读回bootbd429ef0…、原Mesa正常且guardY；无法据此判断第二次测试是否执行/成功，等待用户屏幕反馈。默认菜单不变，实机/dev/kvm尚未声称通过。构建与代码2b52403，详见SQ1-EL2-PREPARATION.md，原始证据out/el2-kvm。
