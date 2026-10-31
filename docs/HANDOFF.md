@@ -1850,3 +1850,5 @@ NotificationRecord已消失。未重启，boot仍a384f5c1…；未改内核页�
 应用兼容属性或启动镜像。重启后尚未实测；组件状态由PackageManager持久保存。
 恢复可对两个用户执行pm default-state --user USER
 com.android.settings/.development.PageAgnosticNotificationService。
+
+**2026-10-31 SQ1 EL2准备独立工作树**：分支 codex/sq1-el2-preparation-2026103；固定slbounce c090a8cd…，仅编译ARM64 sltest（12e5a3e9…），PE检查通过。SC8180X无现成overlay，尚缺本机TCB签名/版本与实测EL2证据。未部署/重启；SQ1的661/65Hz默认与SQ2状态不变。详见SQ1-EL2-PREPARATION.md。

@@ -607,3 +607,7 @@ on 同时应用两个补丁及 AspectMax=2.0 配置；off 使用全新原版源�
 两种产物分别为 out/test2/iptsd 与 out/test2/iptsd-no-ghost-fix；成功构建后包含 iptsd.conf 和带二进制/配置哈希的 build-options.json。
 后续 bash scripts/build-touch-fixup.sh BUNDLE 必须传入相应目录（默认 on 目录）；打包器校验清单并使用配套二进制与配置，旧缓存缺清单则拒绝。
 本轮仅做离线选项与语法验证，不代表新二进制构建或实机验证通过，硬盘部署脚本仍待完成。
+
+### SQ1 EL2 离线准备
+
+见 [SQ1-EL2-PREPARATION.md](SQ1-EL2-PREPARATION.md)。独立分支仅编译 sltest，不部署或修改默认启动。
