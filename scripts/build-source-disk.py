@@ -40,6 +40,17 @@ if __name__ == '__main__':
     display_spec=importlib.util.spec_from_file_location('display_payload',R/'scripts/sq2-display-boot-payload.py')
     display=importlib.util.module_from_spec(display_spec);display_spec.loader.exec_module(display)
     audit=json.loads((b.O/'build-audit.json').read_text())
+    ksu_spec=importlib.util.spec_from_file_location('ksu_payload',R/'scripts/sq2-ksu-boot-payload.py')
+    ksu=importlib.util.module_from_spec(ksu_spec);ksu_spec.loader.exec_module(ksu)
+    ksu_enabled=audit.get('ksu',{}).get('enabled',False)
+    if ksu_enabled:
+        if ksu.sha((b.O/'Image').read_bytes()) != ksu.IMAGE_SHA:
+            raise ValueError('KSU kernel checksum mismatch')
+        if ksu.sha((b.O/'Image-rescue').read_bytes()) != audit['ksu']['rescue_image_sha256']:
+            raise ValueError('KSU rescue checksum mismatch')
+        for name,digest in audit['ksu']['payload_sha256'].items():
+            if name not in entries or ksu.sha(entries[name][1]) != digest:
+                raise ValueError('KSU userspace checksum mismatch: '+name)
     gpu_spec=importlib.util.spec_from_file_location('gpu_payload',R/'scripts/sq2-gpu-boot-payload.py')
     gpu=importlib.util.module_from_spec(gpu_spec);gpu_spec.loader.exec_module(gpu)
     gpu_normal=(b.O/gpu.NORMAL).read_bytes();gpu_rescue=(b.O/gpu.RESCUE).read_bytes()
@@ -64,12 +75,13 @@ if __name__ == '__main__':
         raise ValueError('Display addon is not the exact pinned delta')
     menu=(R/'configs/grub-source.cfg').read_text()
     generated=b.O/'grub-hardware-video.cfg'
-    generated.write_text(display.default_menu(usb.default_menu(video.default_menu(menu)),profile),encoding='utf-8',newline='\n')
+    generated.write_text(ksu.menu(display.default_menu(usb.default_menu(video.default_menu(menu)),profile),ksu_enabled),encoding='utf-8',newline='\n')
     display_policy=display.policy(generated.read_bytes(),base,addon,profile,
                                   effective[display.MODULE][1],effective[display.EDID][1])
     gpu_policy=gpu.policy(generated.read_bytes(),gpu_normal,gpu_rescue)
     b.GRUB=generated
     b.BOOT_FILES+=(display.ADDON,'sc8180x-surface-pro-x-rescue.dtb')
+    if ksu_enabled: b.BOOT_FILES+=('Image-rescue',)
     for n in ('sq2-ssd-layout','sq2-ssd-partitions','sq2-ssd-super-slices'):
         assert entries['etc/'+n][1] == (R/'out/ssd'/n).read_bytes(), n
     b.build()
@@ -81,4 +93,5 @@ if __name__ == '__main__':
     manifest['display_profiles']=display_policy
     manifest['usb_bluetooth']=usb.policy(generated.read_bytes(),base,entries,R)
     manifest['gpu_profile']=gpu_policy
+    manifest['ksu']=audit.get('ksu',{'enabled':False})
     manifest_path.write_text(json.dumps(manifest,indent=2)+'\n')

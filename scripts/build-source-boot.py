@@ -53,6 +53,8 @@ def main():
                         help='on (default): continuity and heatmap repair; edge-only: heatmap repair; off: neither')
     parser.add_argument('--touch-calibration',choices=('on','off'),default='on',
                         help='on (default): measured SQ2 spatial calibration; off: original coordinates')
+    parser.add_argument('--ksu',choices=('on','off'),default='on',
+                        help='on (default): tested KernelSU Next kernel and userspace bootstrap')
     display_spec=importlib.util.spec_from_file_location('display_payload',R/'scripts/sq2-display-boot-payload.py')
     display=importlib.util.module_from_spec(display_spec);display_spec.loader.exec_module(display)
     parser.add_argument('--display-profile',choices=display.PROFILES,default=display.DEFAULT,
@@ -64,12 +66,15 @@ def main():
                         help='Pinned SQ2 CPU/661 baseline; emits boot-tested700/432 default')
     parser.add_argument('--gpu-rescue',type=Path,default=O/'sc8180x-surface-pro-x-rescue.dtb')
     args=parser.parse_args()
+    ksu_spec=importlib.util.spec_from_file_location('ksu_payload',R/'scripts/sq2-ksu-boot-payload.py')
+    ksu=importlib.util.module_from_spec(ksu_spec);ksu_spec.loader.exec_module(ksu)
+    image,rescue_image,ksu_files,ksu_audit=ksu.payload(R,args.ksu=='on')
     touch_files, touch_options = touch_bundle(R, args.ghost_touch_fix, args.touch_calibration)
     output=args.output
     output.parent.mkdir(parents=True,exist_ok=True)
     gpu_spec=importlib.util.spec_from_file_location('gpu_payload',R/'scripts/sq2-gpu-boot-payload.py')
     gpu=importlib.util.module_from_spec(gpu_spec);gpu_spec.loader.exec_module(gpu)
-    if any((output.parent/n).exists() for n in (output.name,display.ADDON,'build-audit.json',gpu.NORMAL,gpu.RESCUE)):
+    if any((output.parent/n).exists() for n in (output.name,display.ADDON,'build-audit.json',gpu.NORMAL,gpu.RESCUE,'Image','Image-rescue')):
         raise ValueError('Refusing existing output/addon/audit; use a fresh directory')
     gpu_normal=gpu.build(args.gpu_baseline.read_bytes())
     gpu_rescue=args.gpu_rescue.read_bytes()
@@ -87,6 +92,11 @@ def main():
         delta[n] = (mode, data)
     def source(n): return (R/n).read_bytes().replace(b'\r\n', b'\n')
     init = source('probe/test2/init-googlebook-native')
+    if args.ksu == 'on':
+        anchor_ksu=b'    lockscreen-framework-boot > /logs/lockscreen-framework-boot.txt 2>&1 &\n'
+        assert init.count(anchor_ksu)==1
+        init=init.replace(anchor_ksu,anchor_ksu+b'    ksu-framework-boot > /logs/ksu-framework-boot.txt 2>&1 &\n')
+        for name,(mode,body) in ksu_files.items(): put(name,body,mode)
     anchor = b'apply-device-info > /logs/device-info.txt 2>&1 || fail device-info\n'
     assert init.count(anchor) == 1 and b'closed-vulkan-start' not in init
     init = init.replace(anchor, b'closed-vulkan-start > /logs/closed-vulkan.txt 2>&1 || fail closed-vulkan-overlay\n'+anchor)
@@ -179,14 +189,15 @@ def main():
     for channel in (7,8):
         assert audio_route.count(f"mix 'RX{channel} Digital Volume' 84\n".encode())==1
     addon=display.build_addon(result,c,module,edid)
-    image=(R/'out/screen-only/Image').read_bytes()
     assert b'SQ2 screen-only policy: system suspend blocked' in image
     with output.open('xb') as f: f.write(result)
     with (output.parent/display.ADDON).open('xb') as f: f.write(addon)
-    shutil.copyfile(R/'out/screen-only/Image',output.parent/'Image')
+    (output.parent/'Image').write_bytes(image)
+    (output.parent/'Image-rescue').write_bytes(rescue_image)
     for name,data in ((gpu.NORMAL,gpu_normal),(gpu.RESCUE,gpu_rescue)):
         with (output.parent/name).open('xb') as f: f.write(data)
     report=dict(base_sha256=sha(base),initramfs_sha256=sha(result),Image_sha256=sha(image),
+                ksu=ksu_audit,
                 ghost_touch_fix=args.ghost_touch_fix!='off',touch_mode=args.ghost_touch_fix,touch_build_options=touch_options,
                 password_addon_last=True,changed=sorted(delta),gpu_profile=gpu_profile,
                 hardware_boot_tested=False,hardware_decode_included=True,

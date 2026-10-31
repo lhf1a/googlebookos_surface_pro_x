@@ -1,0 +1,37 @@
+#!/bin/busybox sh
+# Provision KSU userspace once after Android mounts data. No module injection here.
+set -eu
+export PATH=/bin:/sbin
+grep -qE 'sq2.rescue=1|sq2.ksu=0' /proc/cmdline && exit 0
+mkdir /run/ksu-bootstrap-lock 2>/dev/null || exit 0
+trap 'rmdir /run/ksu-bootstrap-lock' EXIT
+android() { timeout 120 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+for n in $(seq 1 300); do
+    [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = 1 ] && break
+    sleep 1
+done
+[ "$(android getprop sys.boot_completed)" = 1 ] || exit 1
+test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
+cd /etc/sq2-ksu
+echo 'bb231b0f77d6ee78a4362ff751b3cc54c934293a4b0acde177afa59c4a64da00  ksud' | sha256sum -c -
+echo '96c2bbbf1b973461fe82dd1ed17f89deb86a6a5a9d7c4cf079bd32091131ef57  manager-verified.apk' | sha256sum -c -
+data=/proc/1/root/data
+test ! -L "$data/local/tmp"
+mkdir -p "$data/local/tmp"
+test ! -L "$data/adb"
+if [ ! -e "$data/adb/ksud" ]; then
+    cp ksud "$data/local/tmp/sq2-ksud.new"
+    chmod 755 "$data/local/tmp/sq2-ksud.new"
+    timeout 120 nsenter -t 1 -m -r -- /data/local/tmp/sq2-ksud.new debug version | grep -q 'Kernel Version: 33129'
+    timeout 120 nsenter -t 1 -m -r -- /data/local/tmp/sq2-ksud.new install
+    rm -f "$data/local/tmp/sq2-ksud.new"
+    echo 'KSU userspace installed; module boot lifecycle available on next boot.'
+fi
+user=$(android cmd activity get-current-user)
+case "$user" in ''|*[!0-9]*) exit 1;; esac
+if ! android pm list packages --user "$user" com.rifsxd.ksunext | grep -qx 'package:com.rifsxd.ksunext'; then
+    cp manager-verified.apk "$data/local/tmp/sq2-ksu-manager.apk"
+    android pm install --user "$user" "$data/local/tmp/sq2-ksu-manager.apk"
+    rm -f "$data/local/tmp/sq2-ksu-manager.apk"
+fi
+echo KSU_USERSPACE_READY
