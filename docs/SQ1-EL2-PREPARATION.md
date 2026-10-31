@@ -206,3 +206,39 @@ correctly exits1 with `open /dev/kvm: No such file or directory`; boot ID unchan
 This validates only current-baseline refusal, NOT guest execution. Guest success
 path awaits separately booted KVM-capable EL2 kernel. Do not load/replace default
 kernel to make this probe pass without auditing SC8180X DT/hypervisor dependencies.
+
+## Minimal RAM-only EL2/KVM candidate
+
+User requests completion through /dev/kvm verification. Built separate Linux6.3.8
+from a COPY of cached sq2-thermal source using tinyconfig + KVM, GICv3, PSCI, EFI
+framebuffer, proc/sys/devtmpfs and ARM64 ELF/script support. Suspend screen-only
+patch remains default-on; nohibernate in commandline. No BLOCK/NVMe, GPU, remoteproc,
+USB, QCOM SCM/SMMU drivers in this minimal config. No Android or persistent writes
+from test init. maxcpus=1; secondary-CPU behavior remains untested.
+
+Added source files: build-sq2-el2-kvm-kernel.sh, prepare-sq2-el2-kvm-ram.py,
+el2-launcher-main.c and el2-kvm-init. Inputs are ignored out/el2-kvm/{busybox,base.dtb}
+and previously built witness; source DTB fixed6db562c2… belongs SQ2, all GPU/zap,
+remoteproc/USB/PCIe matching paths disabled in a separate copy, identity/reserved
+memory retained. This is deliberately not a general SC8180X Android overlay.
+Launcher combines pinned slbounce code with an EFI application loading our minimal
+kernel. It installs the test DTB explicitly, checks slbounce's DT gate, then installs
+SL hook. It does not load an EFI runtime driver into ordinary boot.
+
+QEMU virt+EL2/GICv3 test of exact Image/initramfs: All CPUs started at EL2,
+KVM VHE initialized, /dev/kvm10:232, guest MMIO42 PASS, KVM_WITNESS_EXIT=0.
+QEMU terminated after35seconds with timeout while init's90second result wait was
+active. This validates test software, not SQ2 hardware.
+
+Candidate Image1a6c86d9…, DTB567a254a…, initramfs63100b9e…,
+TCB195997cf… staged under EFI/SQ2EL2KVM. Menu f7244134… adds manual first entry;
+original persistent Mesa default untouched, backup before-el2-kvm-20261031 is
+5f69fe5d…. One normal reboot/manual selection failed before Linux with
+/loader/efi/chainloader.c88 unknown error. User recovered; bootfaf4eb80… guardY.
+Cause unconfirmed; GRUB devicetree command need not install FDT for a chainloaded
+app, so v2 explicitly installs its own validated FDT before checking the gate.
+V2 launcher4efc6b7b… adds20second stage/status diagnostics. Installed atomic EFI
+replacement and all five manifest hashes passed (initial CRLF manifest corrected).
+Second normal reboot/manual selection requested; result pending. No /dev/kvm
+hardware-success claim yet. Physical disk identity/UUID/root were checked before
+installation; no suspend tests. Raw evidence out/el2-kvm/.

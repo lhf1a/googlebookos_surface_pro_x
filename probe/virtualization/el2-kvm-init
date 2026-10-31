@@ -1,0 +1,22 @@
+#!/bin/sh
+/bin/busybox mount -t proc proc /proc
+/bin/busybox mount -t sysfs sysfs /sys
+/bin/busybox mount -t devtmpfs devtmpfs /dev
+exec </dev/console >/dev/console 2>&1
+export PATH=/bin
+printf '\n=== SQ2 EL2 KVM RAM TEST ===\n'
+uname -a
+cat /proc/cmdline
+printf 'SCREEN_ONLY='; cat /sys/module/suspend/parameters/screen_only
+printf '\nKERNEL EL2/KVM MESSAGES:\n'
+dmesg | grep -i -E 'started at EL|kvm|hyp mode|GIC'
+printf '\nKVM NODE:\n'
+ls -l /dev/kvm
+printf '\nGUEST WITNESS:\n'
+/kvm-arm64-witness
+result=$?
+printf '\nKVM_WITNESS_EXIT=%s\n' "$result"
+printf 'RAM test ends; automatic reboot to original default in 90 seconds.\n'
+sleep 90
+reboot -f
+while :; do sleep 60; done
