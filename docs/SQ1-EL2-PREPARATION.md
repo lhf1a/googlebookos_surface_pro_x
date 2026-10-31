@@ -181,3 +181,28 @@ manual-only menu and normal/rescue entries; no persistent slbounce driver loaded
 Next gate after recovery is a separate minimal SC8180X EL2 kernel/DT design with
 remoteproc/SMMU ownership audited, retaining screen_only/nohibernate and normal
 boot. Do not attempt full Android on an unrelated chipset overlay.
+
+## Recovery verified; guest witness prepared
+
+After green-bar test user reports rebooted into Qualcomm version. Readback confirms
+new boot049964bb-2a3f-4c33-845e-895ce3e73918, baseline60 Image, vulkan=closed,
+boot_completed1, closed Vulkan READY and screen_onlyY. Disk/menu hashes unchanged.
+This is a real board reboot/recovery, not a framework restart. Persistent default
+remains Mesa; user manually selected Qualcomm. No additional reboot performed.
+
+Added `probe/virtualization/kvm-arm64-witness.c`: static ARM64 test opens KVM,
+checks API, creates VM + one vCPU + one host page of RAM, executes four ARM64
+instructions and requires an exact 64-bit MMIO write42 at0x100000. No guest disk,
+network, Android services or external firmware. SIGALRM limits KVM_RUN to5seconds;
+this is not a guarantee against a kernel hang. Build with:
+
+```sh
+aarch64-linux-gnu-gcc -O2 -Wall -Wextra -Werror -static \
+  probe/virtualization/kvm-arm64-witness.c -o /tmp/kvm-arm64-witness
+```
+
+Cross-compilation with warnings-as-errors passed. On recovered current kernel it
+correctly exits1 with `open /dev/kvm: No such file or directory`; boot ID unchanged.
+This validates only current-baseline refusal, NOT guest execution. Guest success
+path awaits separately booted KVM-capable EL2 kernel. Do not load/replace default
+kernel to make this probe pass without auditing SC8180X DT/hypervisor dependencies.

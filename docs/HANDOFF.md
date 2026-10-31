@@ -1859,3 +1859,5 @@ com.android.settings/.development.PageAgnosticNotificationService。
 **2026-10-31 SQ2 EL2手动测试已准备，等现场结果**：用户指定.194并确认在场。合并Windows样本68b2b4a；微软TCB签名/哈希/8指令及sltest12e5a3e9…验证通过。独立EFI/SQ2EL2Test与手动首项已安装，默认Mesa不变、超时10秒，菜单5f69fe5d…，备份before-el2-manual-20261031为2cce07b4…。一次正常重启已发起，等待用户选测试、反馈绿条/错误并手动恢复；不自动测试/改SecureBoot/做休眠。详见SQ1-EL2-PREPARATION.md最新节。
 
 **2026-10-31 SQ2 EL2接管测试出现绿条**：用户明确报告顶部绿条并停住。固定sltest12e5a3e9…代码在HVC1/EL2寄存器访问后画绿条，支持SQ2+SQ1签名TCB单CPU接管成功；无数值CurrentEL/多核/KVM/Linux启动证明。已告知长按关机再回原Mesa，一次SSH检查超时，恢复boot尚待确认；没有再启动实验或做休眠测试。
+
+**2026-10-31 SQ2 EL2绿条后已恢复高通**：boot049964bb…，原baseline60/closed Vulkan READY、boot_completed1、guardY核对，菜单5f69fe5d…未变；用户手选高通，持久Mesa默认不变。新增单vCPU最小KVM MMIO42探针，静态ARM64 -Werror编译通过；现内核按预期/dev/kvm缺失退出1，未启动guest/未再重启。下步仍需独立SC8180X EL2内核/DT准备。
