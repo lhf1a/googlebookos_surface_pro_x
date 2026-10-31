@@ -24,7 +24,7 @@ SC8180X 源码检查：PSCI 使用 SMC；apps/GPU SMMUv2 分别在 0x15000000/0x
 
 - `configs/sq1-el2-preparation.json`：源码 pin、输入和本次构建产物哈希；不是不同工具链可复现性保证。
 - `scripts/verify-sq1-el2-preparation.py`：只读检查本地样本和 EFI，不执行目标、不连接设备、不写盘。
-- 原始日志、PDB、微软二进制及 EFI 保留在忽略目录 `out/virtualization-feasibility-20261031-195101/stages12/`，不进入 Git。新机器需从自己的已授权 Windows 安装取得**相同哈希**样本；不下载来源不明的旧 TCB。
+- 原始日志、PDB 及构建 EFI 保留在忽略目录 `out/virtualization-feasibility-20261031-195101/stages12/`，不进入 Git。用户随后于 2026-10-31 明确授权将四份已提取的 Windows 二进制加入提交并推送，精确副本及哈希归档在 `reference/sq1-el2/windows-22621.6199/`。不附带凭据，不下载来源不明的旧 TCB；微软文件不适用本仓库源码许可。
 
 WSL 中安装好本机原有交叉编译工具后，在独立忽略目录检出 slbounce 清单指定提交，执行 `git submodule update --init --recursive` 和 `make -j4`。本次默认构建 exit=0，链接器 RWX LOAD 警告仍保留，不将其隐藏。不启用 ALWAYS_SWITCH、不加入自动启动目录。
 
