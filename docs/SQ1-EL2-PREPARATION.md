@@ -261,3 +261,10 @@ Scope: single CPU/maxcpus1, tiny kernel, no disks/Android/GPU/audio/remoteproc/U
 No evidence yet for SMP, normal Android kernel compatibility, full AVF Linux
 Terminal, VSOCK/Secretkeeper/attestation or peripheral preservation in EL2.
 Normal persistent Mesa default and rescue remain. No suspend or repeat tests.
+
+Recovery after reported hardware PASS is now confirmed by user and SSH:
+bootffa7053f-ec2c-4c0b-94b9-1e866b7fed3a, original baseline60 Mesa2.7-60,
+boot_completed1, screen_onlyY/nohibernate. Menu f7244134… and persistent default
+sq2-baseline60-mesa unchanged. No extra reboot or experiment. Evidence:
+out/el2-kvm/after-hardware-pass-recovery.txt. /dev/kvm requested gate and subsequent
+normal-system recovery both completed; automatic-vs-manual recovery not inferred.

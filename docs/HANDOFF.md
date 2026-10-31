@@ -1865,3 +1865,5 @@ com.android.settings/.development.PageAgnosticNotificationService。
 **2026-10-31 /dev/kvm实机推进仍待第二次画面结果**：已构建RAM-only最小KVM内核Image1a6c86d9…和initramfs63100b9e…；QEMU EL2内核创建/dev/kvm并执行guest MMIO42 PASS/EXIT0。实机首轮EFI chainloader unknown error，未进Linux；用户恢复后bootfaf4eb80…，v2启动器4efc6b7b…自行安装DTB并显示阶段错误，第二次正常重启已请求。一次后续SSH读回bootbd429ef0…、原Mesa正常且guardY；无法据此判断第二次测试是否执行/成功，等待用户屏幕反馈。默认菜单不变，实机/dev/kvm尚未声称通过。构建与代码2b52403，详见SQ1-EL2-PREPARATION.md，原始证据out/el2-kvm。
 
 **2026-10-31 SQ2实机/dev/kvm与guest验证通过（用户屏幕确认）**：用户对v2明确反馈‘出现/dev/kvm且PASS、EXIT=0’。这是隔离EL2 tiny内核、单vCPU MMIO42实际执行通过；非QEMU替代，非临时系统SSH日志。收到报告后SSH恢复检查超时，本次恢复仍待确认，不能把先前bd429ef0…归到本次。正常默认/救援保留，无休眠/追加重测。Android正常内核、多核、外设与AVF终端仍未验证。
+
+**2026-10-31 KVM实机PASS后正常系统恢复已核验**：用户确认恢复，SSH读回bootffa7053f…、原baseline60 Mesa2.7-60、boot_completed1、guardY/nohibernate；菜单f7244134…与Mesa持久默认不变。完成/dev/kvm单vCPU验证及恢复闭环，没有追加实验。
