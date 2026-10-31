@@ -163,3 +163,21 @@ One normal reboot requested after user onsite confirmation. User instructed to
 select manual first entry, observe, then long-press off/reboot original Mesa.
 Screen result/recovery pending. Do not count SSH loss as successful takeover.
 Private preparation/install evidence: out/sq2-el2-test/. No suspend tests.
+
+## SQ2 onsite result: green bar observed
+
+User explicitly reported "顶部出现绿条并停住" after selecting manual sltest.
+The exact pinned binary SHA12e5a3e9… sets a GOP framebuffer, enters tb_entry,
+executes HVC1, accesses sctlr_el2 and draws green before halting. This is positive
+operator-observed evidence for successful single-CPU Secure Launch/EL2 takeover
+using the SQ1-extracted signed TCB on SQ2 firmware8.256.140. No numeric CurrentEL
+capture was produced, no secondary CPUs started, and no Linux/KVM/AVF was tested.
+Do not translate this result into a working Linux Terminal feature claim.
+
+One bounded SSH recovery check timed out after this feedback. User was instructed
+to long-press off then boot original Mesa. Recovery/new boot ID remain pending;
+no further reboot or experimental launch was requested by the agent. Keep the
+manual-only menu and normal/rescue entries; no persistent slbounce driver loaded.
+Next gate after recovery is a separate minimal SC8180X EL2 kernel/DT design with
+remoteproc/SMMU ownership audited, retaining screen_only/nohibernate and normal
+boot. Do not attempt full Android on an unrelated chipset overlay.
