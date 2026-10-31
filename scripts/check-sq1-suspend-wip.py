@@ -113,8 +113,28 @@ int main(void) {
                                  env=dict(os.environ, CASE=case))
                     check('downs=0' in output, 'unexpected forced controller shutdown')
 
+        def ssam_policy_test(label, modified):
+            source = (tree / 'probe/power-input-boot').read_text()
+            run(['sh', '-n', tree / 'probe/power-input-boot'])
+            start = source.index('for module in ')
+            start = source.index('\ndone', start) + len('\ndone')
+            end = source.index('\nfor n in ', start)
+            # Exercise only the exact boot wake-policy block, without loading
+            # modules or starting Android/watchers. Driver default is disabled.
+            block = source[start:end]
+            fixture = tree / (label + '-sysfs') / 'serial1-0'
+            (fixture / 'power').mkdir(parents=True)
+            (fixture / 'modalias').write_text('of:Nsurface-aggregatorT(null)Csurface,aggregator\n')
+            (fixture / 'power/wakeup').write_text('disabled\n')
+            script = tree / (label + '-policy.sh')
+            script.write_text('set -eu\n' + block.replace('/sys/bus/serial/devices', str(fixture.parent)) +
+                              '\ncat "' + str(fixture / 'power/wakeup') + '"\n')
+            check(run(['sh', script]).strip() == ('disabled' if modified else 'enabled'),
+                  'SSAM wake policy fixture mismatch')
+
         gate_test('BASELINE')
         bridge_test('BASELINE', False)
+        ssam_policy_test('BASELINE', False)
         for entry in entries:
             dest = tree / entry['target']
             check(sha(dest) == entry['before_sha256'], 'series input mismatch')
@@ -122,6 +142,7 @@ int main(void) {
             check(sha(dest) == entry['after_sha256'], 'series output mismatch')
         gate_test('MODIFIED')
         bridge_test('MODIFIED', True)
+        ssam_policy_test('MODIFIED', True)
         for entry in reversed(entries):
             dest = tree / entry['target']
             check(sha(dest) == entry['after_sha256'], 'rollback input mismatch')
@@ -129,6 +150,7 @@ int main(void) {
             check(sha(dest) == entry['before_sha256'], 'rollback output mismatch')
         gate_test('ROLLBACK')
         bridge_test('ROLLBACK', False)
+        ssam_policy_test('ROLLBACK', False)
         for name, digest in originals.items():
             check(sha(tree / name) == digest and sha(baseline / name) == digest,
                   'rollback mismatch or original modified')

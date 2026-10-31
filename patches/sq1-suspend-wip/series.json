@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "status": "experimental checkpoint; real sleep/wake unverified",
+  "status": "experimental checkpoint; first real request aborted before idle; second black-screen outcome unresolved",
   "entries": [
     {
       "patch": "01-debug-whitelist.patch",
@@ -50,6 +50,14 @@
       "before_sha256": "779384f029aeca94729998098bcea40f37fee5777e8192df5cf969476ae27d31",
       "after_sha256": "cff7d3e7eadd25c2f671de81911c07f75da5a459a51f0179e2749a3f326a2c3e",
       "patch_sha256": "33e4d9c7f80eaae4582ba2fac18a601c827f53b1088abd4123cdb46ab0590576"
+    },
+    {
+      "patch": "08-preserve-ssam-wake-default.patch",
+      "target": "probe/power-input-boot",
+      "before_sha256": "8deb61e8869082620f37f953c2d0b850baa94246bf1c48c47c9d923bc1adb5ea",
+      "after_sha256": "bc00cea2e1212558eab441e50a81e49ab5a132102e7dc234742fec0c8c6af91b",
+      "patch_sha256": "f17fe0a9d413ec500b84b91f4db735382299fa85f860f667fed208b3e5c6e6d8",
+      "scope": "proposed boot-policy copy only, not deployed or validated as a sleep fix"
     }
   ]
 }

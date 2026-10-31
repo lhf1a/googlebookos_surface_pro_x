@@ -1,8 +1,79 @@
-# SQ1 suspend/wake checkpoint — 2026-10-30
+# SQ1 suspend/wake checkpoint — 2026-10-31
 
 **Work in progress, not a working suspend feature.** The user requested saving
 this checkpoint on a separate branch. No default build or normal boot entry is
 changed by this commit. It is not permission to test sleep on another device.
+
+## Latest result — 2026-10-31 (supersedes the initial checkpoint below)
+
+The operator returned and reported a short power-key press. Readback showed
+the same boot and core Android processes, an increased power-key IRQ count,
+Android Asleep with reason `power_button`, and no completed real-sleep request.
+That initial press only switched off the screen; it was not a wake test.
+
+### First coordinated request: early SSAM wake, not successful sleep
+
+The prepared one-shot script was uploaded with matching SHA-256 and executed
+once with `pm_test=none`. It consumed its own task's token and returned zero.
+The kernel success counter increased 0 to 1, but the trace did **not** contain
+`machine_suspend`: an IRQ arrived during noirq device suspend, before idle.
+
+- Kernel log: `Triggering wakeup from IRQ 172` on this boot.
+- IRQ mapping: `ssam_wakeup`, TLMM GPIO 180; not the separate PMIC power key.
+- `suspend-to-idle` and `resume from suspend-to-idle` were only about 2 microseconds
+  apart; there is no evidence of CPUs entering the actual idle wait.
+- The power-key count remained 2 before/after. Boot ID, system_server,
+  SurfaceFlinger and Bluetooth bridge were unchanged. Touch transport reported
+  ready, and the trial token and tracing were cleared on return.
+
+The local `power-input-boot` script explicitly forces the Surface Aggregator's
+`power/wakeup` to enabled. Its live hash matched the archived script. In contrast,
+the matching kernel's `ssam_irq_setup` documentation and `ssam_irq_handle` TODO
+state that EC event filtering is unimplemented: ordinary queued events can cause
+spurious wake. `core.c` therefore defaults the device's wake policy to disabled.
+This identifies a concrete conflicting policy, **not proof of the cause of the
+remaining black screen**. No specific EC event (battery, lid, etc.) was decoded.
+
+### Second coordinated request: black screen, post-test state unknown
+
+A separate single-run script was launched to temporarily set only the SSAM
+wake attribute to disabled, leaving PMIC power-key wake enabled. Its cleanup
+restores the original attribute after return. It did not replace a boot script,
+kernel, DTB, initramfs or menu and did not unload a module.
+
+The SSH session ended with connection reset (client exit 255); the only received
+stdout was the expected Image hash check. The remaining script output was
+directed to the ESP and has **not yet been recovered**. The operator explicitly
+reported short-pressing after this test and still seeing a black screen.
+Subsequent reads failed: ICMP timed out; TCP connected but SSH closed before
+key exchange. These observations do not establish that the kernel was alive,
+dead, rebooted, or had reached the idle wait. The second script's final attribute
+state, PM return, cleanup, trace and wake IRQ remain unknown.
+
+The operator was asked to long-press recover and use the original default boot
+entry. **Recovery has not yet been confirmed.** Do not label this test a pass or
+restart it automatically. The temporary sysfs setting does not survive a board
+reboot; no durable SSAM change was installed. If there was no reboot and cleanup
+did not run, its runtime state must be read back before further work.
+
+Patch 08 archives a proposed copy of `power-input-boot` removing its forced
+SSAM enable block while preserving all other code. It is **not deployed** and
+is **not a verified suspend fix**. Fixture baseline/rollback force `enabled`;
+the modified copy leaves the driver's `disabled` default. Exact source rollback
+and patch reconstruction passed. Do not promote it merely because it removes an
+early wake: doing so exposed an unresolved black-screen path in this experiment.
+
+Local evidence extends the same four-role set under `out/sq1-suspend-20261030/`:
+`real-trial/physical-real-1.*`, `real-trial/wake172.*`, and
+`ssam-wake-policy/physical-real-2.*`, reconnect results, source roles and the
+second test script. Raw logs and host/device identities remain private.
+
+**Next action:** confirm recovery and actual current IP/boot identity, retrieve
+the prior ESP test and kernel-live files before any new test, and reconcile them
+with the operator's black-screen report. If the frozen logger did not persist
+late-stage data, record that limitation instead of inventing a hang location.
+Then choose instrumentation for the remaining entry/resume failure. No working
+sleep/wake, repeated-cycle stability or default integration is established.
 
 ## Confirmed progress
 
@@ -31,7 +102,7 @@ changed by this commit. It is not permission to test sleep on another device.
   transport reopen messages were observed; software readiness is not a physical
   touch or display acceptance test.
 
-## Current experiment, not yet exercised in real sleep
+## Initial 2026-10-30 checkpoint (historical)
 
 The isolated candidate changes the `enter_state` screen-only rejection branch
 to also consult `sq1_trial_take`. It adds:
@@ -45,7 +116,9 @@ to also consult `sq1_trial_take`. It adds:
 The kernel compiled, QEMU checks passed, and the device booted this candidate.
 The unarmed physical request was rejected as intended; its failure-counter
 increment is a policy rejection, not a failed real-sleep attempt. Android and
-Bluetooth remained ready. The token is zero; no real sleep was invoked.
+Bluetooth remained ready. At that checkpoint the token was zero and no real
+sleep had been invoked; the October 31 attempts and unknown current state are
+recorded above.
 
 QEMU uses an intentionally failing fake device callback to check the real
 `pm_test=none` gate without entering idle. Unarmed, wrong-owner, other-caller,
@@ -58,10 +131,10 @@ but still needs a real sleep/wake test. A separate tracing instance was smoke
 tested with the boot clock, `power:suspend_resume`, and the observed power-key
 IRQ filter, then turned off. No global continuous tracing was enabled.
 
-The user subsequently said they were not available for physical operation.
-Work is blocked on coordinating the short power-key press, not on permission
-to reboot. Do not start actual sleep unattended, repeat recovery reboots, or
-disable the screen-only guard globally. Normal and rescue entries remain intact.
+At that checkpoint the user was not available for physical operation; the later
+coordinated attempts supersede that blocker. Do not start actual sleep unattended,
+repeat recovery reboots, or disable the screen-only guard globally. Normal and
+rescue entries remain intact.
 
 ## Archived source series
 
@@ -76,6 +149,7 @@ upstream Linux sources. Apply only on isolated copies with matching hashes:
 | 04 | Single-owner, expiring one-shot s2idle trial gate |
 | 05 | QCA type-4 NVM container parsing and bounds |
 | 06–07 | Direct HCI_USER handoff and prompt helper bind |
+| 08 | Proposed removal of forced SSAM wake enable; not deployed, not a proven fix |
 
 The historical helper predates newer Bluetooth input-watcher work on main.
 **Do not replace the current helper wholesale with the historical version.**
@@ -95,13 +169,14 @@ BASELINE/
   kernel/drivers/bluetooth/btqca.c
   probe/sq2-hci-bridge.c
   probe/bluetooth-framework-boot
+  probe/power-input-boot
 ```
 
 ```sh
 python3 scripts/check-sq1-suspend-wip.py BASELINE > verification.json
 ```
 
-The checker validates hashes, applies all seven patches to a temporary copy,
+The checker validates hashes, applies all eight patches to a temporary copy,
 checks each resulting hash, reverses the complete series, and verifies both
 the restored copy and untouched originals. It also compiles the extracted
 policy functions and a mocked bridge transport:
@@ -110,6 +185,7 @@ policy functions and a mocked bridge transport:
 | --- | --- | --- | --- |
 | Trial gate, first/second call | reject/reject | allow/reject | reject/reject |
 | HCI mock | forced down, timeout | no down, bind after two busy replies | forced down, timeout |
+| SSAM policy, driver initially disabled | forces enabled | leaves disabled | forces enabled |
 
 All checker assertions passed at export. The mock's expected baseline/rollback
 exit is 1; the modified success exit is 0. Modified fatal/busy exhaustion remains
@@ -142,9 +218,10 @@ hash-identified Images, not whichever build output happens to be newest.
 1. Obtain current operator availability for the power-key wake and screen/touch
    state. Revalidate local checkpoint against the live device; do not assume a
    saved PID, IP, IRQ, boot ID or disk identity is still current.
-2. Reuse the prepared local `real-trial/run-real.sh` only after reviewing its
-   preconditions. It has been syntax checked, **not executed**. Coordinate the
-   press approximately ten seconds after entry; it is not an automatic timer.
+2. Both prepared scripts have now been invoked once. Preserve their logs and
+   one-shot markers; do not reuse them blindly. After recovery and evidence
+   review, any further test needs fresh boot/IRQ/process preconditions and
+   coordinated physical wake. There is no automatic timer.
 3. Capture actual machine-suspend entry/exit and duration, wake IRQ, return code,
    unchanged boot ID, Android/BT/storage/display/touch recovery and user-visible
    result. A fast abort or a manual long-press reboot is not successful wake.
