@@ -1,0 +1,15 @@
+--- a/probe/sq2-hci-bridge.c
++++ b/probe/sq2-hci-bridge.c
+@@ -46,7 +46,11 @@
+         puts("SQ2_HCI_UP: real controller initialized by kernel");
+         close(hci); return 0;
+     }
+-    if (ioctl(hci,HCIDEVDOWN,dev)<0 && errno!=EALREADY) die("HCIDEVDOWN");
++    /* Bind during the kernel HCI_AUTO_OFF grace period. The USER-channel
++     * API can take over an initialized controller without another power
++     * cycle. Never force down a controller that may have another owner.
++     * SETUP/INIT and already-owned controllers retain the bounded wait.
++     */
+     struct sockaddr_hci addr={AF_BLUETOOTH,(uint16_t)dev,1};
+     /* Kernel setup is asynchronous; hci0 existing does not mean HCI_SETUP
+      * has cleared. Bound the wait instead of exiting permanently on EBUSY.

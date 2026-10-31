@@ -1,0 +1,25 @@
+{
+  "field": "/soc@0/geniqup@cc0000/serial@c8c000/bluetooth/max-speed",
+  "baseline": "b39a7f4b3381b48d194a0fb6a8ae59a06562f2ffbb06242b951f8805f23414dc",
+  "modified": "d08c0dded6907c0ada0ec7a7a3b219e7156e2f40b800c7171e7f733f486c2d5c",
+  "bytes": [
+    {
+      "offset": 28773,
+      "old": 48,
+      "new": 30
+    },
+    {
+      "offset": 28774,
+      "old": 212,
+      "new": 132
+    },
+    {
+      "offset": 28775,
+      "old": 0,
+      "new": 128
+    }
+  ],
+  "baseline_value": 3200000,
+  "modified_value": 2000000,
+  "scope": "Exact experimental DTB only. Not an instruction to byte-patch an arbitrary DTB."
+}

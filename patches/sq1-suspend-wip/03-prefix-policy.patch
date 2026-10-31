@@ -1,0 +1,23 @@
+--- a/kernel/kernel/power/suspend.c
++++ b/kernel/kernel/power/suspend.c
+@@ -79,6 +79,20 @@
+ #endif
+ }
+ 
++/* Diagnostic-only device-prefix experiment, checked under transition mutex. */
++bool sq1_pm_prefix_permitted(void);
++bool sq1_pm_prefix_permitted(void)
++{
++#ifdef CONFIG_PM_DEBUG
++    return sq2_screen_only && sq2_screen_only_test &&
++        pm_suspend_target_state == PM_SUSPEND_TO_IDLE &&
++        pm_test_level == TEST_DEVICES;
++#else
++    return false;
++#endif
++}
++
++
+ 
+ static const struct platform_suspend_ops *suspend_ops;
+ static const struct platform_s2idle_ops *s2idle_ops;

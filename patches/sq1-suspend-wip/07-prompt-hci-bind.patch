@@ -1,0 +1,11 @@
+--- a/probe/bluetooth-framework-boot
++++ b/probe/bluetooth-framework-boot
+@@ -38,7 +38,7 @@
+     sleep 1
+ done
+ test -d /sys/class/bluetooth/hci0
+-sleep 3
++# Start the bounded USER bind promptly; do not miss HCI_AUTO_OFF.
+ nohup /bin/sq2-hci-bridge 0 /dev/sq2-bt-h4 > /logs/bluetooth-bridge.txt 2>&1 < /dev/null &
+ bridge=$!
+ echo "$bridge" > /run/sq2-bt-bridge.pid

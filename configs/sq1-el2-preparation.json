@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "status": "offline-only; onsite confirmation required",
+  "slbounce": {
+    "url": "https://github.com/TravMurav/slbounce.git",
+    "commit": "c090a8cdafa25e4c99df90f8d6f73f3805d9b397",
+    "submodules": {
+      "gnu-efi": "8b018e67212957de176292f95718df48f49a418b",
+      "dtc": "3fbfdd08afd2a7a25b27433f6f5678c0fe694721",
+      "arm64-sysreg-lib": "d421e249a026f6f14653cb6f9c4edd8c5d898595"
+    }
+  },
+  "qebspil_commit": "8e4d9e676a3b3afe136cda9b953a2139ff1a32d0",
+  "qcom_secure_launch_commit": "30b4ceaafeb72d6bd56729dfdc4fc902f8eff967",
+  "tcb_sha256": "195997cf13a82f4715c92374b7918ab1f7231b2cc9be675b0846adf2995f8948",
+  "instructions": {
+    "0x427100": "0xf9403268",
+    "0x427104": "0x9101a100",
+    "0x427108": "0xf9402508",
+    "0x42710c": "0xd63f0100",
+    "0x427234": "0xb9007e89",
+    "0x427240": "0xf9003295",
+    "0x4274f4": "0x97ffff17",
+    "0x42752c": "0x97ff7f44"
+  },
+  "efi": {
+    "sltest.efi": {
+      "sha256": "12e5a3e918c48fb612de9f9ec50f18cadf208090ad91744d4bc5eca1ec0af23b",
+      "bytes": 62352,
+      "subsystem": 10
+    },
+    "slbounce.efi": {
+      "sha256": "ee7063a3f5b82af5f7745210257dc42bcce61757be83c8a2e5ede111550728ee",
+      "bytes": 97568,
+      "subsystem": 12
+    },
+    "dtbhack.efi": {
+      "sha256": "1c286ddc06a850d519111737c58ef7711e90ed8b95bf22db31e0d19ac1027cc1",
+      "bytes": 93064,
+      "subsystem": 10
+    }
+  }
+}
