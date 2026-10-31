@@ -12,14 +12,17 @@ for rel in system/build.prop system/etc/build.prop vendor/build.prop vendor/etc/
         /^ro\.product\.(.*\.)?manufacturer=/ {sub(/=.*/, "=Microsoft"); print; next}
         /^ro\.product\.(.*\.)?brand=/ {sub(/=.*/, "=Microsoft"); print; next}
         /^ro\.soc\.model=/ {next}
+        /^ro\.sf\.lcd_density=/ {next}
         {print}
     ' "$source" > "$target"
     if [ "$rel" = vendor/build.prop ]; then
         printf '\n# Physical SQ2 SoC, used by Diagnostics HardwareInfoProvider.\nro.soc.model=Microsoft SQ2\n' >> "$target"
+        printf '\n# Default UI density; per-user display settings can override it.\nro.sf.lcd_density=300\n' >> "$target"
     fi
     chmod 644 "$target"
     mount --bind "$target" "$source"
 done
 grep -qx 'ro.soc.model=Microsoft SQ2' "$root/vendor/build.prop"
+grep -qx 'ro.sf.lcd_density=300' "$root/vendor/build.prop"
 grep -qx 'ro.product.product.model=Surface Pro X' "$root/product/etc/build.prop"
 echo 'SQ2_DEVICE_INFO: Microsoft Surface Pro X / Microsoft SQ2'
