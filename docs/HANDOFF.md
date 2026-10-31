@@ -1855,3 +1855,5 @@ NotificationRecord已消失。未重启，boot仍a384f5c1…；未改内核页�
 com.android.settings/.development.PageAgnosticNotificationService。
 
 **2026-10-31 SQ1 EL2准备独立工作树**：分支 codex/sq1-el2-preparation-2026103；固定slbounce c090a8cd…，仅编译ARM64 sltest（12e5a3e9…），PE检查通过。SC8180X无现成overlay，尚缺本机TCB签名/版本与实测EL2证据。未部署/重启；SQ1的661/65Hz默认与SQ2状态不变。详见SQ1-EL2-PREPARATION.md。
+
+**2026-10-31 SQ2 EL2手动测试已准备，等现场结果**：用户指定.194并确认在场。合并Windows样本68b2b4a；微软TCB签名/哈希/8指令及sltest12e5a3e9…验证通过。独立EFI/SQ2EL2Test与手动首项已安装，默认Mesa不变、超时10秒，菜单5f69fe5d…，备份before-el2-manual-20261031为2cce07b4…。一次正常重启已发起，等待用户选测试、反馈绿条/错误并手动恢复；不自动测试/改SecureBoot/做休眠。详见SQ1-EL2-PREPARATION.md最新节。

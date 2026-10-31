@@ -126,3 +126,40 @@ SecureBoot efivar path was absent; state is UNKNOWN, not assumed disabled.
 No tcblaunch.exe at the two inspected mounted paths; Windows volumes were not
 mounted/scanned, so this is not proof that no local copy exists. Private inventory
 is `out/sq1-el2-preparation/sq1-inventory.txt`.
+
+## 2026-10-31 SQ2 (.194) manual experiment staged
+
+User explicitly redirected experiments to SQ2 192.168.8.194 and confirmed onsite
+keyboard/screen/recovery readiness. Pulled remote branch
+origin/codex/sq1-el2-preparation-20261031 (68b2b4a), merged as da4cb75.
+TCB Authenticode check: Valid/Microsoft Windows; pinned hash and eight callback
+instruction witnesses passed again. Only pinned sltest SHA12e5a3e9… deployed;
+no slbounce driver, DT overlay, new Linux kernel or automatic test request.
+Building all three upstream EFI tools here was blocked by incomplete dtc checkout;
+that does not affect the already built, hash-matching sltest used in this test.
+
+Fresh target: firmware8.256.140, NVMe serialCYA5N050012105J77,
+markerSQ2-INTERNAL-512-20261027, ESP B027-0512, data4f46d2ec…,
+root loop0 backing p3, guardY, old boota384f5c1…/Mesa2.7-60.
+TCB is from user's SQ1 firmware4.234.140; SQ2 firmware acceptance is untested.
+SecureBoot efivars not readable/listed; no trust-state change was made.
+
+Installed /EFI/SQ2EL2Test/{sltest.efi,tcblaunch.exe,SHA256SUMS}, atomically appended
+manual menu id sq2-el2-manual before existing entries. Persistent default remains
+sq2-baseline60-mesa; timeout temporarily10 for selection. Menu SHA5f69fe5d…,
+backup /EFI/BOOT/grub.cfg.before-el2-manual-20261031 SHA2cce07b4….
+GRUB chainloader excludes executable from LoadOptions; entry passes dummy
+sltest.efi argv0 plus quoted absolute EFI TCB path. GNU-EFI cmdline.c accepts
+LoadedImage fallback, so no EFI shell is needed for this invocation.
+
+Source audit correction: trans.s tb_entry executes HVC1, accesses sctlr_el2, then
+uses framebuffer to draw a green bar and halt. With test_main.c's nonzero GOP
+framebuffer, the green-bar/halt branch occurs before the C psci_off continuation.
+Earlier warning that README disagreed with actual test flow was incomplete.
+Observed green bar would support single-CPU EL2 takeover in this code path;
+it does not prove all CPU EL2/KVM, Linux boot or AVF Terminal availability.
+
+One normal reboot requested after user onsite confirmation. User instructed to
+select manual first entry, observe, then long-press off/reboot original Mesa.
+Screen result/recovery pending. Do not count SSH loss as successful takeover.
+Private preparation/install evidence: out/sq2-el2-test/. No suspend tests.
