@@ -36,6 +36,8 @@ with tempfile.TemporaryDirectory(prefix='sq2-el2-rmtfs-') as directory:
     firmware='qcom/msft/surface/pro-x-sq2/qcmpss8180.mbn'
     run('normal','offline',firmware,['-r','-o','/run/rmtfs','-s','-v'])
     run('sq2.el2=experimental','attached',firmware,['-r','-o','/run/rmtfs','-v'])
+    run('sq2.el2=1','attached',firmware,['-r','-o','/run/rmtfs','-v'])
+    run('sq2.el2=1','offline',firmware,None)
     run('sq2.el2=experimental','offline',firmware,None)
     run('sq2.el2=experimental','running',firmware,None)
     run('sq2.el2=experimental','attached','unknown',None)

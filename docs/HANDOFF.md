@@ -1,5 +1,46 @@
 # SQ2 开发交接
 
+**2026-11-02 默认双启动已部署：EL2 / 高通Vulkan / 60Hz / GPU700，音频爆音仍开放**。
+用户要求将本轮成果提交主线，默认纳入终端、视频和音频修复，并只保留新构建与
+当前能启动的回退项。现GRUB恰好两项：sq2-default → EFI/SQ2Default（高通Vulkan），
+sq2-fallback → EFI/SQ2Fallback（Mesa）。正常参数sq2.el2=1；保留screen_only与
+nohibernate、原用户/凭据、FUSE和所有已验收外设策略；不再调用实验日志bind、
+kmsg收集或360秒恢复。高通仅为既有Vulkan运行包，GLES仍Mesa，不声称全闭源栈。
+
+两个最终initramfs均为d643ea0ee7a4c06cc84705611c30e07fe9ccde08a9c6e0905d0dcc784022e305。
+Image c1ef559f…、DT85b436a3…、qebspile3675e36…保持；两launcher分别为
+默认dc7b5ac9…与回退1e6da8d0…。菜单SHA9f1ee01e…；构建入口和固定输入见BUILD。
+实际归档测试核对全部生效条目、媒体/固件/音频/高通库/凭据及视频清单，除正常
+启动钩子外无变化；私有password addon仍最后。默认构建额外固定能出声的模块对。
+
+回退boot8beb943f…通过Android/user10、声卡/AUDIO_READY、video0/no-TZ、
+KVM witness42、实际60Hz/GPU700与AAudio528000帧/零xruns。Debian曾正常关机，
+重新打开后真实droid@debian提示符可用；不将guest退出误记为board/framework崩溃。
+高通默认boot35308ea7…系统vkjson实际枚举Qualcomm Adreno Vulkan Driver，
+HAL4dee0a10…、实际音频HAL774cd7e7…；H2641080p自动选硬件解码300输入/输出/渲染，
+EOS/STOP/RELEASE通过、9963ms，system_server/SF PID2507/2542不变。原终端
+实际返回aarch64、uid1000(droid)、HTTPS200。更多EL2编解码/guest内部硬解未重测。
+
+用户随后报告两项均停播爆音。发现EL2重编音频模块遗漏旧静音补丁，但单独恢复
+sdm845提前静音与wsa881x PRE_PMD后（包7c6a4ee0…、boot753b0eb1…），用户反馈
+完全无声，虽两次PCM均528000帧/零xruns。该候选失败，已回退为d643ea0e…，
+最终bootdd91a353-05ac-4027-8280-5b93d79b7cbe，用户明确确认“已恢复声音”。
+**停播爆音未修复，不得将寄存器/PCM成功写成听感通过，也不得默认启用失败补丁。**
+声卡模块恢复sdm845 e1d1be6b… / wsa881x b165ca2c…；Image/配置/Module.symvers不变。
+下一次先核对原始完整启动/解除静音路径，不能仅凭遗漏补丁推断全部根因。
+
+磁盘身份：BC711512GB/CYA5N050012105J77，ESP B027-0512，userdata4f46d2ec…，
+root loop0来自p3。旧ESP完整备份在data/local/tmp/sq2-boot-backups/
+before-default-20261102/esp，并有逐文件SHA清单与全部通过的回读记录。
+最终菜单原子替换并回读后，删除八个旧实验EFI目录、旧boot载荷、ESP日志及旧安装
+资料和过时once环境文件。保留两个载荷、共享GRUB/按键引导器/firmware及磁盘身份
+文件；它们不是第三个系统启动项。ESP剩1586776KiB。userdata/系统分区未格式化。
+私有证据位于out/default-20261102-v2、out/default-20261102-audio-v2；最终正常构建
+为out/default-20261102-final-v2，保留固定Image对应的基线kheaders，避免重编时的
+头文件归档漂移。最终重建两initramfs、两launcher及菜单hash均复现已部署版本，
+实际归档测试和失败音频补丁隔离测试通过；无需为相同字节再重启。
+以下早期“重启待验/默认Mesa/回退计时”记录为历史状态。
+
 **2026-11-02 EL2音频无声已定位并在线恢复，持久包重启验收中**：用户报告无声，
 boot仍为3a8da95c…。/proc/asound/cards无声卡，audio-framework日志只有driver
 initialization失败。audio-drivers-start在加载任何音频模块前只接受ADSP state=running；

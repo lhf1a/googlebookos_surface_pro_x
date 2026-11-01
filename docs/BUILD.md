@@ -1,5 +1,49 @@
 # 构建与部署
 
+### 2026-11-02：当前 SQ2 默认构建为 EL2 / 高通 Vulkan / 60 Hz / 700 MHz
+
+`build-source-boot.py` 默认转到 `build-sq2-default.py`，输出两个独立 EFI 目录与
+恰好两个入口的 `grub.cfg`。新默认为 SQ2Default（高通 Vulkan），SQ2Fallback
+保留已工作的 Mesa；两者同为 EL2、原生60Hz、GPU700/RPMh432，包含 no-TZ视频、
+终端及 attached ADSP音频修复。高通选择只切换已有闭源Vulkan运行包，GLES/桌面
+继续沿用既有实现，不代表完整闭源GLES已适配。
+
+```sh
+python3 scripts/build-source-boot.py --output out/default-20261102-final-v2 --passwordless-user 10
+python3 tests/test_sq2_default_boot.py out/default-20261102-final-v2
+```
+
+构建输入：`out/default-input` 为已重启验收的当前SQ2六文件及共享firmware快照；
+`configs/sq2-default-inputs.json`逐文件锁定hash。launcher源码输入为既有
+`out/el2-android/android-el2-v15-full/efi-source`，Makefile及源码也逐文件锁定；
+依赖已准备的slbounce external工具链。参数可指定其它缓存路径但不能绕过hash。
+内核来自 `/root/.cache/sq2-el2-smr-20261101/build`，Venus来自
+`/root/.cache/sq2-venus-no-tz-v4`，固件stream overlay来自
+`/root/.cache/sq2-venus-fw-overlay-v1/sq2_fw_overlay.ko`。
+packer重新组装匹配模块、索引及源码助手；这一步复用已编译的Image/模块，
+不声称重新编译内核或专有固件。内核源码构建命令仍见下方EL2章节。
+
+停播爆音仍未解决：恢复`patch-sq2-audio-sequencing.py`的候选虽通过PCM检查，
+用户却确认完全无声；已回退并由用户确认声音恢复，未把失败补丁加入默认内核。
+默认bundle按`audio_modules`固定能出声的sdm845/wsa881x模块hash，拒绝混入
+未经听感验收的替代版本。临时外部M=目录构建会去掉intree标记，应使用原内核树
+的`make modules`生成正常in-tree模块。原Image/配置/导出表保持，最终实际包
+与已验证d643ea0e…一致。两项均保留当前停播爆音限制，不能标为全部音频问题解决。
+`kheaders.ko`会随模块编译重新生成内嵌头文件归档；由于Image固定，默认打包显式
+保留hash锁定基线中的匹配kheaders，归档测试要求它与基线逐字一致。
+
+正常启动使用 `sq2.el2=1`；保留原modem接管、KVM检查、SSH及终端自动启动，
+删除实验ESP日志bind、kmsg收集与360秒自动回退调用。no-TZ helper同步接受正常
+EL2参数；所有媒体/音频/高通运行库及凭据不变，私有password addon仍最后。
+不传 `--passwordless-user` 时不指定账号；传入时仍由运行时检查现有用户及安全锁，
+不会清除凭据或创建账号。当前设备为已验证无密码的用户10。
+
+此默认bundle绑定本机512GB SQ2的布局和firmware，不能用于SQ1或通用安装盘。
+旧EL1磁盘构建须显式使用 `build-source-boot.py --legacy-el1`；其余旧参数保留。
+`build-source-disk.py`仍是独立的旧128GB安装镜像流程，不用于部署这个bundle。
+构建只输出文件；设备磁盘识别、备份、gzip/hash、原子安装及实际重启结果见HANDOFF。
+旧章节中的“默认Mesa”“实验倒计时”等描述为历史状态，以本节及最新交接为准。
+
 2026-11-02音频补充：audio-drivers-start接受同一ADSP的running/attached两种活动
 状态，避免EL2在加载声卡前退出。pack-sq2-el2-android.py显式刷新该共享helper，
 build-source-boot.py原有shell刷新逻辑也已覆盖。test_sq2_audio_adsp_state.py验证

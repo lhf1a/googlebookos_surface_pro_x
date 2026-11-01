@@ -45,10 +45,10 @@ ls() { :; }
 nsenter() { echo "nsenter $*" >> "$FIXTURE/actions"; return 1; }
 reboot() { echo "reboot $*" >> "$FIXTURE/actions"; }
 '''
-for mode in ('normal', 'guard', 'keep', 'fallback'):
+for mode in ('normal', 'normal_el2', 'guard', 'keep', 'fallback'):
     with tempfile.TemporaryDirectory() as temporary:
         d = Path(temporary)
-        (d / 'cmdline').write_text('' if mode == 'normal' else 'sq2.el2=experimental')
+        (d / 'cmdline').write_text('' if mode == 'normal' else 'sq2.el2=1' if mode == 'normal_el2' else 'sq2.el2=experimental')
         (d / 'guard').write_text('N' if mode == 'guard' else 'Y')
         if mode == 'keep': (d / 'keep').touch()
         code = recovery.replace('/proc/cmdline', str(d / 'cmdline'))
@@ -61,7 +61,7 @@ for mode in ('normal', 'guard', 'keep', 'fallback'):
         actions = (d / 'actions').read_text() if (d / 'actions').exists() else ''
         assert ('sys.powerctl reboot' in actions) == (mode == 'fallback')
         assert ('reboot -f' in actions) == (mode == 'fallback')
-        if mode in ('normal', 'guard'): assert not actions and result.returncode != 0
+        if mode in ('normal', 'normal_el2', 'guard'): assert not actions and result.returncode != 0
         else: assert actions.count('sleep 180') == 2 and result.returncode == 0
         assert ('Recovery canceled' in result.stdout) == (mode == 'keep')
 print('PASS: hook order, optional observer, duplicate rejection, recovery guards/cancel/fallback')

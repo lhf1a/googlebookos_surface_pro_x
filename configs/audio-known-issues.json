@@ -1,13 +1,13 @@
 {
-  "updated": "2026-10-27",
+  "updated": "2026-11-02",
   "device": "Surface Pro X SQ2",
   "priority": "active",
   "source": "User listening reports and bounded ALSA/Android comparisons on 2026-10-27",
   "issues": [
     {
       "id": "speaker-pop-after-stop",
-      "description": "新静音模块配合 pmdown_time=0：直接 ALSA 两遍、同文件 AAudio 两遍及视频暂停等待10秒再恢复两轮，用户均确认无爆音。配置已在线启用并写入启动镜像；尚未验证此次启动策略的重启持久性及长期表现。",
-      "status": "mitigated_pending_reboot_and_extended_validation"
+      "description": "EL2高通默认项和Mesa回退项均由用户确认停播爆音。恢复旧静音补丁的候选使播放完全无声，虽PCM写入正常，听感验收失败；已回退，用户确认声音恢复。缺补丁不是完整根因证明，下一步须核对原启动/解除静音行为；不增加增益。",
+      "status": "open_el2_regression_audible_baseline_restored"
     },
     {
       "id": "speaker-missing-bass",

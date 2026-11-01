@@ -25,6 +25,8 @@ if __name__ == '__main__':
                         help='Optional consistency check; default comes from build-audit.json')
     args=parser.parse_args()
     b.O=b.BOOT=args.boot_dir.resolve();b.C=args.cache_dir.resolve()
+    if (b.O/'build-audit.json').exists() and json.loads((b.O/'build-audit.json').read_text()).get('profile') == 'el2-qualcomm-60-700':
+        parser.error('This is a device-specific 512GB EL2 bundle; do not use the legacy 128GB disk builder. See docs/BUILD.md.')
     # Boot-time exact capacity/partition/UUID guards must match the new disk.
     c_spec = importlib.util.spec_from_file_location('cpio', R/'scripts/pack-sq2-vulkan.py')
     c = importlib.util.module_from_spec(c_spec); c_spec.loader.exec_module(c)

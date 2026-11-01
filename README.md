@@ -6,7 +6,7 @@ An Android-based Googlebook OS port for **Surface Pro X SQ2 / Snapdragon 8cx Gen
 
 ## Feature status
 
-Updated **2026-10-30** · ✅ Available · ⭕️ Partially available · ❌ Unavailable or not confirmed
+Updated **2026-11-02** · ✅ Available · ⭕️ Partially available · ❌ Unavailable or not confirmed
 
 | Feature | Status | Notes |
 | --- | :---: | --- |
@@ -20,11 +20,12 @@ Updated **2026-10-30** · ✅ Available · ⭕️ Partially available · ❌ Una
 | Bluetooth | ⭕️ | Pairing and saved ON/OFF state; HID compatibility still limited |
 | Touchscreen | ✅ | Multitouch and edge ghost-touch fixes |
 | Keyboard cover & touchpad | ✅ | Hotplug recovery |
-| Built-in speakers | ✅ | User-verified loudness, stereo and stop/start; default RX 0 dB (+12 dB versus original) |
+| Built-in speakers | ⭕️ | Playback restored and user-confirmed; EL2 stop-pop remains open; default RX 0 dB |
 | Built-in microphone | ✅ | Stereo/mono recording and playback |
-| Hardware video decoding | ⭕️ | AVC / HEVC / VP8 / VP9 SDR; resolution/profile limits apply |
+| Hardware video decoding | ⭕️ | Current EL2: Android H.264 1080p verified; HEVC / VP8 / VP9 results are from EL1 |
+| Linux Terminal | ⭕️ | EL2 Debian shell and HTTPS verified; guest hardware decoding unverified |
 | HDR video | ❌ | Not supported as a complete application feature |
-| Vulkan & games | ⭕️ | Turnip Vulkan 1.3; application-specific compatibility limits |
+| Vulkan & games | ⭕️ | Qualcomm Vulkan by default, Mesa fallback; application compatibility limits remain |
 | Closed Qualcomm graphics | ⭕️ | Some paths usable; full-system compatibility incomplete |
 | Internal display | ⭕️ | Native 60 Hz; optional device-specific ~65 Hz profile |
 | External USB-C DisplayPort | ❌ | DP / AltMode integration incomplete |
@@ -42,7 +43,7 @@ Availability is scoped to the documented SQ2 configuration, not every peripheral
 
 ## Build & documentation
 
-Default source builds include **hardware video, USB storage/audio and Bluetooth input fixes**, with separate normal/rescue policies and selectable display profiles.
+The current SQ2 default bundle uses **EL2, Qualcomm Vulkan, native 60 Hz and GPU 700 MHz**, with a working Mesa fallback. It includes the Linux Terminal, EL2 H.264 decoding and adopted-ADSP audio fixes. The legacy EL1 installer requires `--legacy-el1`; see BUILD for pinned private inputs and device restrictions.
 
 - [Build & deployment](docs/BUILD.md) · [Current handoff](docs/HANDOFF.md) · [Open work](docs/TODO.md)
 - [USB storage/audio](docs/USB-FUNCTIONS.md) · [Bluetooth input](docs/BLUETOOTH-INPUT.md) · [Microphone](docs/MICROPHONE.md)

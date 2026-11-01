@@ -215,4 +215,10 @@ def main():
     (output.parent/'build-audit.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps({k:v for k,v in report.items() if k!='changed'}))
 
-if __name__=='__main__': main()
+if __name__=='__main__':
+    import sys, runpy
+    if '--legacy-el1' in sys.argv:
+        sys.argv.remove('--legacy-el1')
+        main()
+    else:
+        runpy.run_path(str(R/'scripts/build-sq2-default.py'), run_name='__main__')

@@ -45,6 +45,7 @@ class AutostartTest(unittest.TestCase):
             d = Path(tmp)
             cmdline = 'sq2.el2=experimental'
             if mode == 'normal': cmdline = ''
+            if mode == 'default': cmdline = 'sq2.el2=1'
             if mode == 'rescue': cmdline += ' sq2.rescue=1'
             (d / 'cmdline').write_text(cmdline)
             (d / 'guard').write_text('N' if mode == 'guard' else 'Y')
@@ -67,7 +68,7 @@ class AutostartTest(unittest.TestCase):
                                     env=dict(os.environ, FIXTURE=tmp, MODE=mode),
                                     capture_output=True, text=True, timeout=5)
             calls = (d / 'launches').read_text().splitlines() if (d / 'launches').exists() else []
-            if mode in ('ready', 'switch', 'launch_fail', 'passwordless'):
+            if mode in ('ready', 'default', 'switch', 'launch_fail', 'passwordless'):
                 self.assertEqual(calls, ['/system/bin/cmd activity start-activity -W --user 10 -n '
                                         'com.android.virtualization.terminal/.new2.ui.MainActivity'])
             else:
@@ -75,15 +76,15 @@ class AutostartTest(unittest.TestCase):
             actions = (d / 'user_actions').read_text().splitlines() if (d / 'user_actions').exists() else []
             expected = ['/system/bin/cmd activity start-user -w 10', '/system/bin/cmd activity switch-user 10']
             self.assertEqual(actions, expected if mode == 'passwordless' else expected[:1] if mode == 'user_start_fail' else [])
-            success = mode in ('ready', 'switch', 'normal', 'rescue', 'passwordless')
+            success = mode in ('ready', 'default', 'switch', 'normal', 'rescue', 'passwordless')
             self.assertEqual(result.returncode == 0, success, result.stderr)
             self.assertEqual('LAUNCH_REQUESTED_NOT_SHELL_PROOF' in result.stdout,
-                             mode in ('ready', 'switch', 'passwordless'))
+                             mode in ('ready', 'default', 'switch', 'passwordless'))
             self.assertFalse((d / 'users/0').exists())
 
     def test_guards_waits_and_launch(self):
         for mode in ('normal', 'rescue', 'guard', 'kvm', 'boot', 'stage',
-                     'image', 'invalid', 'ready', 'switch', 'launch_fail',
+                     'image', 'invalid', 'ready', 'default', 'switch', 'launch_fail',
                      'passwordless', 'secure', 'missing_user', 'user_start_fail', 'bad_target'):
             with self.subTest(mode=mode): self.run_case(mode)
 
