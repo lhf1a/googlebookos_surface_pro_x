@@ -251,6 +251,29 @@ Debian HTTPS 200和文件下载已通过，无额外防火墙旁路。
 完整EL2启动已通过模块清单校验，但视频PAS认证仍失败，未通过EL2硬解；
 EL1完整Android控制组的硬解结果及最新EL2阶段见HANDOFF。
 
+### 2026-10-31：默认 KernelSU Next 支持
+
+`build-source-boot.py --ksu on|off` 默认 on，采用已实机验证的 Next 3.2.0
+内建内核（33129）。`sq2-ksu-boot-payload.py` 固定 Image、ksud、官方管理器
+哈希，拒绝未验证的替代输入。原无 KSU 内核同时输出为 `Image-rescue`；
+`build-source-disk.py` 的救援项明确使用它，正常项保留 `lsm=selinux`、
+`suspend.screen_only=1`、`nohibernate`。`--ksu off` 使用原内核且不加入安装助手。
+
+输入为 `out/ksunext/Image-candidate`、`ksud`、`manager-verified.apk`；来源与
+SHA256见 [ROOT-MANAGEMENT.md](ROOT-MANAGEMENT.md)。新源码构建先运行
+`python3 scripts/prepare-sq2-ksunext.py`（独立目录，拒绝覆盖），再运行
+`bash scripts/build-sq2-ksunext.sh`。准备器克隆并核对固定 Next 提交，恢复
+memfd/音频/蓝牙/只关屏补丁。重新生成的不同哈希必须重新验证后更新打包固定值，
+不能自动把任意新编译内核当已验证版本。私有构建依赖仍按本文件原有要求准备。
+
+`ksu-framework-boot` 在 Android boot_completed 后、有界等待并校验载荷，
+仅在缺失时安装 ksud 和当前用户的官方管理器；不覆盖已有安装或降级管理器。
+首次新设备安装后，模块开机生命周期在下一次启动可用；助手不自动重启。
+`sq2.ksu=0` 仅跳过用户态安装，不禁用内建内核代码；需要完全无 KSU 时用
+救援内核或 `--ksu off` 构建。Zygisk/Device Faker 不作为默认预装模块。
+凭据 addon 仍保持最后；助手日志仅为有界启动输出。该新增首启助手须与之前
+已验证的手动安装区分，完整链路实机状态见 ROOT-MANAGEMENT。
+
 ### 2026-10-31：首次启动按本机校准
 
 首次向导现加入边缘拇指检查：3次持续5秒慢拖，随后轻点、拖动和双指确认。
