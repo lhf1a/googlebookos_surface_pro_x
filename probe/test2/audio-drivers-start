@@ -1,9 +1,14 @@
 #!/bin/busybox sh
-# Load only after ADSP is running; do not unload/reset shared remote processors.
+# Load only after ADSP is active; do not unload/reset shared remote processors.
 set -eu
 export PATH=/bin:/sbin
 test "$(cat /sys/class/remoteproc/remoteproc2/name)" = 17300000.remoteproc
-test "$(cat /sys/class/remoteproc/remoteproc2/state)" = running
+# EL2 adopts the firmware-started ADSP as attached, which is also active.
+state=$(cat /sys/class/remoteproc/remoteproc2/state)
+case "$state" in
+    running|attached) ;;
+    *) echo "AUDIO_FAILED: ADSP state=$state"; exit 1;;
+esac
 # The 6.3 NGD child must finish registering before the locator announces its
 # audio domain. Temporarily stop only the retained initramfs mapper, then
 # reannounce after module initialization; never reset the shared ADSP.

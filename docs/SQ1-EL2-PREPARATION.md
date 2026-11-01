@@ -1,5 +1,22 @@
 # SQ1 EL2 接管：离线准备归档（2026-10-31）
 
+## 当前验收与阻塞（2026-11-01，优先于下方历史状态）
+
+目标包含EL2 Linux终端、用户10自动进入，以及用户明确要求保留的Android硬解和
+KernelSU Next。终端可启动不等于全部完成；持久默认仍为正常Mesa入口。
+
+| 项目 | 当前证据与结论 |
+| --- | --- |
+| 用户10/原Linux镜像 | 无安全锁；无人操作重启后RUNNING_UNLOCKED、实际Debian shell及HTTPS通过；未清除凭据 |
+| KernelSU Next | 临时应用未授权拒绝、授权后uid0/ksu域、撤销后拒绝均通过；应用已卸载 |
+| EL2 Android硬解 | no-TZ持久启动已通过：H264 baseline六帧CRC、High+B六帧Surface逐字节、重启后自动选择1080p High300帧实时播放；更多格式/长时负载待验证 |
+| 启动依据 | SQ1 CSRT/PIL关联SID2342，SQ2运行故障确认；扩展SMR补丁及最终NONPIX边界修正后启动成功，保留Linux42固件 |
+
+新boot3a8da95c…验证了首次no-TZ固件启动、Android实际硬解及原用户Debian shell/
+HTTPS共存；启动包已持久更新，正常默认仍Mesa。PAS认证路径自身并未修复，EL2
+显式选用有实机证据的no-TZ路径。不要再重复已完成的EL1认证、GR0差分或EFI名字
+查询；也不要启用SC8180X黑名单中的SHM。运行范围、hash和回退见HANDOFF。
+
 ## 状态与许可
 
 已完成签名 TCB 回调路径定位和本地主机构建；**尚未运行 EFI、验证固件接受载荷或启动 EL2 Linux**。用户允许准备独立测试介质，测试前由用户确认现场就绪。不修改默认启动、不自动关闭 Secure Boot、不重启、不写未识别的磁盘。本文不是实机成功报告，也不将阶段 1/2 全部标为完成。
@@ -735,3 +752,194 @@ must not be treated as validation of the PAS response payload. RMTFS has its
 own checked response handling; equivalent PAS response auditing is pending.
 No PAS fix has yet been implemented. Real Wi-Fi, hardware decoding, KSU and
 Android Linux Terminal acceptance remain outstanding.
+
+
+## 2026-11-01 EL1 controls isolate modem authentication timing
+
+These controls intentionally keep the EFI firmware loader and Linux attach path
+while removing the Secure Launch/EL2 transition. They are not normal boot and
+are not Terminal deliverables. Normal Mesa/Qualcomm/Rescue entries remain intact.
+
+| Boot path | Firmware lifecycle | Linux entry / userspace |
+|---|---|---|
+| Normal | Linux drivers load, authenticate and start firmware | EL1; normal Android boot |
+| EL2 preboot diagnostic | EFI prepares/starts firmware; Linux attaches | Secure Launch to EL2; diagnostic initramfs |
+| EL1 preboot control | Same experimental preparation/attach path, with the per-version auth changes below | Secure Launch skipped; EL1; diagnostic initramfs |
+
+Disabling Secure Launch alone does not select the normal Image, DT or initramfs,
+or restore the normal firmware lifecycle. The diagnostic initramfs collects
+evidence and reboots instead of starting Android. Its existing menu label still
+says EL2 even while an EL1 control is installed; use boot evidence to identify
+the actual exception level. Return to the normal entry for normal boot.
+
+| Control | Modem authentication | Explicit Linux proxy votes / QMP | Observed result |
+|---|---|---|---|
+| v14 | EFI protocol | no / yes | no modem inbound entries, no Wi-Fi |
+| v16 | Linux, after EFI init/mem/load | yes / yes | auth and ready return 0; modem IPCRTR and three inbound entries; Wi-Fi QMI version, no wlan0 |
+| v17 | Linux, after EFI init/mem/load | yes / no | same as v16 |
+| v18 | as v17, remove Wi-Fi msa-fixed-perm | yes / no | modem ready; MSA assignment fails -22, no wlan0 |
+| v19 | Linux, after EFI init/mem/load | no / no | same modem/QMI progress as v16, no wlan0 |
+| v20 | EFI direct 64-bit SMC | no / no | raw auth a0..a3 all zero; no modem inbound entries, QMI version or wlan0 |
+
+The normal system also has `qcom,msa-fixed-perm`; the earlier assumption that it
+was EL2-only was wrong. v19 restores this property. Do not remove it from normal
+or EL2 candidates based on v18. No votes in this table means no extra modem
+proxy requests from the modified driver, not proof that every hardware resource
+is off: other Linux initialization remains a difference from EFI.
+
+EFI metadata, firmware bytes, load bases and spans have matched the normal
+loader. v19 demonstrates that these EFI-loaded modem bytes can reach ready when
+Linux performs auth later, without the extra proxy/QMP requests. It does not
+prove a particular clock, voltage, or timing root cause. v20 used direct 64-bit
+SMC modem authentication in EFI instead of the EFI protocol wrapper, retaining
+EL1 as a control. Transport and raw a0..a3 were all zero, but modem inbound
+item435 still had zero entries; no Wi-Fi QMI version or wlan0 appeared. The
+wrapper change did not solve startup. Normal boot automatically recovered as
+e2e359b4-1118-46de-a78e-1f88386ff85b (boot_completed=1, screen_only=Y).
+Pre-Linux bounded read-only SMEM capture is the next proposed diagnostic to
+distinguish EFI startup failure from state lost during handoff; not implemented.
+
+The isolated source and artifacts are private under out/el2-android and
+/root/.cache. The EL1 kernel tree currently contains the v19 no-proxy experiment;
+do not use it as the normal or final EL2 module set. These experimental controls
+have not been integrated into production builders. Terminal shell, EL2 Wi-Fi,
+actual hardware decoding, and KSU runtime parity remain required.
+
+## 2026-11-01 full Android EL1 v19 control
+
+At the user's request, moved directly from the modem-ready v19 control into
+full Android instead of adding another pre-Linux SMEM probe. The paired Image
+and 327 modules retain the exact config/export interface of the full payload;
+the DT restores normal EL1 GPU zap-shader initialization. This remains EL1,
+with no Secure Launch or KVM claim. Normal boot entries/default are retained.
+
+Boot d0efdb3f-51e0-4926-a3eb-f5db9a40a25c reached boot_completed=1, wlan0 and
+SSH; user confirmed desktop/lockscreen. Logs show modem auth/ready=0 and Wi-Fi
+firmware/HTT initialization around 19 seconds. The six-minute recovery was
+canceled through the explicit RAM keep marker after these checks. This proves
+the v19 preboot/deferred-auth path can support Wi-Fi in full Android; the exact
+remaining difference from the RAM-only Wi-Fi test has not been isolated.
+
+Video initially failed safely before module insertion: the Android packer had
+replaced all 11 video modules but retained the old runtime SHA256SUMS. Fixed
+the packer to validate the original manifest and regenerate it from final
+module bytes, with a host regression test. After checking the actual files and
+updating the RAM manifest, the existing startup helper loaded the backend.
+An actual V4L2 AVC decode then matched all six reference-frame CRCs (mask=3f),
+with EOS/LAST and clean release. This is EL1 hardware evidence, not EL2 or a
+complete Android MediaCodec format regression. KernelSU code is active, but
+ksud/manager/authorization parity is still unverified. Terminal remains pending.
+
+Candidate/evidence: ignored out/el2-android/android-el1-v19. New menu hash:
+570089780b16d0d0f57b67077299e40031238fbf4fab3d22f13d840ff167231e.
+Old diagnostic installers must not assume the previous 3e63f6a8 menu hash.
+
+## 2026-11-01 real EL2 full Android v15 result
+
+The v15 EL2 Image/EFI/DT and corrected parity-pack-v4 full Android payload booted
+as c2d37875-d7fa-4717-af4b-74c37d2a6f69. Logs confirm all CPUs EL2;
+boot_completed=1, screen_only=Y, wlan0 and SSH are present. The early terminal
+stage ran a real one-vCPU MMIO witness42 successfully. Recovery was explicitly
+canceled after these checks. Full-system Wi-Fi works; earlier RAM-only modem
+failures do not establish failure of this full boot path. The exact difference
+between those environments remains unisolated.
+
+Video is not yet working under EL2: the preserved native loader reaches PAS9
+but qcom_mdt_load initialization returns -22. Shutdown returns0 and the existing
+owner frees memory; the overlay remains resident and /dev/video0 is absent.
+Do not hot-unload/retry PAS in this boot. Firmware preparation before EL2 and a
+checked Linux takeover are still required; ELF init/mem_setup in EFI followed
+by Linux no_init loading/authentication is an untested candidate direction.
+
+The user confirmed the original desktop; active user10 is unlocked. Direct
+cmd activity start-activity launched the resolved Terminal component. Actual
+visible shell commands verified Debian13.7 trixie/aarch64, droid uid1000, eight
+CPUs and DNS. Temporary guest file read/write passed; /mnt/shared automounted
+as virtiofs. Guest shutdown/relaunch also worked without rebooting Android.
+HTTPS still times out; host HTTPS succeeds. Missing early sch_ingress/cls_bpf
+and missing CT/FTP/PPTP kernel support are being corrected in a separate full
+Android candidate. No persistent firewall bypass has been installed.
+Pinned ksud and manager were installed for user10; matching runtime hash and
+manager Working/33129/Kprobes were observed. Root authorization and reboot
+lifecycle remain to be verified. See HANDOFF for exact evidence and limits.
+
+The current menu SHA256 is
+a43d292de384a342cab29f24f0cedae570dcce692a480886d39fe0b7501d71df;
+normal Mesa remains the persistent default. Details/artifacts are in HANDOFF.
+
+## 2026-11-01 Wi-Fi绕路复盘与后续实验规则
+
+本节更新上述历史状态。用户指出这轮绕路过多，要求后续不要重演。
+主要问题是验证顺序：长期把精简RAM诊断当作完整Android的前置验收，
+过早围绕EL2/固件启动展开多轮底层修改，完整系统对照做得太晚。
+
+| 当时的判断或做法 | 实际证据 | 后续规则 |
+|---|---|---|
+| RAM诊断没有wlan0，持续追查EL2/预启动 | v19完整EL1、随后v15完整EL2都出现wlan0并可SSH | 存储、屏幕保护和恢复条件具备后，尽早测完整Android；精简环境不能代替目标环境 |
+| 去掉Secure Launch就接近正常启动 | 实验Image、DT、initramfs和EFI固件接管仍在；诊断init本来不启动Android | 对照必须列出执行级别、固件生命周期、载荷和用户态，不能只比较EL1/EL2标签 |
+| 继续增加proxy、QMP、直接SMC及拟议SMEM诊断 | 多轮未恢复Wi-Fi；直接SMC原始成功也没有证明服务上线 | 每轮先写判别预期；连续两轮没有新判别证据，就停止延伸此路线并对照完整基线 |
+| 认为msa-fixed-perm是EL2特有属性 | 正常系统也有；移除反而导致MSA分配-22 | 修改前读取正常运行DT/文件；不凭命名或推测删除现有平台约束 |
+| PAS完成位、驱动识别可代表设备可用 | transport与payload不同，PAS成功与QMI/HTT、接口、联网也是不同层 | 同时记录原始返回和实际功能，不能用前一层通过代替后一层 |
+| guest有DHCP/DNS但HTTPS超时，可能继续归因Wi-Fi | 宿主同URL为200；原生转发缺规则、BPF附着失败 | 先分开宿主连接、guest路由/转发和应用层，再修对应依赖 |
+
+板载Wi-Fi最终在完整EL2 Android中通过，但精简环境失败的唯一根因尚未查明。
+这支持“完整路径可用”，不支持宣称某个proxy/QMP/SMC实验修好了Wi-Fi。
+有证据的基础修复（例如正确发布接管结果、固件路径和RMTFS接管）仍须保留，
+不能因复盘绕路就把所有早期工作一起撤销。
+
+guest联网是后续独立故障。network-v1添加6项CT/FTP/PPTP/GRE配置，提前加载
+sch_ingress/cls_bpf；完整重启cc84d494-ee06-485b-a13a-6c50305ce307后，
+Android原生转发规则出现，Debian HTTPS返回200且下载README通过，用户curl百度
+也取得页面。没有以手工放宽防火墙替代修复。Next脚本模块三个启动阶段也在此boot
+以uid0、u:r:ksu:s0执行；第三方应用root授权未验收。
+
+今后的硬件实验只需一张简短记录：当前基线/boot ID、一个假设、一个改变的变量、
+能区分假设的结果、停止条件。优先检查最终生效的包/清单、DT/固件、依赖加载顺序、
+服务状态和真实错误；新增EFI/SCM机制必须有这些检查无法解释的具体证据。
+连续两轮无新判别证据时，停止的是该诊断路线，继续做基线对照，无须为此等待授权。
+验收顺序是实际终端shell、联网/下载、所需功能回归；主机测试和中间标志只是辅助证据。
+
+当前视频候选venus-v1已经在完整Android中测过，boot8c24a118-6de5-40e4-aa16-04836826cf57：
+EFI合同成功，Linux no_init加载0，认证-22，shutdown0，无video0。
+后续trace-v2只增加已有有界SCM观察器，首次认证实际返回a0=-2、a1低32位
+0xffcfffb4，外层映射-22；shutdown0，观察器无漏采且已卸载。确为实际SCM失败，
+厂商状态含义仍未确认，不据此推导“必须把整个视频启动搬到EFI”。两轮boot均
+重测终端HTTPS200，trace-v2还通过独立目录的宿主/guest双向文件读写。
+只读能力查询虽报告SHM接口存在，主线qcom_tzmem却明确将SC8180X列入黑名单，
+已有Surface Pro X挂死报告；未启用SHM，不盲目套用新平台EL2 remoteproc补丁。
+下一步继续正常EL1/原生EL2首次调用与有效固件生命周期对照，不在本boot热重试。
+当前硬解失败范围是EL2 Android宿主；guest内部硬解尚未验证，二者不可混称。
+
+随后完成有判别力的EL1分段生命周期对照：同一Image、基础initramfs、EFI
+metadata准备及视频固件/模块保留，取消Secure Launch并做必要EL1标记/初始化
+控制。boot9c428d0d…确认全CPU EL1、完整Android、no_init加载0、首次auth
+原始a0/a1均0、视频设备ready。未执行帧测试。故分段流程本身不是充分失败原因，
+下一步缩小到EL2切换后QHEE服务/映射差异，不能继续把metadata分段当作已定根因。
+此对照的联网未通，没有为它继续改Wi-Fi；自动回正常Mesa后取回日志。
+再用原EL2载荷恢复到boot1f4a2290…，终端HTTPS百度200、原用户10、KVM均通过。
+当前默认仍Mesa；在EL2环境工作不代表视频已修复。完整证据位置见HANDOFF顶部。
+
+### 2026-11-01：避免把用户切换误当成凭据故障
+
+此前多次因活动用户为0而请求“解锁”，未先查询目标用户是否有安全锁。用户说明
+无密码后，实查用户10的is-user-secure=false、get-disabled=true。Android原生命令
+start-user -w 10及switch-user 10即可启动/解锁无密码用户，无需清凭据或重建账号。
+另一个实际遗漏是归档虽有终端helper却无init调用。窄增量补齐调用，明确传入10、
+安全锁拒绝、保留已有镜像。无人操作完整重启后RUNNING_UNLOCKED、guest shell及
+HTTPS200通过；不能把此前手动启动归为自动启动成功。之后先查有效调用链及
+用户锁状态，再请求用户介入；默认Mesa和EL2宿主视频限制保持。
+
+### 2026-11-01：SMMU差分阴性与应用root验收
+
+首次EL1/PAS9只读差分已完成：boot f516d8ce…中认证成功，但128组Linux可见
+GR0 SMR/S2CR无变化，观察器captured1/missed0并卸载。视频数据流2300/2320/2340
+一直在CB9，未获得固件SID。停止靠普通流表差分找固件映射的路线；不推导安全
+映射不存在，也不猜2302或直接访问TZ寄存器。隔离控制无wlan0未再扩展网络调试。
+到期自动回EL2 boot81493270…，用户10及Debian自动恢复；原EL1 addon/清单已
+校验并原子还原，once=none，恢复助手已取消，默认仍Mesa。
+
+KernelSU Next新增实际应用授权证据：临时root-check UID1010269通过管理器单独
+授权后，应用自身su得到exit0、uid0、u:r:ksu:s0；撤销授权后同一命令返回ENOENT。
+测试应用已卸载、上传APK已清理，未授权其它应用。这补齐应用授权/撤销验收，
+不代表全部模块兼容性或EL2硬解已通过。原始证据在忽略的root-app-check-v1与
+venus-smmu-trace-v1，最新运行限制见HANDOFF顶部。

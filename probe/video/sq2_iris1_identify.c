@@ -414,7 +414,7 @@ static int identify(struct platform_device *pdev)
   pr_info("SQ2_IRIS1_IDENTIFY phase=firmware_boot_begin\n");
   trace_barrier();
   firmware_attempted = true;
-  ret = sq2_venus_fw_boot(&pdev->dev, &fw_owner, pil_gap);
+  ret = sq2_venus_fw_boot(&pdev->dev, &fw_owner, pil_gap, NULL);
   pr_info("SQ2_IRIS1_IDENTIFY phase=firmware_boot_end ret=%d owner=%d\n", ret, !!fw_owner);
   trace_barrier();
   if (fw_owner) {

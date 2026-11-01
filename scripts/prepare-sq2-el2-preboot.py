@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Prepare an isolated qebspil candidate; no device access or deployment.
 
-Only the three SC8180X PAS identities already used by this kernel are added.
+The three SC8180X DSP PAS identities already used by this kernel are added.
+--venus-firmware also reproduces the deployed PAS9 metadata-only handoff and
+DSP result trace; it does not authenticate or start video firmware in EFI.
 The DT must explicitly opt in and reserve a zero-valued result property.
 Linux takeover and RMTFS ownership are separate requirements, not implemented
 by merely compiling this EFI driver.
@@ -11,12 +13,34 @@ from pathlib import Path
 import io
 import tarfile
 import subprocess
+import hashlib
+import struct
 
 ROOT = Path(__file__).resolve().parents[1]
 PIN = '8e4d9e676a3b3afe136cda9b953a2139ff1a32d0'
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--output', type=Path, required=True)
+p.add_argument('--venus-firmware', type=Path,
+               help='enable the deployed PAS9 metadata handoff using the pinned private Venus image')
 a = p.parse_args()
+# Validate before creating a candidate. Generated firmware metadata stays private.
+venus_metadata = None
+if a.venus_firmware:
+    image = a.venus_firmware.read_bytes()
+    if len(image) != 1159200 or hashlib.sha256(image).hexdigest() != '4e93d34504da96320775476bbd509aa06f985b48fb781d4436c8eb812b929928':
+        p.error('Venus firmware does not match the validated SQ2 image')
+    phoff = struct.unpack_from('<I', image, 28)[0]
+    phentsize, phnum = struct.unpack_from('<HH', image, 42)
+    assert image[:7] == b'\x7fELF\x01\x01\x01' and phentsize == 32
+    assert phoff + phentsize * phnum <= len(image)
+    metadata = bytearray()
+    for index in range(phnum):
+        kind, offset, _, _, size, _, _, _ = struct.unpack_from('<8I', image, phoff + index * phentsize)
+        if kind == 0 and size:
+            assert offset + size <= len(image)
+            metadata.extend(image[offset:offset + size])
+    assert 0 < len(metadata) <= 16384
+    venus_metadata = bytes(metadata)
 src = ROOT / 'upstream/qebspil'
 # Use the fixed source tree, including exact submodule revisions, without
 # carrying Windows-only .git paths into the Linux build.
@@ -53,7 +77,8 @@ edit('src/pil-types.c', 'static const struct pil_type pil_types[] = {', '''stati
 	{ .compatible = "qcom,sc8180x-mpss-pas", .id[PIL_MAIN].full = 4 },
 	{ .compatible = "qcom,sc8180x-cdsp-pas", .id[PIL_MAIN].full = 18 },''')
 edit('src/qebspil.h', 'struct pil {\n', 'struct pil {\n\tvoid *dtb;\n\tint dt_node;\n')
-edit('src/qebspil.h', '#endif', '''EFI_STATUS sq2_rmtfs_prepare(void *dtb);
+edit('src/qebspil.h', '#endif', '''extern UINT64 sq2_pas_result[4];
+EFI_STATUS sq2_rmtfs_prepare(void *dtb);
 EFI_STATUS sq2_rmtfs_finish(void);
 EFI_STATUS sq2_preboot_publish_results(void);
 EFI_STATUS sq2_scm_assign(UINT64 region, UINT64 region_size, UINT64 src,
@@ -120,6 +145,26 @@ edit('src/dtb.c', '''		if (!QEBSPIL_ALWAYS_START && !fdt_getprop(dtb, node, "qco
 edit('src/dtb.c', '\t\tstatus = dtb_enumerate_rproc(&ctx, node, pil);', '''		pil->dtb = (void *)dtb;
 		pil->dt_node = node;
 		status = dtb_enumerate_rproc(&ctx, node, pil);''')
+edit('src/scm.c', 'static QCOM_SCM_PROTOCOL *scm;',
+     'static QCOM_SCM_PROTOCOL *scm;\nUINT64 sq2_pas_result[4];')
+# shortcut: PAS response ABI is unverified, collect raw results before enforcing it.
+for command in ('TZ_PIL_INIT_ID', 'TZ_PIL_MEM_ID',
+                'TZ_PIL_AUTH_RESET_ID', 'TZ_PIL_UNLOCK_XPU_ID'):
+    old = (f'\treturn scm->ScmSipSysCall(scm, {command}, '
+           f'{command}_PARAM_ID, Parameters, Results);')
+    new = (f'\tEFI_STATUS status = scm->ScmSipSysCall(scm, {command}, '
+           f'{command}_PARAM_ID, Parameters, Results);\n'
+           f'\tPrint(u"PAS %u {command}: transport=%r raw=%lx/%lx/%lx\\n",\n'
+           '\t      pas_id, status, Results[0], Results[1], Results[2]);\n'
+           '\tCopyMem(sq2_pas_result, Results, sizeof(sq2_pas_result));\n'
+           '\treturn status;')
+    edit('src/scm.c', old, new)
+scm_path = a.output / 'src/scm.c'
+scm_text = scm_path.read_text()
+assert scm_text.count('UINT64 Results[SCM_MAX_NUM_RESULTS];') == 4
+scm_path.write_text(scm_text.replace('UINT64 Results[SCM_MAX_NUM_RESULTS];',
+    'UINT64 Results[SCM_MAX_NUM_RESULTS] = {~(UINT64)0, ~(UINT64)0, ~(UINT64)0};'))
+
 edit('src/pil.c', '#include "qebspil.h"', '#include "qebspil.h"\n#include <libfdt.h>')
 edit('src/pil.c', '''		if (!EFI_ERROR(status))
 			found = EFI_SUCCESS;''', '''		if (!EFI_ERROR(status)) {
@@ -129,7 +174,7 @@ edit('src/pil.c', '''		if (!EFI_ERROR(status))
 				return EFI_INVALID_PARAMETER;
 			found = EFI_SUCCESS;
 			sq2_preboot_note(loaded_pil[i].dtb, loaded_pil[i].dt_node,
-				11, status, NULL);
+				11, status, sq2_pas_result);
 		} else {
 			sq2_preboot_note(loaded_pil[i].dtb, loaded_pil[i].dt_node,
 				12, status, NULL);
@@ -175,4 +220,65 @@ edit('src/main.c', '\tif (!EFI_ERROR(status))\n\t\treturn status;',
      '\t\tstatus = sq2_preboot_publish_results();\n'
      '\t\tPrint(u"SQ2 kernel DT handoff returned %r\\n", status);\n'
      '\t\tif (!EFI_ERROR(status)) return status;\n\t}')
+if venus_metadata is not None:
+    # Preserve the already deployed DSP trace and Venus call order together.
+    edit('Makefile', '\tsrc/sq2-preboot-rmtfs.o \\',
+         '\tsrc/sq2-preboot-rmtfs.o \\\n\tsrc/sq2-venus-preboot.o \\')
+    (a.output / 'src/sq2-venus-preboot.c').write_bytes(
+        (ROOT / 'probe/virtualization/sq2-venus-preboot.c').read_bytes().replace(b'\r\n', b'\n'))
+    (a.output / 'src/sq2-venus-metadata.h').write_text(
+        'static const unsigned char sq2_venus_metadata[16384] = {\n' +
+        ','.join(hex(byte) for byte in venus_metadata) + '\n};\n')
+    edit('src/qebspil.h', '#endif', '''extern UINT64 sq2_pas_trace[3][4][5];
+EFI_STATUS sq2_venus_prepare(void *dtb);
+EFI_STATUS sq2_venus_finish(void);
+EFI_STATUS sq2_venus_publish(void *dest);
+#endif''')
+    edit('src/main.c', '\tstatus = dtb_enumerate_rprocs(dtb);',
+         '\tstatus = sq2_venus_prepare(dtb);\n\tif (EFI_ERROR(status)) return status;\n'
+         '\tstatus = dtb_enumerate_rprocs(dtb);')
+    edit('src/main.c', '\tif (!EFI_ERROR(status)) {\n\t\tstatus = sq2_preboot_publish_results();',
+         '\tif (!EFI_ERROR(status)) status = sq2_venus_finish();\n'
+         '\tif (!EFI_ERROR(status)) {\n\t\tstatus = sq2_preboot_publish_results();')
+    edit('src/scm.c', 'EFI_STATUS scm_init(void)', '''UINT64 sq2_pas_trace[3][4][5];
+static void sq2_record_pas(UINT8 pas_id, unsigned op, EFI_STATUS status,
+                           const UINT64 *results)
+{
+    unsigned row, i;
+    switch (pas_id) {
+    case 1: row = 0; break;
+    case 4: row = 1; break;
+    case 18: row = 2; break;
+    default: return;
+    }
+    if (op >= 4) return;
+    sq2_pas_trace[row][op][0] = status;
+    for (i = 0; i < 4; i++) sq2_pas_trace[row][op][i + 1] = results[i];
+}
+
+EFI_STATUS scm_init(void)''')
+    edit('src/scm.c', '\tstatus = LibLocateProtocol(',
+         '\tSetMem(sq2_pas_trace, sizeof(sq2_pas_trace), 0xff);\n\tstatus = LibLocateProtocol(')
+    for op, command in enumerate(('TZ_PIL_INIT_ID', 'TZ_PIL_MEM_ID',
+                                  'TZ_PIL_AUTH_RESET_ID', 'TZ_PIL_UNLOCK_XPU_ID')):
+        line = (f'\tEFI_STATUS status = scm->ScmSipSysCall(scm, {command}, '
+                f'{command}_PARAM_ID, Parameters, Results);')
+        edit('src/scm.c', line, line + f'\n\tsq2_record_pas(pas_id, {op}, status, Results);')
+    path = a.output / 'src/scm.c'
+    text = path.read_text()
+    old = '= {~(UINT64)0, ~(UINT64)0, ~(UINT64)0};'
+    assert text.count(old) == 4
+    path.write_text(text.replace(old, '= {~(UINT64)0, ~(UINT64)0, ~(UINT64)0, ~(UINT64)0};'))
+    edit('src/sq2-preboot-rmtfs.c', '\tWriteBackInvalidateDataCacheRange(dest, fdt_totalsize(dest));', '''    {
+        fdt64_t trace[3][4][5];
+        unsigned row, op, word;
+        for (row = 0; row < 3; row++)
+            for (op = 0; op < 4; op++)
+                for (word = 0; word < 5; word++)
+                    trace[row][op][word] = cpu_to_fdt64(sq2_pas_trace[row][op][word]);
+        if (fdt_setprop_inplace(dest, 0, "microsoft,el2-pas-trace", trace, sizeof(trace)))
+            return EFI_INVALID_PARAMETER;
+    }
+	if (EFI_ERROR(sq2_venus_publish(dest))) return EFI_INVALID_PARAMETER;
+	WriteBackInvalidateDataCacheRange(dest, fdt_totalsize(dest));''')
 print(a.output)

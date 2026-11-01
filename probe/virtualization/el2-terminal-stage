@@ -9,6 +9,9 @@ test -f /etc/sq2-video-native/venus-dec.ko
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test -c /dev/kvm
 test -c /dev/vhost-vsock
+# Netd creates the upstream clsact qdisc before Terminal starts.
+modprobe sch_ingress
+modprobe cls_bpf
 grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
 f=/newroot/vendor/etc/vintf/manifest/android.hardware.security.secretkeeper.trusty.xml
 test -f "$f"

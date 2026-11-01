@@ -5,6 +5,8 @@
  */
 #ifndef VENUS_SQ2_FIRMWARE_H
 #define VENUS_SQ2_FIRMWARE_H
+static bool sq2_no_tz;
+module_param(sq2_no_tz, bool, 0400);
 static int venus_sq2_shutdown(struct venus_core *core)
 {
  int ret = sq2_venus_fw_shutdown(&core->sq2_fw_owner);
@@ -31,8 +33,9 @@ static int venus_sq2_boot(struct venus_core *core)
  if (ret) return ret;
  core->sq2_secure_active = true;
  core->sq2_boot_attempted = true;
- venus_iris1_clock_config(core);
- ret = sq2_venus_fw_boot(core->dev, &core->sq2_fw_owner, true);
+ if (!sq2_no_tz) venus_iris1_clock_config(core);
+ ret = sq2_venus_fw_boot(core->dev, &core->sq2_fw_owner, true,
+                        sq2_no_tz ? core->base : NULL);
  if (ret) {
   /* NULL owner proves no secure lease remains. A quarantined owner's stop
    * returns its stored failure without issuing another PAS call. */
@@ -42,6 +45,7 @@ static int venus_sq2_boot(struct venus_core *core)
   return ret;
  }
 
+ if (sq2_no_tz) return 0;
  ret = qcom_scm_mem_protect_video_var(res->cp_start, res->cp_size,
                                     res->cp_nonpixel_start, res->cp_nonpixel_size);
  if (ret) {

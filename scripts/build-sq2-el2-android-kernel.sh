@@ -19,10 +19,13 @@ if new not in s:
  assert s.count(old)==1;p.write_text(s.replace(old,new))
 PY
 python3 "$R/scripts/patch-sq2-el2-context-limit.py" "$K"
+python3 "$R/scripts/patch-sq2-smmu-smr-groups.py" "$K"
 python3 "$R/scripts/patch-sq2-el2-preboot-kernel.py" "$K"
 C=$K/scripts/config
 "$C" --file "$O/.config" -e KSU -e KPROBES -e KSU_KPROBES_HOOK
 for n in VIRTUALIZATION KVM VSOCKETS VHOST_MENU VHOST_VSOCK VHOST_NET VIRTIO_VSOCKETS; do "$C" --file "$O/.config" -e "$n"; done
+# Android tethering installs CT helpers before its guest forwarding rules.
+for n in NETFILTER_XT_TARGET_CT NF_CONNTRACK_FTP NF_CONNTRACK_PPTP NF_NAT_FTP NF_NAT_PPTP; do "$C" --file "$O/.config" -e "$n"; done
 # Preserve the normal hardware-decoder foundation with this kernel's ABI.
 "$C" --file "$O/.config" -m MEDIA_SUPPORT -d MEDIA_SUPPORT_FILTER \
   -e MEDIA_PLATFORM_SUPPORT -d MEDIA_CAMERA_SUPPORT -d MEDIA_ANALOG_TV_SUPPORT \
@@ -41,6 +44,7 @@ make -s -C "$K" O="$O" olddefconfig
 for n in VIDEO_QCOM_VENUS VIDEO_DEV SM_VIDEOCC_8150; do grep -qx "CONFIG_$n=m" "$O/.config"; done
 ! grep -qx 'CONFIG_SND_USB_AUDIO_USE_MEDIA_CONTROLLER=y' "$O/.config"
 for n in KVM VSOCKETS VHOST_VSOCK BLK_DEV_NVME KSU KPROBES KSU_KPROBES_HOOK; do grep -qx "CONFIG_$n=y" "$O/.config"; done
+for n in NETFILTER_XT_TARGET_CT NF_CONNTRACK_FTP NF_CONNTRACK_PPTP NF_NAT_FTP NF_NAT_PPTP; do grep -qx "CONFIG_$n=y" "$O/.config"; done
 grep -qx 'CONFIG_FUSE_FS=m' "$O/.config"
 make -s -C "$K" O="$O" -j16 Image modules
 make -s -C "$K" O="$O" M=drivers/thermal/qcom CONFIG_QCOM_TSENS=m modules

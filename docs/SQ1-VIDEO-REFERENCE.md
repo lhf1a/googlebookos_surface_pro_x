@@ -1,5 +1,98 @@
 # SQ1 Windows 视频驱动参考（2026-10-29）
 
+## 2026-11-01：Windows中间保护边界不能直接用于Linux启动
+
+修正扩展SMR管理后，SID2342冲突消失，但复制Windows PIL的FW/CPA=0..5MiB、
+NONPIX=0..0仍无法启动Linux42固件；延长等待也无响应。对固定固件早期ARM代码
+的分析显示，后者使其五个固件section页表项无效。no-TZ v4将NONPIX_START/END
+均设为5MiB（上游no-TZ的最终边界），随后同boot约8ms就绪并发布/dev/video0。
+测试test_sq2_venus_boot_ranges.py校验完整固件hash、对应指令与页表模型。
+Windows PIL初始化后还有主机保护设置，不应把其一个中间阶段当成Linux最终配置。
+随后SQ2驻留驱动通过V4L2六帧CRC、Android High+B六帧Surface逐字节校验及1080p
+High300帧播放；完整重启3a8da95c…又通过首次启动、自动选中硬解和原终端HTTPS。
+这使SQ1参考真正形成SQ2上的运行验收，但不证明两机所有板级细节完全一致。
+
+## 2026-11-01：SID2342已在SQ2实际故障流中出现
+
+新增no-PAS启动候选实机成功映射固件并释放CPU reset，SMMU故障明确报告SID2342，
+从而把下文CSRT/PIL的静态关联推进为实际启动流证据。GFSR80000004的bit2是SMCF，
+与未知SID的USF不同。只读快照确认硬件有212组，固件已在第183组配置2342；
+旧Linux只管理128组，造成重复匹配。上游5583a55e074b移植后重启复测不再报告
+该冲突，但HFI启动等待超时-110，末次CTRL_STATUS未记录，尚无解码帧。保留“固件流已观测”与
+“固件完成初始化/硬解可用”的区分。实现、构建及回退记录见HANDOFF/BUILD最新条目。
+
+参考：[上游补丁及同类视频启动故障讨论](https://patchew.org/linux/20250821-arm-smmu-qcom-all-smr-v1-1-7f5cbbceac3e@linaro.org/)。
+
+## 2026-11-01：新归档的安全PIL与CSRT
+
+当前分支已快进到8f64975，完整采集位于`reference/sq1-video-20261101/`。
+该归档有用户明确的提交授权，取代下文旧归档“原始资料不可提交”的范围限制；
+临时反汇编、设备日志和解包结果仍留在忽略目录。72项manifest全部验证，
+qcdxkm8180、qcvss8180和IORT与此前参考逐字相同。平台采集报告
+HypervisorPresent/SecureBoot=true、VBS=2；这些状态不证明某段驱动代码实际执行。
+
+新增分析对象是PIL包的`QcSkExt8180.exe`，SHA256
+`da09677b8bc3f35c4217e768f73a1ccc19e112cedf724bd14d393e1545511e22`。
+INF以`async secure PlatformExecute`注册它；它导入IumSdk的MapSecureIo、
+CreateSecureSectionSpecifyPages、AssignMemoryToSocDomain和EmitSmc。
+函数标签由日志字符串及调用链推断；精确PDB请求返回404，没有取得符号。
+
+PAS9静态描述符位于VA14001b200，+176=9；+200回调为14000a280，
++224回调为140009760。子系统启动14000af48的顺序为：
+
+1. 14000afa4调用a738(desc,1)，认证前做内存处理。
+2. 若描述符+198为0，14000afc8调用ce48，包装TZ PIL认证02000205。
+3. 认证成功后14000afe4调用a738(desc,2)，再调用视频启动回调。
+4. 视频启动a280→a1c0，成功路径依次调用a090、b4f8、b930。
+   a1c0要求CPU仍在reset，a090设置FW/CPA/NONPIX范围；b930清bit4。
+   3d20(1)通过性能计数器忙等1微秒，不能把它误当时钟启动函数。
+
+内存处理6590中的源/目标分类结合日志确认3=HLOS、4=HYP、14=HLOS_UNMAPPED。
+3→4先以Windows安全section/view管理内存，再返回成功；4↔14在trustlet内
+为空操作。视频回调9760随后将有效固件段14→12，权限取自段flags，
+支持链接地址与装载物理地址不同，最终进入AssignMemoryToSocDomain。
+这不是“Linux只缺一条assign_mem”的证明；编号12也不是SID。
+
+CSRT SHA256为`4620734b5ec83582882a965070952d95fa2bc2cdae5af0a4d14c147dc32f94ee`。
+安全扩展3470选择QCOM device100c资源组（文件offset5c）。该组的两个SMMU记录、
+40个domain记录、76个权限规则依次有明确长度边界。首个SMMU base15000000，
+条目起点relative60、数量592、stride10。视频数据条目与既有IORT相吻合：
+
+| 条目SID | 条目byte6 | 关联 |
+|---|---|---|
+| 2300/2320/2340 | 3 | 既有非安全视频数据流 |
+| 2301/2305 | 9 | 既有安全数据流 |
+| 2303/2323 | 10 | 既有安全数据流 |
+| 2304/2324/2344 | 11 | 既有安全数据流 |
+| **2342** | **12** | 与视频固件段目标编号相同，固件流候选 |
+
+2342位于组offsetaf4（文件offsetb50），原始10字节为
+`42 23 01 00 00 00 0c 01 00 00`。其余字段没有全部命名。
+同组规则66/67明确为14→12与12→14；规则61为4→14。
+没有2302条目。**2342现在有静态交叉依据，但尚未在SQ2观察到实际取指或成功解码。**
+
+安全扩展的177项HWIO表在RVA1b8a0，32字节一项。
+相关物理地址为aae0000(version)、aae3000(reset)、
+aae1028/102c(FW)、aae1020/1024(CPA)、aae1030/1034(NONPIX)、
+aae2010/2000(clock)。CSRT扩展策略列出这四个4KiB页面，
+39b8通过OpenCurrentExtension/MapSecureIo获取映射；这是Windows安全扩展
+授权上下文，不是Linux EL2直接访问权限证据。
+
+固定输入校验器只做离线解析，不执行PE或访问设备：
+
+```sh
+python3 scripts/inspect-sq2-windows-pil-reference.py \
+  --extension out/el2-android/sq1-reference-20261101/data/drivers/oem109.inf/QcSkExt8180.exe \
+  --csrt out/el2-android/sq1-reference-20261101/data/acpi/CSRT-4620734b5ec83582.dat \
+  --output out/el2-android/sq1-reference-20261101/pil-csrt-verified.json
+python3 tests/test_sq2_windows_pil_reference.py out/el2-android/sq1-reference-20261101/data
+```
+
+真实输入11组指令与数据校验通过；8项负例覆盖hash、ACPI校验和、长度边界、
+stride、候选流、权限规则和关键指令。输出文件禁止覆盖。报告不是硬件验收。
+下一步应核对2342的Linux固件IOVA、reset访问与TZ认证前置条件；不再猜2302，
+也不重复已经无差异的EL1 GR0实验。没有新设备操作；ffcfffb4仍未释义。
+
 用户提供第二台 SQ1 Windows 设备用于分析。已按提供的 ED25519 指纹严格核验主机，使用操作者既有公钥登录。CIM 实测为 Surface Pro X、Microsoft SQ1 @ 3.0 GHz、ARM64、Windows 11 build 22631，64 位管理员 PowerShell 5.1。账户、地址、连接材料及原始文件仅在 private，不进入 Git。
 
 ## 已完成的只读采集

@@ -16,6 +16,7 @@ struct venus_core {
  bool use_tz,iris1,v4,sq2_boot_attempted,sq2_secure_active;
  struct sq2_venus_platform *sq2_platform;
  void *dev;
+ void *base;
  struct sq2_venus_fw *sq2_fw_owner;
 };
 #define IS_IRIS1(c) ((c)->iris1)
@@ -24,13 +25,15 @@ static int boots,stops,clocks,protects,boot_error,stop_error,protect_error;
 static bool quarantine;
 static struct sq2_venus_fw owner;
 static void venus_iris1_clock_config(struct venus_core *c) { (void)c; clocks++; }
-static int sq2_venus_fw_boot(void *d,struct sq2_venus_fw **p,bool gap)
-{ (void)d; assert(gap); boots++; if (!boot_error || quarantine) *p=&owner; return boot_error; }
+static bool expect_no_tz;
+static int sq2_venus_fw_boot(void *d,struct sq2_venus_fw **p,bool gap,void *base)
+{ (void)d; assert(gap && (!!base == expect_no_tz)); boots++; if (!boot_error || quarantine) *p=&owner; return boot_error; }
 static int sq2_venus_fw_shutdown(struct sq2_venus_fw **p)
 { if (!*p) return 0; stops++; if (!stop_error) *p=NULL; return stop_error; }
 static int qcom_scm_mem_protect_video_var(unsigned int a,unsigned int b,unsigned int c,unsigned int d)
 { assert(a==0 && b==0x25800000 && c==0x1000000 && d==0x24800000); protects++; return protect_error; }
 #define dev_err(d,fmt,...) ((void)(d))
+#define module_param(a,b,c)
 #include "../probe/video/venus-sq2-firmware.h"
 int main(void)
 {
@@ -57,6 +60,22 @@ int main(void)
   /* Even a successful shutdown must not re-arm this core's firmware boot. */
   assert(venus_sq2_boot(&c)==-EBUSY && boots==1);
  }
+ /* The explicit candidate skips PAS protection and the old clock writes,
+  * while retaining the same stop/quarantine and one-attempt rules. */
+ expect_no_tz = sq2_no_tz = true;
+ for (b=0;b<2;b++) for (s=0;s<2;s++) {
+  struct venus_core c={.res=&r,.use_tz=true,.iris1=true,.v4=true,
+   .sq2_platform=&platform,.base=&owner};
+  platform=(struct sq2_venus_platform){0};
+  boots=stops=clocks=protects=0;
+  boot_error=b ? -EIO : 0; stop_error=s ? -EBUSY : 0; quarantine=b && s;
+  assert(venus_sq2_boot(&c)==boot_error);
+  assert(boots==1 && !clocks && !protects);
+  assert(venus_sq2_shutdown(&c)==(s ? -EBUSY : 0));
+  assert(c.sq2_secure_active==(bool)s);
+  assert(venus_sq2_boot(&c)==-EBUSY);
+ }
+ expect_no_tz = sq2_no_tz = false;
  {
   struct venus_core c={.res=&r,.use_tz=false,.iris1=true,.v4=true};
   assert(venus_sq2_boot(&c)==-EINVAL && !c.sq2_boot_attempted);
@@ -65,6 +84,6 @@ int main(void)
   c.iris1=true;c.v4=false;
   assert(venus_sq2_boot(&c)==-EINVAL && !c.sq2_boot_attempted);
  }
- puts("SQ2_VENUS_FW_PASS: 8 boot/protection/shutdown combinations; retained owner and original errors; no second boot; 3 invalid platform checks");
+ puts("SQ2_VENUS_FW_PASS: 8 PAS + 4 no-TZ combinations; retained owner and original errors; no second boot; 3 invalid platform checks");
  return 0;
 }

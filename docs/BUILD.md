@@ -1,5 +1,256 @@
 # 构建与部署
 
+2026-11-02音频补充：audio-drivers-start接受同一ADSP的running/attached两种活动
+状态，避免EL2在加载声卡前退出。pack-sq2-el2-android.py显式刷新该共享helper，
+build-source-boot.py原有shell刷新逻辑也已覆盖。test_sq2_audio_adsp_state.py验证
+活动/拒绝状态及实际packer片段。当前窄增量包9401ea98…仅替换这一有效条目，
+保留所有HAL/固件/视频与末尾凭据；部署和最终重启状态见HANDOFF。
+
+当前已验收EL2组合：Image c1ef559f… + no-tz-boot-v1 initramfs8ef93a9e…，DT/EFI
+仍为原值。完整重启3a8da95c…自动启动no-TZ驱动、原用户10及Debian，Android
+High+B六帧像素和自动选择的1080p High300帧播放通过。下方“待首次启动”是历史
+阶段记录；最终验收及strip后模块hash、回退备份见HANDOFF顶部。默认Mesa不改。
+
+### 2026-11-01：no-TZ v4固件/HFI启动通过
+
+后续驻留驱动已经通过V4L2 baseline六帧CRC、Android High+B六帧Surface逐字节
+比较、1080p High300帧可见播放及Debian shell/HTTPS。持久候选构建如下：
+
+```sh
+python3 scripts/pack-sq2-el2-android.py \
+  --kernel-build /root/.cache/sq2-el2-smr-20261101/build \
+  --venus-build /root/.cache/sq2-venus-no-tz-v4 --passwordless-user 10 \
+  --no-tz-overlay /root/.cache/sq2-venus-fw-overlay-v1/sq2_fw_overlay.ko \
+  --output out/el2-android/no-tz-boot-v1
+python3 tests/test_sq2_el2_no_tz_pack.py
+```
+
+显式选项拒绝与PAS观察器并用，检查模块name/release及core参数，固件overlay纳入
+有效SHA清单。只改EL2 helper顺序，原PAS默认不改。包hash8ef93a9e…、180505061字节，
+init和最后凭据member逐字保留；已部署但首次完整启动验收仍待取证。不要将“驻留
+运行通过”与“开机首次初始化通过”混为同一证据。安装/备份路径见HANDOFF。
+
+在下述SMR内核上，v3显式boot-watch延长等待仍无回复。v4保留固件42和现有
+5MiB映射，仅将NONPIX_START=NONPIX_END=span；Windows PIL中间值0..0不能
+直接作为Linux CTRL_INIT前的最终设置。实际固件页表指令验证：
+
+```sh
+python3 tests/test_sq2_venus_boot_ranges.py out/el2-android/venus.mbn
+python3 tests/test_sq2_venus_boot_watch.py /root/.cache/sq2-venus-no-tz-v4
+```
+
+使用下方相同生成/编译命令，kernel/build换成sq2-el2-smr-20261101，输出换成
+sq2-venus-no-tz-v4。临时实机加载sq2_platform_allow=1 sq2_no_tz=1 sq2_boot_watch=1，
+约poll8就绪，/dev/video0出现；实际解码及持久启动尚未验收。观察器默认false，
+正常路径仍100次等待。当前已发布core保持驻留，禁止为再次启动而热卸载。
+
+
+### 2026-11-01：EL2 no-TZ候选与扩展SMR冲突
+
+venus-core只在显式传入`sq2_platform_allow=1 sq2_no_tz=1`时选用独立
+固件stream。固定现有固件hash/5MiB span；IOVA0映射后才执行Windows参考启动序列。
+失败停止先确认reset bit4，再检查完整unmap；任一失败经原事务隔离，保留全部owner。
+旧PAS默认不变，identify探针仍传NULL保持PAS；两种生成器均复制新helper头。
+
+```sh
+python3 scripts/prepare-sq2-venus-iris1.py \
+  --kernel /root/.cache/sq2-el2-network-20261101/kernel \
+  --output /root/.cache/sq2-venus-no-tz-v1 \
+  --firmware-lease --platform-entry --sq2-resources
+make -C /root/.cache/sq2-el2-network-20261101/kernel \
+  O=/root/.cache/sq2-el2-network-20261101/build ARCH=arm64 \
+  CROSS_COMPILE=aarch64-linux-gnu- M=/root/.cache/sq2-venus-no-tz-v1 -j4 modules
+python3 scripts/build-sq2-venus-fw-overlay.py \
+  --stage /root/.cache/sq2-venus-fw-overlay-v1 \
+  --kernel /root/.cache/sq2-el2-network-20261101/kernel \
+  --kernel-output /root/.cache/sq2-el2-network-20261101/build --smmu-phandle 0x2d
+python3 tests/test_sq2_venus_no_tz_lifetime.py
+python3 tests/test_sq2_smmu_snapshot.py
+```
+
+phandle必须取自当前实机，overlay加载时再验；只新增video-firmware child，不改provider。
+本次core SHA0c5a9c11c36dc759728455d1c2ebe6401fb2356053af2bce1308146865eac894，
+overlay SHA9e371c4d205d07fce999bc196740e37c5ab97d474762dfa0ce136e02075ab62a。
+实机未通过HFI，具体为SMCF冲突：已有SID2342在第183组，旧驱动只管理128组。
+`patch-sq2-smmu-smr-groups.py`移植上游5583a55e074b到固定de9e5cb3…源文件，
+build-sq2-el2-android-kernel.sh调用该补丁；保留hypervisor bypass quirk和IRQ-backed
+CB池限制。不要热卸载SMMU或直接删除固件流表。需新内核重启后再验证no-TZ候选。
+
+后续已完成该重启：隔离kernel/build为/root/.cache/sq2-el2-smr-20261101，
+Image c1ef559f…，配置/导出表/release与旧内核相同。真实qcom_smmu_cfg_probe的
+64/128/212组及hypervisor开关测试通过，保留183项与兼容裁剪；同Image的QEMU
+guard检查使用实机lsm=selinux enforcing=0参数通过。新boot841647e4…保持网络/
+用户10/KVM/guest进程，no-TZ v2不再报告SMCF，但HFI启动等待超时-110；末次状态值未记录。
+所有映射与内存成功回收；这是冲突修复验收，不是完整硬解验收。v2构建目录为
+/root/.cache/sq2-venus-no-tz-v2，命令同上但kernel/build指向新的smr目录。
+原boot包仍启动PAS版，no-TZ模块仅临时上传；详情和回退文件见HANDOFF最新条目。
+
+前置reset-only模块构建为obj-m=sq2_reset_probe.o，链接sq2_venus_reset_probe.o和
+原sq2-venus-power.o；SHA055922851159cf80e0692e61160e33d634c65ad7b7ce95e5d304df06d89e86d1。
+实机allow默认拒绝，允许后aae3000=10、回收成功、模块卸载；仅证明当次读取和复位状态。
+
+### 2026-11-01：完整initramfs复现现场运行钩子
+
+`pack-sq2-el2-android.py`现同时打包已部署的EL2恢复助手，实验启动块按原顺序
+调用终端与恢复助手。`--passwordless-user 10`显式选择现有无密码用户；运行时
+仍拒绝安全锁。可选`--scm-trace`核验模块release，并加入单次视频启动后的
+hash检查、观察器加载及退出卸载；不传参数不加入观察器。正常默认不运行这些钩子。
+恢复助手保留360秒取消窗口，仅`/run/el2-control-keep`存在时取消，不自动
+把Android启动完成当作全部功能通过。所有输出仍为离线候选。
+
+```sh
+python3 scripts/pack-sq2-el2-android.py \
+  --kernel-build /root/.cache/sq2-el2-network-20261101/build \
+  --venus-build /root/.cache/sq2-el2-network-20261101/venus-preboot-v1 \
+  --passwordless-user 10 \
+  --scm-trace out/el2-android/android-el2-venus-trace-v2/sq2_scm_trace.ko \
+  --output out/el2-android/parity-pack-runtime-v1
+python3 tests/test_sq2_el2_runtime_pack.py
+```
+
+上述真实构建为180505535字节，SHA256
+02ccb2f01a75e5b81abd6beccaef4c0bed7c4726ae1c6cd27109a72c45fbb2aa。
+与现用terminal-boot-v2的init及所有bin助手逐字相同；凭据末member逐字保留。
+有效差异仅venus-dec/清单及四个builtin索引；venus-dec匹配此前ELF审计的两份
+输入，差异仍仅build-id/源码路径字符串。独立比较及最终视频清单校验通过，
+见产物目录runtime-comparison.json。运行钩子/恢复隔离测试及原配置、视频清单、
+终端测试通过。模块release检查不等于全部ABI验证，新包未部署或实机启动；
+launcher/DT生成整合及EL2宿主硬解问题仍未完成。
+
+### 2026-11-01：重建现用EL2 qebspil
+
+prepare-sq2-el2-preboot.py新增显式--venus-firmware，输入必须是已验收SQ2
+Venus MBN（1159200字节，SHA256 4e93d34504da96320775476bbd509aa06f985b48fb781d4436c8eb812b929928）。
+在创建输出前检查长度/hash；生成的metadata header属于私有固件产物，不能入Git。
+参数同时接入现用DSP trace和Venus prepare/finish/publish调用顺序；仍只在EFI
+准备PAS9 metadata/mem_setup，由Linux加载/认证/关闭。不传参数保留原DSP流程。
+对应DT必须含原有480字节microsoft,el2-pas-trace占位及16字节
+microsoft,el2-venus-prepared=<0 9 0x8c000000 0x500000>；此脚本不生成DT或部署。
+
+```sh
+python3 scripts/prepare-sq2-el2-preboot.py \
+  --output /root/.cache/sq2-efi-repro-venus-v1 \
+  --venus-firmware out/el2-android/venus.mbn
+make -C /root/.cache/sq2-efi-repro-venus-v1 CROSS_COMPILE=aarch64-linux-gnu- -j4
+python3 tests/test_sq2_venus_efi_prepare.py out/el2-android/venus.mbn
+```
+
+输出目录必须不存在。上述实跑EFI为81797字节，SHA256
+e3675e36a749176481742a8ac78b8d505a40e3ea2a87464b123c45dd3080fe95，
+与设备现用文件逐字节相同；不是跨工具链可复现保证。新测试对实际生成器检查
+已验收源码hash、错误固件拒绝、已有目录保护和默认路径；原PAS日志及EFI/Linux
+契约测试也通过。未替换设备文件、未重启；完整initramfs/launcher/DT整合仍待完成。
+
+### 2026-11-01：临时root应用实测与SMMU控制清理
+
+probe/virtualization/root-check为临时无权限、无网络测试应用，只在按钮触发时
+执行su -c 'id; id -Z'，60秒超时、最多读取4096字节；不加入正常启动包。
+实机覆盖未授权ENOENT、管理器授权后exit0/uid0/ksu域、撤销后再次ENOENT，
+之后已卸载并清理上传APK。私有签名密钥与APK留在忽略目录，证据见HANDOFF。
+
+下方EL1观察器已实测：首次auth0，128组GR0流寄存器changed0，正常卸载。
+该路线未取得固件SID，不再重复。临时control-addon已从hash/gzip核验的备份
+原子恢复为1aab58ad…，清单通过，once=none；默认Mesa未变。观察器仍只供显式
+实验，不接入正常或EL2启动；本结果不是EL2硬解修复。
+
+### 2026-11-01：EL1首次PAS9的SMMU只读观察器
+
+probe/video/sq2_venus_smmu_trace.c仅用于显式EL1控制候选，不接入正常启动。
+它验证Surface/SC8180X、EL1及已绑定的apps SMMU后，只映射0x15000000首4KiB，
+在首次insmod/PAS9认证调用前后读取128个SMR/S2CR；不访问CB、TZ别名或页表，
+不写寄存器、不发起PAS。停止卸载只移除观察器，不卸载视频provider。
+test_sq2_smmu_streams.py以ASan/UBSan运行实际读循环，断言访问集合、边界和无写入。
+当前EL2实机加载拒绝EPERM，AArch64模块编译通过；EL1实际结果见HANDOFF。
+使用与控制Image相同的kernel/build目录按常规外部模块构建：
+obj-m += sq2_venus_smmu_trace.o；同目录包含sq2-smmu-streams.h。
+本机产物在out/el2-android/venus-smmu-trace-v1；有效addon、脚本、hash及安装审计
+保存在同目录。候选仍是实验，不属于已完成的EL2硬解方案。
+
+
+### 2026-11-01：基于已验收EL2候选补终端调用
+
+新增 scripts/pack-sq2-el2-terminal-autostart.py BASE OUTPUT --expected-base-sha256 HASH
+用于保留现有EFI/恢复整合的窄增量；自检有效差异严格只有init/helper，shell语法
+正确，原凭据gzip member仍逐字保留在最后。只构建、不部署、不更改启动选择。
+本机显式加 --passwordless-user 10，开机确认该用户存在且is-user-secure=false
+后调用Android start-user -w和switch-user；安全锁直接拒绝，无凭据删除。
+不传参数仍等当前用户已有镜像，普通/救援启动不执行。不创建镜像。
+helper隔离测试现覆盖16场景；test_sq2_el2_terminal_pack.py另测两项打包保留/拒绝边界。
+本机完整重启已自动进入用户10，实际guest shell及HTTPS通过；见HANDOFF。
+这不是完整EFI构建可复现化，也不修复EL2视频认证；本机候选及实机状态见HANDOFF。
+
+
+### 2026-11-01：EFI视频资源名字查询
+
+`probe/virtualization/sq2-video-efi-inventory.c`是独立、单次诊断应用，不接入普通
+启动或正式packer。只接受已核对的Clock协议0x10006，查询七个时钟/三个电源域
+和两个负对照；不会执行电源、时钟、reset或SCM操作。写独立报告后加载原EL2
+launcher，已有报告不覆盖。实机结果及后续交接限制见HANDOFF。
+`python3 tests/test_sq2_video_efi_inventory.py`用ASan/UBSan测试实际查询核心。
+本地编译参数记录在忽略的`out/el2-android/uefi-video-inventory-v1/build-commands.json`，
+使用venus-preboot-v1中的GNU EFI：入口必须是`_start`，objcopy使用
+`-O efi-app-aarch64`并保留`.rodata`等标准段；不要混用旧slbounce的binary输出。
+完整PE文件在QEMU真实FAT镜像上验证报告、拒绝覆盖和LoadImage/StartImage链；
+QEMU的`fat:rw:目录`模式本轮曾写回错误内容，不能作为报告文件一致性的依据。
+QEMU只覆盖通用EFI路径，实际资源名字仍须实机只读查询验证。
+
+### 2026-11-01：接通EL2终端自动打开
+
+`pack-sq2-el2-android.py`现在同时安装`probe/virtualization/el2-terminal-autostart`
+及实验启动块中的异步调用。旧trace-v2归档有helper文件，却没有调用点，不能将
+此前手动执行成功记作自动启动验收。helper检查screen_only/KVM/Android完成和
+stage标记，只打开当前用户已有的Linux镜像；不创建镜像、不切换用户、不解锁。
+删除旧helper的UI dump、45秒诊断等待及logcat采集，保留有界等待和失败退出。
+`python3 tests/test_sq2_el2_terminal_autostart.py`运行实际shell的隔离测试；
+覆盖普通/救援退出、guard/KVM/boot/stage/镜像拒绝、用户切换和启动失败。
+当前实机单次调用通过，但新增开机hook尚未部署或重启验收。
+使用下节同一kernel/venus输入、改输出为`parity-pack-terminal-autostart-v1`
+已实际构建通过；与上一包的有效差异仅init/helper，凭据末member完全相同。
+此包仍不包括运行trace-v2的EFI/恢复/观察器整合，不直接替换现用镜像。
+
+### 2026-11-01：明确指定EL2打包输入
+
+`pack-sq2-el2-android.py`现要求`--kernel-build`和`--venus-build`，不再隐式
+读取旧的pre-network内核目录。前者是含`.config`及`arch/arm64/boot/Image`的
+内核输出目录，后者是针对该内核编译的自定义Venus模块目录。打包前检查
+KSU/KVM和CT/FTP/PPTP/GRE内建配置，以及sch_ingress/cls_bpf模块配置；
+缺项直接拒绝，不创建输出候选。检查不等于全部模块ABI或实机功能验证。
+`tests/test_sq2_el2_pack_config.py`覆盖完整配置和逐项缺失拒绝；视频清单校验
+仍由原manifest测试覆盖。其它自定义模块/底包输入仍沿用现有已固定路径，
+本改动不是完整构建流程去私有依赖，也不包含EFI Venus准备或自动恢复addon。
+
+本机本地构建命令（输出必须尚不存在，不会部署）：
+
+```sh
+python3 scripts/pack-sq2-el2-android.py \
+  --kernel-build /root/.cache/sq2-el2-network-20261101/build \
+  --venus-build /root/.cache/sq2-el2-network-20261101/venus-preboot-v1 \
+  --output out/el2-android/parity-pack-network-explicit-v1
+```
+
+该命令已实际完成；有效载荷与运行trace-v2的比较记录随产物保存。342模块中
+341项hash一致，venus-dec仅build-id及源码路径字符串不同；凭据末member相同。
+恢复/自动打开/观察hook仍有差异，不把此产物直接当成已验收的可替换启动包。
+
+### 2026-11-01：EL2终端网络依赖
+
+完整Android内核须启用NETFILTER_XT_TARGET_CT、NF_CONNTRACK_FTP/PPTP与
+NF_NAT_FTP/PPTP（自动选择NF_CT_PROTO_GRE）。Android tethering先装CT helper规则，
+缺失会导致guest有DHCP/DNS却无转发规则，HTTPS超时。el2-terminal-stage须在
+Android/netd创建接口前加载sch_ingress、cls_bpf。实机完整重启后原生转发规则、
+Debian HTTPS 200和文件下载已通过，无额外防火墙旁路。
+
+
+### 2026-11-01：EL2实验Android视频模块清单
+
+`pack-sq2-el2-android.py` 替换配套视频模块后，必须同步重建
+`etc/sq2-video-native/SHA256SUMS`。打包器先验证原清单/原载荷，再用最终模块
+字节生成新hash，要求所有视频模块均在清单内；未变化的helper仍保持原hash。
+`python3 tests/test_sq2_el2_video_manifest.py` 覆盖该实际代码。旧parity-pack-v1至v3
+遗漏此刷新，启动助手会在加载模块前拒绝；不要绕过校验。v4已修正并构建，
+完整EL2启动已通过模块清单校验，但视频PAS认证仍失败，未通过EL2硬解；
+EL1完整Android控制组的硬解结果及最新EL2阶段见HANDOFF。
+
 ### 2026-10-31：首次启动按本机校准
 
 首次向导现加入边缘拇指检查：3次持续5秒慢拖，随后轻点、拖动和双指确认。

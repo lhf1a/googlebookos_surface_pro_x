@@ -64,7 +64,7 @@ def main():
             shutil.copyfile(f, args.output / f.name)
     shutil.copyfile(ROOT / 'probe/video/venus-iris1.h', args.output / 'venus-iris1.h')
     for name in ('sq2-hfi-properties.h', 'venus-sq2-capabilities.h', 'venus-sq2-frame-sizes.h',
-                 'venus-sq2-vp9-eos.h', 'venus-sq2-crop.h'):
+                 'venus-sq2-vp9-eos.h', 'venus-sq2-crop.h', 'venus-sq2-boot-watch.h'):
         shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
     parser = (src / 'hfi_parser.c').read_text()
     parser = replace(parser, '#include "hfi_parser.h"',
@@ -341,6 +341,15 @@ static void sq2_vdec_trace(struct venus_inst *inst, const char *stage, int ret)
     hfi = replace(hfi, '\tstruct venus_core *core;\n',
                   '\tstruct venus_core *core;\n\tstruct sq2_venus_dma sq2_dma;\n')
     hfi = replace(hfi, '#include "firmware.h"', '#include "firmware.h"\n#include "venus-iris1.h"')
+    hfi = replace(hfi, 'static int venus_boot_core(struct venus_hfi_device *hdev)',
+                  '#include "venus-sq2-boot-watch.h"\n\n'
+                  'static int venus_boot_core(struct venus_hfi_device *hdev)')
+    hfi = replace(hfi, '\tstatic const unsigned int max_tries = 100;',
+                  '\tconst unsigned int max_tries = sq2_boot_watch && IS_SQ2_HFI(hdev->core) ? 2000 : 100;')
+    hfi = replace(hfi, '\t\tctrl_status = readl(cpu_cs_base + CPU_CS_SCIACMDARG0);',
+                  '\t\tctrl_status = readl(cpu_cs_base + CPU_CS_SCIACMDARG0);\n'
+                  '\t\tif (!count || count == 99 || count == 999 || count == 1999 || ctrl_status)\n'
+                  '\t\t\tsq2_boot_snapshot(hdev, ctrl_status, count);')
     hfi = replace(hfi, '\tif (IS_V6(hdev->core)) {\n\t\tmask_val = readl(wrapper_base + WRAPPER_INTR_MASK);',
                   '\tif (IS_IRIS1(hdev->core)) {\n'
                   '\t\tmask_val = venus_iris1_irq_mask(readl(wrapper_base + WRAPPER_INTR_MASK));\n'
@@ -572,7 +581,7 @@ static void sq2_vdec_trace(struct venus_inst *inst, const char *stage, int ret)
         (args.output / 'firmware.c').write_text(fw)
         for name in ('sq2-fw-transaction.h', 'sq2-venus-fw.h', 'sq2-venus-fw.c',
                      'sq2_video_fw_layout.h', 'sq2_pil_mem_query.c', 'sq2-pil-region.h',
-                     'venus-sq2-firmware.h'):
+                     'venus-sq2-firmware.h', 'sq2-venus-no-tz.h'):
             shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
         with (args.output / 'Makefile').open('a') as f:
             f.write('\nvenus-core-objs += sq2-venus-fw.o sq2_pil_mem_query.o\n'

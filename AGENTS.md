@@ -2,6 +2,13 @@
 
 Read docs/HANDOFF.md and docs/BUILD.md before changing the port.
 
+- Wi-Fi debugging lesson (2026-11-01): test the full Android candidate early once storage, the screen-only guard and recovery are verified. A failure in a stripped diagnostic initramfs does not establish an EL2 hardware limitation. Compare against the known-working full boot before adding EFI/SCM/SMEM mechanisms; see the debugging retrospective in docs/SQ1-EL2-PREPARATION.md.
+- Before each hardware experiment, record one hypothesis, the changed variable, the observation that distinguishes outcomes, and the stop condition. After two consecutive experiments fail to add distinguishing evidence, stop extending that route and return to the working baseline/environment comparison. This is a change of debugging direction, not a requirement to ask the user for permission.
+- Verify effective packaged/runtime files, firmware, DT, module dependencies/load order and original error payloads before rewriting a subsystem. Separate board Wi-Fi from guest forwarding; preserve fixes already proven in full Android. Functionality passing does not prove the historical failure's root cause.
+- EL2 audio (2026-11-02): the adopted ADSP reports `attached`, not `running`. Accept both active states for the identified ADSP; never reset it to change the state string. Full EL2 boot checks must include the physical ALSA card, AUDIO_READY and actual HAL hash, not only Android boot completion/video/Terminal readiness.
+
+- Terminal autologin (2026-11-01): user 10 was verified passwordless (is-user-secure=false, get-disabled=true). The explicitly selected EL2 lab hook now starts/switches this existing user and opens its existing image; a full unattended reboot reached RUNNING_UNLOCKED and Debian shell/HTTPS. Check user/security state before asking for manual unlock. Never infer a credential problem from active user 0; secure users are refused by this helper. No credentials were cleared.
+
 - Shared storage was repaired by loading FUSE before Android init. Both emulated volumes mount and the user confirmed Files and Chrome downloads work. Preserve this fix; never format userdata to repair a mount failure.
 - True suspend repair remains paused. The user requested screen-off only: preserve the kernel suspend.screen_only guard and nohibernate boot option. Screen-off/on checks are authorized once the guard is verified; never disable it or resume actual sleep tests without a new request.
 - Audio work was resumed by the user on 2026-10-27: investigate stop-pop, low/thin/compressed sound and stereo image. Keep gain changes bounded, preserve matching DAC/COMP/BOOST SoundWire ports, and distinguish listening results from register/PCM checks.

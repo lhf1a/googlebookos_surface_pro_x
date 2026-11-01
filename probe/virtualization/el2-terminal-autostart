@@ -1,0 +1,34 @@
+#!/bin/busybox sh
+# An explicit user may be started only without a secure lock; never provision.
+set -eu
+case " $(cat /proc/cmdline) " in *' sq2.rescue=1 '*) exit 0;; esac
+case " $(cat /proc/cmdline) " in *' sq2.el2=experimental '*) ;; *) exit 0;; esac
+test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
+test -c /dev/kvm
+for n in $(seq 1 120); do
+    if [ "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null || true)" = 1 ]; then break; fi
+    sleep 2
+done
+test "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed)" = 1
+grep -q SQ2_EL2_TERMINAL_STAGE_READY /logs/el2-terminal.txt
+target=${1:-}
+if [ -n "$target" ]; then
+    case "$target" in *[!0-9]*) exit 1;; esac
+    timeout 3 nsenter -t 1 -m -r -- /system/bin/cmd user list | grep -Fq "UserInfo{$target:"
+    test "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/cmd lock_settings is-user-secure --user "$target")" = false
+    echo "EL2_TERMINAL_START_PASSWORDLESS_USER user=$target"
+    timeout 30 nsenter -t 1 -m -r -- /system/bin/cmd activity start-user -w "$target"
+    timeout 10 nsenter -t 1 -m -r -- /system/bin/cmd activity switch-user "$target"
+fi
+echo EL2_TERMINAL_WAIT_FOR_ACTIVE_USER_IMAGE
+for n in $(seq 1 180); do
+    user=$(timeout 3 nsenter -t 1 -m -r -- /system/bin/cmd activity get-current-user)
+    case "$user" in ''|*[!0-9]*) exit 1;; esac
+    if { [ -z "$target" ] || [ "$user" = "$target" ]; } && [ -f "/proc/1/root/data/user/$user/com.android.virtualization.terminal/files/linux/completed" ]; then break; fi
+    sleep 2
+done
+test -z "$target" || test "$user" = "$target"
+test -f "/proc/1/root/data/user/$user/com.android.virtualization.terminal/files/linux/completed"
+echo "EL2_TERMINAL_OPEN user=$user"
+timeout 20 nsenter -t 1 -m -r -- /system/bin/cmd activity start-activity -W --user "$user" -n com.android.virtualization.terminal/.new2.ui.MainActivity
+echo EL2_TERMINAL_LAUNCH_REQUESTED_NOT_SHELL_PROOF

@@ -1,5 +1,13 @@
 # SQ2 视频硬解适配调查
 
+**2026-11-01 EL2宿主H264硬解已恢复并完成持久启动验收**：SQ1 CSRT/PIL定位固件
+SID2342；旧SMMU驱动漏管第183项导致SMCF，移植上游扩展SMR修复；no-TZ最终
+NONPIX_START/END=5MiB修正固件自身页表，保留Linux42固件。完整重启后自动
+发布video0，MediaCodec High+B六帧Surface图像逐字节匹配，普通APK自动选中硬解
+并播放1080p High300/300帧，约9.96秒，EOS/STOP/RELEASE通过。原用户10自动进入、
+Debian shell与HTTPS正常。范围是EL2 Android宿主H264，不是guest内部硬解，也不
+将下方EL1的HEVC/VPx/4K历史结果自动算作EL2已验证。具体产物/备份见HANDOFF/BUILD。
+
 最新：HEVC 4K60 Main、含449个B帧的600帧素材已在普通APK自动选中新组件并完成600输出/渲染，9978ms、EOS/STOP/RELEASE/RESTORED。native capture有界预算由128MiB增至192MiB解决本轮EOVERFLOW。完整固件能力对齐仍未完成，见[能力对照表](VIDEO-CAPABILITY-ALIGNMENT.md)和HANDOFF最新状态。
 
 **2026-10-30**：最新完整运行态见HANDOFF顶部。Bilibili已通过OMX.qcom.video.decoder.avc别名实际1080p硬解，菜单仍无4K。HEVC原生6帧参考CRC通过，Android自动选择Main 8-bit、320×240含B帧300帧实时播放通过；4K60首轮失败，已定位适配层EOVERFLOW，native capture预算候选尚待实测。用户要求对齐固件全部格式、分辨率/profile/位深和吞吐，不能止于AVC/HEVC或XML声明。

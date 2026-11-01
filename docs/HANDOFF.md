@@ -1,5 +1,768 @@
 # SQ2 开发交接
 
+**2026-11-02 EL2音频无声已定位并在线恢复，持久包重启验收中**：用户报告无声，
+boot仍为3a8da95c…。/proc/asound/cards无声卡，audio-framework日志只有driver
+initialization失败。audio-drivers-start在加载任何音频模块前只接受ADSP state=running；
+EL2接管的17300000.remoteproc实际为attached。修正为同一ADSP的running|attached，
+offline/detached/crashed等仍拒绝并打印原状态；不重启或卸载remoteproc。
+
+只替换RAM helper并运行原framework助手一次，物理card0/三组PCM注册，实际HAL
+inode/hash为774cd7e7…，RX7/8仍84，原DMIC/端口/增益/transport未改。AAudio双声道
+48kHz播放channel-continuity完成528000帧、active xruns0/exit0，ALSA hw_ptr持续
+推进；用户明确确认“已恢复正常声音”。board boot及system_server/SF保持。
+
+按用户要求检查类似问题：源码及设备shell helpers未找到第二处把attached拒为
+未启动的判断；EL2 RMTFS正确要求attached。FUSE卷已挂载，触控/键盘发布、蓝牙ON
+及桥接、SSH、视频、资源监视日志就绪；CPU schedutil及1.7664/3.1488GHz上限，
+CPU80C/5C、GPU75C/5C热策略读回正常。GPU700档为此前已部署基线，不回退为旧661。
+module-load另有dummy模块缺失，配置确实未启用；当前未见其影响已验证网络功能，
+不为消除告警扩展内核。此检查不等于蓝牙传输/热触发/所有外围设备重新实测。
+
+共享helper及EL2完整packer已修正；测试覆盖running/attached、五类非活动状态、
+错误ADSP、缺状态文件和实际packer刷新。仅追加helper的启动包SHA256
+9401ea98de94268e563e2ca546479b9a08d3245b0880cafba0b583a78aa46caf，181144746字节；
+最终有效条目仅bin/audio-drivers-start变化（f696da16…），凭据末member逐字保留。
+已按磁盘/UUID/root/旧包核验、备份、gzip/hash、sync与原子替换部署EL2载荷，默认
+Mesa未改。旧包在data/local/tmp/sq2-boot-backups/before-audio-attached-v1。
+正在一次性EL2重启验证，证据位于out/el2-android/audio-attached-v1。
+
+**2026-11-01 EL2 Android硬解与Linux终端共存，持久启动验收通过（H264范围）**：
+新boot3a8da95c-5451-4216-8039-d68c69938be6，EL2启动包8ef93a9e…首次加载即成功，
+无先行PAS失败/热重试。启动清单全部通过，sq2_no_tz=Y、sq2_boot_watch=N，
+SID2342/5MiB映射及CPU启动成功，/dev/video0自动发布。实际strip后core SHA
+b9b9d83582a548ad2d00c78e55c67723111ade882996d7493f341597f65db35e，decoder SHA
+3ccf818ada0d7eebf44a9f1dbface4032aeb90536303b19f978f385d985a824c；helper SHA
+a7102e17c061f5ca23e3bfe68bc92cbd0bca4ce07a656684064f9b0a37a34087。
+
+重启后Android High+B六帧Surface/CSD输出与独立NV12参考再次逐字节一致。
+普通APK通过MediaCodecList自动选中c2.sq2.avc.experimental，报告hardware=true、
+software=false，1080p High300输入/输出/渲染，EOS、realtime、STOP/RELEASE均通过，
+elapsed9963ms；两次截图有真实变化。两轮shell exit0，框架PID2942/2982保持，
+有限kernel日志无fault/WARN。Debian PID6989从自动启动一直保持，播放后实际原终端
+shell显示aarch64、uid1000(droid)、HTTPS200。用户10自动RUNNING_UNLOCKED，
+KVM witness42通过，三个remoteproc attached，guardY/nohibernate、pstore空。
+本轮只证明Android宿主H264硬解与guest共存；未证明guest内部硬解，也未将EL1的
+HEVC/VPx/4K结果转记为EL2验收。长时间、多格式及第三方应用兼容性仍待验证。
+
+正常默认仍Mesa；一次性EL2入口已消费为none，本机EL2载荷已持久更新。
+/run/el2-control-keep已建立，360秒恢复助手已确认“Recovery canceled after operator validation”。所有证据位于
+out/el2-android/no-tz-boot-v1/{runtime,media,player}及guest-verified.png。
+不再把“缺固件SID资料/PAS认证失败/无video0”当作EL2硬解当前阻塞；保留下面历史
+实验记录以说明定位过程。后续维护不得热卸载已发布Venus/VIDEOCC/SMMU提供者。
+
+**2026-11-01 no-TZ v4已通过真实帧、Android Surface和1080p播放；持久启动重启中**。
+boot841647e4…驻留Venus上，原V4L2 H264 baseline六帧逐CRC匹配、mask3f、输入返回6、
+drain/LAST/close成功。Android原有Codec2服务/XML不改，既有High+B帧探针
+e3f88650…经Surface/CSD输出6张AImage及EOS；与high-bframes-vector/ref.nv12的
+691200字节逐字节完全一致，不能误用baseline的参考文件。1080p High Profile
+实验APK普通UID1010254播放300/300输出/渲染，elapsed9960ms、EOS、STOP/RELEASE
+全部通过，两次截图确认图案变化。有限kernel采集无fault/WARN；system_server2990/
+surfaceflinger2948保持。播放器shell stdin末尾被PowerShell追加CR，打印全部通过后
+报“sh: \r: not found”退出1；这是传输尾部错误，保留原结果，不重复解码掩盖它。
+
+Debian旧PID6878在MediaCodec试验前已退出，guest日志显示正常systemd关机及
+Power down，不能认定VPU崩溃。重新打开原终端后PID5594，实际shell得到aarch64、
+uid1000(droid)、HTTPS百度200；截图guest-verified.png已取回。早先SSH连接间歇超时
+后恢复，boot ID不变。证据统一在out/el2-android/venus-no-tz-v4/{runtime,decode,media,player}。
+
+pack-sq2-el2-android.py新增显式--no-tz-overlay：仅EL2实验启动，先hfi overlay、
+固件SID overlay，再core sq2_no_tz=1和decoder；不带boot-watch，不接PAS观察器。
+默认PAS helper逐字不变，真实helper的加载顺序/失败中止及原manifest/runtime测试通过。
+新包out/el2-android/no-tz-boot-v1/android-el2.cpio.gz为180505061字节，SHA256
+8ef93a9ef232bc655a026b0800e26d2fe25bce696bee17de700a65e441eb0ca1。
+与实际旧包有效条目对比，init/所有媒体用户态/固件/凭据末member不变；差异为
+video helper/core/decoder/新overlay/manifest、移除PAS观察器及匹配内核的kheaders/
+builtin索引。各清单已核验。已识别NVMe/ESP/UUID/root后备份并同卷原子替换EL2
+initramfs，正常Mesa默认和Image/DT/EFI均不改。旧包/清单位于设备
+data/local/tmp/sq2-boot-backups/before-no-tz-v1；为腾ESP空间，将旧before-terminal-boot-v2
+完整复制/cmp/hash/gzip验证到no-tz-v1-old-terminal后才删除其ESP副本。
+已设置一次性android入口并请求重启；需取新boot证据并验证首次启动、播放及原终端。
+
+**2026-11-01 no-TZ v4已发布/dev/video0，实际解码仍待验证**：仍为boot
+841647e4-cdd1-4d82-bdf0-cfeeaa7de6f7、新SMR内核c1ef559f…、guardY、Android完成、
+用户10。v3将显式诊断等待延长到2000次并观察既有状态/队列/SFR，始终为0，
+正常复位回收；等待时间不是解决方案。v4仅将NONPIX_START/END从0改为固件span
+（5MiB），保留FW/CPA的0..span。原Windows PIL设置是中间状态，不是CTRL_INIT前
+最终保护配置。固定Linux42固件的早期ARM指令根据这些边界建立页表；旧组合
+令五个固件section descriptor无效，span..span使之有效，与上游no-TZ一致。
+tests/test_sq2_venus_boot_ranges.py固定固件hash和实际指令并验证该区别。
+
+v4映射SID2342、IOVA0→8c000000共5242880字节并逐页核对，CPU释放成功；
+poll8的CTRL_STATUS=40000001，SFR以“Init SFR msg, NO”开始，qcom-venus绑定并
+发布/dev/video0，core refcnt3。core SHA11ae7769d5d240ad6c12076a187b1a8fbd5bd181279919c40bd4a879db5d1d64，
+decoder SHAdcbf97dfcacf65aa48c0021d14f65a9406e063eb33a68002d738c7892d9fa8c1。
+模块来自/root/.cache/sq2-venus-no-tz-v4，临时加载参数含sq2_boot_watch=1；
+该观察器默认关闭，正常100次等待已经足够。有限采集位于/logs/venus-no-tz-v4。
+
+**不要卸载已发布的Venus或其VIDEOCC/SMMU提供者**。启动包仍为旧PAS版本，
+v4尚未持久化；本轮尚无输出帧/MediaCodec/应用播放证据，不能宣称EL2硬解完成。
+下一步使用驻留driver验证V4L2像素、Android播放和guest shell，然后接入EL2候选
+启动包并重启复验，保留默认Mesa和凭据末member。后续SSH一度TCP连接超时，
+未取得新的boot ID，不能据此认定崩溃或重启。
+
+**2026-11-01 扩展SMR补丁已实机重启，冲突消失但HFI仍未就绪**：当前boot
+841647e4-cdd1-4d82-bdf0-cfeeaa7de6f7，Image为
+c1ef559ff8d240de4f9314ba9d1a2586e7dac3b8eae777bff2a90ed72dd57a1c（30794240字节）。
+隔离源码/build在/root/.cache/sq2-el2-smr-20261101；配置、Module.symvers和release
+与network-20261101逐字一致。只替换EFI/SQ2EL2Android/Image及对应清单；原Image/
+清单备份在设备data/local/tmp/sq2-boot-backups/before-smr-20261101。initramfs仍为
+c17fa3fd…，DT/EFI/凭据及正常默认Mesa不变，once已消费为none。
+
+首次SSH接回已Android完成、guardY、用户10；KVM witness42通过，Debian PID6878，
+三个remoteproc保持attached，网络正常。/run/el2-control-keep已创建取消360秒恢复。
+QEMU实际Image的只读guard及freeze/mem/disk拒绝测试通过；旧smoke命令缺少本机
+lsm=selinux导致KernelSU在QEMU先崩溃，补齐与实机相同的lsm/enforcing参数后通过，
+没有为精简环境的失败修改KernelSU。
+
+no-TZ v2仍只通过/tmp上传模块执行，没有纳入启动包。core SHA
+75b985e2f1e81df6666ad7cc2589699d43f0a919e693fa6f36c0289730b306e2，
+相对v1仅抽出load helper并按新build重编，映射/寄存器行为未变。SID2342映射与
+CPU reset释放仍成功，**本次有限采集中不再有SMCF或其它SMMU fault**；HFI的
+venus_boot_core仍在约100ms后-110，没有/dev/video0；当前代码未记录末次
+CTRL_STATUS，不能把超时直接记作“所有采样均为0”。
+随后reset_assert0、unmap完整5242880、memory_released，Android/用户10/guest进程
+继续存活，boot ID不变。采集见out/el2-android/venus-no-tz-v2/runtime。
+不能宣称完整固件执行或解码成功。下一步围绕CPU启动后的HFI初始化作有界观察，
+区分固件未运行、晚于当前等待窗口、共享队列未写入；不再重复已定位的PAS/EL1/
+128组GR0比较。Windows79与Linux42 ELF物理base均f500000，链接vaddr从0开始；
+当前5MiB IOVA0映射与MDT relocation方向一致，未替换固件。
+
+**2026-11-01 no-PAS候选首次实机启动：确认SID2342，定位扩展SMR冲突**。
+仍为EL2 boot81493270…、guardY、Android完成、用户10；正常默认Mesa未改。
+前置只读复位探针成功：power_end0、aae3000=0x10、完整释放/卸载。
+模块SHA05592285…；日志在out/el2-android/venus-reset-probe-v1/runtime。
+
+新增默认关闭的venus-core参数sq2_no_tz，固定42版固件和原8c000000内存lease，
+独立child SID2342/mask0，IOVA0..5MiB逐页检查，跳过PAS认证/保护；复用原电源/HFI。
+首次实机map成功、Windows参考寄存器写入和reset释放读回成功，但HFI超时-110。
+实际SMMU报告GFSR80000004/GFSYNR0c/SID2342。随后reset_assert0、unmap5242880、
+memory_released；boot ID不变，无/dev/video0。不能记作硬解成功或完整固件执行。
+core模块SHA0c5a9c11…，证据在out/el2-android/venus-no-tz-v1/runtime。
+
+GFSR bit2是SMCF（流匹配冲突），不是未知SID。独立只读快照发现ID0=7c017ed4，
+硬件212组；测试consumer释放后，**SMR183=80002342、S2CR183=30000373**仍存在。
+旧qcom驱动无条件裁剪到128，遗漏该固件已有项。上游5583a55e074b修复同类裸机
+视频启动冲突：固定用S2CR127判断bypass quirk，仅有该quirk时裁剪；无quirk时保留
+完整固件表，而非清空其它remoteproc项。已准备严格源码hash的移植脚本，待隔离
+内核构建/重启及HFI验证。不要在旧内核热重试no-TZ或直接清除高位SMR。
+出处：https://patchew.org/linux/20250821-arm-smmu-qcom-all-smr-v1-1-7f5cbbceac3e@linaro.org/
+
+离线验证：同内核模块编译、21项HWIO/9项负例、实际寄存器helper的读写边界/
+保留位/复位失败、8PAS+4no-TZ分支、16种reset/unmap失败、原16种固件事务隔离
+均通过。快照255组边界/掩码匹配测试通过；快照实机已卸载。未访问TZ阈值读寄存器。
+
+**2026-11-01 CSRT与安全PIL关联到新的固件流候选2342**：沿新采集的
+QcSkExt8180追踪到CSRT/QCOM device100c资源组。首个SMMU记录base15000000，
+592条、每条10字节；视频附近11条中，2342原始条目为4223010000000c010000，
+domain byte=12。PIL PAS9描述符的mem_assign回调9760在认证成功后先4→14，
+再将各有效固件段14→12；CSRT规则亦明确包含14→12和12→14。
+这是2342作为固件流的交叉证据，不是SQ2运行期取指实测，也不是2302依据。
+
+已确认3=HLOS、4=HYP、14=HLOS_UNMAPPED的字符串/分支对应。3→4先经
+CreateSecureSectionSpecifyPages/MapViewOfFile建立Windows安全映射后返回；
+4↔14在trustlet中为空操作。14→12调用AssignMemoryToSocDomain，并支持
+固件链接地址与物理装载地址不同。不可把这些Windows句柄操作照搬成Linux SCM。
+3d20(1)是1微秒忙等，不是缺失的时钟API。视频MMIO四页aae0000/1000/2000/3000
+在该扩展CSRT策略中，通过OpenCurrentExtension/MapSecureIo映射，不能据此
+认定Linux EL2可直接访问。
+
+新增inspect-sq2-windows-pil-reference.py固定扩展/CSRT hash，核验11组指令、
+API import、PAS9回调、流条目、8项内存规则及MMIO策略。真实输入通过，8项
+错误hash/校验和/边界/流编号/规则/指令负例均拒绝。详细依据与命令见
+docs/SQ1-VIDEO-REFERENCE.md的2026-11-01续接；报告在忽略目录
+out/el2-android/sq1-reference-20261101/pil-csrt-verified.json。
+本轮没有设备访问、部署、重启或热重试PAS。下一步以2342/domain12为有依据
+候选核对Linux固件IOVA与复位访问；仍需厘清TZ认证前置条件和安全回收。
+硬解目标继续active，不再将“没有任何固件流资料”当作阻塞理由。
+
+**2026-11-01 新Windows采集已取回，硬解分析取得新的实际实现材料**：用户告知
+SQ1材料可作SQ2参考。当前分支已从008e70d快进至8f64975，未提交的tracked diff
+hash前后相同。按分卷及完整ZIP SHA恢复到out/el2-android/sq1-reference-20261101；
+72个manifest文件全部核验，8张ACPI checksum正确、issues为空。qcdxkm8180、
+qcvss8180及IORT均与此前已知参考hash相同；原Windows指令检查6项/映射10项通过。
+Windows状态为HypervisorPresent/SecureBoot=true、VBS=2。
+
+关键新增可分析入口是PIL包中的QcSkExt8180.exe，SHA256
+da09677b8bc3f35c4217e768f73a1ccc19e112cedf724bd14d393e1545511e22；INF将其作为
+async secure PlatformExecute注册。它包含视频PIL启动/保护实现，不能只分析qcdx。
+已用字符串交叉引用及真实ARM64指令核对video_bring_up(14000a280)调用
+video_init_and_start(14000a1c0)；后者成功路径依次调用a090/b4f8/b930。
+寄存器访问helper在140003c34使用32字节表项的mapped pointer+offset；
+初始化指令指定RVA1b8a0、177项。十个相关项的base+offset确认为0aae0000、
+0aae3000、0aae1028/102c/1020/1024/1030/1034、0aae2010/2000。
+五组固定指令及十表项断言通过，见pil-static-audit.json；原始反汇编仅留out。
+微软符号服务器对该精确PDB GUID/age返回404，未取得符号，不冒称有PDB函数名。
+
+这解除“缺少可继续分析的Windows启动实现”的材料阻塞，但尚未证明本次Windows
+执行了这些分支，也未确定固件SID、Linux EL2访问权限或ffcfffb4含义。下一步应沿
+QcSkExt的PIL认证、内存分配及寄存器表映射追踪，而非重复已完成的GR0/EL1实验。
+本轮没有设备操作、没有应用Windows寄存器序列或启用SHM，硬解未修复。
+
+**2026-11-01 EL2硬解后续可行性复核，未执行新硬件实验**：只读确认当前仍为
+boot81493270…、Android完成、用户10、Debian PID6762、guardY，恢复已取消；
+/dev/video0仍不存在。检查“用SMMU未知流故障识别固件SID”的替代办法：当前
+arm_smmu_global_fault确实报告GFSYNR1低16位，但制造取指故障首先需要释放
+VPU CPU。现用V4 no-TZ路径会写wrapper的FW/CPA/NONPIX阈值和A9复位；已验证
+的HFI CTRL_INIT(0xd2048)只是邮箱启动协议，不能替代CPU复位或证明上述寄存器
+可访问。因此不能仅凭HFI成功经历就进行此实验。静态源hash/结论保存在
+out/el2-android/venus-no-tz-feasibility-v1/audit.json；没有新增寄存器访问、
+固件认证或重启，没有修复硬解。缺失的证据仍是SC8180X无PAS启动时的固件CPU
+复位/保护访问权限，以及固件取指流和IOVA交接；不能从SC7180示例直接推定。
+
+**2026-11-01 完整initramfs已纳入现场运行钩子并完成离线比对**：正式packer新增
+显式--passwordless-user 10及可选--scm-trace，并纳入已部署的360秒EL2恢复助手。
+真实构建parity-pack-runtime-v1为180505535字节，SHA256
+02ccb2f01a75e5b81abd6beccaef4c0bed7c4726ae1c6cd27109a72c45fbb2aa。
+按最后条目审计，与设备现用terminal-boot-v2相比，init及全部bin助手逐字相同，
+原凭据gzip末member逐字保留。有效差异严格为venus-dec及其清单、四个builtin
+模块索引；两份venus-dec均与此前section审计输入逐字相同，差异仍仅build-id及
+源码路径字符串。最终视频清单逐项通过。hook顺序/可选观察器/重复拒绝、恢复
+guard/取消/回退测试和原配置/视频清单/16场景终端测试通过。
+审计见out/el2-android/parity-pack-runtime-v1/runtime-comparison.json。
+未部署、未重启，不将重建包记作新实机验收；launcher/DT生成整合仍待补齐，
+EL2宿主硬解认证失败仍未解决。用户10无安全锁，未清除凭据。
+
+**2026-11-01 现用qebspil已从正式脚本逐字节重建**：发现prepare脚本未包含现场
+Venus metadata调用及DSP原始结果交接。新增显式--venus-firmware，先核验已验证
+MBN的长度/SHA，再按原fw_load_metadata规则生成私有header；不传参数保持原路径。
+从固定上游及submodule生成的Makefile和所有顶层src文件统一LF后与现场构建源相同；
+实际AArch64构建得到81797字节，SHA e3675e36a749176481742a8ac78b8d505a40e3ea2a87464b123c45dd3080fe95，
+与设备ESP现用qebspil完全相同。错误长度/内容拒绝、已存在目录拒绝、默认路径及
+已有EFI/Linux契约测试通过。产物/审计在out/el2-android/efi-repro-venus-v1。
+只做主机构建，无部署/重启；设备仍boot81493270…、用户10，恢复助手已取消。
+这只补齐qebspil生成，不是完整六载荷发布流程：launcher/DT及initramfs中的
+EFI视频/恢复hook整合仍需纳入正式构建。EL2宿主硬解认证失败仍待解决。
+本轮源码/公开资料复核未找到足以安全启动no-TZ或EFI全启动的新映射证据，未
+重复GR0/EL1对照，也未猜SID、修改复位或调用SHM。
+
+**2026-11-01 KernelSU应用授权、撤销均通过，临时实验已收尾**：当前EL2 boot
+81493270-dbe5-4f78-b442-2b7026c05e2a，首次SSH接回前已自动切到用户10并打开
+原Debian镜像，crosvm PID6762/CID2048；恢复日志明确Recovery canceled。
+临时org.surface.sq2.rootcheck仅安装到用户10，应用UID1010269。由官方Next管理器
+只开启此应用超级用户后，应用自身执行su -c 'id; id -Z'，exit0、uid0及
+u:r:ksu:s0均通过。关闭同一授权后再次执行返回su ENOENT，证明撤销生效；
+随后卸载该应用、删除上传APK/临时截图。未给其它应用授权。
+截图及清理记录在out/el2-android/root-app-check-v1；这覆盖应用授权路径，
+不等于全部模块兼容性。终端已重新调到前台，实际id返回droid uid1000，截图
+terminal-id-final.png。末次取图曾SSH超时，下一次连接自行恢复、boot ID不变；
+未改网络或重启，不能记为板级崩溃。
+
+**EL1 SMMU差分实际结果为阴性，停止该路线**：boot
+f516d8ce-7d26-46da-a2c5-81de24f624d3的首次PAS9 auth=0，但128组SMR/S2CR全部
+不变（changed=0）；16项有效，视频数据SID2300/2320/2340前后均为CB9，
+没有取得固件SID2302证据。观察器captured1/missed0并正常卸载。
+这只排除“通过本次Linux可见GR0前后差分直接找出固件流”的办法，不证明安全
+视图无映射，也不能据此猜SID或重复该实验。控制启动Android完成但无wlan0，
+未追查这个隔离环境的网络；360秒助手核验后选择EL2并自动返回上述boot，
+用户10/终端自动恢复。证据在venus-smmu-trace-v1/runtime-summary.txt。
+核验NVMe/ESP/root、原始backup的hash/gzip后，已原子恢复EL1控制addon及清单
+（addon恢复1aab58ad…）；完整清单通过，once=none，未安排后续启动。
+持久默认仍Mesa，EL2宿主视频认证仍失败，guest硬解仍未验收。下一步须取得
+新的固件资源/映射/重置交接证据；不再重跑已完成的EL1认证或GR0快照。
+
+**2026-11-01 EL1视频SMMU只读差分候选**：EL2终端boot600d4d3c…稳定且恢复助手
+已明确取消。新假设是成功的EL1 PAS9认证会改变Linux可见SMR/S2CR，差分可能
+定位QHEE的固件流；无变化或无认证成功则不推导SID，不继续猜2302。
+新增sq2_venus_smmu_trace只允许Surface/SC8180X/EL1，单次insmod调用PAS9前后读
+apps SMMU GR0的128个SMR/S2CR，不读CB/TZ/页表，不写寄存器或发起PAS。
+同内核模块编译通过，真实读循环ASan/UBSan边界/无写入测试通过；EL2实机加载
+拒绝EPERM且无模块残留。使用已成功EL1分段对照的Image/DT/EFI与视频模块，
+只替换控制addon，另加到期自动选择已核验EL2终端的回程（失败仍正常默认）。
+候选venus-smmu-trace-v1：addon b67cf7e2…，module7366250a…；4项有效差异、
+凭据末member相同。停止条件为一次认证或360秒回程，不重复调用PAS或卸载provider。
+10:12UTC已部署并发起一次EL1重启，等待差分及自动EL2回程。公开Carina ACPI模板仍只列非安全/secure数据页表，没有固件SID；
+原始IORT模板checksum未完成，不能冒称运行设备表；未改现有SID/IOVA。
+
+**2026-11-01 无人操作重启进入用户10及Linux终端通过**：boot
+600d4d3c-c0e1-43ac-a075-1ea7af8861bd。实际initramfs为c17fa3fd…；
+helper为584a959b…，开机日志依次出现无密码用户启动、user started、
+OPEN user=10、Status ok。首次SSH接回前已自动完成切换，未执行手动start-activity。
+系统用户10为RUNNING_UNLOCKED，Debian PID7019/CID2048，截图实际显示shell；
+输入id/uname后得到droid uid1000和guest 6.12.93，HTTPS百度返回200。
+Android完成、screen_only=Y/nohibernate和KVM witness42通过，已写keep marker。
+证据位于out/el2-android/android-el2-terminal-boot-v2的runtime.txt及两张截图。
+
+本轮只修init调用及helper。原六载荷中仅initramfs变更；原trace-v2保存在ESP
+EFI/SQ2EL2Android/before-terminal-boot-v2。旧before-terminal-autostart已先复制到
+/data/local/tmp/sq2-boot-backups/before-terminal-autostart，校验两文件hash及gzip后
+移出ESP；无账号/凭据删除。16场景helper测试、2项打包边界测试及真实归档审计通过。
+once.env消费为none，持久默认仍Mesa；本次EL2终端入口自动进入原用户已验收，
+不是普通默认已切换EL2。EL2宿主视频auth仍-22，完整硬解适配未完成。
+
+**2026-11-01 终端自动切换修正准备**：当前boot304594b1…，用户10已恢复真实
+Debian shell（PID10363/CID2048）。旧SSH等待客户端挂起且远端helper已退出，
+不计为自动启动成功。用户明确说明未设密码、授权必要时清锁；实际
+lock_settings is-user-secure --user 10=false、get-disabled=true，故不清除任何
+凭据。此前反复请求手动解锁缺少这项检查，后续先区分用户切换与安全锁。
+新helper仅在明确传入用户10且系统报告无安全锁时start-user -w / switch-user，
+不改凭据或账号；未传用户保持等当前用户行为。16场景及当前设备直接调用通过。
+假设：开机调用遗漏及默认停留用户0阻止原镜像自动打开。唯一变化是当前trace-v2
+有效init和helper，保持EFI/视频/网络/恢复载荷；新窄打包器审计两项差异及末尾
+凭据逐字相同。候选android-el2-terminal-boot-v2（c17fa3fd…），v1未部署。
+判别：重启后无人操作即出现用户10 RUNNING_UNLOCKED、helper启动日志及实际guest
+shell；停止条件为一次完整启动或360秒恢复，不在失败时改账号/格式化数据。
+ESP旧before-terminal-autostart仅在迁往/data/local/tmp/sq2-boot-backups并验证hash/
+gzip后移出，为原子替换腾空间；当前trace-v2另留现场回退。09:58UTC已安装并发起重启，等待实机验收。
+
+
+**2026-11-01 EFI视频资源查询实机通过，未启动视频固件**：boot变为
+304594b1-731b-4ffe-b5e0-73ad6e406646，已回原EL2 Android。当前Clock协议
+0x10006；七个clock及三个power-domain名字均返回0和非零ID，不存在名称的
+两个负对照返回EFI_PROTOCOL_ERROR(0x8000000000000018)。这证明接口和资源
+名字可用，不证明Enable/Reset/PAS或硬解。原payload未换，auth仍-22，shutdown0。
+Android完成、guardY/nohibernate、KVM witness42通过后已写/run/el2-control-keep；
+once.env已消费为none，默认Mesa仍保留。报告/内核日志/audit在uefi-video-inventory-v1。
+当前用户0，已请求用户解锁原桌面；新终端helper正通过SSH有界等待原用户镜像，
+尚未作为boot hook部署。不得再为取得同一EFI资源列表重启。
+
+下一阶段还必须解决固件映射与重置交接：本机内核的qcom_smmu_cfg_probe把有效
+SMR对应S2CR改为bypass，arm_smmu_device_reset禁用所有未分配context bank；
+现有sq2_venus_power_on也会脉冲四个reset。因此不能只在EFI认证然后让现有
+Linux loader照常接管。尚未证明视频FW SID/页表存续，未增加通用SMMU旁路或
+改动其它设备的隔离；先建立明确的资源、映射和firmware owner交接再做启动实验。
+
+**2026-11-01 EFI视频资源查询实验准备**：基线仍trace-v2/boot1f4a2290…。
+公开Carina固件提取物（SurfaceDuoBinaries commit1f458b7914a4b68f787662844bd591b3892303a0）
+的ClockDxe协议0x10006包含七个目标时钟和mvsc/mvs0/mvs1电源域，后者寄存器
+0xab00814/874/8b4与Linux资源对应。PILDxe的uefipil.cfg没有Venus项，未假定
+现成PIL proxy支持视频。公开二进制不是当前设备同hash证明。
+假设：当前EFI也提供这些资源的名字查询。唯一改变是在既有EL2 launcher前
+运行独立inventory.efi；只用GetClockID/GetClockPowerDomainID及不存在名称负
+对照，不调用开关电源/时钟、reset或SCM。精确版本不符时不查；记录到独立
+EFI/SQ2VideoInventory/clock-inventory.txt后链回原el2launch，原六载荷不变。
+全部成功且负对照失败可支持后续设计EFI资源管理；缺项则不扩展EFI固件启动。
+停止条件：一次查询报告或原360秒恢复，不在设备重复试调用。
+ABI/列表/版本/空接口/边界主机测试、AArch64编译、实际PE类型和QEMU启动通过。
+QEMU目录式vvfat写回异常，换真实FAT镜像后报告逐字正确，保留已有报告及
+LoadImage/StartImage下一EFI的完整路径也通过；此为工具验证，非资源实机结果。
+源码probe/virtualization/sq2-video-efi-inventory.c，私有产物uefi-video-inventory-v1；
+已核验物理盘/ESP/root及六载荷hash，安装独立菜单入口/一次性videoclocks选择，
+原默认Mesa/救援保留。菜单1745ab3f…，备份grub.cfg.before-video-inventory-v1；
+EFI为ec17f024…，09:38:20UTC已请求Android直接重启，等待SSH及实机报告。
+
+**2026-11-01 终端启动调用遗漏已修源码，未部署新包**：复核有效trace-v2归档，
+虽含bin/el2-terminal-autostart，init及其它helper均没有调用它。旧记录中的
+“自动打开”不能作为boot hook通过证据。现将helper纳入probe/virtualization，
+正式packer同时安装并在实验启动块异步调用；保留原用户已有镜像及保护检查，
+删除无用UI dump/启动后诊断采集。隔离shell的11种场景通过，设备上直接执行
+新helper退出0，ActivityManager返回Status: ok并交给用户10已运行的Activity。
+第一次PowerShell文本管道尾部额外CR导致shell退出1；改用原LF字节后通过，
+不把该传输错误算作Android故障。未重启或替换运行文件，boot仍1f4a2290…，
+Debian仍PID21870/CID2049。开机自动打开仍需候选部署及重启验证。
+实跑packer产物parity-pack-terminal-autostart-v1为180501306字节，SHA256
+e1b0871186390917b12c60aae78a9ebc1efe2b56f88633e57ead1765eb76cb6d。
+与上一explicit-network包的有效差异严格只有init及新helper；调用恰好一次，
+两个有效shell语法通过，凭据末member逐字相同，审计见autostart-audit.json。
+配置/视频清单回归通过。它仍不包含运行候选的EFI准备/恢复/观察器整合，不能
+直接替换ESP现用镜像；本轮未部署、未提交Git。
+
+视频只读资料核对：Linux v7.0的qcom_tzmem仍列SC8180X黑名单；上游2026-05-13
+解释QHEE在auth前准备SHM、auth后建立映射并启动核，与当前EL1/EL2差异相容，
+但不能证明本机0xffcfffb4的具体含义。没有新判别证据，不执行SHM/no-TZ/EFI
+全启动实验。参考https://lists.openwall.net/linux-kernel/2026/05/13/1494及
+https://raw.githubusercontent.com/torvalds/linux/v7.0/drivers/firmware/qcom/qcom_tzmem.c 。
+EL2宿主硬解仍未修复，终端共享清理状态保持，不重新做已完成的EL1分段对照。
+
+**2026-11-01 已从EL1对照恢复原EL2终端候选**：核对NVMe/ESP/root/guard、
+当前菜单dbda3ee0…和6项EL2载荷hash后，只原子替换一次性env为android并重启；
+没有改载荷或持久默认。当前boot为1f4a2290-022f-4760-9592-f6bfb2bddff3，
+Android完成、guardY/nohibernate、KVM witness42通过；恢复助手明确记录
+Recovery canceled after operator validation。用户确认解锁，活动用户10。
+Debian实际shell恢复，HTTPS百度返回200；Debian镜像站guest超时、宿主同站
+连接重置，原生转发规则/双向流量存在，未因此改Wi-Fi或防火墙。
+guest正常poweroff后旧PID17548退出，重新打开为PID21870/CID2049，Android
+boot ID不变。证据在android-el2-venus-trace-v2/return-*.png及return-kernel-live.txt。
+
+临时Documents/SQ共享清理已完成：目录先删导致UI取消共享失败，故恢复空目录，
+正常重启guest后从设置取消；UI显示无共享文件夹、terminal_settings.xml已无
+该URI，随后rmdir空目录成功。后续测试顺序应先取消共享，再删除目录；不改
+运行中偏好文件。此次未复测双向写读（此前已通过）。
+首次视频认证仍为原a0=-2/a1=0xffcfffb4，shutdown0/内存释放，观察器卸载。
+不再重复EL1分段对照；EL1已成功的事实排除了分段流程本身必然失败。
+上游SC7180的ChromeOS式no-TZ路径不是本机已验证方案：SQ2现有启动分支要求
+use_tz，直接增加video-firmware节点不能完成适配；未读取TZ寄存器、未启用SHM。
+EL2宿主硬解仍未完成，guest硬解未验收，正式EFI构建整合仍待补齐。
+
+打包器已去掉写死旧内核目录，必须明确传入--kernel-build/--venus-build，
+并在生成候选前检查已验证的网络依赖。配置缺项逐项拒绝和原视频清单测试通过；
+用network内核及venus-preboot-v1实跑产物parity-pack-network-explicit-v1，
+180500567字节、342模块。与运行trace-v2相比341模块逐字节相同；venus-dec
+仅ELF的build-id和编译源路径字符串不同，其余section均相同，不能写成整文件
+hash相同。原凭据末member字节相同。其它有效差异为恢复/自动打开/SCM观察hook、
+init、对应视频清单和重建的builtin模块索引，见产物比较JSON。未部署新包；
+该修改只消除旧内核输入陷阱，尚不是完整EFI/附加助手可复现发布流程。
+
+**2026-11-01 Venus分段生命周期EL1对照通过认证，缩小EL2故障范围**：假设是EL2切换/QHEE
+退出导致同一EFI metadata准备后的Linux认证失败。基线为trace-v2的927a63a9…。
+保留同一Image、基础initramfs、qebspil、Venus固件/模块和观察器；只取消Secure
+Launch，配套EL1控制标记/初始化分支及EL1 zap-shader状态。复用已测试恢复助手。
+EFI stub源码已核对支持多个initrd=按序拼接；0.65MB addon的有效条目仅init、
+el2-rmtfs-start、el1-android-recovery，末尾为原凭据gzip member且字节完全相同。
+DT语义、完整归档最终生效条目、旧菜单保留、shell/GRUB语法和EFI编译通过。
+候选out/el2-android/android-venus-el1-control，源码/root/.cache/sq2-venus-el1-control。
+判别：EL1下同一no_init/auth成功则排除“分段流程本身必然失败”，转向EL2交接；
+相同认证错误则先回查EFI准备的状态/生命周期。若固件尚未运行到同一路径，结果
+不具有该判别力。停止条件：首次认证/关闭结果或360秒恢复，不热重试/卸载provider。
+不将此EL1对照当作终端完成，不启用SC8180X SHM。
+
+身份/ESP/root/guard及基线hash校验通过后，已部署独立EFI/SQ2VenusEL1Control，
+基础EL2目录未替换；菜单新增独立入口与消费一次选择，原菜单保存为
+EFI/BOOT/grub.cfg.before-venus-el1-control。新菜单SHA256
+dbda3ee04324a18ed37ffef3b8e73a0bd1ca5cb95f5d4f930bebec098b89ccf0；
+addon1aab58ad…、DT199579b5…、launchera61352a1…，完整清单在候选目录。
+约08:40UTC通过Android直接reboot发起；用户确认已进桌面/锁屏，但SSH未接回。
+随后用户报告恢复，已从正常Mesa取回完整日志，对照boot为
+9c428d0d-dad3-4f15-8f2f-2ef0ccfec671。日志证明全部CPU在EL1、Android完成、
+efi_prepared_no_init、mdt_load_end0；auth42000205的原始a0/a1均0，外层0，
+视频助手输出SQ2_NATIVE_VIDEO_READY_NOT_FRAME_PROOF，观察器missed均0且卸载。
+因此同一分段生命周期在EL1可完成认证和视频设备启动，反驳“EFI到Linux分段本身
+必然失败”；差异限定在EL2切换后的固件调用环境，尚未确定具体缺失的QHEE服务。
+此次未执行解码向量，不声称此对照已通过帧验证。支持查询EL1为0而EL2为1，
+进一步说明该查询不能作为视频功能门槛。
+
+对照180秒时无wlan0、无remoteproc sysfs；恢复助手实际记录EL1 control finished。
+没有为这个独立对照再修改Wi-Fi，也没有热重试PAS。当前已回正常Mesa，boot
+aabcb6f5-e899-40fe-8682-ccf15e327e6a，Android完成、活动用户10、guardY、SSH、
+/dev/video0均在，/dev/kvm不存在符合EL1。原SSH客户端未自行退出只是客户端状态。
+证据位于候选目录/googlebook-native-9c428d0d-dad3-4f15-8f2f-2ef0ccfec671。
+EL2终端配置/镜像保持，正常默认未改；下一步恢复EL2时仍需通过菜单明确选择。
+
+**2026-11-01 最新状态与调试纠偏（优先于下方历史快照）**：用户要求总结Wi-Fi绕路，
+避免在视频适配重演。已将完整Android优先、单假设/判别结果、连续两轮无新增判别
+证据就切回基线对照的规则写入AGENTS.md；复盘见SQ1-EL2-PREPARATION.md末节。
+板载Wi-Fi在v15完整EL2 Android中已通过，精简诊断失败的具体环境差异仍未唯一定位；
+Debian转发问题另有完整重启和HTTPS/下载证据，不能把两个问题合并归因。
+
+当前为android-el2-venus-trace-v2，boot927a63a9-9412-4a2f-af31-6f15b07875d5。
+相对venus-v1只加入匹配内核编译的现有有界SCM观察器和加载/退出卸载hook；
+Image/EFI/DT/视频模块不变。Android完成、用户确认原桌面且活动用户10、SSH、
+全CPU EL2及KVM witness42通过；guardY/nohibernate保留，恢复明确取消。
+Next临时模块目录已为空。venus-v1和本轮分别重测Debian HTTPS均为HTTP/2 200。
+
+DT合同1/9/0x8c000000/0x500000、efi_prepared_no_init、mdt_load_end0出现；
+首次auth实际SMC为42000205/arginfo1/PAS9，原始a0=fffffffffffffffe，
+a1=ffffffffffcfffb4，外层映射-22。shutdown原始0/0，内存释放，无/dev/video0；
+观察器missed均0且已卸载。这是实际SCM认证失败，厂商状态0xffcfffb4
+含义尚未知，不能推断为签名错误或EL2永久不支持。没有热重试或卸载视频provider。
+原始证据在忽略目录out/el2-android/android-el2-venus-trace-v2/kernel-live.txt。
+
+只读INFO/IS_CALL_AVAILABLE查询：PAS init/auth=1、GET_RSCTABLE=0、SHM
+enable/delete/create=1、无效PAS负对照=0；未执行任何SHM操作。主线v6.18
+qcom_tzmem明确将qcom,sc8180x列入黑名单，Surface Pro X已有首次SHM调用挂死报告。
+因此“接口可查询”不等于可安全使用，不能盲目回移新平台EL2 remoteproc的SHM方案。
+参考https://raw.githubusercontent.com/torvalds/linux/v6.18/drivers/firmware/qcom/qcom_tzmem.c
+及https://lkml.iu.edu/hypermail/linux/kernel/2404.0/05545.html；查询证据scm-capabilities/runtime.txt。
+下一步对照正常EL1/原生EL2首次调用和有效固件生命周期；没有判别证据前不扩大EFI启动。
+
+本轮通过Terminal设置的系统目录选择器，仅授权新建Documents/SQ。Debian普通用户
+在/mnt/shared/Documents/SQ读出Android侧写入标记，并写回另一标记，宿主读回一致。
+双向文件共享通过，无驱动/权限补丁。证据share-bidirectional.png及share-runtime.txt。
+两个标记文件已核对后删除，空SQ目录已rmdir。删除共享授权的UI操作未确认生效：
+用户已切到其它应用，terminal_settings.xml仍保留这条已不存在目录的URI；后续在
+Terminal设置移除此测试项即可，不要改正在运行的应用偏好或授权整个存储。
+
+用户授权直接操作设备、重启/清理、自动解锁与桌面操作；保留原账号和凭据，未找到
+现有解锁凭据，不重置。本次仍由用户手动解锁。当前失败的是EL2 Android宿主的
+视频硬解，不能表述为仅Debian不可硬解；EL1已通过六帧硬解，guest内硬解尚未验收。
+正常默认仍Mesa，视频候选未晋升；正式构建器尚未接入此次EFI准备。
+当前实验initramfs SHA256=7f4cb5a982f863fb0c5771f9fab86365666dcdca7acfefdbff2447fb72ccf604，
+凭据member最后且字节不变。ESP仅约99540KiB可用，不盲目再复制185MB候选/备份；
+需要部署时先核对重复实验备份后定点清理，保留正常/救援与可用回退。
+
+**2026-11-01 EL2终端联网与Next启动生命周期通过，视频候选准备中**：网络候选
+android-el2-network-v1已部署并完整重启，boot cc84d494-ee06-485b-a13a-6c50305ce307，
+Android完成、guardY、原用户10、KVM/SSH正常。自动打开Debian PID17434/CID2048。
+仅添加CT/FTP/PPTP及GRE共6个内核配置，并在Android前加载sch_ingress/cls_bpf；
+原生tetherctrl转发规则实际出现，guest HTTPS deb.debian.org返回HTTP/2 200，
+实际下载README并读出内容通过。用户也在终端执行curl百度并获得页面。
+未手工放宽防火墙。恢复已明确取消，正常默认仍Mesa。网络Image3b6d3e68…、
+initramfs85c59537…；342模块符号检查通过（MODVERSIONS本就关闭，不能称CRC ABI验证），
+QEMU只读screen_only及拒绝freeze/mem/disk通过，归档凭据member相同且最后。
+
+Next临时script-only模块通过官方ksud安装，重启后post-fs-data/service/boot-completed
+三个文件均为此boot ID、uid0和u:r:ksu:s0；无系统文件覆盖。已通过官方命令禁用并
+标记卸载，下次启动应移除。管理器此前显示工作中33129/Kprobes；未给第三方应用
+添加root授权。证据android-el2-network-v1/runtime-checks.txt及https.png。
+
+视频仍是PAS9 init -22。新增sq2-venus-preboot.c只让EFI准备已固定固件的认证
+metadata和同一0x8c000000/5MiB区间，未在EFI写入/运行固件代码。Linux仅在严格
+16字节成功contract和原机型/固件/地址/大小检查通过时使用mdt_load_no_init，保留
+原资源时序、auth、video-protect、owner和shutdown/quarantine。EFI匹配完整16KiB
+metadata缓冲（由已核验固件生成、尾部零），Linux仍核验完整固件SHA。
+实际EFI合同/失败/不重试/发布/幂等及Linux分支通过ASan/UBSan主机测试；匹配模块
+完整modpost通过。隔离源码/root/.cache/sq2-venus-preboot-v1及
+/root/.cache/sq2-el2-network-20261101/venus-preboot-v1；产物android-el2-venus-v1。
+DT递归语义审计仅增加root合同，initramfs有效条目仅venus-core和视频清单；
+凭据member最后且相同。正在通过带完整身份/hash检查的安装器部署，尚无实机视频结果。
+
+
+**2026-11-01 真正EL2完整Android v15已启动，KVM与Wi-Fi同时通过**：按用户加快完整
+Android验证的方向，采用v15已通过EL2/KVM的Image/EFI/DT（EFI认证modem，非
+v19 EL1延迟认证），配对parity-pack-v4完整载荷及已修复的视频清单。v15 launcher
+与v10 efi-source产物hash一致，重新生成Android路径/参数，明确保留sl_install。
+DT拒绝EL1控制标记；Android builder移除RAM-only modem proxy实验。只增加360秒
+自动恢复和有界终端自动打开助手，后者检查EL2 cmdline/guard/KVM/Android完成/
+KVM stage marker及当前用户已有linux/completed，再打开已确认组件
+com.android.virtualization.terminal/.new2.ui.MainActivity。不更改镜像或凭据；
+启动Activity不是Linux shell成功。实际helper主机测试覆盖作用域/guard/无镜像
+拒绝及一次启动，Android调用/计时为stub；shell和GRUB语法、归档有效条目审计
+通过。构建时间偏差后重跑已清除，无额外源码变更。
+新目录EFI/SQ2EL2Android，菜单备份grub.cfg.before-el2-android-v15-full，现菜单
+hash a43d292de384a342cab29f24f0cedae570dcce692a480886d39fe0b7501d71df；正常默认
+和EL1控制入口都保留。身份/磁盘/root/固件/hash/gzip检查通过，一次性选择android。
+独立terminal-addon插入init及助手，最后凭据member相同，最终hash/gzip检查通过；
+已重启，新boot c2d37875-d7fa-4717-af4b-74c37d2a6f69。boot_completed1、guardY、
+wlan0及SSH可用，/dev/kvm存在，el2-terminal-stage真实小客体MMIO witness42通过。
+早期日志确认全CPU EL2，modem接管后QMI约14秒/HTT约33秒；完整系统网络已通过，
+不能继续用精简RAM诊断的结果声称EL2必定没有modem/Wi-Fi。二者具体环境差异尚未
+唯一定位。已写/run/el2-control-keep，恢复助手实际输出Recovery canceled；同boot
+仍运行，不自动回正常系统。部署initramfs hash86f0f704075f942051e037d3f6b1829ea01a10e02da3d1258d951193836b4c63。
+
+实际VPU加载已到PAS9：固件检查通过，但qcom_mdt_load的SCM初始化返回-22，
+shutdown0后内存释放；overlay驻留、无/dev/video0。此boot已尝试PAS，不热卸载或
+重试。下一步需补齐PAS9 EFI准备/EL2 Linux接管，保留现有owner/失败隔离规则；
+可先研究EFI仅init/mem_setup、Linux在原资源时序下no_init加载并认证的最小路线，
+尚未实现/证明EL2 auth9或video-protect可用。不得拿EL1六帧解码替代此项。
+
+用户已确认进入原桌面，系统活动用户10且RUNNING_UNLOCKED。原am启动返回
+Activity not found，但相同组件经直接cmd activity start-activity成功；尚未唯一定位
+包装/PATH/时序的原因。实际crosvm_debian PID23431/CID2048已启动；屏幕中执行
+uname/id/getconf/os-release证明Debian13.7 trixie、aarch64、8核、droid普通用户
+shell可交互，DNS解析成功。guest临时文件写读删除通过，/mnt/shared按访问触发
+virtiofs挂载；共享目录尚未做跨系统双向写读验收。sudo -n poweroff后旧VM退出，
+直接重新打开Terminal又启动PID30726/CID2049，Android boot ID未变。
+
+HTTPS尚未通过：guest的IPv4/默认请求超时，宿主同地址200。Android tethering
+创建了DHCP/DNS/NAT/路由，但tetherctrl_FORWARD仅全局计数及DROP，无转发条目；
+TC BPF attach返回EINVAL。sch_ingress/cls_bpf已在RAM补载，guest重启后tap端
+挂接成功；wlan0启动时未建clsact，手动补建但未把这当作持久修复。另发现
+NETFILTER_XT_TARGET_CT、NF_CONNTRACK_FTP/PPTP等缺失；真实iptables-restore
+--test警告CT revision0不受支持。新候选仅添加6个内核配置（含自动选择GRE），
+已编译成功；正式builder加配置，el2-terminal-stage提前加载两个BPF模块。
+待完整Android启动验证系统自身规则和HTTPS，不自行清空或放宽防火墙。
+
+官方ksud（bb231b0f…）和manager-verified.apk（96c2bbbf…）已校验并安装到
+/data/adb/ksud及用户10。实际运行hash相同、debug version33129，管理器界面
+显示工作中/内置/Kprobes、v3.2.0-legacy33129；模块列表为空。授权及下次启动
+生命周期仍待验证，不能从界面状态宣称Next全部通过。
+原始证据out/el2-android/android-el2-v15-full/evidence-c2d37875及terminal-*.png、
+ksunext.png、tethering-netd.txt，均保留忽略。原v15 ESP尚未替换，恢复已取消。
+新候选out/el2-android/android-el2-network-v1，隔离构建/root/.cache/sq2-el2-network-20261101。
+终端自动helper已改直接cmd调用，下轮打包包含；完整目标仍需联网、EL2硬解和Next回归。
+
+**2026-11-01 按用户要求提前进入完整Android，EL1 v19桌面/联网及六帧硬解通过**：
+暂停新增pre-Linux SMEM解析器，未留下或部署该解析器。以v19已验证modem ready
+的Image/327模块/延迟认证EFI为基础，复用完整parity-pack-v3用户态；内核.config
+与Module.symvers逐字一致，保留11个定制视频模块、视频用户态/固件及最后凭据
+member。DT仅恢复正常EL1 GPU zap-shader状态，其余语义与v19逐项一致；launcher
+明确不调用Secure Launch，校验Surface/EL1/defer标记。没有EL2/KVM能力声明。
+完整Android init不执行EL2终端gate；只对sq2.el1_preboot=experimental加入有界
+启动日志和360秒自动恢复（/run/el1-control-keep存在则取消）。RMTFS保持接管，
+不加-s重启modem。恢复脚本作用域/guard/取消/重启fallback主机模拟通过。
+打包、自检、shell语法、GRUB语法和菜单原入口不变检查通过；EFI重跑已无clock skew。
+设备身份、磁盘/ESP/root、固件及新旧hash/gzip通过，新目录EFI/SQ2EL1Android，
+菜单备份grub.cfg.before-el1-android-v19，默认仍Mesa。新菜单SHA256为
+570089780b16d0d0f57b67077299e40031238fbf4fab3d22f13d840ff167231e；旧诊断安装
+脚本的3e63f6a8菜单guard已过时，勿直接复用。新boot d0efdb3f-51e0-4926-a3eb-f5db9a40a25c，
+boot_completed1、guardY、wlan0/SSH可用，用户确认已到桌面/锁屏；日志证明全部CPU
+从EL1启动，modem auth0/ready0，约19秒Wi-Fi完成firmware/HTT初始化。已写
+/run/el1-control-keep取消此boot的自动恢复，保持当前Android，正常默认不提升。
+一次SSH reset后重连boot ID未变，不能记作板级重启。
+
+视频首次启动在模块校验阶段拒绝，尚未进行PAS。发现正式EL2打包器替换11个
+视频模块后遗漏更新etc/sq2-video-native/SHA256SUMS；已修复打包器并加入实际
+刷新代码的测试（模块更新、helper保持、坏输入/重复/越界路径/缺模块拒绝）。
+当前RAM校验15文件与已审计载荷相符后更新清单，首次调用video-decoder-lab-start
+成功，/dev/video0出现。随后V4L2真实AVC向量94c7974e…六帧匹配参考CRC，mask3f、
+EOS/LAST及关闭通过、exit0；同boot Android仍完成。此为EL1硬件解码证据，
+不是EL2或Android MediaCodec各格式的完整回归。KernelSU代码运行有日志，但管理器/
+ksud及授权链未验收，不能从日志宣称Next运行时完整通过。
+运行证据在android-el1-v19/evidence-d0efdb3f，视频清单修复为video-fix子目录；
+已仅向实验initramfs插入855字节addon并保留同一最后凭据member，正常入口不改。
+before-video-manifest备份、身份/菜单/旧新hash/gzip及最终有效条目单文件差异均
+通过；实际ESP initramfs为0b4e4511dbc47ea26303f2354fc228a87c7654072bbace4486c1a795256982e6，
+清单40e60c2e…，未为此重启。当前boot仍d0efdb3f、桌面完成、wlan0/video0、guardY，
+恢复helper已输出Recovery canceled。修正后的正式打包器生成parity-pack-v4，
+180499854字节/342模块；仅离线，准备供下一轮完整EL2 Android候选使用。
+产物out/el2-android/android-el1-v19，生成脚本pack-android-el1-v19.py与
+deploy-android-el1-v19.py；当前无/dev/kvm符合EL1预期，终端目标仍未完成。
+按用户加快进入Android的方向，下一轮优先用完整Android验证真正EL2候选，
+保留本轮已得到的完整系统联网证据；pre-Linux SMEM计划暂缓，不重新扩展诊断。
+
+**2026-11-01 v20 EFI直接64位认证对照完成，modem仍未通信**：基于v19内核/模块和EL1 launcher，
+EFI恢复v15完整init/mem/load，只对PAS4且root两个明确EL1/direct标记，使用
+Linux形式0x42000205/arginfo1/PAS4直接SMC，保存恢复DAIF、保留QCOM a6续接，
+中断返回1最多续接64次。原始a0/a1均0才成功；busy/其他错误不假装成功、不重发
+初始认证。PAS矩阵modem auth格现在是原始a0..a3，区别于协议包装的1/0/0/0。
+其他PAS仍原协议。DT移除defer标记，Linux只接管，不再次认证。init仅标签变化，
+固定Wi-Fi权限保留，modem QMP仍无，驱动不加proxy请求。EFI构建通过；实际C
+参数/a6续接/64次上限/错误/原始64位跟踪经ASan/UBSan，实际dispatch12组合通过；
+交叉编译指令核对。身份/菜单/新旧hash/gzip通过，before-v20备份、原子替换并
+一次性启动。已自动恢复正常boot e2e359b4-1118-46de-a78e-1f88386ff85b，
+boot_completed1、guardY。诊断a86966f3-8eef-4ddf-b6b9-0471c0bfe754已取回：
+modem auth矩阵transport及原始a0..a3均0，但SMEM435仍0条目、无Wi-Fi QMI
+版本、无wlan0。因此换成直接64位SMC并未恢复EFI阶段modem启动；不能把协议
+包装或EL2切换单独当作根因。下一步需区分EFI阶段未启动与交接期间状态丢失，
+拟增加有界只读的pre-Linux SMEM取证，尚未实现或部署。控制组仍EL1，不代表终端完成。
+私有源码/root/.cache/sq2-preboot-v20、脚本prepare-v20.py/pack-v20.py/
+test-direct-auth-v20.py/test-dispatch-v20.py，产物preboot-ram-v20。
+
+启动路径说明：正常入口由Linux驱动加载/认证/启动固件；EL2实验入口由EFI预先
+加载/认证，Secure Launch切到EL2，再由Linux接管。EL1对照只跳过Secure Launch，
+仍使用实验Image/DT/initramfs及EFI预启动/接管，因此“关闭EL2”不等于恢复正常入口。
+诊断initramfs只采集并自动返回正常系统，本来就不进入Android桌面。诊断菜单现有
+EL2名称仍指向EL1对照载荷，不能用菜单名称判断实际执行级别；以启动日志为准。
+正常Mesa/Qualcomm/Rescue入口保持，真正恢复需重启选正常入口，不能只去掉EL2切换。
+
+
+**2026-11-01 v17 QMP单变量对照已启动**：基于v16仅移除modem节点qcom,qmp
+phandle；原Image/initramfs/EFI/launcher逐字不变，完整DT递归审计确认除此
+属性外语义不变。qmp_get缺phandle返回ENODEV，q6v5保留NULL，跳过load_state
+消息；PD/XO及Linux延迟认证/ready等待保持。身份/菜单/新旧hash通过，before-v17
+备份DT/清单并原子替换后一次性启动。监测exec43545，原boot
+9da6b639；待新的诊断boot ID，不可误用v16 df1da1e1。私有pack-v17.py及
+preboot-ram-v17；本轮仍为EL1对照，不应当作EL2可用候选。
+v17已自动恢复2db36ddb-b346-46fc-adcc-6a2b88dc8fc2，boot_completed1/guardY。
+诊断6cfef505-3af1-4b3c-a154-c742a078d2f2取回：auth0/ready0，modem通信及
+Wi-Fi QMI版本均与v16一致，仍无wlan0。故QMP load_state不是本轮成功必要条件。
+曾怀疑qcom,msa-fixed-perm为EL2专用，但v18后检查正常系统也有该属性，
+该假设错误。此属性跳过Wi-Fi MSA权限分配；
+v18仅移除此Wi-Fi属性、试用Linux动态权限分配流程，其余保持v17；完整DT语义
+审计通过。身份/菜单/新旧hash通过，before-v18备份、原子替换、一次性启动完成。
+v18已自动恢复b6bdab15-3c1b-4729-8c9c-8accdc336a83，boot_completed1/guardY。
+诊断36443ccd-9991-4f85-948a-1f1d652c6eef：modem auth0/ready0，但MSA权限
+分配-22，无法到达QMI版本读取；正常系统确认同样带fixed-perm，故该属性须保留。
+v19以v17内容为对照，只取消独立EL1模块的proxy PD/XO等资源请求，并移除
+失败路径无资源可释放的handover调用。q6v5_prepare/认证/ready仍保留，QMP仍无。
+实际C的顺序/失败清理测试、模块完整modpost及cpio单模块差异审计通过。
+v19已从v18恢复v17 DT并部署单模块诊断：身份/菜单/新旧hash/gzip通过，
+before-v19备份后原子替换并一次性启动；等待自动恢复，原boot b6bdab15。
+v19已自动恢复6dc57cc9-812d-42a3-b769-85c516df2791，boot_completed1/guardY。
+诊断37a6de43-e8fc-4d8f-a3c3-1c30085d5c0a：无proxy votes，auth0/ready0，
+modem通信及Wi-Fi QMI版本正常，仍无wlan0。故Linux新增的PD/XO请求和QMP消息
+并非此控制组成功的必要条件，不能再将缺少它们当作已确认根因。
+下一步隔离EFI协议包装与Linux SMC调用方式；仍保留启动时机/其他Linux资源差异。
+正常默认不改。私有prepare-v19.py/pack-v19.py/test-attach-v19.py；隔离EL1
+源树当前为v19无proxy版本，v16原源备份q6v5-before-v19.c，勿误用为生产模块。
+
+
+
+**2026-11-01 v16 延迟modem认证EL1对照**：v15的正常系统boot仍为baba9ea7，
+guardY、boot_completed1；一次SSH超时后重试恢复。隔离EL1源树增加严格限定
+Surface/SC8180X modem、两个EL1 root标记及proxy-test属性的延迟认证路径。
+EFI只对PAS4做init/mem/load，完成状态写2（prepared，非运行成功）；Linux先
+q6v5_prepare及原PD/XO/aggre2/regulator votes，再auth4、最多等待ready5秒。
+其他DSP保持状态1；成功票据只保留到本轮诊断重启，失败释放，不重复reset。
+当前只是资源时序控制组，不是EL2最终方案，不宣称网络或Terminal已修复。
+EFI/Image/modules编译通过；实际publisher状态2/缺标记/错DSP/重入/64位trace
+及实际attach谓词/调用顺序/失败清理经ASan/UBSan通过。新Image的QEMU只读
+screen_only与freeze/mem/disk拒绝测试通过。327模块配对打包、其他载荷审计。
+私有源码/root/.cache/sq2-preboot-v16及sq2-el1-preboot-control，脚本
+out/el2-android/prepare-v16.py、pack-v16.py、test-publish-v16.py、
+test-attach-v16.py、smoke-v16.py；产物preboot-ram-v16。准备脚本只用于从
+v15 EFI和v14内核源重新生成，不可在已改的源树上重复运行。
+身份/菜单/新旧hash/gzip检查通过，before-v16备份后原子替换并一次性启动。
+v16已自动恢复9da6b639-79ec-4996-aa16-314bf04ffa3d，boot_completed1/guardY，
+正常wlan0/video0存在。新诊断df1da1e1-11d5-40e5-af1a-15714ba34d3c日志取回：
+modem auth=0、ready=0；SMEM435有效条目3/slave-kernel状态6；modem IPCRTR已
+绑定，ath10k读到QMI芯片/固件版本。仍无wlan0，不能称Wi-Fi通过。EFI PAS4
+trace的auth格未调用；EL1无KVM符合预期。首次证明EFI加载的modem可由Linux
+延迟认证后进入运行/通信状态；尚不能把改进唯一归因PD/XO/QMP或特定时序。
+下一步用同一v16内核/EFI，仅撤掉modem qcom,qmp属性作load_state对照，
+其余预认证资源准备保持；正常默认/硬解/KSU及凭据保持。
+
+
+**2026-11-01 v15完整PAS返回取证已发起**：主机按实际三固件解析，EFI与Linux
+认证metadata字节一致，所有PT_LOAD重定位基准一致，页对齐span与DT保留区
+均一致（MPSS0x9600000、ADSP0x1a00000、CDSP0x800000）；未发现参数差异。
+v15恢复v12的EL2 Image/327模块/launcher与DT（撤掉EL1控制许可），只追加
+EFI端三PAS×四调用×五UINT64矩阵（transport+4返回），未调用格全FF。最终DT
+根属性480字节，Linux复制到日志pas-trace.bin，保留同一SMEM快照。实际C的
+12格、64位保留、非法ID/op边界经ASan/UBSan通过，EFI编译通过，打包逐项审计。
+身份/菜单/新旧hash/gzip通过，before-v15备份并原子替换，已一次性启动与重启。
+恢复监测exec38347运行中，原boot14b967cc；待新日志判定初始化/mem_setup返回，
+不能只凭最后auth成功认定完整调用成功。私有准备/打包脚本prepare-v15.py、
+pack-v15.py，源码/root/.cache/sq2-preboot-v15，产物preboot-ram-v15。
+v15已自动恢复baba9ea7-e99a-4976-99a7-f0c5a43c3021，guardY。诊断cc4d7077
+日志已取回：三PAS的init/mem/auth全部transport0、结果1/0/0/0；stop格全部FF，
+表示未调用。KVM PASS，Wi-Fi仍无。ESP与正常Linux的三固件SHA256逐一匹配。
+因此前序返回失败与设备固件错配均未得到支持；下一步检查认证前资源时序与
+执行状态，不再用仅看最终auth、重复proxy GUID或EL2切换作为根因结论。
+
+
+**2026-11-01 v13无proxy接口，v14 EL1预启动对照已发起**：v13自动恢复原系统
+296e693d，guardY；诊断8684568b日志取回，proxy EFI状态800000000000000e
+（NOT_FOUND），未执行Vote；Wi-Fi仍缺失，KVM PASS。不能假设SC8180X有该接口。
+完整Android parity-pack-v3已构建180499826字节、342模块，视频用户态/固件保持，
+末尾凭据保持，包含el2-rmtfs-start；仅离线，实际VPU/终端未验证。
+v14隔离/root/.cache/sq2-el1-preboot-control源树/构建；仅3处接管EL2判断增加
+Surface专用DT root microsoft,el1-preboot-control许可，原EL2树/正常默认不变，
+配置逐字一致。启动器不调用sl_install，仍加载qebspil，故保留EL1而运行同一
+预启动/接管。这是区分EFI初始化缺失与EL2切换影响的控制组，不是终端方案。
+Image/modules构建通过，时钟偏移后重跑无偏移警告；实际Image QEMU的只读guard
+及freeze/mem/disk拒绝测试通过。327配套模块逐项打包，其余只改init标签，沿用
+v12只读SMEM快照及EFI（不含v13无效proxy试验）。身份/菜单/新旧hash/gzip通过，
+before-v14备份后原子替换，已一次性启动并Android重启。等待新诊断结果；本轮
+无KVM是预期控制条件。私有脚本prepare-el1-control.py、pack-v14.py及产物
+preboot-ram-v14。原系统默认不变，终端目标未完成。
+v14已自动恢复14b967cc-720a-43ed-86e8-9b604d476bbc，guardY。诊断c761712f
+日志确认全部CPU从EL1启动、无/dev/kvm（预期），三DSP attached，modem435
+仍有效条目0、SMEM421缺失、Wi-Fi缺失；ADSP/CDSP保持正常条目。故此失败
+在不执行Secure Launch/EL2切换时也存在，应定位EFI modem预启动与正常Linux
+初始化的差异，不能继续归咎EL2切换。下一轮需恢复EL2诊断配对后再验最终功能；
+当前诊断菜单的EL2名称实际引用EL1控制组，不能把它当作正常EL2候选使用。
+
+
+**2026-11-01 v12结果与v13预启动proxy对照**：v12自动恢复至b056efde，guardY。
+诊断495f8047日志已取回：SMEM421不存在，modem入站435头部有效但条目0，
+AP出站428有master-kernel/ipa；ADSP/CDSP各有smp2p/slave-kernel且状态6。
+正常对照modem入站有3条，状态6，正常DT的SMEM编号与诊断一致；故不是
+编号交换错误。没有证据将残留SFR文字、无中断或PAS返回独自等同为崩溃。
+v13私有候选基于v11 EFI，仅在PAS4 prepare时发现PIL_PROXY_MODEM_GUID，
+校验Revision0x10000及函数指针后申请原固件Vote(1)，缺失/不符/失败如实记录，
+不伪造成功。返回EFI状态8字节经最终DT根属性传入Linux的modem-proxy-status.txt；
+后续保留同一SMEM快照。实际C六个发现/投票模拟通过，EFI构建通过。
+此GUID来自固定qebspil头文件，尚未证明SC8180X提供它；这是实验而非正式适配。
+仅诊断EFI/DTB/initramfs更改，模块/内核保持；身份/菜单/旧新hash/gzip通过，
+before-v13备份和sync原子替换后一次性启动，Android重启已发起。监测exec
+session49012正在运行，下一步取本轮新日志，勿按ESP mtime排序猜测。
+源码候选/root/.cache/sq2-preboot-v13，私有生成/打包脚本out/el2-android/
+prepare-v13.py、pack-v13.py，产物preboot-ram-v13。正常默认保持，终端未完成。
+
+
+**2026-11-01 v12 只读SMEM对照已发起**：新增独立诊断模块sq2-smem-snapshot，
+仅Surface兼容设备、读取固定7项SMEM，每项最多128字节，无分配/写入/重置。
+实际C主机模拟覆盖非目标拒绝、缺项、零长/短/长边界；匹配内核完整modpost通过。
+正常设备符号导出、vermagic、无MODVERSIONS及模块hash核对后加载/取回/卸载通过，
+原始快照在out/el2-android/smem。正常SMEM421也含SFR Init wdog/kernel error
+文字，不能将其独自判为EL2崩溃证据。正常modem IPCRTR和GLINK中断活跃，
+而v11 modem中断0；EFI启动前没有proxy投票，Linux接管后补投票曾无效，
+尚未验证是否是启动时资源时序。
+v12仅在v11诊断initramfs加入该模块和一次加载/日志/卸载，逐项差异审计通过，
+内核/EFI/DTB保持v11。身份/菜单/旧新hash及gzip核对通过，before-v12备份后
+sync原子替换，一次性启动并Android重启已发起。等待自动恢复和smem-snapshot.txt
+对照；恢复监测exec session26059正在运行，不能因观察超时重复启动。
+原boot63af0d16，正常默认/硬解/KSU载荷不变；终端目标未完成。
+
+
+**2026-11-01 v11 PAS 返回取证已发起一次性启动**：四个 PAS 包装函数添加
+transport/raw 返回日志与未写入哨兵；认证启动最后返回的前三字低32位写入既有
+DT status 字段（阶段11），随已有最终DT发布/ESP日志持久化。仍未确认 PAS ABI，
+不能把完成位当作固件服务成功。实际生成的C包装函数模拟传输失败/非零固件
+返回/完整载荷保留/未写入哨兵检查通过，EFI交叉编译通过；跟踪生成检查通过。
+v11沿用v10 Image/initramfs/launcher，仅更新EFI与移除modem proxy-test的DTB。
+设备原boot d0c85809、guardY、NVMe序列/ESP marker/UUID/root来源、菜单和原新
+文件hash已核对；诊断目录before-v11保留旧两文件/清单，sync原子替换后一次性
+启动已设置。通过PID1 mount namespace的Android sys.powerctl发起重启。
+正常默认与硬解/KSU载荷未改；正在等待自动恢复和v11日志，终端未验收。
+产物/部署位于忽略out/el2-android/preboot-ram-v11及pas-response-v11。
+v11现已自动恢复原系统boot63af0d16-566b-40ee-bfdb-6c1e3d72d86c；boot_completed1、
+wlan0、video0、guardY已读回。新诊断cbfd518f-8697-4988-8a2d-77a7ed448903日志
+已取回：三PAS认证启动的低32位返回都是1/0/0，KVM guest PASS，Wi-Fi仍缺失，
+modem仍只有rpmsg_ctrl而无IPCRTR。不能把PAS返回判定修正称为网络修复。
+ESP目录mtime不可靠；本轮早先按排序取到808f旧日志，不得用它代表v11。
+下一步定位modem运行/GLINK服务及EL2切换影响，再接Android完整终端验收。
+
 **2026-11-01 当前工作快照补充**：v10 已自动恢复原系统，诊断日志确认 modem
 proxy 资源请求成功，但仍无 modem IPCRTR/Wi-Fi，KVM witness 仍 PASS；该实验
 没有修复网络。RAM 构建器目前仍保留这一临时测试，下一轮应撤掉；Android

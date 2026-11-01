@@ -95,8 +95,6 @@ dt.setprop(node, 'microsoft,el2-preboot-rmtfs', b'')
 dt.setprop_u32(node, 'microsoft,el2-preboot-complete', 0)
 dt.setprop(node, 'microsoft,el2-preboot-status', b'\0' * 24)
 dt.setprop(0, 'microsoft,el2-kernel-fdt', b'\0' * 8)
-dt.setprop(dt.path_offset('/soc@0/remoteproc@4080000'),
-           'microsoft,el2-modem-proxy-test', b'')
 dt.pack()
 (dest / 'preboot-el2.dtb').write_bytes(bytes(dt.as_bytearray()))
 source = dest / 'efi-source'

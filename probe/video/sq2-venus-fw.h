@@ -7,7 +7,9 @@ struct sq2_venus_fw;
  * On failure *out can be non-NULL: allocation is quarantined until reboot.
  * Does not handle HFI/IRQ/clock lifetime; callers must retain those separately.
  */
-int sq2_venus_fw_boot(struct device *dev, struct sq2_venus_fw **out, bool pil_gap);
+/* A non-NULL powered MMIO base explicitly selects the EL2 no-TZ lab candidate. */
+int sq2_venus_fw_boot(struct device *dev, struct sq2_venus_fw **out, bool pil_gap,
+                     void __iomem *no_tz_base);
 int sq2_venus_fw_shutdown(struct sq2_venus_fw **owner);
 int sq2_venus_fw_probe_gap(void);
 #endif
