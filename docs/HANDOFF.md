@@ -1,5 +1,15 @@
 # SQ2 开发交接
 
+**2026-11-02 LTE 按用户要求暂停并保存工作**：单变量DMS online请求返回
+result1/error52(DeviceNotReady)；恢复原factory-test模式2成功并回读确认，
+boot836903c9…、Android1/guardY/wlan0保持。有效RMTFS指向全零2MiB dummy EFS，
+真实本机NV/校准尚未接入；仅凭error52不认定其为唯一根因。MPSS地址更正为
+4080000（8300000是CDSP）。新增手动online实验工具的模拟回滚测试、静态构建
+和实机失败/恢复路径通过。只读EFS EFI导出草稿仅编译通过，QEMU/实机未测，
+未部署ESP、未更改启动包/菜单/固件、未重启。接续必须先验证真实EFS读取来源，
+不要重复切模式或把EFI草稿当可部署成果。详细记录及资料见docs/LTE.md；用户
+明确恢复之前不继续开发或硬件实验。
+
 **2026-11-02 LTE 开发首轮（codex/lte-support）**：从73ea6ee创建独立worktree，
 原main目录未提交工作保留。目标192.168.8.194，boot836903c9…、user10、guardY。
 复用只读QMI工具增加NAS和准确DMS模式解码，协议异常/隐私过滤测试及ARM64实机

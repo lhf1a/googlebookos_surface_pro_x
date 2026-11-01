@@ -5,4 +5,6 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$ROOT/out/lte/bin"
 "${CC:-aarch64-linux-gnu-gcc}" -static -O2 -Wall -Wextra -Werror \
     "$ROOT/probe/test2/sq2-qmi-readonly.c" -o "$ROOT/out/lte/bin/sq2-qmi-readonly"
+"${CC:-aarch64-linux-gnu-gcc}" -static -O2 -Wall -Wextra -Werror \
+    "$ROOT/probe/test2/sq2-lte-online-test.c" -o "$ROOT/out/lte/bin/sq2-lte-online-test"
 sha256sum "$ROOT/out/lte/bin/sq2-qmi-readonly"

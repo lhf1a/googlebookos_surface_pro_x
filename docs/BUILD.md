@@ -7,6 +7,11 @@
 `python3 tests/test_sq2_qmi_readonly.py` 使用本机 C 编译器验证实际协议解码器。
 不自动安装或接入开机流程，不改变默认系统包；实机状态和限制见 [LTE.md](LTE.md)。
 
+暂停检查点：同一脚本还构建独立的手动 `sq2-lte-online-test`，不会自动执行。
+`python3 tests/test_sq2_lte_online.py` 验证其有限切换/恢复路径。
+`bash scripts/build-sq2-lte-efi.sh` 只构建尚未通过QEMU/实机验证的EFI读取草稿，
+不可据编译成功直接部署。2026-11-02 用户已要求暂停，后续测试待明确恢复。
+
 ### 2026-11-02：当前 SQ2 默认构建为 EL2 / 高通 Vulkan / 60 Hz / 700 MHz
 
 本日后续修复：EL2内核构建调用音频补丁的`--machine-only`模式，仅改SDM845，
