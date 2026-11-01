@@ -15,12 +15,19 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / 'out/video-decode/running-base.dtb'
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--stage', type=Path, default=Path('/root/.cache/sq2-iris1-identify'))
+p.add_argument('--base-dtb', type=Path, default=BASE)
+p.add_argument('--base-sha256', default='be17f33fbc8545a356f26b8f7a4c4abbd0a58e33a6401c81b18de260773058ef')
+p.add_argument('--kernel', type=Path, default=Path('/root/.cache/sq2-thermal/kernel'))
+p.add_argument('--kernel-output', type=Path, default=Path('/root/.cache/sq2-video-foundation/build'))
+p.add_argument('--output', type=Path, default=ROOT / 'out/video-decode/iris1-identify')
+p.add_argument('--reference-overlay', type=Path, help='Require byte-identical deployed overlay before ABI rebuild')
 args = p.parse_args()
 STAGE = args.stage
-DEST = ROOT / 'out/video-decode/iris1-identify'
-assert hashlib.sha256(BASE.read_bytes()).hexdigest() == 'be17f33fbc8545a356f26b8f7a4c4abbd0a58e33a6401c81b18de260773058ef'
+DEST = args.output
+BASE = args.base_dtb
+assert hashlib.sha256(BASE.read_bytes()).hexdigest() == args.base_sha256
 STAGE.mkdir(exist_ok=False)
-DEST.mkdir(exist_ok=True)
+DEST.mkdir(parents=True, exist_ok=True)
 
 
 def prop(path, key, typ='x'):
@@ -87,15 +94,17 @@ subprocess.run(['dtc', '-@', '-I', 'dts', '-O', 'dtb', '-o', str(STAGE / 'overla
 # Linux 6.3 reject the overlay. Keep __local_fixups__ for internal references.
 subprocess.run(['fdtput', '-r', str(STAGE / 'overlay.dtbo'), '/__symbols__'], check=True)
 blob = (STAGE / 'overlay.dtbo').read_bytes()
+if args.reference_overlay:
+    assert blob == args.reference_overlay.read_bytes(), 'Deployed VIDEOCC overlay changed'
 (STAGE / 'overlay.h').write_text('static const unsigned char overlay[] = {' +
     ','.join(str(b) for b in blob) + '};\n' +
     'static bool check_overlay_refs(void) { return ' +
     ' && '.join(f'check_ref("{path}", {value})' for path, value in refs) + '; }\n')
 shutil.copyfile(ROOT / 'probe/video/sq2_iris1_identify.c', STAGE / 'sq2_iris1_identify.c')
 (STAGE / 'Makefile').write_text('obj-m += sq2_iris1_identify.o\n')
-subprocess.run(['make', '-s', '-C', '/root/.cache/sq2-thermal/kernel',
-    'O=/root/.cache/sq2-video-foundation/build', 'ARCH=arm64', 'CROSS_COMPILE=aarch64-linux-gnu-',
-    f'M={STAGE}', 'KBUILD_MODPOST_WARN=1', 'modules'], check=True,
+subprocess.run(['make', '-s', '-C', str(args.kernel),
+    f'O={args.kernel_output}', 'ARCH=arm64', 'CROSS_COMPILE=aarch64-linux-gnu-',
+    f'M={STAGE}', 'modules'], check=True,
     stdout=(DEST / 'build.log').open('w'), stderr=subprocess.STDOUT)
 shutil.copyfile(STAGE / 'sq2_iris1_identify.ko', DEST / 'sq2_iris1_identify.ko')
 shutil.copyfile(STAGE / 'overlay.dtbo', DEST / 'overlay.dtbo')

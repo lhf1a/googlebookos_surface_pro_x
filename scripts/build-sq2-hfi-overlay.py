@@ -12,6 +12,12 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--stage', type=Path, required=True)
+p.add_argument('--base-dtb', type=Path, default=ROOT / 'out/video-decode/running-base.dtb')
+p.add_argument('--base-sha256', default='be17f33fbc8545a356f26b8f7a4c4abbd0a58e33a6401c81b18de260773058ef')
+p.add_argument('--kernel', type=Path, default=Path('/root/.cache/sq2-thermal/kernel'))
+p.add_argument('--kernel-output', type=Path, default=Path('/root/.cache/sq2-video-foundation/build'))
+p.add_argument('--output', type=Path)
+p.add_argument('--reference-overlay', type=Path, help='Require byte-identical deployed overlay; retains its recorded IRQ reference')
 p.add_argument('--videocc-phandle', type=lambda s: int(s, 0), required=True,
                help='actual current live VIDEOCC phandle, checked again by module')
 p.add_argument('--with-interconnects', action='store_true',
@@ -24,8 +30,8 @@ a = p.parse_args()
 if a.venus_decoder and not (a.windows_reference and a.with_interconnects):
     p.error('--venus-decoder requires --windows-reference --with-interconnects')
 assert 0 < a.videocc_phandle < 2**32
-base = ROOT / 'out/video-decode/running-base.dtb'
-assert hashlib.sha256(base.read_bytes()).hexdigest() == 'be17f33fbc8545a356f26b8f7a4c4abbd0a58e33a6401c81b18de260773058ef'
+base = a.base_dtb
+assert hashlib.sha256(base.read_bytes()).hexdigest() == a.base_sha256
 def prop(path, key, typ='x'):
     return subprocess.check_output(['fdtget', '-t', typ, str(base), path, key], text=True).strip()
 gcc_path = '/soc@0/clock-controller@100000'
@@ -41,7 +47,7 @@ reference_property = 'microsoft,windows-hfi-reference;' if a.windows_reference e
 icc_refs = []
 icc_properties = ''
 if a.with_interconnects:
-    kernel = Path('/root/.cache/sq2-thermal/kernel')
+    kernel = a.kernel
     for source, expected in {
         'drivers/interconnect/qcom/sc8180x.c': '8d9eb593a423bca8c0f41d3ecaa57d80d970c2a9d8c70a832090ddbc06c2abdd',
         'include/dt-bindings/interconnect/qcom,sc8180x.h': '243abe325ef75647ae41ed3c866c6c6429306bd549c0e066ebdcdc42f59b76fb',
@@ -61,8 +67,8 @@ if a.with_interconnects:
       <0x{mmss:x} 7 3 0x{mc:x} 1 3>, <0x{mmss:x} 9 3 0x{mc:x} 1 3>;
    interconnect-names = "cpu-cfg", "video-mem", "firmware-mem";'''
 a.stage.mkdir(parents=True, exist_ok=False)
-dest = ROOT / ('out/video-decode/venus-decoder-overlay' if a.venus_decoder else 'out/video-decode/hfi-overlay')
-dest.mkdir(exist_ok=True)
+dest = a.output or ROOT / ('out/video-decode/venus-decoder-overlay' if a.venus_decoder else 'out/video-decode/hfi-overlay')
+dest.mkdir(parents=True, exist_ok=True)
 node = 'venus-sq2' if a.venus_decoder else 'iris1-hfi'
 compatible = 'microsoft,sq2-venus-lab' if a.venus_decoder else 'microsoft,sq2-iris1-hfi'
 irq_child = ''
@@ -70,7 +76,8 @@ if a.venus_decoder:
     # SQ1 ACPI GSI206 and pinned SM8150 SPI174 agree (206 - 32).
     # Reference only: polled SQ2 decode has not established IRQ delivery yet.
     dsdt = ROOT / 'out/video-decode/sq1-reference-analysis/sq1-dsdt.dsl'
-    assert hashlib.sha256(dsdt.read_bytes()).hexdigest() == '9d033e8d650e27f0f7e67b98addc388927d5abe80b99cd800dcda6e88d22e544'
+    if not a.reference_overlay:
+        assert hashlib.sha256(dsdt.read_bytes()).hexdigest() == '9d033e8d650e27f0f7e67b98addc388927d5abe80b99cd800dcda6e88d22e544'
     assert prop('/', 'interrupt-parent') == '1'
     irq_child = 'interrupts = <0 174 4>; video-decoder { compatible = "venus-decoder"; };'
 dts = f'''/dts-v1/;
@@ -99,6 +106,8 @@ dts = f'''/dts-v1/;
 subprocess.run(['dtc', '-I', 'dts', '-O', 'dtb', '-o', str(a.stage / 'overlay.dtbo'),
                 str(a.stage / 'overlay.dts')], check=True, stderr=(dest / 'dtc.log').open('w'))
 blob = (a.stage / 'overlay.dtbo').read_bytes()
+if a.reference_overlay:
+    assert blob == a.reference_overlay.read_bytes(), 'Deployed HFI overlay changed'
 (a.stage / 'overlay.h').write_text('static const unsigned char overlay[] = {' + ','.join(map(str, blob)) + '};\n')
 c = '''// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/module.h>
@@ -142,9 +151,9 @@ if a.venus_decoder:
 c = c.replace('CHECKS', '\n'.join(f'if (!check("{path}", {ph})) return -EINVAL;' for path, ph in refs))
 (a.stage / 'sq2_hfi_overlay.c').write_text(c)
 (a.stage / 'Makefile').write_text('obj-m += sq2_hfi_overlay.o\n')
-subprocess.run(['make', '-s', '-C', '/root/.cache/sq2-thermal/kernel',
-    'O=/root/.cache/sq2-video-foundation/build', 'ARCH=arm64', 'CROSS_COMPILE=aarch64-linux-gnu-',
-    f'M={a.stage}', 'KBUILD_MODPOST_WARN=1', 'modules'], check=True,
+subprocess.run(['make', '-s', '-C', str(a.kernel),
+    f'O={a.kernel_output}', 'ARCH=arm64', 'CROSS_COMPILE=aarch64-linux-gnu-',
+    f'M={a.stage}', 'modules'], check=True,
     stdout=(dest / 'build.log').open('w'), stderr=subprocess.STDOUT)
 b = (a.stage / 'sq2_hfi_overlay.ko').read_bytes()
 (dest / 'sq2_hfi_overlay.ko').write_bytes(b)

@@ -378,3 +378,360 @@ not normal boot. Final initramfs180495815B (level3 gzip); raw pack-audit.json tr
 all replacements. Static ARM64 collector compiled -Werror. No extra boundary test
 suite per user instruction; syntax, build, file/hash/credential checks retained.
 Android candidate not yet booted at this record; first-boot result still pending.
+
+## Android candidate desktop confirmed by operator
+
+The one-shot Android candidate was installed and a normal reboot requested;
+persistent default remains sq2-baseline60-mesa. Operator reports desktop reached,
+touch and Wi-Fi normal. This is the first full Android candidate boot report,
+not yet an SSH verification of the running kernel or AVF guest execution.
+Repeated SSH attempts to the previous address192.168.8.194 timed out and the
+workstation neighbor entry is unreachable. Current device IP was requested;
+do not infer a kernel crash or working Internet access from these observations.
+Actual boot ID, KVM/VSOCK nodes, bounded boot logs and Linux Terminal shell
+execution remain pending. No default promotion or additional reboot performed.
+
+## 2026-11-01 correction: feature parity required; Wi-Fi failed
+
+Operator corrected the earlier Wi-Fi report: the device was not initialized.
+Desktop/touch confirmation stands; Wi-Fi did NOT pass. User requires existing
+hardware decoding and KernelSU Next support in the EL2 integration. Hardware
+decoding is a completed normal-build feature (see BUILD/HANDOFF); historical
+`experimental` switch names do not justify removing it. The initial Android
+candidate's video=0 and disabled KSU are not acceptable for feature parity.
+
+Operator rebooted to original default. SSH confirms recovery boot
+3ff3e94d-abe9-4a57-b3ff-a6c7b2860cf4, baseline60 Mesa, guardY/nohibernate,
+boot_completed1, wlan0 and /dev/video0 present; one-shot request consumed (none).
+No new experiment armed. Retrieved prior candidate logs from ESP, privately under
+out/el2-android/failed-boot-50eb/googlebook-native-50ebcb47-2290-4dbc-998c-2a1f9a808da6.
+They independently confirm all CPUs EL2, VHE initialized, and the actual Android
+early-stage KVM witness PASS. They also show ADSP/CDSP PAS image initialization
+returning -22 and ath10k without completed initialization. Wi-Fi root cause is
+not yet isolated; donor6.12 module load failures also occur and must not alone
+be assumed causal without baseline comparison.
+
+Pinned slbounce README points to qebspil for EL1 remoteproc preboot before EL2.
+Local qebspil8e4d9e6 has no SC8180X table entries; Linux also needs preboot takeover
+support. This is a candidate direction, not an installed or verified fix.
+Venus PAS startup must be covered too; merely re-enabling video flags is inadequate.
+
+Kernel builder now enables KSU/KPROBES/KSU_KPROBES_HOOK and the normal narrow
+media foundation, preserving USB audio's lack of media-controller coupling.
+KSU-only intermediate build passed (v3.2.0-legacy/33129); media-inclusive Image
+and modules also built successfully, Image SHA256
+da4e804f4b61adbcb801821aec1589ed7f9159b0b3be00f721a8b3afc981c23c.
+Final custom Venus/power/overlay module payload remains pending. Outputs use
+out/el2-android/parity-v2; no replacement Image/initramfs has been deployed.
+Remaining: complete firmware takeover, matching native video modules, retain
+all effective normal payloads, then test Wi-Fi/audio/video/KSU and Terminal.
+
+## 2026-11-01 parity continuation: RMTFS failure and preboot candidate
+
+Recovery rechecked: same3ff3e94d boot, guardY, wlan0/video0, no /dev/kvm.
+Normal video helper reports SQ2_NATIVE_VIDEO_READY; no new playback claim.
+Failed EL2 log has qcom_rmtfs_mem85500000 assign-memory failure(-22); rmtfs then
+cannot open its device and mmap fallback fails. Thus wifi-services never reaches
+the normal modem startup. Normal boot has /dev/qcom_rmtfs_mem1, all three
+remoteprocs running and active RMTFS requests. This adds a concrete missing
+dependency; it does not prove a single fix will restore Wi-Fi.
+
+Current Venus sources regenerated using prepare-sq2-venus-iris1.py with
+--firmware-lease --platform-entry --sq2-resources into the EL2 build's venus
+directory. Built against the complete media/KSU/KVM Module.symvers without
+KBUILD_MODPOST_WARN. Core9d4638ab…/decoder e8b0e478…; module build passed,
+with an existing unused-variable warning. Custom overlay modules and final
+initramfs still need rebuilding/audit, so the old video-disabled packer is NOT
+a ready parity-image installer.
+
+Added prepare-sq2-el2-preboot.py, an isolated qebspil preparation script pinned
+to8e4d9e676a3b3afe136cda9b953a2139ff1a32d0 and exact dtc/gnu-efi revisions.
+Adds SC8180X ADSP1/MPSS4/CDSP18 PAS IDs taken from the actual6.3 driver.
+Requires Surface root compatible, explicit microsoft,el2-preboot and existing
+zero-valued microsoft,el2-preboot-complete DT property, plus broken-reset.
+Sets completion1 only after firmware authentication/start succeed; failed DSP
+status is not hidden behind another DSP's success. No proxy vote supplied for
+these untested SC8180X entries; availability/power sequencing remains unverified.
+Reduces upstream's500-second failure stall to5seconds for this candidate.
+Build passed, AArch64 EFI e27e3cb9834c7c7242a53a31a5092fed0e17a1bdd171769a42f16a7f9661bf31.
+Artifacts private in out/el2-android/parity-v2, stage /root/.cache/sq2-el2-preboot-20261101.
+No device write/reboot, firmware copy or preboot driver load in this turn.
+
+Next required work: matching Linux attach implementation with success-marker
+checks and recovery disabled for non-restartable firmware; RMTFS memory ownership
+handoff; VPU PAS/firmware lifecycle under EL2; rebuild custom video overlays and
+complete parity payload, then one-shot hardware/Terminal validation. Merely
+setting broken-reset or skipping failed SCM calls is not a verified handoff.
+Upstream references: qebspil README; maintainer's remoteproc attach-only recovery
+discussion https://www.mail-archive.com/linux-remoteproc@vger.kernel.org/msg00793.html.
+The older codelinaro raw reference URL redirected to login HTML, not usable C
+source. No code was copied from that failed download.
+
+## 2026-11-01 preboot handoff and ESP cleanup
+
+Normal system recovered at f7f98e82; after Wi-Fi reconnect SSH returned at .194.
+The normal kernel/initramfs, firmware hashes, screen_only=Y and video helper
+readiness were captured under private out/el2-android/recovered-f7f98e82.
+No fresh decoded-frame or listening result is claimed.
+
+Implemented an opt-in EFI/kernel handoff, built in the isolated EL2 tree:
+
+- qebspil SC8180X PAS1/4/18 startup plus RMTFS HYP assignment for the exact
+  0x85500000/2MiB/client1/VMID15 region. Result cells start at zero and change
+  only after successful calls. Retries do not reset an already started DSP.
+- Kernel remoteproc attachment requires the matching Surface/EL2/result1
+  properties; no firmware remapping/reload or unsupported reset recovery.
+  Normal remoteproc behavior remains unchanged without the explicit opt-in.
+- RMTFS uses the verified preboot assignment and avoids EL2 ownership teardown.
+- Linux6.3 EFI stub copies the DT before late EBS. Copy the four result cells
+  from the original DT after successful EBS, using no EFI boot-service calls.
+  The original DT is launcher-allocated EfiLoaderData, not freed by qebspil.
+
+Image fe6207e96f3ca11c51690a5deee0c887c6a6b8633b4f4488a2977a5f6614fed9
+includes KSU Next33129/v3.2.0-legacy kprobes, media foundation and KVM.
+qebspil r3 fac3ac8d46a4c88ef7c2d0c68d1c50979e6886e5a597a4215b3a304a34ac68b4.
+These are experimental handoff artifacts, not proof of restored Wi-Fi/audio.
+
+Added a separate preboot RAM diagnostic and `preboot` consume-once request.
+Only the identified ESP is mounted for bounded logs; no Android/userdata,
+association, DHCP or credentials. Firmware bytes match the actual normal system.
+The first test auto-rebooted without saved logs. QEMU reproduced a KSU crash
+because the diagnostic command line omitted `lsm=selinux` (CONFIG_LSM excludes
+SELinux by default). Adding normal-system `lsm=selinux enforcing=0` allows
+the same Image to boot eight host CPUs and execute the KVM MMIO42 guest, EXIT0.
+This explains a reproducible diagnostic flaw; no physical panic trace was saved.
+The v2 launcher e35b1d47… and initramfs5077299c… were installed and armed after
+cleanup. They print ESP_LOG and retain the result screen for180seconds, with
+a360second userspace watchdog. Firmware/kernel hangs still need manual recovery.
+
+Custom video module ABI rebuilds now accept an explicit kernel/output/base-DTB.
+Both regenerated overlays were byte-compared with the embedded deployed overlay
+before strict modpost builds (no MODPOST_WARN): identify18dbce98…, HFI38c74c2b…,
+software-domain VIDEOCC24ed5d48…. Their register/clock/domain policy was retained.
+Venus core/decoder also built earlier against this media/KSU ABI. No new video
+module has been deployed; VPU PAS/firmware lifetime under EL2 remains unresolved.
+The old video-disabled Android packer is still not a feature-parity installer.
+
+User requested ESP cleanup. Before deletion, the entire ESP was archived locally
+as private out/esp-cleanup-20261101/esp-before.tar, SHA256
+7d4570756ba652c221be3285d13714243fac72dc2fdeae2535788957b09deedc, verified against
+the device archive. Retired2715 files (1,576,345,259 file bytes): obsolete android1,
+dual65 and stability builds, failed EL2 Android remainder, historical logs/menu
+backups/env switches, and redundant FullRAM/old touch addon backups. Kept hashes
+were checked before and after. ESP now422.9MiB used / about1.6GiB available (21%).
+
+Current menu SHA3e63f6a8829178d91742532f08cfa2eb1cb9b8781992cb4f19accddeeb382524:
+Mesa default, Qualcomm, Rescue, preboot diagnostic, FullRAM, tiny KVM, manual
+Secure Launch and shutdown. Normal/rescue image, DTBs, credential-bearing base
+and effective touch/Bluetooth addons remain byte-identical. SQ2Buttons loader
+is retained; its obsolete menu now delegates to the current main menu. Identity
+markers, sq2-port metadata and preboot firmware remain. No partition/userdata
+changes. Old on-ESP menus are no longer recovery instructions; use the local
+archive if a retired experimental artifact is actually needed.
+
+Preboot v2 hardware result saved under el2-preboot-808f9035-89b8-4530-910c-8aa440d188d1:
+HOST_CPUS8, NVMe present, KVM guest MMIO42/EXIT0, ESP_LOG=SAVED. All four
+completion cells were0, no remoteprocs attached and no wlan0. Normal default
+returned at dc2fcd9d with wlan0 and screen_onlyY. Module-load exit0 alone is not
+a device probe result (the driver explicitly rejects absent completion markers).
+
+Review then found slbounce flushes caches before invoking real EBS; our late
+callback changed result cells afterwards without a second writeback. Therefore
+the zero cells cannot distinguish failed startup from lost result writes.
+qebspil r4 now flushes the result DT after every stage update. A six-cell trace
+records stage, EFI status low/high, and low32 of SCM results0..2; the kernel
+EFI stub copies this trace to its final DT alongside the strict completion bit.
+Stage1=RMTFS prepared,2=calling SCM,3=returned,4=assigned; PAS10=starting,
+11=success,12=failure. This is diagnostic evidence, not an override of success.
+v3 Image96929547…, qebspild40b4efa…, DTBb6432781…, initramfs8d68c06d… deployed
+and armed once, with the same normal menu/default. Normal diagnostic exit now
+unbinds logs and unmounts the ESP before reboot; the timeout fallback remains
+bounded. No Android parity candidate deployed.
+
+User photo IMG_0421.JPG captured v3 before Linux: EFI RMTFS returned
+status=Success, result=1/0/0, then our wrapper incorrectly returned Device Error.
+The pinned qebspil scm_sip_interface.h explicitly associates
+HYP_MEM_PROTECT_ASSIGN with tz_common_rsp_t: its first INT64 is the completion
+header (1=completed, 0=not completed), and the next INT64 is ret (0=success).
+It is not the Linux qcom_scm_res layout. Cross-checked the published ABL caller:
+https://github.com/SHIFTPHONES/android_bootable_bootloader_edk2/blob/7d391d8b1059ed48259728cab004ca6f16ee3de2/QcomModulePkg/Library/avb/libavb/avb_util.c
+ScmGetFeatureVersion checks common_rsp.status==1 before consuming the value.
+No firmware error is being ignored: r5 now requires EFI success, completed=1
+AND extended ret=0. A host harness compiled the actual generated wrapper and
+its real response structs: six cases cover successful completion, incomplete,
+negative/positive extended errors, invalid header and EFI transport failure.
+All passed, and the assignment arguments/region/permissions are unchanged.
+
+User manually recovered v3 to normal boot519057aa, wlan0 .194, screen_onlyY.
+No v3 Linux log directory exists. r5 EFI built as AArch64, SHA256
+ce40736235dd11e23b61cb0bcaad983e89313848c31e21687635b3f5a97fef7a.
+Preboot v4 changes only this EFI plus its checksum manifest; Image/initramfs/
+DTB/launcher remain v3 bytes. Added cold reset after a 5-second RMTFS/PAS error
+display; this cannot recover a hung firmware call. Installed after identity and
+old/new hash checks, armed consume-once. Plain initramfs `reboot` returned0 but
+boot ID remained519057aa and request stayedpreboot; it was not a board reboot.
+Use Android setprop sys.powerctl reboot for the actual test. Hardware result
+still pending; this correction alone is not Wi-Fi or Terminal validation.
+
+The next user photo (clipboard55050943) confirms v4 RMTFS assignment Success,
+then Starting remoteproc for MPSS, CDSP and ADSP. No Linux console followed.
+Progressing to later DSPs shows earlier pil_finish calls returned EFI success;
+the final ADSP Starting line does not distinguish an in-call hang from a later
+EBS/Secure Launch/cache handoff failure. Do not claim ADSP auth failed from it.
+Device .194 remained unreachable; requested manual recovery to original default.
+
+Prepared v5 locally (not yet deployed): qebspil r6 brackets PAS init/mem_setup/
+start calls and prints the aggregate completion. The isolated launcher captures
+GOP before EBS and writes a small raw framebuffer hex marker with no EFI calls
+after EBS: 10=enter EBS,11=EBS returned with status,20=enter SL_AUTH,
+21=AUTH returned with result,30=enter SL_LAUNCH,31=returned with CurrentEL.
+The next16 hex digits are the value. No firmware/start ordering or cache-flush
+policy changed. Image/initramfs/DTB/TCB hashes remain identical to v3/v4.
+qebspil84a9ae1a9953f4fa7d92cb40f470549bca450d44d2adf01cfb99b8205945578d;
+launcher5a23d8cd0fcb5c9c8b4329b4603996d66acaa1f7987d6a5f411e0d305f84913e.
+Build and Python syntax passed; upstream linker RWX/WSL clock-skew warnings
+remain. Linux/Android/terminal functionality still unverified for this path.
+
+User restored normal system at boot6c0e84de-f908-4b27-b66e-84612671eb28.
+Verified normal Mesa cmdline, screen_onlyY, exact NVMe/ESP/root identity and
+unchanged main-menu hash3e63f6a8; consume-once was none and no v4 Linux logs
+existed. Installed only v5 qebspil/launcher plus manifest after old/new checksum
+checks, armed preboot once, and invoked Android sys.powerctl reboot. v5 result
+pending. The framebuffer renderer passed an ASan/UBSan host harness for all
+hex digits, null framebuffer and preservation outside its480x40 pixel band.
+
+v5 operator result: aggregate PAS finish returned Success; framebuffer stage31
+with value2. Thus the Secure Launch return path actually reached EL2 after PAS
+calls, but Linux did not reach its console/log collector. This is not evidence
+that Linux attached remoteprocs or that Wi-Fi/Terminal works. Normal restored at
+boot62ff95c5-a189-46dc-b943-aaba49f104ed; no v5 Linux log directory exists.
+
+v6 candidate adds a second cache sweep after successful real EBS (including
+late DSP callbacks), before SL_AUTH. It reuses the exact upstream descriptor
+allowlist; reserved/conventional/MMIO regions are not swept. Original pre-EBS
+sweep is retained, AUTH/LAUNCH order and DSP firmware unchanged. This tests
+the hypothesis that callback-dirtied state was lost during Secure Launch;
+stage31 alone does not establish this root cause. Added12/13 around the new
+sweep. Only launcher changed to
+feb4aca41a9818b680596562e7799ec6af7c7560d4f6a77023c088dca02ee69f.
+Built successfully (same upstream RWX/WSL timestamp warnings), inspected order
+and unchanged other payload hashes. Installed/armed once after identity and
+hash checks, reboot requested via Android sys.powerctl. v6 hardware pending.
+
+v6 user result remains31/value2, so the extra cache sweep did not resolve the
+stall. Normal recovered at boot53c9d620-c8f6-4d3d-8ad0-b558038777e1.
+The RAM launcher had loglevel4, hiding early informational kernel output;
+stage31 alone cannot locate a stall inside the EFI stub versus early kernel.
+v7 adds explicit sq2.el2_trace=1 diagnostic markers in the Linux EFI stub:
+40=efi_exit_boot_services returned/status,41=before copying late DT results,
+42=copy finished/new DT address,50=about to enter kernel/kernel address.
+The ARM64 existing screen_info is captured before EBS; raw pixel writes reuse
+the bounded launcher renderer. No EFI console/services are called afterwards.
+Without the Surface+trace opt-in, the helper stays inactive. Verbose loglevel7,
+ignore_loglevel and initcall_debug expose subsequent early kernel progress.
+Full kernel Image build passed, preserving KSU33129/media configuration; only
+EFI stub code was changed, initramfs/modules/DTB/firmware byte hashes unchanged.
+Image d143442af5dfc46409e1ad82bd8f42590930e88531271748ac90126917e71c8f;
+launcher5dbfa7551efd699eaddeeca10cbd5b6ccd666bf92e251a7f0c68b178da30b12a.
+Installed these two diagnostic files and manifest after identity/hash checks;
+armed once and requested Android reboot. v7 hardware result pending.
+
+v7 hardware result: user reported `41 F81F100`. This brackets the stall inside
+the post-EBS result-copy helper; it does not identify the exact instruction.
+v8 removes that helper: before EBS the stub writes its final DT address into
+the explicit 8-byte `microsoft,el2-kernel-fdt` property. At EL1 after successful
+PAS completion, qebspil validates all four source results and destination
+fields, copies completion/status in place and flushes the destination cache.
+No failed/missing PAS is promoted to success. Non-opt-in normal DTs are ignored
+by the stub; malformed opted-in handoffs fail. Stage42 now means EFI returned
+successfully without post-EBS result parsing; stage50 precedes kernel entry.
+Host tests using the actual diagnostic DT and pinned libfdt passed result/trace
+copy, callback retry and failure rejection with ASan/UBSan. This caught a
+4-byte-aligned DT u64 access; the publisher now uses fdt64_ld. Kernel/EFI build
+passed (existing KSU version fallback and upstream linker warnings remain).
+User restored normal boot707c599b-a9e2-4769-a481-100a6f58e320. Serial/ESP marker,
+UUID/root backing, screen-only guard, unchanged main menu and old/new hashes
+checked. Only diagnostic Image/DTB/qebspil replaced atomically, then one-shot
+armed and Android sys.powerctl reboot requested. v8 hardware results pending.
+Image: 975777d33002d6a251423d00ffd58d7c05757f25d459443db8979f2fe084b15b
+DTB: f0fead9f9395ac668a8f838665635e3db8dc736d2e0bba5ac1c58fba9e3fc6f1
+qebspil: 5e2adb865235cc73c98acf1c12656d2a1582d3f60c81664f19d68ba60120e785
+Artifacts/deployment and private host harness: out/el2-android/preboot-ram-v8
+and out/el2-android/test-preboot-publish.py. No Terminal/Wi-Fi parity claim yet.
+
+v8 recovered automatically to normal boot955804b6-1cd3-492c-bda1-91d7bf639545.
+Retrieved ESP logs for diagnostic27e329d1-075c-49b6-9c36-c09ba24ab58a under
+out/el2-android/preboot-ram-v8. All four completion values1; three DSPs attached,
+8 host CPUs, NVMe and RMTFS devices present, actual KVM MMIO42 witness EXIT0.
+No wlan0. ath10k probe eventually returns0 despite early dependency-load noise.
+pd-mapper reports no maps; kernel remoteproc_sysfs.c exposes "unknown" for every
+RPROC_ATTACHED. pd-mapper discovers JSON directories from remoteproc/firmware
+(upstream reference https://github.com/linux-msm/pd-mapper/blob/master/pd-mapper.c).
+v9 scopes known firmware exposure to the verified Surface/EL2 three-PAS handoff,
+done1, explicit opt-in and exact rproc/DT filename match. Other externally booted
+images remain unknown. Added firmware paths, rpmsg binding, QRTR socket, process,
+module and interrupt logs. Build and shell/Python checks passed; only diagnostic
+Image/initramfs atomically replaced after identity/old-new manifest checks.
+v9 Image13e4d1cb7aec491fd56acdca4150ca66ba34cdd7658437729f19c1fae05f1bd6;
+initramfs1f3887d42946aa096023e240c3bd5ac7fb448c50edc92442252d43f532b1a718.
+One-shot armed and reboot requested; automated SSH recovery observation running.
+
+Full Android packer now requires a fresh explicit output directory, no longer
+skips native video modules, selects rebuilt custom Iris/HFI/VIDEOCC/Venus over
+generic substitutes, checks KSU/KVM config, and preserves video userspace and
+firmware bytes. Terminal stage rejects video=0. Local parity-pack-v1 builds342
+modules including11 video modules and retains the last credential member.
+This is payload preparation only; it was not deployed. Its Image association
+predates v9's sysfs fix and must be regenerated for the next Android candidate.
+VPU PAS lifecycle under EL2, actual hardware decoding and Android Terminal
+remain incomplete; no claim of full feature parity from the packaging audit.
+
+v9 auto-recovered to4938b520-e8e6-49fe-ad1e-f7d6f199cbb2. Log directory
+el2-preboot-a88ad43e-0271-4e8f-9669-592a9ddd0966 retrieved under preboot-ram-v9.
+All firmware paths now correct; pd-mapper remains alive without "no maps".
+Wi-Fi still absent, KVM still PASS. ADSP/CDSP IPCRTR bind and GLINK IRQs advance;
+modem has only rpmsg_ctrl, no IPCRTR, and GIC481 GLINK count0. Thus the metadata
+fix is confirmed but insufficient. No proof that all DSP services are running.
+
+v10 adds a modem-only DT opt-in proxy resource test using the existing
+adsp_start PD/XO/aggre2/regulator requests. It logs bounded SMEM421 contents,
+unwinds acquired resources on error, performs no PAS call/reset/reload, and
+holds successful votes only for the diagnostic lifetime until reboot. The
+matching normal resource voltage/performance policy is reused. This temporary
+hold is not a completed handover or battery/power-management implementation.
+Rebuilt Image/modules; repeated make after clock skew warning finished cleanly
+apart from existing KSU version messages. Every packaged module was compared
+bytewise after strip against the recheck build, then the new Image copied.
+Image a384f89903813b52a1097533ba9853bca8c4e5cb5f9658f33b259c8e65e43e00.
+Identity/menu/old-new manifest checks passed; only diagnostic Image/initramfs/DTB
+replaced, request armed and Android reboot issued. Recovery monitor started;
+v10 result pending. Private deploy files under out/el2-android/preboot-ram-v10.
+
+Added build-only prepare-sq2-el2-android-preboot.py: checks RAM bundle manifest
+and paired Android audit/kernel hash, preserves video flags, copies EL1 preboot
+and EL2 handoff launcher, and strips the RAM-only modem proxy-test DT property.
+parity-pack-v2 plus android-preboot-v1 built against v9 Image13e4d1cb; no device
+deployment. Payload hash9245cef34c73784d7c841c51c1c7dafadf22fca0603e814e012c3045ab7b27f9.
+Still requires actual modem/Wi-Fi, video/VPU lifecycle, KSU and Terminal runtime
+validation. These bundles must not replace the normal default on packaging
+evidence alone.
+
+2026-11-01 snapshot follow-up: v10 automatically recovered to normal boot
+d0c85809-6840-4ef1-ac4f-6b63f26c8011. Retrieved diagnostic logs for
+ae90d5ad-3db1-479b-a07f-d528aaeb37c6 confirm proxy resources were held, but
+modem IPCRTR/Wi-Fi remained absent and KVM witness still passed. The proxy
+experiment did not fix the problem. Its RAM-only opt-in remains in this source
+snapshot; remove it before the next diagnostic. The Android builder strips it.
+
+Added el2-rmtfs-start and its isolated host test: normal boot retains rmtfs -s;
+the explicitly selected EL2 path requires the expected attached modem, firmware
+name and RMTFS character device, then omits -s to avoid restarting that modem.
+The host cases passed; the latest helper/packer changes have not been repacked
+or deployed. Existing android-preboot-v1 therefore does not contain this helper.
+
+Inspection also found that pinned qebspil PAS wrappers discard SCM Results and
+return only the EFI transport status. Previous PAS Success/completion flags
+must not be treated as validation of the PAS response payload. RMTFS has its
+own checked response handling; equivalent PAS response auditing is pending.
+No PAS fix has yet been implemented. Real Wi-Fi, hardware decoding, KSU and
+Android Linux Terminal acceptance remain outstanding.

@@ -1,5 +1,69 @@
 # SQ2 开发交接
 
+**2026-11-01 当前工作快照补充**：v10 已自动恢复原系统，诊断日志确认 modem
+proxy 资源请求成功，但仍无 modem IPCRTR/Wi-Fi，KVM witness 仍 PASS；该实验
+没有修复网络。RAM 构建器目前仍保留这一临时测试，下一轮应撤掉；Android
+预启动构建器会剔除其 DT 属性。新增 el2-rmtfs-start 避免对已 attached 的
+modem 再执行 rmtfs -s，主机分支测试通过，尚未重新打包或部署此 helper。
+进一步检查发现 qebspil 的 PAS 封装仅返回 EFI transport status，未校验 SCM
+Results；因此此前 PAS Success/完成位不能单独证明固件服务成功。返回值
+校验修复尚未实施。Wi-Fi、EL2 下实际硬解、KSU 和 Linux Terminal 的完整
+运行验收仍未完成；本次提交保存当前实验状态，不代表功能已交付。
+
+**2026-11-01 EL2/终端推进及用户要求清理 ESP**：详见
+`docs/SQ1-EL2-PREPARATION.md` 末节。原默认 Mesa、Qualcomm、Rescue 的
+Image/DTB/有效 initramfs addon 均保持原字节；用户明确要求完整保留硬解和
+KSU Next，不能用桌面或 `/dev/kvm` 代替终端与功能一致性验收。
+首次 Android EL2 的 Wi-Fi 失败有 PAS/RMTFS -22 日志，旧候选已撤出菜单。
+当前完成 EFI 预启动 + Linux 接管的实验构建，KSU/media 模块匹配构建通过；
+硬解 VPU 在 EL2 下的 PAS 生命周期仍待解决。新的 RAM 诊断通过一次性 GRUB
+自动选择并恢复默认；v1 遗漏 lsm=selinux，QEMU 复现 KSU 启动崩溃，v2 已补齐
+原系统参数，实机八核/NVMe/KVM guest 通过，但预启动完成位全0，Wi-Fi未恢复。
+v3照片定位EFI误判：Qualcomm的tz_common_rsp_t首项1表示完成、次项0表示成功，
+不能按Linux qcom_scm_res首项0判断。r5修正为严格检查完成1+ret0，六组返回值
+测试及EFI构建通过；只替换诊断EFI为ce407362…，原默认不变。v4照片确认RMTFS
+Success，随后打印到ADSP Starting并停住，尚不能区分ADSP调用或后续EL2切换。
+v5逐个PAS调用返回日志+EBS之后直接帧缓冲阶段码已构建。用户恢复原系统后，
+boot6c0e84de下身份/原菜单/哈希校验通过，已替换两个诊断EFI并发起一次性重启，待结果。
+v5用户反馈all PAS Success、阶段31数值2，确认EL2返回后停住；原系统恢复到
+62ff95c5，未留下v5 Linux日志。v6仅改启动器，在late EBS回调后、SL_AUTH前
+再清理原允许类型的内存缓存，检验交接状态丢失假设；已部署并发起一次性测试，待结果。
+v6仍停31/2，缓存补清理未解决。用户恢复53c9d620后部署v7：Linux EFI stub
+增加40/41/42/50阶段码，诊断命令行开启early info/initcall日志；仅诊断Image与
+launcher变更，原默认及模块/固件保持不变。已发起一次性重启，等待v7实机结果。
+普通initramfs reboot未改变板级boot ID，随后用Android sys.powerctl reboot发起。
+v7用户反馈41 F81F100，停点位于post-EBS结果复制函数内，具体故障指令未定位。
+v8移除该post-EBS解析：EFI stub在EBS前提供最终DT地址，qebspil在EL1完成
+PAS后校验四组真实完成位并直接写最终DT、清理缓存。主机真实DT复制/拒绝失败/
+重复回调及ASan、UBSan通过；内核及EFI编译通过。用户恢复707c599b后身份、
+菜单和旧新hash通过，已仅替换诊断Image/DTB/qebspil并发起一次性自动重启。
+等待v8 kernel DT handoff、42/50或Linux/Wi-Fi/KVM结果；不能据此称已修复。
+v8日志已取回：27e329d1下八核/NVMe/RMTFS/KVM guest MMIO42/EXIT0，三DSP
+attached及四完成位1。Wi-Fi仍无接口；pd-mapper报告no pd maps available。
+确认remoteproc sysfs对ATTACHED统一输出unknown，pd-mapper由固件路径找jsn。
+v9仅对Surface/EL2/三个指定PAS/显式完成1且名称匹配DT的情况显示真实firmware；
+其它外部固件仍unknown。增加映射/QRTR/进程日志并已一次性启动，等待自动恢复。
+原系统恢复boot955804b6，原video0存在。完整Android候选打包器现保留全部11个
+原生视频模块的匹配重编版本、视频用户态/固件和末尾凭据；342模块包生成通过，
+out/el2-android/parity-pack-v1仅构建未部署，VPU EL2生命周期及终端仍未验证。
+v9自动恢复4938b520，a88ad43e诊断日志确认三固件名正确、pd-mapper驻留且不再
+报告缺映射；Wi-Fi仍无。ADSP/CDSP有IPCRTR及GLINK中断，modem无IPCRTR、
+GLINK irq481计数0，KVM仍PASS。v10仅对RAM DT modem节点启用proxy资源对照：
+沿用正常adsp_start的PD/XO/aggre2/regulator请求，失败回收已取得的请求，不重置/
+重载固件；成功仅在此次诊断至重启期间保留。加入SMEM421打印。构建复查无时钟
+偏移警告且包内全部模块逐项匹配，已部署并一次性启动，等待自动恢复日志。
+Android预启动打包器已完成，android-preboot-v1是与v9匹配的构建快照、未部署；
+后续构建器会剔除modem临时proxy-test属性。不得将临时资源保持当作正式电源管理。
+不能先称Wi-Fi修复或Linux终端可用。
+
+清理前完整 ESP 已备份到忽略目录 `out/esp-cleanup-20261101/esp-before.tar`，
+SHA256 `7d4570756ba652c221be3285d13714243fac72dc2fdeae2535788957b09deedc`。
+旧候选/历史日志/旧菜单与重复备份移出设备；ESP 使用率21%，余约1.6GiB。
+保留上述三个启动项、四个 EL2 诊断入口及关机；Mesa 仍为默认。
+SQ2Buttons 的旧菜单改为转入当前主菜单，避免引用已退休文件。
+主菜单 SHA256 `3e63f6a8829178d91742532f08cfa2eb1cb9b8781992cb4f19accddeeb382524`。
+后文历史 ESP 路径可能已退休，不应直接按旧部署步骤复用。
+
 **2026-10-31 首次校准加入可选拇指优化并部署**：用户明确要求在首次启动
 测试中发现问题后才启用。默认配置SizeMax=2.0；42点校准+5点检查后加入边缘
 单拇指持续慢拖3×5秒，最后轻点/拖动/双指人工确认。提前UP仅提示“提前抬起或

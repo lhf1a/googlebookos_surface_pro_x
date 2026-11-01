@@ -6,7 +6,8 @@ import re
 
 BEGIN = '# BEGIN SQ2 EL2 CONSUME-ONCE\n'
 END = '# END SQ2 EL2 CONSUME-ONCE\n'
-TARGETS = {'ram': 'sq2-el2-kvm-ram', 'fullram': 'sq2-el2-fullram', 'android': 'sq2-el2-android'}
+TARGETS = {'ram': 'sq2-el2-kvm-ram', 'fullram': 'sq2-el2-fullram',
+           'android': 'sq2-el2-android', 'preboot': 'sq2-el2-preboot'}
 ENV = '/EFI/BOOT/sq2-el2-once.env'
 
 def prepare(menu, request='none'):

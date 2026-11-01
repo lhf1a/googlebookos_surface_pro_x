@@ -1,0 +1,111 @@
+#!/bin/busybox sh
+# One-shot RAM diagnostic. No Android, userdata, association or DHCP.
+export PATH=/bin:/sbin
+/bin/busybox --install -s /bin
+mkdir -p /proc /sys /dev /run /tmp /logs /media/esp
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mount -t tmpfs tmpfs /run
+mount -t tmpfs tmpfs /tmp
+mount -t debugfs debugfs /sys/kernel/debug
+exec </dev/console >/dev/console 2>&1
+echo 3 > /proc/sys/kernel/printk
+echo /bin/modprobe > /proc/sys/kernel/modprobe
+echo '=== SQ2 EL2 PREBOOT / RMTFS / WIFI RAM DIAGNOSTIC ==='
+# Bound even a hung userspace service. This cannot recover a firmware/kernel hang.
+( sleep 360; dmesg > /logs/kernel-timeout.txt; sync; reboot -f ) &
+if [ "$(cat /sys/module/suspend/parameters/screen_only)" != Y ]; then
+    echo 'FAIL: screen_only guard missing'; sleep 10; reboot -f
+fi
+for i in $(seq 1 15); do
+    [ -b /dev/nvme0n1p6 ] && break
+    sleep 1
+done
+# This exact known ESP is the only disk mounted, for bounded diagnostic logs.
+esp_status=IDENTITY_OR_MOUNT_FAILED
+cat /sys/class/nvme/nvme0/serial > /run/esp-check.txt 2>&1
+blkid /dev/nvme0n1p6 >> /run/esp-check.txt 2>&1
+if [ "$(cat /sys/class/nvme/nvme0/serial | tr -d ' ')" = CYA5N050012105J77 ] &&
+   blkid /dev/nvme0n1p6 | grep -q 'UUID="B027-0512"' &&
+   mount -t vfat -o ro /dev/nvme0n1p6 /media/esp; then
+    if grep -qx SQ2-INTERNAL-512-20261027 /media/esp/SQ2-SSD-ID.txt; then
+        mount -o remount,rw /media/esp >> /run/esp-check.txt 2>&1
+        dest=/media/esp/logs/el2-preboot-$(cat /proc/sys/kernel/random/boot_id)
+        if mkdir -p "$dest" && mount --bind "$dest" /logs; then esp_status=SAVED; fi
+    else
+        umount /media/esp
+    fi
+fi
+uname -a > /logs/result.txt
+echo "ESP_LOG=$esp_status" >> /logs/result.txt
+cp /run/esp-check.txt /logs/esp-check.txt
+cat /proc/cmdline >> /logs/result.txt
+echo "HOST_CPUS=$(grep -c '^processor' /proc/cpuinfo)" >> /logs/result.txt
+for p in /sys/firmware/devicetree/base/soc@0/remoteproc@17300000 \
+         /sys/firmware/devicetree/base/soc@0/remoteproc@8300000 \
+         /sys/firmware/devicetree/base/soc@0/remoteproc@4080000 \
+         /sys/firmware/devicetree/base/reserved-memory/memory@85500000; do
+    printf '%s result bytes: ' "$p" >> /logs/result.txt
+    od -An -tx1 "$p/microsoft,el2-preboot-complete" >> /logs/result.txt 2>&1
+    printf 'stage/status/result bytes: ' >> /logs/result.txt
+    od -An -tx1 "$p/microsoft,el2-preboot-status" >> /logs/result.txt 2>&1
+done
+mkdir -p /run/rmtfs /var/lib/tqftpserv
+for f in modem_fs1 modem_fs2 modem_fsc modem_fsg modem_tuning modem_tunning modem_tng modem_study; do
+    dd if=/dev/zero of="/run/rmtfs/$f" bs=1048576 count=2 2>/dev/null
+done
+qrtr-ns -f > /logs/qrtr-ns.txt 2>&1 &
+sleep 1
+timeout 30 modprobe qcom_q6v5_pas > /logs/remoteproc-load.txt 2>&1
+echo "REMOTE_MODULE_EXIT=$?" >> /logs/result.txt
+sleep 2
+for p in /sys/class/remoteproc/remoteproc*; do
+    echo "$p" >> /logs/firmware-paths.txt
+    cat "$p/name" "$p/state" "$p/firmware" >> /logs/firmware-paths.txt 2>&1
+done
+find /lib/firmware -name '*.jsn' >> /logs/firmware-paths.txt
+pd-mapper > /logs/pd-mapper.txt 2>&1 &
+tqftpserv > /logs/tqftpserv.txt 2>&1 &
+# The EFI-attached modem is already running; do not ask rmtfs to reset/start it.
+rmtfs -r -o /run/rmtfs -v > /logs/rmtfs.txt 2>&1 &
+sleep 3
+timeout 45 modprobe ath10k_snoc > /logs/ath10k-load.txt 2>&1
+echo "WIFI_MODULE_EXIT=$?" >> /logs/result.txt
+sleep 30
+for p in /sys/class/remoteproc/remoteproc*; do
+    echo "$p" >> /logs/result.txt
+    cat "$p/name" "$p/state" >> /logs/result.txt 2>&1
+done
+ls -l /dev/qcom_rmtfs_mem* /dev/nvme0n1 /dev/kvm >> /logs/result.txt 2>&1
+ls /sys/class/net >> /logs/result.txt
+if [ -d /sys/class/net/wlan0 ]; then
+    echo WIFI_INTERFACE_PRESENT_NO_ASSOCIATION_TEST >> /logs/result.txt
+else
+    echo WIFI_INTERFACE_MISSING >> /logs/result.txt
+fi
+timeout 15 /bin/kvm-arm64-witness >> /logs/result.txt 2>&1
+echo "KVM_WITNESS_EXIT=$?" >> /logs/result.txt
+cat /sys/kernel/debug/devices_deferred > /logs/devices-deferred.txt
+ps > /logs/services.txt
+cat /proc/modules > /logs/modules.txt
+cat /proc/net/qrtr > /logs/qrtr-sockets.txt 2>&1
+cat /proc/interrupts > /logs/interrupts.txt
+ls -l /sys/bus/rpmsg/devices/*/driver > /logs/rpmsg-drivers.txt 2>&1
+dmesg > /logs/kernel.txt
+cat /logs/result.txt
+echo 'Recent preboot/PAS/RMTFS/Wi-Fi messages:'
+grep -E 'preboot|EFI-|PAS|rmtfs|remoteproc|ath10k|q6v5' /logs/kernel.txt | tail -12
+if [ "$esp_status" != SAVED ]; then
+    echo 'ESP LOGGING FAILED:'; cat /logs/esp-check.txt
+    grep -E 'pcie|PCI|nvme|iommu|smmu' /logs/kernel.txt | tail -10
+fi
+echo 'Diagnostic finished. Reboot to original default in 180 seconds.'
+sync
+sleep 180
+dmesg > /logs/kernel-final.txt
+sync
+umount /logs
+umount /media/esp
+reboot -f
+while :; do sleep 60; done

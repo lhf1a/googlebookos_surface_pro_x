@@ -14,8 +14,11 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--stage', type=Path, default=Path('/root/.cache/sq2-videocc-sw-domains'))
+p.add_argument('--kernel', type=Path, default=Path('/root/.cache/sq2-thermal/kernel'))
+p.add_argument('--kernel-output', type=Path, default=Path('/root/.cache/sq2-video-foundation/build'))
+p.add_argument('--output', type=Path, default=ROOT / 'out/video-decode/videocc-sw-domains')
 a = p.parse_args()
-k = Path('/root/.cache/sq2-thermal/kernel')
+k = a.kernel
 src = k / 'drivers/clk/qcom/videocc-sm8150.c'
 raw = src.read_bytes()
 assert hashlib.sha256(raw).hexdigest() == '119d847a17eef4ef86586a5ba7ade7cd8da6fb0e695277e4a56f56e9fda6ab53'
@@ -23,14 +26,14 @@ before = raw.decode()
 assert before.count('.flags = HW_CTRL,') == 2
 after = before.replace('.flags = HW_CTRL,', '.flags = 0, /* Iris1 bring-up: handoff deferred until clocks/firmware ready. */')
 a.stage.mkdir(parents=True, exist_ok=False)
-dest = ROOT / 'out/video-decode/videocc-sw-domains'
-dest.mkdir(exist_ok=True)
+dest = a.output
+dest.mkdir(parents=True, exist_ok=True)
 (a.stage / src.name).write_text(after)
 (a.stage / 'Makefile').write_text('obj-m += videocc-sm8150.o\nccflags-y += -I$(srctree)/drivers/clk/qcom\n')
 (dest / 'source.diff').write_text(''.join(difflib.unified_diff(before.splitlines(True), after.splitlines(True),
                                                            fromfile='original', tofile='candidate')))
-subprocess.run(['make', '-s', '-C', str(k), 'O=/root/.cache/sq2-video-foundation/build',
-    'ARCH=arm64', 'CROSS_COMPILE=aarch64-linux-gnu-', f'M={a.stage}', 'KBUILD_MODPOST_WARN=1', 'modules'],
+subprocess.run(['make', '-s', '-C', str(k), f'O={a.kernel_output}',
+    'ARCH=arm64', 'CROSS_COMPILE=aarch64-linux-gnu-', f'M={a.stage}', 'modules'],
     check=True, stdout=(dest / 'build.log').open('w'), stderr=subprocess.STDOUT)
 blob = (a.stage / 'videocc-sm8150.ko').read_bytes()
 (dest / 'videocc-sm8150.ko').write_bytes(blob)
