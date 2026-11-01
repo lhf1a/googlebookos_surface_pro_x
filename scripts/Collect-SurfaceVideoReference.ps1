@@ -58,6 +58,21 @@ Save-Json 'identity.json' $identity
 $os = Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture
 $bios = Get-CimInstance Win32_BIOS | Select-Object Manufacturer,SMBIOSBIOSVersion,ReleaseDate
 Save-Json 'versions.json' ([ordered]@{ os = $os; bios = $bios })
+# Read-only platform context: a failed query stays unknown, never false.
+$platform = [ordered]@{
+    hypervisorPresent = $computer.HypervisorPresent
+    secureBootEnabled = $null
+    deviceGuard = $null
+}
+try { $platform.secureBootEnabled = [bool](Confirm-SecureBootUEFI) }
+catch { Record-Issue 'secure-boot-query' $_.Exception.Message }
+try {
+    $guard = Get-CimInstance -Namespace 'root\Microsoft\Windows\DeviceGuard' -ClassName 'Win32_DeviceGuard'
+    if ($null -eq $guard) { throw 'Win32_DeviceGuard returned no instance.' }
+    $platform.deviceGuard = $guard | Select-Object VirtualizationBasedSecurityStatus,SecurityServicesConfigured,SecurityServicesRunning
+} catch { Record-Issue 'device-guard-query' $_.Exception.Message }
+Save-Json 'platform-state.json' $platform
+# End read-only platform context.
 $signedDrivers = @(Get-CimInstance Win32_PnPSignedDriver)
 Save-Json 'active-drivers.json' @($signedDrivers | Select-Object DeviceName,DeviceClass,Manufacturer,DriverVersion,DriverDate,InfName,HardwareID)
 $activeInfs = @($signedDrivers | ForEach-Object { $_.InfName } | Where-Object { $_ } | Select-Object -Unique)
@@ -253,7 +268,8 @@ Save-Json 'summary.json' ([ordered]@{
 @'
 Private Surface video reference. Keep original binaries and raw hardware data out of Git.
 No drivers were installed/removed; no boot, security, network or account settings were changed.
-Start analysis with identity.json, versions.json, summary.json and manifest.json.
+Start analysis with identity.json, versions.json, platform-state.json, summary.json and manifest.json.
+Platform queries do not enable/disable Secure Boot, VBS or Hyper-V. Null means unknown; see summary issues.
 ACPI duplicate-signature capture may be incomplete. No MSDM/SLIC/license table or raw SMBIOS was requested.
 SQ1/SQ2 firmware equivalence must be established by identity/version/hash; this is not a deployment package.
 '@ | Set-Content -LiteralPath (Join-Path $output 'README.txt') -Encoding UTF8
