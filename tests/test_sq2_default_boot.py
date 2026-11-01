@@ -36,6 +36,8 @@ for directory, graphics in [('SQ2Default', 'closed'), ('SQ2Fallback', 'mesa')]:
     assert set(e) == set(baseline), 'Unexpected added or removed archive entries'
     assert b'running|attached)' in e['bin/audio-drivers-start'][1]
     assert b'*" sq2.el2=1 "*)' in e['bin/video-decoder-lab-start'][1]
+    for helper in ('el2-terminal-autostart', 'el2-terminal-stage'):
+        assert e['bin/'+helper][1] == (R/'probe/virtualization'/helper).read_bytes().replace(b'\r\n', b'\n')
     for prefix in ('lib/firmware/', 'etc/sq2-c2-runtime-boot/', 'etc/sq2-audio/', 'etc/sq2-vulkan-closed/'):
         assert all(e[n] == value for n, value in baseline.items() if n.startswith(prefix)), prefix
     for line in e['etc/sq2-video-native/SHA256SUMS'][1].decode().splitlines():
@@ -45,10 +47,9 @@ for directory, graphics in [('SQ2Default', 'closed'), ('SQ2Fallback', 'mesa')]:
     changed = {n for n in e if e[n] != baseline.get(n)}
     allowed = {'init', 'bin/audio-drivers-start', 'bin/video-decoder-lab-start',
                'bin/el2-rmtfs-start', 'bin/el2-terminal-stage', 'bin/el2-terminal-autostart'}
-    if directory == 'SQ2Default':
-        allowed |= audio.keys()
-        for name, expected in audio.items():
-            assert hashlib.sha256(e[name][1]).hexdigest() == expected, name
+    allowed |= audio.keys()
+    for name, expected in audio.items():
+        assert hashlib.sha256(e[name][1]).hexdigest() == expected, name
     assert changed <= allowed, changed
     text = (out/('source-'+directory)/'src/bounce_main.c').read_text()
     assert 'sq2.vulkan='+graphics in text and 'sq2.el2=1' in text
@@ -56,6 +57,7 @@ for directory, graphics in [('SQ2Default', 'closed'), ('SQ2Fallback', 'mesa')]:
     assert 'sq2.el2_trace=' not in text and 'SQ2EL2Android' not in text
     assert directory in text
 menu = (out/'grub.cfg').read_text()
+assert (out/'EFI/SQ2Default/initramfs.cpio.gz').read_bytes() == (out/'EFI/SQ2Fallback/initramfs.cpio.gz').read_bytes()
 assert menu == b.menu() and menu.count('menuentry ') == 2
 assert 'set default=sq2-default' in menu
 assert 'load_env' not in menu and 'save_env' not in menu

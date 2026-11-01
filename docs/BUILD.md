@@ -2,6 +2,12 @@
 
 ### 2026-11-02：当前 SQ2 默认构建为 EL2 / 高通 Vulkan / 60 Hz / 700 MHz
 
+本日后续修复：EL2内核构建调用音频补丁的`--machine-only`模式，仅改SDM845，
+保留原WSA881x。经重启、寄存器时序和用户单次/10秒间隔/原应用确认，停播爆音已
+修复；不再沿用下方此前“仍未解决”的状态。两启动项共用这一验收后的音频运行包。
+正常EL2只自动进入显式指定的无密码用户，不自动打开终端或运行KVM见证探针；
+手动打开终端所需的AVF和网络准备保留。最终构建为`out/audio-pop-20261102/final-v2`。
+
 `build-source-boot.py` 默认转到 `build-sq2-default.py`，输出两个独立 EFI 目录与
 恰好两个入口的 `grub.cfg`。新默认为 SQ2Default（高通 Vulkan），SQ2Fallback
 保留已工作的 Mesa；两者同为 EL2、原生60Hz、GPU700/RPMh432，包含 no-TZ视频、
@@ -9,8 +15,8 @@
 继续沿用既有实现，不代表完整闭源GLES已适配。
 
 ```sh
-python3 scripts/build-source-boot.py --output out/default-20261102-final-v2 --passwordless-user 10
-python3 tests/test_sq2_default_boot.py out/default-20261102-final-v2
+python3 scripts/build-source-boot.py --output out/audio-pop-20261102/final-v2 --passwordless-user 10
+python3 tests/test_sq2_default_boot.py out/audio-pop-20261102/final-v2
 ```
 
 构建输入：`out/default-input` 为已重启验收的当前SQ2六文件及共享firmware快照；
@@ -23,16 +29,17 @@ python3 tests/test_sq2_default_boot.py out/default-20261102-final-v2
 packer重新组装匹配模块、索引及源码助手；这一步复用已编译的Image/模块，
 不声称重新编译内核或专有固件。内核源码构建命令仍见下方EL2章节。
 
-停播爆音仍未解决：恢复`patch-sq2-audio-sequencing.py`的候选虽通过PCM检查，
-用户却确认完全无声；已回退并由用户确认声音恢复，未把失败补丁加入默认内核。
-默认bundle按`audio_modules`固定能出声的sdm845/wsa881x模块hash，拒绝混入
-未经听感验收的替代版本。临时外部M=目录构建会去掉intree标记，应使用原内核树
-的`make modules`生成正常in-tree模块。原Image/配置/导出表保持，最终实际包
-与已验证d643ea0e…一致。两项均保留当前停播爆音限制，不能标为全部音频问题解决。
+此前恢复整个`patch-sq2-audio-sequencing.py`的组合候选虽通过PCM检查，用户却
+确认完全无声，已回退。本轮仅保留`--machine-only`的SDM845静音顺序，用户确认
+播放、10秒间隔重开与原应用正常。默认bundle按`audio_modules`固定验收后的
+sdm845/wsa881x模块hash，拒绝混入旧PRE_PMD变体。临时外部M=目录构建会去掉
+intree标记，应使用原内核树的`make modules`生成正常in-tree模块。
+原Image/配置/导出表保持；最终两包均为320e5076…，部署和重启结果见HANDOFF。
 `kheaders.ko`会随模块编译重新生成内嵌头文件归档；由于Image固定，默认打包显式
 保留hash锁定基线中的匹配kheaders，归档测试要求它与基线逐字一致。
 
-正常启动使用 `sq2.el2=1`；保留原modem接管、KVM检查、SSH及终端自动启动，
+正常启动使用 `sq2.el2=1`；保留原modem接管、SSH、AVF准备和显式无密码用户登录，
+不自动打开终端、不运行KVM见证探针（后者仅在experimental/debug启动运行），
 删除实验ESP日志bind、kmsg收集与360秒自动回退调用。no-TZ helper同步接受正常
 EL2参数；所有媒体/音频/高通运行库及凭据不变，私有password addon仍最后。
 不传 `--passwordless-user` 时不指定账号；传入时仍由运行时检查现有用户及安全锁，

@@ -1,5 +1,41 @@
 # SQ2 开发交接
 
+**2026-11-02 后续：EL2停播爆音已由用户确认修复，正常开机取消终端弹出与KVM测试。**
+
+原包d643ea0e…的有限跟踪证实：HAL停播后再次prepare，PA仍为0xfc时就执行
+sdw_disable_stream；最终关闭也晚于RDAC/SDW掉电才静音。仅恢复SDM845两处
+停流前静音，WSA881x保持原b165ca2c…；模块92852a7b…、试验包17843d5f…，
+boot059265e0-ce1a-4a2a-bab2-6138da6343bf通过。跟踪读到两侧先0x7c、再断流、
+重建后由原prepare解除静音至0xfc。未改增益、配对端口、HAL或音频transport。
+用户确认单次播放“有声音，结束后没有爆音”，随后确认10秒间隔重开、停止及
+原应用暂停/恢复均正常。三次AAudio均528000帧/零active xruns；听感以用户反馈为准。
+
+默认内核生成使用`patch-sq2-audio-sequencing.py --machine-only`，若源码含失败的
+WSA881x PRE_PMD旧补丁则拒绝，避免静默混入。两启动项共用已验收音频运行包，
+pins同时约束SDM845/WSA881x；旧组合补丁仅供历史EL1使用，不在EL2默认中执行。
+失败组合为何无声的内部机制未另作实机试验，不能扩大为已证明所有关机时序问题。
+
+用户要求停止调试脚本：正常sq2.el2=1下，el2-terminal-autostart保留显式无密码
+用户10登录，但登录后直接退出，不等待镜像、不打开Terminal UI。AVF/SoundWire/
+网络等必要准备保持；KVM witness仅在experimental/debug启动运行。手动终端仍可用，
+本轮不再自动启动guest做验收。音频跟踪使用独立instance，退出时撤销kprobe和instance，
+未动Android自身bootreceiver/wifi tracing实例。测试播放器已退出；本轮上传的trace、
+install-machine、install-final脚本已删除，私有回滚载荷和证据保留。
+
+最终构建`out/audio-pop-20261102/final-v2`，两initramfs相同，SHA256为
+320e5076063ff78887e9fa43a9ae83784a732687f094e0af5739122d740b6d69。
+除SDM845及两个终端helper外，与此前正常包的有效文件一致；凭据最后member、
+Image/DT/launcher/菜单均保持。归档差异、补丁幂等与旧组合拒绝、正常用户只登录不
+开应用、正常准备不跑KVM探针测试通过。最终boot67c69766-fc61-416d-a2fe-c637fde1e015，
+Android completed1、user10、NexusLauncher前台、guardY、AUDIO_READY及模块hash一致。
+无Terminal OPEN/guest启动、无KVM witness、无音频探针或本轮跟踪后台；debugfs未挂载。
+Android自带security_vm保留，它不是Linux终端guest或本轮调试脚本。默认项启动后才
+同步Mesa回退项；两包/清单回读通过，菜单仍9f1ee01e…且恰好两项，ESP剩1586776KiB。
+私有证据在out/audio-pop-20261102；设备备份在data/local/tmp/sq2-pop-20261102/
+backup、SQ2Default-before-final与SQ2Fallback-before-final。未额外启动Mesa或重测全部
+外设；共同音频字节一致不等于重新验证图形或长期声学。以下“爆音仍开放/终端自动
+打开”等为历史状态。
+
 **2026-11-02 默认双启动已部署：EL2 / 高通Vulkan / 60Hz / GPU700，音频爆音仍开放**。
 用户要求将本轮成果提交主线，默认纳入终端、视频和音频修复，并只保留新构建与
 当前能启动的回退项。现GRUB恰好两项：sq2-default → EFI/SQ2Default（高通Vulkan），

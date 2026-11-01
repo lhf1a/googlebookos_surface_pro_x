@@ -13,11 +13,20 @@ with tempfile.TemporaryDirectory() as temporary:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((Path(sys.argv[1])/name).read_bytes())
     command = [sys.executable, str(R/'scripts/patch-sq2-audio-sequencing.py'), str(root)]
+    original_codec = (root/names[1]).read_bytes()
+    subprocess.run(command + ['--machine-only'], check=True)
+    machine_only = (root/names[0]).read_bytes()
+    subprocess.run(command + ['--machine-only'], check=True)
+    assert (root/names[0]).read_bytes() == machine_only
+    assert (root/names[1]).read_bytes() == original_codec
     subprocess.run(command, check=True)
     first = [(root/name).read_bytes() for name in names]
     subprocess.run(command, check=True)
     assert first == [(root/name).read_bytes() for name in names]
     machine, codec = [data.decode() for data in first]
+    assert first[0] == machine_only
+    refused = subprocess.run(command + ['--machine-only'], capture_output=True, text=True)
+    assert refused.returncode == 2 and 'original WSA881x' in refused.stderr
     assert machine.count('sq2_mute_sdw_speakers(substream);\n\t\tsdw_disable_stream(sruntime);') == 2
     assert '"microsoft,surface-pro-x-sndcard"' in machine
     assert 'strcmp(dai->component->driver->name, "WSA881x")' in machine
@@ -28,6 +37,6 @@ with tempfile.TemporaryDirectory() as temporary:
     assert 'usleep_range(2000, 2100)' in pre
     assert 'SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD |' in codec
     build = (R/'scripts/build-sq2-el2-android-kernel.sh').read_text()
-    # This patch alone silenced the EL2 port; retain only as a diagnostic.
-    assert 'patch-sq2-audio-sequencing.py' not in build
-print('PASS: diagnostic patch ordering/idempotence; failed EL2 candidate excluded from default')
+    invocations = [line for line in build.splitlines() if 'patch-sq2-audio-sequencing.py' in line]
+    assert len(invocations) == 1 and invocations[0].endswith(' --machine-only')
+print('PASS: machine-only ordering/idempotence, unchanged codec and failed combined variant rejected')

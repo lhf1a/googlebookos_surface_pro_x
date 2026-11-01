@@ -20,6 +20,7 @@ if new not in s:
 PY
 python3 "$R/scripts/patch-sq2-el2-context-limit.py" "$K"
 python3 "$R/scripts/patch-sq2-smmu-smr-groups.py" "$K"
+python3 "$R/scripts/patch-sq2-audio-sequencing.py" "$K" --machine-only
 python3 "$R/scripts/patch-sq2-el2-preboot-kernel.py" "$K"
 C=$K/scripts/config
 "$C" --file "$O/.config" -e KSU -e KPROBES -e KSU_KPROBES_HOOK

@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
-"""Experimental SQ2 stop-pop fix: mute PA before DAPM/SDW teardown.
+"""SQ2 stop-pop fix: mute PA before SoundWire teardown.
 
 The 6.3 core calls machine hw_free before the normal close-time digital mute.
+EL2 uses --machine-only: the legacy codec PRE_PMD change silenced this port.
 Keep the existing rate, gains, compander ports, and power-up sequence intact.
 """
 from pathlib import Path
-import sys
+import argparse
 
-k = Path(sys.argv[1])
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('kernel', type=Path)
+parser.add_argument('--machine-only', action='store_true', help='EL2: retain the original WSA881x driver')
+args = parser.parse_args()
+k = args.kernel
+if args.machine_only and '/* SQ2 stop-pop: mute before RDAC' in (k/'sound/soc/codecs/wsa881x.c').read_text():
+    parser.error('EL2 requires the original WSA881x source; restore it before applying --machine-only')
 p = k / 'sound/soc/qcom/sdm845.c'
 s = p.read_text()
 marker = 'static void sq2_mute_sdw_speakers('
@@ -48,6 +55,10 @@ static void sq2_mute_sdw_speakers(struct snd_pcm_substream *substream)
     s = s.replace('\t\tsdw_disable_stream(sruntime);',
                   '\t\tsq2_mute_sdw_speakers(substream);\n\t\tsdw_disable_stream(sruntime);')
     p.write_text(s)
+
+if args.machine_only:
+    print('SQ2 machine mute-before-SoundWire patch applied; WSA881x unchanged')
+    raise SystemExit(0)
 
 p = k / 'sound/soc/codecs/wsa881x.c'
 s = p.read_text()

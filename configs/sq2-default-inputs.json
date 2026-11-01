@@ -31,7 +31,7 @@
     "src/sl.h": "e429b9d192cd31050cc5860fa475cfda7f3915f700a4182fae6c776edf48f147"
   },
   "audio_modules": {
-    "lib/modules/6.3.8-sq2-android1/kernel/sound/soc/qcom/snd-soc-sdm845.ko": "e1d1be6b98cfb61441b673e835416f51737e1215377cc2eb066944bcc78c0768",
+    "lib/modules/6.3.8-sq2-android1/kernel/sound/soc/qcom/snd-soc-sdm845.ko": "92852a7bc0ca82d095ef97b1fd6eabdd9da5e3485c2b37c8522763d2a2d5133f",
     "lib/modules/6.3.8-sq2-android1/kernel/sound/soc/codecs/snd-soc-wsa881x.ko": "b165ca2c23b377ef281dd3d0864d37c23ecbf6d717130ea8587fa52c92e12957"
   }
 }

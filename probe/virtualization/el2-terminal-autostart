@@ -1,5 +1,6 @@
 #!/bin/busybox sh
-# An explicit user may be started only without a secure lock; never provision.
+# Normal EL2 only logs into an explicit passwordless user; lab boots may open Terminal.
+# Never provision an image or clear credentials.
 set -eu
 case " $(cat /proc/cmdline) " in *' sq2.rescue=1 '*) exit 0;; esac
 case " $(cat /proc/cmdline) " in *' sq2.el2=experimental '*|*' sq2.el2=1 '*) ;; *) exit 0;; esac
@@ -20,6 +21,8 @@ if [ -n "$target" ]; then
     timeout 30 nsenter -t 1 -m -r -- /system/bin/cmd activity start-user -w "$target"
     timeout 10 nsenter -t 1 -m -r -- /system/bin/cmd activity switch-user "$target"
 fi
+# The normal desktop must not launch the lab Terminal UI or wait for its image.
+case " $(cat /proc/cmdline) " in *' sq2.el2=1 '*) exit 0;; esac
 echo EL2_TERMINAL_WAIT_FOR_ACTIVE_USER_IMAGE
 for n in $(seq 1 180); do
     user=$(timeout 3 nsenter -t 1 -m -r -- /system/bin/cmd activity get-current-user)

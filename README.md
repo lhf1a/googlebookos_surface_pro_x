@@ -20,10 +20,10 @@ Updated **2026-11-02** · ✅ Available · ⭕️ Partially available · ❌ Una
 | Bluetooth | ⭕️ | Pairing and saved ON/OFF state; HID compatibility still limited |
 | Touchscreen | ✅ | Multitouch and edge ghost-touch fixes |
 | Keyboard cover & touchpad | ✅ | Hotplug recovery |
-| Built-in speakers | ⭕️ | Playback restored and user-confirmed; EL2 stop-pop remains open; default RX 0 dB |
+| Built-in speakers | ✅ | EL2 stop-pop fixed; playback, 10-second reopen and original app user-verified; default RX 0 dB |
 | Built-in microphone | ✅ | Stereo/mono recording and playback |
 | Hardware video decoding | ⭕️ | Current EL2: Android H.264 1080p verified; HEVC / VP8 / VP9 results are from EL1 |
-| Linux Terminal | ⭕️ | EL2 Debian shell and HTTPS verified; guest hardware decoding unverified |
+| Linux Terminal | ⭕️ | Open manually; EL2 Debian shell and HTTPS verified; guest hardware decoding unverified |
 | HDR video | ❌ | Not supported as a complete application feature |
 | Vulkan & games | ⭕️ | Qualcomm Vulkan by default, Mesa fallback; application compatibility limits remain |
 | Closed Qualcomm graphics | ⭕️ | Some paths usable; full-system compatibility incomplete |

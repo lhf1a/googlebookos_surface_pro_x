@@ -133,19 +133,17 @@ def main():
     baseline_entries = c.entries(gzip.decompress((args.baseline/'initramfs.cpio.gz').read_bytes()))
     headers_name = 'lib/modules/6.3.8-sq2-android1/kernel/kernel/kheaders.ko'
     report = {'profile': 'el2-qualcomm-60-700', 'hardware_tested': False, 'entries': {}}
-    for directory, graphics, raw in (
-        ('SQ2Default', 'closed', (args.output/'payload/android-el2.cpio.gz').read_bytes()),
-        ('SQ2Fallback', 'mesa', (args.baseline/'initramfs.cpio.gz').read_bytes()),
-    ):
+    raw = (args.output/'payload/android-el2.cpio.gz').read_bytes()
+    packed, changed = normal_payload(raw, c, args.passwordless_user, baseline_entries[headers_name])
+    effective = c.entries(gzip.decompress(packed))
+    for name, expected in pins['audio_modules'].items():
+        assert sha(effective[name][1]) == expected, 'Audio modules differ from the audible baseline: '+name
+    # The accepted audio/runtime is shared; only the graphics launcher differs.
+    for directory, graphics in (('SQ2Default', 'closed'), ('SQ2Fallback', 'mesa')):
         out = args.output/'EFI'/directory
         out.mkdir(parents=True)
         for name in ('Image', 'android-el2.dtb', 'qebspilaa64.efi', 'tcblaunch.exe'):
             shutil.copyfile(args.baseline/name, out/name)
-        packed, changed = normal_payload(raw, c, args.passwordless_user, baseline_entries[headers_name])
-        if directory == 'SQ2Default':
-            effective = c.entries(gzip.decompress(packed))
-            for name, expected in pins['audio_modules'].items():
-                assert sha(effective[name][1]) == expected, 'Audio modules differ from the audible baseline: '+name
         (out/'initramfs.cpio.gz').write_bytes(packed)
         source = args.output/('source-'+directory)
         shutil.copytree(args.launcher_source, source, symlinks=True, ignore=shutil.ignore_patterns('out'))
