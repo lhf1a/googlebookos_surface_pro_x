@@ -1,0 +1,22 @@
+{
+  "archive": "surface-video-reference-sq1.zip",
+  "bytes": 132358785,
+  "sha256": "5082ce6338fc3b96e594a4688e950e9b1f5b4f23fe2ff513e7fb3f1b68015b2a",
+  "parts": [
+    {
+      "name": "surface-video-reference-sq1.zip.part001",
+      "bytes": 50331648,
+      "sha256": "b1d627e46717aa05dfabd4e7b006d36aac938d0f46b8079a54f8f6ec3a0ed275"
+    },
+    {
+      "name": "surface-video-reference-sq1.zip.part002",
+      "bytes": 50331648,
+      "sha256": "4468be8f85e893bc3760a17b3088491224d684e4be155161a2ecb5409531817d"
+    },
+    {
+      "name": "surface-video-reference-sq1.zip.part003",
+      "bytes": 31695489,
+      "sha256": "00d9c91ee8aa4ac16d75f131290389a02ce5ef85407848499fb22f6b6a32fd53"
+    }
+  ]
+}

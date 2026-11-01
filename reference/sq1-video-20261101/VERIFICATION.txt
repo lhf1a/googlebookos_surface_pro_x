@@ -1,0 +1,15 @@
+Branch: codex/sq2-el2-preboot-checkpoint-20261101
+Checkpoint: 008e70d
+Device: SQ1 (comparison only, not SQ2)
+ZIP: C:\Users\Administrator\Documents\ChatGPT\chromebookOS\out\sq1-windows-video-20261101\surface-video-reference-sq1.zip
+SHA256: 5082ce6338fc3b96e594a4688e950e9b1f5b4f23fe2ff513e7fb3f1b68015b2a
+Verified manifest files: 72
+Driver packages: 5
+Selected devices: 93
+ACPI tables: 8; checksum failures: 0
+Collection issues: 0
+No SSDT collected; ACPI duplicate-signature completeness not guaranteed.
+No separate qcpep package exported. Inspect package inventory; do not infer absence of functionality.
+No playback observation performed. No boot/security/driver configuration changed.
+Transfer first attempt: scp source username syntax rejected (exit 1); corrected using -o User, exit 0.
+Raw evidence private; not staged or pushed.

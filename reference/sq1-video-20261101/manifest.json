@@ -1,0 +1,365 @@
+﻿{
+    "files":  [
+                  {
+                      "path":  "acpi-enumeration.json",
+                      "bytes":  670,
+                      "sha256":  "0c4386e4f6ffb815881691c79fbba876565f01c2fff4e4b843097b6ed2c047db"
+                  },
+                  {
+                      "path":  "acpi-tables.json",
+                      "bytes":  2580,
+                      "sha256":  "2a3465e40d65f62996c0a3085996032a9f443d69d7b3594e90af244defbd2c07"
+                  },
+                  {
+                      "path":  "active-drivers.json",
+                      "bytes":  95578,
+                      "sha256":  "76298e39ba15b01afdb9ec3e12a96a6b3c224cb56c02a5fbe8a96c914e5ccec7"
+                  },
+                  {
+                      "path":  "device-resources.json",
+                      "bytes":  125126,
+                      "sha256":  "007d7e55885b14b7df6b1df8df50049c3ef3e7b8f925331e1aef04c861aa4052"
+                  },
+                  {
+                      "path":  "driver-packages.json",
+                      "bytes":  203226,
+                      "sha256":  "1d91539aca644491be90c738deb15343c5b101a5c3f46919063eb7f487f4944b"
+                  },
+                  {
+                      "path":  "exported-packages.json",
+                      "bytes":  1558,
+                      "sha256":  "61a44ed0019ca578a2f0c3fc19f63c508a9d53fa4edbc0c40b950e4b0579100d"
+                  },
+                  {
+                      "path":  "identity.json",
+                      "bytes":  254,
+                      "sha256":  "f9a8536bf88193f2e6b548c0e2b9d6c572f68f3112d00c2ef2bd5a08f3c1f041"
+                  },
+                  {
+                      "path":  "platform-state.json",
+                      "bytes":  595,
+                      "sha256":  "c59b1f0efe13e0062bcd4168b7101be6d768f1d1bc5c85e4d1238db31bd65ceb"
+                  },
+                  {
+                      "path":  "README.txt",
+                      "bytes":  623,
+                      "sha256":  "e4b7ff275d2fb88a2a5cbb51c3e28157962876ab1c7451b6ecba6b3685cab1cd"
+                  },
+                  {
+                      "path":  "summary.json",
+                      "bytes":  465,
+                      "sha256":  "e3c3dc68cbeb1e2d4569538fdfff106d76694a9c5e3ada7a614a3ccadce67e6a"
+                  },
+                  {
+                      "path":  "versions.json",
+                      "bytes":  441,
+                      "sha256":  "ba2f1dd77d664e01f503fe0486f67d61a5426773ecbba37ffa337f9160ccc2ed"
+                  },
+                  {
+                      "path":  "acpi/APIC-15ad31d3cabec631.dat",
+                      "bytes":  748,
+                      "sha256":  "15ad31d3cabec631267744fd3c02c71fc7b76ff9ffe466ef8c9545403c404f94"
+                  },
+                  {
+                      "path":  "acpi/CSRT-4620734b5ec83582.dat",
+                      "bytes":  31927,
+                      "sha256":  "4620734b5ec83582882a965070952d95fa2bc2cdae5af0a4d14c147dc32f94ee"
+                  },
+                  {
+                      "path":  "acpi/DBG2-5e9badafd0c4c7a3.dat",
+                      "bytes":  1050,
+                      "sha256":  "5e9badafd0c4c7a326401e128898ff381e0c1736257debb2c04a46a6ad820bef"
+                  },
+                  {
+                      "path":  "acpi/DSDT-454e7cf5c4b1e9a7.dat",
+                      "bytes":  402442,
+                      "sha256":  "454e7cf5c4b1e9a7f8dd2ff428959ce4b1990948030cf6e5111670cb460f0639"
+                  },
+                  {
+                      "path":  "acpi/FACP-9e7ccb64095a9250.dat",
+                      "bytes":  276,
+                      "sha256":  "9e7ccb64095a9250c066481708156e22c9d17a4ae70130fc658bda9f02401ffb"
+                  },
+                  {
+                      "path":  "acpi/GTDT-2f305b789f003c05.dat",
+                      "bytes":  156,
+                      "sha256":  "2f305b789f003c05653edcae8b90df881ee7dddf3fd4df0b4beaea55e8491616"
+                  },
+                  {
+                      "path":  "acpi/IORT-acfe9033f58667c7.dat",
+                      "bytes":  6467,
+                      "sha256":  "acfe9033f58667c795a4874eb77b9a0e475154448130fc1290fdbd4bcf0713bd"
+                  },
+                  {
+                      "path":  "acpi/MCFG-c56c757eccc275f6.dat",
+                      "bytes":  108,
+                      "sha256":  "c56c757eccc275f625181c43423a0e7f969bcd339852b867d7a9ff3db382af28"
+                  },
+                  {
+                      "path":  "drivers/oem102.inf/export-result.txt",
+                      "bytes":  189,
+                      "sha256":  "c60c90186b7bfda14e9868d2a9237c64837a816d24e42b3082b1be32340dbb61"
+                  },
+                  {
+                      "path":  "drivers/oem102.inf/qciommu8180.cat",
+                      "bytes":  11229,
+                      "sha256":  "53128ae7908f917d38e377c61f614bf1eccabed3a023ad7a5797aec3e22a0a7a"
+                  },
+                  {
+                      "path":  "drivers/oem102.inf/qciommu8180.inf",
+                      "bytes":  20642,
+                      "sha256":  "18abed9f359e8cf7f4fe7a6a091c32b400a115fe5633bf9952d3f46bc1773d05"
+                  },
+                  {
+                      "path":  "drivers/oem102.inf/qciommu8180.sys",
+                      "bytes":  230984,
+                      "sha256":  "6b24bc4b5b0de8174f678cb8921c055a5a00edc0854404b1c6d8d6ac358ad56c"
+                  },
+                  {
+                      "path":  "drivers/oem109.inf/export-result.txt",
+                      "bytes":  187,
+                      "sha256":  "ab5a9572bd39dc6e8a23cd1eaf287f63e222ce485630cc47bd9e9130a80ba675"
+                  },
+                  {
+                      "path":  "drivers/oem109.inf/qcpil8180.cat",
+                      "bytes":  11614,
+                      "sha256":  "642a2fcf54247b446b83571b711455873f8b5358e26d6a883234b94edbc032ff"
+                  },
+                  {
+                      "path":  "drivers/oem109.inf/qcpil8180.inf",
+                      "bytes":  11710,
+                      "sha256":  "c9ad974f5be305019583495d1232c9a6dbb1a1862f4197127fde6858119b9dea"
+                  },
+                  {
+                      "path":  "drivers/oem109.inf/qcpil8180.sys",
+                      "bytes":  178880,
+                      "sha256":  "0821cba482219b0aac2c0c47c4149d06a385013a4ebfa30211ed653f5b8ea242"
+                  },
+                  {
+                      "path":  "drivers/oem109.inf/QcSkExt8180.exe",
+                      "bytes":  149152,
+                      "sha256":  "da09677b8bc3f35c4217e768f73a1ccc19e112cedf724bd14d393e1545511e22"
+                  },
+                  {
+                      "path":  "drivers/oem115.inf/export-result.txt",
+                      "bytes":  187,
+                      "sha256":  "a71f918c36ef27cecffb725b2a2271f06b78429f63f104ea9761b419ebcc1a69"
+                  },
+                  {
+                      "path":  "drivers/oem115.inf/qcscm8180.cat",
+                      "bytes":  11173,
+                      "sha256":  "1b0ff7e950a7e36b8043fd55d9e5e5b140556bb8fea953c5acf0c56ab2e68e9d"
+                  },
+                  {
+                      "path":  "drivers/oem115.inf/qcscm8180.inf",
+                      "bytes":  5080,
+                      "sha256":  "1062968fd787a8400b428b394beeddf305f0fcdd64e1eaeec74a257ebee8405f"
+                  },
+                  {
+                      "path":  "drivers/oem115.inf/qcscm8180.sys",
+                      "bytes":  276720,
+                      "sha256":  "e17a061b18273f3f87d2781a4d5a31ba57663f7616bfc9d64a9bb74153a01e0a"
+                  },
+                  {
+                      "path":  "drivers/oem117.inf/export-result.txt",
+                      "bytes":  188,
+                      "sha256":  "46ccbbf0e2c799c4f20d4c26700d8ad1f2167ade794a0d55e2e1c6c06c5c82e4"
+                  },
+                  {
+                      "path":  "drivers/oem117.inf/qcsmmu8180.cat",
+                      "bytes":  10830,
+                      "sha256":  "f9feaaf36e52b93f09e115b67ed70c4a35e14c8a2be4011aa1fa923853e38d21"
+                  },
+                  {
+                      "path":  "drivers/oem117.inf/qcsmmu8180.inf",
+                      "bytes":  96824,
+                      "sha256":  "1e9e06a07882260542c51dbe6d1f9bf9a4f1becd91406cacf1977266d9676379"
+                  },
+                  {
+                      "path":  "drivers/oem117.inf/qcsmmu8180.sys",
+                      "bytes":  315896,
+                      "sha256":  "152b8295a97855237cb8a5d37fbeae80b65b43d211e0d644ecf0e3cc0fb40e76"
+                  },
+                  {
+                      "path":  "drivers/oem117.inf/SMMC.bin",
+                      "bytes":  618,
+                      "sha256":  "b5bf1ef5c81d69135842d420b61bc6d52ee38df35d5513ca0b201e34c3f90bbf"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/export-result.txt",
+                      "bytes":  186,
+                      "sha256":  "d684dda54deefcb1a66fa73e51073ebcbafdfc9d302bde3b9d5a5cdcec808dc8"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/libqcdx12arm64wslum.so",
+                      "bytes":  49141728,
+                      "sha256":  "5654dd76e632703a609eda2bae009c9681783aad53dcf6de188b764348cbc448"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/libqcdxarm64wslcompiler.so",
+                      "bytes":  54241840,
+                      "sha256":  "3f94924a2f59e49517fee9ba5d89765a99addaced6972d89025975060dc51f09"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdx11arm32um8180.dll",
+                      "bytes":  2040968,
+                      "sha256":  "adc4cec9eac18b5d3a489663072344c6e89848b3568ba08f50e2450129604cd0"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdx11arm64xum8180.dll",
+                      "bytes":  7412144,
+                      "sha256":  "c7394d892558307d4c8b3acb0b680fb3b70432f7acf00413e7e705d015f17884"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdx11chpeum8180.dll",
+                      "bytes":  4046776,
+                      "sha256":  "e742d9711423eb22e8efb454b4f43bf34197e64b00e7e4b87223286ed3caf3d9"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdx11x86um8180.dll",
+                      "bytes":  2760416,
+                      "sha256":  "9abf2df24709b8f75d507776828321842f772748d75ec91227c9af52606efc83"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdx12arm32um8180.dll",
+                      "bytes":  5886768,
+                      "sha256":  "4208147ec67e752d6e50bcfbedd68360c48f9c83a29b2957126df62ed11cae72"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdx12arm64xum8180.dll",
+                      "bytes":  11418112,
+                      "sha256":  "533a0850a5c432f90db7f347fc340396e7670328e6e56c6eea973c57b1fa3172"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdx12chpeum8180.dll",
+                      "bytes":  5029168,
+                      "sha256":  "3321462781c801552020ce66f3c371d6f2c22cad434a62cd292f2f8d547a779f"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdx12x86um8180.dll",
+                      "bytes":  6119224,
+                      "sha256":  "683a99827c90b491ea92b1803c482e108fd1cb73258dfd9aa6ffffbe888430f0"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdx8180.cat",
+                      "bytes":  1084480,
+                      "sha256":  "acc98d27c3473a7321087ccc67967d426cb4f03f6237259960d8785c7fe3748e"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdx8180.inf",
+                      "bytes":  71348,
+                      "sha256":  "253d600d4672aee525945a0e3cfdf5e291a94e2383e3094f42b86dac43818873"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdxarm32compiler8180.DLL",
+                      "bytes":  9835960,
+                      "sha256":  "653bbbc82ea511fd5ca085f17a50ef4bf8ffb9c729290df096e9742eebfb556c"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdxarm64xcompiler8180.DLL",
+                      "bytes":  27279320,
+                      "sha256":  "f84d4aa299c1696fde0d78c7cc5bd636872ab031b93e4f319dc4b2ea591cb6a9"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdxchpecompiler8180.dll",
+                      "bytes":  15996584,
+                      "sha256":  "8fb6d6c0756343e1513ed472f1649c2e2a849e2783870b35b047382c8f9acbdf"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdxkm8180.sys",
+                      "bytes":  2925288,
+                      "sha256":  "14369cb4acec038f94e76bc42cb65db6bc63031c18fc0d632d7d77e1c5b2b112"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdxkmsuc8180.mbn",
+                      "bytes":  14240,
+                      "sha256":  "9c47234c2ffcd5337b4dbf1d82bb587b99afb9e523af959cc9dbb1a6338e62a8"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdxsdarm32.dll",
+                      "bytes":  973344,
+                      "sha256":  "1e2b4ea91aab3da427be8c8d82ef79fd830a98f023917348463b7b82bc8d3778"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdxsdarm64x.dll",
+                      "bytes":  5378640,
+                      "sha256":  "f67bde4671e9e2182257e94e081002754441408730d1f31bf4532cadef2d55e7"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdxsdchpe.dll",
+                      "bytes":  3182064,
+                      "sha256":  "3c0238fcaa7a40bc496588d0462c409b752a0c8c9c6d156f5ae84d7db0717ff6"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdxsdx86.dll",
+                      "bytes":  1362736,
+                      "sha256":  "e0a1a6f5e195c3180e659158176a854c89b8b6d03613a520b5caba33e3f58ca0"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdxwsaum.img",
+                      "bytes":  153538560,
+                      "sha256":  "927d30ff3ae2f783fd4e7b01c5df98517ac644f97e154c3b408f6ab120cc5f86"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcdxx86compiler8180.DLL",
+                      "bytes":  12095136,
+                      "sha256":  "5a5119113c7f9facacd5534da353a33f24631b051beeabf9efd227d2e628743e"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qchdcpumd8180.dll",
+                      "bytes":  72960,
+                      "sha256":  "6b488854ef6ff74d459c7fe9796674c7527110b5da32eb82a105a4ed9d4ca9fe"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcvidencarm64xmfth2648180.DLL",
+                      "bytes":  1018600,
+                      "sha256":  "df3b2e7f13ded81f003003885372b9fc7f514bcda469ce2f37bcaf5172f0d274"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcvidencarm64xmfthevc8180.DLL",
+                      "bytes":  1018624,
+                      "sha256":  "da95b6dabe44865b053f09088e1a7f71ea7c41875edf9ae9bad0d284ea44aafc"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcvidencarm64xum8180.DLL",
+                      "bytes":  202496,
+                      "sha256":  "f3e29acc0288bf180ea724bdd4860577c8c6e5591c66dd0242db0847035f0b7c"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcvidencmfth2648180.DLL",
+                      "bytes":  405248,
+                      "sha256":  "13a47803a742ca5162b4974fa342284042c5ac94b9cf658d745447a4914965ad"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcvidencmfthevc8180.DLL",
+                      "bytes":  405248,
+                      "sha256":  "d884de94b0891c3184d986deb133a34639512bea339d82d4d35f3cf3259eab73"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcvidencum8180.DLL",
+                      "bytes":  90880,
+                      "sha256":  "eaa11c1ce576c4f38aa7c18c6426f1a6a69f8d62bce5db72d72a639901ea8f17"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcvidencx86mfth2648180.DLL",
+                      "bytes":  450280,
+                      "sha256":  "a4c07a0ee6ff225e9d099d1fdcfd0153f432c8414bd975f1a81cf0480210b0fc"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcvidencx86mfthevc8180.DLL",
+                      "bytes":  450280,
+                      "sha256":  "3c6832a102ee969e50e03b67919140cd01adb638d15f4f43130194f0610399df"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcvidencx86um8180.DLL",
+                      "bytes":  98024,
+                      "sha256":  "333749a9ca930f387190acb97a6d28a0156e127ecaa68666264ec73dc99362e6"
+                  },
+                  {
+                      "path":  "drivers/oem166.inf/qcvss8180.mbn",
+                      "bytes":  1142816,
+                      "sha256":  "891997ec156db83ca660359a30a7c139a923d9b9783ead523051816303614a68"
+                  }
+              ],
+    "excludesManifestItself":  true
+}

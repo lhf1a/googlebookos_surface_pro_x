@@ -1,0 +1,8 @@
+Exporting oem102.inf (qciommu8180.inf)
+Exporting oem109.inf (qcpil8180.inf)
+Exporting oem115.inf (qcscm8180.inf)
+Exporting oem117.inf (qcsmmu8180.inf)
+Exporting oem166.inf (qcdx8180.inf)
+Collection saved to: C:\Users\潇潇\sq1-video-collection-20261101\surface-video-reference-sq1
+Archive saved to: C:\Users\潇潇\sq1-video-collection-20261101\surface-video-reference-sq1.zip
+SHA256: 5082ce6338fc3b96e594a4688e950e9b1f5b4f23fe2ff513e7fb3f1b68015b2a
