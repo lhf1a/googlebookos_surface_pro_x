@@ -1,5 +1,14 @@
 # SQ2 开发交接
 
+**2026-11-02 LTE 开发首轮（codex/lte-support）**：从73ea6ee创建独立worktree，
+原main目录未提交工作保留。目标192.168.8.194，boot836903c9…、user10、guardY。
+复用只读QMI工具增加NAS和准确DMS模式解码，协议异常/隐私过滤测试及ARM64实机
+运行通过。MPSS attached，SIM present；DMS原值2=factory-test（不是offline），
+NAS未注册且PS detached，WDS disconnected。当前有效DT没有IPA硬件节点，
+已打包ipa.ko无SC8180X匹配；Android未发现标准Radio HAL/rild，vendor含noRil
+排除文件。没有切射频、修改DT/固件/属性/启动包、拨数据或重启MPSS；LTE未实现。
+原始证据在忽略out/lte-baseline-20261102；开发状态、构建及下一步见LTE.md。
+
 **2026-11-02 后续：EL2停播爆音已由用户确认修复，正常开机取消终端弹出与KVM测试。**
 
 原包d643ea0e…的有限跟踪证实：HAL停播后再次prepare，PA仍为0xfc时就执行

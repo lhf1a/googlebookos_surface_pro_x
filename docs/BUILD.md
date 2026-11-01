@@ -1,5 +1,12 @@
 # 构建与部署
 
+### LTE 手动只读探针（2026-11-02，独立开发分支）
+
+`codex/lte-support` 增加 `bash scripts/build-sq2-lte-tools.sh`，仅需 Linux 的
+`aarch64-linux-gnu-gcc`，输出 `out/lte/bin/sq2-qmi-readonly`。
+`python3 tests/test_sq2_qmi_readonly.py` 使用本机 C 编译器验证实际协议解码器。
+不自动安装或接入开机流程，不改变默认系统包；实机状态和限制见 [LTE.md](LTE.md)。
+
 ### 2026-11-02：当前 SQ2 默认构建为 EL2 / 高通 Vulkan / 60 Hz / 700 MHz
 
 本日后续修复：EL2内核构建调用音频补丁的`--machine-only`模式，仅改SDM845，
