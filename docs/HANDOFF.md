@@ -1,5 +1,84 @@
 # SQ2 开发交接
 
+**2026-11-02 本地同步主线73ea6ee，USB修复接入默认双启动构建**：用户要求拉取
+最新主线、把本轮改动纳入默认构建并推送。先本地stash保全所有工作区改动，
+从8f64975快进到73ea6ee，再恢复工作区；BUILD/HANDOFF顶部冲突按“本轮USB记录+
+主线音频/默认构建记录”合并，保留双方内容。已有GPU实验、REA和Windows音频
+采集的无关本地文件不混入USB提交，安全stash保留。
+
+真正默认入口已是build-sq2-default.py，不是legacy EL1组包分支。新增默认on的
+USB bundle集成，固定原实测Image/46模块/索引/别名和父包语义；共享运行包先
+完成主线normal_payload，再加入USB，之后写两个EFI目录。保留音频92852a7b…/
+b165ca2c…组合、HAL774cd7e7…、no-TZ视频、终端不弹出/不自动KVM测试及原凭据。
+原Image/DTB/菜单未改，本轮没有部署或重启设备。
+
+30项USB测试通过，真实默认载荷集成输出957b5ee6…与前次设备重启验收字节一致；
+BASELINE无usbnet/输入watcher，MODIFIED两者都有，独立ROLLBACK副本恢复320e5076…，
+三个状态音频HAL字节一致。标准完整EFI构建已尝试，但本机缺out/default-input
+及新主线依赖缓存，在首个qebspilaa64.efi输入处停止；不假造缓存或称完整EFI
+重编译通过。具体命令、测试及Git同步证据继续追加原out/usb-network-input-20261102
+的四角色记录；模块/私有输入不进Git。下文前次实机验收保持有效。
+
+**2026-11-02 USB Hub 网卡与鼠标修复，持久安装和重启验证通过**：
+用户指定 root@192.168.5.91，并要求修复、扩充 Linux 网卡驱动和接通 Android
+输入。实际当前设备已是 EL2 默认 Qualcomm 入口，不能沿用下文旧 Mesa 菜单状态。
+当前默认 Image c1ef559f…、DTB 85b436a3…、launcher dc7b5ac9…；本轮均未修改。
+
+网卡 0b95:1790 AX88179A 枚举在 USB 配置2、接口类02/0D（CDC NCM），不是
+强行切配置或 new_id：加载匹配的 usbnet/cdc_ether/cdc_ncm 后生成 eth0。
+用户接好网线后 Android 自己完成 DHCP（30.32.177.131/21、网关30.32.176.1），
+Ethernet CONNECTED/VALIDATED 且成为默认 network104；绑定 eth0 的网关 ping
+2/2、0丢包。未手动配置地址/路由、未运行诊断 DHCP、未改 Wi-Fi 保存状态。
+之前对旧 Wi-Fi 网关192.168.5.1及IPv6路由器的 ping 失败不算驱动失败；保留
+失败日志，不把当时尚未完成的 DHCP 说成已完成。
+
+USB 有线/WWAN 协议集增加46个驱动及依赖模块、811条USB别名，含 ASIX、
+AX88179、RTL8150、LAN78xx、SMSC、AQC111、CDC ECM/NCM/EEM/MBIM、RNDIS、
+QMI、ipheth及多个旧款 USB 以太网。现机 r8152 和 mii 原本内置，未覆盖它们；
+并非“新增46种实测网卡”，也未扩展 USB 无线网卡的固件/Android Wi-Fi HAL。
+以运行 config 编译新增模块，不替换 Image 或已存在模块。原完整 symvers 不在
+本机构建缓存，modpost有明确警告；独立检查所有新增未定义符号对现机导出+
+新增模块导出、vermagic及depmod无环后，实机46模块逐个加载全部成功。
+原版 mdiobus board-info 与 libphy 合并到私有构建副本，原版 net selftests
+另作GPL支持模块，不使用空函数代替缺符号。原始源码目录不改。
+
+罗技046d:c539的 usbhid 和 event23 原本正常，但 EventHub 遇到 devtmpfs 节点
+权限就绪竞态而未接入。新增独立 usb-input-watch，仅选 bustype0003且USB来源
+的evdev节点，先准备0660/root:input与input_device标签，再用IN_CREATE发布；
+按完整sysfs身份缓存，eventN复用会重新发布。不grab、不注入、不改盖键盘、
+触屏或蓝牙。发布后 Android 显示 CURSOR|EXTERNAL、Enabled true和MOUSE映射，
+用户明确确认“移动、按键、滚轮均正常”。已在线启动守护。usb-network-watch
+只按审计USB别名按依赖加载，不负责DHCP/路由；两个helper均保留rescue/usb=0
+退出条件。网络模块需先构建/审计，现已按上节默认纳入EL2共享运行包。
+
+25项USB相关测试通过（含真实shell隔离fixture、身份复用/权限标签失败/禁用/
+模块依赖顺序/未知别名/打包防篡改）。回滚在独立helper副本及启动包副本执行，
+恢复哈希与原件相同；未为回滚测试撤销已修好的现机输入。四角色产物和原始
+命令/输出/错误在忽略 out/usb-network-input-20261102/，敏感原包不得提交。
+
+安装前再次核对 BC711 512GB、序列CYA5N050012105J77、ESP B027-0512、
+data 4f46d2ec…、ESP标记和root loop。只原子替换
+/media/esp/EFI/SQ2Default/initramfs.cpio.gz，从320e5076…变957b5ee6…；
+有效条目审计仅增加USB模块/索引/helper并更改/init，原凭据member逐字保持最后。
+gzip及目录内全部SHA256SUMS通过，原Image/DTB/EL2固件和Mesa fallback未改。
+备份为同目录initramfs.before-usb-network.cpio.gz及SHA256SUMS.before-usb-network。
+旧boot836903c9…下screen_only=Y、nohibernate保持。用Android sys.powerctl
+重启后，SSH曾超时，后来自行恢复到原Wi-Fi地址。新boot
+5aa55ff9-f443-42af-979f-82793b23815e，Android complete1、guardY、nohibernate；
+实际helper/hash和ESP全部SHA256SUMS通过。网卡自动加载cdc_ncm，Android重新
+DHCP到同地址、Ethernet network101 CONNECTED/VALIDATED，绑定eth0网关ping
+3/3零丢包。输入watcher自动发布event16–19，鼠标event17在EventHub为
+CURSOR|EXTERNAL/Enabled true，InputReader具有MOUSE映射。原盖键盘helper
+hash仍b6e4d248…，音频HAL774cd7e7…、蓝牙桥65bef26e…；video0/kvm存在。
+这些节点/哈希不是本轮录音、硬解帧或KVM guest的新运行验收。
+
+用户随后反馈重启后无音频：只读检查确认声卡0仍是Surface-Pro-X、音频helper
+已报AUDIO_READY、HAL运行、左右DAC/COMP/BOOST均On，PCM在RUNNING且有帧。
+内核历史出现SoundWire FIFO underflow/transport -5，不能据HAL/PCM成功称听音
+正常。尚未做任何音频路由/增益/服务/模块改动时，用户明确反馈“声音已恢复”。
+因此停止音频操作，记为短暂无声后用户确认恢复，根因未定位，不归因于USB补丁
+也不声称已修复SoundWire问题。输入/网卡目标完成，保留现状，不再自行重启。
+
 **2026-11-02 后续：EL2停播爆音已由用户确认修复，正常开机取消终端弹出与KVM测试。**
 
 原包d643ea0e…的有限跟踪证实：HAL停播后再次prepare，PA仍为0xfc时就执行
@@ -839,6 +918,7 @@ wlan0、video0、guardY已读回。新诊断cbfd518f-8697-4988-8a2d-77a7ed448903
 modem仍只有rpmsg_ctrl而无IPCRTR。不能把PAS返回判定修正称为网络修复。
 ESP目录mtime不可靠；本轮早先按排序取到808f旧日志，不得用它代表v11。
 下一步定位modem运行/GLINK服务及EL2切换影响，再接Android完整终端验收。
+
 
 **2026-11-01 当前工作快照补充**：v10 已自动恢复原系统，诊断日志确认 modem
 proxy 资源请求成功，但仍无 modem IPCRTR/Wi-Fi，KVM witness 仍 PASS；该实验

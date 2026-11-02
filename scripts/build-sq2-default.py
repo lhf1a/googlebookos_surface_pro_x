@@ -111,6 +111,10 @@ def main():
     p.add_argument('--venus-build', type=Path, default=Path('/root/.cache/sq2-venus-no-tz-v4'))
     p.add_argument('--no-tz-overlay', type=Path, default=Path('/root/.cache/sq2-venus-fw-overlay-v1/sq2_fw_overlay.ko'))
     p.add_argument('--passwordless-user', type=int, help='optional existing passwordless lab user; never clears credentials')
+    p.add_argument('--usb-network', choices=('on', 'off'), default='on',
+                   help='on (default): audited USB NIC modules and Android input hotplug; off: explicit baseline-only build')
+    p.add_argument('--usb-network-bundle', type=Path, default=R/'out/usb-network-input-20261102',
+                   help='Pinned module-stage plus module-audit.json; never fetched from a device during builds')
     args = p.parse_args()
     pins = json.loads((R/'configs/sq2-default-inputs.json').read_text())
     for name, expected in pins['baseline'].items():
@@ -118,6 +122,11 @@ def main():
     for name, expected in pins['launcher_source'].items():
         assert sha((args.launcher_source/name).read_bytes()) == expected, name
     assert sha((args.kernel_build/'arch/arm64/boot/Image').read_bytes()) == pins['baseline']['Image']
+    usb_spec = importlib.util.spec_from_file_location('usb_network_payload', R/'scripts/sq2-usb-network-boot-payload.py')
+    usb_network = importlib.util.module_from_spec(usb_spec)
+    usb_spec.loader.exec_module(usb_network)
+    if args.usb_network == 'on':
+        usb_network.validate_bundle(R, args.usb_network_bundle, pins['baseline']['Image'])
     assert args.passwordless_user is None or args.passwordless_user >= 0
     args.output.mkdir(parents=True, exist_ok=False)
     shutil.copytree(args.baseline/'firmware', args.output/'firmware')
@@ -135,6 +144,11 @@ def main():
     report = {'profile': 'el2-qualcomm-60-700', 'hardware_tested': False, 'entries': {}}
     raw = (args.output/'payload/android-el2.cpio.gz').read_bytes()
     packed, changed = normal_payload(raw, c, args.passwordless_user, baseline_entries[headers_name])
+    report['usb_network'] = {'enabled': False}
+    if args.usb_network == 'on':
+        packed, report['usb_network'] = usb_network.integrate(
+            R, packed, args.usb_network_bundle, pins['baseline']['Image'])
+        changed = sorted(set(changed) | set(report['usb_network']['changed']))
     effective = c.entries(gzip.decompress(packed))
     for name, expected in pins['audio_modules'].items():
         assert sha(effective[name][1]) == expected, 'Audio modules differ from the audible baseline: '+name

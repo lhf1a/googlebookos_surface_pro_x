@@ -7,7 +7,8 @@ CONFIGS = {
     'audio_policy_configuration.xml': 'configs/sq2-usb-audio-policy.xml',
     'manifest.xml': 'configs/sq2-usb-audio-manifest.xml',
 }
-HELPERS = ('usb-functions-stage', 'bluetooth-framework-boot', 'bluetooth-input-watch')
+HELPERS = ('usb-functions-stage', 'bluetooth-framework-boot', 'bluetooth-input-watch',
+           'usb-input-watch', 'usb-network-watch')
 sha = lambda b: hashlib.sha256(b).hexdigest()
 
 

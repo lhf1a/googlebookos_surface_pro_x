@@ -1,5 +1,60 @@
 # 构建与部署
 
+### 2026-11-02：同步主线后默认纳入 USB 网络和 Android 输入修复
+
+在主线73ea6ee的默认双启动流水线上，`build-source-boot.py`继续转入
+`build-sq2-default.py`，新增`--usb-network on|off`（默认on）及
+`--usb-network-bundle`（默认out/usb-network-input-20261102）。两EFI入口共享
+带46个新增模块/依赖和输入watcher的运行包，不再只在legacy EL1载荷添加helper。
+显式off用于原运行包对照；不会改设备。没有已审计bundle时直接拒绝构建，不会
+静默输出缺网卡驱动的“默认包”，也不会自动连接设备取得私有输入。
+
+`configs/sq2-usb-network.json`固定已实测Image、完整新增模块集、索引和USB别名表。
+默认集成还校验父运行包的规范化有效条目摘要：只允许既有显式无密码用户参数
+变化，其余内核、媒体、音频、固件和凭据的字节必须保持验收基线。模块集合或
+内核更新需重新审计和更新pins，不能只看相同vermagic。原normal_payload移除
+实验日志/恢复钩子的行为、主线的音频machine-only修复和终端不自动弹出均保留。
+
+30项USB测试通过；真实默认载荷集成生成957b5ee6…，与本轮已重启验收载荷逐字
+相同。独立副本回滚到320e5076…；音频HAL仍774cd7e7…。本机尝试完整默认EFI
+命令时缺少out/default-input/qebspilaa64.efi等原私有构建输入缓存，故本次完成
+真实运行包集成/验证，未宣称完整EFI/内核重新编译通过。原有EFI构建输入hash
+保护不降低；准备好主线文档规定的缓存后使用标准命令构建，两入口及USB验收
+可用`tests/test_sq2_default_boot.py OUTPUT --baseline BASE_INITRAMFS`检查。
+
+### 2026-11-02：USB 网卡与输入热插拔增量
+
+`build-sq2-usb-network.sh RUNNING.config` 使用精确运行配置，在独立缓存编译
+Linux 6.3.8 的 USB 有线/WWAN 网络模块，不替换 Image；源默认复用已固定的
+sq2-thermal/kernel，可用 SQ2_USB_NET_SOURCE/BUILD/OUTPUT 显式指定路径。
+覆盖 ASIX/AX88179、Realtek、LAN78xx/SMSC、AQC111及CDC/RNDIS等；不是USB
+无线HAL适配或所有网卡已实测。保留现有内置/模块，不把config改成m的构建
+产物覆盖同名builtin。缺完整Module.symvers时保留modpost警告，不能称完整
+modpost通过。原版MDIO board-info在私有副本并入libphy避免依赖环，原版
+net/core/selftests另成GPL支持模块，不能用空实现满足导出。
+
+`audit-sq2-usb-network.py BASE MODULE_DIR RUNTIME_KALLSYMS FRESH_OUTPUT` 从
+原包提取模块基线，排除已有模块和builtin，按真实运行导出核对每个新增模块的
+全部未定义符号与vermagic，用depmod校验依赖及生成索引。拒绝旧输出目录和
+缺符号。`pack-sq2-usb-network.py BASE BUNDLE OUTPUT --expected-base-sha256 HASH`
+再校验审计所属基线和模块hash，新增严格USB别名表、两个helper及/init钩子，
+审计last-entry-wins有效差异，原本地密码SSH member保持最后；仅生成文件。
+当前私有可复现输入/产物在out/usb-network-input-20261102，状态见HANDOFF。
+
+`usb-input-watch`处理USB evdev权限竞态，只在Android完成后对bus0003/USB来源
+节点预置0660/root:input和input_device标签，再用IN_CREATE发布；不用全目录
+chmod或重启system_server。`usb-network-watch`按白名单和依赖顺序加载，保持
+Android独占DHCP/地址/路由与Wi-Fi政策。两者均响应rescue或sq2.usb=0退出。
+源码legacy USB载荷已包含helper，无网络bundle时网络helper直接退出；当前默认
+EL2构建按上节强制校验并纳入网络bundle。现机默认包已
+持久安装，原Image/DTB/fallback不变；新boot5aa55ff9…已确认输入自动接入、
+网卡自动DHCP和Android联网验证通过。
+
+验证：`python3 -m unittest discover -s tests -p '*usb*' -v`（Linux root可运行
+输入mknod隔离fixture），25项通过。模块加载/Android网络已在重启前实测，
+其它型号、USB无线和长期稳定性不据此保证。重启后用户曾报短暂无声，未做音频
+改动即确认恢复；历史SoundWire错误及该现象的根因仍未定位，见HANDOFF。
+
 ### 2026-11-02：当前 SQ2 默认构建为 EL2 / 高通 Vulkan / 60 Hz / 700 MHz
 
 本日后续修复：EL2内核构建调用音频补丁的`--machine-only`模式，仅改SDM845，
@@ -324,6 +379,7 @@ memfd/音频/蓝牙/只关屏补丁。重新生成的不同哈希必须重新验
 救援内核或 `--ksu off` 构建。Zygisk/Device Faker 不作为默认预装模块。
 凭据 addon 仍保持最后；助手日志仅为有界启动输出。该新增首启助手须与之前
 已验证的手动安装区分，完整链路实机状态见 ROOT-MANAGEMENT。
+
 
 ### 2026-10-31：首次启动按本机校准
 

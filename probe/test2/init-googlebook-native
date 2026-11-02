@@ -209,6 +209,12 @@ if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
     if [ -x /bin/bluetooth-framework-boot ]; then
         bluetooth-framework-boot > /logs/bluetooth-framework-boot.txt 2>&1 &
     fi
+    if [ -x /bin/usb-input-watch ]; then
+        usb-input-watch > /logs/usb-input-watch.txt 2>&1 &
+    fi
+    if [ -x /bin/usb-network-watch ]; then
+        usb-network-watch > /logs/usb-network-watch.txt 2>&1 &
+    fi
     lab-input-posture > /logs/lab-input-posture.txt 2>&1 &
     if [ -x /bin/lab-local-setup ]; then
         lab-local-setup > /logs/lab-local-setup.txt 2>&1 &

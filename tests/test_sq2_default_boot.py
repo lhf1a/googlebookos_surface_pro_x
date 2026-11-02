@@ -1,5 +1,6 @@
 """Audit real candidate archives: exact delta, boot isolation and integrity."""
 import gzip
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -19,8 +20,22 @@ def load(name):
 
 b = load('build-sq2-default.py')
 c = load('pack-sq2-vulkan.py')
-out = Path(sys.argv[1])
-baseline = c.entries(gzip.decompress((R/'out/default-input/initramfs.cpio.gz').read_bytes()))
+p = argparse.ArgumentParser(description=__doc__)
+p.add_argument('output', type=Path)
+p.add_argument('--baseline', type=Path, default=R/'out/default-input/initramfs.cpio.gz')
+args = p.parse_args()
+out = args.output
+baseline = c.entries(gzip.decompress(args.baseline.read_bytes()))
+report = json.loads((out/'build-audit.json').read_text())
+usb = load('sq2-usb-network-boot-payload.py')
+usb_enabled = report.get('usb_network',{}).get('enabled',False)
+usb_allowed = set()
+if usb_enabled:
+    policy = usb.pins(R)
+    usb_allowed = {usb.PREFIX+n for n in policy['modules']} | {usb.PREFIX+n for n in policy['metadata']}
+    usb_allowed |= {'bin/'+n for n in usb.HELPERS} | {'etc/sq2-usb-network.aliases'}
+    for name in list(usb_allowed):
+        usb_allowed |= {p.as_posix() for p in Path(name).parents if p.as_posix() != '.'}
 audio = json.loads((R/'configs/sq2-default-inputs.json').read_text())['audio_modules']
 for directory, graphics in [('SQ2Default', 'closed'), ('SQ2Fallback', 'mesa')]:
     raw = (out/'EFI'/directory/'initramfs.cpio.gz').read_bytes()
@@ -33,7 +48,13 @@ for directory, graphics in [('SQ2Default', 'closed'), ('SQ2Fallback', 'mesa')]:
     assert e['bin/dropbear'] == baseline['bin/dropbear']
     headers_name = 'lib/modules/6.3.8-sq2-android1/kernel/kernel/kheaders.ko'
     assert e[headers_name] == baseline[headers_name]
-    assert set(e) == set(baseline), 'Unexpected added or removed archive entries'
+    assert set(baseline) <= set(e), 'Removed archive entries'
+    assert set(e)-set(baseline) <= usb_allowed, 'Unexpected added archive entries'
+    if usb_enabled:
+        assert usb.verify(e,R) == report['usb_network']['source_sha256']
+        for name in set(e)-set(baseline):
+            if name not in {usb.PREFIX+n for n in policy['modules']} | {'bin/'+n for n in usb.HELPERS} | {'etc/sq2-usb-network.aliases'}:
+                assert e[name] == (0o40755,b''), 'Unexpected directory payload'
     assert b'running|attached)' in e['bin/audio-drivers-start'][1]
     assert b'*" sq2.el2=1 "*)' in e['bin/video-decoder-lab-start'][1]
     for helper in ('el2-terminal-autostart', 'el2-terminal-stage'):
@@ -48,6 +69,7 @@ for directory, graphics in [('SQ2Default', 'closed'), ('SQ2Fallback', 'mesa')]:
     allowed = {'init', 'bin/audio-drivers-start', 'bin/video-decoder-lab-start',
                'bin/el2-rmtfs-start', 'bin/el2-terminal-stage', 'bin/el2-terminal-autostart'}
     allowed |= audio.keys()
+    allowed |= usb_allowed
     for name, expected in audio.items():
         assert hashlib.sha256(e[name][1]).hexdigest() == expected, name
     assert changed <= allowed, changed
