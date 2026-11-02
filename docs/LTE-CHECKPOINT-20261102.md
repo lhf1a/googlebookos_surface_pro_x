@@ -1,5 +1,17 @@
 # LTE development checkpoint — 2026-11-02
 
+## Superseded by the 2026-11-03 resume
+
+This file describes the immutable 666e56f checkpoint, not the current device.
+The operator's original FSG has now supplied working RF state without clearing FTM;
+LTE registration, a real QMAPv4/RMNET bearer, Android metered NetworkAgent integration,
+Wi-Fi/default-network fallback and Chrome HTTPS traffic have passed. The first full
+boot restored LTE automatically and preserved audio/EL2/screen-only checks. The final
+candidate has also passed a normal reboot after promotion to the default entry.
+See [LTE-DATA.md](LTE-DATA.md) and the latest [HANDOFF.md](HANDOFF.md) for final boot
+deployment status and remaining radio HAL/voice/SMS limitations. The historical
+failure statements below must not be used as current diagnoses.
+
 ## What is and is not working
 
 The experimental SQ2 environment has a bound IPA driver and `rmnet_ipa0`, its own

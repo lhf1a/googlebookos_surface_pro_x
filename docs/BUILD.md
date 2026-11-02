@@ -1,5 +1,41 @@
 # 构建与部署
 
+## 2026-11-03：原生 Radio 与电话框架
+
+构建、测试、真实设备证据和边界见 [LTE-RADIO.md](LTE-RADIO.md)。从已验证 LTE03
+追加 Radio V3 服务、功能声明和资源覆盖；旧 Java NetworkAgent 在此模式不启动，
+电话框架负责订阅/APN/移动数据策略。APN 由操作者提供真实 SIM MCC/MNC和私有文件，
+不把单机 APN/FSG/身份或登录配置写入公开源码。
+
+```
+python3 scripts/build-sq2-radio.py
+bash scripts/build-sq2-radio-overlay.sh OPERATOR_NUMERIC PRIVATE_APN_FILE
+python3 -m unittest discover -s tests -p test_sq2_radio.py -v
+python3 scripts/pack-sq2-radio.py VERIFIED_LTE03 RADIO_BUNDLE FRESH_OUTPUT
+```
+
+`pack-sq2-radio.py` 验证 LTE03 完整哈希，审计仅12项有效cpio变化，密码SSH成员最后；
+构建不部署。必须以独立一次性启动验证实际 HAL inode/hash、SIM/APN、原生网络与
+音频/EL2/屏幕保护，再提升默认并复核普通重启。NDK parcel 往返不能代替 Android Java
+转换验证；LTE无PDU session使用AIDL规定值0。相同build ID需通过APN update_db请求
+标准checksum合并，不清SQLite，不覆盖用户APN编辑。当前lab策略不代表生产SELinux完成。
+
+## 2026-11-03：LTE 数据服务构建与私有打包
+
+最新流程见 [LTE-DATA.md](LTE-DATA.md)，它更新下面的历史失败状态。
+`bash scripts/build-sq2-lte-data.sh` 构建 QMI session/mode、RMNET netlink helper 和
+Android NetworkAgent jar，并执行 native/QEMU selftest。隐藏 API stubs 只用于编译，
+不打进 dex。`build-sq2-rmnet.sh` 复用完整匹配内核输出与 Module.symvers，保持原配置。
+
+`pack-sq2-lte-data.py BASE BUNDLE OUTPUT --unit-serial SERIAL --fsg-sha256 HASH --apn APN`
+只接受原完整init957；校验IPA/RMNET/固件和操作者提供的本机FSG，审计全部有效cpio条目，
+只变更21项LTE文件/钩子，原音频HAL、触摸、图形、凭据原字节保持，密码SSH addon最后。
+产物包含单机私有数据，禁止发布。最终init783cdacf候选启动、提升默认及普通默认重启
+均通过LTE真实流量和音频/EL2基线检查；具体哈希与恢复方法见HANDOFF和LTE-DATA。
+
+补充检查：`python3 -m unittest discover -s tests -p test_sq2_lte_boot.py -v` 验证
+多个zygote时只选择PID1子进程；`test_sq2_mfs_readonly_lab.py` 验证真实3072字节MFS读上限。
+
 ## 2026-11-02：QMI EFS原厂IDL已恢复，实机元数据通过；文件读取返回Malformed，保存检查点
 
 本轮没有重启、online、清FTM或NV写入命令。原厂MPSS SHA9ec7b6c6中的服务21对象

@@ -9,7 +9,7 @@ class TestMfsReader(unittest.TestCase):
             r=subprocess.run([str(exe),'--self-test'],check=True,capture_output=True,text=True)
             self.assertIn('write opcode refused',r.stdout)
             r=subprocess.run([str(exe),'--frame-fixture'],check=True,capture_output=True,text=True)
-            self.assertEqual(r.stdout.strip(),'01080006002f746573740010040000800000')
+            self.assertEqual(r.stdout.strip(),'01080006002f7465737400100400000c0000')
     def test_build_does_not_deploy(self):
         s=(ROOT/'scripts/build-sq2-mfs-readonly-lab.sh').read_text()
         self.assertNotIn('ssh ',s);self.assertNotIn('scp ',s)

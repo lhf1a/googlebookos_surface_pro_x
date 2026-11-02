@@ -1,5 +1,68 @@
 # SQ2 开发交接
 
+## 2026-11-03：原生 Radio、状态栏与 SIM 设置已接通并成为默认
+
+最新实现和故障对照见 [LTE-RADIO.md](LTE-RADIO.md)。实际 UIM/NAS/DMS → Radio AIDL V3
+→ 电话框架/订阅/APN → netd/SystemUI/Settings 已接通。状态栏显示真实信号与LTE；设置
+显示中国广电SIM、移动数据、流量统计、LTE类型和APN入口。数据关闭撤下网络/地址，
+开启恢复；完整飞行模式DMS1→0恢复通过；关闭Wi-Fi后Chrome HTTPS通过且LTE成为默认，
+恢复Wi-Fi后优先级回切。旧Java NetworkAgent在Radio模式不启动，只有HAL管理bearer。
+
+修正了NAS非法UTF-8名称导致属性异常、同build ID不刷新APN、无PDU session错误使用-1
+导致Java拒收成功响应三处问题。APN使用标准checksum合并，保留用户编辑/删除。临时
+callback日志已移除，正常启动不执行测试探针、DIAG、Terminal UI或KVM witness。
+
+曾有一次rad04启动真实NAS拒绝；保留的LTE03回退也复现相同NAS3/PS2与WDS无服务。
+只读确认自动选网、非本运营商小区forbidden、无有效拒绝原因码。用户确认未改位置/
+SIM/天线，一次正常20秒飞行模式策略恢复后NAS1/PS1与HTTPS200恢复。未改NV/APN/射频，
+不宣称已确定或修复该偶发注册问题；完整证据在LTE-RADIO，不能抹去这次失败。
+
+同一份未改动rad04随后独立启动boot75246691，约61秒建立原生LTE，实际HAL58aa52c2、
+SIM LOADED、HTTPS200、原音频/EL2保护通过。提升为默认后，又从普通默认入口启动
+boot1e6156a5，原生LTE自动连接、HTTPS200、Wi-Fi优先、HAL实际inode/hash及ALSA声卡/
+AUDIO_READY/音频HAL774、三remoteproc attached、screen_onlyY/nohibernate再次通过。
+
+当前载荷：initrad04 `368d4f213d3f5bd6c8d6be159443c569cc82c846da2a88d111b5f416edcc4d05`；
+Radio HAL `58aa52c2b602a6be172c71a93315d8adf7826cb7a434f5a5f2dba55dc7156fcc`；
+EFI `a50e65c904d73d87d86dd43ef6fe25298fe87eb1f32ded33c3efe3d39d0ab93a`；
+默认菜单 `adc0afab1f569580388cee950ebd448eab08e177fc2a66ca42a51b381f1d13e2`，直接
+chainload `/EFI/SQ2LTE/rad04-once.efi`，不再读取once env。菜单仍恰好Qualcomm默认/Mesa
+两项；LTE03载荷、原默认957/85b/DC7、共享固件和Mesa原清单均校验保留。
+
+仅单USIM/LTE IPv4数据；语音、SMS、IMS、eSIM、5G、PIN管理未实现，IPv6/漫游/长期
+移动切站和耗电未验证。captive_portal_mode=0原策略未改，VALIDATED不代替真实HTTPS证据。
+专项测试通过；全库旧脚本参数读取与触摸测试仍有失败，详见LTE-RADIO。私有镜像/FSG/
+APN/身份/密钥和原始日志截图保持在ignored out/private，公开提交只含源码、配置及文档。
+
+## 2026-11-03：LTE 数据已可用，完整启动与默认部署
+
+以下 11-02 的 FTM、Malformed 和 DIAG 失败记录是历史状态。最新实现与证据见
+[LTE-DATA.md](LTE-DATA.md)。原机 FSG 被接受，FTM 自然为 0，DMS online、NAS LTE
+注册/PS attached、QMAPv4/RMNET 真实数据通过；没有清 FTM、移植 NV 或重置 adopted modem。
+Android 发布 metered CELLULAR 网络并由系统按既有策略标记VALIDATED，Wi-Fi 关闭后 Chrome 正常加载 HTTPS，
+恢复 Wi-Fi 后默认网络回切。数据开关、飞行模式设置的低功耗1/online0回读与重连均通过。
+
+首次独立候选 init636167fd…已完成整机重启，boot535134dc：FSG精确哈希、IPA/RMNET、
+Android CELLULAR VALIDATED、LTE HTTPS200、user10、三remoteproc attached、物理声卡、
+AUDIO_READY及实际HAL774cd7e7均通过。原默认init957/DT85b/launcher与Mesa仍保留。
+发现多个 zygote PID 的启动环境选择问题，已限定 PPid=1 主 zygote并通过双顺序夹具；
+同时让 native helper 忽略 SIGPIPE，防止 Java 关闭 stdout 后打断其 QMI 退出清理。
+最终候选 init783cdacf…在boot6b05f435完成独立启动：有效helper6ff6606a、QMI数据abc580c0、
+jar d49a219b精确匹配，Android LTE VALIDATED、HTTPS200、数据关/开撤下与恢复通过。
+原声卡/实际HAL774与三个attached remoteproc再次通过。已将同一载荷提升为默认，菜单
+SHA883cd0a5…恰好“Qualcomm / LTE / 60Hz / GPU700”和原Mesa两项，直接指向已验证EFI，
+不再依赖once env；旧默认957/85b/DC7、原Image、共享固件及Mesa有效清单全部校验保留。
+提升后已从普通默认入口再次整机重启至boot fc66b6e8：cmdline实际initlte03、菜单883cd0a5、
+有效FSG/运行native与jar哈希全部一致，LTE自动连网、HTTPS200、Wi-Fi优先及全部上述音频/
+EL2/屏幕保护检查通过。当前默认已可用；不是只把未经启动的镜像写到ESP。
+该默认启动后再关闭Wi-Fi，原Chrome成功加载带新时间戳的HTTPS页面、蜂窝计数增长，
+随后Wi-Fi恢复为默认；结束时wifi_on=1、airplane_mode_on=0、mobile_data=1。
+
+正常 EL2、screen_only=Y、nohibernate、原密码SSH addon最后及无Terminal/KVM自启保持。
+当前仅单卡私有APN IPv4数据，电话/SMS/原生SIM UI、IPv6、漫游策略和长期移动测试未完成。
+原系统captive_portal_mode=0保留，VALIDATED不代表Google探测通过；实际联网由HTTPS/Chrome独立证实。
+私有FSG、原始日志、截图及带登录资料镜像留在out/private，不入Git。
+
 ## 2026-11-02：QMI EFS原厂IDL已恢复，实机元数据通过；文件读取返回Malformed，保存检查点
 
 本轮没有重启、online、清FTM或NV写入命令。原厂MPSS SHA9ec7b6c6中的服务21对象

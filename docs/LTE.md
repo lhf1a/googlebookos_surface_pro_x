@@ -1,5 +1,16 @@
 # Surface Pro X SQ2 LTE 开发
 
+## 2026-11-03 最新状态：LTE 与 Android 数据已通过
+
+最新状态见 [LTE-DATA.md](LTE-DATA.md) 和 [HANDOFF.md](HANDOFF.md) 的首节。
+原机FSG使NV453自然为0、RF目录有效、DMS interfaces5/8；标准online后LTE注册/PS attached，
+IPA/QMAPv4/RMNET取得真实IPv4承载，Android计费CELLULAR与Chrome默认网络回退通过。
+VALIDATED由系统按原实验室策略产生，不能代替独立HTTPS/Chrome证据。
+候选启动与提升后的普通默认重启均自动恢复，音频/屏幕保护检查通过，完整部署结果见交接。
+下文“LTE不可用”“FSG是否有效不明”“DIAG无响应”“MFS Malformed”保留作历史，不代表现状。
+后续已接通原生SIM设置、信号/LTE状态栏和电话框架数据网络，当前部署与限制以
+[LTE-RADIO.md](LTE-RADIO.md) 为准；电话、短信、IMS、5G仍未实现。
+
 ## 2026-11-02：QMI EFS原厂IDL已恢复，实机元数据通过；文件读取返回Malformed，保存检查点
 
 本轮没有重启、online、清FTM或NV写入命令。原厂MPSS SHA9ec7b6c6中的服务21对象

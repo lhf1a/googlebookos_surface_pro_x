@@ -22,6 +22,8 @@ static void p16(unsigned char*p,unsigned v){p[0]=v;p[1]=v>>8;}
 static void p32(unsigned char*p,uint32_t v){for(unsigned i=0;i<4;i++)p[i]=v>>(8*i);}
 static long long ms(void){struct timespec t;if(clock_gettime(CLOCK_MONOTONIC,&t))return -1;return (long long)t.tv_sec*1000+t.tv_nsec/1000000;}
 static int number(const char*s,uint32_t*v){char*e;if(*s<'0'||*s>'9')return -1;errno=0;unsigned long x=strtoul(s,&e,10);if(errno||*e||x>=QRTR_PORT_CTRL)return -1;*v=x;return 0;}
+/* Original MPSS handler at 0xd86958bc accepts <=0xc00, despite the 32 KiB IDL buffer. */
+enum { MFS_READ_LIMIT = 3072 };
 static int mfs_request(unsigned char*b,unsigned msg,unsigned txn,const char*path){
     memset(b,0,1100);b[0]=0;p16(b+1,txn);p16(b+3,msg);unsigned n=0;
     if(msg==0x1e)n=0;
@@ -29,7 +31,7 @@ static int mfs_request(unsigned char*b,unsigned msg,unsigned txn,const char*path
     else if(msg==0x21){
         if(!path)return -1;size_t z=strlen(path)+1;if(z>1024)return -1;
         b[7]=1;p16(b+8,(unsigned)z+2);p16(b+10,(unsigned)z);memcpy(b+12,path,z);
-        b[12+z]=0x10;p16(b+13+z,4);p32(b+15+z,32768);n=(unsigned)z+12;
+        b[12+z]=0x10;p16(b+13+z,4);p32(b+15+z,MFS_READ_LIMIT);n=(unsigned)z+12;
     }
     else return -1;
     p16(b+5,n);return 7+(int)n;
@@ -74,7 +76,7 @@ static int save_data(const char*dir,unsigned index,const unsigned char*b,unsigne
 static int selftest(void){
     unsigned char b[1100];int n=mfs_request(b,0x21,17,"/test");
     if(n<0){puts("BASELINE: EFS read request unavailable");return 1;}
-    if(n!=25||u16(b+5)!=18||b[7]!=1||u16(b+8)!=8||u16(b+10)!=6||memcmp(b+12,"/test",6)||b[18]!=0x10||u32(b+21)!=32768)return 1;
+    if(n!=25||u16(b+5)!=18||b[7]!=1||u16(b+8)!=8||u16(b+10)!=6||memcmp(b+12,"/test",6)||b[18]!=0x10||u32(b+21)!=3072)return 1;
     if(mfs_request(b,0x20,17,"/test")!=-1)return 1;
     unsigned char r[]={2,17,0,0x21,0,21,0,2,4,0,0,0,0,0,0x10,4,0,0,0,0,0,0x11,4,0,2,0,0xaa,0x55};
     struct decoded x;if(decode(r,sizeof(r),0x21,17,&x)||x.len!=2||x.data[0]!=0xaa)return 1;
