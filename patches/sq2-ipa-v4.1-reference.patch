@@ -1,0 +1,203 @@
+--- a/Makefile
++++ b/Makefile
+@@ -2,7 +2,7 @@
+ #
+ # Makefile for the Qualcomm IPA driver.
+ 
+-IPA_VERSIONS		:=	3.1 3.5.1 4.2 4.5 4.7 4.9 4.11
++IPA_VERSIONS		:=	3.1 3.5.1 4.1 4.2 4.5 4.7 4.9 4.11
+ 
+ # Some IPA versions can reuse another set of GSI register definitions.
+ GSI_IPA_VERSIONS	:=	3.1 3.5.1 4.0 4.5 4.9 4.11
+--- /dev/null
++++ b/data/ipa_data-v4.1.c
+@@ -0,0 +1,77 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* SQ2 IPA4.1 verified endpoint/channel reference. NOT a functional profile.
++ * Qualcomm downstream commit c8bbb1e3a59cb5cde2da79a8db638691b70535d7,
++ * ipa_utils.c IPA_4_1 rows; include/linux/ipa.h names TLV/AOS fields.
++ * No TRE/event sizes, resource limits, memory layout or power policy inferred.
++ * ipa_probe() unconditionally refuses this compatible BEFORE any hardware use;
++ * ipa_version_supported() also continues to reject 4.1.
++ */
++#include "../gsi.h"
++#include "../ipa_data.h"
++
++static const struct ipa_gsi_endpoint_data ipa_gsi_endpoint_data[] = {
++	[IPA_ENDPOINT_AP_COMMAND_TX] = {
++		.ee_id = GSI_EE_AP,
++		.channel_id = 4,
++		.endpoint_id = 5,
++		.toward_ipa = true,
++		.channel.tlv_count = 20, /* AOS=24; NOT ring sizes */
++	},
++	[IPA_ENDPOINT_AP_LAN_RX] = {
++		.ee_id = GSI_EE_AP,
++		.channel_id = 5,
++		.endpoint_id = 10,
++		.toward_ipa = false,
++		.channel.tlv_count = 9, /* AOS=9; NOT ring sizes */
++	},
++	[IPA_ENDPOINT_AP_MODEM_TX] = {
++		.ee_id = GSI_EE_AP,
++		.channel_id = 3,
++		.endpoint_id = 2,
++		.toward_ipa = true,
++		.channel.tlv_count = 16, /* AOS=32; NOT ring sizes */
++	},
++	[IPA_ENDPOINT_AP_MODEM_RX] = {
++		.ee_id = GSI_EE_AP,
++		.channel_id = 6,
++		.endpoint_id = 11,
++		.toward_ipa = false,
++		.channel.tlv_count = 9, /* AOS=9; NOT ring sizes */
++	},
++	[IPA_ENDPOINT_MODEM_COMMAND_TX] = {
++		.ee_id = GSI_EE_MODEM,
++		.channel_id = 1,
++		.endpoint_id = 4,
++		.toward_ipa = true,
++		.channel.tlv_count = 20, /* AOS=24; NOT ring sizes */
++	},
++	[IPA_ENDPOINT_MODEM_LAN_RX] = {
++		.ee_id = GSI_EE_MODEM,
++		.channel_id = 4,
++		.endpoint_id = 14,
++		.toward_ipa = false,
++		.channel.tlv_count = 9, /* AOS=9; NOT ring sizes */
++	},
++	[IPA_ENDPOINT_MODEM_AP_TX] = {
++		.ee_id = GSI_EE_MODEM,
++		.channel_id = 0,
++		.endpoint_id = 3,
++		.toward_ipa = true,
++		.channel.tlv_count = 16, /* AOS=32; NOT ring sizes */
++	},
++	[IPA_ENDPOINT_MODEM_AP_RX] = {
++		.ee_id = GSI_EE_MODEM,
++		.channel_id = 3,
++		.endpoint_id = 13,
++		.toward_ipa = false,
++		.channel.tlv_count = 9, /* AOS=9; NOT ring sizes */
++	},
++};
++
++const struct ipa_data ipa_data_v4_1 = {
++	.version = IPA_VERSION_4_1,
++	.backward_compat = 0x39, /* verified source value; never written here */
++	.endpoint_count = ARRAY_SIZE(ipa_gsi_endpoint_data),
++	.endpoint_data = ipa_gsi_endpoint_data,
++	/* Other fields intentionally absent, not copied from SC7180. */
++};
+--- a/ipa_data.h
++++ b/ipa_data.h
+@@ -244,6 +244,7 @@
+ 
+ extern const struct ipa_data ipa_data_v3_1;
+ extern const struct ipa_data ipa_data_v3_5_1;
++extern const struct ipa_data ipa_data_v4_1; /* reference only */
+ extern const struct ipa_data ipa_data_v4_2;
+ extern const struct ipa_data ipa_data_v4_5;
+ extern const struct ipa_data ipa_data_v4_7;
+--- a/ipa_main.c
++++ b/ipa_main.c
+@@ -656,6 +656,10 @@
+ }
+ 
+ static const struct of_device_id ipa_match[] = {
++	{
++		.compatible = "qcom,sc8180x-ipa",
++		.data = &ipa_data_v4_1,
++	},
+ 	{
+ 		.compatible	= "qcom,msm8998-ipa",
+ 		.data		= &ipa_data_v3_1,
+@@ -803,6 +807,14 @@
+ 	struct ipa *ipa;
+ 	int ret;
+ 
++	/* Offline register/endpoint candidate, NOT a deployable IPA port.
++	 * Fail before clock, firmware, IOMMU, IRQ or DMA initialization.
++	 * Do not add an override until ownership/resources are verified.
++	 */
++	if (of_device_is_compatible(dev->of_node, "qcom,sc8180x-ipa"))
++		return dev_err_probe(dev, -EOPNOTSUPP,
++			"SQ2 IPA4.1 reference only: SID/memory/resources/rings unverified\n");
++
+ 	ipa_validate_build();
+ 
+ 	/* Get configuration data early; needed for power initialization */
+--- a/ipa_reg.c
++++ b/ipa_reg.c
+@@ -113,6 +113,8 @@
+ 		return &ipa_regs_v3_1;
+ 	case IPA_VERSION_3_5_1:
+ 		return &ipa_regs_v3_5_1;
++	case IPA_VERSION_4_1:
++		return &ipa_regs_v4_1;
+ 	case IPA_VERSION_4_2:
+ 		return &ipa_regs_v4_2;
+ 	case IPA_VERSION_4_5:
+--- a/ipa_reg.h
++++ b/ipa_reg.h
+@@ -631,6 +631,7 @@
+ 
+ extern const struct regs ipa_regs_v3_1;
+ extern const struct regs ipa_regs_v3_5_1;
++extern const struct regs ipa_regs_v4_1; /* incomplete; probe refused */
+ extern const struct regs ipa_regs_v4_2;
+ extern const struct regs ipa_regs_v4_5;
+ extern const struct regs ipa_regs_v4_7;
+--- /dev/null
++++ b/reg/ipa_reg-v4.1.c
+@@ -0,0 +1,50 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* INCOMPLETE, offline-only IPA4.1 register subset. No hardware writes here.
++ * Source: c8bbb1e3a59cb5cde2da79a8db638691b70535d7 ipahal_reg.c/_i.h:
++ * 4.1 inherits 4.0. Do NOT substitute the SC7180 IPA4.2 table.
++ * Kept unreachable by the early compatible guard and supported-version check.
++ */
++#include <linux/types.h>
++#include "../ipa.h"
++#include "../ipa_reg.h"
++
++static const u32 reg_endp_init_ctrl_fmask[] = {
++	[ENDP_DELAY] = BIT(1), /* RX suspend removed in 4.0; don't write bit0 */
++};
++REG_STRIDE_FIELDS(ENDP_INIT_CTRL, endp_init_ctrl, 0x800, 0x70);
++
++static const u32 reg_endp_init_hol_block_timer_fmask[] = {
++	[TIMER_BASE_VALUE] = GENMASK(31, 0), /* NOT the 4.2 base/scale split */
++};
++REG_STRIDE_FIELDS(ENDP_INIT_HOL_BLOCK_TIMER, endp_init_hol_block_timer, 0x830, 0x70);
++
++static const u32 reg_endp_init_rsrc_grp_fmask[] = {
++	[ENDP_RSRC_GRP] = GENMASK(1, 0),
++};
++REG_STRIDE_FIELDS(ENDP_INIT_RSRC_GRP, endp_init_rsrc_grp, 0x838, 0x70);
++
++static const u32 reg_endp_init_seq_fmask[] = {
++	[SEQ_TYPE] = GENMASK(7, 0),
++	[SEQ_REP_TYPE] = GENMASK(15, 8),
++};
++REG_STRIDE_FIELDS(ENDP_INIT_SEQ, endp_init_seq, 0x83c, 0x70);
++
++static const u32 reg_idle_indication_cfg_fmask[] = {
++	[ENTER_IDLE_DEBOUNCE_THRESH] = GENMASK(15, 0),
++	[CONST_NON_IDLE_ENABLE] = BIT(16),
++};
++REG_FIELDS(IDLE_INDICATION_CFG, idle_indication_cfg, 0x220);
++REG(IPA_BCR, ipa_bcr, 0x1d0);
++
++static const struct reg *reg_array[] = {
++	[ENDP_INIT_CTRL] = &reg_endp_init_ctrl,
++	[ENDP_INIT_HOL_BLOCK_TIMER] = &reg_endp_init_hol_block_timer,
++	[ENDP_INIT_RSRC_GRP] = &reg_endp_init_rsrc_grp,
++	[ENDP_INIT_SEQ] = &reg_endp_init_seq,
++	[IDLE_INDICATION_CFG] = &reg_idle_indication_cfg,
++	[IPA_BCR] = &reg_ipa_bcr,
++};
++const struct regs ipa_regs_v4_1 = {
++	.reg_count = ARRAY_SIZE(reg_array),
++	.reg = reg_array,
++};

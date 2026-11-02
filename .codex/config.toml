@@ -1,0 +1,7 @@
+# Project-local REA 7.1.0; see docs/REA.md. No cloud keys.
+[mcp_servers.rea]
+command = 'C:/Windows/System32/wsl.exe'
+args = ['-d', 'Ubuntu-24.04', '-u', 'kanoyami', '--exec', '/bin/sh', '/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/rea/rea-offline.sh', 'serve']
+enabled = true
+startup_timeout_sec = 60
+tool_timeout_sec = 120
