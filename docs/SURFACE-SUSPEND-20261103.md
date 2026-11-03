@@ -621,3 +621,15 @@ native suspend attempts=0。当前trial本来就不启用native/JAR修正，因�
 s2idle，电池事件也不例外。本轮首事件BAT与这个限制一致；1.1秒诊断延时只避免了
 关屏转换期间的键盘报告排队，并不构成完整EC唤醒策略。不在现场反馈缺失时盲加
 事件过滤或更改活跃UART/SSAM，下一步首先闭环真实物理电源键与持续触摸。
+
+
+现场反馈补齐：用户确认“已亮屏，触摸持续正常，键盘正常”。随即只读核对仍是
+bootb3221fcd…，SPIready/count1/bus_error2，IPTSd与Android框架PID保持；PMIC IRQ
+从0增加到2，Android Awake，mLastWakeReason=1（电源键）。mLastWakeTime1355670ms，
+明显晚于本轮machine_suspend结束269.867014s；因此这是**SSAM先结束内核睡眠后，
+电源键唤醒Android界面，持续输入正常**，不是PMIC直接结束内核睡眠。
+
+阻塞的现场输入证据已补齐；本候选真实resume的触摸恢复获得本轮用户验证。
+仍缺同候选由PMIC直接唤醒，以及重复恢复/原生策略/能耗验证。准备同boot第二次
+独立单任务对照：只改变按键协调时间，保留SSAMenabled、相同模块和保护；新日志目录
+及SPIcount1→2检查防止重复执行。尚未触发，待现场配合确认，不自动重试。
