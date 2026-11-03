@@ -4,7 +4,7 @@
 Use build-surface-pm-kernel.py (01-framework-owner only), not the diagnostic
 02-native-single-request patch. QEMU/physical validation is a separate step.
 """
-import argparse,hashlib,json,shutil
+import argparse,hashlib,json
 from pathlib import Path
 p=argparse.ArgumentParser(description=__doc__)
 for name in ('image','launcher','spi_module','system_suspend'):

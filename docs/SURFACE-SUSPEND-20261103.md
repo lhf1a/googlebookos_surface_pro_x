@@ -800,3 +800,17 @@ stay_on_while_plugged_in默认1（系统自身充电策略）。锁服务IsLockS
 WindowPolicy showing/inputRestricted/enabled true，凭据NONE未创建/清除。CLI get-disabled
 仍true，记录此差异并等待UI证明。当前nativeattempts0，保留后台应用锁，不能称正常包
 实际休眠已通过。原始正常/Mesa载荷保留；准备在现场反馈通过后提升同一候选菜单。
+
+
+用户补齐现场结果：启动画面、触摸和键盘正常；锁屏、解锁、输入和自动熄屏都正常。
+随后只将默认菜单chainloader改到已启动验证的/EFI/SQ2Power/normal.efi，原Mesa不变，
+原正常载荷/固件26项全部匹配；旧默认菜单另存SQ2Power/grub-before-normal.cfg。
+当前没有自然native请求（后台合法锁保留），因此正常组合真实睡眠/能耗仍未验收，
+不把此前诊断组合单次成功移作本组合的持续稳定性证明。源码和部署记录推到休眠分支。
+
+标记解释：suspend.screen_only是项目的只读内核保护参数；当前保留Y并持续注册Android
+服务，不等于仍只允许关屏。LTE seed、视频、swap/KSU和EL2准备助手存在对Y的硬编码
+依赖，音频HAL本身没有这个直接条件。若以后关闭它，应先替换这些助手的过宽检查为
+各自实际前提，保留diagnostic/fallback保护，隔离启动screen_only=0后做完整启动及
+多轮恢复验证，再提升正常；不能只删除cmdline开关（内核默认值仍true），也不能在线
+写只读sysfs。当前任务未授权/实施这项额外保护重构。

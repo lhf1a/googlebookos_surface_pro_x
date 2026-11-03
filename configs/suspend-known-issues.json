@@ -1,6 +1,6 @@
 {
   "updated": "2026-11-04",
-  "status": "normal_policy_enabled_by_user_hardware_validation_in_progress",
+  "status": "normal_android_policy_deployed_lock_screen_validated",
   "policy": {
     "system_suspend": "Android persistent owner gate; unregistered callers blocked",
     "boot_options": [
@@ -11,7 +11,7 @@
     "fallback": "original screen-only Mesa",
     "framework": "stock; no diagnostic AC grace patch",
     "lockscreen": "enabled, explicit one-time reset to system timeout defaults; credentials preserved",
-    "validation": "single native sleep and sustained input recovered on SQ2; normal continuous policy validation pending"
+    "validation": "Normal policy boot, lockscreen/unlock/input and 15-second automatic screen-off verified on one SQ2. Native persistent gate verified in QEMU. Normal stock combination actual suspend, stability, energy and SQ1 remain unverified."
   },
   "issues": [
     "Lid close switches screen off, but opening the cover does not reliably wake it",
