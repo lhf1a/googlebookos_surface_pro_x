@@ -1,3 +1,58 @@
+## 2026-11-03：SQ2 新启动与只读平台缓存字段对照
+
+SQ2 在已确认主机密钥下恢复连接，本轮实际boot为1df5aab6…，
+不是沿用旧ffad6382的观测。用户称无SIM，本次UIM也为card_state0/apps0；仍DMS0、
+接口5/8，NAS registration2（搜索中）/PS2/LTE1，signal error0，原查询值
+rsrp=-97、rsrq=-14、snr=42。SQ1同一正常boot7112ff09…为card_state1/apps1，
+仍DMS2、接口0、NAS registration0/PS2/LTE0、signal error74。**这次SQ2无SIM也能
+查询到信号，不是本轮注册、PS附着或蜂窝联网通过；SQ1的RF未就绪问题未解决。**
+
+两机现有sysfs均soc_id340/revision2.1/family Snapdragon。通过已校验的现成QMI
+helper和既有查询逻辑，实际运行MPSS的DMS revision两机逐字相同：
+`200717-CA-ceeab88-c8.1-00082.0  1  [Mar 05 2020 23:00:00]`。
+本次有效MPSS、RMTFS、el2-rmtfs-start、wifi-services与供给/run目录FSG哈希也相同。
+Radio/rmnet仍有已知版本差异；其所在七项SQ2成功组件组合已在SQ1实际试过且无改善，
+不重新进行相同替换。运行版本字符串相同不等于固件内部状态或整个启动环境相同。
+
+随后只在新unshare、private传播的子mount namespace，将已注册debugfs以
+ro,nosuid,nodev,noexec临时挂载，读取现有qcom_socinfo驱动缓存的固定非唯一标量。
+同一字段读取命令的BASELINE/MODIFIED/ROLLBACK为：挂载前ABSENT → 私有只读视图
+可见 → 显式umount后ABSENT；这是接口可见性的事务，不是LTE功能A/B/R。
+两机可见的8个值全部相同：
+
+| 缓存字段 | SQ1 / SQ2 实测共同值 |
+| --- | --- |
+| info_fmt | 0x0000000f |
+| raw_version | 2 |
+| hardware_platform | 29 |
+| platform_version | 65536 |
+| hardware_platform_subtype | 0 |
+| chip_family | 0x00000057 |
+| raw_device_family | 0x00000006 |
+| nmodem_supported | 255（只保留字段原值，不解释为实际Modem数量） |
+
+`oem_variant`两机均ABSENT，保持未知，不填默认值。各机父namespace及Android的
+mountinfo SHA256在自身操作前后均不变（不声称两机mountinfo彼此相同），boot ID不变；
+前后DMS模式保持SQ1=2、SQ2=0。收集和私有视图脚本均exit0，已显式卸载，退出子
+namespace，并复核清除对应临时工具/路径；没有持久挂载、加载驱动、重启、改变模式或写NV。
+未读SMEM469/image表、raw NV、serial/unique等身份字段，也未修改默认/回退/固件。
+
+保留并修正错误：最初引用不存在的`/bin/test-lte-readonly`，sha256sum失败exit1；
+改用已pin的现成helper和既有查询逻辑后完成exit0，不宣称首次命令成功。私有视图脚本
+准备时另有PowerShell正则转义错误，未执行WSL语法命令；改为字面String.Replace后
+真实语法检查及两机执行通过，原错误留档。
+
+结论仅限这些已读取字段与运行版本没有解释双机RF状态差异，不能推出UEFI全同、
+校准绑定或某个固件内部根因。之前AP侧交付/应答正证据仍有效，不回头盲改cache/RMTFS；
+不重复旧FSG或七组件组合。本轮没有新的NV453/RFNV读数，通用初始镜像的双机SIM、
+NAS注册、PS及真实蜂窝数据验收仍未完成。私有字面输出/退出码、脚本和文档事务位于
+原工作区out/lte-main-review-20261103/socinfo-resume-v1/online-20261103-231900。
+
+下一步仅从已存QDB的`rfcard_data_init`、`rfc_dynamic_load`（HWID/FSID）及
+`rfc_common_nv_item_read`（RFC NV读取/解压）模板出发，追本轮已复核hash9ec7…的
+原MPSS中可信Hexagon引用和选择条件；若遇分页/CLADE，先验证映射。模板不是实际
+错误证据，不重复DIAG mask或AP交付探针，也不将静态入口当作已找到根因。
+
 ## 2026-11-03：SQ1 原 RMTFS 响应发送接受已实测；结束 AP 传输疑点路线
 
 在原逐扇区观察器上增加真实sendto的返回/errno与最多26字节参数的安全只读解析；
