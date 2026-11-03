@@ -35,6 +35,10 @@ def main():
     p.add_argument('--profiles', type=Path, default=R/'configs/surface-pro-x-profiles.json',
                    help='override model defaults; not a mandatory capability checklist')
     p.add_argument('--touch-bundle', type=Path, help='merged calibration/noise bundle from build-unified-touch.py')
+    p.add_argument('--lte', choices=('on', 'off'), default='on',
+                   help='LTE/Radio baseline on by default; off is the explicit original-runtime option')
+    p.add_argument('--lte-bundle', type=Path, default=R/'private/lte-baseline',
+                   help='private reboot-verified Radio04 initramfs/DT; unit-bound activation')
     a = p.parse_args()
     if not stat.S_ISREG(a.template.stat().st_mode) or a.template.stat().st_size != SIZE:
         p.error('Template must be the pinned regular image, not a block device')
@@ -58,11 +62,13 @@ def main():
         return r.stdout
 
     command=[sys.executable, R/'scripts/build-surface-pro-x.py', '--machine', 'both',
-             '--sealed-input', a.sealed_input, '--profiles', a.profiles, '--output', a.output/'profiles']
+             '--sealed-input', a.sealed_input, '--profiles', a.profiles, '--output', a.output/'profiles',
+             '--lte', a.lte, '--lte-bundle', a.lte_bundle]
     if a.touch_bundle: command+=['--touch-bundle',a.touch_bundle]
     run(command)
-    common = a.output/'profiles/SQ1/EFI/SQ1Default/initramfs.cpio.gz'
-    common_hash = digest(common)
+    common = {entry: a.output/'profiles/SQ1/EFI'/('SQ1'+entry)/'initramfs.cpio.gz'
+              for entry in ('Default', 'Fallback')}
+    common_hash = digest(common['Default'])
     # A single fresh-image storage/identity profile for both machines. Runtime
     # drivers/ABI are the same accepted 957b baseline; model DT retains 661/700.
     root = a.output/'esp-root'
@@ -76,7 +82,7 @@ def main():
             src = a.output/'profiles'/model/'EFI'/(model+entry)
             dst = root/'EFI'/(model+entry)
             shutil.copytree(src, dst)
-            shutil.copyfile(common, dst/'initramfs.cpio.gz')
+            shutil.copyfile(common[entry], dst/'initramfs.cpio.gz')
             rows = {f.name: digest(f) for f in dst.iterdir() if f.name != 'SHA256SUMS'}
             (dst/'SHA256SUMS').write_text(''.join(h+'  '+n+'\n' for n,h in sorted(rows.items())))
     shutil.copytree(a.output/'profiles/SQ1/firmware', root/'firmware')
@@ -133,9 +139,10 @@ def main():
     report=dict(standard_entry='scripts/build.py',format='single-raw-disk-image',
                 image=str(image.resolve()),sha256=digest(image),bytes=SIZE,
                 template_sha256=TEMPLATE_SHA,common_initramfs_sha256=common_hash,
+                fallback_initramfs_sha256=digest(common['Fallback']),lte=a.lte,
                 model_selection='bounded SMBIOS type4 Microsoft SQ1/SQ2; unknown refuses',
                 entries=2,hardware_tested=False,deployed=False,files=hashes,
-                baseline='origin/main fee67b2 accepted runtime; no rejected experiments or mixed module ABI')
+                baseline='fee67b2 accepted runtime + 0100429 LTE/Radio when enabled; original Mesa fallback retained')
     (a.output/'build-audit.json').write_text(json.dumps(report,indent=2)+'\n')
     (a.output/'SHA256SUMS').write_text(report['sha256']+'  '+image.name+'\n')
     print(json.dumps({k:report[k] for k in ('standard_entry','image','sha256','common_initramfs_sha256','hardware_tested')},indent=2))

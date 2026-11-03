@@ -204,6 +204,10 @@ def main():
     p.add_argument('--profiles', type=Path, default=R/'configs/surface-pro-x-profiles.json',
                    help='custom model settings; defaults are not mandatory capability gates')
     p.add_argument('--touch-bundle', type=Path, help='compiled merged calibration/noise bundle; strict source/hash checks')
+    p.add_argument('--lte', choices=('on', 'off'), default='on',
+                   help='baseline LTE/Radio enabled by default; off keeps the original payload')
+    p.add_argument('--lte-bundle', type=Path, default=R/'private/lte-baseline',
+                   help='private, exact reboot-verified Radio04 initramfs and IPA DT')
     args = p.parse_args()
     pins = json.loads((R/'configs/surface-pro-x-unified-inputs.json').read_text())
     profiles = json.loads(args.profiles.read_text())
@@ -224,6 +228,12 @@ def main():
         require(sha(base_entries[name][1]) == expected, 'Audio module mismatch')
     require(sha(base_entries['etc/sq2-audio/audio-hal'][1]) ==
             '774cd7e731bd5a5fcda6edbde6e97464bd0e04acc1603c3be7b0dbe7a69561ea', 'HAL mismatch')
+    lte = None
+    if args.lte == 'on':
+        spec = importlib.util.spec_from_file_location('lte_payload', R/'scripts/surface-lte-payload.py')
+        lte = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lte)
+        lte_delta, lte_dt, lte_source = lte.prepare(raw, R, args.lte_bundle, c)
     prepared = {}
     for machine in machines:
         profile = profiles[machine]
@@ -235,14 +245,23 @@ def main():
             spec=importlib.util.spec_from_file_location('touch_payload',R/'scripts/surface-touch-payload.py')
             touch=importlib.util.module_from_spec(spec);spec.loader.exec_module(touch)
             packed,audit['touch_bundle']=touch.integrate(packed,R,args.touch_bundle,c)
-        dt, changes = device_tree((args.sealed_input/'common/android-el2.dtb').read_bytes(), machine, profile)
+        original_dt = (args.sealed_input/'common/android-el2.dtb').read_bytes()
+        fallback_dt, changes = device_tree(original_dt, machine, profile)
+        runtimes = {'Default': packed, 'Fallback': packed}
+        dts = {'Default': fallback_dt, 'Fallback': fallback_dt}
+        audit['lte'] = {'enabled': False, 'fallback_unchanged': True}
+        if lte:
+            runtimes['Default'], lte_audit = lte.integrate(packed, lte_delta, c)
+            if machine == 'sq2':
+                dts['Default'], _ = device_tree(lte_dt, machine, profile)
+            audit['lte'] = dict(lte_source, **lte_audit, enabled=True, fallback_unchanged=True)
         launchers = {entry: launcher((args.sealed_input/'launchers'/name).read_bytes(), machine, entry)
                      for entry, name in [('Default', 'closed.efi'), ('Fallback', 'mesa.efi')]}
-        prepared[machine] = (packed, dt, launchers, audit, changes)
+        prepared[machine] = (runtimes, dts, launchers, audit, changes)
     args.output.mkdir(parents=True)
     report = {'schema': 1, 'main_commit': pins['upstream_main'], 'hardware_tested': False,
               'device_writes': False, 'kernel_recompiled': False, 'profiles': {}}
-    for machine, (packed, dt, launchers, audit, changes) in prepared.items():
+    for machine, (runtimes, dts, launchers, audit, changes) in prepared.items():
         root = args.output/machine.upper()
         root.mkdir()
         hashes = {}
@@ -257,8 +276,8 @@ def main():
             dest.mkdir(parents=True)
             for name in ('Image', 'qebspilaa64.efi', 'tcblaunch.exe'):
                 shutil.copyfile(args.sealed_input/'common'/name, dest/name)
-            (dest/'android-el2.dtb').write_bytes(dt)
-            (dest/'initramfs.cpio.gz').write_bytes(packed)
+            (dest/'android-el2.dtb').write_bytes(dts[entry])
+            (dest/'initramfs.cpio.gz').write_bytes(runtimes[entry])
             (dest/'el2launch.efi').write_bytes(code)
             rows = {f.name: sha(f.read_bytes()) for f in sorted(dest.iterdir())}
             (dest/'SHA256SUMS').write_text(''.join(h+'  '+n+'\n' for n, h in rows.items()))

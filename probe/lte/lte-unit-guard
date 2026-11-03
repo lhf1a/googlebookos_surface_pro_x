@@ -1,0 +1,18 @@
+#!/bin/busybox sh
+# Read-only activation guard for the shared SQ1/SQ2 runtime. No NV transplant.
+set -eu
+export PATH=/bin:/sbin
+case " $(cat /proc/cmdline) " in
+ *' sq2.rescue=1 '*|*' sq2.lte=0 '*) exit 1;;
+ *' sq2.el2=1 '*) ;;
+ *) exit 1;;
+esac
+test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
+case " $(cat /proc/cmdline) " in *' nohibernate '*) ;; *) exit 1;; esac
+test "$(tr -d '\000' < /proc/device-tree/model)" = 'Microsoft Surface Pro X (SQ2)'
+serial=$(tr -d ' \r\n' < /sys/block/nvme0n1/device/serial)
+expected=$(cat /etc/sq2-lte/unit-serial)
+test -n "$serial"
+test -n "$expected"
+test "$serial" = "$expected"
+grep -qxF SQ2-INTERNAL-512-20261027 /media/esp/SQ2-SSD-ID.txt

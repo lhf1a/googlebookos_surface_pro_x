@@ -1,4 +1,4 @@
-项目标准构建入口：`scripts/build.py`，生成单个 SQ1/SQ2 通用镜像；默认设置可自定义。见 [标准构建](docs/STANDARD-BUILD.md)。
+**Project standard build entry:** `scripts/build.py` creates one SQ1/SQ2 disk image. Defaults remain customizable; see [standard build](docs/STANDARD-BUILD.md).
 
 # Googlebook OS on Surface Pro X SQ2
 
@@ -8,15 +8,17 @@ Unified SQ1/SQ2 offline build: [profiles, fixed inputs and limits](docs/UNIFIED-
 
 An Android-based Googlebook OS port for **Surface Pro X SQ2 / Snapdragon 8cx Gen 2**. Based on mica **16471258 (Android 17)** and Linux **6.3.8-sq2-android1**. This is **not ChromeOS Flex**.
 
-## Latest progress — 2026-11-02
+## Latest progress — 2026-11-03
 
 - Mainline commit `fee67b2` enables USB networking and Android USB input hotplug in the default two-entry build. The USB payload matches the reboot-tested device package; 30 USB tests passed. This does not mean 46 adapter models were tested or that a fresh complete EFI build was performed: the latter still needs the pinned private input caches.
 - Normal EL2 keeps the explicitly selected existing passwordless-user login, but does **not** open Terminal or run the KVM witness at boot. Terminal remains available manually.
-- LTE lab progress includes a bound IPA driver/netdev and accepted device-generated NV/production MCFG. QMI EFS metadata works, but file reads are rejected and the modem remains in factory-test mode; cellular registration/data service is **not available**. Experimental payloads are not promoted to the normal boot.
+- Latest LTE branch `0100429` is merged. SQ2 native Radio/SIM settings, real LTE IPv4 data, mobile-data/airplane-mode controls and Wi-Fi fallback passed the recorded independent and normal-default reboots. Occasional registration rejection remains a known limit.
+- LTE/Radio is **on by default in the standard build** (`--lte off` opts out), with strict private Radio04 inputs and unit-bound activation. The original non-LTE Mesa fallback is preserved. SQ1 LTE is not validated; see [baseline integration and provisioning limits](docs/LTE-BASELINE.md).
+- Unified SQ1 GPU661 / SQ2 GPU700, 60Hz / 2.7Gbps×4, KSU/EL2 and first-touch calibration defaults remain customizable. The merged idle-detection/calibration app source is retained; include its compiled bundle explicitly with `--touch-bundle`.
 
 ## Feature status
 
-Updated **2026-11-02** · ✅ Available · ⭕️ Partially available · ❌ Unavailable or not confirmed
+Updated **2026-11-03** · ✅ Available · ⭕️ Partially available · ❌ Unavailable or not confirmed
 
 | Feature | Status | Notes |
 | --- | :---: | --- |
@@ -49,7 +51,7 @@ Updated **2026-11-02** · ✅ Available · ⭕️ Partially available · ❌ Una
 | Suspend / hibernation | ❌ | Disabled; true suspend/resume unresolved |
 | Orientation sensors | ❌ | Not available |
 | Built-in cameras | ❌ | Not available |
-| LTE | ❌ | IPA netdev and production MCFG available in lab; factory-test / EFS-read blockers remain; no cellular service |
+| LTE | ⭕️ | SQ2: native Radio, SIM/signal/settings and real single-USIM LTE IPv4 data verified across reboot; unit-private calibration/APN required. No voice/SMS/IMS/eSIM/5G; SQ1 and IPv6 unverified |
 
 Availability is scoped to the documented SQ2 configuration, not every peripheral or application. Long-term stability and battery life remain open work. A later boot had transient speaker silence that the user reported recovered without audio changes; the cause of the recorded SoundWire transport errors is still unresolved, separate from the verified stop-pop fix.
 
@@ -57,11 +59,12 @@ Availability is scoped to the documented SQ2 configuration, not every peripheral
 
 The current mainline SQ2 default bundle uses **EL2, Qualcomm Vulkan, native 60 Hz and GPU 700 MHz / RPMh432**, with exactly the new default and working Mesa fallback entries. It includes the Linux Terminal, EL2 H.264 decoding, adopted-ADSP audio/stop-pop fixes, USB NIC modules and Android USB input recovery. The legacy EL1 installer requires `--legacy-el1`; see BUILD for pinned private inputs and device restrictions.
 
-The LTE research snapshot documented here is based on `73ea6ee` and does not yet contain the USB default-build integration in `fee67b2`. Do not deploy its older boot bundle over the validated device configuration.
+The standard single-image build merges the USB/EL2 baseline with LTE/Radio by an audited LTE-only overlay, not by replacing the system with an older research bundle. Supply the exact private Radio04 input via `--lte-bundle`, or explicitly use `--lte off`; missing LTE inputs fail closed. Model/serial/ESP checks prevent transplanting one unit's FSG to SQ1 or another SQ2. This merge does not rebuild the previously delivered IMG/GZ or deploy to a device.
 
 - [Build & deployment](docs/BUILD.md) · [Current handoff](docs/HANDOFF.md) · [Open work](docs/TODO.md)
 - [USB storage/audio](docs/USB-FUNCTIONS.md) · [Bluetooth input](docs/BLUETOOTH-INPUT.md) · [Microphone](docs/MICROPHONE.md)
-- [LTE bring-up](docs/LTE.md) · [LTE Windows reference](docs/LTE-WINDOWS-REFERENCE.md)
+- [LTE baseline](docs/LTE-BASELINE.md) · [Native Radio](docs/LTE-RADIO.md) · [LTE data](docs/LTE-DATA.md)
+- [LTE bring-up history](docs/LTE.md) · [LTE Windows reference](docs/LTE-WINDOWS-REFERENCE.md)
 - [Video decoding](docs/VIDEO-DECODE.md) · [Codec limits](docs/VIDEO-CAPABILITY-ALIGNMENT.md)
 - [Graphics compatibility](docs/WILD-LIFE.md) · [Closed graphics](docs/QUEST2-GPU-RESEARCH.md) · [Display profiles](docs/DISPLAY-REFRESH.md)
 - [Sources & redistribution](docs/PROVENANCE.md) · [Contributor instructions](AGENTS.md)

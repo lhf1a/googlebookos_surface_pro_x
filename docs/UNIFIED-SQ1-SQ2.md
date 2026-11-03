@@ -1,3 +1,6 @@
+> 2026-11-03 更新：默认项已接入 LTE/Radio 增量，Mesa 回退保持非 LTE；仍为一个通用镜像。
+> 私有输入、默认 on/off 与单机激活边界以 [LTE 默认基线](LTE-BASELINE.md) 为准。
+
 # SQ1 / SQ2 unified build — 2026-11-02
 
 ## Scope and offline decision
