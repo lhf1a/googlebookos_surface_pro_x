@@ -78,3 +78,34 @@ storage_type1及read1与[公开SCM storage补丁](https://lists.openwall.net/lin
 
 本轮5项Python测试、PowerShell布局/缺路径/拒绝覆盖测试及原件26处机器码校验通过。
 未将诊断程序接入常规启动，未把失败FSG放入构建输入。
+
+## 早期 EFS 日志试验：有握手，但没有 DATA 日志
+
+为避免再换相同校准输入，另建私有一次性候选，仅在 `wifi-services` 的
+`el2-rmtfs-start` 前加入限时采集器及启动门；FSG 仍为 bd124…，所有其他有效
+cpio 条目一致，原凭据成员最后。主机 ASan/UBSan、ARM64/QEMU 自测通过，
+补丁可精确重建候选，离线回滚恢复原镜像 SHA。此工具没有加入公共默认构建。
+
+正常 BASELINE boot4451de32… → 候选 bootd5727d78… → 实际回滚 bootc0c1b5f9…
+均为 DMS2/接口0、NAS0/PS2、signal74；候选和回滚均 NV453=1、rfnv 完整枚举0项。
+采集器在启动后约19.667秒完成 DIAG feature002051 握手，并发送固定 SSID9/mask15；
+35秒窗口 `data_packets=0, efs_messages=0, malformed=0`，随后发送 SSID9/mask0，
+NV/RFNV 观察完成并 exit0。RMTFS 仍读取 FS1/FS2 sector1 和 FSG 全4096 sectors。
+这是实际无 DATA 的观察，**不是“EFS 没报错”、解密失败或设备绑定的证明**。
+
+限制：发送成功不是 mask ACK；没有切换 DIAG buffering/real-time 模式；未实现 QSR4。
+启动门与采集器共用日志文件的独立写偏移可能覆盖门时间标记，本轮该标记确实缺失，
+因此不能据此证明日志启用早于首次 FSG 恢复。原 QDB 的 authenticate/decompress
+字符串仅是模板，不能当成本轮真实错误。mask0 清理也不代表恢复未知的原 mask；
+已用真正的正常重启退出实验，而非仅关闭程序。
+
+回滚后默认镜像9721b3ad…、Mesa回退9fd377aa…、原菜单2776eded…及两套载荷
+全部哈希不变。试验目录/启动采集器已移除，常亮锁重新持有，screen_only=Y、
+声卡/AUDIO_READY/实际HAL af73f71e…保持。私有完整证据在原工作区
+`out/lte-main-review-20261103/efs-logs-v1/`，扩展原四角色记录。
+
+晚期 GET-mask 尝试未收到 feature，查询没有发出；随后这次早期启动虽完成握手，
+但也没得到区分 restore/auth/decompress 的日志。按照连续两次无区分证据的规则，
+停止在该路线盲加协议参数，转回成功 SQ2 与当前 SQ1 的有效启动环境对照。
+本工作区缺 SQ2 当前可信 SSH 主机记录，已请求确认地址/指纹；不绕过主机验证，
+也不以历史 SQ2 成功冒充当前对照。两机通用 LTE 初始镜像验收仍未完成。
