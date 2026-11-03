@@ -633,3 +633,20 @@ bootb3221fcd…，SPIready/count1/bus_error2，IPTSd与Android框架PID保持；
 仍缺同候选由PMIC直接唤醒，以及重复恢复/原生策略/能耗验证。准备同boot第二次
 独立单任务对照：只改变按键协调时间，保留SSAMenabled、相同模块和保护；新日志目录
 及SPIcount1→2检查防止重复执行。尚未触发，待现场配合确认，不自动重试。
+
+
+### 2026-11-04：同候选第二轮真实休眠由PMIC结束，持续触摸/键盘通过
+
+用户确认可配合后，在同bootb3221fcd…、相同模块与wake策略下，仅运行新日志目录的一次
+任务请求。machine_suspend3380.674249→3432.275442，51.601193秒；内核明确IRQ216唤醒，
+trace记录pm8941_pwrkey按下/释放，无SSAM唤醒IRQ。2336条回调全返回0且无丢失，
+SPIcount1→2、bus_error2→3，恢复全零报头后Error Handler完成恢复，ready/IPTSd正常。
+PM_RETURN/cleanup/wrapper0，Android Awake，全局强制禁锁false/集合空；用户明确确认
+已亮屏、触摸持续正常、键盘正常。这是本SPI候选的直接PMIC唤醒证据，与前轮SSAM唤醒
+后再按键亮屏区别记录。两轮真实恢复通过仍不代表原生自动休眠或能耗已验收。
+
+末态：nativeN/owner0/token0、pm_test none/debug0/times0、SSAMenabled，自己的tracefs
+已卸载；原ESP27项匹配、9份once.env=0，正常载荷与默认菜单未变。新日志在
+spi-input/real-2、real2-responses与real2-final-state.txt。接下来离线准备受限的原生
+服务试验：人工注册owner前保持guard，只准入一次请求并可撤销，保留应用wakelock；
+不把当前诊断1.1秒SSAM延时提升正常，也不直接启用无人值守autosuspend。

@@ -1,18 +1,16 @@
-## 2026-11-04：SPI输入恢复候选已获持续触摸反馈，直接PMIC唤醒待验
+## 2026-11-04：SPI恢复候选两轮真实恢复通过，开始准备受限native试验
 
-用户补充“已亮屏，触摸持续正常，键盘正常”；同bootb3221fcd…实读SPIready/count1/
-bus_error2，IPTSd/框架PID保持，PMIC计数0→2、Android Awake/lastWakeReason1。
-按键发生在SSAM结束131.398212秒内核睡眠之后，因此本轮证明SSAM恢复后的实际
-输入正常，尚不证明此候选由PMIC直接结束machine_suspend。
-
-源码7adbed3修正open开IRQ顺序/无效报头错误恢复，实际函数故障注入/严格构建/回滚及
-受保护platform通过。当前模块3e9e6317…、私有包2e4427e4…，仍带SSAM 1.1秒诊断延时。
-下一步准备同boot新目录的单任务PMIC协调对照，SPIcount1→2；尚未触发，待现场确认。
-不重启、不修改正常载荷、不自动重复或启用native、不全局禁锁、不热卸载。
+当前bootb3221fcd…，SPI候选3e9e6317…/私有包2e4427e4…、SSAM1.1秒诊断模块保持。
+第一轮SSAM唤醒后按键亮屏/持续输入正常；第二轮machine_suspend51.601193秒由
+PMIC IRQ216结束，无SSAM唤醒，2336条回调全0，SPIcount1→2、错误计数2→3，
+全零报头进入新Error Handler后恢复ready/IPTSd。用户确认持续触摸和键盘正常。
+这是直接电源键唤醒及同boot第二次恢复通过，不是原生自动休眠/能耗完成。
 
 原菜单/ESP27项保持，9份once.env=0，pm_test none/debug0/times0、nativeN、owner/token0、
 SSAMenabled，自己的trace挂载已清理。下一次普通启动回原正常入口。
-SSAM逐事件唤醒/原生锁策略、多轮恢复和能耗/SQ1回归仍未完成。详见休眠记录末节。
+下一步先离线准备native单请求准入与人工注册流程，避免旧native入口启动即无限许可；
+保留应用锁，不使用全局禁锁，不提升SSAM固定延时，不热卸载。不自动触发新睡眠。
+SSAM逐事件唤醒、原生策略、多轮/能耗/SQ1回归仍需完成，详见休眠记录末节。
 
 ## 2026-11-04：休眠目标已暂停；候选触摸恢复失败，已回原正常启动
 
