@@ -1,3 +1,23 @@
+## 2026-11-04：用户要求正常化策略并推送，正常候选已启动，待现场锁屏验收
+
+用户明确授权部署正常Android自动休眠/锁屏，恢复系统默认时间；覆盖此前不许持续native
+的历史约定，保留未注册调用者保护/nohibernate和原Mesa回退。当前boot a77ea624…，
+独立EFI/SQ2Power：Image86d896ad…、initrd999cbadd…、launcher99a81102…；persistent
+owner2690，test/trialN，SPI3e9e6317…就绪。SSAM回原773f191c…无1.1秒诊断延时，
+框架回stock126efcf2…无AC宽限补丁，lab保活退出。音频/remoteproc/FUSE核对通过。
+实际内核QEMU正常保护与注册进程连续两次到达合成失败PM回调/撤销owner通过；未入真实idle。
+
+已显式一次删除当前用户关屏/锁后/sleep_timeout及充电常亮覆盖、set-disabled false，
+未更改凭据。框架实读关屏15000ms、sleep_timeout-1、充电常亮默认1；LockSettings服务
+报告user10锁屏未禁用，WindowPolicy showing/inputRestricted/enabled均true。CLI get-disabled
+仍返回true，与服务dump不同，故需真实UI验收，不能只凭CLI判定。当前无native尝试，
+合法后台锁保留；尚未证明本正常stock组合实际睡眠或连续稳定性。
+
+一次性启动已消费；菜单目前仍是消费后回原正常项的临时菜单，待用户锁屏/解锁/输入/
+自动熄屏反馈再把同包设为默认。原默认载荷和Mesa未覆盖。源码b867659及后续记录待推送。
+正常构建默认android策略，需匹配power-bundle；可用--suspend-policy screen-only。
+MIGRATION.md为任务前改动，未混入休眠提交，备份diff在out/power-normal-20261104。
+
 ## 2026-11-04：native单次实际睡眠28.36秒，SSAM后按键亮屏及输入恢复通过
 
 同boot e7638f55…第二轮只增唤醒源追踪，实际machine_suspend28.355558秒、IRQ173，

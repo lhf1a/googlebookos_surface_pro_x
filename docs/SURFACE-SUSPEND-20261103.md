@@ -777,3 +777,26 @@ mLastWakeTime1131167ms晚于machine_suspend结束918.896652秒；这明确是SSA
 正常入口，不启连续自动休眠。下一步应优先区分首次prepare中止的事件来源与SSAM/
 定时器提前唤醒策略，再做有界重复验证；1.1秒诊断延时不是量产修复，单次许可造成的
 后续-95是实验门行为，不应据此修改应用锁或宣称原生框架故障。能耗/SQ1仍未验收。
+
+
+### 2026-11-04：按用户要求切换正常Android策略（原型限制仍在）
+
+用户要求保存工作、开启全部正常化休眠/锁屏策略并推远端；随后明确同时部署验证、
+时间恢复系统默认。持续native现获授权，正常入口不再使用单次120秒门。实施保持
+screen_only以保护未注册进程，只由原生UID1000服务持续申请s2idle；fallback仍screen-only。
+恢复stock框架/SSAM，去除实验JAR和1.1秒诊断延时，不替换正常应用wakelock策略。
+
+比较假设是原生持久准入与stock组件可维持正常运行；改变为持续gate、去掉两处诊断策略，
+观察启动/模块/owner、正常锁屏时间与真实输入/自动休眠，出现恢复失败即回原载荷并记录，
+不把多处变化后的行为差异唯一归因。实际Image86d896…在QEMU两次获准且可撤销；
+普通root请求仍拒绝，原screen-only freeze/mem/disk拒绝。16项power/defaults/once/debug
+测试通过，实际打包只改6项有效条目，私有身份成员最后且不变；原stockSSAM保持。
+
+当前SQ2Power候选一次性启动boot a77ea624…；运行init511cf1af…、SPI模块/loaded note
+匹配，nativeowner2690，lab日志NO_LAB_WAKELOCK，JAR126efcf2…/SSAM773f191c…，
+声卡/AUDIO_READY/HAL774cd7e7…、remoteproc attached、FUSE通过。用户默认时间恢复
+操作已执行；框架关屏15000ms、锁后设置null（使用framework默认），sleep_timeout-1、
+stay_on_while_plugged_in默认1（系统自身充电策略）。锁服务IsLockScreenDisabled false、
+WindowPolicy showing/inputRestricted/enabled true，凭据NONE未创建/清除。CLI get-disabled
+仍true，记录此差异并等待UI证明。当前nativeattempts0，保留后台应用锁，不能称正常包
+实际休眠已通过。原始正常/Mesa载荷保留；准备在现场反馈通过后提升同一候选菜单。
