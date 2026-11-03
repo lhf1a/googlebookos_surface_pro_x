@@ -327,3 +327,49 @@ pwrite不属于本观察目标。原件另有base非空的memcpy路径，单纯h
 更不能把可见尾部当作最后真实操作。观察记录需独立fd直接write、仅输出hash/计数/状态，
 不导出内容、不重新执行原写、不改变NV。以上仅确定可观察调用点；观察器尚未实现或部署，
 没有新增LTE成功结论，AP侧readback也不能证明Modem侧可见性或固件接受结果。
+
+## 2026-11-03：原 RMTFS 的 FSG 逐扇区交付已在 SQ1 完整捕获
+
+新增手动实验室工具 `probe/lte/rmtfs-delivery-observe.c`，不是默认LTE实现或新存储后端。
+只对固定原RMTFS85668122显式LD_PRELOAD；校验原件/实际sysfs/字符节点，在真实pwrite
+返回后逐扇区只读回读，保存并恢复原返回值/errno，原调用只执行一次。独立新建0600日志，
+只输出hash/计数/状态，不输出NV内容；完整记录须以record_end=1结束。固定4序列/
+32768调用/8MiB预算，递归/竞争/短读/日志失效为inconclusive，不改变原写结果。
+保存log/read fd身份，发现复用不读写或误关他人fd；这是固定非对抗原件的受控观察，
+不声称fstat消除了所有跨线程TOCTOU，也不把次数有界说成可中断驱动调用的墙钟超时。
+
+`python3 scripts/verify-rmtfs-delivery.py --output out/rmtfs-delivery-check`
+实际31项host ASan/UBSan与ARM64/QEMU输出相同，涵盖SHA、完整覆盖、错误/短读、
+错序、输入非FSG、并发/递归/预算与fd复用。生产库默认opt-out真实libc pwrite的
+BASELINE/MODIFIED/ROLLBACK均 `pwrite=512 errno=123 readback=512 equal=1`、exit0。
+原ELF+原loader/libc下QEMU加载验证通过，GLIBC_2.17 pwrite确实绑定到观察库；
+安全invalid-option路径三阶段输出相同/exit1（原件不支持-h，不是设备功能测试）。
+兼容性仅覆盖实际原glibc，不声称适用于所有旧glibc。原测试夹具缩进编译失败已修正留档。
+
+只在SQ1镜像副本改变两项：EL2 helper最后的exec增加显式env/preload，以及新增观察库。
+非EL2分支、原RMTFS、FSG/seed、Radio/rmnet、固件、内核/DT、音频和最后凭据层不变。
+候选4bfe6373…；库2338d645…；有效cpio逐项核对、补丁重建、独立副本的原ROLLBACK.sh
+恢复原SHA通过。一次性菜单保持两项，消费env为0并重新读回确认后才进入候选。
+
+实际 BASELINE boot17d11376 → MODIFIED bootbf0efa22 → ROLLBACK boote70d6a67，
+同一QMI/安全观察三次exit0：均DMS2、接口0、NAS registration0/PS2/LTE0、signal74。
+候选运行原RMTFS hash不变，maps及库hash证实加载，不是只在打包文件里加入工具。
+直接独立日志完整捕获：coverage1/fsg1，4096次512B写与4096次回读、各2097152字节；
+input与readback SHA均bd124b2d…，differences0、first_difference-1、real/read return512，
+本次观察区间124238907ns。**证明这个观察窗口内AP侧逐扇区写后读回一致，不证明
+未经观察的时序、Modem可见性、认证/恢复成功或RF初始化已完成。** LTE仍未恢复。
+因此不能再把上轮事后共享窗口差异本身当成AP复制错误，不盲改cache或重写RMTFS。
+
+已真正回原默认，原菜单2776eded、默认9721b3ad、Mesa回退9fd377aa及保护载荷全通过；
+观察库和日志在当前root不存在，RMTFS无预载，SQ1LteRead目录已移除。screen_only=Y、
+nohibernate、常亮锁、ALSA/AUDIO_READY及实际audio HAL af73f71e保持；无新增听感声明。
+回滚后独立只读UIM仍card_state1/app_type2/app_state7（USIM ready），工具随即移除。
+本轮未做新NV453/RFNV读取，不把旧boot的值当新结果；SQ2未连接/重启，仍按用户无SIM。
+
+下一缺口更精确：原日志iovec `(0:0)` 在encode/sendto之前打印，仅是响应字段。
+精确原件0x4e88调用sendto@GLIBC_2.17，其真实ret/errno尚未直接捕获；helper失败
+被压成-1，上层strerror(-ret)不等于真实errno。下一次只给同原路径补齐与FSG序列关联的
+QMI响应type/msgid/transaction/result/error、目标QRTR元数据与真实发送返回（不记录payload）。
+ret==len也只证明本机传输接受，不能跨越到基带接受结论；不重复已有交付试验或旧FSG组合。
+私有镜像/补丁/命令原始输出在原工作区out/lte-main-review-20261103/rmtfs-delivery-v1，
+扩展既有四角色，原文件保持。通用初始镜像的双机注册、PS、真实蜂窝数据验收仍未完成。
