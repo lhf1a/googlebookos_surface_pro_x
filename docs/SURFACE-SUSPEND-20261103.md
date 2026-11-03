@@ -705,3 +705,12 @@ pm_test none/debug0/times0，native attempts0、success0/fail0，SPIready/count0
 全局强制禁锁false/集合空，实验shell保活已无。未改应用锁、充电状态、锁屏或校准。
 尚未开放owner、关屏或进行native睡眠，后续须准备有界采集再现场协调。证据保存在
 native-once/boot-{audit,extra,kernel,menu-restore}、runtime-verified、loaded.config及notes。
+
+
+单次原生观察脚本已准备并仅上传到RAM，尚未执行；SHA3166940b…，主机/目标shell语法
+及单注册/无power-state直写检查通过。它限定当前boot/内核note与SPIcount0，使用独立
+trace实例采集组件/SSAM/电源键，调用原owner helper一次，普通关屏请求保留应用锁；
+一次消费或120秒窗口结束撤销owner，退出清理自己的trace挂载，不自动重试。
+内核120秒只是准入期限，不能保证睡眠后定时唤醒；必须现场物理按键恢复。
+当前AC在线/电量100%，已请求用户拔充电器并确认下一轮按提示135秒后按键配合；
+尚未收到该确认，保持owner0/ready，不发休眠请求。
