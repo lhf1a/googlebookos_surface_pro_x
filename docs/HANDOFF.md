@@ -1,3 +1,20 @@
+## 2026-11-04：SPI-HID 输入恢复候选受保护检查通过，真实对照待现场协调
+
+目标已恢复。候选把ll_open启用IRQ移到电源/复位稳定后，并为无效报头补上已有有界
+error_work恢复。实际函数故障注入、fresh/V1升级/幂等/失败不写入、严格模块构建与
+副本回滚通过。新模块3e9e6317…，私有包spirc0001.cpio.gz/2e4427e4…只替换SPI；
+保留SSAM 1.1秒诊断模块（非最终方案），未提升正常载荷。
+
+当前debug boot3daff131…实际file/note匹配；Asleep/platform的2336条回调全返回0，
+SPIcount0→1。open结束后仍有全零报头，但新Error Handler被触发，最终ready/IPTSd
+恢复；不能称推迟IRQ已消除根因。用户确认连续半分钟触摸及键盘正常，后续错误计数稳定2。
+原菜单已恢复、ESP27项匹配，8份once.env=0，trial/nativeN、owner/token0、pm_test none，
+临时trace挂载已清理。下一次普通重启仍回正常入口。
+
+同模块trial启动器0b3e3c92…已存独立路径，但尚未安装一次性trial菜单/重启或发起真实睡眠；
+正在等用户确认可继续15秒按键协调。不改锁屏/校准，不热卸载。详见休眠记录末节与
+out/suspend-resume-20261104/spi-input私有证据。上轮真实恢复失败不能被本次debug结果覆盖。
+
 ## 2026-11-04：休眠目标已暂停；候选触摸恢复失败，已回原正常启动
 
 优先读取休眠记录末节。带键盘盖、SSAMenabled、1.1秒诊断窗口的单任务试验虽由PMIC

@@ -3,11 +3,54 @@
 from pathlib import Path
 import sys
 
+def repair_resume_input(source):
+    # Opening the IRQ while reset is asserted can read an all-zero header.
+    marker = 'SQ2_SPI_PM_INPUT_RECOVERY_V2'
+    if marker in source:
+        return source
+    irq = """	if (!shid->irq_enabled) {
+		enable_irq(spi->irq);
+		shid->irq_enabled = true;
+	} else {
+		dev_err(dev, "%s called with interrupt already enabled\\n",
+								__func__);
+		shid->logic_error_count++;
+		shid->logic_last_error = -EEXIST;
+	}
+"""
+    # Work only inside open; similarly shaped IRQ handling elsewhere is unrelated.
+    start = source.index('static int spi_hid_ll_open(')
+    end = source.index('static void spi_hid_ll_close(', start)
+    body = source[start:end]
+    assert body.count(irq) == 1, 'SPI open IRQ sequence changed'
+    body = body.replace(irq, '', 1)
+    anchor = """	ret = spi_hid_deassert_reset(shid);
+	if (ret) {
+		dev_err(dev, "%s: failed to deassert reset\\n", __func__);
+		goto err2;
+	}
+"""
+    assert body.count(anchor) == 1, 'SPI open reset sequence changed'
+    body = body.replace(anchor, anchor + '\n	/* ' + marker + ': receive only after power/reset settle. */\n' + irq, 1)
+    source = source[:start] + body + source[end:]
+    invalid = """		shid->bus_error_count++;
+		shid->bus_last_error = ret;
+		goto out;
+"""
+    start = source.index('static void spi_hid_input_header_complete(void *_shid)\n{')
+    end = source.index('static int spi_hid_bus_input_report(', start)
+    body = source[start:end]
+    assert body.count(invalid) == 1, 'SPI invalid-header recovery changed'
+    body = body.replace(invalid, invalid.replace('\t\tgoto out;', '\t\tschedule_work(&shid->error_work);\n\t\tgoto out;'), 1)
+    return source[:start] + body + source[end:]
+
+
 base = Path(sys.argv[1])
 c = base / 'spi-hid-core.c'
 h = base / 'spi-hid-core.h'
 s = c.read_text()
 if 'SQ2_SPI_PM_V1' in s:
+    c.write_text(repair_resume_input(s))
     raise SystemExit(0)
 hs = h.read_text()
 assert '\tbool irq_enabled;' in hs
@@ -88,6 +131,7 @@ assert s.count(marker) == 1
 s = s.replace(marker, pm + marker)
 s = s.replace('\t&dev_attr_ready.attr,', '\t&dev_attr_ready.attr,\n\t&dev_attr_resume_count.attr,')
 s = s.replace('\t\t.name\t= "spi_hid",', '\t\t.name\t= "spi_hid",\n\t\t.pm\t= &spi_hid_pm_ops,')
+s = repair_resume_input(s)
 h.write_text(hs)
 c.write_text(s)
 print('SPI-HID system sleep callbacks applied')

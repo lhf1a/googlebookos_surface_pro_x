@@ -543,3 +543,42 @@ PM回调仍返回0；可见回调返回码不能替代设备ready和持续输入
 screen_onlyY/nohibernate，无trial参数；SPI ready、IPTSd运行并重新发布虚拟输入。
 原ESP27项重新校验全通过，Android boot_completed1/Awake、强制禁锁false/组集合空。
 用户明确确认“已到桌面，触摸恢复”。恢复期间没有发起新的睡眠；目标继续保持用户暂停状态。
+
+
+### 2026-11-04：恢复研发，SPI-HID 全零报头恢复候选
+
+目标恢复后保持原系统，不重放真实睡眠。源码ll_open在power_up/deassert_reset前启用IRQ，
+故障日志中全零报头也早于open完成；无效报头增加计数后直接退出，没有排入既有error_work。
+这支持时序/恢复缺口假设，尚不能证明是唯一硬件根因。候选将IRQ移至电源/复位稳定后，
+并在无效报头分支安排已有有界错误恢复；不增加重试循环、不阻塞等待ready、不改校准。
+
+`scripts/check-spi-hid-resume.py`抽取真实open/header函数编译执行，ASan/UBSan验证旧行为
+与修复后的时序、供电/复位失败、零报头/版本错误/超长、正常数据/响应、PM/off保护。
+fresh/V1升级结果一致、幂等、未知锚点拒绝且不部分写入通过。匹配完整Module.symvers
+严格构建baseline/modified/rollback，基线与回滚二进制相同；初始Makefile时钟偏差记录保留，
+校正独立副本mtime后最终三轮零告警且产物一致。完整diff重建/副本回滚通过。
+实际IRQ为msmgpio122 Edge；匹配pinctrl-msm保留masked边沿锁存，unmask不ack；仍需实机
+验证恢复边沿。67个外部符号匹配新取的运行内核导出，vermagic一致。
+
+私有候选模块3e9e6317…、包2e4427e4…、debug启动器f75c4ecb…，只替换上一SSAM诊断包
+的SPI模块、保留最后凭据成员。SSAM固定延时仍仅为诊断，不写入正常builder。
+原ESP27项校验全通过；候选已写独立路径并通过hash/gzip，正常载荷保持。
+用户确认键盘盖接入并在场，下一步一次性启动后进行受保护检查。
+
+本轮实验假设：稳定后接收中断并补齐无效报头恢复，可避免SPI恢复后长期not ready。
+变量：仅SPI模块两个紧密相关输入恢复修正；SSAM诊断、内核和其他载荷保持上轮。
+区分观察：实际加载note/hash、SPI ready和错误计数、回调/IRQ时序、持续触摸输入。
+停止条件：首个ready超时、输入失败或异常即取证回退；不自动重试真实休眠、不热卸载。
+证据位于忽略的`out/suspend-resume-20261104/spi-input/`。实机结果尚未取得。
+
+
+候选debug启动boot3daff131…成功，用户确认桌面、触摸和键盘正常；实读SPI文件
+3e9e6317…且loaded ELF note与候选一致，SSAM保持97d51f45…。恢复原菜单后ESP27项全匹配，
+8份once.env均为0。音频HAL774cd7e7…、AUDIO_READY、ALSA/FUSE和attached remoteproc检查通过。
+
+一次Asleep/platform受保护检查返回0，2336条回调全返回0、无trace丢失；SPIcount0→1，
+ready恢复，IPTSd换新进程，Android框架PID保持。关键日志：open结束156.638036后，
+156.638579仍有全零报头，156.638682随即Error Handler，最终ready且bus_error1→2。
+因此“仅推迟IRQ即可消除全零报头”未获支持，但新错误恢复路径本轮确实被触发且恢复；
+不能将两处改动共同成功当作唯一根因证明。用户连续操作触摸约半分钟后确认持续正常，
+键盘也正常。尚无本候选真实machine_suspend；原上轮真实恢复失败结论保留。

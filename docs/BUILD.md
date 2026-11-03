@@ -1592,3 +1592,14 @@ SSAM事件诊断：`surface-pm-debug`在内核提供时同时启用SSAM接收事
 tracepoint，用于关联EC事件与组件恢复；缺少时跳过，不改变受保护阶段准入。
 事件元数据只能定位接口，不能直接判定有效输入或真实唤醒根因；本轮SQ2证据见
 SURFACE-SUSPEND-20261103末节。
+
+
+### 2026-11-04 SPI-HID 恢复输入候选验证
+
+`patch-sq2-spi-pm.py`同时修正open启用IRQ顺序与无效报头进入既有错误恢复；已打V1的
+源码支持增量升级，锚点不匹配时在写文件前退出。只影响后续构建，不自动部署设备。
+`scripts/check-spi-hid-resume.py UNPATCHED_SPI_HID_DIR --v1-source V1_SPI_HID_DIR`
+抽取实际函数在主机故障注入，依赖C编译器及ASan/UBSan。它验证协议/调用顺序与错误
+分支，不能模拟物理IRQ、SPI控制器或证明触摸恢复。模块仍须以匹配内核完整Module.symvers
+构建，核对运行file/note和有效initramfs，受保护阶段及真实休眠分别验收。
+当前候选及限制见SURFACE-SUSPEND-20261103末节；正常screen_only/nohibernate不变。
