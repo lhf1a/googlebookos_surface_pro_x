@@ -1,0 +1,80 @@
+#!/bin/busybox sh
+# Explicit PM debug stages only. Never arm a real-sleep caller or token.
+set -eu
+export PATH=/bin:/sbin
+[ "$#" = 2 ] || { echo 'usage: surface-pm-debug freezer|devices|platform NEW_LOG_DIR' >&2; exit 2; }
+stage=$1
+case "$stage" in freezer|devices|platform) ;; *) echo INVALID_DEBUG_STAGE >&2; exit 2;; esac
+params=/sys/module/suspend/parameters
+power=/sys/power
+trace=/sys/kernel/tracing
+[ "$(cat "$params/screen_only")" = Y ]
+[ "$(cat "$params/screen_only_test")" = Y ]
+[ "$(cat "$params/screen_only_trial")" = N ]
+[ "$(cat "$params/screen_only_autosuspend")" = N ]
+[ "$(cat "$params/trial_pid")" = 0 ]
+[ "$(cat "$params/autosuspend_tgid")" = 0 ]
+grep -q '\[s2idle\]' "$power/mem_sleep"
+grep -q '\[none\]' "$power/pm_test"
+[ -d "$trace/instances" ] || { echo TRACEFS_REQUIRED >&2; exit 1; }
+debug=$(cat "$power/pm_debug_messages")
+times=$(cat "$power/pm_print_times")
+delay=$(cat "$params/pm_test_delay")
+log=$2
+mkdir "$log"
+exec > "$log/summary.log" 2>&1
+instance=$trace/instances/surface-pm-debug
+mkdir "$instance"
+cleanup() {
+ result=$?
+ trap - EXIT
+ set +e
+ cleanup_failed=0
+ echo 0 > "$instance/tracing_on" || cleanup_failed=1
+ cat "$instance/trace" > "$log/trace.txt" || cleanup_failed=1
+ dmesg > "$log/kernel.txt" || cleanup_failed=1
+ echo none > "$power/pm_test" || cleanup_failed=1
+ echo "$debug" > "$power/pm_debug_messages" || cleanup_failed=1
+ echo "$times" > "$power/pm_print_times" || cleanup_failed=1
+ echo "$delay" > "$params/pm_test_delay" || cleanup_failed=1
+ rmdir "$instance" || cleanup_failed=1
+ [ "$result" != 0 ] || result=$cleanup_failed
+ sync || result=1
+ echo "CLEANUP_EXIT=$result"
+ exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+cat /proc/sys/kernel/random/boot_id > "$log/boot-before"
+cat /proc/cmdline > "$log/cmdline"
+cat "$power/suspend_stats/success" > "$log/success-before"
+cat "$power/suspend_stats/fail" > "$log/fail-before"
+echo 0 > "$instance/tracing_on"
+echo nop > "$instance/current_tracer"
+echo 1024 > "$instance/buffer_size_kb"
+echo boot > "$instance/trace_clock"
+echo 'action != "timekeeping_freeze"' > "$instance/events/power/suspend_resume/filter"
+echo 1 > "$instance/events/power/suspend_resume/enable"
+echo 1 > "$instance/events/power/device_pm_callback_start/enable"
+echo 1 > "$instance/events/power/device_pm_callback_end/enable"
+echo 1 > "$power/pm_debug_messages"
+echo 1 > "$power/pm_print_times"
+echo 5 > "$params/pm_test_delay"
+echo "$stage" > "$power/pm_test"
+grep -q "\[$stage\]" "$power/pm_test"
+echo "HYPOTHESIS=debug_$stage isolates entry callbacks without actual idle"
+echo "VARIABLE=pm_test_$stage; real_sleep_gates_disabled"
+echo 'DISTINGUISH=PM return, callback errors, unchanged boot'
+echo 'STOP=one request; no retry; debug mode reset on return'
+sync
+echo 1 > "$instance/tracing_on"
+result=0
+echo freeze > "$power/state" || result=$?
+echo 0 > "$instance/tracing_on"
+echo "PM_RETURN=$result"
+cat /proc/sys/kernel/random/boot_id > "$log/boot-after"
+cmp "$log/boot-before" "$log/boot-after"
+cat "$power/suspend_stats/success" > "$log/success-after"
+cat "$power/suspend_stats/fail" > "$log/fail-after"
+exit "$result"

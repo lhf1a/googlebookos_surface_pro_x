@@ -1,3 +1,5 @@
+> 后续：用户已于同日重新接续研发。最新受保护阶段结果和待协调试验状态见文末；历史黑屏失败及其证据缺口仍有效。
+
 # SQ1/SQ2 通用休眠实验收尾 — 2026-11-03
 
 分支：`codex/suspend-fix-5.94-20261103`。工作区：
@@ -166,3 +168,110 @@ VERIFICATION 包含命令、输入、原 stdout/stderr/退出状态、哈希、�
 Android 与候选的环境/有效文件；不要直接重复强制禁锁或凭空重写驱动。
 必须验证真实电源键导致 native suspend、物理唤醒、可解锁/触摸、重复恢复及
 驻留/能耗，才能宣称原目标完成。当前没有该证据。
+
+
+## 重新接续：最新 main 与 SQ2 受保护阶段检查（2026-11-03）
+
+用户明确要求拉取 main、检出休眠开发分支并继续研发。已将本地 main 快进到
+`7b189bd`，并合入本分支；合并提交 `7df7710`。原有 MIGRATION.md 未提交内容
+完整保留，不纳入本次休眠修改。工作始终在 Ubuntu-24.04 的
+`/mnt/spx-workspace/chromebookOS`，Windows 目录只作启动入口。
+
+严格校验已信任 SSH 主机身份后，现场设备确认为 SQ2，恢复后的 boot 仍为
+`ffad6382…`；正常 Image、initramfs、菜单哈希与上节恢复记录一致。
+旧 ESP 日志已取回，显式禁锁失败轮仍只有 COMMAND_EXPLICIT_SLEEP，无新增
+驱动阶段或清理证据；不重写原失败结论。现有内核未启用 PSTORE_CONSOLE/FTRACE，
+也没有 ramoops 保留区；空 pstore 不能排除挂死或作为跨复位日志方案。
+
+新增 `prepare-surface-pm-debug.py` 只接收未签名、无 PE checksum 的 ARM64
+实验启动器，将唯一 UTF-16 LoadOptions 中的原生 autosuspend 许可改成仅调试阶段
+许可。其余字节及文件长度不变，保留原有路径、screen_only/nohibernate。
+签名/校验和、重复/矛盾/未知 suspend 选项和缺失保护均拒绝；这不是通用 EFI
+编辑器，不修改正常启动器。正常构建没有接入该工具。
+
+新增 `probe/test2/surface-pm-debug` 只接受 freezer/devices/platform，要求
+screen_only/test=Y、trial/autosuspend=N、token/owner=0、pm_test=none。
+为每次请求建立独立 trace instance，记录 PM 边界和设备回调，过滤
+`timekeeping_freeze` 洪泛；请求前落盘基线，返回后保存 trace/klog，恢复原调试
+属性、pm_test 和 trace instance。**这是返回后落盘，不能保证挂死后的晚期证据；
+超时或一次性菜单均不构成挂死自动恢复。**
+
+独立启动仍复用上节已启动验证的 `86d896ad…` Image 与 `39f1898b…` 实验
+initramfs，不将缺失的旧主机缓存伪称为本轮重新编译的内核。仅调试启动 boot
+`2fe750ff…`，test=Y、trial/autosuspend=N、token/owner=0；原生框架 JAR 绑定和
+owner helper 因无 autosuspend opt-in 退出，保留原 lab lock。原两项菜单在开机后
+已恢复原 hash，one-shot env 已实际消费为0。
+
+| 单次请求 | PM 返回 | success | fail | 观察 |
+| --- | --- | --- | --- | --- |
+| freezer | 0 | 0→1 | 0 | 五秒调试停顿后返回 |
+| devices | 0 | 1→2 | 0 | 设备挂起/恢复回调返回 |
+| platform | 0 | 2→3 | 0 | trace 含 late/noirq 的进入和返回 |
+
+三项均无 machine_suspend，不能称真实睡眠。boot 保持，用户确认屏幕、触摸、
+上滑解锁全部正常。ALSA/AUDIO_READY、attached ADSP、两用户 FUSE，以及实际
+音频进程 `/proc/PID/exe` 的 `774cd7e7…` 哈希已核对；没有新增听感验收。
+
+5组启动器/脚本测试（含11种 runner 拒绝条件及清理失败传播）、5项原菜单测试、4项通用规范
+测试通过，Python 编译与 shell 语法检查通过。没有把主机拒绝夹具当实机睡眠。
+原始包、执行脚本、日志和身份仅在忽略的 `out/suspend-resume-20261103/`。
+
+后续单任务对照使用独立 trial 启动器，仍保留原生 autosuspend 关闭、每任务
+五秒一次性 token 和 screen_only。它保留上述同一个 Image/runtime，不使用
+`cmd power sleep --disable-wakelocks`。必须等现场按键协调再触发，记录真实
+machine_suspend 区间、唤醒 IRQ、同 boot/PID、token 清理及实际解锁/触摸。
+当前三阶段通过只缩小调试路径的范围，不解释原生睡眠失败，也不证明能耗。
+
+
+单任务配置已另行启动到 `5bbbc8a3…`，screen_only/test/trial=Y，
+autosuspend=N、owner/token=0；未持 token 的请求在实机被拒绝。
+原菜单 `adc0afab…` 已恢复，trial env 已消费0，PMIC 电源键 wakeup=enabled；
+该检查时点尚未触发请求；随后用户确认按键协调，单次试验已执行且失败，见下节。
+旧脚本不可直接重用：须重新核对 boot、guard、owner/token、IRQ、物理状态与日志目录不存在。
+最终 helper 的清理失败传播增量另由主机夹具覆盖；前三项实机检查使用此前
+同一控制逻辑版本，不把该小增量说成重新做过完整实机检查。
+
+
+### SQ2 单任务真实请求：短按仍黑屏（同日接续）
+
+- 假设：先前失败也可能与原生 framework 强制禁锁/恢复控制有关；同一 Image/runtime
+  的单任务 token 请求可检验现象是否仅存在于该控制路径。
+- 变量：原生 owner 始终0、autosuspend=N；不调用 disable-wakelocks。通过标准
+  KEYCODE_SLEEP 仅令框架 Asleep，mGlobalForceDisableWakelocks=false、group 集合空，
+  lab partial lock 仍保留；只有发起 sysfs 请求的当前任务获五秒单次 token。
+  为容纳两个 opt-in，独立试验启动器删除了 earlycon 和 printk.devkmsg 参数，
+  保留 screen_only/nohibernate、EL2、DT、Image、initramfs、图形/音频/网络配置。
+- 区分观察：用户确认可以按提示约15秒短按电源键；请求后 SSH 未返回，随后
+  keepalive 超时。用户明确反馈“仍黑屏，短按无反应”。没有自动重试。
+- 停止条件：首个失败即停止；已指示用户长按关机再开机回原默认入口。
+  原菜单在真实请求前已经逐字恢复，one-shot 环境已消费0。
+
+此结果表明单任务路径也出现相同用户可见失败，不能把问题限定为那条原生
+强制禁锁命令。它**不**证明进入了 machine_suspend、CPU 低功耗、某个驱动卡死，
+也不证明 token 清理完成；须恢复后读取实际文件。尤其三阶段调试时为框架 Awake，
+本次真实请求前为 Asleep，设备 runtime PM 状态可能不同；不能用这组比较排除
+所有设备回调，更不能直接归因为 EL2/PSCI/CPU idle。下一步应先补同一屏幕状态下
+的受保护阶段对照及跨冻结取证，不能直接再做无新证据的真实睡眠。
+
+
+### 实际回退闭环与保留状态
+
+用户长按关机后开机，并确认回到桌面。SSH 实读新 boot `baa5a989…`，
+原内核 #14、正常 cmdline 无 test/trial/autosuspend 参数，screen_only=Y、
+Android completed1 / Awake，force-disable=false、group 集合为空。
+`esp-before.sha256` 中27项（含原菜单、两个完整载荷、共享 GRUB、DT和固件）
+全部校验通过；debug/trial 两份 env 均为0，实验入口未提升默认。
+三个 remoteproc 仍 attached，ALSA/AUDIO_READY、两用户 FUSE 和实际音频
+进程哈希 `774cd7e7…` 复核通过；不是新增听感验收。
+
+`real-1` 只保存 boot/PID/IRQ/计数基线、cmdline 以及 REAL_REQUEST_START；
+没有 PM_RETURN、token-after、boot-after、trace 或事后 klog，pstore 为空。
+基线 fail=1 来自本轮先前有意做的未持 token 拒绝检查，不是一次实际睡眠失败。
+本轮不能判定 token 写入/消费和 cleanup 的最终状态；复位后旧内核已无该许可。
+不把用户长按恢复称自主崩溃或成功唤醒。当前停止真实睡眠试验，保留原正常运行。
+
+后续先对齐 Asleep/Awake 的有效 runtime 环境，再设计验证过的跨冻结证据路径；
+不继续重放真实请求、不全局关闭 SSAM、不盲猜 EL2/GIC/PSCI 根因。新增 helper
+的副本回滚/完整 diff 重建记录在本轮私有 roles 中，原旧四角色不在已迁移工作区，
+没有伪称已恢复旧主机未迁移的原始文件。正常/回退入口实际恢复已另行实读，
+不以副本回滚替代设备恢复。

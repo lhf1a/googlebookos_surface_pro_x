@@ -1,3 +1,25 @@
+## 2026-11-03：休眠研发重新接续，SQ2 三阶段调试通过，单任务真实请求仍黑屏
+
+已按用户要求将 main 更新到7b189bd并合入 `codex/suspend-fix-5.94-20261103`
+（合并7df7710）；原 MIGRATION.md 未提交内容保留。详见
+[SQ1/SQ2 休眠记录末节](SURFACE-SUSPEND-20261103.md)。
+SQ2 独立 debug-only 启动后 freezer/devices/platform 各返回0，success0→3、fail0，
+trace 含 late/noirq 返回、无 machine_suspend；用户确认屏幕/触摸/解锁正常。
+不能称真实睡眠或低功耗通过。正常两项菜单与原载荷不变。
+
+单任务 opt-in boot5bbbc8a3…，screen_only/test/trial=Y，autosuspend=N；
+未持 token 请求实机拒绝，原菜单已恢复、once env0。用户随后协调15秒按键，
+单次真实请求后SSH超时，用户确认仍黑屏、短按无反应；随后长按恢复，实读boot baa5a989…回原#14。
+没有强制禁锁或重试。阶段调试Awake与真实请求Asleep存在runtime差异，
+不能排除所有设备回调或直接归因CPU idle；下一步先同状态对照/跨冻结取证。
+未经 fresh boot/IRQ/UI/guard 检查不复用脚本，不重复此前强制禁锁黑屏试验。
+原 ESP 旧日志与本轮原始证据仅在 `out/suspend-resume-20261103/`。
+已实读原菜单/两载荷/共享GRUB/固件27项hash全部恢复匹配，guardY；
+ALSA/AUDIO_READY、实际HAL774cd7e7…、两用户FUSE及attached ADSP保持。
+real-1只有请求前标记，无返回/晚期trace，pstore空；不声称准确卡点。
+新增可复用 debug-only 启动器转换和阶段采集脚本，默认构建未接入；
+清理失败不能报告成功。5+5+4项离线测试通过，实机范围与限制如上。
+
 ## 2026-11-03：开发与交付禁止单机绑定（当前最高优先级）
 
 按用户要求，同一标准镜像必须面向任意 SQ1/SQ2，不要求按单机重编译或替换专属启动包。

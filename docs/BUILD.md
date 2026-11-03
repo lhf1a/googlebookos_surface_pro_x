@@ -1563,3 +1563,18 @@ on 同时应用两个补丁及 AspectMax=2.0 配置；off 使用全新原版源�
 ### SQ1 EL2 离线准备
 
 见 [SQ1-EL2-PREPARATION.md](SQ1-EL2-PREPARATION.md)。独立分支仅编译 sltest，不部署或修改默认启动。
+
+
+### 2026-11-03 受保护 PM 调试（仅独立实验）
+
+`python3 scripts/prepare-surface-pm-debug.py EXPERIMENTAL_UNSIGNED_LAUNCHER NEW_EFI`
+仅将现有实验启动器改成 debug-stage-only；不下载、不部署、不改正常默认。
+需原始未签名 ARM64 GNU EFI 启动器、包含既有 gate 的匹配 Image/runtime；
+其他格式拒绝，不能借此修改已签名固件。菜单仍用
+`prepare-surface-pm-once.py`，现场身份/hash 校验和正常入口回退独立执行。
+
+在确认 test=Y、trial/autosuspend=N、owner/token=0 且挂载 tracefs 后，显式运行
+`sh surface-pm-debug freezer|devices|platform NEW_LOG_DIRECTORY`，一次一阶段，
+首个失败后先取证，不循环。脚本不接受 none，不授权真实睡眠，日志只保证正常
+返回后保存；驱动挂死仍可能需要现场复位。详见 SURFACE-SUSPEND-20261103.md。
+测试：`python3 -m unittest discover -s tests -p test_surface_pm_debug.py -v`。
