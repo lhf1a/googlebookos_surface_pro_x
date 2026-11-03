@@ -1,3 +1,12 @@
+## 2026-11-04：native单次实际睡眠28.36秒，SSAM唤醒，等待物理输入反馈
+
+同boot e7638f55…第二轮只增唤醒源追踪，实际machine_suspend28.355558秒、IRQ173，
+首个SSAM事件BAT/BST cid0x16，同时timerfd活跃，不能唯一归因。2338回调全0；SPI
+count0→1/bus_error1→2后ready/IPTSd重初始化，内核success1，同Android PID。
+单次许可消耗/owner0、原生后续请求被保护拒绝；debug恢复0、trace清理、原ESP27项保持。
+Android仍Asleep，等待用户原135秒后电源键及持续输入反馈；不重试或软件亮屏。
+首次prepare中止未复现但未修复；不是正常连续autosuspend/功耗验收。详见休眠记录末节。
+
 ## 2026-11-04：首次native请求在prepare后中止，尚无原生实际睡眠
 
 boot e7638f55…、电池供电/带键盘盖，Android一次获准请求完成952prepare/952complete，

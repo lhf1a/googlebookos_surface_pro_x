@@ -739,3 +739,28 @@ Android记录attempts0→6/fail0→6：第一次获准后提前中止，后五�
 证据：native-once/native-single-1、native-single-responses、native-wakeup-map与
 native-first-final.txt。第二份观察脚本已准备并上传但未执行，只增加wakeup_source
 activate/deactivate和临时PM debug（退出恢复原值），仍等现场配合再运行。
+
+
+### 2026-11-04：第二次native单请求进入machine_suspend，SSAM唤醒，现场输入待确认
+
+用户确认继续，保持电池供电/键盘盖连接；同boot/同模块，只增加wakeup_source追踪和
+临时pm_debug_messages，新的native-single-2目录只注册一次。实际准入后进入
+machine_suspend890.541094→918.896652，即28.355558秒；2338条组件回调全返回0，
+无trace丢失，覆盖真实suspend/resume阶段。SPIcount0→1、bus_error1→2，全零报头
+进入Error Handler后ready，IPTSd日志TOUCH_RESUME_REINITIALIZE count=1，Android
+system_server3883/surfaceflinger3393保持。kernel stats success0→1，native attempts11→18、
+failed11→17；一轮成功，其余请求被已消耗的一次性门拒绝，不是多轮睡眠。
+
+内核记录IRQ173触发唤醒，trace见ssam_wakeup；首个SSAM事件为SAM/BAT cid0x16/iid1/
+len0，源码解释为电池状态BST更新。machine_suspend结束前另有[timerfd]激活，debug
+也报告两个active timerfd；不把电池事件顺序当唯一物理唤醒根因证明。event19经运行时
+映射是Volume Buttons，属于恢复阶段事件，未证明操作者按了音量键。没有本轮PMIC
+唤醒IRQ，不能称电源键直接结束睡眠。
+
+collector/cleanup0，owner/token0，pm_test none/debug0/times0，SSAMenabled，trace挂载
+已清理，原ESP27项匹配。采集及随后实读Android仍Asleep，等待原135秒协调按键后的
+持续输入反馈，不软件亮屏、不重复注册。native统计total suspend time仍0，和trace
+时间分开记录；本轮未采前后cpuidle驻留，不能称整段SoC低功耗或能耗通过。
+日志为native-once/native-single-2、native-second-responses、native-second-state.txt。
+第一次prepare中止本轮未复现，增加追踪不能当修复；SSAM最终策略、原生稳定性、
+直接PMIC唤醒、多轮/能耗和SQ1验证仍未完成。
