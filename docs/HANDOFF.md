@@ -8,7 +8,11 @@ PMIC IRQ216结束，无SSAM唤醒，2336条回调全0，SPIcount1→2、错误�
 
 原菜单/ESP27项保持，9份once.env=0，pm_test none/debug0/times0、nativeN、owner/token0、
 SSAMenabled，自己的trace挂载已清理。下一次普通启动回原正常入口。
-下一步先离线准备native单请求准入与人工注册流程，避免旧native入口启动即无限许可；
+native单请求诊断候选已完成离线构建、实际谓词ASan/UBSan、QEMU实际Image准入验证
+及391模块/18541外部引用核对；只允人工注册后的120秒窗口内一次请求，启动owner0。
+独立Nat01 f1128b91…/naton0001 e75f7dbe…/launcher26493e0c…已部署并校验；未装
+新菜单或once.env，未重启或开放许可。候选保留原SPI/SSAM模块，init仅取消自动注册。
+下一步现场协调一次性启动，先验完整Android与owner0，再准备人工单请求观察。
 保留应用锁，不使用全局禁锁，不提升SSAM固定延时，不热卸载。不自动触发新睡眠。
 SSAM逐事件唤醒、原生策略、多轮/能耗/SQ1回归仍需完成，详见休眠记录末节。
 

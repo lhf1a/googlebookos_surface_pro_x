@@ -650,3 +650,33 @@ PM_RETURN/cleanup/wrapper0，Android Awake，全局强制禁锁false/集合空�
 spi-input/real-2、real2-responses与real2-final-state.txt。接下来离线准备受限的原生
 服务试验：人工注册owner前保持guard，只准入一次请求并可撤销，保留应用wakelock；
 不把当前诊断1.1秒SSAM延时提升正常，也不直接启用无人值守autosuspend。
+
+
+### 原生服务受限试验：离线候选与检查
+
+准备02-native-single-request诊断补丁；正确的注册TGID在120秒boottime窗口内仅有一次
+s2idle准入，消费后owner引用与数值清零。它用于下一步原生路径验证，不是正常自动休眠
+实现。人工注册前保持owner0；候选init删除自动注册调用，既有实验JAR/manifest与lab
+native分支保持，SPI/SSAM及其他391模块完全不变，不触碰用户锁/凭据。
+
+在独立work/native-once-20261104复制匹配源码/构建树，应用既有debug/owner两补丁后
+再应用新补丁，配置逐字一致。实际谓词ASan/UBSan、正向patch重建/逆向回滚通过。
+初次构建clock-skew输出保留，最终增量构建无clock-skew且Image字节一致；既有KSU
+非git版本fallback告警仍存在，不宣称全零告警。QEMU最初缺lsm=selinux导致KSU启动
+空指针，与休眠无关；保留失败日志，对齐实机参数后同Image通过normal guard和native
+单次注册测试（UID1000首次到达合成-EAGAIN回调、第二次-EOPNOTSUPP、owner0）。
+这是实际内核准入测试，非真实硬件睡眠。检查全部391个模块的18541项外部引用，均在
+新vmlinux或原包依赖模块导出中找到；只证明符号存在性，加载顺序/ABI仍需实机核对。
+
+Image/Nat01 f1128b91…、naton0001.cpio.gz e75f7dbe…、native-once.efi 26493e0c…。
+包审计只改init取消自动注册，最后私有凭据成员保持；新启动器指向独立Nat01/新initrd，
+保留screen_only/nohibernate和显式native标记，无trial参数。正常载荷与默认不提升。
+三个候选文件已部署到独立SurfacePmAuto目录，远端SHA/gzip及原ESP27项全部通过；
+仅部署文件，没有安装菜单/once.env、重启、人工注册或进行native实机请求。
+部署结果保存在native-once/stage-result.txt；当前运行仍为已通过两轮恢复的SPI trial候选。
+
+下一步假设：已恢复的SPI路径可支持Android自身发起的一次睡眠；保留合法应用锁，
+与原shell请求比较。变量：显式native入口及既有桌面AC宽限/实验保活分支，内核只接受
+一次、人工开启；输入与SSAM诊断保持。区分观察：native attempts、实际machine_suspend/
+唤醒源、SPIready与用户持续输入；未进入也需采集具体锁而非强制清空。停止条件：一次
+准入被消费或120秒窗口无请求就撤销owner；失败立即取证，禁止自动重试。

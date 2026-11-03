@@ -1603,3 +1603,20 @@ SURFACE-SUSPEND-20261103末节。
 分支，不能模拟物理IRQ、SPI控制器或证明触摸恢复。模块仍须以匹配内核完整Module.symvers
 构建，核对运行file/note和有效initramfs，受保护阶段及真实休眠分别验收。
 当前候选及限制见SURFACE-SUSPEND-20261103末节；正常screen_only/nohibernate不变。
+
+
+### 2026-11-04：原生服务单请求诊断门（不用于正常自动休眠）
+
+`patches/surface-pm/02-native-single-request.patch`仅供隔离试验，在01-framework-owner.patch
+之后应用。注册的Android UID1000 TGID只可在120秒boottime窗口内消耗一次s2idle准入；
+消费后释放PID引用/owner归零，过期请求也注销，其他进程/状态/pm_test不消耗。正常
+screen_only和未注册调用者仍拒绝。它刻意不提供连续autosuspend，不接入标准默认构建。
+`python3 scripts/check-surface-native-once.py PATH/kernel/power/suspend.c`编译实际谓词，
+验证权限/单次/取消/过期边界与PM_DEBUG关闭；需C编译器与ASan/UBSan。
+
+实验包还须移除init自动运行framework-suspend-start的那一行；只有现场核对后人工注册。
+120秒为准入截止时间，不是保证强制唤醒的定时器；若尚无请求，观察助手应写owner0撤销。
+保留应用wakelock、原正常菜单/载荷和私有凭据最终成员；不把调试包作为通用交付。
+实际Image的QEMU检查须带与实机相同的`lsm=selinux`，仅enforcing=0不能选中SELinux。
+本轮用合成失败PM回调证明注册进程一次到达、第二次被拒绝，未让QEMU进入真实idle。
+这不是SQ1/SQ2实机恢复或能耗证明，详见休眠记录末节。

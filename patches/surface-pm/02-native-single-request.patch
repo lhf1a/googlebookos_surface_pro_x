@@ -1,0 +1,68 @@
+--- a/kernel/power/suspend.c
++++ b/kernel/power/suspend.c
+@@ -34,6 +34,7 @@
+ #include <linux/sched.h>
+ #include <linux/pid.h>
+ #include <linux/cred.h>
++#include <linux/timekeeping.h>
+ 
+ #include "power.h"
+ 
+@@ -146,6 +147,7 @@
+ module_param_named(screen_only_autosuspend, sq1_screen_only_autosuspend, bool, 0444);
+ static struct pid *sq1_autosuspend_owner;
+ static int sq1_autosuspend_tgid;
++static time64_t sq1_autosuspend_deadline;
+ 
+ static int sq1_autosuspend_set(const char *val, const struct kernel_param *kp)
+ {
+@@ -180,6 +182,7 @@
+ 	old = sq1_autosuspend_owner;
+ 	sq1_autosuspend_owner = owner;
+ 	sq1_autosuspend_tgid = id;
++	sq1_autosuspend_deadline = id ? ktime_get_boottime_seconds() + 120 : 0;
+ 	unlock_system_sleep(flags);
+ 	put_pid(old);
+ 	return 0;
+@@ -191,13 +194,27 @@
+ };
+ module_param_cb(autosuspend_tgid, &sq1_autosuspend_ops, &sq1_autosuspend_tgid, 0600);
+ 
+-/* Called under system_transition_mutex, like owner replacement. */
+-static bool sq1_autosuspend_allowed(suspend_state_t state)
++/* Diagnostic only: one native request within 120 seconds of registration.
++ * Consume under system_transition_mutex, including an expired registration.
++ */
++static bool sq1_autosuspend_take(suspend_state_t state)
+ {
+ #ifdef CONFIG_PM_DEBUG
+-	return sq1_screen_only_autosuspend && sq1_autosuspend_owner &&
+-		state == PM_SUSPEND_TO_IDLE && pm_test_level == TEST_NONE &&
+-		task_tgid(current) == sq1_autosuspend_owner;
++	struct pid *owner;
++	bool allowed;
++
++	if (!sq1_screen_only_autosuspend || !sq1_autosuspend_owner ||
++	    state != PM_SUSPEND_TO_IDLE || pm_test_level != TEST_NONE ||
++	    task_tgid(current) != sq1_autosuspend_owner)
++		return false;
++
++	allowed = ktime_get_boottime_seconds() < sq1_autosuspend_deadline;
++	owner = sq1_autosuspend_owner;
++	sq1_autosuspend_owner = NULL;
++	sq1_autosuspend_tgid = 0;
++	sq1_autosuspend_deadline = 0;
++	put_pid(owner);
++	return allowed;
+ #else
+ 	return false;
+ #endif
+@@ -718,7 +735,7 @@
+ 		return -EBUSY;
+ 
+ 	if (sq2_screen_only && !sq2_screen_only_test_allowed(state) &&
+-	    !sq1_trial_take(state) && !sq1_autosuspend_allowed(state)) {
++	    !sq1_trial_take(state) && !sq1_autosuspend_take(state)) {
+ 		error = -EOPNOTSUPP;
+ 		goto Unlock;
+ 	}
