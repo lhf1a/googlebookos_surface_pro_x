@@ -65,4 +65,35 @@ static int spx_storage_encode(uint8_t *request,size_t cap,struct spx_storage_des
  struct spx_storage_descriptor d={SPX_STORAGE_COMMAND,SPX_STORAGE_ARGINFO,{base,40,base+40,32}};
  memcpy(request,tmp,sizeof(tmp));*desc=d;return 1;
 }
+/* Conservative EFI observation policy, not proof that a particular firmware
+ * implements this service. The original driver checks completed=1 and a zero
+ * 32-bit service return. Require the whole return slot to be zero here; retain
+ * all raw slots in the EFI report rather than silently accepting another ABI.
+ * Windows copies the requested byte count and does not require data_size to
+ * change. Accept unchanged zero or exactly 105, never a partial/oversize value.
+ * All bytes outside the two advertised objects must retain the caller's A5
+ * sentinel. This detects bounded overwrites, not arbitrary secure-world bugs.
+ */
+#define SPX_STORAGE_GETINFO_RESPONSE_V1 1
+enum spx_storage_info_check {
+ SPX_INFO_OK, SPX_INFO_ARGUMENT, SPX_INFO_RESPONSE, SPX_INFO_REQUEST_CHANGED,
+ SPX_INFO_SIZE, SPX_INFO_GUARD, SPX_INFO_GEOMETRY
+};
+static inline enum spx_storage_info_check spx_storage_check_info(
+ const uint8_t *pages,size_t size,const uint8_t expected[64],
+ const uint64_t results[4],struct spx_storage_geometry *out) {
+ if(!pages || size!=2*SPX_STORAGE_PAGE || !expected || !results || !out)
+  return SPX_INFO_ARGUMENT;
+ if(results[0]!=1 || results[1]!=0)return SPX_INFO_RESPONSE;
+ if(memcmp(pages,expected,64))return SPX_INFO_REQUEST_CHANGED;
+ uint64_t returned=spx_storage_u64(pages+64);
+ if(returned!=0 && returned!=SPX_STORAGE_INFO_BYTES)return SPX_INFO_SIZE;
+ for(size_t i=SPX_STORAGE_REQUEST_BYTES;i<SPX_STORAGE_PAGE;i++)
+  if(pages[i]!=0xa5)return SPX_INFO_GUARD;
+ for(size_t i=SPX_STORAGE_PAGE+SPX_STORAGE_INFO_BYTES;i<size;i++)
+  if(pages[i]!=0xa5)return SPX_INFO_GUARD;
+ if(!spx_storage_parse_info(pages+SPX_STORAGE_PAGE,SPX_STORAGE_INFO_BYTES,out))
+  return SPX_INFO_GEOMETRY;
+ return SPX_INFO_OK;
+}
 #endif

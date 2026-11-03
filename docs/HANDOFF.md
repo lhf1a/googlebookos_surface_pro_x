@@ -1,3 +1,32 @@
+## 2026-11-03：优先复用 SQ2 成功完整载荷；SCM 仅保留离线工具
+
+用户追问“SQ2 已走通，SQ1 参考成功路径做成通用为什么不可以”。可以且应当以成功
+SQ2 路径为基线。目前54项选定DT属性、相关固件/RMTFS/seed结果相同，只证明这些
+已核对项相同，不代表完整EFI/内核/有效initramfs/Android载荷和启动环境全部相同。
+SQ1 RFNV0、接口0与SQ2 RFNV14、接口5/8是已观察差异，不是设备绑定或必须另写
+SCM后端的证明。没有证据判定SQ1不能复用，也不把新存储后端作为通用LTE的前置要求。
+
+下步优先取得成功SQ2实际选择的完整启动链/载荷，并与SQ1及已验收归档逐项对照；
+复用已完成的54项及固件检查，不再原样重测。随后以成功路径作单变量候选，保留
+SQ1必要的板级适配、共享固件、正常/回退和screen_only保护，进行SQ1一次性验证。
+若仍失败，再按区分证据定位；不先假定密钥绑定、不重复两份旧FSG、不复制运行SQ2 RF NV。
+通用验收仍要求两机全新配置、SIM、NAS注册、PS及实际蜂窝流量；SQ2现无SIM不能冒充验收。
+
+本轮已开始的GET_INFO工作已收口为未接入默认启动的离线工具：
+`spx_scm_get_info` 针对固定EFI协议、EL1、独占低4GiB两页，仅发一次操作4，不发
+INIT/READ/WRITE/ERASE；调用前clean+invalidate，之后invalidate-only，校验元数据、
+边界哨兵、105字节信息/几何，擦除缓冲再释放。结果只保留几何/状态，无序列号。
+采用保守completed=1/full-return-slot=0策略；不是本机EFI存储返回已实测的声明。
+同步固件调用不可由软件超时抢占，“有界”仅指次数与内存，不保证墙钟时限。
+
+固定qebspil 8e4d9e6 EFI头/缓存源码哈希校验，vtable偏移56、参数10/结果4槽
+编译断言通过。真实transport源码+环境mock的17种场景及EL/revision/null准入在
+host ASan/UBSan与ARM64/QEMU输出一致；release含真实CurrentEL/cache指令，仅生成
+可重定位object，不是可启动EFI镜像，不是安全世界或LTE实机测试。
+`spx_storage_check_info` 原件/候选/回滚同输入为response_validation=0/1/0，均exit0，
+回滚原SHA和补丁重建一致；4项针对性Python测试通过。初次unused-function、cache
+STATIC编译配置错误已修正，原失败与完整命令输出保留。没有设备连接/配置/重启。
+私有证据在原工作区out/lte-main-review-20261103/scm-getinfo-v1，扩展原四角色。
 ## 2026-11-03：LTE 安全存储只读编码器完成原机器码离线对照
 
 本轮未连接/重启设备。Windows原件检查26→68处，确认GET_INFO105字节、READ
