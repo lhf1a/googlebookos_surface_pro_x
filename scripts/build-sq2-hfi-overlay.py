@@ -6,6 +6,8 @@ Never changes/removes the clock provider. The module is resident until reboot.
 import argparse
 import hashlib
 import json
+import importlib.util
+import shutil
 from pathlib import Path
 import subprocess
 
@@ -19,7 +21,7 @@ p.add_argument('--kernel-output', type=Path, default=Path('/root/.cache/sq2-vide
 p.add_argument('--output', type=Path)
 p.add_argument('--reference-overlay', type=Path, help='Require byte-identical deployed overlay; retains its recorded IRQ reference')
 p.add_argument('--videocc-phandle', type=lambda s: int(s, 0), required=True,
-               help='actual current live VIDEOCC phandle, checked again by module')
+               help='VIDEOCC template phandle; module resolves the exact live provider before applying')
 p.add_argument('--with-interconnects', action='store_true',
                help='add SC8180X config, video DDR and firmware DDR paths')
 p.add_argument('--windows-reference', action='store_true',
@@ -108,11 +110,19 @@ subprocess.run(['dtc', '-I', 'dts', '-O', 'dtb', '-o', str(a.stage / 'overlay.dt
 blob = (a.stage / 'overlay.dtbo').read_bytes()
 if a.reference_overlay:
     assert blob == a.reference_overlay.read_bytes(), 'Deployed HFI overlay changed'
-(a.stage / 'overlay.h').write_text('static const unsigned char overlay[] = {' + ','.join(map(str, blob)) + '};\n')
+spec = importlib.util.spec_from_file_location('overlay_phandles', ROOT/'scripts/sq2-overlay-phandles.py')
+fixups = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fixups)
+vid_offsets = fixups.videocc_offsets(blob, '/fragment@0/__overlay__/'+node+'@aa00000', vid, gcc)
+assert len(vid_offsets) == 8
+shutil.copyfile(ROOT/'probe/video/sq2-overlay-phandle.h', a.stage/'sq2-overlay-phandle.h')
+(a.stage / 'overlay.h').write_text('static unsigned char overlay[] = {' + ','.join(map(str, blob)) + '};\n' +
+    'static const unsigned videocc_offsets[] = {' + ','.join(map(str,vid_offsets)) + '};\n')
 c = '''// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/module.h>
 #include <linux/of.h>
 #include "overlay.h"
+#include "sq2-overlay-phandle.h"
 static bool allow;
 module_param(allow, bool, 0400);
 static int id = -1;
@@ -121,11 +131,26 @@ static bool check(const char *path, u32 ph) {
  bool ok = n && n->phandle == ph;
  of_node_put(n); return ok;
 }
+static int bind_videocc(void) {
+ struct device_node *n=of_find_node_by_path("/soc@0/clock-controller@ab00000");
+ u32 clocks, resets, domains, live=0;
+ bool valid=n && of_device_is_compatible(n,"qcom,sc8180x-videocc") &&
+  !of_property_read_u32(n,"#clock-cells",&clocks) && clocks==1 &&
+  !of_property_read_u32(n,"#reset-cells",&resets) && resets==1 &&
+  !of_property_read_u32(n,"#power-domain-cells",&domains) && domains==1;
+ if (valid) live=n->phandle;
+ of_node_put(n);
+ if (!valid || sq2_overlay_rebind(overlay,sizeof(overlay),videocc_offsets,
+     ARRAY_SIZE(videocc_offsets),TEMPLATE_VIDEOCC,live)) return -EINVAL;
+ pr_info("SQ2_HFI_VIDEOCC phandle=%x references=%zu\\n",live,ARRAY_SIZE(videocc_offsets));
+ return 0;
+}
 static int __init start(void) {
  struct device_node *n;
  int ret;
  if (!allow || !of_machine_is_compatible("microsoft,surface-pro-x")) return -EPERM;
  CHECKS
+ ret=bind_videocc(); if (ret) return ret;
  n = of_find_node_by_path("/soc@0/iris1-hfi@aa00000");
  if (n) { of_node_put(n); return -EEXIST; }
  ret = of_overlay_fdt_apply(overlay, sizeof(overlay), &id);
@@ -138,7 +163,8 @@ module_init(start);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("SQ2 temporary dedicated video SMMU consumer; no firmware");
 '''
-refs = [(gcc_path, gcc), (smmu_path, smmu), ('/soc@0/clock-controller@ab00000', vid)] + icc_refs
+refs = [(gcc_path, gcc), (smmu_path, smmu)] + icc_refs
+c = c.replace('TEMPLATE_VIDEOCC',str(vid))
 if a.venus_decoder:
     c = c.replace('CHECKS', 'CHECKS\n { u32 parent;\n'
                   ' n = of_find_node_by_path("/");\n'
@@ -160,6 +186,7 @@ b = (a.stage / 'sq2_hfi_overlay.ko').read_bytes()
 (dest / 'overlay.dtbo').write_bytes(blob)
 (dest / 'candidate.json').write_text(json.dumps({'status': 'build-only-no-SMMU-or-firmware-proof',
     'module_sha256': hashlib.sha256(b).hexdigest(), 'references': refs,
+    'videocc_runtime_identity_checked': True, 'videocc_reference_cells': vid_offsets,
     'sid': ['0x2300', '0x2320', '0x2340'] if a.windows_reference else ['0x1300'],
     'mask': '0' if a.windows_reference else '0x60',
     'windows_reference': a.windows_reference, 'interconnects': a.with_interconnects,
