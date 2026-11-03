@@ -2,6 +2,15 @@
 
 Read docs/HANDOFF.md and docs/BUILD.md before changing the port.
 
+## SPX-PORTABLE-SQ1-SQ2：通用开发与镜像交付（2026-11-03，最高优先级）
+
+- **任意 SQ1/SQ2，不绑定调试样机。** 项目交付目标是同一份标准镜像可在任意 SQ1 或 SQ2 设备上运行，不得要求按每台机器重新编译、改代码或替换设备专属启动包。禁止单机身份绑定；本节覆盖下方历史单机实验约定，完整规范见 `docs/DEVELOPMENT.md`。
+- **禁止单机准入。** 不得以某台机器的序列号、NVMe 型号/序列、MAC、IP/SSH 地址、SSH 主机指纹、原盘 UUID/ESP 标记、Android 用户编号或历史采集 SHA 作为通用构建/正常启动的准入条件。日志和实验对象可以记录这些值，但它们不是产品运行条件。
+- **按运行时硬件事实适配。** SQ1/SQ2 差异通过型号/SoC、硬件能力与运行时资源发现处理；不得固定一次启动的 phandle、eventN、cardN、节点编号或调试主机路径。硬件类别/版本 quirk 必须有硬件依据，不把某台机器的触摸测量结果推广到所有设备。
+- **镜像与本机状态分离。** 通用镜像不得复制调试机的密码/shadow、SSH 私钥/主机身份、Wi-Fi 凭据、IMEI/NV/FSG 校准、用户数据或触摸校准到其他机器。需要的设备唯一数据应由目标设备自己的存储或本机首次配置提供；不得把更换私有文件重新打包当作跨设备启动前提。显式实验室私有包必须单独标记，不能称为通用交付。
+- **不撤销安全保护。** 模块/固件 ABI、构建产物完整性、真实硬件兼容性、SMMU/资源边界、screen_only/nohibernate、不可重复启动固件等保护保留。写盘前仍需动态识别本次目标盘/ESP/根源并防止误写；禁止单机白名单不等于允许盲写、清空 userdata 或热重置提供者。
+- **跨设备验收，诚实标界。** 同一产物覆盖 SQ1/SQ2、默认/Mesa 两入口以及不同设备身份、容量和枚举资源的回归；旧数据升级不得破坏凭据/用户设置。单台样机通过只证明该次观测，不能声称所有设备已实测。现存单机假设/私有包须列为待整改，不因修改规范就宣称现有镜像已完全通用。
+
 - Default build/menu (2026-11-02 user instruction): this SQ2 now targets EL2 + Qualcomm Vulkan + native 60 Hz + GPU700/RPMh432. Keep exactly the new default and working Mesa fallback entries; this supersedes the older rescue/shutdown-menu requirement below. Preserve shared GRUB/firmware and both payloads. Normal EL2 uses sq2.el2=1, without experiment recovery timers or continuous diagnostics. Do not restore sq2.el2=experimental in the normal launcher. See the latest HANDOFF for actual reboot results.
 
 - Wi-Fi debugging lesson (2026-11-01): test the full Android candidate early once storage, the screen-only guard and recovery are verified. A failure in a stripped diagnostic initramfs does not establish an EL2 hardware limitation. Compare against the known-working full boot before adding EFI/SCM/SMEM mechanisms; see the debugging retrospective in docs/SQ1-EL2-PREPARATION.md.

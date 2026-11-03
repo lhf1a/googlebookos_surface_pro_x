@@ -1,3 +1,51 @@
+## 2026-11-03：开发与交付禁止单机绑定（当前最高优先级）
+
+按用户要求，同一标准镜像必须面向任意 SQ1/SQ2，不要求按单机重编译或替换专属启动包。
+根 AGENTS.md 已加入 `SPX-PORTABLE-SQ1-SQ2`，完整规则见 [通用开发规范](DEVELOPMENT.md)。
+禁止以序列/MAC/IP/SSH 身份、固定原盘 UUID/ESP 标记、用户编号或一次枚举值准入；
+机型能力选择与动态资源发现应通用化，目标自己的凭据/校准/NV 与镜像分离。
+磁盘防误写、真实硬件/ABI/产物完整性、screen_only/nohibernate 和固件防重试保护不撤销。
+这是规范更新，不是已修复所有遗留绑定或完成所有 SQ1/SQ2 实测；旧私有实验镜像不自动
+成为通用交付，整改与跨设备矩阵见 TODO 顶部。本轮只更新文档和规范检查，不写设备。
+
+## 2026-11-03：Moonlight V+ 恢复，移除固定 VIDEOCC phandle 启动门槛
+
+实际 LTE DT 的 VIDEOCC overlay 被分配为 `0xb9`，旧助手只接受 `0xb5`，流程在
+加载 HFI/core 之前退出；Codec2 服务仍运行但没有 `/dev/video0`。现直接删除助手的
+固定数值检查及替代格式门槛，不改成新的机型/数值白名单。HFI overlay 按现有 provider
+节点解析实时引用，只重绑定 clocks/resets/power-domains 的八个引用单元；保留 provider
+身份、字段宽度、SMMU/ICC 引用、模块完整性、screen_only/nohibernate 和不可重复启动固件保护。
+EL2 no-TZ 标记移到首次可能启动固件的 core 加载之前；不重置已有 VIDEOCC/provider。
+
+同 boot 恢复 `/dev/video0`，真实 Moonlight V+ 12.14.4 选中 `c2.sq2.hevc.experimental`，
+2880×1920 HEVC 已实际输出并显示，用户明确确认“已恢复”。60fps 是请求配置，不等于
+长期稳定 60fps 认证；日志仍有网络丢帧/输入等待。未重启，框架进程保持；没有修改
+Android 分区/全局图形、音频、DT 或固件，也未写 ESP。本次当前设备改动仅 RAM，
+现有 ESP 镜像未更新，重启仍回原包，不能称重启验收。
+
+本工作区默认 runtime 输入已用独立副本更新，仅变更 helper、HFI overlay 和对应 SHA 清单，
+原共享输入不动。两项菜单/其他 payload 内容和最后凭据成员保持；已有整盘 IMG/GZ
+未重新生成。公开重建：先用 `build-sq2-hfi-overlay.py` 构建动态引用模块，再通过
+`pack-sq2-video-reference-fix.py BASE MODULE FRESH_OUTPUT --expected-base-sha256 HASH --module-sha256 HASH`
+更新操作者自己的 runtime 输入。二进制、私有输入与原始日志不提交。
+
+## 2026-11-03：默认关闭 4 KB 页模式开发提醒
+
+标准入口仍为 `scripts/build.py`。共享 defaults.integrate 将当前 `apply-device-info`
+加入 SQ1/SQ2 默认与 Mesa 四个载荷；助手在 Android init 前的 RAM 属性覆盖中移除
+各分区重复的 `ro.product.build.16k_page.enabled`，仅在 product 属性中写入 `false`。
+仅关闭 Settings 页无关模式常驻提醒及本移植未提供的 16 KB boot OTA 切换入口；
+不改变内核页大小、应用兼容模式、其他通知或 userdata。保留 300 DPI、用户缩放、
+KSU、swap、LTE、EL2、screen_only/nohibernate 与最后凭据成员。
+AOSP 判断依据：[Enable16kUtils](https://android.googlesource.com/platform/packages/apps/Settings/+/refs/heads/main/src/com/android/settings/development/Enable16kUtils.java) 与
+[Enable16KBootReceiver](https://android.googlesource.com/platform/packages/apps/Settings/+/refs/heads/main/src/com/android/settings/development/Enable16KBootReceiver.java)。
+
+离线整镜像构建及四个最终 ESP 载荷检查通过；18 项提醒/defaults/swap 专项通过。
+同输入的实际 shell/awk 夹具中 BASELINE/MODIFIED/ROLLBACK 为 true/false/true，
+均保留默认密度与 userdata；只替换 bind mount，不将主机夹具当作实机通知消失证据。
+旧 LTE 夹具的 5 项失败在干净 main 副本中同样复现，本轮未改动 LTE 子系统。
+没有设备部署、重启或实机提醒验收。私有输入、镜像和原始验证记录不提交 Git。
+
 ## 2026-11-03：默认 300 DPI，移除 KSU 用户态固定 SHA 校验
 
 按用户要求，标准入口、profile 后端、defaults.integrate 及密度助手统一默认

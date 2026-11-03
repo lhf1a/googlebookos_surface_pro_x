@@ -1,5 +1,14 @@
 # 默认通用镜像：本地输入与源码构建
 
+## 当前交付规则：以下私有包流程不得冒充通用发行
+
+本页记录现有实验室输入流程。用户最新要求同一镜像可运行于任意 SQ1/SQ2，规则见
+[DEVELOPMENT](DEVELOPMENT.md) 与根 AGENTS.md；目标唯一身份、凭据、FSG/NV/校准须
+改为本机来源或首次配置，不得靠按设备替换本页私有输入重打包才能启动。
+当前 runtime/donor/私有 addon 中的 SSH 身份和共享实验 FSG 是已知待整改项，规范改变
+不代表这些实现已修正；旧实验包仍保持私有，不得直接作为通用交付。没有本机调制解调器
+数据时应安全降级该可选能力，不阻止基础系统启动。现有输入兼容/完整性与防误写检查仍保留。
+
 标准入口：`python3 scripts/build.py --output /home/USER/spx-release`。
 输出目录必须不存在。默认交付 `surface-pro-x-sq1-sq2.img.gz`，不是 Radio04 或裸 IMG。
 默认构建会编译 Radio AIDL HAL、QMI data/mode、RMNET 用户态助手、Java 辅助包和 Radio 资源覆盖；
@@ -25,7 +34,7 @@
 | `lte/local.keystore` | 首次构建生成的本地 Radio 覆盖签名密钥；后续保留复用，不提交 Git。 |
 
 **2026-11-03 用户要求 SQ1/SQ2 共用 LTE，已解除旧绑定。** 两机默认项均加入 IPA DT，并保留各自 GPU/CPU 档位。LTE 不再核对 NVMe 序列号或固定 ESP 标记；仍拒绝未知机型，保留 EL2、screen_only、nohibernate、rescue/sq2.lte=0。
-本地 FSG 是原 SQ2 采集件，本轮按用户要求作为共享实验输入，仅复制到 `/run` 的 RAM shadow，不写物理 NV 分区。硬件相同不是跨设备配置已验证的证明。若拥有目标机自己的 FSG，应放入同一输入位置重新构建。未配置 APN 时需在系统中设置；不保证插卡即上网，SQ1 实机验证仍未执行。Mesa 回退不加入 LTE。
+以下仅为历史实验现状：本地 FSG 是原 SQ2 采集件，曾作为共享实验输入，只复制到 `/run` 的 RAM shadow、不写物理 NV 分区；此流程不满足最新通用交付规范，不能因硬件相同将校准/NV 移植给其他设备。后续必须使用目标自己的运行时来源，不把逐机替换 FSG 重打包作为通用启动步骤。未配置 APN 时需在系统中设置；不保证插卡即上网，SQ1 实机验证仍未执行。Mesa 回退不加入 LTE。
 
 ## 构建环境
 

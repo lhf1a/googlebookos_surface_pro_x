@@ -1,3 +1,20 @@
+## 2026-11-03：开发与交付禁止单机绑定（当前最高优先级）
+
+按用户要求，同一标准镜像必须面向任意 SQ1/SQ2，不要求按单机重编译或替换专属启动包。
+根 AGENTS.md 已加入 `SPX-PORTABLE-SQ1-SQ2`，完整规则见 [通用开发规范](DEVELOPMENT.md)。
+禁止以序列/MAC/IP/SSH 身份、固定原盘 UUID/ESP 标记、用户编号或一次枚举值准入；
+机型能力选择与动态资源发现应通用化，目标自己的凭据/校准/NV 与镜像分离。
+磁盘防误写、真实硬件/ABI/产物完整性、screen_only/nohibernate 和固件防重试保护不撤销。
+这是规范更新，不是已修复所有遗留绑定或完成所有 SQ1/SQ2 实测；旧私有实验镜像不自动
+成为通用交付，整改与跨设备矩阵见 TODO 顶部。本轮只更新文档和规范检查，不写设备。
+
+## 默认关闭 4 KB 页模式开发提醒（2026-11-03）
+
+标准构建通过启动前 RAM 属性覆盖设置 `ro.product.build.16k_page.enabled=false`，
+两机默认/Mesa 四载荷均采用。仅关闭 Settings 页无关模式常驻提醒及 16 KB 启动切换入口；
+不修改内核页大小、应用兼容、其他通知或 userdata。此移植没有提供 16 KB boot OTA。
+默认 300 DPI、KSU、低内存 swap 与现有默认组件不变；验证范围见 BUILD 顶部。
+
 ## 2026-11-03：源码 LTE 与压缩默认交付
 
 最新默认入口从源码编译 LTE/Radio，不再要求预制 Radio04。私有输入统一放 `private/build-inputs/`，不按历史输入 SHA 白名单拒绝；默认输出 IMG.GZ 并清理本次镜像中间文件。位置、公开工具依赖、单位配置与限制见 [PRIVATE-BUILD.md](PRIVATE-BUILD.md)。下方固定 Radio04 章节仅为历史。
@@ -13,7 +30,7 @@
 - Android 默认 **300 DPI**，`--dpi N` 保留自定义；只改默认属性，不覆盖 userdata 中的显示设置。
 - KernelSU Next 管理器/ksud 默认 `--ksu-manager on`，输入目录 `out/ksunext` 可用 `--ksu-bundle DIR` 替换，`--ksu-manager off` 不注入首启安装器（不移除内核 KSU）。可使用与内核接口兼容的自定义文件，不按固定 SHA 拒绝，也不自动追随 latest，不降级现有安装，不预装 Zygisk/伪装模块或自动授予应用 root。
 - 以 main fee67b2 的匹配内核/驱动和完整957b组件为底；默认项加入最新 `0100429` 的已验证 LTE/Radio 专属增量，Mesa 保持原非 LTE 回退。
-- LTE 默认 `--lte on`，需精确私有 Radio04 输入；`--lte off` 保留关闭选择。仅原绑定 SQ2 可激活，SQ1/其他设备不移植 FSG，详见 [LTE 默认基线](LTE-BASELINE.md)。
+- LTE 默认 `--lte on`，Radio 从源码构建，保留 `--lte off`。禁止原调试机绑定；设备唯一 FSG/NV 必须来自目标自身，不能随通用镜像移植。当前私有实验输入的遗留差距见 [本地输入](PRIVATE-BUILD.md) 和 [通用规范](DEVELOPMENT.md)，不把历史单机验证当作通用验收。
 - 通用触摸修复默认 `--touch-repair on`：状态一致性、按原始信号核心的连续性修复与统一校准向导。算法不区分 SQ1/SQ2，测量结果按设备保存；`--touch-repair off` 保留旧包选择。
 - 默认触摸包目录 `out/touch-baseline`；可用 `--touch-bundle DIR` 指定当前源码匹配包，缺包或过期直接拒绝。第二层需用户在向导中采集、复测确认才保存参数；本轮尚未实机验收。
 
@@ -26,7 +43,7 @@ python3 scripts/build.py --template TEMPLATE.img --gnu-efi BUILT_GNU_EFI --lte-b
 ```
 
 同一镜像包含共用内核/固件、两机DT，以及默认/回退各自跨机型共用的initramfs。两个菜单项为高通默认和Mesa回退；EFI根据SMBIOS的SQ1/SQ2身份路由，未知身份拒绝，不猜测机型。保持SQ1/661和SQ2/700的差别。
-这不是已完成双机实测的声明：本轮没有硬件、虚拟机或功能测试，没有部署。镜像带私有实验室凭据，不公开分发。
+历史实验构建并不代表已完成所有 SQ1/SQ2 的通用验收。带私有实验室凭据的旧镜像不得公开分发，也不得标为符合当前通用交付规范。
 `build-source-boot.py` 是底层启动包/组件兼容入口；**对外标准整镜像入口只有 scripts/build.py**。
 
 ## 编译默认通用触摸包

@@ -23,8 +23,7 @@ done
 insmod sq2_iris1_identify.ko allow=1
 insmod videocc-sm8150.ko
 test -L /sys/bus/platform/devices/ab00000.clock-controller/driver
-ph=$(od -An -tx1 /sys/firmware/devicetree/base/soc@0/clock-controller@ab00000/phandle | tr -d ' \n')
-test "$ph" = 000000b5
+# HFI overlay resolves the live provider; no numeric phandle startup gate.
 insmod venus-core.ko sq2_platform_allow=1
 insmod venus-dec.ko
 cat /proc/sys/kernel/random/boot_id > /tmp/sq2-native-pas-attempted

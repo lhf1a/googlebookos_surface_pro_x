@@ -74,7 +74,7 @@ if args.no_tz_overlay:
  helper=helper.replace(guard,guard+b'case " $(cat /proc/cmdline) " in *" sq2.el2=experimental "*) ;; *) exit 1;; esac\n')
  old=b'insmod venus-core.ko sq2_platform_allow=1\ninsmod venus-dec.ko\ncat /proc/sys/kernel/random/boot_id > /tmp/sq2-native-pas-attempted\ninsmod sq2_hfi_overlay.ko allow=1\n'
  assert helper.count(old)==1
- helper=helper.replace(old,b'insmod sq2_hfi_overlay.ko allow=1\ninsmod sq2_fw_overlay.ko allow=1\ninsmod venus-core.ko sq2_platform_allow=1 sq2_no_tz=1\ninsmod venus-dec.ko\ncat /proc/sys/kernel/random/boot_id > /tmp/sq2-native-pas-attempted\n')
+ helper=helper.replace(old,b'insmod sq2_hfi_overlay.ko allow=1\ninsmod sq2_fw_overlay.ko allow=1\ncat /proc/sys/kernel/random/boot_id > /tmp/sq2-native-pas-attempted\ninsmod venus-core.ko sq2_platform_allow=1 sq2_no_tz=1\ninsmod venus-dec.ko\n')
  subprocess.run(['sh','-n'],input=helper,check=True)
  e[name]=(mode,helper);changed.append(name)
 # End optional no-TZ payload.
