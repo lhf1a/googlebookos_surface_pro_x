@@ -275,3 +275,119 @@ Android completed1 / Awake，force-disable=false、group 集合为空。
 的副本回滚/完整 diff 重建记录在本轮私有 roles 中，原旧四角色不在已迁移工作区，
 没有伪称已恢复旧主机未迁移的原始文件。正常/回退入口实际恢复已另行实读，
 不以副本回滚替代设备恢复。
+
+
+## 按用户提示复查历史逐组件响应：发现 SPI-HID PM 构建回归
+
+历史 `sq1-suspend-wip/02-device-prefix.patch` 与03策略补丁通过关闭 async、
+限制 prepare/suspend 列表前缀并主动返回 ECANCELED 逐步定位，曾将 QCA 蓝牙
+ETIMEDOUT 隔离出来。计数包含没有实际硬件回调的设备列表节点，不能直接当
+独立组件通过数；前缀补丁只允许 TEST_DEVICES，不复制到当前默认或真实睡眠路径。
+
+本轮已有的完整 `device_pm_callback_start/end` 不必重跑即可逐条分析。新增
+`analyze-surface-pm-trace.py TRACE FRESH_DIRECTORY`，按任务、驱动和设备配对
+（允许跨CPU迁移），结合 dpm 边界区分 prepare/suspend/late/noirq 和恢复阶段，
+输出 callbacks.csv、含parent的 components.csv 和 summary.json。
+保留错误码、缺失边界、缓冲区覆盖信息；未知回调格式报错。prepare/complete
+的0返回不能冒充驱动实际执行了睡眠回调。4组异步/迁移/错误/缺失/格式/新输出测试通过。
+
+原 devices trace 的2286条和platform trace的2334条回调记录均配对返回，err全0；
+platform trace为4694/4694条，无记录覆盖。942是driver/device字符串组合数，
+不是942个硬件均已休眠。关键样本（本轮Awake调试，毫秒）：
+
+| 回调对象 | 常规 suspend | 常规 resume | 备注 |
+| --- | --- | --- | --- |
+| QCA UART 蓝牙 | 0.002 | 0.002 | 均返回0，不证明蓝牙控制器低功耗 |
+| Wi-Fi phy | 109.076 | 7.667 | 均返回0 |
+| NVMe PCI设备 | 182.846 | 0.007 | noirq另12.500/12.349，均返回0 |
+| SSAM串口hub | 2.556 | 3.189 | 均返回0 |
+| DP显示控制器 | 1.125 | 1.137 | 均返回0 |
+| DPU | 0.094 | 0.002 | complete另348.413，返回0 |
+| SPI-HID触摸屏 | **未出现** | **未出现** | 只有prepare/complete，不能算休眠回调通过 |
+
+针对 SPI-HID，当前正常运行模块 ELF build-id 与取回文件逐字相同；文件
+SHA `31ee23c6…`，实验 initramfs 的有效条目也是相同SHA。运行 sysfs 没有
+resume_count，运行 kallsyms/ELF 都无 spi_hid_pm_suspend/resume/ops。
+匹配的 EL2 内核源码也未包含旧 `SQ2_SPI_PM_V1`，EL2 builder 未调用既有
+`patch-sq2-spi-pm.py`；早期 lid-power builder 则有该调用。这确认旧PM改动未进入
+当前EL2模块，不是仅凭trace缺项猜测，**仍不是本轮黑屏根因证明**。
+
+EL2 builder补回这一条既有patch调用；不重写SPI子系统、不热卸当前触摸模块。
+在独立模块目录以匹配正常Image `c1ef559f…` 的kernel/build编译，运行配置逐字
+等于build .config，Module.symvers存在。原源码/旧PM补丁/回滚三轮模块编译完成；
+回滚模块与本次baseline逐字一致。初次本地header未来mtime警告保留，修正副本mtime
+后另做三轮最终构建，最终日志无警告，严格modpost通过。
+候选strip后SHA `072cdec5…`，67个未定义引用全部匹配运行__ksymtab，vermagic一致。
+这不声称全内核重新编译或覆盖每项ABI属性。
+
+独立实验包 `e4210f44…` 只改变一个有效SPI模块，其他条目与最后凭据层不变；
+匹配debug-only启动器关闭trial/autosuspend，仅允许受保护调试阶段。当前候选
+启动/逐组件回调验证结果另续；正常输入与默认/回退载荷尚未采用此候选。
+
+
+### SPI-HID 候选逐组件实机验证
+
+独立 debug-only boot `4c9d039f…`，已加载模块文件SHA `072cdec5…` 与候选一致，
+运行ELF build-id note也逐字匹配。运行 kallsyms出现两个PM函数/ops，resume_count
+从0开始；screen_only/test=Y、trial/autosuspend=N、owner/token=0，原菜单已恢复、
+一次性env0。完整Android、物理ALSA/AUDIO_READY、实际HAL774cd7e7…和两用户FUSE通过。
+
+| 单次调试请求 | SPI挂起 | SPI恢复 | resume_count | PM返回/错误 |
+| --- | --- | --- | --- | --- |
+| Awake devices | 0.191 ms | 24.452 ms | 0→1 | 0 / fail0 |
+| Asleep platform | 0.114 ms | 22.150 ms | 1→2 | 0 / fail0 |
+
+关屏用标准KEYCODE_SLEEP，确认框架Asleep且未强制禁锁后运行；返回后用
+KEYCODE_WAKEUP回Awake。两轮同boot；touch-resume助手按计数1/2实际重新初始化。
+用户确认画面/触摸/上滑解锁都正常。Awake devices的2288条、Asleep platform的2336条
+回调记录全部配对返回、err0，均无缓冲覆盖；SPI driver层的suspend/resume已直接记录，
+不再仅凭prepare/complete推定。不是machine_suspend或实际能耗验收。
+
+候选未提升默认，源代码builder补回旧PM patch不会自动替换正常私有runtime。
+新的一次真实对照已在主机准备，只改变相对前次单任务试验的候选initrd，等待用户
+确认是否继续现场按键配合；未重放旧one-shot脚本或自动触发。
+
+
+### 候选真实对照：SSAM 早醒与一次 PMIC 电源键唤醒成功
+
+用户明确继续一次真实对照，独立启动到 `1df5aab6…`：原Image/DT不变，
+只采用已验证SPI模块的实验initrd；原菜单在试验前恢复、env已消费0。
+原生owner0/autosuspend=N，screen_only=Y；每次仍需当前任务五秒token。
+完整Android、ALSA/AUDIO_READY和实际HAL774cd7e7…已检查。
+
+第一次保留原SSAM wake：请求返回0、SPIcount0→1、token0，但trace的
+machine_suspend只有124.525716→124.560607，即34.891ms；日志明确IRQ173
+SSAM触发早醒，不能当成约15秒后的电源键唤醒。用户确认UI正常。
+
+随后另获用户明确现场配合确认，**同boot、同代码/载荷**只在这一请求期间
+临时将动态发现的surface_serial_hub设备wakeup从enabled改disabled，保留
+PMIC电源键enabled。结束恢复原值；不改boot helper、不全局关闭EC唤醒。
+触发前记录新假设/唯一变量/区分观察/首个失败停止条件；不自动循环。
+
+| 本轮 PMIC 对照 | 实际观察 |
+| --- | --- |
+| machine_suspend | 347.650290→363.338477，**15.688187秒** |
+| 唤醒原因 | 内核明确 Triggering wakeup from IRQ216 / pm8941_pwrkey |
+| PM返回/计数 | 返回0，success1→2，fail0→0 |
+| 组件响应 | 2338条回调记录全部返回、err0，无缓冲覆盖 |
+| SPI恢复 | resume_count1→2，ready；触摸助手执行重新初始化 |
+| 连续性 | boot不变，system_server3820 / SurfaceFlinger3361不变 |
+| 清理 | token0，SSAM读回enabled，pm_test=none、debug/times恢复0 |
+| 用户实测 | 明确确认画面、触摸、上滑解锁全部正常 |
+
+这是本SQ2一次受控单任务的s2idle等待/电源键唤醒证据，**不是**能耗/CPU低功耗
+驻留测量、长期/多轮稳定性、SQ1新回归或原生Android自动休眠完成。
+SSAM后续IRQ173在machine_suspend结束后才出现，不能覆盖本轮IRQ216的唤醒原因。
+旧未打SPI补丁的真实黑屏仍保留，未故意回装缺陷模块重现黑屏；因此确认SPI PM
+构建遗漏和候选行为改善，不把它提升为所有历史黑屏唯一根因。
+
+最终仍运行受保护候选：screen_only/test/trial=Y、native=N、owner/token0，
+无新请求或循环；下次启动回原正常。原ESP清单27项全部匹配，默认/Mesa/共享
+GRUB及固件保持；ALSA、AUDIO_READY、实际HAL哈希、attached remoteproc和两用户
+FUSE复核。自己的trace instance/额外mount层已清理，Android原bootreceiver/wifi
+instance及原tracefs挂载保持。没有更新正常私有runtime输入或提升实验入口。
+
+下一步处理SSAM事件过滤/原生唤醒策略，避免把临时排除早醒变成全局禁用；
+再做原生自动休眠、重复恢复与能耗，之后才讨论正常集成。逐组件原始CSV与
+PMIC结果JSON在 `out/suspend-resume-20261103/spi-pm/real-pmic-responses/` 和
+`pmic-result.json`，均忽略，不提交身份日志。

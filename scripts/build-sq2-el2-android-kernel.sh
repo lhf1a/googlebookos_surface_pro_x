@@ -9,6 +9,7 @@ K=$B/kernel;O=$B/build
 mkdir -p "$O"
 cp "$R/configs/sq2-internal-kernel.config" "$O/.config"
 python3 "$R/scripts/patch-sq2-screen-only.py" "$K"
+python3 "$R/scripts/patch-sq2-spi-pm.py" "$K/drivers/hid/spi-hid"
 python3 - "$K" <<'PY'
 from pathlib import Path
 import sys

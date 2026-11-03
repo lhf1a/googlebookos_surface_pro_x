@@ -1578,3 +1578,11 @@ on 同时应用两个补丁及 AspectMax=2.0 配置；off 使用全新原版源�
 首个失败后先取证，不循环。脚本不接受 none，不授权真实睡眠，日志只保证正常
 返回后保存；驱动挂死仍可能需要现场复位。详见 SURFACE-SUSPEND-20261103.md。
 测试：`python3 -m unittest discover -s tests -p test_surface_pm_debug.py -v`。
+
+
+逐组件PM分析：`python3 scripts/analyze-surface-pm-trace.py TRACE FRESH_OUTPUT`。
+输出每次回调的阶段/驱动/设备/parent/调用层/返回码/耗时，以及完整性和缺失边界。
+不要将prepare/complete或没有对应system-sleep回调的设备计为已挂起。
+EL2 kernel builder现调用已有`patch-sq2-spi-pm.py`保留旧SPI-HID系统休眠钩子；
+此源码接线不自动更新私有runtime输入，不代表真实休眠通过。当前隔离验证见
+SURFACE-SUSPEND-20261103末节。

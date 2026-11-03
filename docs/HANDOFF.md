@@ -1,3 +1,25 @@
+## 2026-11-03：逐组件响应核对定位 SPI-HID PM 构建回归，隔离候选阶段验证通过
+
+按用户提示复查旧设备前缀/QCA诊断，并解析本轮PM callback trace。
+原platform2334条回调全部返回，但SPI-HID仅prepare/complete；运行build-id、
+实际module31ee23c6…、有效cpio与符号/sysfs交叉确认旧PM patch未进入EL2模块。
+EL2 builder现补回已有patch-sq2-spi-pm.py调用，不重写驱动、不热卸载。
+独立模块严格编译/67导出符号审计、源码与二进制副本回滚通过。
+
+候选module072cdec5…只替换实验initramfs的一项。boot4c9d039f…仅debug opt-in；
+Awake devices/Asleep platform都返回0/fail0，SPI挂起/恢复分别0.191/24.452与
+0.114/22.150ms，resume_count0→1→2；后者2336条记录全部返回、无覆盖。
+用户确认屏幕/触摸/解锁正常，音频/存储已复核，原菜单已恢复且env0。
+随后boot1df5aab6…真实请求先由SSAM IRQ173在34.891ms提前结束；用户UI正常。
+另获现场确认后，同boot仅单轮临时排除SSAM wake，machine_suspend15.688187s，
+内核明确PMIC IRQ216唤醒；2338条组件回调全返回0，同boot及Android PID，token0、
+SSAM恢复enabled，用户确认画面/触摸/解锁正常。这是一次受控单任务结果，
+不是低功耗能耗、多轮稳定性或原生自动休眠完成，也不是所有历史黑屏唯一根因证明。
+当前受保护实验内核nativeN/owner0/token0，无循环；下次启动原正常。
+原ESP27项、音频实际hash/ALSA/AUDIO_READY/FUSE保持，临时追踪已清理。
+正常默认/回退与私有runtime输入未提升。逐组件CSV/源码四角色和原始证据仍仅out。
+详见 [休眠记录末节](SURFACE-SUSPEND-20261103.md)。
+
 ## 2026-11-03：休眠研发重新接续，SQ2 三阶段调试通过，单任务真实请求仍黑屏
 
 已按用户要求将 main 更新到7b189bd并合入 `codex/suspend-fix-5.94-20261103`
