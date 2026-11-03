@@ -422,3 +422,52 @@ PMIC结果JSON在 `out/suspend-resume-20261103/spi-pm/real-pmic-responses/` 和
 公开助手。新脚本和原始证据在忽略的`out/suspend-resume-20261103/ssam-events/`。
 下一步先对齐无键盘操作的对照，必要时键盘盖分离定位，再决定EC事件策略；原生自动
 休眠、多轮恢复与能耗仍待验证，不能以本轮platform检查宣称目标完成。
+
+
+### 无操作/键盘盖分离对照与保留 SSAM 的真实电源键恢复
+
+用户说明上一轮曾点击设备，要求重新测试。本轮先做无人操作对照，再只读采集
+键盘hidraw报告，随后由用户拔下键盘盖做相同platform对照。每轮独立新日志，
+开始前核对同boot、当前IRQ/PMIC、SSAMenabled、nativeN/owner0/token0；首个失败停止。
+
+| 对照 | 回调/trace | SSAM事件与IRQ | PM计数 |
+| --- | --- | --- | --- |
+| 无操作、键盘盖接入 | 2340返回0；4760/4760 | 18条iid1/len12、2条iid2/len3；IRQ173一次 | success3→4/fail0 |
+| 无操作、增加只读hidraw | 2340返回0；4762/4762 | 同样18+2条；IRQ173一次 | success4→5/fail0 |
+| 键盘盖拔下 | 2260返回0；4576/4576 | 无SSAM事件、无SSAM IRQ | success5→6/fail0 |
+
+三轮均无machine_suspend、无trace覆盖。只读键盘采集开始后关屏前2秒为0字节，
+整个挂起/恢复窗口得到216字节，18条Report1全部为ID=1且11字节输入字段全0，
+没有修饰键/按键按下。读者由18秒timeout结束（143），不是读取失败后伪造空报告。
+这些空报告发生在EC显示状态转换周围，接收时间并不能完全代表EC生成时间。
+用户确认前两轮期间未操作设备、恢复正常。这支持键盘盖电源转换报告排队的方向，
+不证明是哪一条通知命令导致，也不是完整EC事件过滤方案。
+
+随后另获用户按键协调确认，键盘盖保持拔下，**SSAM和PMIC始终enabled**。
+原ESP27项校验全通过、所有once.env=0，不改菜单/载荷；独立单任务五秒token
+只发起一次真实请求，不自动重试，也不调用强制禁锁或自动KEYCODE_WAKEUP。
+
+- machine_suspend：1903.952181→1917.916734，**13.964553秒**。
+- 内核明确`Triggering wakeup from IRQ216`，trace为pm8941_pwrkey；没有SSAM事件。
+- PM_RETURN/cleanup=0，2260条组件回调全返回0、无覆盖；success6→7/fail0。
+- SPIcount6→7、同boot1df5aab6…和system_server3820/SurfaceFlinger3361。
+- 用户确认亮屏/触摸/返回桌面正常，随后补充当前没有上滑锁屏，详见下面更正。
+- 清理实读pm_test=none、debug/times0、token/owner0、nativeN、SSAMenabled；
+  自己的trace挂载/instance已清理，Android原tracefs保持。没有提升默认。
+
+这证明本SQ2在**键盘盖拔下且保留SSAM唤醒**的条件下有一次受控电源键恢复。
+不能将“需拔键盘盖”作为最终可用方案；带盖事件策略、原生自动休眠、多轮恢复和
+能耗仍未完成。原始证据/解析JSON在`out/suspend-resume-20261103/ssam-events/`。
+上游当前controller.c的IRQ处理仍注明EC事件回调/过滤未实现；仅核对源码，未换驱动。
+
+### 用户更正：当前无上滑锁屏，收窄此前UI验收表述
+
+用户指出当前直接进入桌面，没有上滑步骤。实读前台user10的
+`locksettings get-disabled --user 10=true`、Keyguard showing=false/inputRestricted=false；
+这是锁屏None。11月1日HANDOFF已有get-disabled=true记录，早于本轮休眠试验；
+本轮只执行KEYCODE_SLEEP/WAKEUP，没有set-disabled、dismiss-keyguard或凭据修改。
+不能据当前状态确定最早是哪次临时处理留下。
+
+**此前本SQ2记录中的“画面/触摸/上滑解锁均正常”须收窄为“亮屏/触摸/返回桌面正常”。**
+用户当时“都正常”不构成实际执行上滑或安全凭据解锁的证据。13.96秒与15.69秒的
+内核电源键唤醒证据仍有效，锁屏/安全解锁验收未做；保留现有设置，不清除或新增凭据。
