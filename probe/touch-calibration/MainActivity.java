@@ -1,5 +1,7 @@
 package org.surface.touchcalibration;
 import android.app.Activity;
+import android.content.Intent;
+import org.json.*;
 import android.os.*;
 import android.graphics.*;
 import android.view.*;
@@ -10,231 +12,311 @@ import java.nio.file.Files;
 import java.util.*;
 
 public class MainActivity extends Activity {
-  File dir; String device="",nonce=""; Calibration original,candidate;
-  Handler handler=new Handler(); boolean preview=false,waiting=false,collecting=false;
-  long deadline; String pending=""; Targets activeTargets; int skippedRegions=0,skippedChecks=0; boolean noisePreview=false; String noiseNonce=""; long noiseDeadline; boolean idleArmed=false; long idleAt; TextView status; boolean previewForThumb=false;
+  File dir;String device="",nonce="",pending="",noiseNonce="",patch="",exportNotice="";
+  Calibration original,candidate;final Handler handler=new Handler();final WizardFlow flow=new WizardFlow();
+  boolean leaving=false,waiting=false,preview=false,noisePreview=false,collecting=false,noiseCapturing=false;
+  boolean idleArmed=false,retesting=false,noiseBand=false,patchAvailable=false,exporting=false,thumbAfter=false;
+  long deadline,noiseDeadline,idleAt,noiseStart;int attempts=0,noiseContacts=0,beforeContacts=0,afterContacts=0,skippedRegions=0;
+  String beforeNoise="",afterNoise="",plan="";TextView status;Targets activeTargets;
+  ThumbTapCapture thumbBefore,thumbAfterData;Calibration thumbBase;
+  boolean tapAfter=false,tapPreview=false,tapContinue=false,tapLearning=false;long tapDeadline;SingleTapCapture tapBefore;
   String read(String name)throws Exception{return new String(Files.readAllBytes(new File(dir,name).toPath()),StandardCharsets.UTF_8);}
+  void record(String name,String body){try{Files.write(new File(dir,name).toPath(),body.getBytes(StandardCharsets.UTF_8));}catch(Exception ignored){}}
   void send(String command,String body){
+    if(waiting)return;
+    if(command.equals("tap-begin"))tapLearning=true;
     try{
+      if(command.equals("noise-learn")||command.equals("noise-retest")){
+        retesting=command.equals("noise-retest");noiseCapturing=true;noiseContacts=0;noiseStart=SystemClock.uptimeMillis();
+      }
       nonce=UUID.randomUUID().toString();File temp=new File(dir,"request.tmp");
       try(FileOutputStream f=new FileOutputStream(temp)){f.write((command+"\n"+nonce+"\n"+body).getBytes(StandardCharsets.UTF_8));f.getFD().sync();}
       if(!temp.renameTo(new File(dir,"request")))throw new IOException();
       pending=command;waiting=true;deadline=SystemClock.elapsedRealtime()+30000;handler.postDelayed(poll,300);
-    }catch(Exception e){message("请求未发送，请稍后重新打开校准。");}
+    }catch(Exception e){noiseCapturing=false;message("连接失败，请重新打开。","关闭",()->finish());}
   }
   final Runnable poll=new Runnable(){public void run(){
     if(!waiting)return;
     try{
-      String reply=read("reply");String[] lines=reply.split("\n");
+      String[] lines=read("reply").split("\n");
       if(lines.length>=2&&lines[0].equals(nonce)){
-        waiting=false;
-        if(!lines[1].equals("OK")){preview=false;message("未应用校准，已保留上一份结果。请重新打开后再试。");return;}
-        if(pending.equals("noise-learn")){noiseNonce=nonce;noiseDeadline=SystemClock.elapsedRealtime()+25000;message("静置检测中（约12秒）\n请勿触摸屏幕。会报告条带、大片和短暂异常；\n发现异常不等于可以安全学习屏蔽规则，任何规则均不会自动保存。");handler.postDelayed(noisePoll,500);return;}
-        if(pending.equals("noise-apply")){noisePreview=true;noiseReview();return;}
-        if(pending.equals("noise-save")||pending.equals("noise-cancel")){noisePreview=false;coordinateIntro();return;}
-        if(pending.equals("preview")){preview=true;deadline=SystemClock.elapsedRealtime()+150000;if(previewForThumb)thumbIntro();else startValidation();return;}
-        if(pending.equals("save")){preview=false;message("校准已保存。以后开机会自动使用本机结果。", "完成",()->finish());return;}
-        if(pending.equals("cancel")||pending.equals("skip")){preview=false;finish();return;}
+        waiting=false;String done=pending;pending="";
+        if(!lines[1].equals("OK")){noiseCapturing=false;message("操作未完成，请重新打开。","关闭",()->finish());return;}
+        if(leaving){
+          if(done.equals("noise-learn")||done.equals("noise-retest"))noiseNonce=nonce;
+          if(done.equals("noise-apply"))noisePreview=true;
+          if(done.equals("preview"))preview=true;
+          if(done.equals("tap-apply"))tapPreview=true;
+          if(done.equals("tap-save")||done.equals("tap-cancel")){tapPreview=false;tapLearning=false;}
+          if(done.equals("noise-save")||done.equals("noise-cancel")){noisePreview=false;noiseNonce="";}
+          if(done.equals("save")||done.equals("cancel"))preview=false;
+          handler.post(thisActivityCancel);return;
+        }
+        if(done.equals("tap-begin")||done.equals("tap-retest")){if(tapAfter)tapDeadline=SystemClock.elapsedRealtime()+590000;collecting=true;setContentView(new PointView());return;}
+        if(done.equals("tap-finish")){tapLearning=false;record("tap-analysis.txt",read("tap-status"));message("正在调整，请稍候…");send("tap-apply","");return;}
+        if(done.equals("tap-apply")){tapPreview=true;tapAfter=true;tapDeadline=SystemClock.elapsedRealtime()+590000;pointIntro();return;}
+        if(done.equals("tap-save")){tapPreview=false;flow.confirmTap();coordinateIntro();return;}
+        if(done.equals("tap-cancel")){tapLearning=false;tapPreview=false;tapAfter=false;if(tapContinue){tapContinue=false;flow.useOriginalTap();coordinateIntro();}else pointIntro();return;}
+        if(done.equals("noise-learn")||done.equals("noise-retest")){
+          noiseNonce=nonce;noiseDeadline=SystemClock.elapsedRealtime()+25000;
+          message("请保持静置，12秒内不要触摸。");handler.postDelayed(noisePoll,300);return;
+        }
+        if(done.equals("noise-export")){patch=read("noise-patch");patchReady();return;}
+        if(done.equals("noise-apply")){noisePreview=true;flow.changedNoise();prepareRetest();return;}
+        if(done.equals("noise-save")){noisePreview=false;noiseNonce="";flow.confirmNoise();pointIntro();return;}
+        if(done.equals("noise-cancel")){noisePreview=false;flow.changedNoise();noiseIntro();return;}
+        if(done.equals("preview")){preview=true;deadline=SystemClock.elapsedRealtime()+150000;if(thumbAfter)thumbIntro(true);else thumbIntro(false);return;}
+        if(done.equals("save")){preview=false;message("已保存。","完成",()->finish());return;}
+        if(done.equals("cancel")||done.equals("skip")){preview=false;finish();return;}
       }
     }catch(Exception ignored){}
-    if(SystemClock.elapsedRealtime()>deadline){waiting=false;preview=false;message("服务暂未响应。临时校准会自动恢复，请稍后再试。");return;}
+    if(SystemClock.elapsedRealtime()>deadline){waiting=false;noiseCapturing=false;message("连接超时，请重新打开。","关闭",()->finish());return;}
     handler.postDelayed(this,300);
   }};
+  @Override public boolean dispatchTouchEvent(MotionEvent e){
+    if(noiseCapturing){int a=e.getActionMasked();if(a==MotionEvent.ACTION_DOWN||a==MotionEvent.ACTION_POINTER_DOWN)noiseContacts++;return true;}
+    return super.dispatchTouchEvent(e);
+  }
   @Override public void onCreate(Bundle state){
     super.onCreate(state);dir=createDeviceProtectedStorageContext().getFilesDir();
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON|WindowManager.LayoutParams.FLAG_FULLSCREEN);
-    getWindow().getDecorView().setSystemUiVisibility(5894);
-    // Creating the files directory also allows the boot helper to publish context.
-    message("正在读取本机校准状态…");handler.postDelayed(this::load,500);
+    getWindow().getDecorView().setSystemUiVisibility(5894);message("正在读取本机触摸服务…");handler.postDelayed(this::load,500);
   }
-  int attempts=0;
   void load(){
-    try{String body=read("context");for(String line:body.split("\n"))if(line.startsWith("Device="))device=line.substring(7);
+    try{
+      String body=read("context");for(String l:body.split("\n"))if(l.startsWith("Device="))device=l.substring(7);
       if(!device.matches("[0-9a-f]{64}"))throw new IOException();original=new Calibration(body);
-      noiseIntro();
-    }catch(Exception e){if(++attempts<30)handler.postDelayed(this::load,500);else message("校准服务尚未就绪。请稍后重新打开。", "关闭",()->finish());}
+      if(isInMultiWindowMode()){message("请全屏打开应用后校准。","关闭",()->finish());return;}
+      if(getIntent().getBooleanExtra("point_capture",false)){
+        if(getIntent().getBooleanExtra("auto_capture",false))startPointCapture();else pointIntro();
+      }else noiseIntro();
+    }catch(Exception e){if(++attempts<30)handler.postDelayed(this::load,500);else message("触摸服务未就绪，未开始采集。","关闭",()->finish());}
   }
   LinearLayout layout(String text){
-    LinearLayout l=new LinearLayout(this);l.setOrientation(1);l.setGravity(Gravity.CENTER);l.setPadding(80,40,80,40);l.setBackgroundColor(Color.rgb(22,27,36));
-    status=new TextView(this);status.setText(text);status.setTextSize(23);status.setTextColor(Color.WHITE);status.setGravity(Gravity.CENTER);l.addView(status);setContentView(l);return l;
+    LinearLayout l=new LinearLayout(this);l.setOrientation(1);l.setGravity(Gravity.CENTER);l.setPadding(50,24,50,24);l.setBackgroundColor(Color.rgb(22,27,36));
+    status=new TextView(this);status.setText(text);status.setTextSize(21);status.setTextColor(Color.WHITE);status.setGravity(Gravity.CENTER);l.addView(status);
+    ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.addView(l);setContentView(scroll);return l;
   }
-  void button(LinearLayout l,String text,Runnable action){Button b=new Button(this);b.setText(text);b.setTextSize(20);b.setOnClickListener(v->action.run());l.addView(b,new LinearLayout.LayoutParams(600,100));}
+  void button(LinearLayout l,String text,Runnable action){Button b=new Button(this);b.setText(text);b.setTextSize(19);b.setOnClickListener(v->{if(!waiting)action.run();});l.addView(b,new LinearLayout.LayoutParams(850,100));}
+  void holdButton(LinearLayout l,String text,Runnable action){Button b=new Button(this);b.setText(text);b.setTextSize(19);b.setOnLongClickListener(v->{if(!waiting)action.run();return true;});l.addView(b,new LinearLayout.LayoutParams(850,110));}
   void message(String text){layout(text);}
   void message(String text,String label,Runnable action){LinearLayout l=layout(text);button(l,label,action);}
-  void menu(){
-    if(isInMultiWindowMode()){message("请先将校准窗口全屏，再重新打开。窗口模式无法准确测量整块屏幕。","关闭",()->finish());return;}
-    LinearLayout l=layout("触屏校准\n\n先检测本机静置噪声，再进行坐标补偿。请用一根手指自然点击黄色十字，\n每个位置两次，最多42次；之后检查5个位置。点不到可跳过，音量减键也可跳过。\n过程中不必追着偏移的触点移动。原结果会保留到你确认保存。\n\n可跳过，之后从应用列表打开“触屏校准”。");
-    button(l,"先静置检测，再校准",this::noiseIntro);
-    button(l,"保留现有缓解，直接坐标校准",this::coordinateIntro);
-    button(l,"仅检查拇指",()->{candidate=original;previewForThumb=true;message("正在准备拇指测试…");send("preview",candidate.encode(device));});
-    button(l,"暂时跳过",()->send("skip",""));
-  }
-  final double[][] validation={{.5,.5},{.03,.5},{.97,.5},{.5,.03},{.5,.97}};
-  void startValidation(){collecting=true;setContentView(new Targets(true));}
-  void review(boolean pass){
-    collecting=false;
-    if(!pass){LinearLayout l=layout("检查点仍有明显偏差，本次结果不保存。\n请返回后重新校准；原结果会恢复。");button(l,"恢复原结果",()->send("cancel",""));return;}
-    LinearLayout l=layout("请在下方区域轻点 3 次、拖动，再双指张合 2 次。\n确认位置、跟手和双指均正常后保存。\n跳过区域："+skippedRegions+"，未检查点："+skippedChecks+"（不等于全屏已通过）。\n拇指优化："+(candidate.thumbOptimized?"已启用":"未启用")+"；未保存的试用会自动恢复。");
-    View pad=new View(this){Paint p=new Paint(3);float[] points=new float[0];protected void onDraw(Canvas c){c.drawColor(Color.DKGRAY);p.setColor(Color.YELLOW);for(int i=0;i<points.length;i+=2)c.drawCircle(points[i],points[i+1],15,p);}public boolean onTouchEvent(MotionEvent e){int a=e.getActionMasked();int skip=a==MotionEvent.ACTION_POINTER_UP?e.getActionIndex():-1;int n=a==MotionEvent.ACTION_UP||a==MotionEvent.ACTION_CANCEL?0:e.getPointerCount()-(skip>=0?1:0);points=new float[n*2];for(int i=0,j=0;j<n;i++){if(i==skip)continue;points[j*2]=e.getX(i);points[j*2+1]=e.getY(i);j++;}invalidate();return true;}};
-    l.addView(pad,new LinearLayout.LayoutParams(1000,260));button(l,"轻点、拖动和双指正常，保存",()->{if(trialAlive())send("save","");});button(l,"恢复原结果",()->send("cancel",""));
-  }
-  boolean trialAlive(){if(preview&&SystemClock.elapsedRealtime()<deadline)return true;collecting=false;send("cancel","");message("试用时间已结束，正在恢复原结果。");return false;}
-  void thumbIntro(){
-    collecting=false;
-    LinearLayout l=layout("边缘拇指测试\n\n用大拇指在容易出问题的边缘慢拖，保持接触 5 秒，重复 3 次。\n倒计时结束后才抬手。若提前断触或重复点击，可选择优化并重测。\n\n当前跳过区域："+skippedRegions+"，未检查点："+skippedChecks+"（不等于全屏已通过）。\n拇指优化："+(candidate.thumbOptimized?"已启用":"未启用"));
-    button(l,"开始边缘慢拖测试",()->{if(trialAlive()){collecting=true;setContentView(new ThumbView());}});
-    if(candidate.thumbOptimized==original.thumbOptimized)button(l,"本次跳过拇指测试",()->review(true));
-    button(l,"恢复原结果",()->send("cancel",""));
-  }
-  void thumbIssue(){
-    collecting=false;
-    LinearLayout l=layout("检测到提前抬起，或你报告了断触／重复点击。\n如果刚才主动抬手，请重新测试。\n只有拇指仍贴着屏幕却断触时，才建议尝试优化。\n"+(candidate.thumbOptimized?"当前已启用优化；若问题仍在，请保留原结果并反馈。":"优化会放宽大拇指接触面积限制，启用后需要重新测试。"));
-    button(l,"重新测试",()->{if(trialAlive()){collecting=true;setContentView(new ThumbView());}});
-    if(!candidate.thumbOptimized)button(l,"启用拇指优化并重测",()->{candidate=candidate.withThumbOptimization(true);previewForThumb=true;message("正在临时启用优化…");send("preview",candidate.encode(device));});
-    button(l,"恢复原结果",()->send("cancel",""));
-  }
-  final class ThumbView extends View {
-    final ThumbCheck test=new ThumbCheck();final Paint p=new Paint(3);String hint="沿边缘慢拖，倒计时结束后再抬手";float x=-1,y;
-    final Runnable tick=new Runnable(){public void run(){if(!collecting||!isAttachedToWindow())return;if(!trialAlive())return;invalidate();handler.postDelayed(this,100);}};
-    ThumbView(){super(MainActivity.this);}
-    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();handler.post(tick);}
-    @Override protected void onDetachedFromWindow(){handler.removeCallbacks(tick);super.onDetachedFromWindow();}
-    protected void onDraw(Canvas c){
-      float w=getWidth(),h=getHeight();c.drawColor(Color.rgb(22,27,36));p.setColor(Color.rgb(40,70,85));c.drawRect(0,0,w,h*.08f,p);c.drawRect(0,h*.92f,w,h,p);c.drawRect(0,0,w*.08f,h,p);c.drawRect(w*.92f,0,w,h,p);
-      p.setColor(Color.WHITE);p.setTextAlign(Paint.Align.CENTER);p.setTextSize(36);c.drawText("拇指边缘慢拖 "+(test.completed+1)+" / 3",w/2,h*.35f,p);
-      String time=!test.down?"请从蓝色边缘区域落指":test.remaining(SystemClock.uptimeMillis())==0?"可以抬手了":String.format(Locale.ROOT,"保持接触 %.1f 秒",test.remaining(SystemClock.uptimeMillis())/1000.);
-      c.drawText(time,w/2,h*.42f,p);c.drawText(hint,w/2,h*.49f,p);
-      p.setColor(Color.rgb(70,80,95));c.drawRect(w*.25f,h*.58f,w*.75f,h*.70f,p);p.setColor(Color.WHITE);c.drawText("无法连续拖动／出现重复点击",w/2,h*.65f,p);
-      if(test.down){p.setColor(Color.YELLOW);c.drawCircle(x,y,18,p);}
-    }
-    public boolean onTouchEvent(MotionEvent e){
-      if(!collecting||!trialAlive())return true;int a=e.getActionMasked();x=e.getX();y=e.getY();double nx=x/(getWidth()-1.),ny=y/(getHeight()-1.);
-      if(e.getPointerCount()>1){test.cancel();hint="本步骤只用一根拇指，请抬手后重试";invalidate();return true;}
-      if(a==MotionEvent.ACTION_DOWN){if(nx>.25&&nx<.75&&ny>.58&&ny<.70){thumbIssue();return true;}if(!test.begin(e.getEventTime(),nx,ny))hint="请在蓝色边缘区域落指";else hint="沿边缘移动一小段，保持接触直到提示抬手";}
-      else if(a==MotionEvent.ACTION_MOVE){for(int i=0;i<e.getHistorySize();i++)test.move(e.getHistoricalX(i)/(getWidth()-1.),e.getHistoricalY(i)/(getHeight()-1.));test.move(nx,ny);}
-      else if(a==MotionEvent.ACTION_UP){String result=test.end(e.getEventTime(),nx,ny);if(result.equals("early")){thumbIssue();return true;}if(result.equals("complete")){review(true);return true;}hint=result.equals("retry")?"请保持在边缘，并沿边缘拖动一小段后重试":"本次完成，请抬手后开始下一次";}
-      else if(a==MotionEvent.ACTION_CANCEL){test.cancel();hint="测试被中断，请重新落指";}
-      invalidate();return true;
-    }
-  }
-  void coordinateIntro(){
-    LinearLayout l=layout("坐标校准\n每个区域两次；点不到可按中央跳过按钮或音量减键。\n跳过区域沿用原曲线锚点，不伪造采样或禁用该区域。\n校准失败或退出会保留原设置。");
-    button(l,"开始坐标校准",()->{skippedRegions=skippedChecks=0;collecting=true;setContentView(new Targets(false));});
-  }
   void noiseIntro(){
-    LinearLayout l=layout("静置检测幽灵触控\n请先擦干屏幕、放稳设备，移开手和触控笔。\n接下来约12秒不要触摸；检测条带、大片干扰及孤立尖峰。\n宽区域异常会明确报告，但不会自动屏蔽该区域。\n候选需预览确认，不能保证修复所有硬件故障。");
-    button(l,"现在开始",()->{cancelIdleCountdown();send("noise-learn","");});
-    button(l,"取消检测，保留原缓解",()->{cancelIdleCountdown();coordinateIntro();});
-    button(l,"其他校准选项",()->{cancelIdleCountdown();menu();});
+    flow.changedNoise();patchAvailable=false;patch="";noiseBand=false;exportNotice="";
+    LinearLayout l=layout("请放稳设备，移开手与触控笔。\n5秒后开始，请保持静置。");
+    button(l,"现在检测",()->{cancelCountdown();send("noise-learn","");});
+    button(l,"暂不检测，退出",()->{cancelCountdown();finish();});
     idleArmed=true;idleAt=SystemClock.elapsedRealtime()+5000;handler.post(idleCountdown);
   }
-  void cancelIdleCountdown(){idleArmed=false;handler.removeCallbacks(idleCountdown);}
+  void cancelCountdown(){idleArmed=false;handler.removeCallbacks(idleCountdown);}
   final Runnable idleCountdown=new Runnable(){public void run(){
-    if(!idleArmed||isFinishing())return;
-    long left=idleAt-SystemClock.elapsedRealtime();
+    if(!idleArmed||isFinishing())return;long left=idleAt-SystemClock.elapsedRealtime();
     if(left<=0){idleArmed=false;send("noise-learn","");return;}
-    status.setText("静置检测将在 "+((left+999)/1000)+" 秒后自动开始\n\n请放稳设备，移开手和触控笔，保持屏幕干燥。\n检测约12秒；区分“发现异常”和“可安全缓解”。\n不会自动应用、保存或屏蔽整片触摸区域。");
-    handler.postDelayed(this,200);
+    status.setText("请放稳设备，移开手与笔。\n"+((left+999)/1000)+"秒后开始。");handler.postDelayed(this,200);
   }};
-  Map<String,String> noiseDetails(String[] lines){
-    Map<String,String> m=new HashMap<>();
-    for(int i=1;i<lines.length;i++)for(String word:lines[i].trim().split("\\s+")){
-      int p=word.indexOf('=');if(p>0)m.put(word.substring(0,p),word.substring(p+1));
-    }
-    return m;
-  }
-  void detectionResult(String state,String frames,String cells,Map<String,String> info){
-    String summary="\n收到原始帧："+frames+"；异常帧："+info.getOrDefault("abnormal_frames","未知")+
-      "\n采样开始时充电："+(info.getOrDefault("power_online","unknown").equals("1")?"是":info.getOrDefault("power_online","unknown").equals("0")?"否":"未知");
-    LinearLayout l;
-    if(state.equals("ready")){
-      l=layout("检测到可疑孤立尖峰："+cells+" 个电极。"+summary+"\n可临时预览局部插值；正常相邻接触仍保留，不屏蔽整片区域。");
-      button(l,"临时预览缓解",()->send("noise-apply",""));
-    }else{
-      String title;
-      if(state.equals("line_noise"))title="检测到持续条带异常！\n电极行（从0起）："+info.getOrDefault("row_ids","未知")+"；列："+info.getOrDefault("column_ids","未知")+"\n若期间未触摸，这就是静置干扰信号，不是检测正常。\n不适合当作少量坏点自动学习；请检查充电连接条件后重测。";
-      else if(state.equals("broad_signal"))title="检测到大片／连续异常信号。\n若已保持静置，可能存在幽灵触控或供电干扰；\n也需排除真实触碰。未自动屏蔽或保存任何区域。";
-      else if(state.equals("transient"))title="检测到短暂异常／接触信号。\n本次不是“未发现问题”，但证据不足以生成安全缓解规则。\n请保持静置并对照充电条件重测。";
-      else if(state.equals("quiet"))title="本次收到的原始帧未见明显异常。\n不代表所有充电条件下正常，也不是硬件无故障证明。";
-      else if(state.equals("no_data"))title="静置检测数据不足／没有新报告，无法判断。\n设备静置时可能停止发送报告；这里没有判定为正常。";
-      else title="检测没有完成：状态 "+state+"。\n保留原缓解，不将检测失败显示为没有幽灵触控。";
-      l=layout(title+summary);
-    }
-    button(l,"重新静置检测",this::noiseIntro);
-    button(l,"保留原缓解，继续坐标校准",()->send("noise-cancel",""));
-  }
+  Map<String,String> details(String[] lines){Map<String,String> m=new HashMap<>();for(int i=1;i<lines.length;i++)for(String w:lines[i].trim().split("\\s+")){int k=w.indexOf('=');if(k>0)m.put(w.substring(0,k),w.substring(k+1));}return m;}
+  String noiseSummary(String state,String frames,Map<String,String> info){return "原始信号："+state+" / 帧 "+frames+" / 异常帧 "+info.getOrDefault("abnormal_frames","未知")+"\n本应用全屏窗口收到的新触点："+noiseContacts+" / 观测 "+((SystemClock.uptimeMillis()-noiseStart)/1000.)+" 秒\n电极行："+info.getOrDefault("row_ids","无")+"；列："+info.getOrDefault("column_ids","无")+"；供电："+info.getOrDefault("power_online","未知");}
   final Runnable noisePoll=new Runnable(){public void run(){
-    if(SystemClock.elapsedRealtime()>noiseDeadline){message("检测状态通道超时，无法判断，不代表正常。\n未应用任何新规则。","继续坐标校准",()->send("noise-cancel",""));return;}
+    if(SystemClock.elapsedRealtime()>noiseDeadline){noiseCapturing=false;message("检测超时，请重新打开。","关闭",()->finish());return;}
     try{
-      String[] lines=read("noise-status").trim().split("\n");
-      String[] f=lines[0].trim().split("\\s+");
+      String[] lines=read("noise-status").trim().split("\n"),f=lines[0].split("\\s+");
       if(f.length==4&&f[0].equals(noiseNonce)){
-        Map<String,String> info=noiseDetails(lines);
-        if(!f[1].equals("learning")){detectionResult(f[1],f[2],f[3],info);return;}
-        status.setText("静置检测中，请勿触摸（约12秒）\n原始帧："+f[2]+"；异常帧："+info.getOrDefault("abnormal_frames","0")+"\n完成后会分别报告干扰类型和能否安全缓解，不自动保存规则。");
+        Map<String,String> info=details(lines);
+        if(!f[1].equals("learning")){noiseCapturing=false;String summary=noiseSummary(f[1],f[2],info);
+          if(retesting){afterContacts=noiseContacts;afterNoise=summary;flow.finishRetest();record("idle-after.txt",summary);noiseReview();}
+          else{beforeContacts=noiseContacts;beforeNoise=summary;record("idle-before.txt",summary);noiseBand=info.getOrDefault("candidate_kind","none").equals("band");patchAvailable=f[1].equals("ready")||f[1].equals("line_noise")&&noiseBand;detectionResult();}
+          return;
+        }
+        status.setText("正在检测，请勿触摸。");
       }
-    }catch(Exception ignored){}handler.postDelayed(this,500);
+    }catch(Exception ignored){}handler.postDelayed(this,300);
   }};
+  void detectionResult(){
+    LinearLayout l=layout("检测完成，请继续。");
+    if(patchAvailable)button(l,"生成修复",()->send("noise-export",""));
+    else button(l,"再次检测",this::prepareRetest);
+    button(l,"重新检测",this::noiseIntro);button(l,"退出，不改变规则",()->finish());
+  }
+  void patchReady(){
+    LinearLayout l=layout("请保存修复文件，然后开始复测。\n"+exportNotice);
+    button(l,"保存补丁文件…",this::exportPatch);
+    holdButton(l,"长按：应用并复测",()->send("noise-apply",""));
+    button(l,"放弃候选，重新检测",this::noiseIntro);
+  }
+  void exportPatch(){
+    if(patch.isEmpty())return;
+    try{exporting=true;Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/octet-stream");i.putExtra(Intent.EXTRA_TITLE,"static-touch-"+device.substring(0,12)+".noise");startActivityForResult(i,41);}
+    catch(Exception e){exporting=false;exportNotice="暂时无法导出，请重试。";patchReady();}
+  }
+  @Override protected void onActivityResult(int request,int result,Intent data){
+    super.onActivityResult(request,result,data);if(request!=41)return;exporting=false;
+    if(result==RESULT_OK&&data!=null&&data.getData()!=null){
+      try(OutputStream o=getContentResolver().openOutputStream(data.getData(),"w")){if(o==null)throw new IOException();o.write(patch.getBytes(StandardCharsets.UTF_8));o.flush();exportNotice="文件已保存。";}
+      catch(Exception e){exportNotice="保存失败，请重试。";}
+    }else exportNotice="已取消文件导出。";patchReady();
+  }
+  void prepareRetest(){
+    LinearLayout l=layout("请放稳设备，移开手与笔。\n准备好后开始。" );
+    button(l,"已放稳，开始复测",()->send("noise-retest",noisePreview?"preview":"current"));button(l,"放弃并恢复原规则",()->send("noise-cancel",""));
+  }
   void noiseReview(){
-    LinearLayout l=layout("缓解正在临时预览（最长180秒）。\n请轻点、拖动并双指张合；确认没有丢失正常触摸后再保存。\n有异常请恢复原规则，未知类型的幽灵触控不会盲目屏蔽。");
-    button(l,"正常，保存本机缓解并继续校准",()->send("noise-save",""));
-    button(l,"恢复原缓解并继续校准",()->send("noise-cancel",""));
+    LinearLayout l=layout("复测完成\n请轻点、拖动和双指缩放，确认操作正常。");
+    holdButton(l,"长按：操作正常，继续",()->{if(!flow.retested)return;if(noisePreview)send("noise-save","");else{flow.confirmNoise();pointIntro();}});
+    button(l,"仍有问题，再次检测",this::prepareRetest);button(l,"效果不接受，恢复原规则",()->send("noise-cancel",""));
   }
-  @Override public boolean onKeyDown(int key,KeyEvent event){
-    if(key==KeyEvent.KEYCODE_VOLUME_DOWN&&collecting&&activeTargets!=null&&activeTargets.isAttachedToWindow()){
-      activeTargets.skipRegion();return true;
-    }return super.onKeyDown(key,event);
+  void pointIntro(){
+    LinearLayout l=layout((tapAfter?"再测一次":"单指点击检测")+"\n用一根手指轻点黄色十字，然后抬手。共15次。\n采到后等1秒，再点下一个。");
+    button(l,"开始",this::startPointCapture);
+    button(l,"退出",()->finish());
   }
-  @Override public void onBackPressed(){if(noisePreview)send("noise-cancel","");else if(preview)send("cancel","");else finish();}
-  @Override public void onPause(){super.onPause();cancelIdleCountdown();collecting=false;handler.removeCallbacks(noisePoll);if(noisePreview||pending.equals("noise-learn")||pending.equals("noise-apply")){noisePreview=false;send("noise-cancel","");}if(preview||pending.equals("preview")){preview=false;send("cancel","");}}
+  void startPointCapture(){if(tapAfter)send("tap-retest","");else{flow.changedTap();send("tap-begin","");}}
+  boolean tapAlive(){return !tapAfter||tapPreview&&SystemClock.elapsedRealtime()<tapDeadline;}
+  final class PointView extends View {
+    final Paint paint=new Paint(3);final String run=UUID.randomUUID().toString();
+    final SingleTapCapture test=new SingleTapCapture(SystemClock.uptimeMillis()+3000,0x535058L+device.hashCode());
+    final StringBuilder events=new StringBuilder();boolean written=false,truncated=false;int lastCue=-2;
+    PointView(){super(MainActivity.this);record("point15-active-run.txt",run+"\n");}
+    void logCue(int i,long now){try{JSONObject j=new JSONObject();j.put("kind","cue").put("run",run).put("time_ms",now).put("trial",i);if(i>=0&&i<15)j.put("target",new JSONArray(test.targets[i]));events.append(j).append('\n');}catch(Exception ignored){}}
+    void storeResult(boolean complete){
+      if(written)return;written=true;test.complete=complete;
+      try{JSONObject j=new JSONObject();j.put("run",run).put("device",device).put("start_ms",test.start).put("advance_mode","captured_then_1000ms_and_released").put("after_capture_ms",1000).put("completed_trials",test.completed()).put("shown_at_ms",new JSONArray(test.shownAt)).put("captured_at_ms",new JSONArray(test.capturedAt)).put("ended_at_ms",new JSONArray(test.endedAt)).put("complete",complete).put("truncated",truncated);
+        j.put("starts",new JSONArray(test.starts)).put("peak_simultaneous",new JSONArray(test.peak)).put("gesture_groups",new JSONArray(test.groups)).put("cancels",new JSONArray(test.cancels)).put("targets",new JSONArray(test.targets));
+        j.put("operator_confirmed",false);record("point15-summary.json",j.toString(2));record("point15-events.jsonl",events.toString());record("point15-context.profile",original.encode(device));record(tapAfter?"tap-after.json":"tap-before.json",j.toString(2));
+      }catch(Exception e){message("保存失败，请重新开始。","关闭",()->finish());}
+    }
+    final Runnable tick=new Runnable(){public void run(){if(!collecting||!isAttachedToWindow())return;long now=SystemClock.uptimeMillis();test.tick(now);int i=test.trial(now);
+      if(!tapAlive()){collecting=false;storeResult(false);tapContinue=false;send("tap-cancel","");return;}
+      if(i!=lastCue){lastCue=i;logCue(i,now);}
+      if(test.finished(now)){storeResult(true);collecting=false;if(truncated){message("记录未完整保存，请重新开始。","重试",MainActivity.this::startPointCapture);}else pointResult(test,run);return;}invalidate();handler.postDelayed(this,40);}};
+    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();handler.post(tick);}
+    @Override protected void onDetachedFromWindow(){handler.removeCallbacks(tick);storeResult(test.finished(SystemClock.uptimeMillis()));super.onDetachedFromWindow();}
+    protected void onDraw(Canvas c){float w=getWidth(),h=getHeight();c.drawColor(Color.rgb(22,27,36));long now=SystemClock.uptimeMillis();int i=test.trial(now);
+      paint.setColor(Color.WHITE);paint.setTextSize(34);paint.setTextAlign(Paint.Align.CENTER);
+      c.drawText("轻点黄色十字，然后抬手",w/2,h*.34f,paint);
+      if(i<0){c.drawText("准备 "+((test.start-now+999)/1000)+" 秒",w/2,h*.43f,paint);return;}if(i>=15)return;
+      boolean tap=!test.captured();String hint=tap?"请轻点十字":test.remaining(now)>0?String.format(Locale.ROOT,"已采集，%.1f秒后进入下一点",test.remaining(now)/1000.):"已满1秒，请完全抬手后进入下一点";
+      c.drawText((i+1)+" / 15  —  "+hint,w/2,h*.43f,paint);
+      double[] t=test.targets[i];float x=(float)t[0]*(w-1),y=(float)t[1]*(h-1);paint.setColor(tap?Color.YELLOW:Color.GREEN);paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(4);c.drawCircle(x,y,32,paint);c.drawLine(x-44,y,x+44,y,paint);c.drawLine(x,y-44,x,y+44,paint);paint.setStyle(Paint.Style.FILL);
+    }
+    public boolean onTouchEvent(MotionEvent e){
+      if(!collecting)return true;test.event(e.getActionMasked(),e.getPointerCount(),e.getEventTime());
+      if(events.length()<2000000){try{JSONObject j=new JSONObject();j.put("kind","event").put("time_ms",e.getEventTime()).put("down_ms",e.getDownTime()).put("trial",test.trial(e.getEventTime())).put("action",e.getActionMasked()).put("action_index",e.getActionIndex());JSONArray pp=new JSONArray();
+        for(int i=0;i<e.getPointerCount();i++){JSONObject p=new JSONObject();p.put("id",e.getPointerId(i)).put("x",e.getX(i)/Math.max(1,getWidth()-1)).put("y",e.getY(i)/Math.max(1,getHeight()-1)).put("major_px",e.getTouchMajor(i)).put("minor_px",e.getTouchMinor(i)).put("pressure",e.getPressure(i)).put("tool",e.getToolType(i));pp.put(p);}j.put("pointers",pp);events.append(j).append('\n');
+      }catch(Exception ignored){}}else truncated=true;return true;
+    }
+  }
+  void pointResult(SingleTapCapture t,String run){
+    if(!tapAfter){
+      tapBefore=t;LinearLayout l=layout("点击完成\n刚才是否每个十字都只点了一次？");
+      holdButton(l,"长按：是，调整并复测",()->{record("point15-operator-confirmed.txt",run+"\nSINGLE_FINGER_ONE_TAP_PER_TARGET\n");message("正在分析，请稍候…");send("tap-finish","");});
+      button(l,"重新采集",this::pointIntro);return;
+    }
+    flow.tapRetested=true;
+    LinearLayout l=layout("复测完成\n请轻点、快速双击、拖动和双指缩放，确认操作正常。");
+    addGesturePad(l);
+    if(tapBefore!=null&&t.total()<=tapBefore.total()&&t.multiTrials()<=tapBefore.multiTrials())
+      holdButton(l,"长按：操作正常，保存并继续",()->{if(tapAlive()){record("tap-confirmed.txt",run+"\nUSER_ACCEPTED\n");send("tap-save","");}});
+    button(l,"再测一次",this::startPointCapture);
+    button(l,"恢复原设置并继续",()->{tapContinue=true;send("tap-cancel","");});
+  }
+  void addGesturePad(LinearLayout l){
+    View pad=new View(this){final Paint p=new Paint(3);float[] xy=new float[0];
+      protected void onDraw(Canvas c){c.drawColor(Color.DKGRAY);p.setColor(Color.YELLOW);for(int i=0;i<xy.length;i+=2)c.drawCircle(xy[i],xy[i+1],15,p);}
+      public boolean onTouchEvent(MotionEvent e){getParent().requestDisallowInterceptTouchEvent(true);int a=e.getActionMasked(),skip=a==6?e.getActionIndex():-1,n=a==1||a==3?0:e.getPointerCount()-(skip>=0?1:0);xy=new float[n*2];for(int i=0,j=0;j<n;i++){if(i==skip)continue;xy[j*2]=e.getX(i);xy[j*2+1]=e.getY(i);j++;}invalidate();return true;}};
+    l.addView(pad,new LinearLayout.LayoutParams(1000,260));
+  }
+  void coordinateIntro(){
+    if(!flow.noiseConfirmed){prepareRetest();return;}if(!flow.tapConfirmed){pointIntro();return;}
+    LinearLayout l=layout("点击黄色十字，变绿后抬手。\n点不到按音量减跳过；音量加返回上一点。" );
+    button(l,"开始42次采样",()->{skippedRegions=0;collecting=true;setContentView(new Targets());});
+  }
+  boolean trialAlive(){if(preview&&SystemClock.elapsedRealtime()<deadline)return true;collecting=false;send("cancel","");message("预览已超时，正在恢复上次保存的坐标结果。");return false;}
+  void thumbIntro(boolean after){
+    collecting=false;thumbAfter=after;
+    LinearLayout l=layout((after?"再测一次":"拇指点击检测")+"\n每个编号出现时，用拇指轻点一次。共10次。" );
+    button(l,after?"开始同条件复测":"开始10次点击采集",()->{if(trialAlive()){collecting=true;setContentView(new ThumbView(after));}});
+    button(l,"恢复原坐标结果并退出",()->send("cancel",""));
+  }
+  void thumbPlan(){
+    collecting=false;thumbBase=candidate;
+    LinearLayout l=layout("点击完成\n刚才是否每个编号都只点了一次？" );
+    button(l,"我已按提示点击，生成修复方案",()->{
+      if(!trialAlive())return;flow.changedThumb();
+      if(thumbBefore.proposeSizeCandidate()&&!candidate.thumbOptimized){candidate=candidate.withThumbOptimization(true);plan="本轮有重复／缺报／短触点证据：候选将接触面积上限从2.0cm放宽到2.4cm；保持触点阈值、起落时序与坐标曲线不变。不是根因结论，需同条件复测。";}
+      else if(candidate.thumbOptimized)plan="当前已采用2.4cm上限，不继续盲目放宽。保留现有参数进行同条件复测；若仍有问题，不把它声明为已修复。";
+      else plan="本轮未达到生成面积候选的证据门限，保留2.0cm与当前曲线，不无故修改正常触摸；仍进行同条件复测。";
+      record("thumb-plan.txt",thumbBefore.encode()+plan);thumbCandidateReview();
+    });
+    button(l,"刚才操作不一致，重新采集",()->thumbIntro(false));
+  }
+  void thumbCandidateReview(){LinearLayout l=layout("准备好后，再用拇指点击10次。" );
+    button(l,"临时应用方案，再测试10次",()->{thumbAfter=true;send("preview",candidate.encode(device));});
+    button(l,"放弃候选，重新采集",()->{candidate=thumbBase;thumbIntro(false);});
+  }
+  void thumbReview(){
+    collecting=false;flow.thumbRetested=true;
+    LinearLayout l=layout("复测完成，请确认点击正常。" );
+    holdButton(l,"长按：效果确认，进入最后手势确认",()->{if(flow.confirmThumb())review();});
+    button(l,"再做同条件复测",()->thumbIntro(true));
+    button(l,"修复无效，恢复原拇指参数保留坐标",()->{candidate=thumbBase;thumbAfter=true;plan="已恢复本轮拇指测试前参数；重新复测后由你确认，未标记修复成功。";flow.changedThumb();send("preview",candidate.encode(device));});
+    button(l,"放弃全部坐标改动",()->send("cancel",""));
+  }
+  void review(){
+    if(!flow.thumbConfirmed)return;
+    LinearLayout l=layout("请在下方轻点、拖动和双指缩放。\n确认操作正常后保存。" );
+    View pad=new View(this){final Paint p=new Paint(3);float[] points=new float[0];
+      protected void onDraw(Canvas c){c.drawColor(Color.DKGRAY);p.setColor(Color.YELLOW);for(int i=0;i<points.length;i+=2)c.drawCircle(points[i],points[i+1],15,p);}
+      public boolean onTouchEvent(MotionEvent e){getParent().requestDisallowInterceptTouchEvent(true);int a=e.getActionMasked(),skip=a==MotionEvent.ACTION_POINTER_UP?e.getActionIndex():-1,n=a==MotionEvent.ACTION_UP||a==MotionEvent.ACTION_CANCEL?0:e.getPointerCount()-(skip>=0?1:0);points=new float[n*2];for(int i=0,j=0;j<n;i++){if(i==skip)continue;points[j*2]=e.getX(i);points[j*2+1]=e.getY(i);j++;}invalidate();return true;}};
+    l.addView(pad,new LinearLayout.LayoutParams(1000,230));
+    holdButton(l,"长按：位置及手势可接受，保存本机结果",()->{if(trialAlive())send("save","");});
+    button(l,"恢复上次坐标结果",()->send("cancel",""));
+  }
+  final class ThumbView extends View {
+    final boolean after;final Paint p=new Paint(3);final ThumbTapCapture capture;float x=-1,y;
+    ThumbView(boolean a){super(MainActivity.this);after=a;capture=new ThumbTapCapture(SystemClock.uptimeMillis()+3000);}
+    final Runnable tick=new Runnable(){public void run(){if(!collecting||!isAttachedToWindow())return;if(!trialAlive())return;
+      if(capture.finished(SystemClock.uptimeMillis())){collecting=false;if(after){thumbAfterData=capture;record("thumb-after.txt",capture.encode());thumbReview();}else{thumbBefore=capture;record("thumb-before.txt",capture.encode());thumbPlan();}return;}invalidate();handler.postDelayed(this,80);}};
+    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();handler.post(tick);}
+    @Override protected void onDetachedFromWindow(){handler.removeCallbacks(tick);super.onDetachedFromWindow();}
+    protected void onDraw(Canvas c){float w=getWidth(),h=getHeight();c.drawColor(Color.rgb(22,27,36));p.setColor(Color.WHITE);p.setTextAlign(Paint.Align.CENTER);p.setTextSize(36);long now=SystemClock.uptimeMillis();int r=capture.round(now);
+      c.drawText((after?"修复后":"修复前")+"拇指点击采集",w/2,h*.30f,p);
+      c.drawText(now<capture.start?"准备：请在每个编号出现时点击一次":"现在点击一次："+(r+1)+" / 10",w/2,h*.39f,p);
+      c.drawText("在容易出问题的位置点击，不必追逐上报位置",w/2,h*.47f,p);
+      c.drawText("已记录："+capture.total()+"",w/2,h*.55f,p);
+      if(x>=0){p.setColor(Color.YELLOW);c.drawCircle(x,y,16,p);}}
+    public boolean onTouchEvent(MotionEvent e){if(!collecting)return true;int a=e.getActionMasked(),i=e.getActionIndex();x=e.getX(i);y=e.getY(i);
+      if(a==MotionEvent.ACTION_DOWN||a==MotionEvent.ACTION_POINTER_DOWN)capture.down(e.getPointerId(i),e.getEventTime());
+      if(a==MotionEvent.ACTION_UP||a==MotionEvent.ACTION_POINTER_UP)capture.up(e.getPointerId(i),e.getEventTime());
+      invalidate();return true;}
+  }
   final class Targets extends View {
-    final boolean check;final Paint p=new Paint(3);final double[][] samples=new double[42][];
-    int index=0,count;boolean pendingTap=false,down=false,invalid=false;double sx,sy,minX,maxX,minY,maxY;long downTime;String hint="";boolean passed=true;
-    Targets(boolean c){super(MainActivity.this);check=c;activeTargets=this;}
-    double[] target(){if(check)return validation[index];int group=index/14,point=(index%14)/2;return group==0?new double[]{Calibration.POS[point],.5}:group==1?new double[]{.5,Calibration.POS[point]}:new double[]{Calibration.POS[point],.04};}
-    protected void onDraw(Canvas c){
-      c.drawColor(Color.rgb(22,27,36));p.setColor(Color.WHITE);p.setTextSize(36);p.setTextAlign(Paint.Align.CENTER);
-      c.drawText((check?"检查位置 ":"校准 ")+(index+1)+" / "+(check?5:42),getWidth()/2f,getHeight()*.36f,p);
-      c.drawText("只点黄色十字中心，变绿后抬手，等它恢复黄色再点",getWidth()/2f,getHeight()*.40f,p);
-      c.drawText(hint,getWidth()/2f,getHeight()*.44f,p);
-      p.setColor(Color.rgb(65,80,100));c.drawRect(getWidth()*.30f,getHeight()*.65f,getWidth()*.70f,getHeight()*.77f,p);
-      p.setColor(Color.WHITE);c.drawText("此区域点不到：跳过 / 音量减",getWidth()/2f,getHeight()*.72f,p);
-      double[] t=target();float x=(float)t[0]*(getWidth()-1),y=(float)t[1]*(getHeight()-1);
-      p.setColor(pendingTap?Color.GREEN:Color.YELLOW);p.setStrokeWidth(3);p.setStyle(Paint.Style.STROKE);c.drawCircle(x,y,23,p);c.drawLine(x-32,y,x+32,y,p);c.drawLine(x,y-32,x,y+32,p);p.setStyle(Paint.Style.FILL);
-    }
-    void advance(){
-          if(index>=(check?5:42)){
-            collecting=false;if(check){if(passed)thumbIntro();else review(false);return;}
-            try{candidate=Calibration.fitPartial(samples,original).withThumbOptimization(original.thumbOptimized);previewForThumb=false;message("正在应用临时结果，随后检查 5 个位置…");send("preview",candidate.encode(device));}
-            catch(IllegalArgumentException ex){message(ex.getMessage()+"\n上一份结果未改变。","重新开始",()->{collecting=true;setContentView(new Targets(false));});}
-          }else{pendingTap=false;invalidate();}
-    }
-    void skipRegion(){
-      if(!collecting||pendingTap)return;
-      down=false;invalid=true;
-      if(check){skippedChecks++;index++;}else{
-        int start=(index/2)*2;samples[start]=samples[start+1]=null;index=start+2;skippedRegions++;
-      }
-      hint="该区域未测量：保留原曲线锚点，不屏蔽触摸";advance();
-    }
-    void sample(float px,float py){double x=px/(getWidth()-1.),y=py/(getHeight()-1.);if(!check){double[] raw=original.inverse(x,y);x=raw[0];y=raw[1];}sx+=x;sy+=y;count++;minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}
-    public boolean onTouchEvent(android.view.MotionEvent e){
-      if(!collecting||pendingTap)return true;
-      if(e.getActionMasked()==MotionEvent.ACTION_DOWN && e.getX()>getWidth()*.30f && e.getX()<getWidth()*.70f && e.getY()>getHeight()*.65f && e.getY()<getHeight()*.77f){skipRegion();return true;}
-      if(check&&SystemClock.elapsedRealtime()>deadline){collecting=false;send("cancel","");message("试用时间已结束，正在恢复原结果。");return true;}
-      int action=e.getActionMasked();if(e.getPointerCount()!=1)invalid=true;
-      if(action==MotionEvent.ACTION_DOWN){down=true;invalid=false;sx=sy=0;count=0;minX=minY=10;maxX=maxY=-10;downTime=e.getEventTime();sample(e.getX(),e.getY());}
-      else if(action==MotionEvent.ACTION_MOVE&&down){for(int i=0;i<e.getHistorySize();i++)sample(e.getHistoricalX(i),e.getHistoricalY(i));sample(e.getX(),e.getY());}
-      else if(action==MotionEvent.ACTION_UP&&down){
-        sample(e.getX(),e.getY());down=false;long duration=e.getEventTime()-downTime;double x=sx/count,y=sy/count;double[] t=target();
-        if(invalid||duration<25||duration>1500||maxX-minX>.025||maxY-minY>.025||Math.abs(x-t[0])>.1||Math.abs(y-t[1])>.1){hint="这次有滑动或落点太远，请在同一位置重试";invalidate();return true;}
-        if(check)passed&=Math.abs(x-t[0])<=.025&&Math.abs(y-t[1])<=.025;else samples[index]=new double[]{x,y};
-        hint="";pendingTap=true;invalidate();handler.postDelayed(()->{
-          if(!collecting)return;
-          index++;advance();
-        },600);
-      }else if(action==MotionEvent.ACTION_CANCEL){down=false;}
-      return true;
-    }
+    final Paint p=new Paint(3);final double[][] samples=new double[42][];final CalibrationCapture capture=new CalibrationCapture();
+    int index=0;boolean pendingTap=false;String hint="";
+    Targets(){super(MainActivity.this);activeTargets=this;}
+    double[] target(){int g=index/14,k=(index%14)/2;return g==0?new double[]{Calibration.POS[k],.5}:g==1?new double[]{.5,Calibration.POS[k]}:new double[]{Calibration.POS[k],.04};}
+    protected void onDraw(Canvas c){float w=getWidth(),h=getHeight();c.drawColor(Color.rgb(22,27,36));double[] t=target();float x=(float)t[0]*(w-1),y=(float)t[1]*(h-1);
+      p.setColor(Color.WHITE);p.setTextAlign(Paint.Align.CENTER);p.setTextSize(34);c.drawText("全屏偏移采集 "+(index+1)+" / 42",w/2,h*.34f,p);
+      c.drawText("点击黄色十字，变绿后抬手",w/2,h*.40f,p);
+      c.drawText("音量减：跳过此点；音量加：重采上一个点",w/2,h*.46f,p);c.drawText(hint,w/2,h*.55f,p);
+      p.setColor(pendingTap||capture.green(SystemClock.uptimeMillis())?Color.GREEN:Color.YELLOW);p.setStrokeWidth(3);p.setStyle(Paint.Style.STROKE);c.drawCircle(x,y,23,p);c.drawLine(x-32,y,x+32,y,p);c.drawLine(x,y-32,x,y+32,p);p.setStyle(Paint.Style.FILL);}
+    void advance(){capture.cancel();if(index>=42){collecting=false;candidate=Calibration.fitPartial(samples,original).withThumbOptimization(original.thumbOptimized);record("coordinate-candidate.profile",candidate.encode(device));thumbAfter=false;message("正在调整，请稍候…");send("preview",candidate.encode(device));}else{pendingTap=false;invalidate();}}
+    void skipRegion(){if(!collecting||pendingTap)return;int k=index/2*2;samples[k]=samples[k+1]=null;index=k+2;skippedRegions++;hint="已跳过";advance();}
+    void previous(){if(!collecting||pendingTap||index==0)return;index--;samples[index]=null;capture.cancel();hint="重新采集此点";invalidate();}
+    public boolean onTouchEvent(MotionEvent e){if(!collecting||pendingTap)return true;int a=e.getActionMasked(),i=e.getActionIndex();double w=Math.max(1,getWidth()-1),h=Math.max(1,getHeight()-1);
+      if(a==MotionEvent.ACTION_CANCEL){capture.cancel();return true;}
+      if(a==MotionEvent.ACTION_DOWN)capture.cancel();
+      if(a==MotionEvent.ACTION_DOWN||a==MotionEvent.ACTION_POINTER_DOWN){double[] t=target();if(capture.begin(e.getPointerId(i),e.getEventTime(),e.getX(i)/w,e.getY(i)/h,t[0],t[1]))handler.postDelayed(()->{if(isAttachedToWindow())invalidate();},90);}
+      if(a==MotionEvent.ACTION_MOVE){int k=e.findPointerIndex(capture.pointer);if(k>=0){for(int j=0;j<e.getHistorySize();j++)capture.move(capture.pointer,e.getHistoricalX(k,j)/w,e.getHistoricalY(k,j)/h);capture.move(capture.pointer,e.getX(k)/w,e.getY(k)/h);}}
+      if(a==MotionEvent.ACTION_UP||a==MotionEvent.ACTION_POINTER_UP){double[] s=capture.end(e.getPointerId(i),e.getEventTime(),e.getX(i)/w,e.getY(i)/h);if(s!=null){samples[index]=original.inverse(s[0],s[1]);hint="已采集，请抬手";pendingTap=true;handler.postDelayed(()->{if(collecting&&isAttachedToWindow()){index++;advance();}},500);}}
+      invalidate();return true;}
+    @Override protected void onDetachedFromWindow(){capture.cancel();super.onDetachedFromWindow();}
   }
+  @Override public boolean onKeyDown(int key,KeyEvent e){if(collecting&&activeTargets!=null&&activeTargets.isAttachedToWindow()){if(key==KeyEvent.KEYCODE_VOLUME_DOWN){if(e.getRepeatCount()==0)activeTargets.skipRegion();return true;}if(key==KeyEvent.KEYCODE_VOLUME_UP){if(e.getRepeatCount()==0)activeTargets.previous();return true;}}return super.onKeyDown(key,e);}
+  @Override public void onBackPressed(){finish();}
+  final Runnable thisActivityCancel=()->cancelOnLeave();
+  @Override public void onPause(){super.onPause();if(exporting)return;leaving=true;noiseCapturing=false;cancelCountdown();collecting=false;handler.removeCallbacks(noisePoll);
+    // Let a pending bridge request finish before requesting rollback; never replace its nonce.
+    handler.postDelayed(this::cancelOnLeave,100);if(!isFinishing())finish();
+  }
+  void cancelOnLeave(){if(waiting){handler.postDelayed(this::cancelOnLeave,300);return;}if(tapPreview||tapLearning){tapPreview=false;tapLearning=false;send("tap-cancel","");}else if(noisePreview||!noiseNonce.isEmpty()){noisePreview=false;noiseNonce="";send("noise-cancel","");}else if(preview){preview=false;send("cancel","");}}
 }

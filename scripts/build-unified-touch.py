@@ -21,7 +21,7 @@ def main():
     patches=['patch-iptsd-sq2-touch.py','patch-iptsd-sq2-heatmap.py','patch-iptsd-sq2-calibration.py','patch-iptsd-adaptive-noise.py']
     if a.native_bundle:
         previous=json.loads((a.native_bundle/'touch-bundle.json').read_text())
-        for n in ['probe/touch-calibration/adaptive-noise.hpp','probe/touch-calibration/noise-runtime.hpp','probe/test2/sq2-touch-calibration.hpp']+['scripts/'+n for n in patches]:
+        for n in ['probe/touch-calibration/tap-core.hpp','probe/touch-calibration/tap-runtime.hpp','probe/touch-calibration/adaptive-noise.hpp','probe/touch-calibration/noise-runtime.hpp','probe/test2/sq2-touch-calibration.hpp']+['scripts/'+n for n in patches]:
             if sha((R/n).read_bytes().replace(b'\r\n',b'\n'))!=previous['source_sha256'][n]:raise ValueError('Native source changed: '+n)
         data=(a.native_bundle/'payload/bin/iptsd').read_bytes()
         if sha(data)!=previous['files']['bin/iptsd']:raise ValueError('Native cache checksum')

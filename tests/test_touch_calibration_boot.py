@@ -16,7 +16,7 @@ class Boot(unittest.TestCase):
             put('etc/iptsd.conf','[Contacts]\nAspectMax = 2.0\n')
             put('etc/sq2-touch-calibration/wizard.apk','apk')
             (w/'run').mkdir();(w/'android/data/local/tmp').mkdir(parents=True)
-            files=w/'android/data/user_de/10/org.surface.touchcalibration/files'
+            files=w/'android/data/user_de/10/org.surface.touchcalibration.unified/files'
             files.mkdir(parents=True)
             put('bin/android',f'''#!/usr/bin/python3
 import sys,pathlib

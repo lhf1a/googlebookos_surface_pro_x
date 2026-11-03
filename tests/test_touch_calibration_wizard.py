@@ -47,8 +47,7 @@ public class Test {
   Calibration fitted=Calibration.fit(samples);
   check(Math.abs(fitted.map(samples[0][0],samples[0][1])[0]-.015)<.004);
   System.out.print(fitted.encode("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
-  samples[1][0]+=.04;boolean failed=false;
-  try{Calibration.fit(samples);}catch(IllegalArgumentException e){failed=true;}check(failed);
+  samples[1][0]+=.04;Calibration.fit(samples); // disagreement is weighted, not session rejection
  }
 }
 ''')

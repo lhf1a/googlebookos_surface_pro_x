@@ -203,12 +203,26 @@ def main():
     p.add_argument('--output', type=Path, default=R/'out/unified-boot')
     p.add_argument('--profiles', type=Path, default=R/'configs/surface-pro-x-profiles.json',
                    help='custom model settings; defaults are not mandatory capability gates')
-    p.add_argument('--touch-bundle', type=Path, help='compiled merged calibration/noise bundle; strict source/hash checks')
+    p.add_argument('--touch-repair', choices=('on','off'), default='on', help='generic touch repair baseline; off explicitly retains legacy runtime')
+    p.add_argument('--dpi', type=int, default=320, help='default Android UI density; preserve saved user overrides')
+    p.add_argument('--ksu-manager', choices=('on', 'off'), default='on', help='install pinned KernelSU Next userspace; no kernel replacement')
+    p.add_argument('--ksu-bundle', type=Path, default=R/'out/ksunext')
+    p.add_argument('--touch-bundle', type=Path, default=R/'out/touch-baseline', help='compiled merged calibration/noise bundle; strict source/hash checks')
     p.add_argument('--lte', choices=('on', 'off'), default='on',
                    help='baseline LTE/Radio enabled by default; off keeps the original payload')
     p.add_argument('--lte-bundle', type=Path, default=R/'private/lte-baseline',
                    help='private, exact reboot-verified Radio04 initramfs and IPA DT')
     args = p.parse_args()
+    if not 72 <= args.dpi <= 1000:
+        p.error('--dpi must be between 72 and 1000')
+    spec=importlib.util.spec_from_file_location('surface_defaults',R/'scripts/surface-defaults-payload.py')
+    defaults=importlib.util.module_from_spec(spec);spec.loader.exec_module(defaults)
+    if args.ksu_manager == 'on':
+        for name, expected in defaults.FILES.items():
+            path=args.ksu_bundle/name
+            require(path.is_file() and sha(path.read_bytes()) == expected, 'KSU input missing or hash mismatch: '+name)
+    if args.touch_repair == 'on' and not (args.touch_bundle/'touch-bundle.json').is_file():
+        p.error('Build the current generic touch bundle with build-unified-touch.py, pass --touch-bundle, or explicitly select --touch-repair off')
     pins = json.loads((R/'configs/surface-pro-x-unified-inputs.json').read_text())
     profiles = json.loads(args.profiles.read_text())
     machines = ('sq1', 'sq2') if args.machine == 'both' else (args.machine,)
@@ -241,10 +255,11 @@ def main():
                 'The inspected SQ1 Windows ESP is not an Android target')
         donor = (args.sealed_input/'sq1/profile-donor.cpio.gz').read_bytes() if machine == 'sq1' else None
         packed, audit = payload(raw, machine, donor, c, profile)
-        if args.touch_bundle:
+        if args.touch_repair == 'on':
             spec=importlib.util.spec_from_file_location('touch_payload',R/'scripts/surface-touch-payload.py')
             touch=importlib.util.module_from_spec(spec);spec.loader.exec_module(touch)
             packed,audit['touch_bundle']=touch.integrate(packed,R,args.touch_bundle,c)
+        packed,audit['defaults']=defaults.integrate(packed,R,args.ksu_bundle,c,args.dpi,args.ksu_manager == 'on')
         original_dt = (args.sealed_input/'common/android-el2.dtb').read_bytes()
         fallback_dt, changes = device_tree(original_dt, machine, profile)
         runtimes = {'Default': packed, 'Fallback': packed}

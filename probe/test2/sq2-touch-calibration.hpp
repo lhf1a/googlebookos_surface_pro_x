@@ -27,8 +27,8 @@ public:
             if (!parsed.empty()) {
                 const double dx = from - parsed.back().first;
                 const double dy = to - parsed.back().second;
-                if (dx <= 0 || dy <= 0 || dy / dx < 0.2 || dy / dx > 6)
-                    throw std::invalid_argument("SQ2 calibration must be monotonic with slope 0.2..6");
+                if (dx <= 0 || dy <= 0 || !std::isfinite(dy / dx))
+                    throw std::invalid_argument("SQ2 calibration must be finite and strictly monotonic");
             }
             parsed.emplace_back(from, to);
             if (parsed.size() > 16)

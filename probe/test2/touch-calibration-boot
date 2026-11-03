@@ -54,6 +54,24 @@ noise_restore() {
 if [ -x /bin/touch-noise-profile ] && [ -f "$noise_saved" ] && [ ! -L "$noise_saved" ]; then
     /bin/touch-noise-profile "$device" < "$noise_saved" > "$noise/active.new" && mv "$noise/active.new" "$noise/active"
 fi
+tap_saved=$store/$device.tap
+tap_preview=0; tap_until=0
+tap_reload() {
+    noise_cmd tapreload "$1"
+    for i in $(seq 1 25); do
+        [ "$(head -n 1 "$noise/tap-status" 2>/dev/null | cut -d ' ' -f1,2)" = "$1 applied" ] && return 0
+        sleep .2
+    done
+    return 1
+}
+tap_restore() {
+    if [ -f "$noise/tap-previous" ]; then cp "$noise/tap-previous" "$noise/tap-active.new"; mv "$noise/tap-active.new" "$noise/tap-active"; else rm -f "$noise/tap-active"; fi
+    tap_preview=0
+    tap_reload "taprestore-$(cut -d . -f1 /proc/uptime)"
+}
+if [ -x /bin/touch-tap-profile ] && [ -f "$tap_saved" ] && [ ! -L "$tap_saved" ]; then
+    /bin/touch-tap-profile "$device" < "$tap_saved" > "$noise/tap-active.new" && mv "$noise/tap-active.new" "$noise/tap-active"
+fi
 base=/etc/iptsd.conf
 effective=/run/iptsd-calibrated.conf
 neutral=/run/touch-calibration-neutral.profile
@@ -62,7 +80,12 @@ apply() {
     "$tool" validate "$device" < "$1" > /run/touch-calibration-section.new || return 1
     { cat "$base"; printf '\n'; cat /run/touch-calibration-section.new; } > "$effective.new"
     mv "$effective.new" "$effective"
-    /bin/touch-framework-ready
+    # Coordinate previews restart IPTSd. Its new process must load the already
+    # confirmed noise rule before sampling, not replay a stale learn command.
+    reload_nonce="coordinate-$(cut -d ' ' -f1 /proc/uptime | tr -d .)"
+    noise_cmd reload "$reload_nonce"
+    /bin/touch-framework-ready || return 1
+    if [ -s "$noise/version" ]; then noise_reload "$reload_nonce-ready" || return 1; fi
 }
 valid=0
 if [ -f "$saved" ] && [ ! -L "$saved" ] && "$tool" validate "$device" < "$saved" > /dev/null; then valid=1; fi
@@ -73,10 +96,16 @@ user=$(android cmd activity get-current-user)
 case "$user" in ''|*[!0-9]*) exit 1;; esac
 pkg=org.surface.touchcalibration.unified
 apk=/etc/sq2-touch-calibration/wizard.apk
-cp "$apk" /proc/1/root/data/local/tmp/sq2-touch-calibration.apk
-# Package replacement can include dex compilation, especially on first boot.
-ANDROID_COMMAND_TIMEOUT=120 android pm install -r --user "$user" /data/local/tmp/sq2-touch-calibration.apk > /logs/touch-calibration-install.txt
-rm -f /proc/1/root/data/local/tmp/sq2-touch-calibration.apk
+installed=$(android pm path "$pkg" 2>/dev/null | sed -n 's/^package://p' | head -n 1)
+if [ -n "$installed" ] && [ -f "/proc/1/root$installed" ] &&
+   [ "$(sha256sum "/proc/1/root$installed" | cut -d ' ' -f1)" = "$(sha256sum "$apk" | cut -d ' ' -f1)" ]; then
+    # A helper restart must not close an identical APK mid-calibration.
+    echo 'Success (identical installed APK retained)' > /logs/touch-calibration-install.txt
+else
+    cp "$apk" /proc/1/root/data/local/tmp/sq2-touch-calibration.apk
+    ANDROID_COMMAND_TIMEOUT=120 android pm install -r --user "$user" /data/local/tmp/sq2-touch-calibration.apk > /logs/touch-calibration-install.txt
+    rm -f /proc/1/root/data/local/tmp/sq2-touch-calibration.apk
+fi
 # Preserve the old signed package/data for rollback; expose only the merged UI.
 android pm disable-user --user "$user" org.surface.touchcalibration > /logs/touch-calibration-legacy-hidden.txt 2>&1 || true
 files=/proc/1/root/data/user_de/$user/$pkg/files
@@ -92,15 +121,17 @@ restore() {
     apply /run/touch-calibration-current.profile
     preview=0;context_sent=0
 }
-cleanup() { if [ "$noise_preview" = 1 ]; then noise_restore || true; fi; if [ "$preview" = 1 ]; then restore || true; fi; rmdir /run/touch-calibration-lock 2>/dev/null || true; }
+cleanup() { if [ "$tap_preview" = 1 ]; then tap_restore || true; fi; if [ "$noise_preview" = 1 ]; then noise_restore || true; fi; if [ "$preview" = 1 ]; then restore || true; fi; rmdir /run/touch-calibration-lock 2>/dev/null || true; }
 trap cleanup EXIT
 trap 'exit 0' TERM INT
 while true; do
+    if [ "$tap_preview" = 1 ] && [ "$(cut -d . -f1 /proc/uptime)" -ge "$tap_until" ]; then tap_restore; fi
     if [ "$noise_preview" = 1 ] && [ "$(cut -d . -f1 /proc/uptime)" -ge "$noise_until" ]; then noise_restore; fi
     if [ "$preview" = 1 ] && [ "$(cut -d . -f1 /proc/uptime)" -ge "$until_time" ]; then restore; fi
     if [ -d "$files" ] && [ ! -L "$files" ]; then
         if [ "$context_sent" = 0 ]; then context; context_sent=1; fi
         if [ -f "$noise/status" ]; then { head -c 512 "$noise/status"; [ ! -f "$noise/power" ] || cat "$noise/power"; } | "$tool" publish "$files" noise-status; fi
+        if [ -f "$noise/tap-status" ]; then head -c 512 "$noise/tap-status" | "$tool" publish "$files" tap-status; fi
         request=$files/request
         if [ -f "$request" ] && [ ! -L "$request" ] && [ "$(stat -c %s "$request")" -le 4096 ]; then
             cp "$request" /run/touch-calibration-request
@@ -110,8 +141,49 @@ while true; do
             [ "${#nonce}" -le 64 ] || continue
             case "$nonce" in ''|*[!a-z0-9-]*) sleep 1; continue;; esac
             case "$command" in
+                tap-begin)
+                    if [ "$(cat "$noise/version" 2>/dev/null)" != 4 ] || [ ! -x /bin/touch-tap-profile ]; then reply ERROR;continue;fi
+                    if [ "$tap_preview" = 1 ]; then tap_restore; fi
+                    rm -f "$noise/tap-candidate"
+                    noise_cmd taplearn "$nonce"
+                    ok=0
+                    for i in $(seq 1 25); do
+                        [ "$(head -n 1 "$noise/tap-status" 2>/dev/null | cut -d ' ' -f1,2)" = "$nonce learning" ] && { ok=1; break; };sleep .2
+                    done
+                    if [ "$ok" = 1 ]; then reply OK;else reply ERROR;fi
+                    ;;
+                tap-finish)
+                    noise_cmd tapfinish "$nonce";ok=0
+                    for i in $(seq 1 25); do
+                        [ "$(head -n 1 "$noise/tap-status" 2>/dev/null | cut -d ' ' -f1,2)" = "$nonce ready" ] && { ok=1; break; };sleep .2
+                    done
+                    if [ "$ok" = 1 ] && /bin/touch-tap-profile "$device" < "$noise/tap-candidate" > /dev/null; then
+                        "$tool" publish "$files" tap-status < "$noise/tap-status";reply OK
+                    else reply ERROR;fi
+                    ;;
+                tap-apply)
+                    if [ "$tap_preview" = 1 ] || ! /bin/touch-tap-profile "$device" < "$noise/tap-candidate" > "$noise/tap-active.new"; then reply ERROR;continue;fi
+                    rm -f "$noise/tap-previous"
+                    [ ! -f "$noise/tap-active" ] || cp "$noise/tap-active" "$noise/tap-previous"
+                    mv "$noise/tap-active.new" "$noise/tap-active"
+                    tap_preview=1;tap_until=$(( $(cut -d . -f1 /proc/uptime) + 600 ))
+                    if tap_reload "$nonce";then reply OK;else tap_restore;reply ERROR;fi
+                    ;;
+                tap-retest)
+                    if [ "$tap_preview" != 1 ];then reply ERROR;continue;fi
+                    tap_until=$(( $(cut -d . -f1 /proc/uptime) + 600 ));reply OK
+                    ;;
+                tap-save)
+                    if [ "$tap_preview" = 1 ] && /bin/touch-tap-profile "$device" < "$noise/tap-active" > "$tap_saved.new"; then
+                        chmod 600 "$tap_saved.new";sync;mv "$tap_saved.new" "$tap_saved";sync;tap_preview=0;reply OK
+                    else reply ERROR;fi
+                    ;;
+                tap-cancel)
+                    if [ "$tap_preview" = 1 ];then tap_restore;else tap_reload "$nonce";fi
+                    reply OK
+                    ;;
                 noise-learn)
-                    case "$(cat "$noise/version" 2>/dev/null)" in 1|2) ;; *) reply ERROR;continue;; esac
+                    case "$(cat "$noise/version" 2>/dev/null)" in 1|2|3|4) ;; *) reply ERROR;continue;; esac
                     if [ ! -x /bin/touch-noise-profile ]; then reply ERROR;continue;fi
                     if [ "$noise_preview" = 1 ]; then noise_restore; fi
                     rm -f "$noise/candidate"
@@ -120,9 +192,30 @@ while true; do
                     printf 'power_online=%s\n' "$power" > "$noise/power"
                     noise_cmd learn "$nonce";reply OK
                     ;;
+                noise-export)
+                    state=$(head -n 1 "$noise/status" 2>/dev/null | cut -d ' ' -f2)
+                    case "$state" in ready|line_noise) ;; *) reply ERROR;continue;; esac
+                    if /bin/touch-noise-profile "$device" < "$noise/candidate" > "$noise/export.new"; then
+                        "$tool" publish "$files" noise-patch < "$noise/export.new";reply OK
+                    else reply ERROR; fi
+                    ;;
+                noise-retest)
+                    # A timed-out preview must not silently become a baseline retest.
+                    requested=$(sed -n 3p /run/touch-calibration-request)
+                    if [ "$requested" = preview ] && [ "$noise_preview" != 1 ]; then reply ERROR;continue;fi
+                    # Observe original heatmaps again, WITHOUT restoring the active patch.
+                    # Android reports the post-mitigation contacts in the same window.
+                    case "$(cat "$noise/version" 2>/dev/null)" in 3|4) ;; *) reply ERROR;continue;; esac
+                    if [ "$noise_preview" = 1 ]; then noise_until=$(( $(cut -d . -f1 /proc/uptime) + 180 )); fi
+                    power=$(cat /sys/class/power_supply/ADP1/online 2>/dev/null || printf unknown)
+                    case "$power" in 0|1) ;; *) power=unknown;; esac
+                    printf 'power_online=%s\n' "$power" > "$noise/power"
+                    noise_cmd learn "$nonce";reply OK
+                    ;;
                 noise-apply)
                     state=$(head -n 1 "$noise/status" 2>/dev/null | cut -d ' ' -f2)
-                    if [ "$state" != ready ] || ! /bin/touch-noise-profile "$device" < "$noise/candidate" > "$noise/active.new"; then reply ERROR; continue; fi
+                    case "$state" in ready|line_noise) ;; *) reply ERROR;continue;; esac
+                    if ! /bin/touch-noise-profile "$device" < "$noise/candidate" > "$noise/active.new"; then reply ERROR; continue; fi
                     rm -f "$noise/previous"
                     [ ! -f "$noise/active" ] || cp "$noise/active" "$noise/previous"
                     mv "$noise/active.new" "$noise/active"

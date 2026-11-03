@@ -10,11 +10,12 @@ An Android-based Googlebook OS port for **Surface Pro X SQ2 / Snapdragon 8cx Gen
 
 ## Latest progress — 2026-11-03
 
+- Standard builds now default to **320 DPI**, pinned **KernelSU Next manager/ksud auto-install**, and the shared touch repair/calibration bundle. Use `--dpi`, `--ksu-manager off` or `--touch-repair off` to customize. Existing user density overrides and installed KSU versions are preserved; the accepted kernel is not replaced. Offline integration only, no new full disk image or device acceptance in this update.
 - Mainline commit `fee67b2` enables USB networking and Android USB input hotplug in the default two-entry build. The USB payload matches the reboot-tested device package; 30 USB tests passed. This does not mean 46 adapter models were tested or that a fresh complete EFI build was performed: the latter still needs the pinned private input caches.
 - Normal EL2 keeps the explicitly selected existing passwordless-user login, but does **not** open Terminal or run the KVM witness at boot. Terminal remains available manually.
 - Latest LTE branch `0100429` is merged. SQ2 native Radio/SIM settings, real LTE IPv4 data, mobile-data/airplane-mode controls and Wi-Fi fallback passed the recorded independent and normal-default reboots. Occasional registration rejection remains a known limit.
 - LTE/Radio is **on by default in the standard build** (`--lte off` opts out), with strict private Radio04 inputs and unit-bound activation. The original non-LTE Mesa fallback is preserved. SQ1 LTE is not validated; see [baseline integration and provisioning limits](docs/LTE-BASELINE.md).
-- Unified SQ1 GPU661 / SQ2 GPU700, 60Hz / 2.7Gbps×4, KSU/EL2 and first-touch calibration defaults remain customizable. The merged idle-detection/calibration app source is retained; include its compiled bundle explicitly with `--touch-bundle`.
+- Unified SQ1 GPU661 / SQ2 GPU700, 60Hz / 2.7Gbps×4, KSU/EL2 and first-touch calibration defaults remain customizable. Generic touch repair and the guided idle → 15 single taps → automatic candidate → retest/confirm → coordinate/thumb flow are now **on by default** (`--touch-repair off` opts out; `--touch-bundle` overrides the source-verified bundle). The algorithm is shared, while learned profiles stay device-bound. The new second layer is built/offline-tested, not yet device-accepted.
 
 ## Feature status
 
@@ -32,7 +33,7 @@ Updated **2026-11-03** · ✅ Available · ⭕️ Partially available · ❌ Una
 | Wi-Fi | ✅ | Saved networks managed by Android |
 | SSH | ✅ | Automatic public-key access after Android starts |
 | Bluetooth | ⭕️ | Pairing and saved ON/OFF state; HID compatibility still limited |
-| Touchscreen | ✅ | Multitouch and edge ghost-touch fixes |
+| Touchscreen | ⭕️ | Shared state-coherence + guided adaptive repair; residual split taps and the new second layer still require independent device validation |
 | Keyboard cover & touchpad | ✅ | Hotplug recovery |
 | Built-in speakers | ✅ | EL2 stop-pop fixed; playback, 10-second reopen and original app user-verified; default RX 0 dB |
 | Built-in microphone | ✅ | Stereo/mono recording and playback |

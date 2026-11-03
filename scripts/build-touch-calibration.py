@@ -16,7 +16,7 @@ def build(root, output=None):
     with tempfile.TemporaryDirectory(prefix='sq2-calibration-apk-') as td:
         w=Path(td);(w/'classes').mkdir();(w/'dex').mkdir()
         subprocess.run(['javac','--release','8','-encoding','UTF-8','-classpath',str(platform),'-d',str(w/'classes'),
-                        str(src/'Calibration.java'),str(src/'ThumbCheck.java'),str(src/'MainActivity.java')],check=True)
+                        str(src/'Calibration.java'),str(src/'CalibrationCapture.java'),str(src/'ThumbCheck.java'),str(src/'ThumbTapCapture.java'),str(src/'SingleTapCapture.java'),str(src/'WizardFlow.java'),str(src/'MainActivity.java')],check=True)
         subprocess.run([str(tools/'d8'),'--min-api','26','--lib',str(platform),'--output',str(w/'dex'),
                         *map(str,sorted((w/'classes').rglob('*.class')))],check=True)
         subprocess.run([str(tools/'aapt2'),'link','--manifest',str(src/'AndroidManifest.xml'),'-I',str(platform),'-o',str(w/'unsigned.apk')],check=True)
@@ -28,7 +28,9 @@ def build(root, output=None):
         subprocess.run(['aarch64-linux-gnu-strip',str(w/'profile-tool')],check=True)
         subprocess.run(['aarch64-linux-gnu-g++','-std=c++17','-static','-O2','-Wall','-Wextra','-Werror',str(src/'noise-tool.cpp'),'-o',str(w/'noise-tool')],check=True)
         subprocess.run(['aarch64-linux-gnu-strip',str(w/'noise-tool')],check=True)
-        files={'etc/sq2-touch-calibration/wizard.apk':(0o100644,(w/'wizard.apk').read_bytes()),
+        subprocess.run(['aarch64-linux-gnu-g++','-std=c++17','-static','-O2','-Wall','-Wextra','-Werror',str(src/'tap-tool.cpp'),'-o',str(w/'tap-tool')],check=True)
+        subprocess.run(['aarch64-linux-gnu-strip',str(w/'tap-tool')],check=True)
+        files={'bin/touch-tap-profile':(0o100755,(w/'tap-tool').read_bytes()),'etc/sq2-touch-calibration/wizard.apk':(0o100644,(w/'wizard.apk').read_bytes()),
                'bin/touch-noise-profile':(0o100755,(w/'noise-tool').read_bytes()),
                'bin/touch-calibration-profile':(0o100755,(w/'profile-tool').read_bytes()),
                'bin/touch-calibration-boot':(0o100755,(root/'probe/test2/touch-calibration-boot').read_bytes().replace(b'\r\n',b'\n'))}

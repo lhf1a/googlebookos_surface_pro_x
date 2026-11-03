@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add optional monotonic, output-only SQ2 finger coordinate calibration."""
+"""Add optional monotonic, output-only touchscreen finger coordinate calibration."""
 from pathlib import Path
 import sys
 
@@ -35,8 +35,8 @@ replace(touch, '#include <algorithm>', '#include "sq2-touch-calibration.hpp"\n#i
 replace(touch, 'bool m_enabled = true;',
         'bool m_enabled = true;\n\tSQ2TouchCalibration m_calibration {};')
 replace(touch, '\t\tif (info.is_touchscreen())\n',
-        '\t\t// Calibration profiles are specific to the measured SQ2 sensor.\n'
-        '\t\tif (info.is_touchscreen() && info.vendor == 0x045e && (info.product == 0x0c21 || info.product == 0x0996) &&\n'
+        '\t\t// Calibration profiles are bound to the measured sensor by the root helper.\n'
+        '\t\tif (info.is_touchscreen() &&\n'
         '\t\t    info.meta.has_value()) {\n'
         '\t\t\tm_calibration.load(config.touchscreen_calibration_x, config.touchscreen_calibration_y,\n'
         '\t\t\t                   config.touchscreen_calibration_x_top, config.touchscreen_calibration_top_start,\n'

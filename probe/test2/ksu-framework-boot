@@ -29,9 +29,17 @@ if [ ! -e "$data/adb/ksud" ]; then
 fi
 user=$(android cmd activity get-current-user)
 case "$user" in ''|*[!0-9]*) exit 1;; esac
-if ! android pm list packages --user "$user" com.rifsxd.ksunext | grep -qx 'package:com.rifsxd.ksunext'; then
+# Reuse an existing (possibly newer) package; never downgrade it. Include user 0
+# and existing secondary users so a concurrent passwordless-user switch is safe.
+if ! android pm list packages -u com.rifsxd.ksunext | grep -qx 'package:com.rifsxd.ksunext'; then
     cp manager-verified.apk "$data/local/tmp/sq2-ksu-manager.apk"
     android pm install --user "$user" "$data/local/tmp/sq2-ksu-manager.apk"
     rm -f "$data/local/tmp/sq2-ksu-manager.apk"
 fi
+users=$(android pm list users | sed -n 's/.*UserInfo{\([0-9][0-9]*\):.*/\1/p')
+for id in 0 $user $users; do
+    if ! android pm list packages --user "$id" com.rifsxd.ksunext | grep -qx 'package:com.rifsxd.ksunext'; then
+        android pm install-existing --user "$id" com.rifsxd.ksunext
+    fi
+done
 echo KSU_USERSPACE_READY

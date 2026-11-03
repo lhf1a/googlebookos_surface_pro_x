@@ -34,12 +34,18 @@ def main():
     p.add_argument('--output', type=Path, required=True, help='fresh directory, preferably Linux filesystem')
     p.add_argument('--profiles', type=Path, default=R/'configs/surface-pro-x-profiles.json',
                    help='override model defaults; not a mandatory capability checklist')
-    p.add_argument('--touch-bundle', type=Path, help='merged calibration/noise bundle from build-unified-touch.py')
+    p.add_argument('--dpi', type=int, default=320, help='default Android UI density; saved user overrides remain untouched')
+    p.add_argument('--ksu-manager', choices=('on', 'off'), default='on', help='install pinned KernelSU Next userspace at first boot')
+    p.add_argument('--ksu-bundle', type=Path, default=R/'out/ksunext', help='pinned ksud and manager-verified.apk; never replaces kernel')
+    p.add_argument('--touch-repair', choices=('on','off'), default='on', help='generic touch repair baseline; off explicitly retains legacy runtime')
+    p.add_argument('--touch-bundle', type=Path, default=R/'out/touch-baseline', help='merged calibration/noise bundle from build-unified-touch.py')
     p.add_argument('--lte', choices=('on', 'off'), default='on',
                    help='LTE/Radio baseline on by default; off is the explicit original-runtime option')
     p.add_argument('--lte-bundle', type=Path, default=R/'private/lte-baseline',
                    help='private reboot-verified Radio04 initramfs/DT; unit-bound activation')
     a = p.parse_args()
+    if not 72 <= a.dpi <= 1000:
+        p.error('--dpi must be between 72 and 1000')
     if not stat.S_ISREG(a.template.stat().st_mode) or a.template.stat().st_size != SIZE:
         p.error('Template must be the pinned regular image, not a block device')
     if digest(a.template) != TEMPLATE_SHA:
@@ -64,7 +70,8 @@ def main():
     command=[sys.executable, R/'scripts/build-surface-pro-x.py', '--machine', 'both',
              '--sealed-input', a.sealed_input, '--profiles', a.profiles, '--output', a.output/'profiles',
              '--lte', a.lte, '--lte-bundle', a.lte_bundle]
-    if a.touch_bundle: command+=['--touch-bundle',a.touch_bundle]
+    command+=['--touch-repair',a.touch_repair,'--touch-bundle',a.touch_bundle]
+    command+=['--dpi',str(a.dpi),'--ksu-manager',a.ksu_manager,'--ksu-bundle',a.ksu_bundle]
     run(command)
     common = {entry: a.output/'profiles/SQ1/EFI'/('SQ1'+entry)/'initramfs.cpio.gz'
               for entry in ('Default', 'Fallback')}
@@ -139,7 +146,8 @@ def main():
     report=dict(standard_entry='scripts/build.py',format='single-raw-disk-image',
                 image=str(image.resolve()),sha256=digest(image),bytes=SIZE,
                 template_sha256=TEMPLATE_SHA,common_initramfs_sha256=common_hash,
-                fallback_initramfs_sha256=digest(common['Fallback']),lte=a.lte,
+                fallback_initramfs_sha256=digest(common['Fallback']),lte=a.lte,touch_repair=a.touch_repair,
+                dpi=a.dpi,ksu_manager=a.ksu_manager,
                 model_selection='bounded SMBIOS type4 Microsoft SQ1/SQ2; unknown refuses',
                 entries=2,hardware_tested=False,deployed=False,files=hashes,
                 baseline='fee67b2 accepted runtime + 0100429 LTE/Radio when enabled; original Mesa fallback retained')

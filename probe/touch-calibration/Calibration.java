@@ -16,8 +16,8 @@ public final class Calibration {
     void validate(){
       int n=x.length;if(n<2||n>9||x[0]!=0||y[0]!=0||x[n-1]!=1||y[n-1]!=1)throw new IllegalArgumentException("曲线端点无效");
       for(int i=0;i<n;i++){
-        if(!Double.isFinite(x[i])||!Double.isFinite(y[i])||x[i]<0||x[i]>1||y[i]<0||y[i]>1||Math.abs(x[i]-y[i])>.08)throw new IllegalArgumentException("测量偏差过大，请重新落指");
-        if(i>0){double slope=(y[i]-y[i-1])/(x[i]-x[i-1]);if(x[i]<=x[i-1]||slope<.2||slope>6)throw new IllegalArgumentException("测量点无法可靠区分，请重新校准");}
+        if(!Double.isFinite(x[i])||!Double.isFinite(y[i])||x[i]<0||x[i]>1||y[i]<0||y[i]>1)throw new IllegalArgumentException("曲线包含非有限或越界值");
+        if(i>0){double slope=(y[i]-y[i-1])/(x[i]-x[i-1]);if(x[i]<=x[i-1]||!Double.isFinite(slope)||slope<=0)throw new IllegalArgumentException("测量点无法可靠区分，请重新校准");}
       }
     }
     public double map(double v){if(v<=0)return 0;if(v>=1)return 1;int i=1;while(x[i]<v)i++;return y[i-1]+(v-x[i-1])*(y[i]-y[i-1])/(x[i]-x[i-1]);}
@@ -39,16 +39,40 @@ public final class Calibration {
     lo=0;hi=1;for(int i=0;i<40;i++){double m=(lo+hi)/2;if(map(m,rawY)[0]<a)lo=m;else hi=m;}return new double[]{(lo+hi)/2,rawY};
   }
   static Curve fitAxis(double[][] measured,int axis){
-    // Pool overlapping raw positions instead of inventing distinction at saturated edges.
-    List<double[]> pooled=new ArrayList<>();
+    // Repeated taps supply weighted evidence. Disagreement lowers weight, never
+    // invalidates the entire session. Pool-adjacent-violators prevents foldovers.
+    List<double[]> points=new ArrayList<>();
     for(int i=0;i<POS.length;i++){
       double a=measured[i*2][axis],b=measured[i*2+1][axis];
-      if(Math.abs(a-b)>.02)throw new IllegalArgumentException("同一位置两次落点差异过大，请重新校准");
-      pooled.add(new double[]{(a+b)/2,POS[i],1});
-      while(pooled.size()>1){int n=pooled.size();double[] p=pooled.get(n-2),q=pooled.get(n-1);if(q[0]-p[0]>.0015)break;double w=p[2]+q[2];pooled.remove(n-1);pooled.set(n-2,new double[]{(p[0]*p[2]+q[0]*q[2])/w,(p[1]*p[2]+q[1]*q[2])/w,w});}
+      if(!Double.isFinite(a)||!Double.isFinite(b))continue;
+      double raw=Math.max(0,Math.min(1,(a+b)/2));
+      if(raw<=.00001||raw>=.99999)continue; // Saturation has no invertible information.
+      double weight=1/Math.pow(1+Math.abs(a-b)*25,2);
+      points.add(new double[]{raw,POS[i],weight});
     }
-    double[] x=new double[pooled.size()+2],y=new double[x.length];x[x.length-1]=y[y.length-1]=1;
-    for(int i=0;i<pooled.size();i++){x[i+1]=pooled.get(i)[0];y[i+1]=pooled.get(i)[1];}
+    points.sort((a,b)->Double.compare(a[0],b[0]));
+    List<double[]> unique=new ArrayList<>();
+    for(double[] p:points){
+      if(!unique.isEmpty()&&p[0]-unique.get(unique.size()-1)[0]<.00002){
+        double[] q=unique.get(unique.size()-1);double w=p[2]+q[2];
+        q[0]=(q[0]*q[2]+p[0]*p[2])/w;q[1]=(q[1]*q[2]+p[1]*p[2])/w;q[2]=w;
+      }else unique.add(p.clone());
+    }
+    int n=unique.size();if(n==0)return new Curve(new double[]{0,1},new double[]{0,1});
+    List<double[]> blocks=new ArrayList<>();
+    for(int i=0;i<n;i++){
+      double[] p=unique.get(i);blocks.add(new double[]{i,i,p[1]*p[2],p[2]});
+      while(blocks.size()>1){
+        int k=blocks.size();double[] p0=blocks.get(k-2),p1=blocks.get(k-1);
+        if(p0[2]/p0[3]<p1[2]/p1[3])break;
+        p0[1]=p1[1];p0[2]+=p1[2];p0[3]+=p1[3];blocks.remove(k-1);
+      }
+    }
+    double[] x=new double[n+2],y=new double[n+2];x[n+1]=y[n+1]=1;
+    for(int i=0;i<n;i++)x[i+1]=unique.get(i)[0];
+    for(double[] block:blocks)for(int i=(int)block[0];i<=(int)block[1];i++)y[i+1]=block[2]/block[3];
+    // Tiny regularisation keeps serialization strictly monotone, not a cap on offset.
+    for(int i=1;i<=n;i++)y[i]=Math.max(y[i-1]+.00001,Math.min(1-(n+1-i)*.00001,y[i]));
     return new Curve(x,y);
   }
   public static Calibration fit(double[][] samples){

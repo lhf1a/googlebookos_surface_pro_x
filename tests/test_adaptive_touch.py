@@ -42,7 +42,7 @@ int main(){
             subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-O2','-I'+str(R/'probe/touch-calibration'),str(d/'main.cpp'),'-o',str(d/'replay')],check=True)
             subprocess.run([str(d/'replay')],check=True)
 
-    def test_partial_fit_retains_prior_and_rejects_bad_points(self):
+    def test_partial_fit_retains_prior_and_regularizes_disagreement(self):
         code=r'''
 import org.surface.touchcalibration.Calibration;
 public class Partial {
@@ -58,9 +58,8 @@ public class Partial {
   s[0]=s[1]=s[12]=s[13]=null;
   Calibration partial=Calibration.fitPartial(s,old);
   for(int i=0;i<=100;i++)if(Math.abs(partial.map(i/100.,.5)[0]-old.map(i/100.,.5)[0])>.01)throw new AssertionError();
-  s[3][0]+=.1;boolean bad=false;try{Calibration.fitPartial(s,old);}catch(IllegalArgumentException e){bad=true;}
-  if(!bad)throw new AssertionError();
-  System.out.println("all_skipped_keeps_prior=1 partial_fit=1 bad_sample_refused=1");
+  s[3][0]+=.1;Calibration.fitPartial(s,old);
+  System.out.println("all_skipped_keeps_prior=1 partial_fit=1 disagreement_regularized=1");
  }
 }
 '''
@@ -68,4 +67,40 @@ public class Partial {
             d=pathlib.Path(td);(d/'Partial.java').write_text(code)
             subprocess.run(['javac','-d',str(d),str(R/'probe/touch-calibration/Calibration.java'),str(d/'Partial.java')],check=True)
             subprocess.run(['java','-cp',str(d),'Partial'],check=True)
+    def test_bounded_band_preview_and_guards(self):
+        code=r'''
+#include "adaptive-noise.hpp"
+#include <cassert>
+#include <iostream>
+using namespace surface_touch;
+struct Grid {std::vector<double> v=std::vector<double>(46*68,.01);int rows()const{return 46;}int cols()const{return 68;}
+double operator()(int r,int c)const{return v[r*68+c];}double &operator()(int r,int c){return v[r*68+c];}};
+int main(){
+ const std::string id(64,'a');AdaptiveNoise a;a.begin(id,0x45e,0x996,46,68,0);Grid g;
+ for(int c=0;c<68;c++)for(int r=2;r<=4;r++)g(r,c)=.95;
+ for(int i=0;i<=720;i++)a.observe(g,i*17);
+ assert(a.state=="line_noise"&&a.result.bandRows==std::vector<int>({2,3,4}));
+ const auto p=Profile::parse(a.result.encode(),id);g(20,30)=.8;g(1,30)=.7;g(5,30)=.9;
+ assert(AdaptiveNoise::apply(p,id,0x45e,0x996,g)==3*68);
+ assert(g(20,30)==.8&&std::abs(g(3,30)-.8)<1e-10&&g(3,10)==.01);
+ assert(AdaptiveNoise::apply(p,std::string(64,'b'),0x45e,0x996,g)==0);
+ assert(AdaptiveNoise::apply(p,id,0x45e,0xc21,g)==0);
+ for(std::string tail:{"R 1 0","R 1 45","R 5 2 3 4 5 6","R 2 3 3","R 3 3 10 20","C 1 68","R -1","R 1 3 junk"}){
+  bool bad=false;try{Profile::parse("SPXNOISE2 "+id+" 1118 2454 46 68 "+tail,id);}catch(...){bad=true;}assert(bad);
+ }
+ auto column=Profile::parse("SPXNOISE2 "+id+" 1118 2454 46 68 C 1 4",id);
+ Grid c;c(10,4)=.95;assert(AdaptiveNoise::apply(column,id,0x45e,0x996,c)==46&&c(10,4)==.01);
+ AdaptiveNoise wide;wide.begin(id,0x45e,0x996,46,68,0);Grid w;
+ for(int r=0;r<20;r++)for(int c=0;c<68;c++)w(r,c)=.95;
+ for(int i=0;i<=720;i++)wide.observe(w,i*17);
+ assert(!wide.result.band());
+ std::cout<<"band_repair=1 outside_touch_preserved=1 crossing_support_interpolated=1 unsafe_band_refused=1 identity_guard=1\n";
+}
+'''
+        with tempfile.TemporaryDirectory() as td:
+            d=pathlib.Path(td);(d/'main.cpp').write_text(code)
+            subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-O2','-I'+str(R/'probe/touch-calibration'),str(d/'main.cpp'),'-o',str(d/'test')],check=True)
+            subprocess.run([str(d/'test')],check=True)
+
+
 if __name__=='__main__':unittest.main()

@@ -3,7 +3,7 @@
 from pathlib import Path
 import sys
 r=Path(__file__).resolve().parents[1];s=Path(sys.argv[1])/'src/core/generic'
-for name in ('adaptive-noise.hpp','noise-runtime.hpp'):
+for name in ('adaptive-noise.hpp','noise-runtime.hpp','tap-core.hpp','tap-runtime.hpp'):
     (s/name).write_bytes((r/'probe/touch-calibration'/name).read_bytes())
 p=s/'application.hpp';t=p.read_text()
 if 'NoiseRuntime m_surface_noise' not in t:
@@ -16,3 +16,9 @@ if 'NoiseRuntime m_surface_noise' not in t:
     assert t.count(anchor)==1
     t=t.replace(anchor,'\t\tm_surface_noise.process(m_info, m_heatmap);\n\n'+anchor)
     p.write_text(t)
+
+t=p.read_text()
+anchor='\t\tm_finder.find(m_heatmap, m_contacts);'
+if 'm_surface_noise.repair_contacts' not in t:
+    assert t.count(anchor)==1
+    p.write_text(t.replace(anchor,anchor+'\n\t\tm_surface_noise.repair_contacts(m_info, m_heatmap, m_contacts, m_config);',1))

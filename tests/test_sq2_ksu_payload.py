@@ -56,8 +56,12 @@ shift
 case "$*" in
  */getprop*) echo 1;;
  */cmd*) echo 10;;
- *'pm list packages'*) [ ! -f "ROOT/manager" ] || echo package:com.rifsxd.ksunext;;
- *'pm install'*) touch ROOT/manager; echo manager >> ROOT/actions;;
+ *'pm list packages -u'*) [ ! -f "ROOT/manager" ] || echo package:com.rifsxd.ksunext;;
+ *'pm list users'*) printf 'UserInfo{0:Owner:13}\nUserInfo{10:User:10}\n';;
+ *'pm list packages --user 0'*) [ ! -f "ROOT/user0" ] || echo package:com.rifsxd.ksunext;;
+ *'pm list packages --user 10'*) [ ! -f "ROOT/manager" ] || echo package:com.rifsxd.ksunext;;
+ *'pm install-existing --user 0'*) touch ROOT/user0; echo enable0 >> ROOT/actions;;
+ *'pm install --user 10'*) touch ROOT/manager; echo manager >> ROOT/actions;;
  *'debug version'*) echo 'Kernel Version: 33129';;
  *' install') mkdir -p ROOT/data/adb; echo installed > ROOT/data/adb/ksud; echo daemon >> ROOT/actions;;
  *) exit 7;;
@@ -67,10 +71,10 @@ exit 0
             fake.chmod(0o755)
             for _ in range(2):
                 subprocess.run(['sh','-c',source],check=True,capture_output=True)
-            self.assertEqual((p/'actions').read_text(),'daemon\nmanager\n')
+            self.assertEqual((p/'actions').read_text(),'daemon\nmanager\nenable0\n')
             self.assertEqual(list((p/'data/local/tmp').iterdir()),[])
             (p/'cmdline').write_text('sq2.ksu=0')
             subprocess.run(['sh','-c',source],check=True,capture_output=True)
-            self.assertEqual((p/'actions').read_text(),'daemon\nmanager\n')
+            self.assertEqual((p/'actions').read_text(),'daemon\nmanager\nenable0\n')
 
 if __name__=='__main__': unittest.main()
