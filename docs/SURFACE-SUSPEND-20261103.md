@@ -764,3 +764,16 @@ collector/cleanup0，owner/token0，pm_test none/debug0/times0，SSAMenabled，t
 日志为native-once/native-single-2、native-second-responses、native-second-state.txt。
 第一次prepare中止本轮未复现，增加追踪不能当修复；SSAM最终策略、原生稳定性、
 直接PMIC唤醒、多轮/能耗和SQ1验证仍未完成。
+
+
+现场验收闭环：用户对原135秒按键/持续触摸与键盘检查反馈“恢复正常”。随后只读核对
+仍为boot e7638f55…，Android Awake，mLastWakeReason=1，PMIC IRQ216计数2→4，
+mLastWakeTime1131167ms晚于machine_suspend结束918.896652秒；这明确是SSAM先结束
+内核睡眠、稍后电源键亮屏，不能标为PMIC直接结束native睡眠。SPIready/count1/bus_error2
+保持，Android PID3883/3393未变，owner/token0，pm_test none/debug0/times0、SSAMenabled，
+原ESP27项全部匹配且10份once.env均0，临时trace已清理。记录native-second-final.txt。
+
+本候选的Android原生单请求真实睡眠及随后持续输入恢复，现获本机本轮验证；仍不提升
+正常入口，不启连续自动休眠。下一步应优先区分首次prepare中止的事件来源与SSAM/
+定时器提前唤醒策略，再做有界重复验证；1.1秒诊断延时不是量产修复，单次许可造成的
+后续-95是实验门行为，不应据此修改应用锁或宣称原生框架故障。能耗/SQ1仍未验收。
