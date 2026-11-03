@@ -680,3 +680,28 @@ Image/Nat01 f1128b91…、naton0001.cpio.gz e75f7dbe…、native-once.efi 26493e
 一次、人工开启；输入与SSAM诊断保持。区分观察：native attempts、实际machine_suspend/
 唤醒源、SPIready与用户持续输入；未进入也需采集具体锁而非强制清空。停止条件：一次
 准入被消费或120秒窗口无请求就撤销owner；失败立即取证，禁止自动重试。
+
+
+### 2026-11-04：原生单请求候选启动验收，许可未开放
+
+假设：新诊断内核与既有完整Android运行包兼容，取消init自动注册能保持启动无休眠许可。
+变量：Nat01/单请求准入与native实验分支；区分观察为实际内核note/配置、模块note、
+运行init/JAR、owner和native attempts；启动或输入异常立即取证并回原入口，不开放许可。
+
+用户确认在场后一次性启动，boot e7638f55-1b00-40d4-bcd3-7be25ddede89；运行内核
+note SHA2dc18660…与新vmlinux一致，/proc/config.gz与构建配置逐字一致。有效init、
+三助手、两manifest、JAR及SPI/SSAM模块SHA匹配；两模块loaded ELF note也匹配。
+JAR d872e26f…实际绑定到Android system/framework，SELinux标签system_file，当前Enforcing。
+实验保活日志SKIPPED_NATIVE_AUTOSUSPEND，没有自动注册日志。实际UID1000 suspend-service
+PID2649及可执行hash518d1319…匹配。screen_onlyY/nativeY/testN/trialN、owner/token0，
+pm_test none/debug0/times0，native attempts0、success0/fail0，SPIready/count0/bus_error1。
+
+物理ALSA卡/AUDIO_READY、音频HAL实际进程hash774cd7e7…、三remoteproc attached、
+两个用户的FUSE挂载通过；这是结构检查，不是新的音频听感或视频解码验收。用户确认
+已到桌面、触摸和键盘正常。Android PID system_server3883/surfaceflinger3393。
+原菜单已原子恢复，ESP27项全部匹配，10份once.env均0，下次普通重启回原正常入口。
+
+只读Awake检查仍有充电后台作业/Checkin锁，原生WakeLocks和Display blocker保持；
+全局强制禁锁false/集合空，实验shell保活已无。未改应用锁、充电状态、锁屏或校准。
+尚未开放owner、关屏或进行native睡眠，后续须准备有界采集再现场协调。证据保存在
+native-once/boot-{audit,extra,kernel,menu-restore}、runtime-verified、loaded.config及notes。

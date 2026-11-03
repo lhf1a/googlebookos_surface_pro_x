@@ -1,3 +1,13 @@
+## 2026-11-04：原生单请求候选已启动，现场输入正常，尚未开放休眠许可
+
+当前boot e7638f55…，Nat01 f1128b91…/naton0001 e75f7dbe…；实际内核note/配置、
+有效init/JAR和SPI/SSAM文件/loaded note匹配，Android启动完成，用户确认触摸/键盘正常。
+JAR标签system_file、Enforcing；音频HAL实际hash774cd7e7…/ALSA/AUDIO_READY、
+remoteproc attached与FUSE通过。nativeY/testN/trialN、owner/token0，attempts0/success0。
+原菜单已恢复，ESP27项匹配、10份once.env=0，下次正常启动回原原有包。未开放许可。
+下一步准备一次手动准入/120秒到期撤销的原生观察；保留合法应用锁，不做全局禁锁。
+充电后台任务尚有锁，不把Awake阻塞当原生休眠失败。详见休眠记录末节。
+
 ## 2026-11-04：SPI恢复候选两轮真实恢复通过，开始准备受限native试验
 
 当前bootb3221fcd…，SPI候选3e9e6317…/私有包2e4427e4…、SSAM1.1秒诊断模块保持。
