@@ -22,6 +22,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <sys/socket.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -46,6 +47,10 @@
 #define RDO_NODE "/dev/qcom_rmtfs_mem1"
 #define RDO_SYSFS "/sys/class/rmtfs/qcom_rmtfs_mem1/"
 #define RDO_EXE_SHA "856681222851149a54eead466804cb4bc51e5aece26a0b0afb41ae231403a62b"
+#define RDO_MAX_METADATA_BYTES (RDO_MAX_SEQUENCES * 26u)
+#define RDO_AF_QRTR 42
+struct rdo_qrtr_address { sa_family_t family; uint32_t node, port; };
+_Static_assert(sizeof(struct rdo_qrtr_address)==12, "audited sockaddr_qrtr ABI");
 _Static_assert(sizeof(off_t) == 8, "the audited pwrite ABI has 64-bit off_t");
 
 struct rdo_io {
@@ -58,6 +63,10 @@ struct rdo_io {
     int (*fstat)(int, struct stat *);
     int (*clock_gettime)(clockid_t, struct timespec *);
     char *(*getenv)(const char *);
+    ssize_t (*sendto)(int, const void *, size_t, int, const struct sockaddr *, socklen_t);
+    int (*getsockopt)(int, int, int, void *, socklen_t *);
+    int (*getsockname)(int, struct sockaddr *, socklen_t *);
+    ssize_t (*recvfrom)(int, void *, size_t, int, struct sockaddr *, socklen_t *);
 };
 
 /* FIPS 180-4 SHA-256, fixed storage; no libcrypto, allocation or hidden I/O. */
@@ -160,14 +169,17 @@ static int rdo_parse_hash(const char *text, unsigned char out[32])
 
 static struct {
     struct rdo_io io;
-    int logfd, readfd;
+    int logfd, readfd, memfd;
     dev_t log_dev;
     ino_t log_ino;
     dev_t read_dev;
     ino_t read_ino;
+    dev_t mem_dev;
+    ino_t mem_ino;
     dev_t device;
     unsigned calls, attempts;
     uint64_t bytes;
+    unsigned metadata_bytes;
     unsigned char expected[32];
     struct {
         int active;
@@ -182,6 +194,11 @@ static struct {
 static atomic_int rdo_enabled;
 static atomic_int rdo_contended;
 static atomic_flag rdo_busy=ATOMIC_FLAG_INIT;
+static atomic_uint_fast64_t rdo_events;
+static _Thread_local struct {
+    unsigned sequence;
+    uint64_t event, completed_ns;
+} rdo_pending;
 
 static int rdo_now(uint64_t *value)
 {
@@ -225,6 +242,18 @@ static void rdo_marker(const char *reason, int error)
         (void)rdo.io.write(STDERR_FILENO,line,(size_t)n);
     /* An unavailable log never authorizes writing a console/device on fd 2. */
 }
+static void rdo_invalidate_pending(const char *reason)
+{
+    char line[320];
+    int n;
+    if (!rdo_pending.sequence) return;
+    n=snprintf(line,sizeof(line),
+        "RMTFS_RESPONSE sequence=%u attempted=0 reason=%s association=next_send_same_thread "
+        "request_transaction_verified=0 transport_accepted=0 modem_acceptance=unknown record_end=1\n",
+        rdo_pending.sequence,reason);
+    rdo_pending.sequence=0;
+    if (n>0 && (size_t)n<sizeof(line)) rdo_log(line,(size_t)n);
+}
 static void rdo_finish_sequence(const char *reason, int complete, ssize_t wr, int error)
 {
     unsigned char ih[32], oh[32];
@@ -253,10 +282,16 @@ static void rdo_finish_sequence(const char *reason, int complete, ssize_t wr, in
         rdo.seq.read_errno,elapsed,clock_ok,rdo.calls,rdo.bytes);
     rdo.seq.active=0;
     if (n>0 && (size_t)n<sizeof(line)) rdo_log(line,(size_t)n);
+    if (fsg && atomic_load(&rdo_enabled)) {
+        rdo_pending.sequence=rdo.attempts;
+        rdo_pending.event=atomic_load(&rdo_events);
+        rdo_pending.completed_ns=now;
+    }
 }
 static void rdo_stop(const char *reason, int error, ssize_t wr)
 {
     rdo_finish_sequence(reason,0,wr,error);
+    rdo_invalidate_pending(reason);
     atomic_store(&rdo_enabled,0);
     rdo_marker(reason,error);
 }
@@ -337,10 +372,12 @@ static void rdo_initialize(const struct rdo_io *io, const char *exe_hash)
     char *opt;
     int saved=errno;
     static const char admitted[]=
-        "RMTFS_DELIVERY enabled=1 schema=1 sector_bytes=512 window_bytes=2097152 "
+        "RMTFS_DELIVERY enabled=1 schema=2 sector_bytes=512 window_bytes=2097152 "
         "max_sequences=4 max_calls=32768 max_bytes=8388608 "
+        "response_max_metadata_bytes=104 association=next_send_same_thread request_transaction_verified=0 "
         "phase=after_real_pwrite_before_return atomic_snapshot=0 modem_acceptance=unknown record_end=1\n";
-    memset(&rdo,0,sizeof(rdo)); rdo.io=*io; rdo.logfd=-1; rdo.readfd=-1;
+    memset(&rdo,0,sizeof(rdo)); rdo.io=*io; rdo.logfd=-1; rdo.readfd=-1; rdo.memfd=-1;
+    memset(&rdo_pending,0,sizeof(rdo_pending)); atomic_store(&rdo_events,0);
     atomic_store(&rdo_enabled,0); atomic_store(&rdo_contended,0); atomic_flag_clear(&rdo_busy);
     opt=rdo.io.getenv("RMTFS_DELIVERY_OBSERVE");
     if (!opt || strcmp(opt,"1")) goto done;
@@ -354,7 +391,8 @@ static void rdo_initialize(const struct rdo_io *io, const char *exe_hash)
     if (!rdo_parse_hash(rdo.io.getenv("RMTFS_DELIVERY_FSG_SHA256"),rdo.expected)) {
         rdo_marker("fsg_hash",0); goto done;
     }
-    if (!rdo.io.pwrite || !rdo.io.pread) { rdo_marker("symbol",0); goto done; }
+    if (!rdo.io.pwrite || !rdo.io.pread || !rdo.io.sendto || !rdo.io.recvfrom ||
+        !rdo.io.getsockopt || !rdo.io.getsockname) { rdo_marker("symbol",0); goto done; }
     if (!rdo_executable(exe_hash)) { rdo_marker("exe_identity",0); goto done; }
     if (!rdo_identity()) { rdo_marker("sysfs_identity",0); goto done; }
     rdo.readfd=rdo.io.open(RDO_NODE,O_RDONLY|O_NOFOLLOW|O_CLOEXEC,0);
@@ -363,6 +401,14 @@ static void rdo_initialize(const struct rdo_io *io, const char *exe_hash)
         (void)rdo.io.close(rdo.readfd); rdo.readfd=-1; rdo_marker("readfd_identity",0); goto done;
     }
     rdo.read_dev=st.st_dev; rdo.read_ino=st.st_ino;
+    /* A private read-only descriptor allows bounded copies even after EFAULT.
+     * Only the immediate sendto's two pointers (12 + 14 bytes) are admitted. */
+    rdo.memfd=rdo.io.open("/proc/self/mem",O_RDONLY|O_NOFOLLOW|O_CLOEXEC,0);
+    if (rdo.memfd<0) { rdo_marker("self_mem_open",errno); goto done; }
+    if (rdo.io.fstat(rdo.memfd,&st)<0 || !S_ISREG(st.st_mode)) {
+        (void)rdo.io.close(rdo.memfd); rdo.memfd=-1; rdo_marker("self_mem_identity",0); goto done;
+    }
+    rdo.mem_dev=st.st_dev; rdo.mem_ino=st.st_ino;
     atomic_store(&rdo_enabled,1);
     rdo_log(admitted,sizeof(admitted)-1);
 done:
@@ -423,11 +469,113 @@ static void rdo_observe(int fd, const void *buf, size_t count, off_t offset, ssi
     if (rdo.seq.sectors==RDO_SECTORS) rdo_finish_sequence("complete",1,result,error);
 }
 
+static int rdo_copy_parameter(void *dst, const void *src, size_t size, int *copy_errno)
+{
+    struct stat st;
+    uintptr_t address=(uintptr_t)src;
+    ssize_t n;
+    if ((size!=12 && size!=14) || !address || address>(uintptr_t)INT64_MAX-size ||
+        rdo.metadata_bytes>RDO_MAX_METADATA_BYTES-size) {
+        *copy_errno=EINVAL; return 0;
+    }
+    if (rdo.memfd<0 || rdo.io.fstat(rdo.memfd,&st)<0 || !S_ISREG(st.st_mode) ||
+        st.st_dev!=rdo.mem_dev || st.st_ino!=rdo.mem_ino) {
+        rdo.memfd=-1; *copy_errno=EBADF; atomic_store(&rdo_enabled,0); return 0;
+    }
+    rdo.metadata_bytes+=(unsigned)size;
+    n=rdo.io.pread(rdo.memfd,dst,size,(off_t)address);
+    *copy_errno=errno;
+    return n==(ssize_t)size;
+}
+static unsigned rdo_le16(const unsigned char *p)
+{
+    return (unsigned)p[0]|((unsigned)p[1]<<8);
+}
+static int rdo_qrtr_socket(int fd)
+{
+    struct stat before, after;
+    struct rdo_qrtr_address local;
+    socklen_t length;
+    int value;
+    if (rdo.io.fstat(fd,&before)<0 || !S_ISSOCK(before.st_mode)) return 0;
+    length=sizeof(value); value=0;
+    if (rdo.io.getsockopt(fd,SOL_SOCKET,SO_DOMAIN,&value,&length)<0 ||
+        length!=sizeof(value) || value!=RDO_AF_QRTR) return 0;
+    length=sizeof(value); value=0;
+    if (rdo.io.getsockopt(fd,SOL_SOCKET,SO_TYPE,&value,&length)<0 ||
+        length!=sizeof(value) || value!=SOCK_DGRAM) return 0;
+    memset(&local,0,sizeof(local)); length=sizeof(local);
+    if (rdo.io.getsockname(fd,(struct sockaddr *)&local,&length)<0 ||
+        length!=sizeof(local) || local.family!=RDO_AF_QRTR) return 0;
+    if (rdo.io.fstat(fd,&after)<0 || !S_ISSOCK(after.st_mode) ||
+        after.st_dev!=before.st_dev || after.st_ino!=before.st_ino) return 0;
+    return 1;
+}
+static void rdo_response(int fd, const void *buf, size_t length, int flags,
+                         const struct sockaddr *addr, socklen_t addrlen,
+                         ssize_t result, int error, unsigned sequence,
+                         uint64_t expected_event, uint64_t event, uint64_t completed_ns)
+{
+    struct rdo_qrtr_address destination;
+    unsigned char packet[14];
+    const char *reason="intervening_io";
+    char line[1024];
+    int socket_ok=0, destination_ok=0, packet_ok=0, copy_ok=0, copy_errno=0;
+    int type=-1, transaction=-1, message=-1, payload=-1, qmi_result=-1, qmi_error=-1;
+    int accepted=0, n, clock_ok;
+    int64_t node=-1, port=-1;
+    uint64_t now=0, elapsed=0;
+    if (event!=expected_event+1 || atomic_load(&rdo_contended)) goto record;
+    reason="socket_identity";
+    if (!(socket_ok=rdo_qrtr_socket(fd))) goto record;
+    reason="address_length";
+    if (addrlen!=sizeof(destination)) goto record;
+    reason="copy_address";
+    if (!rdo_copy_parameter(&destination,addr,sizeof(destination),&copy_errno)) goto record;
+    reason="destination";
+    if (destination.family!=RDO_AF_QRTR || destination.node==UINT32_MAX ||
+        !destination.port || destination.port>=UINT32_C(0xfffffffe)) goto record;
+    destination_ok=1; node=destination.node; port=destination.port;
+    reason="packet_length_or_flags";
+    if (length!=sizeof(packet) || flags!=0) goto record;
+    reason="copy_packet";
+    if (!rdo_copy_parameter(packet,buf,sizeof(packet),&copy_errno)) goto record;
+    copy_ok=1;
+    reason="packet";
+    if (packet[0]!=2 || rdo_le16(packet+3)!=3 || rdo_le16(packet+5)!=7 ||
+        packet[7]!=2 || rdo_le16(packet+8)!=4 || rdo_le16(packet+10)>1) goto record;
+    packet_ok=1; type=packet[0]; transaction=(int)rdo_le16(packet+1);
+    message=(int)rdo_le16(packet+3); payload=(int)rdo_le16(packet+5);
+    qmi_result=(int)rdo_le16(packet+10); qmi_error=(int)rdo_le16(packet+12);
+    reason=result<0 ? "send_error" : result!=(ssize_t)length ? "send_short" :
+           (qmi_result || qmi_error) ? "qmi_error" : "accepted";
+    accepted=result==(ssize_t)length;
+record:
+    /* Another observed send/pwrite invalidates this weak temporal association. */
+    if (atomic_load(&rdo_events)!=event || atomic_load(&rdo_contended)) {
+        reason="concurrent"; accepted=0;
+    }
+    clock_ok=rdo_now(&now) && now>=completed_ns;
+    if (clock_ok) elapsed=now-completed_ns;
+    n=snprintf(line,sizeof(line),
+        "RMTFS_RESPONSE sequence=%u attempted=1 reason=%s association=next_send_same_thread "
+        "request_transaction_verified=0 socket_ok=%d destination_ok=%d packet_ok=%d copy_ok=%d copy_errno=%d "
+        "node=%" PRId64 " port=%" PRId64 " type=%d transaction=%d message_id=%d payload_length=%d "
+        "qmi_result=%d qmi_error=%d send_length=%zu send_flags=%d address_length=%u "
+        "send_return=%zd send_errno=%d transport_accepted=%d elapsed_ns=%" PRIu64
+        " clock_ok=%d metadata_bytes=%u modem_acceptance=unknown record_end=1\n",
+        sequence,reason,socket_ok,destination_ok,packet_ok,copy_ok,copy_errno,node,port,
+        type,transaction,message,payload,qmi_result,qmi_error,length,flags,(unsigned)addrlen,
+        result,error,accepted,elapsed,clock_ok,rdo.metadata_bytes);
+    if (n>0 && (size_t)n<sizeof(line)) rdo_log(line,(size_t)n);
+}
+
 static ssize_t rdo_forward(int fd, const void *buf, size_t count, off_t offset)
 {
     int entry=errno, result_errno, watching=atomic_load(&rdo_enabled), owner=0;
     ssize_t result;
     if (watching) {
+        (void)atomic_fetch_add(&rdo_events,1);
         owner=!atomic_flag_test_and_set(&rdo_busy);
         if (!owner) atomic_store(&rdo_contended,1);
     }
@@ -435,11 +583,63 @@ static ssize_t rdo_forward(int fd, const void *buf, size_t count, off_t offset)
     result=rdo.io.pwrite(fd,buf,count,offset); /* Exactly once; no short-write retry. */
     result_errno=errno;
     if (owner) {
+        rdo_invalidate_pending("intervening_pwrite");
         if (atomic_load(&rdo_enabled)) rdo_observe(fd,buf,count,offset,result,result_errno);
         atomic_flag_clear(&rdo_busy);
     }
     errno=result_errno;
     return result;
+}
+static ssize_t rdo_send_forward(int fd, const void *buf, size_t length, int flags,
+                                const struct sockaddr *addr, socklen_t addrlen)
+{
+    int entry=errno, result_errno, watching=atomic_load(&rdo_enabled), owner=0;
+    unsigned pending=rdo_pending.sequence;
+    uint64_t expected=rdo_pending.event, completed=rdo_pending.completed_ns, event=0;
+    ssize_t result;
+    rdo_pending.sequence=0; /* The very first send consumes it, including failures. */
+    if (watching) {
+        event=atomic_fetch_add(&rdo_events,1)+1;
+        owner=!atomic_flag_test_and_set(&rdo_busy);
+        if (!owner) atomic_store(&rdo_contended,1);
+    }
+    errno=entry;
+    result=rdo.io.sendto(fd,buf,length,flags,addr,addrlen);
+    result_errno=errno;
+    if (owner) {
+        if (rdo.calls>=RDO_MAX_CALLS) rdo_stop("call_limit",result_errno,result);
+        else {
+            ++rdo.calls;
+            if (pending && atomic_load(&rdo_enabled))
+                rdo_response(fd,buf,length,flags,addr,addrlen,result,result_errno,
+                             pending,expected,event,completed);
+            if (atomic_load(&rdo_contended)) rdo_stop("concurrent",result_errno,result);
+        }
+        atomic_flag_clear(&rdo_busy);
+    }
+    errno=result_errno;
+    return result;
+}
+static ssize_t rdo_recv_forward(int fd, void *buf, size_t length, int flags,
+                                struct sockaddr *addr, socklen_t *addrlen)
+{
+    int entry=errno;
+    if (atomic_load(&rdo_enabled)) {
+        (void)atomic_fetch_add(&rdo_events,1);
+        if (atomic_flag_test_and_set(&rdo_busy)) {
+            atomic_store(&rdo_contended,1);
+            rdo_pending.sequence=0;
+        } else {
+            rdo_invalidate_pending("receive_boundary");
+            if (rdo.calls>=RDO_MAX_CALLS) rdo_stop("call_limit",entry,0);
+            else ++rdo.calls;
+            atomic_flag_clear(&rdo_busy);
+        }
+    }
+    /* No inspection of buf/addr/addrlen and no observer lock held while the
+     * original call may block. This is an event boundary, not a request parser. */
+    errno=entry;
+    return rdo.io.recvfrom(fd,buf,length,flags,addr,addrlen);
 }
 static void rdo_finish(void)
 {
@@ -447,13 +647,16 @@ static void rdo_finish(void)
     struct stat st;
     if (!atomic_flag_test_and_set(&rdo_busy)) {
         rdo_finish_sequence("process_exit",0,0,0);
+        rdo_invalidate_pending("process_exit");
         atomic_store(&rdo_enabled,0);
         if (rdo.logfd>=0 && rdo.io.fstat(rdo.logfd,&st)==0 && S_ISREG(st.st_mode) &&
             st.st_dev==rdo.log_dev && st.st_ino==rdo.log_ino) (void)rdo.io.close(rdo.logfd);
         if (rdo.readfd>=0 && rdo.io.fstat(rdo.readfd,&st)==0 && S_ISCHR(st.st_mode) &&
             st.st_dev==rdo.read_dev && st.st_ino==rdo.read_ino && st.st_rdev==rdo.device)
             (void)rdo.io.close(rdo.readfd);
-        rdo.logfd=-1; rdo.readfd=-1;
+        if (rdo.memfd>=0 && rdo.io.fstat(rdo.memfd,&st)==0 && S_ISREG(st.st_mode) &&
+            st.st_dev==rdo.mem_dev && st.st_ino==rdo.mem_ino) (void)rdo.io.close(rdo.memfd);
+        rdo.logfd=-1; rdo.readfd=-1; rdo.memfd=-1;
         atomic_flag_clear(&rdo_busy);
     }
     errno=saved;
@@ -469,22 +672,38 @@ ssize_t rdo_test_pwrite(int fd, const void *buf, size_t count, off_t offset)
 {
     return rdo_forward(fd,buf,count,offset);
 }
+ssize_t rdo_test_sendto(int fd, const void *buf, size_t length, int flags,
+                       const struct sockaddr *addr, socklen_t addrlen)
+{
+    return rdo_send_forward(fd,buf,length,flags,addr,addrlen);
+}
+ssize_t rdo_test_recvfrom(int fd, void *buf, size_t length, int flags,
+                         struct sockaddr *addr, socklen_t *addrlen)
+{
+    return rdo_recv_forward(fd,buf,length,flags,addr,addrlen);
+}
 void rdo_test_finish(void) { rdo_finish(); }
 #else
 static int rdo_open(const char *path, int flags, mode_t mode) { return open(path,flags,mode); }
 static ssize_t (*rdo_original_pwrite)(int,const void *,size_t,off_t);
 static ssize_t (*rdo_original_pread)(int,void *,size_t,off_t);
+static ssize_t (*rdo_original_sendto)(int,const void *,size_t,int,const struct sockaddr *,socklen_t);
+static ssize_t (*rdo_original_recvfrom)(int,void *,size_t,int,struct sockaddr *,socklen_t *);
 static atomic_int rdo_ready;
 __attribute__((constructor)) static void rdo_load(void)
 {
     int saved=errno;
     void *p;
-    struct rdo_io io={rdo_open,read,NULL,NULL,write,close,fstat,clock_gettime,getenv};
+    struct rdo_io io={rdo_open,read,NULL,NULL,write,close,fstat,clock_gettime,getenv,
+                      NULL,getsockopt,getsockname,NULL};
     _Static_assert(sizeof(p)==sizeof(rdo_original_pwrite),"POSIX dlsym function-pointer ABI");
     /* Once during loader initialization; no lazy resolution or pthread locks. */
     p=dlsym(RTLD_NEXT,"pwrite"); memcpy(&rdo_original_pwrite,&p,sizeof(p));
     p=dlsym(RTLD_NEXT,"pread"); memcpy(&rdo_original_pread,&p,sizeof(p));
-    io.pwrite=rdo_original_pwrite; io.pread=rdo_original_pread;
+    p=dlsym(RTLD_NEXT,"sendto"); memcpy(&rdo_original_sendto,&p,sizeof(p));
+    p=dlsym(RTLD_NEXT,"recvfrom"); memcpy(&rdo_original_recvfrom,&p,sizeof(p));
+    io.pwrite=rdo_original_pwrite; io.pread=rdo_original_pread; io.sendto=rdo_original_sendto;
+    io.recvfrom=rdo_original_recvfrom;
     rdo_initialize(&io,RDO_EXE_SHA);
     atomic_store(&rdo_ready,1);
     errno=saved;
@@ -497,6 +716,20 @@ ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset)
     if (!rdo_original_pwrite) return (ssize_t)syscall(SYS_pwrite64,fd,buf,count,offset);
     if (!atomic_load(&rdo_ready)) return rdo_original_pwrite(fd,buf,count,offset);
     return rdo_forward(fd,buf,count,offset);
+}
+ssize_t sendto(int fd, const void *buf, size_t length, int flags,
+               const struct sockaddr *addr, socklen_t addrlen)
+{
+    if (!rdo_original_sendto) return (ssize_t)syscall(SYS_sendto,fd,buf,length,flags,addr,addrlen);
+    if (!atomic_load(&rdo_ready)) return rdo_original_sendto(fd,buf,length,flags,addr,addrlen);
+    return rdo_send_forward(fd,buf,length,flags,addr,addrlen);
+}
+ssize_t recvfrom(int fd, void *buf, size_t length, int flags,
+                 struct sockaddr *addr, socklen_t *addrlen)
+{
+    if (!rdo_original_recvfrom) return (ssize_t)syscall(SYS_recvfrom,fd,buf,length,flags,addr,addrlen);
+    if (!atomic_load(&rdo_ready)) return rdo_original_recvfrom(fd,buf,length,flags,addr,addrlen);
+    return rdo_recv_forward(fd,buf,length,flags,addr,addrlen);
 }
 __attribute__((destructor)) static void rdo_unload(void) { rdo_finish(); }
 #endif

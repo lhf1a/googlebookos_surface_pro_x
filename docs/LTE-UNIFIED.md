@@ -373,3 +373,49 @@ QMI响应type/msgid/transaction/result/error、目标QRTR元数据与真实发�
 ret==len也只证明本机传输接受，不能跨越到基带接受结论；不重复已有交付试验或旧FSG组合。
 私有镜像/补丁/命令原始输出在原工作区out/lte-main-review-20261103/rmtfs-delivery-v1，
 扩展既有四角色，原文件保持。通用初始镜像的双机注册、PS、真实蜂窝数据验收仍未完成。
+
+## 2026-11-03：SQ1 原 RMTFS 响应发送接受已实测；结束 AP 传输疑点路线
+
+在原逐扇区观察器上增加真实sendto的返回/errno与最多26字节参数的安全只读解析；
+只输出QMI/QRTR元数据，不输出原始报文/NV，不重发、不改包/参数/返回。固定原件、
+实际socket类型/域/地址与日志fd身份仍校验。新增recvfrom仅作进入下一次接收前的
+关联失效边界，不读接收内容，且不在可能阻塞的真实接收期间持观察锁；封住原FSG
+编码失败、下一请求回复误继承pending的路径。仍明确request_transaction_verified=0，
+不是请求txn全链比对或Modem确认。safe copy仅用本进程mem固定fd，坏指针/短读为inconclusive。
+
+保留31项并扩到67组，host ASan/UBSan与ARM64/QEMU输出一致。生产opt-out真实
+socketpair三阶段均sendto14/errno123/收到14/recv_errno124/equal1、exit0；原pwrite
+转发结果也不变。原ELF/原loader下pwrite/sendto/recvfrom@GLIBC_2.17绑定均验证。
+源码副本的原版→候选→实际ROLLBACK.sh response模式恢复，sendto_observer为0/1/0，
+相同实际收发均成功；补丁重建再次1且源码hash匹配。旧image回滚模式再次执行仍恢复9721…。
+verify-01在并发源码改动时被最终hash门正确拒绝，最终固定verify-02；没有把中途结果当最终通过。
+
+SQ1原基线先实测新准入API：仅自建无bind/send/recv的QRTR socket，确认域42/类型2/
+地址长12；/proc/self/mem仅读本helper自己的14字节合成常量，未碰他进程/Modem内存。
+一次性镜像7e789242…仍仅改EL2 helper最终exec和新增观察库5769a70f…；其他有效条目、
+原RMTFS85668122、FSG/seed/Radio/rmnet/固件/内核/DT、最后凭据层都保持。
+
+实际 BASELINE boote70d6a67 → MODIFIED boot85fc9124 → ROLLBACK boot7112ff09：
+同一QMI/安全观察均exit0，均DMS2、接口0、NAS registration0/PS2/LTE0、signal74。
+候选真实maps/hash证明加载。完整日志记录4096×512B，input/readback均bd124…、差异0；
+紧随同线程且中间无后续接收边界的响应：type2/msgid3/transaction1/result0/error0，
+目标QRTR node0/port16，send_length14/send_return14/send_errno0，transport_accepted1。
+记录完整record_end1。**本次AP侧完整写后读回与本机QRTR发送接受均有正证据，仍不是
+Modem收到/接受FSG或RF初始化成功的证明。** 不再继续增加AP交付日志，不把未联网归到
+本轮未发现失败的这条链，也不因此改cache、重写RMTFS或复试旧FSG/组件组合。
+
+已真正回原默认，原菜单2776eded、默认9721b3ad、Mesa回退9fd377aa及全部保护项通过；
+库/预载/临时工具已移除，SQ1LteResp已清理。screen_only/nohibernate、常亮锁、
+ALSA/AUDIO_READY/实际音频HAL af73f71e保持，无新增听感声明。回滚后只读UIM仍USIM ready。
+本轮无新的NV453/RFNV读取，观察器不加入默认构建，通用LTE功能仍未完成。
+
+转向既有接口的固件环境对照：SQ1正常boot7112ff09实读soc_id340/revision2.1/family
+Snapdragon；未读serial_number/unique_id。当前Android未挂debugfs，qcom_socinfo详细
+平台/运行image版本接口未暴露；SecureBoot/SetupMode变量未暴露，保持UNKNOWN。
+本轮不为此挂载/加载模块/重启。第一次PowerShell文本管道给最后参数附CR造成exit1，
+保留错误并改用已保存LF脚本执行后exit0，未跳过失败。SQ2两个既有可信地址均超时，
+未绕过主机验证；本地现存归档也未找到SQ2实际socinfo字段，不能拿DT标签补值。
+下一未完成项是恢复可信连接后的双机实际平台身份/运行固件build对照；差异仅线索，
+不是设备绑定、校准来源错误或不能通用的证明。仍需两机带SIM注册、PS及真实蜂窝流量验收。
+私有完整镜像、源码差异、回滚、字面命令输出在原工作区out/lte-main-review-20261103/
+rmtfs-response-v1，继续扩展原四角色，保留原始字节和此前所有已完成结果。

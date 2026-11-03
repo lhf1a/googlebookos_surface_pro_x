@@ -72,8 +72,9 @@ def main():
         run(arch + '-production-compile', [compiler, *common, '-fPIC', '-shared',
                                           '-Wl,-z,relro,-z,now', src, '-ldl', '-o', lib])
         symbols = run(arch + '-production-symbols', ['readelf', '-W', '--dyn-syms', lib])
-        if not re.search(r'\bGLOBAL\s+DEFAULT\s+\d+\s+pwrite\s*$', symbols, re.M):
-            raise RuntimeError(f'{arch} production library does not export pwrite')
+        for symbol in ('pwrite', 'sendto', 'recvfrom'):
+            if not re.search(r'\bGLOBAL\s+DEFAULT\s+\d+\s+' + symbol + r'\s*$', symbols, re.M):
+                raise RuntimeError(f'{arch} production library does not export {symbol}')
         if re.search(r'\b(?:test_|mock_|rdo_test)', symbols):
             raise RuntimeError(f'{arch} production dynamic symbols contain test seam')
         run(arch + '-production-versions', ['readelf', '-W', '--version-info', lib])
@@ -117,6 +118,47 @@ int main(void) {
     (out / 'production-pwrite-transaction.json').write_text(json.dumps({
         'scope': 'Real libc pwrite on anonymous regular file; production observer default opt-out',
         'phases': phase_output, 'equal': True, 'noDeviceAccess': True}, indent=2) + '\n')
+    send_source = out / 'production-sendto-smoke.c'
+    send_source.write_text(r'''#define _GNU_SOURCE
+#include <sys/socket.h>
+#include <unistd.h>
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+int main(void) {
+    int pair[2];
+    unsigned char input[14], output[14];
+    for(unsigned i=0;i<14;i++)input[i]=(unsigned char)(i*17u);
+    if(socketpair(AF_UNIX,SOCK_DGRAM|SOCK_CLOEXEC,0,pair))return 2;
+    errno=123;
+    ssize_t n=sendto(pair[0],input,sizeof(input),0,NULL,0);
+    int saved=errno;
+    errno=124;
+    ssize_t rd=recvfrom(pair[1],output,sizeof(output),MSG_DONTWAIT,NULL,NULL);
+    int receive_errno=errno;
+    int equal=rd==14 && !memcmp(input,output,14);
+    close(pair[0]);close(pair[1]);
+    printf("sendto=%zd errno=%d received=%zd recv_errno=%d equal=%d\n",n,saved,rd,receive_errno,equal);
+    return !(n==14 && saved==123 && receive_errno==124 && equal);
+}
+''')
+    send_smoke = out / 'production-sendto-smoke'
+    run('production-sendto-smoke-compile', ['gcc', *common, send_source, '-o', send_smoke])
+    send_phases = {}
+    for phase in ('BASELINE', 'MODIFIED', 'ROLLBACK'):
+        smoke_env = os.environ.copy()
+        for key in ('LD_PRELOAD', 'RMTFS_DELIVERY_OBSERVE', 'RMTFS_DELIVERY_FSG_SHA256'):
+            smoke_env.pop(key, None)
+        if phase == 'MODIFIED':
+            smoke_env['LD_PRELOAD'] = str(out / 'librmtfs-delivery-host.so')
+        send_phases[phase] = run(phase + '-production-sendto-smoke', [send_smoke], smoke_env)
+    if len(set(send_phases.values())) != 1:
+        raise RuntimeError('Production default-opt-out sendto A/B/R results differ')
+    if send_phases['BASELINE'] != 'sendto=14 errno=123 received=14 recv_errno=124 equal=1\n':
+        raise RuntimeError('Unexpected production sendto forwarding result')
+    (out / 'production-sendto-transaction.json').write_text(json.dumps({
+        'scope': 'Real libc sendto on AF_UNIX socketpair; default opt-out, NOT QRTR',
+        'phases': send_phases, 'equal': True, 'noDeviceAccess': True}, indent=2) + '\n')
     for p, expected in list(hashes.items()):
         if hashlib.sha256(Path(p).read_bytes()).hexdigest() != expected:
             raise RuntimeError(f'Source or output changed during verification: {p}')
@@ -126,6 +168,7 @@ int main(void) {
         'hostSanitizers': ['ASan', 'UBSan'], 'arm64QEMU': True,
         'hostARM64OutputsEqual': True, 'productionSeparateFromTestSeams': True,
         'productionDefaultOptOutPwriteBaselineModifiedRollbackEqual': True,
+        'productionDefaultOptOutSendtoBaselineModifiedRollbackEqual': True,
         'sourceAndOutputSHA256': hashes, 'status': 'pass'}, indent=2) + '\n')
     print(native, end='')
     print('OFFLINE_ONLY production library built; no hardware changes')
