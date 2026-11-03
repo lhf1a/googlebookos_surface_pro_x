@@ -1,0 +1,23 @@
+{
+  "sq2": {
+    "model": "Surface Pro X SQ2",
+    "esp_uuid": "B027-0512",
+    "layout": "existing SQ2 512GB Android disk",
+    "gpu_mhz": 700,
+    "rpmh_level": 432,
+    "cpu_big_max_khz": 3148800,
+    "display": "2.7-60",
+    "basis": "accepted SQ2 runtime; no new hardware testing"
+  },
+  "sq1": {
+    "model": "Surface Pro X SQ1",
+    "esp_uuid": "B026-1027",
+    "layout": "existing offline 20GiB Android image template; NOT the SQ1 Windows ESP",
+    "gpu_mhz": 661,
+    "rpmh_level": 416,
+    "cpu_big_max_khz": 2995200,
+    "display": "2.7-60",
+    "basis": "offline candidate; firmware/platform comparison only; NOT hardware validated",
+    "windows_esp_must_not_be_targeted": "2010-259C"
+  }
+}

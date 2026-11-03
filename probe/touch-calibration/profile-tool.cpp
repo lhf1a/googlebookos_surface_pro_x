@@ -19,7 +19,7 @@ int main(int argc, char **argv) try {
     if (argc==4 && std::string(argv[1])=="publish") {
         // Directory is the known package's device-protected files directory.
         std::string name=argv[3];
-        if(name!="context" && name!="reply") throw std::runtime_error("Invalid output name");
+        if(name!="context" && name!="reply" && name!="noise-status") throw std::runtime_error("Invalid output name");
         int dir=open(argv[2],O_RDONLY|O_DIRECTORY|O_NOFOLLOW);
         struct stat st{};if(dir<0 || fstat(dir,&st)) throw std::runtime_error("Invalid directory");
         std::string temp=".bridge-"+std::to_string(getpid());

@@ -221,4 +221,4 @@ if __name__=='__main__':
         sys.argv.remove('--legacy-el1')
         main()
     else:
-        runpy.run_path(str(R/'scripts/build-sq2-default.py'), run_name='__main__')
+        runpy.run_path(str(R/'scripts/build-surface-pro-x.py'), run_name='__main__')

@@ -1,4 +1,8 @@
+项目标准构建入口：`scripts/build.py`，生成单个 SQ1/SQ2 通用镜像；默认设置可自定义。见 [标准构建](docs/STANDARD-BUILD.md)。
+
 # Googlebook OS on Surface Pro X SQ2
+
+Unified SQ1/SQ2 offline build: [profiles, fixed inputs and limits](docs/UNIFIED-SQ1-SQ2.md). SQ1 hardware compatibility is not validated.
 
 **English** | [简体中文](README.zh-CN.md)
 

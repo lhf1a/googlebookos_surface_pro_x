@@ -36,8 +36,8 @@ replace(touch, 'bool m_enabled = true;',
         'bool m_enabled = true;\n\tSQ2TouchCalibration m_calibration {};')
 replace(touch, '\t\tif (info.is_touchscreen())\n',
         '\t\t// Calibration profiles are specific to the measured SQ2 sensor.\n'
-        '\t\tif (info.is_touchscreen() && info.vendor == 0x045e && info.product == 0x0c21 &&\n'
-        '\t\t    info.meta.has_value() && info.meta->rows == 46 && info.meta->columns == 68) {\n'
+        '\t\tif (info.is_touchscreen() && info.vendor == 0x045e && (info.product == 0x0c21 || info.product == 0x0996) &&\n'
+        '\t\t    info.meta.has_value()) {\n'
         '\t\t\tm_calibration.load(config.touchscreen_calibration_x, config.touchscreen_calibration_y,\n'
         '\t\t\t                   config.touchscreen_calibration_x_top, config.touchscreen_calibration_top_start,\n'
         '\t\t\t                   config.touchscreen_calibration_top_end);\n'

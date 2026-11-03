@@ -55,5 +55,23 @@ public final class Calibration {
     if(samples.length!=42)throw new IllegalArgumentException();
     return new Calibration(fitAxis(Arrays.copyOfRange(samples,0,14),0),fitAxis(Arrays.copyOfRange(samples,14,28),1),fitAxis(Arrays.copyOfRange(samples,28,42),0));
   }
+  /** Missing regions retain prior inverse anchors, not invented touch samples. */
+  public static Calibration fitPartial(double[][] samples,Calibration prior){
+    if(samples.length!=42)throw new IllegalArgumentException();
+    Curve[] curves=new Curve[3];
+    for(int group=0;group<3;group++){
+      double[][] axis=new double[14][];int measured=0;
+      for(int point=0;point<7;point++){
+        int i=group*14+point*2;
+        if(samples[i]!=null&&samples[i+1]!=null){axis[point*2]=samples[i];axis[point*2+1]=samples[i+1];measured++;}
+        else{
+          double[] anchor=prior.inverse(group==1?.5:POS[point],group==1?POS[point]:group==0?.5:.04);
+          axis[point*2]=anchor;axis[point*2+1]=anchor;
+        }
+      }
+      curves[group]=measured<2?(group==0?prior.x:group==1?prior.y:prior.top):fitAxis(axis,group==1?1:0);
+    }
+    return new Calibration(curves[0],curves[1],curves[2],prior.thumbOptimized);
+  }
   public String encode(String device){return "Version=1\nDevice="+device+"\nCalibrationX="+x.encode()+"\nCalibrationY="+y.encode()+"\nCalibrationXTop="+top.encode()+"\nCalibrationTopStart=0.1\nCalibrationTopEnd=0.3\nContactSizeMax="+(thumbOptimized?"2.4":"2.0")+"\n";}
 }

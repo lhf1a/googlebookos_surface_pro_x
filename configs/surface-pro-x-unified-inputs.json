@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "upstream_main": "fee67b2dc1ce0de100e38131412c3f9062ce11fe",
+  "files": {
+    "common/Image": "c1ef559ff8d240de4f9314ba9d1a2586e7dac3b8eae777bff2a90ed72dd57a1c",
+    "common/android-el2.dtb": "85b436a3a6534f5675ba25c24986f54792393d8b9f830ba2de8e5b415ce66356",
+    "common/initramfs.cpio.gz": "957b5ee68d7a0d845638f7ebec9c0f624e0ae4184418bc8a12381628c720e452",
+    "common/qebspilaa64.efi": "e3675e36a749176481742a8ac78b8d505a40e3ea2a87464b123c45dd3080fe95",
+    "common/tcblaunch.exe": "195997cf13a82f4715c92374b7918ab1f7231b2cc9be675b0846adf2995f8948",
+    "firmware/qcom/msft/surface/pro-x-sq2/qcadsp8180.mbn": "2703ceb6a8bdfd24097a6edc6406ae29994c4b85c6ef634da254e2d38ec9f40f",
+    "firmware/qcom/msft/surface/pro-x-sq2/qccdsp8180.mbn": "2a276b79208e89c3299fa81a39ab47bc61a67b8ba13de2a5685f4a9d67d149c1",
+    "firmware/qcom/msft/surface/pro-x-sq2/qcmpss8180.mbn": "9ec7b6c6dae5d97af84ab71af6cb93b1892a4db1bd2b0b9de3e12a5d691a5439",
+    "firmware/qcom/venus-5.2/venus.mbn": "4e93d34504da96320775476bbd509aa06f985b48fb781d4436c8eb812b929928",
+    "launchers/closed.efi": "dc7b5ac95097533ed131f280d476e45a68a9c0280c758acd94a966348e651476",
+    "launchers/mesa.efi": "1e6da8d09afee823c448dbb4ad01285572cf936f593c9246d066321c8e1be39c",
+    "sq1/profile-donor.cpio.gz": "2b5b48aab35798c968c058c71690ce6be8beb9cba9aeab05de8b657275c18b73"
+  },
+  "sq1_donor_scope": "storage layout, existing auto-grow tools and own lab SSH identity only; never kernel/modules/media from donor",
+  "sq1_hardware_validated": false
+}

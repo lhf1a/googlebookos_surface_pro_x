@@ -26,7 +26,10 @@ def build(root, output=None):
         subprocess.run([str(tools/'apksigner'),'verify',str(w/'wizard.apk')],check=True)
         subprocess.run(['aarch64-linux-gnu-g++','-std=c++17','-static','-O2','-Wall','-Wextra','-Werror',str(src/'profile-tool.cpp'),'-o',str(w/'profile-tool')],check=True)
         subprocess.run(['aarch64-linux-gnu-strip',str(w/'profile-tool')],check=True)
+        subprocess.run(['aarch64-linux-gnu-g++','-std=c++17','-static','-O2','-Wall','-Wextra','-Werror',str(src/'noise-tool.cpp'),'-o',str(w/'noise-tool')],check=True)
+        subprocess.run(['aarch64-linux-gnu-strip',str(w/'noise-tool')],check=True)
         files={'etc/sq2-touch-calibration/wizard.apk':(0o100644,(w/'wizard.apk').read_bytes()),
+               'bin/touch-noise-profile':(0o100755,(w/'noise-tool').read_bytes()),
                'bin/touch-calibration-profile':(0o100755,(w/'profile-tool').read_bytes()),
                'bin/touch-calibration-boot':(0o100755,(root/'probe/test2/touch-calibration-boot').read_bytes().replace(b'\r\n',b'\n'))}
     sha=lambda b:hashlib.sha256(b).hexdigest()
