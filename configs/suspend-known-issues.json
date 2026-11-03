@@ -1,14 +1,17 @@
 {
-  "updated": "2026-10-27",
-  "status": "true_suspend_repair_paused_screen_only_policy",
+  "updated": "2026-11-04",
+  "status": "normal_policy_enabled_by_user_hardware_validation_in_progress",
   "policy": {
-    "system_suspend": "blocked_before_freezer_by_pm_suspend_guard",
-    "boot_options": ["suspend.screen_only=1", "nohibernate"],
-    "screen_off": "allowed",
-    "legacy_infinite_timeout_migration_ms": 120000,
-    "qemu": "readonly guard and freeze/mem/disk rejection passed",
-    "hardware": "guard Y; freeze/mem/disk rejected; SPI resume_count stayed 0 during screen-off",
-    "user_validation": "Power-key and lid screen-off/on both passed; display, touch and keyboard usable"
+    "system_suspend": "Android persistent owner gate; unregistered callers blocked",
+    "boot_options": [
+      "suspend.screen_only=1",
+      "suspend.screen_only_autosuspend=1",
+      "nohibernate"
+    ],
+    "fallback": "original screen-only Mesa",
+    "framework": "stock; no diagnostic AC grace patch",
+    "lockscreen": "enabled, explicit one-time reset to system timeout defaults; credentials preserved",
+    "validation": "single native sleep and sustained input recovered on SQ2; normal continuous policy validation pending"
   },
   "issues": [
     "Lid close switches screen off, but opening the cover does not reliably wake it",
@@ -21,5 +24,5 @@
     "SPI-HID suspend/resume quiesce patch and IPTSd resume watcher included",
     "Kernel devices/platform PM debug stages returned; real suspend still failed"
   ],
-  "instruction": "Keep screen-only mode enabled. Actual suspend repair remains paused; screen off/on validation is authorized with the kernel guard verified. Framework wake locks alone are not sufficient."
+  "instruction": "User authorized normal Android policy and deployment on 2026-11-04. Keep recovery entry and document early wake, repeatability and SQ1/energy limitations."
 }

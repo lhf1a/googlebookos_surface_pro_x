@@ -1,5 +1,17 @@
 # Working agreement
 
+## 2026-11-04 user-directed normal power policy
+
+The user explicitly requested normal Android suspend and lockscreen defaults, deployment
+on the current device and a push of the development branch. This supersedes historical
+screen-only-only/unattended-native prohibitions for the normal entry. Retain screen_only
+as a boundary for unregistered callers; the verified Android suspend service gets the
+persistent owner gate (01-framework-owner, NOT 02-native-single-request). Keep nohibernate,
+matching SPI PM recovery, credentials and the original screen-only Mesa fallback. Remove
+lab wakelocks and diagnostic SSAM delays; use stock framework policy. Restore timeouts
+only on explicit request, never overwrite user choices on every boot. Do not call single
+SQ2 results universal or claim battery efficiency/continuous stability without evidence.
+
 Read docs/HANDOFF.md and docs/BUILD.md before changing the port.
 
 ## SPX-PORTABLE-SQ1-SQ2：通用开发与镜像交付（2026-11-03，最高优先级）

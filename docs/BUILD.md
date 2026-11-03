@@ -1,3 +1,22 @@
+## 2026-11-04：正常Android休眠默认策略
+
+用户要求恢复正常休眠与锁屏策略；标准build.py/profile入口默认--suspend-policy android，
+--suspend-policy screen-only保留旧行为。默认项使用--power-bundle（默认
+private/build-inputs/power），Mesa回退保持旧内核/载荷/无native许可。两机共用Android
+服务准入与SPI恢复模块，不按机器身份限制；尚无SQ1实测证明。
+
+先用build-surface-pm-kernel.py构建01-framework-owner的持续准入Image，不应用诊断02补丁。
+使用prepare-surface-power-bundle.py --image IMAGE --launcher NATIVE_EFI --spi-module SPI_KO
+--system-suspend ANDROID_SYSTEM_SUSPEND --output NEW_BUNDLE收集自有匹配输入。
+NATIVE_EFI是既有未签名原生启动模板；打包检查完整性、SPI vermagic及PM接口，不能代替
+完整符号/ABI及QEMU持续准入测试。不得把single-request Image误标为正常包。
+
+surface-power-payload.py只向正常项接入owner注册、更新SPI模块并让实验保活退出；
+拒绝含实验JAR或SSAM固定延时的基线。保留stock框架和最后私有身份成员。系统默认
+时间恢复为显式一次操作：在Android内以root运行restore-surface-power-defaults.sh，
+只删除关屏/锁后延时/sleep_timeout/充电常亮覆盖并启用当前用户锁屏，不清除凭据。
+后续启动不反复重置用户时间或锁屏选择。nohibernate保留：此次为s2idle，不是磁盘休眠。
+
 ## 2026-11-03：开发与交付禁止单机绑定（当前最高优先级）
 
 按用户要求，同一标准镜像必须面向任意 SQ1/SQ2，不要求按单机重编译或替换专属启动包。

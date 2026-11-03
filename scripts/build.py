@@ -48,6 +48,8 @@ def main():
     p.add_argument('--lte-bundle', type=Path, default=R/'private/build-inputs/lte',
                    help='private raw LTE inputs; Radio compiled from source, unit guard retained')
     p.add_argument('--keep-work', action='store_true', help='retain intermediates for debugging')
+    p.add_argument('--suspend-policy', choices=('android','screen-only'), default='android')
+    p.add_argument('--power-bundle', type=Path, default=R/'private/build-inputs/power')
     a = p.parse_args()
     if not 72 <= a.dpi <= 1000:
         p.error('--dpi must be between 72 and 1000')
@@ -74,7 +76,7 @@ def main():
              '--sealed-input', a.sealed_input, '--profiles', a.profiles, '--output', a.output/'profiles',
              '--lte', a.lte, '--lte-bundle', a.lte_bundle]
     command+=['--touch-repair',a.touch_repair,'--touch-bundle',a.touch_bundle]
-    command+=['--dpi',str(a.dpi),'--ksu-manager',a.ksu_manager,'--ksu-bundle',a.ksu_bundle]
+    command+=['--dpi',str(a.dpi),'--ksu-manager',a.ksu_manager,'--ksu-bundle',a.ksu_bundle,'--suspend-policy',a.suspend_policy,'--power-bundle',a.power_bundle]
     run(command)
     # LTE source compiler is invoked by profile builder; private files are inputs, not Radio04.
     common = {entry: a.output/'profiles/SQ1/EFI'/('SQ1'+entry)/'initramfs.cpio.gz'

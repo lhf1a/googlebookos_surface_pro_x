@@ -3,6 +3,11 @@
 # The kernel's read-only suspend.screen_only guard is the actual protection.
 # Do not hold the display awake or override a user's normal screen timeout.
 export PATH=/bin:/sbin
+# Normal policy delegates all wake locks to Android; fallback retains the guard.
+if [ "$(cat /sys/module/suspend/parameters/screen_only_autosuspend 2>/dev/null)" = Y ]; then
+    echo ANDROID_POWER_POLICY_NO_LAB_WAKELOCK
+    exit 0
+fi
 android() { timeout 8 nsenter -t 1 -m -r -- /system/bin/"$@"; }
 configured=
 ticks=0
