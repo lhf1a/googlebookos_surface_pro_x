@@ -1,5 +1,5 @@
 #!/bin/busybox sh
-# Private, unit-bound FSG in RAM only. Standard public images omit this data.
+# Operator-supplied shared FSG in RAM only. Standard public images omit this data.
 set -eu
 export PATH=/bin:/sbin
 case " $(cat /proc/cmdline) " in
@@ -9,9 +9,10 @@ case " $(cat /proc/cmdline) " in
 esac
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 case " $(cat /proc/cmdline) " in *' nohibernate '*) ;; *) exit 1;; esac
-test "$(tr -d '\000' < /proc/device-tree/model)" = 'Microsoft Surface Pro X (SQ2)'
-test "$(tr -d ' \r\n' < /sys/block/nvme0n1/device/serial)" = "$(cat /etc/sq2-lte/unit-serial)"
-grep -qxF SQ2-INTERNAL-512-20261027 /media/esp/SQ2-SSD-ID.txt
+case "$(tr -d '\000' < /proc/device-tree/model)" in
+ 'Microsoft Surface Pro X (SQ1)'|'Microsoft Surface Pro X (SQ2)') ;;
+ *) exit 1;;
+esac
 awk '$2=="/run" && $3=="tmpfs" {ok=1} END {exit !ok}' /proc/mounts
 test -z "$(pidof rmtfs 2>/dev/null || true)"
 (cd /etc/sq2-lte; sha256sum -c FSG.sha256)

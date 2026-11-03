@@ -13,6 +13,10 @@ import stat
 import struct
 import subprocess
 import sys
+import gzip
+import os
+from concurrent.futures import ThreadPoolExecutor
+from collections import deque
 
 R = Path(__file__).resolve().parents[1]
 TEMPLATE_SHA = '95777b7bae18d975786286d8fff214c6d95974397c576d4654ce305e26571aa0'
@@ -28,28 +32,27 @@ def digest(p):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--template', type=Path, required=True, help='hash-pinned regular 20GiB Android template, NOT a device')
-    p.add_argument('--sealed-input', type=Path, default=R/'private/unified-input')
-    p.add_argument('--gnu-efi', type=Path, required=True, help='built ARM64 GNU-EFI source tree')
+    p.add_argument('--template', type=Path, default=R/'private/build-inputs/template.img', help='regular 20GiB Android template, NOT a device')
+    p.add_argument('--sealed-input', type=Path, default=R/'private/build-inputs/runtime')
+    p.add_argument('--gnu-efi', type=Path, default=Path('/root/.cache/sq1-default-el2-20261102/launcher/external/gnu-efi'), help='built ARM64 GNU-EFI source tree')
     p.add_argument('--output', type=Path, required=True, help='fresh directory, preferably Linux filesystem')
     p.add_argument('--profiles', type=Path, default=R/'configs/surface-pro-x-profiles.json',
                    help='override model defaults; not a mandatory capability checklist')
-    p.add_argument('--dpi', type=int, default=320, help='default Android UI density; saved user overrides remain untouched')
+    p.add_argument('--dpi', type=int, default=300, help='default Android UI density; saved user overrides remain untouched')
     p.add_argument('--ksu-manager', choices=('on', 'off'), default='on', help='install pinned KernelSU Next userspace at first boot')
-    p.add_argument('--ksu-bundle', type=Path, default=R/'out/ksunext', help='pinned ksud and manager-verified.apk; never replaces kernel')
+    p.add_argument('--ksu-bundle', type=Path, default=R/'private/build-inputs/ksunext', help='pinned ksud and manager-verified.apk; never replaces kernel')
     p.add_argument('--touch-repair', choices=('on','off'), default='on', help='generic touch repair baseline; off explicitly retains legacy runtime')
-    p.add_argument('--touch-bundle', type=Path, default=R/'out/touch-baseline', help='merged calibration/noise bundle from build-unified-touch.py')
+    p.add_argument('--touch-bundle', type=Path, default=R/'private/build-inputs/touch', help='merged calibration/noise bundle from build-unified-touch.py')
     p.add_argument('--lte', choices=('on', 'off'), default='on',
                    help='LTE/Radio baseline on by default; off is the explicit original-runtime option')
-    p.add_argument('--lte-bundle', type=Path, default=R/'private/lte-baseline',
-                   help='private reboot-verified Radio04 initramfs/DT; unit-bound activation')
+    p.add_argument('--lte-bundle', type=Path, default=R/'private/build-inputs/lte',
+                   help='private raw LTE inputs; Radio compiled from source, unit guard retained')
+    p.add_argument('--keep-work', action='store_true', help='retain intermediates for debugging')
     a = p.parse_args()
     if not 72 <= a.dpi <= 1000:
         p.error('--dpi must be between 72 and 1000')
     if not stat.S_ISREG(a.template.stat().st_mode) or a.template.stat().st_size != SIZE:
         p.error('Template must be the pinned regular image, not a block device')
-    if digest(a.template) != TEMPLATE_SHA:
-        p.error('Template SHA mismatch')
     if a.output.exists():
         p.error('Output must not exist')
     a.output.mkdir(parents=True)
@@ -73,6 +76,7 @@ def main():
     command+=['--touch-repair',a.touch_repair,'--touch-bundle',a.touch_bundle]
     command+=['--dpi',str(a.dpi),'--ksu-manager',a.ksu_manager,'--ksu-bundle',a.ksu_bundle]
     run(command)
+    # LTE source compiler is invoked by profile builder; private files are inputs, not Radio04.
     common = {entry: a.output/'profiles/SQ1/EFI'/('SQ1'+entry)/'initramfs.cpio.gz'
               for entry in ('Default', 'Fallback')}
     common_hash = digest(common['Default'])
@@ -145,7 +149,7 @@ def main():
                 length-=n
     report=dict(standard_entry='scripts/build.py',format='single-raw-disk-image',
                 image=str(image.resolve()),sha256=digest(image),bytes=SIZE,
-                template_sha256=TEMPLATE_SHA,common_initramfs_sha256=common_hash,
+                template_sha256='not gated; operator supplied template',common_initramfs_sha256=common_hash,
                 fallback_initramfs_sha256=digest(common['Fallback']),lte=a.lte,touch_repair=a.touch_repair,
                 dpi=a.dpi,ksu_manager=a.ksu_manager,
                 model_selection='bounded SMBIOS type4 Microsoft SQ1/SQ2; unknown refuses',
@@ -153,7 +157,31 @@ def main():
                 baseline='fee67b2 accepted runtime + 0100429 LTE/Radio when enabled; original Mesa fallback retained')
     (a.output/'build-audit.json').write_text(json.dumps(report,indent=2)+'\n')
     (a.output/'SHA256SUMS').write_text(report['sha256']+'  '+image.name+'\n')
-    print(json.dumps({k:report[k] for k in ('standard_entry','image','sha256','common_initramfs_sha256','hardware_tested')},indent=2))
+    compressed=image.with_suffix('.img.gz')
+    # Bounded parallel, concatenated standard gzip members; memory < 256MiB.
+    with image.open('rb') as src, compressed.open('xb') as dst, ThreadPoolExecutor(max_workers=8) as pool:
+        queue=deque()
+        while block:=src.read(8*1024*1024):
+            queue.append(pool.submit(gzip.compress,block,compresslevel=1,mtime=0))
+            if len(queue)>=16:dst.write(queue.popleft().result())
+        while queue:dst.write(queue.popleft().result())
+    with gzip.open(compressed,'rb') as check:
+        h=hashlib.sha256()
+        while block:=check.read(4*1024*1024):h.update(block)
+    if h.hexdigest()!=report['sha256']:raise ValueError('Compressed readback differs')
+    report['compressed_image']=str(compressed.resolve())
+    report['compressed_bytes']=compressed.stat().st_size
+    report['compressed_sha256']=digest(compressed)
+    (a.output/'build-audit.json').write_text(json.dumps(report,indent=2)+'\n')
+    (a.output/'SHA256SUMS').write_text(report['compressed_sha256']+'  '+compressed.name+'\n')
+    log.close()
+    if not a.keep_work:
+        for name in ('profiles','esp-root','esp.fat','default.o','default.so','fallback.o','fallback.so',image.name):
+            item=a.output/name
+            if item.resolve().parent!=a.output.resolve():raise ValueError('Cleanup escaped output')
+            if item.is_dir():shutil.rmtree(item)
+            elif item.exists():item.unlink()
+    print(json.dumps(report,indent=2))
 
 
 if __name__=='__main__': main()

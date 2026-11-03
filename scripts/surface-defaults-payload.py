@@ -1,34 +1,39 @@
-"""Shared UI/KSU userspace defaults. Does not replace kernel, modules or userdata."""
+"""Shared UI/KSU/swap userspace defaults. Does not replace kernel, modules or userdata."""
 from pathlib import Path
 import gzip
-import hashlib
 import zlib
 
-FILES = {
-    'ksud': 'bb231b0f77d6ee78a4362ff751b3cc54c934293a4b0acde177afa59c4a64da00',
-    'manager-verified.apk': '96c2bbbf1b973461fe82dd1ed17f89deb86a6a5a9d7c4cf079bd32091131ef57',
-}
+FILES = ('ksud', 'manager-verified.apk')
 HOOK = b'    ksu-framework-boot > /logs/ksu-framework-boot.txt 2>&1 &\n'
+SWAP_HOOK = b'    surface-swap-boot > /logs/surface-swap-boot.txt 2>&1 &\n'
 ANCHOR = b'    lockscreen-framework-boot > /logs/lockscreen-framework-boot.txt 2>&1 &\n'
 
 
-def integrate(raw, root, bundle, c, dpi=320, ksu=True):
+def integrate(raw, root, bundle, c, dpi=300, ksu=True):
     if not isinstance(dpi, int) or not 72 <= dpi <= 1000:
         raise ValueError('DPI must be an integer between 72 and 1000')
     root, bundle = Path(root), Path(bundle)
     before = c.entries(gzip.decompress(raw))
     e = dict(before)
     helper = (root/'probe/test2/apply-device-info').read_bytes().replace(b'\r\n', b'\n')
-    if helper.count(b'density=${2:-320}') != 1:
+    if helper.count(b'density=${2:-300}') != 1:
         raise ValueError('Unexpected density helper')
-    helper = helper.replace(b'density=${2:-320}', ('density=${2:-%d}' % dpi).encode())
+    helper = helper.replace(b'density=${2:-300}', ('density=${2:-%d}' % dpi).encode())
     e['bin/apply-device-info'] = (0o100755, helper)
-    allowed = {'bin/apply-device-info'}
+    allowed = {'bin/apply-device-info', 'bin/surface-swap-boot', 'init'}
+    e['bin/surface-swap-boot'] = (0o100755,
+        (root/'probe/test2/surface-swap-boot').read_bytes().replace(b'\r\n', b'\n'))
+    init = e['init'][1]
+    if init.count(ANCHOR) != 1 or init.count(SWAP_HOOK) > 1:
+        raise ValueError('Unexpected swap asynchronous boot anchor')
+    if SWAP_HOOK not in init:
+        init = init.replace(ANCHOR, ANCHOR+SWAP_HOOK)
+    e['init'] = (e['init'][0], init)
     if ksu:
-        for name, expected in FILES.items():
+        for name in FILES:
             b = (bundle/name).read_bytes()
-            if hashlib.sha256(b).hexdigest() != expected:
-                raise ValueError('KSU input hash mismatch: '+name)
+            if not b:
+                raise ValueError('KSU input empty: '+name)
             e['etc/sq2-ksu/'+name] = (0o100644 if name.endswith('.apk') else 0o100755, b)
         e['etc/sq2-ksu'] = (0o40755, b'')
         e['bin/ksu-framework-boot'] = (0o100755,
@@ -62,6 +67,6 @@ def integrate(raw, root, bundle, c, dpi=320, ksu=True):
     changed = sorted(n for n in e if e[n] != before.get(n))
     if not set(changed) <= allowed:
         raise ValueError('Unrelated baseline change')
-    return packed, dict(dpi=dpi, ksu_manager=ksu, changed=changed,
+    return packed, dict(dpi=dpi, ksu_manager=ksu, swap_below_12g_gib=6, swap_threshold_kib=12582912, changed=changed,
                         credential_member_last=True, unrelated_entries_byte_identical=True,
                         kernel_replaced=False, userdata_overrides_preserved=True)

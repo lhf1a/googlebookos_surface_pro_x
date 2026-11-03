@@ -33,7 +33,7 @@ class Defaults(unittest.TestCase):
             (p/'product/etc').mkdir(parents=True)
             (p/'data').mkdir()
             (p/'data/settings.xml').write_text('display_density_forced=280')
-            for args, expected in (([], '320'), (['360'], '360')):
+            for args, expected in (([], '300'), (['360'], '360')):
                 (p/'vendor/build.prop').write_text('ro.sf.lcd_density=100\nro.vendor.test=keep\n')
                 (p/'product/etc/build.prop').write_text('ro.product.product.model=old\nro.sf.lcd_density=200\n')
                 # Only the bind mount is substituted; execute the real awk/helper.
@@ -64,35 +64,39 @@ class Defaults(unittest.TestCase):
         self.assertNotIn('bin/ksu-framework-boot', e)
         self.assertEqual(e['bin/keep'][1], b'unrelated')
         self.assertTrue(result.endswith(identity))
-        self.assertEqual(audit['changed'], ['bin/apply-device-info'])
+        self.assertEqual(audit['changed'], ['bin/apply-device-info', 'bin/surface-swap-boot', 'init'])
+        self.assertEqual(e['init'][1].count(defaults.SWAP_HOOK), 1)
+        self.assertEqual(audit['swap_below_12g_gib'], 6)
 
-    def test_overlay_pins_fail_closed_and_idempotent(self):
-        import hashlib
-        from unittest.mock import patch
+    def test_overlay_custom_inputs_nonempty_and_idempotent(self):
         raw, identity = self.fixture()
         with tempfile.TemporaryDirectory() as td:
             p = Path(td)
             for n in defaults.FILES:
-                (p/n).write_bytes(n.encode())
-            with self.assertRaises(ValueError):
-                defaults.integrate(raw, ROOT, p, cpio)
-            pins = {n: hashlib.sha256(n.encode()).hexdigest() for n in defaults.FILES}
-            with patch.object(defaults, 'FILES', pins):
-                result, audit = defaults.integrate(raw, ROOT, p, cpio)
-                result2, _ = defaults.integrate(result, ROOT, p, cpio)
-                e = cpio.entries(gzip.decompress(result))
-                self.assertEqual(e, cpio.entries(gzip.decompress(result2)))
-                self.assertEqual(e['init'][1].count(defaults.HOOK), 1)
-                self.assertIn(b'density=${2:-320}', e['bin/apply-device-info'][1])
-                self.assertTrue(result.endswith(identity))
-                self.assertFalse(audit['kernel_replaced'])
+                (p/n).write_bytes(('custom-'+n).encode())
+            result, audit = defaults.integrate(raw, ROOT, p, cpio)
+            result2, _ = defaults.integrate(result, ROOT, p, cpio)
+            e = cpio.entries(gzip.decompress(result))
+            self.assertEqual(e, cpio.entries(gzip.decompress(result2)))
+            self.assertEqual(e['init'][1].count(defaults.HOOK), 1)
+            self.assertIn(b'density=${2:-300}', e['bin/apply-device-info'][1])
+            for n in defaults.FILES:
+                self.assertEqual(e['etc/sq2-ksu/'+n][1], ('custom-'+n).encode())
+            self.assertNotIn(b'sha256sum', e['bin/ksu-framework-boot'][1])
+            self.assertTrue(result.endswith(identity))
+            self.assertFalse(audit['kernel_replaced'])
+            for n in defaults.FILES:
+                (p/n).write_bytes(b'')
                 with self.assertRaises(ValueError):
-                    defaults.integrate(raw, ROOT, p, cpio, 0)
+                    defaults.integrate(raw, ROOT, p, cpio)
+                (p/n).write_bytes(('custom-'+n).encode())
+            with self.assertRaises(ValueError):
+                defaults.integrate(raw, ROOT, p, cpio, 0)
 
     def test_standard_and_profile_entry_defaults(self):
         for name in ['build.py', 'build-surface-pro-x.py']:
             text = (ROOT/'scripts'/name).read_text()
-            self.assertIn("'--dpi', type=int, default=320", text)
+            self.assertIn("'--dpi', type=int, default=300", text)
             self.assertIn("'--ksu-manager', choices=('on', 'off'), default='on'", text)
             self.assertIn("'--touch-repair', choices=('on','off'), default='on'", text)
         text = (ROOT/'scripts/build.py').read_text()

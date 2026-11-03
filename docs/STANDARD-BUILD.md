@@ -1,3 +1,7 @@
+## 2026-11-03：源码 LTE 与压缩默认交付
+
+最新默认入口从源码编译 LTE/Radio，不再要求预制 Radio04。私有输入统一放 `private/build-inputs/`，不按历史输入 SHA 白名单拒绝；默认输出 IMG.GZ 并清理本次镜像中间文件。位置、公开工具依赖、单位配置与限制见 [PRIVATE-BUILD.md](PRIVATE-BUILD.md)。下方固定 Radio04 章节仅为历史。
+
 # 项目标准构建入口
 
 项目标准入口是 `python3 scripts/build.py`，输出**单个 SQ1/SQ2 通用原始磁盘镜像**，不是两份独立镜像。
@@ -5,8 +9,9 @@
 默认基线（不是必须满足的能力校验项）：
 - SQ1：GPU 661MHz；SQ2：GPU 700MHz。
 - 两机：原生 60Hz、2.7Gbps × 4，KSU、EL2、首次触摸校准。
-- Android 默认 **320 DPI**，`--dpi N` 保留自定义；只改默认属性，不覆盖 userdata 中的显示设置。
-- KernelSU Next 管理器/ksud 默认 `--ksu-manager on`，输入目录 `out/ksunext` 可用 `--ksu-bundle DIR` 替换，`--ksu-manager off` 不注入首启安装器（不移除内核 KSU）。使用历史验收的官方 3.2.0 / 33129 固定文件，不追随 latest，不降级现有安装，不预装 Zygisk/伪装模块或自动授予应用 root。
+- 检测内存 **小于 12GiB** 的设备首次正常 SSD 启动自动创建 **6GiB swap**，后续启动复用并启用；等于或大于 12GiB 不创建。文件 `/data/.surface-swap/swapfile`，`sq2.swap=0` 退出；空间不足不阻塞启动。按 Linux `MemTotal < 12582912kB` 判断（扣除固件预留，不是标称 SKU 容量）。
+- Android 默认 **300 DPI**，`--dpi N` 保留自定义；只改默认属性，不覆盖 userdata 中的显示设置。
+- KernelSU Next 管理器/ksud 默认 `--ksu-manager on`，输入目录 `out/ksunext` 可用 `--ksu-bundle DIR` 替换，`--ksu-manager off` 不注入首启安装器（不移除内核 KSU）。可使用与内核接口兼容的自定义文件，不按固定 SHA 拒绝，也不自动追随 latest，不降级现有安装，不预装 Zygisk/伪装模块或自动授予应用 root。
 - 以 main fee67b2 的匹配内核/驱动和完整957b组件为底；默认项加入最新 `0100429` 的已验证 LTE/Radio 专属增量，Mesa 保持原非 LTE 回退。
 - LTE 默认 `--lte on`，需精确私有 Radio04 输入；`--lte off` 保留关闭选择。仅原绑定 SQ2 可激活，SQ1/其他设备不移植 FSG，详见 [LTE 默认基线](LTE-BASELINE.md)。
 - 通用触摸修复默认 `--touch-repair on`：状态一致性、按原始信号核心的连续性修复与统一校准向导。算法不区分 SQ1/SQ2，测量结果按设备保存；`--touch-repair off` 保留旧包选择。
@@ -39,15 +44,14 @@ python3 scripts/build.py --template TEMPLATE.img --gnu-efi BUILT_GNU_EFI --lte-b
 校验不是强制机型参数。`--touch-repair off` 只回到原基础触摸版本，不宣称禁用
 所有历史硬件 quirk。第二层的证据与实机待验收项见 TOUCH-NOISE-AND-CALIBRATION。
 
-## 准备固定 KernelSU Next 用户态
+## 准备 KernelSU Next 用户态（示例版本，可自定义）
 
-只下载官方历史验收版本，不自动获取 latest。二进制留在忽略目录，不提交 Git。
+下方以官方历史验收版本举例；允许传入兼容的自定义 ksud/APK，不执行固定 SHA 校验，也不自动获取 latest。二进制留在忽略目录，不提交 Git。
 
 ```sh
 mkdir -p out/ksunext
 curl -fL https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.2.0/KernelSU_Next_v3.2.0_33129-release.apk -o out/ksunext/manager-verified.apk
 curl -fL https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.2.0/ksud-aarch64-linux-android -o out/ksunext/ksud
-printf '%s  %s\n' 96c2bbbf1b973461fe82dd1ed17f89deb86a6a5a9d7c4cf079bd32091131ef57 out/ksunext/manager-verified.apk bb231b0f77d6ee78a4362ff751b3cc54c934293a4b0acde177afa59c4a64da00 out/ksunext/ksud | sha256sum -c -
 ```
 
 首启安装器保留 `sq2.ksu=0` / rescue 跳过，验证只关屏 guard；等待 Android

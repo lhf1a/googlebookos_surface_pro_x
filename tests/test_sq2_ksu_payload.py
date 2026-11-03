@@ -3,7 +3,6 @@ from pathlib import Path
 import unittest
 import tempfile
 import subprocess
-import hashlib
 
 ROOT=Path(__file__).resolve().parents[1]
 def load(name):
@@ -42,9 +41,8 @@ class Bootstrap(unittest.TestCase):
             (p/'cmdline').write_text('suspend.screen_only=1 nohibernate')
             (p/'guard').write_text('Y\n')
             source=(ROOT/'probe/test2/ksu-framework-boot').read_text()
-            for name,digest in k.FILES.items():
+            for name in k.FILES:
                 (p/'payload'/name).write_text(name)
-                source=source.replace(digest,hashlib.sha256(name.encode()).hexdigest())
             source=source.replace('/proc/cmdline',str(p/'cmdline')).replace('/run/ksu-bootstrap-lock',str(p/'run/lock'))
             source=source.replace('/sys/module/suspend/parameters/screen_only',str(p/'guard'))
             source=source.replace('/etc/sq2-ksu',str(p/'payload')).replace('/proc/1/root/data',str(p/'data'))

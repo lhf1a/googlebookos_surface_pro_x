@@ -2,7 +2,7 @@
 # Before Android init loads read-only properties. Keep mica/desktop dispatch IDs.
 set -eu
 root=${1:-/newroot}
-density=${2:-320}
+density=${2:-300}
 case "$density" in ''|*[!0-9]*) exit 2;; esac
 [ "$density" -ge 72 ] && [ "$density" -le 1000 ] || exit 2
 mkdir -p "$root/debug_ramdisk/device-info"

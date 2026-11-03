@@ -12,6 +12,8 @@ from pathlib import Path
 import zlib
 
 
+DEVICE_METADATA = {}
+
 def entries(data):
     pos, result = 0, {}
     while pos < len(data):
@@ -26,14 +28,19 @@ def entries(data):
         body = data[begin:begin+size]
         assert len(body) == size
         pos = (begin+size+3) & ~3
+        if fields[1] & 0o170000 in (0o020000, 0o060000):
+            DEVICE_METADATA[name] = (fields[9], fields[10])
         if name != 'TRAILER!!!':
             result[name] = (fields[1], body)
     return result
 
 
 def entry(name, body, mode):
+    device = DEVICE_METADATA.get(name)
     name = name.encode()+b'\0'
     fields = [1, mode, 0, 0, 1, 0, len(body), 0, 0, 0, 0, len(name), 0]
+    if device is not None and mode & 0o170000 in (0o020000, 0o060000):
+        fields[9], fields[10] = device
     header = b'070701'+b''.join(f'{n:08x}'.encode() for n in fields)+name
     return header+b'\0'*(-len(header)%4)+body+b'\0'*(-len(body)%4)
 

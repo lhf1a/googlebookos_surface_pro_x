@@ -3,11 +3,12 @@
 import argparse
 import concurrent.futures
 import hashlib
+import os
 from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-CACHE = Path('/root/.cache')
+CACHE = Path(os.environ.get('SPX_CACHE_ROOT', '/root/.cache'))
 REVISION = '1a56e38edc2f2f6189ef405ee1edce554e15cbc0'
 PARTS = ('', '.config', '.data', '.modem', '.network', '.sim', '.voice', '.messaging')
 

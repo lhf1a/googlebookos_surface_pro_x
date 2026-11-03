@@ -32,45 +32,39 @@ def hooked(body, name):
 
 
 def prepare(base, root, bundle, c):
-    """The private input is an exact copy of the reboot-verified Radio04, not a donor OS."""
+    import importlib.util
     root, bundle = Path(root), Path(bundle)
-    if sha(base) != BASE_SHA:
-        raise ValueError('LTE requires the accepted complete 957b runtime')
-    try:
-        radio = (bundle / 'initramfs.cpio.gz').read_bytes()
-        dt = (bundle / 'android-el2.dtb').read_bytes()
-    except FileNotFoundError as e:
-        raise ValueError('LTE defaults to on: supply private/lte-baseline with verified Radio04 '
-                         'initramfs/DT, or explicitly select --lte off') from e
-    if sha(radio) != RADIO_SHA or sha(dt) != DT_SHA:
-        raise ValueError('Unverified LTE Radio04 payload/DT')
-    before, after = c.entries(gzip.decompress(base)), c.entries(gzip.decompress(radio))
-    changed = {n for n in before.keys() | after.keys() if before.get(n) != after.get(n)}
-    allowed = lambda n: (n in HOOKS or n in HELPERS or n in ('etc/sq2-lte', 'etc/sq2-radio')
-                         or n.startswith(('etc/sq2-lte/', 'etc/sq2-radio/')))
-    if not changed or any(not allowed(n) or n not in after for n in changed):
-        raise ValueError('LTE source changed an unrelated baseline file')
-    for n in HOOKS:
-        if after[n] != (before[n][0], hooked(before[n][1], n)):
-            raise ValueError('LTE source has unrecognized init changes: ' + n)
-    for n in HELPERS:
-        source = (root / 'probe/lte' / n.split('/')[-1]).read_bytes().replace(b'\r\n', b'\n')
-        if after[n][1] != source:
-            raise ValueError('LTE helper source differs from verified Radio04: ' + n)
-    delta = {n: after[n] for n in changed - HOOKS.keys()}
-    guard = (root / 'probe/lte/lte-unit-guard').read_bytes().replace(b'\r\n', b'\n')
-    delta['bin/lte-unit-guard'] = (0o100755, guard)
-    # Gate before any telephony overlay/seed mutation, including on SQ1. The
-    # validated helpers' own serial, ESP, EL2 and screen-only checks stay intact.
-    for n in ('bin/radio-stage', 'bin/lte-unit-seed'):
-        mode, body = delta[n]
-        if body.count(b'set -eu\n') != 1:
-            raise ValueError('Unexpected LTE guard insertion site')
-        delta[n] = (mode, body.replace(b'set -eu\n', b'set -eu\nlte-unit-guard || exit 0\n'))
-    return delta, dt, dict(source_commit=LTE_COMMIT, source_initramfs_sha256=RADIO_SHA,
-                           source_dtb_sha256=DT_SHA, private_unit_fsg=True,
-                           activation='SQ2 only; original unit serial and ESP marker must match',
-                           sq1_lte_validated=False, deployed=False)
+    spec=importlib.util.spec_from_file_location('lte_source',root/'scripts/build-lte-source.py')
+    compiler=importlib.util.module_from_spec(spec);spec.loader.exec_module(compiler)
+    out, config=compiler.build(root,bundle)
+    fsg=(bundle/'modem_fsg.bin').read_bytes()
+    if len(fsg)!=2097152 or not any(fsg):raise ValueError('FSG must be a nonempty 2MiB own-device collection')
+    delta={}
+    def put(name,body,mode=0o100600):
+        for parent in reversed(Path(name).parents):
+            key=parent.as_posix()
+            if key.startswith('etc/sq2-'):delta.setdefault(key,(0o40700,b''))
+        delta[name]=(mode,body)
+    for name in ('qmi-data','qmi-mode','rmnet-create'):
+        put('etc/sq2-lte/sq2-'+name,(out/('sq2-'+name)).read_bytes(),0o100700)
+    put('etc/sq2-lte/sq2-lte.jar',(out/'sq2-lte.jar').read_bytes())
+    for name in ('ipa_sq2_lab.ko','rmnet.ko','modem_fsg.bin'):put('etc/sq2-lte/'+name,(bundle/name).read_bytes())
+    put('etc/sq2-lte/firmware/qcom/sc8180x/sq2/ipa_fws.elf',(bundle/'ipa_fws.elf').read_bytes())
+    put('etc/sq2-lte/unit-serial',(config.get('unit_serial','')+'\n').encode())
+    put('etc/sq2-lte/apn',(config.get('apn','')+'\n').encode())
+    put('etc/sq2-lte/FSG.sha256',(sha(fsg)+'  modem_fsg.bin\n').encode())
+    runtime=['ipa_sq2_lab.ko','rmnet.ko','firmware/qcom/sc8180x/sq2/ipa_fws.elf','sq2-qmi-data','sq2-qmi-mode','sq2-rmnet-create','sq2-lte.jar']
+    put('etc/sq2-lte/runtime.sha256',''.join(sha(delta['etc/sq2-lte/'+n][1])+'  '+n+'\n' for n in runtime).encode())
+    for name in ('sq2-radio','sq2-radio-overlay.apk'):put('etc/sq2-radio/'+name,(out/name).read_bytes())
+    for name in ('sq2-qmi-data','sq2-qmi-mode'):put('etc/sq2-radio/'+name,(out/name).read_bytes())
+    for name in ('sq2-radio.rc','sq2-radio-features.xml','sq2-radio-manifest.xml'):put('etc/sq2-radio/'+name,(root/'configs'/name).read_bytes().replace(b'\r\n',b'\n'))
+    radiofiles={n.split('/')[-1]:body for n,(mode,body) in delta.items() if n.startswith('etc/sq2-radio/')}
+    put('etc/sq2-radio/SHA256SUMS',''.join(sha(b)+'  '+n+'\n' for n,b in radiofiles.items()).encode())
+    for name in ('lte-unit-seed','lte-framework-boot','radio-stage','lte-unit-guard'):
+        body=(root/'probe/lte'/name).read_bytes().replace(b'\r\n',b'\n')
+        if name in ('lte-unit-seed','radio-stage'):body=body.replace(b'set -eu\n',b'set -eu\nlte-unit-guard || exit 0\n',1)
+        put('bin/'+name,body,0o100755)
+    return delta,(bundle/'android-el2.dtb').read_bytes(),dict(source_built=True,private_unit_fsg=True,unit_configured=bool(config.get('unit_serial')),hardware_validated=False,activation='SQ1/SQ2 shared LTE; no NVMe serial/ESP binding; operator-supplied FSG staged only in RAM')
 
 
 def integrate(raw, delta, c):

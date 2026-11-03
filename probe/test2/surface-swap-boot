@@ -1,0 +1,81 @@
+#!/bin/busybox sh
+# Persistent 6 GiB swap below 12 GiB detected RAM; never partition/format data.
+set -eu
+if [ "${1:-}" != --android-data ]; then
+    export PATH=/bin:/sbin
+    case " $(cat /proc/cmdline) " in
+        *' sq2.rescue=1 '*|*' sq2.swap=0 '*) echo SWAP_SKIPPED_DISABLED; exit 0;;
+    esac
+    grep -qw 'sq2.native=ssd' /proc/cmdline || { echo SWAP_SKIPPED_NONPERSISTENT; exit 0; }
+    # Detected RAM is Linux MemTotal (KiB), excluding firmware reservations.
+    mem=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+    case "$mem" in ''|*[!0-9]*) echo SWAP_INVALID_MEMTOTAL >&2; exit 1;; esac
+    [ "$mem" -gt 0 ] || { echo SWAP_INVALID_MEMTOTAL >&2; exit 1; }
+    if [ "$mem" -ge 12582912 ]; then
+        echo "SWAP_SKIPPED_MEMORY mem_kib=$mem"; exit 0
+    fi
+    mkdir /run/surface-swap-lock 2>/dev/null || exit 0
+    trap 'rmdir /run/surface-swap-lock' EXIT
+    for n in $(seq 1 300); do
+        [ "$(timeout 10 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null || true)" = 1 ] && break
+        sleep 1
+    done
+    [ "$(timeout 10 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed)" = 1 ] || exit 1
+    [ "$(cat /sys/module/suspend/parameters/screen_only)" = Y ] || exit 1
+    nsenter -t 1 -m -r -- /debug_ramdisk/busybox sh -s -- --android-data < "$0"
+    exit $?
+fi
+# Operate in Android's mount namespace/root, not the stale initramfs /android bind.
+bb() { /debug_ramdisk/busybox "$@"; }
+fail() { echo "SWAP_ERROR: $*" >&2; exit 1; }
+# Match mounted /data to the selected userdata block device by major:minor.
+dev=$(bb stat -L -c '%t %T' /dev/block/by-name/userdata) || fail userdata-device
+set -- $dev
+[ "$#" = 2 ] || fail userdata-device
+device=$((0x$1)):$((0x$2))
+bb awk -v dev="$device" '$3 == dev && $5 == "/data" && $6 ~ /(^|,)rw(,|$)/ && / - ext4 / {ok=1} END {exit !ok}' /proc/self/mountinfo || fail userdata-not-rw-ext4
+[ -d /data ] && [ ! -L /data ] || fail data-path
+umask 077
+dir=/data/.surface-swap
+[ ! -L "$dir" ] || fail directory-symlink
+if [ ! -e "$dir" ]; then bb mkdir "$dir"; fi
+[ -d "$dir" ] && [ "$(bb stat -c '%u:%a' "$dir")" = 0:700 ] || fail directory-ownership-mode
+file=$dir/swapfile
+size=6442450944
+created=0
+tmp=$dir/.swapfile.new
+cleanup() { if [ "$created" = 1 ]; then bb rm -f "$tmp"; fi; }
+trap cleanup EXIT HUP INT TERM
+if [ -e "$file" ] || [ -L "$file" ]; then
+    [ ! -L "$file" ] && [ -f "$file" ] || fail existing-file-type
+    [ "$(bb stat -c '%u:%a:%h:%s' "$file")" = "0:600:1:$size" ] || fail existing-file-ownership-mode-size
+else
+    free=$(bb df -Pk "$dir" | bb awk 'NR == 2 {print $4}')
+    case "$free" in ''|*[!0-9]*) fail free-space;; esac
+    [ "$free" -ge 7340032 ] || fail insufficient-space-6GiB-plus-1GiB-reserve
+    # Only our root-owned, private staging file may be removed after interruption.
+    if [ -e "$tmp" ] || [ -L "$tmp" ]; then
+        [ ! -L "$tmp" ] && [ -f "$tmp" ] || fail staging-file-type
+        [ "$(bb stat -c '%u:%a:%h' "$tmp")" = 0:600:1 ] || fail staging-file-ownership-mode
+        [ "$(bb stat -c '%s' "$tmp")" -le "$size" ] || fail staging-file-size
+        bb rm "$tmp"
+    fi
+    (set -C; : > "$tmp") || fail staging-collision
+    created=1
+    # Write every block: no sparse/truncate/fallocate swapfile holes.
+    bb dd if=/dev/zero of="$tmp" bs=1048576 count=6144 conv=fsync || fail allocation
+    [ "$(bb stat -c '%s' "$tmp")" = "$size" ] || fail allocation-size
+    bb mkswap "$tmp" || fail mkswap
+    bb sync
+    bb mv "$tmp" "$file"
+    created=0
+    bb sync
+    echo "SWAP_CREATED bytes=$size path=$file"
+fi
+if bb awk -v file="$file" 'NR > 1 && $1 == file {ok=1} END {exit !ok}' /proc/swaps; then
+    echo "SWAP_ALREADY_ACTIVE path=$file"
+else
+    # Existing files are never reformatted, even if swapon rejects their header.
+    bb swapon "$file" || fail swapon
+    echo "SWAP_ENABLED bytes=$size path=$file"
+fi

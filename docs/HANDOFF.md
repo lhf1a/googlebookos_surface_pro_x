@@ -1,3 +1,42 @@
+## 2026-11-03：默认 300 DPI，移除 KSU 用户态固定 SHA 校验
+
+按用户要求，标准入口、profile 后端、defaults.integrate 及密度助手统一默认
+300 DPI；`--dpi` 覆盖和 userdata 中已有缩放保持。KSU 的 ksud/APK 打包与
+首启不再按固定 SHA 拒绝；保留文件存在/非空、内核接口兼容检查及已有安装不降级。
+旧组件构建器也移除 ksud/APK 固定 SHA，但原 Image/rescue 内核保护不改。
+修正对应旧测试，不以伪造文件的单元测试代替实际 KSU root 验收。
+保留检测内存 <12GiB 时创建/启用 6GiB swap；本轮没有设备重启或新启动包部署。
+完整性审计、生成输出 SHA、磁盘身份和其他子系统校验仍保持其现有状态。
+
+## 2026-11-03：检测内存小于 12GiB 时自动创建/启用 6GiB swap
+
+WSL 当前工作区 `/mnt/spx-workspace/chromebookOS`。标准构建的 defaults.integrate
+无论 KSU 开关都加入 `surface-swap-boot`，两机默认/原 Mesa 回退载荷均保留。
+助手异步等待 Android 完成，进入 PID1 的 mount namespace/root；不使用过期的
+`/android/data` bind。只处理 `sq2.native=ssd`；按用户更正，检测到 `0 < MemTotal < 12582912kB`
+（12GiB）时创建，等于或大于阈值跳过。检测值扣除了固件预留，不等同于
+标称 DIMM/SKU 容量。实机 7592612kB 仍符合；`sq2.swap=0` / rescue 跳过。
+
+校验已选 userdata 的 major:minor 与 `/data` 的 rw ext4 挂载一致，在 root:0700
+`/data/.surface-swap/` 内首次完整写入 6442450944 字节、0600 swapfile，mkswap 后
+原子改名并 swapon。要求 6GiB + 1GiB 余量；失败不阻塞 Android。已存在文件
+不重新格式化；已启用不重复 swapon，后续启动只重新启用。保留其他 swap、原
+swappiness、userdata/分区、凭据、screen_only/nohibernate 和所有原启动组件。
+
+192.168.5.94（用户确认地址及主机指纹）本次同一 boot 已实测启用：SwapTotal
+6291452kB，文件 6442450944 字节/0600；重复执行 ALREADY_ACTIVE，无重复分配。
+只把助手放入设备 RAM 执行，未改设备 ESP/initramfs，未重启；故设备重启自动
+启用还需部署含本次源码的新载荷，不能把当次启用称为重启验收。
+离线 shell 故障/边界与有效 cpio 检查及独立副本回滚记录：`out/auto-swap-20261103/`。
+
+## 2026-11-03：按用户要求解除 SQ1/SQ2 LTE 单机绑定
+
+LTE guard/seed 接受 SQ1 和 SQ2，移除 NVMe 序列号与固定 ESP 标记准入。两机默认项使用 IPA DT，保留各自 OPP 与 Mesa 原回退。EL2、screen_only、nohibernate、禁用开关、RAM-only FSG 保持。不写设备；共享原 SQ2 FSG 未经新 SQ1 实机验收，APN 不猜测。
+
+## 2026-11-03：源码 LTE 与压缩默认交付
+
+最新默认入口从源码编译 LTE/Radio，不再要求预制 Radio04。私有输入统一放 `private/build-inputs/`，不按历史输入 SHA 白名单拒绝；默认输出 IMG.GZ 并清理本次镜像中间文件。位置、公开工具依赖、单位配置与限制见 [PRIVATE-BUILD.md](PRIVATE-BUILD.md)。下方固定 Radio04 章节仅为历史。
+
 ## 2026-11-03：320 DPI + KernelSU Next + 通用触摸成为标准构建默认
 
 标准整镜像入口仍为 `scripts/build.py`。默认 `--dpi 320`、`--ksu-manager on`、

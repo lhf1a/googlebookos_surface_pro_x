@@ -13,8 +13,8 @@ done
 [ "$(android getprop sys.boot_completed)" = 1 ] || exit 1
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 cd /etc/sq2-ksu
-echo 'bb231b0f77d6ee78a4362ff751b3cc54c934293a4b0acde177afa59c4a64da00  ksud' | sha256sum -c -
-echo '96c2bbbf1b973461fe82dd1ed17f89deb86a6a5a9d7c4cf079bd32091131ef57  manager-verified.apk' | sha256sum -c -
+test -s ksud
+test -s manager-verified.apk
 data=/proc/1/root/data
 test ! -L "$data/local/tmp"
 mkdir -p "$data/local/tmp"
