@@ -603,3 +603,21 @@ PM_RETURN/cleanup/wrapper均0，success0→1/fail0，2336条回调全返回0且�
 临时trace挂载已清理，pm_test none/debug0/times0，owner/token0、nativeN、SSAMenabled；
 原ESP27项仍全部匹配，下一次普通启动为原正常入口。源码与受保护阶段记录已提交7adbed3，
 未推送。当前保持候选但不再发睡眠请求，等待现场反馈。私有证据见spi-input/real-1与real-responses。
+
+
+继续目标时只读核对：仍为bootb3221fcd…，SPIready/count1/bus_error2，SSAM IRQ计数1、
+PMIC电源键IRQ计数0，Android仍Asleep、nativeN/owner0/token0。尚无现场按键/输入反馈，
+没有重试休眠或自动软件亮屏。
+
+为后续原生路径取回`spi-input/native-blockers.txt`：AC在线，Wake Locks共9项，
+包括实验PowerManagerShellCommand、DesktopPowerService:ScreenOff及充电后台作业/
+维护同步锁；mHoldingWakeLockSuspendBlocker=true、DisplaySuspendBlocker=false、
+native suspend attempts=0。当前trial本来就不启用native/JAR修正，因此这不是新native
+候选失败证据，也不能把合法后台作业一律认定为bug。后续须在物理恢复验收闭环后，以
+独立native入口只撤销实验保活/修正桌面宽限，保留应用锁，在适当空闲/电池条件观测。
+不靠全局禁锁或强停用户任务使计数增加。
+
+当前SSAM源码明确未实现GPIO callback逐事件释放/选择性唤醒：任何IRQ都能结束
+s2idle，电池事件也不例外。本轮首事件BAT与这个限制一致；1.1秒诊断延时只避免了
+关屏转换期间的键盘报告排队，并不构成完整EC唤醒策略。不在现场反馈缺失时盲加
+事件过滤或更改活跃UART/SSAM，下一步首先闭环真实物理电源键与持续触摸。
