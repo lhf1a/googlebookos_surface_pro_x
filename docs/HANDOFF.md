@@ -1,3 +1,45 @@
+## 2026-11-03：SQ2 完整启动链对照与 LTE 组件复用已在 SQ1 实测
+
+按用户要求优先复用成功路径，不接入新SCM后端。严格主机校验下读取运行SQ2的实际
+GRUB/launcher/DT/initrad04及运行文件，并与SQ1比较：
+- Image c1ef559f、qebspil e3675e36、tcblaunch 195997cf一致；launcher仅7处路径字符串
+  替换后逐字节相同，无另一个启动实现。完整DT仅8项机型/CPU-GPU OPP属性不同。
+- system/vendor/product/system_ext/system_dlkm/vendor_dlkm六个实际只读映射分区
+  全量SHA256相同，不只比较build fingerprint。未读取或改写userdata。
+- 按最后条目生效解析完整initramfs，SQ2 1044项、SQ1 1073项，46路径不同；多数是
+  存储扩容、KSU、身份保护、显示属性或凭据。LTE相关7项并非全部与成功包相同。
+  Radio与rmnet的代码段哈希不同；LTE JAR内部文件全部相同，仅容器字节不同；
+  overlay差异含APN XML/签名。不能把所有二进制hash差异都称为功能差异。
+
+只把成功SQ2的7项LTE组件（rmnet、Radio HAL、overlay、JAR、APN及两个校验表）
+替换到SQ1原镜像的副本，其他有效条目逐字节不变，原机型/存储保护、FSG、凭据最后
+成员、音频、DT、内核、共享固件与正常/回退载荷均保留。候选d41fb299…，离线补丁
+重建/回滚hash、校验表及菜单语法通过。不是把整套SQ2磁盘布局硬套到SQ1。
+
+实际 BASELINE bootc0c1b5f9… → MODIFIED boota854b90e… → ROLLBACK boot17d11376…：
+同一QMI观察均 DMS2、capabilities接口0、NAS registration0/PS2/LTE0、signal error74，
+观察均exit0。真实运行Radio hash f99b9d6c→58aa52c2→f99b9d6c，rmnet也实际按包切换，
+候选达到Android boot_completed1、LTE_RADIO_TRANSPORT_READY。没有恢复信号/注册；
+**不采纳这次组件替换为修复，不再重复相同组合。** 这不证明SQ1不能复用LTE实现。
+
+一次性env实际消费0；真正回原默认后，原菜单2776eded、默认9721b3ad、回退9fd377aa
+及保护清单全通过，试验目录已清理。screen_only=Y/nohibernate、常亮锁重新持有，
+物理ALSA卡/AUDIO_READY/实际HAL af73f71e保持，不冒充新增听感验收。
+最终只读UIM GetCardStatus error0/cards1/card_state1/app_type2/app_state7，确认USIM
+仍就绪；不读取ICCID/IMSI/PIN。SQ2全程只读、未重启、bootffad6382保持，无SIM事实不变。
+
+本轮附加DIAG握手features0，未读出新NV453/RFNV；旧NV观察不可冒充本轮结果。
+保留错误：第一次SCP源目录错误(-1，停止对应传输后修正)、DIAG观察子命令3被外层df
+的exit0遮蔽（改用同一QMI观察完成A/B/R）、新boot的Android /tmp与SSH /tmp分离导致
+127（将同hash工具放入/proc/1/root/tmp后重跑成功）、SIM查询需Android namespace，
+首次lookup失败1后纠正。均未通过忽略错误来宣称测试通过。
+
+结论范围：已补齐完整静态启动链/只读系统与LTE组件组合对照，复用成功软件组合
+不足以消除当前注册前故障。后续应区分本机固件RF初始化/FSG接受条件，而不是继续
+改APN/IPA寄存器或重复此组合；UEFI版本SQ1 4.234.140、SQ2 8.256.140不同只作事实，
+不是根因证明或跨机型刷UEFI的理由。不清FTM、不写NV、不复试旧FSG。
+私有完整载荷、源码工具、原始输出与A/B/R在原工作区
+out/lte-main-review-20261103/boot-chain-v1，继续扩展原四角色。通用初始镜像仍未完成。
 ## 2026-11-03：优先复用 SQ2 成功完整载荷；SCM 仅保留离线工具
 
 用户追问“SQ2 已走通，SQ1 参考成功路径做成通用为什么不可以”。可以且应当以成功
