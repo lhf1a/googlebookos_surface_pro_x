@@ -714,3 +714,28 @@ trace实例采集组件/SSAM/电源键，调用原owner helper一次，普通关
 内核120秒只是准入期限，不能保证睡眠后定时唤醒；必须现场物理按键恢复。
 当前AC在线/电量100%，已请求用户拔充电器并确认下一轮按提示135秒后按键配合；
 尚未收到该确认，保持owner0/ready，不发休眠请求。
+
+
+### 2026-11-04：首次native请求到达，prepare后中止，未进入machine_suspend
+
+用户确认拔充电器、键盘盖接上且在场；实读AC/USB/Wireless/Dock全false、电量100%。
+同boot e7638f55…只注册一次UID1000服务2649；准入消耗后owner0，collector/cleanup0。
+612.799574开始请求，prepare612.873654→613.992663，随后dpm_suspend仅约52微秒退出。
+1904条组件记录仅952prepare/952complete，均返回0、无trace丢失；没有实际suspend/resume
+设备回调、没有machine_suspend，SPIcount0/bus_error1/ready保持，不能称真实休眠通过。
+
+期间SSAM键盘盖HID事件持续，前后内核wake统计BAT1 event17→22/wakeup0→5；event0
+（动态映射为045E:09AE键盘）event0→2/wakeup0→1，event1是045E:09B0键盘。
+这些变化符合prepare阶段有新唤醒事件，但本轮未开wakeup_source追踪/PM debug，
+不能唯一归因于键盘或电池，更不能将旁路缺IPA固件日志当已证实的中止原因。
+
+Android记录attempts0→6/fail0→6：第一次获准后提前中止，后五次因一次性门已关闭
+直接拒绝，无第二次设备挂起。最后errno-95来自保护拒绝，不能当首个中止的errno。
+内核有些设备失败或早醒的通用提示；本轮没有组件非零回调，下一步仅增可观测性，
+不放宽单次门、禁应用锁或改SSAM策略。用户按原135秒节奏检查后反馈“没有问题”。
+后读同boot/同Android PID、Awake、owner/token0、pm_test none/debug0/times0、SSAMenabled；
+原ESP27项匹配，自有trace挂载清理。只说明界面/输入正常，非睡眠后恢复证明。
+
+证据：native-once/native-single-1、native-single-responses、native-wakeup-map与
+native-first-final.txt。第二份观察脚本已准备并上传但未执行，只增加wakeup_source
+activate/deactivate和临时PM debug（退出恢复原值），仍等现场配合再运行。

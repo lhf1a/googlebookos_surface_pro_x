@@ -1,3 +1,12 @@
+## 2026-11-04：首次native请求在prepare后中止，尚无原生实际睡眠
+
+boot e7638f55…、电池供电/带键盘盖，Android一次获准请求完成952prepare/952complete，
+全返回0；没有设备suspend回调或machine_suspend，SPIready/count0/bus_error1保持。
+键盘盖与BAT1 wake计数都增加，尚缺直接唤醒源追踪，不能唯一归因。原生后续重试已由
+单次门拒绝，owner0；用户按键后反馈无问题，同框架PID/Awake，ESP27项保持。
+已准备第二份仅增wakeup_source追踪/临时PM debug的脚本，未执行；须现场协调再注册，
+不把此次界面正常当原生睡眠通过。详见休眠记录末节。
+
 ## 2026-11-04：原生单请求候选已启动，现场输入正常，尚未开放休眠许可
 
 当前boot e7638f55…，Nat01 f1128b91…/naton0001 e75f7dbe…；实际内核note/配置、
