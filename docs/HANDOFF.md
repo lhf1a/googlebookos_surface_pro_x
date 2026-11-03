@@ -1,19 +1,20 @@
-## 2026-11-04：SPI-HID 输入恢复候选受保护检查通过，真实对照待现场协调
+## 2026-11-04：SPI输入恢复候选真实返回ready，电源键与现场输入验收待反馈
 
-目标已恢复。候选把ll_open启用IRQ移到电源/复位稳定后，并为无效报头补上已有有界
-error_work恢复。实际函数故障注入、fresh/V1升级/幂等/失败不写入、严格模块构建与
-副本回滚通过。新模块3e9e6317…，私有包spirc0001.cpio.gz/2e4427e4…只替换SPI；
-保留SSAM 1.1秒诊断模块（非最终方案），未提升正常载荷。
+目标继续。源码7adbed3修正open开IRQ顺序/无效报头进入已有错误恢复；实际函数故障
+注入、严格模块构建、回滚及受保护platform通过，用户确认持续触摸/键盘正常。
+随后经用户协调启动同模块trial，当前bootb3221fcd…，模块3e9e6317…/包2e4427e4…。
 
-当前debug boot3daff131…实际file/note匹配；Asleep/platform的2336条回调全返回0，
-SPIcount0→1。open结束后仍有全零报头，但新Error Handler被触发，最终ready/IPTSd
-恢复；不能称推迟IRQ已消除根因。用户确认连续半分钟触摸及键盘正常，后续错误计数稳定2。
-原菜单已恢复、ESP27项匹配，8份once.env=0，trial/nativeN、owner/token0、pm_test none，
-临时trace挂载已清理。下一次普通重启仍回正常入口。
+单次machine_suspend131.398212秒由SSAM IRQ173结束，恢复首事件SAM/BAT cid0x53。
+没有PMIC中断，Android仍Asleep；尚未收到本轮实际按键/画面/持续触摸反馈。
+2336条回调全0、success1/fail0；SPI全零报头触发新Error Handler，最终ready、
+错误计数稳定2、IPTSd已重建、框架PID保持。不能据ready声称物理触摸或电源键通过。
+禁止自动重试；先等现场反馈，若输入失败先取证并回原正常入口。
 
-同模块trial启动器0b3e3c92…已存独立路径，但尚未安装一次性trial菜单/重启或发起真实睡眠；
-正在等用户确认可继续15秒按键协调。不改锁屏/校准，不热卸载。详见休眠记录末节与
-out/suspend-resume-20261104/spi-input私有证据。上轮真实恢复失败不能被本次debug结果覆盖。
+已恢复原菜单，ESP27项匹配、9份once.env=0；pm_test none/debug0/times0、nativeN、
+owner/token0、SSAMenabled，自己的trace挂载清理。下一次普通重启回原正常包。
+候选仍带SSAM 1.1秒诊断延时，不是最终方案；全零报头来源、SSAM事件策略、原生自动
+休眠、多轮/能耗与SQ1/SQ2回归未完成。没有软件唤醒，不改锁屏/校准，不热卸载。
+详见SURFACE-SUSPEND-20261103末节及out/suspend-resume-20261104/spi-input私有证据。
 
 ## 2026-11-04：休眠目标已暂停；候选触摸恢复失败，已回原正常启动
 

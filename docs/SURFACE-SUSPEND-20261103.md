@@ -582,3 +582,24 @@ ready恢复，IPTSd换新进程，Android框架PID保持。关键日志：open�
 因此“仅推迟IRQ即可消除全零报头”未获支持，但新错误恢复路径本轮确实被触发且恢复；
 不能将两处改动共同成功当作唯一根因证明。用户连续操作触摸约半分钟后确认持续正常，
 键盘也正常。尚无本候选真实machine_suspend；原上轮真实恢复失败结论保留。
+
+
+真实候选bootb3221fcd…：用户确认可继续后一次性启动，SPI loaded note/hash匹配，
+原菜单恢复、ESP27项与9份已消费once.env核对通过。单任务请求仅一次，nativeN，
+SSAM/PMIC唤醒保持enabled，没有自动KEYCODE_WAKEUP、没有强制禁锁或重试。
+
+本轮machine_suspend138.468802→269.867014，即131.398212秒，唤醒IRQ173/SSAM；
+首个恢复事件为SAM/BAT cid0x53/iid1/len21，随后有键盘盖报告。本轮没有PMIC中断，
+**不能称电源键唤醒通过，也尚不能判断用户是否按过或输入是否恢复。** 网络恢复后实读
+Android仍Asleep，等待用户对实际按键/画面/持续触摸的反馈；未用软件亮屏掩盖这个结果。
+
+PM_RETURN/cleanup/wrapper均0，success0→1/fail0，2336条回调全返回0且无trace丢失，
+框架PID保持。SPIcount0→1，open结束168.427240后168.427919出现全零报头，
+168.428021进入Error Handler；最终ready，bus_error1→2，IPTSd重新初始化并保持运行。
+随后读回仍ready且错误计数2。该证据支持真实resume路径的驱动就绪恢复，但没有用户
+实际输入确认，不能替代完整恢复验收。s2idle统计约21.85–29.85秒，不当131秒整段硬件
+驻留或能耗达标证明。
+
+临时trace挂载已清理，pm_test none/debug0/times0，owner/token0、nativeN、SSAMenabled；
+原ESP27项仍全部匹配，下一次普通启动为原正常入口。源码与受保护阶段记录已提交7adbed3，
+未推送。当前保持候选但不再发睡眠请求，等待现场反馈。私有证据见spi-input/real-1与real-responses。
