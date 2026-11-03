@@ -58,6 +58,11 @@ echo 'action != "timekeeping_freeze"' > "$instance/events/power/suspend_resume/f
 echo 1 > "$instance/events/power/suspend_resume/enable"
 echo 1 > "$instance/events/power/device_pm_callback_start/enable"
 echo 1 > "$instance/events/power/device_pm_callback_end/enable"
+# Correlate EC events released at resume; an IRQ alone does not identify its cause.
+for event in ssam_rx_event_received ssam_request_submit ssam_rx_response_received; do
+    enable=$instance/events/surface_aggregator/$event/enable
+    if [ -f "$enable" ]; then echo 1 > "$enable"; fi
+done
 echo 1 > "$power/pm_debug_messages"
 echo 1 > "$power/pm_print_times"
 echo 5 > "$params/pm_test_delay"

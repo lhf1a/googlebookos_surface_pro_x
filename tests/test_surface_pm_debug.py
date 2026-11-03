@@ -104,3 +104,21 @@ class DebugRunner(unittest.TestCase):
                 self.assertEqual((root/'power/pm_debug_messages').read_text(), '0\n')
                 self.assertEqual((root/'params/pm_test_delay').read_text(), '5\n')
                 self.assertEqual((root/'log/trace.txt').read_text(), 'TRACE')
+
+    def test_optional_ssam_trace_events(self):
+        source = (R/'probe/test2/surface-pm-debug').read_text()
+        start = source.index('for event in ssam_rx_event_received ')
+        fragment = source[start:source.index('\ndone', start)+len('\ndone')]
+        events = ('ssam_rx_event_received', 'ssam_request_submit', 'ssam_rx_response_received')
+        for available in ((), events[:1], events):
+            with self.subTest(available=available), tempfile.TemporaryDirectory() as d:
+                instance = Path(d)
+                for event in available:
+                    enable = instance/'events/surface_aggregator'/event/'enable'
+                    enable.parent.mkdir(parents=True)
+                    enable.write_text('0\n')
+                result = subprocess.run(['sh', '-eu', '-c', 'instance="$1"\n'+fragment,
+                                         'trace-test', str(instance)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                for event in available:
+                    self.assertEqual((instance/'events/surface_aggregator'/event/'enable').read_text(), '1\n')

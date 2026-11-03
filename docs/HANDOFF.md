@@ -1,3 +1,13 @@
+## 2026-11-03：SSAM 提前唤醒继续定位到本轮键盘盖事件
+
+目标“休眠可用”继续进行。单次PMIC唤醒现场正常已确认，但原生自动休眠仍未验证。
+同boot1df5aab6…新增一次受保护Asleep/platform：2340条回调均返回0，4760条trace无覆盖，
+success3/fail0、SPIcount3。SSAM IRQ后释放KIP/HID键盘接口事件，本轮无BAT事件；
+不能套用旧SQ1的DPTF结论，也不能凭元数据断言键盘空报告。后续5秒被动采样无报告；
+现场输入状态和本轮UI反馈待确认。正常入口/载荷未改、SSAM仍enabled、nativeN/owner0/token0，
+Awake、同Android PID，临时追踪已清理。可选SSAM tracepoints接入原受保护助手，
+不放宽trial=N条件。证据与下一步见[SURFACE-SUSPEND-20261103.md](SURFACE-SUSPEND-20261103.md)末节。
+
 ## 2026-11-03：逐组件响应核对定位 SPI-HID PM 构建回归，隔离候选阶段验证通过
 
 按用户提示复查旧设备前缀/QCA诊断，并解析本轮PM callback trace。

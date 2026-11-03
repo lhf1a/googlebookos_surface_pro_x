@@ -1586,3 +1586,9 @@ on 同时应用两个补丁及 AspectMax=2.0 配置；off 使用全新原版源�
 EL2 kernel builder现调用已有`patch-sq2-spi-pm.py`保留旧SPI-HID系统休眠钩子；
 此源码接线不自动更新私有runtime输入，不代表真实休眠通过。当前隔离验证见
 SURFACE-SUSPEND-20261103末节。
+
+
+SSAM事件诊断：`surface-pm-debug`在内核提供时同时启用SSAM接收事件/请求/响应
+tracepoint，用于关联EC事件与组件恢复；缺少时跳过，不改变受保护阶段准入。
+事件元数据只能定位接口，不能直接判定有效输入或真实唤醒根因；本轮SQ2证据见
+SURFACE-SUSPEND-20261103末节。

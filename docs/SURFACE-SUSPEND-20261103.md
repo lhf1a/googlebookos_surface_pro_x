@@ -391,3 +391,34 @@ instance及原tracefs挂载保持。没有更新正常私有runtime输入或提�
 再做原生自动休眠、重复恢复与能耗，之后才讨论正常集成。逐组件原始CSV与
 PMIC结果JSON在 `out/suspend-resume-20261103/spi-pm/real-pmic-responses/` 和
 `pmic-result.json`，均忽略，不提交身份日志。
+
+
+### 接续目标“休眠可用”：SQ2 SSAM 事件定位，尚未完成原生休眠
+
+上一轮用户再次确认15.688187秒PMIC唤醒后的画面、触摸、解锁正常。
+接续实读仍为boot1df5aab6…、success2/fail0、nativeN/owner0/token0。
+本轮没有重启或再次发起真实睡眠，也未修改正常启动入口或SSAM wake策略。
+
+- 假设：SSAM在display-off/D0-exit后有可识别的EC事件排队；不能把旧SQ1的
+  BAT/DPTF cid0x53直接套到这台SQ2。
+- 变量：一次Asleep下的受保护platform阶段，增加SSAM事件/请求/响应及动态IRQ追踪。
+  trial许可虽在该实验boot存在，本次token始终0，pm_test=platform，不进入machine_suspend。
+- 结果：PM_RETURN=0、cleanup=0；4760/4760条trace无覆盖，2340条组件回调全部返回0。
+  success2→3/fail0，SPIresume_count2→3，同boot和system_server3820/SurfaceFlinger3361。
+- SSAM：1173.094422在late阶段出现IRQ173；D0-entry后的1178.151355起集中释放
+  `sid=KIP tc=HID cid=0x00 iid=0x01 len=12`事件。全窗口18条此类事件，另有2条
+  iid0x02/len3事件；本轮未捕获BAT事件。挂起前/恢复后部分报告间隔约100ms。
+- 实际HID_PHYS/描述符将iid1对应到键盘接口045E:09AE；12字节是Report1的
+  1字节ID、8位修饰键和80位键值数组。元数据未包含报告内容，不能据此认定空报告、
+  卡键、无人操作或唯一早醒根因；也不能证明之前34.891ms真实试验的事件相同。
+- 随后一次有界5秒hidraw只读采样为0字节，没有有效报告可解码，不能称已证明周期性
+  空报告。现场是否操作键盘盖以及本次UI恢复反馈仍待用户确认。
+- 结束实读Awake、强制禁锁false/组集合空、SSAM和PMIC均enabled、pm_test=none、
+  owner/token0、nativeN；仅自己的trace挂载/instance已清除，Android原tracefs保留。
+
+`surface-pm-debug`增加三个可选SSAM tracepoint；缺少该子系统的内核仍可执行原
+受保护阶段，拒绝真实睡眠的准入条件未改变。专项测试覆盖无/部分/完整tracepoint。
+实机使用独立私有单次脚本适配当前trial启动，原助手仍要求trial=N，未将例外放宽到
+公开助手。新脚本和原始证据在忽略的`out/suspend-resume-20261103/ssam-events/`。
+下一步先对齐无键盘操作的对照，必要时键盘盖分离定位，再决定EC事件策略；原生自动
+休眠、多轮恢复与能耗仍待验证，不能以本轮platform检查宣称目标完成。
