@@ -1,3 +1,42 @@
+## 2026-11-04：type5 CLADE 配置链与 PH25 诊断/断言元数据
+
+本轮复用原MPSS 9ec7b6c6…及既有反汇编，已找到真实type5消费链：0xc08c9e68
+明确分派type5，保存五word载荷后调用0xc08d26c4，写B+0/0x10/0x14/0x18/0x1c，
+再设置syscfg bit20。原件诊断模板直接命名QURTK_clade_cfg_base、exc_hi_word和
+clade_dict_word，不再仅凭高熵或相近地址推测身份。B的文件初值0x057d0000使
+B+0x2000等于已证type4拷贝目的0x057d2000，0x1800 words等于0x6000字节；
+但B运行值、调用路径是否实际到达、硬件是否启用均未观测。
+
+固定Qualcomm官方hexagon-hypervisor commit `23d5bde4313c1e63ba64dd5d7f542b1055188ef8`，
+7份只读源码均通过Git blob及SHA256校验。[官方寄存器定义](https://github.com/qualcomm/hexagon-hypervisor/blob/23d5bde4313c1e63ba64dd5d7f542b1055188ef8/libs/h2/common/h2_common_defs.h#L99-L138)
+将上述五位移命名为REGION/COMP/EX_HI/EX_LO_SMALL/EX_LO_LARGE；
+当前载荷编码值1/093c0000/00540000/00021300/09568700、字典偏移0x2000与3×0x2000、
+syscfg bit20均相符。固件额外清除部分低位，只有当前对齐输入与官方右移接口逐项相等；
+这不是任意输入等价、同版本codec ABI或运行时成功证明，官方配置头没有给出本件页格式。
+
+另将PH25完整zlib流740,479字节只读展开为4,001,947字节私有分析副本e9dd92b7…，
+EOF、无剩余输入、Adler、64MiB输出上限、独立重建字节相同均通过；已有目标拒绝覆盖。
+它可解析出**诊断/断言元数据**，不是据此发现可执行代码，也不是PH24的CLADE解压。
+首批字段为u16源行号/u32格式指针/u32文件名指针；已有原指令将bit.c:108的空值分支
+与record 0xcfc0000a及调用静态关联。连续前缀在0x7ec2停止，共3245组有效字段；
+这不建立整个文件统一10字节stride。其233项EFS筛选只有time_efs.c:224队列耗尽
+模板获得直接常量xref，不是RF/FSG认证故障，未观测模板实际输出。
+
+最终另按代码中真实`r0=##`引用而非猜测stride核对：域内7935项，7934项首10字节字段
+有效、唯一地址7613；宽RF/EFS筛选43项，报告10项。得到实质RF静态锚：
+0xc0b61d78读取`[r18+0x1a4]`并在零值时跳到0xc0b61e3c；随后r0指向
+record 0xcfca2188（rfdevice_grfc_asm.cpp:268，模板提及NULL rfc_data_override_ptr），
+r1来自`[r18+0xc]`，调用0xc089d250。小窗口原生反汇编及原件字节复核证明250保留r0/r1、
+清r2/r3，再尾跳0xc089d1f8；248/258同入口、清参不同。只确认条件/调用/记录的
+静态关联，**没有命名完整调用ABI或fatal语义，没有证明SQ1触发此条件或它就是根因**。
+
+下一次唯一有界检查点是内部packet `0xc0b61d78`，追本函数内`[r18+0x1a4]`的来源、
+设置和分支条件；它不是已识别函数首址，不继续裸搜hash或重复全-d。本轮无新设备访问、
+启动、NV/射频写入或外部源码执行；通用LTE目标仍未完成，未新增SIM/注册/蜂窝流量验收。
+字段键名误用及首轮shell退出捕获空值均已保留；改用实际instruction字段和subprocess
+记录后验证exit0。完整原始证据、源码、分析二进制与本轮TYPE5文档事务仅留私有
+out/lte-main-review-20261103/rfc-static-v1，不发布原固件、凭据、网络地址或原始日志。
+
 ## 2026-11-04：RFC 静态锚点核对与反汇编覆盖边界
 
 在私有目录从已核对APT包隔离恢复LLVM18.1.3及依赖，未安装到系统；已实际验证
