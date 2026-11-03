@@ -1,3 +1,15 @@
+## 2026-11-03：LTE 安全存储只读编码器完成原机器码离线对照
+
+本轮未连接/重启设备。Windows原件检查26→68处，确认GET_INFO105字节、READ
+4096字节块、LBA每块+1、底层guid_ptr=0及独立返回状态检查。新增纯READ/GET_INFO
+编码器，不含SMC/EFI传输，不接正常启动。host sanitizer、ARM64/QEMU及三项针对性
+Python测试通过；QEMU内执行原件RVA0x22a58构造函数，两个环境桩、不执行安全调用，
+四组72字节请求+32字节参数与新编码器完全一致。不是RF恢复或Secure World验收。
+检查器实际A/B/R为26/68/26、全exit0、回滚原hash；CRLF补丁失败与修正均保留。
+下步核对EFI传输返回及内存/cache约定，只接有界GET_INFO；先离线验证，再考虑
+一次性硬件观察，不猜FSG LBA，不加INIT/WRITE/ERASE。详见 [LTE-UNIFIED](LTE-UNIFIED.md)。
+双机上轮状态及原默认/回退均保持，通用初始镜像LTE仍未完成。
+
 ## 2026-11-03：LTE 双机实时对照取得注册前 RF 差异
 
 用户更正P2P切换后的SQ2地址，同一确认指纹严格校验后连接成功；不再将前一次

@@ -1,0 +1,68 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
+/* Pure request encoder. NO SMC, EFI, device, I/O, INIT, WRITE or ERASE path.
+ * ABI: pinned QcSOCPartition.sys and SCM storage v2 (2026-01-26).
+ * This does not authorize arbitrary addresses or attest physical allocation;
+ * a future transport must supply owned, mapped, coherent memory and validate
+ * its own response convention. Only verified 4096-byte geometry is supported.
+ */
+#ifndef SURFACE_SCM_STORAGE_READ_H
+#define SURFACE_SCM_STORAGE_READ_H
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
+
+#define SPX_STORAGE_COMMAND 0x02001a01u
+#define SPX_STORAGE_ARGINFO 0x214u
+#define SPX_STORAGE_READ 1u
+#define SPX_STORAGE_GET_INFO 4u
+#define SPX_STORAGE_INFO_BYTES 105u
+#define SPX_STORAGE_PAGE 4096u
+#define SPX_STORAGE_REQUEST_BYTES 72u
+#define SPX_STORAGE_MAX_BLOCKS 262144u /* local 1GiB bound; not measured capacity */
+
+struct spx_storage_geometry { uint64_t blocks; uint32_t block_bytes, page_bytes; };
+struct spx_storage_descriptor { uint32_t command, arginfo; uint64_t args[4]; };
+
+static uint32_t spx_storage_u32(const uint8_t *p) {
+ return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
+}
+static uint64_t spx_storage_u64(const uint8_t *p) {
+ return spx_storage_u32(p)|(uint64_t)spx_storage_u32(p+4)<<32;
+}
+static void spx_storage_put64(uint8_t *p,uint64_t v) {
+ for(unsigned i=0;i<8;i++)p[i]=(uint8_t)(v>>(8*i));
+}
+static int spx_storage_parse_info(const uint8_t *p,size_t n,struct spx_storage_geometry *out) {
+ if(!p || !out || n!=SPX_STORAGE_INFO_BYTES)return 0;
+ uint64_t blocks=spx_storage_u64(p);uint32_t block=spx_storage_u32(p+8),page=spx_storage_u32(p+12);
+ uint32_t physical=spx_storage_u32(p+16);
+ if(blocks<4 || blocks>SPX_STORAGE_MAX_BLOCKS || block!=SPX_STORAGE_PAGE ||
+    !page || page>block || (page&(page-1)) || !physical || physical>8)return 0;
+ *out=(struct spx_storage_geometry){blocks,block,page};return 1;
+}
+/* metadata page at base; output page at base+4096. cap covers metadata only.
+ * Failed validation leaves both outputs unchanged. The caller must pass two
+ * separate live output objects, not overlap desc with request.
+ */
+static int spx_storage_encode(uint8_t *request,size_t cap,struct spx_storage_descriptor *desc,
+                             uint64_t base,unsigned operation,uint64_t lba,
+                             const struct spx_storage_geometry *geometry) {
+ if(!request || !desc || cap<SPX_STORAGE_REQUEST_BYTES || !base ||
+    base%SPX_STORAGE_PAGE || base>UINT64_MAX-(2*SPX_STORAGE_PAGE-1))return 0;
+ uint64_t length;
+ if(operation==SPX_STORAGE_GET_INFO) {
+  if(lba || geometry)return 0;
+  length=SPX_STORAGE_INFO_BYTES;
+ } else if(operation==SPX_STORAGE_READ) {
+  if(!geometry || geometry->block_bytes!=SPX_STORAGE_PAGE || geometry->blocks<4 ||
+     geometry->blocks>SPX_STORAGE_MAX_BLOCKS || lba>=geometry->blocks)return 0;
+  length=SPX_STORAGE_PAGE;
+ } else return 0;
+ uint8_t tmp[SPX_STORAGE_REQUEST_BYTES]={0};
+ spx_storage_put64(tmp,1);spx_storage_put64(tmp+32,operation);
+ spx_storage_put64(tmp+40,lba);spx_storage_put64(tmp+48,length);
+ spx_storage_put64(tmp+56,base+SPX_STORAGE_PAGE);
+ struct spx_storage_descriptor d={SPX_STORAGE_COMMAND,SPX_STORAGE_ARGINFO,{base,40,base+40,32}};
+ memcpy(request,tmp,sizeof(tmp));*desc=d;return 1;
+}
+#endif

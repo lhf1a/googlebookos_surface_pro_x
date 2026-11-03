@@ -163,3 +163,39 @@ seed自身的机型/身份准入版本不同，但已观察到相同FSG进入RAM
 下一步检查本机安全存储/恢复条件：复用已核对Windows固定READ与SCM后端结构，
 先核对只读ABI及边界，不重试两份旧FSG、不复制运行SQ2的RF NV、不开任意SCM写入口。
 双机注册、PS和真实蜂窝流量的通用初始镜像验收仍未完成。
+
+## 本机安全存储 READ ABI：离线实现与原机器码对照
+
+本轮不连接设备、不修改NV/固件、不重启。原件检查器
+`inspect-surface-fsg-backend.py` 从26处扩展至68处机器码/常量核验，新增
+`storage_read_layout` 输出。原Windows READ链确认：命令40字节、details32字节，
+GET_INFO操作4/输出105字节、READ操作1/每次至多4096字节；数据指针/剩余长度
+按字节推进，但LBA每块只加1。高层FSG GUID已经在上层解析，SCM命令中的
+slot/lun/guid_ptr均为零，不能直接把FSG GUID塞进这个底层指针。
+布局与[公开SCM storage v2](https://lists.openwall.net/linux-kernel/2026/01/26/752)一致。
+
+Windows TrEE返回包还分别检查首个u64为1、偏移8处u32为0；不要把它与Linux
+封装后的`scm_res.result[0]`或未来EFI协议返回数组直接等同。返回语义、物理内存
+所有权/映射及cache维护仍是接入真实传输前必须独立核对的门槛。
+
+新增 `probe/lte/surface-scm-storage-read.h` 是**纯编码器，不是已能读设备的驱动**：
+只允许GET_INFO/READ，拒绝INIT/WRITE/ERASE/DEINIT和其他操作；验证元数据容量、
+物理页对齐/溢出及LBA边界，仅接受4096字节块几何。1GiB是本地防护上限，
+不是实测芯片容量；不打印GET_INFO内的序列号等标识。没有SMC/EFI调用、磁盘I/O，
+也没有加入正常启动。原GPT只读解析器保留，尚未把新编码器接成完整FSG读取链。
+
+除host ASan/UBSan和ARM64/QEMU边界测试外，私有QEMU夹具运行了固定原件
+RVA0x22a58的原始ARM64请求构造函数：仅context lookup和memset使用环境桩，
+没有运行原存储、TrEE或SCM函数。GET_INFO及READ LBA0/1/8191四组中，新编码器
+与原函数的72字节请求和32字节参数完全相同，8字节边界哨兵保持。
+这证明对应输入的编码一致，不证明Secure World接受或本机RF可恢复。
+
+同一原件输入的检查器事务：BASELINE26处/无新字段 → MODIFIED68处/有新字段 →
+ROLLBACK26处/无新字段，全部exit0；原SHA恢复，补丁重建逐字节相同。第一次patch
+因CRLF归一化失败，保留错误后改为保留原换行的binary patch，未改变原件。
+三项针对性Python测试通过；完整私有源码夹具、测试二进制与A/B/R留在原工作区
+`out/lte-main-review-20261103/storage-read-v1/`，扩展既有四角色。
+
+下步只接入有界、只读的EFI GET_INFO传输并核对返回/内存协议；在离线验证完成前
+不做新启动实验。即使GET_INFO成功，也必须从本机有效GPT解析FSG范围，再进行
+受限读取，不能猜LBA或拿其他设备的RF NV补齐。通用LTE目标保持未完成。
