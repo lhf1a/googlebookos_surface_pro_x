@@ -1,3 +1,16 @@
+## 2026-11-03：LTE 双机实时对照取得注册前 RF 差异
+
+用户更正P2P切换后的SQ2地址，同一确认指纹严格校验后连接成功；不再将前一次
+连接超时当作持续阻塞。SQ2实际bootffad6382…，用户确认无SIM；只读实测DMS0、
+UMTS/LTE接口5/8、NV4530、rfnv14，观察器exit0。SQ1同bootc0c1b5f9…仍DMS2、
+接口0、NV4531/rfnv0。两机未注册/signal74不等于相同RF初始化状态。
+双机所选MPSS/RMTFS/IPA live DT54属性、MPSS及RMTFS/启动文件、FSG/零FS1FS2
+一致；seed准入版本差异没有阻止相同FSG进入RAM。无SIM不能解释SQ1的RF NV为空。
+不能据此直接证明密钥绑定；下一步复用已核对Windows READ/SCM链核对本机安全存储
+读取与恢复条件，不再盲换已一致的IPA/固件/两份旧FSG，不复制运行SQ2的RF NV。
+SQ2未重启/改配置，临时工具已清理；QMI/boot/guard/ALSA/AUDIO_READY/HAL前后保持。
+细节及边界见 [LTE-UNIFIED](LTE-UNIFIED.md)；初始镜像的两机蜂窝验收仍待完成。
+
 ## 2026-11-03：LTE 实际启动文件与归档基线已交叉核对
 
 详见 [LTE-UNIFIED](LTE-UNIFIED.md) 末节。Windows参考SQ1的MPSS与当前SQ1的
@@ -6,9 +19,9 @@ Linux/ESP两份文件均为9ec7b6c6…；不能因目录名sq2就换固件。重
 只多历史打包器的seed行。MPSS/RMTFS/IPA及内存DT50属性相同，仅4项预启动状态
 由未完成变为complete1/stage11或4；实际rmtfs exe/参数/设备fd已核对。
 当前SQ1仍bootc0c1b5f9…、DMS2/接口0/NAS0/PS2/signal74，没有新重启或配置修改。
-用户确认SQ2无SIM并提供新组网地址、确认主机指纹；已存私有可信记录。公钥读取
-成功后SSH登录超时，邻居Unreachable，尚未取得该SQ2实时状态；无SIM不妨碍只读
-环境对照，但注册/蜂窝流量需要后续有SIM验收。等待组网恢复或备用地址，不绕过验证。
+用户确认SQ2无SIM并提供新组网地址、确认主机指纹；已存私有可信记录。最初公钥读取
+成功后SSH登录超时、邻居Unreachable；用户随后更正P2P地址并完成上述实时对照。
+无SIM不妨碍只读环境对照，但注册/蜂窝流量仍需要后续有SIM验收。未绕过主机验证。
 
 ## 2026-11-03：LTE 早期 EFS 采集已实测并实际回滚
 

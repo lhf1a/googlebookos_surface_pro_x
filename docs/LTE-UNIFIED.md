@@ -136,7 +136,30 @@ live MPSS complete1/stage11、RMTFS complete1/stage4；RMTFS仍为
 `out/lte-main-review-20261103/environment-compare-v1/`。
 
 用户说明 SQ2 当前没有SIM；这不妨碍上述只读启动环境对比，但不能进行注册/流量验收。
-用户随后提供组网地址并确认ED25519指纹，可信记录已保存在私有目录。
-读取公钥成功后实际SSH登录超时，当前组网邻居为Unreachable；尚未取得该SQ2
-机型、boot ID或RF状态，不能把归档对照标成双机实时对照。待连接恢复后先只读识别，
-不重启/改动SQ2；通用初始镜像的真实注册与蜂窝流量目标仍未完成。
+用户提供组网地址并确认ED25519指纹，可信记录已保存在私有目录。第一次实际SSH
+登录超时、邻居Unreachable；用户随后说明P2P链路切换并更正地址，同一已确认密钥
+严格校验通过，实际机型SQ2、bootffad6382…，与SQ1的bootc0c1b5f9…不同。
+
+### 双机实时对照结果
+
+| 观察 | SQ1（有中国广电SIM） | SQ2（用户确认无SIM） |
+| --- | --- | --- |
+| DMS mode / capabilities | 2 / 0项 | 0 / UMTS,LTE（5,8） |
+| NV453 / RFNV完整枚举 | 1 / 0项 | 0 / 14项 |
+| NAS registration / PS / signal error | 0 / 2 / 74 | 0 / 2 / 74 |
+
+SQ2 DIAG观察exit0、完整关闭目录、无NV写入；前后QMI及boot ID/guard不变。
+其声卡、AUDIO_READY、实际HAL af73f71e…保持。没有清FTM、发online、设置日志mask，
+也没有重启/改动SQ2启动配置。临时读取程序与DT副本已从SQ2 RAM目录清理。
+
+双机live FDT所选MPSS/RMTFS/IPA及其内存引用/子节点**54项属性全部一致**，包含
+预启动完成状态；运行MPSS、ADSP、CDSP、RMTFS进程exe、el2-rmtfs-start及
+wifi-services均同哈希。两机FSG bd124…与零FS1/FS2的实际RMTFS文件也相同，
+RMTFS日志均读取FS1/FS2 sector1和FSG全4096 sectors，实际设备fd均为mem1。
+seed自身的机型/身份准入版本不同，但已观察到相同FSG进入RAM；不以此为由删除保护。
+
+因此无SIM不能解释SQ1的RF NV/接口为空，当前差异在网络注册之前；不能再盲换
+已一致的IPA/MPSS/启动顺序。文件相同而恢复结果不同仍不构成“设备密钥绑定”的证明。
+下一步检查本机安全存储/恢复条件：复用已核对Windows固定READ与SCM后端结构，
+先核对只读ABI及边界，不重试两份旧FSG、不复制运行SQ2的RF NV、不开任意SCM写入口。
+双机注册、PS和真实蜂窝流量的通用初始镜像验收仍未完成。
