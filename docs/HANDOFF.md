@@ -1,3 +1,15 @@
+## 2026-11-03：LTE 实际启动文件与归档基线已交叉核对
+
+详见 [LTE-UNIFIED](LTE-UNIFIED.md) 末节。Windows参考SQ1的MPSS与当前SQ1的
+Linux/ESP两份文件均为9ec7b6c6…；不能因目录名sq2就换固件。重新确认本地common
+镜像为历史成功LTE固定输入957b…，RMTFS及5项相关运行文件相同；wifi-services
+只多历史打包器的seed行。MPSS/RMTFS/IPA及内存DT50属性相同，仅4项预启动状态
+由未完成变为complete1/stage11或4；实际rmtfs exe/参数/设备fd已核对。
+当前SQ1仍bootc0c1b5f9…、DMS2/接口0/NAS0/PS2/signal74，没有新重启或配置修改。
+用户确认SQ2无SIM并提供新组网地址、确认主机指纹；已存私有可信记录。公钥读取
+成功后SSH登录超时，邻居Unreachable，尚未取得该SQ2实时状态；无SIM不妨碍只读
+环境对照，但注册/蜂窝流量需要后续有SIM验收。等待组网恢复或备用地址，不绕过验证。
+
 ## 2026-11-03：LTE 早期 EFS 采集已实测并实际回滚
 
 详见 [LTE-UNIFIED](LTE-UNIFIED.md) 末节。私有候选只在 RMTFS 前加入有界日志观察，

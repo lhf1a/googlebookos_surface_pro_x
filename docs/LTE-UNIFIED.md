@@ -109,3 +109,34 @@ NV/RFNV 观察完成并 exit0。RMTFS 仍读取 FS1/FS2 sector1 和 FSG 全4096 
 停止在该路线盲加协议参数，转回成功 SQ2 与当前 SQ1 的有效启动环境对照。
 本工作区缺 SQ2 当前可信 SSH 主机记录，已请求确认地址/指纹；不绕过主机验证，
 也不以历史 SQ2 成功冒充当前对照。两机通用 LTE 初始镜像验收仍未完成。
+
+## 有效启动环境交叉核对（不换件、不重启）
+
+参考 Windows SQ1 的 DriverStore 中实际 `qcmpss8180.mbn` 为75470832字节、
+SHA256 `9ec7b6c6dae5d97af84ab71af6cb93b1892a4db1bd2b0b9de3e12a5d691a5439`。
+它与当前 Android SQ1 的 `/lib/firmware`、ESP共享 `firmware/` 中的 MPSS，
+以及历史默认输入清单一致。因此目录名 `pro-x-sq2` 不是选错 MPSS 文件的证据；
+这仍不证明固件已接受 FSG，也不能仅靠文件哈希证明运行固件每个内存页。
+
+本地 common 镜像重新计算得到957b5ee6…，正是历史成功 LTE 打包器固定输入，
+不是另找一个“相近”基线。按 cpio 最后覆盖顺序解析，与当前部署9721b3ad…比较：
+RMTFS、el2-rmtfs-start、pd-mapper、tqftpserv、qrtr-ns、MPSS均相同；
+wifi-services 唯一差异恰好是历史 LTE 打包器插入的 seed 行，重放该插入逐字节一致。
+qcom_q6v5 与 qcom_q6v5_pas 两模块也相同。没有把未包含的模块算作通过。
+
+历史已验收 IPA DT49228267…与本次读取的 SQ1 live FDT 对比 MPSS、RMTFS、IPA
+及其内存引用/子节点：50项属性完全相同，差异仅4项预启动完成/状态属性。
+live MPSS complete1/stage11、RMTFS complete1/stage4；RMTFS仍为
+0x85500000/2MiB、client1/VMID15。运行进程exe哈希85668122…与包内一致，
+参数 `-r -o /run/rmtfs -v`，实际打开 `/dev/qcom_rmtfs_mem1`。
+解析器结果与fdtget交叉核对；不把这些状态当作RF初始化成功。
+
+当前SQ1 bootc0c1b5f9…前后不变、guardY、DMS2/接口0/NAS0/PS2/signal74；
+本轮没有修改启动载荷、NV、射频设置或重启。完整私有证据在
+`out/lte-main-review-20261103/environment-compare-v1/`。
+
+用户说明 SQ2 当前没有SIM；这不妨碍上述只读启动环境对比，但不能进行注册/流量验收。
+用户随后提供组网地址并确认ED25519指纹，可信记录已保存在私有目录。
+读取公钥成功后实际SSH登录超时，当前组网邻居为Unreachable；尚未取得该SQ2
+机型、boot ID或RF状态，不能把归档对照标成双机实时对照。待连接恢复后先只读识别，
+不重启/改动SQ2；通用初始镜像的真实注册与蜂窝流量目标仍未完成。
