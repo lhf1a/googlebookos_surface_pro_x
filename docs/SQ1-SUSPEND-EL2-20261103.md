@@ -1,5 +1,7 @@
 # SQ1 EL2 suspend checkpoint — 2026-11-03
 
+> 后续结果与当前收尾状态见 [SQ1/SQ2 通用休眠实验记录](SURFACE-SUSPEND-20261103.md)。下文为首轮历史检查点；后续 .91 显式睡眠失败，不能据此认定修复完成。
+
 Branch: `codex/suspend-fix-5.94-20261103`. Workspace:
 `/mnt/spx-workspace/chromebookOS`. The operator explicitly resumed suspend
 research on the device at 192.168.5.94 and authorized isolated default boot

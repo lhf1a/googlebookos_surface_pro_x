@@ -16,7 +16,9 @@ def main():
     source = a.source.read_text()
     candidate = 'static bool sq1_trial_take(' in source
     policy = ('\n'.join(extract(source, n) for n in
-              ('sq2_screen_only_test_allowed', 'sq1_trial_take'))) if candidate else ''
+              (('sq2_screen_only_test_allowed', 'sq1_trial_take', 'sq1_autosuspend_allowed')
+               if 'static bool sq1_autosuspend_allowed(' in source else
+               ('sq2_screen_only_test_allowed', 'sq1_trial_take')))) if candidate else ''
     guard = source[source.index('int pm_suspend('):].split('if (', 1)[1].split(') {', 1)[0]
     admission = 'false'
     if candidate:
@@ -36,6 +38,9 @@ def main():
 #define TEST_CPUS 4
 typedef int suspend_state_t;
 static bool sq2_screen_only=true, sq2_screen_only_test=true, sq1_screen_only_trial=true;
+static bool sq1_screen_only_autosuspend=false;
+static void *sq1_autosuspend_owner=0;
+#define task_tgid(x) ((void *)(long)(x))
 static int sq1_trial_pid=42, current=42, pm_test_level=TEST_NONE;
 static unsigned long jiffies=1, sq1_trial_deadline=500;
 #define task_pid_nr(x) (x)
