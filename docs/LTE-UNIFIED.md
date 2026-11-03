@@ -272,3 +272,58 @@ GRUB/launcher/DT/initrad04及运行文件，并与SQ1比较：
 不是根因证明或跨机型刷UEFI的理由。不清FTM、不写NV、不复试旧FSG。
 私有完整载荷、源码工具、原始输出与A/B/R在原工作区
 out/lte-main-review-20261103/boot-chain-v1，继续扩展原四角色。通用初始镜像仍未完成。
+
+## 2026-11-03：RMTFS 当前共享窗口只读核对，前移观察点
+
+在上述实际回滚后继续使用原基线；未再重启或替换任何LTE载荷。补齐了此前文件hash
+没有覆盖的运行时观察。两机实际sysfs均为class rmtfs、client1、phys_addr0x85500000、
+size0x200000、char243:1。核对Linux6.3.8的rmtfs_mem.read接口及本项目probe-only补丁后，
+通过O_RDONLY读取固定2MiB，两次哈希；只在设备管道内处理字节，不保存/导出原始内容。
+[驱动原始接口](https://raw.githubusercontent.com/gregkh/linux/v6.3.8/drivers/soc/qcom/rmtfs_mem.c)。
+
+SQ1 boot17d11376：最后记录的数据操作仍是FSG read0:4096。两次AP侧窗口hash均
+为eb51ef4c…，与供给文件bd124b2d…不同。逐字节比较只输出差异计数/范围：
+2,088,453/2,097,152字节不同，覆盖全部512页；前后数据请求序列hash相同。
+**这是当前共享缓冲不同，不是已证明首次交付错误或cache故障**；仍需排除Modem
+在收到数据后自行改写。该窗口也不能当作FS1/FS2的进程内shadow。
+
+SQ2 bootffad6382：当前更完整日志已经包含多轮FS1/FS2 write0:4096，先前12KiB
+抓取未覆盖后续写请求。当前窗口两次d8ed5a72…稳定，前后数据请求序列hash相同；
+由于已发生后续写，不要求它等于初始FSG。backing FS1/FS2仍全零，不等于Modem
+运行EFS相同或未生成NV；-r下RAM shadow的旧采集记录见LTE.md，不冒充持久落盘。
+两机RMTFS进程/原exe hash85668122、boot ID、screen_only=Y和Android完成状态保持；
+SQ1前后QMI仍DMS2/接口0/NAS0/PS2/signal74。临时只读脚本均已从设备移除。
+
+独立历史审计没有发现遗漏的清FTM、FCC解锁或MCFG强制选择步骤；首次成功记录为
+FSG恢复后NV453自然0/RFNV14，再正常online。旧shadow工具不在现有Git/本地证据中，
+不能猜旧地址复用；现有文档也不足以独立证明bd124具体采自哪台设备，不能据此反驳
+用户提供的来源，更不能推断设备绑定。
+
+下一步针对同一原RMTFS交付调用，在共享写完成与应答之前观察输入/readback一致性，
+先锁定原件导入符号、离线验证观察器再做一次性候选；不重写LTE后端、不清FTM、不
+写NV、不复试旧FSG/七项组件组合。同步读取或诊断观察可能影响时序，须作为实验限制。
+私有证据：原工作区out/lte-main-review-20261103/rmtfs-buffer-v1；扩展原四角色。
+首次猜错sysfs类名的读取exit1后，按实际设备枚举修正；未跳过任何读取错误。
+通用SQ1/SQ2初始镜像的注册/PS/真实流量验收仍未完成。
+
+补充限制：本次两机RMTFS stdout文件恰为8KiB/16KiB；可能存在用户态输出缓冲。
+因此“前后请求日志hash不变”只表示可见记录未变，不能保证窗口期间没有尚未刷出的请求。
+后续交付观察必须使用独立、直接写出的记录，不能再依赖日志文件当前尾部推定准确时序。
+### 原 RMTFS ELF 的交付调用已锁定（仅离线分析）
+
+从已校验镜像只在内存解析实际原件856681222851149a54eead466804cb4bc51e5aece26a0b0afb41ae231403a62b，
+69360字节，确认导入pwrite/pread@GLIBC_2.17，无pwrite64/pread64。2MiB请求不是一次大写：
+0x2da4调用共享写helper0x4210，每次512字节；正常char-fd路径0x429c尾跳pwrite@plt，
+每次返回必须等于512才继续。完整循环结束才编码msgid3并经sendto应答。
+因此可在真实pwrite返回后、返回调用者之前只读核对该扇区，而不用替换RMTFS后端。
+
+下一候选须过滤实际char设备而非所有pwrite，聚合4096个连续512字节扇区，保留原参数、
+返回值及errno；只有完整序列且输入hash等于已知FSG才标记FSG交付。sysfs和普通文件的
+pwrite不属于本观察目标。原件另有base非空的memcpy路径，单纯hook并不覆盖它；两机
+当前maps无设备映射且fd3指向mem1，只支持采样时的char-fd路径，不证明启动全程覆盖。
+必须以实际捕获完整序列作为新实验准入/覆盖证据，不能以“观察日志为空”判定写入失败。
+
+原件有stdout/printf/fwrite导入，无setvbuf/setbuf/fflush导入；结合8KiB/16KiB日志长度，
+更不能把可见尾部当作最后真实操作。观察记录需独立fd直接write、仅输出hash/计数/状态，
+不导出内容、不重新执行原写、不改变NV。以上仅确定可观察调用点；观察器尚未实现或部署，
+没有新增LTE成功结论，AP侧readback也不能证明Modem侧可见性或固件接受结果。

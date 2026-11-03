@@ -1,3 +1,39 @@
+## 2026-11-03：RMTFS 当前共享窗口只读核对，前移观察点
+
+在上述实际回滚后继续使用原基线；未再重启或替换任何LTE载荷。补齐了此前文件hash
+没有覆盖的运行时观察。两机实际sysfs均为class rmtfs、client1、phys_addr0x85500000、
+size0x200000、char243:1。核对Linux6.3.8的rmtfs_mem.read接口及本项目probe-only补丁后，
+通过O_RDONLY读取固定2MiB，两次哈希；只在设备管道内处理字节，不保存/导出原始内容。
+[驱动原始接口](https://raw.githubusercontent.com/gregkh/linux/v6.3.8/drivers/soc/qcom/rmtfs_mem.c)。
+
+SQ1 boot17d11376：最后记录的数据操作仍是FSG read0:4096。两次AP侧窗口hash均
+为eb51ef4c…，与供给文件bd124b2d…不同。逐字节比较只输出差异计数/范围：
+2,088,453/2,097,152字节不同，覆盖全部512页；前后数据请求序列hash相同。
+**这是当前共享缓冲不同，不是已证明首次交付错误或cache故障**；仍需排除Modem
+在收到数据后自行改写。该窗口也不能当作FS1/FS2的进程内shadow。
+
+SQ2 bootffad6382：当前更完整日志已经包含多轮FS1/FS2 write0:4096，先前12KiB
+抓取未覆盖后续写请求。当前窗口两次d8ed5a72…稳定，前后数据请求序列hash相同；
+由于已发生后续写，不要求它等于初始FSG。backing FS1/FS2仍全零，不等于Modem
+运行EFS相同或未生成NV；-r下RAM shadow的旧采集记录见LTE.md，不冒充持久落盘。
+两机RMTFS进程/原exe hash85668122、boot ID、screen_only=Y和Android完成状态保持；
+SQ1前后QMI仍DMS2/接口0/NAS0/PS2/signal74。临时只读脚本均已从设备移除。
+
+独立历史审计没有发现遗漏的清FTM、FCC解锁或MCFG强制选择步骤；首次成功记录为
+FSG恢复后NV453自然0/RFNV14，再正常online。旧shadow工具不在现有Git/本地证据中，
+不能猜旧地址复用；现有文档也不足以独立证明bd124具体采自哪台设备，不能据此反驳
+用户提供的来源，更不能推断设备绑定。
+
+原件ELF已锁定共享写路径：每次512字节pwrite，完整4096次循环之后才发QMI应答；
+不是单次2MiB写。当前两机fd3指向mem1、maps无设备映射，仍需新启动实际完整捕获证明
+覆盖（原件另有memcpy路径）。stdout无显式flush导入且日志为8/16KiB，尾部不证明
+没有未刷出的请求；本次“请求hash不变”只表示已刷出部分不变。详见LTE-UNIFIED。
+下一步针对同一原RMTFS交付调用，在共享写完成与应答之前观察输入/readback一致性，
+导入符号已确认；先离线验证观察器再做一次性候选；不重写LTE后端、不清FTM、不
+写NV、不复试旧FSG/七项组件组合。同步读取或诊断观察可能影响时序，须作为实验限制。
+私有证据：原工作区out/lte-main-review-20261103/rmtfs-buffer-v1；扩展原四角色。
+首次猜错sysfs类名的读取exit1后，按实际设备枚举修正；未跳过任何读取错误。
+通用SQ1/SQ2初始镜像的注册/PS/真实流量验收仍未完成。
 ## 2026-11-03：SQ2 完整启动链对照与 LTE 组件复用已在 SQ1 实测
 
 按用户要求优先复用成功路径，不接入新SCM后端。严格主机校验下读取运行SQ2的实际
