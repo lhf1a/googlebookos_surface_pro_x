@@ -323,17 +323,25 @@ int main(int argc,char**argv) {
         core->dataChanged=[data]{data->changed();};
         std::thread([network,sim,modem]{
             net::RegStateResult oldReg;net::SignalStrength oldSignal;sim::CardStatus oldCard;mdm::RadioState oldState=mdm::RadioState::UNAVAILABLE;
-            bool first=true;unsigned tick=0;
+            bool firstModem=true,firstNetwork=true,firstSignal=true;unsigned tick=0;
             for(;;){
                 try {
-                    auto state=core->state();if(first || state!=oldState){modem->changed(state);oldState=state;}
-                }catch(const std::exception&){if(oldState!=mdm::RadioState::UNAVAILABLE){modem->changed(mdm::RadioState::UNAVAILABLE);oldState=mdm::RadioState::UNAVAILABLE;}}
+                    auto state=core->state();if(firstModem || state!=oldState){modem->changed(state);oldState=state;}
+                    firstModem=false;
+                }catch(const std::exception&){if(firstModem || oldState!=mdm::RadioState::UNAVAILABLE){modem->changed(mdm::RadioState::UNAVAILABLE);oldState=mdm::RadioState::UNAVAILABLE;}firstModem=false;}
+                // Registration and signal availability are independent. A failed
+                // signal query must not suppress registration or repeat modem state.
                 try {
-                    auto reg=core->registration();auto signal=core->strength();
+                    auto reg=core->registration();
                     bool dirty=core->networkDirty.exchange(false);
-                    network->changed(signal,first || dirty || reg!=oldReg,first || dirty || signal!=oldSignal);oldReg=reg;oldSignal=signal;
-                    first=false;
-                }catch(const std::exception&){/* Missing NAS signal while offline is not a modem failure. */}
+                    network->changed(oldSignal,firstNetwork || dirty || reg!=oldReg,false);
+                    oldReg=reg;firstNetwork=false;
+                }catch(const std::exception&){}
+                try {
+                    auto signal=core->strength();
+                    network->changed(signal,false,firstSignal || signal!=oldSignal);
+                    oldSignal=signal;firstSignal=false;
+                }catch(const std::exception&){/* Keep unavailable signal unknown. */}
                 try {if(tick++%6==0){auto card=core->card();if(card!=oldCard){sim->changed();oldCard=card;}}}catch(const std::exception&){}
                 core->changes.post([]{core->checkBearer();});std::this_thread::sleep_for(std::chrono::seconds(5));
             }

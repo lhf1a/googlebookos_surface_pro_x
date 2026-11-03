@@ -1,3 +1,72 @@
+## 2026-11-03：通用 LTE 新分支与第二份 Windows FSG 启动对照
+
+新分支 `codex/lte-unified` 从最新已拉取main a2997af1 建立；包含独立Radio轮询修复、
+只读RF观察器、Windows固定FSG READ采集器与机器码校验，详见 [LTE-UNIFIED](LTE-UNIFIED.md)。
+不合并/覆盖原工作区未提交改动，不发布FSG/NV/凭据或原始日志。
+
+Windows参考机原驱动READ成功取回另一份2MiB FSG 31c3e5af…（原共享包bd124b2d…），
+后端SCM storage调用号02001a01/arginfo214和40/32字节结构已与原机器码交叉核对。
+这是参考SQ1的数据，不宣称属于待测SQ1；格式/哈希不同不证明设备绑定或已接受校准。
+
+用户确认休眠工作移到别机后，先归档并清理旧SQ1PmTrial，回正常默认内核：
+BASELINE boot e98867d8… 仍NV4531/rfnv0/DMS接口0/mode2，NAS0/PS2/signal74。
+仅替换FSG及checksum的MODIFIED boot 6dfff0a2… 确认31c3e5af同时进入打包目录与
+RMTFS目录，固件完整读取4096 sectors，但上述RF/注册结果完全相同；此次迁移不采纳。
+一次性env已消费0，菜单已恢复原两项。没有clear-FTM、MPSS reset或无变化online重试。
+ROLLBACK boot4451de32… 已实际回原默认，原FSG bd124… 与原镜像9721b3ad…恢复/保持，
+同一观察脚本仍NV4531/rfnv0/DMS2/接口0/NAS0/PS2/signal74，三阶段均exit0。
+试验目录已清理，默认与Mesa回退镜像及原两项菜单hash不变；最终亮屏锁重新持有。
+ALSA/AUDIO_READY、实际audio.primary.default.so哈希af73f71e…及guardY保持；不是新增听感验收。
+
+下步应取得基带真实EFS restore/auth/decompress错误并对齐本机读取路径，
+不再原样重复这两份FSG或旧FS1/FS2配对。通用初始镜像的两机新启动、注册与蜂窝流量
+仍未通过，不能把SIM可读、静态校验或历史SQ2成功称为通用LTE完成。
+## 2026-11-03：新 SQ1 的实际 RF/NV 差异已读出；避免重复迁移验证
+
+.94 同 boot 0aec8328，DIAG 按既有 DATA2/DCI4→CTRL0 顺序完成三字节 feature
+协商，raw 请求/non-HDLC 响应成功。只读结果 NV453 status0/value1，
+`/nv/item_files/rfnv` 完整枚举0项、closedir errno0；DMS capabilities接口数0。
+这与已工作 SQ2 的 NV453=0、rfnv14、UMTS/LTE接口5/8明确不同。
+当前 FSG 文件仍为 bd124b2d…，RMTFS 在 FS1/FS2 sector1 后请求FSG全部4096 sectors；
+不能把“复制/哈希通过”当成固件已接受RF数据，也不能据此直接断言设备密钥绑定或校准源错误。
+下步转向 FSG/NV restore 的固件接受路径及工作环境差异，不再重试 APN/online/整包移植。
+
+复用规则：.76此次快照FS1 62528314… /FS2 1247bc6f… 与旧迁移试验完全相同；
+不重复该配对；QMI21 RF读取EPERM路线已停止；NV1878 inactive、空/rf和PDC error16
+不单独作为故障证据。历史SQ2实际LTE成功不能被旧FTM失败记录覆盖。
+
+新增 `probe/lte/surface-lte-rf-observe.c` 是手动实验室只读工具，不接入默认镜像启动：
+20秒总上限，NV仅白名单453，只枚举固定rfnv目录，不导出条目内容/身份，不写NV、
+不清FTM、不改日志mask、不重启MPSS。标准EFS0x13成功，0x3e明确拒绝；不猜4098/4099端点。
+主机ASan/UBSan、ARM64/QEMU自测及实机自测通过；实机session exit0。
+BASELINE和退出后DMS2/NAS0/PS2/signal74相同，AP发布均撤销；固件自己的CMD/DCI_CMD
+端点保留，与旧成功诊断行为一致。boot、screen_only=Y及亮屏锁不变，未改ESP/固件。
+诊断程序返回0只代表完成观察，不代表LTE已恢复。原Radio仍运行，上一节HAL修复未持久部署。
+完整私有证据：原工作区 out/lte-main-review-20261103/diag-readonly-v1/，
+扩展既有mode-startup-v1四角色。原SQ2 .91此次严格SSH因缺可信host key拒绝连接，
+没有绕过验证或把旧记录当成本轮实时结果。通用初始镜像的两机新启动/注册/蜂窝流量验收仍待完成。
+
+## 2026-11-03：新 SQ1 Radio 状态轮询修复；基带 DeviceNotReady 未解决
+
+在 .94 的 SQ1 / 中国广电 SIM 上，UIM USIM READY、SIM EF 读取成功，IPA/RMNET 已就绪，
+但 DMS mode2、NAS未注册/PS detached、signal error74。接受现有 Windows 输入核对，
+不继续重复采集。仅一次 RAM helper 允许 mode2 发标准 online0，设备返回 error52，
+仍停mode2；该准入放宽不采纳，原 helper 和 NV 保持。不能靠强制清FTM或伪报ON修复。
+
+`sq2-radio.cpp` 将原共享 first 标志拆为 firstModem/firstNetwork/firstSignal，注册与信号
+查询分别处理异常，避免 signal error74 阻断注册通知并每5秒重复UNAVAILABLE。
+完整207单元 Radio AIDL 构建通过；4项Python测试通过（新增测试含4种轮询场景）。
+同一生产循环的 native夹具 BASELINE/MODIFIED/ROLLBACK：三轮modem通知3/1/3，
+注册通知0/1/0，均exit0；回滚源码哈希一致。实机16秒观察窗口重复UNAVAILABLE为4/0/3，
+实际进程hash原f99b9d6c→候选f9d8aa2f→原f99b9d6c，事务exit0，boot不变；
+三阶段DMS/NAS结果均未改善。只在RAM临时bind，已恢复原HAL；未改ESP/启动包/NV或重启。
+声卡、AUDIO_READY及被检查音频库路径hash保持，不是新增听感验收。
+
+修复源码保存在 `codex/lte-radio-startup-fix`；未合并/推送main，未持久部署。
+下一步：追踪当前基带的实际RF/NV初始化和DIAG只读证据，与已成功SQ2环境比较；
+不重复无变化online、不盲选MCFG、不把本HAL修复称为LTE已通。
+私有证据：原工作区 out/lte-main-review-20261103/mode-startup-v1/。
+
 ## 2026-11-03：默认关闭 4 KB 页模式开发提醒
 
 标准入口仍为 `scripts/build.py`。共享 defaults.integrate 将当前 `apply-device-info`
