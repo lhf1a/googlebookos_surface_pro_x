@@ -1,0 +1,613 @@
+{
+  "schema": 1,
+  "measured_ipa_version": "4.1.0",
+  "measured_raw": "0x40010000",
+  "proposed_compatible": "qcom,sc8180x-ipa",
+  "source": {
+    "url": "https://android.googlesource.com/kernel/msm/+/c8bbb1e3a59cb5cde2da79a8db638691b70535d7/drivers/platform/msm/ipa/ipa_v3/ipa_utils.c",
+    "sha256": "27c1d76ef2ea21b2cc69686f1a18642f40a20bc1f622f17e684aeae09c033413"
+  },
+  "endpoints": {
+    "AP_COMMAND_TX": {
+      "client": "APPS_CMD_PROD",
+      "endpoint_id": 5,
+      "channel_id": 4,
+      "raw_auxiliary_fields": [
+        20,
+        24
+      ],
+      "ee": "IPA_EE_AP",
+      "windows_static_direction_flag": 1,
+      "windows_static_seq_raw": 0,
+      "ipa_if_tlv": 20,
+      "ipa_if_aos": 24,
+      "auxiliary_fields_resolved": true,
+      "ring_sizes_verified": false,
+      "source_line": 1745
+    },
+    "AP_LAN_RX": {
+      "client": "APPS_LAN_CONS",
+      "endpoint_id": 10,
+      "channel_id": 5,
+      "raw_auxiliary_fields": [
+        9,
+        9
+      ],
+      "ee": "IPA_EE_AP",
+      "windows_static_direction_flag": 0,
+      "windows_static_seq_raw": 4294967295,
+      "ipa_if_tlv": 9,
+      "ipa_if_aos": 9,
+      "auxiliary_fields_resolved": true,
+      "ring_sizes_verified": false,
+      "source_line": 1838
+    },
+    "AP_MODEM_TX": {
+      "client": "APPS_WAN_PROD",
+      "endpoint_id": 2,
+      "channel_id": 3,
+      "raw_auxiliary_fields": [
+        16,
+        32
+      ],
+      "ee": "IPA_EE_AP",
+      "windows_static_direction_flag": 1,
+      "windows_static_seq_raw": 2052,
+      "ipa_if_tlv": 16,
+      "ipa_if_aos": 32,
+      "auxiliary_fields_resolved": true,
+      "ring_sizes_verified": false,
+      "source_line": 1739
+    },
+    "AP_MODEM_RX": {
+      "client": "APPS_WAN_CONS",
+      "endpoint_id": 11,
+      "channel_id": 6,
+      "raw_auxiliary_fields": [
+        9,
+        9
+      ],
+      "ee": "IPA_EE_AP",
+      "windows_static_direction_flag": 0,
+      "windows_static_seq_raw": 4294967295,
+      "ipa_if_tlv": 9,
+      "ipa_if_aos": 9,
+      "auxiliary_fields_resolved": true,
+      "ring_sizes_verified": false,
+      "source_line": 1844
+    },
+    "MODEM_COMMAND_TX": {
+      "client": "Q6_CMD_PROD",
+      "endpoint_id": 4,
+      "channel_id": 1,
+      "raw_auxiliary_fields": [
+        20,
+        24
+      ],
+      "ee": "IPA_EE_Q6",
+      "windows_static_direction_flag": 1,
+      "windows_static_seq_raw": 4294967295,
+      "ipa_if_tlv": 20,
+      "ipa_if_aos": 24,
+      "auxiliary_fields_resolved": true,
+      "ring_sizes_verified": false,
+      "source_line": 1769
+    },
+    "MODEM_LAN_RX": {
+      "client": "Q6_LAN_CONS",
+      "endpoint_id": 14,
+      "channel_id": 4,
+      "raw_auxiliary_fields": [
+        9,
+        9
+      ],
+      "ee": "IPA_EE_Q6",
+      "windows_static_direction_flag": 0,
+      "windows_static_seq_raw": 4294967295,
+      "ipa_if_tlv": 9,
+      "ipa_if_aos": 9,
+      "auxiliary_fields_resolved": true,
+      "ring_sizes_verified": false,
+      "source_line": 1862
+    },
+    "MODEM_AP_TX": {
+      "client": "Q6_WAN_PROD",
+      "endpoint_id": 3,
+      "channel_id": 0,
+      "raw_auxiliary_fields": [
+        16,
+        32
+      ],
+      "ee": "IPA_EE_Q6",
+      "windows_static_direction_flag": 1,
+      "windows_static_seq_raw": 4294967295,
+      "ipa_if_tlv": 16,
+      "ipa_if_aos": 32,
+      "auxiliary_fields_resolved": true,
+      "ring_sizes_verified": false,
+      "source_line": 1763
+    },
+    "MODEM_AP_RX": {
+      "client": "Q6_WAN_CONS",
+      "endpoint_id": 13,
+      "channel_id": 3,
+      "raw_auxiliary_fields": [
+        9,
+        9
+      ],
+      "ee": "IPA_EE_Q6",
+      "windows_static_direction_flag": 0,
+      "windows_static_seq_raw": 4294967295,
+      "ipa_if_tlv": 9,
+      "ipa_if_aos": 9,
+      "auxiliary_fields_resolved": true,
+      "ring_sizes_verified": false,
+      "source_line": 1868
+    }
+  },
+  "windows_q6_pipe_channel_pairs_equal": true,
+  "windows_static_endpoint_direction_flags_equal": true,
+  "clock": {
+    "provider": "qcom,sc8180x-rpmh-clk",
+    "index": 12,
+    "read_only_probe_rate_hz": 100000000,
+    "read_probe_verified": true
+  },
+  "data_plane_validated": false,
+  "implemented": false,
+  "unresolved": [
+    "IPA_SIDS",
+    "IPA_MEMORY_LAYOUT",
+    "IPA_RESOURCE_GROUP_LIMITS",
+    "IPA_INIT_BITFIELDS",
+    "GSI_RING_OWNERSHIP",
+    "MODEM_EFS_ACCEPTANCE"
+  ],
+  "original_sq1_iort_reference": {
+    "sha256": "acfe9033f58667c795a4874eb77b9a0e475154448130fc1290fdbd4bcf0713bd",
+    "checksum_valid": true,
+    "node": "\\_SB.IPA",
+    "input_base": "0xb030000",
+    "id_count": 2,
+    "output_base": "0x520",
+    "smmu_base": "0x15000000",
+    "current_sq2_el2_ownership_verified": false
+  },
+  "register_reference": {
+    "source_commit": "c8bbb1e3a59cb5cde2da79a8db638691b70535d7",
+    "source_sha256": {
+      "ipahal_reg.c": "b4d4d9d549dff9d3a217b3b5078a2ede5b604ce5745632449b02493c4163ab02",
+      "ipahal_reg.h": "fde5384df8330c72d23796636081dd52eecdfb09e909fc5516429dbbb98a8790",
+      "ipahal-ipahal_reg_i.h": "32e9cb95e026564389e57b5210e4eff769f86429111673d6c0f77d1e4daf57c5",
+      "ipa.h": "a20344343ade3041cc14474398b3c6da373ec43625c76b4b338a999a2d7b835e"
+    },
+    "ipa41_inherits_ipa40": true,
+    "measured_register": "IPA_COMP_HW_VERSION",
+    "measured_register_offset": "0x30",
+    "distinct_IPA_VERSION_offset": "0x34",
+    "distinct_IPA_VERSION_read": false,
+    "idle_indication_offset": "0x220",
+    "sc7180_idle_indication_offset": "0x240",
+    "endp_ctrl": {
+      "offset": "0x800",
+      "stride": "0x70",
+      "delay_mask": "0x2",
+      "suspend_supported": false
+    },
+    "endp_hol_timer": {
+      "offset": "0x830",
+      "stride": "0x70",
+      "timer_mask": "0xffffffff",
+      "sc7180_split_base_scale": true
+    },
+    "endp_resource_group_mask": "0x3",
+    "backward_compat": "0x39",
+    "sc7180_backward_compat": "0x0",
+    "aggr_bitmap_mask": "0x7fffff",
+    "sc7180_aggr_bitmap_mask": "0x1ffff"
+  },
+  "current_sq2_smmu_observation": {
+    "id0": "0x7c017ed4",
+    "scr0": "0x002d1c06",
+    "groups_scanned": 212,
+    "candidate_sids": [
+      "0x520",
+      "0x521",
+      "0x522"
+    ],
+    "visible_matches": [
+      0,
+      0,
+      0
+    ],
+    "ownership_inferred": false,
+    "writes_performed": false
+  },
+  "reference_candidate": {
+    "built": true,
+    "deployable": false,
+    "hardware_loaded": false,
+    "patch": "patches/sq2-ipa-v4.1-reference.patch",
+    "patch_sha256": "3e0a306d2c8fb19410fe8f0df77027f4c4903c3874b57074f505a98a57a7b2d4",
+    "module_sha256": "f219b9c0a5f8b98443b22a9c416fbbe9a5ed5620446f5a65e4a1d2e342bb8bca",
+    "early_probe_return": "-EOPNOTSUPP before power/MMIO/IOMMU/IRQ/DMA",
+    "supported_version_still_false": true,
+    "registers_defined": 6,
+    "resource_limits_supplied": false,
+    "memory_layout_supplied": false,
+    "ring_sizes_supplied": false
+  },
+  "soc_references": {
+    "sm8150": {
+      "hw_enum": 15,
+      "version": "4.1",
+      "raw_windows": [
+        [
+          31457280,
+          212992
+        ],
+        [
+          31473664,
+          163840
+        ]
+      ],
+      "sid_roles": {
+        "ap": "0x520",
+        "wlan": "0x521",
+        "uc": "0x522"
+      },
+      "sha256": "a71e5e3fa6108e6fac6df1373c6dce002fba0d2c9cc97f68be2dba4b1a5842d1",
+      "imem_reference": {
+        "address": "0x146bd000",
+        "size": "0x2000",
+        "current_sq2_ownership_verified": false
+      },
+      "url": "https://android.googlesource.com/kernel/msm/+/c8bbb1e3a59cb5cde2da79a8db638691b70535d7/arch/arm64/boot/dts/qcom/sm8150.dtsi"
+    },
+    "sm8250_kona": {
+      "hw_enum": 17,
+      "version": "4.5",
+      "raw_windows": [
+        [
+          31457280,
+          540672
+        ],
+        [
+          31473664,
+          143360
+        ]
+      ],
+      "sid_roles": {
+        "ap": "0x5c0",
+        "wlan": "0x5c1",
+        "uc": "0x5c2"
+      },
+      "sha256": "d81aa04a4c67380bf0ee05f5ebca853ff27262679cbab697fbf8122656493007",
+      "url": "https://android.googlesource.com/kernel/msm/+/9af99ae982b0c47fb0ff33e475355dd755afd89c/arch/arm64/boot/dts/qcom/kona.dtsi"
+    }
+  },
+  "reference_memory_partition": {
+    "reference_only": true,
+    "source_sha256": "27c1d76ef2ea21b2cc69686f1a18642f40a20bc1f622f17e684aeae09c033413",
+    "fields": {
+      "ofst_start": 640,
+      "v4_flt_hash_ofst": 648,
+      "v4_flt_hash_size": 120,
+      "v4_flt_hash_size_ddr": 16384,
+      "v4_flt_nhash_ofst": 776,
+      "v4_flt_nhash_size": 120,
+      "v4_flt_nhash_size_ddr": 16384,
+      "v6_flt_hash_ofst": 904,
+      "v6_flt_hash_size": 120,
+      "v6_flt_hash_size_ddr": 16384,
+      "v6_flt_nhash_ofst": 1032,
+      "v6_flt_nhash_size": 120,
+      "v6_flt_nhash_size_ddr": 16384,
+      "v4_rt_num_index": 15,
+      "v4_modem_rt_index_lo": 0,
+      "v4_modem_rt_index_hi": 7,
+      "v4_apps_rt_index_lo": 8,
+      "v4_apps_rt_index_hi": 14,
+      "v4_rt_hash_ofst": 1160,
+      "v4_rt_hash_size": 120,
+      "v4_rt_hash_size_ddr": 16384,
+      "v4_rt_nhash_ofst": 1288,
+      "v4_rt_nhash_size": 120,
+      "v4_rt_nhash_size_ddr": 16384,
+      "v6_rt_num_index": 15,
+      "v6_modem_rt_index_lo": 0,
+      "v6_modem_rt_index_hi": 7,
+      "v6_apps_rt_index_lo": 8,
+      "v6_apps_rt_index_hi": 14,
+      "v6_rt_hash_ofst": 1416,
+      "v6_rt_hash_size": 120,
+      "v6_rt_hash_size_ddr": 16384,
+      "v6_rt_nhash_ofst": 1544,
+      "v6_rt_nhash_size": 120,
+      "v6_rt_nhash_size_ddr": 16384,
+      "modem_hdr_ofst": 1672,
+      "modem_hdr_size": 320,
+      "apps_hdr_ofst": 1992,
+      "apps_hdr_size": 0,
+      "apps_hdr_size_ddr": 2048,
+      "modem_hdr_proc_ctx_ofst": 2000,
+      "modem_hdr_proc_ctx_size": 512,
+      "apps_hdr_proc_ctx_ofst": 2512,
+      "apps_hdr_proc_ctx_size": 512,
+      "apps_hdr_proc_ctx_size_ddr": 0,
+      "modem_comp_decomp_ofst": 0,
+      "modem_comp_decomp_size": 0,
+      "modem_ofst": 5104,
+      "modem_size": 4108,
+      "apps_v4_flt_hash_ofst": 9212,
+      "apps_v4_flt_hash_size": 0,
+      "apps_v4_flt_nhash_ofst": 9212,
+      "apps_v4_flt_nhash_size": 0,
+      "apps_v6_flt_hash_ofst": 9212,
+      "apps_v6_flt_hash_size": 0,
+      "apps_v6_flt_nhash_ofst": 9212,
+      "apps_v6_flt_nhash_size": 0,
+      "uc_info_ofst": 128,
+      "uc_info_size": 512,
+      "end_ofst": 10240,
+      "apps_v4_rt_hash_ofst": 9212,
+      "apps_v4_rt_hash_size": 0,
+      "apps_v4_rt_nhash_ofst": 9212,
+      "apps_v4_rt_nhash_size": 0,
+      "apps_v6_rt_hash_ofst": 9212,
+      "apps_v6_rt_hash_size": 0,
+      "apps_v6_rt_nhash_ofst": 9212,
+      "apps_v6_rt_nhash_size": 0,
+      "uc_descriptor_ram_ofst": 9216,
+      "uc_descriptor_ram_size": 1024,
+      "pdn_config_ofst": 3032,
+      "pdn_config_size": 80,
+      "stats_quota_ofst": 3120,
+      "stats_quota_size": 96,
+      "stats_tethering_ofst": 3216,
+      "stats_tethering_size": 320,
+      "stats_flt_v4_ofst": 3536,
+      "stats_flt_v4_size": 384,
+      "stats_flt_v6_ofst": 3920,
+      "stats_flt_v6_size": 384,
+      "stats_rt_v4_ofst": 4304,
+      "stats_rt_v4_size": 384,
+      "stats_rt_v6_ofst": 4688,
+      "stats_rt_v6_size": 384,
+      "stats_drop_ofst": 5072,
+      "stats_drop_size": 32
+    },
+    "current_sq2_compatibility": "unverified"
+  },
+  "reference_resources": {
+    "reference_only": true,
+    "source_sha256": "27c1d76ef2ea21b2cc69686f1a18642f40a20bc1f622f17e684aeae09c033413",
+    "data": {
+      "source": {
+        "IPA_v4_0_RSRC_GRP_TYPE_SRC_PKT_CONTEXTS": [
+          [
+            1,
+            63
+          ],
+          [
+            1,
+            63
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            63
+          ]
+        ],
+        "IPA_v4_0_RSRC_GRP_TYPE_SRS_DESCRIPTOR_LISTS": [
+          [
+            10,
+            10
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            8,
+            8
+          ]
+        ],
+        "IPA_v4_0_RSRC_GRP_TYPE_SRC_DESCRIPTOR_BUFF": [
+          [
+            12,
+            12
+          ],
+          [
+            14,
+            14
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            8,
+            8
+          ]
+        ],
+        "IPA_v4_0_RSRC_GRP_TYPE_SRC_HPS_DMARS": [
+          [
+            0,
+            63
+          ],
+          [
+            0,
+            63
+          ],
+          [
+            0,
+            63
+          ],
+          [
+            0,
+            63
+          ]
+        ],
+        "IPA_v4_0_RSRC_GRP_TYPE_SRC_ACK_ENTRIES": [
+          [
+            14,
+            14
+          ],
+          [
+            20,
+            20
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            14,
+            14
+          ]
+        ]
+      },
+      "destination": {
+        "IPA_v4_0_RSRC_GRP_TYPE_DST_DATA_SECTORS": [
+          [
+            4,
+            4
+          ],
+          [
+            4,
+            4
+          ],
+          [
+            3,
+            3
+          ],
+          [
+            2,
+            2
+          ]
+        ],
+        "IPA_v4_0_RSRC_GRP_TYPE_DST_DPS_DMARS": [
+          [
+            2,
+            63
+          ],
+          [
+            1,
+            63
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            0,
+            2
+          ]
+        ]
+      },
+      "groups": {
+        "source_count": 4,
+        "destination_count": 4,
+        "group0": "LWA_DL",
+        "group1": "UL_DL",
+        "group2": "unused",
+        "group3": "UC_RX_Q"
+      },
+      "qsb": {
+        "DDR": {
+          "max_reads": 12,
+          "max_writes": 8
+        },
+        "PCIE": {
+          "max_reads": 12,
+          "max_writes": 4
+        }
+      }
+    }
+  },
+  "independent_mainline_shaped_reference": {
+    "repository": "https://github.com/Sr-0w/hotdog-linux-bringup",
+    "commit": "47087509c4289c2580c54f5433e55366b2e00445",
+    "data_sha256": "b86d20383839865b462acee79ea1b005e86f6393f45138902185d1e14d243de1",
+    "endpoint_pairs_checked": 8,
+    "sram_offset_size_pairs_checked": 23,
+    "warnings": [
+      "Hotdog reference IMEM=0x146a8000; SM8150 downstream and SQ1 original reference=0x146bd000. Do not transplant.",
+      "Hotdog register table ENDP_RSRC_GRP=BIT(0); pinned downstream IPA4.1 inherited mask=0x3. Audit before reuse.",
+      "Hotdog data omits backward_compat; our Linux6.3.8 uses this field and needs source-backed0x39, not implicit0.",
+      "Hotdog self-loading ipa_fws and phone reservations are not evidence for current adopted SQ2 firmware ownership.",
+      "Author reports rmnet_ipa0 locally; this is not upstream acceptance or verified live cellular traffic on SQ2."
+    ]
+  },
+  "current_sq2_iort": {
+    "sha256": "acfe9033f58667c795a4874eb77b9a0e475154448130fc1290fdbd4bcf0713bd",
+    "bytes": 6467,
+    "checksum_valid": true,
+    "byte_identical_to_sq1": true,
+    "rsdp_phys": "0xffffe018",
+    "iort_phys": "0xfff91018",
+    "named_component": "\\_SB.IPA",
+    "ipa_output_range": [
+      "0x520",
+      "0x522"
+    ],
+    "smmu_base": "0x15000000",
+    "live_smmu_ownership_inferred": false
+  },
+  "current_sq2_gsi_observation": {
+    "status": 0,
+    "enabled": false,
+    "context_reads": 0,
+    "contexts_valid": false,
+    "clock_rate_before": 0,
+    "clock_rate_during": 100000000,
+    "clock_rate_after": 0,
+    "clock_enabled_before": false,
+    "clock_enabled_after": false,
+    "default_refusal_tested": true,
+    "probe_removed": true,
+    "no_writes": true,
+    "no_dma": true
+  },
+  "original_ipa_firmware": {
+    "sha256": "510f10022640b99042a05aac6ead42435deb4d4e509ec8f4a78b851b4f911b18",
+    "bytes": 37184,
+    "elf32_dsp6": true,
+    "relocatable": true,
+    "minimum_staging_span": "0x57000",
+    "loaded": false,
+    "pas_auth_tested": false,
+    "source": "previously collected SQ1 original driver package"
+  },
+  "lab_driver_candidate": {
+    "module_sha256": "9b6e6dd6659f5344205927d0e27c66c564786955a414bef6cc73957e8c049abd",
+    "patch_sha256": "82cfc8365ac381dd80e9e2e687deda746cce47e91cb58276413c209508b6ae0a",
+    "boot_id": "e5874e01-33ae-4127-9082-12a05eb9b687",
+    "runtime_mode": 2,
+    "driver_bound": true,
+    "firmware_original_sha256": "510f10022640b99042a05aac6ead42435deb4d4e509ec8f4a78b851b4f911b18",
+    "firmware_load_and_setup_pass": true,
+    "interface": "rmnet_ipa0",
+    "interface_created": true,
+    "traffic_validated": false,
+    "hardware_memory_size": "0x2800",
+    "hardware_flavor": "0x0a0d0a17",
+    "translated_iommu_singleton_pass": true,
+    "staging_start": "0x9b000000",
+    "staging_size": "0x60000",
+    "staging_reserved_observed": true,
+    "modem_online_error": 52,
+    "original_factory_test_restored": true,
+    "default_payload_promoted": false,
+    "original_menu_restored": true,
+    "live_dt_is_alternative": true
+  }
+}

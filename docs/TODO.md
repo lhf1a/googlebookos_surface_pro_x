@@ -1,5 +1,15 @@
 # SQ2 适配待办
 
+## LTE（2026-11-02 开始，同日按用户要求暂停）
+
+- 独立分支 `codex/lte-support`；当前完整 EL2 上 MPSS/QMI 可用，SIM present，
+  DMS=factory-test，NAS 未注册/PS 未附着，WDS disconnected。
+- 已完成带 NAS 的只读探针、协议解码测试和实机基线；LTE 上网尚未实现。
+- 下一步核对射频模式来源、SC8180X IPA/GSI 数据通路与 Android Radio HAL。
+  依据及实施顺序见 [LTE.md](LTE.md)。不更改正常启动或重启 MPSS 来试错。
+- online请求已被固件以error52拒绝，原模式2已恢复；当前EFS为全零占位文件。
+  优先定位本机真实EFS，EFI读取草稿仅编译通过、尚未部署；明确恢复前不继续。
+
 ## 已解决：SQ2 内置扬声器（2026-10-30）
 
 - 默认 RX7/RX8=84/84（0 dB，相比原值 +12 dB）；用户确认听感很好，并确认设备正常启动、播放音频响度正确，声音问题已解决。

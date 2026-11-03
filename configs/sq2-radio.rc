@@ -1,0 +1,13 @@
+# Data-only lab HAL; current port runs permissive with the kernel context.
+service sq2-radio /vendor/bin/sq2-radio
+    class hal
+    user root
+    group root radio system inet net_admin
+    seclabel u:r:kernel:s0
+    interface aidl android.hardware.radio.config.IRadioConfig/default
+    interface aidl android.hardware.radio.sim.IRadioSim/slot1
+    interface aidl android.hardware.radio.modem.IRadioModem/slot1
+    interface aidl android.hardware.radio.network.IRadioNetwork/slot1
+    interface aidl android.hardware.radio.data.IRadioData/slot1
+    interface aidl android.hardware.radio.voice.IRadioVoice/slot1
+    interface aidl android.hardware.radio.messaging.IRadioMessaging/slot1

@@ -1,0 +1,20 @@
+[
+  {
+    "file": "ipa_sq2_lab.ko",
+    "bytes": 349704,
+    "sha256": "9b6e6dd6659f5344205927d0e27c66c564786955a414bef6cc73957e8c049abd",
+    "status": "Explicit lab-only IPA mode2; rmnet_ipa0 observed, cellular traffic not verified"
+  },
+  {
+    "file": "android-ip4.dtb",
+    "bytes": 89594,
+    "sha256": "49228267f0f2fce8a54b87965f6bf83fa718dbe9bb68ea6da9a227b9e2f1210f",
+    "status": "Experimental SQ2 IPA DT; not normal/default DT"
+  },
+  {
+    "file": "sq2-mfs-readonly-lab",
+    "bytes": 704936,
+    "sha256": "cec1148970d97ac5c533d6a8ac4ecdb82f4ebe5d8a76c42a75065f9d449db07a",
+    "status": "Read-only EFS lab helper; metadata works, file read returns Malformed"
+  }
+]
