@@ -1,3 +1,70 @@
+## 2026-11-04：RFC 静态锚点核对与反汇编覆盖边界
+
+在私有目录从已核对APT包隔离恢复LLVM18.1.3及依赖，未安装到系统；已实际验证
+Hexagon目标，固定原MPSS为9ec7b6c6…、75,470,832字节，ELF32 little-endian、
+e_machine164/e_flags0x66，采用hexagonv66。依据固定版本
+[LLVM Hexagon实现](https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-18.1.3/llvm/lib/Target/Hexagon/Disassembler/HexagonDisassembler.cpp)，
+按packet/immext完整语义核对，不把孤立数值当指令交叉引用。
+
+生成fc476b24…的53节**仅分析视图**：只改e_shoff/e_shnum/e_shstrndx并追加元数据，
+33个原PH、31个PT_LOAD文件字节及原映射字段完全不变；独立校验和精确重建通过，
+错误SHA、截断及目标/原件路径碰撞均拒绝。NULL、高熵段和NOBITS尾部不标作已解码
+代码，存在的原VA重叠仍保留。不能部署、签名或替换设备固件。
+
+**无SHT并不阻止本次LLVM反汇编。** 同一64字节窗口0xc0800000..0xc0800040的
+BASELINE/MODIFIED/ROLLBACK/REAPPLIED实际均exit0，16条指令的字节及文本逐条相同，
+并与原PH2文件字节一致。原版/回滚通过PT_LOAD#2 fallback，带no-overlap warning；
+视图/重施仅改为.ph02.load.rx.file标签且无该warning。真实rfc-elf回滚得到原9ec7…，
+重施得到fc476…，均已哈希核对。命名节视图不是这项反汇编能力的必要前置。
+
+原QDB4723a56f…在0x40后的zlib内容与既有解码文本逐字相同；原头明确是Qshrink4
+`<hash>:<ss_mask>:<ssid>:<line>:<file>:<string>`，第一列不是源代码行号或文本行号。
+确认7个完整的16字节描述符及其格式/文件名指针，原PH可映射的VA从0xc20d7fc0到
+0xc20d8020；主锚0xc20d7fd0对应rfc_cmw.cpp:1312的构造函数日志描述符。
+这不是源行1331的HWID比较分支，也还没有建立指令xref/调用参数流；相邻源行不能
+证明同一控制流。五个目标QDB记录的完整前缀没有原始文件命中，不据此判断运行时缺失。
+
+对11个原PF_X文件区间、共9,596,676字节的限定全-d已完成，输出84,077,435字节，
+含52,207行unknown。针对已验证锚点的直接无符号/有符号常量及LLVM实际合成的
+immext模式均无命中；这不覆盖所有寄存器组合、间接表、GP/PC相对引用或未解码页。
+复用这份输出，另按固定外部[QSR4参考脚本](https://raw.githubusercontent.com/mzakocs/qualcomm_baseband_scripts/1bd919800813e26e830b30c481319fde3a6c983b/qshrink4_qdb_ghidra_script.py)
+的`((u32_constant >> 3) & 0xfffff)`投影检查138,984个完整`##`常量，10项自测及
+排除半截immext通过，仍无五个目标候选。该投影只是参考假设，**不是本MPSS已证实ABI**；
+没有套用Pixel5函数地址/配置，也未执行外部设备提取器。
+
+这些结果都是有明确覆盖范围的阴性，不证明RFC函数不存在、固件有故障、SQ1校准绑定
+或LTE根因已定位。没有解压/验证CLADE，没有设备连接、启动、NV读取或固件写入；本轮
+不会把静态工具通过称作SIM/注册/PS/蜂窝流量通过。通用初始镜像目标仍未完成。
+
+工具错误已保留并修正：首轮下载文件名未考虑APT编码epoch，随后猜测libLLVM文件名
+也失败；改用已下载实际文件名/依赖路径后隔离LLVM执行成功。内联WSL变量展开丢失
+另有失败记录，改为固定绝对路径；section-view初版误拒filesz=0且offset超EOF的PH32，
+已将文件范围检查限定非空段，未改PH或补造段字节。未把中途失败输出当作最终验证通过。
+
+进一步对原件的限定标量邻域只读定位得到4组地址/范围候选，其中2组有较强结构关系：
+PH21内相邻字段精确等于PH25的base/end；PH2三条连续记录的地址样字段覆盖PH24
+末端向下0x2000对齐后的候选区间 [0xc88a0000,0xc88a6000)，未覆盖文件末端0xc88a6040前最后0x40字节。另2个孤立整数匹配已排除。仍未确认CLADE配置ABI、字典或运行时
+使用，第三字段不能猜作PA/文件偏移；这不是解压成功，也不是压缩机制已完成识别。
+
+新增原字节/现存指令证据：PH2的42条length/type启动记录不是已证明的硬件页表；
+type4消费者确实读取source/destination/length并按4字节搬运。上述三记录将
+[c88a0000,c88a6000)+r25搬到[057d2000,057d8000)；这是代码路径中的目标地址，
+仍不能命名为CPU PA或特定本地内存。r25的定义为运行PC页减链接基址c0800000，
+但中间调用是否始终保留r25尚未穷尽验证，没有观测实际运行值，不能固定代入PH的PA。
+原候选三块各2048个word全部分别满足30/23/17bit，OR为3fffffff/7fffff/1ffff，
+越界和零word均0；前邻0x6000与PH25首0x6000两个对照不满足。它加强字典候选的
+结构证据，但未建立压缩页边界、解码器ABI、RFC调用或LTE修复，也没有进行解压。
+
+最后对0xc0800a60→0xc08015e8完成一次有界静态核对：可达函数仅28字节/7个word，
+与原件逐字相符，是将TLB索引0..0xbe清零的循环；没有type5、字典或压缩配置关联。
+没有执行函数或观察运行时TLB，也不递归跟踪此函数。本轮收口为已证启动拷贝路径与
+字典结构候选；下一阶段应从type5的真实消费者或压缩页结构另找入口，不能称已找到
+解码器。不再裸搜hash或重复全-d，
+也不能把公开CLADE说明当成本件已压缩/已解密失败的证明。固定参考源码、来源与边界在
+私有PRIMARY_SOURCES_AND_LIMITS.txt和reference-source/provenance.json；完整脚本、
+字面输出、二进制分析副本、回滚及文档事务位于原工作区out/lte-main-review-20261103/rfc-static-v1，
+不提交原始固件/QDB、网络地址、凭据或原始日志。
+
 ## 2026-11-03：SQ2 新启动与只读平台缓存字段对照
 
 SQ2 在已确认主机密钥下恢复连接，本轮实际boot为1df5aab6…，
