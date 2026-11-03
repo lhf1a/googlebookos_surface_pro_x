@@ -1,3 +1,20 @@
+## 2026-11-03：默认关闭 4 KB 页模式开发提醒
+
+标准入口仍为 `scripts/build.py`。共享 defaults.integrate 将当前 `apply-device-info`
+加入 SQ1/SQ2 默认与 Mesa 四个载荷；助手在 Android init 前的 RAM 属性覆盖中移除
+各分区重复的 `ro.product.build.16k_page.enabled`，仅在 product 属性中写入 `false`。
+仅关闭 Settings 页无关模式常驻提醒及本移植未提供的 16 KB boot OTA 切换入口；
+不改变内核页大小、应用兼容模式、其他通知或 userdata。保留 300 DPI、用户缩放、
+KSU、swap、LTE、EL2、screen_only/nohibernate 与最后凭据成员。
+AOSP 判断依据：[Enable16kUtils](https://android.googlesource.com/platform/packages/apps/Settings/+/refs/heads/main/src/com/android/settings/development/Enable16kUtils.java) 与
+[Enable16KBootReceiver](https://android.googlesource.com/platform/packages/apps/Settings/+/refs/heads/main/src/com/android/settings/development/Enable16KBootReceiver.java)。
+
+离线整镜像构建及四个最终 ESP 载荷检查通过；18 项提醒/defaults/swap 专项通过。
+同输入的实际 shell/awk 夹具中 BASELINE/MODIFIED/ROLLBACK 为 true/false/true，
+均保留默认密度与 userdata；只替换 bind mount，不将主机夹具当作实机通知消失证据。
+旧 LTE 夹具的 5 项失败在干净 main 副本中同样复现，本轮未改动 LTE 子系统。
+没有设备部署、重启或实机提醒验收。私有输入、镜像和原始验证记录不提交 Git。
+
 ## 2026-11-03：默认 300 DPI，移除 KSU 用户态固定 SHA 校验
 
 按用户要求，标准入口、profile 后端、defaults.integrate 及密度助手统一默认

@@ -1,3 +1,10 @@
+## 默认关闭 4 KB 页模式开发提醒（2026-11-03）
+
+标准构建通过启动前 RAM 属性覆盖设置 `ro.product.build.16k_page.enabled=false`，
+两机默认/Mesa 四载荷均采用。仅关闭 Settings 页无关模式常驻提醒及 16 KB 启动切换入口；
+不修改内核页大小、应用兼容、其他通知或 userdata。此移植没有提供 16 KB boot OTA。
+默认 300 DPI、KSU、低内存 swap 与现有默认组件不变；验证范围见 BUILD 顶部。
+
 ## 2026-11-03：源码 LTE 与压缩默认交付
 
 最新默认入口从源码编译 LTE/Radio，不再要求预制 Radio04。私有输入统一放 `private/build-inputs/`，不按历史输入 SHA 白名单拒绝；默认输出 IMG.GZ 并清理本次镜像中间文件。位置、公开工具依赖、单位配置与限制见 [PRIVATE-BUILD.md](PRIVATE-BUILD.md)。下方固定 Radio04 章节仅为历史。
