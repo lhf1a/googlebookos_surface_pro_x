@@ -471,3 +471,75 @@ PMIC结果JSON在 `out/suspend-resume-20261103/spi-pm/real-pmic-responses/` 和
 **此前本SQ2记录中的“画面/触摸/上滑解锁均正常”须收窄为“亮屏/触摸/返回桌面正常”。**
 用户当时“都正常”不构成实际执行上滑或安全凭据解锁的证据。13.96秒与15.69秒的
 内核电源键唤醒证据仍有效，锁屏/安全解锁验收未做；保留现有设置，不清除或新增凭据。
+
+
+### SSAM 关屏报告排队时序：隔离延时诊断候选已准备，尚未启动
+
+继续沿键盘盖对照定位。原trace在display-off通知后约100ms开始接收空键盘报告；
+D0-exit后剩余报告集中到恢复阶段释放，普通Awake被动窗口没有报告。
+当前待验证假设：在关屏通知与D0-exit之间保留窗口，可能避免将有限的释放报告排队
+成wake IRQ。报告的确切生成机制尚未确认，不将固定延时当作最终修复。
+
+从匹配正常内核的SSAM源码复制到独立work目录，仅在成功的pm_prepare/display-off
+通知后增加1100ms诊断延时及日志，不改事件订阅、wake开关或其他PM路径。
+正常源码/构建入口未接入此变更，不热卸载活跃SSAM。基线/候选/回滚模块严格构建，
+Module.symvers存在、baseline与rollback逐字相同；最初时钟偏差告警完整保留，
+最终候选在副本mtime归一后无告警且二进制与前次一致。副本回滚及完整diff重建通过。
+当前模块file/note和有效cpio匹配，候选148个外部引用全部找到实际内核导出，vermagic匹配。
+
+独立模块97d51f45…，实验initrd a954879e…只改变一个SSAM模块、保留已验证SPI PM与
+最后凭据成员；debug-only启动器a37b1278…仅允许受保护PM阶段，trial/native关闭。
+实际ESP挂载为动态核对的nvme分区6，原27项完整性清单全通过；候选传到独立路径并
+hash/gzip通过。**尚未安装一次性菜单、未重启、未做候选实机PM测试**；等待现场确认
+键盘盖接入及启动观察。正常两入口/载荷保持原状。候选与四角色证据仅在忽略的
+`out/suspend-resume-20261103/ssam-grace/`，不作为已验收休眠功能。
+
+
+### SSAM 延时诊断：加载与两次受保护检查完成
+
+用户确认键盘盖已接上并在场观察后，启动到boot6a06cbe5…；加载模块文件SHA
+97d51f45…且sysfs ELF note与候选逐字匹配。testY、trial/nativeN、owner/token0；
+原菜单立即恢复、once.env消费0，原ESP27项均匹配。ALSA/AUDIO_READY、真实音频
+进程774cd7e7…、三个attached remoteproc、两用户FUSE检查通过，用户确认桌面正常。
+
+两次Asleep/platform均返回0、2336条回调全部返回、无trace覆盖，success0→1→2/fail0，
+SPIresume_count0→1→2。第一轮有一次PMIC中断，用户确认按过电源键且恢复正常；
+因此补做一次不按键对照，第二轮既无SSAM也无PMIC IRQ，用户确认恢复正常。
+两轮都没有machine_suspend，不能当真实睡眠。
+
+第一轮关屏通知157.975673；9条iid1键盘报告从158.083762至158.886149，全部早于
+D0-exit159.593812。D0-entry164.647683后不再出现积压键盘报告，display-on164.951194
+之后另9条报告正常到达。这与原候选一部分报告积压到D0-entry的时序有明确区别，
+支持“关屏转换报告需先送完”的方向，但不能只凭这一固定延时推广到其他键盘盖/EC。
+
+已准备同模块的单任务trial启动器92d0ebf9…；用户确认继续真实按键对照后发出
+一次性重启，正常载荷保持，native仍关闭。新boot的验证和真实请求结果待下节。
+低功耗测量入口已发现：每核cpuidle/state*/s2idle/{time,usage}可读；当前内核未开启
+CONFIG_QCOM_STATS。此前只有累计值、没有逐试验差分，不作为硬件驻留通过证据。
+AC在线、BAT Full/power_now0，不能用此值声称零耗电；放电能耗仍需独立验证。
+
+
+### 2026-11-04：32.20秒电源键恢复后触摸失灵，候选不通过，退出实验恢复正常启动
+
+真实单任务boot86ef9211…使用相同SSAM诊断模块97d51f45…，键盘盖接入且SSAM/PMIC
+wakeup均enabled。machine_suspend133.037388→165.240756（32.203368秒），内核明确
+PMIC IRQ216唤醒，无SSAM早醒；2336条回调返回0且无trace覆盖。用户初报亮屏/触摸/
+键盘正常，随后明确报告“触摸失灵了”。**因此本轮不能标为完整恢复通过。**
+
+故障时同boot，SPIresume_count=1，但ready持续为`not ready`；触摸助手记录
+`TOUCH_RESUME_NOT_READY count=1`。SPI恢复日志有全零报头/invalid sync constant，
+PM回调仍返回0；可见回调返回码不能替代设备ready和持续输入验收。没有据此确认唯一根因。
+保存故障日志后仅调用已有touch-framework-ready重新初始化用户态：旧IPTSd停止，
+重新打开后等待12秒仍SPI_READY_TIMEOUT、退出3；未热卸载驱动，没有反复重试。
+
+用户已暂停“休眠可用”目标，本次仅处理故障恢复，不继续睡眠试验。核对原ESP27项
+全部匹配、7份once.env均为0、owner/token0后，重启回原正常启动包；恢复实测另续。
+原始故障快照、重新初始化结果与回退核验存于
+`out/suspend-resume-20261103/ssam-grace/touch-failure/`。正常构建未采用SSAM延时或SPI
+实验候选。每核s2idle/time虽增加约5.16–7.66秒，与32.20秒窗口不等，不作能耗/驻留达标证据。
+
+
+回退闭环：新boot `c3898a5d…` 实读正常内核#14、原默认initrad04.cpio.gz、
+screen_onlyY/nohibernate，无trial参数；SPI ready、IPTSd运行并重新发布虚拟输入。
+原ESP27项重新校验全通过，Android boot_completed1/Awake、强制禁锁false/组集合空。
+用户明确确认“已到桌面，触摸恢复”。恢复期间没有发起新的睡眠；目标继续保持用户暂停状态。
