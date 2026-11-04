@@ -16,7 +16,7 @@ def build(root, output=None):
     with tempfile.TemporaryDirectory(prefix='sq2-calibration-apk-') as td:
         w=Path(td);(w/'classes').mkdir();(w/'dex').mkdir()
         subprocess.run(['javac','--release','8','-encoding','UTF-8','-classpath',str(platform),'-d',str(w/'classes'),
-                        str(src/'Calibration.java'),str(src/'CalibrationCapture.java'),str(src/'ThumbCheck.java'),str(src/'ThumbTapCapture.java'),str(src/'SingleTapCapture.java'),str(src/'WizardFlow.java'),str(src/'MainActivity.java')],check=True)
+                        str(src/'Calibration.java'),str(src/'CalibrationCapture.java'),str(src/'ThumbCheck.java'),str(src/'ThumbTapCapture.java'),str(src/'SingleTapCapture.java'),str(src/'WizardFlow.java'),str(src/'SlideCapture.java'),str(src/'MainActivity.java')],check=True)
         subprocess.run([str(tools/'d8'),'--min-api','26','--lib',str(platform),'--output',str(w/'dex'),
                         *map(str,sorted((w/'classes').rglob('*.class')))],check=True)
         subprocess.run([str(tools/'aapt2'),'link','--manifest',str(src/'AndroidManifest.xml'),'-I',str(platform),'-o',str(w/'unsigned.apk')],check=True)

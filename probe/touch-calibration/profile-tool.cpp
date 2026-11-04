@@ -11,9 +11,11 @@
 
 using namespace iptsd::apps::daemon;
 int main(int argc, char **argv) try {
+    const bool noisePatch=argc==4 && std::string(argv[1])=="publish" && std::string(argv[3])=="noise-patch";
+    const size_t limit=noisePatch?132096:4096;
     std::string body, line;
     while (std::getline(std::cin,line)) {
-        if (line.size()>1024 || body.size()+line.size()>4096) throw std::runtime_error("Profile too large");
+        if (line.size()>(noisePatch?limit:1024) || body.size()+line.size()>limit) throw std::runtime_error("Profile too large");
         body+=line+'\n';
     }
     if (argc==4 && std::string(argv[1])=="publish") {

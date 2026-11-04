@@ -19,15 +19,15 @@ public:
         if(op=="reload"||op=="tapreload") {auto text=read(root+"tap-active");active=text.empty()?TapPolicy{}:TapPolicy::parse(text,id);learning=false;tracker.reset();}
         if(op=="taplearn"){learning=true;tracker.begin();std::remove((root+"tap-candidate").c_str());}
         if(op=="tapfinish") {if(!learning)throw std::runtime_error("not collecting");learning=false;
-          TapPolicy candidate=identityProfile;candidate.frames=active.frames;
+          TapPolicy candidate=identityProfile;candidate.frames=0; // A fresh test must not inherit an old delay.
           if(tracker.observations>=15&&tracker.repairable>0)candidate.frames=std::max(candidate.frames,std::min(6,tracker.maxBurst+1));
           write(root+"tap-candidate",candidate.encode());}
         write(root+"tap-status",n+" "+(op=="tapfinish"?"ready":op=="taplearn"?"learning":"applied")+" "+std::to_string(tracker.observations)+" "+std::to_string(tracker.repairable)+" "+std::to_string(tracker.maxBurst)+"\n");
       }catch(...){learning=false;write(root+"tap-status",n+" error 0 0 0\n");}
     }
-    template<class Info,class Image,class Config,class Contacts> void process(const Info &info,const Image&im,Contacts &contacts,const Config &cfg,long now){
+    template<class Info,class Image,class Config,class Contacts> void process(const Info &info,const Image&im,Contacts &contacts,const Config &cfg,long now,bool bypass=false){
       if(!info.is_touchscreen())return;
-      bool enabled=active.device==id&&active.vendor==info.vendor&&active.product==info.product&&active.rows==im.rows()&&active.cols==im.cols()&&active.frames>0;
+      bool enabled=!learning&&!bypass&&active.device==id&&active.vendor==info.vendor&&active.product==info.product&&active.rows==im.rows()&&active.cols==im.cols()&&active.frames>0;
       if(!learning&&!enabled)return;
       tracker.step(im,contacts,now,learning?6:active.frames,enabled,cfg.contacts_size_max,std::hypot(cfg.width,cfg.height));
     }

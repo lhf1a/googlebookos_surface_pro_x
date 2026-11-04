@@ -67,7 +67,7 @@ int main(){using namespace surface_touch;auto im=blob();std::vector<Contact> c(1
   # Simulate only the native file boundary; actual shell/validators/publishers execute.
   source=source.replace("runner=put('runner',script,0o755)","script=script.replace('noise_cmd() {', "+repr(fake)+").replace('noise_reload() {', 'noise_reload() { return 0;\\n')\n            runner=put('runner',script,0o755)")
   begin=source.index('                p=start();');end=source.index('            finally:',begin)
-  source=source[:begin]+"""                p=start();noise=w/'run/iptsd-noise';(noise/'version').write_text('4\\n')
+  source=source[:begin]+"""                p=start();noise=w/'run/iptsd-noise';(noise/'version').write_text('7\\n')
                 self.assertEqual(request('tap-save'),'ERROR')
                 self.assertEqual(request('tap-begin'),'OK')
                 self.assertEqual(request('tap-finish'),'OK')

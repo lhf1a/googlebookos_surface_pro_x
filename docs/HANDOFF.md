@@ -3465,3 +3465,23 @@ com.android.settings/.development.PageAgnosticNotificationService。
 **2026-10-31 KVM实机PASS后正常系统恢复已核验**：用户确认恢复，SSH读回bootffa7053f…、原baseline60 Mesa2.7-60、boot_completed1、guardY/nohibernate；菜单f7244134…与Mesa持久默认不变。完成/dev/kvm单vCPU验证及恢复闭环，没有追加实验。
 
 **2026-10-31 完整EL2内核8核/KVM通过，但NVMe未通过**：照片确认HOST_CPUS8、全CPU EL2、KVM PASS/EXIT0，同时/dev/nvme不存在；PCIe1c18000延迟probe。初版诊断遗漏tail，已修正新initramfs e743de2a…并增加SMMU/supplier信息。用户要求后续一次性GRUB自动选项：已装消费成功才选测试的白名单机制，默认Mesa不变，菜单6ef2e1f7…，fullram请求一次已发起重启，等待新照片与请求消费核验。完整Android KVM内核/331匹配模块及175744446B启动包仅本地准备，含实验性RAM Secretkeeper声明隐藏及protected_vm=0；未部署Android入口、未启动终端。详见SQ1-EL2-PREPARATION.md。
+
+
+## 2026-11-04：统一触摸校准 v7 纳入默认构建
+
+项目标准构建入口仍是 `scripts/build.py`，`--touch-repair on` 默认开启，
+共享组件与 profile 后端统一从 `private/build-inputs/touch` 读取触摸包。
+SQ1/SQ2 的 Default/Fallback 都集成相同触摸算法；保留 `--touch-bundle DIR`
+和 `--touch-repair off` 自定义入口，不改变 LTE、显示、EL2、音频或存储基线。
+组件生成方式见 [触摸默认基线](TOUCH-CALIBRATION.md)。
+
+流程：打开5秒后静置45秒 → 修复/复测确认 → 单指滑动20秒 → 修复/复测确认
+→ 15次单点 → 坐标/拇指校准。初测临时停用旧的每设备幽灵/连点策略，复测仅
+使用本轮候选；退出/取消或保护期限到达恢复，显式确认才持久保存。保留坐标参数。
+首次生成后的按钮为“应用修复并复测”。滑动不再有30次/0.5路程等硬性门槛。
+静置异常不因帧数、分窗或面积被拒绝：孤立点/窄行优先，SPXNOISE3 噪声幅度图
+处理宽区、间歇和混合异常；无原始数据不虚构结果，生成不等于已修复。
+
+32项离线回归通过；协议7 APK、IPTSd及助手已在 .94 运行时部署，运行/安装哈希及
+原配置保持已核验。实际缓解效果、完整向导和新整盘双机启动仍需验收。
+本次提交不包含 APK、内核、私有输入、原始日志或设备校准文件，也不写设备启动镜像。

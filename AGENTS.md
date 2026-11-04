@@ -48,3 +48,5 @@ Read docs/HANDOFF.md and docs/BUILD.md before changing the port.
 - The user subsequently enabled root password login on the current lab SSH server. Preserve public-key access too. The password and shadow entry stay private; local password-ssh addon must remain last when repacking this device. Standard public builds still default to key-only.
 - Report observations and limits honestly; do not label untested patches as working features.
 - Root/permissive/debug builds are authorized in this lab. This does not authorize erasing an unidentified disk or publishing secrets.
+
+- 2026-11-04 用户要求：后续任务不要擅自新增按次数、持续时间或异常区域大小拒绝处理的产品门槛。触摸检测已发现异常时，用现有证据生成可撤销候选并进入复测；不能把生成候选写成修复成功。保留设备身份、数据解析、回滚与明确保存机制，不虚构未采到的数据。

@@ -57,16 +57,24 @@ public class Check {
   # Fixture turns native reload ACK into a file update, not an Android/device test.
   replacement='noise_reload() {\n    printf \'%s applied 100 0\\n\' "$1" > "$noise/status"; return 0\n'
   source=source.replace("runner=put('runner',script,0o755)","script=script.replace('noise_reload() {', "+repr(replacement)+")\n            runner=put('runner',script,0o755)")
+  ack='noise_cmd() {\n    case "$1" in learn|learn-test|slide|slide-test) printf \'%s learning 0 0\\n\' "$2" > "$noise/status";; esac\n'
+  source=source.replace("runner=put('runner',script,0o755)","script=script.replace('noise_cmd() {', "+repr(ack)+")\n            runner=put('runner',script,0o755)")
   begin=source.index('                p=start();');end=source.index('            finally:',begin)
-  source=source[:begin]+"""                p=start();noise=w/'run/iptsd-noise';(noise/'version').write_text('3\\n')
+  source=source[:begin]+"""                p=start();noise=w/'run/iptsd-noise';(noise/'version').write_text('7\\n')
                 patch=f'SPXNOISE2 {device} 1118 3105 46 68 R 1 3\\n'
                 (noise/'candidate').write_text(patch);(noise/'status').write_text('fixture line_noise 100 0\\n')
                 self.assertEqual(request('noise-export'),'OK');self.assertEqual((files/'noise-patch').read_text(),patch)
                 self.assertFalse((noise/'active').exists());self.assertFalse((store/(device+'.noise')).exists())
                 self.assertEqual(request('noise-apply'),'OK');active=(noise/'active').read_bytes()
                 self.assertEqual(request('noise-retest','preview'),'OK');self.assertEqual((noise/'active').read_bytes(),active)
-                self.assertTrue((noise/'command').read_text().startswith('learn '));self.assertFalse((store/(device+'.noise')).exists())
+                self.assertTrue((noise/'command').read_text().startswith('learn-test '));self.assertFalse((store/(device+'.noise')).exists())
+                self.assertEqual(request('noise-slide','preview'),'OK')
+                self.assertTrue((noise/'command').read_text().startswith('slide-test '))
                 self.assertEqual(request('noise-save'),'OK');self.assertEqual((store/(device+'.noise')).read_bytes(),active)
+                self.assertEqual(request('noise-slide','current'),'OK')
+                self.assertTrue((noise/'command').read_text().startswith('slide '))
+                self.assertEqual(request('noise-resume'),'OK')
+                self.assertEqual((noise/'active').read_bytes(),active)
                 # Real coordinate preview dispatch must replace stale learn with
                 # reload and leave the already confirmed active/saved rule intact.
                 (noise/'command').write_text('learn '+device+' stale-learn\\n')

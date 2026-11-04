@@ -12,7 +12,7 @@ struct Grid { std::vector<double> v=std::vector<double>(46*68,0.01);int rows()co
 double operator()(int r,int c)const{return v[r*68+c];}double &operator()(int r,int c){return v[r*68+c];}};
 int main(){
  const std::string id(64,'a');Grid g;AdaptiveNoise a;a.begin(id,0x45e,0x996,46,68,0);
- for(int i=0;i<=720;i++){g(20,30)=i%3?0.95:0.01;a.observe(g,i*17);}
+ for(int i=0;i<=720;i++){g(20,30)=i%3?0.95:0.01;a.observe(g,i*63);}
  assert(a.state=="ready"&&a.result.cells.size()==1);
  auto p=Profile::parse(a.result.encode(),id);g(20,30)=.95;
  assert(AdaptiveNoise::apply(p,id,0x45e,0x996,g)==1&&g(20,30)==.01);
@@ -22,19 +22,19 @@ int main(){
  assert(AdaptiveNoise::apply(p,std::string(64,'b'),0x45e,0x996,isolated)==0);
  assert(AdaptiveNoise::apply(p,id,0x45e,0xc21,isolated)==0);
  AdaptiveNoise quiet;quiet.begin(id,0x45e,0x996,46,68,0);Grid q;
- for(int i=0;i<=720;i++)quiet.observe(q,i*17);
+ for(int i=0;i<=720;i++)quiet.observe(q,i*63);
  assert(quiet.state=="quiet"&&quiet.result.cells.empty());
  AdaptiveNoise touch;touch.begin(id,0x45e,0x996,46,68,0);touch.observe(g,17);
- touch.finish(12000);assert(touch.state=="transient"&&touch.result.cells.empty());
+ touch.finish(45000);assert(touch.state=="ready"&&touch.result.model());
  AdaptiveNoise line;line.begin(id,0x45e,0x996,46,68,0);Grid stripe;
  for(int c=0;c<68;c++)stripe(3,c)=.95;
- for(int i=0;i<=720;i++)line.observe(stripe,i*17);
+ for(int i=0;i<=720;i++)line.observe(stripe,i*63);
  assert(line.state=="line_noise"&&line.lineRows.size()==1&&line.lineRows[0]==3&&line.result.cells.empty());
- AdaptiveNoise nodata;nodata.begin(id,0x45e,0x996,46,68,0);nodata.finish(12000);
+ AdaptiveNoise nodata;nodata.begin(id,0x45e,0x996,46,68,0);nodata.finish(45000);
  assert(nodata.state=="no_data"&&nodata.frames==0);
  bool bad=false;try{Profile::parse(p.encode(),std::string(64,'b'));}catch(...){bad=true;}assert(bad);
  bad=false;try{Profile::parse(p.encode()+"junk",id);}catch(...){bad=true;}assert(bad);
- std::cout<<"sparse_learn=1 isolated_repaired=1 real_blob_preserved=1 quiet_no_change=1 contamination_refused=1 identity_guard=1\n";
+ std::cout<<"sparse_learn=1 isolated_repaired=1 real_blob_preserved=1 quiet_no_change=1 idle_blob_candidate=1 identity_guard=1\n";
 }
 '''
         with tempfile.TemporaryDirectory() as td:
@@ -78,7 +78,7 @@ double operator()(int r,int c)const{return v[r*68+c];}double &operator()(int r,i
 int main(){
  const std::string id(64,'a');AdaptiveNoise a;a.begin(id,0x45e,0x996,46,68,0);Grid g;
  for(int c=0;c<68;c++)for(int r=2;r<=4;r++)g(r,c)=.95;
- for(int i=0;i<=720;i++)a.observe(g,i*17);
+ for(int i=0;i<=720;i++)a.observe(g,i*63);
  assert(a.state=="line_noise"&&a.result.bandRows==std::vector<int>({2,3,4}));
  const auto p=Profile::parse(a.result.encode(),id);g(20,30)=.8;g(1,30)=.7;g(5,30)=.9;
  assert(AdaptiveNoise::apply(p,id,0x45e,0x996,g)==3*68);
@@ -92,7 +92,7 @@ int main(){
  Grid c;c(10,4)=.95;assert(AdaptiveNoise::apply(column,id,0x45e,0x996,c)==46&&c(10,4)==.01);
  AdaptiveNoise wide;wide.begin(id,0x45e,0x996,46,68,0);Grid w;
  for(int r=0;r<20;r++)for(int c=0;c<68;c++)w(r,c)=.95;
- for(int i=0;i<=720;i++)wide.observe(w,i*17);
+ for(int i=0;i<=720;i++)wide.observe(w,i*63);
  assert(!wide.result.band());
  std::cout<<"band_repair=1 outside_touch_preserved=1 crossing_support_interpolated=1 unsafe_band_refused=1 identity_guard=1\n";
 }

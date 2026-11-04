@@ -37,6 +37,14 @@ noise_cmd() {
     printf '%s %s %s\n' "$1" "$device" "$2" > "$noise/command.new"
     mv "$noise/command.new" "$noise/command"
 }
+noise_begin() {
+    noise_cmd "$1" "$2"
+    for i in $(seq 1 25); do
+        [ "$(head -n 1 "$noise/status" 2>/dev/null | cut -d ' ' -f1,2)" = "$2 learning" ] && return 0
+        sleep .2
+    done
+    return 1
+}
 noise_reload() {
     noise_cmd reload "$1"
     for i in $(seq 1 25); do
@@ -142,7 +150,7 @@ while true; do
             case "$nonce" in ''|*[!a-z0-9-]*) sleep 1; continue;; esac
             case "$command" in
                 tap-begin)
-                    if [ "$(cat "$noise/version" 2>/dev/null)" != 4 ] || [ ! -x /bin/touch-tap-profile ]; then reply ERROR;continue;fi
+                    if [ "$(cat "$noise/version" 2>/dev/null)" != 7 ] || [ ! -x /bin/touch-tap-profile ]; then reply ERROR;continue;fi
                     if [ "$tap_preview" = 1 ]; then tap_restore; fi
                     rm -f "$noise/tap-candidate"
                     noise_cmd taplearn "$nonce"
@@ -175,22 +183,22 @@ while true; do
                     ;;
                 tap-save)
                     if [ "$tap_preview" = 1 ] && /bin/touch-tap-profile "$device" < "$noise/tap-active" > "$tap_saved.new"; then
-                        chmod 600 "$tap_saved.new";sync;mv "$tap_saved.new" "$tap_saved";sync;tap_preview=0;reply OK
+                        chmod 600 "$tap_saved.new";sync;mv "$tap_saved.new" "$tap_saved";sync;tap_preview=0;if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
                     else reply ERROR;fi
                     ;;
                 tap-cancel)
                     if [ "$tap_preview" = 1 ];then tap_restore;else tap_reload "$nonce";fi
-                    reply OK
+                    if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
                     ;;
                 noise-learn)
-                    case "$(cat "$noise/version" 2>/dev/null)" in 1|2|3|4) ;; *) reply ERROR;continue;; esac
+                    case "$(cat "$noise/version" 2>/dev/null)" in 7) ;; *) reply ERROR;continue;; esac
                     if [ ! -x /bin/touch-noise-profile ]; then reply ERROR;continue;fi
                     if [ "$noise_preview" = 1 ]; then noise_restore; fi
                     rm -f "$noise/candidate"
                     power=$(cat /sys/class/power_supply/ADP1/online 2>/dev/null || printf unknown)
                     case "$power" in 0|1) ;; *) power=unknown;; esac
                     printf 'power_online=%s\n' "$power" > "$noise/power"
-                    noise_cmd learn "$nonce";reply OK
+                    if noise_begin learn "$nonce"; then reply OK;else noise_reload "$nonce-cancel";reply ERROR;fi
                     ;;
                 noise-export)
                     state=$(head -n 1 "$noise/status" 2>/dev/null | cut -d ' ' -f2)
@@ -199,34 +207,42 @@ while true; do
                         "$tool" publish "$files" noise-patch < "$noise/export.new";reply OK
                     else reply ERROR; fi
                     ;;
-                noise-retest)
+                noise-retest|noise-slide)
                     # A timed-out preview must not silently become a baseline retest.
                     requested=$(sed -n 3p /run/touch-calibration-request)
                     if [ "$requested" = preview ] && [ "$noise_preview" != 1 ]; then reply ERROR;continue;fi
                     # Observe original heatmaps again, WITHOUT restoring the active patch.
                     # Android reports the post-mitigation contacts in the same window.
-                    case "$(cat "$noise/version" 2>/dev/null)" in 3|4) ;; *) reply ERROR;continue;; esac
-                    if [ "$noise_preview" = 1 ]; then noise_until=$(( $(cut -d . -f1 /proc/uptime) + 180 )); fi
+                    case "$(cat "$noise/version" 2>/dev/null)" in 7) ;; *) reply ERROR;continue;; esac
+                    if [ "$noise_preview" = 1 ]; then noise_until=$(( $(cut -d . -f1 /proc/uptime) + 600 )); fi
                     power=$(cat /sys/class/power_supply/ADP1/online 2>/dev/null || printf unknown)
                     case "$power" in 0|1) ;; *) power=unknown;; esac
                     printf 'power_online=%s\n' "$power" > "$noise/power"
-                    noise_cmd learn "$nonce";reply OK
+                    op=learn; [ "$command" != noise-slide ] || op=slide
+                    [ "$requested" != preview ] || op=$op-test
+                    if noise_begin "$op" "$nonce"; then reply OK;else noise_reload "$nonce-cancel";reply ERROR;fi
                     ;;
                 noise-apply)
                     state=$(head -n 1 "$noise/status" 2>/dev/null | cut -d ' ' -f2)
                     case "$state" in ready|line_noise) ;; *) reply ERROR;continue;; esac
                     if ! /bin/touch-noise-profile "$device" < "$noise/candidate" > "$noise/active.new"; then reply ERROR; continue; fi
-                    rm -f "$noise/previous"
-                    [ ! -f "$noise/active" ] || cp "$noise/active" "$noise/previous"
+                    if [ "$noise_preview" != 1 ]; then
+                        rm -f "$noise/previous"
+                        [ ! -f "$noise/active" ] || cp "$noise/active" "$noise/previous"
+                    fi
                     mv "$noise/active.new" "$noise/active"
-                    noise_preview=1;noise_until=$(( $(cut -d . -f1 /proc/uptime) + 180 ))
+                    noise_preview=1;noise_until=$(( $(cut -d . -f1 /proc/uptime) + 600 ))
                     if noise_reload "$nonce"; then reply OK; else noise_restore;reply ERROR; fi
                     ;;
                 noise-save)
                     if [ "$noise_preview" = 1 ] && /bin/touch-noise-profile "$device" < "$noise/active" > "$noise_saved.new"; then
                         chmod 600 "$noise_saved.new";sync;mv "$noise_saved.new" "$noise_saved";sync
-                        noise_preview=0;reply OK
+                        noise_preview=0;if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
                     else reply ERROR; fi
+                    ;;
+                noise-resume)
+                    if [ "$noise_preview" = 1 ]; then reply ERROR;continue;fi
+                    if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
                     ;;
                 noise-cancel)
                     if [ "$noise_preview" = 1 ]; then noise_restore; else noise_cmd reload "$nonce"; fi

@@ -1,3 +1,5 @@
+**默认触摸基线 v7：** 45秒静置、滑动伴随触点检查、可撤销候选与复测确认，SQ1/SQ2 共用。见[构建方式与验证范围](docs/TOUCH-CALIBRATION.md)。
+
 **通用触摸基线（2026-11-03）：** 标准入口 `scripts/build.py` 默认 `--touch-repair on`，算法不区分 SQ1/SQ2，保留关闭与自定义包选择。静置检测后接入“15点采集→自动修复候选→复测确认→坐标/拇指校准”，界面只保留操作指引。新版已离线编译/组包，第二层尚未实机验收；详见 [标准构建](docs/STANDARD-BUILD.md) 与 [触摸流程](docs/TOUCH-NOISE-AND-CALIBRATION.md)。
 
 项目标准构建入口：`scripts/build.py`，生成单个 SQ1/SQ2 通用镜像；默认设置可自定义。见 [标准构建](docs/STANDARD-BUILD.md)。

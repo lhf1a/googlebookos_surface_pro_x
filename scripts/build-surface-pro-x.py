@@ -207,7 +207,7 @@ def main():
     p.add_argument('--dpi', type=int, default=300, help='default Android UI density; preserve saved user overrides')
     p.add_argument('--ksu-manager', choices=('on', 'off'), default='on', help='install pinned KernelSU Next userspace; no kernel replacement')
     p.add_argument('--ksu-bundle', type=Path, default=R/'out/ksunext')
-    p.add_argument('--touch-bundle', type=Path, default=R/'out/touch-baseline', help='compiled merged calibration/noise bundle; strict source/hash checks')
+    p.add_argument('--touch-bundle', type=Path, default=R/'private/build-inputs/touch', help='compiled merged calibration/noise bundle; strict source/hash checks')
     p.add_argument('--lte', choices=('on', 'off'), default='on',
                    help='baseline LTE/Radio enabled by default; off keeps the original payload')
     p.add_argument('--lte-bundle', type=Path, default=R/'private/lte-baseline',

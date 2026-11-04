@@ -1,3 +1,5 @@
+**Default touch baseline (v7):** 45-second idle detection, slide-ghost checks, reversible candidate/retest flow and shared SQ1/SQ2 integration. [Build and validation scope](docs/TOUCH-CALIBRATION.md).
+
 **Project standard build entry:** `scripts/build.py` creates one SQ1/SQ2 disk image. Defaults remain customizable; see [standard build](docs/STANDARD-BUILD.md).
 
 # Googlebook OS on Surface Pro X SQ2
