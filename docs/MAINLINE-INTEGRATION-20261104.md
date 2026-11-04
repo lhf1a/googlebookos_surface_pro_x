@@ -1,3 +1,16 @@
+## 2026-11-04：接回81c5c67的本机LTE自动采集构建链
+
+用户明确要求按81c5c673bb695a71a9017c2cf1bf6bd6ddf457aa修复标准通用构建。
+此项覆盖下方“保留旧LTE兼容/FSG打包路径”的合并决策：默认EFI router在EL2前采集
+本机FSG并使用本机UUID缓存，RAM seed核验来源/CRC后提供RMTFS，Radio为唯一bearer owner。
+构建不读取或嵌入modem_fsg.bin、unit.json、单机APN/serial；使用源码AOSP APN表。
+恢复上游退休的旧Java NetworkAgent删除与其旧基线测试删除。正常unrestricted和
+screen_only=0、nohibernate、共享固件、双机档位、Mesa回退保持，不恢复must-Y门禁。
+UUID只是动态缓存归属，不是样机白名单；实际缓存含私有校准，不能分发。
+本次只构建、不部署/重启；LTE构建通用化不证明双机新整镜像/长睡稳定性。
+标准组包仍使用指定模板和runtime中的原有SSH身份；本地产物不可当匿名公共镜像发布。
+U4阶段候选仍是独立打包入口，不宣称标准镜像已自动包含全部U4诊断覆盖层。
+
 > 2026-11-04更新：下文lte-fs12-seed、lte-fsg-seed及el2-preboot-init相关旧诊断工具已退役；引用仅为历史记录，当前实现见docs/HANDOFF.md顶部。
 
 ## 2026-11-04：当前U4开发版本合入主线（未部署）

@@ -46,7 +46,7 @@ def main():
     p.add_argument('--lte', choices=('on', 'off'), default='on',
                    help='LTE/Radio baseline on by default; off is the explicit original-runtime option')
     p.add_argument('--lte-bundle', type=Path, default=R/'private/build-inputs/lte',
-                   help='private raw LTE inputs; Radio compiled from source, unit guard retained')
+                   help='shared LTE firmware/modules; own-device FSG collected by EFI, never embedded')
     p.add_argument('--keep-work', action='store_true', help='retain intermediates for debugging')
     p.add_argument('--suspend-policy', choices=('unrestricted','android','screen-only'), default='unrestricted')
     p.add_argument('--power-bundle', type=Path, default=R/'private/build-inputs/power')
@@ -101,6 +101,10 @@ def main():
     shutil.copytree(a.output/'profiles/SQ1/firmware', root/'firmware')
     g = a.gnu_efi
     for fallback, name in ((0, 'default'), (1, 'fallback')):
+        if not fallback and a.lte == 'on':
+            run([sys.executable,R/'scripts/build-spx-lte-router.py','--output',a.output/'lte-router','--gnu-efi',g])
+            shutil.copyfile(a.output/'lte-router/default.efi',root/'EFI/SPX/default.efi')
+            continue
         obj=a.output/(name+'.o'); elf=a.output/(name+'.so')
         run(['aarch64-linux-gnu-gcc', '-Wall', '-Wextra', '-Werror', '-fpic', '-fshort-wchar',
              '-fno-stack-protector', '-ffreestanding', '-mstrict-align', '-DCONFIG_aarch64',
@@ -156,7 +160,8 @@ def main():
                 dpi=a.dpi,ksu_manager=a.ksu_manager,
                 model_selection='bounded SMBIOS type4 Microsoft SQ1/SQ2; unknown refuses',
                 entries=2,hardware_tested=False,deployed=False,files=hashes,
-                baseline='fee67b2 accepted runtime + 0100429 LTE/Radio when enabled; original Mesa fallback retained')
+                baseline='matched runtime + source-built own-device EFI/cache LTE when enabled; original Mesa fallback retained',
+                embedded_lte_calibration=False,identity_policy='operator template/runtime identity retained; not an anonymous public image')
     (a.output/'build-audit.json').write_text(json.dumps(report,indent=2)+'\n')
     (a.output/'SHA256SUMS').write_text(report['sha256']+'  '+image.name+'\n')
     compressed=image.with_suffix('.img.gz')

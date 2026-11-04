@@ -20,7 +20,7 @@ for i in $(seq 1 240); do
 done
 test "$(android getprop sys.boot_completed)" = 1
 src=/etc/sq2-lte
-(cd "$src"; sha256sum -c runtime.sha256)
+(cd "$src"; sha256sum -c runtime.sha256 >/dev/null)
 test ! -d /sys/module/ipa_sq2_lab
 grep -q '9b000000-9b05ffff : reserved' /proc/iomem
 # The kernel resolves firmware in init's mount namespace. This helper retains
@@ -41,29 +41,9 @@ insmod "$src/rmnet.ko"
 "$src/sq2-rmnet-create" create
 ip link set rmnet_ipa0 up
 ip link set rmnet_data0 up
-stage=/dev/sq2-lte
-mkdir -m 700 "$stage"
-for name in sq2-qmi-data sq2-qmi-mode sq2-lte.jar;do cp "$src/$name" "$stage/$name";done
-chmod 700 "$stage/sq2-qmi-data" "$stage/sq2-qmi-mode"
-if test -f /proc/1/root/vendor/etc/vintf/manifest/sq2-radio.xml; then
- # Radio HAL is the only bearer owner; telephony creates the NetworkAgent.
- touch "$stage/radio-data-ready"
- # The build ID is unchanged on this port. Ask TelephonyProvider to merge the
- # resource checksum once; update_db preserves user edits/deletions (not restore).
- android_env
- android content delete --uri content://telephony/carriers/update_db
- echo LTE_RADIO_TRANSPORT_READY
- exit 0
-fi
-apn=$(cat "$src/apn")
-# Restart only the process, never the modem/IPA transport. Native clients close
-# their own bearer on parent death; the interface belongs exclusively to us.
-for attempt in 1 2 3; do
- android_env
- ip addr flush dev rmnet_data0 scope global
- export CLASSPATH=$stage/sq2-lte.jar
- android app_process /system/bin Sq2Lte "$stage" "$apn" || true
- sleep 10
-done
-echo LTE_SERVICE_STOPPED_AFTER_THREE_EXITS
-exit 1
+# Radio HAL is the sole bearer owner; Android telephony creates NetworkAgent.
+mkdir -p -m 700 /dev/sq2-lte
+touch /dev/sq2-lte/radio-data-ready
+# Merge the resource checksum without replacing user edits/deletions.
+android_env
+android content delete --uri content://telephony/carriers/update_db >/dev/null

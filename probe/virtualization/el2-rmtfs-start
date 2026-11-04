@@ -2,7 +2,7 @@
 # Preserve normal modem start; paired EFI handoff must not reset it again.
 case " $(cat /proc/cmdline) " in
     *' sq2.el2=experimental '*|*' sq2.el2=1 '*) ;;
-    *) exec rmtfs -r -o /run/rmtfs -s -v ;;
+    *) exec rmtfs -r -o /run/rmtfs -s ;;
 esac
 found=0
 for p in /sys/class/remoteproc/remoteproc*; do
@@ -16,4 +16,4 @@ for p in /sys/class/remoteproc/remoteproc*; do
 done
 [ "$found" = 1 ] || { echo 'EL2 RMTFS: expected one verified modem' >&2; exit 1; }
 test -c /dev/qcom_rmtfs_mem1 || exit 1
-exec rmtfs -r -o /run/rmtfs -v
+exec rmtfs -r -o /run/rmtfs

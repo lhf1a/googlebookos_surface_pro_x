@@ -211,7 +211,7 @@ def main():
     p.add_argument('--lte', choices=('on', 'off'), default='on',
                    help='baseline LTE/Radio enabled by default; off keeps the original payload')
     p.add_argument('--lte-bundle', type=Path, default=R/'private/lte-baseline',
-                   help='private, exact reboot-verified Radio04 initramfs and IPA DT')
+                   help='shared LTE firmware/modules and IPA DT; no per-device calibration input')
     p.add_argument('--suspend-policy', choices=('unrestricted','android','screen-only'), default='unrestricted')
     p.add_argument('--power-bundle', type=Path, default=R/'private/build-inputs/power')
     args = p.parse_args()
