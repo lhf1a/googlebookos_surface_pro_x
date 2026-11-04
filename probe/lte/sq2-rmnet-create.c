@@ -25,12 +25,11 @@ static void build(struct request*q,unsigned parent){
  add(q,IFLA_RMNET_MUX_ID,&mux,2);add(q,IFLA_RMNET_FLAGS,&f,sizeof(f));nest_end(q,data);nest_end(q,info);
 }
 int main(int argc,char**argv){
- struct request q;if(argc==2&&!strcmp(argv[1],"selftest")){build(&q,4);if(q.n.nlmsg_len>sizeof(q)||q.n.nlmsg_type!=RTM_NEWLINK)return 1;unsigned seen=0;
- for(unsigned pos=NLMSG_ALIGN(NLMSG_LENGTH(sizeof(q.i)));pos<q.n.nlmsg_len;){struct rtattr*r=(void*)((char*)&q+pos);if(r->rta_len<4||pos+RTA_ALIGN(r->rta_len)>q.n.nlmsg_len)return 1;seen++;pos+=RTA_ALIGN(r->rta_len);}return seen!=3;}
+ struct request q;
  if(argc!=2||strcmp(argv[1],"create"))return 2;
  unsigned parent=if_nametoindex("rmnet_ipa0");if(!parent||if_nametoindex("rmnet_data0")){fputs("Refusing missing parent or existing child\n",stderr);return 1;}build(&q,parent);
  int fd=socket(AF_NETLINK,SOCK_RAW|SOCK_CLOEXEC,NETLINK_ROUTE);if(fd<0)return 1;struct sockaddr_nl dst={.nl_family=AF_NETLINK};if(sendto(fd,&q,q.n.nlmsg_len,0,(void*)&dst,sizeof(dst))!=(ssize_t)q.n.nlmsg_len)return 1;
  struct pollfd p={fd,POLLIN,0};if(poll(&p,1,3000)<=0)return 1;unsigned char b[4096];int n=recv(fd,b,sizeof(b),MSG_TRUNC);close(fd);if(n<(int)NLMSG_LENGTH(sizeof(struct nlmsgerr))||n>(int)sizeof(b))return 1;
  struct nlmsghdr*h=(void*)b;if(h->nlmsg_type!=NLMSG_ERROR||h->nlmsg_seq!=1||h->nlmsg_len>(unsigned)n)return 1;struct nlmsgerr*e=NLMSG_DATA(h);if(e->error){fprintf(stderr,"netlink: %s\n",strerror(-e->error));return 1;}
- puts("RMNET_CREATED mux=1 flags=15 parent=rmnet_ipa0 child=rmnet_data0");return 0;
+ return 0;
 }

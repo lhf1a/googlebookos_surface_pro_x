@@ -26,7 +26,7 @@ class RadioProtocol(unittest.TestCase):
             binary = Path(directory) / 'query'
             subprocess.run(['g++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
                             '-fsanitize=address,undefined', '-g',
-                            str(ROOT / 'probe/lte/sq2-radio-query.cpp'), '-o', str(binary)], check=True)
+                            str(ROOT / 'tests/sq2_radio_protocol_test.cpp'), '-o', str(binary)], check=True)
             result = subprocess.run([str(binary), 'selftest'], check=True, capture_output=True, text=True)
             self.assertIn('PASS QMI bounds', result.stdout)
 

@@ -1,0 +1,34 @@
+{
+  "source": "https://github.com/stephan-gh/qebspil",
+  "revision": "8e4d9e676a3b3afe136cda9b953a2139ff1a32d0",
+  "preparation": "scripts/prepare-sq2-el2-preboot.py; existing locally prepared source tree",
+  "files": [
+    {
+      "file": "CacheMaintenanceLib.h",
+      "sha256": "07e34ded40094ffe29ffcf2b1f7d9a3f013530237f171252fa54a692455a4ef3",
+      "matches_prepared_qebspil_source_after_lf_normalization": true
+    },
+    {
+      "file": "EFIListenerDef.h",
+      "sha256": "622a1a720acb010e502c84f73f2ba25c0ab36b747d130f2c989180fe64ce19ee",
+      "matches_prepared_qebspil_source_after_lf_normalization": true
+    },
+    {
+      "file": "EFIScm.h",
+      "sha256": "022ff767c7725d65b4f4fe140bcb5dc20760c7a8e79953293a9dd62287f2efd3",
+      "matches_prepared_qebspil_source_after_lf_normalization": true
+    },
+    {
+      "file": "cache.c",
+      "sha256": "793e9313de422420be696efc5a09cb66224702c7d8c58e0671fe17fe145712da",
+      "matches_prepared_qebspil_source_after_lf_normalization": true
+    },
+    {
+      "file": "scm_sip_interface.h",
+      "sha256": "5f0c31cbf47de11b9e094a9c523eff9b2e6b12d32e28f81a577b80abbd28599e",
+      "matches_prepared_qebspil_source_after_lf_normalization": true
+    }
+  ],
+  "licenses": "Original copyright/SPDX/license notices retained in each file. No firmware blobs in this directory.",
+  "changes": "Line endings normalized to LF; code unchanged from prepared upstream files."
+}

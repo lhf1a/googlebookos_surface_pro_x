@@ -11,6 +11,12 @@ Read docs/HANDOFF.md and docs/BUILD.md before changing the port.
 - **不撤销安全保护。** 模块/固件 ABI、构建产物完整性、真实硬件兼容性、SMMU/资源边界、screen_only/nohibernate、不可重复启动固件等保护保留。写盘前仍需动态识别本次目标盘/ESP/根源并防止误写；禁止单机白名单不等于允许盲写、清空 userdata 或热重置提供者。
 - **跨设备验收，诚实标界。** 同一产物覆盖 SQ1/SQ2、默认/Mesa 两入口以及不同设备身份、容量和枚举资源的回归；旧数据升级不得破坏凭据/用户设置。单台样机通过只证明该次观测，不能声称所有设备已实测。现存单机假设/私有包须列为待整改，不因修改规范就宣称现有镜像已完全通用。
 
+## LTE 执行与收尾约定（2026-11-04）
+
+- 按用户要求跳过离线功能验证/QEMU 前置环节，直接推进已指定真机；一次实验连续完成一组有依赖的改动、采集与观察，减少重启与反复确认。保留原件、可执行恢复、实际访问/内存边界及私有资料保护，不扩展成无意义门禁。
+- 复用 SQ2 已完成的 Android LTE 验收。已得到 FSG 地址即采集，不因旧哈希、固定序列/IP/UUID或猜测状态增加 helper 拦截；新的失败做针对性修正。正常运行不携带 LTE 观测器、测试入口、原始协议/寄存器转储或第二个 bearer owner。
+- 当前正确路径为本机 EFI GET_INFO/GPT/FSG → 本机 UUID 缓存 → RAM RMTFS → RF/注册 → IPA4.1/RMNET → 原生 Radio AIDL/Android 电话框架。不得将一台设备校准内嵌为通用输入。详见 `docs/LTE-PRODUCT.md` 与 `docs/LTE-EXPERIMENTS.md`。
+
 - Default build/menu (2026-11-02 user instruction): this SQ2 now targets EL2 + Qualcomm Vulkan + native 60 Hz + GPU700/RPMh432. Keep exactly the new default and working Mesa fallback entries; this supersedes the older rescue/shutdown-menu requirement below. Preserve shared GRUB/firmware and both payloads. Normal EL2 uses sq2.el2=1, without experiment recovery timers or continuous diagnostics. Do not restore sq2.el2=experimental in the normal launcher. See the latest HANDOFF for actual reboot results.
 
 - Wi-Fi debugging lesson (2026-11-01): test the full Android candidate early once storage, the screen-only guard and recovery are verified. A failure in a stripped diagnostic initramfs does not establish an EL2 hardware limitation. Compare against the known-working full boot before adding EFI/SCM/SMEM mechanisms; see the debugging retrospective in docs/SQ1-EL2-PREPARATION.md.

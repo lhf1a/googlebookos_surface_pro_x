@@ -1,5 +1,5 @@
 #!/bin/busybox sh
-# Operator-supplied shared FSG in RAM only. Standard public images omit this data.
+# Generic runtime: consume only this device's EFI-collected cache, in RAM.
 set -eu
 export PATH=/bin:/sbin
 case " $(cat /proc/cmdline) " in
@@ -9,18 +9,13 @@ case " $(cat /proc/cmdline) " in
 esac
 test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 case " $(cat /proc/cmdline) " in *' nohibernate '*) ;; *) exit 1;; esac
-case "$(tr -d '\000' < /proc/device-tree/model)" in
- 'Microsoft Surface Pro X (SQ1)'|'Microsoft Surface Pro X (SQ2)') ;;
- *) exit 1;;
-esac
 awk '$2=="/run" && $3=="tmpfs" {ok=1} END {exit !ok}' /proc/mounts
 test -z "$(pidof rmtfs 2>/dev/null || true)"
-(cd /etc/sq2-lte; sha256sum -c FSG.sha256)
-test "$(wc -c < /etc/sq2-lte/modem_fsg.bin)" = 2097152
-test "$(wc -c < /run/rmtfs/modem_fsg)" = 2097152
-cp /etc/sq2-lte/modem_fsg.bin /run/rmtfs/modem_fsg.lte-new
-cmp /etc/sq2-lte/modem_fsg.bin /run/rmtfs/modem_fsg.lte-new
+uuid=$(tr 'A-F' 'a-f' < /sys/class/dmi/id/product_uuid)
+case "$uuid" in *[!0-9a-f-]*|'') echo 'LTE_FSG_UUID_UNAVAILABLE' >&2; exit 1;; esac
+cache="/media/esp/EFI/SPX/LTE/$uuid.bin"
+rm -f /run/rmtfs/modem_fsg.lte-new
+sq2-fsg-cache "$cache" "$uuid" /run/rmtfs/modem_fsg.lte-new
 chmod 600 /run/rmtfs/modem_fsg.lte-new
 mv /run/rmtfs/modem_fsg.lte-new /run/rmtfs/modem_fsg
 touch /run/lte-unit-seeded
-echo LTE_UNIT_FSG_READY

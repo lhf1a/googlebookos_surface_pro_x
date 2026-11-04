@@ -1,3 +1,5 @@
+> 2026-11-04 LTE 更新：默认 router 自动采集本机 FSG，Radio 从源码构建，AOSP APN 随源码；旧观测器/Java bearer 已移除。当前输入见 [PRIVATE-BUILD](PRIVATE-BUILD.md)，实机结果和限制见 [LTE-PRODUCT](LTE-PRODUCT.md)。
+
 ## 2026-11-03：开发与交付禁止单机绑定（当前最高优先级）
 
 按用户要求，同一标准镜像必须面向任意 SQ1/SQ2，不要求按单机重编译或替换专属启动包。

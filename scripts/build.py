@@ -99,6 +99,10 @@ def main():
     shutil.copytree(a.output/'profiles/SQ1/firmware', root/'firmware')
     g = a.gnu_efi
     for fallback, name in ((0, 'default'), (1, 'fallback')):
+        if not fallback and a.lte == 'on':
+            run([sys.executable,R/'scripts/build-spx-lte-router.py','--output',a.output/'lte-router','--gnu-efi',g])
+            shutil.copyfile(a.output/'lte-router/default.efi',root/'EFI/SPX/default.efi')
+            continue
         obj=a.output/(name+'.o'); elf=a.output/(name+'.so')
         run(['aarch64-linux-gnu-gcc', '-Wall', '-Wextra', '-Werror', '-fpic', '-fshort-wchar',
              '-fno-stack-protector', '-ffreestanding', '-mstrict-align', '-DCONFIG_aarch64',

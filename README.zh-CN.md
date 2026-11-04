@@ -4,24 +4,24 @@
 
 # Surface Pro X SQ2 上的 Googlebook OS
 
-SQ1/SQ2 已合并离线构建入口：[机型配置、固定输入及限制](docs/UNIFIED-SQ1-SQ2.md)。SQ1 尚未实机验证，未改 Windows 或部署镜像。
+SQ1/SQ2 已合并离线构建入口：[机型配置、固定输入及限制](docs/UNIFIED-SQ1-SQ2.md)。SQ1 LTE 已有针对性实机验证；完整新镜像的 SQ1/SQ2 全新启动验收尚未完成。
 
 [English](README.md) | **简体中文**
 
 面向 **Surface Pro X SQ2 / Snapdragon 8cx Gen 2** 的 Android 系 Googlebook OS 移植。基于 mica **16471258（Android 17）** 和 Linux **6.3.8-sq2-android1**，**不是 ChromeOS Flex**。
 
-## 最新进展 — 2026-11-03
+## 最新进展 — 2026-11-04
 
 - 标准构建默认 **300 DPI、KernelSU Next 管理器/ksud 首启安装、通用触摸修复与校准**。保留 `--dpi`、`--ksu-manager off`、`--touch-repair off` 自定义；不覆盖用户缩放、不降级已安装 KSU、不替换原验收内核。本次仅离线集成，未生成新的整盘镜像或实机验收。
 - 主线提交 `fee67b2` 已将 USB 网卡和 Android USB 输入热插拔默认纳入双启动构建。USB 载荷与实机重启验收包一致，30 项 USB 测试通过；不代表实测了 46 种网卡，也不代表完成了新的全套 EFI 重编译，后者仍需固定私有输入缓存。
 - 正常 EL2 保留显式指定的已有无密码用户登录，但开机**不自动打开终端、不运行 KVM 见证探针**；仍可手动打开终端。
-- 最新 LTE 分支 `0100429` 已合并；SQ2 原生 Radio、SIM/信号/设置、真实 LTE IPv4 数据、移动数据/完整飞行模式开关及 Wi-Fi 回退，已有独立启动与普通默认重启通过记录。偶发注册拒绝仍是已知限制。
-- **标准构建默认纳入 LTE/Radio**，可用 `--lte off` 关闭；严格要求私有 Radio04 输入及单机身份匹配，原非 LTE Mesa 回退保留。SQ1 LTE 尚未验证，见 [基线接入与配置边界](docs/LTE-BASELINE.md)。
+- **SQ1/SQ2 均已有 LTE IPv4 真机联网结果。** SQ1 已完成自动采集本机 FSG、普通默认重启复用缓存，以及标准 AOSP 广电 APN 的真实蜂窝 HTTPS；复用 SQ2 已完成的原生 Radio/SIM/数据与开关验收。
+- **标准构建默认启用 LTE/Radio**（`--lte off` 关闭），不再内嵌单机/共享 FSG，保留原 Mesa 回退。产品路径已移除旧 LTE 探针、详细转储及 Java bearer。用户确认清理版正常启动，但 SSH 未恢复，LTE 复测未完成；完整新镜像双机全新启动尚未验收，见 [当前 LTE 范围](docs/LTE-PRODUCT.md)。
 - SQ1 GPU661 / SQ2 GPU700、60Hz / 2.7Gbps×4、KSU/EL2、首次触摸校准仍为可自定义默认设置；通用触摸包默认从 `out/touch-baseline` 纳入，`--touch-bundle` 可替换。
 
 ## 功能状态
 
-更新于 **2026-11-03** · ✅ 可用 · ⭕️ 部分可用 · ❌ 不可用或未确认
+更新于 **2026-11-04** · ✅ 可用 · ⭕️ 部分可用 · ❌ 不可用或未确认
 
 | 功能 | 状态 | 说明 |
 | --- | :---: | --- |
@@ -54,7 +54,7 @@ SQ1/SQ2 已合并离线构建入口：[机型配置、固定输入及限制](doc
 | 睡眠 / 休眠 | ❌ | 已禁用，真正 suspend/resume 尚未解决 |
 | 方向传感器 | ❌ | 不可用 |
 | 内置摄像头 | ❌ | 不可用 |
-| LTE | ⭕️ | SQ2 原生 Radio、SIM/信号/设置与单 USIM LTE IPv4 真实数据已跨重启验证；需本机私有校准/APN。不支持语音/SMS/IMS/eSIM/5G，SQ1 和 IPv6 未验证 |
+| LTE | ⭕️ | SQ1/SQ2 原生 Radio 与真实 LTE IPv4 数据；本机 FSG 缓存、AOSP APN。不支持语音/SMS/IMS/eSIM/5G；IPv6、漫游、长期稳定性未验收 |
 
 上述状态针对文档中的 SQ2 配置，不代表所有外设或应用均兼容。长期稳定性与续航仍待完善。后续一次启动曾短暂无声，用户在未做音频改动前确认恢复；记录中的 SoundWire 传输错误根因仍未定位，与已验收的停播爆音修复分开记录。
 
@@ -62,7 +62,7 @@ SQ1/SQ2 已合并离线构建入口：[机型配置、固定输入及限制](doc
 
 当前主线 SQ2 默认构建为 **EL2、高通 Vulkan、原生 60 Hz、GPU700 MHz / RPMh432**，恰好保留新默认和可工作的 Mesa 回退两项；已纳入 Linux 终端、EL2 H.264 硬解、ADSP 接管音频/停播爆音修复、USB 网卡模块及 Android USB 输入恢复。旧 EL1 安装构建须显式使用 `--legacy-el1`；固定私有输入和设备限制见 BUILD。
 
-标准单镜像构建通过受审计的 LTE 专属增量合并 USB/EL2 基线，不用旧研究包替换整个系统。使用 `--lte-bundle` 提供精确私有 Radio04 输入，或显式 `--lte off`；默认缺输入会拒绝而非静默省略 LTE。型号/序列号/ESP 检查防止将一台机器的 FSG 移植到 SQ1 或另一台 SQ2。本轮合并未重构建此前交付的 IMG/GZ，也未部署设备。
+标准构建从源码编译 LTE/Radio，由操作者提供固件/模块输入（`--lte-bundle`），不再移植旧 Radio04 运行包。默认 EFI router 自动采集当前设备 FSG 至私有本地缓存；校准和实验室身份不随镜像分发。详见 [LTE 产品路径与验收边界](docs/LTE-PRODUCT.md)。本次源码清理不重新发布已有私有 IMG/GZ。
 
 - [构建部署](docs/BUILD.md) · [最新交接](docs/HANDOFF.md) · [待办](docs/TODO.md)
 - [USB 存储/音频](docs/USB-FUNCTIONS.md) · [蓝牙输入](docs/BLUETOOTH-INPUT.md) · [麦克风](docs/MICROPHONE.md)

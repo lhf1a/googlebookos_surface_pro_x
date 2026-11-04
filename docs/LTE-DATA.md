@@ -1,3 +1,5 @@
+> 2026-11-04：本文为历史记录。当前构建、自动本机 FSG 与产品清理见 [LTE-PRODUCT](LTE-PRODUCT.md)；旧实验工具已退出产品源码路径。
+
 # SQ2 LTE 数据接入（2026-11-03）
 
 本节更新此前“FTM/RF 未就绪、LTE 尚不可用”的历史记录。原机 FSG、IPA、QMAPv4/RMNET

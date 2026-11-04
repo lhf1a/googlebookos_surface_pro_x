@@ -2,24 +2,24 @@
 
 # Googlebook OS on Surface Pro X SQ2
 
-Unified SQ1/SQ2 offline build: [profiles, fixed inputs and limits](docs/UNIFIED-SQ1-SQ2.md). SQ1 hardware compatibility is not validated.
+Unified SQ1/SQ2 offline build: [profiles, fixed inputs and limits](docs/UNIFIED-SQ1-SQ2.md). SQ1 LTE has targeted hardware validation; full fresh-image SQ1/SQ2 acceptance remains incomplete.
 
 **English** | [简体中文](README.zh-CN.md)
 
 An Android-based Googlebook OS port for **Surface Pro X SQ2 / Snapdragon 8cx Gen 2**. Based on mica **16471258 (Android 17)** and Linux **6.3.8-sq2-android1**. This is **not ChromeOS Flex**.
 
-## Latest progress — 2026-11-03
+## Latest progress — 2026-11-04
 
 - Standard builds now default to **300 DPI**, **KernelSU Next manager/ksud auto-install**, and the shared touch repair/calibration bundle. Use `--dpi`, `--ksu-manager off` or `--touch-repair off` to customize. Existing user density overrides and installed KSU versions are preserved; the accepted kernel is not replaced. Offline integration only, no new full disk image or device acceptance in this update.
 - Mainline commit `fee67b2` enables USB networking and Android USB input hotplug in the default two-entry build. The USB payload matches the reboot-tested device package; 30 USB tests passed. This does not mean 46 adapter models were tested or that a fresh complete EFI build was performed: the latter still needs the pinned private input caches.
 - Normal EL2 keeps the explicitly selected existing passwordless-user login, but does **not** open Terminal or run the KVM witness at boot. Terminal remains available manually.
-- Latest LTE branch `0100429` is merged. SQ2 native Radio/SIM settings, real LTE IPv4 data, mobile-data/airplane-mode controls and Wi-Fi fallback passed the recorded independent and normal-default reboots. Occasional registration rejection remains a known limit.
-- LTE/Radio is **on by default in the standard build** (`--lte off` opts out), with strict private Radio04 inputs and unit-bound activation. The original non-LTE Mesa fallback is preserved. SQ1 LTE is not validated; see [baseline integration and provisioning limits](docs/LTE-BASELINE.md).
+- **SQ1 and SQ2 LTE IPv4 data have been demonstrated on hardware.** SQ1 now captures its own FSG automatically, reuses it after normal reboot and connects using the standard AOSP APN table; SQ2 native Radio/SIM/data/control validation is retained.
+- LTE remains **on by default** (`--lte off` opts out). No shared/device-specific FSG is embedded, and the original Mesa fallback remains. Legacy LTE probes, verbose dumps and the Java bearer were removed from the product path. The cleanup build booted according to the operator, but LTE rechecking is pending SSH recovery. Full fresh-image dual-device acceptance is still incomplete; see [current LTE scope](docs/LTE-PRODUCT.md).
 - Unified SQ1 GPU661 / SQ2 GPU700, 60Hz / 2.7Gbps×4, KSU/EL2 and first-touch calibration defaults remain customizable. Generic touch repair and the guided idle → 15 single taps → automatic candidate → retest/confirm → coordinate/thumb flow are now **on by default** (`--touch-repair off` opts out; `--touch-bundle` overrides the source-verified bundle). The algorithm is shared, while learned profiles stay device-bound. The new second layer is built/offline-tested, not yet device-accepted.
 
 ## Feature status
 
-Updated **2026-11-03** · ✅ Available · ⭕️ Partially available · ❌ Unavailable or not confirmed
+Updated **2026-11-04** · ✅ Available · ⭕️ Partially available · ❌ Unavailable or not confirmed
 
 | Feature | Status | Notes |
 | --- | :---: | --- |
@@ -52,7 +52,7 @@ Updated **2026-11-03** · ✅ Available · ⭕️ Partially available · ❌ Una
 | Suspend / hibernation | ❌ | Disabled; true suspend/resume unresolved |
 | Orientation sensors | ❌ | Not available |
 | Built-in cameras | ❌ | Not available |
-| LTE | ⭕️ | SQ2: native Radio, SIM/signal/settings and real single-USIM LTE IPv4 data verified across reboot; unit-private calibration/APN required. No voice/SMS/IMS/eSIM/5G; SQ1 and IPv6 unverified |
+| LTE | ⭕️ | SQ1/SQ2 native Radio and real LTE IPv4 data; own-device FSG cache and AOSP APNs. No voice/SMS/IMS/eSIM/5G; IPv6, roaming and long-term coverage unverified |
 
 Availability is scoped to the documented SQ2 configuration, not every peripheral or application. Long-term stability and battery life remain open work. A later boot had transient speaker silence that the user reported recovered without audio changes; the cause of the recorded SoundWire transport errors is still unresolved, separate from the verified stop-pop fix.
 
@@ -60,7 +60,7 @@ Availability is scoped to the documented SQ2 configuration, not every peripheral
 
 The current mainline SQ2 default bundle uses **EL2, Qualcomm Vulkan, native 60 Hz and GPU 700 MHz / RPMh432**, with exactly the new default and working Mesa fallback entries. It includes the Linux Terminal, EL2 H.264 decoding, adopted-ADSP audio/stop-pop fixes, USB NIC modules and Android USB input recovery. The legacy EL1 installer requires `--legacy-el1`; see BUILD for pinned private inputs and device restrictions.
 
-The standard single-image build merges the USB/EL2 baseline with LTE/Radio by an audited LTE-only overlay, not by replacing the system with an older research bundle. Supply the exact private Radio04 input via `--lte-bundle`, or explicitly use `--lte off`; missing LTE inputs fail closed. Model/serial/ESP checks prevent transplanting one unit's FSG to SQ1 or another SQ2. This merge does not rebuild the previously delivered IMG/GZ or deploy to a device.
+The standard build compiles LTE/Radio from source and uses operator-supplied firmware/module inputs (`--lte-bundle`), not an old Radio04 runtime. The default EFI router captures current-device FSG into a private local cache; no calibration or lab identity is redistributed. See [LTE product path and validation limits](docs/LTE-PRODUCT.md). Existing private IMG/GZ files are not republished by this source cleanup.
 
 - [Build & deployment](docs/BUILD.md) · [Current handoff](docs/HANDOFF.md) · [Open work](docs/TODO.md)
 - [USB storage/audio](docs/USB-FUNCTIONS.md) · [Bluetooth input](docs/BLUETOOTH-INPUT.md) · [Microphone](docs/MICROPHONE.md)

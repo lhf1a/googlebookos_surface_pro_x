@@ -300,16 +300,6 @@ template<class T> static std::shared_ptr<T> service(const char* instance) {
     if(AServiceManager_addService(object->asBinder().get(),name.c_str())!=STATUS_OK)throw std::runtime_error("Radio service registration failed");return object;
 }
 int main(int argc,char**argv) {
-    if(argc==2 && std::string(argv[1])=="parcel-selftest") {
-        auto object=ndk::SharedRefBase::make<RadioData>();ndk::ScopedAParcel parcel;
-        int status=AIBinder_prepareTransaction(object->asBinder().get(),parcel.getR());printf("prepare=%d\n",status);if(status)return 1;
-        int pos=AParcel_getDataPosition(parcel.get());
-        data::SetupDataCallResult value;value.cid=1;value.active=2;value.type=data::PdpProtocolType::IP;value.ifname="rmnet_data0";value.mtuV4=1496;value.pduSessionId=0;value.suggestedRetryTime=-1;
-        data::LinkAddress address;address.address="192.0.2.1/32";address.deprecationTime=address.expirationTime=INT64_MAX;value.addresses={address};value.dnses={"192.0.2.2"};value.gateways={"0.0.0.0"};
-        status=value.writeToParcel(parcel.get());printf("write=%d\n",status);if(status)return 1;
-        AParcel_setDataPosition(parcel.get(),pos);data::SetupDataCallResult result;status=result.readFromParcel(parcel.get());
-        printf("read=%d equal=%d\n",status,result==value);return status || result!=value;
-    }
     if(argc!=1){fprintf(stderr,"No debug registration or alternate instance supported\n");return 2;}(void)argv;
     try {
         signal(SIGPIPE,SIG_IGN);
