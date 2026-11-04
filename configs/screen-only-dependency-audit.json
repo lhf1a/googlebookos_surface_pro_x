@@ -176,16 +176,18 @@
     {
       "path": "probe/test2/lte-fs12-seed",
       "original_reference_count": 1,
-      "classification": "功能/构建入口",
-      "action": "已解除必须Y；显式旧兼容分支可保留",
-      "source_changed": true
+      "classification": "已退役的历史诊断工具",
+      "action": "2026-11-04按用户要求从主线移除；仅Git历史保留，不再构建或运行",
+      "source_changed": true,
+      "retired": true
     },
     {
       "path": "probe/test2/lte-fsg-seed",
       "original_reference_count": 1,
-      "classification": "功能/构建入口",
-      "action": "已解除必须Y；显式旧兼容分支可保留",
-      "source_changed": true
+      "classification": "已退役的历史诊断工具",
+      "action": "2026-11-04按用户要求从主线移除；仅Git历史保留，不再构建或运行",
+      "source_changed": true,
+      "retired": true
     },
     {
       "path": "probe/test2/surface-pm-debug",
@@ -344,9 +346,10 @@
     {
       "path": "probe/virtualization/el2-preboot-init",
       "original_reference_count": 2,
-      "classification": "功能/构建入口",
-      "action": "已解除必须Y；显式旧兼容分支可保留",
-      "source_changed": true
+      "classification": "已退役的历史诊断工具",
+      "action": "2026-11-04按用户要求从主线移除；仅Git历史保留，不再构建或运行",
+      "source_changed": true,
+      "retired": true
     },
     {
       "path": "probe/virtualization/el2-terminal-autostart",
@@ -638,16 +641,18 @@
     {
       "path": "tests/test_sq2_lte_fs12_seed.py",
       "original_reference_count": 3,
-      "classification": "测试",
-      "action": "更新N成功预期并保留其他拒绝场景",
-      "source_changed": true
+      "classification": "已退役的历史诊断工具",
+      "action": "2026-11-04按用户要求从主线移除；仅Git历史保留，不再构建或运行",
+      "source_changed": true,
+      "retired": true
     },
     {
       "path": "tests/test_sq2_lte_fsg_seed.py",
       "original_reference_count": 3,
-      "classification": "测试",
-      "action": "更新N成功预期并保留其他拒绝场景",
-      "source_changed": true
+      "classification": "已退役的历史诊断工具",
+      "action": "2026-11-04按用户要求从主线移除；仅Git历史保留，不再构建或运行",
+      "source_changed": true,
+      "retired": true
     },
     {
       "path": "tests/test_sq2_overlay_phandles.py",

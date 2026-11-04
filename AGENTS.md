@@ -1,3 +1,12 @@
+## 2026-11-04 retired device-bound diagnostic tools
+
+User requested removal of the old single-machine diagnostics after mainline audit.
+Do not restore lte-fs12-seed, lte-fsg-seed, el2-preboot-init or their dedicated
+packers/tests from historical merges. Keep normal LTE and U4 paths unchanged.
+prepare-sq2-el2-preboot.py remains a shared EFI preparation tool; only its old
+RAM-diagnostic packer was retired. Do not bypass NV/calibration or disk safety
+checks to revive these tools. Historical documentation is not an active entry.
+
 ## 2026-11-04 user-directed mainline integration
 
 On merge conflicts preserve the current unrestricted U4 capabilities and startup

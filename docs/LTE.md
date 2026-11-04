@@ -1,3 +1,5 @@
+> 2026-11-04更新：下文lte-fs12-seed、lte-fsg-seed及el2-preboot-init相关旧诊断工具已退役；引用仅为历史记录，当前实现见docs/HANDOFF.md顶部。
+
 # Surface Pro X SQ2 LTE 开发
 
 ## 2026-11-03 最新状态：LTE 与 Android 数据已通过

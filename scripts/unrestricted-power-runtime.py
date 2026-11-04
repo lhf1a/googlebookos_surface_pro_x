@@ -27,8 +27,6 @@ def transform(name, data):
             legacy=text[a:b]
             text=text[:a]+'# The legacy opt-in gate is irrelevant when system sleep is unrestricted.\nif [ "$(cat "$params/screen_only" 2>/dev/null)" = Y ]; then\n'+legacy+'fi\n'+text[b:]
         return text.encode()
-    if base=='el2-preboot-init':
-        text=re.sub(r'^if \[ "\$\(cat /sys/module/suspend/parameters/screen_only\)" != Y \]; then\n.*?^fi\n','',text,flags=re.M|re.S)
     lines=[]
     for line in text.splitlines(True):
         stripped=line.lstrip()

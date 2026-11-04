@@ -1,3 +1,5 @@
+> 2026-11-04更新：下文lte-fs12-seed、lte-fsg-seed及el2-preboot-init相关旧诊断工具已退役；引用仅为历史记录，当前实现见docs/HANDOFF.md顶部。
+
 ## 2026-11-04：当前U4开发版本合入主线（未部署）
 
 按用户“冲突保持现在能力和启动流程”：保留unrestricted策略、Venus system PM、QCA最终

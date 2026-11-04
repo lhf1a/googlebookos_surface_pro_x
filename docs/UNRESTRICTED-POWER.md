@@ -1,3 +1,5 @@
+> 2026-11-04更新：下文lte-fs12-seed、lte-fsg-seed及el2-preboot-init相关旧诊断工具已退役；引用仅为历史记录，当前实现见docs/HANDOFF.md顶部。
+
 # screen_only 依赖整理与无限制环境
 
 ## 2026-11-04 最终部署补充

@@ -1,3 +1,16 @@
+## 2026-11-04：移除旧单机诊断工具（不改变正常启动）
+
+用户要求清除仍有单机限制的旧诊断工具。本次移除lte-fs12-seed、lte-fsg-seed、
+el2-preboot-init及两个专用LTE打包器、prepare-sq2-el2-preboot-ram.py和两份专用测试，
+共8文件；删除unrestricted转换器中仅服务旧preboot-init的特例。历史引用标记退役，
+原始实现可从Git历史取回，不再作为可运行入口。没有将NVMe serial/ESP标记检查直接
+删掉后继续允许旧工具采用校准数据，也没有增加替代的单机白名单。
+
+正常LTE lte-unit-seed/lte-unit-guard/lte-framework-boot、标准build.py、U4打包器及Mesa
+入口字节不变；prepare-sq2-el2-preboot.py是仍被EFI准备链使用的共享工具，予以保留，
+不要与已删除的preboot-ram.py混淆。没有设备访问、写ESP、重启或新的睡眠试验。
+这不代表所有常规组件枚举/模板依赖已清理，更不表示十分钟挂死已修复。
+
 ## 2026-11-04：当前U4开发版本合入主线（未部署）
 
 按用户“冲突保持现在能力和启动流程”：保留unrestricted策略、Venus system PM、QCA最终
