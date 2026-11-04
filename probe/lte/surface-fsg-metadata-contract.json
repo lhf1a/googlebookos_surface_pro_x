@@ -1,0 +1,54 @@
+{
+  "driverSHA256": "9c9087f671a8e8d998c65061a3826c69ef518181fde0a35f7361412794a8d77d",
+  "sites": {
+    "0x3f094": "0xecaf2b4e",
+    "0x3ddf4": "0x18009509",
+    "0x3de00": "0x540018a0",
+    "0x3e24c": "0x94000e91",
+    "0x41d30": "0x91004102",
+    "0x41d3c": "0x97fffeb7",
+    "0x41ea4": "0x97fffd87",
+    "0x41900": "0x9103c108",
+    "0x419dc": "0xd2801008",
+    "0x419ec": "0xd2800202",
+    "0x41b38": "0x9100810a",
+    "0x41b40": "0x91006109",
+    "0x41b48": "0xf9000128",
+    "0x41b6c": "0x9100a10b",
+    "0x41b9c": "0xcb080128",
+    "0x41ba0": "0x91000509",
+    "0x41bac": "0x91002108",
+    "0x41bb0": "0xf9000109",
+    "0x41bbc": "0x91004109",
+    "0x41bc4": "0xb9000128",
+    "0x41be8": "0x9b097d09",
+    "0x41bf0": "0x91002108",
+    "0x41bf4": "0xf9000109",
+    "0x41bfc": "0x52800028",
+    "0x41c00": "0x39000128",
+    "0x3edd4": "0xb9000128",
+    "0x3eddc": "0x91001109",
+    "0x3ede4": "0xb9000128"
+  },
+  "ioctl": "0xecaf2b4e",
+  "chain": [
+    "dispatch literal3f094/branch3de00 ->3e114",
+    "call3e24c ->41c90",
+    "block-backed cache path41d3c ->41818",
+    "matched GPT entry computes LBA/count/bytes and returns flag1; no SCM call in that leaf"
+  ],
+  "response": {
+    "command": 0,
+    "status": 4,
+    "isBlockBacked": 16,
+    "bytes": 24,
+    "blockBytes": 32,
+    "startLBA": 40,
+    "blockCount": 48
+  },
+  "limits": [
+    "Cached partition metadata, not current raw flash GET_INFO.",
+    "Fallback414c0 enumerates Windows disk partition metadata; collector refuses non-block-backed response.",
+    "Fixed FSG GUID only. No arbitrary IOCTL, read/write payload, device path or address parameter."
+  ]
+}
