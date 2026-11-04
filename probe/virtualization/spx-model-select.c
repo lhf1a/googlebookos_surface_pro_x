@@ -5,24 +5,6 @@
 #ifndef FALLBACK
 #define FALLBACK 0
 #endif
-#ifndef SPX_LTE_AUTO
-#define SPX_LTE_AUTO 0
-#endif
-#if SPX_LTE_AUTO && !FALLBACK
-EFI_STATUS spx_lte_fsg_prepare(EFI_HANDLE,EFI_SYSTEM_TABLE *,const char *);
-static char device_uuid[37];
-static void remember_uuid(const UINT8 *p) {
-    static const unsigned order[]={3,2,1,0,5,4,7,6,8,9,10,11,12,13,14,15};
-    static const char hex[]="0123456789abcdef";
-    unsigned zeros=0,ones=0,j=0;
-    for(unsigned i=0;i<16;i++){zeros+=p[i]==0;ones+=p[i]==255;}
-    if(zeros==16 || ones==16)return;
-    for(unsigned i=0;i<16;i++) {
-        if(i==4 || i==6 || i==8 || i==10)device_uuid[j++]='-';
-        device_uuid[j++]=hex[p[order[i]]>>4];device_uuid[j++]=hex[p[order[i]]&15];
-    }
-}
-#endif
 static UINT64 le(const UINT8 *p, UINTN n) {
     UINT64 v=0; UINTN i; for(i=0;i<n;i++) v|=(UINT64)p[i]<<(8*i); return v;
 }
@@ -40,9 +22,6 @@ static int identify(const UINT8 *p, UINTN bytes) {
         end=off+len;
         while(end+1<bytes && (p[end] || p[end+1])) end++;
         if(end+1>=bytes) return 0;
-#if SPX_LTE_AUTO && !FALLBACK
-        if(p[off]==1 && len>=24)remember_uuid(p+off+8);
-#endif
         if(p[off]==4 && len>16 && p[off+16]) {
             s=off+len;
             while(s<end && index<p[off+16]) { while(s<end && p[s]) s++; s++; index++; }
@@ -77,10 +56,6 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
         model=m;
     }
     if(!model) { Print(L"SPX: SQ1/SQ2 SMBIOS identity unavailable; stopped.\n"); return EFI_UNSUPPORTED; }
-#if SPX_LTE_AUTO && !FALLBACK
-    ret=spx_lte_fsg_prepare(image,st,device_uuid);
-    if(EFI_ERROR(ret))Print(L"SPX LTE own-device capture/cache: %r; continuing Android launcher.\n",ret);
-#endif
     name=model==1 ? (FALLBACK?L"\\EFI\\SQ1Fallback\\el2launch.efi":L"\\EFI\\SQ1Default\\el2launch.efi")
                   : (FALLBACK?L"\\EFI\\SQ2Fallback\\el2launch.efi":L"\\EFI\\SQ2Default\\el2launch.efi");
     ret=uefi_call_wrapper(st->BootServices->HandleProtocol,3,image,&LoadedImageProtocol,(VOID **)&loaded);

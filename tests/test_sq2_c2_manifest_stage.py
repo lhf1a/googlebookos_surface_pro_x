@@ -15,6 +15,7 @@ class ManifestStageTest(unittest.TestCase):
             for name, data in [('proc/cmdline', command),
                                ('proc/mounts', 'overlay /newroot/vendor overlay rw 0 0\n' if overlay else ''),
                                ('sys/module/suspend/parameters/screen_only', guard)]:
+                if data is None: continue
                 p = root / name
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text(data)
@@ -53,8 +54,14 @@ class ManifestStageTest(unittest.TestCase):
         self.assertEqual(tree.findtext('hal/fqname'), 'IComponentStore/default1')
         self.assertEqual(tree.findtext('hal/version'), '2')
 
+    def test_suspend_flag_is_not_a_codec_admission_guard(self):
+        for flag in ('Y', 'N', None):
+            rc, data = self.run_case('sq2.video.c2=experimental', guard=flag)
+            self.assertEqual(rc, 0)
+            self.assertEqual(ET.fromstring(data).findtext('hal/fqname'), 'IComponentStore/default1')
+
     def test_guards_do_not_write(self):
-        for args in [dict(guard='N'), dict(overlay=False)]:
+        for args in [dict(overlay=False)]:
             rc, data = self.run_case('sq2.video.c2=experimental', **args)
             self.assertNotEqual(rc, 0)
             self.assertIsNone(data)

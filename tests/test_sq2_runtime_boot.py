@@ -25,7 +25,7 @@ class RuntimeBootTest(unittest.TestCase):
             code=code.replace('source=/vendor/etc/sq2-codec2','source='+str(src)).replace('parent=/data/vendor/sq2-codec2','parent='+str(parent))
             code=code.replace('/sys/module/suspend/parameters/screen_only',str(d/'guard')).replace('/proc/mounts',str(d/'mounts'))
             p=subprocess.run(['sh','-c',code],capture_output=True,text=True)
-            if mode in ('fresh','existing'):
+            if mode in ('fresh','existing','guard'):
                 self.assertEqual(p.returncode,0,p.stderr);self.assertEqual((target/'service').read_bytes(),contents)
             else:
                 self.assertNotEqual(p.returncode,0)
@@ -33,9 +33,9 @@ class RuntimeBootTest(unittest.TestCase):
                 else:self.assertFalse(target.exists())
 
     def test_install_and_reuse(self):
-        for mode in ('fresh','existing'):self.install(mode)
+        for mode in ('fresh','existing','guard'):self.install(mode)
     def test_rejections_preserve_state(self):
-        for mode in ('guard','unmounted','archive','tampered','symlink'):self.install(mode)
+        for mode in ('unmounted','archive','tampered','symlink'):self.install(mode)
     def test_framework_noop_guards(self):
         source=(ROOT/'probe/test2/video-runtime-framework-boot').read_text()
         with tempfile.TemporaryDirectory() as tmp:

@@ -116,7 +116,6 @@ case "${SQ2_SF_PRIME_CACHE:-default}" in default|0) ;; *) exit 2;; esac
 test -x /tmp/quest2-kmsg-collector
 test "$(hash /tmp/quest2-kmsg-collector)" = "$kmsg_sha"
 test "$(stat -c '%d:%i' /)" != "$(stat -c '%d:%i' "$root")"
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 check_mesa
 test "$(android /system/bin/getprop ro.hardware.egl)" = freedreno
 test "$(android /system/bin/getprop ro.hardware.vulkan)" = freedreno

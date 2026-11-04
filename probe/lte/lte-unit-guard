@@ -7,7 +7,6 @@ case " $(cat /proc/cmdline) " in
  *' sq2.el2=1 '*) ;;
  *) exit 1;;
 esac
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 case " $(cat /proc/cmdline) " in *' nohibernate '*) ;; *) exit 1;; esac
 case "$(tr -d '\000' < /proc/device-tree/model)" in
  'Microsoft Surface Pro X (SQ1)'|'Microsoft Surface Pro X (SQ2)') ;;

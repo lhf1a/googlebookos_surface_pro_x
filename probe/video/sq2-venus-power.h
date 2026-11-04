@@ -7,4 +7,8 @@ bool sq2_venus_power_ready(struct sq2_venus_power *owner);
 /* On error *out may remain owned; caller must run off before release. */
 int sq2_venus_power_on(struct device *dev, void __iomem *base, struct sq2_venus_power **out);
 int sq2_venus_power_off(struct sq2_venus_power **owner, bool firmware_attempted);
+#ifdef SQ2_VENUS_SYSTEM_PM
+int sq2_venus_power_system_quiet(struct sq2_venus_power *owner);
+int sq2_venus_power_system_restore(struct sq2_venus_power *owner);
+#endif
 #endif

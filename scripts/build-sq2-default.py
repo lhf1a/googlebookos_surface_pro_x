@@ -53,6 +53,9 @@ def normal_payload(raw, c, user=None, kernel_headers=None):
         body = (R/'probe/virtualization'/name).read_bytes().replace(b'\r\n', b'\n')
         subprocess.run(['sh', '-n'], input=body, check=True)
         e['bin/'+name] = (0o100755, body)
+    spec=importlib.util.spec_from_file_location('unrestricted_runtime',R/'scripts/unrestricted-power-runtime.py')
+    runtime=importlib.util.module_from_spec(spec);spec.loader.exec_module(runtime)
+    e,unrestricted_changes=runtime.integrate_entries(e)
     # Private password addon is preserved byte-for-byte and remains last.
     rest, credential = raw, None
     while rest:
@@ -70,7 +73,7 @@ def normal_payload(raw, c, user=None, kernel_headers=None):
     assert c.entries(gzip.decompress(result)) == e
     changed = sorted(n for n in e if e[n] != before.get(n))
     assert set(changed) <= {'init', 'bin/el2-rmtfs-start', 'bin/el2-terminal-stage',
-                            'bin/el2-terminal-autostart', 'bin/video-decoder-lab-start', headers_name}
+                            'bin/el2-terminal-autostart', 'bin/video-decoder-lab-start', headers_name} | set(unrestricted_changes)
     return result, changed
 
 
@@ -81,7 +84,9 @@ def launcher_source(text, directory, graphics):
     text = text.replace('SQ2EL2Android', directory)
     text = text.replace('sq2.el2=experimental', 'sq2.el2=1')
     text = text.replace('sq2.vulkan=mesa', 'sq2.vulkan='+graphics).replace(' sq2.el2_trace=1', '')
-    assert 'suspend.screen_only=1 nohibernate' in text and 'sq2.display=2.7-60' in text
+    flag='1' if directory=='SQ2Fallback' else '0'
+    text=text.replace('suspend.screen_only=1','suspend.screen_only='+flag).replace('suspend.screen_only=0','suspend.screen_only='+flag)
+    assert 'suspend.screen_only='+flag+' nohibernate' in text and 'sq2.display=2.7-60' in text
     return text
 
 

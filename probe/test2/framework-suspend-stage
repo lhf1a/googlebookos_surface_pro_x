@@ -1,0 +1,37 @@
+#!/bin/busybox sh
+# Called before Android init. Only an explicitly opted-in payload gets this JAR.
+set -eu
+export PATH=/bin:/sbin
+if [ "$(cat /sys/module/suspend/parameters/screen_only 2>/dev/null)" != Y ]; then
+    echo UNRESTRICTED_SUSPEND_STOCK_FRAMEWORK
+    exit 0
+fi
+case " $(cat /proc/cmdline) " in *" sq2.rescue=1 "*) exit 0;; esac
+case " $(cat /proc/cmdline) " in *" suspend.screen_only_autosuspend=1 "*) ;; *) exit 0;; esac
+[ "$(cat /sys/module/suspend/parameters/screen_only)" = Y ]
+[ "$(cat /sys/module/suspend/parameters/screen_only_autosuspend)" = Y ]
+target=/newroot/system/framework/desktop-services.jar
+source=/etc/surface-pm/desktop-services.jar
+manifest=/etc/surface-pm/framework.sha256
+expected_before=$(awk '$1 == "baseline" {print $2}' "$manifest")
+expected_after=$(awk '$1 == "candidate" {print $2}' "$manifest")
+for digest in "$expected_before" "$expected_after"; do
+ case "$digest" in *[!0-9a-f]*|'') echo INVALID_FRAMEWORK_MANIFEST; exit 1;; esac
+ [ "${#digest}" = 64 ]
+done
+before=$(sha256sum "$target"); before=${before%% *}
+after=$(sha256sum "$source"); after=${after%% *}
+[ "$before" = "$expected_before" ]
+[ "$after" = "$expected_after" ]
+mount --bind "$source" "$target"
+check=$(sha256sum "$target"); check=${check%% *}
+[ "$check" = "$after" ]
+# Android init has the loaded SELinux policy at post-fs, before zygote.
+# Label the bound RAM inode there; never weaken system_server's policy.
+rc=/newroot/debug_ramdisk/keystore2.rc
+[ -f "$rc" ]
+cat >> "$rc" <<'RC'
+on post-fs
+    restorecon /system/framework/desktop-services.jar
+RC
+echo FRAMEWORK_AC_SCREENOFF_GRACE_1000MS

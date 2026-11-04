@@ -2,7 +2,6 @@
 # Restore only the known RAM allocator launcher; leave global libraries alone.
 set -eu
 [ "$(id -u)" = 0 ]
-[ "$(cat /sys/module/suspend/parameters/screen_only)" = Y ]
 target=/vendor/bin/hw/android.hardware.graphics.allocator-service.minigbm
 backup=/vendor/bin/hw/sq2-allocator-original
 original=7f394d7082735401e0a2cdc9fbcb010edef49a4d703366a9a73ef295eeb919da

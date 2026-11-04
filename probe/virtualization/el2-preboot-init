@@ -15,9 +15,6 @@ echo /bin/modprobe > /proc/sys/kernel/modprobe
 echo '=== SQ2 EL2 PREBOOT / RMTFS / WIFI RAM DIAGNOSTIC ==='
 # Bound even a hung userspace service. This cannot recover a firmware/kernel hang.
 ( sleep 360; dmesg > /logs/kernel-timeout.txt; sync; reboot -f ) &
-if [ "$(cat /sys/module/suspend/parameters/screen_only)" != Y ]; then
-    echo 'FAIL: screen_only guard missing'; sleep 10; reboot -f
-fi
 for i in $(seq 1 15); do
     [ -b /dev/nvme0n1p6 ] && break
     sleep 1

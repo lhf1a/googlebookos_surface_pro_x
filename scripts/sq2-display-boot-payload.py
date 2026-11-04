@@ -139,8 +139,9 @@ def validate_menu(menu, profile):
         if len(linux) != 1 or not ident or ident[1] in ids or len(initrd) != 1:
             raise ValueError('Ambiguous boot entry')
         tokens = linux[0].split()
-        if not {'suspend.screen_only=1', 'nohibernate'}.issubset(tokens):
-            raise ValueError('Screen-only safety guard missing')
+        policy=[t for t in tokens if t.startswith('suspend.screen_only=')]
+        if 'nohibernate' not in tokens or len(policy)!=1 or policy[0] not in ('suspend.screen_only=0','suspend.screen_only=1'):
+            raise ValueError('Missing or invalid suspend policy')
         flags = [t for t in tokens if t.startswith('sq2.display=')]
         if len(flags) != 1 or flags[0][12:] not in PROFILES:
             raise ValueError('Display selection missing/duplicated')

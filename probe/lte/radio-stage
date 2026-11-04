@@ -1,11 +1,10 @@
 #!/bin/busybox sh
-# Stage the native Radio service before Android init.
+# This hook exists only in the independent Radio candidate.
 set -eu
 case " $(cat /proc/cmdline) " in *' sq2.rescue=1 '*|*' sq2.lte=0 '*) exit 0;; esac
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
 src=/etc/sq2-radio
-(cd "$src"; sha256sum -c SHA256SUMS >/dev/null)
+(cd "$src"; sha256sum -c SHA256SUMS)
 target=/newroot/vendor
 test ! -e "$target/etc/vintf/manifest/sq2-radio.xml"
 for name in sq2-radio sq2-qmi-data sq2-qmi-mode; do
@@ -38,3 +37,4 @@ done
 # prepares IPA/RMNET, then exits without starting its old NetworkAgent owner.
 cp "$src/sq2-radio-manifest.xml" "$target/etc/vintf/manifest/sq2-radio.xml"
 chmod 644 "$target/etc/vintf/manifest/sq2-radio.xml"
+echo SQ2_RADIO_STAGED

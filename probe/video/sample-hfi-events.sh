@@ -5,7 +5,6 @@ trace=/proc/1/root/sys/kernel/tracing
 instance=$trace/instances/sq2_hfi_events
 output=/proc/1/root/data/local/tmp/sq2-hfi-existing-events.txt
 test ! -e "$output"
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test ! -e "$trace/events/sq2_hfi_events"
 mkdir "$instance"
 registered=0

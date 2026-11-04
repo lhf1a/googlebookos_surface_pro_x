@@ -1,6 +1,104 @@
-## 2026-11-04：LTE 本机自动 FSG 与产品路径清理
+## 2026-11-04：当前U4开发版本合入主线（未部署）
 
-默认 LTE 改为本机 EFI 采集/UUID 缓存 → RAM RMTFS → 原 IPA/Radio AIDL；不再内嵌共享 FSG 或使用私有 Radio04 donor、单机序列准入。AOSP APN 表随源码，生产包移除 LTE 实验观测器/旧 Java bearer/自测入口和成功转储，保留错误与真实边界。SQ1 已完成自动首次采集、标准广电 APN 蜂窝 HTTPS 和正常默认缓存复用；SQ2 沿用已通过 Android LTE 的路径。完整新镜像双机全新启动及 SQ2 新采集入口未验收。详见 [当前路径及限制](LTE-PRODUCT.md)、[实验执行约定](LTE-EXPERIMENTS.md)；下方旧 LTE 构建/单机说明仅供历史参考。
+按用户“冲突保持现在能力和启动流程”：保留unrestricted策略、Venus system PM、QCA最终
+失败清理、GENI UART补丁、SPI/FUSE/音视频既有链路。7处文本/删除冲突选当前版本；另
+解决LTE语义冲突：不以主线新EFI FSG/router替换当前启动路径，保留当前LTE兼容工具及
+打包依赖。上游新增LTE实现保留为尚未接入默认的源码；旧主线“已默认接入”描述在本合并
+中不代表当前入口。主线触控v7及对应改动保留，未作本机重新部署或声学/触控验收。
+
+U4固定默认仅指上轮私有离线ZIP；包、身份、日志均不入Git，设备仍原SQ2Free。
+pm_test=devices诊断包不改为真实连续睡眠；未冷启动WSA helper源码仍明确标候选。
+十分钟静置无响应仍未解决，不以合并代码替代实机验收。不写ESP、不重启、不推送远端。
+
+## 2026-11-04：WSA开机枚举修正版（已打包、未部署/冷启动）
+
+隔离诊断打包器新增 `--audio-wsa-bootstrap AUDIO_DRIVERS_START`，与原有
+`--bluetooth-module`/`--own-kernel`组合生成7项有效覆盖；仍devices阶段，不提升默认。
+先对齐实际受影响清单，再打包新helper，原身份gzip成员保持最后且字节不变。
+新helper去掉全量tinymix寄存器读；检查原WSA驱动链接的动态Assigned编号、Attached和
+runtimeactive，仅在开机部分枚举、全部PCM closed时做一次既有slave runtime恢复。
+不替换WSA/主端/ADSP，不修改增益与DAC/COMP/BOOST端口，不增每次睡眠hook。
+当前同boot一次WSA runtime周期及用户听音已通过；冷启动新helper尚未验证，不能以
+夹具或包内SHA通过代替现场结果。U4单次直接freeze恢复通过但SSAM在s2idle前早醒，
+并非Android原生策略/合盖/30秒驻留通过。下一步不重复无新变量的计时请求。
+
+## 2026-11-04：QCA最终失败清理 / GENI TX完成副本补丁（真机候选）
+
+```
+python3 scripts/prepare-qca-failed-setup-cleanup.py --kernel MATCHING_KERNEL --output FRESH_HCI_UART_SOURCE
+make -C MATCHING_KERNEL O=MATCHING_BUILD ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M=FRESH_HCI_UART_SOURCE -j8 modules
+python3 scripts/patch-geni-tx-dma-completion.py MATCHING_KERNEL/drivers/tty/serial/qcom_geni_serial.c FRESH_UART_COPY.c
+```
+
+QCA只补最终错误的既有shutdown，原失败errno保持；原工作源码不改。GENI为内建驱动，
+不能卸载活动UART；本轮使用root私有mount namespace只读bind新C副本、在隔离O目录
+增量make Image，退出后原源码hash不变。原配置/模块release保持，原Image不覆盖。
+阶段打包器新增--bluetooth-module MATCHING_HCI_UART_KO及--own-kernel；后者从带真实
+SHA的显式derived power bundle把Image放入新EFI目录，其他固件/DT/基线目录仍原位置。
+这是私有诊断包、不是正常默认提升；初始BT kmsg仅RAM采集120秒，不是恢复/准入定时器。
+实际结果与限制以最新HANDOFF为准；不以重启初始化成功替代历史失败根因证明。
+
+## 2026-11-04：显式Venus system-PM阶段候选（尚未实机验收）
+
+不要将stage候选提升默认。对当前Image精确source和隔离完整build输出运行：
+
+```
+python3 scripts/prepare-sq2-venus-iris1.py --kernel KERNEL --output FRESH_MODULES --firmware-lease --platform-entry --sq2-resources --system-sleep
+make -C KERNEL O=MATCHING_BUILD ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M=FRESH_MODULES -j8 modules
+python3 scripts/prepare-sq2-venus-system-pm-boot.py --base BASE_INITRD --current-overlay ACCEPTED_UNRESTRICTED_OVERLAY --power-bundle POWER_BUNDLE --module-directory FRESH_MODULES --output FRESH_BOOT
+```
+
+打包器离线生成5条有效变化与三initrd EFI options；只支持devices诊断boot，不请求睡眠、
+不写设备/改默认。不需复制已有Image/DT，仍引用当前正常目录，原身份gzip member最后且
+原字节保持，因此含凭据输入的输出只能留私有。新core/decoder须配对替换；不加flag的
+旧构建保持resident runtime guard和原system路径。用户要求此轮直接真机后不再扩展离线矩阵。
+实际部署须动态核对本次设备/ESP、原载荷/固件、gzip/SHA和空间，独立一次性boot保留Mesa。
+同boot完成新模块/音频必要健康检查、devices原始错误与恢复后视频，不能称真睡通过。
+
+## 2026-11-04：嵌套Codec2/VIDEOCC实际输入补充
+
+增量构建必须审计runtime.tar内脚本和内外SHA，不能只清外层guard。
+prepare-unrestricted-environment.py对旧Codec2需要显式--codec-launcher（配对源码，
+BASE=/data/vendor/sq2-codec2/v2u/）；对旧固定VIDEOCC需要--video-reference-module。
+仅允许显式该HFI模块变化，其余内核/模块/DT/固件保持。旧v1不覆盖，新v2u独立安装
+并校验。首次遗漏清单/嵌套guard的失败保留在HANDOFF。当前实机N、视频/音频启动/
+两用户存储通过，但合盖链路和真实睡眠仍未验收。
+
+## 2026-11-04：默认无限制电源环境（用户确认）
+
+默认 `--suspend-policy unrestricted`，正常启动明确传入
+`suspend.screen_only=0 suspend.screen_only_autosuspend=0`。内核不再执行其
+owner、单次/两次预算或120秒准入门；不运行 owner 注册与 lab keep-awake 启动钩子。
+各功能 helper 不再要求 screen_only=Y。`android` 与 `screen-only` 仅作显式兼容策略；
+原 Mesa 回退及原载荷保留。nohibernate、硬件/ABI/磁盘/热保护、凭据和 Android 合法锁保留。
+这不等于证明真正低功耗驻留、无限多轮稳定性、磁盘休眠或历史黑屏已修复。
+
+通用完整构建使用 `scripts/build.py --suspend-policy unrestricted`，仍须提供匹配的
+私有硬件输入。当前设备的非破坏增量包可用 `scripts/prepare-unrestricted-environment.py`
+从自己的原正常 initramfs、power bundle、DTB 和启动固件离线生成。它不枚举或写设备。
+增量启动项使用两个 initrd= 参数：原正常包 + helper覆盖层/原私有身份成员。
+实际6.3.8 EFI stub按参数顺序拼接，最终有效cpio逐项核对，身份成员逐字不变且最后。
+EFI模板应从匹配的既有 launcher 源码构建并为额外参数预留足够空间；不能扩大已签名PE，
+不能把另一个设备的私有身份放进自己的包。细节及全部依赖表见 `docs/UNRESTRICTED-POWER.md`。
+
+## 2026-11-04：正常Android休眠默认策略
+
+用户要求恢复正常休眠与锁屏策略；标准build.py/profile入口默认--suspend-policy android，
+--suspend-policy screen-only保留旧行为。默认项使用--power-bundle（默认
+private/build-inputs/power），Mesa回退保持旧内核/载荷/无native许可。两机共用Android
+服务准入与SPI恢复模块，不按机器身份限制；尚无SQ1实测证明。
+
+先用build-surface-pm-kernel.py构建01-framework-owner的持续准入Image，不应用诊断02补丁。
+使用prepare-surface-power-bundle.py --image IMAGE --launcher NATIVE_EFI --spi-module SPI_KO
+--system-suspend ANDROID_SYSTEM_SUSPEND --output NEW_BUNDLE收集自有匹配输入。
+NATIVE_EFI是既有未签名原生启动模板；打包检查完整性、SPI vermagic及PM接口，不能代替
+完整符号/ABI及QEMU持续准入测试。不得把single-request Image误标为正常包。
+
+surface-power-payload.py只向正常项接入owner注册、更新SPI模块并让实验保活退出；
+拒绝含实验JAR或SSAM固定延时的基线。保留stock框架和最后私有身份成员。系统默认
+时间恢复为显式一次操作：在Android内以root运行restore-surface-power-defaults.sh，
+只删除关屏/锁后延时/sleep_timeout/充电常亮覆盖并启用当前用户锁屏，不清除凭据。
+后续启动不反复重置用户时间或锁屏选择。nohibernate保留：此次为s2idle，不是磁盘休眠。
 
 ## 2026-11-03：开发与交付禁止单机绑定（当前最高优先级）
 
@@ -1569,21 +1667,58 @@ on 同时应用两个补丁及 AspectMax=2.0 配置；off 使用全新原版源�
 见 [SQ1-EL2-PREPARATION.md](SQ1-EL2-PREPARATION.md)。独立分支仅编译 sltest，不部署或修改默认启动。
 
 
-## 2026-11-04：统一触摸校准 v7 纳入默认构建
+### 2026-11-03 受保护 PM 调试（仅独立实验）
 
-项目标准构建入口仍是 `scripts/build.py`，`--touch-repair on` 默认开启，
-共享组件与 profile 后端统一从 `private/build-inputs/touch` 读取触摸包。
-SQ1/SQ2 的 Default/Fallback 都集成相同触摸算法；保留 `--touch-bundle DIR`
-和 `--touch-repair off` 自定义入口，不改变 LTE、显示、EL2、音频或存储基线。
-组件生成方式见 [触摸默认基线](TOUCH-CALIBRATION.md)。
+`python3 scripts/prepare-surface-pm-debug.py EXPERIMENTAL_UNSIGNED_LAUNCHER NEW_EFI`
+仅将现有实验启动器改成 debug-stage-only；不下载、不部署、不改正常默认。
+需原始未签名 ARM64 GNU EFI 启动器、包含既有 gate 的匹配 Image/runtime；
+其他格式拒绝，不能借此修改已签名固件。菜单仍用
+`prepare-surface-pm-once.py`，现场身份/hash 校验和正常入口回退独立执行。
 
-流程：打开5秒后静置45秒 → 修复/复测确认 → 单指滑动20秒 → 修复/复测确认
-→ 15次单点 → 坐标/拇指校准。初测临时停用旧的每设备幽灵/连点策略，复测仅
-使用本轮候选；退出/取消或保护期限到达恢复，显式确认才持久保存。保留坐标参数。
-首次生成后的按钮为“应用修复并复测”。滑动不再有30次/0.5路程等硬性门槛。
-静置异常不因帧数、分窗或面积被拒绝：孤立点/窄行优先，SPXNOISE3 噪声幅度图
-处理宽区、间歇和混合异常；无原始数据不虚构结果，生成不等于已修复。
+在确认 test=Y、trial/autosuspend=N、owner/token=0 且挂载 tracefs 后，显式运行
+`sh surface-pm-debug freezer|devices|platform NEW_LOG_DIRECTORY`，一次一阶段，
+首个失败后先取证，不循环。脚本不接受 none，不授权真实睡眠，日志只保证正常
+返回后保存；驱动挂死仍可能需要现场复位。详见 SURFACE-SUSPEND-20261103.md。
+测试：`python3 -m unittest discover -s tests -p test_surface_pm_debug.py -v`。
 
-32项离线回归通过；协议7 APK、IPTSd及助手已在 .94 运行时部署，运行/安装哈希及
-原配置保持已核验。实际缓解效果、完整向导和新整盘双机启动仍需验收。
-本次提交不包含 APK、内核、私有输入、原始日志或设备校准文件，也不写设备启动镜像。
+
+逐组件PM分析：`python3 scripts/analyze-surface-pm-trace.py TRACE FRESH_OUTPUT`。
+输出每次回调的阶段/驱动/设备/parent/调用层/返回码/耗时，以及完整性和缺失边界。
+不要将prepare/complete或没有对应system-sleep回调的设备计为已挂起。
+EL2 kernel builder现调用已有`patch-sq2-spi-pm.py`保留旧SPI-HID系统休眠钩子；
+此源码接线不自动更新私有runtime输入，不代表真实休眠通过。当前隔离验证见
+SURFACE-SUSPEND-20261103末节。
+
+
+SSAM事件诊断：`surface-pm-debug`在内核提供时同时启用SSAM接收事件/请求/响应
+tracepoint，用于关联EC事件与组件恢复；缺少时跳过，不改变受保护阶段准入。
+事件元数据只能定位接口，不能直接判定有效输入或真实唤醒根因；本轮SQ2证据见
+SURFACE-SUSPEND-20261103末节。
+
+
+### 2026-11-04 SPI-HID 恢复输入候选验证
+
+`patch-sq2-spi-pm.py`同时修正open启用IRQ顺序与无效报头进入既有错误恢复；已打V1的
+源码支持增量升级，锚点不匹配时在写文件前退出。只影响后续构建，不自动部署设备。
+`scripts/check-spi-hid-resume.py UNPATCHED_SPI_HID_DIR --v1-source V1_SPI_HID_DIR`
+抽取实际函数在主机故障注入，依赖C编译器及ASan/UBSan。它验证协议/调用顺序与错误
+分支，不能模拟物理IRQ、SPI控制器或证明触摸恢复。模块仍须以匹配内核完整Module.symvers
+构建，核对运行file/note和有效initramfs，受保护阶段及真实休眠分别验收。
+当前候选及限制见SURFACE-SUSPEND-20261103末节；正常screen_only/nohibernate不变。
+
+
+### 2026-11-04：原生服务单请求诊断门（不用于正常自动休眠）
+
+`patches/surface-pm/02-native-single-request.patch`仅供隔离试验，在01-framework-owner.patch
+之后应用。注册的Android UID1000 TGID只可在120秒boottime窗口内消耗一次s2idle准入；
+消费后释放PID引用/owner归零，过期请求也注销，其他进程/状态/pm_test不消耗。正常
+screen_only和未注册调用者仍拒绝。它刻意不提供连续autosuspend，不接入标准默认构建。
+`python3 scripts/check-surface-native-once.py PATH/kernel/power/suspend.c`编译实际谓词，
+验证权限/单次/取消/过期边界与PM_DEBUG关闭；需C编译器与ASan/UBSan。
+
+实验包还须移除init自动运行framework-suspend-start的那一行；只有现场核对后人工注册。
+120秒为准入截止时间，不是保证强制唤醒的定时器；若尚无请求，观察助手应写owner0撤销。
+保留应用wakelock、原正常菜单/载荷和私有凭据最终成员；不把调试包作为通用交付。
+实际Image的QEMU检查须带与实机相同的`lsm=selinux`，仅enforcing=0不能选中SELinux。
+本轮用合成失败PM回调证明注册进程一次到达、第二次被拒绝，未让QEMU进入真实idle。
+这不是SQ1/SQ2实机恢复或能耗证明，详见休眠记录末节。

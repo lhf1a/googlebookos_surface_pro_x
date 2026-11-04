@@ -1,8 +1,712 @@
-## 2026-11-04：LTE 本机自动 FSG 与产品路径清理
+## 2026-11-04：当前U4开发版本合入主线（未部署）
 
-收尾清理版：已编译并安装 SQ1，用户确认正常启动；SSH 尚未恢复，本清理版 LTE 复测未完成。修改前旧版本的本轮蜂窝 HTTPS 也超时，不宣称持续联网稳定；原版回退保留，详情见 LTE-PRODUCT。
+按用户“冲突保持现在能力和启动流程”：保留unrestricted策略、Venus system PM、QCA最终
+失败清理、GENI UART补丁、SPI/FUSE/音视频既有链路。7处文本/删除冲突选当前版本；另
+解决LTE语义冲突：不以主线新EFI FSG/router替换当前启动路径，保留当前LTE兼容工具及
+打包依赖。上游新增LTE实现保留为尚未接入默认的源码；旧主线“已默认接入”描述在本合并
+中不代表当前入口。主线触控v7及对应改动保留，未作本机重新部署或声学/触控验收。
 
-默认 LTE 改为本机 EFI 采集/UUID 缓存 → RAM RMTFS → 原 IPA/Radio AIDL；不再内嵌共享 FSG 或使用私有 Radio04 donor、单机序列准入。AOSP APN 表随源码，生产包移除 LTE 实验观测器/旧 Java bearer/自测入口和成功转储，保留错误与真实边界。SQ1 已完成自动首次采集、标准广电 APN 蜂窝 HTTPS 和正常默认缓存复用；SQ2 沿用已通过 Android LTE 的路径。完整新镜像双机全新启动及 SQ2 新采集入口未验收。详见 [当前路径及限制](LTE-PRODUCT.md)、[实验执行约定](LTE-EXPERIMENTS.md)；下方旧 LTE 构建/单机说明仅供历史参考。
+U4固定默认仅指上轮私有离线ZIP；包、身份、日志均不入Git，设备仍原SQ2Free。
+pm_test=devices诊断包不改为真实连续睡眠；未冷启动WSA helper源码仍明确标候选。
+十分钟静置无响应仍未解决，不以合并代码替代实机验收。不写ESP、不重启、不推送远端。
+
+## 2026-11-04：按用户确认制作U4离线固定默认启动包（未写真机）
+
+用户明确仅制作离线默认启动包。新私有增量ZIP逐字复用U4 Imagef64bc678、overlayd339e6de、
+EFIfbea8768；未重新编译内核或加入未冷启动WSA新版。只把包内sq2-default的条件chainloader
+改为固定/EFI/SQ2U4/devices.efi，不消费boot-once.env；恰两项，原Mesa第二项保持。
+原SQ2Free/base initramfs/共享固件DT/Mesa是已有部署依赖，包内列明SHA，不是完整重装镜像。
+pm_test=devices、诊断trace及RAM启动日志原样保持；不是持续真睡或pstore持久化修复。
+菜单B/M/R同检查：conditional true/false/true，默认目标U4+Free/U4/U4+Free，均exit0；
+主ROLLBACK新增u4-offline-menu模式恢复原字节，patch重建匹配；ZIP逐文件回读匹配。
+无设备访问、无ESP写入、无重启，新默认入口未真机启动验证，十分钟静置挂死仍未解决。
+
+## 2026-11-04：十分钟静置再次无响应，用户手动重启；不得标记睡眠已修复
+
+用户反馈“我静置十分钟后，睡死了，已重启恢复”。此前最后确认U4 boot3c371f1a…，
+pm_test=devices、debug0；故障瞬间是否改变阶段及确切卡点无日志，不能直接断定进入了
+真实低功耗，更不能把SSAM早醒直接等同这次挂死根因。短程视频/声音/输入通过仍成立，
+但长期静置稳定性明确失败。没有安排新睡眠、修改用户电源策略、重启或部署新候选。
+
+首次SSH超时exit255，随后保留相同主机验证/公钥增加verbose只读诊断exit0，连接已恢复。
+新boot a20344b4-f727-402f-b01e-ce5f0145ed26，实际cmdline仅原SQ2Power base + SQ2Free
+覆盖层，内核#2 Nov3，pm_test none，N/autoN/testN/trialN，当前success/fail0/0。
+证实一次性U4入口已回原默认；这些重启后计数不能解释旧boot最后一次挂起。
+
+pstore已挂载但为空，/proc/last_kmsg不存在，DropBox SYSTEM_LAST_KMSG及SYSTEM_RESTART
+无条目。当前dmesg不是旧boot日志；不能据缺少panic记录排除kernel hang/panic。
+已读取保存持久DropBox与近期tombstone：8份压缩记录和2份当前记录均是gscd因/dev/tpm0
+不存在而SIGABRT。重启导入文件时间20:07，内嵌旧记录时间19:57–19:58；必须使用载荷时间，
+不能把导入时间当崩溃时间。这是反复服务崩溃线索，尚无证据证明导致整机挂死，不禁用
+安全服务来冒充休眠修复。原记录与命令/输出/退出码保存在本次POST_IDLE_HANG目录。
+
+下一步先确认故障时接线/合盖条件，补足跨重启保留的PM阶段证据；在有区分性取证前不再
+盲目等待十分钟复现、不提升U4默认、不屏蔽SSAM唤醒。继续保留既有四角色及B/M/R证据。
+
+## 2026-11-04：U4恢复正常，音频健康起点重试仍被SSAM提前唤醒
+<!-- U4_AUDIO_HEALTHY_RETRY_20261104 -->
+
+本节更新下方候选“尚待实机”的阶段状态；同一工作区/分支，不回写父源码，不重复已完成
+离线矩阵。本轮U4实际boot为3c371f1a-416f-4881-97e8-f65373002f09，Imagef64bc678…、
+Venus coree46fdfe6…/decf0bfdf50…、hci_uart8772d304…均已实读。相同platform输入write0，
+success0→1/fail0，Venus stop/start1/1，未再见上一内核的GENI UART IOMMU重复unmap WARN。
+随后第一次显式pm_test=none/freeze write0，success1→2/fail0，八CPU s2idle计数增加，
+478.423196→478.429939仅6.743ms即被SSAM IRQ173唤醒；不是30秒低功耗驻留验收。
+两次阶段/真请求的UART未见旧WARN不等于竞态已穷尽证明；QCA初始化成功未走新增最终
+失败清理分支，不能把启动成功归因于该补丁。原noTZ固件/hash/stream完整性保护保持。
+
+用户随后说内置无声。原始RAM启动kmsg在52秒已有SWR FIFO/WSA读-5，早于首次PM241秒；
+左WSA UNATTACHED/numberN/A，右Attached/number1，而ALSA/AUDIO_READY/HAL774均存在。
+不能仅因反馈发生在PM之后就归因为睡眠丢音。ADSP始终attached，不重置它或SoundWire主端。
+只在停止HAL/audioserver、确认全部PCM closed后做一次原WSA成对runtime auto/on周期，
+恢复原on/3000策略及原HAL。双WSA变Attached，动态number1/2，用户明确“恢复”。
+此前相同路由开关仍-61的路线不再重复；未改WSA驱动/SDM845 machine-only时序/增益/端口。
+
+audio-drivers-start副本已移除会真实读寄存器的全量tinymix contents，并以实际wsa881x
+驱动链接的Attached/正devnum/runtimeactive判枚举完成；仅开机部分枚举且所有PCM closed时，
+允许一次现有slave runtime恢复并还原策略。不加每次睡眠恢复钩子/后台轮询/owner门禁。
+原helper SHA f696da16…，新36fb57ed…；同一部分枚举夹具BASELINE/MODIFIED/ROLLBACK：
+exit0/0/0、Attached1/2/1、成对runtime周期无/有/无，全量contents有/无/有；rollback原hash
+相同。夹具不是硬件冷启动证明。新7条覆盖的未来诊断包overlay36142f52…有效脚本逐字匹配，
+身份member仍最后且未改；尚未部署/未冷启动，当前设备的恢复是上述同boot人工一次操作。
+
+用户补充上一轮其他功能正常且自己手动点亮，不能将上一轮写成“等待全程无操作”。
+随后明确“再试一次”，新测试先确认声音已恢复、双WSA Attached。首次预读仍有两个活动
+解码session，未请求睡眠；用户退出播放回桌面并答“就绪”后，精确只读快照sessions0/atomic0、
+无video FD，仅18项/36466688 bytes待回收。读者加载即卸载，无固件/寄存器/IRQ写入。
+发新“开始”后仅一次直接内核pm_test=none; echo freeze，传输/写入均exit0：
+success2→3，fail9→9，Venus stop/start2/2→3/3；已有9失败不抹去，不能说全boot零失败。
+新SSAM IRQ在2318.378593触发，比2318.380757 s2idle调用早2.164ms；调用立即返回，
+八CPU s2idle usage/time完全不变。SSAM计数1→2，PMIC电源键6→6，wakeup_irq173。
+因此本次未形成新低功耗驻留，success计数增加也不能冒充真睡30秒。该次无新UART WARN。
+双WSA前后Attached/number1、2/runtimeactive，实际HAL同PID20512/hash774；用户统一确认
+“正常 自动亮起”，覆盖画面、视频声音、持续触摸和键盘。这是恢复功能通过、持续睡眠未过。
+本次是直接内核freeze，不是Android原生睡眠策略/合盖/长时间耗电验收，不混淆层级。
+
+同boot只读复核当前SSAM原模块773f191c…，文件build-id note SHA f35d1d62…与已加载note
+一致；实际ssam_irq_handle反汇编除可选dynamic_debug仅返回IRQ_HANDLED，没有EC GPIO
+callback排队事件释放/按事件判定唤醒。源码controller.c:2693也明示该逻辑未实现。结合
+本轮IRQ早于s2idle且无电源键增加，可将下一步聚焦EC待处理事件及其真实唤醒资格；
+仍未采到本轮原始EC载荷，不能认定是空键盘包、电池或某个按键，更不屏蔽整个SSAM IRQ。
+不继续相同30秒计时重试；先核对现有原始采集路径与EC callback时序，再推进Android原生
+对照。SSAM wakeup仍enabled、BT ON、观察模块已卸载，用户设置/接线/正常输入保持。
+
+pm_test已恢复devices、pm_debug0；screen_only/auto/test/trial均N、owner0，不新增次数/期限/
+保活门。这只是隔离阶段boot，不是正常默认持续睡眠已修复。一次性入口已消费，下次启动
+仍回原SQ2Free，原SQ2Power/工作Mesa/共享GRUB、固件、DT及载荷保留。本次重试没有重启。
+历史连续黑屏、多轮驻留、合盖及冷启动音频枚举修正版仍未验收，不提前提升新候选为默认。
+
+## 2026-11-04：Venus阶段恢复通过，QCA失败清理及GENI UART候选继续真机
+<!-- VENUS_QCA_GENI_LIVE_20261104 -->
+
+按用户要求直接真机、不再扩展离线矩阵、每次启动合并检查。Venus v2在7f5a053b…
+先devices后platform均write0、fail0，stops/starts2/2。第二次前真实视频遗留4项/
+2834432 bytes，在确认CPU reset/5MiB unmap后回收为0，HFI/SYS_INIT恢复。用户确认
+恢复后视频、声音、触摸、键盘全部正常。不是实际低功耗通过；每阶段SPI增加一次-22，
+platform另有USB xHC恢复重置，继续保留原错误。
+
+随后获新30秒配合，pm_test=none只请求一次真实freeze。实际636.078→639.531s，
+在devices阶段因hci_uart_qca serial0-0等待SSR/FW状态3秒而-110，write1；success仍2、
+CPU0..7 s2idle usage/time全0，未进真实睡眠，不冒称一次唤醒成功。立即恢复devices/
+pm_debug0，没有自动重试。可选kretprobe静态s2idle_loop/enter已内联无符号，register -2，
+读者已卸载；改用内核自有CPU s2idle计数及pm_debug边界，不把采集器失败变硬件失败。
+
+同boot只读精确结构快照：HCI_UP/INIT/RUNNING0、SETUP1/AUTO_OFF1、power_on_work0、
+queues0；QCA IBSdisabled1、BT_OFF0、SSR0、memdump0、rx/tx asleep0、所有work0。
+原bridge等待300次后EBUSY退出，Android BLE_TURNING_ON，用户持久bluetooth_on=1。
+没有后台初始化能再清IBS位。实机hci_uart note9886e002…与精确匹配内核build相同。
+
+用户明确允许修改蓝牙驱动。qca_setup最终失败耗尽重试后缺少硬件shutdown，现只在该
+错误分支调用已有qca_power_shutdown，保留原errno、成功路径不改。不清标记伪造下载
+成功、不写用户蓝牙开关、不热卸载QCA。原K源码SHA57cc000b…不变；实际改动C副本及
+native patch/可重建CLI位于私有工作目录和probe/bluetooth。相同失败输入的实际函数mock
+B/M/R：均ret-110/4 attempts；shutdown3/4/3、最终off0/1/0，执行主rollback恢复原C和
+原模块hash。mock不是硬件断电证明；新hci_uart8772d304…/loaded note6fab2b74…已上机。
+
+853b1222…首次启动原始BT日志完整采集到：Product0a/SOC40010224/ROM1001，下载原
+crbtfw01.tlv/crnv01.bin后setup completed；HCI SETUP0/UP1/RUNNING1/USER1、IBSdisabled0，
+桥接就绪、Android ON且保存开关仍1。随后platform write0，fail0，Venus stop/start1/1。
+物理ALSA/AUDIO_READY/实际HAL774及用户“全部正常”通过。此次没有触发新失败清理，
+不能把初始化成功归因于该补丁，也未证明前次初始化失败根因。第一轮SoundWire无声
+仅在后续重启恢复，没有音频代码改动或声称根因修复。
+
+该platform回程新见GENI UART TX→iommu_dma_unmap_page WARN(!phys)，停止继续真睡。
+源码handle_tx_dma无条件unmap/advance，而stop_tx_dma已可将address/remaining清0，
+迟到TX_DMA_DONE能二次回收。已在副本将回收限定为仍有非零在途字节，后续排队/唤醒
+路径照旧，不按DMA地址0判合法性，不屏蔽非零真实传输的映射错误。原内建驱动未热改。
+相同late-DONE/retired0输入的实际函数mock B/M/R，unmap及advance调用1/0/1、均exit0；
+原C回滚hash相同。这不是UART硬件race根因已证实。
+
+私有mount namespace只把新C副本只读映射到原编译路径，用隔离build增量编译；日志只重编
+GENI UART及版本对象。配置hash保持b8c8ea74…，原源码/原Image86d字节不变。新Image
+f64bc678…（30794240B）已独立部署SQ2U4并发起启动，原正常SQ2Free/原SQ2Power、
+Mesa、共享固件/DT、所有原载荷保留。新EFI fbea8768…加载独立Image，三initrd沿用
+原base+Free+Venus/QCA候选；stage仍devices。一次性选择已准备，下次再启动回原Free。
+新Image尚待本次启动/同platform原输入以及进一步真实睡眠，不提前标通过或提升默认。
+
+## 2026-11-04：Venus第一轮真机区分证据与回收顺序修正（v2已重启）
+<!-- VENUS_RETIRED_ORDER_V2_20261104 -->
+
+首轮50d9612a…完整AndroidC2 running/video0，新core c270/dec2d97实读，用户确认视频、
+触摸、键盘正常，但内置扬声器无声。ALSA/AUDIO_READY/实际HAL774通过不能替代听音。
+首次trace目录不存在使辅助采集exit1，尚未请求PM；直接命令v2才实际echo freeze一次，
+exit1，fail0→1、last Venus -16、phaseRUNNING/stops0/starts0。未进真实低功耗。
+
+为区分此次EBUSY，临时加载只读一次snapshot模块（精确core.h结构），读取后立即卸载，
+不写寄存器/IRQ/固件/PM/缓冲，不卸载主驱动。实际sessions0、atomic0、无video FD，
+noTZ/fwowner/secure/HFI均1、sys_error0，但charged4960256 bytes、retired7且scope均未ended。
+这是本候选把待回收缓冲错误放在停固件之前的顺序问题，不能将其称为活动视频阻塞。
+
+已改venus_sq2_pm_idle：不再要求待回收list/charge预先为0；保留活动session拒绝和
+running/DMA状态检查。venus_sq2_pm_stop仍先IRQ同步/CPU reset确认/5MiB完整unmap、
+再hfi_destroy及retire_stopped，回收后才核对charge/list为0；不一致终态保留，不清零
+计数造假、不在固件活动时释放缓冲。无新增helper门禁/owner/预算/超时。v2重新配对编译，
+不扩展离线测试；独立SQ2Vp2已部署并发起第二次重启，仍devices诊断不是正常默认提升。
+coree46fdfe6…/decf0bfdf50…、overlay2f34e57d…、EFI014874e3…，原SQ2Free/Mesa继续保留。
+这次必要重启是应用内核代码修改，不重复已通过启动包的整套验收，不热改活动内核字节。
+
+无声原错误SoundWire wr_fifo overflow/WSA DPN_PortCtrl失败、SLIM/MultiMedia1 prepare -61，
+时间151s早于本轮PM命令228s，不归因于本轮设备恢复。MUSIC非静音且路由内置speaker，
+ADSP保持attached，音频module/固件/HAL未改。只做一次停HAL/正常成对DAC-COMP-BOOST
+路由关开/再起HAL和audioserver，无ADSP或provider reset；route shell返回0但SDW -61
+仍存在，停止原样重试。用户随后明确内置仍无声；本轮不能标音频修复或候选验收。
+下轮同一boot优先完成Venus真实冷停/重建区分及实际视频/音频，仍不直接真睡。
+
+## 2026-11-04：Venus blanket EBUSY已定位，独立system-PM候选已上机待阶段结果
+<!-- VENUS_SYSTEM_PM_20261104 -->
+
+继续同一unrestricted工作区/分支；原父工作区源码未改。用户已确认可配合重启，随后
+要求停止扩展离线验证、直接推进真机、单轮覆盖更多、减少重启、不重复已完成验收。
+因此只沿一次新候选启动推进，不再扩展host测试矩阵；真实磁盘/DMA/固件/回退安全不删除。
+
+实机原venus-core b9b9d835…、dec3ccf818a…及加载note/反汇编已对齐：SQ2 HFI的
+venus_runtime_suspend直接-EBUSY，system PM映射pm_runtime_force_suspend，尚未调用HFI。
+当前Image86d896…精确source/build隔离副本生成真实Module.symvers；重建基线core299及
+decoder56个函数机器码均与实机相同，非alloc路径字符串/build-id不同，不冒称整文件SHA一致。
+实机本轮同boot acf4e7a8…做一次pm_test=devices、echo freeze：write exit1，原始stderr
+Device or resource busy，fail86→87、failed_suspend82→83、success0；最后aa00000.venus-sq2
+suspend -16。结束pm_test恢复none。后台自然尝试另有记录，不把它们计成这一次命令。
+
+显式prepare-sq2-venus-iris1.py --system-sleep才选新system callbacks；runtime guard仍保留。
+新venus_sq2_system_suspend/resume仅空闲noTZ：核对session/DMA owner，IRQ同步后确认CPU
+reset及完整5MiB unmap，再释放HFI；保留三genpd引用/七clock handles，关clock/ICC；
+resume重建HFI、原已校验固件/stream和SYS_INIT。一个module-owned固件缓存避免冻结用户态
+后读盘。只有确认clean-stop才清boot_attempted；stop/start失败终态隔离，不自动重试，
+不把EBUSY改0，不卸载活动模块，不通过重置provider冒充成功。活动会话/未清DMA仍拒绝。
+
+新pair core c270304f… / decoder2d97310b… 已完整modpost编译。离线实际source+mock回调同
+idle/noTZ输入B/M/R：suspend -16/0/-16、resume均0，stops0/1/0、starts0/1/0；均exe exit0，
+执行主ROLLBACK.sh恢复pristine fixture hash相同。16轮power handles保持、17故障点、128轮
+纯状态机及旧HFI resume/内部buffer/transport回归已完成；均不是实机重启固件或真睡证明。
+调用CLI误加-v、非root读cache、mock日志消除产生unused告警的原错误均保留，改调用后通过。
+
+独立SQ2Vpm/devices.cpio.gz仅改core、decoder、native清单、startup trace参数及/init的
+pm_test=devices（在Android启动前设置，整个本诊断boot不进真实低功耗）；screen_only=N、
+auto=N、owner0，不加入owner/次数/期限/keepawake。原正常SQ2Free、原SQ2Power、Mesa、
+共享firmware/GRUB binary、Image/DT、codec service、音频和userdata字节不覆盖。
+ESP动态识别及原protected hashes通过，新增约1MiB；两项菜单one-shot选择已写入，
+下次启动消费选择后再重启回当前SQ2Free。首启真实GRUB选择/消费/回原正常的既有模式已验证。
+新overlay00ee0c7a…、EFI3466ce07…；新候选已部署且reboot命令已执行，等待本次boot与stage
+观察。不是正常默认提升；stage通过不等于真实s2idle、合盖或原黑屏修复。后续同一boot尽量
+完成区分性检查，失败留原错误并停止该机制，不热修活动驱动。
+
+## 2026-11-04：静置窗口亮屏与输入通过，但真正挂起仍0次（最新）
+<!-- UNRESTRICTED_IDLE30_POSTCHECK_20261104 -->
+
+用户先声明静置半小时，结束确认“正常唤醒了”，并另确认20秒持续触摸拖动/键盘
+“也都是正常”。期间没有常驻SSH或轮询，没有更改用户超时/合盖/供电策略，没有工具
+请求新的睡眠、禁锁或重启。两次快照北京时间16:32:49→17:06:42，间隔2033.06秒。
+同boot acf4e7a8…，system_server3671/SurfaceFlinger3179/native2613/C2 3099均未变。
+
+内核success0→0，fail14→46，其中failed_freeze3→4、failed_suspend11→42；
+SPI ready保持、resume_count0→0、既有bus_error1(-22)不变。原生服务也报46次尝试/
+46次失败、累计睡眠0ms。最后失败仍是aa00000.venus-sq2、suspend阶段-16(EBUSY)。
+因此只能验收关屏/亮屏和持续输入，不是实际挂起后恢复通过；原黑屏没有在真睡中排除。
+
+基线时Android已Asleep，wake_lock_summary0且框架两项suspend blocker均false，
+说明当时已非screen_only或框架锁拦截；回读时Awake，screen_only/auto/test/trial均N、
+owner0、pm_test none。最后SleepReason是power_button，不把这轮写成严格30分钟
+完全无输入、纯timeout单变量实验。两次快照电池86%→79%，均无外部电源；
+没有真正挂起，不能将这个差值当深睡功耗结果。
+
+回读Venus core runtime active、decoder子设备suspended；当时全进程FD只读扫描没找到
+video节点持有者，不能倒推每个失败时刻都无会话。dmesg环主要已被audit覆盖，保留
+原始可读载荷，不据最后计数虚构精确卡点。源码prepare-sq2-venus-iris1.py存在SQ2 HFI
+返回-EBUSY的PM保护分支；还须核对实机模块的构建选项/对应源码，不能直接删除
+保护、卸载活动驱动或重置固件来冒充“真睡修复”。本轮没有新的驱动/内核修改。
+
+下一步对齐实际Venus模块/PM回调与no-TZ/firmware lease状态，选择能区分结果的对照；
+保留已确认的视频、音频、FUSE、触控及新默认/原Mesa入口。合盖映射仍未验收。
+原B/M/R准入证据保持：Y拒绝、N放行、回滚Y拒绝；source helper同N夹具1/0/1。
+这些不代替实机睡眠成功。
+
+## 2026-11-04：无限制环境实机启动、视频修复及合盖边界（最新）
+<!-- UNRESTRICTED_DEPLOY_VIDEO_AND_LID_20261104 -->
+
+独立工作区 /mnt/spx-workspace/chromebookOS-unrestricted-20261104，
+分支 codex/unrestricted-power-20261104。父工作区988份源码哈希保持，没有提交/推送。
+本节更新下方早先“尚未部署/15条目/模块不变”的阶段记录。
+
+完整Android实读screen_only=N、autosuspend=N、test/trial=N、owner/token0、
+pm_test none、s2idle。最终22条有效覆盖均在实机校验；正常入口已切换SQ2Free，
+菜单恰为新默认+原Mesa两项，原正常包/两原载荷/共享GRUB和固件字节保留。
+首次验证的一次性启动选择已移出默认菜单；没有休眠次数门、期限或实验保活钩子。
+合法Android锁、用户超时/凭据、nohibernate和热/磁盘/ABI保护保留。
+
+首次启动停在video-c2-stage：改过install.sh却保留旧SHA清单，用户现场确认仅该项
+FAILED。修正为先验证原哈希，再递归刷新受影响清单；没有跳过完整性检查。
+经shell reboot-f回原正常包，实机再次验证原菜单/载荷，修正版再启动到桌面。
+
+随后用户报告bilibiliHD闪退、Chrome视频页白屏。实际原runtime.tar内start.sh
+仍test N=Y而exit1，服务stopped；老助手固定VIDEOCC phandle=b5，实机b9，
+在HFI/core前退出、没有video0。不是把b5改成b9：复用11月3日已验证动态provider
+引用模块86b6acbc…及配对启动次序，PAS尝试标记先于core；不重置/卸载provider。
+唯一更换的内核模块为该HFI overlay；内核、SPI/SSAM、DT、固件、codec service和
+mapper字节保留。嵌套guard已清理，launcher由配对源码编译到独立v2u版本；
+旧v1不覆盖/删除，两份实际文件清单均通过。未知嵌套限制/不匹配输入拒绝组包。
+
+最新重启实机C2服务running、default1已注册、video0存在、全部22项hash匹配；
+用户明确“已恢复”“视频正常”。两用户共享存储MOUNTED且RUNNING_UNLOCKED；
+物理ALSA/AUDIO_READY/实际运行HAL774cd7e7…通过，ADSP attached按已采纳规则接受。
+这不是新声学/全部codec/长期帧率认证；没有当前播放的逐帧硬件计数，不扩大用户反馈。
+
+最新合盖只读核验：global.lid_behavior=0，WindowPolicy为LID_BEHAVIOR_NONE；
+输入有KIP Tablet Mode Switch（SW bit1），没有SW_LID bit0能力。本轮未改变合盖
+设置、未要求用户合盖、未请求睡眠。内核success=0、SPI resume_count=0，不能说
+“所有障碍清零”。合法应用/显示blocker仍存在，亮屏时不据此诊断睡眠失败。
+核验时已无充电，5分钟关屏设置保持；早先启动验收接AC，条件不混用。
+
+QEMU同root/owner0/三次freezer输入BASELINE/MODIFIED/ROLLBACK：
+Y拒绝1/1/1、N允许0/0/0、回滚Y再拒绝。真实包清单失败/通过/执行回滚后失败
+为exit1/0/1；嵌套脚本同N/相同mock launch输入为1/0/1，mock不充当实机frame证据。
+原连续真睡黑屏尚未修复证明，合盖睡眠/开盖唤醒/多轮恢复未验收。下一步先采实际
+姿态报告并核对策略映射，现场协调后再测；不拿SW_TABLET_MODE当SW_LID，
+不以功能通过替代历史根因证明。
+
+## 2026-11-04：用户确认关闭screen_only，创建无限制环境
+<!-- UNRESTRICTED_POWER_ENVIRONMENT_20261104 -->
+
+用户明确“是，关闭 screen_only 并清理依赖”。这里不是screen_on/KEEP_SCREEN_ON。
+默认源码策略变为unrestricted，实际启动参数screen_only=0、autosuspend=0；不安装/运行
+owner准入或实验保活启动钩子，次数/期限/特许owner不再参与。功能模块不再因flag不是Y
+而退出；原正常/Mesa载荷与共享固件不覆盖，合法Android锁/用户超时、ABI/热/磁盘保护
+及nohibernate保持。完整102文件引用清单与处理分类见UNRESTRICTED-POWER.md。
+
+源码在独立副本修改，原开发工作区代码保留。有效原正常包已重打为增量覆盖层650641字节，
+最终15条目变化、所有.ko/DT/固件/凭据数据不变，身份成员仍最后。新增ESP文件约32.6MB，
+不须删除旧诊断包或原载荷。实际6.3.8 Image86d896…在QEMU中同一root/owner0/连续3次
+freeze+pm_test=freezer输入：BASELINE Y为1/1/1拒绝，修改N为0/0/0，回滚Y再1/1/1。
+三组退出0，回滚EFI哈希回到99a811…；这只是准入/freezer阶段，不是实机低功耗稳定性。
+第一次QEMU因测试入口漏掉实际lsm=selinux参数而KernelSU早期panic/超时124，原错误保留；
+按实际入口补lsm=selinux enforcing=0后通过，没有为测试禁用KSU或更改内核。
+
+旧全量unittest discovery误导入需源码参数的CLI harness并缺私有输入，失败原样保留；
+改为逐文件隔离运行实际相关TestCase并更新N不再拒绝的预期。固件/hash/overlay/未知目标、
+symlink、用户安全状态等其他拒绝场景保持。物理设备是否切换N另见部署记录，不能把
+包参数/QEMU结果写成当前设备已关闭。原连续休眠黑屏仍未解决，未宣称本改动是根因修复。
+
+## 2026-11-04：带Hub/Wi-Fi/USB2原生单请求早醒与输入恢复闭环
+
+仅拔网线后默认网络101、eth0 carrier0；7次采样应用锁false但Awake/display blockertrue。
+tips job189在首次采样约5分钟前自行jobFinished，不能将锁释放归因于拔线。USB树与上次
+v3记录不同，两个外接USB3 Hub缺失、网卡/读卡器重新枚举为480Mbps；旧断连段已覆盖，
+不能把这轮称严格单变量网络试验，也不能据此写USB驱动根因修复。
+
+另获新的现场确认后，owner0下先普通KEYCODE_SLEEP，3次自然无框架阻塞后发新开始，
+此前未执行的v5 b101ef82…只注册一次。machine_suspend6420.780198→6420.820863，
+40.665ms；2452回调全返回0、5112/5112无覆盖，success1→2、SPIready/count1→2。
+SSAM IRQ173计数1→2；kernel也有active timerfd，不能将早醒唯一归因于键盘盖。
+18条原始12字节Report1输入字段全0，与18条KIP/iid1元数据数量相同；evdev0事件、
+event14零激活。这不能反推v2未采载荷，亦不能把空报告本身说成v2 event14根因。
+PMIC窗口前后均16，稍后物理按键18；用户确认“已恢复，触摸键盘正常，等待期间无操作”。
+cleanup0、owner/token0、pm_test none、debug/times0、自己的trace挂载已撤除。
+
+真实touch-resume-watch1825778f…异步检测resume_count、停止iptsd后等待1秒重建；trace
+解冻102.023ms后已有新的原生尝试被单次门拒绝，后续iptsd事件仍在出现。它是重入假设，
+不是已复现的第二轮故障。最多两次准入的独立源码456c9093…做了实际谓词ASan/UBSan
+BASELINE/修改/回滚1/2/1和完整patch重建；没有构建或部署内核。构建第一次因work父目录
+缺失exit1，尚未复制源码就停止。用户随后切换到无限制环境，此诊断构建路线不再续跑。
+
+## 2026-11-04：无操作反馈闭环，原始采集窗口无PM请求，停止盲目计时转向环境对照
+<!-- HUB135_OPERATOR_FEEDBACK_AND_RAW_WINDOW_20261104 -->
+
+Hub v2现场反馈现已闭合：用户明确“已恢复”“等待期间完全没操作”。因此本次
+键盘盖事件不是等待期间人为输入；仍没有该轮原始载荷，不能把len12直接断为空报告。
+随后同boot/PID保持、SPIready/count1、PMIC6→8；之后关屏不等于再次真实睡眠。
+历史SSAM诊断延时下的空报告记录保留，不以它替代本次stock SSAM的未采载荷。
+
+采集方案按实际源码修正：HID debugfs仅512字节FIFO，冻结时可静默截断，故不使用。
+改为只读hidraw与非独占evdev的有界ARM64静态采集器；不ioctl、不grab、不发硬件报告。
+Surface HID实际LL open/close是空操作、无power回调；hidraw的64环只可排队63条，仍须
+与SSAM trace逐条数量核对，数量不匹配不称完整。记录的是read时间，不冒充EC生成时间。
+C源3be460b6…，静态ELF6a367396…；首次-Werror缩进告警exit1保留，补大括号后两架构
+严格编译exit0，主机FIFO fixture12字节与3字节分帧exit0，预期不存在节点exit3。
+实机5秒只读自检0条/exit0，owner0、success和SPIcount不变，不是睡眠试验成功。
+
+用户另次确认135秒配合后，明确发开始，只执行新raw v3观察器734a95f7…一次。
+同495331fe…，stock SSAM773f191c…/JAR126efcf2…/SPI3e9e6317…，Hub与电池条件保持。
+本窗口注册TGID2342一次，120秒admission_timeout：原生attempts62→62，内核success1、
+fail61均不变；trace357/357无覆盖，零suspend_enter/组件回调/machine_suspend/KIP HID。
+两个读者均0条，SIGTERM排空后exit0，cleanup0，owner/token0，SPIready/count1。
+前后PowerManagerService.WakeLocks均Active，累计持有时间增加120973ms，Google搜索、
+tips、Play商店等合法后台锁出现，故没有请求实际进入内核。不能称休眠失败、采集到
+空报告或问题消失。通用callback分析器对无回调trace报ValueError/exit1已原样保留；
+改用无PM分支摘要exit0。用户明确本窗口“已恢复，触摸键盘正常，等待期间无操作”，
+结合无PM证据只能验收关屏亮屏及输入，不冒充真实睡眠恢复。
+
+后续只读v4监测在boot4974/4979/4984连续三次Asleep且框架两项blocker自然false，
+中间捕获一次合法微信短锁；owner始终0，未注册/强停/禁锁。native失败退避仍可Active，
+历史最大60001ms，不能将框架无blocker直接写成服务已无退避。监测退出0。
+
+用户再确认后准备独立v5 b101ef82…，只在准入前增加自然blocker复核；尚未执行。
+v5被动预检37次/约185秒均未就绪并exit1，未发新的开始，也没有注册；不是硬件失败。
+实际前/中/后快照均Awake，display blocker保持，同时tips job已持锁数分钟。停止
+重复计时路线，返回成功baseline与当前环境比较，不自动复用消耗过的v2/v3窗口。
+
+成功无Hub、Hub v2/v3和当前四份有效快照的mScreenOffTimeoutSetting均300000，
+sleep_timeout均-1；不能把当前5分钟设置当新回归或擅自重置。相同运行JAR/SSAM/SPI和
+原菜单9c71d06d…再次匹配。当前默认网络103为Hub以太网eth0，Wi-Fi网络101仍validated；
+Hub加入还改变了默认网络，不是纯USB负载对照。tips job189要求网络且正在执行，
+但没有证据证明以太网、该job或键盘报告是原连续休眠黑屏唯一根因。完整网络/任务
+原始记录仅在忽略out，不把地址、SSID和身份细节提交Git。
+
+已询问用户仅拔Hub上的网线、保持Hub/键盘盖/其他USB与电池供电、不按电源；待反馈。
+下一步只观察默认网络/相同USB枚举/后台锁，owner保持0，不请求睡眠、不禁网口驱动，
+不改用户超时，不把网络对照结果提前当休眠修复。v5脚本保留未执行，不能因旧135秒
+确认就稍后自行触发；恢复现场试验须重新说明当前条件与开始时刻。
+原正常持续休眠黑屏仍未解决；本轮没有更改产品驱动、内核或默认/回退载荷。
+
+## 2026-11-04：带Hub的135秒协调窗口已执行，键盘盖事件导致设备挂起提前中止
+
+本记录取代下方旧记录中“Hub v2尚未执行/待135秒确认”的待续状态。用户已确认
+“可以，135秒后按键”；显式发出开始后，只启动一次已核验52bf4b71…观察器。
+同boot495331fe-0e50-4827-87c2-d05fa1fabbca、stock SSAM/JAR、原生服务TGID2342，
+外接Hub/AX88179A/读卡器，电池供电；只注册一次，不强停应用或禁用合法wake lock。
+
+本次实际准入不是成功睡眠：machine_suspend边界为零；4360/4360条trace无覆盖，
+2154条已执行组件回调全部返回0，阶段为prepare1017/complete1017/suspend63/resume57，
+尚未到late/noirq。内核原始错误为-16（EBUSY），last_failed_step=suspend，明确记录
+Wakeup pending / active wakeup source:event14。success保持1，窗口fail27→28；后续
+owner0后-95拒绝属于准入保护，不能混称更多硬件失败。SPIready、resume_count仍1，
+不是新增恢复成功。当前仍同boot、Android PID3262/2818，没有SSH失联或已证实的硬冻结。
+
+实际sysfs/InputReader映射event14为Microsoft Surface 045E:09AE Keyboard，PHYS
+01:15:02:01:00，经SSAM/KIP连接，不是USB Hub事件节点。trace boot clock顺序：
+2486.971256收到KIP/HID cid0/iid1/len12，2486.971296 event14激活，随后设备挂起中止；
+恢复中另有同类报告。SSAM IRQ173在窗口前后均1，PMIC IRQ216均6；不称电源键结束睡眠。
+这支持键盘盖报告触发本次提前中止，但不能把元数据推断成空报告、操作者输入、
+Hub根因或正常持续休眠黑屏唯一根因。历史曾有无操作时全零12字节转换报告，不能
+替代本轮未采集的原始载荷；fs/eventpoll.c的EPOLLWAKEUP可按设备文件名生成event14
+锁，事件源名字不等于新硬件IRQ。evdev会丢空SYN_REPORT，不能凭len12就过滤报告。
+
+观察器cleanup0，autosuspend_tgid/trial_pid均0，test/trial均N，SPIready，pm_test none，
+debug/times恢复0，自己的trace mount已撤除；原菜单仍9c71d06d…，未改默认/回退载荷。
+补充只读能力核对：实际键盘HID debugfs events/rdesc可用；只挂载读取描述符后卸载，
+未启动报告读者或新的睡眠；CAPABILITY_CLEANUP_EXIT=0。未加入1.1秒延时、未屏蔽
+键盘/SSAM唤醒、未写USB retention补丁、未重试准入。
+
+一次只读收尾脚本误读不存在summary文件而exit1，错误源保留；修正为summary.log
+及实际参数名后exit0，无副作用，不称硬件失败。收尾实读Asleep，最后PMIC计数6，
+因此135秒后物理亮屏/持续触摸键盘结果与等待期间是否操作仍待用户反馈。不能因
+SSH可连或SPIready替代用户验收。下一步先闭合该反馈，再决定是否增加有界HID原始
+报告采集以区分真实操作与转换报告；不复用已消费v2观察器，不自动发起第二次睡眠。
+原正常持续休眠黑屏尚未解决。本轮没有端口驱动/内核/产品策略代码修改。
+
+## 2026-11-04：无外接Hub的stock原生单请求恢复通过；带Hub窗口尚未产生真实请求
+
+同boot495331fe…，后台合法任务自然释放后，人工只注册一次实际UID1000服务2342，
+SHA518d1319…。原生trace machine_suspend1147.216252→1176.731662，29.515410秒；
+2256条回调全0，4623/4623无覆盖，内核success0→1，SPIcount0→1、ready，Android
+PID3262/2818保持。用户明确反馈“完全正常”。结束内核睡眠为SSAM IRQ173，PMIC
+计数在请求前后均2，之后物理亮屏时增加到4；不称PMIC直接结束内核睡眠。
+Android mLastWakeTime是uptime，trace用boot clock，不能不对齐就直接相减推算延迟。
+
+前后9→15/16等fail包含owner0/单次门关闭后的EOPNOTSUPP保护拒绝；不能当多次真实
+硬件挂起失败。native total suspend time仍0，不代替实际trace区间，不作能耗证明。
+观察器cleanup0、owner0、debug/times0、原菜单9c71d06d保持；未自动重试或软件亮屏。
+这证明本次stock组合原生单请求恢复，不证明正常持续重入、长时间稳定性或所有外设。
+
+用户随后只接回Hub、不接充电器，实读同boot/AC及USB供电均false，外接2109 USB2/3
+Hub、0b95:1790 AX88179A、05e3:0749读卡器出现，SPIready/count1。下一次窗口在注册前
+因新AudioMix、Play Store和微信回调锁而退出1，owner始终0，success/count未增加；
+没有产生新的真实睡眠，不能记录为“带Hub睡眠失败”。原始power-before保留。
+
+诊断助手后续改为记录合法blocker、保留原生服务自行等待，不强停/禁锁；已在独立
+日志目录准备Hub v2观察器52bf4b71…，尚未执行/注册，private trace instance inactive。
+窗口最多准入120秒、只注册一次，结束或到期撤销；这不是定时唤醒保证。
+已请求用户确认“收到开始后135秒再短按”配合；尚未收到本轮确认，因此没有发开始。
+用户确认后先重新核对fresh boot、owner0、SPIcount1、实际Hub/供电、helper哈希、trace
+instance和已恢复原菜单，再执行此唯一待续窗口。不得复用已消费的无Hub/Hub-v1脚本。
+USB retention候选仍未更改、构建或部署；原正常持续休眠黑屏仍未解决。
+
+## 2026-11-04：stock手动真实睡眠恢复通过，原生单请求stock入口已启动但owner0
+
+本轮手动trial boot a2c0729b…已执行且只执行一次：machine_suspend289.295305→318.851842，
+29.556537秒；2256条组件回调全0，trace4682/4682无覆盖。同boot/PID3287/2828、SPIready/
+count1、success1/fail0、owner/token0，debug/times恢复0。用户确认亮屏、持续触摸和键盘
+都正常；实际结束内核睡眠为IRQ173/SSAM。物理PMIC计数随后0→2，Android最后亮屏
+435928ms晚于内核醒来318851ms，仍是SSAM先醒、稍后按键亮屏，不是PMIC直接结束睡眠。
+一次SSH reset255后同boot重新连接并取回完整trace，不将SSH断开直接称板卡冻结。
+
+用户随后说当前未接充电器；此前接键盘盖/Hub/充电器的快照不能沿用。新原生入口实读
+AC/USB/Wireless/Dock均false、电量76%，USB仅六个root hub，无外接Hub/网卡；因此与最初
+带Hub的阶段检查并非完全相同物理环境，不能以单次成功排除Hub或直接归因为Android。
+
+已复用旧Nat01 f1128b91…准备stock原生单请求对照。只在当前initrd999cbadd…的最后私有
+身份member之前插入禁自动注册helper的248字节gzip增量，有效变化仅framework-suspend-start；
+身份member仍最后且逐字不变。新natst45c932d3…、launcher3be38ea8…放独立路径，正常包
+和Mesa未覆盖。initrd独立副本ROLLBACK已恢复原999cbadd…；实际源码谓词ASan/UBSan
+BASELINE持续准入→MODIFIED单次/120秒到期/撤销→ROLLBACK持续准入均退出0，原源码未动。
+实际GRUB新的三组菜单均验证首选候选、二次回正常，回滚选正常；不是硬件睡眠通过。
+
+当前boot495331fe-0e50-4827-87c2-d05fa1fabbca，实际GNU build-id在Nat01 Image中唯一匹配。
+完整Android、ALSA/AUDIO_READY/实际HAL774、三attached remoteproc及FUSE已核对，用户
+确认桌面/触摸/键盘正常。最初声卡未就绪的检查退出1，随后自然就绪；未改音频或ADSP。
+stockSSAM773、SPI3e9、JAR126保持，nativeY/testN/trialN、owner/token0，自动注册stub
+和NO_LAB_WAKELOCK日志匹配；原菜单9c71d06d已恢复、once.env0。原生真实睡眠尚未许可。
+
+下一步保留合法应用锁，先看后台任务是否允许原生睡眠，再开一次人工注册窗口；不靠
+禁锁/强停增加计数，不把owner0保护拒绝或无请求称硬件失败。USB retention候选仍未改/
+构建/部署。原正常持续休眠黑屏未解决，不能提升本诊断候选或称全部问题已修好。
+
+## 2026-11-04：正常组合阶段/仅关屏通过，真实休眠故障继续定位
+
+同 VHDX 工作区、同休眠分支继续；用户要求参考历史记录追踪并解决，随后补充黑屏发生于
+空闲、无主动应用负载，并自行模拟关屏。已保存 SQ1 初始/EL2、SQ2 SPI/SSAM/原生单次与
+正常策略的对照；不把单次诊断成功推广到正常持续策略。
+
+当前 boot `d3bbe707-676b-4e06-9032-04fbd3cc37fd` 为本轮主动的一次受保护调试启动；
+Image86d896ad、initrd999cbadd、SPI3e9e6317、stockSSAM773f191c、stockJAR126efcf2
+均保持。testY/nativeN/trialN、owner0；原菜单9c71d06d已在检查前恢复，one-shot env0，
+正常/Mesa/固件21项及SQ2Power六项完整性通过。用户确认到桌面。
+
+同 stock 组合的一次 Asleep/platform 返回0，2454条组件回调全配对返回、错误0，
+trace4996/4996无覆盖，包含late/noirq及恢复阶段，无machine_suspend。SPIcount0→1、
+零报头进入既有Error Handler后ready，用户持续触摸/键盘确认正常；Android PID3620/3192
+保持。初次采集因/sys/kernel/tracing被挂载层遮蔽，在PM请求前TRACEFS_REQUIRED退出1，
+改用历史独立/tmp挂载后成功；原错误保留，不算一次硬件睡眠失败。
+
+另发现USB xHC恢复USBSTS0x401/Reinit/root hub丢失状态。源码usb30_sec/prim/mp_gdsc
+仍PWRSTS_OFF_ON；上游25bc96f26cd6的三域RET_ON修复已核对为相关候选，尚未修改、
+构建或部署。PCIe现有ALWAYS_ON不撤销。该USB异常不能直接当作黑屏根因；为保持本轮
+真实睡眠对照单变量，USB候选暂不混入。现场键盘盖、USB Hub、充电器都连接。
+
+用户随后自行仅关屏/短按亮屏，确认“可以，都正常”。180秒被动trace362/362、无覆盖，
+PM回调0、machine_suspend0；计数保持success1/fail0、SPIready/count1，同boot。
+1次success来自前面的platform检查，不是真实睡眠。最终读回Awake、PMIC计数增加。
+空PM trace被逐组件分析器拒绝退出1，已以明确零回调检查记录，不当设备故障。
+这将重点收窄到真实系统休眠，尚未证明Android框架本身错误。
+
+用户已同意下一轮收到“开始”提示后30秒短按一次电源键，检查持续触摸/键盘。
+现只准备同一kernel/runtime的当前任务五秒单次trial启动器；持续native保持关闭，
+不全局禁应用锁/SSAM，不改SPI或USB。为容纳既有EFI字符串，仅移除历史试验同样移除的
+earlycon/printk.devkmsg控制台选项，差异单列。真实请求尚未执行，须新boot/IRQ/UI/
+实际文件/guard及原菜单恢复核验后再发。不得把此手动trial称Android原生策略通过。
+
+证据与计划延续原out/suspend-followup-20261104四角色，补充normal-trace/；
+ROLLBACK.sh新增launcher/menu副本模式，旧单参数文档回滚仍保留。故障未解决。
+
+## 2026-11-04：新 VHDX 工作区接续；正常休眠黑屏仍未解决
+<!-- SUSPEND_FOLLOWUP_20261104: UNRESOLVED -->
+
+按用户要求，从远端 `codex/suspend-fix-5.94-20261103` 的最新提交
+`73dcdc862ac2948ed26f90a90f05f0f6df7e343e` 建立独立工作区：
+`/mnt/spx-workspace/chromebookOS-suspend-20261104`，位于 D 盘
+`D:\WSL\chromebookOS-workspace.vhdx`（WSL `/dev/nbd0`、ext4）。
+原 Windows 工作区及其未提交内容不作切换、清理或合并。
+
+**最新现场结果覆盖“休眠可用”的推断，不抹去历史有限通过：** 用户报告在
+192.168.5.91 部署最新工作后，睡眠仍黑屏无响应，并确认“是重启过，无响应”。
+当前读到的是用户重启后的 boot `b2c8dc03-18a9-4432-ad9f-baab1cbe928a`，
+不能称为自主重启或自动恢复。用户未另行逐项说明故障时 SSH/键盘/触摸的状态。
+前次正常组合只验证了启动、锁屏/解锁、输入和自动关屏；当时 native attempts0。
+此前带诊断策略的单次睡眠成功不能移作当前 stock/持续准入组合的稳定性证明。
+
+本轮严格固定既有主机密钥，只读核对 .91；实际 SQ2Power 的 Image `86d896ad…`、
+initramfs `999cbadd…`、normal.efi `99a81102…` 与最新部署记录匹配，六项
+SHA256SUMS 和 initramfs gzip 检查通过。生效默认菜单确实指向 SQ2Power，Mesa
+回退仍在。运行 init `511cf1af…`、SPI `3e9e6317…`、stock SSAM `773f191c…`、
+stock framework `126efcf2…` 匹配；本轮不是发现部署了旧的单请求诊断组合。
+
+当前 owner2700，screen_onlyY/autosuspendY、testN/trialN、pm_test none；Y 是未注册
+调用者的边界，不等于正常服务被禁止睡眠。恢复后 Android boot_completed1/Awake，
+native attempts0、kernel success0/fail0，SPI ready/resume_count0/bus_error1(-22)。
+本轮三次读取 boot 一致、system_server3884/SurfaceFlinger3443；这些只说明本次读回状态，
+不能解释已丢失的上次故障。pstore 空，当前 dmesg 被本次启动的审计噪声覆盖，
+未取得上次黑屏的冻结/设备回调/idle/恢复边界，根因仍未知。
+
+声卡 Surface-Pro-X、AUDIO_READY、实际 HAL 774cd7e7…及三个 remoteproc attached
+只读核对通过，不是新的听音或其他外设功能验收。本轮未改目标设备、未重启、未触发
+睡眠、未改超时/锁屏、未禁应用锁、未禁 SSAM wake，也未热卸载任何驱动。
+
+下一步先在当前正常组合下设计有界跨冻结取证，区分挂起前、idle 内或恢复阶段无响应；
+每轮先记录假设、单变量、区分判据与停止条件，并核对 fresh boot、实际包及可用回退。
+不原样反复睡眠，不把阶段测试返回0或一轮恢复当长期通过。连续两轮无新证据即回到
+工作基线/环境比较。此轮仅完成工作区建立、部署核对及失败记录，没有新修复候选。
+
+原始命令/输出/错误、工作区 checkpoint 与记录副本三态校验保存在忽略的
+`out/suspend-followup-20261104/`。该目录四角色只验证本次交接文档的增补和回滚，
+不是硬件睡眠 BASELINE/MODIFIED/ROLLBACK 实测；不提交凭据、私有输入或原始日志。
+
+## 2026-11-04：正常策略已设为默认，锁屏/自动关屏现场通过
+
+用户确认启动、触摸/键盘正常，随后确认锁屏、解锁、输入及约15秒自动熄屏均正常。
+现机boot a77ea624…仍运行已验证的SQ2Power包；默认GRUB已切到/EFI/SQ2Power/normal.efi，
+原Mesa回退/原默认载荷/共享固件均保留，除有意变更菜单外原26项完整性通过。
+持久nativeowner2690，screen_onlyY/testN/trialN；此Y保留未注册进程边界，不阻止Android。
+实验保活已退出，stock框架/SSAM恢复，已取消超长关屏及30分钟锁后延时覆盖，凭据未改。
+
+仍须诚实区分：本正常stock组合受后台合法锁影响，采样nativeattempts0/success0；
+单次原生实际睡眠通过来自此前实验组合。当前证明正常策略、启动、锁屏与输入正常，
+尚未证明持续休眠稳定性、能耗或SQ1。没有为了增加成功计数禁锁/强停应用。
+回退可选Mesa；恢复旧默认菜单可从EFI/SQ2Power/grub-before-normal.cfg校验后替回。
+部署证据在out/power-normal-20261104。推送目标为休眠开发分支，不合入main；
+任务前MIGRATION.md改动保留本地并备份，未混入休眠提交。
+
+## 2026-11-04：用户要求正常化策略并推送，正常候选已启动，待现场锁屏验收
+
+用户明确授权部署正常Android自动休眠/锁屏，恢复系统默认时间；覆盖此前不许持续native
+的历史约定，保留未注册调用者保护/nohibernate和原Mesa回退。当前boot a77ea624…，
+独立EFI/SQ2Power：Image86d896ad…、initrd999cbadd…、launcher99a81102…；persistent
+owner2690，test/trialN，SPI3e9e6317…就绪。SSAM回原773f191c…无1.1秒诊断延时，
+框架回stock126efcf2…无AC宽限补丁，lab保活退出。音频/remoteproc/FUSE核对通过。
+实际内核QEMU正常保护与注册进程连续两次到达合成失败PM回调/撤销owner通过；未入真实idle。
+
+已显式一次删除当前用户关屏/锁后/sleep_timeout及充电常亮覆盖、set-disabled false，
+未更改凭据。框架实读关屏15000ms、sleep_timeout-1、充电常亮默认1；LockSettings服务
+报告user10锁屏未禁用，WindowPolicy showing/inputRestricted/enabled均true。CLI get-disabled
+仍返回true，与服务dump不同，故需真实UI验收，不能只凭CLI判定。当前无native尝试，
+合法后台锁保留；尚未证明本正常stock组合实际睡眠或连续稳定性。
+
+一次性启动已消费；菜单目前仍是消费后回原正常项的临时菜单，待用户锁屏/解锁/输入/
+自动熄屏反馈再把同包设为默认。原默认载荷和Mesa未覆盖。源码b867659及后续记录待推送。
+正常构建默认android策略，需匹配power-bundle；可用--suspend-policy screen-only。
+MIGRATION.md为任务前改动，未混入休眠提交，备份diff在out/power-normal-20261104。
+
+## 2026-11-04：native单次实际睡眠28.36秒，SSAM后按键亮屏及输入恢复通过
+
+同boot e7638f55…第二轮只增唤醒源追踪，实际machine_suspend28.355558秒、IRQ173，
+首个SSAM事件BAT/BST cid0x16，同时timerfd活跃，不能唯一归因。2338回调全0；SPI
+count0→1/bus_error1→2后ready/IPTSd重初始化，内核success1，同Android PID。
+单次许可消耗/owner0、原生后续请求被保护拒绝；debug恢复0、trace清理、原ESP27项保持。
+用户已反馈恢复正常；后读Awake、PMIC2→4，最后按键时间晚于内核醒来，属于SSAM
+先醒后按键亮屏，不是PMIC直接结束native睡眠。SPIready/count1/bus_error2、框架PID
+保持，owner/token0、10份once.env0；未提升正常入口或开放连续休眠。
+首次prepare中止未复现但未修复；不是正常连续autosuspend/功耗验收。详见休眠记录末节。
+
+## 2026-11-04：首次native请求在prepare后中止，尚无原生实际睡眠
+
+boot e7638f55…、电池供电/带键盘盖，Android一次获准请求完成952prepare/952complete，
+全返回0；没有设备suspend回调或machine_suspend，SPIready/count0/bus_error1保持。
+键盘盖与BAT1 wake计数都增加，尚缺直接唤醒源追踪，不能唯一归因。原生后续重试已由
+单次门拒绝，owner0；用户按键后反馈无问题，同框架PID/Awake，ESP27项保持。
+已准备第二份仅增wakeup_source追踪/临时PM debug的脚本，未执行；须现场协调再注册，
+不把此次界面正常当原生睡眠通过。详见休眠记录末节。
+
+## 2026-11-04：原生单请求候选已启动，现场输入正常，尚未开放休眠许可
+
+当前boot e7638f55…，Nat01 f1128b91…/naton0001 e75f7dbe…；实际内核note/配置、
+有效init/JAR和SPI/SSAM文件/loaded note匹配，Android启动完成，用户确认触摸/键盘正常。
+JAR标签system_file、Enforcing；音频HAL实际hash774cd7e7…/ALSA/AUDIO_READY、
+remoteproc attached与FUSE通过。nativeY/testN/trialN、owner/token0，attempts0/success0。
+原菜单已恢复，ESP27项匹配、10份once.env=0，下次正常启动回原原有包。未开放许可。
+下一步准备一次手动准入/120秒到期撤销的原生观察；保留合法应用锁，不做全局禁锁。
+充电后台任务尚有锁，不把Awake阻塞当原生休眠失败。详见休眠记录末节。
+
+## 2026-11-04：SPI恢复候选两轮真实恢复通过，开始准备受限native试验
+
+当前bootb3221fcd…，SPI候选3e9e6317…/私有包2e4427e4…、SSAM1.1秒诊断模块保持。
+第一轮SSAM唤醒后按键亮屏/持续输入正常；第二轮machine_suspend51.601193秒由
+PMIC IRQ216结束，无SSAM唤醒，2336条回调全0，SPIcount1→2、错误计数2→3，
+全零报头进入新Error Handler后恢复ready/IPTSd。用户确认持续触摸和键盘正常。
+这是直接电源键唤醒及同boot第二次恢复通过，不是原生自动休眠/能耗完成。
+
+原菜单/ESP27项保持，9份once.env=0，pm_test none/debug0/times0、nativeN、owner/token0、
+SSAMenabled，自己的trace挂载已清理。下一次普通启动回原正常入口。
+native单请求诊断候选已完成离线构建、实际谓词ASan/UBSan、QEMU实际Image准入验证
+及391模块/18541外部引用核对；只允人工注册后的120秒窗口内一次请求，启动owner0。
+独立Nat01 f1128b91…/naton0001 e75f7dbe…/launcher26493e0c…已部署并校验；未装
+新菜单或once.env，未重启或开放许可。候选保留原SPI/SSAM模块，init仅取消自动注册。
+下一步现场协调一次性启动，先验完整Android与owner0，再准备人工单请求观察。
+保留应用锁，不使用全局禁锁，不提升SSAM固定延时，不热卸载。不自动触发新睡眠。
+SSAM逐事件唤醒、原生策略、多轮/能耗/SQ1回归仍需完成，详见休眠记录末节。
+
+## 2026-11-04：休眠目标已暂停；候选触摸恢复失败，已回原正常启动
+
+优先读取休眠记录末节。带键盘盖、SSAMenabled、1.1秒诊断窗口的单任务试验虽由PMIC
+在32.20秒后唤醒且回调返回0，用户随后报告触摸失灵。故障实读SPI not ready，恢复助手
+超时；现有用户态重新初始化也退出3。候选不能标为完整恢复通过，也未提升默认。
+已保存日志，原ESP27项/全部once.env=0核对后回原正常包。新boot c3898a5d…实读原#14、
+原默认initrd、screen_onlyY且无trial参数、SPI ready/IPTSd运行；原ESP27项全部匹配，
+用户确认已到桌面、触摸恢复。
+用户已暂停研发，本次仅完成故障恢复，不继续休眠请求。不改锁屏或校准，不热卸载驱动。
+
+## 2026-11-03：键盘盖空报告对照；保留 SSAM 时电源键恢复一次通过
+
+同boot1df5aab6…，用户确认无操作的两轮platform均出现18条全零键盘报告及SSAM IRQ；
+拔下键盘盖后SSAM事件/IRQ消失，2260条组件回调返回0。随后按用户协调，保持SSAM
+唤醒enabled、盖拔下，真实machine_suspend13.964553秒由PMIC IRQ216结束，
+success6→7/fail0、SPIcount7、同Android PID，用户确认亮屏/触摸/桌面正常。
+这仍是单任务实验；带盖事件处理、原生自动休眠、重复恢复及能耗未完成。
+
+**验收更正：用户指出直接进入桌面，未执行上滑。** 当前user10 get-disabled=true，
+11月1日已有同状态记录。此前本SQ2“上滑解锁通过”的表述不能作为证据，收窄为亮屏/
+触摸/返回桌面正常；未改凭据或锁屏策略。设备仍受保护nativeN/owner0/token0、
+SSAMenabled；正常载荷未提升，临时追踪已清理。详见休眠记录末两节。
+
+## 2026-11-03：SSAM 提前唤醒继续定位到本轮键盘盖事件
+
+目标“休眠可用”继续进行。单次PMIC唤醒现场正常已确认，但原生自动休眠仍未验证。
+同boot1df5aab6…新增一次受保护Asleep/platform：2340条回调均返回0，4760条trace无覆盖，
+success3/fail0、SPIcount3。SSAM IRQ后释放KIP/HID键盘接口事件，本轮无BAT事件；
+不能套用旧SQ1的DPTF结论，也不能凭元数据断言键盘空报告。后续5秒被动采样无报告；
+现场输入状态和本轮UI反馈待确认。正常入口/载荷未改、SSAM仍enabled、nativeN/owner0/token0，
+Awake、同Android PID，临时追踪已清理。可选SSAM tracepoints接入原受保护助手，
+不放宽trial=N条件。证据与下一步见[SURFACE-SUSPEND-20261103.md](SURFACE-SUSPEND-20261103.md)末节。
+
+## 2026-11-03：逐组件响应核对定位 SPI-HID PM 构建回归，隔离候选阶段验证通过
+
+按用户提示复查旧设备前缀/QCA诊断，并解析本轮PM callback trace。
+原platform2334条回调全部返回，但SPI-HID仅prepare/complete；运行build-id、
+实际module31ee23c6…、有效cpio与符号/sysfs交叉确认旧PM patch未进入EL2模块。
+EL2 builder现补回已有patch-sq2-spi-pm.py调用，不重写驱动、不热卸载。
+独立模块严格编译/67导出符号审计、源码与二进制副本回滚通过。
+
+候选module072cdec5…只替换实验initramfs的一项。boot4c9d039f…仅debug opt-in；
+Awake devices/Asleep platform都返回0/fail0，SPI挂起/恢复分别0.191/24.452与
+0.114/22.150ms，resume_count0→1→2；后者2336条记录全部返回、无覆盖。
+用户确认屏幕/触摸/解锁正常，音频/存储已复核，原菜单已恢复且env0。
+随后boot1df5aab6…真实请求先由SSAM IRQ173在34.891ms提前结束；用户UI正常。
+另获现场确认后，同boot仅单轮临时排除SSAM wake，machine_suspend15.688187s，
+内核明确PMIC IRQ216唤醒；2338条组件回调全返回0，同boot及Android PID，token0、
+SSAM恢复enabled，用户确认画面/触摸/解锁正常。这是一次受控单任务结果，
+不是低功耗能耗、多轮稳定性或原生自动休眠完成，也不是所有历史黑屏唯一根因证明。
+当前受保护实验内核nativeN/owner0/token0，无循环；下次启动原正常。
+原ESP27项、音频实际hash/ALSA/AUDIO_READY/FUSE保持，临时追踪已清理。
+正常默认/回退与私有runtime输入未提升。逐组件CSV/源码四角色和原始证据仍仅out。
+详见 [休眠记录末节](SURFACE-SUSPEND-20261103.md)。
+
+## 2026-11-03：休眠研发重新接续，SQ2 三阶段调试通过，单任务真实请求仍黑屏
+
+已按用户要求将 main 更新到7b189bd并合入 `codex/suspend-fix-5.94-20261103`
+（合并7df7710）；原 MIGRATION.md 未提交内容保留。详见
+[SQ1/SQ2 休眠记录末节](SURFACE-SUSPEND-20261103.md)。
+SQ2 独立 debug-only 启动后 freezer/devices/platform 各返回0，success0→3、fail0，
+trace 含 late/noirq 返回、无 machine_suspend；用户确认屏幕/触摸/解锁正常。
+不能称真实睡眠或低功耗通过。正常两项菜单与原载荷不变。
+
+单任务 opt-in boot5bbbc8a3…，screen_only/test/trial=Y，autosuspend=N；
+未持 token 请求实机拒绝，原菜单已恢复、once env0。用户随后协调15秒按键，
+单次真实请求后SSH超时，用户确认仍黑屏、短按无反应；随后长按恢复，实读boot baa5a989…回原#14。
+没有强制禁锁或重试。阶段调试Awake与真实请求Asleep存在runtime差异，
+不能排除所有设备回调或直接归因CPU idle；下一步先同状态对照/跨冻结取证。
+未经 fresh boot/IRQ/UI/guard 检查不复用脚本，不重复此前强制禁锁黑屏试验。
+原 ESP 旧日志与本轮原始证据仅在 `out/suspend-resume-20261103/`。
+已实读原菜单/两载荷/共享GRUB/固件27项hash全部恢复匹配，guardY；
+ALSA/AUDIO_READY、实际HAL774cd7e7…、两用户FUSE及attached ADSP保持。
+real-1只有请求前标记，无返回/晚期trace，pstore空；不声称准确卡点。
+新增可复用 debug-only 启动器转换和阶段采集脚本，默认构建未接入；
+清理失败不能报告成功。5+5+4项离线测试通过，实机范围与限制如上。
 
 ## 2026-11-03：开发与交付禁止单机绑定（当前最高优先级）
 
@@ -3465,23 +4169,3 @@ com.android.settings/.development.PageAgnosticNotificationService。
 **2026-10-31 KVM实机PASS后正常系统恢复已核验**：用户确认恢复，SSH读回bootffa7053f…、原baseline60 Mesa2.7-60、boot_completed1、guardY/nohibernate；菜单f7244134…与Mesa持久默认不变。完成/dev/kvm单vCPU验证及恢复闭环，没有追加实验。
 
 **2026-10-31 完整EL2内核8核/KVM通过，但NVMe未通过**：照片确认HOST_CPUS8、全CPU EL2、KVM PASS/EXIT0，同时/dev/nvme不存在；PCIe1c18000延迟probe。初版诊断遗漏tail，已修正新initramfs e743de2a…并增加SMMU/supplier信息。用户要求后续一次性GRUB自动选项：已装消费成功才选测试的白名单机制，默认Mesa不变，菜单6ef2e1f7…，fullram请求一次已发起重启，等待新照片与请求消费核验。完整Android KVM内核/331匹配模块及175744446B启动包仅本地准备，含实验性RAM Secretkeeper声明隐藏及protected_vm=0；未部署Android入口、未启动终端。详见SQ1-EL2-PREPARATION.md。
-
-
-## 2026-11-04：统一触摸校准 v7 纳入默认构建
-
-项目标准构建入口仍是 `scripts/build.py`，`--touch-repair on` 默认开启，
-共享组件与 profile 后端统一从 `private/build-inputs/touch` 读取触摸包。
-SQ1/SQ2 的 Default/Fallback 都集成相同触摸算法；保留 `--touch-bundle DIR`
-和 `--touch-repair off` 自定义入口，不改变 LTE、显示、EL2、音频或存储基线。
-组件生成方式见 [触摸默认基线](TOUCH-CALIBRATION.md)。
-
-流程：打开5秒后静置45秒 → 修复/复测确认 → 单指滑动20秒 → 修复/复测确认
-→ 15次单点 → 坐标/拇指校准。初测临时停用旧的每设备幽灵/连点策略，复测仅
-使用本轮候选；退出/取消或保护期限到达恢复，显式确认才持久保存。保留坐标参数。
-首次生成后的按钮为“应用修复并复测”。滑动不再有30次/0.5路程等硬性门槛。
-静置异常不因帧数、分窗或面积被拒绝：孤立点/窄行优先，SPXNOISE3 噪声幅度图
-处理宽区、间歇和混合异常；无原始数据不虚构结果，生成不等于已修复。
-
-32项离线回归通过；协议7 APK、IPTSd及助手已在 .94 运行时部署，运行/安装哈希及
-原配置保持已核验。实际缓解效果、完整向导和新整盘双机启动仍需验收。
-本次提交不包含 APK、内核、私有输入、原始日志或设备校准文件，也不写设备启动镜像。

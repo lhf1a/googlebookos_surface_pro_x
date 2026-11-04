@@ -1,0 +1,102 @@
+--- a/kernel/power/suspend.c
++++ b/kernel/power/suspend.c
+@@ -32,6 +32,8 @@
+ #include <linux/moduleparam.h>
+ #include <linux/jiffies.h>
+ #include <linux/sched.h>
++#include <linux/pid.h>
++#include <linux/cred.h>
+ 
+ #include "power.h"
+ 
+@@ -134,6 +136,72 @@
+ #endif
+ }
+ 
++
++/* Explicit framework autosuspend opt-in. Keep shell/unregistered callers
++ * behind screen_only; use a referenced TGID object so PID reuse grants nothing.
++ * The identified Android suspend service is UID 1000. Its executable identity
++ * is checked by the root boot helper before registration.
++ */
++static bool sq1_screen_only_autosuspend;
++module_param_named(screen_only_autosuspend, sq1_screen_only_autosuspend, bool, 0444);
++static struct pid *sq1_autosuspend_owner;
++static int sq1_autosuspend_tgid;
++
++static int sq1_autosuspend_set(const char *val, const struct kernel_param *kp)
++{
++	struct pid *owner = NULL, *old;
++	struct task_struct *task;
++	unsigned int flags;
++	int id, ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	ret = kstrtoint(val, 0, &id);
++	if (ret)
++		return ret;
++	if (id < 0)
++		return -EINVAL;
++	if (id && (!sq2_screen_only || !sq1_screen_only_autosuspend))
++		return -EPERM;
++	if (id) {
++		owner = find_get_pid(id);
++		if (!owner)
++			return -ESRCH;
++		rcu_read_lock();
++		task = pid_task(owner, PIDTYPE_TGID);
++		if (!task || !uid_eq(task_euid(task), KUIDT_INIT(1000))) {
++			rcu_read_unlock();
++			put_pid(owner);
++			return -EPERM;
++		}
++		rcu_read_unlock();
++	}
++	flags = lock_system_sleep();
++	old = sq1_autosuspend_owner;
++	sq1_autosuspend_owner = owner;
++	sq1_autosuspend_tgid = id;
++	unlock_system_sleep(flags);
++	put_pid(old);
++	return 0;
++}
++
++static const struct kernel_param_ops sq1_autosuspend_ops = {
++	.set = sq1_autosuspend_set,
++	.get = param_get_int,
++};
++module_param_cb(autosuspend_tgid, &sq1_autosuspend_ops, &sq1_autosuspend_tgid, 0600);
++
++/* Called under system_transition_mutex, like owner replacement. */
++static bool sq1_autosuspend_allowed(suspend_state_t state)
++{
++#ifdef CONFIG_PM_DEBUG
++	return sq1_screen_only_autosuspend && sq1_autosuspend_owner &&
++		state == PM_SUSPEND_TO_IDLE && pm_test_level == TEST_NONE &&
++		task_tgid(current) == sq1_autosuspend_owner;
++#else
++	return false;
++#endif
++}
+ 
+ static const struct platform_suspend_ops *suspend_ops;
+ static const struct platform_s2idle_ops *s2idle_ops;
+@@ -650,7 +718,7 @@
+ 		return -EBUSY;
+ 
+ 	if (sq2_screen_only && !sq2_screen_only_test_allowed(state) &&
+-	    !sq1_trial_take(state)) {
++	    !sq1_trial_take(state) && !sq1_autosuspend_allowed(state)) {
+ 		error = -EOPNOTSUPP;
+ 		goto Unlock;
+ 	}
+@@ -700,7 +768,7 @@
+ {
+ 	int error;
+ 
+-	if (sq2_screen_only && !sq2_screen_only_test) {
++	if (sq2_screen_only && !sq2_screen_only_test && !sq1_screen_only_autosuspend) {
+ 		pr_warn_ratelimited("SQ2 screen-only policy: system suspend blocked\n");
+ 		return -EOPNOTSUPP;
+ 	}

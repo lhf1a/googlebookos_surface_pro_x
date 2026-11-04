@@ -13,7 +13,6 @@ if [ "$#" -eq 2 ]; then
  suffix=-$2
 fi
 [ "$(id -u)" = 0 ]
-[ "$(cat /sys/module/suspend/parameters/screen_only)" = Y ]
 [ "$(stat -c %d:%i /)" != "$(stat -c %d:%i /proc/1/root/.)" ]
 while IFS=: read -r hierarchy controllers group; do
  [ "$group" = / ]

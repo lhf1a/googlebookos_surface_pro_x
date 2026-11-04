@@ -61,10 +61,6 @@ static void private_environment(void) {
     require(!statfs("/vendor/lib64/egl", &fs) && fs.f_type == 0x01021994,
             "private EGL tmpfs required");
 #endif
-    FILE *guard = fopen("/sys/module/suspend/parameters/screen_only", "re");
-    require(guard != NULL, "read screen-only guard");
-    int enabled = fgetc(guard); fclose(guard);
-    require(enabled == 'Y', "screen_only must remain Y");
     const char *preload = getenv("LD_PRELOAD"), *path = getenv("LD_LIBRARY_PATH");
     require((!preload || !*preload) && (!path || !*path), "unset LD_PRELOAD/LD_LIBRARY_PATH");
     printf("READPIXELS_NAMESPACE=%s INIT_NAMESPACE=%s\n", self, init);

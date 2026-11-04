@@ -390,6 +390,10 @@ static const struct sq2_fw_operations sq2_fw_ops = {
  .stop = sq2_fw_pas_stop, .release = sq2_fw_release,
 };
 
+#ifdef SQ2_VENUS_SYSTEM_PM
+/* Bounded module-owned reference; this published backend is pinned to reboot. */
+static const struct firmware *sq2_system_pm_image;
+#endif
 int sq2_venus_fw_boot(struct device *dev, struct sq2_venus_fw **out, bool pil_gap,
                      void __iomem *no_tz_base)
 {
@@ -428,13 +432,31 @@ int sq2_venus_fw_boot(struct device *dev, struct sq2_venus_fw **out, bool pil_ga
  fw->pil_gap = pil_gap;
  fw->no_tz_base = no_tz_base;
  fw->parent = dev;
- ret = request_firmware_direct(&fw->image, image_name, dev);
- if (ret)
-  goto free;
+#ifdef SQ2_VENUS_SYSTEM_PM
+ if (no_tz_base) {
+  if (!sq2_system_pm_image) {
+   ret = request_firmware_direct(&sq2_system_pm_image, image_name, dev);
+   if (ret) goto free;
+   ret = sq2_fw_check_image(sq2_system_pm_image);
+   if (ret) {
+    release_firmware(sq2_system_pm_image); sq2_system_pm_image = NULL;
+    goto free;
+   }
+  }
+  fw->image = sq2_system_pm_image;
+ } else
+#endif
+ {
+  ret = request_firmware_direct(&fw->image, image_name, dev);
+  if (ret) goto free;
+ }
  ret = sq2_fw_check_image(fw->image);
  if (!ret)
   ret = sq2_fw_start(&fw->tx, &sq2_fw_ops, fw);
- release_firmware(fw->image);
+#ifdef SQ2_VENUS_SYSTEM_PM
+ if (!no_tz_base)
+#endif
+  release_firmware(fw->image);
  fw->image = NULL;
  if (fw->tx.state != SQ2_FW_EMPTY) {
   sq2_fw_owner = fw;

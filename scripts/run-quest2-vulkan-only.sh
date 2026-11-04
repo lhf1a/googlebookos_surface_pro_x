@@ -72,7 +72,6 @@ case "${SQ2_GSL_ALLOC_TRACE:-0}" in
     1) test "$1" = --offscreen; (cd "$root$home/gsl-allocation-trace"; sha256sum -c SHA256SUMS);;
     *) exit 2;;
 esac
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 (cd "$root$candidate"; sha256sum -c SHA256SUMS)
 (cd "$root$probe"; sha256sum -c VULKAN_DEVICE_SHA256SUMS)
 case "$1" in

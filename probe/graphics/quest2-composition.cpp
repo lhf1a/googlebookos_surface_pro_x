@@ -146,10 +146,6 @@ static bool environment() {
     CHECK(strcmp(own, init) && !statfs("/vendor/lib64/egl", &fs) && fs.f_type == 0x01021994,
           "private EGL tmpfs/mount namespace required");
 #endif
-    FILE *guard = fopen("/sys/module/suspend/parameters/screen_only", "re");
-    CHECK(guard, "read screen-only guard");
-    int enabled = fgetc(guard); fclose(guard);
-    CHECK(enabled == 'Y', "screen_only must remain Y");
     const char *preload = getenv("LD_PRELOAD"), *path = getenv("LD_LIBRARY_PATH");
     CHECK((!preload || !*preload) && (!path || !*path), "unset LD_PRELOAD/LD_LIBRARY_PATH");
     printf("COMPOSITION_NAMESPACE=%s INIT_NAMESPACE=%s\n", own, init);

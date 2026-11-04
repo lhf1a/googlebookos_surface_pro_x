@@ -4,7 +4,6 @@
 set -eu
 case " $(cat /proc/cmdline) " in *' sq2.rescue=1 '*) exit 0;; esac
 case " $(cat /proc/cmdline) " in *' sq2.el2=experimental '*|*' sq2.el2=1 '*) ;; *) exit 0;; esac
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test -c /dev/kvm
 for n in $(seq 1 120); do
     if [ "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null || true)" = 1 ]; then break; fi

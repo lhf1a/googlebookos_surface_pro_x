@@ -159,5 +159,73 @@
     "reboot_validated": true,
     "deployment": "Tested image promoted to normal boot with original menu/rescue retained; no kernel/DTB/graphics/touch changes. Credential addon last. Previous d519b958 image kept locally.",
     "limits": "No beamforming/AEC, long-call, Bluetooth microphone or certification claims."
+  },
+  "unrestricted_power_20261104": {
+    "date": "2026-11-04",
+    "policy": "unrestricted",
+    "actual_screen_only": "N",
+    "actual_autosuspend": "N",
+    "actual_test": "N",
+    "actual_trial": "N",
+    "actual_owner": 0,
+    "pm_test": "none",
+    "kernel_pm_mode": "s2idle",
+    "kernel_pm_success_since_boot": 0,
+    "default_menu_entries": 2,
+    "default": "SQ2Free/unrestricted.efi",
+    "fallback": "SQ2Fallback/el2launch.efi",
+    "default_menu_sha256": "e3d238eb8b206f0f908140cdb3cb8ddd5ca4df47c3dbddf92985babcd8fc6675",
+    "effective_changed_entries": 22,
+    "codec_service": "running",
+    "video_node": "/dev/video0",
+    "operator_video_feedback": "视频正常",
+    "codec_runtime": "v2u; v1 preserved and both hashes verified",
+    "audio": "physical ALSA + AUDIO_READY + actual HAL774cd7e7 verified; no new listening claim",
+    "storage": "emulated 0/10 MOUNTED, both users RUNNING_UNLOCKED",
+    "lid_behavior": "LID_BEHAVIOR_NONE",
+    "global_lid_behavior": 0,
+    "sw_lid_capability": false,
+    "tablet_mode_switch_present": true,
+    "lid_close_sleep_verified": false,
+    "real_sleep_in_new_build_verified": false,
+    "black_screen_root_cause_fixed": false,
+    "legitimate_android_wakelocks_preserved": true,
+    "screen_timeout_ms": 300000,
+    "latest_power": "battery, AC/USB/Wireless/Dock false; earlier boot verification on AC",
+    "original_normal_and_mesa_payloads_and_firmware_preserved": true
+  },
+  "unrestricted_idle_window_20261104": {
+    "date": "2026-11-04",
+    "operator_display": "normal wake reported",
+    "operator_continuous_touch_keyboard": "normal confirmed",
+    "same_boot_and_android_pids": true,
+    "snapshot_interval_seconds": 2033.06,
+    "kernel_success_before_after": [
+      0,
+      0
+    ],
+    "kernel_fail_before_after": [
+      14,
+      46
+    ],
+    "freeze_failures_before_after": [
+      3,
+      4
+    ],
+    "suspend_failures_before_after": [
+      11,
+      42
+    ],
+    "SPI_resume_before_after": [
+      0,
+      0
+    ],
+    "last_failed_dev": "aa00000.venus-sq2",
+    "last_failed_errno": -16,
+    "last_failed_step": "suspend",
+    "classification": "screen-off/on and input pass; NO successful kernel sleep",
+    "no_background_monitor_or_forced_sleep": true,
+    "last_framework_sleep_reason": "power_button; not strict untouched timeout-only proof",
+    "Venus_source_guard": "candidate source has explicit SQ2 HFI EBUSY PM guard; actual build provenance must be checked before changes"
   }
 }

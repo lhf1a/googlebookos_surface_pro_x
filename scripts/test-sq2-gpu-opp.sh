@@ -3,7 +3,6 @@
 set -eu
 frequency=${1:?frequency in Hz required}
 case "$frequency" in 514000000|590000000|661000000) ;; *) exit 2;; esac
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 dev=/sys/class/devfreq/2c00000.gpu
 grep -qw "$frequency" "$dev/available_frequencies"
 old_min=$(cat "$dev/min_freq")

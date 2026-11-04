@@ -5,7 +5,6 @@ set -eu
 pkg=org.surface.sq2.quest2probe
 # Keep executable and arguments separate for busybox nsenter.
 android() { exe=$1;shift;nsenter -t 1 -m -r -- "/system/bin/$exe" "$@"; }
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 user=$(android am get-current-user)
 boot=$(cat /proc/sys/kernel/random/boot_id)
 pids=$(android pidof system_server surfaceflinger)

@@ -59,8 +59,8 @@ class UsbStage(unittest.TestCase):
             script.write_text(text)
             result = subprocess.run(['sh', str(script)], capture_output=True, text=True)
             print(case, 'stdout=', repr(result.stdout), 'stderr=', repr(result.stderr), 'exit=', result.returncode)
-            enabled = case == 'enabled'
-            self.assertEqual(result.returncode == 0, case in ('enabled', 'no-flag', 'rescue', 'off'))
+            enabled = case in ('enabled', 'guardN')
+            self.assertEqual(result.returncode == 0, case in ('enabled', 'guardN', 'no-flag', 'rescue', 'off'))
             self.assertEqual((t/'vendor/etc/vintf/manifest/sq2-usb-audio.xml').exists(), enabled)
             self.assertEqual((t/'fstab').read_bytes(), files['storage.fstab'] if enabled else pristine)
             if enabled:

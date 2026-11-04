@@ -5,7 +5,6 @@ workers=
 cleanup() { for pid in $workers; do kill "$pid" 2>/dev/null || :; done; }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 for policy in 0 4; do
     test "$(cat /sys/devices/system/cpu/cpufreq/policy$policy/scaling_governor)" = schedutil
 done

@@ -212,6 +212,8 @@ def main():
                    help='baseline LTE/Radio enabled by default; off keeps the original payload')
     p.add_argument('--lte-bundle', type=Path, default=R/'private/lte-baseline',
                    help='private, exact reboot-verified Radio04 initramfs and IPA DT')
+    p.add_argument('--suspend-policy', choices=('unrestricted','android','screen-only'), default='unrestricted')
+    p.add_argument('--power-bundle', type=Path, default=R/'private/build-inputs/power')
     args = p.parse_args()
     if not 72 <= args.dpi <= 1000:
         p.error('--dpi must be between 72 and 1000')
@@ -243,6 +245,9 @@ def main():
         lte = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(lte)
         lte_delta, lte_dt, lte_source = lte.prepare(raw, R, args.lte_bundle, c)
+    spec=importlib.util.spec_from_file_location('surface_power',R/'scripts/surface-power-payload.py')
+    power=importlib.util.module_from_spec(spec);spec.loader.exec_module(power)
+    power_files=power.bundle_files(args.power_bundle) if args.suspend_policy in ('android','unrestricted') else None
     prepared = {}
     for machine in machines:
         profile = profiles[machine]
@@ -267,6 +272,11 @@ def main():
             audit['lte'] = dict(lte_source, **lte_audit, enabled=True, fallback_unchanged=True)
         launchers = {entry: launcher((args.sealed_input/'launchers'/name).read_bytes(), machine, entry)
                      for entry, name in [('Default', 'closed.efi'), ('Fallback', 'mesa.efi')]}
+        if power_files:
+            runtimes['Default'],audit['power']=power.integrate(runtimes['Default'],R,args.power_bundle,c,policy=args.suspend_policy)
+            launchers['Default']=power.launcher(args.power_bundle,machine,policy=args.suspend_policy)
+        else:
+            audit['power']={'policy':'screen-only'}
         prepared[machine] = (runtimes, dts, launchers, audit, changes)
     args.output.mkdir(parents=True)
     report = {'schema': 1, 'main_commit': pins['upstream_main'], 'hardware_tested': False,
@@ -287,6 +297,8 @@ def main():
             for name in ('Image', 'qebspilaa64.efi', 'tcblaunch.exe'):
                 shutil.copyfile(args.sealed_input/'common'/name, dest/name)
             (dest/'android-el2.dtb').write_bytes(dts[entry])
+            if entry=='Default' and power_files:
+                (dest/'Image').write_bytes(power_files['Image'])
             (dest/'initramfs.cpio.gz').write_bytes(runtimes[entry])
             (dest/'el2launch.efi').write_bytes(code)
             rows = {f.name: sha(f.read_bytes()) for f in sorted(dest.iterdir())}

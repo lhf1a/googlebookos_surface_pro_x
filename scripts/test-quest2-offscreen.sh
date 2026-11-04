@@ -4,7 +4,6 @@
 set -eu
 base=${1:-/data/local/tmp/sq2-closed}
 case "$base" in /data/local/tmp/*) ;; *) echo 'Expected Android local test directory' >&2;exit 2;; esac
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test -x "/proc/1/root$base/probe"
 test -f "/proc/1/root$base/v819/vulkan-no-profile.so"
 sensor=

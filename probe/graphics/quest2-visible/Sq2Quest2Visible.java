@@ -21,9 +21,6 @@ public final class Sq2Quest2Visible {
         String own = Files.readSymbolicLink(Paths.get("/proc/self/ns/mnt")).toString();
         String init = Files.readSymbolicLink(Paths.get("/proc/1/ns/mnt")).toString();
         if (own.equals(init)) throw new IllegalStateException("Private EGL mount namespace required");
-        String guard = new String(Files.readAllBytes(Paths.get(
-                "/sys/module/suspend/parameters/screen_only")), StandardCharsets.US_ASCII).trim();
-        if (!guard.equals("Y")) throw new IllegalStateException("screen_only guard is not Y");
         for (String key : new String[] {"LD_PRELOAD", "LD_LIBRARY_PATH"}) {
             String value = System.getenv(key);
             if (value != null && !value.isEmpty()) {

@@ -68,7 +68,7 @@ class AutostartTest(unittest.TestCase):
                                     env=dict(os.environ, FIXTURE=tmp, MODE=mode),
                                     capture_output=True, text=True, timeout=5)
             calls = (d / 'launches').read_text().splitlines() if (d / 'launches').exists() else []
-            if mode in ('ready', 'switch', 'launch_fail', 'passwordless'):
+            if mode in ('ready', 'switch', 'launch_fail', 'passwordless', 'guard'):
                 self.assertEqual(calls, ['/system/bin/cmd activity start-activity -W --user 10 -n '
                                         'com.android.virtualization.terminal/.new2.ui.MainActivity'])
             else:
@@ -76,10 +76,10 @@ class AutostartTest(unittest.TestCase):
             actions = (d / 'user_actions').read_text().splitlines() if (d / 'user_actions').exists() else []
             expected = ['/system/bin/cmd activity start-user -w 10', '/system/bin/cmd activity switch-user 10']
             self.assertEqual(actions, expected if mode in ('passwordless', 'default_user') else expected[:1] if mode == 'user_start_fail' else [])
-            success = mode in ('ready', 'default', 'default_user', 'switch', 'normal', 'rescue', 'passwordless')
+            success = mode in ('ready', 'default', 'default_user', 'switch', 'normal', 'rescue', 'passwordless', 'guard')
             self.assertEqual(result.returncode == 0, success, result.stderr)
             self.assertEqual('LAUNCH_REQUESTED_NOT_SHELL_PROOF' in result.stdout,
-                             mode in ('ready', 'switch', 'passwordless'))
+                             mode in ('ready', 'switch', 'passwordless', 'guard'))
             if mode in ('default', 'default_user'):
                 self.assertNotIn('WAIT_FOR_ACTIVE_USER_IMAGE', result.stdout)
             self.assertFalse((d / 'users/0').exists())

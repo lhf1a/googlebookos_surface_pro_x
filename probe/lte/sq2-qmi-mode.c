@@ -50,7 +50,7 @@ static int response(const uint8_t *buf, size_t n, unsigned txn, unsigned msg, in
         if(type==2) {
             if(found || len!=4) return 1;
             found=1;
-            if(le16(buf+p) || le16(buf+p+2))fprintf(stderr,"DMS message=0x%04x result=%u error=%u\n",msg,le16(buf+p),le16(buf+p+2));
+            printf("DMS message=0x%04x result=%u error=%u\n",msg,le16(buf+p),le16(buf+p+2));
             if(le16(buf+p) || le16(buf+p+2)) return 1;
         } else if(type==1 && msg==0x2d) {
             if(len!=1 || have_mode) return 1;
@@ -93,6 +93,15 @@ done:
     return ret;
 }
 int main(int argc,char **argv) {
+ if(argc==2&&!strcmp(argv[1],"selftest")) {
+  uint8_t b[16];if(request(b,1,0)!=11||b[3]!=0x2e||b[10]||request(b,2,-1)!=7||b[3]!=0x2d)return 1;
+  if(request(b,1,1)!=11||b[10]!=1)return 1;
+  for(int m=2;m<256;m++)if(request(b,1,m))return 1;
+  uint8_t r[]={2,1,0,0x2e,0,7,0,2,4,0,0,0,0,0};int v=-1;
+  if(response(r,sizeof(r),1,0x2e,&v))return 1;r[12]=52;if(!response(r,sizeof(r),1,0x2e,&v))return 1;
+  if(!response(r,sizeof(r)-1,1,0x2e,&v))return 1;
+  puts("PASS online/low-power builder, refusal and malformed reply");return 0;
+ }
  struct sockaddr_qrtr dst={.sq_family=AF_QIPCRTR};
  if(argc!=4||(strcmp(argv[3],"online")&&strcmp(argv[3],"low-power"))||endpoint(argv[1],&dst.sq_node)||endpoint(argv[2],&dst.sq_port)||!dst.sq_port)return 2;
  int desired=!strcmp(argv[3],"low-power");

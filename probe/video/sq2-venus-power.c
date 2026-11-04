@@ -24,6 +24,9 @@ struct sq2_venus_power {
  struct icc_bulk_data icc[3];
  int npd, nclk, nrst, powered, enabled, states[4];
  bool voted, resets_changed, rate_changed, config_saved, ready;
+#ifdef SQ2_VENUS_SYSTEM_PM
+ bool system_quiet;
+#endif
  unsigned long rate;
  void __iomem *base;
  u32 cgc, config, version;
@@ -198,3 +201,63 @@ int sq2_venus_power_off(struct sq2_venus_power **owner, bool firmware_attempted)
  kfree(p); *owner=NULL;
  return first;
 }
+
+#ifdef SQ2_VENUS_SYSTEM_PM
+/* The genpd virtual devices/usage references stay owned. System noirq PM owns
+ * domain transitions; detaching/reattaching devices during the PM walk is not
+ * permitted here. Caller has already proven firmware/DMA stopped. */
+int sq2_venus_power_system_quiet(struct sq2_venus_power *p)
+{
+ int i, ret;
+ if (!p || p->powered != 3 || p->npd != 3 || p->nclk != 7 ||
+     p->nrst != 4 || !p->voted) return -EINVAL;
+ if (p->system_quiet) return 0;
+ p->ready = false;
+ if (p->config_saved) {
+  writel(p->config, p->base + 0xe2000);
+  writel(p->cgc, p->base + 0xe2010);
+  p->config_saved = false;
+ }
+ if (p->rate_changed) {
+  ret = clk_set_rate(p->clk[4], p->rate);
+  if (ret) return ret;
+  p->rate_changed = false;
+ }
+ while (p->enabled) clk_disable_unprepare(p->clk[--p->enabled]);
+ for (i = 2; i >= 0; i--) {
+  ret = icc_set_bw(p->icc[i].path, 0, 0);
+  if (ret) return ret;
+ }
+ p->system_quiet = true;
+ return 0;
+}
+int sq2_venus_power_system_restore(struct sq2_venus_power *p)
+{
+ int i, ret;
+ if (!p || !p->system_quiet || p->enabled || p->powered != 3 ||
+     p->npd != 3 || p->nclk != 7 || p->nrst != 4) return -EINVAL;
+ p->system_quiet = false;
+ ret = icc_bulk_set_bw(3, p->icc);
+ if (ret) return ret;
+ ret = pulse(p);
+ if (ret) return ret;
+ for (i = 0; i < 7; i++) {
+  ret = clk_prepare_enable(p->clk[i]);
+  if (ret) return ret;
+  p->enabled++;
+ }
+ p->rate = clk_get_rate(p->clk[4]);
+ p->rate_changed = true;
+ ret = clk_set_rate(p->clk[4], 200000000);
+ if (ret) return ret;
+ if (clk_get_rate(p->clk[4]) < 199999000 ||
+     clk_get_rate(p->clk[4]) > 200001000) return -ERANGE;
+ p->version = readl(p->base + 0xe0000);
+ if (p->version != 0x5010002f) return -ENODEV;
+ p->cgc = readl(p->base + 0xe2010);
+ p->config = readl(p->base + 0xe2000);
+ p->config_saved = true;
+ p->ready = true;
+ return 0;
+}
+#endif

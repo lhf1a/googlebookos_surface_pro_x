@@ -1,4 +1,39 @@
+## 2026-11-04 user-directed mainline integration
+
+On merge conflicts preserve the current unrestricted U4 capabilities and startup
+flow. Retain the current LTE/runtime compatibility path, not the newly introduced
+EFI LTE router as the default. Incoming touch v7 source changes are retained.
+U4 persistent-default ZIP remains private/offline-only, pm_test=devices; do not
+silently deploy it or call idle stability repaired. Candidate WSA bootstrap source
+is not cold-boot verified. This merge does not authorize device writes or reboot.
+
 # Working agreement
+
+## 2026-11-04 user-directed unrestricted suspend environment
+
+The user explicitly confirmed disabling `suspend.screen_only` and removing every
+feature module's must-be-Y dependency. The new default build policy is
+`--suspend-policy unrestricted`: boot with `suspend.screen_only=0` and
+`suspend.screen_only_autosuspend=0`; no owner registration, trial counter,
+admission deadline, diagnostic framework JAR or lab keep-awake hook. This supersedes
+historical mandatory-screen-only and owner-only normal-policy requirements below.
+Keep the original working Mesa fallback, original payloads and shared firmware.
+Do not confuse the real display/screen-on state or KEEP_SCREEN_ON with this gate.
+Kernel/module ABI, target-disk validation, firmware integrity, thermal protection,
+credentials and nohibernate remain. Android's legitimate wake locks and user
+settings remain authoritative. No claim that unrestricted suspend fixes black screen.
+
+## 2026-11-04 user-directed normal power policy
+
+The user explicitly requested normal Android suspend and lockscreen defaults, deployment
+on the current device and a push of the development branch. This supersedes historical
+screen-only-only/unattended-native prohibitions for the normal entry. Retain screen_only
+as a boundary for unregistered callers; the verified Android suspend service gets the
+persistent owner gate (01-framework-owner, NOT 02-native-single-request). Keep nohibernate,
+matching SPI PM recovery, credentials and the original screen-only Mesa fallback. Remove
+lab wakelocks and diagnostic SSAM delays; use stock framework policy. Restore timeouts
+only on explicit request, never overwrite user choices on every boot. Do not call single
+SQ2 results universal or claim battery efficiency/continuous stability without evidence.
 
 Read docs/HANDOFF.md and docs/BUILD.md before changing the port.
 
@@ -29,7 +64,8 @@ Read docs/HANDOFF.md and docs/BUILD.md before changing the port.
 - Terminal autologin (2026-11-01): user 10 was verified passwordless (is-user-secure=false, get-disabled=true). The explicitly selected EL2 lab hook now starts/switches this existing user and opens its existing image; a full unattended reboot reached RUNNING_UNLOCKED and Debian shell/HTTPS. Check user/security state before asking for manual unlock. Never infer a credential problem from active user 0; secure users are refused by this helper. No credentials were cleared.
 
 - Shared storage was repaired by loading FUSE before Android init. Both emulated volumes mount and the user confirmed Files and Chrome downloads work. Preserve this fix; never format userdata to repair a mount failure.
-- True suspend repair remains paused. The user requested screen-off only: preserve the kernel suspend.screen_only guard and nohibernate boot option. Screen-off/on checks are authorized once the guard is verified; never disable it or resume actual sleep tests without a new request.
+- Suspend research was explicitly resumed on 2026-11-03 on `codex/suspend-fix-5.94-20261103`. Preserve normal screen_only/nohibernate and both original payloads. Debug stages and any coordinated single-task trial use isolated opt-in launchers; never globally disable the guard or turn on unattended native autosuspend. The prior forced-wakelock control black-screen failure remains unresolved; see docs/SURFACE-SUSPEND-20261103.md.
+- SPI-HID PM regression (2026-11-03): retain the existing SPI sleep patch in EL2 kernel builds. Check actual module/build-id, resume_count and suspend/resume callbacks; prepare/complete alone proves no device sleep. One isolated SQ2 trial recovered by PMIC after temporary per-request SSAM wake exclusion; this does not authorize globally disabling SSAM or promoting native autosuspend. See the latest suspend record.
 - Audio work was resumed by the user on 2026-10-27: investigate stop-pop, low/thin/compressed sound and stereo image. Keep gain changes bounded, preserve matching DAC/COMP/BOOST SoundWire ports, and distinguish listening results from register/PCM checks.
 - Microphone on 2026-10-28: preserve DMIC0/1 -> MultiMedia2 (CARD_0_DEV_1), raw DEC gain 96, stereo 48 kHz policy and HAL 774cd7e7… with only its built-in microphone address overwrite removed. Stock playback/capture transport is retained; do not reapply the old pacing/MonoPipe experiment. Actual HAL inode/hash and recording/playback were verified after reboot; user confirmed both AudioRecord formats and original diagnostics. Sensor/camera work is deferred at user request; current P1 is Wild Life misrendering despite completed scores, see docs/TODO.md.
 - Preserve mapper import/multiplane graphics and touch state fixes. Default contact detection/stability plus AspectMax=2.0 were validated; do not reintroduce high detection thresholds.

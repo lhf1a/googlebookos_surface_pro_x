@@ -1,0 +1,23 @@
+--- a/qcom_geni_serial.c
++++ b/qcom_geni_serial.c
+@@ -946,10 +946,16 @@
+ 	struct qcom_geni_serial_port *port = to_dev_port(uport);
+ 	struct circ_buf *xmit = &uport->state->xmit;
+ 
+-	uart_xmit_advance(uport, port->tx_remaining);
+-	geni_se_tx_dma_unprep(&port->se, port->tx_dma_addr, port->tx_remaining);
+-	port->tx_dma_addr = 0;
+-	port->tx_remaining = 0;
++	/* Cancel/stop may have retired this transfer before a late DONE IRQ.
++	 * Do not unmap or advance ownership twice. DMA address zero is not
++	 * used as the discriminator: a nonzero byte count owns the mapping.
++	 */
++	if (port->tx_remaining) {
++		uart_xmit_advance(uport, port->tx_remaining);
++		geni_se_tx_dma_unprep(&port->se, port->tx_dma_addr, port->tx_remaining);
++		port->tx_dma_addr = 0;
++		port->tx_remaining = 0;
++	}
+ 
+ 	if (!uart_circ_empty(xmit))
+ 		qcom_geni_serial_start_tx_dma(uport);

@@ -9,7 +9,6 @@ base=/data/local/tmp/sq2-bilibili-$label
 mkdir "$base"
 target=/vendor/etc/media_codecs_c2.xml
 test ! -e "$target"
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test "$(getprop init.svc.sq2-c2-experimental)" = running
 user=$(am get-current-user)
 logger=
