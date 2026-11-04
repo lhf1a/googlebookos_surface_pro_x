@@ -10,7 +10,6 @@ if [ "$mode" = packet ]; then group=sq2_vp9_packet; suffix=-packet; fi
 instance=$trace/instances/$group
 output=/proc/1/root/data/local/tmp/sq2-vp9-eos$suffix-trace.txt
 test ! -e "$output"
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test ! -e "$trace/events/$group"
 mkdir "$instance"
 registered=0

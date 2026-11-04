@@ -9,7 +9,6 @@ blkid /dev/nvme0n1p1 | grep -q 'UUID="4f46d2ec-323e-486e-b473-fc2adc0849ba"'
 grep -q '^/dev/nvme0n1p6 /media/esp vfat ' /proc/mounts
 test "$(readlink -f /dev/mapper/system_a)" = /dev/loop0
 test "$(cat /sys/block/loop0/loop/backing_file)" = /dev/nvme0n1p3
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 boot=/media/esp/boot/sq2-android1
 efi=/media/esp/EFI/BOOT
 check() { test "$(sha256sum "$1" | cut -d ' ' -f 1)" = "$2"; }

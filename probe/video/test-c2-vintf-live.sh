@@ -2,7 +2,6 @@
 # Run inside Android root. Temporary RAM-vendor declaration; no service restart.
 set -eu
 target=/vendor/etc/vintf/manifest/sq2-c2-experimental.xml
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test ! -e "$target"
 test -x /data/local/tmp/sq2-c2-discovery-probe
 test -x /data/local/tmp/sq2-c2-aidl-v2

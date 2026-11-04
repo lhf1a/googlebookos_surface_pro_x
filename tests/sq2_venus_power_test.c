@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <assert.h>
 #define SQ2_VENUS_POWER_HOST_TEST
+#define SQ2_VENUS_SYSTEM_PM
 #define __iomem
 #define GFP_KERNEL 0
 #define ERR_PTR(e) ((void *)(intptr_t)(e))
@@ -29,7 +30,7 @@ static int of_icc_bulk_get(struct device *d,int n,struct icc_bulk_data *p)
 {int i;(void)d;if(bad())return -EIO;iccs=n;for(i=0;i<n;i++)p[i].path=&pd[0];return 0;}
 static int icc_bulk_set_bw(int n,struct icc_bulk_data *p)
 {(void)n;assert(p[0].avg_bw==1000&&p[1].peak_bw==304000&&p[2].peak_bw==304000);t('B');return bad()?-EIO:0;}
-static int icc_set_bw(void *p,int a,int b){(void)p;assert(!a&&!b);t('b');return 0;}
+static int icc_set_bw(void *p,int a,int b){(void)p;assert(!a&&!b);t('b');return bad()?-EIO:0;}
 static void icc_bulk_put(int n,struct icc_bulk_data *p){(void)p;iccs-=n;}
 static struct device *dev_pm_domain_attach_by_id(struct device *d,int i)
 {(void)d;if(bad())return ERR_PTR(-EIO);pds++;return &pd[i];}
@@ -72,6 +73,26 @@ int main(void)
  fail=step+1;assert(sq2_venus_power_off(&p,true)==-EIO);
  assert(p&&powered==3&&enabled==7&&iccs==3&&!sq2_venus_power_ready(p));
  fail=0;assert(!sq2_venus_power_off(&p,true));empty();
+ /* System PM retains every acquired handle/domain usage reference. */
+ reset();fail=0;assert(!sq2_venus_power_on(&dev,(void *)0x1000000,&p));
+ for(f=0;f<16;f++) {
+  ti=0;trace[0]=0;
+  assert(!sq2_venus_power_system_quiet(p));
+  assert(!sq2_venus_power_ready(p)&&!enabled&&powered==3&&pds==3&&clock_refs==7&&resets_count==4);
+  assert(!sq2_venus_power_system_restore(p));
+  assert(sq2_venus_power_ready(p)&&enabled==7&&powered==3&&pds==3&&clock_refs==7&&resets_count==4);
+ }
+ ti=0;assert(!sq2_venus_power_off(&p,true));empty();
+ /* Each restore failure is retained, then safely quieted for final cleanup. */
+ for(f=1;f<=17;f++) {
+  reset();fail=0;assert(!sq2_venus_power_on(&dev,(void *)0x1000000,&p));
+  ti=0;assert(!sq2_venus_power_system_quiet(p));
+  fail=step+f;
+  assert(sq2_venus_power_system_restore(p)==-EIO);
+  assert(p&&powered==3&&pds==3&&clock_refs==7&&resets_count==4);
+  fail=0;ti=0;assert(!sq2_venus_power_system_quiet(p));
+  assert(!sq2_venus_power_off(&p,true));empty();
+ }
  printf("SQ2_POWER_OWNER_PASS: actual C; %d acquisition/activation failure positions unwind; ICC/domain/reset/clock order; rate restore failure retains powered references; mock providers only\n",max);
  return 0;
 }

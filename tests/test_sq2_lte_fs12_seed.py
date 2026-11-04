@@ -68,12 +68,17 @@ class Seed(unittest.TestCase):
             used.rename(used.with_suffix('')); p.write_bytes(old)
 
     def test_guards_refuse(self):
-        for n,d in [('ACTIVE',b'1'),('sys/module/suspend/parameters/screen_only',b'N'),
+        for n,d in [('ACTIVE',b'1'),
                     ('etc/sq2-lte/unit-serial',b'WRONG'),('proc/mounts',b'/dev/foo /run ext4 rw 0 0\n')]:
             p=self.root/n; old=p.read_bytes() if p.exists() else None; p.write_bytes(d)
             self.assertNotEqual(self.run_seed().returncode,0); self.assert_zero()
             if old is None: p.unlink()
             else: p.write_bytes(old)
+
+    def test_screen_only_N_does_not_block_valid_seed(self):
+        (self.root/'sys/module/suspend/parameters/screen_only').write_text('N')
+        r=self.run_seed();self.assertEqual(r.returncode,0,r.stderr)
+        self.assertIn('SEEDED',r.stdout)
 
     def test_rescue_noop(self):
         (self.root/'proc/cmdline').write_text('sq2.el2=1 sq2.rescue=1 nohibernate')

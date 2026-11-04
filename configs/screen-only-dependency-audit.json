@@ -1,0 +1,764 @@
+{
+  "scope": "unrestricted profile, not removal of hardware/security integrity checks",
+  "literal_screen_on_matches": 0,
+  "keep_screen_on_preserved": 2,
+  "reference_files": 102,
+  "reference_lines": 211,
+  "items": [
+    {
+      "path": "configs/deployment-status.json",
+      "original_reference_count": 1,
+      "classification": "历史状态",
+      "action": "保留旧观测，不能篡改成实测N",
+      "source_changed": false
+    },
+    {
+      "path": "configs/grub-internal-ssd.cfg",
+      "original_reference_count": 2,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "configs/grub-source.cfg",
+      "original_reference_count": 3,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "configs/sq2-video-hfi-status.json",
+      "original_reference_count": 1,
+      "classification": "历史状态",
+      "action": "保留旧观测，不能篡改成实测N",
+      "source_changed": false
+    },
+    {
+      "path": "configs/suspend-known-issues.json",
+      "original_reference_count": 2,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "patches/sq1-suspend-wip/01-debug-whitelist.patch",
+      "original_reference_count": 11,
+      "classification": "历史/兼容内核补丁",
+      "action": "保留供旧入口/回退复现；N绕过全部门",
+      "source_changed": false
+    },
+    {
+      "path": "patches/sq1-suspend-wip/03-prefix-policy.patch",
+      "original_reference_count": 1,
+      "classification": "历史/兼容内核补丁",
+      "action": "保留供旧入口/回退复现；N绕过全部门",
+      "source_changed": false
+    },
+    {
+      "path": "patches/sq1-suspend-wip/04-single-owner-trial.patch",
+      "original_reference_count": 7,
+      "classification": "历史/兼容内核补丁",
+      "action": "保留供旧入口/回退复现；N绕过全部门",
+      "source_changed": false
+    },
+    {
+      "path": "patches/surface-pm/01-framework-owner.patch",
+      "original_reference_count": 8,
+      "classification": "历史/兼容内核补丁",
+      "action": "保留供旧入口/回退复现；N绕过全部门",
+      "source_changed": false
+    },
+    {
+      "path": "patches/surface-pm/02-native-single-request.patch",
+      "original_reference_count": 4,
+      "classification": "历史/兼容内核补丁",
+      "action": "保留供旧入口/回退复现；N绕过全部门",
+      "source_changed": false
+    },
+    {
+      "path": "patches/suspend-el2-trial/01-debug-single-owner.patch",
+      "original_reference_count": 16,
+      "classification": "历史/兼容内核补丁",
+      "action": "保留供旧入口/回退复现；N绕过全部门",
+      "source_changed": false
+    },
+    {
+      "path": "probe/graphics/quest2-composition.cpp",
+      "original_reference_count": 2,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/graphics/quest2-hwui/Sq2Quest2Hwui.java",
+      "original_reference_count": 2,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/graphics/quest2-readpixels.c",
+      "original_reference_count": 2,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/graphics/quest2-visible/Sq2Quest2Visible.java",
+      "original_reference_count": 2,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/graphics/vulkan-readback.c",
+      "original_reference_count": 7,
+      "classification": "无关：offscreen_only",
+      "action": "保留离屏渲染模式，不是休眠门",
+      "source_changed": false
+    },
+    {
+      "path": "probe/lte/lte-framework-boot",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/lte/lte-unit-guard",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/lte/lte-unit-seed",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/lte/radio-stage",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/framework-suspend-stage",
+      "original_reference_count": 3,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/framework-suspend-start",
+      "original_reference_count": 3,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/ksu-framework-boot",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/lab-keep-awake",
+      "original_reference_count": 2,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/lte-fs12-seed",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/lte-fsg-seed",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/surface-pm-debug",
+      "original_reference_count": 4,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/surface-swap-boot",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/usb-functions-stage",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/video-codec-manifest-stage",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/video-decoder-lab-start",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/video-runtime-framework-boot",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/test2/video-runtime-stage",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/video/restore-sq2-allocator.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/video/sample-hfi-events.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/video/sample-mpeg2-first-error.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/video/sample-mpeg2-geometry.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/video/sample-vp9-eos.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/video/sq2-allocator-watchdog.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/video/sq2-c2-runtime-install.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/video/test-c2-bilibili.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/video/test-c2-media-refresh.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/video/test-c2-player.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/video/test-c2-vintf-live.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/virtualization/el2-android-recovery",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/virtualization/el2-kvm-init",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/virtualization/el2-launcher-main.c",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/virtualization/el2-pcie-diagnostic-init",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/virtualization/el2-preboot-init",
+      "original_reference_count": 2,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/virtualization/el2-terminal-autostart",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "probe/virtualization/el2-terminal-stage",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/build-sq2-default.py",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/check-sq1-autosuspend-policy.py",
+      "original_reference_count": 3,
+      "classification": "显式旧诊断/状态工具",
+      "action": "不接入新入口；原语义保留供回退验证",
+      "source_changed": false
+    },
+    {
+      "path": "scripts/check-sq1-suspend-wip.py",
+      "original_reference_count": 6,
+      "classification": "显式旧诊断/状态工具",
+      "action": "不接入新入口；原语义保留供回退验证",
+      "source_changed": false
+    },
+    {
+      "path": "scripts/check-surface-native-once.py",
+      "original_reference_count": 3,
+      "classification": "显式旧诊断/状态工具",
+      "action": "不接入新入口；原语义保留供回退验证",
+      "source_changed": false
+    },
+    {
+      "path": "scripts/check-suspend-trial-policy.py",
+      "original_reference_count": 11,
+      "classification": "显式旧诊断/状态工具",
+      "action": "不接入新入口；原语义保留供回退验证",
+      "source_changed": false
+    },
+    {
+      "path": "scripts/install-sq2-edp-test.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/pack-sq2-c2-runtime.py",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/patch-sq2-screen-only.py",
+      "original_reference_count": 4,
+      "classification": "显式旧诊断/状态工具",
+      "action": "不接入新入口；原语义保留供回退验证",
+      "source_changed": false
+    },
+    {
+      "path": "scripts/prepare-sq2-edp-stage.py",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/prepare-sq2-el2-android-preboot.py",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/prepare-surface-pm-debug.py",
+      "original_reference_count": 4,
+      "classification": "显式旧诊断/状态工具",
+      "action": "不接入新入口；原语义保留供回退验证",
+      "source_changed": false
+    },
+    {
+      "path": "scripts/run-quest2-gles-system.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/run-quest2-gles.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/run-quest2-vulkan-only.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/run-quest2-wildlife.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/smoke-sq2-ksunext.py",
+      "original_reference_count": 2,
+      "classification": "显式旧诊断/状态工具",
+      "action": "不接入新入口；原语义保留供回退验证",
+      "source_changed": false
+    },
+    {
+      "path": "scripts/smoke-sq2-screen-only.py",
+      "original_reference_count": 2,
+      "classification": "显式旧诊断/状态工具",
+      "action": "不接入新入口；原语义保留供回退验证",
+      "source_changed": false
+    },
+    {
+      "path": "scripts/sq2-display-boot-payload.py",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/sq2-gpu-boot-payload.py",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/surface-power-payload.py",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/test-quest2-offscreen.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/test-quest2-surfaceflinger.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/test-quest2-vulkan-only.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/test-quest2-wsi.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/test-sq2-cpu-frequency.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "scripts/test-sq2-gpu-opp.sh",
+      "original_reference_count": 1,
+      "classification": "功能/构建入口",
+      "action": "已解除必须Y；显式旧兼容分支可保留",
+      "source_changed": true
+    },
+    {
+      "path": "tests/test_closed_vulkan_boot.py",
+      "original_reference_count": 2,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_development_portability_policy.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_allocator_labels.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_allocator_restore.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_allocator_watchdog.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_c2_manifest_stage.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "更新N成功预期并保留其他拒绝场景",
+      "source_changed": true
+    },
+    {
+      "path": "tests/test_sq2_default_boot.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_display_boot_payload.py",
+      "original_reference_count": 2,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_el2_no_tz_pack.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_el2_runtime_pack.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_el2_terminal_autostart.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "更新N成功预期并保留其他拒绝场景",
+      "source_changed": true
+    },
+    {
+      "path": "tests/test_sq2_el2_terminal_stage.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_ksu_payload.py",
+      "original_reference_count": 2,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_lte_fs12_seed.py",
+      "original_reference_count": 3,
+      "classification": "测试",
+      "action": "更新N成功预期并保留其他拒绝场景",
+      "source_changed": true
+    },
+    {
+      "path": "tests/test_sq2_lte_fsg_seed.py",
+      "original_reference_count": 3,
+      "classification": "测试",
+      "action": "更新N成功预期并保留其他拒绝场景",
+      "source_changed": true
+    },
+    {
+      "path": "tests/test_sq2_overlay_phandles.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_runtime_boot.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "更新N成功预期并保留其他拒绝场景",
+      "source_changed": true
+    },
+    {
+      "path": "tests/test_sq2_usb_boot.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "更新N成功预期并保留其他拒绝场景",
+      "source_changed": true
+    },
+    {
+      "path": "tests/test_sq2_usb_input_watch.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_usb_network_watch.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_sq2_video_default_menu.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_surface_lte_baseline.py",
+      "original_reference_count": 2,
+      "classification": "测试",
+      "action": "更新N成功预期并保留其他拒绝场景",
+      "source_changed": true
+    },
+    {
+      "path": "tests/test_surface_pm_debug.py",
+      "original_reference_count": 10,
+      "classification": "测试",
+      "action": "保留兼容/完整性验证；不是运行时限制",
+      "source_changed": false
+    },
+    {
+      "path": "tests/test_surface_power_policy.py",
+      "original_reference_count": 2,
+      "classification": "测试",
+      "action": "更新N成功预期并保留其他拒绝场景",
+      "source_changed": true
+    },
+    {
+      "path": "tests/test_surface_swap.py",
+      "original_reference_count": 1,
+      "classification": "测试",
+      "action": "更新N成功预期并保留其他拒绝场景",
+      "source_changed": true
+    }
+  ],
+  "additional_packaged_dependencies": {
+    "runtime.tar/start.sh": "must-Y removed; separate verified v2u, original v1 preserved",
+    "runtime.tar/launch": "paired C rebuilt with explicit BASE=v2u; same private namespace/mapper/cache policy",
+    "nested_and_parent_SHA256SUMS": "validate original, refresh changed hashes, no bypass",
+    "VIDEOCC": "fixed b5 gate removed; live provider identity/cells and 8 reference bindings retained",
+    "explicit_module_exception": "accepted dynamic sq2_hfi_overlay.ko only"
+  },
+  "latest_validation": {
+    "date": "2026-11-04",
+    "policy": "unrestricted",
+    "actual_screen_only": "N",
+    "actual_autosuspend": "N",
+    "actual_test": "N",
+    "actual_trial": "N",
+    "actual_owner": 0,
+    "pm_test": "none",
+    "kernel_pm_mode": "s2idle",
+    "kernel_pm_success_since_boot": 0,
+    "default_menu_entries": 2,
+    "default": "SQ2Free/unrestricted.efi",
+    "fallback": "SQ2Fallback/el2launch.efi",
+    "default_menu_sha256": "e3d238eb8b206f0f908140cdb3cb8ddd5ca4df47c3dbddf92985babcd8fc6675",
+    "effective_changed_entries": 22,
+    "codec_service": "running",
+    "video_node": "/dev/video0",
+    "operator_video_feedback": "视频正常",
+    "codec_runtime": "v2u; v1 preserved and both hashes verified",
+    "audio": "physical ALSA + AUDIO_READY + actual HAL774cd7e7 verified; no new listening claim",
+    "storage": "emulated 0/10 MOUNTED, both users RUNNING_UNLOCKED",
+    "lid_behavior": "LID_BEHAVIOR_NONE",
+    "global_lid_behavior": 0,
+    "sw_lid_capability": false,
+    "tablet_mode_switch_present": true,
+    "lid_close_sleep_verified": false,
+    "real_sleep_in_new_build_verified": false,
+    "black_screen_root_cause_fixed": false,
+    "legitimate_android_wakelocks_preserved": true,
+    "screen_timeout_ms": 300000,
+    "latest_power": "battery, AC/USB/Wireless/Dock false; earlier boot verification on AC",
+    "original_normal_and_mesa_payloads_and_firmware_preserved": true
+  }
+}

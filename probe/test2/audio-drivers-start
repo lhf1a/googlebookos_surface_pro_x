@@ -42,6 +42,79 @@ for n in $(seq 1 30); do
     [ ! -c /dev/snd/controlC0 ] || break
     sleep 1
 done
+# An ALSA card is published before asynchronous WSA enumeration completes.
+# Do not read all mixer registers while an amp still has device number zero.
+# SoundWire driver links identify the actual pair; never pin assigned devnums.
+wsa_complete() {
+    count=0
+    for link in /sys/bus/soundwire/drivers/wsa881x-codec/sdw:*; do
+        [ -L "$link" ] || continue
+        count=$((count + 1))
+        [ "$(cat "$link/status")" = Attached ] || return 1
+        [ "$(cat "$link/power/runtime_status")" = active ] || return 1
+        number=$(cat "$link/device_number")
+        case "$number" in ''|*[!0-9]*|0) return 1;; esac
+    done
+    [ "$count" -ge 2 ]
+}
+for n in $(seq 1 20); do
+    wsa_complete && break
+    sleep 0.1
+done
+if ! wsa_complete; then
+    echo 'AUDIO_WSA_PARTIAL: existing slave runtime recovery, no ADSP/master reset'
+    # The audio HAL is stopped by the caller. Never cycle hardware with a live
+    # PCM client; retain the failure rather than reset a running stream.
+    for state in /proc/asound/card*/pcm*/sub*/status; do
+        [ ! -r "$state" ] || [ "$(cat "$state")" = closed ] || {
+            echo 'AUDIO_FAILED: active PCM prevents WSA recovery'; exit 1;
+        }
+    done
+    # Only the original WSA runtime callbacks drive each shutdown GPIO. Keep
+    # all WCD/master/ADSP providers and the accepted WSA module unchanged.
+    wsa_restore() {
+        restore_errors=0
+        for link in /sys/bus/soundwire/drivers/wsa881x-codec/sdw:*; do
+            [ -L "$link" ] || continue
+            echo on > "$link/power/control" || restore_errors=$((restore_errors + 1))
+            echo 3000 > "$link/power/autosuspend_delay_ms" || restore_errors=$((restore_errors + 1))
+        done
+        echo "AUDIO_WSA_POLICY_RESTORE_ERRORS=$restore_errors"
+    }
+    trap 'wsa_restore; restore_mapper' EXIT
+    for link in /sys/bus/soundwire/drivers/wsa881x-codec/sdw:*; do
+        [ -L "$link" ] || continue
+        echo 0 > "$link/power/autosuspend_delay_ms"
+        echo auto > "$link/power/control"
+    done
+    for n in $(seq 1 20); do
+        pending=0
+        for link in /sys/bus/soundwire/drivers/wsa881x-codec/sdw:*; do
+            [ -L "$link" ] || continue
+            [ "$(cat "$link/power/runtime_status")" = suspended ] || pending=1
+        done
+        [ "$pending" = 1 ] || break
+        sleep 0.1
+    done
+    echo "AUDIO_WSA_RUNTIME_SUSPEND_PENDING=$pending"
+    wsa_restore
+    trap restore_mapper EXIT
+    for n in $(seq 1 30); do
+        wsa_complete && break
+        sleep 0.1
+    done
+fi
+if ! wsa_complete; then
+    echo 'AUDIO_FAILED: WSA pair not Attached after normal slave recovery'
+    exit 1
+fi
+for link in /sys/bus/soundwire/drivers/wsa881x-codec/sdw:*; do
+    [ -L "$link" ] || continue
+    echo on > "$link/power/control"
+    printf 'AUDIO_WSA_ENUM_READY %s devnum=' "$link"
+    cat "$link/device_number"
+    echo
+ done
 cat /proc/asound/cards /proc/asound/pcm
 ls -l /dev/snd
-tinymix -D 0 contents
+# No blanket tinymix contents: it performs hardware reads, not harmless logging.

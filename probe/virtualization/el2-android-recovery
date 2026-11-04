@@ -1,6 +1,5 @@
 #!/bin/busybox sh
 case " $(cat /proc/cmdline) " in *' sq2.el2=experimental '*) ;; *) exit 1;; esac
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y || exit 1
 echo 'EL2 Android v15: automatic normal recovery in 360 seconds unless /run/el2-control-keep exists'
 sleep 180
 echo '=== Android status at 180 seconds ==='

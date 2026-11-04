@@ -212,7 +212,7 @@ def main():
                    help='baseline LTE/Radio enabled by default; off keeps the original payload')
     p.add_argument('--lte-bundle', type=Path, default=R/'private/lte-baseline',
                    help='private, exact reboot-verified Radio04 initramfs and IPA DT')
-    p.add_argument('--suspend-policy', choices=('android','screen-only'), default='android')
+    p.add_argument('--suspend-policy', choices=('unrestricted','android','screen-only'), default='unrestricted')
     p.add_argument('--power-bundle', type=Path, default=R/'private/build-inputs/power')
     args = p.parse_args()
     if not 72 <= args.dpi <= 1000:
@@ -247,7 +247,7 @@ def main():
         lte_delta, lte_dt, lte_source = lte.prepare(raw, R, args.lte_bundle, c)
     spec=importlib.util.spec_from_file_location('surface_power',R/'scripts/surface-power-payload.py')
     power=importlib.util.module_from_spec(spec);spec.loader.exec_module(power)
-    power_files=power.bundle_files(args.power_bundle) if args.suspend_policy=='android' else None
+    power_files=power.bundle_files(args.power_bundle) if args.suspend_policy in ('android','unrestricted') else None
     prepared = {}
     for machine in machines:
         profile = profiles[machine]
@@ -273,8 +273,8 @@ def main():
         launchers = {entry: launcher((args.sealed_input/'launchers'/name).read_bytes(), machine, entry)
                      for entry, name in [('Default', 'closed.efi'), ('Fallback', 'mesa.efi')]}
         if power_files:
-            runtimes['Default'],audit['power']=power.integrate(runtimes['Default'],R,args.power_bundle,c)
-            launchers['Default']=power.launcher(args.power_bundle,machine)
+            runtimes['Default'],audit['power']=power.integrate(runtimes['Default'],R,args.power_bundle,c,policy=args.suspend_policy)
+            launchers['Default']=power.launcher(args.power_bundle,machine,policy=args.suspend_policy)
         else:
             audit['power']={'policy':'screen-only'}
         prepared[machine] = (runtimes, dts, launchers, audit, changes)

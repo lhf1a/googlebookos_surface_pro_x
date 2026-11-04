@@ -1,3 +1,74 @@
+## 2026-11-04：WSA开机枚举修正版（已打包、未部署/冷启动）
+
+隔离诊断打包器新增 `--audio-wsa-bootstrap AUDIO_DRIVERS_START`，与原有
+`--bluetooth-module`/`--own-kernel`组合生成7项有效覆盖；仍devices阶段，不提升默认。
+先对齐实际受影响清单，再打包新helper，原身份gzip成员保持最后且字节不变。
+新helper去掉全量tinymix寄存器读；检查原WSA驱动链接的动态Assigned编号、Attached和
+runtimeactive，仅在开机部分枚举、全部PCM closed时做一次既有slave runtime恢复。
+不替换WSA/主端/ADSP，不修改增益与DAC/COMP/BOOST端口，不增每次睡眠hook。
+当前同boot一次WSA runtime周期及用户听音已通过；冷启动新helper尚未验证，不能以
+夹具或包内SHA通过代替现场结果。U4单次直接freeze恢复通过但SSAM在s2idle前早醒，
+并非Android原生策略/合盖/30秒驻留通过。下一步不重复无新变量的计时请求。
+
+## 2026-11-04：QCA最终失败清理 / GENI TX完成副本补丁（真机候选）
+
+```
+python3 scripts/prepare-qca-failed-setup-cleanup.py --kernel MATCHING_KERNEL --output FRESH_HCI_UART_SOURCE
+make -C MATCHING_KERNEL O=MATCHING_BUILD ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M=FRESH_HCI_UART_SOURCE -j8 modules
+python3 scripts/patch-geni-tx-dma-completion.py MATCHING_KERNEL/drivers/tty/serial/qcom_geni_serial.c FRESH_UART_COPY.c
+```
+
+QCA只补最终错误的既有shutdown，原失败errno保持；原工作源码不改。GENI为内建驱动，
+不能卸载活动UART；本轮使用root私有mount namespace只读bind新C副本、在隔离O目录
+增量make Image，退出后原源码hash不变。原配置/模块release保持，原Image不覆盖。
+阶段打包器新增--bluetooth-module MATCHING_HCI_UART_KO及--own-kernel；后者从带真实
+SHA的显式derived power bundle把Image放入新EFI目录，其他固件/DT/基线目录仍原位置。
+这是私有诊断包、不是正常默认提升；初始BT kmsg仅RAM采集120秒，不是恢复/准入定时器。
+实际结果与限制以最新HANDOFF为准；不以重启初始化成功替代历史失败根因证明。
+
+## 2026-11-04：显式Venus system-PM阶段候选（尚未实机验收）
+
+不要将stage候选提升默认。对当前Image精确source和隔离完整build输出运行：
+
+```
+python3 scripts/prepare-sq2-venus-iris1.py --kernel KERNEL --output FRESH_MODULES --firmware-lease --platform-entry --sq2-resources --system-sleep
+make -C KERNEL O=MATCHING_BUILD ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M=FRESH_MODULES -j8 modules
+python3 scripts/prepare-sq2-venus-system-pm-boot.py --base BASE_INITRD --current-overlay ACCEPTED_UNRESTRICTED_OVERLAY --power-bundle POWER_BUNDLE --module-directory FRESH_MODULES --output FRESH_BOOT
+```
+
+打包器离线生成5条有效变化与三initrd EFI options；只支持devices诊断boot，不请求睡眠、
+不写设备/改默认。不需复制已有Image/DT，仍引用当前正常目录，原身份gzip member最后且
+原字节保持，因此含凭据输入的输出只能留私有。新core/decoder须配对替换；不加flag的
+旧构建保持resident runtime guard和原system路径。用户要求此轮直接真机后不再扩展离线矩阵。
+实际部署须动态核对本次设备/ESP、原载荷/固件、gzip/SHA和空间，独立一次性boot保留Mesa。
+同boot完成新模块/音频必要健康检查、devices原始错误与恢复后视频，不能称真睡通过。
+
+## 2026-11-04：嵌套Codec2/VIDEOCC实际输入补充
+
+增量构建必须审计runtime.tar内脚本和内外SHA，不能只清外层guard。
+prepare-unrestricted-environment.py对旧Codec2需要显式--codec-launcher（配对源码，
+BASE=/data/vendor/sq2-codec2/v2u/）；对旧固定VIDEOCC需要--video-reference-module。
+仅允许显式该HFI模块变化，其余内核/模块/DT/固件保持。旧v1不覆盖，新v2u独立安装
+并校验。首次遗漏清单/嵌套guard的失败保留在HANDOFF。当前实机N、视频/音频启动/
+两用户存储通过，但合盖链路和真实睡眠仍未验收。
+
+## 2026-11-04：默认无限制电源环境（用户确认）
+
+默认 `--suspend-policy unrestricted`，正常启动明确传入
+`suspend.screen_only=0 suspend.screen_only_autosuspend=0`。内核不再执行其
+owner、单次/两次预算或120秒准入门；不运行 owner 注册与 lab keep-awake 启动钩子。
+各功能 helper 不再要求 screen_only=Y。`android` 与 `screen-only` 仅作显式兼容策略；
+原 Mesa 回退及原载荷保留。nohibernate、硬件/ABI/磁盘/热保护、凭据和 Android 合法锁保留。
+这不等于证明真正低功耗驻留、无限多轮稳定性、磁盘休眠或历史黑屏已修复。
+
+通用完整构建使用 `scripts/build.py --suspend-policy unrestricted`，仍须提供匹配的
+私有硬件输入。当前设备的非破坏增量包可用 `scripts/prepare-unrestricted-environment.py`
+从自己的原正常 initramfs、power bundle、DTB 和启动固件离线生成。它不枚举或写设备。
+增量启动项使用两个 initrd= 参数：原正常包 + helper覆盖层/原私有身份成员。
+实际6.3.8 EFI stub按参数顺序拼接，最终有效cpio逐项核对，身份成员逐字不变且最后。
+EFI模板应从匹配的既有 launcher 源码构建并为额外参数预留足够空间；不能扩大已签名PE，
+不能把另一个设备的私有身份放进自己的包。细节及全部依赖表见 `docs/UNRESTRICTED-POWER.md`。
+
 ## 2026-11-04：正常Android休眠默认策略
 
 用户要求恢复正常休眠与锁屏策略；标准build.py/profile入口默认--suspend-policy android，

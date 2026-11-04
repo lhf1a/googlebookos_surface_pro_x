@@ -1,6 +1,6 @@
 """Normal Android-owned suspend payload; retain the separate screen-only fallback."""
 from pathlib import Path
-import gzip, hashlib, json, re, struct, zlib
+import gzip, hashlib, json, re, struct, zlib, importlib.util
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -17,7 +17,8 @@ def bundle_files(bundle):
     if not re.fullmatch(rb'[0-9a-f]{64}\n',files['system-suspend.sha256']):raise ValueError('Invalid native service manifest')
     return files
 
-def integrate(raw, root, bundle, c):
+def integrate(raw, root, bundle, c, policy="android"):
+    if policy not in ("android","unrestricted"):raise ValueError("Invalid suspend policy")
     f=bundle_files(bundle); before=c.entries(gzip.decompress(raw));e=dict(before)
     modules=[n for n in e if n.endswith('/spi-hid.ko')]
     if len(modules)!=1:raise ValueError('One SPI-HID module required')
@@ -39,8 +40,21 @@ def integrate(raw, root, bundle, c):
     e['etc/surface-pm/system-suspend.sha256']=(0o100644,f['system-suspend.sha256'])
     mode,init=e['init']; anchor=b'lab-keep-awake > /logs/lab-keep-awake.txt 2>&1 &\n'
     hook=b'framework-suspend-start > /logs/framework-suspend-start.txt 2>&1 &\n'
-    if init.count(anchor)!=1 or hook in init:raise ValueError('Unexpected power boot hook')
-    e['init']=(mode,init.replace(anchor,anchor+hook))
+    if init.count(anchor)!=1 or init.count(hook)>1:raise ValueError('Unexpected power boot hook')
+    if policy=='unrestricted':
+        # No registration/keep-awake processes are needed when the kernel gate is off.
+        init=init.replace(hook,b'').replace(anchor,b'')
+    else:
+        if hook in init:raise ValueError('Power boot hook already present')
+        init=init.replace(anchor,anchor+hook)
+    e['init']=(mode,init)
+    unrestricted_changes=[]
+    if policy=='unrestricted':
+        spec=importlib.util.spec_from_file_location('unrestricted_runtime',Path(root)/'scripts/unrestricted-power-runtime.py')
+        runtime=importlib.util.module_from_spec(spec);spec.loader.exec_module(runtime)
+        e,unrestricted_changes=runtime.integrate_entries(e)
+        e,manifest_changes=runtime.refresh_manifests(before,e)
+        unrestricted_changes=sorted(set(unrestricted_changes+manifest_changes))
     rest=raw;identity=None
     while rest:
         d=zlib.decompressobj(31);entries=c.entries(d.decompress(rest))
@@ -53,11 +67,18 @@ def integrate(raw, root, bundle, c):
     body+=b'\0'*(-len(body)%512)
     result=gzip.compress(body,compresslevel=3,mtime=0)+identity
     if c.entries(gzip.decompress(result))!=e:raise ValueError('Effective payload mismatch')
-    return result,dict(policy='android-persistent-owner',changed=sorted(n for n in e if e[n]!=before.get(n)),
+    return result,dict(policy=('unrestricted' if policy=='unrestricted' else 'android-persistent-owner'),
+        screen_only_enabled=(policy!='unrestricted'),owner_gate=(policy!='unrestricted'),
+        request_budget=None,admission_deadline=None,unrestricted_helpers=unrestricted_changes,changed=sorted(n for n in e if e[n]!=before.get(n)),
         spi_sha256=digest(f['spi-hid.ko']),kernel_sha256=digest(f['Image']),credential_member_last=True,
         framework='stock',ssam_diagnostic_delay=False,hardware_tested=False)
 
-def launcher(bundle, machine, directory=None, initrd='initramfs.cpio.gz', dt='android-el2.dtb'):
+def launcher(bundle, machine, directory=None, initrd='initramfs.cpio.gz', dt='android-el2.dtb', policy='android', base_initrd=None, initrd_addons=()):
+    if policy not in ('android','unrestricted'):raise ValueError('Invalid suspend policy')
+    if (base_initrd or initrd_addons) and policy!='unrestricted':raise ValueError('Layered initrd is an explicit unrestricted profile')
+    for path in ([base_initrd] if base_initrd else [])+list(initrd_addons):
+        if not re.fullmatch(r'\\EFI\\[A-Za-z0-9_.-]+\\[A-Za-z0-9_.-]+',path) or any(x in ('.','..') for x in path.split('\\')):
+            raise ValueError('Invalid layered EFI path')
     raw=bundle_files(bundle)['native.efi']
     pe=struct.unpack_from('<I',raw,0x3c)[0]; opt=pe+24
     if raw[pe:pe+4]!=b'PE\0\0' or struct.unpack_from('<H',raw,pe+4)[0]!=0xaa64:raise ValueError('ARM64 PE required')
@@ -75,6 +96,17 @@ def launcher(bundle, machine, directory=None, initrd='initramfs.cpio.gz', dt='an
             seen+=1
             if 'suspend.screen_only_autosuspend=1' not in text or 'nohibernate' not in text:raise ValueError('Native policy absent')
             new=text.replace(r'\EFI\SurfacePmAuto\initramfs.cpio.gz','\\EFI\\'+target+'\\'+initrd)
+            if policy=='unrestricted':
+                new=new.replace('suspend.screen_only=1','suspend.screen_only=0')
+                new=new.replace('suspend.screen_only_autosuspend=1','suspend.screen_only_autosuspend=0')
+                new=re.sub(r'\bpanic=\S+','panic=0',new)
+                if base_initrd or initrd_addons:
+                    fields=re.findall(r'\binitrd=\S+',new)
+                    if len(fields)!=1:raise ValueError('One primary initrd required')
+                    if base_initrd:new=new.replace(fields[0],'initrd='+base_initrd)
+                    new=new.rstrip()+''.join(' initrd='+x for x in initrd_addons)
+                if any(t.startswith(('suspend.screen_only_test=','suspend.screen_only_trial=')) and t.rsplit('=',1)[1] not in ('0','N') for t in new.split()):
+                    raise ValueError('Diagnostic sleep option in unrestricted launcher')
         elif text.startswith('\\EFI\\SQ2Default\\'):
             seen+=1
             new=text.replace('SQ2Default',target).replace('android-ip4.dtb',dt)

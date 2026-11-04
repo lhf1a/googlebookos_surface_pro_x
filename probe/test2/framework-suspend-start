@@ -2,6 +2,10 @@
 # Let only the verified native Android suspend process use the opt-in gate.
 set -eu
 export PATH=/bin:/sbin
+if [ "$(cat /sys/module/suspend/parameters/screen_only 2>/dev/null)" != Y ]; then
+    echo UNRESTRICTED_SUSPEND_NO_OWNER_REGISTRATION
+    exit 0
+fi
 case " $(cat /proc/cmdline) " in *" sq2.rescue=1 "*) exit 0;; esac
 case " $(cat /proc/cmdline) " in *" suspend.screen_only_autosuspend=1 "*) ;; *) exit 0;; esac
 params=/sys/module/suspend/parameters

@@ -4,7 +4,6 @@ set -eu
 source=/vendor/etc/sq2-codec2
 parent=/data/vendor/sq2-codec2
 target=$parent/v1
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 grep -q ' /data ext4 ' /proc/mounts
 (cd "$source"; sha256sum -c runtime.sha256)
 test ! -L "$parent"

@@ -13,6 +13,9 @@ static int venus_sq2_shutdown(struct venus_core *core)
  if (core->sq2_secure_active) {
   ret = sq2_venus_platform_secure_end(core->sq2_platform, ret);
   if (!ret) core->sq2_secure_active = false;
+#ifdef SQ2_VENUS_SYSTEM_PM
+  if (!ret) core->sq2_no_tz_active = false;
+#endif
  }
  return ret;
 }
@@ -45,6 +48,9 @@ static int venus_sq2_boot(struct venus_core *core)
   return ret;
  }
 
+#ifdef SQ2_VENUS_SYSTEM_PM
+ core->sq2_no_tz_active = sq2_no_tz;
+#endif
  if (sq2_no_tz) return 0;
  ret = qcom_scm_mem_protect_video_var(res->cp_start, res->cp_size,
                                     res->cp_nonpixel_start, res->cp_nonpixel_size);

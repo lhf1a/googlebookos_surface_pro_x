@@ -5,7 +5,6 @@ export PATH=/bin:/sbin
 cmdline=$(cat /proc/cmdline)
 case " $cmdline " in *' sq2.rescue=1 '*|*' sq2.usb=0 '*) exit 0;; esac
 case " $cmdline " in *' sq2.usb=experimental '*) ;; *) exit 0;; esac
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
 source=/etc/sq2-usb
 (cd "$source"; sha256sum -c SHA256SUMS)

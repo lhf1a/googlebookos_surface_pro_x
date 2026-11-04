@@ -20,7 +20,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     EFI_GUID dt_guid = EFI_DTB_TABLE_GUID;
     EFI_PHYSICAL_ADDRESS dt = 0;
     UINT64 size;
-    static CHAR16 options[] = L"console=tty0 earlycon=efifb keep_bootcon loglevel=7 acpi=off efi=novamap maxcpus=1 clk_ignore_unused pd_ignore_unused suspend.screen_only=1 nohibernate panic=15 rdinit=/init initrd=\\EFI\\SQ2EL2KVM\\initramfs.cpio.gz";
+    static CHAR16 options[] = L"console=tty0 earlycon=efifb keep_bootcon loglevel=7 acpi=off efi=novamap maxcpus=1 clk_ignore_unused pd_ignore_unused suspend.screen_only=0 nohibernate panic=15 rdinit=/init initrd=\\EFI\\SQ2EL2KVM\\initramfs.cpio.gz";
     InitializeLib(image, st);
     Print(L"SQ2 isolated EL2 KVM test. No disks or Android.\n");
     Print(L"CurrentEL=%d\n", read_currentel().el);

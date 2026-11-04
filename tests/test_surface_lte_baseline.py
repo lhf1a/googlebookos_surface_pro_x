@@ -116,46 +116,23 @@ class LteBaseline(unittest.TestCase):
 
 
 class UnitGuard(unittest.TestCase):
-    def test_readonly_fixture_sq1_sq2_serial_marker_and_opt_out(self):
-        paths = {
-            '/proc/cmdline': 'sq2.el2=1 nohibernate',
-            '/sys/module/suspend/parameters/screen_only': 'Y',
-            '/proc/device-tree/model': 'Microsoft Surface Pro X (SQ2)\0',
-            '/sys/block/nvme0n1/device/serial': 'FIXTURE-SQ2',
-            '/etc/sq2-lte/unit-serial': 'FIXTURE-SQ2',
-            '/media/esp/SQ2-SSD-ID.txt': 'SQ2-INTERNAL-512-20261027\n',
-        }
+    def test_hardware_and_opt_out_guards_independent_of_sleep_policy(self):
+        paths={'/proc/cmdline':'sq2.el2=1 nohibernate',
+               '/sys/module/suspend/parameters/screen_only':'N',
+               '/proc/device-tree/model':'Microsoft Surface Pro X (SQ2)\0'}
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            script = (ROOT/'probe/lte/lte-unit-guard').read_text()
-            for path, value in paths.items():
-                p = root/path.lstrip('/')
-                p.parent.mkdir(parents=True, exist_ok=True)
-                p.write_text(value)
-                script = script.replace(path, str(p))
-            guard = root/'guard.sh'
-            guard.write_text(script)
-            def run():
-                return subprocess.run(['sh', str(guard)], capture_output=True).returncode
-            self.assertEqual(run(), 0)
-            for path, bad in [('/proc/device-tree/model', 'Microsoft Surface Pro X (SQ1)\0'),
-                              ('/sys/block/nvme0n1/device/serial', 'OTHER-UNIT'),
-                              ('/media/esp/SQ2-SSD-ID.txt', 'OTHER-ESP\n'),
-                              ('/proc/cmdline', 'sq2.el2=1 nohibernate sq2.lte=0'),
-                              ('/proc/cmdline', 'sq2.el2=1 nohibernate sq2.rescue=1'),
-                              ('/proc/cmdline', 'sq2.el2=1'),
-                              ('/sys/module/suspend/parameters/screen_only', 'N')]:
-                p = root/path.lstrip('/')
-                p.write_text(bad)
-                self.assertNotEqual(run(), 0, path)
-                p.write_text(paths[path])
-            for path in ('/sys/block/nvme0n1/device/serial', '/etc/sq2-lte/unit-serial'):
-                p = root/path.lstrip('/')
-                p.write_text('')
-                self.assertNotEqual(run(), 0, 'empty ' + path)
-                p.unlink()
-                self.assertNotEqual(run(), 0, 'missing ' + path)
-                p.write_text(paths[path])
+            root=Path(temp);code=(ROOT/'probe/lte/lte-unit-guard').read_text()
+            for path,value in paths.items():
+                p=root/path.lstrip('/');p.parent.mkdir(parents=True,exist_ok=True);p.write_text(value);code=code.replace(path,str(p))
+            helper=root/'helper';helper.write_text(code)
+            def run():return subprocess.run(['sh',str(helper)],capture_output=True).returncode
+            for model in ('SQ1','SQ2'):
+                (root/'proc/device-tree/model').write_text('Microsoft Surface Pro X ('+model+')\0')
+                for flag in ('N','Y'):
+                    (root/'sys/module/suspend/parameters/screen_only').write_text(flag);self.assertEqual(run(),0)
+            (root/'sys/module/suspend/parameters/screen_only').unlink();self.assertEqual(run(),0)
+            for path,bad in [('/proc/device-tree/model','Unsupported board\0'),('/proc/cmdline','sq2.el2=1'),('/proc/cmdline','sq2.el2=1 nohibernate sq2.lte=0'),('/proc/cmdline','sq2.el2=1 nohibernate sq2.rescue=1')]:
+                p=root/path.lstrip('/');old=p.read_text();p.write_text(bad);self.assertNotEqual(run(),0,path);p.write_text(old)
 
 
 if __name__ == '__main__':

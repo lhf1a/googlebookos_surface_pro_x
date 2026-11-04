@@ -60,12 +60,17 @@ class Seed(unittest.TestCase):
         self.assertTrue((self.root/'media/esp/EFI/SQ2LTE/fsg-seed.ARM.used').exists())
         r=self.run_seed();self.assertEqual(r.returncode,0);self.assertEqual(r.stdout,'')
 
+    def test_screen_only_N_does_not_block_valid_seed(self):
+        (self.root/'sys/module/suspend/parameters/screen_only').write_text('N')
+        r=self.run_seed();self.assertEqual(r.returncode,0,r.stderr)
+        self.assertIn('SEEDED',r.stdout)
+
     def test_rescue_noop(self):
         (self.root/'proc/cmdline').write_text('sq2.el2=1 sq2.rescue=1 nohibernate')
         self.assertEqual(self.run_seed().returncode,0);self.unchanged()
 
     def test_guard_unit_ram_or_active_refused(self):
-        for name, data in [('sys/module/suspend/parameters/screen_only',b'N\n'),
+        for name, data in [
                            ('etc/sq2-lte/unit-serial',b'OTHER_UNIT\n'),
                            ('proc/mounts',b'/dev/invalid /run ext4 rw 0 0\n'),
                            ('ACTIVE',b'1')]:

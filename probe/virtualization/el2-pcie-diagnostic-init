@@ -11,7 +11,7 @@ echo 0 > /proc/sys/kernel/printk
 printf '\033[2J\033[H=== SQ2 FULL EL2: PCIe/NVMe diagnosis ===\n'
 uname -a
 printf 'HOST_CPUS='; grep -c '^processor' /proc/cpuinfo
-printf 'SCREEN_ONLY='; cat /sys/module/suspend/parameters/screen_only
+printf 'SCREEN_ONLY='; cat /sys/module/suspend/parameters/screen_only 2>/dev/null || echo unavailable
 printf '\nPCIe / NVMe / dependency logs:\n'
 dmesg | grep -i -E 'pcie|pci 000|nvme|defer|smmu|iommu|failed.*(regulator|clock|phy)|probe.*fail' | tail -50
 printf '\nDEFERRED DEVICES:\n'

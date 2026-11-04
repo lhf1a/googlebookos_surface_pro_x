@@ -157,8 +157,8 @@ class BootGate(unittest.TestCase):
             r=self.run_gate(cmdline=cmd);self.assertEqual(r.returncode,0,r.stderr);self.assertIn('SWAP_SKIPPED_',r.stdout)
             self.assertNotIn('INNER_STAGE_REACHED',r.stdout)
 
-    def test_guard_not_disabled(self):
-        r=self.run_gate(guard='N');self.assertNotEqual(r.returncode,0);self.assertNotIn('INNER_STAGE_REACHED',r.stdout)
+    def test_guard_is_not_a_swap_admission_dependency(self):
+        r=self.run_gate(guard='N');self.assertEqual(r.returncode,0,r.stderr);self.assertIn('INNER_STAGE_REACHED',r.stdout)
 
 
 if __name__=='__main__':unittest.main()

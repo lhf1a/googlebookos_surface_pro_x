@@ -183,7 +183,6 @@ if [ "${1:-}" = --inside ];then
 fi
 case "${1:-}" in ''|--ahb|--window|--yuv|--visible|--hwui|--readpixels|--composition|--combined|--fp16|--color|--usage|--vulkan-device|--vulkan|--vulkan-offscreen|--vulkan-properties|--vulkan-import|--vulkan-window|--vulkan-window-create) ;; *) echo 'Unsupported system graphics probe mode' >&2;exit 2;; esac
 test "$#" -le 1
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 root=/proc/1/root
 expected=f16302e33e4f7c8bbaccbe5ab5fd5d19f3279222ee430ace236c4bad237a5434
 expected_vk=0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c

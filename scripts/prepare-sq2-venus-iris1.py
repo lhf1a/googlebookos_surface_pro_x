@@ -42,7 +42,11 @@ def main():
                    help='compile opt-in independent core entry; requires firmware lease; no SoC match added')
     p.add_argument('--sq2-resources', action='store_true',
                    help='add only microsoft,sq2-venus-lab match; requires platform entry; runtime allow still defaults false')
+    p.add_argument('--system-sleep', action='store_true',
+                   help='explicit idle-only no-TZ system PM candidate; retains runtime resident guard')
     args = p.parse_args()
+    if args.system_sleep and not (args.firmware_lease and args.platform_entry and args.sq2_resources):
+        p.error('--system-sleep requires firmware-lease, platform-entry and sq2-resources')
     if args.platform_entry and not args.firmware_lease:
         p.error('--platform-entry requires --firmware-lease')
     if args.sq2_resources and not args.platform_entry:
@@ -586,7 +590,12 @@ static void sq2_vdec_trace(struct venus_inst *inst, const char *stage, int ret)
         with (args.output / 'Makefile').open('a') as f:
             f.write('\nvenus-core-objs += sq2-venus-fw.o sq2_pil_mem_query.o\n'
                     'ccflags-y += -DSQ2_PIL_QUERY_LIBRARY -I$(srctree)/drivers/firmware\n')
-    manifest = {'status': ('compile-only-explicit-lab-match-no-hardware-validation' if args.sq2_resources
+    if args.system_sleep:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('sq2_system_pm_patch', ROOT/'scripts/patch-sq2-venus-system-pm.py')
+        pm = importlib.util.module_from_spec(spec); spec.loader.exec_module(pm)
+        pm.apply(args.output, ROOT)
+    manifest = {'system_sleep_candidate': args.system_sleep, 'status': ('compile-only-explicit-lab-match-no-hardware-validation' if args.sq2_resources
                            else 'compile-only-no-platform-match-no-hardware-validation'),
                 'sq2_transport': 'explicit inactive flag; coherent 16MiB UC; bounded IOVA; SFR view; CPU-only mailboxes; no VERSION write',
                 'remaining': ['core probe/recovery/remove dispatch and runtime PM adaptation',

@@ -103,7 +103,6 @@ case "${1:-}" in
 esac
 test "$(id -u)" = 0
 test "$(stat -c '%d:%i' /)" != "$(stat -c '%d:%i' "$root")"
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test "$(android /system/bin/getprop sys.boot_completed)" = 1
 check_default
 test "$(hash "$root$base/vulkan-v77-bridge.so")" = "$candidate_vk"

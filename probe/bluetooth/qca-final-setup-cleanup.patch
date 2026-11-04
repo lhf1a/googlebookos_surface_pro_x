@@ -1,0 +1,20 @@
+--- a/hci_qca.c
++++ b/hci_qca.c
+@@ -1821,6 +1821,17 @@
+ 		goto retry;
+ 	}
+ 
++
++	/* A final failed setup has no asynchronous downloader left to clear
++	 * IBS_DISABLED. Close the hardware using the existing QCA shutdown
++	 * path; otherwise a dead controller blocks every system suspend as
++	 * though firmware were still being downloaded. Keep the setup error.
++	 */
++	if (ret) {
++		bt_dev_err(hdev, "QCA setup failed ret=%d retries=%u; powering down failed controller", ret, retries);
++		qca_power_shutdown(hu);
++	}
++
+ 	/* Setup bdaddr */
+ 	if (soc_type == QCA_ROME)
+ 		hu->hdev->set_bdaddr = qca_set_bdaddr_rome;

@@ -48,7 +48,7 @@ def main():
     p.add_argument('--lte-bundle', type=Path, default=R/'private/build-inputs/lte',
                    help='private raw LTE inputs; Radio compiled from source, unit guard retained')
     p.add_argument('--keep-work', action='store_true', help='retain intermediates for debugging')
-    p.add_argument('--suspend-policy', choices=('android','screen-only'), default='android')
+    p.add_argument('--suspend-policy', choices=('unrestricted','android','screen-only'), default='unrestricted')
     p.add_argument('--power-bundle', type=Path, default=R/'private/build-inputs/power')
     a = p.parse_args()
     if not 72 <= a.dpi <= 1000:

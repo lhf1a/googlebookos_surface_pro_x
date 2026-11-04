@@ -8,12 +8,15 @@ case "$stage" in freezer|devices|platform) ;; *) echo INVALID_DEBUG_STAGE >&2; e
 params=/sys/module/suspend/parameters
 power=/sys/power
 trace=/sys/kernel/tracing
+# The legacy opt-in gate is irrelevant when system sleep is unrestricted.
+if [ "$(cat "$params/screen_only" 2>/dev/null)" = Y ]; then
 [ "$(cat "$params/screen_only")" = Y ]
 [ "$(cat "$params/screen_only_test")" = Y ]
 [ "$(cat "$params/screen_only_trial")" = N ]
 [ "$(cat "$params/screen_only_autosuspend")" = N ]
 [ "$(cat "$params/trial_pid")" = 0 ]
 [ "$(cat "$params/autosuspend_tgid")" = 0 ]
+fi
 grep -q '\[s2idle\]' "$power/mem_sleep"
 grep -q '\[none\]' "$power/pm_test"
 [ -d "$trace/instances" ] || { echo TRACEFS_REQUIRED >&2; exit 1; }

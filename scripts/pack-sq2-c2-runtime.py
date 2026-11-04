@@ -39,7 +39,6 @@ def package(service, mapper, output):
 set -eu
 case "${1:-}" in --serve|--names-test) ;; *) exit 2;; esac
 test "$#" -eq 1
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 cd /data/vendor/sq2-codec2/v1
 sha256sum -c SHA256SUMS
 exec ./launch "$1"

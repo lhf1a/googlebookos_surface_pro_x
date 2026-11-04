@@ -51,7 +51,7 @@ class Power(unittest.TestCase):
    self.assertNotIn('clear',calls);self.assertNotIn('set-pin',calls);self.assertNotIn('set-password',calls)
  def test_entry_policies_retain_fallback(self):
   s=(R/'scripts/build-surface-pro-x.py').read_text()
-  self.assertIn("choices=('android','screen-only'), default='android'",s)
+  self.assertIn("choices=('unrestricted','android','screen-only'), default='unrestricted'",s)
   self.assertIn("runtimes['Default'],audit['power']=power.integrate",s)
   self.assertIn("if entry=='Default' and power_files:",s)
 if __name__=='__main__':unittest.main()

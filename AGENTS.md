@@ -1,5 +1,19 @@
 # Working agreement
 
+## 2026-11-04 user-directed unrestricted suspend environment
+
+The user explicitly confirmed disabling `suspend.screen_only` and removing every
+feature module's must-be-Y dependency. The new default build policy is
+`--suspend-policy unrestricted`: boot with `suspend.screen_only=0` and
+`suspend.screen_only_autosuspend=0`; no owner registration, trial counter,
+admission deadline, diagnostic framework JAR or lab keep-awake hook. This supersedes
+historical mandatory-screen-only and owner-only normal-policy requirements below.
+Keep the original working Mesa fallback, original payloads and shared firmware.
+Do not confuse the real display/screen-on state or KEEP_SCREEN_ON with this gate.
+Kernel/module ABI, target-disk validation, firmware integrity, thermal protection,
+credentials and nohibernate remain. Android's legitimate wake locks and user
+settings remain authoritative. No claim that unrestricted suspend fixes black screen.
+
 ## 2026-11-04 user-directed normal power policy
 
 The user explicitly requested normal Android suspend and lockscreen defaults, deployment

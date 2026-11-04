@@ -78,8 +78,9 @@ def validate_menu(menu):
         is_rescue = 'sq2.rescue=1' in linux[0].split()
         if len(linux) != 1 or dtb != [BOOT+(RESCUE if is_rescue else NORMAL)]:
             raise ValueError('GPU menu must use pinned normal DTB and separate rescue')
-        if not {'suspend.screen_only=1', 'nohibernate'}.issubset(linux[0].split()):
-            raise ValueError('GPU menu missing screen-only protection')
+        policy=[t for t in linux[0].split() if t.startswith('suspend.screen_only=')]
+        if 'nohibernate' not in linux[0].split() or len(policy)!=1 or policy[0] not in ('suspend.screen_only=0','suspend.screen_only=1'):
+            raise ValueError('Missing or invalid suspend policy')
         parsed += linux
         normal += not is_rescue
         rescue += is_rescue

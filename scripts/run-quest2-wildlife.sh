@@ -17,7 +17,6 @@ root=/proc/1/root
 expected=0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c
 a() { exe=$1;shift;nsenter -t 1 -m -r -- "/system/bin/$exe" "$@"; }
 hash() { sha256sum "$1" | cut -d ' ' -f1; }
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test "$(hash "$root$target")" = "$expected"
 test -f "$root$base/vulkan.sq2-selector.so"
 (cd "$root$base/runtime";sha256sum -c SHA256SUMS)

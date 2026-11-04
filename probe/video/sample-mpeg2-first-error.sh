@@ -6,7 +6,6 @@ trace=/proc/1/root/sys/kernel/tracing
 instance=$trace/instances/sq2_mpeg2_first
 output=/proc/1/root/data/local/tmp/sq2-mpeg2-first-error-trace.txt
 test ! -e "$output"
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test -c /dev/video0
 test -x /tmp/mpeg2-aligned-decode-test
 test ! -e "$trace/events/sq2_mpeg2_first"

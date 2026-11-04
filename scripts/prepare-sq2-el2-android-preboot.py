@@ -53,7 +53,7 @@ text = text.replace('preboot-el2.dtb', 'android-el2.dtb')
 start = text.index('    static CHAR16 options[] =')
 end = text.index('\n', start)
 options = ('console=tty0 earlycon=efifb loglevel=6 acpi=off efi=novamap '
-           'clk_ignore_unused pd_ignore_unused suspend.screen_only=1 nohibernate '
+           'clk_ignore_unused pd_ignore_unused suspend.screen_only=0 nohibernate '
            'panic=15 sq2.native=ssd sq2.storage=nvme sq2.el2=experimental '
            'sq2.audio=1 sq2.video.c2=experimental sq2.video.autostart=1 '
            'sq2.vulkan=mesa sq2.display=2.7-60 sq2.usb=experimental '

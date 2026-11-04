@@ -4,7 +4,6 @@ trace=/proc/1/root/sys/kernel/tracing
 instance=$trace/instances/sq2_mpeg2_geometry
 output=/proc/1/root/data/local/tmp/sq2-mpeg2-geometry-trace.txt
 test ! -e "$output"
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 test ! -e "$trace/events/sq2_mpeg2_geometry"
 mkdir "$instance"
 registered=0

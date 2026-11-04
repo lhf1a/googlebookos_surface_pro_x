@@ -19,4 +19,8 @@ int sq2_venus_platform_secure_end(struct sq2_venus_platform *owner, int pas_stat
  * Power/reset/ICC owner must also be released before this final operation.
  */
 int sq2_venus_platform_release(struct sq2_venus_platform **owner);
+#ifdef SQ2_VENUS_SYSTEM_PM
+int sq2_venus_platform_system_quiet(struct sq2_venus_platform *owner);
+int sq2_venus_platform_system_restore(struct sq2_venus_platform *owner);
+#endif
 #endif

@@ -21,7 +21,6 @@ test "$((linked + wrapper))" -le 1
 case "${1:-}" in ''|--ahb|--ahb-import-only|--ahb-cpu-readback) ;; *) echo 'usage: run-quest2-gles.sh [--egl-linked | --egl-wrapper] [--gsl-dmabuf] [--ahb|--ahb-import-only|--ahb-cpu-readback]' >&2; exit 2;; esac
 test "$#" -le 1
 root=/proc/1/root
-test "$(cat /sys/module/suspend/parameters/screen_only)" = Y
 expected=0b36eeba9d77ed15e7465396314df80a9479f0b5ccd858d362b40af39fb1759c
 actual=$(sha256sum "$root/vendor/lib64/hw/vulkan.freedreno.so" | cut -d ' ' -f1)
 test "$actual" = "$expected"

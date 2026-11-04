@@ -37,7 +37,7 @@ def main():
     replacing = {p.stem.replace('-', '_') for p in paths}
     capture = args.capture
     live = capture.read_text(encoding='utf-8-sig').splitlines()
-    assert live[0].strip() == 'Y', 'screen-only guard capture missing'
+    assert live[0].strip() in ('Y','N'), 'suspend-policy capture missing'
     # A resident module's old exports cannot satisfy its replacement's audit.
     exports = {line.split()[2].removeprefix('__ksymtab_') for line in live
                if len(line.split()) >= 3 and line.split()[2].startswith('__ksymtab_')

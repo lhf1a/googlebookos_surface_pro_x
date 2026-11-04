@@ -7,7 +7,9 @@
 #include <unistd.h>
 
 // Versioned private runtime; never bind the mapper in the caller's namespace.
+#ifndef BASE
 #define BASE "/data/vendor/sq2-codec2/v1/"
+#endif
 int main(int argc, char **argv) {
     if (argc != 2 || (strcmp(argv[1], "--serve") && strcmp(argv[1], "--names-test"))) return 2;
     if (unshare(CLONE_NEWNS) || mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL)) {

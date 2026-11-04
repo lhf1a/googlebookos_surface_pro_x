@@ -10,7 +10,6 @@ case " $(cat /proc/cmdline) " in
  *' sq2.el2=1 '*) ;;
  *) echo 'LTE_FSG_REFUSED: not normal EL2'; exit 1;;
 esac
-[ "$(cat /sys/module/suspend/parameters/screen_only)" = Y ] || exit 1
 case " $(cat /proc/cmdline) " in *' nohibernate '*) ;; *) exit 1;; esac
 [ "$(tr -d '\000' < /proc/device-tree/model)" = 'Microsoft Surface Pro X (SQ2)' ] || exit 1
 unit=$(cat /etc/sq2-lte/unit-serial)
