@@ -96,11 +96,11 @@ insmod fat
 insmod chain
 set timeout=10
 set default=sq2-default
-menuentry 'SQ2 Android + Linux - Qualcomm / 60Hz / GPU700' --id sq2-default {
+menuentry 'SQ2 Android + Linux - Qualcomm / 60Hz / GPU661' --id sq2-default {
  search --no-floppy --fs-uuid --set=root B027-0512
  chainloader /EFI/SQ2Default/el2launch.efi
 }
-menuentry 'SQ2 working fallback - Mesa / 60Hz / GPU700' --id sq2-fallback {
+menuentry 'SQ2 working fallback - Mesa / 60Hz / GPU661' --id sq2-fallback {
  search --no-floppy --fs-uuid --set=root B027-0512
  chainloader /EFI/SQ2Fallback/el2launch.efi
 }

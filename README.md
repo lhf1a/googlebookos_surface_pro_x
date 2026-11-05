@@ -17,7 +17,7 @@ An Android-based Googlebook OS port for **Surface Pro X SQ2 / Snapdragon 8cx Gen
 - Normal EL2 keeps the explicitly selected existing passwordless-user login, but does **not** open Terminal or run the KVM witness at boot. Terminal remains available manually.
 - **SQ1 and SQ2 LTE IPv4 data have been demonstrated on hardware.** SQ1 now captures its own FSG automatically, reuses it after normal reboot and connects using the standard AOSP APN table; SQ2 native Radio/SIM/data/control validation is retained.
 - LTE remains **on by default** (`--lte off` opts out). No shared/device-specific FSG is embedded, and the original Mesa fallback remains. Legacy LTE probes, verbose dumps and the Java bearer were removed from the product path. The cleanup build booted according to the operator, but LTE rechecking is pending SSH recovery. Full fresh-image dual-device acceptance is still incomplete; see [current LTE scope](docs/LTE-PRODUCT.md).
-- Unified SQ1 GPU661 / SQ2 GPU700, 60Hz / 2.7Gbps×4, KSU/EL2 and first-touch calibration defaults remain customizable. Generic touch repair and the guided idle → 15 single taps → automatic candidate → retest/confirm → coordinate/thumb flow are now **on by default** (`--touch-repair off` opts out; `--touch-bundle` overrides the source-verified bundle). The algorithm is shared, while learned profiles stay device-bound. The new second layer is built/offline-tested, not yet device-accepted.
+- Unified SQ1 GPU661 / SQ2 GPU661, 60Hz / 2.7Gbps×4, KSU/EL2 and first-touch calibration defaults remain customizable. Generic touch repair and the guided idle → 15 single taps → automatic candidate → retest/confirm → coordinate/thumb flow are now **on by default** (`--touch-repair off` opts out; `--touch-bundle` overrides the source-verified bundle). The algorithm is shared, while learned profiles stay device-bound. The new second layer is built/offline-tested, not yet device-accepted.
 
 ## Feature status
 
@@ -46,7 +46,7 @@ Updated **2026-11-04** · ✅ Available · ⭕️ Partially available · ❌ Una
 | Closed Qualcomm graphics | ⭕️ | Some paths usable; full-system compatibility incomplete |
 | Internal display | ⭕️ | Current default is native 60 Hz; device-specific ~65 Hz remains experimental |
 | External USB-C DisplayPort | ❌ | DP / AltMode integration incomplete |
-| CPU & GPU frequency scaling | ✅ | CPU up to 1.7664 / 3.1488 GHz; SQ2 GPU default 700 MHz (RPMh432) |
+| CPU & GPU frequency scaling | ✅ | CPU up to 1.7664 / 3.1488 GHz; SQ2 GPU default 661 MHz (OEM TURBO_L1 corner 416); 700 MHz/RPMh432 is opt-in (`--gpu-profile experimental-700`) |
 | Thermal management | ✅ | CPU / GPU temperature monitoring and passive cooling |
 | Battery & resource monitor | ⭕️ | Capacity/current/SOH available; capacity estimated, battery temperature unavailable |
 | RTC | ✅ | System clock support |
@@ -60,7 +60,7 @@ Availability is scoped to the documented SQ2 configuration, not every peripheral
 
 ## Build & documentation
 
-The current mainline SQ2 default bundle uses **EL2, Qualcomm Vulkan, native 60 Hz and GPU 700 MHz / RPMh432**, with exactly the new default and working Mesa fallback entries. It includes the Linux Terminal, EL2 H.264 decoding, adopted-ADSP audio/stop-pop fixes, USB NIC modules and Android USB input recovery. The legacy EL1 installer requires `--legacy-el1`; see BUILD for pinned private inputs and device restrictions.
+The current mainline SQ2 default bundle uses **EL2, Qualcomm Vulkan, native 60 Hz and GPU 661 MHz / OEM corner 416**, with exactly the new default and working Mesa fallback entries. It includes the Linux Terminal, EL2 H.264 decoding, adopted-ADSP audio/stop-pop fixes, USB NIC modules and Android USB input recovery. The legacy EL1 installer requires `--legacy-el1`; see BUILD for pinned private inputs and device restrictions.
 
 The standard build compiles LTE/Radio from source and uses operator-supplied firmware/module inputs (`--lte-bundle`), not an old Radio04 runtime. The default EFI router captures current-device FSG into a private local cache; no calibration or lab identity is redistributed. See [LTE product path and validation limits](docs/LTE-PRODUCT.md). Existing private IMG/GZ files are not republished by this source cleanup.
 

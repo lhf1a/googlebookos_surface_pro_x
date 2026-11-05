@@ -19,7 +19,7 @@ SQ1/SQ2 已合并离线构建入口：[机型配置、固定输入及限制](doc
 - 正常 EL2 保留显式指定的已有无密码用户登录，但开机**不自动打开终端、不运行 KVM 见证探针**；仍可手动打开终端。
 - **SQ1/SQ2 均已有 LTE IPv4 真机联网结果。** SQ1 已完成自动采集本机 FSG、普通默认重启复用缓存，以及标准 AOSP 广电 APN 的真实蜂窝 HTTPS；复用 SQ2 已完成的原生 Radio/SIM/数据与开关验收。
 - **标准构建默认启用 LTE/Radio**（`--lte off` 关闭），不再内嵌单机/共享 FSG，保留原 Mesa 回退。产品路径已移除旧 LTE 探针、详细转储及 Java bearer。用户确认清理版正常启动，但 SSH 未恢复，LTE 复测未完成；完整新镜像双机全新启动尚未验收，见 [当前 LTE 范围](docs/LTE-PRODUCT.md)。
-- SQ1 GPU661 / SQ2 GPU700、60Hz / 2.7Gbps×4、KSU/EL2、首次触摸校准仍为可自定义默认设置；通用触摸包默认从 `out/touch-baseline` 纳入，`--touch-bundle` 可替换。
+- SQ1 GPU661 / SQ2 GPU661、60Hz / 2.7Gbps×4、KSU/EL2、首次触摸校准仍为可自定义默认设置；通用触摸包默认从 `out/touch-baseline` 纳入，`--touch-bundle` 可替换。
 
 ## 功能状态
 
@@ -48,7 +48,7 @@ SQ1/SQ2 已合并离线构建入口：[机型配置、固定输入及限制](doc
 | 高通闭源图形 | ⭕️ | 部分路径可用，全系统兼容性尚未完成 |
 | 内屏显示 | ⭕️ | 当前默认原生 60 Hz；特定设备的约 65 Hz 档位仍为实验功能 |
 | 外接 USB-C DisplayPort | ❌ | DP / AltMode 适配未完成 |
-| CPU / GPU 调频 | ✅ | CPU 最高 1.7664 / 3.1488 GHz，SQ2 GPU 默认 700 MHz（RPMh432） |
+| CPU / GPU 调频 | ✅ | CPU 最高 1.7664 / 3.1488 GHz，SQ2 GPU 默认 661 MHz（OEM TURBO_L1 档 416）；700 MHz/RPMh432 改为需显式 `--gpu-profile experimental-700` |
 | 温控 | ✅ | CPU / GPU 温度监控与被动降频 |
 | 电池与资源监控 | ⭕️ | 容量、电流、SOH 可用；容量为估算，无电池温度 |
 | RTC | ✅ | 系统时钟支持 |
@@ -62,7 +62,7 @@ SQ1/SQ2 已合并离线构建入口：[机型配置、固定输入及限制](doc
 
 ## 构建与文档
 
-当前主线 SQ2 默认构建为 **EL2、高通 Vulkan、原生 60 Hz、GPU700 MHz / RPMh432**，恰好保留新默认和可工作的 Mesa 回退两项；已纳入 Linux 终端、EL2 H.264 硬解、ADSP 接管音频/停播爆音修复、USB 网卡模块及 Android USB 输入恢复。旧 EL1 安装构建须显式使用 `--legacy-el1`；固定私有输入和设备限制见 BUILD。
+当前主线 SQ2 默认构建为 **EL2、高通 Vulkan、原生 60 Hz、GPU661 MHz / OEM 416 档**，恰好保留新默认和可工作的 Mesa 回退两项；已纳入 Linux 终端、EL2 H.264 硬解、ADSP 接管音频/停播爆音修复、USB 网卡模块及 Android USB 输入恢复。旧 EL1 安装构建须显式使用 `--legacy-el1`；固定私有输入和设备限制见 BUILD。
 
 标准构建从源码编译 LTE/Radio，由操作者提供固件/模块输入（`--lte-bundle`），不再移植旧 Radio04 运行包。默认 EFI router 自动采集当前设备 FSG 至私有本地缓存；校准和实验室身份不随镜像分发。详见 [LTE 产品路径与验收边界](docs/LTE-PRODUCT.md)。本次源码清理不重新发布已有私有 IMG/GZ。
 

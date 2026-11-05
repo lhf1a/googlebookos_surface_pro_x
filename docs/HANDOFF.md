@@ -1,3 +1,70 @@
+## 2026-11-05：6.18 首启 EFI Not Found，补齐 DT 握手后待复测
+
+用户从回退入口恢复后报告默认项 `preboot prepare/EFI_NOT_FOUND`。本轮实际读取确认
+仍运行 6.3.8/SQ2Fallback，而默认 SQ2MesaDev 的 Image 已为 6.18，菜单也已改为两项/6.18 默认；
+旧迁移文档“三项/默认未改/未部署”不再代表当前状态。错误发生在 Linux LoadImage 之前。
+
+默认新 DTB 缺 `microsoft,el2-preboot-rmtfs`，正对应真实 `sq2_rmtfs_prepare` 返回 Not Found
+的条件；三 DSP 和根节点握手槽也漏带。新增独立准备器只添加 18 项 EFI ABI 属性，
+四节点完成位保持0、不伪造成功；6.18 原资源/phandle/firmware/OPP逐属性未变。
+真实 C+libfdt 主机测试（EFI 分配桩、无SCM）B/M/R 为 NotFound/Success/NotFound，
+exit14/0/14；rollback 恢复原hash、patch重建一致、7测试通过，不是真机认证或开机通过。
+
+只原子替换设备默认 DTB：e91bd896… → 6c6afe67…（88771 bytes），完整回读一致；原件留
+`/media/esp/EFI/SQ2MesaDev/android-el2.dtb.before618-handshake-20261105-e91bd896`。
+默认 Image/initramfs/EFI、GRUB 与全部回退文件hash不变，boot ID不变，未重启、未切图形驱动。
+四角色固定在 `out/kernel-6.18-migration-20261105/`；详情与下一步实验边界见
+`docs/KERNEL-6.18-MIGRATION.md` §0。下一步复测是否越过 preboot prepare；热管理等缺项未完成，
+不做压力测试、不宣称整树迁移或黑屏修复已验收。
+
+## 2026-11-05：高通与 Mesa 切换后必须清理所有应用图形缓存
+
+用户明确要求：**每次高通闭源与 Mesa 驱动双向切换后，在重新启动应用前，必须清理所有应用的图形缓存，不限于 Chrome。**
+
+- 范围覆盖设备上所有 Android 用户/工作资料及其应用：实际存在的 GPU、Shader、Vulkan pipeline、OpenGL program、ANGLE/Dawn/Graphite 等可重建图形缓存；动态发现用户和应用路径，不绑定样机、用户编号或固定目录白名单。
+- 只处理可确认的图形派生缓存。不得以“清缓存”为由清空应用数据、整个 cache 目录、账号、Cookie、历史、下载、密码或凭据；未知用途文件先辨识，不盲删。
+- 切换前停止相关应用/图形消费者，保留原驱动和可恢复备份；切换后使旧后端图形缓存失效，再启动应用并记录实际后端及结果。无法清理的应用应明确报告，不能静默声称已完成全应用清理。
+- 清理与实际驱动切换关联，不在每次普通启动时无条件清理。保留 Mesa 回退入口与恢复能力；回退到另一后端也遵守同一要求。
+- 证据边界：本轮只对 Chrome 的五处图形缓存做了备份移走及哈希一致的文件恢复验证，用户确认随后 Chrome 正常。所有应用清理是新增操作规范，不是已经完成的全应用实测；缓存相关性不等于已证明所有 GPU/GMU 故障根因。
+
+本次 Chrome 处理：GPUPersistentCache、Default/GPUCache、Default/DawnGraphiteCache、Default/DawnWebGPUCache、设备加密存储中的 com.android.opengl.shaders_cache.multifile。原有 11 月 2 日备份保留；本轮约 12.8 MiB，未清浏览器数据。证据在本机 D:\spx_gbos\NTEGraphicsProbeSuite\device-test\chrome-cache\VERIFICATION.txt。
+
+## 2026-11-05：SQ2 黑屏定位与 GPU 默认回退到已验证的 661/416（未部署）
+
+用户指定 out/sq2-black-screen-20261105 的 GPU/msm 问题。两次实机复现的首次事件完全
+同类：`HFI_H2F_MSG_GX_BW_PERF_VOTE` 5ms 内无应答（基线 seq 3615、候选 seq 950），
+随后 `GMU watchdog expired`，再往后 hangcheck/`recover` 无限循环，SurfaceFlinger 卡在
+`DRM_MSM_WAIT_FENCE`，最终整机 UI 挂死。从候选 devcoredump 的 gmu-hfi 段解出 host→GMU
+消息流与 perf 表：GMU 收到 11 档（0=off、1=177MHz…9=661MHz、10=700MHz），卡住的那条
+vote 正是 perf_index=10；同档前几条已成功消费，所以不是"档位非法"，而是该档下的
+DVFS/RPMh 事务未能完成。
+
+恢复路径两次失败点不同但同源：基线是 `a6xx_rpmh_start` 报 Unable to power on the GPU RSC
+（PDC/RSC 序列卡死后每次 recover 都失败）；上一轮候选（已移植上游 PDC 序列）RSC 交换
+通过，但 2 秒后 `GMU firmware initialization timed out`——CX/GDSC 没有真正复位。主线在
+`a6xx_recover` 用 genpd notifier + `dev_pm_genpd_synced_poweroff(cxpd)` 强制 CX GDSC 崩溃并
+检测（6.3.8 只有旧的 `reset_control_reset(cx_collapse)`），这是下一步若要修“自愈”的落点。
+
+本次改动只做一件事：把 GPU 默认档回退到唯一没有观察到 GPU/GMU fault/hang/timeout 的
+实机配置。`sq2-gpu-boot-payload.py` 的 `build()` 现在原样返回固定 661/416 DTB
+(a5a25e43…)，700/432 (6db562c2…) 只保留为 `build_700()` / `--gpu-profile experimental-700`
+显式实验档；`configs/sq2-gpu-opp.json`、菜单标签、README/STANDARD-BUILD/BUILD 同步。
+理由是 700/432 在 2026-10-30 设为默认时只确认“能开机”，负载稳定性从未验证，而本次锁死
+正发生在它作为默认期间。
+
+实际落地（设备中途掉线后又恢复）：核对发现已部署 DTB 不是仓库固定哈希，而是
+`SQ2MesaDev/android-el2.dtb` = e9264ca6…、`SQ2Fallback/android-el2.dtb` = 85b436a3…，
+两者都是 590@416 / 661@432 / 700@432。用 `strip-700-opp.py` 只改默认项：删除
+`opp-700000000` 并把 `opp-661000000` 的 level 从 432 改回 OEM 416，其余节点/属性/保留内存、
+GPU 与 GMU compatible 全部逐字节校验不变，结果 e9264ca6… → fadd4771…（9 档，末档 661@416）；
+原件留在设备 `.gpu700.bak` 与主机 `gpu661-revert/backup-7e55a199/`。回退项**故意保留 700**
+作为可启动安全项，菜单标签暂仍写 GPU700。
+
+明确未做：没有重启（DTB 只在启动时读取，需用户自行重启生效）、没有改内核/initramfs/Mesa、
+没有动 SQ2Default/SQ2Free/SQ2Power 的 ip4 DTB。因此这不是已证根因修复：661 下仍需长时负载
+验证才能宣称黑屏解决；若在 661 复现，下一步按上文做 CX GDSC/PDC 恢复硬化，而不是再调频率。
+确认默认项在 661 上启动正常后，再对回退项做同样处理并同步菜单标签。
+
 ## 2026-11-04：接回81c5c67的本机LTE自动采集构建链
 
 实际标准构建exit0：在不含FSG/unit.json的输入目录完成Radio、缓存解析器、EFI router及

@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Offline, hash-pinned SQ2 700 MHz / RPMh432 default; retain514 rescue.
+"""Offline, hash-pinned SQ2 GPU profiles: validated 661/416 default, 700/432 opt-in.
 
-Only this exact DTB has completed an SQ2 boot. No claim of measured mV,
-physical PLL frequency, load stability or SQ1 compatibility. Never deploys.
+`build()` returns the bytes that passed hardware validation: 661 MHz at the OEM
+TURBO_L1 corner 416. `build_700()` keeps the later 700 MHz / RPMh432 transform as
+an explicit opt-in only: that profile's own record says boot was confirmed while
+load and long-term stability were never established, and the 2026-11-05 GMU
+watchdog lockups happened while it was the default. Neither function deploys.
+No claim of measured mV, physical PLL frequency or SQ1 compatibility.
 """
 import hashlib
 import importlib.util
@@ -13,9 +17,12 @@ import struct
 NORMAL = 'sc8180x-surface-pro-x.dtb'
 RESCUE = 'sc8180x-surface-pro-x-rescue.dtb'
 BASE_SHA = 'a5a25e439be24ffd506d1dc026d4094c6c2add60e56db54900f8e89e30358516'
-NORMAL_SHA = '6db562c2a28c82ca66a1e87b98d7c63c32c5a84f909917c8435fdc3fc19fef25'
+NORMAL_SHA = BASE_SHA
+EXPERIMENTAL_SHA = '6db562c2a28c82ca66a1e87b98d7c63c32c5a84f909917c8435fdc3fc19fef25'
 RESCUE_SHA = '7a4d1c73cc8d64ffef979edf00e1240bef8bf15678690b7a53c45b72434dda55'
 BOOT = '/boot/sq2-android1/'
+PROFILES = ('validated-661', 'experimental-700')
+DEFAULT = 'validated-661'
 
 
 def sha(data):
@@ -23,7 +30,14 @@ def sha(data):
 
 
 def build(raw):
-    """Reproduce the tested bytes from the pinned CPU+GPU661/416 baseline."""
+    """Return the hardware-validated default profile unchanged (661 MHz / 416)."""
+    if sha(raw) != BASE_SHA:
+        raise ValueError('Expected pinned SQ2 CPU/GPU661-416 DTB; not SQ1 or arbitrary OPPs')
+    return raw
+
+
+def build_700(raw):
+    """Opt-in 700 MHz / RPMh432 transform of the same pinned 661/416 baseline."""
     if sha(raw) != BASE_SHA:
         raise ValueError('Expected pinned SQ2 CPU/661 DTB; not SQ1 or arbitrary OPPs')
     # libfdt is required only for Linux/WSL building, not Windows deployment.
@@ -52,18 +66,27 @@ def build(raw):
             or any(f.get_mem_rsv(i) != original.get_mem_rsv(i) for i in range(f.num_mem_rsv()))):
         raise ValueError('Reserved memory changed')
     result = bytes(f.as_bytearray())
-    if sha(result) != NORMAL_SHA:
-        raise ValueError('Generated DTB differs from the boot-tested SQ2 bytes')
+    if sha(result) != EXPERIMENTAL_SHA:
+        raise ValueError('Generated DTB differs from the 700/432 boot-tested bytes')
     return result
 
 
 def verify(normal, rescue):
-    if sha(normal) != NORMAL_SHA or sha(rescue) != RESCUE_SHA:
-        raise ValueError('Default GPU/rescue DTB differs from pinned SQ2 profile')
-    return dict(schema=1, device='SQ2', maximum_hz=700000000, opp_level=432,
-                normal_sha256=NORMAL_SHA, rescue_sha256=RESCUE_SHA,
-                rescue_maximum_hz=514000000,
-                validation='700/432 boot confirmed; load and long-term stability untested')
+    nsha = sha(normal)
+    if nsha == NORMAL_SHA:
+        maximum_hz, opp_level = 661000000, 416
+        validation = '661/416 hardware-validated default (the profile with no observed GPU/GMU faults)'
+    elif nsha == EXPERIMENTAL_SHA:
+        maximum_hz, opp_level = 700000000, 432
+        validation = ('700/432 opt-in experiment: boot confirmed only; load and long-term '
+                      'stability untested, GMU watchdog lockups observed on 2026-11-05')
+    else:
+        raise ValueError('Default GPU DTB differs from pinned SQ2 profile')
+    if sha(rescue) != RESCUE_SHA:
+        raise ValueError('Rescue GPU DTB differs from pinned SQ2 profile')
+    return dict(schema=1, device='SQ2', maximum_hz=maximum_hz, opp_level=opp_level,
+                normal_sha256=nsha, rescue_sha256=RESCUE_SHA,
+                rescue_maximum_hz=514000000, validation=validation)
 
 
 def validate_menu(menu):

@@ -15,7 +15,7 @@ main `fee67b2` 的 USB/音频/视频/EL2 修复以及统一 SQ1/SQ2 构建、触
 
 默认与 Mesa 回退各有一份跨机型共用运行包，仍是**一个磁盘镜像、两个菜单项**。
 LTE 只加到默认项；Mesa 回退保留原非 LTE 运行包和原 DT，不把未验证的 LTE 改动
-扩散到工作回退。原生 60Hz / 2.7Gbps×4、SQ1 GPU661 / SQ2 GPU700、KSU/EL2、
+扩散到工作回退。原生 60Hz / 2.7Gbps×4、SQ1 GPU661 / SQ2 GPU661、KSU/EL2、
 音频、USB、FUSE、视频、首次触摸校准及 screen_only/nohibernate 策略不改变。
 
 ## 私有输入与设备边界

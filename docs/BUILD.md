@@ -1,3 +1,30 @@
+## 2026-11-05：6.18 独立候选必须补齐配对 EFI DT 握手
+
+不要直接用 `make dtbs` 的板级输出替换 EL2 launcher 的 DTB。6.18 独立迁移候选使用：
+
+```
+python3 scripts/prepare-sq2-lts-el2-dtb.py INPUT_618_BOARD_DTB FRESH_EL2_DTB
+python3 -m unittest discover -s tests -p test_sq2_lts_el2_dtb.py -v
+```
+
+依赖 python3-libfdt/dtc；准备器只给匹配 SC8180X DT 添加配对 EFI preboot ABI，保留资源及
+所有已有属性，完成位初始化0，拒绝覆盖已有文件。它不部署、不启动、不认证固件。
+此前漏带 RMTFS opt-in 导致默认首次启动在 preboot prepare/Not Found 失败；修正 DTB
+已部署并回读，但尚未启动复测。该工具未把标准6.3.8构建改为6.18，TSENS/LTE等仍缺项。
+真实进度、四角色和回退证据见 `docs/KERNEL-6.18-MIGRATION.md` §0。
+
+## 2026-11-05：高通与 Mesa 切换后必须清理所有应用图形缓存
+
+用户明确要求：**每次高通闭源与 Mesa 驱动双向切换后，在重新启动应用前，必须清理所有应用的图形缓存，不限于 Chrome。**
+
+- 范围覆盖设备上所有 Android 用户/工作资料及其应用：实际存在的 GPU、Shader、Vulkan pipeline、OpenGL program、ANGLE/Dawn/Graphite 等可重建图形缓存；动态发现用户和应用路径，不绑定样机、用户编号或固定目录白名单。
+- 只处理可确认的图形派生缓存。不得以“清缓存”为由清空应用数据、整个 cache 目录、账号、Cookie、历史、下载、密码或凭据；未知用途文件先辨识，不盲删。
+- 切换前停止相关应用/图形消费者，保留原驱动和可恢复备份；切换后使旧后端图形缓存失效，再启动应用并记录实际后端及结果。无法清理的应用应明确报告，不能静默声称已完成全应用清理。
+- 清理与实际驱动切换关联，不在每次普通启动时无条件清理。保留 Mesa 回退入口与恢复能力；回退到另一后端也遵守同一要求。
+- 证据边界：本轮只对 Chrome 的五处图形缓存做了备份移走及哈希一致的文件恢复验证，用户确认随后 Chrome 正常。所有应用清理是新增操作规范，不是已经完成的全应用实测；缓存相关性不等于已证明所有 GPU/GMU 故障根因。
+
+发布/部署检查：若改变运行时图形驱动后端，将全用户、全应用图形缓存失效处理纳入切换流程；当前本次变更仅更新规范，未实现新的自动清理器。
+
 ## 2026-11-04：接回81c5c67的本机LTE自动采集构建链
 
 实际标准构建exit0：在不含FSG/unit.json的输入目录完成Radio、缓存解析器、EFI router及
@@ -772,7 +799,7 @@ attached、物理 ALSA 声卡、AUDIO_READY、实际音频 HAL `774cd7e7…` 通
 
 `build-source-boot.py` 默认转到 `build-sq2-default.py`，输出两个独立 EFI 目录与
 恰好两个入口的 `grub.cfg`。新默认为 SQ2Default（高通 Vulkan），SQ2Fallback
-保留已工作的 Mesa；两者同为 EL2、原生60Hz、GPU700/RPMh432，包含 no-TZ视频、
+保留已工作的 Mesa；两者同为 EL2、原生60Hz、GPU661（OEM TURBO_L1 416档），包含 no-TZ视频、
 终端及 attached ADSP音频修复。高通选择只切换已有闭源Vulkan运行包，GLES/桌面
 继续沿用既有实现，不代表完整闭源GLES已适配。
 
@@ -1279,13 +1306,13 @@ Module.symvers的依赖元数据恢复流程，不声称完整modpost验证。�
 视频helper集成后须保留目标名到源码名映射，通用同名刷新不可覆盖video.HELPERS；
 最终verify_helpers检查三项有效脚本，避免把旧stage打回新runtime包。
 
-### SQ2 GPU 默认构建：700 MHz / RPMh432（2026-10-30）
+### SQ2 GPU 默认档：661 MHz / OEM 416（700/432 已于 2026-11-05 退回 opt-in）
 
-`build-source-boot.py` 默认从固定 CPU+661/416 DTB（a5a25e43…）重现已启动的700/432 DTB（6db562c2…），输出 `sc8180x-surface-pro-x.dtb`；661与700两档均为corner432，其余原档位、CPU OPP、内存保留及GPU75°C/5°C、CPU80°C/5°C温控不变。独立 `sc8180x-surface-pro-x-rescue.dtb` 仍为原514 MHz（7a4d1c73…）。此默认为SQ2专用，不宣称兼容SQ1；不包含737/775/850/880档位。
+`build-source-boot.py` 默认使用固定 CPU+661/416 DTB（a5a25e43…）原样输出 `sc8180x-surface-pro-x.dtb`，不再追加700 MHz节点；其余原档位、CPU OPP、内存保留及GPU75°C/5°C、CPU80°C/5°C温控不变。独立 `sc8180x-surface-pro-x-rescue.dtb` 仍为原514 MHz（7a4d1c73…）。此默认为SQ2专用，不宣称兼容SQ1；不包含737/775/850/880档位。
 
-输入路径可用 `--gpu-baseline BASE.dtb --gpu-rescue RESCUE.dtb` 指定，但必须匹配固定哈希；输出需全新目录。需要WSL的python3-libfdt，不连接设备或写物理盘。boot audit包含gpu_profile；disk builder验证后才生成普通镜像文件，manifest绑定实际菜单和两份DTB，部署器在枚举磁盘前再次读取ESP验证。USB/蓝牙、硬解、显示选项和最新扬声器unity RX修复继续保留，SSH凭据仍最后。
+旧的700/432组合（6db562c2…，661与700均为corner432）保留为显式实验档：`--gpu-profile experimental-700` 或脚本里的 `build_700()`，默认构建不产生它。2026-10-30 把700/432设为默认时只确认过“能开机”，负载与长期稳定性未验证；2026-11-05 记录的 GMU watchdog 死锁发生在该默认期间，卡住的正是 perf index 10（700 MHz）的 `HFI_H2F_MSG_GX_BW_PERF_VOTE`。回退到661/416是回到唯一没有观察到 GPU/GMU fault/hang/timeout 的实机配置，不等于已证根因；需要在661下重新做长时负载才能宣称修好。
 
-700/432仅完成SQ2 Android启动及实时DT档位确认，尚未做负载/长期稳定性验证；432不是毫伏。旧700/416的短测不能代替本组合验证。此处改变的是以后默认构建，本轮不修改现机ESP默认、不重启、不提升实机默认入口。
+输入路径可用 `--gpu-baseline BASE.dtb --gpu-rescue RESCUE.dtb` 指定，但必须匹配固定哈希；输出需全新目录。`experimental-700` 需要WSL的python3-libfdt，默认档不需要。不连接设备或写物理盘。boot audit包含gpu_profile；disk builder验证后才生成普通镜像文件，manifest绑定实际菜单和两份DTB，部署器在枚举磁盘前再次读取ESP验证。USB/蓝牙、硬解、显示选项和最新扬声器unity RX修复继续保留，SSH凭据仍最后。
 
 验证：`python3 -m unittest discover -s tests -p 'test_sq2_gpu_default_build.py' -v`；真实DTB重现及打包测试需要本地固定输入。默认构建仍包含原有专有二进制输入，不是无缓存全源码AOSP构建。
 

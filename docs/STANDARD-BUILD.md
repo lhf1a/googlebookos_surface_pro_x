@@ -26,7 +26,7 @@
 项目标准入口是 `python3 scripts/build.py`，输出**单个 SQ1/SQ2 通用原始磁盘镜像**，不是两份独立镜像。
 
 默认基线（不是必须满足的能力校验项）：
-- SQ1：GPU 661MHz；SQ2：GPU 700MHz。
+- SQ1：GPU 661MHz；SQ2：GPU 661MHz（OEM TURBO_L1 416 档）。700MHz/RPMh432 见 BUILD 的显式实验开关。
 - 两机：原生 60Hz、2.7Gbps × 4，KSU、EL2、首次触摸校准。
 - 检测内存 **小于 12GiB** 的设备首次正常 SSD 启动自动创建 **6GiB swap**，后续启动复用并启用；等于或大于 12GiB 不创建。文件 `/data/.surface-swap/swapfile`，`sq2.swap=0` 退出；空间不足不阻塞启动。按 Linux `MemTotal < 12582912kB` 判断（扣除固件预留，不是标称 SKU 容量）。
 - Android 默认 **300 DPI**，`--dpi N` 保留自定义；只改默认属性，不覆盖 userdata 中的显示设置。

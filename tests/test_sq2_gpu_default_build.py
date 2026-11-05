@@ -73,9 +73,13 @@ class DefaultGpu(unittest.TestCase):
         self.assertEqual(g.build(raw), result)
         self.assertEqual(BASE.read_bytes(), raw)
         policy = g.verify(result, RESCUE.read_bytes())
-        self.assertEqual((policy['maximum_hz'], policy['opp_level']), (700000000, 432))
+        self.assertEqual((policy['maximum_hz'], policy['opp_level']), (661000000, 416))
         self.assertEqual(policy['rescue_maximum_hz'], 514000000)
-        for normal, rescue in ((raw, RESCUE.read_bytes()), (result, result)):
+        experimental = g.build_700(raw)
+        self.assertEqual(g.sha(experimental), g.EXPERIMENTAL_SHA)
+        self.assertEqual(g.verify(experimental, RESCUE.read_bytes())['maximum_hz'], 700000000)
+        for normal, rescue in ((result, result), (experimental, experimental),
+                               (result, experimental)):
             with self.assertRaises(ValueError):
                 g.verify(normal, rescue)
 

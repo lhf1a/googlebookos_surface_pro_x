@@ -1,3 +1,27 @@
+## 2026-11-05：高通与 Mesa 切换后必须清理所有应用图形缓存
+
+用户明确要求：**每次高通闭源与 Mesa 驱动双向切换后，在重新启动应用前，必须清理所有应用的图形缓存，不限于 Chrome。**
+
+- 范围覆盖设备上所有 Android 用户/工作资料及其应用：实际存在的 GPU、Shader、Vulkan pipeline、OpenGL program、ANGLE/Dawn/Graphite 等可重建图形缓存；动态发现用户和应用路径，不绑定样机、用户编号或固定目录白名单。
+- 只处理可确认的图形派生缓存。不得以“清缓存”为由清空应用数据、整个 cache 目录、账号、Cookie、历史、下载、密码或凭据；未知用途文件先辨识，不盲删。
+- 切换前停止相关应用/图形消费者，保留原驱动和可恢复备份；切换后使旧后端图形缓存失效，再启动应用并记录实际后端及结果。无法清理的应用应明确报告，不能静默声称已完成全应用清理。
+- 清理与实际驱动切换关联，不在每次普通启动时无条件清理。保留 Mesa 回退入口与恢复能力；回退到另一后端也遵守同一要求。
+- 证据边界：本轮只对 Chrome 的五处图形缓存做了备份移走及哈希一致的文件恢复验证，用户确认随后 Chrome 正常。所有应用清理是新增操作规范，不是已经完成的全应用实测；缓存相关性不等于已证明所有 GPU/GMU 故障根因。
+
+## 2026-11-05：GPU 默认回退 661/416，700/432 改为显式实验档
+
+用户要求修复 out/sq2-black-screen-20261105 记录的 GPU/msm 问题。证据：两次复现首次事件
+均为 `HFI_H2F_MSG_GX_BW_PERF_VOTE` 无应答→GMU watchdog→recover 死循环；coredump 的 HFI
+队列显示卡住的是 perf_index 10（700MHz）。700/432 自 2026-10-30 起为默认，当时只验证
+“能开机”。已把 `build-sq2-gpu-boot-payload.py:build()` 回退为固定 661/416 原样输出
+（a5a25e43…），700/432（6db562c2…）仅保留 `build_700()` 与 `--gpu-profile experimental-700`。
+菜单标签、configs/sq2-gpu-opp.json、README/BUILD/STANDARD-BUILD 同步。此改动覆盖下方
+2026-11-02“默认 GPU700/RPMh432”的默认项，但保留该档为可显式开启的实验。
+实际落地：设备恢复后只改了默认入口的 DTB（`/EFI/SQ2MesaDev/android-el2.dtb`
+e9264ca6… → fadd4771…：删 opp-700000000、661 档 432→416，其余逐字节校验不变，原件留
+`.gpu700.bak` 与主机备份）；回退入口仍保留 700 作为安全项。没有重启、没有改内核/initramfs/
+Mesa。661 下需长时负载验证；不得把这次回退写成已证根因或已修复黑屏。
+
 ## 2026-11-04：接回81c5c67的本机LTE自动采集构建链
 
 用户明确要求按81c5c673bb695a71a9017c2cf1bf6bd6ddf457aa修复标准通用构建。
@@ -74,7 +98,7 @@ Read docs/HANDOFF.md and docs/BUILD.md before changing the port.
 - 复用 SQ2 已完成的 Android LTE 验收。已得到 FSG 地址即采集，不因旧哈希、固定序列/IP/UUID或猜测状态增加 helper 拦截；新的失败做针对性修正。正常运行不携带 LTE 观测器、测试入口、原始协议/寄存器转储或第二个 bearer owner。
 - 当前正确路径为本机 EFI GET_INFO/GPT/FSG → 本机 UUID 缓存 → RAM RMTFS → RF/注册 → IPA4.1/RMNET → 原生 Radio AIDL/Android 电话框架。不得将一台设备校准内嵌为通用输入。详见 `docs/LTE-PRODUCT.md` 与 `docs/LTE-EXPERIMENTS.md`。
 
-- Default build/menu (2026-11-02 user instruction): this SQ2 now targets EL2 + Qualcomm Vulkan + native 60 Hz + GPU700/RPMh432. Keep exactly the new default and working Mesa fallback entries; this supersedes the older rescue/shutdown-menu requirement below. Preserve shared GRUB/firmware and both payloads. Normal EL2 uses sq2.el2=1, without experiment recovery timers or continuous diagnostics. Do not restore sq2.el2=experimental in the normal launcher. See the latest HANDOFF for actual reboot results.
+- Default build/menu (2026-11-02 user instruction): this SQ2 now targets EL2 + Qualcomm Vulkan + native 60 Hz + GPU700/RPMh432. **The GPU700/RPMh432 part of the default was reverted on 2026-11-05 (see the top entry): the default is GPU661/OEM416 and 700/432 is opt-in via `--gpu-profile experimental-700`.** The menu/entries, EL2/Vulkan/60Hz and the rest of this instruction still stand: keep exactly the new default and working Mesa fallback entries; this supersedes the older rescue/shutdown-menu requirement below. Preserve shared GRUB/firmware and both payloads. Normal EL2 uses sq2.el2=1, without experiment recovery timers or continuous diagnostics. Do not restore sq2.el2=experimental in the normal launcher. See the latest HANDOFF for actual reboot results.
 
 - Wi-Fi debugging lesson (2026-11-01): test the full Android candidate early once storage, the screen-only guard and recovery are verified. A failure in a stripped diagnostic initramfs does not establish an EL2 hardware limitation. Compare against the known-working full boot before adding EFI/SCM/SMEM mechanisms; see the debugging retrospective in docs/SQ1-EL2-PREPARATION.md.
 - Before each hardware experiment, record one hypothesis, the changed variable, the observation that distinguishes outcomes, and the stop condition. After two consecutive experiments fail to add distinguishing evidence, stop extending that route and return to the working baseline/environment comparison. This is a change of debugging direction, not a requirement to ask the user for permission.

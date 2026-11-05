@@ -197,7 +197,8 @@ def verify_gpu_profile(manifest, layout, image):
     for name, data in ((gpu.NORMAL, normal), (gpu.RESCUE, rescue)):
         if manifest.get('boot_payload_sha256', {}).get(name) != gpu.sha(data):
             raise ValueError('Packed GPU DTB differs from boot payload manifest')
-    print('PASS: packed SQ2 GPU700/432 default and514 rescue')
+    print('PASS: packed SQ2 GPU %d MHz / RPMh%d default and514 rescue'
+          % (policy['maximum_hz'] // 1000000, policy['opp_level']))
 
 
 def main():

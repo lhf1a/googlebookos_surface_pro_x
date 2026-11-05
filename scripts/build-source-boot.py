@@ -63,8 +63,11 @@ def main():
                         help='Hash-pinned tested V6 module; both profiles are packaged')
     parser.add_argument('--edp-edid',type=Path,default=R/'out/display-refresh/default65-r2/sq2-native65.bin')
     parser.add_argument('--gpu-baseline',type=Path,default=O/'sc8180x-surface-pro-x.dtb',
-                        help='Pinned SQ2 CPU/661 baseline; emits boot-tested700/432 default')
+                        help='Pinned SQ2 CPU/GPU661-416 baseline used by every GPU profile')
     parser.add_argument('--gpu-rescue',type=Path,default=O/'sc8180x-surface-pro-x-rescue.dtb')
+    parser.add_argument('--gpu-profile',choices=('validated-661','experimental-700'),default='validated-661',
+                        help='validated-661 (default): 661 MHz at OEM TURBO_L1 corner 416. '
+                             'experimental-700: 700 MHz at RPMh432, boot-confirmed but load stability untested')
     args=parser.parse_args()
     ksu_spec=importlib.util.spec_from_file_location('ksu_payload',R/'scripts/sq2-ksu-boot-payload.py')
     ksu=importlib.util.module_from_spec(ksu_spec);ksu_spec.loader.exec_module(ksu)
@@ -76,7 +79,8 @@ def main():
     gpu=importlib.util.module_from_spec(gpu_spec);gpu_spec.loader.exec_module(gpu)
     if any((output.parent/n).exists() for n in (output.name,display.ADDON,'build-audit.json',gpu.NORMAL,gpu.RESCUE,'Image','Image-rescue')):
         raise ValueError('Refusing existing output/addon/audit; use a fresh directory')
-    gpu_normal=gpu.build(args.gpu_baseline.read_bytes())
+    gpu_normal=(gpu.build_700(args.gpu_baseline.read_bytes()) if args.gpu_profile=='experimental-700'
+                else gpu.build(args.gpu_baseline.read_bytes()))
     gpu_rescue=args.gpu_rescue.read_bytes()
     gpu_profile=gpu.verify(gpu_normal,gpu_rescue)
     module=args.edp_module.read_bytes();edid=args.edp_edid.read_bytes()
