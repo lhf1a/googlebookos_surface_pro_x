@@ -78,7 +78,7 @@ def main():
     if hashlib.sha256(raw).hexdigest()!=a.expected_base_sha256:p.error('Original runtime hash mismatch')
     if hashlib.sha256(module).hexdigest()!=a.module_sha256:p.error('Module hash mismatch')
     if b'SQ2_HFI_VIDEOCC' not in module:p.error('Not the runtime VIDEOCC binding module')
-    for field,expected in [('name','sq2_hfi_overlay'),('vermagic','6.3.8-sq2-android1')]:
+    for field,expected in [('name','sq2_hfi_overlay'),('vermagic',__import__('kernel_baseline').policy()['kernel_release'])]:
         value=subprocess.check_output(['modinfo','-F',field,str(a.module)],text=True).strip()
         if (value if field=='name' else value.split()[0])!=expected:p.error('Overlay '+field+' mismatch')
     spec=importlib.util.spec_from_file_location('cpio',ROOT/'scripts/pack-sq2-vulkan.py')

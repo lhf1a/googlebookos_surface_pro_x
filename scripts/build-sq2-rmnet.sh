@@ -6,6 +6,10 @@ SOURCE=$(realpath "$1")
 BUILD=$(realpath "$2")
 OUT=$(realpath -m "$3")
 test ! -e "$OUT"
+# Single supported kernel baseline; validate before creating output.
+policy=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/kernel_baseline.py
+python3 "$policy" source "$SOURCE"
+python3 "$policy" build "$BUILD"
 test -s "$BUILD/Module.symvers"
 test -f "$BUILD/.config"
 config=$(sha256sum "$BUILD/.config")

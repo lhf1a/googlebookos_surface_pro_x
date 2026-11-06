@@ -6,12 +6,18 @@ case " $(cat /proc/cmdline) " in
 esac
 found=0
 for p in /sys/class/remoteproc/remoteproc*; do
-    [ "$(cat "$p/name" 2>/dev/null)" = 4080000.remoteproc ] || continue
+    # 6.3.8 calls this 4080000.remoteproc; 6.18 calls it modem.
+    # Identify the actual OF provider, not a display name or class enumeration.
+    dt="$p/device/of_node"
+    [ -r "$dt/compatible" ] || continue
+    tr '\000' '\n' < "$dt/compatible" | grep -Fxq 'qcom,sc8180x-mpss-pas' || continue
     [ "$(cat "$p/state" 2>/dev/null)" = attached ] || {
         echo 'EL2 RMTFS: modem was not attached; refusing a firmware restart' >&2
         exit 1
     }
-    [ "$(cat "$p/firmware" 2>/dev/null)" = qcom/msft/surface/pro-x-sq2/qcmpss8180.mbn ] || exit 1
+    expected=$(tr -d '\000' < "$dt/firmware-name") || exit 1
+    case "$expected" in */qcmpss8180.mbn) ;; *) exit 1;; esac
+    [ "$(cat "$p/firmware" 2>/dev/null)" = "$expected" ] || exit 1
     found=$((found + 1))
 done
 [ "$found" = 1 ] || { echo 'EL2 RMTFS: expected one verified modem' >&2; exit 1; }

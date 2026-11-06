@@ -1,0 +1,405 @@
+{
+  "schema": 1,
+  "date": "2026-11-07",
+  "active_kernel_series": "6.18",
+  "retired_kernel": "6.3.8",
+  "scope": "Repository build tooling, not on-device fallback payloads or historical reference source",
+  "retired": [
+    {
+      "path": "configs/android-test.config",
+      "sha256": "85150139853bcc4d3f753c9948ea57154a604702fda44c9ee59a1fdea77a5b96",
+      "bytes": 2610,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "configs/diagnostic.config",
+      "sha256": "14b2b2a01434d489966fa9b8079caa675a2de38e898543e92330f7f4921d6d7c",
+      "bytes": 1269,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "configs/probe-inputs.sha256",
+      "sha256": "14a60cbc40af10908811143cb25144610fccfb463cd17db1cd5b783b15912591",
+      "bytes": 421,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "configs/sq2-default-inputs.json",
+      "sha256": "0692f873925ade822aaddce7cbd842bce1701ff31b30e07c2fb8deeea23daf32",
+      "bytes": 2912,
+      "reason": "Retired 6.3.8 default artifact pins; configs/kernel-baseline.json is the sole selected 6.18 baseline."
+    },
+    {
+      "path": "configs/sq2-internal-kernel.config",
+      "sha256": "5ad63495c58f8e12f7fc9ac7af6569723fc89f5c4f24f11897cccfa22af609d7",
+      "bytes": 189319,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "configs/sq2-usb-network.json",
+      "sha256": "90766d4c7732df2ff84db9a9253808ed0640eda04e0464e9d59130ad2b17e141",
+      "bytes": 6599,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "configs/test2.config",
+      "sha256": "bcc18ec1c341f3c32e5260ae5b6445e97f1a993d0a14b32aace53d20f2a1c492",
+      "bytes": 415,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-android-test-kernel.sh",
+      "sha256": "8f83e591918e1e46655d6cc4ae097d22bcb79043af0ba25b0ce6a4f6ad971cc6",
+      "bytes": 1619,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-probe.sh",
+      "sha256": "9847af3f98b2d5004688bfc913a706884d44cc3aafc78ed052844f3dceb4548a",
+      "bytes": 2797,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq1-pm-trial.sh",
+      "sha256": "a6ec925b9a0ce3a8477138e0563729cde110355789b96d2c41981aedd00a4df5",
+      "bytes": 2184,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-audio-sequencing.sh",
+      "sha256": "3c113b9b0275089ab645e5250b203c4c529117e90f2c8f4b67a3849d32a8c956",
+      "bytes": 933,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-battery-compat.sh",
+      "sha256": "4cdb1a3cf1498bb5c469e219a66b14eb93ab0f6d842d64617659e51704827533",
+      "bytes": 864,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-dpcd-read.sh",
+      "sha256": "4cd7c2b4af92412c601d89d394b50178b1cd71cc044cf7858ff72445cc1b2dd0",
+      "bytes": 921,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-edp-rates.sh",
+      "sha256": "2e540c9ade02b373a14c02b37f207c95d2a6cab9f2c5aa076c965bc4d8455d5e",
+      "bytes": 722,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-el2-android-kernel.sh",
+      "sha256": "6bab3ba9fe3f29ab48b51b2ebbf0e617497827c338ef22f8028b0bbd3a87216e",
+      "bytes": 3456,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-el2-kvm-kernel.sh",
+      "sha256": "a3d519b4cfb2e599d2d25bf463b05f39a39a8dc96568dcc8c568eb14dbac4df8",
+      "bytes": 1249,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-iris1-phase.sh",
+      "sha256": "eef76d25dc679246ca5d67aeef032bef9f88d8da994aff30d51fd6aaa3e8929e",
+      "bytes": 3646,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-ksunext.sh",
+      "sha256": "89dd48a9ce1f81cff4c4662fb1bd59827dc5f333295a5283bf435a4640099ead",
+      "bytes": 1046,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-lid-power.sh",
+      "sha256": "3689f11ef61fa4b58cae628924f009904ee0a312f9a9e33c4b6f7ed4d8de38d9",
+      "bytes": 964,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-scm-trace.sh",
+      "sha256": "212e130017fa14f0f25c921eda9c6675c42867e3608a064dc5bf36801d49402b",
+      "bytes": 1195,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-screen-only.sh",
+      "sha256": "e3f92a6e18af4d6aa281c945960f09247ffecac34afe8e981b94504d8046b46c",
+      "bytes": 856,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-tsens.sh",
+      "sha256": "e00e7845a038b75820a96e4543d5aee55b020ceef58e7a4da86f5321e63a356a",
+      "bytes": 1379,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-usb-network.sh",
+      "sha256": "73d965162a246958ad841cbbbe245758ff55e322b17475cc003eab9d3be82c3e",
+      "bytes": 3304,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-venus-iris1.sh",
+      "sha256": "e240c9a8bc386e824707b3501c86386513b65b03a7d349623e10f719e960122e",
+      "bytes": 3497,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-video-clock-overlay.py",
+      "sha256": "a2f5e2b014fb53bd34d7626219d88a39087b26c0b624d5adb7aa5984ad514a1e",
+      "bytes": 3144,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-video-dma-reference.py",
+      "sha256": "644d0b712c4d195a29656dab0f1772a0c57f6ccbe801f34b4cadb24ed1d0f31f",
+      "bytes": 3596,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-video-firmware-stage.sh",
+      "sha256": "c57894e80a073ce18e83c9da782a10469c9a90f643d5a682420109099417bd76",
+      "bytes": 1727,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-video-foundation.sh",
+      "sha256": "96a830132b03acf6becf328003a5bfb54666e13c8de959a6389f937612704402",
+      "bytes": 2692,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-video-memory-probe.sh",
+      "sha256": "24827d99014515afa2ad10d9e0b8debae596642494f2b4647e35b84311b72cdf",
+      "bytes": 652,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-sq2-videocc-sw-domains.py",
+      "sha256": "5e1db8cd2f9b108f84edaf309247dadc4816d43c88fc70160aebb47787080b78",
+      "bytes": 2512,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-surface-pm-kernel.py",
+      "sha256": "ee75f1da08ab3a41d501a83c9ed4c2eb113a1ec5f4ec96bb1a36a3de21e8d75a",
+      "bytes": 2625,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/build-test2-kernel.sh",
+      "sha256": "9cf00feb7ece1aa20a0b13f644de81b62df0f0b1195d3a0aac22d7478652660c",
+      "bytes": 1139,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/compile-sq2-edp-rates.sh",
+      "sha256": "7208bfcd3a299f56b7ab93d2a1dc32bfb1bb607782889ee4c34c796db9d878ca",
+      "bytes": 968,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/fetch-probe-inputs.sh",
+      "sha256": "e35d7e6ca61e3d4ba78f5fef8e343260dced31896af5c80df8b7359c1646c81c",
+      "bytes": 1082,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "scripts/pack-android-test.sh",
+      "sha256": "1a76597a4959e50d5402b9e5f8656323157d636881c4771651c77dc3dd2e5166",
+      "bytes": 2260,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/pack-googlebook-internal-ssd.sh",
+      "sha256": "fff0784c7681fcf85eaea44ba0a8da89e03b6ed4682edbb353ebf5f0c6f97146",
+      "bytes": 3898,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/pack-googlebook-native.sh",
+      "sha256": "13c29dde146151ba8dee83133e0ab2bd39fb0318eef09e74ff6a7e3409d63ab0",
+      "bytes": 4414,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/pack-sq2-audio-test.sh",
+      "sha256": "674d98ff37b06a65cf3fd149e746a6ffea46ea5f5243a54a3c651e3ba6d4a6a5",
+      "bytes": 968,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/pack-sq2-cpufreq.py",
+      "sha256": "c17321e90292ed2087b2bed53521bc92684d9ee149ae1ae93f651ea64fcf35e3",
+      "bytes": 2210,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "scripts/pack-sq2-edp-rates.py",
+      "sha256": "3d91daa734a2da8e5e5f4be60e35660369a3b81af1d57831950b9467305f44c2",
+      "bytes": 4621,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "scripts/pack-sq2-el2-android.py",
+      "sha256": "7559af0eadc24b3257b7c23ad6cc1216ec9375645610910e9e54ee5785ebf228",
+      "bytes": 12425,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/pack-sq2-power-connectivity.sh",
+      "sha256": "cad5d007f375d2a30630f63a213ae163c7e9c10c6dbdd7e95fd84b046dfae450",
+      "bytes": 2196,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "scripts/pack-sq2-resource-monitor.py",
+      "sha256": "9147201eab4f99a900e1aa28f2d194beabb4210e8044c9592e828442f9d5fe3e",
+      "bytes": 2504,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "scripts/pack-sq2-tsens.py",
+      "sha256": "8163fcb6dea7a86c56f499ad3df3d745e36821fea8ed41cb36319c52003775b1",
+      "bytes": 2750,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "scripts/pack-sq2-usb-network.py",
+      "sha256": "573945cf57520013a08f407f69ba1bc8610666e66b76ed2a21fa578569d26fa6",
+      "bytes": 5419,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "scripts/pack-test2.sh",
+      "sha256": "3ae7256da75ec9afc11982ad8f16a8dee46e3d200f866b4110c420436b7747c3",
+      "bytes": 4259,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/patch-sq2-audio.py",
+      "sha256": "05f7e453e83e4b20aa89f69a9fa6a890299fc873eab10b43971d9cd6a61707ff",
+      "bytes": 1713,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/patch-sq2-bluetooth.py",
+      "sha256": "0aa561e717babf7aaa2e86e77e274f57a58c0eaa565d0ec06c823fe7b2dba971",
+      "bytes": 2860,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/patch-sq2-ksunext-63.py",
+      "sha256": "a77199931711301a5bd85755277d973d9ba88ab0b368cc591275ffb7c14aa158",
+      "bytes": 1118,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/patch-test3-kernel.py",
+      "sha256": "6a9b311a60d353ed290906375812b4257bae1e4c7a3703b7e8f205f41685001c",
+      "bytes": 1593,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/prepare-memfd-compat.py",
+      "sha256": "c76189b37bf168a4b1ee39619baaadb37f8d46f5527af5b6aa07b355a19f3663",
+      "bytes": 3296,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/prepare-sq2-ksunext.py",
+      "sha256": "87ea12404bb8202ed225a08885f57395ac10e911d36fb2d0b76758da643ae336",
+      "bytes": 2729,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "scripts/prepare-test2-usb.py",
+      "sha256": "7bd9aff71314cdc663422dd2d2cadf01da2d1e550100b7659ee98fe102096c8f",
+      "bytes": 5840,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "scripts/sq2-display-boot-payload.py",
+      "sha256": "68260df36202a0787591ff101a3aa16a7b1d86c6e508821931bd3e352162aca1",
+      "bytes": 7951,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "scripts/sq2-usb-network-boot-payload.py",
+      "sha256": "7439acf7c1679e80dca31220a5ef4d409a734c81d78215076e8f33c69fc0aa99",
+      "bytes": 4130,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "scripts/verify-unified-stage.py",
+      "sha256": "6cdf9a8d669d663de80b7934c0297a52ede07db130d03a34d37fb635e849f38b",
+      "bytes": 2433,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "tests/test_sq2_audio_adsp_state.py",
+      "sha256": "f27d06f9e5829449621da6764100ef40c495e19f13cd6b5322d274020dec80cd",
+      "bytes": 1975,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "tests/test_sq2_default_boot.py",
+      "sha256": "aaa5f6753d96fdc30f0dd2e29336fb391223202cd9d183117ec42d01ad1ec5d8",
+      "bytes": 4816,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "tests/test_sq2_display_boot_payload.py",
+      "sha256": "d7bd7028de9cb63acabb87a707e93f52029e3449afb651d9a94b86045b63a714",
+      "bytes": 4449,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "tests/test_sq2_el2_no_tz_pack.py",
+      "sha256": "ba67759c8212fa5185bd4f67d43e9541523afcb9cbcf6b6a5a3b74fcf4fac793",
+      "bytes": 3465,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "tests/test_sq2_el2_pack_config.py",
+      "sha256": "55ecd675ef0f2a75cbcbed914e821cee15aa4fe4f4f9541fad51c5ec53231c14",
+      "bytes": 1273,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "tests/test_sq2_el2_runtime_pack.py",
+      "sha256": "06667b347e504cacd9d338ecd24cdabe65496b2153a0df22945dbe4a05a41f67",
+      "bytes": 3708,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "tests/test_sq2_el2_video_manifest.py",
+      "sha256": "7d7106d51e9e86053d8f21ff09498d88b7a03f3cda86fb455fc58f1123fb0bf1",
+      "bytes": 1825,
+      "reason": "Retired Linux 6.3.8-specific build/install path or its exclusive configuration/test; source history and private byte-exact rollback retained."
+    },
+    {
+      "path": "tests/test_sq2_usb_network_default.py",
+      "sha256": "41cd7915e3bddd4dec38679a55bd532f43bcf65c71ee5997b27eb421834b1bc4",
+      "bytes": 5181,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    },
+    {
+      "path": "tests/test_sq2_usb_network_pack.py",
+      "sha256": "e02bfc4bbc97c77389659f104edc356d4a1dc3a56678032a8ec7dd9f20bc0979",
+      "bytes": 3404,
+      "reason": "Retired Linux 6.3.8-only source fetching, payload builder or exclusive test; current 6.18 accepted bundle and on-device fallback unchanged."
+    }
+  ],
+  "retained_reference_patches": [
+    "scripts/patch-sq2-audio-sequencing.py",
+    "scripts/patch-sq2-spi-pm.py",
+    "scripts/patch-sq2-el2-preboot-kernel.py"
+  ],
+  "private_backup": "out/kernel-baseline-20261107/retired-638"
+}

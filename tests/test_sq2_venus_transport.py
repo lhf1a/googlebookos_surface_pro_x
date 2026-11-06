@@ -1,5 +1,6 @@
 """Exercise the actual pinned-source preparer; no device access."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -7,10 +8,10 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-KERNEL = Path('/root/.cache/sq2-thermal/kernel')
+KERNEL = Path(os.environ['SQ2_VENUS_REFERENCE_SOURCE']) if os.environ.get('SQ2_VENUS_REFERENCE_SOURCE') else None
 
 
-@unittest.skipUnless(KERNEL.exists(), 'pinned WSL kernel tree required')
+@unittest.skipUnless(KERNEL is not None and KERNEL.is_dir(), 'explicit SQ2_VENUS_REFERENCE_SOURCE fixture required')
 class VenusTransport(unittest.TestCase):
     def test_decoder_overlay_matches_pinned_driver(self):
         driver = (KERNEL / 'drivers/media/platform/qcom/venus/vdec.c').read_text()

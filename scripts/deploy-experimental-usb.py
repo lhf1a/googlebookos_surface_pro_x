@@ -120,32 +120,8 @@ def verify_hardware_video(manifest, layout, image, required=False):
 
 
 def verify_display_profiles(manifest, layout, image):
-    policy = manifest.get('display_profiles')
-    if policy is None:
-        return
-    spec = importlib.util.spec_from_file_location('display_payload',
-        Path(__file__).resolve().with_name('sq2-display-boot-payload.py'))
-    display = importlib.util.module_from_spec(spec); spec.loader.exec_module(display)
-    if (policy.get('schema') != 1 or policy.get('stock_module_sha256') != display.STOCK_SHA
-            or policy.get('edp65_module_sha256') != display.MODULE_SHA
-            or policy.get('edp65_edid_sha256') != display.EDID_SHA
-            or policy.get('password_addon_last') is not True):
-        raise ValueError('Unsupported display policy')
-    esp = next(p for p in layout['partitions'] if p['name'] == 'SQ2PROBE')
-    def packed(name):
-        return subprocess.check_output(['mtype', '-i', f'{image}@@{esp["offset"]}', '::/'+name])
-    menu = packed('EFI/BOOT/grub.cfg')
-    if display.sha(menu) != policy.get('menu_sha256'):
-        raise ValueError('Display menu hash mismatch')
-    display.validate_menu(menu, policy.get('default'))
-    hashes = policy.get('boot_payload_sha256', {})
-    if set(hashes) != {display.BASE, display.ADDON}:
-        raise ValueError('Missing display payload hashes')
-    for name, expected in hashes.items():
-        if (manifest.get('boot_payload_sha256', {}).get(name) != expected
-                or display.sha(packed('boot/sq2-android1/'+name)) != expected):
-            raise ValueError('Packed display payload hash mismatch: '+name)
-    print('PASS: packed display defaults, stock rescue and both payload hashes')
+    if manifest.get('display_profiles') is not None:
+        raise ValueError('Linux 6.3.8 display payloads are retired; use the accepted 6.18 bundle')
 
 
 def verify_usb_bluetooth(manifest, layout, image, required=False):

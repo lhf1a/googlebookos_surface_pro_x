@@ -8,7 +8,7 @@
   ],
   "experimental_opp_level": 416,
   "level_name": "RPMH_REGULATOR_LEVEL_TURBO_L1",
-  "voltage_policy": "Both the 590/661 and the opt-in 700 profile keep frequencies above 514 MHz on a firmware corner, not a guessed millivolt value. The default (661 MHz) uses the OEM TURBO_L1 corner 416. The 700/432 experiment raised both the clock and the corner; corner432 is not present in this platform's OEM opp table.",
+  "voltage_policy": "Current Linux6.18 accepted baseline preserves700MHz/RPMh432 by user instruction; no new voltage table or claim of OEM equivalence. Historical661/416 remains reference only, not the active default.",
   "provenance": {
     "sq2_device_tree": "https://github.com/linux-surface/kernel/blob/b86f786594dc9e53c57fcfa2aa58ada9541506bb/arch/arm64/boot/dts/qcom/sc8180x.dtsi",
     "gen3_reference": "https://github.com/torvalds/linux/blob/v6.12/arch/arm64/boot/dts/qcom/sc8280xp.dtsi",
@@ -16,27 +16,28 @@
     "target_661_mhz": "Operator-specified SQ2 maximum. This frequency-to-corner pairing is experimental, not an extracted OEM voltage curve."
   },
   "thermal_policy": {
-    "module": "qcom_tsens.ko for 6.3.8-sq2-android1, loaded before Android init",
-    "sensor": "gpu-thermal-top",
+    "module": "qcom_tsens.ko matched to6.18.60-sq2-android1, loaded before Android init",
+    "sensor": "gpu-top-thermal",
     "passive_millidegrees": 75000,
     "hysteresis_millidegrees": 5000,
     "cooling": "Existing MSM devfreq cooling device, all states",
     "load_test_stop_millidegrees": 80000,
-    "missing_sensor": "Load-test script refuses to proceed; 661 MHz boot refuses a failed TSENS module load."
+    "missing_sensor": "Keep matched6.18 TSENS and actual thermal limits; never replace missing GPU/battery measurements with fabricated values."
   },
   "limits": "Short functional/load tests do not establish OEM voltage equivalence, long-term stability or measured physical PLL frequency. a6xx_gmu_get_freq returns a cached requested frequency. See deployment-status.json for actual test/deployment results.",
-  "default_max_hz": 661000000,
-  "default_opp_level": 416,
+  "default_max_hz": 700000000,
+  "default_opp_level": 432,
   "default_661_opp_level": 416,
-  "default_dtb_sha256": "a5a25e439be24ffd506d1dc026d4094c6c2add60e56db54900f8e89e30358516",
+  "default_dtb_sha256": "c137b9604b908e39aba4be6ecd98e55cd9986fe3fd7522c93069bef7489c956b",
   "default_device": "SQ2 only",
   "rescue_max_hz": 514000000,
-  "default_build": "scripts/build-source-boot.py emits pinned661/416 by default (661/416 equals the pinned input, so no extra DT node is added) plus a separate514 rescue DTB; --gpu-profile experimental-700 re-enables the 700/432 transform. Disk build and deployment verify both hashes.",
-  "default_validation": "661/416 is the profile that ran on hardware with no observed GPU/GMU fault, hang or timeout in the checked logs. The 700/432 profile replaced it as default on 2026-10-30 with boot-only confirmation; the 2026-11-05 GMU watchdog lockups (HFI_H2F_MSG_GX_BW_PERF_VOTE timeout at perf index 10, the 700 MHz level) occurred while it was default. Reverting the default to 661/416 is a return to the validated configuration, not a proven root-cause fix: a soak at 661 is still required before the lockup can be called fixed.",
+  "default_build": "scripts/build.py preserves exact Linux6.18 accepted bundle; does not transform GPU OPPs. Historical661 defaults no longer apply to this baseline.",
+  "default_validation": "Current SQ2 user-selected700/432 preserved byte-exact by explicit2026-11-07 instruction. Does not claim long-term stability or verified OEM voltage curve.",
   "experimental_700_record": {
     "default_window": "2026-10-30..2026-11-05",
     "dtb_sha256": "6db562c2a28c82ca66a1e87b98d7c63c32c5a84f909917c8435fdc3fc19fef25",
     "validation_at_the_time": "SQ2 Android boot confirmed at700/432; load and long-term stability never tested.",
-    "status": "opt-in only; not part of any default build entry"
-  }
+    "status": "Historical6.3.8 record; current6.18 baseline explicitly preserves700/432, see configs/kernel-baseline.json."
+  },
+  "historical_661_policy_preserved_in_git": true
 }

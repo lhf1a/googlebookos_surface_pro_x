@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Prepare isolated, compile-only Iris1 HFI changes; no platform match or install.
 
+Historical reference-source transformer, not a supported standalone kernel build.
+Its pinned input hashes describe the old reference Venus source only; the unified
+6.18 builder compiles the already reviewed migration source, not this reference.
 Hardware resource/power and firmware lifetime support are still required.
 """
 import argparse
@@ -34,7 +37,7 @@ def replace(text, before, after):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--kernel', type=Path, default=Path('/root/.cache/sq2-thermal/kernel'))
+    p.add_argument('--kernel', type=Path, required=True, help='Explicit historical reference source tree; not a kernel compilation target')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--firmware-lease', action='store_true',
                    help='compile PAS owner and SQ2 firmware dispatch (platform probe still blocked)')

@@ -1,85 +1,49 @@
-**默认触摸基线 v7：** 45秒静置、滑动伴随触点检查、可撤销候选与复测确认，SQ1/SQ2 共用。见[构建方式与验证范围](docs/TOUCH-CALIBRATION.md)。
+# Surface Pro X Googlebook OS
 
-**通用触摸基线（2026-11-03）：** 标准入口 `scripts/build.py` 默认 `--touch-repair on`，算法不区分 SQ1/SQ2，保留关闭与自定义包选择。静置检测后接入“15点采集→自动修复候选→复测确认→坐标/拇指校准”，界面只保留操作指引。新版已离线编译/组包，第二层尚未实机验收；详见 [标准构建](docs/STANDARD-BUILD.md) 与 [触摸流程](docs/TOUCH-NOISE-AND-CALIBRATION.md)。
+唯一编译基线为 **Linux 6.18 LTS / 6.18.60-sq2-android1**。
 
-项目标准构建入口：`scripts/build.py`，生成单个 SQ1/SQ2 通用镜像；默认设置可自定义。见 [标准构建](docs/STANDARD-BUILD.md)。
+[统一构建入口](docs/BUILD.md) · [最新进度](docs/HANDOFF.md) · [迁移验证](docs/KERNEL-6.18-MIGRATION.md)
 
-# Surface Pro X SQ2 上的 Googlebook OS
+## 保持当前验收内容
 
-SQ1/SQ2 已合并离线构建入口：[机型配置、固定输入及限制](docs/UNIFIED-SQ1-SQ2.md)。SQ1 LTE 已有针对性实机验证；完整新镜像的 SQ1/SQ2 全新启动验收尚未完成。
+以 `configs/kernel-baseline.json` 的文件清单为准，不重新混装旧模块。当前原件：
+- Image：`db374853bb5df0cdaa5215b1226256adedda3292a93084e874438a4ba706c982`
+- initramfs：`5b3a70c349735e58b404b0d3825dc0dde12ae991706cbbab7e15ed65c9911185`
+- DTB：`c137b9604b908e39aba4be6ecd98e55cd9986fe3fd7522c93069bef7489c956b`
 
-[English](README.md) | **简体中文**
+有效启动参数为 **Mesa、原生60Hz、EL2、unrestricted suspend、nohibernate**；GPU为当前700/RPMh432档。
+保留音频、SSAM电池、SPI触摸response、Venus队列锁、IPA预留与RMNET、Android拥有网络及启动后SSH等当前修正。
+不因为旧文档默认高通/661而改变当前验收内容。单机用户确认与六帧视频证明不等于跨设备或长期认证。
+Scene跨用户链接属于已授权设备数据状态，不复制到其他设备；Scene GPU读数缺失仍是已知问题。
 
-面向 **Surface Pro X SQ2 / Snapdragon 8cx Gen 2** 的 Android 系 Googlebook OS 移植。基于 mica **16471258（Android 17）** 和 Linux **6.3.8-sq2-android1**，**不是 ChromeOS Flex**。
+## 一个入口，明确区分核验、组包与编译
 
-## 最新进展 — 2026-11-04
+在具备Python3的主机运行；源码编译需要Linux/WSL与匹配ARM64工具链：
 
-- 标准构建默认 **300 DPI、KernelSU Next 管理器/ksud 首启安装、通用触摸修复与校准**。保留 `--dpi`、`--ksu-manager off`、`--touch-repair off` 自定义；不覆盖用户缩放、不降级已安装 KSU、不替换原验收内核。本次仅离线集成，未生成新的整盘镜像或实机验收。
-- 主线提交 `fee67b2` 已将 USB 网卡和 Android USB 输入热插拔默认纳入双启动构建。USB 载荷与实机重启验收包一致，30 项 USB 测试通过；不代表实测了 46 种网卡，也不代表完成了新的全套 EFI 重编译，后者仍需固定私有输入缓存。
-- 正常 EL2 保留显式指定的已有无密码用户登录，但开机**不自动打开终端、不运行 KVM 见证探针**；仍可手动打开终端。
-- **SQ1/SQ2 均已有 LTE IPv4 真机联网结果。** SQ1 已完成自动采集本机 FSG、普通默认重启复用缓存，以及标准 AOSP 广电 APN 的真实蜂窝 HTTPS；复用 SQ2 已完成的原生 Radio/SIM/数据与开关验收。
-- **标准构建默认启用 LTE/Radio**（`--lte off` 关闭），不再内嵌单机/共享 FSG，保留原 Mesa 回退。产品路径已移除旧 LTE 探针、详细转储及 Java bearer。用户确认清理版正常启动，但 SSH 未恢复，LTE 复测未完成；完整新镜像双机全新启动尚未验收，见 [当前 LTE 范围](docs/LTE-PRODUCT.md)。
-- SQ1 GPU661 / SQ2 GPU661、60Hz / 2.7Gbps×4、KSU/EL2、首次触摸校准仍为可自定义默认设置；通用触摸包默认从 `out/touch-baseline` 纳入，`--touch-bundle` 可替换。
+```sh
+python3 scripts/build.py verify
+python3 scripts/build.py package --output out/6.18-release-FRESH
+python3 scripts/build.py compile --help
+```
 
-## 功能状态
+默认输入为 `private/build-inputs/kernel-6.18/EFI/SQ2L618C`。`package`逐字节复制当前EFI包并核对清单，
+**不是源码编译，也不是生成新的完整磁盘镜像**。旧磁盘重组入口已撤销，避免悄悄装回6.3.8。
+`build-surface-pro-x.py`、`build-source-boot.py`、`build-source-disk.py`、`build-sq2-default.py`兼容文件名均转到同一CLI，旧参数明确拒绝。
 
-更新于 **2026-11-04** · ✅ 可用 · ⭕️ 部分可用 · ❌ 不可用或未确认
+`compile`使用显式source/config/build-dir/output/cross-compile；实际执行Image、modules、dtbs与模块导出。
+默认配置为 `configs/kernel-6.18-baseline.config`。完整基线还需要匹配的外挂源目录与模块清单，具体参数以`compile --help`为准。
+新编译输出与验收发布包分离，未经配套打包/验收不得覆盖发布pins。不能以仅核心编译通过代替全部外挂模块与initramfs功能对齐。
 
-| 功能 | 状态 | 说明 |
-| --- | :---: | --- |
-| NVMe 启动与持久化存储 | ✅ | ARM64 UEFI / GRUB |
-| Android 桌面与 GLES | ⭕️ | 桌面可用，图形兼容性仍有限 |
-| 共享存储与下载 | ✅ | Files、Chrome 下载 |
-| USB 存储 | ✅ | FAT32 便携存储；不保证所有文件系统和设备 |
-| USB 音频 | ✅ | USB-C EarPods 播放、麦克风与自动路由 |
-| USB 有线网卡 | ⭕️ | AX88179A 经 CDC NCM 驱动，Android DHCP、联网验证及重启通过；新增 46 个驱动及依赖，其他型号未实测；不含通用 USB Wi-Fi HAL 支持 |
-| USB 鼠标输入 | ✅ | 罗技 C539 移动、按键、滚轮经用户确认；重启后自动接入 Android 输入服务 |
-| Wi-Fi | ✅ | Android 管理已保存网络 |
-| SSH | ✅ | Android 启动后自动提供公钥访问 |
-| 蓝牙 | ⭕️ | 配对与开关状态保留；HID 兼容性仍有限 |
-| 触摸屏 | ⭕️ | 通用状态修复与校准流程已构建；第二层和残余分裂点击仍待独立实机验收 |
-| 键盘盖与触控板 | ✅ | 支持热插拔恢复 |
-| 内置扬声器 | ✅ | EL2 停播爆音已修复，播放、间隔10秒重开及原应用经用户确认；默认 RX 0 dB |
-| 内置麦克风 | ✅ | 双声道/单声道录音与回放 |
-| 硬件视频解码 | ⭕️ | 当前 EL2 已验证 Android H.264 1080p；HEVC / VP8 / VP9 结果来自 EL1 |
-| Linux 终端 | ⭕️ | 手动打开；EL2 Debian shell 与 HTTPS 已验证；guest 内部硬解未验证 |
-| HDR 视频 | ❌ | 尚不具备完整普通应用支持 |
-| Vulkan 与游戏 | ⭕️ | 默认高通 Vulkan，Mesa 回退；存在应用兼容限制 |
-| 高通闭源图形 | ⭕️ | 部分路径可用，全系统兼容性尚未完成 |
-| 内屏显示 | ⭕️ | 当前默认原生 60 Hz；特定设备的约 65 Hz 档位仍为实验功能 |
-| 外接 USB-C DisplayPort | ❌ | DP / AltMode 适配未完成 |
-| CPU / GPU 调频 | ✅ | CPU 最高 1.7664 / 3.1488 GHz，SQ2 GPU 默认 661 MHz（OEM TURBO_L1 档 416）；700 MHz/RPMh432 改为需显式 `--gpu-profile experimental-700` |
-| 温控 | ✅ | CPU / GPU 温度监控与被动降频 |
-| 电池与资源监控 | ⭕️ | 容量、电流、SOH 可用；容量为估算，无电池温度 |
-| RTC | ✅ | 系统时钟支持 |
-| 电源键与合盖关屏 | ✅ | 仅关屏，系统继续运行 |
-| 睡眠 / 休眠 | ❌ | 已禁用，真正 suspend/resume 尚未解决 |
-| 方向传感器 | ❌ | 不可用 |
-| 内置摄像头 | ❌ | 不可用 |
-| LTE | ⭕️ | SQ1/SQ2 原生 Radio 与真实 LTE IPv4 数据；本机 FSG 缓存、AOSP APN。不支持语音/SMS/IMS/eSIM/5G；IPv6、漫游、长期稳定性未验收 |
+## 本地输入与恢复
 
-上述状态针对文档中的 SQ2 配置，不代表所有外设或应用均兼容。长期稳定性与续航仍待完善。后续一次启动曾短暂无声，用户在未做音频改动前确认恢复；记录中的 SoundWire 传输错误根因仍未定位，与已验收的停播爆音修复分开记录。
+- `private/build-inputs/kernel-6.18/`：当前私有EFI包、源码归档与构建清单；不纳入Git。
+- `out/mainline-618-20261107/`：改动前Git bundle、未提交diff、未跟踪文件归档和本轮输出。
+- `out/kernel-baseline-20261107/retired-638/`：退休工具逐字节备份。
+- `configs/retired-kernel-tools.json`：退休清单与原hash。仅退休旧工具，不删除真机回退入口。
+- 既有四角色与验证记录继续保存在 `out/kernel-6.18-migration-20261105/`；新记录只追加。
 
-## 构建与文档
+## 隐私与验收边界
 
-当前主线 SQ2 默认构建为 **EL2、高通 Vulkan、原生 60 Hz、GPU661 MHz / OEM 416 档**，恰好保留新默认和可工作的 Mesa 回退两项；已纳入 Linux 终端、EL2 H.264 硬解、ADSP 接管音频/停播爆音修复、USB 网卡模块及 Android USB 输入恢复。旧 EL1 安装构建须显式使用 `--legacy-el1`；固定私有输入和设备限制见 BUILD。
-
-标准构建从源码编译 LTE/Radio，由操作者提供固件/模块输入（`--lte-bundle`），不再移植旧 Radio04 运行包。默认 EFI router 自动采集当前设备 FSG 至私有本地缓存；校准和实验室身份不随镜像分发。详见 [LTE 产品路径与验收边界](docs/LTE-PRODUCT.md)。本次源码清理不重新发布已有私有 IMG/GZ。
-
-- [构建部署](docs/BUILD.md) · [最新交接](docs/HANDOFF.md) · [待办](docs/TODO.md)
-- [USB 存储/音频](docs/USB-FUNCTIONS.md) · [蓝牙输入](docs/BLUETOOTH-INPUT.md) · [麦克风](docs/MICROPHONE.md)
-- [LTE 默认基线](docs/LTE-BASELINE.md) · [原生 Radio](docs/LTE-RADIO.md) · [LTE 数据](docs/LTE-DATA.md)
-- [LTE 开发历史](docs/LTE.md) · [LTE Windows 原版参考](docs/LTE-WINDOWS-REFERENCE.md)
-- [视频解码](docs/VIDEO-DECODE.md) · [视频能力限制](docs/VIDEO-CAPABILITY-ALIGNMENT.md)
-- [图形兼容性](docs/WILD-LIFE.md) · [闭源图形](docs/QUEST2-GPU-RESEARCH.md) · [显示档位](docs/DISPLAY-REFRESH.md)
-- [来源与发布边界](docs/PROVENANCE.md) · [贡献者操作约定](AGENTS.md)
-
-详细工程文档目前主要为中文。仓库保存适配源码、配置与构建工具，**不是开箱即用镜像，也不能全新克隆后一键构建**。构建依赖固定版本的专有镜像、固件与本地输入，这些内容不随仓库发布。
-
-## 安全提示
-
-- 不要格式化 userdata 修复挂载，也不要将安装器盲用于另一块磁盘或设备。
-- 恰好保留新默认和可工作的 Mesa 回退两项、两个载荷、共享 GRUB/固件及仅关屏保护；不要在此移植上热重启 `vold`。
-- 通用构建档位与既有实机配置可能不同，替换启动文件前先阅读 BUILD。
-- root/debug/permissive 实验配置不是生产安全方案，安全启动与硬件安全集成尚未完成。
-- 密钥、凭据、专有二进制、整盘镜像和原始日志不进入 Git；各组件保留各自许可。
+当前私有包保留原SSH身份，不能当成匿名公共镜像发布。Git仅保存源码、配置、清单、测试与文档。
+不把IP、序列号、用户编号或原盘UUID作为编译/运行准入。SQ1/SQ2通用交付目标保持，但本轮基线是当前SQ2已观察产物，不能假称6.18双机新镜像全验收。
+本轮主线整理不写设备、不重启，不清除userdata或已有恢复能力。

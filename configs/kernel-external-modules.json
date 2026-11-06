@@ -1,0 +1,142 @@
+{
+  "schema": 1,
+  "kernel_release": "6.18.60-sq2-android1",
+  "source_layout": "external directory from linux-6.18.60-current-sources-20261107.tar.gz",
+  "groups": [
+    {
+      "source": "tsens",
+      "make_options": [
+        "CONFIG_QCOM_TSENS=m"
+      ],
+      "modules": {
+        "lmh.ko": "kernel/drivers/thermal/qcom/lmh.ko",
+        "qcom_tsens.ko": "extra/qcom_tsens.ko"
+      },
+      "runtime_module_sha256": {
+        "lmh.ko": "05d4fbb489cc59648451cd2d1ac2a835035c5fce9d05093ba85f385d43844c2e",
+        "qcom_tsens.ko": "318188e2b21af75bc4d19df3149b096814954e116b0de14ccaed9e28dee7aa72"
+      }
+    },
+    {
+      "source": "battery",
+      "make_options": [],
+      "modules": {
+        "sq2_battery_compat.ko": "extra/sq2_battery_compat.ko"
+      },
+      "runtime_module_sha256": {
+        "sq2_battery_compat.ko": "df6d55fa96b3d35f476a8e00afa6b7b730717607c95deb9ef47e8651bbee6509"
+      }
+    },
+    {
+      "source": "ipa",
+      "make_options": [],
+      "modules": {
+        "ipa_sq2_lab.ko": "extra/ipa_sq2_lab.ko"
+      },
+      "runtime_module_sha256": {
+        "ipa_sq2_lab.ko": "f8f99e4565ca6a8c0a87b7f8578c468f608179fd216a836c2323c921c76f3550"
+      }
+    },
+    {
+      "source": "identify",
+      "make_options": [],
+      "modules": {
+        "sq2_iris1_identify.ko": "extra/sq2_iris1_identify.ko"
+      },
+      "runtime_module_sha256": {
+        "sq2_iris1_identify.ko": "2ff75606753f05c5d97a5ffd0a43c8f21b487ead61b802857bc6e42418c3465d"
+      }
+    },
+    {
+      "source": "hfi-618-v2",
+      "make_options": [],
+      "modules": {
+        "sq2_hfi_overlay.ko": "extra/sq2_hfi_overlay.ko"
+      },
+      "runtime_module_sha256": {
+        "sq2_hfi_overlay.ko": "d0193d1e52f79dc83210717f31622e4e17e7f8918b7b92b02d200a95020f0382"
+      }
+    },
+    {
+      "source": "fw-618",
+      "make_options": [],
+      "modules": {
+        "sq2_fw_overlay.ko": "extra/sq2_fw_overlay.ko"
+      },
+      "runtime_module_sha256": {
+        "sq2_fw_overlay.ko": "7d6d4fe9eb51152d0d05ddc005ccbaa46c4a0eb242a65b28b50e3f289eec28d1"
+      }
+    },
+    {
+      "source": "videocc-618",
+      "make_options": [],
+      "modules": {
+        "videocc-sm8150.ko": "kernel/drivers/clk/qcom/videocc-sm8150.ko"
+      },
+      "runtime_module_sha256": {
+        "videocc-sm8150.ko": "27663feaf9f07abd7c947f64c06d7fe59fb3321d3c4cf953f6f2ca5958d14993"
+      }
+    },
+    {
+      "source": "rmnet-618",
+      "make_options": [
+        "CONFIG_RMNET=m"
+      ],
+      "modules": {
+        "rmnet.ko": "extra/rmnet.ko"
+      },
+      "runtime_module_sha256": {
+        "rmnet.ko": "2c121275aabfe39adb6ddae740e6212eba0dbb815f77f7d0df6020a8d14a755d"
+      }
+    },
+    {
+      "source": "edp-618/drivers/gpu/drm/msm",
+      "make_options": [],
+      "modules": {
+        "msm.ko": "kernel/drivers/gpu/drm/msm/msm.ko"
+      },
+      "runtime_module_sha256": {
+        "msm.ko": "7f30fe3b351708a131820fcde0e433c4011fe9115860924bab280f2afaad2d12"
+      }
+    },
+    {
+      "source": "venus",
+      "make_options": [],
+      "modules": {
+        "venus-core.ko": "kernel/drivers/media/platform/qcom/venus/venus-core.ko",
+        "venus-dec.ko": "kernel/drivers/media/platform/qcom/venus/venus-dec.ko",
+        "venus-enc.ko": "kernel/drivers/media/platform/qcom/venus/venus-enc.ko"
+      },
+      "runtime_module_sha256": {
+        "venus-core.ko": "689cad5c65c6a77d738117297a7f8e6ea4e4dbeb24266a9c5bf6bba1ab77f905",
+        "venus-dec.ko": "444ef53d7e5454fa4916b571e9c962d9d03dfa0e82676bbded455ccaf8c83ffb",
+        "venus-enc.ko": "e8bb96d41f86efb64fb727c79360e53223733ef5f2923ad00a3547fb50fe917f"
+      }
+    },
+    {
+      "source": "spi-hid",
+      "make_options": [],
+      "modules": {
+        "spi-hid.ko": "kernel/drivers/hid/spi-hid/spi-hid.ko"
+      },
+      "runtime_module_sha256": {
+        "spi-hid.ko": "048782059cfbc7f01c27f0bd6569d17e6567278544aa390963e30dec170908b0"
+      }
+    },
+    {
+      "source": "ssam",
+      "make_options": [],
+      "modules": {
+        "surface_aggregator.ko": "kernel/drivers/platform/surface/aggregator/surface_aggregator.ko"
+      },
+      "runtime_module_sha256": {
+        "surface_aggregator.ko": "a057812ef8136749e1460670497e3183ecba4c34534385deffab18760a927832"
+      }
+    }
+  ],
+  "notes": [
+    "All named source-tree compiled .ko hashes matched the effective deployed initramfs at baseline capture.",
+    "Compilation may change binary hashes; preserve matched layout/ABI and do not automatically promote new output to runtime pins.",
+    "Replace core modules with same-name external overrides; do not retain duplicate differing implementations."
+  ]
+}

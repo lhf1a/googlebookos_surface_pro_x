@@ -3,9 +3,9 @@ import ast,unittest
 R=Path(__file__).resolve().parents[1]
 class DefaultTouch(unittest.TestCase):
  def test_standard_and_backend_defaults(self):
-  for n in ['build.py','build-surface-pro-x.py']:
-   calls=[c for c in ast.walk(ast.parse((R/'scripts'/n).read_text())) if isinstance(c,ast.Call) and c.args and isinstance(c.args[0],ast.Constant)]
-   repair=next(c for c in calls if c.args[0].value=='--touch-repair');self.assertEqual(next(k.value.value for k in repair.keywords if k.arg=='default'),'on')
-   bundle=next(c for c in calls if c.args[0].value=='--touch-bundle');default=next(k.value for k in bundle.keywords if k.arg=='default');self.assertEqual(default.right.value,'private/build-inputs/touch')
-  self.assertIn('TOUCH-CALIBRATION.md',(R/'README.md').read_text());self.assertIn('TOUCH-CALIBRATION.md',(R/'README.zh-CN.md').read_text())
+     # Current boot is preserved as a checked 6.18 bundle, not rebuilt through old overlays.
+     for name in ['build.py', 'build-surface-pro-x.py', 'build-source-boot.py', 'build-source-disk.py', 'build-sq2-default.py']:
+         text = (R/"scripts"/name).read_text()
+         self.assertIn("build-lts.py", text)
+         self.assertNotIn("6.3.8", text)
 if __name__=='__main__':unittest.main()

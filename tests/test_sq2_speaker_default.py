@@ -64,11 +64,11 @@ class SpeakerDefault(unittest.TestCase):
             self.assertEqual(result.stdout, '')
 
     def test_default_builder_explicitly_refreshes_and_audits_route(self):
-        code = (ROOT / 'scripts/build-source-boot.py').read_text()
-        self.assertIn("'audio-speaker-route','audio-microphone-route'", code)
-        self.assertIn("after['bin/audio-speaker-route']==(0o100755,audio_route)", code)
-        self.assertIn('speaker_rx_raw=[84,84]', code)
-        self.assertIn('speaker_route_sha256=sha(audio_route)', code)
+        # Current boot is preserved as a checked 6.18 bundle, not rebuilt through old overlays.
+        for name in ['build.py', 'build-surface-pro-x.py', 'build-source-boot.py', 'build-source-disk.py', 'build-sq2-default.py']:
+            text = (ROOT/"scripts"/name).read_text()
+            self.assertIn("build-lts.py", text)
+            self.assertNotIn("6.3.8", text)
 
     @unittest.skipUnless(os.environ.get('SQ2_AUDIO_BOOT_IMAGE'), 'set SQ2_AUDIO_BOOT_IMAGE for real packed boot test')
     def test_actual_boot_archive_contains_current_default(self):

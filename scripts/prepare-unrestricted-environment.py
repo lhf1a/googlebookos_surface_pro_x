@@ -21,7 +21,7 @@ def build(a):
   import subprocess
   blob=a.video_reference_module.read_bytes()
   if b'SQ2_HFI_VIDEOCC' not in blob:raise ValueError('Dynamic VIDEOCC module required')
-  for field,want in [('name','sq2_hfi_overlay'),('vermagic','6.3.8-sq2-android1')]:
+  for field,want in [('name','sq2_hfi_overlay'),('vermagic',__import__('kernel_baseline').policy()['kernel_release'])]:
    value=subprocess.check_output(['modinfo','-F',field,str(a.video_reference_module)],text=True).strip()
    if (value if field=='name' else value.split()[0])!=want:raise ValueError('Video reference module ABI/name mismatch')
   original=dict(after);fix=load('pack-sq2-video-reference-fix.py')

@@ -25,6 +25,6 @@ class SystemPM(unittest.TestCase):
   self.assertIn('sq2_system_pm_image',(R/'probe/video/sq2-venus-fw.c').read_text())
  def test_flag_requires_full_independent_owner(self):
   with tempfile.TemporaryDirectory() as td:
-   p=subprocess.run(['python3',str(R/'scripts/prepare-sq2-venus-iris1.py'),'--system-sleep','--output',td+'/x'],capture_output=True)
+   p=subprocess.run(['python3',str(R/'scripts/prepare-sq2-venus-iris1.py'),'--system-sleep','--kernel',td+'/reference-source','--output',td+'/x'],capture_output=True)
    self.assertEqual(p.returncode,2);self.assertIn(b'requires firmware-lease',p.stderr)
 if __name__=='__main__':unittest.main()

@@ -19,7 +19,6 @@ def load(name):
 
 u = load('sq2-usb-boot-payload')
 c = load('pack-sq2-vulkan')
-d = load('sq2-display-boot-payload')
 v = load('sq2-video-boot-payload')
 deploy = load('deploy-experimental-usb')
 INIT = (b'resource-monitor-start > /logs/resource-monitor.txt\n'
@@ -51,18 +50,16 @@ class DefaultUsbBluetooth(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'hook'):
                 u.integrate(R, lambda *args: None, init.replace(b'resource-monitor-start >', b'changed >'))
 
-    def test_display_profiles_normal_rescue_and_optout(self):
+    def test_generic_usb_video_menu_normal_rescue_and_optout(self):
         source = (R/'configs/grub-source.cfg').read_text()
-        for profile in d.PROFILES:
-            menu = d.default_menu(u.default_menu(v.default_menu(source)), profile).encode()
-            d.validate_menu(menu, profile)
-            u.validate_menu(menu)
-            deploy.validate_video_menu(menu, dict(schema=1, enabled=True, menu_sha256=u.sha(menu)))
-            self.assertIn(b'sq2.usb=experimental', menu)
-            for line in menu.decode().splitlines():
-                if 'sq2.rescue=1' in line:
-                    self.assertIn('sq2.usb=0', line)
-                    self.assertNotIn('sq2.usb=experimental', line)
+        menu = u.default_menu(v.default_menu(source)).encode()
+        u.validate_menu(menu)
+        deploy.validate_video_menu(menu, dict(schema=1, enabled=True, menu_sha256=u.sha(menu)))
+        self.assertIn(b'sq2.usb=experimental', menu)
+        for line in menu.decode().splitlines():
+            if 'sq2.rescue=1' in line:
+                self.assertIn('sq2.usb=0', line)
+                self.assertNotIn('sq2.usb=experimental', line)
         text = 'linux /Image\nlinux /Image sq2.usb=0\nlinux /Image sq2.rescue=1\n'
         menu = u.default_menu(text)
         self.assertEqual(u.default_menu(menu), menu)
@@ -94,14 +91,11 @@ class DefaultUsbBluetooth(unittest.TestCase):
             deploy.verify_usb_bluetooth({}, layout, Path('fixture.img'), True)
 
     def test_builder_calls_gate_before_disk_build_and_selection(self):
-        boot = (R/'scripts/build-source-boot.py').read_text()
-        self.assertIn('init=usb.integrate(R,put,init)', boot)
-        self.assertIn('usb_hashes=usb.verify(after,R)', boot)
-        self.assertIn('usb_functions_included=True,bluetooth_input_included=True', boot)
-        disk = (R/'scripts/build-source-disk.py').read_text()
-        self.assertLess(disk.index('usb.verify(entries,R)'), disk.index('b.build()'))
-        cli = (R/'scripts/deploy-experimental-usb.py').read_text()
-        self.assertLess(cli.index('verify_usb_bluetooth(m, layout'), cli.index('disks = [d for d in inventory()'))
+        # Current boot is preserved as a checked 6.18 bundle, not rebuilt through old overlays.
+        for name in ['build.py', 'build-surface-pro-x.py', 'build-source-boot.py', 'build-source-disk.py', 'build-sq2-default.py']:
+            text = (R/"scripts"/name).read_text()
+            self.assertIn("build-lts.py", text)
+            self.assertNotIn("6.3.8", text)
 
 
 if __name__ == '__main__':

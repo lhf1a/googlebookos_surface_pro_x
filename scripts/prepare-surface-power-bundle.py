@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stage operator-built persistent-owner kernel inputs; no device operations.
 
-Use build-surface-pm-kernel.py (01-framework-owner only), not the diagnostic
+Use the unified Linux 6.18 builder with reviewed source, not the retired diagnostic
 02-native-single-request patch. QEMU/physical validation is a separate step.
 """
 import argparse,hashlib,json

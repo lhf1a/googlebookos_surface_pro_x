@@ -1,0 +1,49 @@
+#!/bin/busybox sh
+# Private opt-in initramfs diagnostics. Never changes Android Wi-Fi settings.
+set -eu
+enabled() {
+    [ -f /etc/sq2-early-network.enabled ] || return 1
+    case " $(cat /proc/cmdline) " in *" sq2.el2=1 "*) ;; *) return 1;; esac
+    case " $(cat /proc/cmdline) " in *" sq2.ssh=0 "*) return 1;; esac
+}
+stop_owned() {
+    file=$1
+    [ -f "$file" ] || return 0
+    pid=$(cat "$file")
+    case "$pid" in ''|*[!0-9]*) echo "Invalid PID file: $file"; return 1;; esac
+    [ "$pid" -gt 1 ] || return 1
+    if ! kill -0 "$pid" 2>/dev/null; then rm -f "$file"; return 0; fi
+    # Do not signal a reused PID or any Android-owned supplicant/client.
+    command=$(tr '\000' ' ' < "/proc/$pid/cmdline")
+    case " $command " in *" $file "*) ;; *) echo "PID ownership mismatch: $file"; return 1;; esac
+    kill "$pid"
+    for n in 1 2 3 4 5; do
+        if ! kill -0 "$pid" 2>/dev/null; then rm -f "$file"; return 0; fi
+        sleep 1
+    done
+    echo "Client has not stopped: $file"
+    return 1
+}
+case "${1:-}" in
+    start)
+        enabled || exit 0
+        mkdir -p /run /logs
+        # Listen before firmware/association; reuse existing identity/auth policy.
+        start-ssh
+        if el2-early-network-up; then
+            echo 'SQ2_EARLY_NETWORK_READY: DHCP address; no overlay-network guarantee'
+        else
+            rc=$?
+            echo "SQ2_EARLY_NETWORK_PENDING: network-up exit=$rc; see RAM/ESP logs"
+            exit "$rc"
+        fi
+        ;;
+    handoff)
+        enabled || exit 0
+        stop_owned /run/sq2-early-udhcpc.pid
+        stop_owned /run/sq2-early-wpa.pid
+        # Keep Dropbear alive in retained initramfs. Android owns Wi-Fi from here.
+        echo 'SQ2_EARLY_NETWORK_HANDOFF: bootstrap clients stopped; SSH listener retained'
+        ;;
+    *) echo 'Usage: el2-early-network start|handoff' >&2; exit 64;;
+esac

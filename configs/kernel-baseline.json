@@ -1,0 +1,26 @@
+{
+  "kernel_version": "6.18.60",
+  "bundle_directory": "EFI/SQ2L618C",
+  "private_identity_present": true,
+  "gpu_profile": "700MHz / RPMh432 preserved from current accepted DT",
+  "notes": [
+    "Only Linux 6.18 LTS compilation is supported.",
+    "The package includes private operator identity; never publish its bytes.",
+    "Current accepted runtime is preserved exactly; compile outputs do not automatically replace it.",
+    "Scene user-data symlink is device state; Scene GPU UI telemetry remains unadapted."
+  ],
+  "hardware_scope": "SQ2 observed; SQ1 same-bundle cross-device validation not completed",
+  "kernel_release": "6.18.60-sq2-android1",
+  "graphics": "mesa",
+  "schema": 1,
+  "files": {
+    "Image": "db374853bb5df0cdaa5215b1226256adedda3292a93084e874438a4ba706c982",
+    "el2launch.efi": "e09929fc90b51e9fdad501eea0b912514e352e2f063c6169feed8641dbb3ae56",
+    "start.efi": "32905b2b9b872fb4ffef200534c4e4a2e7d97954519a542bedc0e376fb51c31b",
+    "tcblaunch.exe": "195997cf13a82f4715c92374b7918ab1f7231b2cc9be675b0846adf2995f8948",
+    "initramfs.cpio.gz": "5b3a70c349735e58b404b0d3825dc0dde12ae991706cbbab7e15ed65c9911185",
+    "qebspilaa64.efi": "e3675e36a749176481742a8ac78b8d505a40e3ea2a87464b123c45dd3080fe95",
+    "kernel-options.txt": "77c0cbb1b1f895bf834722b133d383a0eaecba226ec788df046d9d0f6a53b860",
+    "android-el2.dtb": "c137b9604b908e39aba4be6ecd98e55cd9986fe3fd7522c93069bef7489c956b"
+  }
+}

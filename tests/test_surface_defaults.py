@@ -94,13 +94,11 @@ class Defaults(unittest.TestCase):
                 defaults.integrate(raw, ROOT, p, cpio, 0)
 
     def test_standard_and_profile_entry_defaults(self):
-        for name in ['build.py', 'build-surface-pro-x.py']:
-            text = (ROOT/'scripts'/name).read_text()
-            self.assertIn("'--dpi', type=int, default=300", text)
-            self.assertIn("'--ksu-manager', choices=('on', 'off'), default='on'", text)
-            self.assertIn("'--touch-repair', choices=('on','off'), default='on'", text)
-        text = (ROOT/'scripts/build.py').read_text()
-        self.assertIn("'--dpi',str(a.dpi),'--ksu-manager',a.ksu_manager,'--ksu-bundle',a.ksu_bundle", text)
+        # Current boot is preserved as a checked 6.18 bundle, not rebuilt through old overlays.
+        for name in ['build.py', 'build-surface-pro-x.py', 'build-source-boot.py', 'build-source-disk.py', 'build-sq2-default.py']:
+            text = (ROOT/"scripts"/name).read_text()
+            self.assertIn("build-lts.py", text)
+            self.assertNotIn("6.3.8", text)
 
 
 if __name__ == '__main__':

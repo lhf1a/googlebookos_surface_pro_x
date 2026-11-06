@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import unittest
 import tempfile
+import re
 import subprocess
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -9,24 +10,21 @@ def load(name):
     s=importlib.util.spec_from_file_location(name,ROOT/'scripts'/name)
     m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m
 k=load('sq2-ksu-boot-payload.py')
-d=load('sq2-display-boot-payload.py')
 v=load('sq2-video-boot-payload.py')
 u=load('sq2-usb-boot-payload.py')
 
 class KsuMenu(unittest.TestCase):
     def test_real_combined_menu_and_rescue(self):
         base=(ROOT/'configs/grub-source.cfg').read_text()
-        for profile in d.PROFILES:
-            menu=d.default_menu(u.default_menu(v.default_menu(base)),profile)
-            result=k.menu(menu,True)
-            d.validate_menu(result.encode(),profile)
-            for block in d.blocks(result):
-                if 'sq2.rescue=1' in block[0]:
-                    self.assertIn('/Image-rescue ',block[0])
-                elif 'linux ' in block[0]:
-                    self.assertIn('/Image ',block[0])
-                    self.assertNotIn('/Image-rescue ',block[0])
-            self.assertEqual(k.menu(menu,False),menu)
+        menu=u.default_menu(v.default_menu(base))
+        result=k.menu(menu,True)
+        for block in re.finditer(r'^menuentry [^\n]*\{[^{}]*\}', result, re.M):
+            if 'sq2.rescue=1' in block[0]:
+                self.assertIn('/Image-rescue ',block[0])
+            elif 'linux ' in block[0]:
+                self.assertIn('/Image ',block[0])
+                self.assertNotIn('/Image-rescue ',block[0])
+        self.assertEqual(k.menu(menu,False),menu)
 
     def test_refuse_missing_selinux_or_rescue(self):
         menu=(ROOT/'configs/grub-source.cfg').read_text()

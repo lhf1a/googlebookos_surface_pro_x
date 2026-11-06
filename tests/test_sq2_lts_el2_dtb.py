@@ -97,6 +97,38 @@ class LtsEl2DtbTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(path.read_bytes(), self.pristine)
 
+    def video_tree(self, phandle=None):
+        dt = libfdt.Fdt(self.pristine)
+        dt.resize(len(self.pristine) + 4096)
+        dt.setprop(dt.path_offset('/'), 'phandle', self.module.cells(183))
+        node = dt.add_subnode(dt.path_offset('/soc@0'), 'clock-controller@ab00000')
+        dt.setprop(node, 'compatible', b'qcom,sc8180x-videocc\0qcom,sm8150-videocc\0')
+        for name in ['#clock-cells', '#reset-cells', '#power-domain-cells']:
+            node = dt.path_offset('/soc@0/clock-controller@ab00000')
+            dt.setprop(node, name, self.module.cells(1))
+        if phandle is not None:
+            dt.setprop(dt.path_offset('/soc@0/clock-controller@ab00000'),
+                       'phandle', self.module.cells(phandle))
+        dt.pack()
+        return bytes(dt.as_bytearray())
+
+    def test_video_provider_allocates_after_existing_handles(self):
+        result = self.module.prepare(self.video_tree())
+        self.assertEqual(self.get(result, '/soc@0/clock-controller@ab00000', 'phandle'),
+                         self.module.cells(184))
+
+    def test_video_provider_preserves_existing_handle(self):
+        data = self.video_tree(99)
+        self.assertEqual(self.module.ensure_video_provider(data), data)
+
+    def test_video_provider_idempotent(self):
+        result = self.module.ensure_video_provider(self.video_tree())
+        self.assertEqual(self.module.ensure_video_provider(result), result)
+
+    def test_video_provider_rejects_zero_handle(self):
+        with self.assertRaisesRegex(ValueError, 'invalid existing'):
+            self.module.ensure_video_provider(self.video_tree(0))
+
 
 if __name__ == '__main__':
     unittest.main()

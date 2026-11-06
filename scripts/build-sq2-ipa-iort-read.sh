@@ -4,6 +4,10 @@ set -eu
 [ "$#" -eq 3 ] || { echo 'usage: build-sq2-ipa-iort-read.sh SOURCE BUILD FRESH_OUTPUT' >&2; exit 2; }
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 src=$(realpath "$1"); build=$(realpath "$2"); out=$(realpath -m "$3")
+# Single supported kernel baseline; validate before creating output.
+policy=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/kernel_baseline.py
+python3 "$policy" source "$src"
+python3 "$policy" build "$build"
 test -f "$build/Module.symvers"
 [ ! -e "$out" ] || { echo 'fresh output required' >&2; exit 2; }
 mkdir -p "$out"

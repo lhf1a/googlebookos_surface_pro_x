@@ -20,8 +20,9 @@ class BluetoothInputTests(unittest.TestCase):
         self.assertLess(helper.index('\nstart_input_watch\n'), helper.index('# Do not bring'))
         self.assertIn("grep -q '/bin/bluetooth-input-watch'", helper)
         self.assertNotIn('settings put', helper)
-        for name in ('scripts/build-source-boot.py', 'scripts/pack-sq2-power-connectivity.sh',
-                     'scripts/pack-googlebook-internal-ssd.sh'):
+        # Unified 6.18 entry preserves the accepted bundle byte-for-byte;
+        # the generic additive packer still owns this helper update.
+        for name in ('scripts/pack-sq2-bluetooth-input.py',):
             self.assertIn('bluetooth-input-watch', (ROOT/name).read_text())
 
     def test_addon_exact_delta_and_credentials(self):

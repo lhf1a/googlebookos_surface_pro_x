@@ -6,6 +6,10 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 kernel=$(realpath "$1")
 build=$(realpath "$2")
 output=$(realpath -m "$3")
+# Single supported kernel baseline; validate before creating output.
+policy=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/kernel_baseline.py
+python3 "$policy" source "$kernel"
+python3 "$policy" build "$build"
 [ -f "$kernel/Makefile" ] && [ -f "$build/Module.symvers" ] || exit 2
 [ ! -e "$output" ] || { echo 'Refusing existing output' >&2; exit 2; }
 mkdir -p "$output"

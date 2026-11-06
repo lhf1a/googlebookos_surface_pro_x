@@ -6,6 +6,7 @@ new policy. Otherwise generate a fresh candidate and require the policy.
 from pathlib import Path
 import subprocess
 import sys
+import os
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -110,7 +111,9 @@ if __name__ == '__main__':
         if len(sys.argv) >= 2:
             run(sys.argv[1], directory, '--strict' in sys.argv[2:])
         else:
+            if not os.environ.get('SQ2_VENUS_REFERENCE_SOURCE'):
+                raise SystemExit('Set SQ2_VENUS_REFERENCE_SOURCE to the pinned historical reference tree, or supply helpers.c')
             output = directory / 'venus'
             subprocess.run([sys.executable, str(ROOT / 'scripts/prepare-sq2-venus-iris1.py'),
-                            '--output', str(output)], check=True)
+                            '--kernel', os.environ['SQ2_VENUS_REFERENCE_SOURCE'], '--output', str(output)], check=True)
             run(output / 'helpers.c', directory, True)

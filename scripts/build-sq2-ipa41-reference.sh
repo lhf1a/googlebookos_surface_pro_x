@@ -4,6 +4,10 @@ set -eu
 [ "$#" -eq 3 ] || { echo 'usage: build-sq2-ipa41-reference.sh KERNEL_SOURCE KERNEL_BUILD FRESH_OUTPUT' >&2; exit 2; }
 src=$(realpath "$1"); build=$(realpath "$2")
 case "$3" in /*) out=$3;; *) out=$PWD/$3;; esac
+# Single supported kernel baseline; validate before creating output.
+policy=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/kernel_baseline.py
+python3 "$policy" source "$src"
+python3 "$policy" build "$build"
 [ ! -e "$out" ] || { echo 'fresh output required' >&2; exit 2; }
 here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 test -f "$src/drivers/net/ipa/ipa_main.c"

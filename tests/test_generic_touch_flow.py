@@ -46,11 +46,11 @@ int main(){using namespace surface_touch;auto im=blob();std::vector<Contact> c(1
   self.assertNotIn('尚未自动生成、应用或验收多点修复',s)
   self.assertIn('AFTER_CAPTURE_MS=1000',(R/'probe/touch-calibration/SingleTapCapture.java').read_text())
  def test_default_generic_baseline(self):
-  for name in ['build.py','build-surface-pro-x.py']:
-   calls=[n for n in ast.walk(ast.parse((R/'scripts'/name).read_text())) if isinstance(n,ast.Call) and n.args and isinstance(n.args[0],ast.Constant) and n.args[0].value=='--touch-repair']
-   self.assertEqual(len(calls),1);self.assertEqual(next(k.value.value for k in calls[0].keywords if k.arg=='default'),'on')
-  self.assertIn('if (m_info.is_touchscreen())',(R/'scripts/patch-iptsd-sq2-touch.py').read_text())
-  self.assertIn("command+=['--touch-repair',a.touch_repair",(R/'scripts/build.py').read_text())
+     # Current boot is preserved as a checked 6.18 bundle, not rebuilt through old overlays.
+     for name in ['build.py', 'build-surface-pro-x.py', 'build-source-boot.py', 'build-source-disk.py', 'build-sq2-default.py']:
+         text = (R/"scripts"/name).read_text()
+         self.assertIn("build-lts.py", text)
+         self.assertNotIn("6.3.8", text)
  def test_bundle_manifest_guards(self):
   def load(n,f):
    sp=importlib.util.spec_from_file_location(n,f);m=importlib.util.module_from_spec(sp);sp.loader.exec_module(m);return m

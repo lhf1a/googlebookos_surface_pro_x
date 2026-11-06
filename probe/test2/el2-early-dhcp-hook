@@ -1,0 +1,23 @@
+#!/bin/busybox sh
+# Use the existing DHCP configuration logic, then report only lease/network data.
+# No Wi-Fi credential, account or private key is printed.
+set -u
+/bin/dhcp-hook "$@"
+rc=$?
+case "${1:-}" in
+    bound|renew|deconfig)
+        mkdir -p /logs
+        {
+            printf 'SQ2_EARLY_DHCP event=%s hook_exit=%s\n' "${1:-unknown}" "$rc"
+            printf 'interface=%s\naddress=%s\nnetmask=%s\ngateway=%s\ndns=%s\nserver=%s\nlease_seconds=%s\n' \
+                "${interface:-unknown}" "${ip:-unassigned}" "${subnet:-unspecified}" \
+                "${router:-unspecified}" "${dns:-unspecified}" \
+                "${serverid:-unspecified}" "${lease:-unspecified}"
+            if [ -n "${interface:-}" ]; then
+                ip -4 addr show dev "$interface"
+                ip -4 route show dev "$interface"
+            fi
+        } | tee -a /logs/early-dhcp.txt /dev/console
+        ;;
+esac
+exit "$rc"

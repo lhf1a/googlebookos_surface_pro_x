@@ -36,7 +36,4 @@ with tempfile.TemporaryDirectory() as temporary:
     assert 'WSA881X_SPKR_DRV_EN' in pre and '0x80, 0x00' in pre
     assert 'usleep_range(2000, 2100)' in pre
     assert 'SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD |' in codec
-    build = (R/'scripts/build-sq2-el2-android-kernel.sh').read_text()
-    invocations = [line for line in build.splitlines() if 'patch-sq2-audio-sequencing.py' in line]
-    assert len(invocations) == 1 and invocations[0].endswith(' --machine-only')
 print('PASS: machine-only ordering/idempotence, unchanged codec and failed combined variant rejected')

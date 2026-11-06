@@ -1,89 +1,62 @@
-> 2026-11-04 LTE 更新：默认 router 自动采集本机 FSG，Radio 从源码构建，AOSP APN 随源码；旧观测器/Java bearer 已移除。当前输入见 [PRIVATE-BUILD](PRIVATE-BUILD.md)，实机结果和限制见 [LTE-PRODUCT](LTE-PRODUCT.md)。
+# 唯一标准编译基线：Linux 6.18 LTS
 
-## 2026-11-03：开发与交付禁止单机绑定（当前最高优先级）
+更新：2026-11-07。当前版本 **6.18.60-sq2-android1**。6.3.8专用编译链已退休；历史记录不是可执行入口。
 
-按用户要求，同一标准镜像必须面向任意 SQ1/SQ2，不要求按单机重编译或替换专属启动包。
-根 AGENTS.md 已加入 `SPX-PORTABLE-SQ1-SQ2`，完整规则见 [通用开发规范](DEVELOPMENT.md)。
-禁止以序列/MAC/IP/SSH 身份、固定原盘 UUID/ESP 标记、用户编号或一次枚举值准入；
-机型能力选择与动态资源发现应通用化，目标自己的凭据/校准/NV 与镜像分离。
-磁盘防误写、真实硬件/ABI/产物完整性、screen_only/nohibernate 和固件防重试保护不撤销。
-这是规范更新，不是已修复所有遗留绑定或完成所有 SQ1/SQ2 实测；旧私有实验镜像不自动
-成为通用交付，整改与跨设备矩阵见 TODO 顶部。本轮只更新文档和规范检查，不写设备。
+## 保持当前验收内容
 
-## 默认关闭 4 KB 页模式开发提醒（2026-11-03）
+以 `configs/kernel-baseline.json` 的文件清单为准，不重新混装旧模块。当前原件：
+- Image：`db374853bb5df0cdaa5215b1226256adedda3292a93084e874438a4ba706c982`
+- initramfs：`5b3a70c349735e58b404b0d3825dc0dde12ae991706cbbab7e15ed65c9911185`
+- DTB：`c137b9604b908e39aba4be6ecd98e55cd9986fe3fd7522c93069bef7489c956b`
 
-标准构建通过启动前 RAM 属性覆盖设置 `ro.product.build.16k_page.enabled=false`，
-两机默认/Mesa 四载荷均采用。仅关闭 Settings 页无关模式常驻提醒及 16 KB 启动切换入口；
-不修改内核页大小、应用兼容、其他通知或 userdata。此移植没有提供 16 KB boot OTA。
-默认 300 DPI、KSU、低内存 swap 与现有默认组件不变；验证范围见 BUILD 顶部。
+有效启动参数为 **Mesa、原生60Hz、EL2、unrestricted suspend、nohibernate**；GPU为当前700/RPMh432档。
+保留音频、SSAM电池、SPI触摸response、Venus队列锁、IPA预留与RMNET、Android拥有网络及启动后SSH等当前修正。
+不因为旧文档默认高通/661而改变当前验收内容。单机用户确认与六帧视频证明不等于跨设备或长期认证。
+Scene跨用户链接属于已授权设备数据状态，不复制到其他设备；Scene GPU读数缺失仍是已知问题。
 
-## 2026-11-03：源码 LTE 与压缩默认交付
+## 一个入口，明确区分核验、组包与编译
 
-最新默认入口从源码编译 LTE/Radio，不再要求预制 Radio04。私有输入统一放 `private/build-inputs/`，不按历史输入 SHA 白名单拒绝；默认输出 IMG.GZ 并清理本次镜像中间文件。位置、公开工具依赖、单位配置与限制见 [PRIVATE-BUILD.md](PRIVATE-BUILD.md)。下方固定 Radio04 章节仅为历史。
-
-# 项目标准构建入口
-
-项目标准入口是 `python3 scripts/build.py`，输出**单个 SQ1/SQ2 通用原始磁盘镜像**，不是两份独立镜像。
-
-默认基线（不是必须满足的能力校验项）：
-- SQ1：GPU 661MHz；SQ2：GPU 661MHz（OEM TURBO_L1 416 档）。700MHz/RPMh432 见 BUILD 的显式实验开关。
-- 两机：原生 60Hz、2.7Gbps × 4，KSU、EL2、首次触摸校准。
-- 检测内存 **小于 12GiB** 的设备首次正常 SSD 启动自动创建 **6GiB swap**，后续启动复用并启用；等于或大于 12GiB 不创建。文件 `/data/.surface-swap/swapfile`，`sq2.swap=0` 退出；空间不足不阻塞启动。按 Linux `MemTotal < 12582912kB` 判断（扣除固件预留，不是标称 SKU 容量）。
-- Android 默认 **300 DPI**，`--dpi N` 保留自定义；只改默认属性，不覆盖 userdata 中的显示设置。
-- KernelSU Next 管理器/ksud 默认 `--ksu-manager on`，输入目录 `out/ksunext` 可用 `--ksu-bundle DIR` 替换，`--ksu-manager off` 不注入首启安装器（不移除内核 KSU）。可使用与内核接口兼容的自定义文件，不按固定 SHA 拒绝，也不自动追随 latest，不降级现有安装，不预装 Zygisk/伪装模块或自动授予应用 root。
-- 以 main fee67b2 的匹配内核/驱动和完整957b组件为底；默认项加入最新 `0100429` 的已验证 LTE/Radio 专属增量，Mesa 保持原非 LTE 回退。
-- LTE 默认 `--lte on`，Radio 从源码构建，保留 `--lte off`。禁止原调试机绑定；设备唯一 FSG/NV 必须来自目标自身，不能随通用镜像移植。当前私有实验输入的遗留差距见 [本地输入](PRIVATE-BUILD.md) 和 [通用规范](DEVELOPMENT.md)，不把历史单机验证当作通用验收。
-- 通用触摸修复默认 `--touch-repair on`：状态一致性、按原始信号核心的连续性修复与统一校准向导。算法不区分 SQ1/SQ2，测量结果按设备保存；`--touch-repair off` 保留旧包选择。
-- 默认触摸包目录 `private/build-inputs/touch`；可用 `--touch-bundle DIR` 指定当前源码匹配包，缺包或过期直接拒绝。第二层需用户在向导中采集、复测确认才保存参数；本轮尚未实机验收。
-
-`--profiles CUSTOM.json` 保留自定义频率配置；`--sealed-input` 选择本地固定输入。
-更换内核功能、显示/固件等组件时，保留既有组件构建和 `--rebuild-components`、`--legacy-el1` 路径；需要配套输入及清单，不会假称修改配置文本就改变已编译内核。
-文件哈希、模块ABI、存储身份和拒绝误写物理盘属于安全/一致性保护，不是强制采用默认能力的门槛。
+在具备Python3的主机运行；源码编译需要Linux/WSL与匹配ARM64工具链：
 
 ```sh
-python3 scripts/build.py --template TEMPLATE.img --gnu-efi BUILT_GNU_EFI --lte-bundle PRIVATE_LTE_DIRECTORY --output FRESH_OUTPUT
+python3 scripts/build.py verify
+python3 scripts/build.py package --output out/6.18-release-FRESH
+python3 scripts/build.py compile --help
 ```
 
-同一镜像包含共用内核/固件、两机DT，以及默认/回退各自跨机型共用的initramfs。两个菜单项为高通默认和Mesa回退；EFI根据SMBIOS的SQ1/SQ2身份路由，未知身份拒绝，不猜测机型。保持SQ1/661和SQ2/700的差别。
-历史实验构建并不代表已完成所有 SQ1/SQ2 的通用验收。带私有实验室凭据的旧镜像不得公开分发，也不得标为符合当前通用交付规范。
-`build-source-boot.py` 是底层启动包/组件兼容入口；**对外标准整镜像入口只有 scripts/build.py**。
+默认输入为 `private/build-inputs/kernel-6.18/EFI/SQ2L618C`。`package`逐字节复制当前EFI包并核对清单，
+**不是源码编译，也不是生成新的完整磁盘镜像**。旧磁盘重组入口已撤销，避免悄悄装回6.3.8。
+`build-surface-pro-x.py`、`build-source-boot.py`、`build-source-disk.py`、`build-sq2-default.py`兼容文件名均转到同一CLI，旧参数明确拒绝。
 
-## 编译默认通用触摸包
+`compile`使用显式source/config/build-dir/output/cross-compile；实际执行Image、modules、dtbs与模块导出。
+默认配置为 `configs/kernel-6.18-baseline.config`。完整基线还需要匹配的外挂源目录与模块清单，具体参数以`compile --help`为准。
+新编译输出与验收发布包分离，未经配套打包/验收不得覆盖发布pins。不能以仅核心编译通过代替全部外挂模块与initramfs功能对齐。
 
-使用已固定的 IPTSd v3.1.1 源码归档、Meson 依赖和 ARM64 cross-file，离线编译。
-输出目录必须不存在；更新时使用新目录并通过 `--touch-bundle` 指定，勿覆盖旧验收包。
+## 本地输入与恢复
+
+- `private/build-inputs/kernel-6.18/`：当前私有EFI包、源码归档与构建清单；不纳入Git。
+- `out/mainline-618-20261107/`：改动前Git bundle、未提交diff、未跟踪文件归档和本轮输出。
+- `out/kernel-baseline-20261107/retired-638/`：退休工具逐字节备份。
+- `configs/retired-kernel-tools.json`：退休清单与原hash。仅退休旧工具，不删除真机回退入口。
+- 既有四角色与验证记录继续保存在 `out/kernel-6.18-migration-20261105/`；新记录只追加。
+
+## 隐私与验收边界
+
+当前私有包保留原SSH身份，不能当成匿名公共镜像发布。Git仅保存源码、配置、清单、测试与文档。
+不把IP、序列号、用户编号或原盘UUID作为编译/运行准入。SQ1/SQ2通用交付目标保持，但本轮基线是当前SQ2已观察产物，不能假称6.18双机新镜像全验收。
+本轮主线整理不写设备、不重启，不清除userdata或已有恢复能力。
+通用开发与身份分离规则见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+
+## 已执行的完整源码编译形式
+
+解开私有源码归档得到`kernel/`和`external/`后：
 
 ```sh
-python3 scripts/build-unified-touch.py --archive IPTSD_V3_1_1_TAR_GZ --dependencies MESON_SUBPROJECTS --cross-file ARM64_CROSS_FILE --output out/touch-baseline
-python3 scripts/build.py --template TEMPLATE.img --gnu-efi BUILT_GNU_EFI --lte-bundle PRIVATE_LTE_DIRECTORY --output FRESH_OUTPUT
+python3 scripts/build.py compile --source SOURCE_ROOT/kernel \
+  --config configs/kernel-6.18-baseline.config --build-dir FRESH_BUILD \
+  --output FRESH_EXPORT --cross-compile TOOLCHAIN/bin/aarch64-linux-gnu- \
+  --external-sources SOURCE_ROOT/external --jobs 8
 ```
 
-同一包进入两机的默认/回退载荷，不按机型选择触摸算法。包不含任何设备的
-已测坐标、静置行/列或点触参数。默认能力设置仍可显式关闭/替换；文件完整性
-校验不是强制机型参数。`--touch-repair off` 只回到原基础触摸版本，不宣称禁用
-所有历史硬件 quirk。第二层的证据与实机待验收项见 TOUCH-NOISE-AND-CALIBRATION。
-
-## 准备 KernelSU Next 用户态（示例版本，可自定义）
-
-下方以官方历史验收版本举例；允许传入兼容的自定义 ksud/APK，不执行固定 SHA 校验，也不自动获取 latest。二进制留在忽略目录，不提交 Git。
-
-```sh
-mkdir -p out/ksunext
-curl -fL https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.2.0/KernelSU_Next_v3.2.0_33129-release.apk -o out/ksunext/manager-verified.apk
-curl -fL https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.2.0/ksud-aarch64-linux-android -o out/ksunext/ksud
-```
-
-首启安装器保留 `sq2.ksu=0` / rescue 跳过，验证只关屏 guard；等待 Android
-boot completed 后，先检查内核接口版本再安装缺失的 ksud。已有 ksud 不覆盖。
-管理器优先复用已安装的版本，向现有用户执行 install-existing；不创建用户。
-模块生命周期在后续启动可用，不把包内置等同于本轮实机 root 验收。
-官方来源：[KernelSU Next v3.2.0](https://github.com/KernelSU-Next/KernelSU-Next/releases/tag/v3.2.0)。
-
-本次离线检查包含默认/自定义密度、保留用户设置、KSU 首启/重复启动/多用户/关闭、
-四个有效载荷中的共同文件及源码副本回滚。四载荷组包显式关闭 LTE，仅因当前
-缺私有 Radio04，不修改默认 on。未重建整盘镜像，也未部署设备。
-
-
-## 统一触摸校准 v7 默认基线（2026-11-04）
-
-共享触摸包默认集成到 SQ1/SQ2 的默认与回退载荷。45秒静置、滑动伴随触点检测、自动候选/复测确认及隔离旧策略一起提供；构建方法与实测限制见 [TOUCH-CALIBRATION](TOUCH-CALIBRATION.md)。
+显式`--resume-build`只复用config与ABI匹配的构建目录。缺少外挂源时默认拒绝；`--core-only`必须明确指定且产物标记不完整。
+本次完整入口28步exit0、15个外挂模块覆盖成功；发布包另经verify保持原hash。源码导出不等于新boot包已验收。

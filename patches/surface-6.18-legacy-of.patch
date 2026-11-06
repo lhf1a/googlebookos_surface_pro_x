@@ -1,0 +1,115 @@
+--- a/core.c
++++ b/core.c
+@@ -365,10 +365,55 @@
+ 	return status ? -ENXIO : 0;
+ }
+ 
++static int ssam_serdev_setup_via_of(struct serdev_device *serdev)
++{
++	const char *parity = "n";
++	bool flow_control;
++	u32 baud_rate;
++	int status;
++
++	status = device_property_read_u32(&serdev->dev, "current-speed", &baud_rate);
++	if (status)
++		return status;
++
++	flow_control = device_property_read_bool(&serdev->dev, "uart-has-rtscts");
++
++	status = device_property_read_string(&serdev->dev, "uart-parity", &parity);
++	if (status && status != -EINVAL)
++		return status;
++
++	serdev_device_set_baudrate(serdev, baud_rate);
++	serdev_device_set_flow_control(serdev, flow_control);
++
++	switch (parity[0]) {
++	case 'n':
++		status = serdev_device_set_parity(serdev, SERDEV_PARITY_NONE);
++		break;
++	case 'e':
++		status = serdev_device_set_parity(serdev, SERDEV_PARITY_EVEN);
++		break;
++	case 'o':
++		status = serdev_device_set_parity(serdev, SERDEV_PARITY_ODD);
++		break;
++	default:
++		status = 0;
++		dev_warn(&serdev->dev, "setup: unsupported parity (value: '%s')\n", parity);
++	}
++
++	if (status)
++		dev_err(&serdev->dev, "setup: failed to set parity (value: '%s')\n", parity);
++
++	return status;
++}
++
+ static int ssam_serdev_setup(struct acpi_device *ssh, struct serdev_device *serdev)
+ {
+ 	if (ssh)
+ 		return ssam_serdev_setup_via_acpi(serdev, ssh->handle);
++
++	/* Preserve the deployed SQ1/SQ2 OF transport contract. */
++	if (of_device_is_compatible(serdev->dev.of_node, "surface,aggregator"))
++		return ssam_serdev_setup_via_of(serdev);
+ 
+ 	/* TODO: these values may differ per board/implementation */
+ 	serdev_device_set_baudrate(serdev, 4 * HZ_PER_MHZ);
+@@ -742,7 +787,13 @@
+ 	 * as it can't be matched based on top-level board compatible (like it
+ 	 * does the ACPI case).
+ 	 */
+-	if (!ssh) {
++	if (of_device_is_compatible(dev->of_node, "surface,aggregator")) {
++		status = ssam_register_clients(dev, ctrl);
++		if (status) {
++			ssam_clear_controller();
++			goto err_mainref;
++		}
++	} else if (!ssh) {
+ 		struct platform_device *ph_pdev =
+ 			platform_device_register_simple("surface_aggregator_platform_hub",
+ 							0, NULL, 0);
+@@ -826,6 +877,7 @@
+ #ifdef CONFIG_OF
+ static const struct of_device_id ssam_serial_hub_of_match[] = {
+ 	{ .compatible = "microsoft,surface-sam", },
++	{ .compatible = "surface,aggregator", },
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(of, ssam_serial_hub_of_match);
+--- a/bus.c
++++ b/bus.c
+@@ -413,15 +413,26 @@
+ static int ssam_get_uid_for_node(struct fwnode_handle *node, struct ssam_device_uid *uid)
+ {
+ 	const char *str = fwnode_get_name(node);
++	int status;
+ 
+ 	/*
+ 	 * To simplify definitions of firmware nodes, we set the device name
+-	 * based on the UID of the device, prefixed with "ssam:".
++	 * based on the UID of the device, prefixed with "ssam:". In device
++	 * trees, however, we use a dedicated "ssam-uid" property. Therefore we
++	 * check for the name prefix first and then decide where to get the UID
++	 * from.
+ 	 */
+-	if (strncmp(str, "ssam:", strlen("ssam:")) != 0)
+-		return -ENODEV;
+-
+-	str += strlen("ssam:");
++
++	if (strncmp(str, "ssam:", strlen("ssam:")) == 0) {
++		str += strlen("ssam:");
++	} else {
++		status = fwnode_property_read_string(node, "ssam-uid", &str);
++		if (status == -EINVAL)
++			return -ENODEV;
++		if (status)
++			return status;
++	}
++
+ 	return ssam_device_uid_from_string(str, uid);
+ }
+ 

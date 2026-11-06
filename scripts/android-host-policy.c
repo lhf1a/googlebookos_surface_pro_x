@@ -5,6 +5,7 @@
 #include <sepol/policydb/policydb.h>
 #include <sepol/policydb/hashtab.h>
 #include <sepol/policydb/ebitmap.h>
+#include <sepol/policydb/polcaps.h>
 int main(int argc,char **argv) {
     if(argc!=3 && (argc!=4 || strcmp(argv[3],"--all-types")))return 2;
     policydb_t p;policy_file_t f;policydb_init(&p);policy_file_init(&f);
@@ -32,6 +33,10 @@ int main(int argc,char **argv) {
                 }
     }
     printf("GENFS_COMPAT: %u trailing-star paths converted; %u complex patterns unchanged\n",converted,complex);
+    /* The converted policy uses legacy prefix semantics, including on newer
+     * kernels. Leaving this capability set makes /net_shared an exact match
+     * on 6.18 and labels its BPF children unlabeled. */
+    if (ebitmap_set_bit(&p.policycaps, POLICYDB_CAP_GENFS_SECLABEL_WILDCARD, 0))return 6;
     const char *domains[]={"kernel","init"};
     for(unsigned i=0;i<2;i++) {
         type_datum_t *t=hashtab_search(p.p_types.table,domains[i]);if(!t)return 5;

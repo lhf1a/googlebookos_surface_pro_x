@@ -2,13 +2,30 @@
 # Load only after ADSP is active; do not unload/reset shared remote processors.
 set -eu
 export PATH=/bin:/sbin
-test "$(cat /sys/class/remoteproc/remoteproc2/name)" = 17300000.remoteproc
-# EL2 adopts the firmware-started ADSP as attached, which is also active.
-state=$(cat /sys/class/remoteproc/remoteproc2/state)
-case "$state" in
-    running|attached) ;;
-    *) echo "AUDIO_FAILED: ADSP state=$state"; exit 1;;
-esac
+# Kernel versions name this provider differently (17300000.remoteproc/adsp).
+# Identify the actual ADSP by its OF hardware binding, not name or enumeration.
+adsp_count=0
+for provider in /sys/class/remoteproc/remoteproc*; do
+    [ -r "$provider/device/of_node/compatible" ] || continue
+    tr '\000' '\n' < "$provider/device/of_node/compatible" |
+        grep -qx 'qcom,sc8180x-adsp-pas' || continue
+    state=$(cat "$provider/state")
+    case "$state" in
+        running|attached) ;;
+        *) echo "AUDIO_FAILED: ADSP state=$state"; exit 1;;
+    esac
+    firmware=$(cat "$provider/firmware")
+    expected=$(tr '\000' '\n' < "$provider/device/of_node/firmware-name")
+    [ -n "$expected" ] && [ "$firmware" = "$expected" ] || {
+        echo 'AUDIO_FAILED: ADSP firmware differs from device tree'; exit 1;
+    }
+    case "$firmware" in
+        */qcadsp8180.mbn|qcadsp8180.mbn) ;;
+        *) echo 'AUDIO_FAILED: unexpected SC8180X ADSP firmware'; exit 1;;
+    esac
+    adsp_count=$((adsp_count + 1))
+done
+[ "$adsp_count" = 1 ] || { echo 'AUDIO_FAILED: expected one verified ADSP'; exit 1; }
 # The 6.3 NGD child must finish registering before the locator announces its
 # audio domain. Temporarily stop only the retained initramfs mapper, then
 # reannounce after module initialization; never reset the shared ADSP.

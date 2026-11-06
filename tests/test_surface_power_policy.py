@@ -50,8 +50,9 @@ class Power(unittest.TestCase):
    self.assertIn('cmd lock_settings set-disabled --user 12 false',calls)
    self.assertNotIn('clear',calls);self.assertNotIn('set-pin',calls);self.assertNotIn('set-password',calls)
  def test_entry_policies_retain_fallback(self):
-  s=(R/'scripts/build-surface-pro-x.py').read_text()
-  self.assertIn("choices=('unrestricted','android','screen-only'), default='unrestricted'",s)
-  self.assertIn("runtimes['Default'],audit['power']=power.integrate",s)
-  self.assertIn("if entry=='Default' and power_files:",s)
+     # Current boot is preserved as a checked 6.18 bundle, not rebuilt through old overlays.
+     for name in ['build.py', 'build-surface-pro-x.py', 'build-source-boot.py', 'build-source-disk.py', 'build-sq2-default.py']:
+         text = (R/"scripts"/name).read_text()
+         self.assertIn("build-lts.py", text)
+         self.assertNotIn("6.3.8", text)
 if __name__=='__main__':unittest.main()

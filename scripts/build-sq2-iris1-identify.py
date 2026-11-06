@@ -17,11 +17,14 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--stage', type=Path, default=Path('/root/.cache/sq2-iris1-identify'))
 p.add_argument('--base-dtb', type=Path, default=BASE)
 p.add_argument('--base-sha256', default='be17f33fbc8545a356f26b8f7a4c4abbd0a58e33a6401c81b18de260773058ef')
-p.add_argument('--kernel', type=Path, default=Path('/root/.cache/sq2-thermal/kernel'))
-p.add_argument('--kernel-output', type=Path, default=Path('/root/.cache/sq2-video-foundation/build'))
+p.add_argument('--kernel', type=Path, required=True)
+p.add_argument('--kernel-output', type=Path, required=True)
 p.add_argument('--output', type=Path, default=ROOT / 'out/video-decode/iris1-identify')
 p.add_argument('--reference-overlay', type=Path, help='Require byte-identical deployed overlay before ABI rebuild')
 args = p.parse_args()
+from kernel_baseline import validate_kernel_source, validate_build_tree
+validate_kernel_source(args.kernel)
+validate_build_tree(args.kernel_output)
 STAGE = args.stage
 DEST = args.output
 BASE = args.base_dtb

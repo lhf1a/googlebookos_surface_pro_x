@@ -16,8 +16,8 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--stage', type=Path, required=True)
 p.add_argument('--base-dtb', type=Path, default=ROOT / 'out/video-decode/running-base.dtb')
 p.add_argument('--base-sha256', default='be17f33fbc8545a356f26b8f7a4c4abbd0a58e33a6401c81b18de260773058ef')
-p.add_argument('--kernel', type=Path, default=Path('/root/.cache/sq2-thermal/kernel'))
-p.add_argument('--kernel-output', type=Path, default=Path('/root/.cache/sq2-video-foundation/build'))
+p.add_argument('--kernel', type=Path, required=True)
+p.add_argument('--kernel-output', type=Path, required=True)
 p.add_argument('--output', type=Path)
 p.add_argument('--reference-overlay', type=Path, help='Require byte-identical deployed overlay; retains its recorded IRQ reference')
 p.add_argument('--videocc-phandle', type=lambda s: int(s, 0), required=True,
@@ -29,6 +29,9 @@ p.add_argument('--windows-reference', action='store_true',
 p.add_argument('--venus-decoder', action='store_true',
                help='explicit lab Venus node with decoder-only child and reference SPI174; not hardware IRQ validation')
 a = p.parse_args()
+from kernel_baseline import validate_kernel_source, validate_build_tree
+validate_kernel_source(a.kernel)
+validate_build_tree(a.kernel_output)
 if a.venus_decoder and not (a.windows_reference and a.with_interconnects):
     p.error('--venus-decoder requires --windows-reference --with-interconnects')
 assert 0 < a.videocc_phandle < 2**32

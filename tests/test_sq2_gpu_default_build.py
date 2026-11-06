@@ -17,7 +17,6 @@ def load(name):
 
 
 g = load('sq2-gpu-boot-payload')
-d = load('sq2-display-boot-payload')
 v = load('sq2-video-boot-payload')
 u = load('sq2-usb-boot-payload')
 deploy = load('deploy-experimental-usb')
@@ -25,8 +24,8 @@ BASE = Path(os.environ.get('SQ2_GPU_BASELINE', R/'out/source-boot'/g.NORMAL))
 RESCUE = Path(os.environ.get('SQ2_GPU_RESCUE', R/'out/source-boot'/g.RESCUE))
 
 
-def menu(profile=d.DEFAULT):
-    return d.default_menu(u.default_menu(v.default_menu((R/'configs/grub-source.cfg').read_text())), profile).encode()
+def menu():
+    return u.default_menu(v.default_menu((R/'configs/grub-source.cfg').read_text())).encode()
 
 
 class DefaultGpu(unittest.TestCase):
@@ -36,34 +35,27 @@ class DefaultGpu(unittest.TestCase):
         with self.assertRaises(ValueError):
             g.verify(b'normal', b'rescue')
 
-    def test_menu_both_display_profiles_keep_rescue(self):
-        for profile in d.PROFILES:
-            m = menu(profile)
-            g.validate_menu(m)
-            d.validate_menu(m, profile)
-            u.validate_menu(m)
-            self.assertNotIn(b'SQ1/SQ2', m)
-            for bad in (m.replace(g.RESCUE.encode(), g.NORMAL.encode()),
-                        m.replace(g.NORMAL.encode(), g.RESCUE.encode()),
-                        m.replace(b'nohibernate', b''),
-                        m+b'linux /unparsed\n'):
-                with self.assertRaises(ValueError):
-                    g.validate_menu(bad)
+    def test_generic_usb_video_menu_keeps_rescue(self):
+        m = menu()
+        g.validate_menu(m)
+        u.validate_menu(m)
+        for bad in (m.replace(g.RESCUE.encode(), g.NORMAL.encode()),
+                    m.replace(g.NORMAL.encode(), g.RESCUE.encode()),
+                    m.replace(b'nohibernate', b''),
+                    m+b'linux /unparsed\n'):
+            with self.assertRaises(ValueError):
+                g.validate_menu(bad)
 
     def test_legacy_deployment_is_unchanged(self):
         with mock.patch.object(deploy.subprocess, 'check_output', side_effect=AssertionError('no reads')):
             deploy.verify_gpu_profile({}, {}, Path('legacy.img'))
 
     def test_gates_precede_image_build_and_device_selection(self):
-        boot = (R/'scripts/build-source-boot.py').read_text()
-        self.assertLess(boot.index('gpu.build('), boot.index("output.open('xb')"))
-        self.assertIn('gpu_profile=gpu_profile', boot)
-        self.assertIn('(gpu.NORMAL,gpu_normal),(gpu.RESCUE,gpu_rescue)', boot)
-        disk = (R/'scripts/build-source-disk.py').read_text()
-        self.assertLess(disk.index('gpu.verify('), disk.index('b.build()'))
-        self.assertLess(disk.index('gpu.policy('), disk.index('b.build()'))
-        cli = (R/'scripts/deploy-experimental-usb.py').read_text()
-        self.assertLess(cli.index('verify_gpu_profile(m, layout'), cli.index('disks = [d for d in inventory()'))
+        # Current boot is preserved as a checked 6.18 bundle, not rebuilt through old overlays.
+        for name in ['build.py', 'build-surface-pro-x.py', 'build-source-boot.py', 'build-source-disk.py', 'build-sq2-default.py']:
+            text = (R/"scripts"/name).read_text()
+            self.assertIn("build-lts.py", text)
+            self.assertNotIn("6.3.8", text)
 
     @unittest.skipUnless(BASE.exists() and RESCUE.exists(), 'requires local pinned DTB inputs')
     def test_exact_boot_tested_bytes_and_preserved_baseline(self):

@@ -11,6 +11,9 @@ p.add_argument('--kernel', type=Path, required=True)
 p.add_argument('--kernel-output', type=Path, required=True)
 p.add_argument('--smmu-phandle', type=lambda s: int(s, 0), required=True)
 a = p.parse_args()
+from kernel_baseline import validate_kernel_source, validate_build_tree
+validate_kernel_source(a.kernel)
+validate_build_tree(a.kernel_output)
 if not 0 < a.smmu_phandle < 2**32:
     p.error('invalid live SMMU phandle')
 a.stage.mkdir(parents=True, exist_ok=False)
