@@ -3,6 +3,9 @@
  * busy/live sessions do not consume a transition. No retry budget or timer. */
 #ifndef SQ2_VENUS_SYSTEM_PM_H
 #define SQ2_VENUS_SYSTEM_PM_H
+/* Positive callback result: no firmware/DMA transition occurred and IRQ
+ * delivery has been restored. Never use for a partial or failed stop. */
+#define SQ2_PM_STOP_UNCHANGED_BUSY 1
 enum sq2_system_pm_phase {
  SQ2_PM_RUNNING, SQ2_PM_OFF, SQ2_PM_BROKEN, SQ2_PM_STOPPING, SQ2_PM_STARTING
 };
@@ -27,6 +30,9 @@ static inline int sq2_system_pm_suspend(struct sq2_system_pm *s,
  if (ret) return ret;
  s->phase = SQ2_PM_STOPPING;
  ret = ops->stop(ctx);
+ if (ret == SQ2_PM_STOP_UNCHANGED_BUSY) {
+  s->phase = SQ2_PM_RUNNING; return -EBUSY;
+ }
  if (ret) {
   s->error = ret; s->phase = SQ2_PM_BROKEN; return ret;
  }

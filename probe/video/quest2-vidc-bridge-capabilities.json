@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "stage": "event-broker-auxiliary-capability-dmabuf-candidate",
+  "enable": "LD_PRELOAD this library and QUEST2_VIDC_BRIDGE=1 in the isolated donor process only",
+  "decode_owner": "unchanged Quest OMX donor and real Venus backend",
+  "hardware_decoding_verified": false,
+  "source_evidence": {
+    "donor_libOmxVdec_sha256": "c16707e607dc6691a836d4c8ecfeb9f8c81c038cff92f808df3385b748b55344",
+    "subscription_events": ["0x08001001", "0x08001003", "0x08001006", "0x08001007", "0x08001005", "0x08001008", "0x0800100a"],
+    "downstream_header": "out/quest2-abi-readonly-20261107/downstream-videodev2.h:2272-2290",
+    "downstream_event_consumer": "out/quest2-abi-readonly-20261107/omx_vdec_v4l2.cpp:279-467",
+    "h264_level_difference": "downstream UNKNOWN=18, 6.1=19, 6.2=20; Linux 6.18 6.1=18, 6.2=19"
+  },
+  "implemented": [
+    "dynamic Venus H264 decoder discovery using sysfs, QUERYCAP and ENUM_FMT",
+    "seven exact private event subscriptions with process-owned queue and eventfd poll notification",
+    "real native SOURCE_CHANGE subscription, with unrepresentable payload explicitly rejected",
+    "actual backend EIO/ENODEV to subscribed SYS_ERROR, retaining original failure",
+    "flush completion only for known empty never-streaming queues",
+    "H264 standard control enum conversion retaining actual kernel capabilities and errno",
+    "standard DMABUF requests passed to real backend without data fabrication",
+    "operation fd/session pins, nonblocking decoder fd, real backend outside registry lock",
+    "poll eventfd duplication failures retained with cleanup rather than hidden timeouts",
+    "explicit QUEST2_VIDC_AUX_CAPS=1: real formatted auxiliary session REQBUFS and HFI minimum query for early EAGAIN",
+    "USERPTR_ION_to_DMABUF: one plane, zero allocation/data offset; actual fd/size and kernel attach checks",
+    "real buffer fd lifetime pins, backend returned slot count, donor 64-bit cookie restoration and actual dequeue metadata",
+    "QCOM EOS to native LAST and native LAST/ERROR to QCOM EOS/DATA_CORRUPT"
+  ],
+  "not_implemented": [
+    "USERPTR multiple planes or nonzero allocation/data offsets",
+    "private CODECCONFIG buffer flag without native equivalent",
+    "active_queue_flush_and_returned_buffer_ownership",
+    "release_reference_and_unqueued_buffer_payloads",
+    "source_change_private_bitdepth_and_color_metadata",
+    "private_controls_without_equivalent_native_contract",
+    "private_session_continue",
+    "fcntl_duplicate_fd_tracking",
+    "generic unmanaged-close concurrent dup2 transition: this is not a universal transparent fd layer"
+  ],
+  "rules": [
+    "Subscriptions may wait indefinitely for a condition that has not occurred; no fabricated completion events.",
+    "Unsupported private controls, queue formats and active flush operations fail EOPNOTSUPP.",
+    "MIN_BUFFERS_FOR_OUTPUT and CAPTURE return only values from the real driver; no guessed counts.",
+    "Auxiliary capability queries require paired kernel early-EAGAIN getters and no-STREAMON close SESSION_END fix; close success is not END confirmation, inspect kernel lifecycle evidence.",
+    "Managed close pins before its atomic descriptor/registry commit; EMFILE leaves original fd open and returns failure.",
+    "No device writes, firmware reset, provider reload, global service registration or filesystem node replacement."
+  ]
+}

@@ -23,6 +23,18 @@ class SystemPM(unittest.TestCase):
   for forbidden in ['dev_pm_domain_detach','pm_runtime_put','clk_put','kfree(']:
    self.assertNotIn(forbidden,system)
   self.assertIn('sq2_system_pm_image',(R/'probe/video/sq2-venus-fw.c').read_text())
+ def test_busy_retry_is_limited_to_untouched_stop_and_irq_restored(self):
+  s=(R/'probe/video/venus-sq2-system-pm.h').read_text()
+  stop=s[s.index('static int venus_sq2_pm_stop'):s.index('static int venus_sq2_pm_start')]
+  self.assertIn('if (!ret) return SQ2_PM_STOP_UNCHANGED_BUSY;',stop)
+  self.assertLess(stop.index('stop:busy-irq-restore'),stop.index('SQ2_PM_STOP_UNCHANGED_BUSY'))
+  self.assertLess(stop.index('SQ2_PM_STOP_UNCHANGED_BUSY'),stop.index('venus_shutdown(core)'))
+  self.assertNotIn('clear_bit',s)
+  patch=(R/'scripts/patch-sq2-venus-system-pm.py').read_text()
+  self.assertIn('READ_ONCE(core->sq2_system_pm.phase) != SQ2_PM_RUNNING',patch)
+  self.assertIn('module_param_cb(sq2_pm_status, &sq2_pm_status_ops, NULL, 0400)',s)
+  for stage in ['stop:firmware-shutdown','stop:hfi-deinit','stop:power-quiet','start:power-restore','start:hfi-init']:
+   self.assertIn(stage,s)
  def test_flag_requires_full_independent_owner(self):
   with tempfile.TemporaryDirectory() as td:
    p=subprocess.run(['python3',str(R/'scripts/prepare-sq2-venus-iris1.py'),'--system-sleep','--kernel',td+'/reference-source','--output',td+'/x'],capture_output=True)

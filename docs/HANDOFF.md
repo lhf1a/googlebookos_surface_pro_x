@@ -1,3 +1,94 @@
+## 2026-11-07：独立 6.18 高通入口已冷启动，真实应用渲染失败；缓存改为启动后按需
+
+用户最新规则：先推进测试，只有启动后遇相关问题才按需清理 Chrome 已确认图形缓存，不备份；
+取消切换必清和预启动缓存回执门槛。其他应用/数据不处理，Mesa默认与回退保留。
+本次复用之前已完成的Chrome六处删除记录，没有再次dry-run、force-stop或删除缓存。
+
+一次Android重启意图记录于06:59:48 UTC；controller在重启中退出143，无reboot命令返回值，未重发。
+随后实读新boot357c1a85-c6ed-47fa-b78e-70425fc659ed，内核6.18.60-sq2-android1，
+SQ2QDbg/sq2.vulkan=qcom，boot_completed=1、bootanim stopped，15库校验通过，SF实际Qualcomm GLES V@0819.0。
+全局系统loader、与PID1相同mountns的GLES三帧和Vulkancompute/image/raster均exit0；
+同实际窗口2073x1382的Vulkan ImageReader WSI三帧逐像素bad0、stride8448、3次present/3fence。
+这些测试前后boot及SF3216/system_server3668未变；不是长期稳定或完整屏幕渲染证明。
+
+用户反馈“桌面壁纸正常，应用渲染错误，触摸操作正常”。实际截图确认当前EasyTier窗口重复分块和文字错位；
+focus com.kkrainbow.easytier，SF buffer2073x1382、RGBA8888、usage0x10000900、modifier0、compressedfalse。
+完整桌面验收未通过，不能把小离屏或CPU-readable WSI通过称全部图形功能正常。
+不停止EasyTier，不清其缓存；没有把此问题认定为Chrome缓存或GPU/GMU根因。
+当前dmesg定向图形错误筛选无匹配；crash buffer有gscd因/dev/tpm0缺失反复abort，单列为观察而非图形解释。
+
+默认525d739f…、debugf7422b5d…、菜单1fab2101…保持；重读91个protected及9个debug EFI文件全部匹配。
+第一次相对路径hash检查因未cd/media/esp失败exit1，修正工作目录后exit0，原错误证据保留。
+未再写设备启动包、未发第二次重启。已构建去门槛候选eb3910ec…（224860631B），仅有效helper
+bin/qualcomm-full-start变化，15库/内核/DT/init/凭据原样；20tests通过，无回执同输入B/M/R=70→0→70。
+该候选尚未部署，不修渲染问题；当前f742的消费回执不可再用于重复试启，下一次试启应使用去门槛候选。
+最新执行与证据见out/qualcomm-graphics-618-20261107/CURRENT.json；以下早期清理/回执流程均为历史。
+
+## 2026-11-07：最新缓存策略覆盖——仅 Chrome 图形缓存，直接删除且不备份
+
+用户明确修改 AGENTS.md 和开发规范：只清理 Chrome 的图形缓存，不需要缓存备份。其余应用不再扫描/分类/清理；
+Chrome 账号、Cookie、历史、密码、凭据、下载、书签、设置、普通网页缓存和整个 cache/code_cache 不清空。
+只在实际 Mesa↔高通切换时停止 Chrome 并删除已确认可重建图形缓存，完成后重启；普通启动不无条件清理。
+原驱动、6.18 Mesa 默认与回退保留。“不备份缓存”不授权删除既有历史备份。
+
+已按精确PID/starttime终止当前旧全应用只读dry-run，确认进程退出；旧device WORK写入ABORT，本地旧launch/controller拒绝继续。
+未进行本轮真机缓存删除、未停桌面、未切驱动、未部署新包或重启，boot0bdbe240…/boot_completed=1保持。
+上轮中断留下35个缓存备份已逐一核对来源与哈希，原位保留，不覆盖Mesa重新生成的缓存。
+全应用durability候选仅留历史，未部署。旧debug包4752d501…仍要求旧回执，不能马上重试。
+下一步只改 Chrome-only 删除执行器与对应回执/独立debug包，再按现有授权和现场状态推进；不得重启旧全应用controller。
+AGENTS.md及DEVELOPMENT.md PORT-07是当前规范；下文全应用记录均是被本节替代的历史，不是当前执行授权。
+
+## 2026-11-07：高通全图形替换只基于已适配 6.18，独立调试候选
+
+当前任务已由原厂视频路径转为完整 Qualcomm Vulkan/GLES 图形集成；视频 candidate4 未部署，
+不回到 6.3.8 开发。用户已允许部署独立项与一次 Android 正常重启，并会手选第三项；原 6.18
+Mesa 默认、Image/DT 和现存回退必须保持。现设备默认 initramfs 是 video candidate3 的 525d739f…；
+独立图形包由验收父 5b3a70c3… 派生，不能用后者覆盖现设备默认。
+
+原隔离测试在 boot12b2115b… / 6.18.60-sq2-android1 上进行。隔离测试先证实
+旧高通外部 AHB CPU 上传 bad16351/16384、Mesa 前后均0；私有 mapper3 CPU 桥使实际 mmap/DMA_BUF
+START/END 成功，165次多尺寸上传全0bad。随后 HWUI 显示旧强制4通道与6.18 SC8180X的8通道布局不符；
+只恢复 GLES offset0x2a6100 的原能力字段提取，保留bank15及原PBO/零面积/fence修正，三帧HWUI全部区域/文字通过。
+独立内纹理上传→外AHB读回、GLES三帧、Vulkan compute/image/raster也通过。所有测试只在私有命名空间，
+未替换全局 Mesa，未改6.18内核/DT/模块。完整桌面冷启动验收尚未取得。
+
+最终 runtime-618-layout8-15 的 GLES SHA e48bf009…；配套新 initramfs SHA4752d501…，224226857B。
+新 debug 包保留全部原父非init文件，密码SSHaddon最后；helper使用成功且未消费的全用户图形缓存回执。
+原生包恢复与重应用逐字节相同，菜单2→3→2/default不变；host71项：70通过、1权限项常规跳过；该权限项另以root专项通过。
+缓存分类覆盖Unity/UE/Mesa真实格式与混合源目录，不把业务数据或图片清作GPU缓存。最终dry-run已通过：
+6用户存储根/1179应用路径/165可重建缓存位置，未知待办0。独立EFI已安装并回读，全82个原EFI文件未变；
+第三项存在，default仍sq2-default。部署不等于缓存转换或桌面验收。
+
+首次清理controller停在CACHE_APPLY，用户确认黑屏期间手动重启。旧事务XXDf2dw4仍prepared：35条entry，
+报告持久化29个MOVED，6条entry元数据空白且报告含NUL；应保留原始记录并核对真实备份，不补造ready或直接续旧lock。
+首次debug boot5d26c83b…报SQ2_FULL_GRAPHICS_CACHE_PREP_REQUIRED: missing regular receipt member，
+这在所有图形库写入之前；不能当作高通驱动运行失败。controller无cache-apply.exit/reboot输出，未到Android重启命令。
+现已回到原6.18 Mesa，boot0bdbe240…、boot_completed=1，default525d739f…/debug4752d501…及4个Mesa库保持；
+15个新库路径均无冲突。新在线全量发现继续，旧备份原位保留、不覆盖Mesa重建缓存。先补事务落盘/进度，再重新受控转换，
+不重复部署未变图形包，也不修改6.3.8。以out/qualcomm-graphics-618-20261107/CURRENT.json为后续状态。
+
+证据/产物在out/qualcomm-graphics-618-20261107；稳定四角色仍out/kernel-6.18-migration-20261105，
+ROLLBACK.sh新增--qualcomm618-initramfs/--qualcomm618-menu并在独立副本实际恢复原hash。
+原Mesa入口不含反向缓存清理；受控返回必须另做qualcomm→mesa事务，失联手动回退只算应急恢复。
+
+## 2026-11-07：Quest 原厂流程续接，配对安全修正已部署并发送一次 Android 重启
+
+共享 EIO 已单次读取真实软件状态：sys_error=1、PM BROKEN/-110、stops9/starts8，说明第九次恢复失败；具体恢复子阶段尚未判定，不是已修根因。观察模块已卸载，未写状态/寄存器或热重启固件。
+
+最终 candidate3 包 SHA525d739f… 已完整部署/回读，仅改配套 Venus 模块与清单，原5b3a70…仍留ESP，回退/GRUB/Image/DT/固件/GPU/凭据保持。修正未停机busy误隔离、真实MIN_OUTPUT查询、未STREAMON关闭END、内外层PM失败引用、未确认scope的ID复用隔离及回调排空。candidate2审查失败后中止上传，未激活；不再使用。最终11实际函数抽取场景通过，Quest35测试通过；不等于真机解码。
+
+2026-11-07 03:48:48 UTC 仅发送一次 `sync && nsenter -t 1 -m -r -- /system/bin/reboot`。SSH请求退出255/连接失联，随后10.126.126.6暂未回连；新boot/桌面/帧均未确认。已询问用户恢复EasyTier，不重复重启。下一步读取 `pm-candidate3/deployment/DEPLOYMENT.json` 和本次实际boot状态，再跑原厂OMX GetHandle与真帧；不要重建或重跑旧候选。
+
+原厂客户端、stage2b进程局部VIDC桥已上传私有trial；stage3真实单平面offset0 DMABUF适配已实编/测试，尚未真机运行。SOURCE_CHANGE完整元数据/activeflush等仍未实现，不能吞错误。系统C2仍保留恢复，Quest固件未替换Surface固件，游戏黑屏未修复。
+
+进度和完整证据：out/quest2-video-618-20261107；稳定四角色仍在out/kernel-6.18-migration-20261105，新增rollback参数--quest2-pm-initramfs已在独立副本恢复原hash，binary patch重建一致。未提交或推送本轮候选，发布baseline pins未改。详见[QUEST2-VIDEO-PORT.md](QUEST2-VIDEO-PORT.md)。
+
+## 2026-11-07：用户改走 Quest 2 原厂视频流程；真机装载/枚举通过，Venus open EIO 阻断
+
+用户要求尝试提取的 Quest 2 解码工作流替代完全自写流程。已恢复固定 v77 原库，新增可重建 OMX API 客户端、私有组包入口和只转发不伪成功的 I/O 观测层；不是新增自写解码器。当前只有64位ABI，故从原厂64位OMX开始，不强装32位服务。独立候选实读原库映射，Init/枚举18项/Deinit exit0；GetHandle原样因video32不存在失败，进程内映射到动态发现的Venus后，open直接errno5(EIO)，尚未进入私有事件ioctl。独立系统shell直接open同节点也EIO。现有C2和Quest前端都受这个共享后端故障影响；不把本次错误误称Quest库加载失败，也不把枚举通过称硬解通过。
+
+现用C2/service与start.sh哈希、boot ID、框架PID未变；仅写私有trial目录。BASELINE旧C2 4codec/8name→MODIFIED原厂OMX18项→ROLLBACK原输出/原hash，均exit0，候选已重新应用至独立副本。未注册新系统服务、未换固件/GPU、未改启动包、未重启，游戏黑屏尚未修复。详细来源、真实调用、后续VIDC事件/DMABUF兼容缺口与命令见[QUEST2-VIDEO-PORT.md](QUEST2-VIDEO-PORT.md)。当前分支codex/quest2-video-618-20261107；下一步先排查共享Venus拒绝open，再继续原厂OMX兼容，不重复原始失败或热重启PAS。
+
 ## 2026-11-07：保存全量进度，6.18 LTS成为唯一编译基线，统一主线入口
 
 按用户要求，本轮保存当前全部迁移成果并收敛统一入口。唯一版本6.18.60-sq2-android1；发布基线精确保持现机Mesa/60Hz/GPU700-RPMh432/EL2/unrestricted/nohibernate，不从旧文档切回高通或661档。
@@ -756,7 +847,7 @@ exit14/0/14；rollback 恢复原hash、patch重建一致、7测试通过，不�
 `docs/KERNEL-6.18-MIGRATION.md` §0。下一步复测是否越过 preboot prepare；热管理等缺项未完成，
 不做压力测试、不宣称整树迁移或黑屏修复已验收。
 
-## 2026-11-05：高通与 Mesa 切换后必须清理所有应用图形缓存
+## 2026-11-05：全应用图形缓存历史（已被 2026-11-07 Chrome-only 规则替代）
 
 用户明确要求：**每次高通闭源与 Mesa 驱动双向切换后，在重新启动应用前，必须清理所有应用的图形缓存，不限于 Chrome。**
 

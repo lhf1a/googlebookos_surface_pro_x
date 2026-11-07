@@ -60,3 +60,35 @@ python3 scripts/build.py compile --source SOURCE_ROOT/kernel \
 
 显式`--resume-build`只复用config与ABI匹配的构建目录。缺少外挂源时默认拒绝；`--core-only`必须明确指定且产物标记不完整。
 本次完整入口28步exit0、15个外挂模块覆盖成功；发布包另经verify保持原hash。源码导出不等于新boot包已验收。
+
+
+## 2026-11-07：独立 Qualcomm 全图形调试包（只在 6.18 上适配）
+
+用户明确要求在已经适配的 6.18 上替换高通图形，不允许在 6.3.8 上演进。
+本分支复用当前 6.18 Image、DTB、模块和已验收配套；旧版本仅作为历史用户态移植资料，
+不恢复退休的 6.3.8 编译链，不改现存设备回退。当前默认 Mesa 发布 pins 保持不变。
+
+私有重建链为 restore-sq2-qualcomm-graphics-runtime.py → prepare-quest2-cpu-access.py →
+prepare-quest2-618-layout.py → pack-sq2-qualcomm-full.py → prepare-sq2-618-debug-entry.py。
+各入口参数以源码 --help 为准；输入是固定来源的私有 donor 与当前 6.18 父包，不含单机准入。
+最终专用 packer 只接受已经真机验证的 15 库 layout8/bank15 runtime manifest，拒绝旧 14 库
+和旧强制 4 通道中间包；这个 pin 是私有二进制来源/配对完整性，不是硬件身份白名单。
+
+6.18 上修正两点：mapper3 私有 CPU 访问桥在真实 mmap/DMA_BUF 同步后上传 GPU-only AHB；
+GLES 的 CPU 纹理通道从旧强制 4 恢复为实际能力字段，保留 bank15。未修改当前内核、DT、GPU档位。
+真实隔离命名空间测试包括 165 次上传、多尺寸、内纹理上传到外 AHB 的独立读回、HWUI 三帧及
+GLES/Vulkan 探针；通过不代表完整桌面冷启动/游戏/跨设备验收。
+
+新包只加入 opt-in qualcomm-full-start 和配套 runtime，原父包所有非 init 文件逐字节保持，
+原凭据 addon 仍最后生效。EFI 构建只新增 SQ2QDbg 独立目录与第三项，原两项内容/顺序/default 保持。
+本地产物带实验室原 SSH 身份，不能匿名公开分发。
+
+当前缓存策略以 2026-11-07 AGENTS.md / DEVELOPMENT.md PORT-07 最新规则为准：**先推进启动测试，仅在启动后遇相关问题时按需清理 Chrome 的已确认图形缓存，直接删除，不备份缓存**。
+只动态发现 Chrome 用户/资料路径；保留账号、Cookie、历史、密码、凭据、下载、设置、普通网页缓存及其他应用全部数据。
+Mesa↔Qualcomm 双向切换及普通启动均不自动或强制清理，不设预启动清理/回执门槛；按需处理前停止 Chrome，完成后重启 Chrome。原驱动、6.18 Mesa 默认与启动回退仍保留。
+历史4752d501…调试包要求旧全应用回执，文档修改不会自动移除旧包中的门槛。旧全应用控制器已停用；
+当前试启入口应取消全应用及 Chrome-only 预启动清理/回执要求；不得用伪造完成回执绕过旧门槛，不沿用全应用扫描。
+本次规范修改未执行真机缓存删除、未部署新图形包、未重启。
+
+本轮 private 候选/字面验证/缓存来源证据保存在 out/qualcomm-graphics-618-20261107，
+既有四角色继续位于 out/kernel-6.18-migration-20261105；新增原生 payload/menu/cache 角色是补充而非替代。

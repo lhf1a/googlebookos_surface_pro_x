@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "scope": "All dynamically discovered Android app roots; not an assertion that every unknown engine cache format has been classified",
+  "required_context": "Built-in basenames are recognized only under app top-level cache/code_cache/.cache/app_<engine>. Names elsewhere remain unknown unless optional private classifications bind their exact current type/content to independently inspected purpose.",
+  "system_compositor_cache_paths": [
+    "data/misc/surfaceflinger/skia_shaders",
+    "data/misc/surfaceflinger/egl_shaders.multifile"
+  ],
+  "system_compositor_evidence": "2026-11-07 parent executor read-only device inspection explicitly found these two derived caches; stop SurfaceFlinger before applying; never move containing data/misc directories.",
+  "sources": [
+    {
+      "names": [
+        "GPUPersistentCache",
+        "GPUCache",
+        "DawnGraphiteCache",
+        "DawnWebGPUCache",
+        "com.android.opengl.shaders_cache.multifile"
+      ],
+      "evidence": "docs/HANDOFF.md 2026-11-05; original private chrome-cache/VERIFICATION.txt records five moved locations, ROLLBACK_HASH_MATCH and Chrome stopped; this is Chrome-only historical validation"
+    },
+    {
+      "names": [
+        "com.android.opengl.shaders_cache",
+        "com.android.skia.shaders_cache"
+      ],
+      "source": "https://android.googlesource.com/platform/frameworks/base/+/788f87dab63338c0a964c3c70fee2c3544efe1a8/core/java/android/view/ThreadedRenderer.java"
+    },
+    {
+      "names": [
+        "ShaderCache",
+        "GrShaderCache"
+      ],
+      "source": "https://chromium.googlesource.com/chromium/src/+/efebdb649977730f38af9c17a2a4e53e22f02ee9/chrome/browser/chrome_content_browser_client.cc"
+    },
+    {
+      "names": [
+        "mesa_shader_cache",
+        "mesa_shader_cache_db",
+        "mesa_shader_cache_sf"
+      ],
+      "source": "https://docs.mesa3d.org/envvars.html"
+    }
+  ],
+  "never_remove": [
+    "entire cache/code_cache",
+    "application data",
+    "account/cookie/history/download/password",
+    "unknown shader/pipeline blobs",
+    "symlink targets"
+  ],
+  "runtime_dependency": "BusyBox ash and documented applets; no Python",
+  "caller_contract": "Observe actual backend before/after; stop all graphics consumers; call only for a real change; provide CE-unlocked user IDs from authoritative runtime state; block affected app launches while CE/unknown/access failures remain pending. --quiesced is recorded caller attestation, not independent proof.",
+  "rollback": "Same-parent atomic rename; complete private manifest and content/ownership/mode hashes; preserve SELinux/xattrs by rename; refuse destination conflicts or changed backup. Rollback data alone does not switch the GPU driver.",
+  "evidence_classifications": "Optional private --classification-file, exact content/type checks only for previously unknown discovered objects; see graphics-backend-cache-classifications.md. Source-directory descendants remain scanned; no package/user whitelist."
+}

@@ -1,0 +1,41 @@
+#!/bin/busybox sh
+# Opt-in debug payload only. The accepted Mesa initramfs is never changed.
+# /data is deliberately not mounted here: Android owns mount_all --late.
+set -eu
+case " $(cat /proc/cmdline) " in
+    *' sq2.vulkan=qcom '*) ;;
+    *) echo SQ2_FULL_GRAPHICS_DISABLED_MESA; exit 0;;
+esac
+source=/etc/sq2-graphics-full
+vendor=/newroot/vendor
+# Cache cleanup is not a boot admission condition and is never automatic here.
+# If a post-boot issue warrants cleanup, use the separate Chrome-only/no-backup
+# helper explicitly after stopping Chrome; other application data is untouched.
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+(cd "$source"; sha256sum -c SHA256SUMS)
+count=$(cat "$source/LIBRARY_COUNT")
+case "$count" in 15) ;; *) exit 65;; esac
+test "$(find "$source" -maxdepth 1 -name '*.so' | wc -l)" = "$count"
+# Validate the effective parent, not a sample machine, before RAM-only writes.
+(cd "$vendor"; sha256sum -c "$source/MESA_SHA256SUMS")
+backup=/newroot/debug_ramdisk/mesa-graphics-original
+test ! -e "$backup"
+for library in "$source/"*.so; do
+    test ! -e "$vendor/lib64/egl/${library##*/}"
+    test ! -L "$vendor/lib64/egl/${library##*/}"
+done
+mkdir -p "$backup/egl" "$backup/hw"
+for name in libEGL_freedreno.so libGLESv1_CM_freedreno.so libGLESv2_freedreno.so; do
+    cp -p "$vendor/lib64/egl/$name" "$backup/egl/$name"
+done
+cp -p "$vendor/lib64/hw/vulkan.freedreno.so" "$backup/hw/"
+cp "$source/"*.so "$vendor/lib64/egl/"
+ln -sf libquest2-egl-wrapper.so "$vendor/lib64/egl/libEGL_freedreno.so"
+ln -sf libGLESv1_CM_adreno.so "$vendor/lib64/egl/libGLESv1_CM_freedreno.so"
+ln -sf libGLESv2_adreno.so "$vendor/lib64/egl/libGLESv2_freedreno.so"
+cp "$source/libquest2-vulkan-wrapper.so" "$vendor/lib64/hw/vulkan.freedreno.so"
+mkdir -p "$vendor/etc/sq2-vulkan-closed"
+cp "$source/qgl_config.txt" "$vendor/etc/sq2-vulkan-closed/"
+cp "$source/sq2-closed-vulkan.rc" "$vendor/etc/init/"
+cp "$source/vulkan-version.xml" "$vendor/etc/permissions/android.hardware.vulkan.version-1_3.xml"
+echo "SQ2_FULL_GRAPHICS_SELECTED: v77 EGL/GLES1/GLES2 + Vulkan; libraries=$count; native MSM/minigbm/HWC retained; full desktop acceptance required"

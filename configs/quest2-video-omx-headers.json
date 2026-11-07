@@ -1,0 +1,14 @@
+{
+  "source_base": "https://android.googlesource.com/platform/frameworks/native/+/refs/tags/android-12.0.0_r1/headers/media_plugin/media/openmax/",
+  "sha256": {
+    "OMX_Audio.h": "5feb6d40ae2ad3e3e172957c9a54f5aa51ee30c5c8dda1a47b5a34f6f9f4ea1f",
+    "OMX_Component.h": "32ddf10d8b32f3e100b87a5e88049b8221464db2580a9c7c218758397993810a",
+    "OMX_Core.h": "32bdcf4de4533e7fea1cd11e0954294f220dd1dc4d5f568a2a53d81868fcc6fd",
+    "OMX_Image.h": "d3d9f1c9643b60fefbcfa7ad13a1c8905b5d8dc7d907e35515ac2c2a1290c68d",
+    "OMX_Index.h": "6e53aa3d4311f86a0b45901e652fdfa783e7f0a20f6dd17f29e7aaedb5113bb7",
+    "OMX_IVCommon.h": "70a176bb069cd2f2b4f5845f3fa6f26133e0089e75044fc5caf8e400f0d1f685",
+    "OMX_Other.h": "fc00885b8a98f01b98255b236fa7312bd22e3d8c1061c1944f482a54e607c310",
+    "OMX_Types.h": "6ff64a0101834dadddb9c68d2f63dd9893b759c05807cc0448afec3413514264",
+    "OMX_Video.h": "48f5208993d14e8db8c81d22e4ee8c41a62ef06638cf393b0741c1402a2953bf"
+  }
+}
