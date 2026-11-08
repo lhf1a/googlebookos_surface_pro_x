@@ -1,3 +1,18 @@
+## 2026-11-08：整体移植方向
+
+用户选择按[高通显示与视频栈整体移植方案](QUALCOMM-FULL-STACK-PORT.md)说明后续路线。
+目标包括匹配KGSL、QTI gralloc、msm_vidc、HWC/显示内核与原生视频缓冲；下文是混合栈
+已完成工作与历史证据，不代表整栈已移植。当前事实以HANDOFF最新节为准。
+
+## 2026-11-07 当前续接
+
+大窗口skiagl HWUI花屏已由显式Direct候选在隔离进程中消除，并完成原库回退复现及候选重应用。
+这属于GMEM多分块路径的规避，不是底层根因修复。候选已部署为设备默认并正常重启；设置网络页/显示页和EasyTier实机截图恢复正常，
+全局GLES/Vulkan基础及大尺寸ImageReader WSI通过；性能功耗、广泛游戏和SQ1跨机仍未测。
+当前源码与私有产物位于WSL独立worktree；构建命令、hash、回退边界及实测证据见
+[BUILD](BUILD.md#2026-11-07大窗口-hwui-花屏的-direct-兼容候选)与[HANDOFF](HANDOFF.md)。
+以下记录中旧缓存门槛均被启动后按需Chrome-only规则替代；不得按历史全应用清理流程试启。
+
 # Quest 2 GLES 接入系统合成的离线审计
 
 2026-10-28。以提交 `769f2f54dc2d6e3f5e5d3dcaf9ad3529eb0d8f32` 的适配器和私有候选 `gles-linked-zero-area` 为基础；GLES SHA256 为 `c47968472a01e3d2a69dad87d3e000fe7914a0f4e0198c6c70e389ba43219476`。仅检查本地代码、匹配 donor、缓存系统 ELF 和既有设备转储，没有操作设备或修改启动。

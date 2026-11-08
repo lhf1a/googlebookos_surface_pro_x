@@ -1,0 +1,4 @@
+on post-fs
+    restorecon /system/lib64
+    restorecon /system/lib64/libsq2-p010-renderer.so
+    restorecon /system/lib64/libstagefright.so

@@ -1,3 +1,891 @@
+## 2026-11-08：保存开发进度，后续按整体高通显示/视频栈方案推进
+
+用户要求保存并推送当前分支；新增[整体移植说明](QUALCOMM-FULL-STACK-PORT.md)，覆盖架构、
+版本矩阵、ION/DMA-BUF与原厂gralloc、KGSL、msm_vidc、HWC/显示内核、HDR和安全路径。
+当前仍为6.18混合栈：持久AVC-only HIDL、RGB10 renderer、真实HDR10/HLG诊断通过；
+292/300回调缺口与真实HFI恢复超时未解决，不将计划标为实现。
+本次仅保存源码/配置/测试/说明，不部署、不重启；私有产物及原始日志保留在WSL out/private。
+下一步是配套输入/接口矩阵，随后按内存、GPU/视频、显示、HDR/安全的依赖顺序推进。
+旧C2源码差异作为此前工作保存，不恢复项目C2默认服务/注册。
+本次保存验证：19个相关unittest模块共95项全部通过、无skip；实际HFI boot loop
+24个reply/profile与5个缓冲边界用例在ASAN/UBSAN下通过，boot-kmsg空间/上限/ENOSPC
+测试同样通过。新增/修改Python AST、JSON、相关shell语法与git diff --check通过。
+完整命令和输出在out/progress-save-20261108；不是新的整镜像编译或真机验收。
+提交仅包含源码/配置/测试/说明，私有目录、二进制和高置信凭据扫描未发现误纳入。
+下节保留最近真机事实。
+
+## 2026-11-08：现场唤醒取到真实HFI恢复失败，正常重启恢复；逐帧回调对照完成
+
+用户“已联通”后取得原ee8de2ae boot，确认sys_error1、start:hfi-resume -110、stops17/starts16。
+原8MiB持久日志保存了718秒失败：reset/unmap完整成功，resume固件映射/CPU start返回0，
+最终poll99的HFI status=0、cmd/msg/debug无进展、SFR全0。不是最后poll已ready的误判；
+已持久化的边界修正仍有效，但没有修复真实PM超时。parent platform sleeping警告仅为线索，
+先前成功resume也出现，不能认定因果；不通过延长超时/清sys_error/热卸载掩盖问题。
+
+已取回kernel-live并校验SHA06d2d8ea35a2a2b0d6a6ad15e32d40433214f40e8dd646d6573b641e249cd7a2，
+只删除该准确ESP日志副本；旧包hash保持5b9f7012…，没有新部署或回退备份。
+一次授权正常重启89.8秒恢复，boot872b3b57-680b-4d04-8f85-6fde9d6021ba，
+Venus健康。旧remote-recovery-block-audit/GOAL-BLOCKED仅作历史，现场阻塞已解除，
+完整硬件/HDR移植仍未完成。证据all-codecs/user-wake-{pm-failure-result,recovery}.json。
+
+安装已构建PTS审计APKef4490c0…，同一AVC资产、普通UID、无播放中截图：
+高通自动选择OMX.qcom.video.decoder.avc，300输入/300输出、EOS/STOP/RELEASE正常，
+292回调；缺失PTS(us)为0、33333、100000、8100000、9866666、9900000、9933333、9966666。
+零重复/未知回调，缺口不只是尾部，严格RESULT=false。未把缺失回调等同真实显示丢帧。
+同boot同APK仅显式改用系统c2.android.avc.decoder做对照，300/300回调，
+EOS/实时/关闭及严格RESULT=true。没有修改系统默认codec，也没有恢复退休的项目C2。
+范围收窄至OEM→ACodec→SoftwareRenderer路径，尚不能细分为codec、调度或tracker根因。
+证据all-codecs/render-audit-v1-comparison.json及两份原始stdout；测试后退出诊断Activity。
+两次关闭后sys_error0/insts0/vb2_bytes0，ESP261200KiB可用。临时锁使用原子claim，
+避免手工和自动计时器双重release；已读回held=false/refCount0。释放前安排一次正常
+PowerManager 3秒唤醒，后续SSH读回同boot健康；ESP最后读回260204KiB；前次logs78388KiB。
+最终证据render-audit-v1-final-state.json；没有更改休眠/锁屏设置。
+
+原HDR10/HLG真实RGB10/metadata证据保留；持久服务仍AVC-only。
+后续实际呈现时间/队列fence、PM恢复、SDR tone-map、HEVC独立CSD、MPEG2、
+VP9profile2、DRC/seek/最大持续负载、动态HDR/secure等仍在原目标范围内。
+
+## 2026-11-08：目标受阻，等待设备现场唤醒
+
+结束测试释放临时唤醒锁后的远程不可达已连续三个goal turn存在。
+本轮再核验：WSL SSH No route；Windows TCP22超时、neighbor Incomplete；
+ADB设备清单和mDNS发现均为空。没有活跃远程测试可继续观察，没有发送新重启/部署。
+已完成的renderer持久启动/HDR Surface证据保持，PTS审计候选已构建未安装。
+当前无法取得PM故障快照或验证候选，继续改固件启动/渲染逻辑会缺少区分性证据。
+目标按blocked记录，完整硬件/HDR目标未完成，未缩小范围。
+
+用户已被请求短按电源唤醒并报告屏幕状态，先不要重启以保留新内核日志。
+恢复后第一步读boot_id、sq2_pm_status和有界SQ2_BOOT_WATCH/SQ2_SYSTEM_PM日志；
+若sys_error1，不运行解码、不清错误、不热卸载，先取证再按授权正常恢复。
+具体记录all-codecs/remote-recovery-block-audit.json和GOAL-BLOCKED.json。
+
+## 2026-11-08：渲染回调PTS审计候选已构建，设备仍待唤醒
+
+本轮SSH继续No route，未发重启/解码/部署；上一节请求的短按电源唤醒尚未得到反馈。
+现有285/300计数不足以区分片尾未回收、区间缺口或重复/未知回调。
+实际patched SoftwareRenderer只在render中经FrameRenderTracker收集已完成项，
+此路径是尾部回调不足的候选解释，不证明所有缺失帧都已显示，也不证明现场根因。
+
+MainActivity新增内存中的queued/callback PTS记录，在原3秒等待后输出一次RENDER_AUDIT：
+缺失PTS列表、是否纯尾部缺口、重复数和未知PTS。原good/RESULT严格条件、EOS/PTS检查、
+render-ahead节奏和关闭流程不变；没有放宽285/300为通过。
+纯Java RenderedFrameAudit被实际编译测试，完整/尾缺口/中间缺口/重复未知/零回调/空输入均通过；
+build-sq2-video-app.sh同步编译新helper，bash语法/diff检查通过。
+
+新候选all-codecs/player-render-audit-v1/sq2-video-test.apk，
+SHAef4490c02f6264711b37278fde3ca1ee30da44fb49c243e2d837910efc55626f，
+签名验证通过；复用完全相同的AVC资产SHA4b2c7c57…，未重新编码视频或覆盖旧验证APK。
+实际命令/源和资产hash在该目录BUILD.json；候选未安装、未真机验证。
+恢复后先取新内核PM快照并核对健康；随后只做一次无播放中截图干扰的普通应用PTS审计。
+不能把host分类测试当作渲染缺口已修复。完整HDR/硬件能力目标保持active。
+
+## 2026-11-08：测试收尾释放唤醒锁时SSH再中断，保留当前状态等待唤醒取证
+
+renderer持久启动、普通应用实际加载、HDR10/HLG逐像素/元数据验收仍有效，见下一节。
+最后HDR关闭时ee8de2ae boot驱动sys_error0/core_state1/insts0/vb2_bytes0。
+随后发送临时shell PARTIAL_WAKE_LOCK release及健康读回，SSH25秒超时；之后新连接超时。
+无法确认release实际完成，也不能断言当前健康或已卡死；600秒自动release已在本boot预先安排。
+没有再发reboot/解码/卸载/清错误。已请用户短按电源唤醒并说明屏幕，先不重启。
+恢复后先保存SQ2_BOOT_WATCH enabled=0最后poll快照及PM状态，区分真正status0超时与就绪边界，
+不将正常启动/短解码通过写成修复了休眠根因。
+状态renderer-v2-final-state.json，连接证据renderer-v2-wakelock-release-check.json。
+完整目标继续active；此处仅当前远程通道受阻，不撤回已完成验证或缩小硬件/HDR范围。
+
+## 2026-11-08：RGB10 renderer已持久化并重启验收，普通应用加载及HDR10/HLG Surface通过
+
+默认initramfs现为5b9f7012ab43db5ec42f6169d57047527f19a0feff0fb824d77d7711ec68c351，
+来源all-codecs/package-p010-renderer-v2。正常重启127.1秒SSH恢复，
+boot ee8de2ae-0be1-46cd-a6a9-ae14f4768855。启动helper成功，system init post-fs
+将/system/lib64和两个库标为system_lib_file，root:root0644；实际SHA93312fd5…/c67c598e…正确。
+kernel仍6.18.60，配套core包含已测最后poll就绪判定与默认失败快照；不宣称PM根因修复。
+EFI仅默认initramfs/SHA256SUMS变化，未新建回退/备份或清应用缓存。
+
+默认HIDL仍AVC-only、native metadata默认关闭。本boot为HDR回归再临时加载已验证五codec/
+native-extra-v2；Main10广告仍过滤。真正system路径（没有LD_LIBRARY_PATH）HDR10、HLG各
+6帧RGB10/EOS/关闭通过，像素文件与独立验证的参考版本完全一致；实际gralloc mastering/
+content-light值、HLG absent和PQ/HLG dataspace逐项一致。不是仅检查磁盘文件存在。
+证据hidl-{hdr10,hlg}-renderer-persistent-1-result.json及对应stdout/frames。
+
+普通应用：发现原安装测试APK为HEVC，先以同签名baseline AVC诊断APK更新（不删app data）。
+当前用户动态为10；普通UID1010271/untrusted_app_34实际加载两个/system/lib64库，
+自动选中OMX.qcom.video.decoder.avc、hardware=true。首次屏幕睡眠导致Surface在START前释放，
+正常PowerManager唤醒后再测试；没有改锁屏凭据或超时设置。
+300输入/300输出、EOS、9.963秒实时、STOP_OK/RELEASE_OK，但仅285 rendered回调，
+原严格RESULT仍false，未放宽判断。截图renderer-v2-app-awake.png可见完整测试图案；
+截图/回调数均不能证明全部300帧实际显示。此项沿用已知待修问题，不写成普通播放全通过。
+证据renderer-v2-app-{awake-test.stdout,result.json}；测试后force-stop退出诊断Activity。
+
+本boot测试期间仅持有临时shell PARTIAL_WAKE_LOCK（600秒自动释放），普通休眠配置保持；
+结束时发送显式释放，但SSH超时，未得到释放回读；当前状态见renderer-v2-final-state.json。
+下一步SDR物理合成/色调映射、HEVC独立CSD/正常容器、渲染回调缺口、PM快照取证，
+以及MPEG2、VP9profile2、DRC/seek/持续最大负载/动态HDR/secure。目标保持active，源码未提交。
+
+## 2026-11-08：系统默认库路径AVC/HDR10/HLG验证通过，renderer持久更新等待启动验收
+
+远程恢复后确认efcddeb2 boot在无新解码测试时再次发生s2idle HFI resume失败（stops6/starts5），
+日志renderer-system-second-pm-failure.txt已保存；不热卸载/清sys_error。
+内核边界修正包6ee0fbc1…已正常部署，EFI仅initramfs/SHA256SUMS变化。
+正常重启95.5秒SSH恢复，boot25e4c984-70f6-4c79-8108-6657223a8c20；
+实际core build-id和文件SHAcab437a1…匹配，sq2_boot_watch=N，驱动健康。
+本轮测试临时cmd power PARTIAL_WAKE_LOCK，设置600秒自动释放；没有改用户休眠设置。
+正常重启/解码通过不代表PM根因已修复；暂未重新执行休眠试验。
+
+当前正常system/lib64查找（无LD_LIBRARY_PATH）AVC独立CSD、HDR10 full-AU、HLG full-AU各6帧，
+EOS/关闭通过，真实maps指向system路径，两库SHA/labels正确。AVC像素与参考完全一致，
+HDR RGB10各文件与已独立浮点验证的CFI结果逐字节相同。实际AHB HDR10 mastering/CTA值、
+HLG metadata absent、PQ/HLG dataspace及stride/crop逐项相同；最终sys_error0/insts0/vb2_bytes0。
+证据hidl-avc-renderer-system-2-result.json、hidl-{hdr10,hlg}-renderer-system-1-result.json。
+HDR使用RAM五codec/native-extra-v2，持久HIDL仍AVC-only，未广告Main10/面板HDR。
+
+新增持久候选v2基于已部署boot-status内核包，renderer SHA不变。
+启动helper改为在现有keystore system rc挂载之后运行，向该system rc追加post-fs restorecon；
+让system init恢复system_lib_file，不从vendor_init发起系统标签操作。旧v1 vendor rc方案已替代。
+all-codecs/package-p010-renderer-v2/initramfs.cpio.gz SHA
+5b9f7012ab43db5ec42f6169d57047527f19a0feff0fb824d77d7711ec68c351，236150077bytes。
+已部署并逐文件回读；EFI仍仅默认initramfs/SHA256SUMS变化，无新增回退或清缓存。
+正在正常重启并按600秒窗口核验，尚未把开机labels/普通APK标通过。
+已捕获并hash核验bcfb…和efcd…旧kernel-live，只删除准确ESP副本；部署后ESP265224KiB/logs73468KiB。
+下一步新boot系统库标签/实际加载、普通应用与SDR tone-map；HEVC CSD/MPEG2/PM/其余能力仍未完成。
+
+## 2026-11-08：HFI最后一次就绪误判已修正，默认超时取证候选已编译
+
+SSH继续No route，尚未收到唤醒/屏幕反馈；没有发新reboot、没有新增真机测试或部署。
+在现机配套源码的venus_boot_core中复现真实边界缺陷：循环最后一次读到有效status，
+count仍递增至max_tries，旧的count>=max_tries无条件判timeout，误拒已经ready的固件。
+实际函数host测试对原代码在最后一次就绪断言失败；新条件增加!ctrl_status后通过。
+保留真实非法UC_REGION错误判定；不延长默认100次或显式watch2000次轮询，不增加重启。
+
+probe/video/venus-sq2-boot-watch.h在默认poll99且status0时增加一条队列/SFR快照，
+只读已有status及CPU-owned coherent内存，缺失队列/不足20字节SFR拒读，无新MMIO/队列写。
+旧sq2_boot_watch=1同时延长等待，不宜用它作为不改变时序的默认故障取证；新路径不需开它。
+scripts/patch-sq2-venus-boot-status.py对现有已适配源码精确增量应用，先校验loop/header再写，
+支持幂等，未知header或poll-bound拒绝。历史prepare-sq2-venus-iris1生成路径也同步正确谓词。
+
+all-codecs/venus-boot-status-v1从当前已部署v4匹配源码新建，只改hfi_venus.c和上述header，
+三件模块重新编译通过。core SHAcab437a1f543062b6b97f10c0e56b0d085dd6164596eeeceae9eba216905393b；
+dec/enc与旧包字节相同，三件vermagic为6.18.60-sq2-android1，未新增undefined符号。
+保留既有helpers.c unused dev警告；KBUILD_MODPOST_WARN=1不是完整外部provider运行验收。
+24种reply/profile（含poll99/poll1999）+5种缺失/短缓冲测试在ASAN/UBSAN下通过，
+5项既有PM测试及2项增量patch拒绝/幂等测试通过，Python/diff检查通过。
+证据boot-status-original-boundary-test.txt、boot-status-candidate.json、boot-status-build-v1.json。
+
+这是已证的源码边界修正和取证改进，不是已证现场s2idle失败根因；
+现场失败status未捕获，必须验证新boot实际模块、默认就绪及受控PM结果后才能下结论。
+候选未组包/部署；renderer RAM安装、持久默认及剩余HDR能力状态保持上一节。
+目标仍是全部硬件解码能力/HDR，不以本修正代替普通Surface/SDR tone-map/HEVC CSD/MPEG2等验收。
+
+## 2026-11-08：renderer RAM系统覆盖通过，后续SSH失联，持久候选未写设备
+
+本节覆盖下节“等待恢复”：既有镜像正常重启成功，wait-sq2-ssh窗口76.3秒取得新boot
+efcddeb2-e4a4-49a6-9304-9871b72101e7；Android完成、sq2-omx running，
+sys_error0/core_state1/insts0/vb2_bytes0/stops0/starts0。早前五codec/native-extra RAM服务已随重启退出，
+本boot运行持久AVC-only。实际kernel仍6.18.60，持久initramfs仍ca47b0ab…。
+
+新增probe/test2/sq2-p010-renderer-stage及scripts/pack-sq2-p010-renderer.py：
+核验确切原库和加固候选SHA，离线准备system/lib64 overlay后整体bind发布；
+启动时vendor rc的post-fs恢复目录/两库system_lib_file标签，早于zygote/media。
+实际RAM试装在Android namespace执行同一helper，并在发布前chcon。
+实际文件SHA、root:root0644和system_lib_file标签均通过（renderer-system-stage-v2.stdout）。
+没有覆盖原EROFS库，也没改现机持久载荷。不要将RAM文件校验视为普通客户端已通过。
+
+随后的AVC普通system路径探针在SSH连接阶段No route to host，命令未执行。
+此boot没有新解码测试、未启动五codec候选，没有清错误或再发reboot。
+后续只读连接同样失败，已请用户短按电源唤醒并确认屏幕状态，尚未得到回答；
+暂不能判断只是休眠断网还是冻结，不能把它归因于renderer。恢复后先核对boot/驱动健康。
+内核第一次失败日志额外显示：固件5MiB映射/NO_PAS CPU启动返回0后HFI握手超时；
+同轮有“parent platform should not be sleeping”。PM顺序仍需取证，未据此猜改内核。
+
+本地候选all-codecs/package-p010-renderer-v1/initramfs.cpio.gz，
+SHA09a99cfb7c821a7a3fabacfe2b125875100bad4f1155f9f294a53cc24a2b409b，235307551bytes。
+仅init hook和新增renderer文件变化，kernel/HIDL服务/凭据保持，effective cpio逐项审计通过。
+3项packer/stage拒绝测试及5项精确ELF测试通过；Python编译/shell语法/diff检查通过。
+未写EFI/新增回退/清缓存。ESP上次261432KiB空闲、logs80152KiB：
+临时上传新包后余量会低于32MiB，必须先取回并SHA核验必要旧开发日志，再只删除准确ESP副本。
+
+下一步：远程恢复→驱动健康/映射核验→无LD_LIBRARY_PATH的AVC Surface回归→
+RAM native-extra HDR10/HLG回归→核验空间后持久部署/600秒重启验证→SDR色调映射。
+真实普通APK、面板tone-map、HEVC CSD、MPEG2、PM稳定性及更广硬件能力仍未完成。
+完整状态见all-codecs/renderer-system-integration-state.json；目标保持active。
+
+## 2026-11-08：空闲s2idle后Venus HFI恢复失败，renderer部署前检查已中止
+
+boot bcfb7cfd…在本轮只读检查时最初健康；uptime3666起系统自动多次s2idle，
+Venus释放/重载固件，uptime3668恢复报failed to reset venus core、
+SQ2_SYSTEM_PM start:hfi-resume ret=-110；最终sys_error1/core_state0/dma_stopped1/insts0/vb2_bytes0。
+这发生在任何新renderer挂载或新解码试验之前，不能归因于renderer。
+stage脚本在健康检查处退出，没有修改系统库，也没有清错误/热卸载/手动重复PAS。
+已取回有界dmesg到all-codecs/renderer-prestage-pm-failure.txt及结构化json；
+正常Android reboot已发出，按600秒窗口等待changed boot。此处尚未确认恢复。
+这是系统PM路径的新证据，独立于MPEG2冻结，不能称全部内核稳定性已完成。
+
+## 2026-11-08：真正MediaCodec RGB10 Surface及gralloc HDR元数据通过，尚未全局部署
+
+本节覆盖下方“仅独立源码测试”的阶段。实际Android17 libstagefright通过精确SHA和指令锚点校验，
+仅三个隐藏SoftwareRenderer入口增加各12字节跳转；原LOAD地址、CFI、packed relocations和RELR保持。
+源构建adapter使用实际系统FrameRenderTracker，类大小/字段偏移/返回list ABI均断言并对照反汇编。
+新增只读LOAD容纳动态表，三个绑定槽位于原RELRO零填充；独立ELF审计及5项测试通过。
+LIEF写入候选因移动原地址且丢新重定位而拒绝；接受的stdlib patcher不移动原地址。
+原Build-ID未改变，必须用完整SHA区分。不是可跨系统版本通用的二进制补丁。
+
+接受目录all-codecs/renderer-p010-adapter-cfi-v3：
+libstagefright.so SHA93312fd55e49a61f85483a46137f9bca8a98ae3c0299e07658e32590a9e104b5；
+libsq2-p010-renderer.so SHAc67c598e90979aa9d85ce0cb8409e82d5f01366ad3c78916a373a96855848a92。
+adapter启用LTO/cross-DSO CFI/FORTIFY/stack protector/RELRO/NOW/noexecstack。
+不要部署renderer-p010-elf-v3的旧未加固adapter或adapter-v2的被拒绝父库。
+
+实际OEM OMX→HIDL→ACodec→修正SoftwareRenderer→RGB10 ImageReader：
+HDR10/HLG各6帧、EOS/client0/正常关闭，格式43、320x240，PQ0x09c60000/HLG0x0a060000。
+无输入色彩/HDR hints；独立ffmpeg P010和浮点BT2020矩阵对照最大误差1/1023，保留低两位及alpha3。
+CFI产物捕获的六帧与前述独立验证版本逐字节相同，AVC独立CSD六帧也与参考相等。
+实际AHB gralloc读回HDR10 mastering primaries/white point、1000/.005亮度、
+MaxCLL1000/MaxFALL400；HLG各帧SMPTE2086/CTA均absent。
+源码新增显式清理缺失静态metadata，独立同Surface HDR10→HLG切换验证不残留；
+reset首帧即使缓存为零也重发/清理metadata。
+
+证据all-codecs/hidl-{hdr10,hlg,avc}-renderer-cfi-1-result.json、对应stdout/frames、
+hidl-*-renderer-v3-1-pixels.json、renderer-cfi-metadata-1.stdout及候选BUILD.json。
+最后健康boot bcfb7cfd…，sys_error0/core_state1/insts0/vb2_bytes0；ESP264252KiB/logs77332KiB。
+均为LD_LIBRARY_PATH私有客户端选择，没有全局库替换、EFI更新或重启。
+持久包仍ca47b0ab…/AVC-only；RAM五codec/native-extra-v2；Main10广告仍过滤。
+下一步持久化renderer并验证普通进程真实加载与SDR合成；不将RGB10 Surface证明扩大为屏幕HDR。
+HEVC独立CSD、MPEG2冻结、动态HDR、VP9profile2、DRC/seek/负载、secure仍未完成。
+
+## 2026-11-08：P010系统渲染源码候选，独立CPU与真实Surface测试均通过
+
+本节是上一节SoftwareRenderer abort的源码修正验证，不代表系统libstagefright已替换。
+新增patches/stagefright-p010-renderer.patch，基于AOSP av e2f098935447…，
+配置configs/stagefright-p010-renderer.json固定原始及补丁后两个源码hash。
+P01054明确转真正RGB1010102而非旧Planar16的Y410；每帧传入真实色彩参数，
+已有RGB full-range dataspace路径保留PQ/HLG。格式/stride改变销毁旧converter并重建、
+重发dataspace，P010裁剪输出从0,0开始；转换失败取消buffer，不提交未初始化内容。
+转换前校验stride/crop/两平面容量，ColorConverter修正奇数cropTop的chroma跨行及奇数尾像素读取。
+
+实际完整SoftwareRenderer.cpp和ColorConverter.cpp均ARM64编译通过。
+独立测试链接源码匹配的FrameRenderTracker（仅移除未使用gui/Surface.h头依赖），
+避免依赖系统未知类布局；系统mapper/BufferQueue/foundation仍用现机真实库。
+tests/fixtures/quest2_video/p010-renderer.cpp执行实际converter：1024灰阶逐值相等，
+BT2020 limited PQ/HLG及full PQ与独立浮点矩阵误差<=2/1023，奇数3x3裁剪/输出padding及
+非法几何/短平面容量断言通过。不是重新实现转换来测试自身。
+
+p010-surface.cpp调用实际patched SoftwareRenderer，真实RGB10 ImageReader连续取得3帧：
+每像素精确相等，source stride16→24且output stride64，crop0,0,3,3，
+dataspace PQ0x09c60000→HLG0x0a060000，转换器重建后仍正确。没有打开硬件解码器。
+随后用scripts/build-sq2-p010-renderer.py全新-O2构建并重复上述针对新产物验证，全部通过。
+证据all-codecs/renderer-p010-isolated-result.json、renderer-p010-repro/BUILD.json及*-repro-1.stdout。
+CPU binary SHA76e857cd…，Surface binary SHA40b2765a…。精确补丁应用、Python编译、diff检查通过。
+
+当前boot仍bcfb7cfd…，sys_error0/core_state1/insts0/vb2_bytes0；ESP264272KiB空闲/logs77312KiB。
+没有替换系统库/写EFI/重启/清缓存，RAM五codec/native-extra-v2与持久AVC-only服务状态保持。
+下一步将已验证源码接入真正系统MediaCodec调用，再做解码→Surface像素和SDR显示色调映射；
+不能把独立进程测试宣称普通播放器HDR已修复。全部硬件能力目标仍active。
+
+集成调查：实际libstagefright的renderer是隐藏符号，普通LD_PRELOAD无效。
+只读反汇编识别constructor0x1d25c0/destructor0x1d2650/reset0x1d26e0/render0x1d2fb0，
+原MediaCodec sized delete为168bytes、FrameRenderTracker偏移104；这些仅属该SHA版本。
+尚未采取二进制跳转修改，尚未证明完整系统ABI；避免未经核对用AOSP16整库覆盖Android17。
+
+## 2026-11-08：Android17 P010 Surface明确失败，驱动正常释放
+
+HDR10 full-AU Surface探针在首帧release/render时SIGABRT（CLIENT_EXIT134），未取得图像。
+系统SoftwareRenderer.cpp:183 CHECK(mConverter->isValid())：color54没有专用分支，
+落入不支持的P010→RGB565转换。RGB10 AHardwareBuffer分配、CPU写锁及ImageReader创建均成功，
+不能把此失败归因于allocator。输出已带正确P010布局、BT2020/PQ/limited和真实HDR metadata。
+实际Android17/SDK37/incremental16471258；libstagefright SHA77292e86…，
+Build-ID451859cef133fa7485469efe7c3def6b。SoftwareRenderer/ColorConverter方法为隐藏符号，
+不能用普通LD_PRELOAD方法覆盖；AOSP参考源码不是该系统完整ABI匹配证明。
+
+失败客户端退出后再次核验sys_error0/core_state1/insts0/vb2_bytes0，sq2-omx running，
+同boot bcfb7cfd…，无需因本次客户端abort重启。最新ESP265872KiB可用/logs75712KiB。
+SurfaceFlinger报告SDR/NATIVE，无HDR10/HLG/wide-color显示能力；需验证真正SDR色调映射。
+probe/video/sq2-mediacodec-frames.c新增--surface-full-au，HEVC10使用RGB10 ImageReader并保存
+带真实stride/crop/dataspace的AHB读回；链接新增-landroid。HEVC仍拒绝AVC专用CSD模式。
+此节覆盖上一节“HEVC Surface参数不支持”；探针可运行不等于系统路径可用。
+证据all-codecs/hidl-hdr10-surface-p010-1-result.json及其stdout/build.json、surface-p010-*-health.stdout。
+不重复未修改失败试验；下一步系统源码P010高精度渲染修正，Main10广告仍不提升。
+
+## 2026-11-08：HDR10/HLG已贯通OEM OMX→HIDL→ACodec缓冲与真实元数据
+
+本节覆盖上一节“尚未接入HIDL metadata”。当前boot bcfb7cfd-679b-4f58-b95d-264f1b60f0c8，
+持久initramfs仍ca47b0ab…/AVC-only，未写EFI；RAM运行五codec/P010候选服务和native-extra-v2桥。
+进程24868实际mediacodec domain，executable SHA4ee5f027…、桥map_files SHA
+0af1d99bce10e886909dc06f6fde4a6483aefa8977e0a832f3e2e5adfc24cc76已核验。
+Main10 profile广告仍过滤，等待真正Surface/色调映射路径，不将缓冲证明扩大为HDR显示。
+
+桥以独立system DMA heap元数据缓冲提交原生第二平面，offset0；原厂共享fd/各槽offset保持，
+两侧明确START/END CPU同步。完整record链校验后拼入真实crop，仅拷到NONE，不解释尾部。
+INIT前按codec启用实际HFI mask，辅助最小buffer查询会话同样设置；后续原厂control仅确认已启用项。
+显式QUEST2_VIDC_NATIVE_EXTRA=1启用，或候选编译-DQUEST2_NATIVE_EXTRA_DEFAULT=1，普通构建默认0。
+
+首次桥试验失败的明确适配错误：每次capture QBUF前G_FMT，违反INIT且未SOURCE_CHANGE时
+G_FMT返回EINVAL的原生契约。随后FLUSH超时/END未确认，sys_error1/retired4273664。
+保存日志后正常重启，600秒窗口内85.7秒恢复；未清错误/热卸载/重复PAS。
+v2改为使用实际格式协商的capacity，QBUF不查G_FMT；主机测试覆盖此状态。
+第二次直接OMX有真实VUI但仅2帧：诊断客户端把color事件0x7f000062当尺寸变更而刷新丢帧。
+现通过GetExtensionIndex识别color/HDR通知，不重建buffer；第三次六帧完整、逐字节等于
+HEVC Main参考325a21d7…，EOS/关闭正常。此修正不吞未知事件或真实尺寸重配。
+
+同boot HIDL HDR10和HLG各六帧P010、1382400有效像素字节，与独立参考b5986576…完全一致。
+未向输入AMediaFormat注入色彩/HDR提示，输出来自实际OEM解码器：
+- HDR10 color-standard6(BT2020)/transfer6(PQ)/range2(limited)；25字节hdr-static-info逐字段相等：
+  RGB原色/白点、max mastering1000 cd/m2、min50原始单位、MaxCLL1000/MaxFALL400，
+  hex 00d084803ec233c4864c1db80b133d4240e8033200e8039001。原厂正确做G/B/R→RGB及最大亮度单位换算。
+- 随后HLG color-standard6/transfer7(HLG)/range2，原厂返回25个零字节代表未知静态值，
+  不伪称字段缺失，但明确没有残留前会话HDR10值。
+- 标准源码sq2-mediacodec-frames.c新增HEVC full-AU编译模式与真实metadata打印，替代out内临时改写；
+  两种源编译后再实测6帧，所有raw帧hash与已独立对照结果一致。HEVC诊断CSD/Surface模式明确尚不支持。
+- 新桥AVC HIDL6帧NV12与参考c1b286b6…一致；最终sys_error0/insts0/vb2_bytes0。
+
+7项桥测试含ASAN/UBSAN独立DMA、共享fd偏移、HDR10→HLG原始链、非法长度、失败同步/分配、
+早期G_FMT拒绝、辅助会话mask及释放；20项OMX客户端/共享session测试通过，ARM64候选编译通过。
+已取回两份旧boot3a68…/f748… kernel-live，逐字节SHA验证后仅删除ESP副本，释放12717779字节；
+ESP最近268060KiB可用/logs73524KiB。无新增回退/备份/缓存清理，未重跑MPEG2或独立CSD。
+
+证据all-codecs/hidl-{hdr10,hlg}-native-extra-1-result.json、*-source.stdout及*-source-frames.sha256、
+native-extra-hidl-avc-1-pixels.json、direct-hevc-native-extra-3-pixels.json、
+native-extra-hidl-current-state.stdout、cleanup-captured-native-extra-logs.json。
+下一步高精度Surface与SDR面板色调映射；动态HDR、HEVC独立CSD、MPEG2、VP9profile2、
+动态重配置/seek/持续最大负载/secure真实保护路径仍未完成。全部改动仍未提交。
+
+## 2026-11-08：v4内核元数据路径已部署，HDR10/HLG像素与固件记录核验通过
+
+本节覆盖下方v2待重启状态。默认initramfs为all-codecs/package-hdr-extradata-v4，
+SHA ca47b0aba12c71f0ac77067403c582455075b4cc09514d0f974eaa7af47588b4。
+v2首次原生试验收到HFI_ERR_SESSION_BAD_POINTER(0x1003)，不是0x1002参数错误；
+内部DPB没有extradata地址。v4为DPB分配加入对齐metadata尾部、独立地址/大小及容量检查，
+整块仍绑定原退休scope；未清sys_error或热卸载。配套三模块重建，不能混用旧布局。
+正常重启后SSH92.2秒恢复，boot f748e1f3-c906-48c5-ac2a-5e816e94ecc3；
+实际core/dec build-id与候选匹配。AVC六帧691200字节逐字节等于参考c1b286b6…。
+全EFI仅默认initramfs和SHA256SUMS变化，未新增回退/备份或清缓存。
+
+本boot原生V4L2 --extradata实测HDR10及HLG各六帧P010，独立CRC全部相等，
+EOS/STREAMOFF/close正常，最终sys_error0/core_state1/insts0/vb2_bytes0。
+真实固件需求188字节，不是猜测大小。逐帧原始数据已取回并严格解析：
+- HDR10每帧VUI为10-bit、limited、BT2020/PQ/BT2020nc(9/16/9)。
+  首帧另含mastering与content-light，与独立ffprobe逐字段相等；原色顺序G/B/R，
+  MaxCLL1000/MaxFALL400。后五帧仅VUI，不假称静态记录每帧重发。
+- HLG每帧VUI为10-bit、limited、9/18/9，无mastering/content-light，未残留前会话PQ记录。
+- HDR10首帧records188字节，后五帧及所有HLG records100字节（含NONE终止）。
+  DMA平面容量188不等于记录链长度，终止后的尾部不可解释为元数据。
+
+持久HIDL服务仍是已验收AVC-only，私有metadata control默认0。以上证明内核固件metadata通路，
+不证明OMX/HIDL传递、10-bit Surface、SDR tone-map或动态HDR完成；Main10系统广告仍未提升。
+HEVC独立CSD、MPEG2启动/关闭及此前照片的重启卡死根因仍未修复，不重复相同失败试验。
+ESP最近可用264356KiB/logs77228KiB，继续有界日志和部署/重启空间管理。
+证据all-codecs/native-{hdr-extradata-2,hlg-extradata-1}-{raw,result.json}、
+hdr-extradata-v4-deployment.json、hdr-extradata-v4-avc-pixels.json及对应stdout。
+下一步把已验证原始记录接入桥的独立DMA metadata平面，再做HIDL真实元数据读回；
+不能直接将共享donor fd的非零offset提交为原生metadata平面。
+
+## 2026-11-08：原生HDR extradata候选已部署，等待启动验证
+
+默认initramfs更新为f64be16994cf8cd9bbe53b09f14fef3cd7454de5e0d00c3a50e99f2b213f5be8，
+来源all-codecs/package-hdr-extradata-v2，232345056字节；AVC-only HIDL服务未改。
+全EFI对照仅SQ2QDbg/initramfs与SHA256SUMS变化，不新增回退/备份，不清用户缓存。
+前boot775bdb07…健康；已发送一次正常重启，600秒窗口等待新boot，尚未做新模块实机验收。
+
+新增scripts/patch-sq2-venus-extradata.py及venus-sq2-extradata.h：
+- SQ2私有V4L2 control0x00982f00，mask bit0 VUI、bit1 mastering、bit2 content light。
+  默认0维持单平面；只在未INIT时可改，HEVC允许三项，AVC允许VUI，不广告Android HDR。
+- 下游真实HFI property及enable/index两字payload；元数据平面大小来自固件需求查询，不猜固定值。
+- 两个DMA平面分别校验地址/容量/offset并绑定原退休scope，END未确认时同样隔离，未放松DMA保护。
+- 固件buffer requirements记录数在拷贝前检查，修正第12条记录先写后判断的潜在越界。
+- 包含上一轮未部署的迟到事件event/data1/data2限速诊断；仍不证明修复MPEG2。
+- 6项内核适配测试含ASAN/UBSAN及3项元数据解析测试通过，native探针host CRC/P010参考检查、
+  既有runner包装syscall断言通过；配套三模块编译/depmod/运行导出符号校验通过。
+  helpers.c既有unused dev警告保留。测试不替代固件metadata/显示验证。
+
+原生探针新增--extradata EXISTING_EMPTY_DIR /dev/videoN，按帧保存有界固件第二平面，
+严格保持六帧像素/EOS/释放条件；独立检查器inspect-sq2-hfi-extradata.py检查记录边界/终止记录，
+保留原始metadata单位和未知record，不填HDR默认值。
+下一步启动后先AVC回归，再一次HDR10 full-AU取证；不重跑MPEG2或独立CSD。
+ESP部署后259676KiB/logs82732KiB。全部源码未提交，目标所有硬件能力/HDR仍未完成。
+
+## 2026-11-08：MPEG2双输入仍失败，正常重启与AVC恢复验证通过
+
+照片确认的是init重启超时主动SysRq panic；不能据此诊断NULL解引用。已部署6573aa73…保护包保持。
+本次未写EFI、未替换系统服务。新增诊断客户端--input-buffers通过标准OMX设置actual，保留真实min。
+首次尺寸设置后再改count触发S_FMT EBUSY，未送码流；改为同一次端口设置后实读actual2/min1，
+两帧12488/5962字节已送，SOURCE_CHANGE及输出重建完成，但仍0帧、FLUSH errno110、退出6。
+该结果排除“仅单输入缓冲导致”的充分解释，直接OEM也失败，不局限于HIDL层。
+END未确认，sys_error1/insts0/vb2_bytes4080896，保留真实隔离，未清错误/热卸载/重复PAS。
+
+关闭后每5秒约90470条0x21001无效session回调被限速抑制，证明保护及限速生效，
+不证明事件风暴或冻结根因已修复；当前日志缺event_id/data1/data2，不能推测为某一固件错误。
+正常重启SSH91.3秒恢复（600秒窗口），新boot775bdb07-938d-4d02-911e-337e7629f739。
+Android完成、sq2-omx running、pstore空、Venus sys_error0/insts0/vb2_bytes0。
+随后AVC buffer六帧/EOS/正常释放通过，691200字节逐字节等于参考，SHAc1b286b6…。
+ESP可用264920KiB/logs78308KiB。保持当前健康状态，不重复MPEG2输入数量试验。
+
+内核诊断候选venus-late-event-details已编译，core SHAd89b6d40…，未组包/部署。
+patch-sq2-venus-omx.py --late-events-only支持原始或已加旧保护的源；增加有界固定字段长度检查后
+限速打印迟到事件的session/event/data1/data2，保留NULL保护、SYS_ERROR、DMA隔离及END确认。
+4项内核适配测试（含实际dispatcher ASAN/UBSAN）及19项OMX客户端测试通过；三模块构建通过，
+helpers.c既有unused dev警告保留。下一步分析消息内容及SOURCE_CHANGE/FLUSH/CONTINUE/关闭时序，
+不能继续盲增buffer数量。HDR metadata/高精度Surface/色调映射与HEVC独立CSD仍未完成。
+
+证据out/quest2-video-618-20261107/all-codecs/mpeg2-input-count-result.json、
+direct-mpeg2-input2-{1,2}.stdout、direct-mpeg2-input2-kernel-full.txt、
+input2-recovered-avc-pixels.json、late-event-details-candidate.json。
+另纠正旧取回日志边界：mpeg2-previous-kernel-full.txt是8MiB限额文件，止于uptime1265，
+早于首次MPEG2测试1577，不能当作包含该次panic的完整日志；照片和实时捕获才是相应证据。
+全部源码改动仍未提交，保留其他未提交图形/视频工作。
+
+## 2026-11-08：迟到事件保护已持久化，正常启动与AVC回归通过
+
+当前默认initramfs 6573aa735f8fbcc6fd133a69325ccbbf1f14e5bacb15750287e343331a4f47a6，
+仍为AVC-only HIDL服务，保留全部已验收图形/音频/用户状态。全EFI只改变SQ2QDbg/initramfs与清单。
+正常重启SSH88.4秒恢复，boot 51d27080-a945-4d19-bc04-b454d834353c；
+实际venus-core文件SHA bf92953e…及/sys/module/venus_core/notes/.note.gnu.build-id与候选一致。
+保护仅拒绝NULL session的迟到session事件（SYS_ERROR例外）并限速日志，不弱化DMA隔离/END确认。
+
+本boot AVC buffer与Surface独立CSD各6帧、EOS/正常释放，通过独立NV12逐字节对照：
+各691200字节，SHA c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd。
+最终sys_error=0/core_state=1/insts=0/vb2_bytes=0；临时stayon恢复null。
+取回前失败boot的8388458字节kernel-live.txt，核验SHA后只删除其ESP副本；
+ESP可用271344KiB，logs71884KiB。未新增回退/备份，不清用户/应用缓存。
+
+本轮先前另完成HEVC Main full-AU、Main10 PQ/HLG P010、VP8及VP9 profile0的HIDL像素校验；
+这些多codec/P010候选仍仅本地，重启后RAM广告已移除。VP8缺可选colour字段的桥修正已实机通过。
+HEVC独立CSD、MPEG2关闭卡住的根因仍未解决；HDR metadata/高精度Surface/色调映射仍未接通。
+未重复native-hevc-csd或MPEG2失败试验，不宣称保护已修复冻结。用户照片明确是init重启超时后
+主动SysRq panic，不能误写成已证NULL解引用panic。后续优先取已保存日志定位消息/关闭时序。
+
+证据all-codecs/late-events-deployment.json、late-events-avc-{buffer,surface}-pixels.json、
+late-events-postboot-health.stdout、cleanup-captured-mpeg2-log.json；24项针对性测试通过。
+全部源码仍未提交，保留其他未提交开发内容。
+
+## 2026-11-08：用户照片确认重启超时后的SysRq panic
+
+用户IMG_0447.JPG清楚显示：Venus对session6e1ff00c重复0x21001无有效实例；
+随后init Reboot thread timed out → Trigger crash at last! → sysrq Trigger a crash →
+Kernel panic - not syncing: sysrq triggered crash，uptime约2005秒、Comm init。
+这是正常重启流程超时后init主动触发panic；不能写成已证NULL解引用崩溃，也不能由panic栈反推最初解码根因。
+设备随后恢复，SSH检查546.2秒返回新boot ef448b84-26a9-489d-a453-b362fe0a6391，Android/OMX正常、Venus健康、pstore为空。未重复失败测试/清错误/卸载provider。
+
+迟到事件保护候选已完整组包：
+all-codecs/package-late-events/initramfs.cpio.gz，SHA6573aa735f8fbcc6fd133a69325ccbbf1f14e5bacb15750287e343331a4f47a6，
+231503045字节；基于当前db08b64b…默认包，仍AVC-only服务。仅core模块实际内容及清单变化，
+decoder/encoder与当前包hash相同；所有其他有效文件/凭据严格保持。完整模块集depmod -e -F无错误。
+24项针对性主机测试通过，实际运行导出符号均满足候选依赖。已核验NVMe ESP/根源后原子部署，
+全EFI仅SQ2QDbg/initramfs和SHA256SUMS改变，未新建备份/清缓存，ESP可用267052KiB。
+已发起一次正常重启，600秒窗口等待新boot及AVC回归；尚未证明修复冻结。不要重跑MPEG2或native-hevc-csd。
+照片解读与实际测试证据在all-codecs/mpeg2-reboot-panic-photo.json及PROGRESS.json。
+
+## 2026-11-08：HIDL多格式与P010像素通过，MPEG2失败后等待重启恢复
+
+本节覆盖下面“仅原生HDR/HEVC HIDL零帧”的状态。boot 7152ab7c…上，使用完整首AU内参数头，
+原厂OMX→HIDL→ACodec→NDK缓冲路径取得以下独立像素证据（各6帧、PTS/EOS/STOP/DELETE成功）：
+- HEVC Main：691200字节NV12，SHA325a21d7…，与独立软件参考逐字节相等。
+- HEVC Main10 HDR10/PQ及HLG：各1382400字节P010，SHAb5986576…，逐字节相等。
+  两个向量使用相同像素、不同VUI/SEI，因此参考hash相同；非HDR显示或metadata传输证明。
+- VP8：691200字节NV12，SHA31f089a6…；VP9 profile0：691200字节NV12，SHA5aa1dc51…，均精确相等。
+  VP8首次0帧的根因已明确：固件SOURCE_CHANGE mask7缺少可选colour，桥错误要求mask15。
+  现必需尺寸/位深/progressive仍严格校验，缺colour按原下游零初始化语义传unspecified0，不猜BT601/709/2020。
+  修正后同向量立即六帧通过；bridge 6项主机测试覆盖缺可选字段与缺必需字段区别。
+- HEVC独立CODECCONFIG仍未修复，不把full-AU对照当普通MP4/CSD播放已通过。
+  HIDL P010服务当前仍过滤10-bit profile；metadata/SoftwareRenderer/Surface/tone-map未接通。
+
+MPEG2完整AU首次测试仅送1帧、0输出，停止卡住，外层30秒TERM退出143。
+稍后sys_error=1、insts=0、vb2_bytes=3585280；记录真实隔离保留内存，不清错误/热卸载/重试。
+日志有SOURCE_CHANGE mask7/progressive0和后续无有效session的0x21001事件；尚不能归因。
+正常重启第一连接尝试未连通，随后明确得到旧boot及NORMAL_REBOOT_DISPATCH，命令已送达。
+当前主机600秒窗口等待新boot，暂未确认恢复；没有写EFI或创建新回退。ESP最后271584KiB/logs72464KiB。
+
+静态检查另发现确定的迟到事件NULL路径：callback close过滤令to_instance返回NULL后，
+hfi_event_notify仍可能分发到依赖inst的session处理函数。新增--late-events-only保护，仅SYS_ERROR
+允许无session；无效session日志限速，保留真实错误、DMA隔离与END确认。
+实际patch后dispatcher ASAN/UBSAN测试和未知锚点拒绝测试通过；三模块6.18构建通过，
+未新增外部符号依赖，尚未部署/真机验证，不宣称此修正证明冻结根因。
+后续应先确认恢复并核验运行模块/provider，再用成套启动包部署候选；禁止热替换Venus。
+
+证据out/quest2-video-618-20261107/all-codecs：
+hidl-{hevc,hdr10,hlg,vp9}-full-au-1-pixels.json、hidl-vp8-full-au-2-pixels.json、
+hidl-mpeg2-failure-state.stdout、reconnect-after-mpeg2.jsonl、venus-late-events-build.json。
+默认仍db08b64b…及AVC-only服务；多codec/P010/optional-colour只在RAM测试，正常重启即消失。
+全部源码未提交，保留此前图形/视频改动；不宣称所有格式/最大规格/显示/DRM已完成。
+
+## 2026-11-08：冻结后已恢复，HDR原生像素与原厂HEVC完整帧通过
+
+本节覆盖下方等待恢复及HDR仅离线状态。用户已现场恢复，boot 7152ab7c-cbc2-4de5-911b-aa9618cdc5ba；
+SSH和持久AVC HIDL正常。默认包仍db08b64b…，本轮未写EFI、未替换系统服务。
+- 原生HDR10(PQ/BT2020)和HLG(Main10/P010)各六帧全部独立CRC匹配，EOS/正常关闭通过。
+  实际stride640、320x256分配、crop320x240；不代表HIDL HDR元数据或显示/色调映射通过。
+- 同一原生HEVC码流使用完整首AU内参数头，经未修改原厂OMX+bridge输出六帧，PTS/EOS/关闭通过。
+  紧凑NV12共691200字节逐字节等于参考，SHA325a21d773ec202f45d4cdb0504e5927ce8e54cc058f4dba42e23ae2f9481e07。
+  这是绕过HIDL的直接OMX证据；HIDL独立CODECCONFIG路径仍未修复，不能扩大声明。
+- 已取回冻结前kernel日志，末段重复HFI 0x221007(EBD)无有效session。
+  sq2_closing回调过滤也会产生相同日志，不能由此断言UAF/内存破坏；pstore为空，根因仍未知。
+  禁止原样重跑native-hevc-csd；后续硬件stdout直接写主机文件，超时也保留部分日志。
+- 最新健康sys_error=0/core_state=1/insts=0/vb2_bytes=0，ESP可用273044KiB、logs71004KiB。
+  多codec/P010 HIDL仅本地候选，10-bit profile仍未启用；全部源码未提交。
+
+证据all-codecs/{native-hdr10.stdout,native-hlg.stdout,direct-hevc-full-1-pixels.json,
+freeze-previous-kernel.txt,resumed-health-2.stdout}；direct诊断客户端新增标准codec选择，
+15项OMX/ABI主机测试通过。下一步定位HEVC独立参数头与HFI协议/队列差异，继续真实HDR链路。
+
+## 2026-11-08：全硬件能力/HDR移植进行中，原生HEVC/Main10已复核
+
+当前默认initramfs为db08b64bebd2a2feee0baf84c9d4e92a4f8d4e26e868dd44a78285b666f862a0，
+只在已验证AVC包上增加逐codec只读HFI能力导出；持久HIDL服务仍为AVC版。
+五codec HIDL服务/诊断桥目前仅RAM测试，重启即消失，不得称全部codec已可用。
+
+- 实际固件HEVC Main/Main10 HighTier6，VP9 profile0/2 level6.1，VP8版本0..3，MPEG2 Simple/Main；
+  MPEG1没有完整能力表，读ENODATA，不伪造。解析器覆盖HEVC tier、VP9缺5.2位移、MPEG2枚举映射。
+- boot ee4d1fe3-f8fa-4db1-b6a3-20a733cd7bc2上，独立原生V4L2 HEVC与Main10/P010各六帧
+  全部CRC等于独立参考，EOS/释放通过，结束sys_error=0/insts=0/vb2_bytes=0。
+  P010实读320x256、stride640、payload245760；这证明10-bit硬解，不证明HDR显示。
+- HIDL HEVC四次均0帧；已确认callback在poll等待，stop时FLUSH超时后才看到SOURCE_CHANGE。
+  END未确认触发真实quarantine；未清sys_error/热卸载/重复PAS。已取证并请求正常重启。
+  相同原生码流经HIDL仍0帧，poll真实ready位正常传递；问题进一步集中在CSD/队列时序。
+- bridge新增QP10↔P010、真实byte stride及crop bitdepth映射，六项主机测试/ARM64编译通过。
+  HIDL标准P010(54)↔QTI P010(0x7fa30c0a)及byte stride布局候选已编译，ABI/metadata测试通过，未部署。
+  HIDL仍过滤10-bit profiles；HDR VUI/static/dynamic元数据及高精度显示尚未接通。
+  AOSP16 SoftwareRenderer没有P010分支，不能仅加profile标签就宣称HDR。
+- 最近ESP可用287880KiB、logs56168KiB；有界日志策略保持，每次部署/重启继续核对空间。
+  上轮SSH113.9秒恢复，新boot已确认；后续重启继续600秒窗口。
+
+全部证据在out/quest2-video-618-20261107/all-codecs/PROGRESS.json及同目录。
+源码未提交，保留所有其他图形/视频改动。之前AVC像素通过而普通APK严格render验收仍false；
+不能因新增能力声明扩大已有验收结论。
+
+最新续接：正常重启得到boot c8a9eb2d-48f1-4bf7-850e-3b018e59a3e6，SSH105.8秒恢复。
+随后原生独立CSD对照（native-hevc-csd）SSH命令48秒超时，网络无路由；该runner没有在TimeoutExpired
+时保留部分stdout，不能声称此测试解码通过/失败或确定内核根因。已完成600秒SSH检查（47次，仍不可达）并询问设备屏幕，
+不追加重启、不清错误。恢复后先取boot/kernel/PM/日志/ESP状态，不重跑同一不明实验。
+Windows侧ping无响应且ARP邻居Incomplete；不是仅WSL连接失败。等待设备屏幕/网络恢复后续接。
+用户随后确认设备“卡住”。这是现场卡住观测，不足以定位Venus、GPU或PM根因；已请求现场正常重启，完全无响应时再强制关机开机。恢复后只读取证，禁止直接重复native-hevc-csd。
+HDR10/HLG各6帧P010测试向量已生成，ffprobe核对BT2020/PQ或HLG、静态HDR10 metadata和10-bit精度；
+只是本地测试输入，未运行真机HDR。构建器build-sq2-hevc-test-vector.py新增--dynamic-range；
+现有video-probe构建器以--media-file-binder实际平台libbinder_ndk.so构建MediaCodec文件探针。
+本轮主机OMX/ABI14、bridge6、builder6、XML5、caps1通过；ARM64 service/bridge/probe构建通过。
+
+## 2026-11-07：HIDL独立启动、旧C2清理、AVC能力按实际固件声明
+
+此条覆盖下方旧profile枚举/旧默认包状态。用户要求能力声明符合硬件及当前适配路径，
+不照抄donor XML、不把测试片规格当上限。默认包已部署并正常重启：
+initramfs fdffc804df8a8d6c6369b9d2129d525be8c62fab3494523c2aa4110b6c4e812e，
+boot b6888ecf-a481-4c31-ba98-0397fbae5c9b，SSH105.1秒恢复（600秒整体窗口）。
+仅SQ2QDbg/initramfs及SHA256SUMS改变，没有新增备份；历史EFI入口/用户数据/应用缓存保持。
+唯一内核6.18.60-sq2-android1，全部源码改动未提交，禁止覆盖其他未提交图形/视频工作。
+
+- 自定义c2.sq2.*.experimental已从启动包、init服务/manifest/XML和实际codec枚举移除。
+  确认无进程映射、fd或挂载引用后，删除/data/vendor/sq2-codec2下五个旧项目runtime：
+  clean-20261030、omx-hidl-v1、omx-v1、v1、v2u，共3284KiB。系统c2.android.*及
+  libc2dcolorconvert保留；C2前缀是Codec2接口名，不能等同软件解码或按前缀全删。
+- 新只读sq2_avc_caps导出真实HFI表。固件五个profile均为Level6：Baseline、
+  Constrained Baseline、Main、High、Constrained High。初版v1误把最大编码限制在5.2，
+  导致服务拒绝启动；没有绕过错误，已依据下游HAL/OMX头补6/6.1/6.2内核及用户态映射，
+  也修正原HFI5.2→V4L2 5.1错误。v2正常启动，Android枚举完整五项且各level=131072。
+- 启动按native ready→生成实际能力XML→启动OMX→刷新media，无旧C2依赖。
+  宽高分别96..8192、2x2对齐、宏块/帧138240、宏块/秒3888000、帧率1..480、
+  码率1..220000000、驱动session上限16。须组合约束；Android确实拒绝8192x8192。
+  Android计算出3840x2160上限120fps、7680x4320上限30fps，这些是能力枚举，未做极限吞吐实测。
+  session上限来自core，不代表16路最大规格并发吞吐已验证。
+- HIDL IOmx/IOmxStore/ashmem和hwservicemanager正常注册；UID/domain分别
+  mediacodec/mediacodec、system/hwservicemanager。本次实读全局SELinux为Enforcing，
+  与前次permissive记录不同；未审计全部domain permissive例外，不宣称完整生产策略验收。
+- 重启后buffer-9和surface-6（独立CSD）各6帧/EOS/正常释放，紧凑NV12各691200字节
+  全部等于参考SHA c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd。
+  buffer脚本最终grep无匹配导致shell exit1，实际CLIENT_EXIT=0、六帧像素和健康均通过；
+  不把日志筛选退出码误写为解码失败。
+- 普通用户APK自动选择OMX，High320x240@30输入/输出300、9961ms、EOS/STOP/RELEASE正常；
+  High1920x1080@60输入/输出600、9981ms、EOS/STOP/RELEASE正常。
+  rendered分别293/300、562/600，两个严格RESULT均false，完整显示验收尚未通过。
+  1080p60仅验证传输/时序/关闭，未作逐像素比对；不能推广最大规格、所有格式或零拷贝。
+
+最终Venus sys_error=0、insts=0、vb2_bytes=0；stayon恢复null，测试应用已停止。
+ESP可用305708KiB、logs39160KiB；8MiB每boot上限/32MiB空间底线继续保留。
+证据system-omx/PROGRESS.json、hidl-only-v2-java-caps.txt、hidl-buffer-9-pixels.json、
+hidl-surface-6-pixels.json、hidl-high-auto-v2.stdout、hidl-high-1080-60-auto-v2.stdout、
+retire-project-c2-runtime.stdout。能力解析匿名实机fixture/ASAN/UBSAN与C2定向移除测试通过，
+ARM64服务及配套模块构建通过。下一步定位真实显示丢帧/回调缺失，继续其余codec/元数据适配；
+HEVC/VPx/HDR/secure/完整extradata/原厂gralloc零拷贝、最大吞吐与长稳仍未完成。
+不清sys_error、不热卸载provider、不重复PAS；硬件异常先取证。
+
+## 2026-11-07：HIDL系统接入已持久化，Surface像素与普通APK路径推进
+
+本条覆盖下方旧“SSH失联/HIDL 0帧/仅RAM服务”状态。用户要求继续原厂OMX→HIDL→ACodec，
+自动部署/正常重启/设默认已授权；本轮不新增回退，不清用户数据、凭据或应用缓存。
+工作树/分支不变，唯一内核6.18.60-sq2-android1，全部修改仍未提交。
+
+已完成并实际观察：
+- HIDL v1 initramfs49fe4858…正常启动，boota9a033da…；init以system/hwservicemanager和
+  mediacodec/mediacodec身份拉起管理器和OMX，IOmx/IOmxStore/ashmem注册成功，ccodec=1。
+  设备既有permissive策略仍在，不是生产SELinux通过。
+- HIDL buffer六帧、EOS、关闭及像素精确通过（hidl-buffer-6/7）。此前失败的AllocateBuffer
+  原因为默认hamoa XML漏接quirks，现已接通，不再把AIDL结果代作HIDL证明。
+- 配套CODECCONFIG OEM0x20000→native0x01000000→HFI0x80，模块只读能力核验；SPS/PPS单独入队成功。
+- Surface首次6帧却像素错位。AOSP SoftwareRenderer的NV12分支按width而非stride读行；
+  HIDL改为报告真实分配384×256，并保留可见crop320×240。hidl-surface-4的6帧/691200字节
+  转为NV12后逐字节等于独立参考，SHA c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd。
+- 普通APK枚举曾因空profile导致Java Range异常/native abort。反汇编确认Quest QUERYCTRL offset56
+  (flags)是profile支持位图，现从真实QUERYMENU构造；不能用reserved[0]或原生控制flags冒充。
+  修正后62个codec条目均能读取，自动选择OMX.qcom.video.decoder.avc且hardware=true。
+- APK带frame-rate=30配置曾被私有0x992077拒绝；已将Q16 fps转真实VIDIOC_S_PARM时间分数。
+  10秒320×240 baseline APK实际inputs=outputs=300、EOS=true、elapsed9962ms，STOP/RELEASE均OK，
+  insts/vb2_bytes/sys_error均回0。rendered回调仅272/300，严格RESULT=false，完整播放验收未通过。
+- 当前OEM profile枚举在缺失的ConstrainedHigh处提前NoMore，自动列表仅三项；High流独立像素已通过，
+  但High自动选择待补。不要扩大为HEVC/VPx/secure/HDR、gralloc零拷贝、完整extradata或长稳通过。
+
+默认入口已安装HIDL v3 initramfs966a661ca6b3da1182f11386f2f30d236bcd2763008a7666044e531568659d80，
+相对v1仅HIDL service、bridge与bundle校验表变化；全EFI仅SQ2QDbg的initramfs及SHA256SUMS变化。
+未新增备份；原历史入口不删。部署前ESP可用323656KiB、logs21092KiB；有界8MiB日志和32MiB底线保持。
+正常重启后SSH第7次、85.1秒恢复，新boot fb7aaeee-89fa-43bc-a7d6-b4b01077ba31。
+默认v3载荷hash、CODECCONFIG能力、init服务身份/注册均实读匹配；无临时挂载。
+hidl-surface-5与hidl-buffer-8各六帧再次像素完全匹配/EOS/关闭通过。
+重启后APK自动选OMX，300帧、EOS、9962ms、STOP_OK/RELEASE_OK；rendered295/300，RESULT仍false。
+最终sys_error=0、insts=0、vb2_bytes=0；ESP可用320376KiB、logs24368KiB，临时stayon已恢复null。
+
+源码/本地证据在out/quest2-video-618-20261107/system-omx；重点：hidl-surface-4-pixels.json、
+hidl-profile-mask2-runtime.stdout、hidl-player-auto-4-close.stdout、package-hidl-v3、hidl-v3-deployment.json。
+14项OMX/ABI测试、6项桥测试、1项Venus adapter测试、4项XML测试通过；ARM64构建和git diff --check通过。
+下一步：解决普通APK渲染回调尾部缺失与High profile枚举；新boot自动注册、实际载荷、
+ESP、Surface和buffer复测已完成。不要清sys_error/热卸载/重复PAS，真实异常先取证再正常重启。
+
+## 2026-11-07：ESP写满恢复，启动诊断修正已部署，HIDL继续
+
+用户在Linux启动文字遇No space left on device；自行清理logs释放约300MB后恢复Android和SSH。
+恢复boot ad468496-de3e-4fa4-be65-9a7488ddea40，ESP可用344828KiB、日志3064KiB。
+实读确认user0=system.HEADLESS，user10=full.SECONDARY/ADMIN当前用户，ro.fw.mu.headless_system_user=true。
+Termux官方v0.118.3 arm64已装但拒绝次用户bootstrap；后装F-Droid TermOne Plus(com.termoneplus)供root终端。
+Scene用户反馈旧修正未生效仍打不开。未切用户/迁移data。ADB配对完成；一次性配对码不入库。
+
+此boot Venus原先ready，后系统suspend/resume触发hfi-resume=-110，sys_error=1，core_state=0，
+insts=0、vb2_bytes=0。不是本轮HIDL解码触发；未清错误/热卸载/重复PAS。
+证据system-omx/newboot-venus-error.stdout。正常重启恢复后必须重新检查健康才做HIDL。
+
+已部署启动诊断修正：initramfs dd33e800976cbda46e1043576ba540b2f6709a5dfe9af3ae1751ea5fdd4bd732。
+仅init日志失败路径、bin/boot-kmsg和bin/ssh-framework-boot三处有效变化；模块/固件/凭据不变。
+boot-kmsg每boot最多8MiB，并在可用空间低于32MiB时停止；初始持久日志不可用则使用RAM日志，
+不再因创建日志目录/打开日志ENOSPC阻断Android启动。SSH按uptime等待600秒。
+ARM64构建和主机ASAN/UBSAN限额/ENOSPC测试通过；六项SSH两侧测试通过。
+ESP使用同分区临时文件、完整hash/gzip检查后替换；没有新增备份/回滚工作，现有历史入口保持。
+全EFI核验仅SQ2QDbg/initramfs和SHA256SUMS改变，部署后可用342780KiB。
+已请求一次正常Android重启；等待新boot，主机按600秒整体窗口重连。
+
+HIDL AllocateBuffer接线及runtime已准备在system-omx/hidl-allocate-bundle.tar、stage-hidl-allocate.sh，
+尚未在本次新boot部署。正常init持久集成仍未完成；不可把AIDL六帧成功写成HIDL成功。
+
+## 2026-11-07：用户确认已启动，SSH服务未启动，转ADB恢复
+
+用户确认Android正常启动但没有SSH，要求每次重启后SSH判失败窗口改为10分钟。
+已修改项目AGENTS约定，新增主机600秒重连脚本，设备ssh-framework-boot也由240轮
+改为基于uptime的600秒；共6项测试通过。设备端修改尚未部署，旧包未变。
+主机当前600秒重连日志system-omx/reconnect-600-1.jsonl；不能将单次拒绝当整体超时。
+发现旧SSH启动助手可能在Android boot_completed前退出，但尚未读到真机日志证实。
+用户已开启无线ADB，连接端口192.168.8.195:43439已TCP连通；正在等待完成首次配对。
+WSL已安装adb34.0.4，未记录用户一次性配对码到项目文件。ADB恢复后先取ssh-framework-boot.txt
+及ssh.txt，使用原身份恢复dropbear，再读取boot_id和Venus健康，继续HIDL AllocateBuffer验证。
+
+## 2026-11-07：系统 HIDL OMX 移植，AllocateBuffer 修正待实机验证
+
+用户明确选择原厂 OMX 服务 → HIDL → 系统 ACodec；自动部署/正常重启/设默认已有授权。
+用户本轮要求不考虑回退：不新增备份/回滚工作，不删除既有入口，不清用户数据或应用缓存。
+唯一内核仍6.18.60-sq2-android1，全部未提交图形/视频改动必须保留。
+
+已完成：
+- 系统 AIDL C2 → 原厂 OMX AVC 曾通过 buffer 和 ImageReader Surface+CSD 两组测试：
+  各6帧、EOS、退出正常，691200字节逐字节等于软件参考，PTS为0/33333/66666/99999/133332/166665。
+  证据 system-omx/system-pixel-verification.json。此结果不能当作HIDL通过。
+- 64位AOSP16 hwservicemanager移植并实际注册manager/token；在成为hwbinder context manager后
+  发布disabled=false，满足现平台libhwbinder握手。不是伪造ready或绕过注册。
+- OMX HIDL服务注册IOmx/IOmxStore及真实ashmem allocator；移植memory mapper。
+  原厂7库不改，vendor路径进程局部加载VIDC桥。只广告非安全AVC。
+- HIDL代理在平台OMXNodeInstance之前转换96字节wire与112字节native PortDefinition；
+  保留sanitize，拒绝跨进程opaque pointers。线性NV12映射标准21↔OEM0x7fa30c04，
+  明确requiresSwRenderer，当前不支持原厂gralloc零拷贝。
+- HIDL已能CONFIGURE/START并送4个AU，但首次输出端口重配置UseBuffer失败，0帧。
+  平台默认parser读取media_codecs_hamoa.xml，而自定义OmxStore XML没有接入默认parser，
+  日志明确Failed to obtain quirks。准备接入原生requires-allocate-on-input/output-ports，
+  复用此前独立客户端成功的OEM AllocateBuffer，由平台执行共享内存copy。
+
+最新状态：失败boot f0652a54-ea7c-45e6-8265-a048c90fcdf0触发END未确认，sys_error=1、
+insts=0、vb2_bytes=22056192。已停止硬解、保存hidl-buffer-5及hidl-omx-v5日志，
+未清sys_error、未热卸载provider、未重复PAS。随后通过Android sys.powerctl发起一次正常重启。
+SSH192.168.8.195先超时/无路由，后持续Connection refused；尚未确认新boot或当前屏幕。
+已询问用户屏幕/地址，待回复。不能把重启请求写成启动成功，也不能在未知内核状态下重试硬解。
+本轮未修改EFI/initramfs，仍为4c740ae7…；HIDL此前仅RAM overlay，重启后需重新安装。
+
+本地新增可复现构建入口scripts/build-quest2-hidl.py，源archive固定AOSP android-16.0.0_r1哈希，
+补丁patches/quest2-hwservicemanager-enabled.patch，编译参数configs/quest2-hidl-build.json可重定位。
+三件ARM64重建成功，见system-omx/rebuild-hidl-1/BUILD.json。
+scripts/prepare-quest2-hidl-xml.py将AVC include接到实际variant，删除该名称冲突alias，
+保留其他音频/codec项；framework manifest只解除manager/token的max-level。
+configs/quest2-media-codecs-omx.xml已补两项AllocateBuffer quirks，尚未部署/实测。
+14项OMX测试（含ASAN/UBSAN ABI及session）+4项XML保留/拒绝测试通过。
+修正了session测试漏链接ASAN而加载已插桩mock的问题；失败与通过日志均保留。
+
+下一步：确认设备启动/SSH；先读取新boot、内核健康及有效文件。安装新HIDL组件和默认variant
+XML接线，验证ACodec确实采用AllocateBuffer，再做6帧/PTS/EOS/像素/正常关闭；失败后先取证。
+通过后再接入正常init启动和6.18启动包并验证正常重启，不能将临时nohup注册视为系统移植完成。
+C2仍须使用no-omx-aliases版本及无Alias XML，ccodec策略1；父包security/build.prop仍含4，需改。
+HEVC/VPx、真实流中DRC、完整extradata、HDR/secure、原厂gralloc/零拷贝及长稳尚未完成。
+证据目录out/quest2-video-618-20261107/system-omx；全部源码尚未提交/推送。
+
+## 2026-11-07：uncached 分配及原厂 OMX AVC 完整链路通过
+
+在 work/qualcomm-618 / codex/quest2-proprietary-gpu 继续开发，单一内核基线仍为6.18.60-sq2-android1。
+此条覆盖下文历史“uncached extradata 阻断”。本轮完成所需分配能力和原厂 AVC 的基础接口对齐，
+不代表全部原厂 codec/Surface/安全解码能力已移植。
+
+- ION flags=0/system mask bit25/align0 →动态发现 MSM render 节点，GEM_NEW(MSM_BO_WC)、
+  GEM_INFO核验cache flags、PRIME导出真实DMA-buf。6.18实际mmap/vmap使用write-combine，
+  初始化页有cache清理；不把cached伪称uncached，不新增ION驱动、不提交GPU命令。
+  flags=1继续使用system DMA heap。两类16KB真实分配、零初始化、双映射共享、fd/映射寿命和越界拒绝均通过。
+- cached输入复用暴露缺少同步：初始帧正常，后续真实DATA_CORRUPT。补真实DMA_BUF_SYNC ownership边界后，
+  六帧重复验证像素完全匹配；没有吞错误标记。安全heap/未知flags/特殊alignment仍拒绝。
+- 配套Venus从真实HFI sequence属性携带presence/尺寸/bitdepth/progressive/colour；缺字段不猜值。
+  原厂初始输出端口disable/free/enable/reallocate成功，minimum从18变6。空EOS走真实STOP，区分DRC LAST。
+- slice来自真实NV12 G_FMT的32对齐高度并检查sizeimage。Quest实际二进制只读extradata crop，
+  不使用参考源码reserved回退；桥的第二个元数据伴随plane把真实V4L2 COMPOSE/G_FMT编码为
+  Quest indexed OUTPUT_CROP记录，严格校验映射边界和寿命。**这是裁剪元数据协议翻译，
+  不是原始HFI extradata透传**；MISR集合为空，未伪造HDR/interlace/统计。
+- 原厂flush转真实HFI flush且等待应答；应答后按正常VB2生命周期清除EOS dequeue latch并归还剩余缓冲。
+  不清sys_error、不热卸载provider、不重复PAS。早期未支持SOURCE_CHANGE的失败曾进入END隔离，
+  已保存证据并正常重启恢复；后续成功不是清错误字段得到的。
+
+已按用户授权自动部署并正常重启。当前debug initramfs
+`4c740ae7cd8c4b48d3950b9ca405a19b72225315cc8c44d27e20f0ac17812b63`，
+boot `f0652a54-ea7c-45e6-8265-a048c90fcdf0`，boot_completed=1，SF3241/system_server3639。
+配套模块core `2b9661707a746c43dde4472b8b8221db9aa231e3e8c167dfb01bc1a19bec46cf`，
+dec `133c679c560288c87168864689660e845b596287d7b494d8e925fa6f6d484269`，
+enc `d02f04dfd90cbc9a6f21d8c2cc7bb5af45e0acfa601604ba3249a4fba0ae125e`。
+恢复副本与原生ROLLBACK.sh在 `/data/local/tmp/sq2-efi-install.2mefcK`。
+原Mesa入口/旧回退、GLES Direct、凭据、用户数据保留，不清缓存；其他EFI清单更新前后相同。
+
+最终两次独立打开原厂AVC均exit0：六帧、EOS、Idle→Loaded、全部FreeBuffer、FreeHandle/Deinit成功。
+320×240可见画面、stride384、slice256，PTS为0/33333/66667/100000/133333/166667。
+每次691200字节逐字节等于独立软件参考，SHA256均为
+`c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd`。
+两次前后insts=0、vb2_bytes=0、sys_error=0、hfi_error=0，boot及SF/system_server不变。
+65项回归通过、无跳过；解码客户端及桥/内核夹具包含ASAN/UBSAN检查，ARM64五件构建完成。
+
+证据 `out/quest2-video-618-20261107/uncached-native/`：PROGRESS.json、PIXEL-VERIFICATION.json、
+decode-final/reopen、allocation-final、build-final、regression-tests-complete.log、package-flush和install-flush。
+设备独立用户态候选 `/data/local/tmp/sq2-omx-uncached-20261107`，原厂7库原字节不改。
+尚未替换系统C2/MediaCodec；下一步为原厂HEVC/VP9、真正流中分辨率变化、10bit/HDR、原始HFI
+extradata、Surface/gralloc零拷贝、seek/flush持续运行和系统服务接入。SQ1/功耗/长稳未验收。
+全部源码及本轮图形改动仍未提交/推送。
+
+## 2026-11-07：OMX 接入当前高通分支，推进到真实缓冲分配
+
+工作树为 work/qualcomm-618，分支 codex/quest2-proprietary-gpu。ce03b44 已包含 OMX 客户端、VIDC 桥及
+Venus PM/min-output/safe-close 源码；本轮复用这些代码并补齐高通启动包，不重复 cherry-pick，也不覆盖原工作区的 Mesa 修改。
+
+按已有自动部署/重启授权，将 candidate3 Venus 与现有 Direct 15 库组合并正常启动：
+initramfs SHA256 cf7276be1bcd8db29fbf76e7cb3c4acf8adc3b9e46bffad549da3d7d6969fb65，
+boot 63c2cafa-9f6c-4e8b-9411-952bef602e51，6.18.60-sq2-android1，boot_completed=1。
+相对前一 Direct 包仅两处 venus-core、两处 venus-dec 及视频校验清单变化；GLES 58e1aafe…、
+其他模块/凭据/菜单默认保持。原 6.18 Mesa 及旧回退保留。
+设备恢复目录 /data/local/tmp/sq2-efi-install.5zkd01 保存前一 Direct 包及原生 ROLLBACK.sh。
+
+原厂 AVC 的 Init/GetHandle/GetState/FreeHandle/Deinit 已通过，旧 open EIO 未复现。
+本轮桥记录控制 ID，确认 CAPTURE minimum 0x980927 在 HFI INIT 前返回 EINVAL；
+仅对未分配/未流式会话的这个错误启用显式 AUX_CAPS 真实辅助查询，其余 EINVAL、辅助查询错误保持。
+实际最小缓冲为输入4、输出18，不使用请求 count=1 冒充结果。
+
+普通 OMX NV12 请求触发原厂 UBWC→C2D 转换，而当前隔离环境没有 libC2D2。
+客户端新增 --venus-nv12，显式请求 QCOM 0x7fa30c04；实机 SetParameter/GetParameter/Crop 成功，
+返回320×256、stride384、slice0、crop320×240。因为 slice 和存储布局尚未验证，输出仍仅允许 raw，
+不能把格式名直接当作已验证的紧凑 NV12。默认标准格式及 --native-color 保持，两个显式选择互斥。
+
+实测原厂 ion_alloc_fd 的 mask=0x2000000、flags=1、align=0；进程局部桥将这一精确的
+cached system 请求交给真实 DMA_HEAP_IOCTL_ALLOC。四个输入缓冲分配成功，每次实际495616字节，
+OMX可用大小491520。安全/其他heap/uncached/特殊alignment继续明确拒绝，不替换系统分配器。
+
+**当前阻断：uncached extradata。** 下一次请求为16384字节、同system mask、flags=0；
+设备仅有 /dev/dma_heap/system，桥返回 EOPNOTSUPP，原厂输出分配返回 OMX_ErrorInsufficientResources。
+源码参考明确 extradata 使用 uncached。不得改 flags 或仅换名字把 cached 内存冒充 uncached。
+下一步需要真实 uncached DMA-buf 后端，或有证据支撑的完整缓存同步适配，再继续队列/事件/真实帧验证。
+
+最终客户端 exit6、frames0、EOS0；Loaded→Idle 分配中断，正常状态清理未完成，
+OMX_FreeHandle=0 且内核 insts=0、sys_error/hfi_error/PM error=0。SF3140/system_server3663及boot未变；
+最终实验前后 vb2_bytes 都为72450048，不能把它宣称为0或所有资源无泄漏证明。
+没有进入 Executing 或送帧，没有替换系统 C2、没有游戏/MediaCodec修复结论。未清缓存。
+
+最终64项测试实际通过（21 packer、6 bridge、12 decode、10 probe、10 runtime、5 builder），
+ARM64四件重新编译并在独立目录回读hash，最后候选重复到同一真实阻断。
+桥测试覆盖CAPTURE早期/流式后/关闭AUX差异、辅助失败、cached分配/安全拒绝和真实fd寿命；
+主机模型不作为硬件解码证明。代码及本轮图形修改尚未提交/推送。
+
+证据：out/quest2-video-618-20261107/resume-on-qcom，包括 INTEGRATION.json、newboot.stdout、
+decode-control-trace、decode-capture-minimum、decode-venus-nv12、decode-ion-trace、
+decode-ion-system、decode-final 的脚本/stdout/stderr，build-final、final测试和 PROGRESS.json。
+设备独立候选位于 /data/local/tmp/sq2-qcom-omx-20261107；原厂7库原字节保持。
+
+## 2026-11-07：Direct高通默认启动成功，设置及EasyTier花屏验收通过
+
+按用户“自动部署、自动重启并设为默认”授权完成；新boot `73d4ee5a-dfe4-4904-b1d0-68f4e5e75e33`，
+内核6.18.60-sq2-android1，SQ2QDbg/qcom，boot_completed=1，SF3254/system_server3696。
+启动helper完整校验15库并选择高通；实际Settings/EasyTier/SurfaceFlinger进程映射高通GLES，
+各自root内GLES完整hash均为58e1aafe…。原始启动身份保留且严格主机密钥SSH回连成功。
+
+真实设置的网络主页与显示设置页、EasyTier编辑页截图均恢复清晰文字/位图/控件，无原先重复分块或横条。
+这是本次实机截图验收，不是用户物理屏幕/全部应用或长时稳定性认证。
+全局同PID1挂载命名空间：GLES三帧逐像素通过；Vulkan compute/image/raster通过；
+2073×1382 Vulkan ImageReader WSI三帧各2864886像素bad0，3次present/3个native fence。
+该WSI消费端为ImageReader，不冒称可见Vulkan SurfaceFlinger链路本轮已测。
+前后boot及SF/system_server PID未变；本轮dmesg定向GPU/GMU/SMMU fault/hang/timeout筛选无匹配。
+crash buffer仍包含gscd等平台服务记录，没有将这些记录归因或掩盖为GPU修复的一部分。
+EasyTier首次隐式intent未解析，改用系统resolve-activity返回的.MainActivity启动成功；原失败证据保留。
+
+全EFI清单前后只有3项变化：debug initramfs、其SHA256SUMS、用户指定的GRUB默认/标签；其他108文件保持。
+高通默认initramfs db5e6119…，菜单6695c417…，原6.18 Mesa525d739f入口和旧回退仍在。
+原debug与原生恢复脚本位于 `/data/local/tmp/sq2-efi-install.MwqyNk`；菜单恢复脚本在
+`/data/local/tmp/sq2-qcom-debug/direct-candidate-20261107/ROLLBACK-MENU.sh`。
+恢复菜单可选择原6.18 Mesa；恢复旧f742 debug会恢复历史花屏及缓存门槛，不能作为新高通试启输入。
+未清理任何缓存、未改账号/应用数据/设置、未重建内核/DT/模块，也未推送本轮源码。
+
+证据：`out/qualcomm-graphics-618-20261107/direct-postboot/ACCEPTANCE.json`、settings/easytier截图、
+global-basic/global-wsi/mapped-runtime输出、efi-after完整清单；其他阶段见下文。
+Direct是现有sysmem路径兼容规避，GMEM根因、性能/功耗、游戏覆盖和SQ1跨机验证仍未完成。
+
+## 2026-11-07：Direct候选已部署并设为默认，正常重启已请求
+
+用户明确授权自动部署、自动重启并设为默认。新debug initramfs db5e6119…已安装并完整回读，
+原debug f7422b5d及配套SHA256SUMS保存在设备 `/data/local/tmp/sq2-efi-install.MwqyNk`，带原生ROLLBACK.sh。
+设备存储链证实ESP与当前Android根源同盘；ESP空间不足双份，通过已校验持久恢复副本复用旧debug文件空间。
+109个其他EFI文件在更新前后保持；随后只改GRUB默认与两个显示标签，三个chainloader路径、顺序和载荷不变。
+新菜单SHA6695c417…，默认sq2-qcom-618-debug；6.18 Mesa525d739f及旧回退保留。
+菜单恢复脚本 `/data/local/tmp/sq2-qcom-debug/direct-candidate-20261107/ROLLBACK-MENU.sh`，副本恢复验证通过。
+未清缓存、未停应用、未热替换全局库。已发起一次正常Android reboot，客户端随重启超时，不能据此重发；
+新boot与实际设置/EasyTier结果仍待观测。详见out中的direct-deployment-review和direct-postboot。
+
+## 2026-11-07：WSL续接，Direct候选修复隔离大窗口，实际设置应用待新启动
+
+开发工作树 `/mnt/spx-workspace/chromebookOS/work/qualcomm-618`，分支 `codex/quest2-proprietary-gpu`，
+已快进到 `ce03b441a4be07ad591e874d3a529557b1233e68`；原工作区未提交的Mesa开发保留。
+私有包从 `F:\WSL\SPX-Workspace\qualcomm-618-20261107` 导入，归档及6681个manifest文件逐一hash/大小验证通过。
+导入证明在上级 `work/private-import-20261107/IMPORT-VERIFICATION.json`；所有私有库、凭据与原始证据只在忽略目录。
+
+用户补充系统设置也花屏。当前真机192.168.8.195，6.18.60-sq2-android1，boot357c1a85…，
+SF3216/system_server3668；实际应用HWUI为skiagl。普通GLES 2073×1382正常；同尺寸HWUI重复横条/黑底，
+640×360正常。公共binning hint和esx配置未增加有效证据，已停止该路线。
+
+修改GLES原有context初始化的两条ARM64指令，启用显式Direct/sysmem：VA0x167734，
+`a2791c1244ab3db9` → `a2011d325fab3db9`。原能力字段、layout8/bank15、CPU上传、PBO、fence修正不变。
+新完整GLES SHA `58e1aafe2de28dfb632df9c64b56b761906bf8aeae014975f71938f1061a4d83`。
+这只是绕过多分块渲染故障；没有证明GMEM底层根因已修复，也未验收性能/功耗/所有应用/SQ1。
+
+真实私有命名空间大HWUI窗口完成 baseline→modified→rollback→reapply：与正常640×360场景比较230400像素，
+不同数依次230394→0→230304→0；最初候选扩展背景2118606像素全正确。
+GLES三帧、Vulkan compute/image/raster、13×7及2073×1382外部硬件Bitmap上传、原HWUI三帧回归均通过。
+此轮未重测Vulkan AHB/WSI；不能用旧小探针替代真实应用验收。全过程未改全局驱动、未清缓存、未重启。
+
+源码增加可见HWUI/大尺寸探针和 `prepare-quest2-618-direct.py`，packer改为精确Direct manifest。
+6项新patch边界/事务测试、20项打包/启动helper、10项EFI、1项真实尺寸parser（共37项）通过；基线verify通过。
+已构建 `package-layout8-direct` 与 `efi-618-layout8-direct`，initramfs SHA
+`db5e611943f9c4835ab13255fcb75bf5e65f83a2aec5c1562d90a107a29426c7`。
+相对当前f7422b5d仅有效GLES、其校验清单、去缓存门槛helper变化；其他有效成员及最后凭据保留。
+离线rollback/reapply逐字节通过。默认仍525d739f，菜单1fab2101与其他debug EFI文件匹配，不覆盖默认或旧回退。
+
+证据总目录 `out/qualcomm-graphics-618-20261107`：`resume-hwui-direct-{init,rollback,reapply}`、
+`resume-direct-regression`、`direct-deployment-review/{effective-diff.json,pixel-BMR-reapply.json,PLAN.json}`。
+下一步用已准备的独立debug更新事务保存原f742及校验单、核对所有受保护EFI文件，再正常启动新候选，
+验收真实设置/EasyTier与全局GLES/Vulkan。当前只做隔离验证，设置界面修复不能标已完成。
+用户随后明确授权“允许自动部署 自动重启并设为默认”；无需重复确认本任务的正常部署/重启。
+正在更新独立debug包并准备将第三项设为默认；原6.18 Mesa及旧回退保留。无缓存准备门槛。
+
 ## 2026-11-07：独立 6.18 高通入口已冷启动，真实应用渲染失败；缓存改为启动后按需
 
 用户最新规则：先推进测试，只有启动后遇相关问题才按需清理 Chrome 已确认图形缓存，不备份；

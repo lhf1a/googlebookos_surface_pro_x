@@ -1,0 +1,30 @@
+#!/bin/busybox sh
+# Stage the exact Android renderer pair before Android init starts media clients.
+set -eu
+case " $(cat /proc/cmdline) " in *' sq2.rescue=1 '*|*' sq2.video=0 '*) exit 0;; esac
+case " $(cat /proc/cmdline) " in *' sq2.video.c2=experimental '*) ;; *) exit 0;; esac
+source=/etc/sq2-p010-renderer
+target=/newroot/system/lib64
+stage=/newroot/debug_ramdisk/sq2-p010-renderer
+(cd "$source"; sha256sum -c SHA256SUMS)
+(cd "$target"; sha256sum -c "$source/BASELINE.sha256")
+test ! -e "$target/libsq2-p010-renderer.so"
+test -f /newroot/debug_ramdisk/keystore2.rc
+! grep -q "restorecon /system/lib64/libsq2-p010-renderer.so" /newroot/debug_ramdisk/keystore2.rc
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+# Prepare the complete pair off-target so a failed copy cannot expose a half install.
+mkdir "$stage"
+mkdir "$stage/lower" "$stage/upper" "$stage/work" "$stage/merged"
+mount --bind "$target" "$stage/lower"
+mount -t overlay overlay -o lowerdir=$stage/lower,upperdir=$stage/upper,workdir=$stage/work "$stage/merged"
+cp "$source/libsq2-p010-renderer.so" "$source/libstagefright.so" "$stage/merged/"
+chmod 644 "$stage/merged/libsq2-p010-renderer.so" "$stage/merged/libstagefright.so"
+chown 0:0 "$stage/merged/libsq2-p010-renderer.so" "$stage/merged/libstagefright.so"
+(cd "$stage/merged"; sha256sum -c "$source/LIBRARIES.sha256")
+# post-fs runs with loaded policy, before zygote/media. Match the system inode types.
+# Use the existing system init overlay so this action runs as init, not vendor_init.
+printf '\n' >> /newroot/debug_ramdisk/keystore2.rc
+cat "$source/service.rc" >> /newroot/debug_ramdisk/keystore2.rc
+mount --bind "$stage/merged" "$target"
+(cd "$target"; sha256sum -c "$source/LIBRARIES.sha256")
+echo SQ2_P010_RENDERER_STAGED

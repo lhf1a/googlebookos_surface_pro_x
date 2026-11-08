@@ -19,6 +19,8 @@ import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.ArrayList;
+import java.util.List;
 
 // Ordinary app UID, no device-node access and no privileged permissions.
 public class MainActivity extends Activity implements SurfaceHolder.Callback {
@@ -26,6 +28,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private Thread worker;
     private TextView status;
     private final AtomicInteger rendered = new AtomicInteger();
+    private final List<Long> renderedPts = new ArrayList<>();
     private final Handler main = new Handler(Looper.getMainLooper());
     private synchronized void record(String message) {
         android.util.Log.i("SQ2VideoTest", message);
@@ -57,19 +60,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private void decode(SurfaceHolder holder) {
         MediaCodec codec = null;MediaExtractor extractor = new MediaExtractor();boolean started=false;
         String name = getIntent().getStringExtra("codec");
-        if (name == null) name = "c2.sq2.avc.experimental";
+        if (name == null) name = "auto";
         try (AssetFileDescriptor file = getAssets().openFd("clip.mp4")) {
             extractor.setDataSource(file.getFileDescriptor(),file.getStartOffset(),file.getLength());
             extractor.selectTrack(0);MediaFormat format=extractor.getTrackFormat(0);
             String mime=format.getString(MediaFormat.KEY_MIME);
             String hardwareName;
             switch(mime) {
-                case "video/hevc": hardwareName="c2.sq2.hevc.experimental"; break;
-                case "video/avc": hardwareName="c2.sq2.avc.experimental"; break;
-                case "video/x-vnd.on2.vp8": hardwareName="c2.sq2.vp8.experimental"; break;
-                case "video/x-vnd.on2.vp9": hardwareName="c2.sq2.vp9.experimental"; break;
+                case "video/hevc": hardwareName="OMX.qcom.video.decoder.hevc"; break;
+                case "video/avc": hardwareName="OMX.qcom.video.decoder.avc"; break;
+                case "video/x-vnd.on2.vp8": hardwareName="OMX.qcom.video.decoder.vp8"; break;
+                case "video/x-vnd.on2.vp9": hardwareName="OMX.qcom.video.decoder.vp9"; break;
                 default: throw new IllegalArgumentException("unsupported test MIME: "+mime);
             }
+            String expectedCodec = getIntent().getStringExtra("expected-codec");
+            if (expectedCodec != null) hardwareName = expectedCodec;
             int fps;
             try(java.io.BufferedReader reader=new java.io.BufferedReader(new java.io.InputStreamReader(getAssets().open("fps.txt"),StandardCharsets.US_ASCII))){
                 fps=Integer.parseInt(reader.readLine());
@@ -85,7 +90,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                     record("CAPABILITY hardware="+candidate.isHardwareAccelerated()+" software="+candidate.isSoftwareOnly()+" profiles="+caps.profileLevels.length+" format_supported="+caps.isFormatSupported(format));
                 }
                 name=list.findDecoderForFormat(format);record("AUTO_SELECTED "+name);
-                if(!hardwareName.equals(name))throw new IllegalStateException("automatic selection did not choose experimental hardware");
+                if(!hardwareName.equals(name))throw new IllegalStateException("automatic selection did not choose expected codec: "+hardwareName);
             }
             record("CREATE " + name + " uid=" + android.os.Process.myUid() + " format=" + format);
             if(getIntent().getBooleanExtra("probe-profile",false)){
@@ -95,10 +100,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 record("PROFILE_PROBE using original bitstream without framework profile hint");
             }
             codec=MediaCodec.createByCodecName(name);
-            codec.setOnFrameRenderedListener((c,pts,time) -> rendered.incrementAndGet(),main);
+            codec.setOnFrameRenderedListener((c,pts,time) -> {
+                synchronized (renderedPts) { renderedPts.add(pts); }
+                rendered.incrementAndGet();
+            },main);
             codec.configure(format,holder.getSurface(),null,0);codec.start();started=true;
             record("START codec=" + codec.getName());
             int inputs=0,outputs=0,discarded=0;boolean inputEos=false,outputEos=false;
+            List<Long> queuedPts = new ArrayList<>();
             boolean seekTest=getIntent().getBooleanExtra("seek",false),sought=false;
             int loops=getIntent().getIntExtra("loops",1),inputLoop=0;
             if((loops!=1&&loops!=6)||(seekTest&&loops!=1))throw new IllegalArgumentException("unsupported test loops");
@@ -129,6 +138,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                         // Bound render-ahead explicitly; different codec pools have different backpressure.
                         while(!cancelled&&target-System.nanoTime()>10000000L) Thread.sleep(2);
                         codec.releaseOutputBuffer(index,target);outputs++;
+                        queuedPts.add(info.presentationTimeUs);
                     }
                     else codec.releaseOutputBuffer(index,false);
                     outputEos=(info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0;
@@ -154,6 +164,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             long elapsedMs=(decodeEnd-begin)/1000000;
             boolean realtime=elapsedMs<=(seekTest?8000:loops*10000L+500);
             boolean good=!cancelled&&outputEos&&inputs==expected+discarded&&outputs==expected&&rendered.get()==expected&&realtime&&(!seekTest||sought);
+            List<Long> callbackSnapshot;
+            synchronized (renderedPts) { callbackSnapshot = new ArrayList<>(renderedPts); }
+            record(RenderedFrameAudit.summarize(queuedPts, callbackSnapshot));
             record("RESULT pass="+good+" inputs="+inputs+" outputs="+outputs+" rendered="+rendered.get()+" eos="+outputEos+" cancelled="+cancelled+" realtime="+realtime+" elapsed_ms="+elapsedMs);
             Thread.sleep(2000);
         } catch(Exception e) {record("ERROR "+e);}

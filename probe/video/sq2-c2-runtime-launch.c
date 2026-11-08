@@ -18,10 +18,18 @@ int main(int argc, char **argv) {
     if (mount(BASE "libminigbm_gralloc.so", "/vendor/lib64/libminigbm_gralloc.so", NULL, MS_BIND, NULL)) {
         perror("private mapper"); return 4;
     }
+#ifdef SQ2_OMX_BACKEND
+    setenv("LD_LIBRARY_PATH", BASE "lib64:/system/lib64:/apex/com.android.media.swcodec/lib64:/vendor/lib64", 1);
+    setenv("LD_PRELOAD", BASE "lib64/libquest2-vidc-bridge.so", 1);
+    setenv("SQ2_OMX_CORE", BASE "lib64/libOmxCore.so", 1);
+    setenv("QUEST2_VIDC_BRIDGE", "1", 1);
+    setenv("QUEST2_VIDC_AUX_CAPS", "1", 1);
+#else
     setenv("LD_LIBRARY_PATH", "/system/lib64:/apex/com.android.media.swcodec/lib64:/vendor/lib64", 1);
+    unsetenv("LD_PRELOAD");
+#endif
     setenv("SQ2_VIDEO_MAP_CACHE", "1", 1);
     unsetenv("SQ2_P010_DIRECT");
-    unsetenv("LD_PRELOAD");
     execl(BASE "service", "sq2-c2-service", argv[1], NULL);
     perror("runtime service"); return 5;
 }

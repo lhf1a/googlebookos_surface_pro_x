@@ -1,4 +1,1331 @@
 {
+  "latest_all_codec_development": {
+    "date": "2026-11-08",
+    "kernel": "6.18.60-sq2-android1",
+    "status": "resumed-incomplete: persistent renderer verified; genuine Venus PM timeout and OEM rendering callback deficit unresolved",
+    "initramfs_sha256": "5b9f7012ab43db5ec42f6169d57047527f19a0feff0fb824d77d7711ec68c351",
+    "persisted_service": "AVC-only; additional read-only firmware capability exports",
+    "default_entry": "sq2-qcom-618-debug",
+    "last_confirmed_boot": "872b3b57-680b-4d04-8f85-6fde9d6021ba",
+    "native_hevc": [
+      "HEVC Main six frames all CRCs match/EOS/clean close",
+      "HEVC Main10 P010 six frames all CRCs match/EOS/clean close"
+    ],
+    "hidl_hevc": {
+      "attempts": 4,
+      "outputs": 0,
+      "latest": "hevc-native-poll2.stdout",
+      "callback": "Poll transitions preserved; same native-proven stream through HIDL still zero frames, SOURCE_CHANGE only after FLUSH timeout",
+      "health": "Previous failed boot recovered; current boot healthy after native HDR and direct OMX full-AU HEVC tests"
+    },
+    "p010_candidate": "Bridge QP10/P010 plus HIDL standard color54/byte-stride mapping built; ABI and metadata host checks pass; candidate not deployed; Main10 profile gate remains",
+    "hdr": "HDR10/HLG full-AU OEM OMX/HIDL/ACodec -> persistent RGB10 Surface pixels and actual metadata verified; SDR tone mapping, native-extra default promotion, normal HEVC CSD and dynamic HDR incomplete",
+    "evidence": "out/quest2-video-618-20261107/all-codecs",
+    "new_backups_created": false,
+    "cache_cleared": false,
+    "ssh_recovery": {
+      "ready": true,
+      "elapsed_seconds": 91.3,
+      "timeout_seconds": 600
+    },
+    "direct_omx_hevc": {
+      "codec": "HEVC Main",
+      "input": "complete AUs with in-band parameter headers, no separate CODECCONFIG",
+      "frames": 6,
+      "pixels": {
+        "equal": true,
+        "bytes": 691200,
+        "frames": 6,
+        "sha256": "325a21d773ec202f45d4cdb0504e5927ce8e54cc058f4dba42e23ae2f9481e07",
+        "reference_sha256": "325a21d773ec202f45d4cdb0504e5927ce8e54cc058f4dba42e23ae2f9481e07"
+      },
+      "eos": true,
+      "clean_close": true,
+      "evidence": "direct-hevc-full-1.stdout",
+      "hidl": false
+    },
+    "native_hdr": [
+      "HDR10 PQ/BT2020 Main10/P010 six frames exact CRC/EOS/clean close",
+      "HLG BT2020 Main10/P010 six frames exact CRC/EOS/clean close"
+    ],
+    "esp_last_observed": {
+      "free_kib": 260204,
+      "logs_kib": 78388
+    },
+    "hidl_buffer_verified": {
+      "hevc": {
+        "pixels": {
+          "frames": 6,
+          "stride": 384,
+          "slice_height": 256,
+          "crop": [
+            0,
+            0,
+            320,
+            240
+          ],
+          "color_format": 21,
+          "bytes": 691200,
+          "equal": true,
+          "sha256": "325a21d773ec202f45d4cdb0504e5927ce8e54cc058f4dba42e23ae2f9481e07",
+          "reference_sha256": "325a21d773ec202f45d4cdb0504e5927ce8e54cc058f4dba42e23ae2f9481e07"
+        },
+        "eos": true,
+        "clean_close": true,
+        "stdout": "hidl-hevc-full-au-1.stdout"
+      },
+      "hdr10": {
+        "pixels": {
+          "frames": 6,
+          "stride": 640,
+          "slice_height": 256,
+          "crop": [
+            0,
+            0,
+            320,
+            240
+          ],
+          "color_format": 54,
+          "bytes": 1382400,
+          "equal": true,
+          "sha256": "b5986576f3fa295030442d9b6ef07952c1af51f02145948a477957512ee842ce",
+          "reference_sha256": "b5986576f3fa295030442d9b6ef07952c1af51f02145948a477957512ee842ce"
+        },
+        "eos": true,
+        "clean_close": true,
+        "stdout": "hidl-hdr10-full-au-1.stdout"
+      },
+      "hlg": {
+        "pixels": {
+          "frames": 6,
+          "stride": 640,
+          "slice_height": 256,
+          "crop": [
+            0,
+            0,
+            320,
+            240
+          ],
+          "color_format": 54,
+          "bytes": 1382400,
+          "equal": true,
+          "sha256": "b5986576f3fa295030442d9b6ef07952c1af51f02145948a477957512ee842ce",
+          "reference_sha256": "b5986576f3fa295030442d9b6ef07952c1af51f02145948a477957512ee842ce"
+        },
+        "eos": true,
+        "clean_close": true,
+        "stdout": "hidl-hlg-full-au-1.stdout"
+      },
+      "vp8": {
+        "pixels": {
+          "frames": 6,
+          "stride": 384,
+          "slice_height": 256,
+          "crop": [
+            0,
+            0,
+            320,
+            240
+          ],
+          "color_format": 21,
+          "bytes": 691200,
+          "equal": true,
+          "sha256": "31f089a631a9b134c4d6fe3062f75803743d32b6d880d348d2eb844a0fed8355",
+          "reference_sha256": "31f089a631a9b134c4d6fe3062f75803743d32b6d880d348d2eb844a0fed8355"
+        },
+        "eos": true,
+        "clean_close": true,
+        "stdout": "hidl-vp8-full-au-2.stdout"
+      },
+      "vp9": {
+        "pixels": {
+          "frames": 6,
+          "stride": 384,
+          "slice_height": 256,
+          "crop": [
+            0,
+            0,
+            320,
+            240
+          ],
+          "color_format": 21,
+          "bytes": 691200,
+          "equal": true,
+          "sha256": "5aa1dc5164593e110411f16149d20de6fb66475f04dcd0ced32219ff5bc03214",
+          "reference_sha256": "5aa1dc5164593e110411f16149d20de6fb66475f04dcd0ced32219ff5bc03214"
+        },
+        "eos": true,
+        "clean_close": true,
+        "stdout": "hidl-vp9-full-au-1.stdout"
+      }
+    },
+    "mpeg2_failure": {
+      "codec": "MPEG2",
+      "frames": 0,
+      "client_exit": 143,
+      "clean_close": false,
+      "sys_error": 1,
+      "retired_bytes": 3585280,
+      "evidence": "hidl-mpeg2-failure-state.stdout",
+      "action": "Normal reboot dispatched; waiting for changed boot over existing 600-second SSH window"
+    },
+    "late_event_guard": "built-host-tested-not-deployed",
+    "reboot_panic_photo": {
+      "file": "G:/Downloads/IMG_0447.JPG",
+      "kernel": "6.18.60-sq2-android1",
+      "uptime_seconds": 2005,
+      "session_id": "6e1ff00c",
+      "packet_type": "0x21001 (HFI_MSG_EVENT_NOTIFY)",
+      "observed": [
+        "Repeated qcom-venus no valid instance",
+        "init: Reboot thread timed out",
+        "init: Trigger crash at last!",
+        "sysrq: Trigger a crash",
+        "Kernel panic - not syncing: sysrq triggered crash"
+      ],
+      "meaning": "Android init forced SysRq panic after reboot timeout; not evidence of a NULL-dereference panic",
+      "status": "User confirms frozen/black; local power-cycle requested; no repeated hardware test"
+    },
+    "late_event_candidate": {
+      "sha256": "6573aa735f8fbcc6fd133a69325ccbbf1f14e5bacb15750287e343331a4f47a6",
+      "bytes": 231503045,
+      "deployed": true,
+      "depmod": "passed against complete existing module set and System.map",
+      "reboot_verified": true
+    },
+    "late_event_deployment": {
+      "deployed": true,
+      "reboot_verified": true,
+      "sha256": "6573aa735f8fbcc6fd133a69325ccbbf1f14e5bacb15750287e343331a4f47a6",
+      "changed_efi_files": [
+        "/media/esp/EFI/SQ2QDbg/SHA256SUMS",
+        "/media/esp/EFI/SQ2QDbg/initramfs.cpio.gz"
+      ],
+      "new_backups_created": false,
+      "cache_cleared": false,
+      "boot_before": "ef448b84-26a9-489d-a453-b362fe0a6391",
+      "boot_after": "51d27080-a945-4d19-bc04-b454d834353c",
+      "ssh_recovery_seconds": 88.4,
+      "loaded_module_note_verified": true,
+      "avc_regression": {
+        "buffer": {
+          "frames": 6,
+          "bytes": 691200,
+          "equal": true,
+          "sha256": "c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd",
+          "reference_sha256": "c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd",
+          "boot": "51d27080-a945-4d19-bc04-b454d834353c"
+        },
+        "surface": {
+          "frames": 6,
+          "bytes": 691200,
+          "equal": true,
+          "sha256": "c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd",
+          "reference_sha256": "c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd",
+          "boot": "51d27080-a945-4d19-bc04-b454d834353c"
+        }
+      },
+      "final_health": {
+        "sys_error": 0,
+        "core_state": 1,
+        "instances": 0,
+        "vb2_bytes": 0
+      },
+      "esp": {
+        "free_kib": 271344,
+        "logs_kib": 71884
+      },
+      "freeze_root_cause_fixed": false
+    },
+    "mpeg2_input_count_probe": {
+      "hypothesis": "Only one MPEG2 input buffer prevents progress",
+      "configuration_attempt": "Separate count request after geometry hit S_FMT EBUSY before input submission; clean close",
+      "actual_count_attempt": {
+        "actual": 2,
+        "minimum": 1,
+        "submitted_aus": 2,
+        "frames": 0,
+        "exit": 6,
+        "flush_errno": 110,
+        "sys_error": 1,
+        "retired_bytes": 4080896
+      },
+      "conclusion": "Two buffers and two AUs still stall; single-buffer-only explanation is insufficient. Direct OEM also fails, so failure is not confined to HIDL.",
+      "late_events": "About 90470 rejected callbacks per 5 seconds after close, packet0x21001; event id/error payload not recorded by installed module",
+      "recovery": {
+        "normal_reboot": true,
+        "ssh_seconds": 91.3,
+        "timeout_seconds": 600,
+        "boot": "775bdb07-938d-4d02-911e-337e7629f739",
+        "sys_error": 0,
+        "insts": 0,
+        "vb2_bytes": 0
+      },
+      "avc_regression": {
+        "frames": 6,
+        "bytes": 691200,
+        "equal": true,
+        "sha256": "c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd",
+        "reference_sha256": "c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd",
+        "boot": "775bdb07-938d-4d02-911e-337e7629f739",
+        "stride": 384,
+        "slice_height": 256,
+        "color_format": 21
+      },
+      "evidence": [
+        "direct-mpeg2-input2-1.stdout",
+        "direct-mpeg2-input2-2.stdout",
+        "direct-mpeg2-input2-kernel-full.txt",
+        "reconnect-after-mpeg2-input2.jsonl",
+        "input2-recovered-health.stdout"
+      ],
+      "next": "Do not repeat input-count experiment; inspect event payload and SOURCE_CHANGE/FLUSH/CONTINUE/close state transitions before further MPEG2 testing"
+    },
+    "late_event_details_candidate": {
+      "status": "built-not-packaged-or-deployed",
+      "core_sha256": "d89b6d40cb6d8de08a278fd3527f0b151baa1f24065b4306f00961d055d2667f",
+      "change": "Rate-limited event/session/data1/data2 diagnostic only when fixed fields fit reported packet size; retain null-session guard and sessionless SYS_ERROR",
+      "host_tests": "4 kernel adapter tests passed including ASAN/UBSAN dispatcher; 19 OMX client tests passed",
+      "build": "6.18 paired three-module build succeeds; existing unused dev variable warning in helpers.c",
+      "limits": "No hardware validation of diagnostic candidate; not a root-cause fix"
+    },
+    "native_hdr_extradata": {
+      "deployed": true,
+      "boot_verified": true,
+      "metadata_verified": true,
+      "scope": "Native V4L2 only; HIDL metadata/display not yet connected",
+      "control": "0x00982f00, opt-in mask7; default0",
+      "boot": "f748e1f3-c906-48c5-ac2a-5e816e94ecc3",
+      "package_sha256": "ca47b0aba12c71f0ac77067403c582455075b4cc09514d0f974eaa7af47588b4",
+      "hdr10_evidence": "native-hdr-extradata-2-result.json",
+      "hlg_evidence": "native-hlg-extradata-1-result.json",
+      "hdr10": "Six exact P010 frames, PQ/BT2020 VUI each frame; mastering G/B/R and MaxCLL1000/MaxFALL400 only on frame0, all present values match independent source",
+      "hlg": "Six exact P010 frames, HLG transfer18/BT2020 VUI each frame, no static HDR records",
+      "fix": "Internal DPB allocation also needs aligned firmware extradata tail; missing pointer caused HFI0x1003 on v2; v4 fixed and normal reboot verified",
+      "record_boundary": "188-byte capacity; HDR10 frame0 records188, subsequent and all HLG records100 including terminator; ignore tail",
+      "health": {
+        "sys_error": 0,
+        "core_state": 1,
+        "instances": 0,
+        "vb2_bytes": 0
+      }
+    },
+    "hdr_extradata_v4_deployment": {
+      "deployed": true,
+      "reboot_verified": true,
+      "sha256": "ca47b0aba12c71f0ac77067403c582455075b4cc09514d0f974eaa7af47588b4",
+      "changed_efi_files": [
+        "/media/esp/EFI/SQ2QDbg/SHA256SUMS",
+        "/media/esp/EFI/SQ2QDbg/initramfs.cpio.gz"
+      ],
+      "new_backups_created": false,
+      "boot_before": "3a68bdfc-d6ac-473d-8f43-0f082be3d0d6",
+      "boot_after": "f748e1f3-c906-48c5-ac2a-5e816e94ecc3",
+      "ssh_recovery_seconds": 92.2,
+      "loaded_module_note_verified": true,
+      "avc_regression": {
+        "frames": 6,
+        "bytes": 691200,
+        "equal": true,
+        "sha256": "c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd",
+        "reference_sha256": "c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd",
+        "boot": "f748e1f3-c906-48c5-ac2a-5e816e94ecc3"
+      },
+      "cache_cleared": false
+    },
+    "native_metadata_bridge": {
+      "source": "probe/video/quest2-vidc-bridge.c",
+      "sha256": "0af1d99bce10e886909dc06f6fde4a6483aefa8977e0a832f3e2e5adfc24cc76",
+      "runtime": "RAM-only multi-codec/P010 service, actual process map SHA verified",
+      "service_sha256": "4ee5f027a6849d9e9d11b578e4ff0f8aaf4483cc91c27f05030e0a4e4a31c074",
+      "persistent": false,
+      "enable": "QUEST2_VIDC_NATIVE_EXTRA=1 or explicit candidate -DQUEST2_NATIVE_EXTRA_DEFAULT=1; standard default0",
+      "host_tests": "7 bridge tests including actual C with ASAN/UBSAN;20 OMX diagnostic/session tests",
+      "metadata_path": "real HFI -> native second DMABUF -> bounded raw records + crop -> unchanged OEM -> HIDL/ACodec -> AMediaFormat",
+      "init_fix": "QBUF uses true negotiated native metadata capacity; G_FMT before SOURCE_CHANGE is invalid, never query it per QBUF",
+      "native_memory": "independent page-aligned system DMA heap per capture slot, offset0; donor shared fd/offset preserved; explicit CPU START/END sync; kernel retirement refs unchanged",
+      "diagnostic_fix": "Resolve actual OMX metadata extension indices; color/static/dynamic metadata notification no longer flushes/reallocates output port; unknown change and geometry events preserve reconfiguration",
+      "evidence": "native-extra-hidl-current-state.stdout"
+    },
+    "hidl_hdr_metadata_verified": {
+      "hdr10": {
+        "boot": "bcfb7cfd-679b-4f58-b95d-264f1b60f0c8",
+        "codec": "HEVC Main10",
+        "frames": 6,
+        "input": "full AUs with in-band VPS/SPS/PPS, no input color/HDR hints",
+        "pixels": {
+          "equal": true,
+          "bytes": 1382400,
+          "sha256": "b5986576f3fa295030442d9b6ef07952c1af51f02145948a477957512ee842ce",
+          "format": "P010",
+          "stride": 640,
+          "slice_height": 256,
+          "crop": [
+            0,
+            0,
+            320,
+            240
+          ]
+        },
+        "color": {
+          "standard": 6,
+          "transfer": 6,
+          "range": 2
+        },
+        "hdr_static": {
+          "id": 0,
+          "red_x": 34000,
+          "red_y": 16000,
+          "green_x": 13250,
+          "green_y": 34500,
+          "blue_x": 7500,
+          "blue_y": 3000,
+          "white_x": 15635,
+          "white_y": 16450,
+          "max_luminance": 1000,
+          "min_luminance": 50,
+          "max_cll": 1000,
+          "max_fall": 400
+        },
+        "hdr_static_hex": "00d084803ec233c4864c1db80b133d4240e8033200e8039001",
+        "metadata_match": true,
+        "hdr_static_semantics": "source metadata matches, OEM maximum luminance converted to cd/m2",
+        "eos": true,
+        "clean_close": true,
+        "bridge_sha256": "0af1d99bce10e886909dc06f6fde4a6483aefa8977e0a832f3e2e5adfc24cc76",
+        "files": [
+          {
+            "name": "sq2-ndk-frame-0.bin",
+            "bytes": 245760,
+            "sha256": "bc3b653389046ab7eb15eb86f9a9e8bf5168a13331c89cb6d4bc9fc3e188504e"
+          },
+          {
+            "name": "sq2-ndk-frame-1.bin",
+            "bytes": 245760,
+            "sha256": "9e2554253f299a17a0f6aa84e4dc2e3ded63621949127d357b20bec75b9430f2"
+          },
+          {
+            "name": "sq2-ndk-frame-2.bin",
+            "bytes": 245760,
+            "sha256": "39914e63aa336313206613bf6c2df06fbb30a5ec25662d770fc372a3ead792f2"
+          },
+          {
+            "name": "sq2-ndk-frame-3.bin",
+            "bytes": 245760,
+            "sha256": "2b11c530568b8baa64fa6474d34474ffc6c3b561059e187b4ebc92d0413addb7"
+          },
+          {
+            "name": "sq2-ndk-frame-4.bin",
+            "bytes": 245760,
+            "sha256": "2fbf023fcb9d637c447be6013538fc9686c1e6a727ef5a428689d8fc8072b709"
+          },
+          {
+            "name": "sq2-ndk-frame-5.bin",
+            "bytes": 245760,
+            "sha256": "fc7470ef5b34700f4426fe3406abc0b7da8dcc2c73eabc168a48ec33d3aeae1a"
+          }
+        ],
+        "scope": "OEM OMX/HIDL/ACodec/NDK buffer only; Surface/tone-map not yet validated",
+        "tracked_probe_source": "probe/video/sq2-mediacodec-frames.c",
+        "tracked_probe_recheck": "hidl-hdr10-native-extra-source.stdout",
+        "tracked_probe_raw_frames": "hidl-hdr10-native-extra-source-frames.sha256"
+      },
+      "hlg": {
+        "boot": "bcfb7cfd-679b-4f58-b95d-264f1b60f0c8",
+        "codec": "HEVC Main10",
+        "frames": 6,
+        "input": "full AUs with in-band VPS/SPS/PPS, no input color/HDR hints",
+        "pixels": {
+          "equal": true,
+          "bytes": 1382400,
+          "sha256": "b5986576f3fa295030442d9b6ef07952c1af51f02145948a477957512ee842ce",
+          "format": "P010",
+          "stride": 640,
+          "slice_height": 256,
+          "crop": [
+            0,
+            0,
+            320,
+            240
+          ]
+        },
+        "color": {
+          "standard": 6,
+          "transfer": 7,
+          "range": 2
+        },
+        "hdr_static": {
+          "id": 0,
+          "red_x": 0,
+          "red_y": 0,
+          "green_x": 0,
+          "green_y": 0,
+          "blue_x": 0,
+          "blue_y": 0,
+          "white_x": 0,
+          "white_y": 0,
+          "max_luminance": 0,
+          "min_luminance": 0,
+          "max_cll": 0,
+          "max_fall": 0
+        },
+        "hdr_static_hex": "00000000000000000000000000000000000000000000000000",
+        "metadata_match": true,
+        "hdr_static_semantics": "OEM emits25 zero bytes for absent metadata; no stale prior HDR10 fields",
+        "eos": true,
+        "clean_close": true,
+        "bridge_sha256": "0af1d99bce10e886909dc06f6fde4a6483aefa8977e0a832f3e2e5adfc24cc76",
+        "files": [
+          {
+            "name": "sq2-ndk-frame-0.bin",
+            "bytes": 245760,
+            "sha256": "bc3b653389046ab7eb15eb86f9a9e8bf5168a13331c89cb6d4bc9fc3e188504e"
+          },
+          {
+            "name": "sq2-ndk-frame-1.bin",
+            "bytes": 245760,
+            "sha256": "9e2554253f299a17a0f6aa84e4dc2e3ded63621949127d357b20bec75b9430f2"
+          },
+          {
+            "name": "sq2-ndk-frame-2.bin",
+            "bytes": 245760,
+            "sha256": "39914e63aa336313206613bf6c2df06fbb30a5ec25662d770fc372a3ead792f2"
+          },
+          {
+            "name": "sq2-ndk-frame-3.bin",
+            "bytes": 245760,
+            "sha256": "2b11c530568b8baa64fa6474d34474ffc6c3b561059e187b4ebc92d0413addb7"
+          },
+          {
+            "name": "sq2-ndk-frame-4.bin",
+            "bytes": 245760,
+            "sha256": "2fbf023fcb9d637c447be6013538fc9686c1e6a727ef5a428689d8fc8072b709"
+          },
+          {
+            "name": "sq2-ndk-frame-5.bin",
+            "bytes": 245760,
+            "sha256": "fc7470ef5b34700f4426fe3406abc0b7da8dcc2c73eabc168a48ec33d3aeae1a"
+          }
+        ],
+        "scope": "OEM OMX/HIDL/ACodec/NDK buffer only; Surface/tone-map not yet validated",
+        "tracked_probe_source": "probe/video/sq2-mediacodec-frames.c",
+        "tracked_probe_recheck": "hidl-hlg-native-extra-source.stdout",
+        "tracked_probe_raw_frames": "hidl-hlg-native-extra-source-frames.sha256"
+      }
+    },
+    "transient_service": "Five-codec/P010 + native-extra-v2 in RAM; Main10 profile still filtered",
+    "latest_recovery": {
+      "seconds": 85.7,
+      "window_seconds": 600,
+      "boot": "bcfb7cfd-679b-4f58-b95d-264f1b60f0c8"
+    },
+    "p010_surface_failure": {
+      "status": "failed-client-SIGABRT-before-first-image",
+      "boot": "bcfb7cfd-679b-4f58-b95d-264f1b60f0c8",
+      "android": {
+        "release": "17",
+        "sdk": 37,
+        "incremental": "16471258"
+      },
+      "libstagefright": {
+        "sha256": "77292e864dc21717d1946778a9df5e2e77db5005ba763bbb84f7e10a4c62992c",
+        "build_id": "451859cef133fa7485469efe7c3def6b"
+      },
+      "allocator": {
+        "rgb10_allocate": 0,
+        "rgb10_cpu_write_lock": 0,
+        "image_reader_create": 0
+      },
+      "failure": "SoftwareRenderer.cpp:183 CHECK(mConverter->isValid()); P01054 routed to unsupported RGB565 conversion",
+      "input": "Full HEVC HDR10 AUs, no input color/HDR hints",
+      "observed_output": "P01054 stride640 slice256 crop320x240, BT2020/PQ/limited and correct HDR static metadata before render",
+      "rendered_images": 0,
+      "client_exit": 134,
+      "after_cleanup": {
+        "sys_error": 0,
+        "core_state": 1,
+        "instances": 0,
+        "vb2_bytes": 0,
+        "service": "running"
+      },
+      "display": "SurfaceFlinger reports SDR/NATIVE only, no HDR10/HLG or wide color capability; tone mapping remains unverified",
+      "evidence": [
+        "hidl-hdr10-surface-p010-1.stdout",
+        "surface-p010-abort-health.stdout",
+        "surface-p010-resume-health.stdout"
+      ],
+      "do_not_repeat_unchanged": true,
+      "system_renderer_fix_deployed": false
+    },
+    "next_step": "Distinguish OEM renderer queue/latch/fence behavior and Venus genuine zero-status HFI resume timeout; continue full hardware/HDR scope.",
+    "p010_renderer_candidate": {
+      "status": "persisted-and-reboot-verified; ordinary-app-loading and HDR10/HLG-Surface verified",
+      "system_library_replaced": true,
+      "system_mediacodec_surface_verified": true,
+      "display_tone_mapping_verified": false,
+      "global_deployment_verified": true,
+      "candidate_directory": "out/quest2-video-618-20261107/all-codecs/renderer-p010-adapter-cfi-v3",
+      "binaries": {
+        "libstagefright.so": "93312fd55e49a61f85483a46137f9bca8a98ae3c0299e07658e32590a9e104b5",
+        "libsq2-p010-renderer.so": "c67c598e90979aa9d85ce0cb8409e82d5f01366ad3c78916a373a96855848a92"
+      },
+      "source_patch": "patches/stagefright-p010-renderer.patch",
+      "builder": "scripts/build-sq2-p010-renderer.py",
+      "elf_patcher": "scripts/patch-sq2-p010-stagefright.py",
+      "original_system_sha256": "77292e864dc21717d1946778a9df5e2e77db5005ba763bbb84f7e10a4c62992c",
+      "integration": "Exact-SHA Android17 library; preserve original LOAD addresses, CFI and relocations; three 12-byte entry thunks into ABI-asserted source-built adapter",
+      "hardening": [
+        "LTO",
+        "cross-DSO CFI",
+        "FORTIFY_SOURCE=2",
+        "stack-protector-strong",
+        "RELRO",
+        "BIND_NOW",
+        "noexecstack"
+      ],
+      "validation": {
+        "hdr10": {
+          "result": "pass",
+          "frames": 6,
+          "eos": true,
+          "clean_close": true,
+          "metadata": "actual queued AHB mastering/light match source",
+          "pixels": "all6 actual files exactly match prior independently verified counterparts",
+          "files": {
+            "sq2-rgb10-frame-0.bin": "7dff3ac084523f74dc4658906a0410ffd71b80de251986e5a88f5cb62c6de2bb",
+            "sq2-rgb10-frame-1.bin": "de33efe0e5733b73b6bc762c549c627df2475c1a70030ed5b6676a4cdff37279",
+            "sq2-rgb10-frame-2.bin": "246ea2ea83d6e71bbc4c5debbb754073417ef6cac46026d918c20027103219db",
+            "sq2-rgb10-frame-3.bin": "5c9b8730ea405131b0c3064d6329e8df4d728a61c45244aa347eefb8f43e2512",
+            "sq2-rgb10-frame-4.bin": "e2aa1fb43f69a2e9899e22e76a69da47e432abca42f9a4c66c2cd4950f76e709",
+            "sq2-rgb10-frame-5.bin": "2dbc483645c96407239a1d322f68c84fb9ccbdf8dca032814b721b79626b2ea4"
+          },
+          "comparison_evidence": "hidl-hdr10-renderer-v3-1-pixels.json"
+        },
+        "hlg": {
+          "result": "pass",
+          "frames": 6,
+          "eos": true,
+          "clean_close": true,
+          "metadata": "actual queued AHB metadata absent",
+          "pixels": "all6 actual files exactly match prior independently verified counterparts",
+          "files": {
+            "sq2-rgb10-frame-0.bin": "7dff3ac084523f74dc4658906a0410ffd71b80de251986e5a88f5cb62c6de2bb",
+            "sq2-rgb10-frame-1.bin": "de33efe0e5733b73b6bc762c549c627df2475c1a70030ed5b6676a4cdff37279",
+            "sq2-rgb10-frame-2.bin": "246ea2ea83d6e71bbc4c5debbb754073417ef6cac46026d918c20027103219db",
+            "sq2-rgb10-frame-3.bin": "5c9b8730ea405131b0c3064d6329e8df4d728a61c45244aa347eefb8f43e2512",
+            "sq2-rgb10-frame-4.bin": "e2aa1fb43f69a2e9899e22e76a69da47e432abca42f9a4c66c2cd4950f76e709",
+            "sq2-rgb10-frame-5.bin": "2dbc483645c96407239a1d322f68c84fb9ccbdf8dca032814b721b79626b2ea4"
+          },
+          "comparison_evidence": "hidl-hlg-renderer-v3-1-pixels.json"
+        },
+        "avc": {
+          "result": "pass",
+          "frames": 6,
+          "eos": true,
+          "clean_close": true,
+          "metadata": "AVC CSD regression",
+          "pixels": "all6 actual files exactly match prior independently verified counterparts",
+          "files": {
+            "sq2-ndk-frame-0.bin": "e29567bca0298497e0b01bdf7de80d15233635c11e31418904108f884bb1c189",
+            "sq2-ndk-frame-1.bin": "0826b1bca4e33dce0147eb2b942706906dfb7abe21e8432f6123f1d70874e18e",
+            "sq2-ndk-frame-2.bin": "9502d455a0331e1e773871c2044cfb6fc3f9ccff43f48c0df7ee975c133d69d0",
+            "sq2-ndk-frame-3.bin": "c7fda4b1c68aed8f91ecb439c5e5ece53490c8b0210ccd497f6fd73bbfa06c65",
+            "sq2-ndk-frame-4.bin": "d1be162b9a434687448da9981856e604c7a99f51c42b9214d59477c02313d7a7",
+            "sq2-ndk-frame-5.bin": "32139353e94eb63585d1ffbb982bf3b7908c90225fe0af3aefbd93e91391472d"
+          },
+          "comparison_evidence": "hidl-avc-renderer-v3-1-pixels.json"
+        }
+      },
+      "pixel_reference": "RGB10 BT2020 conversion max absolute error1/1023 against independent ffmpeg P010+float matrix; AVC six I420 frames exactly match reference after NV12 packing",
+      "metadata_clear": "Same Surface HDR10 to HLG: actual gralloc SMPTE2086/CTA present then absent; reset resends/clears even zero cached metadata",
+      "evidence": [
+        "renderer-cfi-metadata-1.stdout",
+        "hidl-hdr10-renderer-cfi-1-result.json",
+        "hidl-hlg-renderer-cfi-1-result.json",
+        "hidl-avc-renderer-cfi-1-result.json"
+      ],
+      "boot": "bcfb7cfd-679b-4f58-b95d-264f1b60f0c8",
+      "next": "Persist narrowly scoped renderer integration retaining AVC-only default; verify normal system loading, reboot, ordinary app and SDR composition",
+      "system_library_replacement_scope": "Persistent exact-version system/lib64 pair; reboot labels/hash, ordinary untrusted app maps and HDR10/HLG decoded Surface pixels/metadata verified"
+    },
+    "renderer_predeployment_pm_failure": {
+      "boot": "bcfb7cfd-679b-4f58-b95d-264f1b60f0c8",
+      "stage": "before renderer mount or decoder test",
+      "error": "Venus system resume start:hfi-resume -110; sys_error1/core_state0/dma_stopped1/insts0/vb2_bytes0",
+      "evidence": "renderer-prestage-pm-failure.txt",
+      "uptime_failure": 3668,
+      "observation": "Automatic s2idle stop/start cycles; 3 starts then next HFI resume fails. No provider unload, error clear or manual PAS attempted.",
+      "renderer_installed": false,
+      "action": "Normal Android reboot on existing persisted image,600-second authenticated changed-boot window",
+      "recovery": {
+        "ready": true,
+        "boot_id": "efcddeb2-e4a4-49a6-9304-9871b72101e7",
+        "attempts": 7,
+        "elapsed_seconds": 76.3
+      }
+    },
+    "device_status": "Recovered by authorized normal reboot; healthy after AVC OEM and software-control close; see user-wake-recovery.json",
+    "p010_renderer_system_integration": {
+      "status": "persisted-and-reboot-verified; ordinary-app-loading and HDR10/HLG-Surface verified",
+      "deployment": {
+        "baseline_sha256": "6ee0fbc1e2d8a51a7734f7b1c6dcd34461fe8b36a8517237a2dce35619b0e2bd",
+        "sha256": "5b9f7012ab43db5ec42f6169d57047527f19a0feff0fb824d77d7711ec68c351",
+        "bytes": 236150077,
+        "changed_entries": [
+          "bin/sq2-p010-renderer-stage",
+          "etc/sq2-p010-renderer",
+          "etc/sq2-p010-renderer/BASELINE.sha256",
+          "etc/sq2-p010-renderer/LIBRARIES.sha256",
+          "etc/sq2-p010-renderer/SHA256SUMS",
+          "etc/sq2-p010-renderer/libsq2-p010-renderer.so",
+          "etc/sq2-p010-renderer/libstagefright.so",
+          "etc/sq2-p010-renderer/service.rc",
+          "init"
+        ],
+        "libraries": {
+          "libstagefright.so": "93312fd55e49a61f85483a46137f9bca8a98ae3c0299e07658e32590a9e104b5",
+          "libsq2-p010-renderer.so": "c67c598e90979aa9d85ce0cb8409e82d5f01366ad3c78916a373a96855848a92"
+        },
+        "credentials_kernel_hidl_unchanged": true,
+        "private_package": true,
+        "deployed": true,
+        "reboot_verified": true,
+        "boot_before": "25e4c984-70f6-4c79-8108-6657223a8c20",
+        "changed_efi_files": [
+          "/media/esp/EFI/SQ2QDbg/SHA256SUMS",
+          "/media/esp/EFI/SQ2QDbg/initramfs.cpio.gz"
+        ],
+        "new_backups_created": false,
+        "cache_cleared": false,
+        "boot_after": "ee8de2ae-0be1-46cd-a6a9-ae14f4768855",
+        "ssh_recovery": {
+          "ready": true,
+          "boot_id": "ee8de2ae-0be1-46cd-a6a9-ae14f4768855",
+          "attempts": 10,
+          "elapsed_seconds": 127.1
+        },
+        "driver_health_verified": true
+      },
+      "hdr": {
+        "hdr10": {
+          "result": "pass",
+          "frames": 6,
+          "eos": true,
+          "clean_close": true,
+          "files": {
+            "sq2-rgb10-frame-0.bin": "7dff3ac084523f74dc4658906a0410ffd71b80de251986e5a88f5cb62c6de2bb",
+            "sq2-rgb10-frame-1.bin": "de33efe0e5733b73b6bc762c549c627df2475c1a70030ed5b6676a4cdff37279",
+            "sq2-rgb10-frame-2.bin": "246ea2ea83d6e71bbc4c5debbb754073417ef6cac46026d918c20027103219db",
+            "sq2-rgb10-frame-3.bin": "5c9b8730ea405131b0c3064d6329e8df4d728a61c45244aa347eefb8f43e2512",
+            "sq2-rgb10-frame-4.bin": "e2aa1fb43f69a2e9899e22e76a69da47e432abca42f9a4c66c2cd4950f76e709",
+            "sq2-rgb10-frame-5.bin": "2dbc483645c96407239a1d322f68c84fb9ccbdf8dca032814b721b79626b2ea4"
+          },
+          "metadata": [
+            "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+            "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+            "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+            "IMAGE_RGB10 index=0 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=0 crop=0,0,320,240",
+            "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+            "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+            "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+            "IMAGE_RGB10 index=1 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=33333000 crop=0,0,320,240",
+            "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+            "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+            "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+            "IMAGE_RGB10 index=2 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=66666000 crop=0,0,320,240",
+            "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+            "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+            "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+            "IMAGE_RGB10 index=3 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=99999000 crop=0,0,320,240",
+            "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+            "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+            "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+            "IMAGE_RGB10 index=4 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=133332000 crop=0,0,320,240",
+            "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+            "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+            "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+            "IMAGE_RGB10 index=5 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=166665000 crop=0,0,320,240"
+          ],
+          "maps": "persistent system/lib64 pair; no LD_LIBRARY_PATH",
+          "pixel_comparison": "All frames byte-identical to independently verified CFI counterparts",
+          "boot": "ee8de2ae-0be1-46cd-a6a9-ae14f4768855"
+        },
+        "hlg": {
+          "result": "pass",
+          "frames": 6,
+          "eos": true,
+          "clean_close": true,
+          "files": {
+            "sq2-rgb10-frame-0.bin": "7dff3ac084523f74dc4658906a0410ffd71b80de251986e5a88f5cb62c6de2bb",
+            "sq2-rgb10-frame-1.bin": "de33efe0e5733b73b6bc762c549c627df2475c1a70030ed5b6676a4cdff37279",
+            "sq2-rgb10-frame-2.bin": "246ea2ea83d6e71bbc4c5debbb754073417ef6cac46026d918c20027103219db",
+            "sq2-rgb10-frame-3.bin": "5c9b8730ea405131b0c3064d6329e8df4d728a61c45244aa347eefb8f43e2512",
+            "sq2-rgb10-frame-4.bin": "e2aa1fb43f69a2e9899e22e76a69da47e432abca42f9a4c66c2cd4950f76e709",
+            "sq2-rgb10-frame-5.bin": "2dbc483645c96407239a1d322f68c84fb9ccbdf8dca032814b721b79626b2ea4"
+          },
+          "metadata": [
+            "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+            "IMAGE_RGB10 index=0 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=0 crop=0,0,320,240",
+            "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+            "IMAGE_RGB10 index=1 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=33333000 crop=0,0,320,240",
+            "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+            "IMAGE_RGB10 index=2 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=66666000 crop=0,0,320,240",
+            "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+            "IMAGE_RGB10 index=3 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=99999000 crop=0,0,320,240",
+            "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+            "IMAGE_RGB10 index=4 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=133332000 crop=0,0,320,240",
+            "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+            "IMAGE_RGB10 index=5 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=166665000 crop=0,0,320,240"
+          ],
+          "maps": "persistent system/lib64 pair; no LD_LIBRARY_PATH",
+          "pixel_comparison": "All frames byte-identical to independently verified CFI counterparts",
+          "boot": "ee8de2ae-0be1-46cd-a6a9-ae14f4768855"
+        }
+      },
+      "ordinary_app": {
+        "codec": "OMX.qcom.video.decoder.avc",
+        "selection": "automatic",
+        "uid": 1010271,
+        "domain": "untrusted_app_34",
+        "system_library_maps_verified": true,
+        "inputs": 300,
+        "outputs": 300,
+        "rendered_callbacks": 285,
+        "eos": true,
+        "realtime": true,
+        "elapsed_ms": 9963,
+        "stop_ok": true,
+        "release_ok": true,
+        "strict_result": false,
+        "screenshot": "renderer-v2-app-awake.png",
+        "visual": "Complete test chart visible; not proof that all frames were displayed",
+        "evidence": "renderer-v2-app-awake-test.stdout",
+        "first_attempt": "Screen asleep; Surface released before START. Woke display through normal PowerManager API, then retried once."
+      },
+      "display_tone_mapping_verified": false,
+      "current_default_service": "AVC-only, metadata default off",
+      "transient_service": "Five-codec/P010 + native-extra-v2 in RAM; Main10 profile still filtered",
+      "next": "Physical SDR composition/tone mapping, normal HEVC CSD, rendered callback gaps, PM failure snapshot and remaining capabilities"
+    },
+    "last_reboot_ssh_seconds": 89.8,
+    "venus_boot_status_candidate": {
+      "source": "out/quest2-video-618-20261107/all-codecs/venus-hdr-extradata-v4",
+      "candidate": "out/quest2-video-618-20261107/all-codecs/venus-boot-status-v1",
+      "changed_source_files": [
+        "hfi_venus.c",
+        "venus-sq2-boot-watch.h"
+      ],
+      "original_boundary_test": "fails when ready arrives on last poll",
+      "candidate_tests": "24 reply/profile cases +5 invalid CPU buffer cases; ASAN/UBSAN; five existing PM tests pass",
+      "waits": "unchanged default100/watch2000; no additional MMIO or queue writes",
+      "unknown_header_rejected": true,
+      "idempotent": true,
+      "deployed": false,
+      "hardware_root_cause_verified": false,
+      "build_exit": 0,
+      "modules": {
+        "venus-core.ko": {
+          "sha256": "cab437a1f543062b6b97f10c0e56b0d085dd6164596eeeceae9eba216905393b",
+          "vermagic": "6.18.60-sq2-android1 SMP mod_unload aarch64",
+          "new_undefined_symbols": []
+        },
+        "venus-dec.ko": {
+          "sha256": "066705d74ce6014af7d673f1f49cfafdfd6e613c1d34f56a6cc23e2d4f192cb1",
+          "vermagic": "6.18.60-sq2-android1 SMP mod_unload aarch64",
+          "new_undefined_symbols": []
+        },
+        "venus-enc.ko": {
+          "sha256": "3ce2c0871ce99b1711a575c956e1dd2238b5664b6814a7d0f37ddcc114b21b44",
+          "vermagic": "6.18.60-sq2-android1 SMP mod_unload aarch64",
+          "new_undefined_symbols": []
+        }
+      },
+      "build_evidence": "boot-status-build-v1.json",
+      "scope": "Only hfi_venus.c final-ready timeout predicate and bounded CPU-owned boot-state snapshot header; complete matching three modules rebuilt",
+      "target_failure": "Root cause of real s2idle HFI resume timeout unverified; no default wait extension, no provider unload/PAS/error clearing",
+      "patch_tests": "2 incremental patch tests passed: exact change/idempotence and unknown header/loop rejection before writes"
+    },
+    "venus_boot_status_deployment": {
+      "baseline_sha256": "ca47b0aba12c71f0ac77067403c582455075b4cc09514d0f974eaa7af47588b4",
+      "sha256": "6ee0fbc1e2d8a51a7734f7b1c6dcd34461fe8b36a8517237a2dce35619b0e2bd",
+      "bytes": 234029854,
+      "changed_entries": [
+        "etc/sq2-video-native/SHA256SUMS",
+        "etc/sq2-video-native/venus-core.ko",
+        "etc/sq2-video-native/venus-dec.ko",
+        "lib/modules/6.18.60-sq2-android1/kernel/drivers/media/platform/qcom/venus/venus-core.ko",
+        "lib/modules/6.18.60-sq2-android1/kernel/drivers/media/platform/qcom/venus/venus-dec.ko",
+        "lib/modules/6.18.60-sq2-android1/kernel/drivers/media/platform/qcom/venus/venus-enc.ko"
+      ],
+      "module_sha256": {
+        "venus-core.ko": "cab437a1f543062b6b97f10c0e56b0d085dd6164596eeeceae9eba216905393b",
+        "venus-dec.ko": "066705d74ce6014af7d673f1f49cfafdfd6e613c1d34f56a6cc23e2d4f192cb1",
+        "venus-enc.ko": "3ce2c0871ce99b1711a575c956e1dd2238b5664b6814a7d0f37ddcc114b21b44"
+      },
+      "kernel_release": "6.18.60-sq2-android1",
+      "private_package": true,
+      "credentials_unchanged": true,
+      "deployed": true,
+      "reboot_verified": true,
+      "boot_before": "efcddeb2-e4a4-49a6-9304-9871b72101e7",
+      "new_backups_created": false,
+      "cache_cleared": false,
+      "changed_efi_files": [
+        "/media/esp/EFI/SQ2QDbg/SHA256SUMS",
+        "/media/esp/EFI/SQ2QDbg/initramfs.cpio.gz"
+      ],
+      "boot_after": "25e4c984-70f6-4c79-8108-6657223a8c20",
+      "ssh_recovery": {
+        "ready": true,
+        "boot_id": "25e4c984-70f6-4c79-8108-6657223a8c20",
+        "attempts": 8,
+        "elapsed_seconds": 95.5
+      },
+      "driver_health_verified": true,
+      "loaded_module_build_id_verified": true
+    },
+    "p010_system_path_verified": {
+      "avc": {
+        "result": "pass",
+        "frames": 6,
+        "eos": true,
+        "clean_close": true,
+        "files": {
+          "sq2-ndk-frame-0.bin": "e29567bca0298497e0b01bdf7de80d15233635c11e31418904108f884bb1c189",
+          "sq2-ndk-frame-1.bin": "0826b1bca4e33dce0147eb2b942706906dfb7abe21e8432f6123f1d70874e18e",
+          "sq2-ndk-frame-2.bin": "9502d455a0331e1e773871c2044cfb6fc3f9ccff43f48c0df7ee975c133d69d0",
+          "sq2-ndk-frame-3.bin": "c7fda4b1c68aed8f91ecb439c5e5ece53490c8b0210ccd497f6fd73bbfa06c65",
+          "sq2-ndk-frame-4.bin": "d1be162b9a434687448da9981856e604c7a99f51c42b9214d59477c02313d7a7",
+          "sq2-ndk-frame-5.bin": "32139353e94eb63585d1ffbb982bf3b7908c90225fe0af3aefbd93e91391472d"
+        },
+        "pixel_comparison": "All files byte-identical to independently verified CFI counterpart",
+        "maps": "actual /system/lib64 pair; no client LD_LIBRARY_PATH",
+        "metadata": [],
+        "boot": "25e4c984-70f6-4c79-8108-6657223a8c20"
+      },
+      "hdr10": {
+        "result": "pass",
+        "frames": 6,
+        "eos": true,
+        "clean_close": true,
+        "files": {
+          "sq2-rgb10-frame-0.bin": "7dff3ac084523f74dc4658906a0410ffd71b80de251986e5a88f5cb62c6de2bb",
+          "sq2-rgb10-frame-1.bin": "de33efe0e5733b73b6bc762c549c627df2475c1a70030ed5b6676a4cdff37279",
+          "sq2-rgb10-frame-2.bin": "246ea2ea83d6e71bbc4c5debbb754073417ef6cac46026d918c20027103219db",
+          "sq2-rgb10-frame-3.bin": "5c9b8730ea405131b0c3064d6329e8df4d728a61c45244aa347eefb8f43e2512",
+          "sq2-rgb10-frame-4.bin": "e2aa1fb43f69a2e9899e22e76a69da47e432abca42f9a4c66c2cd4950f76e709",
+          "sq2-rgb10-frame-5.bin": "2dbc483645c96407239a1d322f68c84fb9ccbdf8dca032814b721b79626b2ea4"
+        },
+        "pixel_comparison": "All files byte-identical to independently verified CFI counterpart",
+        "maps": "actual /system/lib64 pair; no client LD_LIBRARY_PATH",
+        "metadata": [
+          "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+          "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+          "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+          "IMAGE_RGB10 index=0 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=0 crop=0,0,320,240",
+          "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+          "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+          "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+          "IMAGE_RGB10 index=1 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=33333000 crop=0,0,320,240",
+          "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+          "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+          "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+          "IMAGE_RGB10 index=2 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=66666000 crop=0,0,320,240",
+          "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+          "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+          "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+          "IMAGE_RGB10 index=3 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=99999000 crop=0,0,320,240",
+          "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+          "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+          "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+          "IMAGE_RGB10 index=4 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=133332000 crop=0,0,320,240",
+          "IMAGE_HDR smpte_rc=0 present=1 cta_rc=0 present=1",
+          "IMAGE_MASTERING R=0.680000,0.320000 G=0.265000,0.690000 B=0.150000,0.060000 W=0.312700,0.329000 max=1000.000000 min=0.005000",
+          "IMAGE_LIGHT max_cll=1000.000000 max_fall=400.000000",
+          "IMAGE_RGB10 index=5 format=43 width=320 height=240 stride=320 dataspace=0x9c60000 timestamp_ns=166665000 crop=0,0,320,240"
+        ],
+        "boot": "25e4c984-70f6-4c79-8108-6657223a8c20"
+      },
+      "hlg": {
+        "result": "pass",
+        "frames": 6,
+        "eos": true,
+        "clean_close": true,
+        "files": {
+          "sq2-rgb10-frame-0.bin": "7dff3ac084523f74dc4658906a0410ffd71b80de251986e5a88f5cb62c6de2bb",
+          "sq2-rgb10-frame-1.bin": "de33efe0e5733b73b6bc762c549c627df2475c1a70030ed5b6676a4cdff37279",
+          "sq2-rgb10-frame-2.bin": "246ea2ea83d6e71bbc4c5debbb754073417ef6cac46026d918c20027103219db",
+          "sq2-rgb10-frame-3.bin": "5c9b8730ea405131b0c3064d6329e8df4d728a61c45244aa347eefb8f43e2512",
+          "sq2-rgb10-frame-4.bin": "e2aa1fb43f69a2e9899e22e76a69da47e432abca42f9a4c66c2cd4950f76e709",
+          "sq2-rgb10-frame-5.bin": "2dbc483645c96407239a1d322f68c84fb9ccbdf8dca032814b721b79626b2ea4"
+        },
+        "pixel_comparison": "All files byte-identical to independently verified CFI counterpart",
+        "maps": "actual /system/lib64 pair; no client LD_LIBRARY_PATH",
+        "metadata": [
+          "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+          "IMAGE_RGB10 index=0 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=0 crop=0,0,320,240",
+          "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+          "IMAGE_RGB10 index=1 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=33333000 crop=0,0,320,240",
+          "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+          "IMAGE_RGB10 index=2 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=66666000 crop=0,0,320,240",
+          "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+          "IMAGE_RGB10 index=3 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=99999000 crop=0,0,320,240",
+          "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+          "IMAGE_RGB10 index=4 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=133332000 crop=0,0,320,240",
+          "IMAGE_HDR smpte_rc=0 present=0 cta_rc=0 present=0",
+          "IMAGE_RGB10 index=5 format=43 width=320 height=240 stride=320 dataspace=0xa060000 timestamp_ns=166665000 crop=0,0,320,240"
+        ],
+        "boot": "25e4c984-70f6-4c79-8108-6657223a8c20"
+      }
+    },
+    "p010_renderer_persistent_deployment": {
+      "baseline_sha256": "6ee0fbc1e2d8a51a7734f7b1c6dcd34461fe8b36a8517237a2dce35619b0e2bd",
+      "sha256": "5b9f7012ab43db5ec42f6169d57047527f19a0feff0fb824d77d7711ec68c351",
+      "bytes": 236150077,
+      "changed_entries": [
+        "bin/sq2-p010-renderer-stage",
+        "etc/sq2-p010-renderer",
+        "etc/sq2-p010-renderer/BASELINE.sha256",
+        "etc/sq2-p010-renderer/LIBRARIES.sha256",
+        "etc/sq2-p010-renderer/SHA256SUMS",
+        "etc/sq2-p010-renderer/libsq2-p010-renderer.so",
+        "etc/sq2-p010-renderer/libstagefright.so",
+        "etc/sq2-p010-renderer/service.rc",
+        "init"
+      ],
+      "libraries": {
+        "libstagefright.so": "93312fd55e49a61f85483a46137f9bca8a98ae3c0299e07658e32590a9e104b5",
+        "libsq2-p010-renderer.so": "c67c598e90979aa9d85ce0cb8409e82d5f01366ad3c78916a373a96855848a92"
+      },
+      "credentials_kernel_hidl_unchanged": true,
+      "private_package": true,
+      "deployed": true,
+      "reboot_verified": true,
+      "boot_before": "25e4c984-70f6-4c79-8108-6657223a8c20",
+      "changed_efi_files": [
+        "/media/esp/EFI/SQ2QDbg/SHA256SUMS",
+        "/media/esp/EFI/SQ2QDbg/initramfs.cpio.gz"
+      ],
+      "new_backups_created": false,
+      "cache_cleared": false,
+      "boot_after": "ee8de2ae-0be1-46cd-a6a9-ae14f4768855",
+      "ssh_recovery": {
+        "ready": true,
+        "boot_id": "ee8de2ae-0be1-46cd-a6a9-ae14f4768855",
+        "attempts": 10,
+        "elapsed_seconds": 127.1
+      },
+      "driver_health_verified": true
+    },
+    "persisted_initramfs_sha256": "5b9f7012ab43db5ec42f6169d57047527f19a0feff0fb824d77d7711ec68c351",
+    "renderer_v2_final_state": {
+      "status": "SSH lost during temporary wakelock release; current PM/health unknown",
+      "boot_last_verified": "ee8de2ae-0be1-46cd-a6a9-ae14f4768855",
+      "last_verified_health": "sys_error0/core_state1/insts0/vb2_bytes0 after HDR10/HLG close",
+      "wakelock_release": "Explicit release command dispatched but SSH timed out; automatic600-second release also scheduled; release readback not verified",
+      "evidence": "renderer-v2-wakelock-release-check.json",
+      "next": "User short power-button wake requested; read boot/PM status and bounded SQ2_BOOT_WATCH snapshot before any decode/reboot"
+    },
+    "final_health": {
+      "last_verified_boot": "872b3b57-680b-4d04-8f85-6fde9d6021ba",
+      "sys_error": 0,
+      "core_state": 1,
+      "instances": 0,
+      "vb2_bytes": 0,
+      "scope": "After diagnostic app exit, temporary lock release and delayed normal PowerManager wake",
+      "temporary_wakelock_release_verified": true
+    },
+    "render_callback_audit_candidate": {
+      "status": "installed-device-tested-strict-hardware-failure",
+      "apk_sha256": "ef4490c02f6264711b37278fde3ca1ee30da44fb49c243e2d837910efc55626f",
+      "source": "probe/video/player-app/RenderedFrameAudit.java",
+      "semantics": "Per-output queued PTS versus actual callback PTS: missing ordered list, tail-only classification, duplicates and unexpected PTS; not proof of displayed/dropped frames",
+      "behavior": "Append PTS in memory; report once after existing callback wait. Existing strict RESULT and render pacing unchanged",
+      "tests": "Actual Java helper tested: complete, tail gap, interior gap, duplicate/unexpected, no callbacks, empty input",
+      "input_clip_sha256": "4b2c7c578f0fd9eb820e0909c484fb313dc9e2f94ec675978e4ef341e3d02b97",
+      "build": "player-render-audit-v1/BUILD.json",
+      "next": "Trace actual queue/latch/fence timestamps in OEM ACodec SoftwareRenderer path; keep strict result.",
+      "result": "render-audit-v1-comparison.json"
+    },
+    "goal_blocker": {
+      "status": "superseded",
+      "resolved_by": "User wake allowed same-boot PM capture, then authorized normal reboot recovered SSH at89.8s",
+      "historical_evidence": "remote-recovery-block-audit.json",
+      "objective_complete": false
+    },
+    "user_wake_recovery": {
+      "ssh": {
+        "ready": true,
+        "boot_id": "872b3b57-680b-4d04-8f85-6fde9d6021ba",
+        "attempts": 8,
+        "elapsed_seconds": 89.8
+      },
+      "health_stdout": "user-wake-recovered-health.stdout",
+      "driver_healthy": true,
+      "package_unchanged": true
+    },
+    "user_wake_pm_failure": {
+      "boot": "ee8de2ae-0be1-46cd-a6a9-ae14f4768855",
+      "uptime_seconds": 718.497,
+      "status": "0x00000000",
+      "poll": 99,
+      "boot_watch": false,
+      "command_read": 0,
+      "command_write": 0,
+      "message_write": 0,
+      "debug_write": 0,
+      "sfr_words": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "sys_error": 1,
+      "insts": 0,
+      "vb2_bytes": 0,
+      "stops": 17,
+      "starts": 16,
+      "conclusion": "Real zero-status HFI ready timeout after clean suspend/restart; not the fixed last-poll ready false-positive",
+      "warning": "Dynamic firmware memory platform device registered while parent platform sleeping",
+      "warning_causality": "Unproven; earlier boot also showed this warning without immediate failure",
+      "captured_log": "out/quest2-video-618-20261107/all-codecs/captured-kernel-ee8de2ae-pm-failure.txt",
+      "sha256": "06d2d8ea35a2a2b0d6a6ad15e32d40433214f40e8dd646d6573b641e249cd7a2",
+      "recovery": "Normal reboot on unchanged renderer-v2 package; no decoder/session or hot provider reset"
+    },
+    "render_callback_audit": {
+      "boot_id": "872b3b57-680b-4d04-8f85-6fde9d6021ba",
+      "hardware": {
+        "codec": "OMX.qcom.video.decoder.avc",
+        "evidence": "render-audit-v1-device.stdout",
+        "inputs": 300,
+        "outputs": 300,
+        "rendered_callbacks": 292,
+        "missing_pts_us": [
+          0,
+          33333,
+          100000,
+          8100000,
+          9866666,
+          9900000,
+          9933333,
+          9966666
+        ],
+        "tail_only": false,
+        "duplicates": 0,
+        "strict_result": false,
+        "eos": true,
+        "stop_ok": true,
+        "release_ok": true,
+        "no_playback_screenshot": true
+      },
+      "software_control": {
+        "codec": "c2.android.avc.decoder",
+        "evidence": "render-audit-v1-software-2.stdout",
+        "inputs": 300,
+        "outputs": 300,
+        "rendered_callbacks": 300,
+        "missing_pts_us": [],
+        "tail_only": false,
+        "duplicates": 0,
+        "strict_result": true,
+        "eos": true,
+        "stop_ok": true,
+        "release_ok": true,
+        "no_playback_screenshot": true
+      },
+      "conclusion": "OEM/ACodec/SoftwareRenderer path callback deficit remains; pure-tail explanation disproven. Software control passes; not proof of which OEM path component causes deficit or actual displayed/dropped frames.",
+      "scope": "Same APK, AVC asset, timing, user and boot; changed codec only. No production codec policy change."
+    },
+    "render_audit_final_state": {
+      "boot_id": "872b3b57-680b-4d04-8f85-6fde9d6021ba",
+      "driver_healthy": true,
+      "temporary_wakelock_release_verified": true,
+      "evidence": "render-audit-v1-final-health.stdout",
+      "esp_free_kib": 260204,
+      "esp_logs_kib": 78388,
+      "objective_complete": false
+    },
+    "full_stack_plan": {
+      "document": "docs/QUALCOMM-FULL-STACK-PORT.md",
+      "direction": "Matched Qualcomm KGSL, QTI allocator/mapper/gralloc, msm_vidc, OEM OMX/HIDL and HWC/display kernel on Linux6.18",
+      "status": "design-recorded-not-implemented",
+      "checkpoint_scope": "Save mixed-stack source and verified progress; no new deployment",
+      "pending": "Version/UAPI/firmware compatibility inventory, then shared memory contract"
+    },
+    "source_checkpoint_validation": {
+      "date": "2026-11-08",
+      "unittest_modules": 19,
+      "tests": 95,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "hfi_poll_and_buffer_cases": 29,
+      "sanitizers": "ASAN/UBSAN for HFI poll and boot-kmsg harnesses",
+      "boot_kmsg_space_and_enospc": "passed",
+      "python_json_shell_and_diff_checks": "passed",
+      "device_test_this_checkpoint": false,
+      "full_image_rebuild_this_checkpoint": false,
+      "local_evidence": "out/progress-save-20261108"
+    }
+  },
+  "latest_omx_development": {
+    "date": "2026-11-07",
+    "branch": "codex/quest2-proprietary-gpu",
+    "kernel": "6.18.60-sq2-android1",
+    "boot_id": "b6888ecf-a481-4c31-ba98-0397fbae5c9b",
+    "initramfs_sha256": "fdffc804df8a8d6c6369b9d2129d525be8c62fab3494523c2aa4110b6c4e812e",
+    "status": "HIDL-only-hardware-derived-AVC-capabilities-verified-render-callback-acceptance-incomplete",
+    "init_services_registered": true,
+    "uid_domains_verified": true,
+    "buffer": {
+      "equal": true,
+      "frames": 6,
+      "bytes": 691200,
+      "sha256": "c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd",
+      "boot_id": "b6888ecf-a481-4c31-ba98-0397fbae5c9b"
+    },
+    "surface_csd": {
+      "equal": true,
+      "frames": 6,
+      "bytes": 691200,
+      "sha256": "c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd",
+      "boot_id": "b6888ecf-a481-4c31-ba98-0397fbae5c9b"
+    },
+    "ordinary_apk": {
+      "profile": "AVC High",
+      "size": "320x240",
+      "fps": 30,
+      "auto_selected": "OMX.qcom.video.decoder.avc",
+      "hardware": true,
+      "inputs": 300,
+      "outputs": 300,
+      "rendered_callbacks": 293,
+      "eos": true,
+      "elapsed_ms": 9961,
+      "stop": true,
+      "release": true,
+      "strict_pass": false
+    },
+    "ordinary_apk_1080p60": {
+      "profile": "AVC High",
+      "size": "1920x1080",
+      "fps": 60,
+      "auto_selected": "OMX.qcom.video.decoder.avc",
+      "hardware": true,
+      "inputs": 600,
+      "outputs": 600,
+      "rendered_callbacks": 562,
+      "eos": true,
+      "elapsed_ms": 9981,
+      "stop": true,
+      "release": true,
+      "strict_pass": false,
+      "pixel_equality_checked": false
+    },
+    "avc_capabilities": {
+      "source": "read-only actual Venus HFI decoder table; core session limit",
+      "profiles": [
+        "Baseline",
+        "Constrained Baseline",
+        "Main",
+        "High",
+        "Constrained High"
+      ],
+      "level": "6",
+      "profile_level_value": 131072,
+      "width": [
+        96,
+        8192
+      ],
+      "height": [
+        96,
+        8192
+      ],
+      "alignment": [
+        2,
+        2
+      ],
+      "macroblocks_per_frame": [
+        1,
+        138240
+      ],
+      "macroblocks_per_second": [
+        1,
+        3888000
+      ],
+      "frame_rate": [
+        1,
+        480
+      ],
+      "bitrate": [
+        1,
+        220000000
+      ],
+      "driver_session_limit": 16,
+      "android_effective_enumeration_verified": true,
+      "examples_declared_not_benchmarked": [
+        "3840x2160 at up to 120 fps",
+        "7680x4320 at up to 30 fps"
+      ],
+      "8192x8192_supported": false,
+      "limit_note": "All geometry/throughput/profile-level constraints apply together; driver session maximum does not promise full-size concurrent throughput"
+    },
+    "project_c2_retired": {
+      "packaged_runtime_removed": true,
+      "service_manifest_xml_absent": true,
+      "android_enumeration_absent": true,
+      "device_runtime_removed": [
+        "clean-20261030",
+        "omx-hidl-v1",
+        "omx-v1",
+        "v1",
+        "v2u"
+      ],
+      "device_bytes_kib_removed": 3284,
+      "system_c2_android_preserved": true,
+      "libc2dcolorconvert_preserved": true
+    },
+    "venus_after": {
+      "sys_error": 0,
+      "insts": 0,
+      "vb2_bytes": 0
+    },
+    "esp_free_kib": 305708,
+    "esp_logs_kib": 39160,
+    "remaining": [
+      "Rendered callbacks incomplete (293/300 and 562/600); full display acceptance is false",
+      "Only AVC 8-bit linear path integrated; HEVC/VPx/HDR/secure/full extradata/native gralloc zero-copy not accepted",
+      "Maximum advertised raster/bitrate/throughput and concurrent sessions not stress-tested; no long-term/SQ1 acceptance"
+    ],
+    "default_entry": "sq2-qcom-618-debug",
+    "normal_boot_observed": true,
+    "evidence": "out/quest2-video-618-20261107/system-omx",
+    "new_backups_created": false,
+    "cache_cleared": false,
+    "selinux": "global Enforcing observed; full per-domain policy audit pending",
+    "scope": "Historical verified AVC milestone; current all-codec task/deployment state is latest_all_codec_development"
+  },
+  "latest_graphics_deployment": {
+    "recorded": "2026-11-07",
+    "scope": "Prior graphics acceptance; latest combined initramfs is recorded in latest_all_codec_development",
+    "kernel": "6.18.60-sq2-android1",
+    "default_entry": "sq2-qcom-618-debug",
+    "runtime_libraries": 15,
+    "gles_mode": "explicit Direct/sysmem workaround",
+    "initramfs_sha256": "db5e611943f9c4835ab13255fcb75bf5e65f83a2aec5c1562d90a107a29426c7",
+    "gles_sha256": "58e1aafe2de28dfb632df9c64b56b761906bf8aeae014975f71938f1061a4d83",
+    "grub_sha256": "6695c41774fb411625472f5cefba4d8c5ae93658543a7cccc10402bc493ef37f",
+    "retained_618_mesa_initramfs_sha256": "525d739f0e1d461aab686296d21262cb3e501e3ff591aec69ae0f0d043052c48",
+    "normal_reboot_observed": true,
+    "settings_and_easytier_screenshots": "readable, no former repeated bands",
+    "gles_vulkan_basic": "pass",
+    "vulkan_imagereader_wsi": "2073x1382, 3 frames, zero bad pixels",
+    "cache_cleanup_performed": false,
+    "legacy_fallback_retained": true,
+    "gmem_root_cause_fixed": false,
+    "performance_power_cross_device_verified": false,
+    "evidence": "out/qualcomm-graphics-618-20261107/direct-postboot/ACCEPTANCE.json"
+  },
   "recorded": "2026-10-28",
   "device": "Surface Pro X SQ2 16GB, replacement 512GB internal NVMe",
   "os": "mica 16471258",

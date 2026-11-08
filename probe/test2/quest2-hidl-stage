@@ -1,0 +1,27 @@
+#!/bin/busybox sh
+# Install the paired HIDL service before Android init parses its HAL services.
+set -eu
+cmdline=$(cat /proc/cmdline)
+case " $cmdline " in *' sq2.rescue=1 '*|*' sq2.video=0 '*) exit 0;; esac
+case " $cmdline " in *' sq2.video.c2=experimental '*) ;; *) exit 0;; esac
+source=/etc/sq2-hidl
+(cd "$source"; sha256sum -c SHA256SUMS)
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+stage=/newroot/debug_ramdisk/sq2-hidl-bin
+mkdir -p "$stage/lower" "$stage/upper" "$stage/work"
+mount --bind /newroot/system_ext/bin "$stage/lower"
+mount -t overlay overlay -o lowerdir=$stage/lower,upperdir=$stage/upper,workdir=$stage/work /newroot/system_ext/bin
+cp "$source/hwservicemanager" /newroot/system_ext/bin/hwservicemanager
+chmod 755 /newroot/system_ext/bin/hwservicemanager
+mount --bind "$source/framework-manifest.xml" /newroot/system_ext/etc/vintf/manifest.xml
+mkdir -p /newroot/vendor/etc/sq2-omx/lib64
+cp "$source"/lib64/* /newroot/vendor/etc/sq2-omx/lib64/
+cp "$source/quest2-omx-service" /newroot/vendor/bin/hw/quest2-omx-service
+chmod 755 /newroot/vendor/bin/hw/quest2-omx-service
+cp "$source/android.hidl.memory@1.0-impl.so" /newroot/vendor/lib64/hw/
+cp "$source/media_codecs_quest2_omx.xml" /newroot/vendor/etc/sq2-omx/media_codecs.xml
+cp "$source/media_codecs_quest2_omx.xml" /newroot/vendor/etc/
+cp "$source/media_codecs_hamoa.xml" /newroot/vendor/etc/media_codecs_hamoa.xml
+cp "$source/manifest.xml" /newroot/vendor/etc/vintf/manifest/quest2-omx.xml
+cp "$source/service.rc" /newroot/vendor/etc/init/quest2-hidl.rc
+echo QUEST2_HIDL_STAGED

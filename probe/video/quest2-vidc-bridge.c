@@ -2,9 +2,10 @@
  * Explicit, process-local Quest VIDC ABI adapter. This is NOT a decoder.
  * The unchanged donor drives OMX; Venus performs all actual decoding.
  *
- * Candidate: real event broker, controls and offset-zero ION/dma-buf queues.
- * Unsupported private controls, active flush, reference-buffer registration,
- * multiple planes/offset layouts fail EOPNOTSUPP rather than fake success.
+ * Real event broker, acknowledged flush, WC/cached ION and DMA-buf queues.
+ * Linear NV12/P010 have a translated crop metadata companion plane. Unknown
+ * controls and video planes/offsets remain unsupported. Native firmware metadata
+ * is an explicit candidate option with separate offset-zero DMA allocations.
  * See tests/test_quest2_vidc_bridge.py and quest2-vidc-bridge-capabilities.json.
  */
 #define _GNU_SOURCE
@@ -15,6 +16,9 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <linux/videodev2.h>
+#include <linux/dma-heap.h>
+#include <linux/dma-buf.h>
+#include <drm/msm_drm.h>
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
@@ -25,11 +29,30 @@
 #include <string.h>
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+/* Bounded service-lifetime diagnostics; logcat owns the bounded Android ring. */
+static void q2_trace(const char *format, ...) {
+    int saved=errno;
+#ifdef __ANDROID__
+    static unsigned count;
+    if (__atomic_fetch_add(&count,1,__ATOMIC_RELAXED)>=4096) return;
+#endif
+    va_list args;va_start(args,format);
+#ifdef __ANDROID__
+    __android_log_vprint(ANDROID_LOG_DEBUG,"Q2BRIDGE",format,args);
+#else
+    vfprintf(stderr,format,args);
+#endif
+    va_end(args);errno=saved;
+}
 #define Q2_EVENT_BASE 0x08001000U
 #define Q2_FLUSH_DONE (Q2_EVENT_BASE + 1)
 #define Q2_RECONFIG (Q2_EVENT_BASE + 3)
@@ -43,7 +66,13 @@
 #define Q2_CMD_CONTINUE 5U
 #define Q2_BUF_EOS 0x02000000U
 #define Q2_BUF_CODECCONFIG 0x00020000U
+#define Q2_NATIVE_CODECCONFIG 0x01000000U
+#define Q2_PIX_FMT_P010_VENUS v4l2_fourcc('Q','P','1','0')
 #define Q2_BUF_DATA_CORRUPT 0x00400000U
+#define Q2_NATIVE_EXTRA_CTRL 0x00982f00U
+#ifndef QUEST2_NATIVE_EXTRA_DEFAULT
+#define QUEST2_NATIVE_EXTRA_DEFAULT 0
+#endif
 
 #ifdef __ANDROID__
 typedef int request_t;
@@ -52,16 +81,27 @@ typedef unsigned long request_t;
 #endif
 typedef int (*q2_backend)(int, unsigned long, void *);
 struct q2_event_node { struct v4l2_event event; struct q2_event_node *next; };
-struct q2_buffer_slot { struct v4l2_plane donor; int pin,valid,queued; };
+struct q2_buffer_slot {
+    struct v4l2_plane donor, extra;
+    int pin,valid,queued,extra_fd;
+    void *extra_map;
+    int native_extra_fd;
+    void *native_extra_map;
+    uint32_t native_extra_size, native_extra_used;
+};
 struct q2_queue { unsigned count; int userptr; struct q2_buffer_slot *slots; };
 struct q2_session {
     int fd, wake;
     pthread_mutex_t mutex;
     unsigned subscriptions, refs, streaming, queued;
-    int source_subscribed;
-    uint32_t sequence;
+    int source_subscribed, draining, metadata_plane;
+    uint32_t sequence, codec_config_flag, native_extra_mask, native_extra_capacity;
+    int native_extra_enabled;
     struct q2_event_node *head, *tail;
     q2_backend backend;
+    int (*sync_buffer)(int);
+    int (*cpu_access)(int, uint64_t);
+    int (*allocate_extra)(size_t, int *);
     int (*query_minimum)(struct q2_session *, uint32_t, int *);
     struct q2_queue queues[2];
 };
@@ -142,6 +182,21 @@ static int q2_level(int value, int to_native) {
 }
 static int q2_private_control(uint32_t id) { return id >= Q2_CTRL_BASE && id < Q2_CTRL_BASE + 0x1000; }
 static int q2_ctrl(struct q2_session *s, unsigned long request, struct v4l2_control *ctrl) {
+    if (ctrl->id == 0x00992077U && request == VIDIOC_S_CTRL) {
+        /* Downstream FRAME_RATE is Q16 fps; upstream Venus takes time/frame. */
+        if (ctrl->value <= 0) return q2_error(EINVAL);
+        struct v4l2_streamparm parm = {.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE};
+        parm.parm.capture.timeperframe.numerator = 65536;
+        parm.parm.capture.timeperframe.denominator = (uint32_t)ctrl->value;
+        return s->backend(s->fd, VIDIOC_S_PARM, &parm);
+    }
+    if (ctrl->id == Q2_CTRL_BASE+17 && request == VIDIOC_S_CTRL && s->native_extra_enabled) {
+        /* Downstream enum values, not HFI types. Firmware was enabled before
+         * INIT; later OMX requests may acknowledge only that real mask. */
+        unsigned bit=ctrl->value==29?1:ctrl->value==26?2:ctrl->value==27?4:0;
+        if(ctrl->value==25 && s->metadata_plane) return 0;
+        return bit && (s->native_extra_mask&bit)?0:q2_error(EOPNOTSUPP);
+    }
     if (q2_private_control(ctrl->id)) return q2_error(EOPNOTSUPP);
     struct v4l2_control native = *ctrl;
     if (ctrl->id == V4L2_CID_MPEG_VIDEO_H264_LEVEL && request == VIDIOC_S_CTRL) {
@@ -149,8 +204,17 @@ static int q2_ctrl(struct q2_session *s, unsigned long request, struct v4l2_cont
         if (native.value < 0) return q2_error(EINVAL);
     }
     int result = s->backend(s->fd, request, &native);
-    if (result && errno == EAGAIN && request == VIDIOC_G_CTRL && s->query_minimum &&
-        (ctrl->id == V4L2_CID_MIN_BUFFERS_FOR_OUTPUT || ctrl->id == V4L2_CID_MIN_BUFFERS_FOR_CAPTURE)) {
+    int backend_error = errno;
+    q2_trace("Q2BRIDGE CTRL req=0x%lx id=0x%x value=%d result=%d errno=%d\n",
+            request, ctrl->id, native.value, result, result ? backend_error : 0);
+    errno = backend_error;
+    /* Venus CAPTURE reports EINVAL before HFI INIT; the auxiliary query must
+     * still succeed on a real initialized session, never supply a guessed count. */
+    if (result && request == VIDIOC_G_CTRL && s->query_minimum &&
+        ((errno == EAGAIN && (ctrl->id == V4L2_CID_MIN_BUFFERS_FOR_OUTPUT ||
+                             ctrl->id == V4L2_CID_MIN_BUFFERS_FOR_CAPTURE)) ||
+         (errno == EINVAL && ctrl->id == V4L2_CID_MIN_BUFFERS_FOR_CAPTURE &&
+          !s->streaming && !s->queued && !s->queues[0].count && !s->queues[1].count))) {
         result = s->query_minimum(s, ctrl->id, &native.value);
     }
     if (result) return result;
@@ -168,7 +232,12 @@ static int q2_queue_index(uint32_t type) {
 static void q2_queue_clear(struct q2_session *s,struct q2_queue *q) {
     for(unsigned i=0;i<q->count;i++) {
         struct q2_buffer_slot *slot=&q->slots[i];
+        if(slot->extra_map) {munmap(slot->extra_map,slot->extra.length);syscall(SYS_close,slot->extra_fd);}
         if(slot->valid && slot->pin>=0) (void)syscall(SYS_close,slot->pin);
+        if(slot->native_extra_map) {
+            munmap(slot->native_extra_map,slot->native_extra_size);
+            syscall(SYS_close,slot->native_extra_fd);
+        }
         if(slot->queued && s->queued) s->queued--;
     }
     free(q->slots);memset(q,0,sizeof(*q));
@@ -186,7 +255,7 @@ static int q2_reqbufs(struct q2_session *s,struct v4l2_requestbuffers *request) 
         if(!q->slots) {
             int error=errno;struct v4l2_requestbuffers release=native;release.count=0;
             int r=s->backend(s->fd,VIDIOC_REQBUFS,&release);
-            fprintf(stderr,"Q2BRIDGE failed buffer metadata allocation; release result=%d errno=%d\n",r,errno);
+            q2_trace("Q2BRIDGE failed buffer metadata allocation; release result=%d errno=%d\n",r,errno);
             return q2_error(error);
         }
     }
@@ -204,8 +273,17 @@ static int q2_user_buffer(struct q2_session *s,unsigned long request,struct v4l2
     if(!q->userptr || !q->slots) return q2_error(EINVAL);
     if(!buffer->m.planes) return q2_error(EFAULT);
     if(buffer->length!=1) return q2_error(EOPNOTSUPP);
-    struct v4l2_buffer native=*buffer;struct v4l2_plane plane={0};
-    native.memory=V4L2_MEMORY_DMABUF;native.m.planes=&plane;
+    struct v4l2_buffer native=*buffer;struct v4l2_plane planes[2]={{0}};
+    unsigned native_planes=index==1 && s->native_extra_mask?2:1;
+    native.memory=V4L2_MEMORY_DMABUF;native.m.planes=planes;native.length=native_planes;
+    /* Query before DQBUF: an unsupported selection must not consume ownership. */
+    struct v4l2_selection visible={.type=V4L2_BUF_TYPE_VIDEO_CAPTURE,
+                                   .target=V4L2_SEL_TGT_COMPOSE};
+    if(request==VIDIOC_DQBUF && index==1) {
+        if(s->backend(s->fd,VIDIOC_G_SELECTION,&visible)) return -1;
+        if(visible.r.left<0 || visible.r.top<0 || !visible.r.width || !visible.r.height)
+            return q2_error(EPROTO);
+    }
     int pin=-1;struct q2_buffer_slot *slot=NULL;
     if(request!=VIDIOC_DQBUF) {
         if(buffer->index>=q->count) return q2_error(EINVAL);
@@ -218,6 +296,7 @@ static int q2_user_buffer(struct q2_session *s,unsigned long request,struct v4l2
             /* CODECCONFIG collides with the upstream timestamp-source field;
              * unknown private flags may not silently become native flags. */
             uint32_t allowed=0x00007fffU|V4L2_BUF_FLAG_LAST|Q2_BUF_EOS;
+            if(index==0 && s->codec_config_flag==Q2_NATIVE_CODECCONFIG) allowed|=Q2_BUF_CODECCONFIG;
             if(buffer->flags&~allowed) return q2_error(EOPNOTSUPP);
             pin=(int)syscall(SYS_fcntl,(int)donor->reserved[0],F_DUPFD_CLOEXEC,0);
             if(pin<0) return -1;
@@ -226,13 +305,28 @@ static int q2_user_buffer(struct q2_session *s,unsigned long request,struct v4l2
             if(st.st_size<=0 || (uint64_t)st.st_size<donor->length) {
                 syscall(SYS_close,pin);return q2_error(st.st_size<=0?EOPNOTSUPP:EINVAL);
             }
-            plane=*donor;memset(plane.reserved,0,sizeof(plane.reserved));plane.m.fd=pin;
-            native.flags&=~Q2_BUF_EOS;if(buffer->flags&Q2_BUF_EOS) native.flags|=V4L2_BUF_FLAG_LAST;
+            if(request==VIDIOC_QBUF && s->sync_buffer && s->sync_buffer(pin)) {
+                int error=errno;syscall(SYS_close,pin);return q2_error(error);
+            }
+            planes[0]=*donor;memset(planes[0].reserved,0,sizeof(planes[0].reserved));planes[0].m.fd=pin;
+            native.flags&=~(Q2_BUF_EOS|Q2_BUF_CODECCONFIG);
+            if(buffer->flags&Q2_BUF_EOS) native.flags|=V4L2_BUF_FLAG_LAST;
+            if(buffer->flags&Q2_BUF_CODECCONFIG) native.flags|=s->codec_config_flag;
         }
     }
+    if(native_planes==2 && (request==VIDIOC_QBUF || request==VIDIOC_PREPARE_BUF)) {
+        if(!slot || !slot->native_extra_map) {
+            if(pin>=0) syscall(SYS_close,pin);
+            return q2_error(EINVAL);
+        }
+        planes[1].m.fd=slot->native_extra_fd;planes[1].length=slot->native_extra_size;
+    }
     int result=s->backend(s->fd,request,&native),error=errno;
+    if(request==VIDIOC_DQBUF && !result)
+        q2_trace("Q2BRIDGE DQ type=%u index=%u flags=0x%x bytes=%u crop=%d,%d,%u,%u draining=%d\n",
+                native.type,native.index,native.flags,planes[0].bytesused,visible.r.left,visible.r.top,visible.r.width,visible.r.height,s->draining);
     if(result) {if(pin>=0) syscall(SYS_close,pin);return q2_error(error);}
-    if(native.length!=1 || native.index>=q->count) {
+    if(native.length!=native_planes || native.index>=q->count) {
         if(pin>=0) syscall(SYS_close,pin);
         return q2_error(EPROTO);
     }
@@ -240,31 +334,204 @@ static int q2_user_buffer(struct q2_session *s,unsigned long request,struct v4l2
     if(request==VIDIOC_QBUF || request==VIDIOC_PREPARE_BUF) {
         if(slot->valid && slot->pin>=0) (void)syscall(SYS_close,slot->pin);
         slot->donor=buffer->m.planes[0];slot->pin=pin;slot->valid=1;
-        if(request==VIDIOC_QBUF) {slot->queued=1;s->queued++;}
+        if(request==VIDIOC_QBUF) {slot->queued=1;s->queued++;
+            if(index==0 && (buffer->flags&Q2_BUF_EOS)) s->draining=1;}
     } else if(request==VIDIOC_DQBUF) {
         if(!slot->valid || !slot->queued) return q2_error(EPROTO);
         slot->queued=0;if(s->queued)s->queued--;
+        slot->native_extra_used=0;
+        if(native_planes==2) {
+            if(planes[1].data_offset || planes[1].bytesused>slot->native_extra_size)
+                native.flags|=V4L2_BUF_FLAG_ERROR;
+            else slot->native_extra_used=planes[1].bytesused;
+        }
+        if(s->sync_buffer && s->sync_buffer(slot->pin)) {
+            q2_trace("Q2BRIDGE CPU synchronization failed errno=%d\n",errno);
+            native.flags|=V4L2_BUF_FLAG_ERROR;
+            (void)q2_enqueue(s,Q2_SYS_ERROR,NULL,0);
+        }
         if(slot->pin>=0) (void)syscall(SYS_close,slot->pin);
         slot->pin=-1;
     }
-    struct v4l2_plane translated=plane;
+    struct v4l2_plane translated=planes[0];
     if(slot->valid) {
         translated.m.userptr=slot->donor.m.userptr;
         memcpy(translated.reserved,slot->donor.reserved,sizeof(translated.reserved));
     } else {translated.m.userptr=0;memset(translated.reserved,0,sizeof(translated.reserved));}
-    if(native.flags&V4L2_BUF_FLAG_LAST) {native.flags&=~V4L2_BUF_FLAG_LAST;native.flags|=Q2_BUF_EOS;}
+    if(request==VIDIOC_DQBUF && index==1) {
+        translated.reserved[2]=visible.r.left;translated.reserved[3]=visible.r.top;
+        translated.reserved[4]=visible.r.width;translated.reserved[5]=visible.r.height;
+    }
+    if(native.flags&Q2_NATIVE_CODECCONFIG) {
+        native.flags&=~Q2_NATIVE_CODECCONFIG;native.flags|=Q2_BUF_CODECCONFIG;
+    }
+    if(native.flags&V4L2_BUF_FLAG_LAST) {native.flags&=~V4L2_BUF_FLAG_LAST;
+        if(request!=VIDIOC_DQBUF || s->draining) native.flags|=Q2_BUF_EOS;}
     if(native.flags&V4L2_BUF_FLAG_ERROR) native.flags|=Q2_BUF_DATA_CORRUPT;
-    native.memory=V4L2_MEMORY_USERPTR;native.m.planes=buffer->m.planes;
+    native.memory=V4L2_MEMORY_USERPTR;native.m.planes=buffer->m.planes;native.length=1;
     *buffer=native;buffer->m.planes[0]=translated;return 0;
+}
+/* Quest's binary consumes crop exclusively through its extradata plane. This
+ * record translates real V4L2 COMPOSE geometry; it is not raw HFI extradata.
+ * Optional MISR sets are absent. No HDR/interlace/statistics are invented. */
+static void q2_crop_extra(void *mapping, const struct v4l2_plane *plane,
+                          const struct v4l2_format *format, uint32_t sequence) {
+    uint32_t data[90]={0}; /* 336-byte indexed crop + 24-byte terminator */
+    data[0]=336;data[2]=1;data[3]=0x7f100002;data[4]=316;
+    data[5]=0x0700000f;data[6]=312;data[8]=1;
+    for(unsigned i=0;i<4;i++)data[9+i]=plane->reserved[2+i];
+    data[13]=format->fmt.pix_mp.width;data[14]=format->fmt.pix_mp.height;
+    data[15]=sequence;
+    data[16]=data[17]=format->fmt.pix_mp.pixelformat==V4L2_PIX_FMT_P010?10:8;
+    data[84]=24;
+    memcpy(mapping,data,sizeof(data));
+}
+/* Capacity is not record length: NONE ends the actual firmware chain.
+ * Validate the full chain before exposing any bytes to the donor parser. */
+static int q2_extra_records(const void *data,size_t bytes,size_t *used) {
+    size_t at=0;
+    while(bytes-at>=20) {
+        uint32_t h[5];memcpy(h,(const char *)data+at,sizeof(h));
+        if(h[0]<20 || (h[0]&3) || h[0]>bytes-at || h[4]>h[0]-20) return q2_error(EPROTO);
+        if(!h[3]) {
+            if(h[4]) return q2_error(EPROTO);
+            *used=at+h[0];return 0;
+        }
+        unsigned minimum=h[3]==0x7f100006?56:h[3]==0x15?40:h[3]==0x16?8:0;
+        if(h[4]<minimum) return q2_error(EPROTO);
+        at+=h[0];
+    }
+    return q2_error(EPROTO);
+}
+static int q2_extra_access(struct q2_session *s,int fd,uint64_t flags) {
+    if(s->cpu_access) return s->cpu_access(fd,flags);
+    return s->sync_buffer?s->sync_buffer(fd):0;
+}
+static int q2_native_extra_prepare(struct q2_session *s,struct q2_buffer_slot *slot,uint32_t bytes) {
+    if(!bytes || !s->allocate_extra || !s->cpu_access) return q2_error(ENODATA);
+    long page=sysconf(_SC_PAGESIZE);
+    if(page<=0 || ((unsigned long)page&((unsigned long)page-1)) ||
+       bytes>UINT32_MAX-((unsigned long)page-1)) return q2_error(EOVERFLOW);
+    uint32_t size=(bytes+(unsigned long)page-1)&~((unsigned long)page-1);
+    if(slot->native_extra_map && slot->native_extra_size<size) return q2_error(ENOSPC);
+    if(!slot->native_extra_map) {
+        int fd=-1;
+        if(s->allocate_extra(size,&fd)) return -1;
+        void *mapping=mmap(NULL,size,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
+        if(mapping==MAP_FAILED) {int error=errno;syscall(SYS_close,fd);return q2_error(error);}
+        slot->native_extra_fd=fd;slot->native_extra_map=mapping;slot->native_extra_size=size;
+    }
+    if(q2_extra_access(s,slot->native_extra_fd,DMA_BUF_SYNC_START|DMA_BUF_SYNC_WRITE)) return -1;
+    memset(slot->native_extra_map,0,slot->native_extra_size);
+    slot->native_extra_used=0;
+    return q2_extra_access(s,slot->native_extra_fd,DMA_BUF_SYNC_END|DMA_BUF_SYNC_WRITE);
+}
+static int q2_metadata_buffer(struct q2_session *s,unsigned long request,struct v4l2_buffer *buffer) {
+    if(buffer->length!=2 || !buffer->m.planes) return q2_error(EINVAL);
+    struct q2_queue *q=&s->queues[1];
+    struct v4l2_format format={.type=V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE};
+    void *mapping=NULL;int fd=-1;
+    struct v4l2_plane extra={0};
+    size_t required=360;
+    if(s->native_extra_mask) {
+        /* QBUF is legal before SOURCE_CHANGE, but G_FMT is not. Use the
+         * last negotiated capacity, refreshed by real format/reconfig ioctls. */
+        uint32_t capacity=s->native_extra_capacity;
+        if(!capacity || capacity>UINT32_MAX-336U) return q2_error(ENODATA);
+        required=336U+capacity;
+    }
+    if(request==VIDIOC_QBUF || request==VIDIOC_PREPARE_BUF) {
+        if(buffer->index>=q->count || !q->slots || q->slots[buffer->index].queued) return q2_error(EINVAL);
+        extra=buffer->m.planes[1];
+        q2_trace("Q2BRIDGE EXTRA index=%u fd=%u offset=%u len=%u used=%u data_offset=%u\n",buffer->index,extra.reserved[0],extra.reserved[1],extra.length,extra.bytesused,extra.data_offset);
+        long page=sysconf(_SC_PAGESIZE);
+        if(page<=0 || extra.reserved[0]>INT_MAX || extra.length<required ||
+           extra.reserved[1]%(unsigned long)page || extra.data_offset || extra.bytesused>extra.length)
+            return q2_error(EOPNOTSUPP);
+        fd=(int)syscall(SYS_fcntl,(int)extra.reserved[0],F_DUPFD_CLOEXEC,0);
+        if(fd<0) return -1;
+        struct stat st;
+        if(fstat(fd,&st)) {int error=errno;syscall(SYS_close,fd);return q2_error(error);}
+        if(st.st_size<=0 || (uint64_t)extra.reserved[1]+extra.length>(uint64_t)st.st_size) {
+            syscall(SYS_close,fd);return q2_error(EINVAL);
+        }
+        mapping=mmap(NULL,extra.length,PROT_READ|PROT_WRITE,MAP_SHARED,fd,extra.reserved[1]);
+        if(mapping==MAP_FAILED) {int error=errno;syscall(SYS_close,fd);return q2_error(error);}
+        if(s->native_extra_mask && q2_native_extra_prepare(s,&q->slots[buffer->index],
+                                                    s->native_extra_capacity)) {
+            int error=errno;munmap(mapping,extra.length);syscall(SYS_close,fd);return q2_error(error);
+        }
+    }
+    if(request==VIDIOC_DQBUF) {
+        if(s->backend(s->fd,VIDIOC_G_FMT,&format)) return -1;
+        if((format.fmt.pix_mp.pixelformat!=V4L2_PIX_FMT_NV12 &&
+            format.fmt.pix_mp.pixelformat!=V4L2_PIX_FMT_P010) ||
+           !format.fmt.pix_mp.width || !format.fmt.pix_mp.height)
+            return q2_error(EOPNOTSUPP);
+    }
+    struct v4l2_buffer native=*buffer;struct v4l2_plane plane=buffer->m.planes[0];
+    native.length=1;native.m.planes=&plane;
+    int r=q2_user_buffer(s,request,&native),error=errno;
+    if(r) {
+        if(mapping) {munmap(mapping,extra.length);syscall(SYS_close,fd);}
+        return q2_error(error);
+    }
+    struct q2_buffer_slot *slot=&q->slots[native.index];
+    if(mapping) {
+        if(slot->extra_map) {munmap(slot->extra_map,slot->extra.length);syscall(SYS_close,slot->extra_fd);}
+        slot->extra_map=mapping;slot->extra_fd=fd;slot->extra=extra;
+    }
+    size_t written=0;
+    if(request==VIDIOC_DQBUF && slot->extra_map) {
+        int donor_access=0,native_access=0,error=0;size_t used=0;
+        if(q2_extra_access(s,slot->extra_fd,DMA_BUF_SYNC_START|DMA_BUF_SYNC_WRITE)) error=errno;
+        else {
+            donor_access=1;
+            memset(slot->extra_map,0,slot->extra.length);
+            uint32_t end=24;memcpy(slot->extra_map,&end,sizeof(end));
+        }
+        if(!error && slot->native_extra_used) {
+            if(q2_extra_access(s,slot->native_extra_fd,DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ)) error=errno;
+            else {
+                native_access=1;
+                if(q2_extra_records(slot->native_extra_map,slot->native_extra_used,&used)) error=errno;
+                else if(used>slot->extra.length-336U) error=ENOSPC;
+            }
+        }
+        if(!error) {
+            q2_crop_extra(slot->extra_map,&plane,&format,native.sequence);written=360;
+            if(used) {memcpy((char *)slot->extra_map+336,slot->native_extra_map,used);written=336+used;}
+        }
+        if(native_access && q2_extra_access(s,slot->native_extra_fd,DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ)) error=errno;
+        if(donor_access && q2_extra_access(s,slot->extra_fd,DMA_BUF_SYNC_END|DMA_BUF_SYNC_WRITE)) error=errno;
+        if(error) {
+            native.flags|=Q2_BUF_DATA_CORRUPT;written=0;
+            (void)q2_enqueue(s,Q2_SYS_ERROR,NULL,0);
+        }
+        q2_trace("Q2BRIDGE METADATA index=%u native=%u records=%zu donor=%zu error=%d\n",
+                 native.index,slot->native_extra_used,used,written,error);
+    }
+    native.length=2;native.m.planes=buffer->m.planes;*buffer=native;
+    buffer->m.planes[0]=plane;buffer->m.planes[1]=slot->extra;
+    buffer->m.planes[1].bytesused=(uint32_t)written;
+    return 0;
 }
 static int q2_source_event(struct q2_session *s, const struct v4l2_event *native) {
     if (native->type != V4L2_EVENT_SOURCE_CHANGE ||
         native->u.src_change.changes != V4L2_EVENT_SRC_CH_RESOLUTION) return q2_error(EOPNOTSUPP);
-    /* The downstream event requires bit depth, progressive and color metadata,
-     * not just dimensions. Until those mappings are fully source-verified,
-     * report the unrepresentable real event rather than invent zero metadata. */
-    (void)s;
-    return q2_error(EOPNOTSUPP);
+    uint32_t data[8];memcpy(data,native->u.data,sizeof(data));
+    q2_trace("Q2BRIDGE SOURCE magic=0x%x present=0x%x h=%u w=%u depth=0x%x progressive=%u color=%u\n",
+            data[1],data[2],data[3],data[4],data[5],data[6],data[7]);
+    /* Only paired-kernel HFI metadata is accepted. NV12 alone does not prove
+     * the coded bit depth, progressive flag or stream colour primaries. */
+    if(data[1]!=0x51324d31 || (data[2]&7)!=7 || !data[3] || !data[4] ||
+       (data[5]!=0 && data[5]!=0x20002) || data[6]>1) return q2_error(EOPNOTSUPP);
+    /* Downstream initializes absent colour_space to 0 (unspecified); VP8
+     * firmware legitimately omits it. Do not infer a colour standard. */
+    uint32_t donor[]={data[3],data[4],data[5]==0x20002?1U:0U,data[6],
+                      data[2]&8 ? data[7] : 0};
+    /* Upstream requires CAPTURE setup/restart even when old storage fits. */
+    return q2_enqueue(s,Q2_RECONFIG,donor,5);
 }
 static int q2_dispatch(struct q2_session *s, unsigned long request, void *argument) {
     if (!argument && _IOC_DIR(request) != _IOC_NONE) return q2_error(EFAULT);
@@ -277,7 +544,7 @@ static int q2_dispatch(struct q2_session *s, unsigned long request, void *argume
         if (q2_source_event(s, &native)) {
             int error = errno;
             /* This is an actual unrepresentable event, not a fabricated VPU failure. */
-            fprintf(stderr, "Q2BRIDGE unrepresentable native event=0x%x errno=%d\n", native.type, error);
+            q2_trace( "Q2BRIDGE unrepresentable native event=0x%x errno=%d\n", native.type, error);
             return q2_error(error);
         }
         return q2_pop(s, argument);
@@ -294,6 +561,21 @@ static int q2_dispatch(struct q2_session *s, unsigned long request, void *argume
     if (request == VIDIOC_QUERYCTRL) {
         struct v4l2_queryctrl *query = argument;
         if (q2_private_control(query->id)) return q2_error(EOPNOTSUPP);
+        if (query->id == V4L2_CID_MPEG_VIDEO_H264_PROFILE) {
+            struct v4l2_queryctrl native = *query;
+            if (s->backend(s->fd, request, &native)) return -1;
+            if (native.minimum < 0 || native.maximum >= 32 || native.minimum > native.maximum)
+                return q2_error(EOVERFLOW);
+            uint32_t supported = 0;
+            for (int i = native.minimum; i <= native.maximum; i++) {
+                struct v4l2_querymenu menu = {.id = native.id, .index = (uint32_t)i};
+                if (!s->backend(s->fd, VIDIOC_QUERYMENU, &menu)) supported |= 1U << i;
+                else if (errno != EINVAL) return -1;
+            }
+            /* Quest reads QUERYCTRL offset 56 (flags) as a supported-profile mask. */
+            native.flags = supported;
+            *query = native; return 0;
+        }
         if (query->id == V4L2_CID_MPEG_VIDEO_H264_LEVEL) {
             struct v4l2_queryctrl native = *query;
             if (s->backend(s->fd, request, &native)) return -1;
@@ -318,20 +600,89 @@ static int q2_dispatch(struct q2_session *s, unsigned long request, void *argume
         struct v4l2_decoder_cmd *cmd = argument;
         if (cmd->cmd == Q2_CMD_FLUSH) {
             if (!cmd->flags || (cmd->flags & ~3U)) return q2_error(EINVAL);
-            if (s->queued || s->streaming) return q2_error(EOPNOTSUPP);
-            /* No buffer ever submitted and no streaming: all requested queues
-             * are already empty. The broker owns and reports that completion. */
+            if (s->queued || s->streaming) {
+                /* The paired Venus handler waits for the real HFI acknowledgement
+                 * and returns software-owned buffers through the real VB2 queue. */
+                if (s->backend(s->fd,request,cmd)) return -1;
+            }
             if (request == VIDIOC_TRY_DECODER_CMD) return 0;
+            if (cmd->flags&1) s->draining=0;
             return q2_enqueue(s, Q2_FLUSH_DONE, &cmd->flags, 1);
         }
         if (cmd->cmd == Q2_CMD_CONTINUE) return q2_error(EOPNOTSUPP);
     }
     if (request == VIDIOC_REQBUFS) return q2_reqbufs(s,argument);
+    if ((request==VIDIOC_QBUF || request==VIDIOC_PREPARE_BUF || request==VIDIOC_QUERYBUF || request==VIDIOC_DQBUF) &&
+        s->metadata_plane && ((struct v4l2_buffer *)argument)->type==V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
+        ((struct v4l2_buffer *)argument)->memory==V4L2_MEMORY_USERPTR)
+        return q2_metadata_buffer(s,request,argument);
+    if(request==VIDIOC_S_FMT || request==VIDIOC_TRY_FMT) {
+        struct v4l2_format *f=argument;
+        if(f->type==V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
+           f->fmt.pix_mp.pixelformat==Q2_PIX_FMT_P010_VENUS)
+            f->fmt.pix_mp.pixelformat=V4L2_PIX_FMT_P010;
+    }
+    if ((request==VIDIOC_S_FMT || request==VIDIOC_TRY_FMT) && s->metadata_plane) {
+        struct v4l2_format *f=argument;
+        if(f->type==V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE && f->fmt.pix_mp.num_planes==2) {
+            f->fmt.pix_mp.num_planes=s->native_extra_mask?2:1;
+            memset(&f->fmt.pix_mp.plane_fmt[1],0,sizeof(f->fmt.pix_mp.plane_fmt[1]));
+        }
+    }
     if ((request == VIDIOC_QBUF || request == VIDIOC_PREPARE_BUF || request == VIDIOC_QUERYBUF || request == VIDIOC_DQBUF) &&
         ((struct v4l2_buffer *)argument)->memory == V4L2_MEMORY_USERPTR) return q2_user_buffer(s,request,argument);
     /* Standard requests retain their real errno. Private unknown ioctl numbers
      * are never converted to success, including VIDIOC_{REGISTER,RELEASE}_BUFFER. */
+    if(request==VIDIOC_S_FMT || request==VIDIOC_TRY_FMT) {
+        struct v4l2_format *f=argument;
+        q2_trace("FMT request=0x%lx type=%u codec=0x%x width=%u height=%u planes=%u size=%u\n",
+          request,f->type,f->fmt.pix_mp.pixelformat,f->fmt.pix_mp.width,f->fmt.pix_mp.height,
+          f->fmt.pix_mp.num_planes,f->fmt.pix_mp.plane_fmt[0].sizeimage);
+    }
     int result = s->backend(s->fd, request, argument); int saved = errno;
+    if(!result && request==VIDIOC_S_FMT && s->native_extra_enabled) {
+        struct v4l2_format *f=argument;
+        if(f->type==V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+            uint32_t mask=f->fmt.pix_mp.pixelformat==V4L2_PIX_FMT_HEVC?7:
+                          f->fmt.pix_mp.pixelformat==V4L2_PIX_FMT_H264?1:0;
+            if(mask!=s->native_extra_mask) {
+                struct v4l2_control extra={.id=Q2_NATIVE_EXTRA_CTRL,.value=(int)mask};
+                if(s->backend(s->fd,VIDIOC_S_CTRL,&extra)) return -1;
+                s->native_extra_mask=mask;
+            }
+        }
+    }
+    if (!result && request == VIDIOC_DECODER_CMD) {
+        uint32_t cmd=((struct v4l2_decoder_cmd *)argument)->cmd;
+        if(cmd==V4L2_DEC_CMD_STOP) s->draining=1;
+        else if(cmd==V4L2_DEC_CMD_START) s->draining=0;
+    }
+    if (!result && (request==VIDIOC_G_FMT || request==VIDIOC_S_FMT || request==VIDIOC_TRY_FMT)) {
+        struct v4l2_format *f=argument;
+        struct v4l2_pix_format_mplane *p=&f->fmt.pix_mp;
+        if(f->type==V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE && s->native_extra_mask &&
+           request!=VIDIOC_TRY_FMT) {
+            if(p->num_planes!=2) return q2_error(EPROTO);
+            s->native_extra_capacity=p->plane_fmt[1].sizeimage;
+        }
+        /* Both linear formats use the real byte stride and 32-aligned height.
+         * QP10 and P010 name the same Venus linear layout in these paired drivers. */
+        if(f->type==V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
+           (p->pixelformat==V4L2_PIX_FMT_NV12 || p->pixelformat==V4L2_PIX_FMT_P010) && p->num_planes==(s->native_extra_mask?2:1) &&
+           p->height && p->height<=UINT16_MAX && !(p->height&31) &&
+           p->plane_fmt[0].bytesperline>=(uint64_t)p->width*(p->pixelformat==V4L2_PIX_FMT_P010?2:1) &&
+           (uint64_t)p->plane_fmt[0].bytesperline*p->height*3/2<=p->plane_fmt[0].sizeimage)
+        {
+            p->plane_fmt[0].reserved[0]=p->height;
+            uint64_t need=s->native_extra_mask?336ULL+p->plane_fmt[1].sizeimage:360;
+            long page=sysconf(_SC_PAGESIZE);
+            if(page<=0 || ((unsigned long)page&((unsigned long)page-1)) ||
+               need>UINT32_MAX-((unsigned long)page-1)) return q2_error(EOVERFLOW);
+            p->num_planes=2;p->plane_fmt[1].sizeimage=(need+page-1)&~((uint64_t)page-1);
+            if(request!=VIDIOC_TRY_FMT)s->metadata_plane=1;
+            if(p->pixelformat==V4L2_PIX_FMT_P010)p->pixelformat=Q2_PIX_FMT_P010_VENUS;
+        }
+    }
     if (!result && request == VIDIOC_QBUF) s->queued++;
     if (!result && request == VIDIOC_DQBUF && s->queued) s->queued--;
     if (!result && (request == VIDIOC_STREAMON || request == VIDIOC_STREAMOFF)) {
@@ -363,18 +714,100 @@ static struct q2_fd *q2_fds;
 static pthread_mutex_t q2_lock = PTHREAD_MUTEX_INITIALIZER;
 static int q2_enabled;
 static int q2_aux_enabled;
+static int q2_native_extra_enabled;
 static int (*q2_next_ioctl)(int, request_t, ...);
 static int (*q2_next_poll)(struct pollfd *, nfds_t, int);
 static int (*q2_next_ppoll)(struct pollfd *, nfds_t, const struct timespec *, const sigset_t *);
 static int q2_real_ioctl(int fd, unsigned long request, void *argument) {
     return q2_next_ioctl ? q2_next_ioctl(fd, (request_t)request, argument) : (int)syscall(SYS_ioctl, fd, request, argument);
 }
+/* Linux MSM uses pgprot_writecombine for WC GEM mmap and cleans initial
+ * pages before sharing. PRIME preserves that mapping and the DMA-buf lifetime.
+ * No GPU command is submitted; protected or special ION heaps remain unsupported. */
+static int q2_wc_allocate_on_fd(int drm,size_t len,int *handle) {
+    struct drm_msm_gem_new create={.size=len,.flags=MSM_BO_WC};
+    if (q2_real_ioctl(drm,DRM_IOCTL_MSM_GEM_NEW,&create)) return -1;
+    struct drm_msm_gem_info info={.handle=create.handle,.info=0x05}; /* MSM_INFO_GET_FLAGS */
+    struct drm_prime_handle prime={.handle=create.handle,.flags=DRM_CLOEXEC|DRM_RDWR,.fd=-1};
+    int r=q2_real_ioctl(drm,DRM_IOCTL_MSM_GEM_INFO,&info),error=errno;
+    if (!r && info.value!=MSM_BO_WC) {r=-1;error=EPROTO;}
+    if (!r) {r=q2_real_ioctl(drm,DRM_IOCTL_PRIME_HANDLE_TO_FD,&prime);error=errno;}
+    struct drm_gem_close release={.handle=create.handle};
+    if (q2_real_ioctl(drm,DRM_IOCTL_GEM_CLOSE,&release) && !r) {r=-1;error=errno;}
+    if (r) {
+        if (prime.fd>=0) (void)syscall(SYS_close,prime.fd);
+        return q2_error(error);
+    }
+    *handle=prime.fd;return 0;
+}
+static int q2_wc_allocate(size_t len,int *handle) {
+    DIR *dir=opendir("/dev/dri");if (!dir) return -1;
+    struct dirent *entry;int result=-1,error=ENODEV;
+    while ((entry=readdir(dir))) {
+        if (strncmp(entry->d_name,"renderD",7)) continue;
+        const char *n=entry->d_name+7;
+        if (!*n || strspn(n,"0123456789")!=strlen(n)) continue;
+        char path[PATH_MAX];snprintf(path,sizeof(path),"/dev/dri/%s",entry->d_name);
+        int drm=(int)syscall(SYS_openat,AT_FDCWD,path,O_RDWR|O_CLOEXEC,0);
+        if (drm<0) {error=errno;continue;}
+        char name[64]={0};struct drm_version version={.name_len=sizeof(name)-1,.name=name};
+        struct stat st;
+        int match=!fstat(drm,&st) && S_ISCHR(st.st_mode) &&
+            !q2_real_ioctl(drm,DRM_IOCTL_VERSION,&version) && !strcmp(name,"msm");
+        if (match) {result=q2_wc_allocate_on_fd(drm,len,handle);error=result?errno:0;}
+        (void)syscall(SYS_close,drm);
+        if (match) break;
+    }
+    closedir(dir);
+    q2_trace("Q2BRIDGE ION system_uncached_msm_wc len=%zu result=%d errno=%d fd=%d\n",
+            len,result,error,result?-1:*handle);
+    errno=error;return result;
+}
+int ion_open(void) {
+    if (!q2_enabled) {
+        int (*next)(void)=dlsym(RTLD_NEXT,"ion_open");
+        return next ? next() : q2_error(ENOSYS);
+    }
+    return (int)syscall(SYS_openat,AT_FDCWD,"/dev/dma_heap/system",O_RDONLY|O_CLOEXEC,0);
+}
+int ion_close(int fd) {
+    if (!q2_enabled) {
+        int (*next)(int)=dlsym(RTLD_NEXT,"ion_close");
+        return next ? next(fd) : q2_error(ENOSYS);
+    }
+    return (int)syscall(SYS_close,fd);
+}
+int ion_alloc_fd(int fd,size_t len,size_t align,unsigned mask,unsigned flags,int *handle) {
+    if (!q2_enabled) {
+        int (*next)(int,size_t,size_t,unsigned,unsigned,int *)=dlsym(RTLD_NEXT,"ion_alloc_fd");
+        if (next) return next(fd,len,align,mask,flags,handle);
+        errno=ENOSYS;return -ENOSYS;
+    }
+    if (!handle) {errno=EINVAL;return -EINVAL;}
+    *handle=-1;
+    if (!len) {errno=EINVAL;return -EINVAL;}
+    if (align || mask!=(1U<<25) || flags>1) {
+        q2_trace("Q2BRIDGE ION unsupported len=%zu align=%zu mask=0x%x flags=0x%x\n",len,align,mask,flags);
+        errno=EOPNOTSUPP;return -EOPNOTSUPP;
+    }
+    if (!flags) {
+        if (fcntl(fd,F_GETFD)<0) return -errno;
+        if (q2_wc_allocate(len,handle)) return -errno;
+        return 0;
+    }
+    struct dma_heap_allocation_data allocation={.len=len,.fd_flags=O_RDWR|O_CLOEXEC};
+    int r=q2_real_ioctl(fd,DMA_HEAP_IOCTL_ALLOC,&allocation),error=r?errno:0;
+    q2_trace("Q2BRIDGE ION system_cached len=%zu result=%d errno=%d fd=%d\n",
+            len,r,error,r?-1:(int)allocation.fd);
+    if (r) {errno=error;return -error;}
+    *handle=(int)allocation.fd;return 0;
+}
 static int q2_aux_minimum(struct q2_session *s,uint32_t id,int *answer) {
     if (!q2_aux_enabled) return q2_error(EAGAIN);
     struct v4l2_format formats[2]={{.type=V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE},{.type=V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE}};
     for(unsigned i=0;i<2;i++) {
         int r=q2_real_ioctl(s->fd,VIDIOC_G_FMT,&formats[i]);int error=errno;
-        fprintf(stderr,"Q2BRIDGE AUX main G_FMT type=%u result=%d errno=%d\n",formats[i].type,r,error);
+        q2_trace("Q2BRIDGE AUX main G_FMT type=%u result=%d errno=%d\n",formats[i].type,r,error);
         if(r) return q2_error(error);
         if(!formats[i].fmt.pix_mp.width || !formats[i].fmt.pix_mp.height || !formats[i].fmt.pix_mp.pixelformat) return q2_error(EPROTO);
     }
@@ -382,36 +815,63 @@ static int q2_aux_minimum(struct q2_session *s,uint32_t id,int *answer) {
     ssize_t n=readlink(proc,node,sizeof(node)-1);if(n<0) return -1;
     node[n]=0;
     int aux=(int)syscall(SYS_openat,AT_FDCWD,node,O_RDWR|O_NONBLOCK|O_CLOEXEC,0);
-    fprintf(stderr,"Q2BRIDGE AUX open node=%s result=%d errno=%d\n",node,aux,errno);
+    q2_trace("Q2BRIDGE AUX open node=%s result=%d errno=%d\n",node,aux,errno);
     if(aux<0) return -1;
     int result=-1,error=0;
     for(unsigned i=0;i<2;i++) {
         struct v4l2_format expected=formats[i];
         int r=q2_real_ioctl(aux,VIDIOC_S_FMT,&formats[i]);error=errno;
-        fprintf(stderr,"Q2BRIDGE AUX S_FMT type=%u result=%d errno=%d\n",formats[i].type,r,error);
+        q2_trace("Q2BRIDGE AUX S_FMT type=%u result=%d errno=%d\n",formats[i].type,r,error);
         if(r) goto done;
         if(formats[i].fmt.pix_mp.width!=expected.fmt.pix_mp.width || formats[i].fmt.pix_mp.height!=expected.fmt.pix_mp.height ||
            formats[i].fmt.pix_mp.pixelformat!=expected.fmt.pix_mp.pixelformat) {error=ERANGE;goto done;}
     }
+    if(s->native_extra_mask) {
+        struct v4l2_control extra={.id=Q2_NATIVE_EXTRA_CTRL,.value=(int)s->native_extra_mask};
+        if(q2_real_ioctl(aux,VIDIOC_S_CTRL,&extra)) {error=errno;goto done;}
+    }
     struct v4l2_requestbuffers buffers={.count=1,.type=V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,.memory=V4L2_MEMORY_DMABUF};
     int r=q2_real_ioctl(aux,VIDIOC_REQBUFS,&buffers);error=errno;
-    fprintf(stderr,"Q2BRIDGE AUX REQBUFS request_count=1 actual_count=%u result=%d errno=%d (not used as minimum)\n",buffers.count,r,error);
+    q2_trace("Q2BRIDGE AUX REQBUFS request_count=1 actual_count=%u result=%d errno=%d (not used as minimum)\n",buffers.count,r,error);
     if(r) goto done;
     struct v4l2_control control={.id=id};
     r=q2_real_ioctl(aux,VIDIOC_G_CTRL,&control);error=errno;
-    fprintf(stderr,"Q2BRIDGE AUX G_CTRL id=0x%x value=%d result=%d errno=%d\n",id,control.value,r,error);
+    q2_trace("Q2BRIDGE AUX G_CTRL id=0x%x value=%d result=%d errno=%d\n",id,control.value,r,error);
     if(r) goto done;
     if(control.value<=0) {error=EPROTO;goto done;}
     *answer=control.value;result=0;
 done:
     r=(int)syscall(SYS_close,aux);
-    fprintf(stderr,"Q2BRIDGE AUX close result=%d errno=%d SESSION_END_confirmation=paired-kernel-log-required\n",r,errno);
+    q2_trace("Q2BRIDGE AUX close result=%d errno=%d SESSION_END_confirmation=paired-kernel-log-required\n",r,errno);
     if(r && !result) {error=errno;result=-1;}
     errno=error;return result;
 }
 static struct q2_session *q2_lookup(int fd) {
     for (struct q2_fd *p = q2_fds; p; p = p->next) if (p->fd == fd) return p->session;
     return NULL;
+}
+static int q2_cpu_access(int fd,uint64_t flags) {
+    struct dma_buf_sync sync={.flags=flags};int r;
+    do {r=(int)syscall(SYS_ioctl,fd,DMA_BUF_IOCTL_SYNC,&sync);} while(r<0 && errno==EINTR);
+    return r;
+}
+static int q2_allocate_extra(size_t size,int *fd) {
+    int heap=(int)syscall(SYS_openat,AT_FDCWD,"/dev/dma_heap/system",O_RDONLY|O_CLOEXEC,0);
+    if(heap<0) return -1;
+    struct dma_heap_allocation_data alloc={.len=size,.fd_flags=O_RDWR|O_CLOEXEC};
+    int r=q2_real_ioctl(heap,DMA_HEAP_IOCTL_ALLOC,&alloc),error=errno;
+    syscall(SYS_close,heap);
+    if(r) return q2_error(error);
+    *fd=(int)alloc.fd;return 0;
+}
+static int q2_sync_buffer(int fd) {
+    struct dma_buf_sync sync={.flags=DMA_BUF_SYNC_START|DMA_BUF_SYNC_RW};
+    int r;
+    do { r=(int)syscall(SYS_ioctl,fd,DMA_BUF_IOCTL_SYNC,&sync); } while(r<0 && errno==EINTR);
+    if(r) return r;
+    sync.flags=DMA_BUF_SYNC_END|DMA_BUF_SYNC_RW;
+    do { r=(int)syscall(SYS_ioctl,fd,DMA_BUF_IOCTL_SYNC,&sync); } while(r<0 && errno==EINTR);
+    return r;
 }
 static int q2_attach(int fd, struct q2_session *s) {
     struct q2_fd *p = malloc(sizeof(*p)); if (!p) return -1;
@@ -455,7 +915,7 @@ static int q2_decoder(int flags) {
             if (q2_real_ioctl(fd, VIDIOC_ENUM_FMT, &fmt)) break;
             if (fmt.pixelformat == V4L2_PIX_FMT_H264) { h264 = 1; break; }
         }
-        if (h264) { selected = fd; fprintf(stderr, "Q2BRIDGE decoder=%s driver=%s\n", path, cap.driver); break; }
+        if (h264) { selected = fd; q2_trace( "Q2BRIDGE decoder=%s driver=%s\n", path, cap.driver); break; }
         (void)syscall(SYS_close, fd);
     }
     closedir(dir); if (selected < 0) errno = failure; return selected;
@@ -464,6 +924,8 @@ __attribute__((constructor)) static void q2_initialize(void) {
     q2_next_ioctl = dlsym(RTLD_NEXT, "ioctl"); q2_next_poll = dlsym(RTLD_NEXT, "poll"); q2_next_ppoll = dlsym(RTLD_NEXT, "ppoll");
     const char *enabled = getenv("QUEST2_VIDC_BRIDGE"); q2_enabled = enabled && !strcmp(enabled, "1");
     const char *aux = getenv("QUEST2_VIDC_AUX_CAPS"); q2_aux_enabled = aux && !strcmp(aux, "1");
+    const char *extra=getenv("QUEST2_VIDC_NATIVE_EXTRA");
+    q2_native_extra_enabled=extra?!strcmp(extra,"1"):QUEST2_NATIVE_EXTRA_DEFAULT;
 }
 static int q2_openat(int dir, const char *path, int flags, mode_t mode) {
     if (!q2_enabled || !path || (strcmp(path, "/dev/video32") && strcmp(path, "/dev/video/q6_dec")))
@@ -473,9 +935,20 @@ static int q2_openat(int dir, const char *path, int flags, mode_t mode) {
      * blocking fd can sleep in that drain, preventing the other queue's QBUF.
      * Only this private redirected descriptor is made nonblocking. */
     int fd = q2_decoder(flags | O_NONBLOCK); if (fd < 0) return fd;
+    uint32_t codec_config_flag=0;
+    int capfd=(int)syscall(SYS_openat,AT_FDCWD,"/sys/module/venus_dec/parameters/sq2_omx_config_flag",O_RDONLY|O_CLOEXEC,0);
+    if(capfd>=0) {
+        char text[32]={0};ssize_t n=read(capfd,text,sizeof(text)-1);
+        syscall(SYS_close,capfd);
+        if(n>0) {char *end=NULL;unsigned long flag=strtoul(text,&end,10);
+            if(flag==Q2_NATIVE_CODECCONFIG && (*end=='\n'||!*end)) codec_config_flag=(uint32_t)flag;}
+    }
     struct q2_session *s = calloc(1, sizeof(*s));
     if (!s) { int e = errno; syscall(SYS_close, fd); return q2_error(e); }
-    s->fd = fd; s->backend = q2_real_ioctl; s->query_minimum=q2_aux_minimum;
+    s->codec_config_flag=codec_config_flag;
+    s->native_extra_enabled=q2_native_extra_enabled;
+    s->cpu_access=q2_cpu_access;s->allocate_extra=q2_allocate_extra;
+    s->fd = fd; s->backend = q2_real_ioctl; s->sync_buffer=q2_sync_buffer; s->query_minimum=q2_aux_enabled ? q2_aux_minimum : NULL;
     int init = pthread_mutex_init(&s->mutex, NULL);
     if (init) { free(s); syscall(SYS_close, fd); return q2_error(init); }
     s->wake = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE);
@@ -543,7 +1016,7 @@ __attribute__((visibility("hidden"))) int q2_ioctl_forward(int fd, request_t req
     (void)syscall(SYS_close,pinned);
     pthread_mutex_lock(&q2_lock); struct q2_session *dead=q2_release(s); pthread_mutex_unlock(&q2_lock);
     q2_dispose(dead);
-    fprintf(stderr,"Q2BRIDGE ioctl fd=%d req=0x%x return=%d errno=%d\n",fd,(unsigned)request,r,error);
+    q2_trace("Q2BRIDGE ioctl fd=%d req=0x%x return=%d errno=%d\n",fd,(unsigned)request,r,error);
     errno=error; return r;
 }
 static int q2_poll(struct pollfd *fds,nfds_t count,int timeout,const struct timespec *ts,const sigset_t *mask,int precise) {
@@ -575,6 +1048,16 @@ static int q2_poll(struct pollfd *fds,nfds_t count,int timeout,const struct time
     for(nfds_t i=0;i<count;i++) {
         if(r>=0) { fds[i].revents=copy[i].revents; if(copy[count+i].revents&POLLIN) fds[i].revents|=POLLPRI; if(fds[i].revents) ready++; }
         if(copy[count+i].fd>=0) (void)syscall(SYS_close,copy[count+i].fd);
+    }
+    /* Log readiness transitions, not the OEM's pre-stream POLLERR busy loop. */
+    static _Thread_local unsigned last_signature,transitions;
+    unsigned signature=(unsigned)r;
+    for(nfds_t i=0;i<count;i++) signature=signature*31U+(unsigned)(fds[i].revents&0xffff);
+    if(signature!=last_signature && transitions++<128) {
+        for(nfds_t i=0;i<count;i++)
+            q2_trace("POLL tid=%ld fd=%d events=0x%x result=%d native=0x%x wake=0x%x merged=0x%x\n",
+                     syscall(SYS_gettid),fds[i].fd,fds[i].events,r,copy[i].revents,copy[count+i].revents,fds[i].revents);
+        last_signature=signature;
     }
     free(copy); errno=error; return r<0?r:ready;
 }

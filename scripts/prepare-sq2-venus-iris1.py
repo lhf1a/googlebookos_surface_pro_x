@@ -357,6 +357,8 @@ static void sq2_vdec_trace(struct venus_inst *inst, const char *stage, int ret)
                   '\t\tctrl_status = readl(cpu_cs_base + CPU_CS_SCIACMDARG0);\n'
                   '\t\tif (!count || count == 99 || count == 999 || count == 1999 || ctrl_status)\n'
                   '\t\t\tsq2_boot_snapshot(hdev, ctrl_status, count);')
+    hfi = replace(hfi, '\\tif (count >= max_tries)\\n\\t\\tret = -ETIMEDOUT;',
+                  '\\tif (!ctrl_status && count >= max_tries)\\n\\t\\tret = -ETIMEDOUT;')
     hfi = replace(hfi, '\tif (IS_V6(hdev->core)) {\n\t\tmask_val = readl(wrapper_base + WRAPPER_INTR_MASK);',
                   '\tif (IS_IRIS1(hdev->core)) {\n'
                   '\t\tmask_val = venus_iris1_irq_mask(readl(wrapper_base + WRAPPER_INTR_MASK));\n'

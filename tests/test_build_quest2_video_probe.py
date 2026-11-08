@@ -38,7 +38,7 @@ class Quest2VideoBuilder(unittest.TestCase):
             pins[name] = hashlib.sha256(data).hexdigest()
         (self.root/'configs/quest2-video-omx-headers.json').write_text(json.dumps({'sha256': pins}))
         for name in ('quest2-omx-probe.c', 'quest2-video-io-trace.c',
-                     'quest2-omx-decode.c', 'quest2-vidc-bridge.c'):
+                     'quest2-omx-decode.c', 'quest2-vidc-bridge.c', 'quest2-ion-probe.c', 'sq2-mediacodec-file.c'):
             (self.root/'probe/video'/name).write_text('synthetic source fixture '+name)
         self.calls = []
         self.failure = None
@@ -68,7 +68,7 @@ class Quest2VideoBuilder(unittest.TestCase):
         output, report = self.invoke()
         self.assertEqual(set(report['sha256']), BASE)
         self.assertEqual(len(self.calls), 2)
-        self.assertEqual(report['optional_features'], {'decode_client': False, 'vidc_bridge': False})
+        self.assertEqual(report['optional_features'], {'decode_client': False, 'vidc_bridge': False, 'media_file': False})
         self.assertEqual(len(report['header_sha256']), 9)
         self.assertEqual(report['target'], 'aarch64-linux-android35')
         self.assertEqual(report['status'], 'compiled-not-decoding-verified')
@@ -78,8 +78,8 @@ class Quest2VideoBuilder(unittest.TestCase):
     def test_independent_explicit_options_and_combination(self):
         for i, (flags, additions) in enumerate([
             (['--with-decode-client'], {'quest2-omx-decode'}),
-            (['--with-vidc-bridge'], {'libquest2-vidc-bridge.so'}),
-            (['--with-decode-client', '--with-vidc-bridge'], {'quest2-omx-decode', 'libquest2-vidc-bridge.so'}),
+            (['--with-vidc-bridge'], {'libquest2-vidc-bridge.so', 'quest2-ion-probe'}),
+            (['--with-decode-client', '--with-vidc-bridge'], {'quest2-omx-decode', 'libquest2-vidc-bridge.so', 'quest2-ion-probe'}),
         ]):
             with self.subTest(flags=flags):
                 self.calls.clear()
@@ -95,6 +95,19 @@ class Quest2VideoBuilder(unittest.TestCase):
                         self.assertIn('-pthread', command)
                         self.assertIn('-fPIC', command)
                         self.assertIn('-shared', command)
+
+    def test_container_probe_requires_and_records_real_platform_dependency(self):
+        binder = self.root/'libbinder_ndk.so'
+        with self.assertRaises(SystemExit):
+            self.invoke('--media-file-binder', str(binder))
+        self.assertFalse((self.root/'output').exists())
+        binder.write_bytes(b'synthetic platform link library')
+        _, report = self.invoke('--media-file-binder', str(binder))
+        command = self.calls[-1]
+        self.assertEqual(set(report['sha256']), BASE | {'sq2-mediacodec-file'})
+        self.assertIn(str(binder), command)
+        self.assertIn('-lmediandk', command)
+        self.assertEqual(report['media_file_binder_sha256'], hashlib.sha256(binder.read_bytes()).hexdigest())
 
     def test_header_mismatch_fails_before_output_or_compiler(self):
         (self.headers/'OMX_Core.h').write_text('corrupted fixture')

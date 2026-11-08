@@ -212,6 +212,40 @@ public final class Sq2Quest2Hwui {
         System.out.println("HWUI_LIBRARIES hwui=" + hwui + " closed=" + closed + " freedreno=" + freedreno);
     }
 
+    // Reuse the exact scene for a GPU-only visible BufferQueue instead of ImageReader.
+    static int drawVisible(android.view.Surface surface, int width, int height) throws Exception {
+        initializeStandaloneFonts();
+        if (!HardwareRenderer.isDrawingEnabled()) throw new IllegalStateException("HWUI drawing disabled");
+        HardwareRenderer renderer = new HardwareRenderer();
+        RenderNode node = new RenderNode("SQ2 HWUI visible diagnostics");
+        Bitmap software = null, hardware = null;
+        try {
+            software = icon(0);
+            hardware = software.copy(Bitmap.Config.HARDWARE, false);
+            if (hardware == null) throw new IllegalStateException("Hardware bitmap copy failed");
+            node.setPosition(0, 0, width, height);
+            renderer.setName("SQ2 HWUI visible");
+            renderer.setOpaque(true);
+            renderer.setSurface(surface);
+            renderer.setContentRoot(node);
+            RecordingCanvas canvas = node.beginRecording(width, height);
+            scene(canvas, software, hardware, 0);
+            node.endRecording();
+            int sync = renderer.createRenderRequest().setVsyncTime(System.nanoTime())
+                    .setWaitForPresent(true).syncAndDraw();
+            if (sync != HardwareRenderer.SYNC_OK && sync != HardwareRenderer.SYNC_REDRAW_REQUESTED)
+                throw new IllegalStateException("Visible HWUI sync failed: " + sync);
+            System.out.println("HWUI_VISIBLE_FRAME width=" + width + " height=" + height + " sync=" + sync);
+            Thread.sleep(5000);
+            return 1;
+        } finally {
+            renderer.destroy();
+            node.discardDisplayList();
+            if (hardware != null) hardware.recycle();
+            if (software != null) software.recycle();
+        }
+    }
+
     @SuppressWarnings("deprecation")
     private static void run(String[] args) throws Exception {
         if (args.length != 0) throw new IllegalArgumentException("Use SQ2_HWUI_OUTPUT and SQ2_HWUI_MESA");

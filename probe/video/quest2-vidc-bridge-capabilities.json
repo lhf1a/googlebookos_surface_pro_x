@@ -1,12 +1,20 @@
 {
   "schema": 1,
-  "stage": "event-broker-auxiliary-capability-dmabuf-candidate",
+  "stage": "system-HIDL-OMX-AVC-buffer-and-Surface-pixel-verified",
   "enable": "LD_PRELOAD this library and QUEST2_VIDC_BRIDGE=1 in the isolated donor process only",
   "decode_owner": "unchanged Quest OMX donor and real Venus backend",
-  "hardware_decoding_verified": false,
+  "hardware_decoding_verified": true,
   "source_evidence": {
     "donor_libOmxVdec_sha256": "c16707e607dc6691a836d4c8ecfeb9f8c81c038cff92f808df3385b748b55344",
-    "subscription_events": ["0x08001001", "0x08001003", "0x08001006", "0x08001007", "0x08001005", "0x08001008", "0x0800100a"],
+    "subscription_events": [
+      "0x08001001",
+      "0x08001003",
+      "0x08001006",
+      "0x08001007",
+      "0x08001005",
+      "0x08001008",
+      "0x0800100a"
+    ],
     "downstream_header": "out/quest2-abi-readonly-20261107/downstream-videodev2.h:2272-2290",
     "downstream_event_consumer": "out/quest2-abi-readonly-20261107/omx_vdec_v4l2.cpp:279-467",
     "h264_level_difference": "downstream UNKNOWN=18, 6.1=19, 6.2=20; Linux 6.18 6.1=18, 6.2=19"
@@ -16,33 +24,152 @@
     "seven exact private event subscriptions with process-owned queue and eventfd poll notification",
     "real native SOURCE_CHANGE subscription, with unrepresentable payload explicitly rejected",
     "actual backend EIO/ENODEV to subscribed SYS_ERROR, retaining original failure",
-    "flush completion only for known empty never-streaming queues",
     "H264 standard control enum conversion retaining actual kernel capabilities and errno",
     "standard DMABUF requests passed to real backend without data fabrication",
     "operation fd/session pins, nonblocking decoder fd, real backend outside registry lock",
     "poll eventfd duplication failures retained with cleanup rather than hidden timeouts",
-    "explicit QUEST2_VIDC_AUX_CAPS=1: real formatted auxiliary session REQBUFS and HFI minimum query for early EAGAIN",
-    "USERPTR_ION_to_DMABUF: one plane, zero allocation/data offset; actual fd/size and kernel attach checks",
+    "explicit QUEST2_VIDC_AUX_CAPS=1: real formatted auxiliary session REQBUFS and HFI minimum query for early EAGAIN or CAPTURE EINVAL",
     "real buffer fd lifetime pins, backend returned slot count, donor 64-bit cookie restoration and actual dequeue metadata",
-    "QCOM EOS to native LAST and native LAST/ERROR to QCOM EOS/DATA_CORRUPT"
+    "USERPTR_ION_to_DMABUF: actual one-plane video payload, offset zero, bounded real fd and lifetime pins",
+    "ION system mask bit25, align0: flags1 to system DMA heap; flags0 to verified MSM GEM WC PRIME export; other flags/heaps rejected",
+    "actual DMA_BUF_SYNC START/END for cached payload ownership transitions; errors retained",
+    "paired Venus SOURCE_CHANGE carries actual HFI presence/bitdepth/progressive/colour fields; required geometry/bitdepth/progressive fields checked; optional absent colour is downstream unspecified0",
+    "active flush waits for real HFI acknowledgement, returns actual queued buffers and clears completed EOS dequeue latch",
+    "empty EOS DECODER_CMD_STOP and queued EOS tracking; DRC LAST is not EOS",
+    "NV12 scanlines from actual aligned G_FMT geometry, checked against sizeimage",
+    "bounded second companion plane serializes actual V4L2 COMPOSE/G_FMT as Quest OUTPUT_CROP extradata; not raw firmware extradata; no MISR measurements",
+    "paired CODECCONFIG: original 0x20000 to native 0x01000000 to HFI 0x80; loaded-driver capability checked",
+    "AVC QUERYCTRL profile mask from actual QUERYMENU results, translated into the downstream flags field",
+    "downstream Q16 frame-rate control to real Venus VIDIOC_S_PARM timeperframe"
   ],
   "not_implemented": [
-    "USERPTR multiple planes or nonzero allocation/data offsets",
-    "private CODECCONFIG buffer flag without native equivalent",
-    "active_queue_flush_and_returned_buffer_ownership",
+    "CODECCONFIG on kernels without the paired read-only native flag capability",
     "release_reference_and_unqueued_buffer_payloads",
-    "source_change_private_bitdepth_and_color_metadata",
     "private_controls_without_equivalent_native_contract",
     "private_session_continue",
     "fcntl_duplicate_fd_tracking",
-    "generic unmanaged-close concurrent dup2 transition: this is not a universal transparent fd layer"
+    "generic unmanaged-close concurrent dup2 transition: this is not a universal transparent fd layer",
+    "USERPTR multiple video planes or nonzero video allocation/data offsets",
+    "interlace/MISR statistics and dynamic HDR transport",
+    "10-bit Surface/display conversion and UBWC output",
+    "Surface/gralloc zero-copy"
   ],
   "rules": [
     "Subscriptions may wait indefinitely for a condition that has not occurred; no fabricated completion events.",
-    "Unsupported private controls, queue formats and active flush operations fail EOPNOTSUPP.",
+    "Unsupported controls, video layouts and metadata remain explicit failures; translated crop describes actual kernel geometry only.",
     "MIN_BUFFERS_FOR_OUTPUT and CAPTURE return only values from the real driver; no guessed counts.",
-    "Auxiliary capability queries require paired kernel early-EAGAIN getters and no-STREAMON close SESSION_END fix; close success is not END confirmation, inspect kernel lifecycle evidence.",
+    "Auxiliary capability queries require paired kernel real minimum getters and no-STREAMON close SESSION_END fix; close success is not END confirmation, inspect kernel lifecycle evidence.",
     "Managed close pins before its atomic descriptor/registry commit; EMFILE leaves original fd open and returns failure.",
-    "No device writes, firmware reset, provider reload, global service registration or filesystem node replacement."
-  ]
+    "The bridge does not reset firmware, reload providers or replace filesystem nodes; the separate HIDL init integration registers system services."
+  ],
+  "verification_scope": {
+    "codec": "AVC High with B-frames",
+    "size": "320x240",
+    "frames_per_run": 6,
+    "runs": 2,
+    "pixel_exact": true,
+    "eos": true,
+    "clean_release": true,
+    "evidence": "out/quest2-video-618-20261107/uncached-native/PROGRESS.json"
+  },
+  "system_hidl_verification": {
+    "buffer_pixels": true,
+    "surface_csd_pixels": true,
+    "init_services": true,
+    "auto_codec_selection": true,
+    "app_300_frames_eos": true,
+    "app_all_render_callbacks": false,
+    "profile_enumeration_limit": null,
+    "selinux": "current boot globally Enforcing; per-domain exception audit incomplete",
+    "evidence": "out/quest2-video-618-20261107/system-omx/PROGRESS.json",
+    "reboot_buffer_and_surface_pixels": true,
+    "profile_enumeration": "Five firmware AVC profiles, each Level6, verified in Android MediaCodecInfo",
+    "app_1080p60_600_frames_eos": true,
+    "project_c2_retired": true
+  },
+  "hardware_derived_avc_capabilities": {
+    "source": "read-only actual Venus HFI decoder table; core session limit",
+    "profiles": [
+      "Baseline",
+      "Constrained Baseline",
+      "Main",
+      "High",
+      "Constrained High"
+    ],
+    "level": "6",
+    "profile_level_value": 131072,
+    "width": [
+      96,
+      8192
+    ],
+    "height": [
+      96,
+      8192
+    ],
+    "alignment": [
+      2,
+      2
+    ],
+    "macroblocks_per_frame": [
+      1,
+      138240
+    ],
+    "macroblocks_per_second": [
+      1,
+      3888000
+    ],
+    "frame_rate": [
+      1,
+      480
+    ],
+    "bitrate": [
+      1,
+      220000000
+    ],
+    "driver_session_limit": 16,
+    "android_effective_enumeration_verified": true,
+    "examples_declared_not_benchmarked": [
+      "3840x2160 at up to 120 fps",
+      "7680x4320 at up to 30 fps"
+    ],
+    "8192x8192_supported": false,
+    "limit_note": "All geometry/throughput/profile-level constraints apply together; driver session maximum does not promise full-size concurrent throughput"
+  },
+  "all_codec_candidate": {
+    "date": "2026-11-08",
+    "state": "buffer-paths-verified-in-ram-not-persisted",
+    "read_only_firmware_exports": [
+      "avc",
+      "hevc",
+      "vp8",
+      "vp9",
+      "mpeg2"
+    ],
+    "bridge_linear_formats": [
+      "NV12",
+      "QP10 translated to native P010"
+    ],
+    "hidl_p010_format": 54,
+    "ten_bit_profiles_enabled": false,
+    "hdr_metadata_connected": false,
+    "hdr_surface_connected": false,
+    "hevc_hidl_frames": 6,
+    "native_hevc_main10_pixels": "Native and HIDL full-AU PQ/HLG six frames each byte-exact; HDR metadata/Surface pending",
+    "evidence": "out/quest2-video-618-20261107/all-codecs",
+    "p010_hidl_frames": {
+      "hdr10": 6,
+      "hlg": 6
+    },
+    "vp8_hidl_frames": 6,
+    "vp9_hidl_frames": 6,
+    "mpeg2_hidl_frames": 0,
+    "separate_hevc_csd": "unresolved zero-frame/freeze path"
+  },
+  "candidate_native_metadata": {
+    "enable": "QUEST2_VIDC_NATIVE_EXTRA=1 or explicit candidate -DQUEST2_NATIVE_EXTRA_DEFAULT=1; standard default0",
+    "implementation": "independent page-aligned system DMA heap per capture slot, offset0; donor shared fd/offset preserved; explicit CPU START/END sync; kernel retirement refs unchanged",
+    "record_validation": "bounded records to NONE; retain true raw VUI, static HDR and crop; ignore capacity tail",
+    "verified": "HEVC Main10 full-AU HDR10/HLG6 frames pixel exact + AMediaFormat metadata; AVC and HEVC Main regressions",
+    "production_limit": "RAM candidate; high-precision Surface/tone mapping and dynamic HDR not verified"
+  }
 }

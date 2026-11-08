@@ -22,8 +22,10 @@ LIBRARIES = set('libEGL_adreno.so libGLESv1_CM_adreno.so libGLESv2_adreno.so '
     'vulkan-v77-bridge.so'.split())
 CPU_SHIM = 'libsq2map.so'
 # This is a private artifact integrity pin, NOT a device identity/SoC whitelist.
-# Rebuild with prepare-quest2-cpu-access.py then prepare-quest2-618-layout.py.
-DEPLOYABLE_RUNTIME_SUMS_SHA = 'f3d01db0714559b03b0ff8bc84d3d193f171f0466d4efdaa0c3f45c1d23c6ed4'
+# Rebuild with prepare-quest2-cpu-access.py then prepare-quest2-618-layout.py and prepare-quest2-618-direct.py.
+DEPLOYABLE_RUNTIME_SUMS_SHA = '395520969a5f1ce766dabde0af258204a17d9dc5c5ea37783f1937590b5c0689'
+# Paired 6.18 Venus PM/min-output/safe-close candidate, preserved as a private input.
+VENUS_618_BASE_SHA = '525d739f0e1d461aab686296d21262cb3e501e3ff591aec69ae0f0d043052c48'
 HOOK = b'closed-vulkan-start > /logs/closed-vulkan.txt 2>&1 || fail closed-vulkan-overlay\n'
 NEW_HOOK = b'qualcomm-full-start > /logs/qualcomm-full.txt 2>&1 || fail qualcomm-full-graphics\n'
 
@@ -58,7 +60,8 @@ def build(a):
     require(not a.output.exists(), 'Fresh output directory required')
     baseline_manifest = json.loads((ROOT/'configs/kernel-baseline.json').read_text())
     base = a.base.read_bytes()
-    require(sha(base) == baseline_manifest['files']['initramfs.cpio.gz'], 'Accepted baseline hash mismatch')
+    require(sha(base) in (baseline_manifest['files']['initramfs.cpio.gz'], VENUS_618_BASE_SHA),
+            'Accepted baseline hash mismatch')
     before = cpio.entries(gzip.decompress(base))
     mode, init = before['init']
     require(init.count(HOOK) == 1 and NEW_HOOK not in init, 'Unexpected graphics hook')
@@ -70,7 +73,7 @@ def build(a):
         hashes[name] = digest
     libraries = {n for n in hashes if n.endswith('.so')}
     require(libraries == LIBRARIES|{CPU_SHIM} and set(hashes) == libraries|{'qgl_config.txt'},
-            'Exact deployable 15-library layout8/bank15 stack plus qgl_config required; historical 14-library/CPU4 runtime is not deployable here')
+            'Exact deployable 15-library layout8/bank15/Direct stack plus qgl_config required; historical 14-library/CPU4 runtime is not deployable here')
     blobs = {}
     for name in libraries:
         path = a.runtime/name
@@ -83,7 +86,7 @@ def build(a):
     require((CPU_SHIM in libraries) == (blobs['libqti-mapper3-bridge.so'].count(private_mapper_path) == 1),
             'Private CPU shim and mapper selector must be paired')
     require(sha(runtime_sums) == DEPLOYABLE_RUNTIME_SUMS_SHA,
-            'Private deployable runtime manifest pin mismatch; rebuild the accepted layout8/bank15 candidate')
+            'Private deployable runtime manifest pin mismatch; rebuild the accepted layout8/bank15/Direct candidate')
     config = a.runtime/'qgl_config.txt'
     require(config.is_file() and not config.is_symlink() and sha(config.read_bytes()) == hashes['qgl_config.txt'],
             'Runtime hash mismatch: qgl_config.txt')
@@ -164,10 +167,13 @@ echo RESTORED_ACCEPTED_MESA_INITRAMFS
     run('REAPPLY',['sh',str((a.output/'APPLY.sh').resolve()),str(restored.resolve()),str((a.output/'reapplied.cpio.gz').resolve())])
     require((a.output/'reapplied.cpio.gz').read_bytes() == candidate, 'Exact patch roundtrip mismatch')
     report = dict(schema=1,baseline_sha256=sha(base),candidate_sha256=sha(candidate),
+        venus_618_omx_prerequisites=sha(base) == VENUS_618_BASE_SHA,
         append_sha256=sha(append), changed_effective_paths=sorted(changed), runtime_sha256={n:sha(blobs[n]) for n in sorted(libraries)},
         private_cpu_shim_present=CPU_SHIM in libraries,
         private_runtime_manifest_sha256=sha(runtime_sums),
         layout='original donor channel extraction (8 for this verified 6.18 path), retained bank15',
+        render_mode='explicit Direct (sysmem) workaround; GMEM root cause unresolved',
+        performance_and_power_verified=False,
         cache_receipt_required=False, cache_receipt_single_use=False,
         cache_cleanup_trigger='postboot-on-demand', cache_scope='chrome-graphics-only', cache_backup='none',
         cache_receipt_schema=None,

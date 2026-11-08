@@ -2,12 +2,14 @@
 # SSH after Android boot; Android owns Wi-Fi and DHCP.
 set -eu
 export PATH=/bin:/sbin
-for n in $(seq 1 240); do
+# Use boot uptime so clock corrections cannot shorten the ten-minute window.
+deadline=$(( $(cut -d. -f1 /proc/uptime) + 600 ))
+while [ "$(cut -d. -f1 /proc/uptime)" -lt "$deadline" ]; do
     if [ "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null || true)" = 1 ]; then
-        break
+        # Use Android netd routing; no diagnostic subnet/default routes.
+        exec start-ssh
     fi
     sleep 1
 done
-[ "$(timeout 3 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed)" = 1 ] || exit 1
-# Use Android netd routing; do not install diagnostic subnet/default routes.
-start-ssh
+echo 'SSH_START_TIMEOUT: Android boot did not complete within 600 seconds.' >&2
+exit 1

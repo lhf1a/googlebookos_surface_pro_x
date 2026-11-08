@@ -17,6 +17,13 @@ import java.nio.file.Paths;
 public final class Sq2Quest2Visible {
     private static native int draw(Surface surface, int width, int height);
 
+    private static int extent(String requested, int fallback, int available) {
+        int value = requested == null ? Math.min(fallback, available) : Integer.parseInt(requested);
+        if (value < 64 || value > available)
+            throw new IllegalArgumentException("Overlay dimension outside visible display: " + value);
+        return value;
+    }
+
     private static void checkPrivateEnvironment() throws Exception {
         String own = Files.readSymbolicLink(Paths.get("/proc/self/ns/mnt")).toString();
         String init = Files.readSymbolicLink(Paths.get("/proc/1/ns/mnt")).toString();
@@ -48,9 +55,8 @@ public final class Sq2Quest2Visible {
         Point size = new Point();
         display.getRealSize(size);
         final int inset = 64;
-        int width = Math.min(640, size.x - 2 * inset);
-        int height = Math.min(360, size.y - 2 * inset);
-        if (width < 64 || height < 64) throw new IllegalStateException("Display too small for overlay");
+        int width = extent(System.getenv("SQ2_VISIBLE_WIDTH"), 640, size.x - 2 * inset);
+        int height = extent(System.getenv("SQ2_VISIBLE_HEIGHT"), 360, size.y - 2 * inset);
         System.out.println("VISIBLE_DISPLAY id=" + display.getDisplayId() + " layer_stack=" + stack
                 + " size=" + size.x + "x" + size.y + " rotation=" + display.getRotation()
                 + " overlay=" + width + "x" + height + " position=" + inset + "," + inset);
@@ -58,7 +64,11 @@ public final class Sq2Quest2Visible {
         SurfaceControl control = null;
         Surface surface = null;
         try {
-            System.load(library);
+            String producer = System.getenv("SQ2_VISIBLE_PRODUCER");
+            boolean hwui = "hwui".equals(producer);
+            if (producer != null && !hwui && !"gles".equals(producer))
+                throw new IllegalArgumentException("SQ2_VISIBLE_PRODUCER must be gles or hwui");
+            if (!hwui) System.load(library);
             control = new SurfaceControl.Builder().setName("SQ2 Quest2 private EGL 5s")
                     .setBufferSize(width, height).setFormat(PixelFormat.RGBA_8888)
                     .setOpaque(true).setHidden(true).build();
@@ -72,7 +82,8 @@ public final class Sq2Quest2Visible {
                         .setVisibility(control, true).apply();
             }
             System.out.println("VISIBLE_OVERLAY_SHOWN duration_ms=5000 input_window=none");
-            int frames = draw(surface, width, height);
+            int frames = hwui ? Sq2Quest2Hwui.drawVisible(surface, width, height)
+                    : draw(surface, width, height);
             System.out.println("VISIBLE_SUBMISSIONS_COMPLETE frames=" + frames
                     + " visual_confirmation_required=1");
         } finally {

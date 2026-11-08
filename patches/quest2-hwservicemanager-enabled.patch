@@ -1,0 +1,13 @@
+--- a/service.cpp
++++ b/service.cpp
+@@ -188,6 +188,10 @@ int main() {
+     // Then tell the kernel
+     ProcessState::self()->becomeContextManager();
+ 
++    // This platform waits for an explicit enabled/disabled decision as well as ready.
++    // Publish enabled only after installing the real binder context manager.
++    int enabled_rc = property_set("hwservicemanager.disabled", "false");
++    LOG_ALWAYS_FATAL_IF(enabled_rc, "Cannot publish hwservicemanager enabled: %d", enabled_rc);
+     int rc = property_set("hwservicemanager.ready", "true");
+     if (rc) {
+         ALOGE("Failed to set \"hwservicemanager.ready\" (error %d). "\

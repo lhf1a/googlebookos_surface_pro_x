@@ -35,7 +35,9 @@ public:
   std::vector<std::shared_ptr<const C2Component::Traits>> result;
   for(const auto& info:sq2Codecs){
    auto t=std::make_shared<C2Component::Traits>();t->name=info.name;
+#ifndef SQ2_HIDL_OMX
    t->aliases.push_back(sq2CodecAlias(info.codec));
+#endif
    t->domain=C2Component::DOMAIN_VIDEO;t->kind=C2Component::KIND_DECODER;
    t->rank=512;t->mediaType=info.mime;t->owner=getName();result.push_back(t);
   }
@@ -62,7 +64,11 @@ int main(int argc,char** argv){
    std::shared_ptr<C2ComponentInterface> rejected;
    if(store.createInterface(C2String(sq2CodecAlias(info.codec))+".secure",&rejected)!=C2_NOT_FOUND)return 8;
   }
+#ifdef SQ2_HIDL_OMX
+  for(const auto& t:store.listComponents())if(!t->aliases.empty())return 9;
+#else
   for(const auto& t:store.listComponents())if(t->aliases.size()!=1)return 9;
+#endif
   puts("NAMES_PASS codecs=4 names=8 secure_rejected=4 no_decode=1");return 0;
  }
  setvbuf(stdout,nullptr,_IONBF,0);struct sigaction sa{};sa.sa_sigaction=crash;sa.sa_flags=SA_SIGINFO;sigaction(SIGSEGV,&sa,nullptr);ABinderProcess_setThreadPoolMaxThreadCount(4);ABinderProcess_startThreadPool();

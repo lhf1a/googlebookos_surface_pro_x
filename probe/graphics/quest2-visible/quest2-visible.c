@@ -1,4 +1,4 @@
-/* JNI producer -> SurfaceControl BLAST BufferQueue -> existing Mesa SurfaceFlinger.
+/* JNI producer -> SurfaceControl BLAST BufferQueue -> existing SurfaceFlinger.
  * Requires the private donor EGL mount namespace; it never changes global mounts.
  * Successful submissions are not proof of correctly displayed pixels.
  */
@@ -80,8 +80,8 @@ JNIEXPORT jint JNICALL Java_Sq2Quest2Visible_draw(JNIEnv *env, jclass type,
     REQUIRE(strcmp(own, init), "private mount namespace required");
     REQUIRE(!statfs("/vendor/lib64/egl", &fs) && fs.f_type == TMPFS_MAGIC,
             "private EGL tmpfs required");
-    REQUIRE(geteuid() == 0 && width >= 64 && width <= 640 && height >= 64 && height <= 360,
-            "root and bounded window dimensions required");
+    REQUIRE(geteuid() == 0 && width >= 64 && height >= 64,
+            "root and valid window dimensions required");
     window = ANativeWindow_fromSurface(env, java_surface);
     REQUIRE(window, "ANativeWindow_fromSurface");
     REQUIRE(!ANativeWindow_setBuffersGeometry(window, width, height, WINDOW_FORMAT_RGBA_8888),
@@ -109,6 +109,10 @@ JNIEXPORT jint JNICALL Java_Sq2Quest2Visible_draw(JNIEnv *env, jclass type,
     REQUIRE(surface != EGL_NO_SURFACE && eglMakeCurrent(display, surface, surface, context),
             "EGL window surface/current");
     current = 1;
+    GLint viewport_limits[2] = {0, 0};
+    glGetIntegerv(GL_MAX_VIEWPORT_DIMS, viewport_limits);
+    REQUIRE(glGetError() == GL_NO_ERROR && width <= viewport_limits[0] && height <= viewport_limits[1],
+            "window exceeds actual GLES viewport limits");
     REQUIRE(eglSwapInterval(display, 1), "EGL swap interval");
     const char *renderer = (const char *)glGetString(GL_RENDERER);
     const char *version = (const char *)glGetString(GL_VERSION);

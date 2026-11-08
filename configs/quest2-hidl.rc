@@ -1,0 +1,21 @@
+service hwservicemanager /system_ext/bin/hwservicemanager
+    class core
+    user system
+    group system readproc
+    seclabel u:r:hwservicemanager:s0
+    onrestart setprop hwservicemanager.ready false
+
+service sq2-omx /vendor/bin/hw/quest2-omx-service
+    disabled
+    class hal
+    user mediacodec
+    group system graphics camera
+    seclabel u:r:mediacodec:s0
+    interface android.hardware.media.omx@1.0::IOmx default
+    interface android.hardware.media.omx@1.0::IOmxStore default
+    interface android.hidl.allocator@1.0::IAllocator ashmem
+    setenv LD_LIBRARY_PATH /vendor/etc/sq2-omx/lib64:/system/lib64:/vendor/lib64
+    setenv LD_PRELOAD /vendor/etc/sq2-omx/lib64/libquest2-vidc-bridge.so
+    setenv QUEST2_VIDC_BRIDGE 1
+    setenv QUEST2_VIDC_AUX_CAPS 1
+    oneshot

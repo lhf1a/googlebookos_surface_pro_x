@@ -3,15 +3,31 @@
 #include <media/NdkImageReader.h>
 #include <android/hardware_buffer.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <android/data_space.h>
 // Platform libbinder_ndk entry point: standalone clients need callback threads.
 extern void ABinderProcess_startThreadPool(void);
+#ifdef SQ2_IMAGE_HDR_METADATA
+extern int sq2_dump_image_hdr_metadata(AHardwareBuffer *buffer);
+#endif
+static const char *frame_directory="/data/local/tmp";
 typedef uint32_t u32;
 typedef uint8_t u8;
+#ifdef SQ2_HEVC_VECTOR
+#include "sq2-hevc-vector.h"
+#define SQ2_MIME "video/hevc"
+#define SQ2_COMPONENT "OMX.qcom.video.decoder.hevc"
+#define SQ2_COLOR (SQ2_VEC_BYTES_PER_SAMPLE==2?54:21)
+#else
 #include "sq2-h264-vector.h"
+#define SQ2_MIME "video/avc"
+#define SQ2_COMPONENT "OMX.qcom.video.decoder.avc"
+#define SQ2_COLOR 19
+#endif
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return t.tv_sec+t.tv_nsec/1e9; }
 static size_t startcode(size_t at, size_t *prefix) {
  for(size_t i=at;i+3<sizeof(sq2_vec_stream);i++) {
@@ -47,8 +63,37 @@ static size_t copy_au_without_csd(uint8_t *dst,unsigned index) {
  }
  return written;
 }
+static int save_rgb10_image(AImage *im,unsigned index){
+ AHardwareBuffer *buffer=NULL;int32_t space=0;int64_t timestamp=0;AImageCropRect crop;
+ if(AImage_getHardwareBuffer(im,&buffer)||!buffer||AImage_getDataSpace(im,&space)||
+    AImage_getTimestamp(im,&timestamp)||AImage_getCropRect(im,&crop))return 0;
+#ifdef SQ2_IMAGE_HDR_METADATA
+ if(!sq2_dump_image_hdr_metadata(buffer))return 0;
+#endif
+ AHardwareBuffer_Desc desc={0};AHardwareBuffer_describe(buffer,&desc);
+ printf("IMAGE_RGB10 index=%u format=%u width=%u height=%u stride=%u dataspace=0x%x timestamp_ns=%lld crop=%d,%d,%d,%d\n",
+   index,desc.format,desc.width,desc.height,desc.stride,space,(long long)timestamp,
+   crop.left,crop.top,crop.right,crop.bottom);
+ if(desc.format!=AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM || desc.width<SQ2_VEC_W ||
+    desc.height<SQ2_VEC_H || desc.stride<desc.width || crop.left || crop.top ||
+    crop.right!=SQ2_VEC_W || crop.bottom!=SQ2_VEC_H)return 0;
+ void *pixels=NULL;int rc=AHardwareBuffer_lock(buffer,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,-1,NULL,&pixels);
+ printf("IMAGE_RGB10_LOCK=%d\n",rc);if(rc||!pixels)return 0;
+ char path[256];int n=snprintf(path,sizeof(path),"%s/sq2-rgb10-frame-%u.bin",frame_directory,index);
+ FILE *out=n>0&&(size_t)n<sizeof(path)?fopen(path,"wbx"):NULL;int ok=out!=NULL;
+ if(out){
+  for(unsigned y=0;y<SQ2_VEC_H;y++)
+   if(fwrite((const uint8_t *)pixels+(size_t)y*desc.stride*4,4,SQ2_VEC_W,out)!=SQ2_VEC_W){ok=0;break;}
+  if(fclose(out))ok=0;
+ }
+ if(AHardwareBuffer_unlock(buffer,NULL))ok=0;
+ return ok;
+}
 static int save_image(AImage *im,unsigned index){
  int32_t width=0,height=0,planes=0;int64_t timestamp=0;AImageCropRect crop;
+ int32_t image_format=0;
+ if(AImage_getFormat(im,&image_format))return 0;
+ if(image_format==AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM)return save_rgb10_image(im,index);
  if(AImage_getWidth(im,&width)||AImage_getHeight(im,&height)||AImage_getNumberOfPlanes(im,&planes)||
     AImage_getCropRect(im,&crop)||AImage_getTimestamp(im,&timestamp))return 0;
  printf("IMAGE index=%u width=%d height=%d planes=%d timestamp_ns=%lld crop=%d,%d,%d,%d\n",
@@ -62,33 +107,67 @@ static int save_image(AImage *im,unsigned index){
   if(!data||len<0||row<=0||pixel<=0||(uint64_t)(h-1)*row+(uint64_t)(w-1)*pixel>=(uint64_t)len)return 0;
   for(int y=0;y<h;y++)for(int x=0;x<w;x++)packed[at++]=data[(size_t)y*row+(size_t)x*pixel];
  }
- char path[128];snprintf(path,sizeof(path),"/data/local/tmp/sq2-ndk-frame-%u.bin",index);
+ char path[128];snprintf(path,sizeof(path),"%s/sq2-ndk-frame-%u.bin",frame_directory,index);
  FILE *out=fopen(path,"wb");if(!out)return 0;
  int ok=fwrite(packed,1,sizeof(packed),out)==sizeof(packed);if(fclose(out))ok=0;
  return ok;
 }
 int main(int argc, char **argv) {
  setvbuf(stdout,NULL,_IONBF,0);
+ FILE *maps=fopen("/proc/self/maps","r");
+ if(maps){char line[1024];while(fgets(line,sizeof(line),maps))
+   if(strstr(line,"/libstagefright.so")||strstr(line,"/libsq2-p010-renderer.so"))printf("RENDERER_MAP %s",line);
+  fclose(maps);}
+ if(getenv("SQ2_FRAME_DIR"))frame_directory=getenv("SQ2_FRAME_DIR");
+ if(argc>3 || (argc>2 && strcmp(argv[2],"--surface-csd") && strcmp(argv[2],"--surface-full-au") && strcmp(argv[2],"--csd") && strcmp(argv[2],"--csd-stripped"))) {
+  fprintf(stderr,"usage: %s [codec [--surface-full-au|--surface-csd|--csd|--csd-stripped]]\n",argv[0]);return 64;
+ }
+#ifdef SQ2_HEVC_VECTOR
+ /* CSD splitting remains AVC-specific; HEVC uses complete parameter-bearing AUs. */
+ if(argc>2&&strcmp(argv[2],"--surface-full-au")){fputs("HEVC probe supports full-AU buffer or Surface mode\n",stderr);return 64;}
+#endif
  ABinderProcess_startThreadPool();
- const char *name=argc>1?argv[1]:"c2.sq2.avc.experimental";
+ const char *name=argc>1?argv[1]:SQ2_COMPONENT;
  printf("CREATE_BEGIN name=%s\n",name);
  fsync(1);
  AMediaCodec *c=AMediaCodec_createCodecByName(name);
  printf("CREATE_END nonnull=%d\n",c!=NULL);
  if(!c)return 2;
- int surface=argc>2&&!strcmp(argv[2],"--surface-csd");
+ int surface=argc>2&&(!strcmp(argv[2],"--surface-csd")||!strcmp(argv[2],"--surface-full-au"));
  AImageReader *reader=NULL;ANativeWindow *window=NULL;
  if(surface){
-  int r=AImageReader_newWithUsage(SQ2_VEC_W,SQ2_VEC_H,AIMAGE_FORMAT_YUV_420_888,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,8,&reader);
+  int r;
+#ifdef SQ2_HEVC_VECTOR
+  if(SQ2_VEC_BYTES_PER_SAMPLE==2) {
+   AHardwareBuffer_Desc wanted={.width=SQ2_VEC_W,.height=SQ2_VEC_H,.layers=1,
+      .format=AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM,
+      .usage=AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN|AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY|AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE};
+   AHardwareBuffer *allocation=NULL;
+   r=AHardwareBuffer_allocate(&wanted,&allocation);printf("RGB10_ALLOCATE=%d\n",r);
+   if(r){AMediaCodec_delete(c);return 7;}
+   void *pixels=NULL;r=AHardwareBuffer_lock(allocation,AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY,-1,NULL,&pixels);
+   printf("RGB10_WRITE_LOCK=%d\n",r);
+   if(!r)r=AHardwareBuffer_unlock(allocation,NULL);
+   AHardwareBuffer_release(allocation);
+   if(r){AMediaCodec_delete(c);return 7;}
+   r=AImageReader_newWithDataSpace(SQ2_VEC_W,SQ2_VEC_H,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+      8,AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM,ADATASPACE_UNKNOWN,&reader);
+  }else
+#endif
+   r=AImageReader_newWithUsage(SQ2_VEC_W,SQ2_VEC_H,AIMAGE_FORMAT_YUV_420_888,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,8,&reader);
   printf("IMAGE_READER=%d\n",r);
   if(r||AImageReader_getWindow(reader,&window)){if(reader)AImageReader_delete(reader);AMediaCodec_delete(c);return 7;}
  }
  AMediaFormat *f=AMediaFormat_new();
- AMediaFormat_setString(f,AMEDIAFORMAT_KEY_MIME,"video/avc");
+ AMediaFormat_setString(f,AMEDIAFORMAT_KEY_MIME,SQ2_MIME);
  AMediaFormat_setInt32(f,AMEDIAFORMAT_KEY_WIDTH,SQ2_VEC_W);
  AMediaFormat_setInt32(f,AMEDIAFORMAT_KEY_HEIGHT,SQ2_VEC_H);
- if(!surface)AMediaFormat_setInt32(f,"color-format",19);
- int strip_csd=surface||(argc>2&&!strcmp(argv[2],"--csd-stripped"));
+ if(!surface
+#ifdef SQ2_HEVC_VECTOR
+    || SQ2_VEC_BYTES_PER_SAMPLE==2
+#endif
+   )AMediaFormat_setInt32(f,"color-format",SQ2_COLOR);
+ int strip_csd=argc>2&&(!strcmp(argv[2],"--surface-csd")||!strcmp(argv[2],"--csd-stripped"));
  if(argc>2&&(strip_csd||!strcmp(argv[2],"--csd"))) {
   if(!add_csd(f)){AMediaFormat_delete(f);AMediaCodec_delete(c);return 6;}
  }
@@ -121,13 +200,28 @@ int main(int argc, char **argv) {
    }else if(i!=AMEDIACODEC_INFO_TRY_AGAIN_LATER){printf("INPUT_ERROR=%zd\n",i);failed=1;}
   }
   AMediaCodecBufferInfo info={0};ssize_t o=AMediaCodec_dequeueOutputBuffer(c,&info,1000);
-  if(o==AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED){f=AMediaCodec_getOutputFormat(c);printf("FORMAT %s\n",AMediaFormat_toString(f));AMediaFormat_delete(f);}
+  if(o==AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED){
+   f=AMediaCodec_getOutputFormat(c);printf("FORMAT %s\n",AMediaFormat_toString(f));
+   int32_t standard=0,transfer=0,range=0;
+   int hs=AMediaFormat_getInt32(f,"color-standard",&standard);
+   int ht=AMediaFormat_getInt32(f,"color-transfer",&transfer);
+   int hr=AMediaFormat_getInt32(f,"color-range",&range);
+   printf("COLOR standard=%d present=%d transfer=%d present=%d range=%d present=%d\n",standard,hs,transfer,ht,range,hr);
+   void *hdr=NULL;size_t hdrsize=0;
+   if(AMediaFormat_getBuffer(f,"hdr-static-info",&hdr,&hdrsize)){
+    printf("HDR_STATIC bytes=%zu hex=",hdrsize);
+    if(hdrsize<=128)for(size_t j=0;j<hdrsize;j++)printf("%02x",((unsigned char*)hdr)[j]);
+    else printf("diagnostic_limit_exceeded");
+    puts("");
+   } else puts("HDR_STATIC absent");
+   AMediaFormat_delete(f);
+  }
   else if(o>=0){
    size_t capacity=0;uint8_t *buf=surface?NULL:AMediaCodec_getOutputBuffer(c,o,&capacity);
    printf("OUTPUT pts=%lld size=%d offset=%d flags=%u capacity=%zu\n",(long long)info.presentationTimeUs,info.size,info.offset,info.flags,capacity);
    if(info.size>0&&!surface){
     if(!buf||info.offset<0||(size_t)info.offset>capacity||(size_t)info.size>capacity-(size_t)info.offset){failed=1;}
-    else {char path[128];snprintf(path,sizeof(path),"/data/local/tmp/sq2-ndk-frame-%u.bin",frames);FILE *out=fopen(path,"wb");if(!out)failed=1;else {if(fwrite(buf+info.offset,1,info.size,out)!=(size_t)info.size)failed=1;fclose(out);}frames++;}
+    else {char path[128];snprintf(path,sizeof(path),"%s/sq2-ndk-frame-%u.bin",frame_directory,frames);FILE *out=fopen(path,"wb");if(!out)failed=1;else {if(fwrite(buf+info.offset,1,info.size,out)!=(size_t)info.size)failed=1;fclose(out);}frames++;}
    }
    eos=!!(info.flags&AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
    int render=surface&&info.size>0;if(render)rendered++;

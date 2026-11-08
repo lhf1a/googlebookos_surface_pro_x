@@ -35,7 +35,7 @@ else
  ffmpeg -nostdin -v error -f lavfi -i "testsrc2=size=$SIZE:rate=$FPS" -frames:v "$((FPS*10))" -c:v libx264 -profile:v "$PROFILE" -pix_fmt yuv420p -g "$FPS" -bf "$BFRAMES" -movflags +faststart -y "$OUT/assets/clip.mp4"
 fi
 ffprobe -v error -select_streams v:0 -show_entries stream=profile,level,width,height,has_b_frames,pix_fmt -show_entries frame=pict_type,pts_time -of json "$OUT/assets/clip.mp4" > "$OUT/vector.json"
-javac --release 8 -encoding UTF-8 -classpath "$WORK/sdk/android-35/android.jar" -d "$OUT/classes" "$SRC/MainActivity.java"
+javac --release 8 -encoding UTF-8 -classpath "$WORK/sdk/android-35/android.jar" -d "$OUT/classes" "$SRC/MainActivity.java" "$SRC/RenderedFrameAudit.java"
 "$SDK/d8" --min-api 26 --lib "$WORK/sdk/android-35/android.jar" --output "$OUT/dex" "$OUT"/classes/org/surface/sq2/videotest/*.class
 "$SDK/aapt2" link --manifest "$SRC/AndroidManifest.xml" -I "$WORK/sdk/android-35/android.jar" -A "$OUT/assets" -0 mp4 -o "$OUT/unsigned.apk"
 (cd "$OUT/dex"; zip -q "$OUT/unsigned.apk" classes.dex)

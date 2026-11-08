@@ -4,7 +4,13 @@
 #include <android/log.h>
 #define SQ2_SESSION_TRACE(stage) __android_log_print(ANDROID_LOG_INFO,"SQ2C2Lifecycle","CLOSE_STAGE %s",stage)
 #define SQ2_SESSION_ERROR(error) __android_log_print(ANDROID_LOG_ERROR,"SQ2C2Lifecycle","SESSION_ERROR errno=%d",error)
+#ifdef SQ2_OMX_BACKEND
+#include "sq2-omx-session.h"
+using Sq2DecodeSession = Sq2OmxSession;
+#else
 #include "sq2-v4l2-session.h"
+using Sq2DecodeSession = Sq2V4L2Session;
+#endif
 #include "sq2-avc-config.h"
 #include "sq2-codecs.h"
 #include "sq2-split-uv.h"
@@ -26,7 +32,7 @@ class Sq2C2V4L2Component final:public android::SimpleC2Component {
   ~Lease(){if(mapping!=MAP_FAILED)munmap(mapping,bytes);if(fd>=0)::close(fd);}
   int sync(uint64_t flags){dma_buf_sync s{};s.flags=flags;int r;do{r=ioctl(fd,DMA_BUF_IOCTL_SYNC,&s);}while(r<0&&errno==EINTR);return r<0?-errno:0;}
  };
- Sq2V4L2Session session_;std::shared_ptr<C2BlockPool> pool_;const uint32_t codec_;uint32_t outputFormat_=V4L2_PIX_FMT_NV12;
+ Sq2DecodeSession session_;std::shared_ptr<C2BlockPool> pool_;const uint32_t codec_;uint32_t outputFormat_=V4L2_PIX_FMT_NV12;
  bool directP010_=false;
  Sq2AvcConfig config_,configured_;bool collectingConfig_=false;
  std::set<uint64_t> outputInodes_;
@@ -117,12 +123,13 @@ class Sq2C2V4L2Component final:public android::SimpleC2Component {
   if(!pending_.count(frame.token))return;
   auto lease=std::static_pointer_cast<Lease>(frame.buffer.owner);
   auto& g=frame.geometry;
+  const size_t capacity=frame.data?frame.buffer.bytes:(lease?lease->bytes:0);
   const bool ten=outputFormat_==V4L2_PIX_FMT_P010;
   const unsigned sampleBytes=ten?2:1;
   uint64_t rowBytes=uint64_t(g.width)*sampleBytes;
   uint64_t uv=uint64_t(g.stride)*g.scanlines;
-  if(g.format!=outputFormat_||frame.offset||!g.width||!g.height||(g.width&1)||(g.height&1)||rowBytes>g.stride||uv+uint64_t(g.stride)*(g.height/2)>lease->bytes||uv+uint64_t(g.stride)*(g.height/2-1)+rowBytes>frame.bytes){complete(frame.token,{},C2_CORRUPTED);return;}
-  if(lease->graphic){
+  if(g.format!=outputFormat_||frame.offset||!g.width||!g.height||(g.width&1)||(g.height&1)||rowBytes>g.stride||uv+uint64_t(g.stride)*(g.height/2)>capacity||uv+uint64_t(g.stride)*(g.height/2-1)+rowBytes>frame.bytes){complete(frame.token,{},C2_CORRUPTED);return;}
+  if(lease&&lease->graphic){
    // DQBUF completes device writes. Never requeue this lease: the session replaces
    // it, while the shared graphic block remains owned by the downstream client.
    ++timedFrames_;
@@ -152,9 +159,9 @@ class Sq2C2V4L2Component final:public android::SimpleC2Component {
     if(ten)good=good&&l.allocatedDepth==16&&l.rightShift==6&&l.endianness!=C2PlaneInfo::BIG_END&&l.colSampling==(plane?2u:1u)&&l.rowSampling==(plane?2u:1u);
    }
    if(good){
-    auto syncBegin=Clock::now();good=lease->sync(DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ)==0;syncUs_+=micros(syncBegin,Clock::now());
+    auto syncBegin=Clock::now();good=frame.data||lease->sync(DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ)==0;syncUs_+=micros(syncBegin,Clock::now());
     if(good){
-     auto src=static_cast<const uint8_t*>(lease->mapping);
+     auto src=frame.data?frame.data:static_cast<const uint8_t*>(lease->mapping);
      auto pixelsBegin=Clock::now();
      auto yEnd=pixelsBegin;
      if(ten){
@@ -176,7 +183,7 @@ class Sq2C2V4L2Component final:public android::SimpleC2Component {
      }else for(unsigned plane=1;plane<3;plane++)for(unsigned y=0;y<g.height/2;y++)for(unsigned x=0;x<g.width/2;x++)
       p[plane][size_t(y)*layout.planes[plane].rowInc+x*layout.planes[plane].colInc]=src[uv+size_t(y)*g.stride+2*x+plane-1];
      }
-     syncBegin=Clock::now();uvUs_+=micros(yEnd,syncBegin);good=lease->sync(DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ)==0;syncUs_+=micros(syncBegin,Clock::now());
+     syncBegin=Clock::now();uvUs_+=micros(yEnd,syncBegin);good=frame.data||lease->sync(DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ)==0;syncUs_+=micros(syncBegin,Clock::now());
     }
    }
    copied=Clock::now();
@@ -243,7 +250,7 @@ public:
    complete(token,{},r?C2_BAD_VALUE:C2_OK);current_=nullptr;return;
   }
   collectingConfig_=false;
-  if(session_.state()==Sq2V4L2Session::State::Closed){
+  if(session_.state()==Sq2DecodeSession::State::Closed){
    C2StreamPictureSizeInfo::output size(0u);C2StreamPixelFormatInfo::output pixel(0u);std::vector<std::unique_ptr<C2Param>> params;
    if(intf()->query_vb({&size,&pixel},{},C2_MAY_BLOCK,&params)!=C2_OK){failPending();current_=nullptr;return;}
    if(pixel.value!=0x23&&pixel.value!=0x36){failPending();current_=nullptr;return;}
@@ -270,8 +277,8 @@ public:
   }
   bool eos=(w->input.flags&C2FrameData::FLAG_END_OF_STREAM)!=0;
   if(!r&&eos){r=session_.requestDrain();auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-   while(!r&&session_.state()!=Sq2V4L2Session::State::Ended&&std::chrono::steady_clock::now()<deadline)r=session_.pump(20);
-   if(!r&&session_.state()!=Sq2V4L2Session::State::Ended)r=-ETIMEDOUT;
+   while(!r&&session_.state()!=Sq2DecodeSession::State::Ended&&std::chrono::steady_clock::now()<deadline)r=session_.pump(20);
+   if(!r&&session_.state()!=Sq2DecodeSession::State::Ended)r=-ETIMEDOUT;
    if(!r){
     if(w->workletsProcessed)w->worklets.front()->output.flags=C2FrameData::FLAG_END_OF_STREAM;
     else complete(token,{},C2_OK,true);

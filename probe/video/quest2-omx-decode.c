@@ -1,9 +1,10 @@
-/* Standard non-secure OMX AVC client, not a decoder or a firmware loader.
+/* Standard non-secure OMX video client, not a decoder or a firmware loader.
  * An explicit invocation uses the selected vendor component and real buffers.
  * AU sizes/PTS come from the caller's demuxer. No compressed data is decoded here.
  */
 #define _GNU_SOURCE
 #include <OMX_Component.h>
+#include "quest2-omx-session.h"
 #include <dlfcn.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -23,6 +24,9 @@ _Static_assert(sizeof(void *) == 8 && sizeof(OMX_U32) == 4, "64-bit OMX ABI requ
 #define INIT(x) do { memset(&(x), 0, sizeof(x)); (x).nSize = sizeof(x); \
     (x).nVersion.s.nVersionMajor = 1; (x).nVersion.s.nVersionMinor = 1; \
     (x).nVersion.s.nRevision = 2; } while (0)
+/* QCOM OMX extension: Venus linear NV12 (not UBWC); retain raw output until
+ * returned storage geometry has been validated separately. */
+#define Q2_COLOR_VENUS_NV12 ((OMX_COLOR_FORMATTYPE)0x7fa30c04)
 enum ownership { APP, COMPONENT, READY };
 struct slot { OMX_BUFFERHEADERTYPE *header; enum ownership owner; uint64_t order; };
 struct port { OMX_PARAM_PORTDEFINITIONTYPE definition; struct slot *slots; size_t count; };
@@ -39,12 +43,16 @@ struct client {
     OMX_STATETYPE state;
     uint64_t sequence;
     struct port input, output;
+    OMX_VIDEO_CODINGTYPE compression;
     OMX_CONFIG_RECTTYPE crop;
-    unsigned timeout_ms;
+    OMX_INDEXTYPE metadata_indices[3];
+    unsigned timeout_ms, requested_input_buffers;
     bool output_eos, event_eos;
     size_t frames, linear_frames;
     const char *directory;
     FILE *metadata;
+    quest2_omx_deliver deliver;
+    void *opaque;
 };
 
 static OMX_ERRORTYPE event(OMX_HANDLETYPE h, OMX_PTR opaque, OMX_EVENTTYPE type,
@@ -60,7 +68,14 @@ static OMX_ERRORTYPE event(OMX_HANDLETYPE h, OMX_PTR opaque, OMX_EVENTTYPE type,
         if (a == OMX_CommandStateSet) c->state = (OMX_STATETYPE)b;
     }
     if (type == OMX_EventPortSettingsChanged && a == c->output.definition.nPortIndex) {
-        if (b == OMX_IndexConfigCommonOutputCrop) c->crop_changed = true;
+        bool metadata = false;
+        for (unsigned i = 0; i < 3; i++)
+            metadata |= c->metadata_indices[i] && b == (OMX_U32)c->metadata_indices[i];
+        if (metadata) {
+            /* Color/HDR updates do not change buffer geometry. Resetting the
+             * port here discards queued frames; NDK probes verify their values. */
+            printf("METADATA_CHANGED index=0x%08x buffers_preserved=1\n", b);
+        } else if (b == OMX_IndexConfigCommonOutputCrop) c->crop_changed = true;
         else c->reconfigure = true;
     }
     if (type == OMX_EventBufferFlag && a == c->output.definition.nPortIndex && (b & OMX_BUFFERFLAG_EOS))
@@ -190,11 +205,15 @@ static bool save_output(struct client *c, OMX_BUFFERHEADERTYPE *b) {
     printf("FRAME index=%zu pts=%" PRId64 " bytes=%u offset=%u allocated=%u flags=0x%x width=%u height=%u stride=%d slice=%u color=0x%x\n",
         c->frames, (int64_t)b->nTimeStamp, b->nFilledLen, b->nOffset, b->nAllocLen, b->nFlags,
         v->nFrameWidth, v->nFrameHeight, v->nStride, v->nSliceHeight, (unsigned)v->eColorFormat);
-    FILE *raw = frame_file(c, "raw");
-    if (!raw) return false;
-    bool ok = fwrite(b->pBuffer + b->nOffset, 1, b->nFilledLen, raw) == b->nFilledLen;
-    if (fclose(raw)) ok = false;
-    bool linear = v->eColorFormat == OMX_COLOR_FormatYUV420SemiPlanar;
+    bool ok = !(b->nFlags & OMX_BUFFERFLAG_DATACORRUPT);
+    if (!c->deliver) {
+        FILE *raw = frame_file(c, "raw");
+        if (!raw) return false;
+        ok = fwrite(b->pBuffer + b->nOffset, 1, b->nFilledLen, raw) == b->nFilledLen && ok;
+        if (fclose(raw)) ok = false;
+    }
+    bool linear = v->eColorFormat == OMX_COLOR_FormatYUV420SemiPlanar ||
+                  v->eColorFormat == Q2_COLOR_VENUS_NV12;
     size_t stride = v->nStride > 0 ? (size_t)v->nStride : 0;
     size_t slice = v->nSliceHeight, width = c->crop.nWidth, height = c->crop.nHeight;
     size_t left = c->crop.nLeft >= 0 ? (size_t)c->crop.nLeft : SIZE_MAX;
@@ -211,6 +230,15 @@ static bool save_output(struct client *c, OMX_BUFFERHEADERTYPE *b) {
         linear = linear && uv_row <= (SIZE_MAX - y_size - left - width) / stride;
         if (linear) last_uv = y_size + uv_row * stride + left + width;
         linear = linear && last_uv <= b->nFilledLen;
+    }
+    if (c->deliver) {
+        /* The C2 adapter currently exports uncropped-origin linear NV12 only. */
+        if (!ok || !linear || left || top || b->nTimeStamp < 0) return false;
+        struct quest2_omx_frame frame = {b->pBuffer + b->nOffset, b->nFilledLen,
+            width, height, stride, slice, (uint64_t)b->nTimeStamp};
+        if (c->deliver(c->opaque, &frame)) return false;
+        ++c->frames; ++c->linear_frames;
+        return true;
     }
     if (linear) {
         FILE *nv12 = frame_file(c, "nv12");
@@ -278,6 +306,7 @@ static bool reconfigure_output(struct client *c) {
     puts("OUTPUT_RECONFIGURE_DONE"); return true;
 }
 
+#ifndef QUEST2_OMX_SESSION_ONLY
 static bool read_aus(const char *path, struct au **rows, size_t *count, uint64_t *total) {
     FILE *f = fopen(path, "r"); if (!f) return false;
     char *line = NULL; size_t capacity = 0; bool ok = true;
@@ -346,7 +375,16 @@ static bool decode(struct client *c, FILE *input, struct au *aus, size_t count) 
     return index == count && sent_eos && c->output_eos && c->frames > 0;
 }
 
-static bool discover(struct client *c, unsigned width, unsigned height, bool native_color) {
+#endif
+static bool discover(struct client *c, unsigned width, unsigned height, bool native_color, bool venus_nv12) {
+    const char *extensions[] = {"OMX.google.android.index.describeColorAspects",
+        "OMX.google.android.index.describeHDRStaticInfo", "OMX.google.android.index.describeHDR10PlusInfo"};
+    for (unsigned i = 0; i < 3; i++) {
+        OMX_INDEXTYPE index = 0;
+        if (c->component->GetExtensionIndex &&
+            c->component->GetExtensionIndex(c->handle, (OMX_STRING)extensions[i], &index) == OMX_ErrorNone)
+            c->metadata_indices[i] = index;
+    }
     OMX_PORT_PARAM_TYPE ports; INIT(ports);
     if (!checked("GetParameter(VideoInit)", c->component->GetParameter(c->handle, OMX_IndexParamVideoInit, &ports))) return false;
     bool input = false, output = false;
@@ -357,23 +395,40 @@ static bool discover(struct client *c, unsigned width, unsigned height, bool nat
         if (p.definition.eDir == OMX_DirInput && !input) { c->input = p; input = true; }
         if (p.definition.eDir == OMX_DirOutput && !output) { c->output = p; output = true; }
     }
-    if (!input || !output || c->input.definition.format.video.eCompressionFormat != OMX_VIDEO_CodingAVC) return false;
+    if (!input || !output || c->input.definition.format.video.eCompressionFormat != (c->compression ? c->compression : OMX_VIDEO_CodingAVC)) return false;
     if (width || height) {
         if (!width || !height) return false;
         c->input.definition.format.video.nFrameWidth = width;
         c->input.definition.format.video.nFrameHeight = height;
-        if (!checked("SetParameter(InputPortDefinition)", c->component->SetParameter(c->handle,
-            OMX_IndexParamPortDefinition, &c->input.definition))) return false;
     }
+    if (c->requested_input_buffers) {
+        if (c->requested_input_buffers < c->input.definition.nBufferCountMin) {
+            fprintf(stderr, "INPUT_BUFFERS_BELOW_MIN requested=%u min=%u\n",
+                    c->requested_input_buffers, c->input.definition.nBufferCountMin);
+            return false;
+        }
+        c->input.definition.nBufferCountActual = c->requested_input_buffers;
+    }
+    /* OEM SetParameter allocates V4L2 slots: combine geometry/count before S_FMT is busy. */
+    if ((width || height || c->requested_input_buffers) &&
+        !checked("SetParameter(InputPortDefinition)", c->component->SetParameter(c->handle,
+            OMX_IndexParamPortDefinition, &c->input.definition))) return false;
     if (!native_color) {
         OMX_VIDEO_PARAM_PORTFORMATTYPE format; INIT(format);
         format.nPortIndex = c->output.definition.nPortIndex;
         format.eCompressionFormat = OMX_VIDEO_CodingUnused;
-        format.eColorFormat = OMX_COLOR_FormatYUV420SemiPlanar;
-        if (!checked("SetParameter(OutputLinearNV12)", c->component->SetParameter(c->handle,
+        format.eColorFormat = venus_nv12 ? Q2_COLOR_VENUS_NV12 : OMX_COLOR_FormatYUV420SemiPlanar;
+        if (!checked(venus_nv12 ? "SetParameter(OutputVenusNV12)" : "SetParameter(OutputLinearNV12)", c->component->SetParameter(c->handle,
             OMX_IndexParamVideoPortFormat, &format))) return false;
     }
-    return definition(c, &c->input) && definition(c, &c->output) && crop(c);
+    if (!definition(c, &c->input) || !definition(c, &c->output)) return false;
+    if (c->requested_input_buffers &&
+        c->input.definition.nBufferCountActual != c->requested_input_buffers) {
+        fprintf(stderr, "INPUT_BUFFERS_NOT_ACCEPTED requested=%u actual=%u\n",
+                c->requested_input_buffers, c->input.definition.nBufferCountActual);
+        return false;
+    }
+    return crop(c);
 }
 static bool cleanup(struct client *c) {
     if (!c->handle) return true;
@@ -395,18 +450,20 @@ static bool cleanup(struct client *c) {
     if (state == OMX_StateLoaded) return free_port(c, &c->input) && free_port(c, &c->output);
     return false;
 }
+#ifndef QUEST2_OMX_SESSION_ONLY
 static int usage(const char *name) {
-    fprintf(stderr, "Usage: %s --library ABS_LIB --input AVC --aus SIZE_PTS_FILE --output FRESH_DIR [--component NAME] [--width W --height H] [--native-color] [--timeout-ms N]\n", name);
+    fprintf(stderr, "Usage: %s --library ABS_LIB --input ELEMENTARY_STREAM --aus SIZE_PTS_FILE --output FRESH_DIR [--component NAME] [--width W --height H] [--native-color | --venus-nv12] [--timeout-ms N] [--input-buffers N]\n", name);
     fprintf(stderr, "AU file: decimal bytes and signed microsecond PTS per line, in compressed decode order. Default requests linear NV12. This command initializes hardware and submits frames; it never installs a service or firmware.\n");
     return 64;
 }
 int main(int argc, char **argv) {
     const char *library = NULL, *input_path = NULL, *au_path = NULL, *output = NULL;
     const char *name = "OMX.qcom.video.decoder.avc";
-    unsigned width = 0, height = 0, timeout = 30000; bool native_color = false;
+    unsigned width = 0, height = 0, timeout = 30000, input_buffers = 0; bool native_color = false, venus_nv12 = false;
     setvbuf(stdout, NULL, _IONBF, 0); setvbuf(stderr, NULL, _IONBF, 0);
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--native-color")) { native_color = true; continue; }
+        if (!strcmp(argv[i], "--venus-nv12")) { venus_nv12 = true; continue; }
         if (i + 1 >= argc) return usage(argv[0]);
         const char *key = argv[i++], *value = argv[i];
         if (!strcmp(key, "--library")) library = value;
@@ -414,15 +471,18 @@ int main(int argc, char **argv) {
         else if (!strcmp(key, "--aus")) au_path = value;
         else if (!strcmp(key, "--output")) output = value;
         else if (!strcmp(key, "--component")) name = value;
-        else if (!strcmp(key, "--width") || !strcmp(key, "--height") || !strcmp(key, "--timeout-ms")) {
+        else if (!strcmp(key, "--width") || !strcmp(key, "--height") || !strcmp(key, "--timeout-ms") || !strcmp(key, "--input-buffers")) {
             char *end; errno = 0; unsigned long n = strtoul(value, &end, 10);
             if (!*value || *end || errno || n > UINT_MAX) return usage(argv[0]);
             if (!strcmp(key, "--width")) width = (unsigned)n;
             else if (!strcmp(key, "--height")) height = (unsigned)n;
-            else timeout = (unsigned)n;
+            else if (!strcmp(key, "--input-buffers")) {
+                if (!n || value[0] == '-') return usage(argv[0]);
+                input_buffers = (unsigned)n;
+            } else timeout = (unsigned)n;
         } else return usage(argv[0]);
     }
-    if (!library || library[0] != '/' || !input_path || !au_path || !output || strstr(name, ".secure")) return usage(argv[0]);
+    if ((native_color && venus_nv12) || !library || library[0] != '/' || !input_path || !au_path || !output || strstr(name, ".secure")) return usage(argv[0]);
     struct au *aus = NULL; size_t count = 0; uint64_t total = 0;
     if (!read_aus(au_path, &aus, &count, &total)) { fprintf(stderr, "Invalid AU manifest\n"); free(aus); return 65; }
     FILE *input = fopen(input_path, "rb"); struct stat info;
@@ -430,7 +490,11 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Input size does not equal AU manifest\n"); if (input) fclose(input); free(aus); return 65;
     }
     if (mkdir(output, 0700)) { perror("fresh output directory"); fclose(input); free(aus); return 66; }
-    struct client c = { .timeout_ms = timeout, .directory = output };
+    struct client c = { .timeout_ms = timeout, .requested_input_buffers = input_buffers, .directory = output, .compression = OMX_VIDEO_CodingAVC };
+    if (!strcmp(name,"OMX.qcom.video.decoder.hevc")) c.compression=OMX_VIDEO_CodingHEVC;
+    else if (!strcmp(name,"OMX.qcom.video.decoder.vp8")) c.compression=OMX_VIDEO_CodingVP8;
+    else if (!strcmp(name,"OMX.qcom.video.decoder.vp9")) c.compression=OMX_VIDEO_CodingVP9;
+    else if (!strcmp(name,"OMX.qcom.video.decoder.mpeg2")) c.compression=OMX_VIDEO_CodingMPEG2;
     pthread_mutex_init(&c.mutex, NULL);
     pthread_condattr_t attr; pthread_condattr_init(&attr); pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
     pthread_cond_init(&c.changed, &attr); pthread_condattr_destroy(&attr);
@@ -456,7 +520,7 @@ int main(int argc, char **argv) {
     result = 5;
     if (checked("OMX_GetHandle", get(&c.handle, (OMX_STRING)name, &c, &callbacks)) && c.handle) {
         c.component = c.handle;
-        if (discover(&c, width, height, native_color) && send_command(&c, OMX_CommandStateSet, OMX_StateIdle) &&
+        if (discover(&c, width, height, native_color, venus_nv12) && send_command(&c, OMX_CommandStateSet, OMX_StateIdle) &&
             allocate(&c, &c.input) && allocate(&c, &c.output) && wait_command(&c) &&
             send_command(&c, OMX_CommandStateSet, OMX_StateExecuting) && wait_command(&c) && decode(&c, input, aus, count)) result = 0;
         bool cleaned = cleanup(&c);
@@ -474,3 +538,5 @@ finish:
     printf("RESULT exit=%d frames=%zu linear_nv12=%zu output_eos=%d service_replaced=0 firmware_replaced=0\n", result, c.frames, c.linear_frames, c.output_eos);
     return result;
 }
+
+#endif

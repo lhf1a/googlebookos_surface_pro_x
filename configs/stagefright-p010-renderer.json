@@ -1,0 +1,17 @@
+{
+  "reference_git": "https://android.googlesource.com/platform/frameworks/av",
+  "reference_commit": "e2f098935447ca4945946de5cb69db843fe3f003",
+  "sources": {
+    "SoftwareRenderer.cpp": "84c26432fe4ca3d31348f6583322d6758a559490f84d47f33474b034b6765226",
+    "ColorConverter.cpp": "f299440f6fc3920c0cb1c0b2a763c018a1c5473c6cce8f1e04b67d8f4be8d420"
+  },
+  "patch": "patches/stagefright-p010-renderer.patch",
+  "status": "source candidate, not linked into Android17 libstagefright, not deployed",
+  "patched_sources": {
+    "SoftwareRenderer.cpp": "eec0442bc4f3b1d0f88bd16050f9dbedeac1bd1ad248ed3820d396befe8fbfb6",
+    "ColorConverter.cpp": "f036e34359ae7db9bc19fab8717c927ec2060643ee96ece2cc6d78d860ef7d94"
+  },
+  "native_headers_commit": "4f463a6b1de9198963dc6aff74154a504ba3f8f6",
+  "limits": "Isolated diagnostic build only; system ABI/integration and SDR tone mapping remain unverified",
+  "hdr_helper_source_sha256": "9db9dd8ba83f22c2fd09804d95d27c406490c502f265f23a3adc8b3323f4f71f"
+}

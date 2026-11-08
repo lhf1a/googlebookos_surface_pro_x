@@ -67,21 +67,35 @@ int main(void) {
  for(unsigned i=0;i<3;i++) h.queues[i].qhdr=&q[i];
  for(unsigned sq=0;sq<2;sq++) for(unsigned watch=0;watch<2;watch++) {
   c.sq2=sq;sq2_boot_watch=watch;
-  for(unsigned late=0;late<4;late++) {
+  for(unsigned late=0;late<6;late++) {
    reads=sleeps=records=writes=0;
-   ready_at=late==0 ? 0:late==1 ? 149:late==2 ? 10000:0;
-   reply=late==3 ? 4:1;
+   const unsigned points[]={0,99,149,1999,10000,0};
+   ready_at=points[late];
+   reply=late==5 ? 4:1;
    int ret=venus_boot_core(&h);
    unsigned limit=sq&&watch ? 2000:100;
-   if(late==3) assert(ret==-EINVAL && reads==1 && !sleeps);
+   if(late==5) assert(ret==-EINVAL && reads==1 && !sleeps);
    else if(ready_at>=limit) assert(ret==-ETIMEDOUT && reads==limit);
    else assert(!ret && reads==ready_at+1);
    assert(writes==(sq ? 2:3));
-   assert(records<6 && (sq&&watch ? records>0:records==0));
+   if (sq && watch) assert(records>0 && records<6);
+   else assert(records==(sq && ret==-ETIMEDOUT ? 1U:0U));
    assert(q[0].rx_req==1 && !q[0].write_idx && !q[1].write_idx && !sfr[1]);
   }
  }
- puts("BOOT_WATCH_PASS: 16 reply/profile cases; legacy/default bound100, explicit SQ2 bound2000, no new MMIO/queue writes");
+ /* Malformed or absent CPU buffers must suppress the bounded snapshot. */
+ c.sq2=true;sq2_boot_watch=false;
+ for(unsigned broken=0;broken<5;broken++) {
+  reads=sleeps=records=writes=0;ready_at=10000;reply=1;
+  h.sfr.kva=sfr;h.sfr.size=sizeof(sfr);
+  for(unsigned i=0;i<3;i++) h.queues[i].qhdr=&q[i];
+  if(broken<3) h.queues[broken].qhdr=NULL;
+  else if(broken==3) h.sfr.kva=NULL;
+  else h.sfr.size=19;
+  assert(venus_boot_core(&h)==-ETIMEDOUT);
+  assert(reads==100 && writes==2 && !records);
+ }
+ puts("BOOT_WATCH_PASS: 24 reply/profile +5 buffer-boundary cases; default SQ2 timeout one snapshot; legacy/default bound100, explicit SQ2 bound2000, no new MMIO/queue writes");
 }
 '''
 with tempfile.TemporaryDirectory() as name:

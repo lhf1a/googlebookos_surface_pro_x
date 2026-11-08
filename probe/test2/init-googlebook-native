@@ -45,9 +45,14 @@ fi
 bootid=$(cat /proc/sys/kernel/random/boot_id)
 logdir=/media/esp/logs/googlebook-native-$bootid
 if [ "$debug" = 1 ]; then
-mkdir -p "$logdir" || fail log-directory
-mount --bind "$logdir" /logs || fail logs-bind
-boot-kmsg /logs/kernel-live.txt || fail kmsg-recorder
+if mkdir -p "$logdir" && mount --bind "$logdir" /logs; then
+    if ! boot-kmsg /logs/kernel-live.txt; then
+        umount /logs || fail logs-unbind
+        echo 'Persistent logging unavailable; continuing with RAM logs.'
+    fi
+else
+    echo 'Persistent log directory unavailable; continuing with RAM logs.'
+fi
 fi
 # Normal-boot helper output stays in initramfs RAM, without synchronous ESP I/O.
 exec > /dev/console 2>&1

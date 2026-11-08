@@ -135,6 +135,20 @@ class QualcommFullPack(unittest.TestCase):
         self.assertFalse(any('graphics-cache-receipt' in n or n.endswith('/ready') for n in after))
         self.assertTrue(report['original_mesa_preserved'])
 
+    def test_explicit_paired_venus_parent_preserves_its_modules(self):
+        original = self.base.read_bytes()
+        # Separate pinned candidate parent, while published baseline remains unchanged.
+        candidate = original + archive({'lib/modules/6.18.60/venus-fixture.ko':
+                                        (0o100644, b'paired Venus compatibility module')})
+        self.base.write_bytes(candidate)
+        with mock.patch.object(M, 'VENUS_618_BASE_SHA', M.sha(candidate)):
+            report = M.build(self.args)
+        after = M.cpio.entries(gzip.decompress((self.output/'initramfs.cpio.gz').read_bytes()))
+        self.assertTrue(report['venus_618_omx_prerequisites'])
+        self.assertEqual(after['lib/modules/6.18.60/venus-fixture.ko'][1],
+                         b'paired Venus compatibility module')
+        self.assertEqual((self.output/'restored.cpio.gz').read_bytes(), candidate)
+
     def test_copy_rollback_and_exact_reapply_are_real_commands(self):
         M.build(self.args)
         report = json.loads((self.output/'VERIFICATION.txt').read_text())

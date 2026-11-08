@@ -21,7 +21,7 @@
 #endif
 struct Sq2Geometry { uint32_t width,height,stride,scanlines,bytes,count; uint32_t format=V4L2_PIX_FMT_NV12; };
 struct Sq2CaptureBuffer { int fd=-1; size_t bytes=0; std::shared_ptr<void> owner; };
-struct Sq2DecodedFrame { Sq2CaptureBuffer buffer; Sq2Geometry geometry; uint64_t token; uint32_t bytes,offset,flags; };
+struct Sq2DecodedFrame { Sq2CaptureBuffer buffer; Sq2Geometry geometry; uint64_t token; uint32_t bytes,offset,flags; const uint8_t *data=nullptr; };
 class Sq2V4L2Session {
 public:
  using Allocate=std::function<int(const Sq2Geometry&,Sq2CaptureBuffer&)>;

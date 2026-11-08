@@ -82,8 +82,24 @@ static OMX_ERRORTYPE get_parameter(OMX_HANDLETYPE h,OMX_INDEXTYPE index,OMX_PTR 
 }
 static OMX_ERRORTYPE set_parameter(OMX_HANDLETYPE h,OMX_INDEXTYPE index,OMX_PTR data) {
     (void)h;(void)data;
-    if(index==OMX_IndexParamPortDefinition)return OMX_ErrorNone;
-    if(index==OMX_IndexParamVideoPortFormat)return enabled("MOCK_FORMAT_FAIL")?OMX_ErrorUnsupportedSetting:OMX_ErrorNone;
+    if(index==OMX_IndexParamPortDefinition) {
+        OMX_PARAM_PORTDEFINITIONTYPE *p=data;
+        if(p->nPortIndex>1)return OMX_ErrorBadPortIndex;
+        printf("MOCK_PORT_SET actual=%u min=%u\n",p->nBufferCountActual,p->nBufferCountMin);
+        if(enabled("MOCK_COUNT_FAIL"))return OMX_ErrorUnsupportedSetting;
+        if(p->nBufferCountActual<mock.ports[p->nPortIndex].nBufferCountMin ||
+           p->nBufferCountActual>16)return OMX_ErrorBadParameter;
+        if(!enabled("MOCK_COUNT_IGNORE"))
+            mock.ports[p->nPortIndex].nBufferCountActual=p->nBufferCountActual;
+        return OMX_ErrorNone;
+    }
+    if(index==OMX_IndexParamVideoPortFormat) {
+        OMX_VIDEO_PARAM_PORTFORMATTYPE *p=data;
+        printf("MOCK_FORMAT color=0x%x\n",(unsigned)p->eColorFormat);
+        if(enabled("MOCK_FORMAT_FAIL"))return OMX_ErrorUnsupportedSetting;
+        if(p->eColorFormat==(OMX_COLOR_FORMATTYPE)0x7fa30c04)mock.ports[1].format.video.eColorFormat=p->eColorFormat;
+        return OMX_ErrorNone;
+    }
     return OMX_ErrorUnsupportedIndex;
 }
 static OMX_ERRORTYPE get_config(OMX_HANDLETYPE h,OMX_INDEXTYPE index,OMX_PTR data) {
@@ -141,6 +157,8 @@ static OMX_ERRORTYPE empty(OMX_HANDLETYPE h,OMX_BUFFERHEADERTYPE *b) {
     if(b->nFlags&OMX_BUFFERFLAG_ENDOFFRAME){
         if(mock.frame_count==32)return OMX_ErrorInsufficientResources;
         mock.frames[mock.frame_count++]=b->nTimeStamp;
+        if(enabled("MOCK_METADATA_EVENTS"))
+            report(OMX_EventPortSettingsChanged,1,0x7f000061U+mock.frame_count);
         if(enabled("MOCK_RECONFIGURE") && !mock.reconfigured++) {
             mock.ports[1].format.video.nStride=12;mock.ports[1].format.video.nSliceHeight=8;mock.ports[1].nBufferSize=144;
             report(OMX_EventPortSettingsChanged,1,OMX_IndexParamPortDefinition);
@@ -149,11 +167,19 @@ static OMX_ERRORTYPE empty(OMX_HANDLETYPE h,OMX_BUFFERHEADERTYPE *b) {
     if(b->nFlags&OMX_BUFFERFLAG_EOS){mock.eos=1;qsort(mock.frames,mock.frame_count,sizeof(mock.frames[0]),compare_pts);}
     mock.callbacks.EmptyBufferDone(&mock.component,mock.app,b);drain();return OMX_ErrorNone;
 }
+static OMX_ERRORTYPE extension(OMX_HANDLETYPE h,OMX_STRING name,OMX_INDEXTYPE *index) {
+    (void)h;
+    if(!enabled("MOCK_METADATA_EVENTS"))return OMX_ErrorUnsupportedIndex;
+    const char *names[]={"OMX.google.android.index.describeColorAspects",
+        "OMX.google.android.index.describeHDRStaticInfo","OMX.google.android.index.describeHDR10PlusInfo"};
+    for(unsigned i=0;i<3;i++)if(!strcmp(name,names[i])){*index=(OMX_INDEXTYPE)(0x7f000062U+i);return OMX_ErrorNone;}
+    return OMX_ErrorUnsupportedIndex;
+}
 OMX_ERRORTYPE OMX_Init(void){puts("MOCK_INIT");return OMX_ErrorNone;}
 OMX_ERRORTYPE OMX_Deinit(void){puts("MOCK_DEINIT");return OMX_ErrorNone;}
 OMX_ERRORTYPE OMX_GetHandle(OMX_HANDLETYPE *handle,OMX_STRING name,OMX_PTR app,OMX_CALLBACKTYPE *callbacks){
     (void)name;memset(&mock,0,sizeof(mock));mock.pending=-1;mock.state=OMX_StateLoaded;mock.app=app;mock.callbacks=*callbacks;
-    mock.component.SendCommand=command;mock.component.GetParameter=get_parameter;mock.component.SetParameter=set_parameter;
+    mock.component.GetExtensionIndex=extension;mock.component.SendCommand=command;mock.component.GetParameter=get_parameter;mock.component.SetParameter=set_parameter;
     mock.component.GetConfig=get_config;mock.component.GetState=state;mock.component.AllocateBuffer=allocate;
     mock.component.FreeBuffer=free_buffer;mock.component.FillThisBuffer=fill;mock.component.EmptyThisBuffer=empty;
     for(int i=0;i<2;++i){
@@ -164,6 +190,12 @@ OMX_ERRORTYPE OMX_GetHandle(OMX_HANDLETYPE *handle,OMX_STRING name,OMX_PTR app,O
         mock.ports[i].format.video.nStride=8;mock.ports[i].format.video.nSliceHeight=6;
         mock.ports[i].format.video.eCompressionFormat=i?OMX_VIDEO_CodingUnused:OMX_VIDEO_CodingAVC;
         mock.ports[i].format.video.eColorFormat=i?OMX_COLOR_FormatYUV420SemiPlanar:OMX_COLOR_FormatUnused;
+    }
+    if(!enabled("MOCK_WRONG_CODEC")){
+        if(!strcmp(name,"OMX.qcom.video.decoder.hevc"))mock.ports[0].format.video.eCompressionFormat=OMX_VIDEO_CodingHEVC;
+        else if(!strcmp(name,"OMX.qcom.video.decoder.vp8"))mock.ports[0].format.video.eCompressionFormat=OMX_VIDEO_CodingVP8;
+        else if(!strcmp(name,"OMX.qcom.video.decoder.vp9"))mock.ports[0].format.video.eCompressionFormat=OMX_VIDEO_CodingVP9;
+        else if(!strcmp(name,"OMX.qcom.video.decoder.mpeg2"))mock.ports[0].format.video.eCompressionFormat=OMX_VIDEO_CodingMPEG2;
     }
     if(enabled("MOCK_NONLINEAR"))mock.ports[1].format.video.eColorFormat=(OMX_COLOR_FORMATTYPE)0x7fa30c06;
     *handle=&mock.component;return OMX_ErrorNone;

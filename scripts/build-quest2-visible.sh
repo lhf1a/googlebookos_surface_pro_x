@@ -14,10 +14,11 @@ test -x "$SDK/d8"
 test -f "$ANDROID_JAR"
 mkdir -p "$OUT/classes" "$OUT/dex"
 javac --release 8 -encoding UTF-8 -Xlint:all -Werror -classpath "$ANDROID_JAR" \
-    -d "$OUT/classes" "$SRC/Sq2Quest2Visible.java"
+    -d "$OUT/classes" "$SRC/Sq2Quest2Visible.java" \
+    "$ROOT/probe/graphics/quest2-hwui/Sq2Quest2Hwui.java"
 # The cached d8 supports DEX min-api through 34; the target framework remains 35+.
 "$SDK/d8" --min-api 34 --lib "$ANDROID_JAR" --output "$OUT/dex" \
-    "$OUT/classes/Sq2Quest2Visible.class"
+    "$OUT/classes/Sq2Quest2Visible.class" "$OUT/classes/Sq2Quest2Hwui.class"
 jar --create --file "$OUT/quest2-visible.jar" -C "$OUT/dex" classes.dex
 "$CC" -std=c11 -O2 -Wall -Wextra -Werror -fPIC -shared \
     "$SRC/quest2-visible.c" -landroid -lEGL -lGLESv2 -ldl -llog \

@@ -1,0 +1,34 @@
+{
+  "target_sha256": "77292e864dc21717d1946778a9df5e2e77db5005ba763bbb84f7e10a4c62992c",
+  "entries": [
+    {
+      "entry": "0x1d25c0",
+      "slot": "0x22b118",
+      "symbol": "sq2_p010_renderer_ctor",
+      "original_hex": "fd7bbda9f65701a9f44f02a9",
+      "patch_hex": "d00200b0108e40f900021fd6"
+    },
+    {
+      "entry": "0x1d2650",
+      "slot": "0x22b120",
+      "symbol": "sq2_p010_renderer_dtor",
+      "original_hex": "ffc300d1fd7b01a9f44f02a9",
+      "patch_hex": "d00200b0109240f900021fd6"
+    },
+    {
+      "entry": "0x1d2fb0",
+      "slot": "0x22b128",
+      "symbol": "sq2_p010_renderer_render",
+      "original_hex": "ff8306d1fd7b14a9fc6f15a9",
+      "patch_hex": "d00200b0109640f900021fd6"
+    }
+  ],
+  "library": "libsq2-p010-renderer.so",
+  "scope": "Exact Android17 library integration; preserve all original virtual addresses and relocations",
+  "elf_class": 64,
+  "machine": 183,
+  "deployment_sha256": {
+    "libstagefright.so": "93312fd55e49a61f85483a46137f9bca8a98ae3c0299e07658e32590a9e104b5",
+    "libsq2-p010-renderer.so": "c67c598e90979aa9d85ce0cb8409e82d5f01366ad3c78916a373a96855848a92"
+  }
+}
