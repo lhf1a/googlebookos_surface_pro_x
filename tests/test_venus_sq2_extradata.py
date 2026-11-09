@@ -22,6 +22,34 @@ class Extradata(unittest.TestCase):
             subprocess.run([str(exe)],check=True,timeout=10)
 
 
+    def test_dpb_size_failure_has_single_cleanup_owner(self):
+        fixture = (ROOT/'tests/fixtures/quest2_video/venus-dpb-allocation.c').read_text()
+        harness = (ROOT/'tests/fixtures/quest2_video/venus-dpb-allocation-test.c').read_text()
+        repaired = patch.fix_dpb_cleanup(fixture)
+        self.assertEqual(patch.fix_dpb_cleanup(repaired), repaired)
+        with tempfile.TemporaryDirectory() as td:
+            for name, allocator in [('old', fixture), ('fixed', repaired)]:
+                source = Path(td)/(name+'.c')
+                exe = Path(td)/name
+                source.write_text(harness.replace('/* ALLOCATOR */', allocator))
+                subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror',
+                    '-fsanitize=address,undefined','-fno-pie','-no-pie',
+                    '-I'+str(ROOT/'probe/video'),str(source),'-o',str(exe)],check=True)
+                result = subprocess.run([str(exe)],text=True,capture_output=True,timeout=10)
+                if name == 'old':
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('attempting double-free', result.stderr)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+
+    def test_dpb_cleanup_rejects_unknown_or_duplicate_source(self):
+        with self.assertRaises(ValueError):
+            patch.fix_dpb_cleanup('unknown helpers source')
+        with self.assertRaises(ValueError):
+            patch.fix_dpb_cleanup(patch.OLD_DPB_EXTRA_SIZE*2)
+        with self.assertRaises(ValueError):
+            patch.fix_dpb_cleanup(patch.OLD_DPB_EXTRA_SIZE+patch.DPB_EXTRA_SIZE)
+
     def test_firmware_requirement_count_checked_before_copy(self):
         preamble = """
 #include <assert.h>

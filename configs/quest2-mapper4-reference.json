@@ -1,0 +1,7 @@
+{
+  "purpose": "Standard metadata encoding reference; import-only candidate, not a complete mapper4 HAL",
+  "gralloc4_header": {
+    "url": "https://android.googlesource.com/platform/frameworks/native/+/2827a4a16b0340ecd07c2d5a6c89991799b362bb/libs/gralloc/types/include/gralloctypes/Gralloc4.h?format=TEXT",
+    "sha256": "1e81e73559b6b89ec968258bd433e6f3fd88ac5ed3a97b963ecea15ca1e62208"
+  }
+}

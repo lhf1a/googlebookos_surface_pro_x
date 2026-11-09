@@ -1,0 +1,138 @@
+#include "qti-dpu-atomic-contract.h"
+#include "qti-dpu-sdm-contract.h"
+#include <assert.h>
+#include <stdlib.h>
+using namespace sde_drm;
+static int add_error, add_count;
+static uint64_t active_value;
+static bool missing_active;
+extern "C" drmModeObjectPropertiesPtr drmModeObjectGetProperties(int, uint32_t id, uint32_t type) {
+  assert(id==7&&type==DRM_MODE_OBJECT_CRTC);
+  auto p=new drmModeObjectProperties{};p->count_props=1;p->props=new uint32_t[1]{20};return p;
+}
+extern "C" void drmModeFreeObjectProperties(drmModeObjectPropertiesPtr p){delete[] p->props;delete p;}
+extern "C" drmModePropertyPtr drmModeGetProperty(int,uint32_t id) {
+ auto p=new drmModePropertyRes{};p->prop_id=id;p->flags=DRM_MODE_PROP_RANGE;
+ strcpy(p->name,missing_active?"unsupported":"ACTIVE");return p;
+}
+extern "C" void drmModeFreeProperty(drmModePropertyPtr p){delete p;}
+extern "C" int drmModeAtomicAddProperty(drmModeAtomicReq*,uint32_t object,uint32_t property,uint64_t value) {
+ assert(object==7&&property==20);++add_count;active_value=value;return add_error?add_error:0;
+}
+static int perform(const DpuAtomicContract &contract,DRMOps op,uint32_t object,...) {
+ va_list args;va_start(args,object);int ret=contract.Perform(nullptr,op,object,args);va_end(args);return ret;
+}
+enum DisplayError {kErrorNone,kErrorParameters,kErrorNotSupported};
+enum {kMaxSDELayers=8,kFormatRGBA8888=0,kFormatYCbCr420Planar=100,kRotatorNone=0,kRotatorOffline=1};
+struct Flags {bool secure=false,secure_camera=false,secure_display=false,interlace=false,hdr=false;};
+struct Buffer {Flags flags;int format=0;ColorMetaData color_metadata={};};
+struct Layer {Buffer input_buffer;};
+struct Config {bool use_solidfill_stage=false;struct {int mode=0;}hw_rotator_session;};
+struct HWLayers {struct {std::vector<Layer>hw_layers;}info;Config config[8];};
+struct HWDeviceDRM {DRMCrtcInfo dpu_info_={};DisplayError ValidateDpuLayers(HWLayers*);};
+#define DLOGW(...) ((void)0)
+@VALIDATE_DPU_LAYERS@
+static ColorMetaData rgb() {
+ ColorMetaData c={};c.colorPrimaries=ColorPrimaries_BT709_5;c.range=Range_Full;
+ c.transfer=Transfer_sRGB;c.matrixCoefficients=MatrixCoEff_Identity;return c;
+}
+static ColorMetaData yuv() {
+ auto c=rgb();c.colorPrimaries=ColorPrimaries_BT601_6_525;c.range=Range_Limited;
+ c.transfer=Transfer_SMPTE_170M;c.matrixCoefficients=MatrixCoEff_BT601_6_525;return c;
+}
+int main() {
+ DRMDisplayToken token={};token.crtc_id=7;token.conn_id=8;
+ DRMCrtcInfo caps={};caps.kernel_managed_dpu=true;caps.max_mixer_width=2560;caps.has_src_split=true;
+ DRMPlaneTypeInfo vig={},dma={};vig.type=DRMPlaneType::VIG;dma.type=DRMPlaneType::DMA;
+ DRMPlanesInfo planes={{41,vig},{49,dma}};
+ DpuAtomicContract contract;assert(contract.Init(-1,token,caps,planes)==0);
+ assert(perform(contract,DRMOps::PLANE_SET_SRC_RECT,41,DRMRect{0,0,640,480})==1);
+ assert(perform(contract,DRMOps::PLANE_SET_H_DECIMATION,41,uint32_t(0))==0);
+ assert(perform(contract,DRMOps::PLANE_SET_H_DECIMATION,41,uint32_t(1))==-EOPNOTSUPP);
+ assert(perform(contract,DRMOps::PLANE_SET_H_DECIMATION,99,uint32_t(0))==-ENOENT);
+ assert(perform(contract,DRMOps::CRTC_SET_SECURITY_LEVEL,9,uint32_t(0))==-EINVAL);
+ for(auto op:{DRMOps::PLANE_SET_FB_SECURE_MODE,DRMOps::PLANE_SET_MULTIRECT_MODE,
+              DRMOps::PLANE_SET_SRC_CONFIG,DRMOps::PLANE_SET_INVERSE_PMA}) {
+  assert(perform(contract,op,41,uint32_t(0))==0);
+  assert(perform(contract,op,41,uint32_t(1))==-EOPNOTSUPP);
+ }
+ assert(perform(contract,DRMOps::CRTC_SET_SECURITY_LEVEL,7,uint32_t(1))==-EOPNOTSUPP);
+ DRMCscType csc=kCscYuv2Rgb601L;
+ assert(perform(contract,DRMOps::PLANE_SET_CSC_CONFIG,41,&csc)==1);
+ assert(perform(contract,DRMOps::PLANE_SET_CSC_CONFIG,49,&csc)==-EOPNOTSUPP);
+ csc=kCscYuv2Rgb709L;assert(perform(contract,DRMOps::PLANE_SET_CSC_CONFIG,41,&csc)==1);
+ for(auto type:{kCscYuv2Rgb601FR,kCscYuv2Rgb709FR,kCscYuv2Rgb2020L,kCscYuv2Rgb2020FR}) {
+  csc=type;assert(perform(contract,DRMOps::PLANE_SET_CSC_CONFIG,41,&csc)==-EOPNOTSUPP);
+ }
+ csc=kCscTypeMax;assert(perform(contract,DRMOps::PLANE_SET_CSC_CONFIG,49,&csc)==0);
+ assert(perform(contract,DRMOps::PLANE_SET_CSC_CONFIG,41,static_cast<DRMCscType*>(nullptr))==-EINVAL);
+ assert(perform(contract,DRMOps::PLANE_SET_SCALER_CONFIG,41,uint64_t(100))==-EOPNOTSUPP);
+ assert(perform(contract,DRMOps::CRTC_SET_CORE_AB,7,uint64_t(123456))==0);
+ assert(perform(contract,DRMOps::CRTC_SET_ROT_CLK,7,uint32_t(1))==-EOPNOTSUPP);
+ assert(perform(contract,DRMOps::CRTC_SET_ROT_PREFILL_BW,7,uint64_t(1))==-EOPNOTSUPP);
+ assert(perform(contract,DRMOps::CONNECTOR_SET_TOPOLOGY_CONTROL,8,uint32_t(4))==-EOPNOTSUPP);
+ assert(perform(contract,DRMOps::CONNECTOR_SET_TOPOLOGY_CONTROL,8,uint32_t(0))==0);
+ assert(perform(contract,DRMOps::CONNECTOR_SET_POWER_MODE,8,uint32_t(DRMPowerMode::ON))==0);
+ assert(add_count==1&&active_value==1);
+ assert(perform(contract,DRMOps::CONNECTOR_SET_POWER_MODE,8,uint32_t(DRMPowerMode::OFF))==0&&active_value==0);
+ assert(perform(contract,DRMOps::CONNECTOR_SET_POWER_MODE,8,uint32_t(DRMPowerMode::DOZE))==-EOPNOTSUPP);
+ add_error=-ENOMEM;
+ assert(perform(contract,DRMOps::CONNECTOR_SET_POWER_MODE,8,uint32_t(DRMPowerMode::ON))==-ENOMEM);
+ assert(perform(contract,DRMOps::DPPS_CACHE_FEATURE,7,uint32_t(0),uint64_t(0))==-EOPNOTSUPP);
+ DRMPPFeatureInfo feature={};int payload=1;feature.payload=&payload;
+ assert(perform(contract,DRMOps::PLANE_SET_POST_PROC,41,&feature)==-EOPNOTSUPP);
+ feature.payload=nullptr;assert(perform(contract,DRMOps::PLANE_SET_POST_PROC,41,&feature)==0);
+ DpuAtomicContract legacy;caps.kernel_managed_dpu=false;
+ assert(legacy.Init(-1,token,caps,planes)==0);
+ assert(perform(legacy,DRMOps::PLANE_SET_FB_SECURE_MODE,41,uint32_t(1))==1);
+ caps.kernel_managed_dpu=true;missing_active=true;DpuAtomicContract broken;
+ assert(broken.Init(-1,token,caps,planes)==-EOPNOTSUPP);
+ DRMTopology topology={};
+ assert(DpuLogicalTopology(1920,caps,&topology)&&topology==DRMTopology::SINGLE_LM);
+ assert(DpuLogicalTopology(2880,caps,&topology)&&topology==DRMTopology::DUAL_LM_MERGE);
+ assert(!DpuLogicalTopology(5121,caps,&topology)&&!DpuLogicalTopology(2881,caps,&topology));
+ assert(!DpuLogicalTopology(0,caps,&topology));caps.max_mixer_width=0;
+ assert(!DpuLogicalTopology(1920,caps,&topology));
+ assert(DpuColorSupported(false,rgb())&&DpuColorSupported(true,yuv()));
+ auto bt709=yuv();bt709.colorPrimaries=ColorPrimaries_BT709_5;bt709.matrixCoefficients=MatrixCoEff_BT709_5;
+ assert(DpuColorSupported(true,bt709));
+ bt709.range=Range_Full;assert(!DpuColorSupported(true,bt709));
+ bt709.range=Range_Limited;bt709.transfer=Transfer_SMPTE_ST2084;
+ assert(!DpuColorSupported(true,bt709));
+ for(int which=0;which<9;++which) {
+  auto c=yuv();
+  switch(which) {
+   case 0:c.colorPrimaries=ColorPrimaries_BT709_5;break;
+   case 1:c.range=Range_Full;break;
+   case 2:c.transfer=Transfer_SMPTE_ST2084;break;
+   case 3:c.transfer=Transfer_HLG;break;
+   case 4:c.matrixCoefficients=MatrixCoEff_BT601_6_Unadjusted;break;
+   case 5:c.masteringDisplayInfo.colorVolumeSEIEnabled=true;break;
+   case 6:c.dynamicMetaDataValid=true;break;
+   case 7:c.cRI.criEnabled=true;break;
+   case 8:c.matrixCoefficients=MatrixCoEff_Identity;break;
+  }
+  assert(!DpuColorSupported(true,c));
+ }
+ auto color=rgb();color.colorPrimaries=ColorPrimaries_DCIP3;assert(!DpuColorSupported(false,color));
+ color=rgb();color.range=Range_Limited;assert(!DpuColorSupported(false,color));
+ HWDeviceDRM device;HWLayers layers;device.dpu_info_.kernel_managed_dpu=true;
+ assert(device.ValidateDpuLayers(nullptr)==kErrorParameters);
+ layers.info.hw_layers.resize(1);layers.info.hw_layers[0].input_buffer.color_metadata=rgb();
+ assert(device.ValidateDpuLayers(&layers)==kErrorNone);
+ for(int which=0;which<7;++which) {
+  auto &b=layers.info.hw_layers[0].input_buffer;b.flags={};layers.config[0]={};
+  switch(which) {
+   case 0:b.flags.secure=true;break;
+   case 1:b.flags.secure_camera=true;break;
+   case 2:b.flags.secure_display=true;break;
+   case 3:b.flags.hdr=true;break;
+   case 4:b.flags.interlace=true;break;
+   case 5:layers.config[0].use_solidfill_stage=true;break;
+   case 6:layers.config[0].hw_rotator_session.mode=kRotatorOffline;break;
+  }
+  assert(device.ValidateDpuLayers(&layers)==kErrorNotSupported);
+ }
+ device.dpu_info_.kernel_managed_dpu=false;
+ assert(device.ValidateDpuLayers(&layers)==kErrorNone);
+}

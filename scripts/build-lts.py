@@ -15,7 +15,7 @@ import subprocess
 
 from kernel_baseline import ROOT, digest, policy, validate_build_tree, validate_kernel_source
 
-DEFAULT_BUNDLE = ROOT / 'private/build-inputs/kernel-6.18/EFI/SQ2L618C'
+DEFAULT_BUNDLE = ROOT / 'private/build-inputs/kernel-6.18' / policy()['bundle_directory']
 REQUIRED = {'Image', 'android-el2.dtb', 'el2launch.efi', 'initramfs.cpio.gz',
             'kernel-options.txt', 'qebspilaa64.efi', 'start.efi', 'tcblaunch.exe'}
 

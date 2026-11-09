@@ -11,15 +11,14 @@ import io
 import json
 import os
 from pathlib import Path
-import shutil
-import subprocess
 import tarfile
 from urllib.request import urlopen
+from gitiles_archive import archive_tree
 
 ROOT = Path(os.environ.get('SQ2_QUEST2_WORK', '/root/.cache/sq2-quest2-hidl'))
 ROOT.mkdir(parents=True, exist_ok=True)
 manifest = json.loads((Path(__file__).resolve().parents[1] / 'configs/quest2-gpu-research.json').read_text())
-expected = {item['url']: item['decoded_sha256'] for item in manifest['build_sources']['public_interface_inputs']}
+expected = {item['url']: item for item in manifest['build_sources']['public_interface_inputs']}
 TAG = 'android-12.0.0_r1'
 TOOL = '94dfb8dcf347e4fa1d8fda6b0a9b745a4c1ae0a3'
 QTI = 'dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0'
@@ -36,7 +35,7 @@ for repo, subdir in [
     ('system/libfmq', 'include'), ('system/libfmq', 'base'),
 ]:
     archive(repo, subdir, 'include')
-for kind, versions in [('common', ['1.0','1.1','1.2']), ('mapper', ['2.0','2.1','3.0','4.0'])]:
+for kind, versions in [('common', ['1.0','1.1','1.2']), ('allocator', ['3.0']), ('mapper', ['2.0','2.1','3.0','4.0'])]:
     for version in versions:
         archive('hardware/interfaces', f'graphics/{kind}/{version}', f'hal/android/hardware/graphics/{kind}/{version}')
 archive('system/libhidl', 'transport/base/1.0', 'hal/android/hidl/base/1.0')
@@ -57,19 +56,20 @@ def fetch(job):
         data = cache.read_bytes()
     else:
         print(f'Fetching {url}', flush=True)
-        # Some WSL lab networks cannot reach GitHub directly; the host curl
-        # retains its normal network configuration and TLS verification.
-        host_curl = shutil.which('curl.exe')
-        if host_curl and url.startswith('https://raw.githubusercontent.com/'):
-            data = subprocess.check_output([host_curl, '-fsSL', '--max-time', '30', url])
-        else:
-            with urlopen(url, timeout=30) as response:
-                data = response.read()
+        with urlopen(url, timeout=30) as response:
+            data = response.read()
         cache.write_bytes(data)
     if kind == 'b64':
         data = base64.b64decode(data, validate=False)
     digest = hashlib.sha256(data).hexdigest()
-    if expected.get(url) != digest:
+    pin = expected[url]
+    content_tree = None
+    if kind == 'tar' and 'git_tree' in pin:
+        with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
+            content_tree = archive_tree(tar)
+        if content_tree != pin['git_tree']:
+            raise RuntimeError(f'Public input Git tree mismatch: {url}')
+    elif pin['decoded_sha256'] != digest:
         raise RuntimeError(f'Public input hash mismatch: {url}')
     target = ROOT / dest
     if kind == 'tar':
@@ -79,7 +79,10 @@ def fetch(job):
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
-    return {'url':url, 'destination':dest, 'decoded_sha256':digest}
+    result = {'url':url, 'destination':dest, 'decoded_sha256':digest}
+    if content_tree:
+        result.update(git_commit=pin['git_commit'], git_tree=content_tree)
+    return result
 
 with ThreadPoolExecutor(max_workers=6) as pool:
     results = list(pool.map(fetch, jobs))

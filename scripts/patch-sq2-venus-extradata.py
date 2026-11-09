@@ -6,6 +6,27 @@ This does not advertise Android HDR or deploy a module.
 import argparse
 from pathlib import Path
 
+DPB_EXTRA_SIZE = '''		buf->size = dpb_size;
+		if (inst->sq2_extra_mask) {
+			u32 total;
+			ret = sq2_extra_dpb_size(dpb_size, inst->sq2_extra_size, PAGE_SIZE, &total);
+			if (ret)
+				goto fail;
+			buf->size = total;
+		}'''
+OLD_DPB_EXTRA_SIZE = DPB_EXTRA_SIZE.replace(
+    "\t\t\tif (ret)\n\t\t\t\tgoto fail;",
+    "\t\t\tif (ret) {\n\t\t\t\tkfree(buf);\n\t\t\t\tgoto fail;\n\t\t\t}")
+
+def fix_dpb_cleanup(text):
+    """Leave the failed allocation to its existing common cleanup label."""
+    old, new = text.count(OLD_DPB_EXTRA_SIZE), text.count(DPB_EXTRA_SIZE)
+    if old == 1 and not new:
+        return text.replace(OLD_DPB_EXTRA_SIZE, DPB_EXTRA_SIZE, 1)
+    if new == 1 and not old:
+        return text
+    raise ValueError("Unknown DPB extradata allocation cleanup anchor")
+
 
 def patch_buffer_requirements(text):
     old = """	req_bytes = pkt->shdr.hdr.size - sizeof(*pkt);
@@ -143,17 +164,7 @@ def apply(directory, root):
 		}
 	}
 	ret = hfi_session_process_buf(inst, &fdata);''')
-    replace('helpers.c', '\t\tbuf->size = dpb_size;',
-'''		buf->size = dpb_size;
-		if (inst->sq2_extra_mask) {
-			u32 total;
-			ret = sq2_extra_dpb_size(dpb_size, inst->sq2_extra_size, PAGE_SIZE, &total);
-			if (ret) {
-				kfree(buf);
-				goto fail;
-			}
-			buf->size = total;
-		}''')
+    replace('helpers.c', '\t\tbuf->size = dpb_size;', DPB_EXTRA_SIZE)
     replace('helpers.c', '\t\tif (dpb_size > buf->size) {',
 '''		if (dpb_size > buf->size || (inst->sq2_extra_mask &&
 		    inst->sq2_extra_size > buf->size - dpb_size)) {''')
@@ -176,5 +187,11 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('directory', type=Path)
     p.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
+    p.add_argument('--dpb-cleanup-only', action='store_true',
+                   help='Fix the duplicate free in an already-patched helpers.c')
     args = p.parse_args()
-    apply(args.directory, args.root)
+    if args.dpb_cleanup_only:
+        helper = args.directory/'helpers.c'
+        helper.write_text(fix_dpb_cleanup(helper.read_text()))
+    else:
+        apply(args.directory, args.root)

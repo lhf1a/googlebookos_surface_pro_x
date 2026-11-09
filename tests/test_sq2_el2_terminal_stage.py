@@ -7,8 +7,8 @@ import tempfile
 R = Path(__file__).resolve().parents[1]
 source = (R/'probe/virtualization/el2-terminal-stage').read_text()
 for mode, cmdline, probe in [('normal', 'sq2.el2=1', False),
-                             ('debug', 'sq2.el2=1 sq2.debug=1', True),
-                             ('lab', 'sq2.el2=experimental', True)]:
+                             ('debug', 'sq2.el2=1 sq2.debug=1', False),
+                             ('lab', 'sq2.el2=experimental', False)]:
     with tempfile.TemporaryDirectory() as temporary:
         d = Path(temporary)
         (d/'cmdline').write_text(cmdline)
@@ -35,4 +35,4 @@ for mode, cmdline, probe in [('normal', 'sq2.el2=1', False),
         assert 'STAGE_READY' in result.stdout
         assert (d/'modules').read_text().splitlines() == ['sch_ingress', 'cls_bpf']
         assert not (d/'manifest').exists()
-print('PASS: terminal prerequisites preserved; KVM probe only runs in explicit lab/debug boots')
+print('PASS: terminal prerequisites preserved; retired KVM probe never runs')

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Accept a ready reply on the last HFI poll; add a bounded default timeout snapshot."""
+"""Accept a ready reply on the last HFI poll; preserve the normal poll limit."""
 import argparse
 import hashlib
 from pathlib import Path
@@ -17,9 +17,8 @@ def apply(directory):
     end = source.index("static u32 venus_hwversion(", start)
     body = source[start:end]
     for anchor in (
-        "max_tries = sq2_boot_watch && IS_SQ2_HFI(hdev->core) ? 2000 : 100;",
+        "max_tries = 100;",
         "while (!ctrl_status && count < max_tries)",
-        "sq2_boot_snapshot(hdev, ctrl_status, count);",
         "if ((ctrl_status & CPU_CS_SCIACMDARG0_ERROR_STATUS_MASK) == 4)",
     ):
         if body.count(anchor) != 1:
@@ -28,13 +27,7 @@ def apply(directory):
         body = body.replace(OLD, NEW)
     elif body.count(NEW) != 1 or OLD in body:
         raise ValueError("Unknown HFI timeout branch")
-    header = (ROOT / "probe/video/venus-sq2-boot-watch.h").read_bytes()
-    target = directory / "venus-sq2-boot-watch.h"
-    previous = target.read_bytes()
-    if previous != header and hashlib.sha256(previous).hexdigest() != OLD_HEADER_SHA:
-        raise ValueError("Unknown boot snapshot header; preserve local edits")
     path.write_text(source[:start] + body + source[end:])
-    target.write_bytes(header)
 
 
 if __name__ == "__main__":

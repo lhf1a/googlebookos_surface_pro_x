@@ -22,7 +22,7 @@ S=$(mktemp -d "$B/touch-amend.XXXXXX")
 mkdir -p "$S/bin" "$S/etc"
 cp "$BUNDLE/iptsd.conf" "$S/etc/iptsd.conf"
 cp "$BUNDLE/iptsd" "$S/bin/iptsd"
-for p in touch-services refresh-iptsd-input-nodes collect-ghost-touch trial-touch-threshold; do
+for p in touch-services refresh-iptsd-input-nodes; do
     cp "$ROOT/probe/test2/$p" "$S/bin/$p"
     sh -n "$S/bin/$p"
 done

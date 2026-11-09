@@ -389,107 +389,149 @@
       {
         "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/base/include.tar.gz",
         "destination": "include",
-        "decoded_sha256": "327a0743edf1f75eb38bb0fe7fcf19555a56293c61e26070c4f67be6e6b1d530"
+        "decoded_sha256": "327a0743edf1f75eb38bb0fe7fcf19555a56293c61e26070c4f67be6e6b1d530",
+        "git_commit": "ef7cca7d56ab4763602de2185926ccff406a900a",
+        "git_tree": "3ef79fdaa9663d8a3e3056b0a06b9f8a926db42b"
       },
       {
         "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/include.tar.gz",
         "destination": "include",
-        "decoded_sha256": "5f4eb319037f55e7370dbcd43380d845072bcdb52634aac9d3358fa0ea5dbf7d"
+        "decoded_sha256": "5f4eb319037f55e7370dbcd43380d845072bcdb52634aac9d3358fa0ea5dbf7d",
+        "git_commit": "ef7cca7d56ab4763602de2185926ccff406a900a",
+        "git_tree": "751631d3eb14779156c4b606f83ee2d7c39edccf"
       },
       {
         "url": "https://android.googlesource.com/platform/system/libhwbinder/+archive/android-12.0.0_r1/include.tar.gz",
         "destination": "include",
-        "decoded_sha256": "aa170bcf19da2e2744961b4163faefa94513a79647f6a90a072ce829f8c13dd6"
+        "decoded_sha256": "aa170bcf19da2e2744961b4163faefa94513a79647f6a90a072ce829f8c13dd6",
+        "git_commit": "d45db455c4f224c87f94bce86c71e1ca7df99af5",
+        "git_tree": "843046245597697eb8b73720b585c2c1991bd74d"
       },
       {
         "url": "https://android.googlesource.com/platform/system/core/+archive/android-12.0.0_r1/libutils/include.tar.gz",
         "destination": "include",
-        "decoded_sha256": "df29c9427ea6e08c26b3f3230572cf05ce6580abed46ef27700275b1cd841bfe"
+        "decoded_sha256": "df29c9427ea6e08c26b3f3230572cf05ce6580abed46ef27700275b1cd841bfe",
+        "git_commit": "1d37c4499249b17f143df12cebc5ee9ea3600ce3",
+        "git_tree": "f8ce53187f75981743cd21b983fd55d4ba0379c5"
       },
       {
         "url": "https://android.googlesource.com/platform/system/core/+archive/android-12.0.0_r1/libcutils/include.tar.gz",
         "destination": "include",
-        "decoded_sha256": "213b8d11ca7951985a581fd9b1beb251ee47e7b52ed2e5f2ee4735cb2b079cbb"
+        "decoded_sha256": "213b8d11ca7951985a581fd9b1beb251ee47e7b52ed2e5f2ee4735cb2b079cbb",
+        "git_commit": "1d37c4499249b17f143df12cebc5ee9ea3600ce3",
+        "git_tree": "12669a3c022be0797d83325e6ad1a579ed23dd11"
       },
       {
         "url": "https://android.googlesource.com/platform/system/libbase/+archive/android-12.0.0_r1/include.tar.gz",
         "destination": "include",
-        "decoded_sha256": "4d1d8b6fd8348d9422047198411a3a8caffac326a65d65079690ec15ad80ccf1"
+        "decoded_sha256": "4d1d8b6fd8348d9422047198411a3a8caffac326a65d65079690ec15ad80ccf1",
+        "git_commit": "5d87ea136b23dd152f00a81ecbb78e460b87ce94",
+        "git_tree": "29818900b938ed0ff1b48efcf94d90164cfa7b69"
       },
       {
         "url": "https://android.googlesource.com/platform/system/logging/+archive/android-12.0.0_r1/liblog/include.tar.gz",
         "destination": "include",
-        "decoded_sha256": "30eebe77c7e7f8d040f1c0c4ba301c40cb402828ece89a04031173a915b6550c"
+        "decoded_sha256": "30eebe77c7e7f8d040f1c0c4ba301c40cb402828ece89a04031173a915b6550c",
+        "git_commit": "37cb6ed458c92bc488b60963fd2cb8351ff30677",
+        "git_tree": "14ef98be992102b412564eb4dce00a3c7e02a58f"
       },
       {
         "url": "https://android.googlesource.com/platform/system/core/+archive/android-12.0.0_r1/libsystem/include.tar.gz",
         "destination": "include",
-        "decoded_sha256": "a3ac20a9815f0596106a15239489bdbf1fee802eb50bafadfe308bc4bd6bc60e"
+        "decoded_sha256": "a3ac20a9815f0596106a15239489bdbf1fee802eb50bafadfe308bc4bd6bc60e",
+        "git_commit": "1d37c4499249b17f143df12cebc5ee9ea3600ce3",
+        "git_tree": "2942cc219520e870b6724f8bce5591e184572418"
       },
       {
         "url": "https://android.googlesource.com/platform/system/libfmq/+archive/android-12.0.0_r1/include.tar.gz",
         "destination": "include",
-        "decoded_sha256": "16510db6d9eaa47984b7b0f764b6b1fa8ad5fc7b4b7838b35155969cbc292a0a"
+        "decoded_sha256": "16510db6d9eaa47984b7b0f764b6b1fa8ad5fc7b4b7838b35155969cbc292a0a",
+        "git_commit": "8dd3bc99a159970f44298bb8e3d83366aac63273",
+        "git_tree": "d5a6e76c151cea0b3a4bf0951836fa3493a0cfe9"
       },
       {
         "url": "https://android.googlesource.com/platform/system/libfmq/+archive/android-12.0.0_r1/base.tar.gz",
         "destination": "include",
-        "decoded_sha256": "c702854cef8c2a506b0734cb781c730335b6f03eea124ff251eedc67e1ccb94d"
+        "decoded_sha256": "c702854cef8c2a506b0734cb781c730335b6f03eea124ff251eedc67e1ccb94d",
+        "git_commit": "8dd3bc99a159970f44298bb8e3d83366aac63273",
+        "git_tree": "cac238d9c1ef9b8584df12dd496f4043a675889f"
       },
       {
         "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/common/1.0.tar.gz",
         "destination": "hal/android/hardware/graphics/common/1.0",
-        "decoded_sha256": "07530152561f5c5390eb75e0fe8a7c858a1e41eb230dfe5b7b354fa76496321a"
+        "decoded_sha256": "07530152561f5c5390eb75e0fe8a7c858a1e41eb230dfe5b7b354fa76496321a",
+        "git_commit": "4a8246e3757732cb787327c3f8ad5cbacf910d1e",
+        "git_tree": "a6181161d15cf81682e5fb5591313fe38fd289a2"
       },
       {
         "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/common/1.1.tar.gz",
         "destination": "hal/android/hardware/graphics/common/1.1",
-        "decoded_sha256": "2852288802ef3044b5d7a12c87d4e3ebc5b785657c711c62a467d06eea8d92c3"
+        "decoded_sha256": "2852288802ef3044b5d7a12c87d4e3ebc5b785657c711c62a467d06eea8d92c3",
+        "git_commit": "4a8246e3757732cb787327c3f8ad5cbacf910d1e",
+        "git_tree": "b2e033ffa04e52c07affa35c5dca9e203696b3e9"
       },
       {
         "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/common/1.2.tar.gz",
         "destination": "hal/android/hardware/graphics/common/1.2",
-        "decoded_sha256": "1cfb156e295f34f0523f4d170d273eaece1352894843c1e92665a13c847011a7"
+        "decoded_sha256": "1cfb156e295f34f0523f4d170d273eaece1352894843c1e92665a13c847011a7",
+        "git_commit": "4a8246e3757732cb787327c3f8ad5cbacf910d1e",
+        "git_tree": "c88088ebf42652634576d1218f812ee006be26f0"
       },
       {
         "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/2.0.tar.gz",
         "destination": "hal/android/hardware/graphics/mapper/2.0",
-        "decoded_sha256": "e87611c2890bbff18f7edd776ce794ff7c8a2afb0135e9962e81fc89abb1e580"
+        "decoded_sha256": "e87611c2890bbff18f7edd776ce794ff7c8a2afb0135e9962e81fc89abb1e580",
+        "git_commit": "4a8246e3757732cb787327c3f8ad5cbacf910d1e",
+        "git_tree": "8c790ca98bd06a47ed9d1e415d525a2fd1f45fbd"
       },
       {
         "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/2.1.tar.gz",
         "destination": "hal/android/hardware/graphics/mapper/2.1",
-        "decoded_sha256": "a0742bcf9296991661b26fbbccba7216617682e928771b6ef551d18988e36d1f"
+        "decoded_sha256": "a0742bcf9296991661b26fbbccba7216617682e928771b6ef551d18988e36d1f",
+        "git_commit": "4a8246e3757732cb787327c3f8ad5cbacf910d1e",
+        "git_tree": "37f82aab097a0ce98e8d35782e64e38ce3858d8a"
       },
       {
         "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/3.0.tar.gz",
         "destination": "hal/android/hardware/graphics/mapper/3.0",
-        "decoded_sha256": "62e2011b1008c106f7d09e64b4389f93a3f6c587ce428bb5f968416ce01d69f5"
+        "decoded_sha256": "62e2011b1008c106f7d09e64b4389f93a3f6c587ce428bb5f968416ce01d69f5",
+        "git_commit": "4a8246e3757732cb787327c3f8ad5cbacf910d1e",
+        "git_tree": "47b582a4a333db03ba7b6bf63553ca4cda447c54"
       },
       {
         "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/4.0.tar.gz",
         "destination": "hal/android/hardware/graphics/mapper/4.0",
-        "decoded_sha256": "682c68e85cfe55e7183ee9571f96269f5dae5f5327e8a07548a550ed055e8ddc"
+        "decoded_sha256": "682c68e85cfe55e7183ee9571f96269f5dae5f5327e8a07548a550ed055e8ddc",
+        "git_commit": "4a8246e3757732cb787327c3f8ad5cbacf910d1e",
+        "git_tree": "87609375888ac1154b3d12f093ab42073d8e1f0c"
       },
       {
         "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/base/1.0.tar.gz",
         "destination": "hal/android/hidl/base/1.0",
-        "decoded_sha256": "9a6d292f5533c9bd2283cca1131f7fc975bd0b0adff22a5354cfb97b405117d1"
+        "decoded_sha256": "9a6d292f5533c9bd2283cca1131f7fc975bd0b0adff22a5354cfb97b405117d1",
+        "git_commit": "ef7cca7d56ab4763602de2185926ccff406a900a",
+        "git_tree": "bae10c89d0a0324a8856cb105c4366c282cd7159"
       },
       {
         "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/manager/1.0.tar.gz",
         "destination": "hal/android/hidl/manager/1.0",
-        "decoded_sha256": "ae865b76448bcea5d2fd41649c22b3281e29299298ec54f2c20ca3ba96271892"
+        "decoded_sha256": "ae865b76448bcea5d2fd41649c22b3281e29299298ec54f2c20ca3ba96271892",
+        "git_commit": "ef7cca7d56ab4763602de2185926ccff406a900a",
+        "git_tree": "6be0a716a50b18780bd019cd52255e44f2ca4a0b"
       },
       {
         "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/manager/1.1.tar.gz",
         "destination": "hal/android/hidl/manager/1.1",
-        "decoded_sha256": "1cd8a0529a6deb438a0ba967a5e03a382ae8fdecadbf4c2ccfbd88c82e4debc4"
+        "decoded_sha256": "1cd8a0529a6deb438a0ba967a5e03a382ae8fdecadbf4c2ccfbd88c82e4debc4",
+        "git_commit": "ef7cca7d56ab4763602de2185926ccff406a900a",
+        "git_tree": "3c0d0ebe272e7865ab66ba0eebd17f823cb449db"
       },
       {
         "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/manager/1.2.tar.gz",
         "destination": "hal/android/hidl/manager/1.2",
-        "decoded_sha256": "6b9d026c4b7bdafb116218975affdd02a83e23ad3354f824534c7c8b61d2ede3"
+        "decoded_sha256": "6b9d026c4b7bdafb116218975affdd02a83e23ad3354f824534c7c8b61d2ede3",
+        "git_commit": "ef7cca7d56ab4763602de2185926ccff406a900a",
+        "git_tree": "bdbbe6d80b72d5ebcbc8baef23e602ec37690533"
       },
       {
         "url": "https://android.googlesource.com/platform/prebuilts/build-tools/+/94dfb8dcf347e4fa1d8fda6b0a9b745a4c1ae0a3/linux-x86/bin/hidl-gen?format=TEXT",
@@ -525,6 +567,13 @@
         "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapper/3.0/IQtiMapper.hal",
         "destination": "hal/vendor/qti/hardware/display/mapper/3.0/IQtiMapper.hal",
         "decoded_sha256": "72889f3c7812efb6e00cd59d17dca3ee392b029eef83622758d206e1e835722c"
+      },
+      {
+        "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/allocator/3.0.tar.gz",
+        "destination": "hal/android/hardware/graphics/allocator/3.0",
+        "decoded_sha256": "6620385a789f24d91c2b8d556ece65625a48cad770b160ab7d75a56e4fde6723",
+        "git_commit": "4a8246e3757732cb787327c3f8ad5cbacf910d1e",
+        "git_tree": "1f6d3ec25fae535787bd63be1b85fd05339d6be2"
       }
     ]
   }

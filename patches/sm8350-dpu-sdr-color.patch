@@ -1,0 +1,16 @@
+--- a/sde-drm/drm_plane.cpp
++++ b/sde-drm/drm_plane.cpp
+@@ -1020,6 +1020,13 @@
+ 
+     case DRMOps::PLANE_SET_CSC_CONFIG: {
+       uint32_t* csc_type = va_arg(args, uint32_t*);
++      if (!prop_mgr_.IsPropertyAvailable(DRMProperty::CAPABILITIES)) {
++        if (!csc_type) return -EINVAL;
++        if (*csc_type == kCscTypeMax) return 0;
++        if (*csc_type != kCscYuv2Rgb601L && *csc_type != kCscYuv2Rgb709L)
++          return -EOPNOTSUPP;
++        return dpu_properties_.Color(req, obj_id, *csc_type == kCscYuv2Rgb709L);
++      }
+       if (csc_type) {
+         SetCscConfig(req, (DRMCscType)*csc_type);
+       }

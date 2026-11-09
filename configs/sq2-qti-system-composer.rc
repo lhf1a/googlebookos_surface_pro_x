@@ -1,0 +1,17 @@
+# Preserve the video transfer function reported by the decoder through composition.
+on init
+    setprop debug.sf.treat_170m_as_sRGB 0
+
+# Source QTI composer on the normal system Binder and hwBinder domains.
+service vendor.hwcomposer /vendor/bin/hw/vendor.qti.hardware.display.composer-service
+    class hal animation
+    interface android.hardware.graphics.composer@2.4::IComposer default
+    interface vendor.qti.hardware.display.composer@3.0::IQtiComposer default
+    interface vendor.display.config@2.0::IDisplayConfig default
+    user system
+    seclabel u:r:hal_graphics_composer_default:s0
+    group graphics drmrpc
+    capabilities SYS_NICE
+    setenv LD_LIBRARY_PATH /vendor/lib64/sq2-qti-display:/system/lib64:/apex/com.android.i18n/lib64:/apex/com.android.tethering/lib64:/vendor/lib64
+    onrestart restart surfaceflinger
+    task_profiles ServiceCapacityLow

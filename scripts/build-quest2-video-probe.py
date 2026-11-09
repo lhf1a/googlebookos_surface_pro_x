@@ -23,9 +23,13 @@ def main():
                    help='Also build the explicit OMX decode client; does not run it')
     p.add_argument('--with-vidc-bridge', action='store_true',
                    help='Also build the process-local VIDC bridge; does not enable it')
+    p.add_argument('--native-extra-default', action='store_true',
+                   help='Enable real firmware AVC VUI/HEVC HDR extradata in the built bridge by default')
     p.add_argument('--media-file-binder', type=Path,
                    help='Also build MediaCodec container probe, linking this actual platform libbinder_ndk.so')
     a = p.parse_args()
+    if a.native_extra_default and not a.with_vidc_bridge:
+        p.error('--native-extra-default requires --with-vidc-bridge')
     cfg = json.loads((ROOT/'configs/quest2-video-omx-headers.json').read_text())
     try:
         for name, expected in cfg['sha256'].items():
@@ -44,14 +48,14 @@ def main():
 
         products = [
             ('quest2-omx-probe.c', 'quest2-omx-probe', ['-I', path(a.headers)]),
-            ('quest2-video-io-trace.c', 'libquest2-io-trace.so', ['-fPIC', '-shared']),
         ]
         if a.with_decode_client:
             products.append(('quest2-omx-decode.c', 'quest2-omx-decode',
                              ['-I', path(a.headers), '-pthread']))
         if a.with_vidc_bridge:
             products.append(('quest2-vidc-bridge.c', 'libquest2-vidc-bridge.so',
-                             ['-fPIC', '-shared', '-pthread', '-llog']))
+                             ['-fPIC', '-shared', '-pthread', '-llog'] +
+                             (['-DQUEST2_NATIVE_EXTRA_DEFAULT=1'] if a.native_extra_default else [])))
             products.append(('quest2-ion-probe.c', 'quest2-ion-probe', []))
         if a.media_file_binder:
             products.append(('sq2-mediacodec-file.c', 'sq2-mediacodec-file',
@@ -71,9 +75,11 @@ def main():
                       target='aarch64-linux-android35',
                       optional_features=dict(decode_client=a.with_decode_client,
                                              vidc_bridge=a.with_vidc_bridge,
+                                             native_extra_default=a.native_extra_default,
                                              media_file=bool(a.media_file_binder)),
                       media_file_binder_sha256=hashlib.sha256(a.media_file_binder.read_bytes()).hexdigest() if a.media_file_binder else None,
                       header_sha256=cfg['sha256'],
+                      memory_backend_sha256=hashlib.sha256((ROOT/'probe/graphics/quest2-system-ion.h').read_bytes()).hexdigest() if a.with_vidc_bridge else None,
                       source_sha256={source: hashlib.sha256((ROOT/'probe/video'/source).read_bytes()).hexdigest()
                                      for source, _, _ in products},
                       sha256={name: hashlib.sha256((a.output/name).read_bytes()).hexdigest()

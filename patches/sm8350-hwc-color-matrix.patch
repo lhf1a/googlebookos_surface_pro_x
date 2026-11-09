@@ -1,0 +1,75 @@
+--- a/composer/hwc_layers.cpp
++++ b/composer/hwc_layers.cpp
+@@ -192,6 +192,38 @@
+   return dataspace;
+ }
+ 
++// Android graphics/common Dataspace documents the YUV KR/KB interpretation.
++// QTI color_metadata.h explicitly distinguishes adjusted/unadjusted BT.601.
++// RGB storage is identity; a primaries-only standard is not a YUV matrix contract.
++static bool GetSDMColorMatrix(int32_t dataspace, LayerBufferFormat format,
++                              MatrixCoEfficients *matrix) {
++  if (format == kFormatInvalid) return false;
++  *matrix = MatrixCoEff_Identity;
++  if (format < kFormatYCbCr420Planar) return true;
++  switch (dataspace & HAL_DATASPACE_STANDARD_MASK) {
++    case HAL_DATASPACE_STANDARD_BT709:
++      *matrix = MatrixCoEff_BT709_5;
++      return true;
++    case HAL_DATASPACE_STANDARD_BT601_525:
++      *matrix = MatrixCoEff_BT601_6_525;
++      return true;
++    case HAL_DATASPACE_STANDARD_BT601_625:
++      *matrix = MatrixCoEff_BT601_6_625;
++      return true;
++    case HAL_DATASPACE_STANDARD_BT601_525_UNADJUSTED:
++      *matrix = MatrixCoEff_SMPTE240M;  // Android: KR=0.212, KB=0.087.
++      return true;
++    case HAL_DATASPACE_STANDARD_BT601_625_UNADJUSTED:
++      *matrix = MatrixCoEff_BT601_6_Unadjusted;  // QTI: KR=0.222, KB=0.071.
++      return true;
++    case HAL_DATASPACE_STANDARD_BT2020:
++      *matrix = MatrixCoEff_BT2020;  // Non-constant luminance.
++      return true;
++    default:
++      return false;
++  }
++}
++
+ // Retrieve ColorMetaData from android_data_space_t (STANDARD|TRANSFER|RANGE)
+ bool GetSDMColorSpace(const int32_t &dataspace, ColorMetaData *color_metadata) {
+   bool valid = false;
+@@ -1031,6 +1063,8 @@
+   if (dataspace_ != HAL_DATASPACE_UNKNOWN) {
+     use_color_metadata = false;
+     bool valid_csc = GetSDMColorSpace(dataspace_, &csc);
++    valid_csc = valid_csc && GetSDMColorMatrix(dataspace_,
++        layer_buffer->format, &csc.matrixCoefficients);
+     if (!valid_csc) {
+       dataspace_supported_ = false;
+       return;
+@@ -1038,13 +1072,15 @@
+ 
+     if (layer_buffer->color_metadata.transfer != csc.transfer ||
+        layer_buffer->color_metadata.colorPrimaries != csc.colorPrimaries ||
+-       layer_buffer->color_metadata.range != csc.range) {
++       layer_buffer->color_metadata.range != csc.range ||
++       layer_buffer->color_metadata.matrixCoefficients != csc.matrixCoefficients) {
+         // ColorMetadata updated. Needs validate.
+         layer_->update_mask.set(kMetadataUpdate);
+         // if we are here here, update the sdm layer csc.
+         layer_buffer->color_metadata.transfer = csc.transfer;
+         layer_buffer->color_metadata.colorPrimaries = csc.colorPrimaries;
+         layer_buffer->color_metadata.range = csc.range;
++        layer_buffer->color_metadata.matrixCoefficients = csc.matrixCoefficients;
+     }
+   }
+ 
+@@ -1063,6 +1099,7 @@
+         new_metadata.colorPrimaries = layer_buffer->color_metadata.colorPrimaries;
+         new_metadata.transfer = layer_buffer->color_metadata.transfer;
+         new_metadata.range = layer_buffer->color_metadata.range;
++        new_metadata.matrixCoefficients = layer_buffer->color_metadata.matrixCoefficients;
+       }
+       if ((layer_buffer->color_metadata.colorPrimaries != new_metadata.colorPrimaries) ||
+           (layer_buffer->color_metadata.transfer != new_metadata.transfer) ||

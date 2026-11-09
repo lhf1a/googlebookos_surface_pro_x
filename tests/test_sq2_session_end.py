@@ -29,7 +29,8 @@ struct hfi_msg_session_load_resources_done_pkt {int error_type;};
 static bool test_bit(int n,unsigned long *p){return (*p>>n)&1;}
 static int wait_session_msg(struct venus_inst *i)
 {return !wait_for_completion_timeout(&i->done,TIMEOUT)?-ETIMEDOUT:(i->error?-EIO:0);}
-static void sq2_venus_scope_end(struct venus_inst *i){assert(i->sq2_end_confirmed);}
+static int scope_ends;
+static void sq2_venus_scope_end(struct venus_inst *i){assert(i->sq2_end_confirmed);scope_ends++;}
 /* FUNCTIONS */
 static int mode,sends;
 static int send_end(struct venus_inst *i)
@@ -45,20 +46,22 @@ static int send_end(struct venus_inst *i)
 int main(int argc,char **argv)
 {
  bool strict=argc>1;(void)argv;struct hfi_ops ops={send_end};
- for(mode=0;mode<5;mode++)for(int error=0;error<2;error++) {
+ for(mode=0;mode<5;mode++)for(int error=0;error<2;error++)for(int prior=0;prior<2;prior++) {
   struct venus_core core={.ops=&ops,.sq2=true,.sys_error=error};
-  struct venus_inst i={.core=&core,.state=INST_INIT};sends=0;
+  struct venus_inst i={.core=&core,.state=INST_INIT,.session_error=prior};sends=0;scope_ends=0;
   int ret=hfi_session_deinit(&i);
   if(strict) {
    int expected=error?-EIO:(mode==4?-EINVAL:(mode==3?-EIO:(mode==2?0:-ETIMEDOUT)));
    assert(ret==expected);assert(i.sq2_end_confirmed==(!error&&mode==2));
+   assert(i.session_error==prior);assert(scope_ends==(!error&&mode==2));
    int before=sends;int repeat=hfi_session_deinit(&i);
    assert(sends==before);assert(repeat==(i.sq2_end_confirmed?0:-EIO));
+   assert(scope_ends==(!error&&mode==2));
   }
   if((mode==1&&!error)||(mode==0&&error))
    printf("END mode=%s ret=%d confirmed=%d sends=%d\n",error?"sys_error":"unrelated_reply",ret,i.sq2_end_confirmed,sends);
  }
- printf("10 END cases; strict=%d; generated functions, mock replies, not firmware proof\n",strict);
+ printf("20 END cases including prior session errors; strict=%d; generated functions, mock replies, not firmware proof\n",strict);
  return 0;
 }
 '''

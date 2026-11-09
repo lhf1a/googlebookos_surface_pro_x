@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "kernel_release": "6.18.60-sq2-android1",
-  "source_layout": "external directory from linux-6.18.60-current-sources-20261107.tar.gz",
+  "source_layout": "External build recipe; the 20261107 archive alone does not reproduce v21-release (see docs/BUILD.md)",
   "groups": [
     {
       "source": "tsens",
@@ -96,7 +96,7 @@
         "msm.ko": "kernel/drivers/gpu/drm/msm/msm.ko"
       },
       "runtime_module_sha256": {
-        "msm.ko": "7f30fe3b351708a131820fcde0e433c4011fe9115860924bab280f2afaad2d12"
+        "msm.ko": "f3ba9cf78e1d58c66f233662230e3e5dcea65e96d6498a004870e169c3becc26"
       }
     },
     {
@@ -108,9 +108,9 @@
         "venus-enc.ko": "kernel/drivers/media/platform/qcom/venus/venus-enc.ko"
       },
       "runtime_module_sha256": {
-        "venus-core.ko": "689cad5c65c6a77d738117297a7f8e6ea4e4dbeb24266a9c5bf6bba1ab77f905",
-        "venus-dec.ko": "444ef53d7e5454fa4916b571e9c962d9d03dfa0e82676bbded455ccaf8c83ffb",
-        "venus-enc.ko": "e8bb96d41f86efb64fb727c79360e53223733ef5f2923ad00a3547fb50fe917f"
+        "venus-core.ko": "c16733bc5dac2a37220d0a34d9618e17ac5b6c49594b60e7a5ea3f01fd4edc33",
+        "venus-dec.ko": "f10e6f7087bb40fa802892d6e5c39cf1aff7ce9e6557d7fa8dbd0b130eaefed0",
+        "venus-enc.ko": "2fb69621e951875a1334de0c8134445096b1f53abe8ba0989d079c63dc53f99c"
       }
     },
     {
@@ -135,7 +135,7 @@
     }
   ],
   "notes": [
-    "All named source-tree compiled .ko hashes matched the effective deployed initramfs at baseline capture.",
+    "Runtime hashes identify v21-release; source inputs must also include the current display, Venus and SoundWire patches. They are not a claim that the historical archive reproduces this baseline.",
     "Compilation may change binary hashes; preserve matched layout/ABI and do not automatically promote new output to runtime pins.",
     "Replace core modules with same-name external overrides; do not retain duplicate differing implementations."
   ]

@@ -1,0 +1,201 @@
+--- a/libdrmutils/drm_master.cpp
++++ b/libdrmutils/drm_master.cpp
+@@ -40,6 +40,8 @@
+ #include <display/drm/sde_drm.h>
+ #include <algorithm>
+ #include <iterator>
++#include <cstring>
++#include <vector>
+ 
+ #include "drm_master.h"
+ 
+@@ -58,14 +60,17 @@
+ mutex DRMMaster::s_lock;
+ 
+ int DRMMaster::GetInstance(DRMMaster **master) {
++  if (!master) return -EINVAL;
++  *master = nullptr;
+   lock_guard<mutex> obj(s_lock);
+ 
+   if (!s_instance) {
+     s_instance = new DRMMaster();
+-    if (s_instance->Init() < 0) {
++    int ret = s_instance->Init();
++    if (ret < 0) {
+       delete s_instance;
+       s_instance = nullptr;
+-      return -ENODEV;
++      return ret;
+     }
+   }
+ 
+@@ -79,18 +84,102 @@
+   s_instance = nullptr;
+ }
+ 
++// libdrm ioctls return -1 with errno, unlike the public negative-errno interface here.
++static int IoctlResult(int ret) {
++  return ret == 0 ? 0 : -(errno ? errno : EIO);
++}
++
+ int DRMMaster::Init() {
+-  dev_fd_ = drmOpen("msm_drm", nullptr);
+-  if (dev_fd_ < 0) {
+-    DRM_LOGE("drmOpen failed with error %d", dev_fd_);
+-    return -ENODEV;
+-  }
+-
+-  return 0;
++  int count = drmGetDevices2(0, nullptr, 0);
++  if (count <= 0) return count < 0 ? count : -ENODEV;
++  std::vector<drmDevicePtr> devices(count, nullptr);
++  count = drmGetDevices2(0, devices.data(), count);
++  if (count < 0) return count;
++  int selected = -1;
++  bool downstream = false;
++  int result = -ENODEV;
++  for (int i = 0; i < count; ++i) {
++    auto device = devices[i];
++    if (!device || !(device->available_nodes & (1 << DRM_NODE_PRIMARY))) continue;
++    const char *node = device->nodes[DRM_NODE_PRIMARY];
++    if (!node) { result = -EINVAL; break; }
++    int fd = open(node, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
++    if (fd < 0) { result = -errno; break; }
++    if (drmGetNodeTypeFromFd(fd) != DRM_NODE_PRIMARY) {
++      drmClose(fd);
++      result = -EINVAL;
++      break;
++    }
++    errno = 0;
++    drmVersionPtr version = drmGetVersion(fd);
++    if (!version) {
++      result = -(errno ? errno : EIO);
++      drmClose(fd);
++      break;
++    }
++    bool msm = version->name && version->name_len == 3 && !memcmp(version->name, "msm", 3);
++    bool legacy = version->name && version->name_len == 7 && !memcmp(version->name, "msm_drm", 7);
++    drmFreeVersion(version);
++    if (!msm && !legacy) { drmClose(fd); continue; }
++    errno = 0;
++    drmModeRes *resources = drmModeGetResources(fd);
++    if (!resources) {
++      result = -(errno ? errno : EIO);
++      drmClose(fd);
++      break;
++    }
++    bool kms = resources->count_crtcs > 0 && resources->count_connectors > 0;
++    drmModeFreeResources(resources);
++    if (!kms) { drmClose(fd); continue; }
++    if (selected >= 0) {
++      drmClose(fd);
++      result = -ENOTUNIQ;
++      break;
++    }
++    selected = fd;
++    downstream = legacy;
++    result = 0;
++  }
++  drmFreeDevices(devices.data(), count);
++  if (result) {
++    if (selected >= 0) drmClose(selected);
++    return result;
++  }
++  dev_fd_ = selected;
++
++  // ID zero cannot name a framebuffer. Linux 6.18 CLOSEFB reaches lookup and returns ENOENT;
++  // unlike RMFB, it drops only this file's reference and leaves active planes scanning out.
++  drm_mode_closefb closefb{};
++  errno = 0;
++  result = IoctlResult(drmIoctl(dev_fd_, DRM_IOCTL_MODE_CLOSEFB, &closefb));
++  if (result == -ENOENT) {
++    fb_release_ = FbRelease::kCloseFb;
++    return 0;
++  }
++  if (result == 0) return -EPROTO;
++  if (result != -EINVAL && result != -ENOTTY && result != -EOPNOTSUPP) return result;
++#ifdef DRM_IOCTL_MSM_RMFB2
++  // Never send a downstream command merely because its definition was compiled in.
++  if (downstream) {
++    uint32_t invalid_id = 0;
++    errno = 0;
++    result = IoctlResult(drmIoctl(dev_fd_, DRM_IOCTL_MSM_RMFB2, &invalid_id));
++    if (result == -ENOENT) {
++      fb_release_ = FbRelease::kMsmRmFb2;
++      return 0;
++    }
++    if (result == 0) return -EPROTO;
++    if (result != -EINVAL && result != -ENOTTY && result != -EOPNOTSUPP) return result;
++  }
++#else
++  (void)downstream;
++#endif
++  // A fallback RMFB would disable live planes. This HWC requires refcounted release.
++  return -EOPNOTSUPP;
+ }
+ 
+ DRMMaster::~DRMMaster() {
+-  drmClose(dev_fd_);
++  if (dev_fd_ >= 0) drmClose(dev_fd_);
+   dev_fd_ = -1;
+ }
+ 
+@@ -131,23 +220,27 @@
+ }
+ 
+ int DRMMaster::RemoveFbId(uint32_t fb_id) {
+-  int ret = 0;
++  if (dev_fd_ < 0) return -ENODEV;
++  if (!fb_id) return -EINVAL;
++  int ret;
++  errno = 0;
++  if (fb_release_ == FbRelease::kCloseFb) {
++    drm_mode_closefb closefb{};
++    closefb.fb_id = fb_id;
++    ret = IoctlResult(drmIoctl(dev_fd_, DRM_IOCTL_MODE_CLOSEFB, &closefb));
+ #ifdef DRM_IOCTL_MSM_RMFB2
+-  ret = drmIoctl(dev_fd_, DRM_IOCTL_MSM_RMFB2, &fb_id);
+-  if (ret) {
+-    DRM_LOGE("drmIoctl::DRM_IOCTL_MSM_RMFB2 failed for fb_id %d with error %d", fb_id, errno);
+-  }
+-#else
+-  DRM_LOGE("drmModeRmFB is no longer used. DRM_IOCTL_MSM_RMFB2 not found");
++  } else if (fb_release_ == FbRelease::kMsmRmFb2) {
++    ret = IoctlResult(drmIoctl(dev_fd_, DRM_IOCTL_MSM_RMFB2, &fb_id));
+ #endif
++  } else {
++    return -EOPNOTSUPP;
++  }
++  if (ret) DRM_LOGE("Framebuffer %u reference release failed: %d", fb_id, ret);
+   return ret;
+ }
+ 
+ bool DRMMaster::IsRmFbRefCounted() {
+-#ifdef DRM_IOCTL_MSM_RMFB2
+-  return true;
+-#endif
+-  return false;
++  return fb_release_ != FbRelease::kUnsupported;
+ }
+ 
+ }  // namespace drm_utils
+--- a/libdrmutils/drm_master.h
++++ b/libdrmutils/drm_master.h
+@@ -78,7 +78,7 @@
+    * Input:
+    *   master: Pointer to store a pointer to the instance
+    * Returns:
+-   *   -ENODEV if device cannot be opened or initilization fails
++   *   negative errno if device discovery or reference-release validation fails
+    */
+   static int GetInstance(DRMMaster **master);
+   static void DestroyInstance();
+@@ -87,6 +87,8 @@
+   DRMMaster() {}
+   int Init();
+ 
++  enum class FbRelease { kUnsupported, kCloseFb, kMsmRmFb2 };
++  FbRelease fb_release_ = FbRelease::kUnsupported;
+   int dev_fd_ = -1;              // Master fd for DRM
+   static DRMMaster *s_instance;  // Singleton instance
+   static std::mutex s_lock;

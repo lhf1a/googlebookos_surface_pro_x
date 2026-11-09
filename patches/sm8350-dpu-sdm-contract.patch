@@ -1,0 +1,306 @@
+--- a/sde-drm/drm_atomic_req.h
++++ b/sde-drm/drm_atomic_req.h
+@@ -36,6 +36,7 @@
+ #include <xf86drmMode.h>
+ #include <vector>
+ #include "qti-dpu-output-fence.h"
++#include "qti-dpu-atomic-contract.h"
+ 
+ namespace sde_drm {
+ 
+@@ -56,6 +57,7 @@
+   int fd_ = -1;
+   int plane_error_ = 0;
+   DpuOutputFences output_fences_;
++  DpuAtomicContract dpu_contract_;
+   DRMDisplayToken token_ = {};
+ };
+ 
+--- a/sde-drm/drm_atomic_req.cpp
++++ b/sde-drm/drm_atomic_req.cpp
+@@ -56,6 +56,13 @@
+     return -ENOMEM;
+   }
+ 
++  DRMCrtcInfo info = {};
++  int ret = drm_mgr_->GetCrtcInfo(tok.crtc_id, &info);
++  if (ret) return ret;
++  DRMPlanesInfo planes;
++  if (info.kernel_managed_dpu) drm_mgr_->GetPlanesInfo(&planes);
++  ret = dpu_contract_.Init(fd_, tok, info, planes);
++  if (ret) return ret;
+   return output_fences_.Init(fd_, tok.crtc_id, tok.conn_id);
+ }
+ 
+@@ -63,6 +70,16 @@
+   va_list args;
+   va_start(args, obj_id);
+   int result = 0;
++  va_list contract_args;
++  va_copy(contract_args, args);
++  result = dpu_contract_.Perform(drm_atomic_req_, opcode, obj_id, contract_args);
++  va_end(contract_args);
++  if (result <= 0) {
++    if (result && !plane_error_) plane_error_ = result;
++    va_end(args);
++    return result;
++  }
++  result = 0;
+   if (output_fences_.Enabled()) {
+     bool handled = true;
+     switch (opcode) {
+--- a/sdm/libs/core/drm/hw_device_drm.h
++++ b/sdm/libs/core/drm/hw_device_drm.h
+@@ -217,13 +217,14 @@
+    public:
+     explicit Registry(BufferAllocator *buffer_allocator);
+     // Called on each Validate and Commit to map the handle_id to fb_id of each layer buffer.
+-    void Register(HWLayers *hw_layers);
++    DisplayError Register(HWLayers *hw_layers);
++    void SetKernelManagedDpu(bool enabled) { kernel_managed_dpu_ = enabled; }
+     // Called on display disconnect to clear output buffer map and remove fb_ids.
+     void Clear();
+     // Create the fd_id for the given buffer.
+     int CreateFbId(const LayerBuffer &buffer, uint32_t *fb_id);
+     // Find handle_id in the layer map. Else create fb_id and add <handle_id,fb_id> in map.
+-    void MapBufferToFbId(Layer* layer, const LayerBuffer &buffer);
++    int MapBufferToFbId(Layer* layer, const LayerBuffer &buffer);
+     // Find handle_id in output buffer map. Else create fb_id and add <handle_id,fb_id> in map.
+     void MapOutputBufferToFbId(LayerBuffer* buffer);
+     // Find fb_id for given handle_id in the layer map.
+@@ -233,6 +234,7 @@
+ 
+    private:
+     bool disable_fbid_cache_ = false;
++    bool kernel_managed_dpu_ = false;
+     std::unordered_map<uint64_t, std::shared_ptr<LayerBufferObject>> output_buffer_map_ {};
+     BufferAllocator *buffer_allocator_ = {};
+     uint8_t fbid_cache_limit_ = UI_FBID_LIMIT;
+@@ -253,6 +255,8 @@
+   Registry registry_;
+   sde_drm::DRMDisplayToken token_ = {};
+   HWResourceInfo hw_resource_ = {};
++  sde_drm::DRMCrtcInfo dpu_info_ = {};
++  DisplayError ValidateDpuLayers(HWLayers *hw_layers);
+   HWPanelInfo hw_panel_info_ = {};
+   HWScaleDRM *hw_scale_ = {};
+   sde_drm::DRMManagerInterface *drm_mgr_intf_ = {};
+--- a/sdm/libs/core/drm/hw_device_drm.cpp
++++ b/sdm/libs/core/drm/hw_device_drm.cpp
+@@ -72,6 +72,7 @@
+ #include <drm_lib_loader.h>
+ #include <drm_master.h>
+ #include <drm_res_mgr.h>
++#include "qti-dpu-sdm-contract.h"
+ #include <fcntl.h>
+ #include <inttypes.h>
+ #include <linux/fb.h>
+@@ -172,7 +173,13 @@
+ }
+ 
+ static void GetDRMFormat(LayerBufferFormat format, uint32_t *drm_format,
+-                         uint64_t *drm_format_modifier) {
++                         uint64_t *drm_format_modifier, bool kernel_managed_dpu) {
++  if (kernel_managed_dpu &&
++      (format == kFormatYCbCr420P010 || format == kFormatYCbCr420P010Venus)) {
++    *drm_format = DRM_FORMAT_P010;
++    *drm_format_modifier = DRM_FORMAT_MOD_LINEAR;
++    return;
++  }
+   switch (format) {
+     case kFormatRGBA8888:
+       *drm_format = DRM_FORMAT_ABGR8888;
+@@ -342,11 +349,13 @@
+   }
+ }
+ 
+-void HWDeviceDRM::Registry::Register(HWLayers *hw_layers) {
++DisplayError HWDeviceDRM::Registry::Register(HWLayers *hw_layers) {
++  if (!hw_layers || hw_layers->info.hw_layers.size() > kMaxSDELayers) return kErrorParameters;
+   HWLayersInfo &hw_layer_info = hw_layers->info;
+   uint32_t hw_layer_count = UINT32(hw_layer_info.hw_layers.size());
+ 
+   for (uint32_t i = 0; i < hw_layer_count; i++) {
++    if (hw_layers->config[i].use_solidfill_stage) continue;
+     Layer &layer = hw_layer_info.hw_layers.at(i);
+     LayerBuffer input_buffer = layer.input_buffer;
+     HWRotatorSession *hw_rotator_session = &hw_layers->config[i].hw_rotator_session;
+@@ -362,8 +371,9 @@
+       input_buffer.width *= 2;
+       input_buffer.height /= 2;
+     }
+-    MapBufferToFbId(&layer, input_buffer);
+-  }
++    if (MapBufferToFbId(&layer, input_buffer)) return kErrorHardware;
++  }
++  return kErrorNone;
+ }
+ 
+ int HWDeviceDRM::Registry::CreateFbId(const LayerBuffer &buffer, uint32_t *fb_id) {
+@@ -383,7 +393,9 @@
+   buf_info.aligned_height = layout.height = buffer.height;
+   buf_info.format = buffer.format;
+   buf_info.native_handle = reinterpret_cast<const void *>(buffer.buffer_id);
+-  GetDRMFormat(buf_info.format, &layout.drm_format, &layout.drm_format_modifier);
++  GetDRMFormat(buf_info.format, &layout.drm_format, &layout.drm_format_modifier,
++               kernel_managed_dpu_);
++  if (!layout.drm_format) return -EOPNOTSUPP;
+   ret = buffer_allocator_->GetBufferLayout(buf_info, layout.stride, layout.offset, &layout.num_planes);
+   if (ret) {
+     DLOGE("GetBufferLayout failed: %d", ret);
+@@ -398,9 +410,9 @@
+   return ret;
+ }
+ 
+-void HWDeviceDRM::Registry::MapBufferToFbId(Layer* layer, const LayerBuffer &buffer) {
++int HWDeviceDRM::Registry::MapBufferToFbId(Layer* layer, const LayerBuffer &buffer) {
+   if (buffer.planes[0].fd < 0) {
+-    return;
++    return -EINVAL;
+   }
+ 
+   uint64_t handle_id = buffer.handle_id;
+@@ -413,7 +425,7 @@
+       FrameBufferObject *fb_obj = static_cast<FrameBufferObject*>(it->second.get());
+       if (fb_obj->IsEqual(buffer.format, buffer.width, buffer.height)) {
+         // Found fb_id for given handle_id key
+-        return;
++        return 0;
+       } else {
+         // Erase from fb_id map if format or size have been modified
+         layer->buffer_map->buffer_map.erase(it);
+@@ -427,11 +439,12 @@
+   }
+ 
+   uint32_t fb_id = 0;
+-  if (CreateFbId(buffer, &fb_id) >= 0) {
+-    // Create and cache the fb_id in map
+-    layer->buffer_map->buffer_map[handle_id] = std::make_shared<FrameBufferObject>(fb_id,
+-        buffer.format, buffer.width, buffer.height);
+-  }
++  int ret = CreateFbId(buffer, &fb_id);
++  if (ret < 0) return ret;
++  if (!fb_id) return -EIO;
++  layer->buffer_map->buffer_map[handle_id] = std::make_shared<FrameBufferObject>(fb_id,
++      buffer.format, buffer.width, buffer.height);
++  return 0;
+ }
+ 
+ void HWDeviceDRM::Registry::MapOutputBufferToFbId(LayerBuffer *output_buffer) {
+@@ -547,6 +560,23 @@
+     return kErrorDeviceRemoved;
+   }
+ 
++  ret = drm_mgr_intf_->GetCrtcInfo(token_.crtc_id, &dpu_info_);
++  if (!ret && dpu_info_.kernel_managed_dpu) {
++    for (auto &mode : connector_info_.modes) {
++      if (!sde_drm::DpuLogicalTopology(mode.mode.hdisplay, dpu_info_, &mode.topology)) {
++        ret = -EOPNOTSUPP;
++        break;
++      }
++    }
++  }
++  if (ret) {
++    drm_mgr_intf_->DestroyAtomicReq(drm_atomic_intf_);
++    drm_atomic_intf_ = {};
++    drm_mgr_intf_->UnregisterDisplay(&token_);
++    return kErrorNotSupported;
++  }
++
++  registry_.SetKernelManagedDpu(dpu_info_.kernel_managed_dpu);
+   hw_info_intf_->GetHWResourceInfo(&hw_resource_);
+ 
+   InitializeConfigs();
+@@ -554,7 +584,7 @@
+   UpdateMixerAttributes();
+ 
+   // TODO(user): In future, remove has_qseed3 member, add version and pass version to constructor
+-  if (hw_resource_.has_qseed3) {
++  if (hw_resource_.has_qseed3 && !dpu_info_.kernel_managed_dpu) {
+     hw_scale_ = new HWScaleDRM(HWScaleDRM::Version::V2);
+   }
+ 
+@@ -1495,7 +1525,7 @@
+     drm_atomic_intf_->Perform(DRMOps::CRTC_SET_MODE, token_.crtc_id, &current_mode);
+   }
+ 
+-  if (!validate && (hw_layer_info.set_idle_time_ms >= 0)) {
++  if (!dpu_info_.kernel_managed_dpu && !validate && (hw_layer_info.set_idle_time_ms >= 0)) {
+     DLOGI_IF(kTagDriverConfig, "Setting idle timeout to = %d ms",
+              hw_layer_info.set_idle_time_ms);
+     drm_atomic_intf_->Perform(DRMOps::CRTC_SET_IDLE_TIMEOUT, token_.crtc_id,
+@@ -1546,11 +1576,30 @@
+   SetSolidfillStages();
+ }
+ 
++DisplayError HWDeviceDRM::ValidateDpuLayers(HWLayers *hw_layers) {
++  if (!dpu_info_.kernel_managed_dpu) return kErrorNone;
++  if (!hw_layers || hw_layers->info.hw_layers.size() > kMaxSDELayers) return kErrorParameters;
++  for (size_t i = 0; i < hw_layers->info.hw_layers.size(); ++i) {
++    const auto &buffer = hw_layers->info.hw_layers[i].input_buffer;
++    const auto &config = hw_layers->config[i];
++    if (buffer.flags.secure || buffer.flags.secure_camera || buffer.flags.secure_display ||
++        buffer.flags.interlace || buffer.flags.hdr || config.use_solidfill_stage ||
++        config.hw_rotator_session.mode != kRotatorNone ||
++        !sde_drm::DpuColorSupported(buffer.format >= kFormatYCbCr420Planar, buffer.color_metadata)) {
++      DLOGW("Layer %zu requires a feature outside the Linux DPU contract", i);
++      return kErrorNotSupported;
++    }
++  }
++  return kErrorNone;
++}
++
+ DisplayError HWDeviceDRM::Validate(HWLayers *hw_layers) {
+   DTRACE_SCOPED();
+ 
+-  DisplayError err = kErrorNone;
+-  registry_.Register(hw_layers);
++  DisplayError err = ValidateDpuLayers(hw_layers);
++  if (err != kErrorNone) return err;
++  err = registry_.Register(hw_layers);
++  if (err != kErrorNone) return err;
+ 
+   Fence::ScopedRef scoped_ref;
+   SetupAtomic(scoped_ref, hw_layers, true /* validate */, nullptr, nullptr);
+@@ -1571,8 +1620,10 @@
+ DisplayError HWDeviceDRM::Commit(HWLayers *hw_layers) {
+   DTRACE_SCOPED();
+ 
+-  DisplayError err = kErrorNone;
+-  registry_.Register(hw_layers);
++  DisplayError err = ValidateDpuLayers(hw_layers);
++  if (err != kErrorNone) return err;
++  err = registry_.Register(hw_layers);
++  if (err != kErrorNone) return err;
+ 
+   if (default_mode_) {
+     err = DefaultCommit(hw_layers);
+--- a/sdm/libs/core/drm/hw_peripheral_drm.cpp
++++ b/sdm/libs/core/drm/hw_peripheral_drm.cpp
+@@ -91,6 +91,10 @@
+ }
+ 
+ void HWPeripheralDRM::InitDestScaler() {
++  if (dpu_info_.kernel_managed_dpu) {
++    topology_control_ = 0;
++    return;  // Linux reserves the physical mixers; no downstream DSPP request.
++  }
+   if (hw_resource_.hw_dest_scalar_info.count) {
+     // Do all destination scaler block resource allocations here.
+     dest_scaler_blocks_used_ = 1;
+@@ -645,6 +649,7 @@
+ }
+ 
+ DisplayError HWPeripheralDRM::ControlIdlePowerCollapse(bool enable, bool synchronous) {
++  if (dpu_info_.kernel_managed_dpu) return kErrorNotSupported;
+   if (enable == idle_pc_enabled_) {
+     return kErrorNone;
+   }
+@@ -964,6 +969,7 @@
+ }
+ 
+ DisplayError HWPeripheralDRM::EnableSelfRefresh() {
++  if (dpu_info_.kernel_managed_dpu) return kErrorNotSupported;
+   self_refresh_state_ = kSelfRefreshEnable;
+   return kErrorNone;
+ }

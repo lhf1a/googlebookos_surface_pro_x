@@ -1,0 +1,36 @@
+{
+  "target_sha256": "77292e864dc21717d1946778a9df5e2e77db5005ba763bbb84f7e10a4c62992c",
+  "entries": [
+    {
+      "entry": "0x1d25c0",
+      "slot": "0x22b118",
+      "symbol": "sq2_p010_renderer_ctor",
+      "original_hex": "fd7bbda9f65701a9f44f02a9",
+      "patch_hex": "d00200b0108e40f900021fd6"
+    },
+    {
+      "entry": "0x1d2650",
+      "slot": "0x22b120",
+      "symbol": "sq2_p010_renderer_dtor",
+      "original_hex": "ffc300d1fd7b01a9f44f02a9",
+      "patch_hex": "d00200b0109240f900021fd6"
+    },
+    {
+      "entry": "0x1d2fb0",
+      "slot": "0x22b128",
+      "symbol": "sq2_p010_renderer_render",
+      "original_hex": "ff8306d1fd7b14a9fc6f15a9",
+      "patch_hex": "d00200b0109640f900021fd6"
+    },
+    {
+      "entry": "0x1b0ea0",
+      "slot": "0x22b130",
+      "symbol": "sq2_native_window_hdr_metadata",
+      "original_hex": "ff8301d1fd7b03a9f65704a9"
+    }
+  ],
+  "library": "libsq2-p010-renderer.so",
+  "scope": "RAM candidate: existing P010 integration plus explicit clearing of absent static HDR metadata; not deployed",
+  "elf_class": 64,
+  "machine": 183
+}

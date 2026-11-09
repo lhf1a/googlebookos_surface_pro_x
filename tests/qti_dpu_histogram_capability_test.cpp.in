@@ -1,0 +1,236 @@
+#include <cassert>
+#include <cerrno>
+#include <cinttypes>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <mutex>
+#include <utility>
+#include <vector>
+using std::lock_guard;
+using std::mutex;
+#define DLOGE(...) ((void)0)
+#define DLOGI(...) ((void)0)
+#define DRM_LOGE(...) ((void)0)
+constexpr uint32_t DRM_MODE_OBJECT_CRTC = 1, DRM_MODE_OBJECT_CONNECTOR = 2;
+constexpr int NUM_HISTOGRAM_COLOR_COMPONENTS = 4;
+constexpr int HWC2_DISPLAYED_CONTENT_SAMPLING_ENABLE = 1;
+constexpr int HWC2_DISPLAYED_CONTENT_SAMPLING_DISABLE = 0;
+enum DisplayError { kErrorNone, kErrorParameters, kErrorNotSupported, kErrorHardware, kErrorUndefined };
+enum SupportedDisplayFeature { kDedicatedCwb, kColorSampling };
+namespace HWC2 { enum class Error { None, Unsupported, NoResources, BadParameter }; }
+namespace sde_drm {
+enum DRMDPPSFeatureID { kFeatureAbaHistCtrl, kFeatureAbaHistIRQ, kFeatureAd4Roi,
+  kFeatureLtmHistCtrl, kFeatureSvBlScale, kFeatureLtmBufferCtrl, kFeatureLtm, kDppsFeaturesMax };
+enum class DRMOps { DPPS_CACHE_FEATURE };
+enum HistModes { kHistDisabled, kHistEnabled };
+struct DppsFeaturePayload { uint32_t object_type = 0; uint32_t feature_id = 0; uint64_t value = 0; };
+struct DRMDppsFeatureInfo {
+  DRMDPPSFeatureID id; uint32_t obj_id; uint32_t version; uint32_t payload_size; void *payload;
+};
+struct DRMDppsPropInfo { uint32_t version = 0, prop_id = 0, obj_id = 0; uint64_t value = 0; };
+struct DRMDppsManagerImp {
+  mutex api_lock_;
+  DRMDppsPropInfo dpps_feature_[kDppsFeaturesMax] = {};
+  std::vector<std::pair<uint32_t, int>> ltm_buffers_ctrl_map_;
+  std::vector<DRMDppsPropInfo> dpps_dirty_prop_;
+  int InitLtmBuffers(DRMDppsFeatureInfo *) { return -EINVAL; }
+  void GetDppsFeatureInfo(DRMDppsFeatureInfo *);
+};
+@DRM_GET@
+}
+using namespace sde_drm;
+struct Manager {
+  DRMDppsManagerImp implementation;
+  unsigned calls = 0;
+  bool leave_unchanged = false;
+  void GetDppsFeatureInfo(DRMDppsFeatureInfo *info) {
+    ++calls;
+    if (!leave_unchanged) implementation.GetDppsFeatureInfo(info);
+  }
+};
+struct Atomic {
+  int result = 0;
+  unsigned calls = 0;
+  uint32_t last_object = 0, last_feature = 0;
+  uint64_t last_value = 0;
+  int Perform(DRMOps, uint32_t object, uint32_t feature, uint64_t value) {
+    ++calls; last_object = object; last_feature = feature; last_value = value;
+    return result;
+  }
+};
+struct DisplayDppsAd4RoiCfg { int h_start, h_end, v_start, v_end, factor_in, factor_out; };
+struct HWPeripheralDRM {
+  struct { bool kernel_managed_dpu = false; } dpu_info_;
+  struct { uint32_t crtc_id = 105, conn_id = 108; } token_;
+  struct { int h_x, h_y, v_x, v_y, factor_in, factor_out; } ad4_roi_cfg_{};
+  uint64_t ltm_hist_en_ = 0;
+  Atomic *drm_atomic_intf_;
+  Manager *drm_mgr_intf_;
+  DisplayError SetDppsFeature(void *, size_t);
+  DisplayError GetDppsFeatureInfo(void *, size_t);
+  DisplayError SetBLScale(uint32_t);
+};
+@HW_SET@
+@HW_GET@
+@HW_BL@
+
+struct DisplayBase {
+  unsigned inherited_queries = 0;
+  DisplayError IsSupportedOnDisplay(SupportedDisplayFeature, uint32_t *supported) {
+    ++inherited_queries;
+    if (!supported) return kErrorParameters;
+    *supported = 77; return kErrorNone;
+  }
+};
+enum { kModeCommand, kModeVideo, kDppsSetFeature };
+struct DisplayBuiltIn : DisplayBase {
+  enum class SamplingState { Off, On };
+  SamplingState samplingState = SamplingState::Off;
+  bool histogramSetup = false;
+  DppsFeaturePayload histogramCtrl, histogramIRQ;
+  HWPeripheralDRM *hw_intf_;
+  struct { int mode = kModeVideo; } hw_panel_info_;
+  unsigned partial_updates = 0, base_commits = 0;
+  DisplayError DppsProcessOps(int, void *payload, size_t size) {
+    return hw_intf_->SetDppsFeature(payload, size);
+  }
+  void ControlPartialUpdate(bool, uint32_t *) { ++partial_updates; }
+  void initColorSamplingState();
+  DisplayError IsSupportedOnDisplay(SupportedDisplayFeature, uint32_t *);
+  DisplayError setColorSamplingState(SamplingState);
+  DisplayError colorSamplingOn();
+  DisplayError colorSamplingOff();
+  DisplayError CommitHistogram() {
+    DisplayError error = kErrorNone;
+@COMMIT_HISTOGRAM@
+    ++base_commits;
+    return kErrorNone;
+  }
+};
+@INIT@
+@SUPPORTED@
+@STATE@
+@ON@
+@OFF@
+
+struct Histogram {
+  unsigned starts = 0, stops = 0, attributes = 0, collects = 0;
+  uint64_t frames = 0;
+  HWC2::Error result = HWC2::Error::None;
+  void start() { ++starts; frames = 0; }
+  void start(uint64_t max_frames) { ++starts; frames = max_frames; }
+  void stop() { ++stops; }
+  HWC2::Error getAttributes(int32_t *, int32_t *, uint8_t *) { ++attributes; return result; }
+  HWC2::Error collect(uint64_t, uint64_t, int32_t *, uint64_t **, uint64_t *) {
+    ++collects; return result;
+  }
+};
+struct HWCDisplayBuiltIn {
+  DisplayBuiltIn *display_intf_;
+  mutex sampling_mutex;
+  bool api_sampling_vote = false, vndservice_sampling_vote = false;
+  Histogram histogram;
+  HWC2::Error SetDisplayedContentSamplingEnabledVndService(bool);
+  HWC2::Error SetDisplayedContentSamplingEnabled(int32_t, uint8_t, uint64_t);
+  HWC2::Error GetDisplayedContentSamplingAttributes(int32_t *, int32_t *, uint8_t *);
+  HWC2::Error GetDisplayedContentSample(uint64_t, uint64_t, uint64_t *, int32_t *, uint64_t **);
+};
+@HWC_VENDOR@
+@HWC_ENABLE@
+@HWC_ATTRIBUTES@
+@HWC_SAMPLE@
+
+int main() {
+  Atomic atomic;
+  Manager manager;
+  HWPeripheralDRM hw;
+  hw.drm_atomic_intf_ = &atomic; hw.drm_mgr_intf_ = &manager;
+  DisplayBuiltIn display;
+  display.hw_intf_ = &hw;
+  HWCDisplayBuiltIn hwc;
+  hwc.display_intf_ = &display;
+  // Missing real properties must override a compiled-in feature version.
+  for (auto id : {kFeatureAbaHistCtrl, kFeatureAbaHistIRQ})
+    manager.implementation.dpps_feature_[id].version = 1;
+  display.initColorSamplingState();
+  assert(!display.histogramSetup);
+  assert(atomic.calls == 0);
+  for (auto id : {kFeatureAbaHistCtrl, kFeatureAbaHistIRQ}) {
+    manager.implementation.dpps_feature_[id].prop_id = 12 + id;
+  }
+
+  hw.dpu_info_.kernel_managed_dpu = true;
+  manager.calls = 0;
+  display.histogramSetup = true;  // Reinitialization cannot retain stale capability.
+  display.initColorSamplingState();
+  assert(!display.histogramSetup);
+  assert(manager.calls == 0 && atomic.calls == 0);
+  DRMDppsFeatureInfo info = {kFeatureAbaHistCtrl, 0, 99, 0, nullptr};
+  assert(hw.GetDppsFeatureInfo(&info, sizeof(info)) == kErrorNotSupported && info.version == 0);
+  assert(hw.GetDppsFeatureInfo(nullptr, sizeof(info)) == kErrorParameters);
+  assert(hw.GetDppsFeatureInfo(&info, sizeof(info) - 1) == kErrorParameters);
+  DppsFeaturePayload payload{DRM_MODE_OBJECT_CRTC, kFeatureAbaHistIRQ, kHistDisabled};
+  assert(hw.SetDppsFeature(&payload, sizeof(payload)) == kErrorNotSupported);
+  assert(hw.SetDppsFeature(nullptr, sizeof(payload)) == kErrorParameters);
+  assert(hw.SetDppsFeature(&payload, sizeof(payload) - 1) == kErrorParameters);
+  assert(hw.SetBLScale(100) == kErrorNotSupported);
+  assert(atomic.calls == 0 && manager.calls == 0);
+  for (int frame = 0; frame < 120; ++frame) assert(display.CommitHistogram() == kErrorNone);
+  assert(display.base_commits == 120 && atomic.calls == 0);
+  assert(display.colorSamplingOn() == kErrorNotSupported);
+  assert(display.colorSamplingOff() == kErrorNotSupported);
+  assert(hwc.SetDisplayedContentSamplingEnabledVndService(true) == HWC2::Error::Unsupported);
+  assert(hwc.SetDisplayedContentSamplingEnabled(1, 0, 30) == HWC2::Error::Unsupported);
+  assert(hwc.GetDisplayedContentSamplingAttributes(nullptr, nullptr, nullptr) == HWC2::Error::Unsupported);
+  assert(hwc.GetDisplayedContentSample(0, 0, nullptr, nullptr, nullptr) == HWC2::Error::Unsupported);
+  assert(!hwc.api_sampling_vote && !hwc.vndservice_sampling_vote);
+  assert(hwc.histogram.starts == 0 && hwc.histogram.stops == 0);
+  assert(hwc.histogram.attributes == 0 && hwc.histogram.collects == 0 && atomic.calls == 0);
+
+  hw.dpu_info_.kernel_managed_dpu = false;
+  manager.leave_unchanged = true;
+  info.version = 99;
+  assert(hw.GetDppsFeatureInfo(&info, sizeof(info)) == kErrorNotSupported && info.version == 0);
+  manager.leave_unchanged = false;
+  manager.implementation.dpps_feature_[kFeatureAbaHistIRQ].prop_id = 0;
+  display.initColorSamplingState(); assert(!display.histogramSetup);
+  manager.implementation.dpps_feature_[kFeatureAbaHistIRQ].prop_id = 13;
+  display.initColorSamplingState(); assert(display.histogramSetup);
+  uint32_t supported = 0;
+  assert(display.IsSupportedOnDisplay(kColorSampling, &supported) == kErrorNone && supported == 1);
+  assert(display.IsSupportedOnDisplay(kColorSampling, nullptr) == kErrorParameters);
+  assert(display.IsSupportedOnDisplay(kDedicatedCwb, &supported) == kErrorNone && supported == 77);
+  assert(display.inherited_queries == 1);
+  assert(hwc.SetDisplayedContentSamplingEnabled(2, 0, 30) == HWC2::Error::BadParameter);
+  assert(hwc.SetDisplayedContentSamplingEnabled(1, 0, 30) == HWC2::Error::None);
+  assert(hwc.api_sampling_vote && hwc.histogram.starts == 1 && hwc.histogram.frames == 30);
+  assert(display.samplingState == DisplayBuiltIn::SamplingState::On);
+  assert(display.histogramCtrl.value == kHistEnabled && display.histogramIRQ.value == kHistEnabled);
+  assert(atomic.last_object == 105 && atomic.last_feature == kFeatureAbaHistCtrl);
+  atomic.result = -EIO;
+  auto calls = atomic.calls;
+  assert(hwc.SetDisplayedContentSamplingEnabled(0, 0, 0) == HWC2::Error::NoResources);
+  assert(atomic.calls == calls + 1 && hwc.api_sampling_vote && hwc.histogram.stops == 0);
+  assert(display.samplingState == DisplayBuiltIn::SamplingState::On);
+  assert(display.histogramCtrl.value == kHistEnabled && display.histogramIRQ.value == kHistEnabled);
+  auto commits = display.base_commits;
+  assert(display.CommitHistogram() == kErrorHardware && display.base_commits == commits);
+  payload.feature_id = kFeatureLtmHistCtrl; payload.value = 1;
+  assert(hw.SetDppsFeature(&payload, sizeof(payload)) == kErrorHardware && !hw.ltm_hist_en_);
+  atomic.result = -ENOTSUP;
+  assert(hwc.SetDisplayedContentSamplingEnabledVndService(true) == HWC2::Error::Unsupported);
+  assert(!hwc.vndservice_sampling_vote && hwc.histogram.starts == 1);
+  atomic.result = 0;
+  assert(hw.SetDppsFeature(&payload, sizeof(payload)) == kErrorNone && hw.ltm_hist_en_);
+  assert(hwc.SetDisplayedContentSamplingEnabled(0, 0, 0) == HWC2::Error::None);
+  assert(!hwc.api_sampling_vote && hwc.histogram.stops == 1);
+  assert(display.histogramCtrl.value == kHistDisabled && display.histogramIRQ.value == kHistDisabled);
+  assert(display.CommitHistogram() == kErrorNone && display.base_commits == commits + 1);
+  assert(atomic.last_feature == kFeatureAbaHistIRQ && atomic.last_value == kHistDisabled);
+  hwc.histogram.result = HWC2::Error::BadParameter;
+  assert(hwc.GetDisplayedContentSamplingAttributes(nullptr, nullptr, nullptr) == HWC2::Error::BadParameter);
+  assert(hwc.GetDisplayedContentSample(0, 0, nullptr, nullptr, nullptr) == HWC2::Error::BadParameter);
+  assert(hwc.histogram.attributes == 1 && hwc.histogram.collects == 1);
+  std::puts("Histogram capability: Linux emits zero DPPS ops; real property/query/error/state tests passed");
+}

@@ -1,0 +1,165 @@
+#include <algorithm>
+#include <cassert>
+#include <cinttypes>
+#include <cstdint>
+#include <cstdio>
+#include <map>
+#include <memory>
+#include <set>
+#include <type_traits>
+#include <vector>
+using hwc2_layer_t = uint64_t;
+using Display = uint64_t;
+using Layer = hwc2_layer_t;
+using std::shared_ptr;
+#define DLOGW(...) ((void)0)
+#define DLOGE(...) ((void)0)
+#define UINT32(x) static_cast<uint32_t>(x)
+#define INT32(x) static_cast<int32_t>(x)
+namespace HWC2 {
+enum class Error { None, BadParameter, NotValidated, BadLayer, HasChanges };
+enum class Composition : int32_t { Client = 1, Device = 2 };
+enum class LayerRequest : int32_t { ClearClientTarget = 1 };
+enum class DisplayRequest : int32_t { FlipClientTarget = 1 };
+}
+enum GeometryChanges { kRemoved = 1 };
+struct SDMLayer { struct { struct { bool flip_buffer = false; } flags; } request; };
+struct HWCLayer {
+  uint64_t id;
+  SDMLayer data;
+  SDMLayer *GetSDMLayer() { return &data; }
+};
+struct Fence {};
+struct HWCDisplay {
+  uint64_t id_ = 0;
+  std::map<hwc2_layer_t, HWCLayer *> layer_map_;
+  std::multiset<HWCLayer *> layer_set_;
+  std::map<hwc2_layer_t, HWC2::Composition> layer_changes_;
+  std::map<hwc2_layer_t, HWC2::LayerRequest> layer_requests_;
+  unsigned geometry_changes_ = 0;
+  bool validated_ = false, layer_stack_invalid_ = false, has_client_composition_ = false;
+  bool client_connected_ = true, flush_ = false;
+  HWCLayer *client_target_;
+  HWC2::Error DestroyLayer(hwc2_layer_t);
+  HWC2::Error GetChangedCompositionTypes(uint32_t *, hwc2_layer_t *, int32_t *);
+  HWC2::Error GetDisplayRequests(int32_t *, uint32_t *, hwc2_layer_t *, int32_t *);
+};
+@DESTROY@
+@CHANGED@
+@REQUESTS@
+struct HWCDisplayBuiltIn : HWCDisplay {
+  enum { kInternalValidate, kInternalCommit };
+  struct { bool block_on_fb = true; } layer_stack_;
+  shared_ptr<Fence> retire_fence_;
+  unsigned validate_state_ = 0, commit_state_ = 0, presents = 0;
+  HWC2::Error Present(shared_ptr<Fence> *) { ++presents; return HWC2::Error::None; }
+  HWC2::Error PresentAndOrGetValidateDisplayOutput(uint32_t *, uint32_t *);
+  HWC2::Error ValidateEmpty(uint32_t *out_num_types, uint32_t *out_num_requests) {
+    auto status = HWC2::Error::None;
+@EMPTY_VALIDATE@
+    return HWC2::Error::BadParameter;
+  }
+};
+@INTERNAL_VALIDATE@
+
+using Error = HWC2::Error;
+constexpr auto HWC2_ERROR_NONE = static_cast<int>(Error::None);
+constexpr auto HWC2_ERROR_HAS_CHANGES = static_cast<int>(Error::HasChanges);
+struct IComposerClient {
+  using Composition = HWC2::Composition;
+  struct ClientTargetProperty { int pixelFormat = 1, dataspace = 0; };
+};
+struct Session {
+  HWCDisplayBuiltIn *display_;
+  int ValidateDisplay(Display, uint32_t *types, uint32_t *requests) {
+    return static_cast<int>(display_->PresentAndOrGetValidateDisplayOutput(types, requests));
+  }
+  int GetChangedCompositionTypes(Display, uint32_t *count, hwc2_layer_t *layers, int32_t *types) {
+    return static_cast<int>(display_->GetChangedCompositionTypes(count, layers, types));
+  }
+  int GetDisplayRequests(Display, int32_t *request, uint32_t *count,
+                         hwc2_layer_t *layers, int32_t *requests) {
+    return static_cast<int>(display_->GetDisplayRequests(request, count, layers, requests));
+  }
+  int GetClientTargetProperty(Display, IComposerClient::ClientTargetProperty *) {
+    return HWC2_ERROR_NONE;
+  }
+};
+struct Client { Session *hwc_session_; };
+struct QtiComposerClient {
+  struct CommandReader {
+    Client mClient;
+    Display mDisplay = 0;
+    Error validateDisplay(Display, std::vector<Layer> &, std::vector<IComposerClient::Composition> &,
+                          uint32_t &, std::vector<Layer> &, std::vector<uint32_t> &,
+                          IComposerClient::ClientTargetProperty &);
+  };
+};
+@TRANSPORT@
+static void Add(HWCDisplayBuiltIn &display, uint64_t id) {
+  auto *layer = new HWCLayer{id, {}};
+  display.layer_map_[id] = layer;
+  display.layer_set_.insert(layer);
+  display.layer_changes_[id] = HWC2::Composition::Client;
+  display.layer_requests_[id] = HWC2::LayerRequest::ClearClientTarget;
+  display.has_client_composition_ = true;
+  display.validated_ = true;
+}
+int main() {
+  HWCDisplayBuiltIn display;
+  HWCLayer target{0, {}};
+  target.data.request.flags.flip_buffer = true;
+  display.client_target_ = &target;
+  Session session{&display};
+  QtiComposerClient::CommandReader reader{{&session}, 0};
+  Add(display, 37);
+  assert(display.DestroyLayer(37) == Error::None);
+  assert(display.layer_set_.empty() && !display.validated_);
+  uint32_t types = 3, requests = 4;
+  assert(display.ValidateEmpty(&types, &requests) == Error::None);
+  std::vector<Layer> changed, requested;
+  std::vector<IComposerClient::Composition> compositions;
+  std::vector<uint32_t> masks;
+  uint32_t display_mask = 99;
+  IComposerClient::ClientTargetProperty property;
+  assert(reader.validateDisplay(0, changed, compositions, display_mask,
+                                requested, masks, property) == Error::None);
+  if (!changed.empty()) {
+    std::printf("LEAKED_LAYER_ID=%" PRIu64 "\n", changed[0]);
+    std::fflush(stdout);
+  }
+  assert(changed.empty() && compositions.empty() && requested.empty() && masks.empty());
+  assert(types == 0 && requests == 0 && display_mask == 0);
+  assert(display.layer_changes_.empty() && display.layer_requests_.empty());
+  assert(!display.has_client_composition_ && display.validated_ && !display.flush_);
+  assert(display.presents == 0);
+
+  hwc2_layer_t layers[2] = {123, 456}; int32_t values[2] = {789, 987};
+  types = 2;
+  assert(display.GetChangedCompositionTypes(&types, layers, values) == Error::None);
+  assert(types == 0 && layers[0] == 123 && values[0] == 789);
+  int32_t request_mask = 999; requests = 2;
+  assert(display.GetDisplayRequests(&request_mask, &requests, layers, values) == Error::None);
+  assert(request_mask == 0 && requests == 0 && layers[0] == 123 && values[0] == 789);
+  assert(display.GetChangedCompositionTypes(nullptr, nullptr, nullptr) == Error::BadParameter);
+  assert(display.GetDisplayRequests(nullptr, &requests, nullptr, nullptr) == Error::BadParameter);
+  assert(display.GetDisplayRequests(&request_mask, nullptr, nullptr, nullptr) == Error::BadParameter);
+  display.client_connected_ = false;
+  assert(display.ValidateEmpty(&types, &requests) == Error::None && display.flush_);
+
+  for (unsigned cycle = 0; cycle < 100; ++cycle) {
+    uint64_t id = 88 + cycle;
+    Add(display, id);
+    assert(reader.validateDisplay(0, changed, compositions, display_mask,
+                                  requested, masks, property) == Error::None);
+    assert(changed.size() == 1 && changed[0] == id && compositions[0] == HWC2::Composition::Client);
+    assert(requested.size() == 1 && requested[0] == id && masks[0] == 1 && display_mask == 1);
+    assert(display.DestroyLayer(id) == Error::None);
+    types = 12; requests = 13;
+    assert(display.ValidateEmpty(&types, &requests) == Error::None);
+    assert(reader.validateDisplay(0, changed, compositions, display_mask,
+                                  requested, masks, property) == Error::None);
+    assert(changed.empty() && requested.empty() && types == 0 && requests == 0 && display_mask == 0);
+  }
+  std::puts("Empty-layer output: destroy/validate/internal-validate/HIDL vectors and 100 transitions passed");
+}

@@ -1,0 +1,12 @@
+--- a/mm-video-v4l2/vidc/vdec/src/omx_vdec_v4l2.cpp
++++ b/mm-video-v4l2/vidc/vdec/src/omx_vdec_v4l2.cpp
+@@ -6590,6 +6590,9 @@
+         }
+         case VDEC_MSG_EVT_CONFIG_CHANGED:
+             DEBUG_PRINT_HIGH("Port settings changed");
++            // The old output queue is drained before this decoder sequence boundary.
++            // Keep client defaults, but do not carry coded SEI into the new sequence.
++            memset(&omx->m_internal_hdr_info.sInfo, 0, sizeof(omx->m_internal_hdr_info.sInfo));
+             omx->m_reconfig_width = vdec_msg->msgdata.output_frame.picsize.frame_width;
+             omx->m_reconfig_height = vdec_msg->msgdata.output_frame.picsize.frame_height;
+             omx->isPortReconfigInsufficient = vdec_msg->msgdata.output_frame.flags;

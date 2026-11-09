@@ -5,8 +5,6 @@
  * restart on resume. A failed stop/start remains quarantined until reboot. */
 #ifndef VENUS_SQ2_SYSTEM_PM_INTEGRATION_H
 #define VENUS_SQ2_SYSTEM_PM_INTEGRATION_H
-static bool sq2_pm_trace;
-module_param(sq2_pm_trace, bool, 0400);
 
 /* Published SQ2 cores and this module remain pinned until reboot. Read-only
  * observations do not clear errors or request firmware/PM transitions. */
@@ -179,10 +177,6 @@ static __maybe_unused int venus_sq2_system_suspend(struct device *dev)
  ret = sq2_system_pm_suspend(&core->sq2_system_pm, &venus_sq2_system_ops, core);
  if (ret && core->sq2_system_pm.phase == SQ2_PM_BROKEN)
   set_bit(0, &core->sys_error);
- if (sq2_pm_trace)
-  dev_info(dev, "SQ2_SYSTEM_PM suspend ret=%d phase=%u stops=%lu starts=%lu\n",
-           ret, core->sq2_system_pm.phase,
-           core->sq2_system_pm.stops, core->sq2_system_pm.starts);
  mutex_unlock(&core->pm_lock);
  return ret;
 }
@@ -193,10 +187,6 @@ static __maybe_unused int venus_sq2_system_resume(struct device *dev)
  if (!IS_SQ2_HFI(core)) return pm_runtime_force_resume(dev);
  mutex_lock(&core->pm_lock);
  ret = sq2_system_pm_resume(&core->sq2_system_pm, &venus_sq2_system_ops, core);
- if (sq2_pm_trace)
-  dev_info(dev, "SQ2_SYSTEM_PM resume ret=%d phase=%u stops=%lu starts=%lu\n",
-           ret, core->sq2_system_pm.phase,
-           core->sq2_system_pm.stops, core->sq2_system_pm.starts);
  mutex_unlock(&core->pm_lock);
  return ret;
 }

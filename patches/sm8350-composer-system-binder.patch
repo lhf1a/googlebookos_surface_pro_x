@@ -1,0 +1,19 @@
+--- a/composer/service.cpp
++++ b/composer/service.cpp
+@@ -41,12 +41,13 @@
+   ALOGI("Creating Display HW Composer HAL");
+ 
+   // TODO(user): double-check for SCHED_FIFO logic
+-  // the conventional HAL might start binder services
+-  ProcessState::initWithDriver("/dev/vndbinder");
++  // libui's modern AIDL allocator and this process's QService share system Binder.
++  // HIDL composer keeps its independent hwBinder RPC threadpool.
++  ProcessState::initWithDriver("/dev/binder");
+   sp<ProcessState> ps(ProcessState::self());
+   ps->setThreadPoolMaxThreadCount(4);
+   ps->startThreadPool();
+-  ALOGI("ProcessState initialization completed");
++  ALOGI("ProcessState initialized on /dev/binder for AIDL allocator and QService");
+ 
+   // same as SF main thread
+   struct sched_param param = {0};

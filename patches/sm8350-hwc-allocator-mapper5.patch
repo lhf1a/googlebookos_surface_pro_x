@@ -1,0 +1,717 @@
+--- a/composer/hwc_buffer_allocator.h
++++ b/composer/hwc_buffer_allocator.h
+@@ -32,16 +32,10 @@
+ #include <fcntl.h>
+ #include <sys/mman.h>
+ 
+-#include <android/hardware/graphics/allocator/2.0/IAllocator.h>
+-#include <android/hardware/graphics/allocator/3.0/IAllocator.h>
+-#include <android/hardware/graphics/mapper/2.1/IMapper.h>
+-#include <android/hardware/graphics/mapper/3.0/IMapper.h>
++#include <android/hardware/graphics/mapper/IMapper.h>
++#include <core/buffer_allocator.h>
+ #include "gralloc_priv.h"
+ 
+-using IAllocatorV3 = android::hardware::graphics::allocator::V3_0::IAllocator;
+-using IAllocatorV2 = android::hardware::graphics::allocator::V2_0::IAllocator;
+-using IMapperV3 = android::hardware::graphics::mapper::V3_0::IMapper;
+-using IMapperV2 = android::hardware::graphics::mapper::V2_0::IMapper;
+ namespace sdm {
+ 
+ template <class Type>
+@@ -68,10 +62,8 @@
+ 
+  private:
+   int GetGrallocInstance();
+-  android::sp<IMapperV2> mapper_V2_;
+-  android::sp<IMapperV3> mapper_V3_;
+-  android::sp<IAllocatorV2> allocator_V2_;
+-  android::sp<IAllocatorV3> allocator_V3_;
++  int GetAllocationConfig(const BufferConfig &config, int *format, uint64_t *usage);
++  AIMapper *mapper_ = nullptr;
+ };
+ 
+ }  // namespace sdm
+--- a/composer/hwc_buffer_allocator.cpp
++++ b/composer/hwc_buffer_allocator.cpp
+@@ -33,234 +33,193 @@
+ #include <utils/constants.h>
+ #include <utils/debug.h>
+ 
+-#include "gr_utils.h"
++#include "quest2-gralloc-utils-abi.h"
+ #include "hwc_buffer_allocator.h"
+-#include "hwc_debugger.h"
+-#include "hwc_layers.h"
++#include <android/hardware_buffer.h>
++#include <android/hardware/graphics/mapper/utils/IMapperMetadataTypes.h>
++#include <EGL/egl.h>
++#include <EGL/eglext.h>
++#include <system/window.h>
++#include <dlfcn.h>
++#include <limits.h>
++#include <vector>
++
++namespace gralloc {
++int GetCustomDimensions(private_handle_t *, int *, int *);
++int GetAlignedWidthAndHeight(const BufferInfo &, unsigned *, unsigned *);
++}
++
+ 
+ #define __CLASS__ "HWCBufferAllocator"
+ 
+-using android::hardware::graphics::mapper::V2_0::Error;
+-using MapperV3Error = android::hardware::graphics::mapper::V3_0::Error;
+-using android::hardware::graphics::mapper::V2_0::BufferDescriptor;
+-using MapperV3BufferDescriptor = android::hardware::graphics::mapper::V3_0::BufferDescriptor;
+-using android::hardware::hidl_handle;
+-using android::hardware::hidl_vec;
+-
+ namespace sdm {
++namespace {
++using Metadata = aidl::android::hardware::graphics::common::StandardMetadataType;
++
++int MapperError(AIMapper_Error error) {
++  switch (error) {
++    case AIMAPPER_ERROR_NONE: return 0;
++    case AIMAPPER_ERROR_BAD_BUFFER: case AIMAPPER_ERROR_BAD_VALUE: return -EINVAL;
++    case AIMAPPER_ERROR_UNSUPPORTED: return -ENOTSUP;
++    default: return -ENOMEM;
++  }
++}
++template<Metadata T, class Value>
++bool ReadMetadata(AIMapper *mapper, buffer_handle_t handle, Value *out) {
++  int32_t size = mapper->v5.getStandardMetadata(handle, int64_t(T), nullptr, 0);
++  if (size <= 0 || size > 4096) return false;
++  std::vector<uint8_t> bytes(size);
++  if (mapper->v5.getStandardMetadata(handle, int64_t(T), bytes.data(), bytes.size()) != size)
++    return false;
++  auto value = android::hardware::graphics::mapper::StandardMetadata<T>::value::decode(
++      bytes.data(), bytes.size());
++  if (!value) return false;
++  *out = static_cast<Value>(*value);
++  return true;
++}
++
++LayerBufferFormat AllocatedFormat(int format, uint64_t modifier) {
++  if (modifier == 0x0500000000000001ULL) {
++    switch (format) {
++      case HAL_PIXEL_FORMAT_RGBA_8888: return kFormatRGBA8888Ubwc;
++      case HAL_PIXEL_FORMAT_RGBX_8888: return kFormatRGBX8888Ubwc;
++      case HAL_PIXEL_FORMAT_RGBA_1010102: return kFormatRGBA1010102Ubwc;
++      default: return kFormatInvalid;
++    }
++  }
++  if (modifier) return kFormatInvalid;
++  switch (format) {
++    case HAL_PIXEL_FORMAT_RGBA_8888: return kFormatRGBA8888;
++    case HAL_PIXEL_FORMAT_RGBX_8888: return kFormatRGBX8888;
++    case HAL_PIXEL_FORMAT_BGRA_8888: return kFormatBGRA8888;
++    case HAL_PIXEL_FORMAT_RGBA_1010102: return kFormatRGBA1010102;
++    case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS: return kFormatYCbCr420SemiPlanarVenus;
++    case HAL_PIXEL_FORMAT_YCbCr_420_P010: return kFormatYCbCr420P010;
++    case HAL_PIXEL_FORMAT_YCbCr_420_P010_VENUS: return kFormatYCbCr420P010Venus;
++    default: return kFormatInvalid;
++  }
++}
++}  // namespace
++
+ 
+ int HWCBufferAllocator::GetGrallocInstance() {
+-  // Lazy initialization of gralloc HALs
+-  if (mapper_V3_ != nullptr || mapper_V2_ != nullptr || allocator_V3_ != nullptr ||
+-      allocator_V2_ != nullptr) {
+-    return 0;
+-  }
+-
+-  allocator_V3_ = IAllocatorV3::getService();
+-  if (allocator_V3_ == nullptr) {
+-    allocator_V2_ = IAllocatorV2::getService();
+-    if (allocator_V2_ == nullptr) {
+-      DLOGE("Unable to get allocator");
+-      return -EINVAL;
+-    }
+-  }
+-
+-  mapper_V3_ = IMapperV3::getService();
+-  if (mapper_V3_ == nullptr) {
+-    mapper_V2_ = IMapperV2::getService();
+-    if (mapper_V2_ == nullptr) {
+-      DLOGE("Unable to get mapper");
+-      return -EINVAL;
+-    }
+-  }
+-
++  if (mapper_) return 0;
++  // Imported handles require this SP-HAL to remain loaded for their entire lifetime.
++  static void *support = dlopen("libvndksupport.so", RTLD_NOW | RTLD_LOCAL);
++  using LoadSphal = void *(*)(const char *, int);
++  static auto load = support ? reinterpret_cast<LoadSphal>(
++      dlsym(support, "android_load_sphal_library")) : nullptr;
++  static void *library = load ? load("mapper.quest2.so", RTLD_NOW | RTLD_LOCAL) : nullptr;
++  using LoadMapper = AIMapper_Error (*)(AIMapper **);
++  static auto get = library ? reinterpret_cast<LoadMapper>(
++      dlsym(library, "AIMapper_loadIMapper")) : nullptr;
++  AIMapper *candidate = nullptr;
++  if (!get || get(&candidate) != AIMAPPER_ERROR_NONE || !candidate ||
++      candidate->version != AIMAPPER_VERSION_5) return -ENODEV;
++  mapper_ = candidate;
++  return 0;
++}
++
++int HWCBufferAllocator::GetAllocationConfig(const BufferConfig &config,
++                                             int *format, uint64_t *usage) {
++  if (!config.width || !config.height || config.width > INT_MAX || config.height > INT_MAX)
++    return -EINVAL;
++  *usage = 0;
++  int ret = SetBufferInfo(config.format, format, usage);
++  if (ret) return ret;
++  if (config.secure) *usage |= AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT;
++  if (config.secure_camera) *usage |= (1ULL << 17);  // CAMERA_OUTPUT
++  if (!config.cache) *usage |= GRALLOC_USAGE_PRIVATE_UNCACHED;
++  if (config.trusted_ui) {
++    *usage |= GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY;
++    *usage &= ~uint64_t(GRALLOC_USAGE_PRIVATE_UNCACHED);
++  }
++  if (config.gfx_client) *usage |= AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
++  *usage |= AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY;
+   return 0;
+ }
+ 
+ int HWCBufferAllocator::AllocateBuffer(BufferInfo *buffer_info) {
++  if (!buffer_info || buffer_info->private_data || !buffer_info->buffer_config.width ||
++      !buffer_info->buffer_config.height || buffer_info->buffer_config.width > INT_MAX ||
++      buffer_info->buffer_config.height > INT_MAX) return -EINVAL;
+   auto err = GetGrallocInstance();
+   if (err != 0) {
+     return err;
+   }
+   const BufferConfig &buffer_config = buffer_info->buffer_config;
+   AllocatedBufferInfo *alloc_buffer_info = &buffer_info->alloc_buffer_info;
+-  int format;
++  int format = 0;
+   uint64_t alloc_flags = 0;
+-  int error = SetBufferInfo(buffer_config.format, &format, &alloc_flags);
+-  if (error != 0) {
++  int error = GetAllocationConfig(buffer_config, &format, &alloc_flags);
++  if (error) return error;
++
++  AHardwareBuffer_Desc desc{};
++  desc.width = buffer_config.width;
++  desc.height = buffer_config.height;
++  desc.layers = 1;
++  desc.format = format;
++  desc.usage = alloc_flags;
++  AHardwareBuffer *ahb = nullptr;
++  int ret = AHardwareBuffer_allocate(&desc, &ahb);
++  if (ret) return ret;
++
++  auto client = reinterpret_cast<PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC>(
++      eglGetProcAddress("eglGetNativeClientBufferANDROID"));
++  const auto *window = client ? static_cast<ANativeWindowBuffer_t *>(client(ahb)) : nullptr;
++  buffer_handle_t handle = nullptr;
++  AIMapper_Error import_error = window && window->handle ?
++      mapper_->v5.importBuffer(window->handle, &handle) : AIMAPPER_ERROR_BAD_BUFFER;
++  AHardwareBuffer_describe(ahb, &desc);
++  AHardwareBuffer_release(ahb);
++  if (import_error != AIMAPPER_ERROR_NONE) return MapperError(import_error);
++  if (!handle) return -EINVAL;
++
++  uint64_t size = 0, id = 0, modifier = 0, stride = 0, width = 0, height = 0;
++  bool valid = handle->numFds == 2 &&
++      ReadMetadata<Metadata::ALLOCATION_SIZE>(mapper_, handle, &size) &&
++      ReadMetadata<Metadata::BUFFER_ID>(mapper_, handle, &id) &&
++      ReadMetadata<Metadata::PIXEL_FORMAT_MODIFIER>(mapper_, handle, &modifier) &&
++      ReadMetadata<Metadata::STRIDE>(mapper_, handle, &stride) &&
++      ReadMetadata<Metadata::WIDTH>(mapper_, handle, &width) &&
++      ReadMetadata<Metadata::HEIGHT>(mapper_, handle, &height);
++  unsigned aligned_w = 0, aligned_h = 0, predicted_size = 0;
++  gralloc::BufferInfo info{int(buffer_config.width), int(buffer_config.height), format, 1, alloc_flags};
++  LayerBufferFormat actual_format = AllocatedFormat(format, modifier);
++  valid = valid && !gralloc::GetBufferSizeAndDimensions(info, &predicted_size, &aligned_w, &aligned_h) &&
++      width == buffer_config.width && height == buffer_config.height &&
++      size && size <= UINT32_MAX && size == predicted_size &&
++      stride == desc.stride && stride == aligned_w && actual_format != kFormatInvalid;
++  if (!valid) {
++    mapper_->v5.freeBuffer(handle);
+     return -EINVAL;
+   }
+-
+-  if (buffer_config.secure) {
+-    alloc_flags |= BufferUsage::PROTECTED;
+-  }
+-
+-  if (buffer_config.secure_camera) {
+-    alloc_flags |= BufferUsage::CAMERA_OUTPUT;
+-  }
+-
+-  if (!buffer_config.cache) {
+-    // Allocate uncached buffers
+-    alloc_flags |= GRALLOC_USAGE_PRIVATE_UNCACHED;
+-  }
+-
+-  if (buffer_config.trusted_ui) {
+-    // Allocate cached buffers for trusted UI
+-    alloc_flags |= GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY;
+-    alloc_flags &= ~GRALLOC_USAGE_PRIVATE_UNCACHED;
+-  }
+-
+-  if (buffer_config.gfx_client) {
+-    alloc_flags |= BufferUsage::GPU_TEXTURE;
+-  }
+-
+-  alloc_flags |= BufferUsage::COMPOSER_OVERLAY;
+-
+-  const native_handle_t *buf = nullptr;
+-
+-  if (mapper_V3_ != nullptr) {
+-    IMapperV3::BufferDescriptorInfo descriptor_info;
+-    descriptor_info.width = buffer_config.width;
+-    descriptor_info.height = buffer_config.height;
+-    descriptor_info.layerCount = 1;
+-    descriptor_info.format =
+-        static_cast<android::hardware::graphics::common::V1_2::PixelFormat>(format);
+-    descriptor_info.usage = alloc_flags;
+-
+-    auto hidl_err = MapperV3Error::NONE;
+-
+-    auto descriptor = BufferDescriptor();
+-    mapper_V3_->createDescriptor(descriptor_info, [&](const auto &_error, const auto &_descriptor) {
+-      hidl_err = _error;
+-      if (hidl_err != MapperV3Error::NONE) {
+-        return;
+-      }
+-      descriptor = _descriptor;
+-    });
+-
+-    if (hidl_err != MapperV3Error::NONE) {
+-      DLOGE("Failed to create descriptor");
+-      return -ENOMEM;
+-    }
+-
+-    hidl_handle raw_handle = nullptr;
+-
+-    allocator_V3_->allocate(descriptor, 1,
+-                            [&](const auto &_error, const auto &_stride, const auto &_buffers) {
+-                              hidl_err = _error;
+-                              if (hidl_err != MapperV3Error::NONE) {
+-                                return;
+-                              }
+-                              raw_handle = _buffers[0];
+-                            });
+-
+-    if (hidl_err != MapperV3Error::NONE) {
+-      DLOGE("Failed to allocate buffer");
+-      return -ENOMEM;
+-    }
+-
+-    mapper_V3_->importBuffer(raw_handle, [&](const auto &_error, const auto &_buffer) {
+-      hidl_err = _error;
+-      if (hidl_err != MapperV3Error::NONE) {
+-        return;
+-      }
+-      buf = static_cast<const native_handle_t *>(_buffer);
+-    });
+-
+-    if (hidl_err != MapperV3Error::NONE) {
+-      DLOGE("Failed to import buffer into HWC");
+-      return -ENOMEM;
+-    }
+-  } else {
+-    IMapperV2::BufferDescriptorInfo descriptor_info;
+-    descriptor_info.width = buffer_config.width;
+-    descriptor_info.height = buffer_config.height;
+-    descriptor_info.layerCount = 1;
+-    descriptor_info.format =
+-        static_cast<android::hardware::graphics::common::V1_0::PixelFormat>(format);
+-    descriptor_info.usage = alloc_flags;
+-
+-    auto hidl_err = Error::NONE;
+-
+-    auto descriptor = BufferDescriptor();
+-    mapper_V2_->createDescriptor(descriptor_info, [&](const auto &_error, const auto &_descriptor) {
+-      hidl_err = _error;
+-      if (hidl_err != Error::NONE) {
+-        return;
+-      }
+-      descriptor = _descriptor;
+-    });
+-
+-    if (hidl_err != Error::NONE) {
+-      DLOGE("Failed to create descriptor");
+-      return -ENOMEM;
+-    }
+-
+-    hidl_handle raw_handle = nullptr;
+-
+-    allocator_V2_->allocate(descriptor, 1,
+-                            [&](const auto &_error, const auto &_stride, const auto &_buffers) {
+-                              hidl_err = _error;
+-                              if (hidl_err != Error::NONE) {
+-                                return;
+-                              }
+-                              raw_handle = _buffers[0];
+-                            });
+-
+-    if (hidl_err != Error::NONE) {
+-      DLOGE("Failed to allocate buffer");
+-      return -ENOMEM;
+-    }
+-
+-    mapper_V2_->importBuffer(raw_handle, [&](const auto &_error, const auto &_buffer) {
+-      hidl_err = _error;
+-      if (hidl_err != Error::NONE) {
+-        return;
+-      }
+-      buf = static_cast<const native_handle_t *>(_buffer);
+-    });
+-
+-    if (hidl_err != Error::NONE) {
+-      DLOGE("Failed to import buffer into HWC");
+-      return -ENOMEM;
+-    }
+-  }
+-
+-  private_handle_t *hnd = nullptr;
+-  hnd = (private_handle_t *)buf;  // NOLINT
+-  alloc_buffer_info->fd = hnd->fd;
+-  alloc_buffer_info->stride = UINT32(hnd->width);
+-  alloc_buffer_info->aligned_width = UINT32(hnd->width);
+-  alloc_buffer_info->aligned_height = UINT32(hnd->height);
+-  alloc_buffer_info->size = hnd->size;
+-  alloc_buffer_info->id = hnd->id;
+-  alloc_buffer_info->format = HWCLayer::GetSDMFormat(hnd->format, hnd->flags);
+-
+-  buffer_info->private_data = reinterpret_cast<void *>(hnd);
++  alloc_buffer_info->fd = handle->data[0];
++  alloc_buffer_info->stride = uint32_t(stride);
++  alloc_buffer_info->aligned_width = aligned_w;
++  alloc_buffer_info->aligned_height = aligned_h;
++  alloc_buffer_info->size = uint32_t(size);
++  alloc_buffer_info->id = id;
++  alloc_buffer_info->format = actual_format;
++  alloc_buffer_info->native_handle = handle;
++  buffer_info->private_data = const_cast<native_handle_t *>(handle);
+   return 0;
+ }
+ 
+ int HWCBufferAllocator::FreeBuffer(BufferInfo *buffer_info) {
+-  int err = 0;
+-  auto hnd = reinterpret_cast<void *>(buffer_info->private_data);
+-  if (mapper_V3_ != nullptr) {
+-    mapper_V3_->freeBuffer(hnd);
+-  } else {
+-    mapper_V2_->freeBuffer(hnd);
+-  }
+-  AllocatedBufferInfo &alloc_buffer_info = buffer_info->alloc_buffer_info;
+-
+-  alloc_buffer_info.fd = -1;
+-  alloc_buffer_info.stride = 0;
+-  alloc_buffer_info.size = 0;
+-  buffer_info->private_data = NULL;
+-  return err;
++  if (!buffer_info || !buffer_info->private_data || !mapper_) return -EINVAL;
++  auto handle = static_cast<buffer_handle_t>(buffer_info->private_data);
++  int err = MapperError(mapper_->v5.freeBuffer(handle));
++  if (err) return err;
++  buffer_info->alloc_buffer_info = {};
++  buffer_info->private_data = nullptr;
++  return 0;
+ }
+ 
+ void HWCBufferAllocator::GetCustomWidthAndHeight(const private_handle_t *handle, int *width,
+                                                  int *height) {
+-  *width = handle->width;
+-  *height = handle->height;
++  *width = 0;
++  *height = 0;
+   gralloc::GetCustomDimensions(const_cast<private_handle_t *>(handle), width, height);
+ }
+ 
+@@ -269,47 +228,23 @@
+                                                   int *aligned_height) {
+   uint64_t usage = 0;
+   if (alloc_type & GRALLOC_USAGE_HW_FB) {
+-    usage |= BufferUsage::COMPOSER_CLIENT_TARGET;
++    usage |= (1ULL << 12);
+   }
+   if (alloc_type & GRALLOC_USAGE_PRIVATE_ALLOC_UBWC) {
+     usage |= GRALLOC_USAGE_PRIVATE_ALLOC_UBWC;
+   }
+-  uint32_t aligned_w = UINT(width);
+-  uint32_t aligned_h = UINT(height);
+-  gralloc::BufferInfo info(width, height, format, usage);
++  uint32_t aligned_w = static_cast<unsigned>(width);
++  uint32_t aligned_h = static_cast<unsigned>(height);
++  gralloc::BufferInfo info{width, height, format, 1, usage};
+   gralloc::GetAlignedWidthAndHeight(info, &aligned_w, &aligned_h);
+-  *aligned_width = INT(aligned_w);
+-  *aligned_height = INT(aligned_h);
++  *aligned_width = static_cast<int>(aligned_w);
++  *aligned_height = static_cast<int>(aligned_h);
+ }
+ 
+ uint32_t HWCBufferAllocator::GetBufferSize(BufferInfo *buffer_info) {
+-  const BufferConfig &buffer_config = buffer_info->buffer_config;
+-  uint64_t alloc_flags = GRALLOC_USAGE_PRIVATE_IOMMU_HEAP;
+-
+-  int width = INT(buffer_config.width);
+-  int height = INT(buffer_config.height);
+-  int format;
+-
+-  if (buffer_config.secure) {
+-    alloc_flags |= INT(GRALLOC_USAGE_PROTECTED);
+-  }
+-
+-  if (!buffer_config.cache) {
+-    // Allocate uncached buffers
+-    alloc_flags |= GRALLOC_USAGE_PRIVATE_UNCACHED;
+-  }
+-
+-  if (SetBufferInfo(buffer_config.format, &format, &alloc_flags) < 0) {
+-    return 0;
+-  }
+-
+-  uint32_t aligned_width = 0, aligned_height = 0, buffer_size = 0;
+-  gralloc::BufferInfo info(width, height, format, alloc_flags);
+-  int ret = GetBufferSizeAndDimensions(info, &buffer_size, &aligned_width, &aligned_height);
+-  if (ret < 0) {
+-    return 0;
+-  }
+-  return buffer_size;
++  if (!buffer_info) return 0;
++  AllocatedBufferInfo predicted{};
++  return GetAllocatedBufferInfo(buffer_info->buffer_config, &predicted) ? 0 : predicted.size;
+ }
+ 
+ int HWCBufferAllocator::SetBufferInfo(LayerBufferFormat format, int *target, uint64_t *flags) {
+@@ -438,132 +373,83 @@
+ }
+ 
+ int HWCBufferAllocator::GetAllocatedBufferInfo(
+-    const BufferConfig &buffer_config, AllocatedBufferInfo *allocated_buffer_info) {
+-  // TODO(user): This API should pass the buffer_info of the already allocated buffer
+-  // The private_data can then be typecast to the private_handle and used directly.
+-  uint64_t alloc_flags = GRALLOC_USAGE_PRIVATE_IOMMU_HEAP;
+-
+-  int width = INT(buffer_config.width);
+-  int height = INT(buffer_config.height);
+-  int format;
+-
+-  if (buffer_config.secure) {
+-    alloc_flags |= INT(GRALLOC_USAGE_PROTECTED);
+-  }
+-
+-  if (!buffer_config.cache) {
+-    // Allocate uncached buffers
+-    alloc_flags |= GRALLOC_USAGE_PRIVATE_UNCACHED;
+-  }
+-
+-  if (SetBufferInfo(buffer_config.format, &format, &alloc_flags) < 0) {
++    const BufferConfig &config, AllocatedBufferInfo *allocated_buffer_info) {
++  if (!allocated_buffer_info) return -EINVAL;
++  int format = 0;
++  uint64_t usage = 0;
++  int ret = GetAllocationConfig(config, &format, &usage);
++  if (ret) return ret;
++  uint32_t aligned_width = 0, aligned_height = 0, buffer_size = 0;
++  gralloc::BufferInfo info{int(config.width), int(config.height), format, 1, usage};
++  ret = gralloc::GetBufferSizeAndDimensions(info, &buffer_size, &aligned_width, &aligned_height);
++  if (ret || !buffer_size) return ret ? ret : -EINVAL;
++  *allocated_buffer_info = {};
++  allocated_buffer_info->stride = aligned_width;
++  allocated_buffer_info->aligned_width = aligned_width;
++  allocated_buffer_info->aligned_height = aligned_height;
++  allocated_buffer_info->size = buffer_size;
++  allocated_buffer_info->format = AllocatedFormat(format, gralloc::IsUBwcEnabled(format, usage) ?
++      0x0500000000000001ULL : 0);
++  return 0;
++}
++
++int HWCBufferAllocator::GetBufferLayout(const AllocatedBufferInfo &buf_info,
++                                        uint32_t stride[4], uint32_t offset[4],
++                                        uint32_t *num_planes) {
++  if (!stride || !offset || !num_planes || !buf_info.native_handle) return -EINVAL;
++  *num_planes = 0;
++  int err = GetGrallocInstance();
++  if (err) return err;
++  auto native = static_cast<const native_handle_t *>(buf_info.native_handle);
++  uint64_t size = 0, modifier = 0;
++  int32_t format = 0;
++  if (!ReadMetadata<Metadata::ALLOCATION_SIZE>(mapper_, native, &size) ||
++      !ReadMetadata<Metadata::PIXEL_FORMAT_MODIFIER>(mapper_, native, &modifier) ||
++      !ReadMetadata<Metadata::PIXEL_FORMAT_REQUESTED>(mapper_, native, &format) ||
++      AllocatedFormat(format, modifier) != buf_info.format) return -EINVAL;
++
++  // Pass the real imported handle: the newer SM8350 struct is not the donor's full ABI.
++  auto handle = reinterpret_cast<private_handle_t *>(const_cast<native_handle_t *>(native));
++  err = gralloc::GetBufferLayout(handle, stride, offset, num_planes);
++  if (err || !*num_planes || *num_planes > 4) {
++    *num_planes = 0;
++    return err ? err : -EINVAL;
++  }
++  for (uint32_t i = 0; i < *num_planes; ++i) {
++    if (!stride[i] || offset[i] >= size) {
++      *num_planes = 0;
++      return -EINVAL;
++    }
++  }
++  return 0;
++}
++
++int HWCBufferAllocator::MapBuffer(const private_handle_t *handle,
++                                   shared_ptr<Fence> acquire_fence) {
++  if (!handle) return -EINVAL;
++  int err = GetGrallocInstance();
++  if (err) return err;
++  int fd = Fence::Dup(acquire_fence);
++  if (acquire_fence && fd < 0) return -EMFILE;
++  void *address = nullptr;
++  ARect region{};
++  // Stable-C lock takes ownership; ScopedRef would close the descriptor a second time.
++  err = MapperError(mapper_->v5.lock(handle, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
++                                    region, fd, &address));
++  if (err) return err;
++  if (!address) {
++    int release = -1;
++    mapper_->v5.unlock(handle, &release);
++    if (release >= 0) close(release);
+     return -EINVAL;
+   }
+-
+-  uint32_t aligned_width = 0, aligned_height = 0, buffer_size = 0;
+-  gralloc::BufferInfo info(width, height, format, alloc_flags);
+-  int ret = GetBufferSizeAndDimensions(info, &buffer_size, &aligned_width, &aligned_height);
+-  if (ret < 0) {
+-    return -EINVAL;
+-  }
+-  allocated_buffer_info->stride = UINT32(aligned_width);
+-  allocated_buffer_info->aligned_width = UINT32(aligned_width);
+-  allocated_buffer_info->aligned_height = UINT32(aligned_height);
+-  allocated_buffer_info->size = UINT32(buffer_size);
+-
+-  return 0;
+-}
+-
+-int HWCBufferAllocator::GetBufferLayout(const AllocatedBufferInfo &buf_info,
+-                                                 uint32_t stride[4], uint32_t offset[4],
+-                                                 uint32_t *num_planes) {
+-  // TODO(user): Transition APIs to not need a private handle
+-  private_handle_t hnd(-1, 0, 0, 0, 0, 0, 0);
+-  int format = HAL_PIXEL_FORMAT_RGBA_8888;
+-  uint64_t flags = 0;
+-
+-  SetBufferInfo(buf_info.format, &format, &flags);
+-  // Setup only the required stuff, skip rest
+-  hnd.format = format;
+-  hnd.width = INT32(buf_info.aligned_width);
+-  hnd.height = INT32(buf_info.aligned_height);
+-  if (flags & GRALLOC_USAGE_PRIVATE_ALLOC_UBWC) {
+-    hnd.flags = private_handle_t::PRIV_FLAGS_UBWC_ALIGNED;
+-  }
+-
+-  int ret = gralloc::GetBufferLayout(&hnd, stride, offset, num_planes);
+-  if (ret < 0) {
+-    DLOGE("GetBufferLayout failed");
+-    return -EINVAL;
+-  }
+-
+-  return 0;
+-}
+-
+-int HWCBufferAllocator::MapBuffer(const private_handle_t *handle,
+-                                           shared_ptr<Fence> acquire_fence) {
+-  auto err = GetGrallocInstance();
+-  if (err != 0) {
+-    return err;
+-  }
+-
+-  Fence::ScopedRef scoped_ref;
+-  NATIVE_HANDLE_DECLARE_STORAGE(acquire_fence_storage, 1, 0);
+-  hidl_handle acquire_fence_handle;
+-  if (acquire_fence) {
+-    auto h = native_handle_init(acquire_fence_storage, 1, 0);
+-    h->data[0] = scoped_ref.Get(acquire_fence);
+-    acquire_fence_handle = h;
+-  }
+-
+-  auto hnd = const_cast<private_handle_t *>(handle);
+-  void *buffer_ptr = NULL;
+-  if (mapper_V3_ != nullptr) {
+-    const IMapperV3::Rect access_region = {.left = 0, .top = 0, .width = 0, .height = 0};
+-    mapper_V3_->lock(
+-        reinterpret_cast<void *>(hnd), (uint64_t)BufferUsage::CPU_READ_OFTEN, access_region,
+-        acquire_fence_handle,
+-        [&](const auto &_error, const auto &_buffer, const auto &_bpp, const auto &_stride) {
+-          if (_error == MapperV3Error::NONE) {
+-            buffer_ptr = _buffer;
+-          }
+-        });
+-  } else {
+-    const IMapperV2::Rect access_region = {.left = 0, .top = 0, .width = 0, .height = 0};
+-    mapper_V2_->lock(reinterpret_cast<void *>(hnd), (uint64_t)BufferUsage::CPU_READ_OFTEN,
+-                     access_region, acquire_fence_handle,
+-                     [&](const auto &_error, const auto &_buffer) {
+-                       if (_error == Error::NONE) {
+-                         buffer_ptr = _buffer;
+-                       }
+-                     });
+-  }
+-  if (!buffer_ptr) {
+-    return -EINVAL;
+-  }
+   return 0;
+ }
+ 
+ int HWCBufferAllocator::UnmapBuffer(const private_handle_t *handle, int *release_fence) {
+-  int err = 0;
++  if (!handle || !release_fence || !mapper_) return -EINVAL;
+   *release_fence = -1;
+-  auto hnd = const_cast<private_handle_t *>(handle);
+-  if (mapper_V3_ != nullptr) {
+-    mapper_V3_->unlock(reinterpret_cast<void *>(hnd),
+-                       [&](const auto &_error, const auto &_release_fence) {
+-                         if (_error != MapperV3Error::NONE) {
+-                           err = -EINVAL;
+-                         }
+-                       });
+-  } else {
+-    mapper_V2_->unlock(reinterpret_cast<void *>(hnd),
+-                       [&](const auto &_error, const auto &_release_fence) {
+-                         if (_error != Error::NONE) {
+-                           err = -EINVAL;
+-                         }
+-                       });
+-  }
+-  return err;
++  return MapperError(mapper_->v5.unlock(handle, release_fence));
+ }
+ 
+ }  // namespace sdm
+--- a/sdm/include/core/buffer_allocator.h
++++ b/sdm/include/core/buffer_allocator.h
+@@ -75,6 +75,7 @@
+   LayerBufferFormat format = kFormatInvalid;  // Specifies buffer format for allocated buffer.
+   uint32_t size = 0;             //!< Specifies the size of the allocated buffer.
+   uint64_t id = 0;               //!< Specifies the Id of the allocated buffer.
++  const void *native_handle = nullptr;  //!< Borrowed imported handle for real platform layout queries.
+ };
+ 
+ /*! @brief Holds the information about the input/output configuration of an output buffer.
+--- a/sdm/libs/core/drm/hw_device_drm.cpp
++++ b/sdm/libs/core/drm/hw_device_drm.cpp
+@@ -382,8 +382,13 @@
+   buf_info.aligned_width = layout.width = buffer.width;
+   buf_info.aligned_height = layout.height = buffer.height;
+   buf_info.format = buffer.format;
++  buf_info.native_handle = reinterpret_cast<const void *>(buffer.buffer_id);
+   GetDRMFormat(buf_info.format, &layout.drm_format, &layout.drm_format_modifier);
+-  buffer_allocator_->GetBufferLayout(buf_info, layout.stride, layout.offset, &layout.num_planes);
++  ret = buffer_allocator_->GetBufferLayout(buf_info, layout.stride, layout.offset, &layout.num_planes);
++  if (ret) {
++    DLOGE("GetBufferLayout failed: %d", ret);
++    return ret;
++  }
+   ret = master->CreateFbId(layout, fb_id);
+   if (ret < 0) {
+     DLOGE("CreateFbId failed. width %d, height %d, format: %s, stride %u, error %d",

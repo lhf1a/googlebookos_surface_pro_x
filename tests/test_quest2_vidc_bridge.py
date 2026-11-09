@@ -301,7 +301,7 @@ int main(void) {
     assert(ion_alloc_fd(-1,4096,0,1U<<25,0,&fd)==-EBADF && fd==-1 && calls==1);
     assert(ion_alloc_fd(91,4096,0,1U<<25,0x80000001U,&fd)==-EOPNOTSUPP && calls==1);
     assert(ion_alloc_fd(91,4096,0,1U<<9,1,&fd)==-EOPNOTSUPP && calls==1);
-    assert(ion_alloc_fd(91,4096,4096,1U<<25,1,&fd)==-EOPNOTSUPP && calls==1);
+    assert(ion_alloc_fd(91,4096,2*(size_t)sysconf(_SC_PAGESIZE),1U<<25,1,&fd)==-EOPNOTSUPP && calls==1);
     assert(ion_alloc_fd(91,0,0,1U<<25,1,&fd)==-EINVAL && calls==1);
     fail_alloc=1;assert(ion_alloc_fd(91,4096,0,1U<<25,1,&fd)==-ENOMEM && errno==ENOMEM && fd==-1 && calls==2);
     puts("ION: exact cached system request, real fd ownership, unsupported security/cache/heap/alignment rejected, backend errors retained");
@@ -427,6 +427,26 @@ int main(void) {
 
 
 class QuestVidcBridge(unittest.TestCase):
+    def test_native_node_binding_usage_and_concurrent_lifetime(self):
+        with tempfile.TemporaryDirectory() as td:
+            executable = str(Path(td) / "test")
+            subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+                            "-fsanitize=address,undefined", "-fno-pie", "-no-pie", "-rdynamic",
+                            str(ROOT / "tests/fixtures/quest2_video/bridge-node.c"),
+                            "-ldl", "-pthread", "-o", executable], check=True)
+            result = subprocess.run([executable], capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for marker in ("NODE_BIND:", "NODE_MODES:", "NODE_LIFETIME:", "NODE_SCOPE:"):
+                self.assertIn(marker, result.stdout)
+            # Without -rdynamic the native callback is genuinely absent from dlsym.
+            subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+                            "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+                            str(ROOT / "tests/fixtures/quest2_video/bridge-node.c"),
+                            "-ldl", "-pthread", "-o", executable], check=True)
+            result = subprocess.run([executable, "--missing-layout"], capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("NODE_SYMBOL:", result.stdout)
+
     def test_native_metadata_dma_and_donor_record_contract(self):
         with tempfile.TemporaryDirectory() as td:
             executable = str(Path(td)/'test')
@@ -437,6 +457,28 @@ class QuestVidcBridge(unittest.TestCase):
             p = subprocess.run([executable], capture_output=True, text=True, timeout=15)
             self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
             self.assertIn('NATIVE_EXTRA:', p.stdout)
+
+    def test_native_layout_negotiates_only_after_queue_release(self):
+        with tempfile.TemporaryDirectory() as td:
+            executable = str(Path(td) / "test")
+            subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+                            "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+                            str(ROOT / "tests/fixtures/quest2_video/bridge-native-layout.c"),
+                            "-ldl", "-pthread", "-o", executable], check=True)
+            result = subprocess.run([executable], capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("NATIVE_LAYOUT:", result.stdout)
+
+    def test_empty_capture_format_renegotiation(self):
+        with tempfile.TemporaryDirectory() as td:
+            executable = str(Path(td) / "test")
+            subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+                            "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+                            str(ROOT / "tests/fixtures/quest2_video/bridge-empty-capture.c"),
+                            "-ldl", "-pthread", "-o", executable], check=True)
+            result = subprocess.run([executable], capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("EMPTY_CAPTURE:", result.stdout)
 
     def test_cached_system_ion_allocation_contract(self):
         with tempfile.TemporaryDirectory() as td:

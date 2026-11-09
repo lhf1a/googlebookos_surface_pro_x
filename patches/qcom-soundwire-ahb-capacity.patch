@@ -1,0 +1,103 @@
+--- a/drivers/soundwire/qcom.c
++++ b/drivers/soundwire/qcom.c
+@@ -211,6 +211,8 @@
+ 	u32 wr_fifo_depth;
+ 	u32 rd_fifo_depth;
+ 	bool clock_stop_not_supported;
++	/* Serialize each complete WCD AHB address/data transaction. */
++	struct mutex ahb_lock;
+ };
+ 
+ struct qcom_swrm_data {
+@@ -283,18 +285,21 @@
+ 	struct regmap *wcd_regmap = ctrl->regmap;
+ 	int ret;
+ 
++	mutex_lock(&ctrl->ahb_lock);
+ 	/* pg register + offset */
+ 	ret = regmap_bulk_write(wcd_regmap, SWRM_AHB_BRIDGE_RD_ADDR_0,
+ 			  (u8 *)&reg, 4);
+ 	if (ret < 0)
+-		return SDW_CMD_FAIL;
++		goto out;
+ 
+ 	ret = regmap_bulk_read(wcd_regmap, SWRM_AHB_BRIDGE_RD_DATA_0,
+ 			       val, 4);
+ 	if (ret < 0)
+-		return SDW_CMD_FAIL;
+-
+-	return SDW_CMD_OK;
++		goto out;
++
++out:
++	mutex_unlock(&ctrl->ahb_lock);
++	return ret < 0 ? SDW_CMD_FAIL : SDW_CMD_OK;
+ }
+ 
+ static int qcom_swrm_ahb_reg_write(struct qcom_swrm_ctrl *ctrl,
+@@ -302,19 +307,22 @@
+ {
+ 	struct regmap *wcd_regmap = ctrl->regmap;
+ 	int ret;
++	mutex_lock(&ctrl->ahb_lock);
+ 	/* pg register + offset */
+ 	ret = regmap_bulk_write(wcd_regmap, SWRM_AHB_BRIDGE_WR_DATA_0,
+ 			  (u8 *)&val, 4);
+ 	if (ret)
+-		return SDW_CMD_FAIL;
++		goto out;
+ 
+ 	/* write address register */
+ 	ret = regmap_bulk_write(wcd_regmap, SWRM_AHB_BRIDGE_WR_ADDR_0,
+ 			  (u8 *)&reg, 4);
+ 	if (ret)
+-		return SDW_CMD_FAIL;
+-
+-	return SDW_CMD_OK;
++		goto out;
++
++out:
++	mutex_unlock(&ctrl->ahb_lock);
++	return ret ? SDW_CMD_FAIL : SDW_CMD_OK;
+ }
+ 
+ static int qcom_swrm_cpu_reg_read(struct qcom_swrm_ctrl *ctrl, int reg,
+@@ -897,9 +905,6 @@
+ 
+ 	swrm_wait_for_frame_gen_enabled(ctrl);
+ 	ctrl->slave_status = 0;
+-	ctrl->reg_read(ctrl, SWRM_COMP_PARAMS, &val);
+-	ctrl->rd_fifo_depth = FIELD_GET(SWRM_COMP_PARAMS_RD_FIFO_DEPTH, val);
+-	ctrl->wr_fifo_depth = FIELD_GET(SWRM_COMP_PARAMS_WR_FIFO_DEPTH, val);
+ 
+ 	return 0;
+ }
+@@ -1545,6 +1550,7 @@
+ 	ctrl->dev = dev;
+ 	dev_set_drvdata(&pdev->dev, ctrl);
+ 	mutex_init(&ctrl->port_lock);
++	mutex_init(&ctrl->ahb_lock);
+ 	init_completion(&ctrl->broadcast);
+ 	init_completion(&ctrl->enumeration);
+ 
+@@ -1575,6 +1581,20 @@
+ 	prop->default_row = data->default_rows;
+ 
+ 	ctrl->reg_read(ctrl, SWRM_COMP_HW_VERSION, &ctrl->version);
++
++	/* Immutable capabilities must be valid before enumeration can use the FIFO. */
++	ret = ctrl->reg_read(ctrl, SWRM_COMP_PARAMS, &val);
++	if (ret != SDW_CMD_OK) {
++		ret = -EIO;
++		goto err_clk;
++	}
++	ctrl->rd_fifo_depth = FIELD_GET(SWRM_COMP_PARAMS_RD_FIFO_DEPTH, val);
++	ctrl->wr_fifo_depth = FIELD_GET(SWRM_COMP_PARAMS_WR_FIFO_DEPTH, val);
++	if (!ctrl->wr_fifo_depth) {
++		dev_err(dev, "Invalid command FIFO capacity: %#x\n", val);
++		ret = -EINVAL;
++		goto err_clk;
++	}
+ 
+ 	ret = devm_request_threaded_irq(dev, ctrl->irq, NULL,
+ 					qcom_swrm_irq_handler,

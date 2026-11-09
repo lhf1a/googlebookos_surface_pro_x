@@ -1,0 +1,198 @@
+--- a/sde-drm/drm_plane.h
++++ b/sde-drm/drm_plane.h
+@@ -78,6 +78,7 @@
+ #include <mutex>
+ 
+ #include "drm_property.h"
++#include "qti-dpu-plane-properties.h"
+ #include "drm_pp_manager.h"
+ 
+ namespace sde_drm {
+@@ -110,7 +111,7 @@
+   const DRMPlaneTypeInfo& GetPlaneTypeInfo() { return plane_type_info_; }
+   void SetDecimation(drmModeAtomicReq *req, uint32_t prop_id, uint32_t prop_value);
+   void SetExclRect(drmModeAtomicReq *req, DRMRect rect);
+-  void Perform(DRMOps code, drmModeAtomicReq *req, va_list args);
++  int Perform(DRMOps code, drmModeAtomicReq *req, va_list args);
+   void Dump();
+   void SetMultiRectMode(drmModeAtomicReq *req, DRMMultiRectMode drm_multirect_mode);
+   void Unset(bool is_commit, drmModeAtomicReq *req);
+@@ -137,6 +138,7 @@
+   uint32_t assigned_crtc_id_ = 0;
+   uint32_t requested_crtc_id_ = 0;
+   DRMPropertyManager prop_mgr_ {};
++  DpuPlaneProperties dpu_properties_;
+   bool has_excl_rect_ = false;
+   drm_clip_rect excl_rect_copy_ = {};
+   std::unique_ptr<DRMPPManager> pp_mgr_ {};
+@@ -164,7 +166,7 @@
+   void GetPlanesInfo(DRMPlanesInfo *info);
+   void DumpAll();
+   void DumpByID(uint32_t id);
+-  void Perform(DRMOps code, uint32_t obj_id, drmModeAtomicReq *req, va_list args);
++  int Perform(DRMOps code, uint32_t obj_id, drmModeAtomicReq *req, va_list args);
+   void UnsetUnusedResources(uint32_t crtc_id, bool is_commit, drmModeAtomicReq *req);
+   void ResetColorLutsOnUsedPlanes(uint32_t crtc_id, bool is_commit, drmModeAtomicReq *req);
+   void RetainPlanes(uint32_t crtc_id);
+--- a/sde-drm/drm_plane.cpp
++++ b/sde-drm/drm_plane.cpp
+@@ -339,12 +339,12 @@
+   plane_pool_.at(id)->Dump();
+ }
+ 
+-void DRMPlaneManager::Perform(DRMOps code, uint32_t obj_id, drmModeAtomicReq *req, va_list args) {
++int DRMPlaneManager::Perform(DRMOps code, uint32_t obj_id, drmModeAtomicReq *req, va_list args) {
+   lock_guard<mutex> lock(lock_);
+   auto it = plane_pool_.find(obj_id);
+   if (it == plane_pool_.end()) {
+     DRM_LOGE("Invalid plane id %d", obj_id);
+-    return;
++    return -ENOENT;
+   }
+ 
+   if (code == DRMOps::PLANE_SET_SCALER_CONFIG) {
+@@ -354,7 +354,7 @@
+     }
+   }
+ 
+-  it->second->Perform(code, req, args);
++  return it->second->Perform(code, req, args);
+ }
+ 
+ void DRMPlaneManager::DumpAll() {
+@@ -606,6 +606,7 @@
+       continue;
+     }
+ 
++    dpu_properties_.Observe(*info);
+     string property_name(info->name);
+     DRMProperty prop_enum = prop_mgr_.GetPropertyEnum(property_name);
+     if (prop_enum == DRMProperty::INVALID) {
+@@ -838,7 +839,7 @@
+   }
+ }
+ 
+-void DRMPlane::Perform(DRMOps code, drmModeAtomicReq *req, va_list args) {
++int DRMPlane::Perform(DRMOps code, drmModeAtomicReq *req, va_list args) {
+   uint32_t prop_id = 0;
+   uint32_t obj_id = drm_plane_->plane_id;
+ 
+@@ -909,17 +910,13 @@
+ 
+     case DRMOps::PLANE_SET_ALPHA: {
+       uint32_t alpha = va_arg(args, uint32_t);
+-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::ALPHA);
+-      AddProperty(req, obj_id, prop_id, alpha, true /* cache */, tmp_prop_val_map_);
+-      DRM_LOGV("Plane %d: Setting alpha %d", obj_id, alpha);
+-    } break;
++      return dpu_properties_.Alpha(req, obj_id, alpha);
++    }
+ 
+     case DRMOps::PLANE_SET_BLEND_TYPE: {
+       uint32_t blending = va_arg(args, uint32_t);
+-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::BLEND_OP);
+-      AddProperty(req, obj_id, prop_id, blending, true /* cache */, tmp_prop_val_map_);
+-      DRM_LOGV("Plane %d: Setting blending %d", obj_id, blending);
+-    } break;
++      return dpu_properties_.Blend(req, obj_id, blending);
++    }
+ 
+     case DRMOps::PLANE_SET_H_DECIMATION: {
+       uint32_t deci = va_arg(args, uint32_t);
+@@ -964,10 +961,8 @@
+ 
+     case DRMOps::PLANE_SET_INPUT_FENCE: {
+       int fence = va_arg(args, int);
+-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::INPUT_FENCE);
+-      AddProperty(req, obj_id, prop_id, fence, false /* cache */, tmp_prop_val_map_);
+-      DRM_LOGV("Plane %d: Setting input fence %d", obj_id, fence);
+-    } break;
++      return dpu_properties_.InputFence(req, obj_id, fence);
++    }
+ 
+     case DRMOps::PLANE_SET_SCALER_CONFIG: {
+       uint64_t handle = va_arg(args, uint64_t);
+@@ -1039,7 +1034,9 @@
+ 
+     default:
+       DRM_LOGE("Invalid opcode %d for DRM Plane %d", code, obj_id);
+-  }
++      return -EINVAL;
++  }
++  return 0;
+ }
+ 
+ void DRMPlane::UpdatePPLutFeatureInuse(DRMPPFeatureInfo *data) {
+--- a/sde-drm/drm_atomic_req.h
++++ b/sde-drm/drm_atomic_req.h
+@@ -53,6 +53,7 @@
+   drmModeAtomicReq *drm_atomic_req_ = {};
+   DRMManager *drm_mgr_ = {};
+   int fd_ = -1;
++  int plane_error_ = 0;
+   DRMDisplayToken token_ = {};
+ };
+ 
+--- a/sde-drm/drm_atomic_req.cpp
++++ b/sde-drm/drm_atomic_req.cpp
+@@ -62,6 +62,7 @@
+ int DRMAtomicReq::Perform(DRMOps opcode, uint32_t obj_id, ...) {
+   va_list args;
+   va_start(args, obj_id);
++  int result = 0;
+   switch (opcode) {
+     case DRMOps::PLANE_SET_SRC_RECT:
+     case DRMOps::PLANE_SET_DST_RECT:
+@@ -84,7 +85,8 @@
+     case DRMOps::PLANE_SET_INVERSE_PMA:
+     case DRMOps::PLANE_SET_DGM_CSC_CONFIG:
+     case DRMOps::PLANE_SET_POST_PROC: {
+-      drm_mgr_->GetPlaneMgr()->Perform(opcode, obj_id, drm_atomic_req_, args);
++      result = drm_mgr_->GetPlaneMgr()->Perform(opcode, obj_id, drm_atomic_req_, args);
++      if (result && !plane_error_) plane_error_ = result;
+     } break;
+     case DRMOps::CRTC_SET_POST_PROC:
+     case DRMOps::CRTC_SET_MODE:
+@@ -147,7 +149,7 @@
+       DRM_LOGE("Invalid opcode %d", opcode);
+   }
+   va_end(args);
+-  return 0;
++  return result;
+ }
+ 
+ int DRMAtomicReq::Validate() {
+@@ -155,7 +157,7 @@
+   // because we just want to validate, not actually mark planes as removed
+   drm_mgr_->GetPlaneMgr()->UnsetUnusedResources(token_.crtc_id, false/*is_commit*/,
+                                                 drm_atomic_req_);
+-  int ret = drmModeAtomicCommit(fd_, drm_atomic_req_,
++  int ret = plane_error_ ? plane_error_ : drmModeAtomicCommit(fd_, drm_atomic_req_,
+                                 DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_TEST_ONLY, nullptr);
+   if (ret) {
+     DRM_LOGE("drmModeAtomicCommit failed with error %d (%s).", errno, strerror(errno));
+@@ -164,6 +166,7 @@
+   drm_mgr_->GetPlaneMgr()->PostValidate(token_.crtc_id, !ret);
+   drm_mgr_->GetCrtcMgr()->PostValidate(token_.crtc_id, !ret);
+   drmModeAtomicSetCursor(drm_atomic_req_, 0);
++  plane_error_ = 0;
+ 
+   return ret;
+ }
+@@ -184,7 +187,7 @@
+     flags |= DRM_MODE_ATOMIC_NONBLOCK;
+   }
+ 
+-  int ret = drmModeAtomicCommit(fd_, drm_atomic_req_, flags, nullptr);
++  int ret = plane_error_ ? plane_error_ : drmModeAtomicCommit(fd_, drm_atomic_req_, flags, nullptr);
+   if (ret) {
+     DRM_LOGE("drmModeAtomicCommit failed with error %d (%s).", errno, strerror(errno));
+   }
+@@ -192,6 +195,7 @@
+   drm_mgr_->GetPlaneMgr()->PostCommit(token_.crtc_id, !ret);
+   drm_mgr_->GetCrtcMgr()->PostCommit(token_.crtc_id, !ret);
+   drmModeAtomicSetCursor(drm_atomic_req_, 0);
++  plane_error_ = 0;
+ 
+   return ret;
+ }

@@ -18,6 +18,15 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef QUEST2_NATIVE_OUTPUT
+#include "quest2-omx-native-output.h"
+#endif
+#ifdef QUEST2_NATIVE_HWC
+#include "../graphics/quest2-vpu-hwc.h"
+extern int quest2_capture_display(unsigned,int64_t,int *);
+extern int quest2_capture_display_flush(int *);
+extern int quest2_capture_queue(unsigned);
+#endif
 
 _Static_assert(sizeof(void *) == 8 && sizeof(OMX_U32) == 4, "64-bit OMX ABI required");
 
@@ -27,7 +36,7 @@ _Static_assert(sizeof(void *) == 8 && sizeof(OMX_U32) == 4, "64-bit OMX ABI requ
 /* QCOM OMX extension: Venus linear NV12 (not UBWC); retain raw output until
  * returned storage geometry has been validated separately. */
 #define Q2_COLOR_VENUS_NV12 ((OMX_COLOR_FORMATTYPE)0x7fa30c04)
-enum ownership { APP, COMPONENT, READY };
+enum ownership { APP, COMPONENT, READY, DISPLAY };
 struct slot { OMX_BUFFERHEADERTYPE *header; enum ownership owner; uint64_t order; };
 struct port { OMX_PARAM_PORTDEFINITIONTYPE definition; struct slot *slots; size_t count; };
 struct au { size_t bytes; int64_t pts; };
@@ -48,6 +57,13 @@ struct client {
     OMX_INDEXTYPE metadata_indices[3];
     unsigned timeout_ms, requested_input_buffers;
     bool output_eos, event_eos;
+#ifdef QUEST2_NATIVE_OUTPUT
+    bool native_output;
+    uint32_t native_usage;
+#endif
+#ifdef QUEST2_NATIVE_HWC
+    struct slot *display_retired;
+#endif
     size_t frames, linear_frames;
     const char *directory;
     FILE *metadata;
@@ -168,11 +184,21 @@ static bool crop(struct client *c) {
     return true;
 }
 static bool allocate(struct client *c, struct port *port) {
+#ifdef QUEST2_NATIVE_OUTPUT
+    if(c->native_output && port==&c->output &&
+       !q2_omx_native_config(&port->definition,&c->crop,c->native_usage))return false;
+#endif
     port->count = port->definition.nBufferCountActual;
     port->slots = calloc(port->count, sizeof(*port->slots));
     if (!port->slots) { port->count = 0; return false; }
     for (size_t i = 0; i < port->count; ++i) {
         struct slot *slot = &port->slots[i];
+#ifdef QUEST2_NATIVE_OUTPUT
+        if(c->native_output && port==&c->output) {
+            if(!q2_omx_native_allocate(c->handle,c->component,&port->definition,
+                                     (unsigned)i,slot,&slot->header))return false;
+        } else
+#endif
         if (!checked("AllocateBuffer", c->component->AllocateBuffer(c->handle, &slot->header,
             port->definition.nPortIndex, slot, port->definition.nBufferSize))) return false;
         printf("BUFFER port=%u index=%zu allocated=%u\n", port->definition.nPortIndex, i, slot->header->nAllocLen);
@@ -197,7 +223,7 @@ static FILE *frame_file(struct client *c, const char *suffix) {
 /* Only strip documented linear row padding. This is not video decoding, UBWC
  * reconstruction, or an assumption that nFilledLen is a tightly packed image.
  */
-static bool save_output(struct client *c, OMX_BUFFERHEADERTYPE *b) {
+static bool save_linear_output(struct client *c, OMX_BUFFERHEADERTYPE *b) {
     if (b->nOffset > b->nAllocLen || b->nFilledLen > b->nAllocLen - b->nOffset) return false;
     if (b->nFlags & OMX_BUFFERFLAG_EOS) c->output_eos = true;
     if (!b->nFilledLen) return true;
@@ -258,7 +284,61 @@ static bool save_output(struct client *c, OMX_BUFFERHEADERTYPE *b) {
     ++c->frames;
     return ok && !(b->nFlags & OMX_BUFFERFLAG_DATACORRUPT);
 }
+static bool save_output(struct client *c, OMX_BUFFERHEADERTYPE *b) {
+#ifdef QUEST2_NATIVE_HWC
+    c->display_retired=NULL;
+#endif
+#ifdef QUEST2_NATIVE_OUTPUT
+    if(c->native_output && b->nFilledLen) {
+        unsigned index=0;
+        while(index<c->output.count && c->output.slots[index].header!=b)index++;
+        if(index==c->output.count || b->pAppPrivate!=&c->output.slots[index])return false;
+        struct q2_omx_native_read read={.fd=-1};
+        if(!q2_omx_native_read(index,b,&read))return false;
+        OMX_VIDEO_PORTDEFINITIONTYPE original=c->output.definition.format.video;
+        OMX_CONFIG_RECTTYPE original_crop=c->crop;
+        /* Diagnostic CPU view only: the component header remains an opaque handle. */
+        c->output.definition.format.video.nStride=read.stride;
+        c->output.definition.format.video.nSliceHeight=read.scan;
+        c->crop.nLeft=c->crop.nTop=0;c->crop.nWidth=read.width;c->crop.nHeight=read.height;
+        bool ok=save_linear_output(c,&read.header);
+        c->crop=original_crop;
+        c->output.definition.format.video=original;
+        ok=q2_omx_native_read_end(&read) && ok;
+#ifdef QUEST2_NATIVE_HWC
+        if(ok) {
+            int retired=-1;
+            if(quest2_capture_display(index,(int64_t)b->nTimeStamp,&retired))return false;
+            pthread_mutex_lock(&c->mutex);
+            bool valid=c->output.slots[index].owner==APP && retired>=-1 &&
+                (retired<0 || ((unsigned)retired<c->output.count && (unsigned)retired!=index &&
+                 c->output.slots[retired].owner==DISPLAY));
+            if(valid) {
+                c->output.slots[index].owner=DISPLAY;
+                if(retired>=0) {
+                    c->output.slots[retired].owner=APP;
+                    c->display_retired=&c->output.slots[retired];
+                }
+            }
+            pthread_mutex_unlock(&c->mutex);
+            if(!valid)return false;
+        }
+#endif
+        return ok;
+    }
+#endif
+    return save_linear_output(c,b);
+}
 static bool refill(struct client *c, struct slot *slot) {
+#ifdef QUEST2_NATIVE_HWC
+    pthread_mutex_lock(&c->mutex);bool reusable=slot->owner==APP;pthread_mutex_unlock(&c->mutex);
+    if(!reusable){fputs("REFUSE_REFILL_NON_APP_BUFFER\n",stderr);return false;}
+    if(c->native_output) {
+        size_t index=0;
+        while(index<c->output.count && slot!=&c->output.slots[index])++index;
+        if(index==c->output.count || quest2_capture_queue((unsigned)index))return false;
+    }
+#endif
     OMX_BUFFERHEADERTYPE *b = slot->header;
     b->nFilledLen = b->nOffset = b->nFlags = 0;
     pthread_mutex_lock(&c->mutex); slot->owner = COMPONENT; pthread_mutex_unlock(&c->mutex);
@@ -274,16 +354,32 @@ static bool queue_outputs(struct client *c) {
 }
 static bool free_port(struct client *c, struct port *port) {
     bool ok = true;
+#ifdef QUEST2_NATIVE_HWC
+    if(c->native_output && port==&c->output) {
+        int released=-1;
+        if(quest2_capture_display_flush(&released))return false;
+        pthread_mutex_lock(&c->mutex);
+        bool valid=released>=-1 && (released<0 || ((unsigned)released<port->count &&
+            port->slots[released].owner==DISPLAY));
+        if(valid && released>=0)port->slots[released].owner=APP;
+        c->display_retired=NULL;
+        pthread_mutex_unlock(&c->mutex);
+        if(!valid)return false;
+    }
+#endif
     for (size_t i = 0; i < port->count; ++i) {
         struct slot *slot = &port->slots[i];
         if (!slot->header) continue;
         pthread_mutex_lock(&c->mutex);
-        bool owned = slot->owner != COMPONENT;
+        bool owned = slot->owner != COMPONENT && slot->owner != DISPLAY;
         pthread_mutex_unlock(&c->mutex);
         if (!owned) { fprintf(stderr, "REFUSE_FREE_COMPONENT_OWNED_BUFFER\n"); ok = false; continue; }
         if (!checked("FreeBuffer", c->component->FreeBuffer(c->handle, port->definition.nPortIndex, slot->header))) ok = false;
         else slot->header = NULL;
     }
+#ifdef QUEST2_NATIVE_OUTPUT
+    if(ok && c->native_output && port==&c->output)quest2_capture_finish();
+#endif
     if (ok) { free(port->slots); port->slots = NULL; port->count = 0; }
     return ok;
 }
@@ -301,6 +397,10 @@ static bool reconfigure_output(struct client *c) {
         if (!ready && !owned) break;
     }
     if (!free_port(c, &c->output) || !wait_command(c) || !definition(c, &c->output) || !crop(c)) return false;
+#ifdef QUEST2_NATIVE_OUTPUT
+    if(c->native_output && !checked("SetParameter(NativeOutputPort)",c->component->SetParameter(
+        c->handle,OMX_IndexParamPortDefinition,&c->output.definition)))return false;
+#endif
     if (!send_command(c, OMX_CommandPortEnable, c->output.definition.nPortIndex) ||
         !allocate(c, &c->output) || !wait_command(c) || !queue_outputs(c)) return false;
     puts("OUTPUT_RECONFIGURE_DONE"); return true;
@@ -345,7 +445,12 @@ static bool decode(struct client *c, FILE *input, struct au *aus, size_t count) 
         if (error) return false;
         if (out) {
             if (!save_output(c, out->header)) return false;
+#ifdef QUEST2_NATIVE_HWC
+            struct slot *reusable=c->native_output && out->header->nFilledLen ? c->display_retired : out;
+            if (!change && !c->output_eos && reusable && !refill(c,reusable)) return false;
+#else
             if (!change && !c->output_eos && !refill(c, out)) return false;
+#endif
         }
         if (change && !reconfigure_output(c)) return false;
         if (crop_change && !crop(c)) return false;
@@ -413,6 +518,10 @@ static bool discover(struct client *c, unsigned width, unsigned height, bool nat
     if ((width || height || c->requested_input_buffers) &&
         !checked("SetParameter(InputPortDefinition)", c->component->SetParameter(c->handle,
             OMX_IndexParamPortDefinition, &c->input.definition))) return false;
+#ifdef QUEST2_NATIVE_OUTPUT
+    if(c->native_output && !q2_omx_native_enable(c->handle,c->component,
+        c->output.definition.nPortIndex,&c->native_usage))return false;
+#endif
     if (!native_color) {
         OMX_VIDEO_PARAM_PORTFORMATTYPE format; INIT(format);
         format.nPortIndex = c->output.definition.nPortIndex;
@@ -428,6 +537,10 @@ static bool discover(struct client *c, unsigned width, unsigned height, bool nat
                 c->requested_input_buffers, c->input.definition.nBufferCountActual);
         return false;
     }
+#ifdef QUEST2_NATIVE_OUTPUT
+    if(c->native_output && !checked("SetParameter(NativeOutputPort)",c->component->SetParameter(
+        c->handle,OMX_IndexParamPortDefinition,&c->output.definition)))return false;
+#endif
     return crop(c);
 }
 static bool cleanup(struct client *c) {
@@ -454,14 +567,23 @@ static bool cleanup(struct client *c) {
 static int usage(const char *name) {
     fprintf(stderr, "Usage: %s --library ABS_LIB --input ELEMENTARY_STREAM --aus SIZE_PTS_FILE --output FRESH_DIR [--component NAME] [--width W --height H] [--native-color | --venus-nv12] [--timeout-ms N] [--input-buffers N]\n", name);
     fprintf(stderr, "AU file: decimal bytes and signed microsecond PTS per line, in compressed decode order. Default requests linear NV12. This command initializes hardware and submits frames; it never installs a service or firmware.\n");
+#ifdef QUEST2_NATIVE_OUTPUT
+    fputs("--native-buffers: original gralloc UseBuffer2 and GPU validation; requires private native-layout bridge.\n",stderr);
+#endif
     return 64;
 }
 int main(int argc, char **argv) {
     const char *library = NULL, *input_path = NULL, *au_path = NULL, *output = NULL;
     const char *name = "OMX.qcom.video.decoder.avc";
     unsigned width = 0, height = 0, timeout = 30000, input_buffers = 0; bool native_color = false, venus_nv12 = false;
+#ifdef QUEST2_NATIVE_OUTPUT
+    bool native_output=false;
+#endif
     setvbuf(stdout, NULL, _IONBF, 0); setvbuf(stderr, NULL, _IONBF, 0);
     for (int i = 1; i < argc; ++i) {
+#ifdef QUEST2_NATIVE_OUTPUT
+        if(!strcmp(argv[i],"--native-buffers")){native_output=true;venus_nv12=true;continue;}
+#endif
         if (!strcmp(argv[i], "--native-color")) { native_color = true; continue; }
         if (!strcmp(argv[i], "--venus-nv12")) { venus_nv12 = true; continue; }
         if (i + 1 >= argc) return usage(argv[0]);
@@ -491,6 +613,9 @@ int main(int argc, char **argv) {
     }
     if (mkdir(output, 0700)) { perror("fresh output directory"); fclose(input); free(aus); return 66; }
     struct client c = { .timeout_ms = timeout, .requested_input_buffers = input_buffers, .directory = output, .compression = OMX_VIDEO_CodingAVC };
+#ifdef QUEST2_NATIVE_OUTPUT
+    c.native_output=native_output;
+#endif
     if (!strcmp(name,"OMX.qcom.video.decoder.hevc")) c.compression=OMX_VIDEO_CodingHEVC;
     else if (!strcmp(name,"OMX.qcom.video.decoder.vp8")) c.compression=OMX_VIDEO_CodingVP8;
     else if (!strcmp(name,"OMX.qcom.video.decoder.vp9")) c.compression=OMX_VIDEO_CodingVP9;
@@ -528,6 +653,12 @@ int main(int argc, char **argv) {
         if (!cleaned || !released) result = 6;
         printf("CLEANUP buffers_and_states=%d handle_released=%d\n", cleaned, released);
         if (!released) { fflush(NULL); _Exit(result); }
+#ifdef QUEST2_NATIVE_OUTPUT
+        if(c.native_output)quest2_capture_finish();
+#ifdef QUEST2_NATIVE_HWC
+        quest2_hwc_video_finish();
+#endif
+#endif
     }
 finish:
     if (initialized && !checked("OMX_Deinit", deinit())) result = 7;

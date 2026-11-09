@@ -1,0 +1,112 @@
+--- a/composer/QtiComposerCommandBuffer.h
++++ b/composer/QtiComposerCommandBuffer.h
+@@ -22,6 +22,10 @@
+ 
+ #include <log/log.h>
+ #include <sync/sync.h>
++#include <linux/sync_file.h>
++#include <sys/ioctl.h>
++#include <fcntl.h>
++#include <errno.h>
+ #include <fmq/MessageQueue.h>
+ #include <hidl/MQDescriptor.h>
+ #include <utils/fence.h>
+@@ -837,23 +841,34 @@
+     return readHandle(useCache);
+   }
+ 
+-  // Handle would still own original fence. Hence create a Fence object on duped fd.
+-  void readFence(shared_ptr<Fence>* fence, const string &name) {
+-    auto handle = readHandle();
+-    if (!handle || handle->numFds == 0) {
+-      return;
+-    }
+-
+-    if (handle->numFds != 1) {
+-      ALOGE("invalid fence handle with %d fds", handle->numFds);
+-      return;
+-    }
+-
+-    *fence = Fence::Create(dup(handle->data[0]), name);
+-    if (*fence == nullptr) {
+-      ALOGW("failed to dup fence %d", handle->data[0]);
+-      sync_wait(handle->data[0], -1);
+-    }
++  // Pin the sync_file before validation; an errored sync_file is still a valid fence.
++  Error readFence(shared_ptr<Fence>* fence, const string &name) {
++    fence->reset();
++    int32_t index = readSigned();
++    if (index == static_cast<int32_t>(IQtiComposerClient::HandleIndex::EMPTY)) {
++      return Error::NONE;
++    }
++    if (index < 0 || static_cast<size_t>(index) >= mDataHandles.size()) {
++      return Error::BAD_PARAMETER;
++    }
++    const auto *handle = mDataHandles[index].getNativeHandle();
++    if (!handle || handle->numInts != 0) return Error::BAD_PARAMETER;
++    if (handle->numFds == 0) return Error::NONE;
++    if (handle->numFds != 1) return Error::BAD_PARAMETER;
++
++    int fd;
++    do { fd = fcntl(handle->data[0], F_DUPFD_CLOEXEC, 0); } while (fd < 0 && errno == EINTR);
++    if (fd < 0) return errno == EBADF ? Error::BAD_PARAMETER : Error::NO_RESOURCES;
++    struct sync_file_info info = {};
++    int result;
++    do { result = ioctl(fd, SYNC_IOC_FILE_INFO, &info); } while (result < 0 && errno == EINTR);
++    if (result < 0) {
++      const int error = errno;
++      close(fd);
++      return error == ENOMEM ? Error::NO_RESOURCES : Error::BAD_PARAMETER;
++    }
++    *fence = Fence::Create(fd, name);
++    return *fence ? Error::NONE : Error::NO_RESOURCES;
+   }
+ 
+  private:
+--- a/composer/QtiComposerClient.cpp
++++ b/composer/QtiComposerClient.cpp
+@@ -1372,7 +1372,7 @@
+ 
+ bool QtiComposerClient::CommandReader::parseSetClientTarget(uint16_t length) {
+   // 4 parameters followed by N rectangles
+-  if ((length - 4) % 4 != 0) {
++  if (length < 4 || (length - 4) % 4 != 0) {
+     return false;
+   }
+ 
+@@ -1380,11 +1380,11 @@
+   auto slot = read();
+   auto clientTarget = readHandle(useCache);
+   shared_ptr<Fence> fence = nullptr;
+-  readFence(&fence, "fbt");
++  const auto fence_error = readFence(&fence, "fbt");
+   auto dataspace = readSigned();
+   auto damage = readRegion((length - 4) / 4);
+   hwc_region region = {damage.size(), damage.data()};
+-  auto err = lookupBuffer(BufferCache::CLIENT_TARGETS, slot, useCache, clientTarget, &clientTarget);
++  auto err = fence_error == Error::NONE ? lookupBuffer(BufferCache::CLIENT_TARGETS, slot, useCache, clientTarget, &clientTarget) : fence_error;
+   if (err == Error::NONE) {
+     auto error = mClient.hwc_session_->SetClientTarget(mDisplay, clientTarget, fence,
+         dataspace, region);
+@@ -1411,8 +1411,8 @@
+   auto slot = read();
+   auto outputBuffer = readHandle(useCache);
+   shared_ptr<Fence> fence = nullptr;
+-  readFence(&fence, "outbuf");
+-  auto err = lookupBuffer(BufferCache::OUTPUT_BUFFERS, slot, useCache, outputBuffer, &outputBuffer);
++  const auto fence_error = readFence(&fence, "outbuf");
++  auto err = fence_error == Error::NONE ? lookupBuffer(BufferCache::OUTPUT_BUFFERS, slot, useCache, outputBuffer, &outputBuffer) : fence_error;
+   if (err == Error::NONE) {
+     auto error = mClient.hwc_session_->SetOutputBuffer(mDisplay, outputBuffer, fence);
+     err = static_cast<Error>(error);
+@@ -1653,8 +1653,8 @@
+   auto slot = read();
+   auto buffer = readHandle(useCache);
+   shared_ptr<Fence> fence = nullptr;
+-  readFence(&fence, "layer");
+-  auto error = lookupBuffer(BufferCache::LAYER_BUFFERS, slot, useCache, buffer, &buffer);
++  const auto fence_error = readFence(&fence, "layer");
++  auto error = fence_error == Error::NONE ? lookupBuffer(BufferCache::LAYER_BUFFERS, slot, useCache, buffer, &buffer) : fence_error;
+   if (error == Error::NONE) {
+     auto err = mClient.hwc_session_->SetLayerBuffer(mDisplay, mLayer, buffer, fence);
+     error = static_cast<Error>(err);

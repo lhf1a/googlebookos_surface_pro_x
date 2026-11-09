@@ -1,0 +1,87 @@
+--- a/composer/hwc_buffer_allocator.cpp
++++ b/composer/hwc_buffer_allocator.cpp
+@@ -42,6 +42,7 @@
+ #include <system/window.h>
+ #include <dlfcn.h>
+ #include <limits.h>
++#include <inttypes.h>
+ #include <vector>
+ 
+ namespace gralloc {
+@@ -143,7 +144,9 @@
+   if (!buffer_info || buffer_info->private_data || !buffer_info->buffer_config.width ||
+       !buffer_info->buffer_config.height || buffer_info->buffer_config.width > INT_MAX ||
+       buffer_info->buffer_config.height > INT_MAX) return -EINVAL;
++  DLOGI("DPU_ALLOCATOR phase=get_mapper enter");
+   auto err = GetGrallocInstance();
++  DLOGI("DPU_ALLOCATOR phase=get_mapper exit result=%d", err);
+   if (err != 0) {
+     return err;
+   }
+@@ -161,21 +164,31 @@
+   desc.format = format;
+   desc.usage = alloc_flags;
+   AHardwareBuffer *ahb = nullptr;
++  DLOGI("DPU_ALLOCATOR phase=ahb_allocate enter size=%ux%u format=%u usage=%" PRIu64,
++        desc.width, desc.height, desc.format, desc.usage);
+   int ret = AHardwareBuffer_allocate(&desc, &ahb);
++  DLOGI("DPU_ALLOCATOR phase=ahb_allocate exit result=%d buffer=%p", ret, ahb);
+   if (ret) return ret;
+ 
++  DLOGI("DPU_ALLOCATOR phase=native_client enter");
+   auto client = reinterpret_cast<PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC>(
+       eglGetProcAddress("eglGetNativeClientBufferANDROID"));
+   const auto *window = client ? static_cast<ANativeWindowBuffer_t *>(client(ahb)) : nullptr;
++  DLOGI("DPU_ALLOCATOR phase=native_client exit window=%p", window);
+   buffer_handle_t handle = nullptr;
++  DLOGI("DPU_ALLOCATOR phase=import enter");
+   AIMapper_Error import_error = window && window->handle ?
+       mapper_->v5.importBuffer(window->handle, &handle) : AIMAPPER_ERROR_BAD_BUFFER;
++  DLOGI("DPU_ALLOCATOR phase=import exit result=%d handle=%p", import_error, handle);
+   AHardwareBuffer_describe(ahb, &desc);
++  DLOGI("DPU_ALLOCATOR phase=ahb_release enter");
+   AHardwareBuffer_release(ahb);
++  DLOGI("DPU_ALLOCATOR phase=ahb_release exit");
+   if (import_error != AIMAPPER_ERROR_NONE) return MapperError(import_error);
+   if (!handle) return -EINVAL;
+ 
+   uint64_t size = 0, id = 0, modifier = 0, stride = 0, width = 0, height = 0;
++  DLOGI("DPU_ALLOCATOR phase=metadata enter");
+   bool valid = handle->numFds == 2 &&
+       ReadMetadata<Metadata::ALLOCATION_SIZE>(mapper_, handle, &size) &&
+       ReadMetadata<Metadata::BUFFER_ID>(mapper_, handle, &id) &&
+@@ -183,13 +196,17 @@
+       ReadMetadata<Metadata::STRIDE>(mapper_, handle, &stride) &&
+       ReadMetadata<Metadata::WIDTH>(mapper_, handle, &width) &&
+       ReadMetadata<Metadata::HEIGHT>(mapper_, handle, &height);
++  DLOGI("DPU_ALLOCATOR phase=metadata exit valid=%d", valid);
+   unsigned aligned_w = 0, aligned_h = 0, predicted_size = 0;
+   gralloc::BufferInfo info{int(buffer_config.width), int(buffer_config.height), format, 1, alloc_flags};
+   LayerBufferFormat actual_format = AllocatedFormat(format, modifier);
++  DLOGI("DPU_ALLOCATOR phase=dimensions enter");
+   valid = valid && !gralloc::GetBufferSizeAndDimensions(info, &predicted_size, &aligned_w, &aligned_h) &&
+       width == buffer_config.width && height == buffer_config.height &&
+       size && size <= UINT32_MAX && size == predicted_size &&
+       stride == desc.stride && stride == aligned_w && actual_format != kFormatInvalid;
++  DLOGI("DPU_ALLOCATOR phase=dimensions exit valid=%d aligned=%ux%u size=%u",
++        valid, aligned_w, aligned_h, predicted_size);
+   if (!valid) {
+     mapper_->v5.freeBuffer(handle);
+     return -EINVAL;
+@@ -203,13 +220,16 @@
+   alloc_buffer_info->format = actual_format;
+   alloc_buffer_info->native_handle = handle;
+   buffer_info->private_data = const_cast<native_handle_t *>(handle);
++  DLOGI("DPU_ALLOCATOR phase=allocate_done fd=%d id=%" PRIu64, alloc_buffer_info->fd, id);
+   return 0;
+ }
+ 
+ int HWCBufferAllocator::FreeBuffer(BufferInfo *buffer_info) {
+   if (!buffer_info || !buffer_info->private_data || !mapper_) return -EINVAL;
+   auto handle = static_cast<buffer_handle_t>(buffer_info->private_data);
++  DLOGI("DPU_ALLOCATOR phase=mapper_free enter handle=%p", handle);
+   int err = MapperError(mapper_->v5.freeBuffer(handle));
++  DLOGI("DPU_ALLOCATOR phase=mapper_free exit result=%d", err);
+   if (err) return err;
+   buffer_info->alloc_buffer_info = {};
+   buffer_info->private_data = nullptr;

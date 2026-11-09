@@ -1,0 +1,140 @@
+--- a/sdm/libs/core/drm/hw_device_drm.cpp
++++ b/sdm/libs/core/drm/hw_device_drm.cpp
+@@ -1598,6 +1598,7 @@
+   DisplayError err = ValidateDpuLayers(hw_layers);
+   if (err != kErrorNone) return err;
+ 
++  const bool trace = dpu_info_.kernel_managed_dpu && first_cycle_;
+   BufferInfo test_buffer{};
+   std::unique_ptr<HWLayers> test_layers;
+   auto validate = [&]() -> DisplayError {
+@@ -1622,7 +1623,9 @@
+         test_buffer.buffer_config.buffer_count = 1;
+         test_buffer.buffer_config.cache = true;
+         test_buffer.buffer_config.gfx_client = true;
++        if (trace) DLOGI("DPU_TEST_ONLY phase=allocate enter display=%d", display_id_);
+         int ret = buffer_allocator_->AllocateBuffer(&test_buffer);
++        if (trace) DLOGI("DPU_TEST_ONLY phase=allocate exit result=%d", ret);
+         if (ret) {
+           DLOGE("DPU TEST_ONLY target allocation failed: %d", ret);
+           return kErrorResources;
+@@ -1649,14 +1652,20 @@
+       }
+     }
+     HWLayers *layers = test_layers ? test_layers.get() : hw_layers;
++    if (trace) DLOGI("DPU_TEST_ONLY phase=register enter temporary=%d", bool(test_layers));
+     DisplayError error = registry_.Register(layers);
++    if (trace) DLOGI("DPU_TEST_ONLY phase=register exit result=%d", error);
+     if (error != kErrorNone) {
+       DLOGE("Framebuffer registration for validation failed: %d", error);
+       return error;
+     }
+     Fence::ScopedRef scoped_ref;
++    if (trace) DLOGI("DPU_TEST_ONLY phase=setup_atomic enter");
+     SetupAtomic(scoped_ref, layers, true /* validate */, nullptr, nullptr);
++    if (trace) DLOGI("DPU_TEST_ONLY phase=setup_atomic exit");
++    if (trace) DLOGI("DPU_TEST_ONLY phase=atomic_validate enter");
+     int ret = drm_atomic_intf_->Validate();
++    if (trace) DLOGI("DPU_TEST_ONLY phase=atomic_validate exit result=%d", ret);
+     if (ret) {
+       DLOGE("failed with error %d for %s", ret, device_name_);
+       DumpHWLayers(layers);
+@@ -1669,14 +1678,19 @@
+   };
+   err = validate();
+   // Drop temporary FB references before freeing the temporary imported allocator handle.
++  if (trace) DLOGI("DPU_TEST_ONLY phase=release_fb enter result=%d", err);
+   test_layers.reset();
++  if (trace) DLOGI("DPU_TEST_ONLY phase=release_fb exit");
+   if (test_buffer.private_data) {
++    if (trace) DLOGI("DPU_TEST_ONLY phase=free_buffer enter");
+     int ret = buffer_allocator_->FreeBuffer(&test_buffer);
++    if (trace) DLOGI("DPU_TEST_ONLY phase=free_buffer exit result=%d", ret);
+     if (ret) {
+       DLOGE("DPU TEST_ONLY target release failed: %d", ret);
+       if (err == kErrorNone) err = kErrorResources;
+     }
+   }
++  if (trace) DLOGI("DPU_TEST_ONLY phase=done result=%d", err);
+   return err;
+ }
+ 
+--- a/sde-drm/drm_atomic_req.cpp
++++ b/sde-drm/drm_atomic_req.cpp
+@@ -75,7 +75,10 @@
+   result = dpu_contract_.Perform(drm_atomic_req_, opcode, obj_id, contract_args);
+   va_end(contract_args);
+   if (result <= 0) {
+-    if (result && !plane_error_) plane_error_ = result;
++    if (result && !plane_error_) {
++      DRM_LOGE("Atomic property rejected: op=%d object=%u result=%d", int(opcode), obj_id, result);
++      plane_error_ = result;
++    }
+     va_end(args);
+     return result;
+   }
+@@ -97,7 +100,10 @@
+         break;
+     }
+     if (handled) {
+-      if (result && !plane_error_) plane_error_ = result;
++      if (result && !plane_error_) {
++      DRM_LOGE("Atomic property rejected: op=%d object=%u result=%d", int(opcode), obj_id, result);
++      plane_error_ = result;
++    }
+       va_end(args);
+       return result;
+     }
+@@ -125,7 +131,10 @@
+     case DRMOps::PLANE_SET_DGM_CSC_CONFIG:
+     case DRMOps::PLANE_SET_POST_PROC: {
+       result = drm_mgr_->GetPlaneMgr()->Perform(opcode, obj_id, drm_atomic_req_, args);
+-      if (result && !plane_error_) plane_error_ = result;
++      if (result && !plane_error_) {
++      DRM_LOGE("Atomic property rejected: op=%d object=%u result=%d", int(opcode), obj_id, result);
++      plane_error_ = result;
++    }
+     } break;
+     case DRMOps::CRTC_SET_POST_PROC:
+     case DRMOps::CRTC_SET_MODE:
+@@ -201,7 +210,8 @@
+   int ret = plane_error_ ? plane_error_ : drmModeAtomicCommit(fd_, drm_atomic_req_,
+                                 DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_TEST_ONLY, nullptr);
+   if (ret) {
+-    DRM_LOGE("drmModeAtomicCommit failed with error %d (%s).", errno, strerror(errno));
++    DRM_LOGE("Atomic request failed: result=%d adapter_error=%d errno=%d (%s).",
++             ret, plane_error_, plane_error_ ? 0 : errno, plane_error_ ? "not submitted" : strerror(errno));
+   }
+ 
+   drm_mgr_->GetPlaneMgr()->PostValidate(token_.crtc_id, !ret);
+@@ -233,7 +243,8 @@
+   int fence_result = output_fences_.Complete(!ret);
+   if (!ret) ret = fence_result;
+   if (ret) {
+-    DRM_LOGE("drmModeAtomicCommit failed with error %d (%s).", errno, strerror(errno));
++    DRM_LOGE("Atomic request failed: result=%d adapter_error=%d errno=%d (%s).",
++             ret, plane_error_, plane_error_ ? 0 : errno, plane_error_ ? "not submitted" : strerror(errno));
+   }
+ 
+   drm_mgr_->GetPlaneMgr()->PostCommit(token_.crtc_id, !ret);
+--- a/sdm/libs/core/drm/hw_device_drm.cpp
++++ b/sdm/libs/core/drm/hw_device_drm.cpp
+@@ -1782,7 +1782,18 @@
+     }
+   }
+ 
++  if (dpu_info_.kernel_managed_dpu && first_cycle_) {
++    for (const auto &layer : hw_layers->info.hw_layers) {
++      const auto &buffer = layer.input_buffer;
++      DLOGI("DPU_COMMIT target handle=%" PRIu64 " id=%" PRIu64 " fd=%d format=%d",
++            buffer.buffer_id, buffer.handle_id, buffer.planes[0].fd, buffer.format);
++    }
++  }
+   int ret = drm_atomic_intf_->Commit(sync_commit, false /* retain_planes*/);
++  if (dpu_info_.kernel_managed_dpu && first_cycle_) {
++    DLOGI("DPU_COMMIT result=%d release_fd=%" PRId64 " retire_fd=%" PRId64,
++          ret, release_fence_fd, retire_fence_fd);
++  }
+   shared_ptr<Fence> release_fence = Fence::Create(INT(release_fence_fd), "release");
+   shared_ptr<Fence> retire_fence = Fence::Create(INT(retire_fence_fd), "retire");
+   if (ret) {

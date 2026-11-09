@@ -1,0 +1,129 @@
+#include <assert.h>
+#include <errno.h>
+#include <stdint.h>
+#include <memory>
+#include <unordered_map>
+#include <vector>
+#include <drm_fourcc.h>
+#include <drm_interface.h>
+using namespace sde_drm;
+@FORMATS_ENUM@
+enum DisplayError {kErrorNone,kErrorParameters,kErrorHardware};
+enum {kMaxSDELayers=8,kRotatorNone=0,kRotatorOffline=1,
+      VIDEO_FBID_LIMIT=4,UI_FBID_LIMIT=3,OFFLINE_ROTATOR_FBID_LIMIT=2};
+#define UINT32(x) static_cast<uint32_t>(x)
+#define DLOGE(...) ((void)0)
+#define DLOGW(...) ((void)0)
+struct LayerBuffer {
+ struct {int fd=-1;}planes[4];
+ struct {bool video=false,interlace=false;}flags;
+ uint64_t handle_id=0,buffer_id=0;
+ uint32_t width=0,height=0;
+ LayerBufferFormat format=kFormatRGBA8888;
+};
+struct LayerBufferObject {virtual ~LayerBufferObject()=default;};
+struct FrameBufferObject:LayerBufferObject {
+ uint32_t id,w,h;LayerBufferFormat format;
+ FrameBufferObject(uint32_t i,LayerBufferFormat f,uint32_t x,uint32_t y):id(i),w(x),h(y),format(f){}
+ bool IsEqual(LayerBufferFormat f,uint32_t x,uint32_t y){return format==f&&w==x&&h==y;}
+ uint32_t GetFbId(){return id;}
+};
+struct BufferMap {std::unordered_map<uint64_t,std::shared_ptr<LayerBufferObject>>buffer_map;};
+struct Layer {LayerBuffer input_buffer;std::shared_ptr<BufferMap>buffer_map=std::make_shared<BufferMap>();};
+struct HWRotateInfo {bool valid=false;};
+struct HWRotatorSession {int mode=0;HWRotateInfo hw_rotate_info[2];LayerBuffer output_buffer;};
+struct Config {bool use_solidfill_stage=false;HWRotatorSession hw_rotator_session;};
+struct HWLayersInfo {std::vector<Layer>hw_layers;};
+struct HWLayers {HWLayersInfo info;Config config[kMaxSDELayers];};
+struct DRMBuffer {int fd=-1;uint32_t width=0,height=0,drm_format=0,num_planes=0;
+ uint64_t drm_format_modifier=0;uint32_t stride[4]={},offset[4]={};};
+struct AllocatedBufferInfo {int fd=-1;uint32_t aligned_width=0,aligned_height=0;
+ LayerBufferFormat format=kFormatRGBA8888;const void*native_handle=nullptr;};
+static int layout_error,create_error,layout_calls,create_calls,fail_create_call;
+static bool missing_master,zero_fb;
+static uint32_t last_format,last_width,last_height;static uint64_t last_modifier;
+struct BufferAllocator {
+ int GetBufferLayout(const AllocatedBufferInfo &buffer,uint32_t*stride,uint32_t*offset,uint32_t*count) {
+  ++layout_calls;assert(buffer.fd>=0&&buffer.native_handle);stride[0]=128;offset[0]=0;*count=1;return layout_error;
+ }
+};
+struct DRMMaster {
+ static DRMMaster master;
+ static int GetInstance(DRMMaster **p){*p=missing_master?nullptr:&master;return missing_master?-ENODEV:0;}
+ int CreateFbId(const DRMBuffer&buffer,uint32_t*fb) {
+  ++create_calls;last_format=buffer.drm_format;last_modifier=buffer.drm_format_modifier;
+  last_width=buffer.width;last_height=buffer.height;
+  if(create_error||(fail_create_call&&create_calls==fail_create_call))return create_error?create_error:-ENOMEM;
+  *fb=zero_fb?0:uint32_t(100+create_calls);return 0;
+ }
+};
+DRMMaster DRMMaster::master;
+struct HWDeviceDRM {
+ struct Registry {
+  explicit Registry(BufferAllocator*a):buffer_allocator_(a){}
+  bool disable_fbid_cache_=false,kernel_managed_dpu_=false;
+  BufferAllocator*buffer_allocator_;uint8_t fbid_cache_limit_=UI_FBID_LIMIT;
+  DisplayError Register(HWLayers*);
+  int CreateFbId(const LayerBuffer&,uint32_t*);
+  int MapBufferToFbId(Layer*,const LayerBuffer&);
+ };
+};
+@GET_DRM_FORMAT@
+@CREATE_FB_ID@
+@MAP_BUFFER@
+@REGISTER@
+static Layer layer(uint64_t id=1) {
+ Layer l;l.input_buffer.planes[0].fd=12;l.input_buffer.width=320;l.input_buffer.height=240;
+ l.input_buffer.buffer_id=1234;l.input_buffer.handle_id=id;return l;
+}
+static void reset() {
+ layout_error=create_error=layout_calls=create_calls=fail_create_call=0;
+ missing_master=zero_fb=false;
+}
+int main() {
+ BufferAllocator allocator;HWDeviceDRM::Registry registry(&allocator);registry.kernel_managed_dpu_=true;
+ HWLayers layers;layers.info.hw_layers.push_back(layer());
+ assert(registry.Register(&layers)==kErrorNone&&create_calls==1&&layout_calls==1);
+ assert(registry.Register(&layers)==kErrorNone&&create_calls==1); // genuine cached FB
+ for(int scenario=0;scenario<5;++scenario) {
+  reset();layers.info.hw_layers[0]=layer();
+  switch(scenario) {
+   case 0:layout_error=-EINVAL;break;
+   case 1:create_error=-ENOMEM;break;
+   case 2:zero_fb=true;break;
+   case 3:missing_master=true;break;
+   case 4:layers.info.hw_layers[0].input_buffer.planes[0].fd=-1;break;
+  }
+  assert(registry.Register(&layers)==kErrorHardware);
+  assert(layers.info.hw_layers[0].buffer_map->buffer_map.empty());
+  if(scenario==0)assert(create_calls==0&&layout_calls==1);
+  if(scenario>=3)assert(create_calls==0&&layout_calls==0);
+ }
+ reset();layers.info.hw_layers[0]=layer();layers.info.hw_layers.push_back(layer(2));fail_create_call=2;
+ assert(registry.Register(&layers)==kErrorHardware&&create_calls==2);
+ assert(layers.info.hw_layers[0].buffer_map->buffer_map.size()==1);
+ assert(layers.info.hw_layers[1].buffer_map->buffer_map.empty());
+ reset();assert(registry.Register(&layers)==kErrorNone&&create_calls==1);
+ reset();layers.info.hw_layers.resize(1);layers.info.hw_layers[0]=layer();
+ layers.config[0].use_solidfill_stage=true;layers.info.hw_layers[0].input_buffer.planes[0].fd=-1;
+ assert(registry.Register(&layers)==kErrorNone&&create_calls==0);
+ layers.config[0]={};layers.info.hw_layers[0]=layer();
+ for(auto format:{kFormatYCbCr420P010,kFormatYCbCr420P010Venus}) {
+  reset();auto l=layer();l.input_buffer.format=format;
+  assert(registry.MapBufferToFbId(&l,l.input_buffer)==0);
+  assert(last_format==DRM_FORMAT_P010&&last_modifier==DRM_FORMAT_MOD_LINEAR);
+  reset();l=layer();l.input_buffer.format=format;registry.kernel_managed_dpu_=false;
+  assert(registry.MapBufferToFbId(&l,l.input_buffer)==0);
+  assert(last_format==DRM_FORMAT_NV12&&last_modifier==DRM_FORMAT_MOD_QCOM_DX);
+  registry.kernel_managed_dpu_=true;
+ }
+ reset();auto l=layer();l.input_buffer.format=static_cast<LayerBufferFormat>(0x7fff);
+ assert(registry.MapBufferToFbId(&l,l.input_buffer)==-EOPNOTSUPP&&layout_calls==0&&create_calls==0);
+ reset();layers.info.hw_layers[0]=layer();layers.config[0].hw_rotator_session.mode=kRotatorOffline;
+ layers.config[0].hw_rotator_session.hw_rotate_info[0].valid=true;
+ layers.config[0].hw_rotator_session.output_buffer=layer(2).input_buffer;
+ layers.config[0].hw_rotator_session.output_buffer.planes[0].fd=-1;
+ assert(registry.Register(&layers)==kErrorHardware);
+ layers.info.hw_layers.resize(kMaxSDELayers+1);
+ assert(registry.Register(&layers)==kErrorParameters&&registry.Register(nullptr)==kErrorParameters);
+}

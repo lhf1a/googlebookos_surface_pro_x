@@ -29,6 +29,7 @@ def section(data, table, name):
 
 
 class P010ElfTests(unittest.TestCase):
+    recipe_name = "stagefright-p010-elf.json"
     @classmethod
     def setUpClass(cls):
         path = Path(os.environ.get("SQ2_STAGEFRIGHT_INPUT", str(
@@ -36,7 +37,7 @@ class P010ElfTests(unittest.TestCase):
         if not path.is_file():
             raise unittest.SkipTest("Actual private libstagefright fixture is unavailable")
         cls.original = path.read_bytes()
-        cls.recipe = json.loads((ROOT / "configs/stagefright-p010-elf.json").read_text())
+        cls.recipe = json.loads((ROOT / "configs" / cls.recipe_name).read_text())
         cls.patched, cls.audit = patcher.patch(cls.original, cls.recipe)
 
     def test_reject_unknown_input(self):
@@ -76,8 +77,8 @@ class P010ElfTests(unittest.TestCase):
             self.assertEqual(old[name][3], new[name][3], name)
             self.assertEqual(section(self.original, old, name),
                              section(self.patched, new, name), name)
-        self.assertEqual(new[".dynsym"][5] - old[".dynsym"][5], 3 * 24)
-        self.assertEqual(new[".rela.plt"][5] - old[".rela.plt"][5], 3 * 24)
+        self.assertEqual(new[".dynsym"][5] - old[".dynsym"][5], len(self.recipe["entries"]) * 24)
+        self.assertEqual(new[".rela.plt"][5] - old[".rela.plt"][5], len(self.recipe["entries"]) * 24)
 
     def test_branch_slots_are_readonly_after_binding(self):
         ph, table = headers(self.patched)
@@ -104,6 +105,10 @@ class P010ElfTests(unittest.TestCase):
         recipe = dict(self.recipe, target_sha256=hashlib.sha256(data).hexdigest())
         with self.assertRaisesRegex(ValueError, "RELRO"):
             patcher.patch(bytes(data), recipe)
+
+
+class HdrClearElfTests(P010ElfTests):
+    recipe_name = "stagefright-hdr-clear-elf.json"
 
 
 if __name__ == "__main__":

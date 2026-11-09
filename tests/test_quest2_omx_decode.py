@@ -38,6 +38,34 @@ class OmxDecodeClient(unittest.TestCase):
             if result.returncode:
                 raise AssertionError(result.stderr)
 
+    def test_native_output_opaque_handle_and_read_only_frame_bounds(self):
+        binary = self.root / "native-output"
+        subprocess.run([CC, "-std=gnu11", "-Wall", "-Wextra", "-Werror",
+            "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+            "-I" + str(HEADERS),
+            str(ROOT / "tests/fixtures/quest2_video/omx-native-output.c"),
+            "-o", str(binary)], check=True, capture_output=True, text=True)
+        result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("NATIVE_OUTPUT:", result.stdout)
+
+    def test_display_owned_buffers_require_real_release_before_refill_or_free(self):
+        binary = self.root / "display-ownership"
+        android_headers = Path(os.environ.get("QUEST2_ANDROID_INCLUDE",
+            Path.home() / ".cache/sq2-quest2-hidl/include"))
+        if not (android_headers / "cutils/native_handle.h").exists():
+            self.skipTest("set QUEST2_ANDROID_INCLUDE to Android native_handle headers")
+        subprocess.run([CC, "-std=gnu11", "-O1", "-Wall", "-Wextra", "-Werror",
+            "-Wno-unused-function", "-ffunction-sections", "-fdata-sections",
+            "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+            "-I" + str(HEADERS), "-I" + str(android_headers),
+            str(ROOT / "tests/fixtures/quest2_video/omx-display-ownership.c"),
+            "-Wl,--gc-sections", "-pthread", "-ldl", "-o", str(binary)],
+            check=True, capture_output=True, text=True)
+        result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("DISPLAY_OWNERSHIP:", result.stdout)
+
     def test_hidl_port_wire_abi(self):
         binary = self.root / 'port-abi-test'
         subprocess.run([CC, '-std=c11', '-Wall', '-Wextra', '-Werror',

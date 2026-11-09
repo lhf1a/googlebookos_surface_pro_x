@@ -1,0 +1,344 @@
+--- a/sdm/libs/core/drm/hw_device_drm.h
++++ b/sdm/libs/core/drm/hw_device_drm.h
+@@ -68,6 +68,7 @@
+   virtual DisplayError Deinit();
+   void GetDRMDisplayToken(sde_drm::DRMDisplayToken *token) const;
+   bool IsPrimaryDisplay() const { return hw_panel_info_.is_primary_panel; }
++  bool IsKernelManagedDpu() const { return dpu_info_.kernel_managed_dpu; }
+   virtual PanelFeaturePropertyIntf *GetPanelFeaturePropertyIntf() { return nullptr; }
+   virtual DisplayError GetPanelBrightnessBasePath(std::string *base_path) const {
+     return kErrorNotSupported;
+--- a/sdm/libs/core/drm/hw_events_drm.h
++++ b/sdm/libs/core/drm/hw_events_drm.h
+@@ -33,6 +33,7 @@
+ #include <drm_interface.h>
+ #include <sys/poll.h>
+ #include <sys/inotify.h>
++#include <atomic>
+ #include <map>
+ #include <mutex>
+ #include <string>
+@@ -70,6 +71,11 @@
+   static void VSyncHandlerCallback(int fd, unsigned int sequence, unsigned int tv_sec,
+                                    unsigned int tv_usec, void *data);
+ 
++  static void KernelVSyncHandlerCallback(int fd, unsigned int sequence, unsigned int tv_sec,
++                                         unsigned int tv_usec, void *data);
++  static std::atomic<unsigned long> next_vsync_cookie_;
++  static thread_local HWEventsDRM *vsync_dispatcher_;
++  unsigned long vsync_cookie_ = 0;
+   void *DisplayEventHandler();
+   void HandleVSync(char *data);
+   void HandleIdleTimeout(char *data);
+@@ -83,7 +89,8 @@
+   void HandleHistogram(char *data);
+   void HandleBacklightEvent(char *data);
+   int SetHwRecoveryEvent(const uint32_t hw_event_code, HWRecoveryEvent *sdm_event_code);
+-  void PopulateHWEventData(const vector<HWEvent> &event_list);
++  DisplayError PopulateHWEventData(const vector<HWEvent> &event_list);
++  int OpenDrmEventFd();
+   void WakeUpEventThread();
+   DisplayError SetEventParser();
+   DisplayError InitializePollFd();
+@@ -100,7 +107,9 @@
+   vector<pollfd> poll_fds_{};
+   pthread_t event_thread_{};
+   std::string event_thread_name_ = "SDM_EventThread";
+-  bool exit_threads_ = false;
++  std::atomic<bool> exit_threads_{false};
++  bool thread_started_ = false;
++  bool kernel_managed_dpu_ = false;
+   uint32_t vsync_index_ = UINT32_MAX;
+   uint32_t histogram_index_ = UINT32_MAX;
+   bool vsync_enabled_ = false;
+--- a/sdm/libs/core/drm/hw_events_drm.cpp
++++ b/sdm/libs/core/drm/hw_events_drm.cpp
+@@ -37,6 +37,9 @@
+ #include <sys/prctl.h>
+ #include <sys/resource.h>
+ #include <sys/types.h>
++#include <sys/stat.h>
++#include <sys/eventfd.h>
++#include <unistd.h>
+ #include <utils/constants.h>
+ #include <utils/debug.h>
+ #include <utils/sys.h>
+@@ -72,9 +75,33 @@
+ 
+ using drm_utils::DRMMaster;
+ 
++std::atomic<unsigned long> HWEventsDRM::next_vsync_cookie_{1};
++thread_local HWEventsDRM *HWEventsDRM::vsync_dispatcher_ = nullptr;
++
++int HWEventsDRM::OpenDrmEventFd() {
++  DRMMaster *master = nullptr;
++  int source = -1;
++  if (DRMMaster::GetInstance(&master) < 0 || !master) return -1;
++  master->GetHandle(&source);
++  if (source < 0) return -1;
++  char *path = drmGetDeviceNameFromFd2(source);
++  if (!path) return -1;
++  int fd = open(path, O_RDWR | O_CLOEXEC | O_NONBLOCK);
++  free(path);
++  if (fd < 0) return -1;
++  struct stat original = {}, reopened = {};
++  if (fstat(source, &original) || fstat(fd, &reopened) ||
++      !S_ISCHR(original.st_mode) || !S_ISCHR(reopened.st_mode) ||
++      original.st_rdev != reopened.st_rdev) {
++    close(fd);
++    return -1;
++  }
++  // A separate open owns a separate DRM event queue; dup would share the master's.
++  return fd;
++}
++
+ DisplayError HWEventsDRM::InitializePollFd() {
+   for (uint32_t i = 0; i < event_data_list_.size(); i++) {
+-    char data[kMaxStringLength]{};
+     HWEventData &event_data = event_data_list_[i];
+     poll_fds_[i] = {};
+     poll_fds_[i].fd = -1;
+@@ -85,23 +112,23 @@
+         if (is_primary_) {
+           DRMMaster *master = nullptr;
+           int ret = DRMMaster::GetInstance(&master);
+-          if (ret < 0) {
++          if (ret < 0 || !master) {
+             DLOGE("Failed to acquire DRMMaster instance");
+             return kErrorNotSupported;
+           }
+           master->GetHandle(&poll_fds_[i].fd);
+         } else {
+-          poll_fds_[i].fd = drmOpen("msm_drm", nullptr);
+-        }
++          poll_fds_[i].fd = kernel_managed_dpu_ ? OpenDrmEventFd() : drmOpen("msm_drm", nullptr);
++        }
++        if (poll_fds_[i].fd < 0) return kErrorResources;
+         vsync_index_ = i;
+       } break;
+       case HWEvent::EXIT: {
+         // Create an eventfd to be used to unblock the poll system call when
+         // a thread is exiting.
+-        poll_fds_[i].fd = Sys::eventfd_(0, 0);
++        poll_fds_[i].fd = Sys::eventfd_(0, EFD_CLOEXEC | EFD_NONBLOCK);
++        if (poll_fds_[i].fd < 0) return kErrorResources;
+         poll_fds_[i].events |= POLLIN;
+-        // Clear any existing data
+-        Sys::pread_(poll_fds_[i].fd, data, kMaxStringLength, 0);
+       } break;
+       case HWEvent::IDLE_NOTIFY: {
+         poll_fds_[i].fd = drmOpen("msm_drm", nullptr);
+@@ -218,44 +245,74 @@
+   return error;
+ }
+ 
+-void HWEventsDRM::PopulateHWEventData(const vector<HWEvent> &event_list) {
+-  for (auto &event : event_list) {
++DisplayError HWEventsDRM::PopulateHWEventData(const vector<HWEvent> &event_list) {
++  event_data_list_.clear();
++  poll_fds_.clear();
++  vsync_index_ = histogram_index_ = idle_notify_index_ = panel_dead_index_ =
++      idle_pc_index_ = hw_recovery_index_ = backlight_event_index_ = UINT32_MAX;
++  for (auto event : event_list) {
++    if (kernel_managed_dpu_ && event != HWEvent::VSYNC && event != HWEvent::EXIT &&
++        (event != HWEvent::BACKLIGHT_EVENT || brightness_node_.empty())) {
++      DLOGI("Event %d is unsupported by the Linux DPU backend", static_cast<int>(event));
++      continue;
++    }
+     HWEventData event_data;
+     event_data.event_type = event;
+     event_data_list_.push_back(std::move(event_data));
+   }
+-
+-  SetEventParser();
+-  InitializePollFd();
++  if (std::none_of(event_data_list_.begin(), event_data_list_.end(),
++                  [](const HWEventData &event) { return event.event_type == HWEvent::EXIT; }))
++    return kErrorParameters;
++
++  poll_fds_.assign(event_data_list_.size(), pollfd{-1, 0, 0});
++  DisplayError error = SetEventParser();
++  if (error != kErrorNone) return error;
++  return InitializePollFd();
+ }
+ 
+ DisplayError HWEventsDRM::Init(int display_id, DisplayType display_type,
+                                HWEventHandler *event_handler, const vector<HWEvent> &event_list,
+                                const HWInterface *hw_intf) {
+-  if (!event_handler)
++  if (!event_handler || !hw_intf || thread_started_)
+     return kErrorParameters;
+ 
+   static_cast<const HWDeviceDRM *>(hw_intf)->GetDRMDisplayToken(&token_);
+   is_primary_ = static_cast<const HWDeviceDRM *>(hw_intf)->IsPrimaryDisplay();
++  kernel_managed_dpu_ = static_cast<const HWDeviceDRM *>(hw_intf)->IsKernelManagedDpu();
+   std::string backlight_path;
+-  static_cast<const HWDeviceDRM *>(hw_intf)->GetPanelBrightnessBasePath(&backlight_path);
++  DisplayError brightness_error =
++      static_cast<const HWDeviceDRM *>(hw_intf)->GetPanelBrightnessBasePath(&backlight_path);
+   brightness_node_ = backlight_path + "brightness";
++  if (kernel_managed_dpu_) {
++    struct stat status = {};
++    if (brightness_error != kErrorNone || backlight_path.empty() ||
++        stat(brightness_node_.c_str(), &status) || !S_ISREG(status.st_mode)) {
++      brightness_node_.clear();
++    }
++  }
+ 
+   DLOGI("Setup event handler for display %d-%d, CRTC %d, Connector %d", display_id, display_type,
+         token_.crtc_id, token_.conn_id);
+ 
+   event_handler_ = event_handler;
+-  poll_fds_.resize(event_list.size());
+-
+-  DLOGI("poll_fd size %d", (int)poll_fds_.size());
+-  event_thread_name_ += " - " + std::to_string(display_id) + "-" + std::to_string(display_type);
+-
+-  PopulateHWEventData(event_list);
+-
+-  if (pthread_create(&event_thread_, NULL, &DisplayEventThread, this) < 0) {
+-    DLOGE("Failed to start %s, error = %s", event_thread_name_.c_str(), strerror(errno));
++  exit_threads_ = false;
++  vsync_enabled_ = vsync_registered_ = false;
++  vsync_cookie_ = next_vsync_cookie_.fetch_add(1, std::memory_order_relaxed);
++  event_thread_name_ = "SDM_EventThread - " + std::to_string(display_id) + "-" + std::to_string(display_type);
++
++  DisplayError error = PopulateHWEventData(event_list);
++  if (error != kErrorNone) {
++    CloseFds();
++    return error;
++  }
++  int thread_error = pthread_create(&event_thread_, NULL, &DisplayEventThread, this);
++  if (thread_error != 0) {
++    DLOGE("Failed to start %s, error = %s", event_thread_name_.c_str(), strerror(thread_error));
++    CloseFds();
+     return kErrorResources;
+   }
++  thread_started_ = true;
++  if (kernel_managed_dpu_) return kErrorNone;
+ 
+   RegisterPanelDead(true);
+   RegisterIdleNotify(true);
+@@ -283,20 +340,24 @@
+ 
+ DisplayError HWEventsDRM::Deinit() {
+   exit_threads_ = true;
+-  RegisterPanelDead(false);
+-  RegisterIdleNotify(false);
+-  RegisterIdlePowerCollapse(false);
+-  if (!disable_hw_recovery_) {
+-    RegisterHwRecovery(false);
+-  }
+-  if (enable_hist_interrupt_) {
+-    RegisterHistogram(false);
+-  }
+-  Sys::pthread_cancel_(event_thread_);
+-  WakeUpEventThread();
+-  pthread_join(event_thread_, NULL);
++  if (!kernel_managed_dpu_) {
++    RegisterPanelDead(false);
++    RegisterIdleNotify(false);
++    RegisterIdlePowerCollapse(false);
++    if (!disable_hw_recovery_) RegisterHwRecovery(false);
++    if (enable_hist_interrupt_) RegisterHistogram(false);
++  }
++  if (thread_started_) {
++    {
++      std::lock_guard<std::mutex> lock(vsync_mutex_);
++      vsync_enabled_ = false;
++      vsync_registered_ = false;
++    }
++    WakeUpEventThread();
++    pthread_join(event_thread_, NULL);
++    thread_started_ = false;
++  }
+   CloseFds();
+-
+   return kErrorNone;
+ }
+ 
+@@ -318,12 +379,13 @@
+     } break;
+     case HWEvent::BACKLIGHT_EVENT: {
+       std::lock_guard<std::mutex> lock(backlight_mutex_);
+-      if (backlight_event_index_ == UINT32_MAX) {
+-        return kErrorResources;
++      if (backlight_event_index_ >= poll_fds_.size() ||
++          poll_fds_[backlight_event_index_].fd < 0) {
++        return kErrorNotSupported;
+       }
+       int inotify_fd = poll_fds_[backlight_event_index_].fd;
+       if (!enable) {
+-        if (backlight_wd_ > 0) {
++        if (backlight_wd_ >= 0) {
+           Sys::inotify_rm_watch_(inotify_fd, backlight_wd_);
+         }
+         backlight_wd_ = -1;
+@@ -358,7 +420,8 @@
+ }
+ 
+ void HWEventsDRM::CloseFds() {
+-  for (uint32_t i = 0; i < event_data_list_.size(); i++) {
++  for (uint32_t i = 0; i < poll_fds_.size(); i++) {
++    if (poll_fds_[i].fd < 0) continue;
+     switch (event_data_list_[i].event_type) {
+       case HWEvent::VSYNC:
+         if (!is_primary_) {
+@@ -372,7 +435,8 @@
+         break;
+       case HWEvent::BACKLIGHT_EVENT: {
+         std::lock_guard<std::mutex> lock(backlight_mutex_);
+-        Sys::inotify_rm_watch_(poll_fds_[i].fd, backlight_wd_);
++        if (backlight_wd_ >= 0) Sys::inotify_rm_watch_(poll_fds_[i].fd, backlight_wd_);
++        backlight_wd_ = -1;
+         Sys::close_(poll_fds_[i].fd);
+         poll_fds_[i].fd = -1;
+       } break;
+@@ -485,6 +549,8 @@
+ 
+ DisplayError HWEventsDRM::RegisterVSync() {
+   DTRACE_SCOPED();
++  if (vsync_index_ >= poll_fds_.size() || poll_fds_[vsync_index_].fd < 0)
++    return kErrorNotSupported;
+   drmVBlank vblank {};
+   uint32_t high_crtc = token_.crtc_index << DRM_VBLANK_HIGH_CRTC_SHIFT;
+   vblank.request.type = (drmVBlankSeqType)(DRM_VBLANK_RELATIVE | DRM_VBLANK_EVENT |
+@@ -492,7 +558,9 @@
+   vblank.request.sequence = 1;
+   // DRM hack to pass in context to unused field signal. Driver will write this to the node being
+   // polled on, and will be read as part of drm event handling and sent to handler
+-  vblank.request.signal = reinterpret_cast<unsigned long>(this);  // NOLINT
++  // The borrowed primary fd can retain events beyond this object's lifetime.
++  vblank.request.signal = kernel_managed_dpu_ ? vsync_cookie_ :
++      reinterpret_cast<unsigned long>(this);  // NOLINT
+   int error = drmWaitVBlank(poll_fds_[vsync_index_].fd, &vblank);
+   if (error < 0) {
+     DLOGE("drmWaitVBlank failed with err %d", errno);
+@@ -645,8 +713,11 @@
+ 
+   drmEventContext event = {};
+   event.version = DRM_EVENT_CONTEXT_VERSION;
+-  event.vblank_handler = &HWEventsDRM::VSyncHandlerCallback;
++  event.vblank_handler = kernel_managed_dpu_ ? &HWEventsDRM::KernelVSyncHandlerCallback :
++      &HWEventsDRM::VSyncHandlerCallback;
++  vsync_dispatcher_ = this;
+   int error = drmHandleEvent(poll_fds_[vsync_index_].fd, &event);
++  vsync_dispatcher_ = nullptr;
+   if (error != 0) {
+     DLOGE("drmHandleEvent failed: %i", error);
+   }
+@@ -701,6 +772,14 @@
+   }
+ 
+   return;
++}
++
++void HWEventsDRM::KernelVSyncHandlerCallback(int fd, unsigned int sequence, unsigned int tv_sec,
++                                             unsigned int tv_usec, void *data) {
++  HWEventsDRM *handler = vsync_dispatcher_;
++  if (!handler || handler->exit_threads_ ||
++      reinterpret_cast<unsigned long>(data) != handler->vsync_cookie_) return;
++  VSyncHandlerCallback(fd, sequence, tv_sec, tv_usec, handler);
+ }
+ 
+ void HWEventsDRM::VSyncHandlerCallback(int fd, unsigned int sequence, unsigned int tv_sec,

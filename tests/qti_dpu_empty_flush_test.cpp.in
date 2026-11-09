@@ -1,0 +1,232 @@
+// Only DRM/framework boundaries are test doubles; methods below come from actual source.
+#include <cassert>
+#include <cerrno>
+#include <cstdint>
+#include <cinttypes>
+#include <cstdio>
+#include <cstdarg>
+#include <fcntl.h>
+#include <memory>
+#include <set>
+#include <sys/eventfd.h>
+#include <poll.h>
+#include <unistd.h>
+#include <vector>
+using std::shared_ptr;
+#define DTRACE_SCOPED() do {} while (0)
+#define DLOGE(...) do {} while (0)
+#define DLOGI(...) do {} while (0)
+#define DLOGW(...) do {} while (0)
+#define INT(v) static_cast<int>(v)
+#define UINT32(v) static_cast<uint32_t>(v)
+
+enum DisplayError { kErrorNone, kErrorHardware, kErrorParameters, kErrorPermission, kErrorShutDown };
+namespace HWC2 { enum class Error { None, NoResources, BadParameter, Unsupported }; }
+enum { kTUIStateNone, kTUIStateStart, kTUIStateEnd };
+enum { kSecureEventMax, kTUITransitionEnd, kSecureDisplayEnd, kTUITransitionUnPrepare };
+struct Fence {
+  int fd;
+  explicit Fence(int value) : fd(value) {}
+  ~Fence() { if (fd >= 0) close(fd); }
+  static shared_ptr<Fence> Create(int fd, const char *) {
+    return fd >= 0 ? std::make_shared<Fence>(fd) : nullptr;
+  }
+};
+struct LayerBuffer { shared_ptr<Fence> release_fence, acquire_fence; };
+struct Layer {
+  LayerBuffer input_buffer;
+  struct { bool single_buffer = false; } flags;
+  struct { struct {} flags; } request;
+};
+struct LayerStack {
+  shared_ptr<Fence> retire_fence;
+  struct { bool geometry_changed = true; } flags;
+};
+struct HWLayers { struct { LayerStack *stack = nullptr; } info; };
+enum class DRMOps { CRTC_GET_RELEASE_FENCE, CONNECTOR_GET_RETIRE_FENCE };
+struct Atomic {
+  int result = 0, request_result = 0, calls = 0, release_requests = 0, retire_requests = 0;
+  int64_t *retire = nullptr;
+  int last_fd = -1;
+  bool last_sync = false, last_retain = true;
+  int Perform(DRMOps op, uint32_t object, ...) {
+    va_list ap; va_start(ap, object); auto output = va_arg(ap, int64_t *); va_end(ap);
+    *output = -1;
+    if (op == DRMOps::CRTC_GET_RELEASE_FENCE) ++release_requests;
+    else { ++retire_requests; retire = output; }
+    return request_result;
+  }
+  int Commit(bool synchronous, bool retain_planes) {
+    ++calls; last_sync = synchronous; last_retain = retain_planes;
+    int status = request_result ? request_result : result;
+    if (!status && retire) {
+      last_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+      assert(last_fd >= 0); *retire = last_fd;
+    }
+    retire = nullptr;
+    return status;
+  }
+};
+class HWDeviceDRM {
+ public:
+  Atomic atomic;
+  Atomic *drm_atomic_intf_ = &atomic;
+  struct { bool kernel_managed_dpu = true; } dpu_info_;
+  struct { uint32_t crtc_id = 4, conn_id = 5; } token_;
+  int tui_state_ = kTUIStateNone;
+  bool secure_display_active_ = false, first_null_cycle_ = false;
+  int clears = 0, resets = 0, dims = 0;
+  void ClearSolidfillStages() { ++clears; }
+  void ResetROI() { ++resets; }
+  void AddDimLayerIfNeeded() { ++dims; }
+  DisplayError Flush(HWLayers *);
+  DisplayError NullCommit(bool, bool);
+};
+@NULL_COMMIT@
+@HW_FLUSH@
+
+struct TestLayer {
+  Layer layer;
+  int geometry_resets = 0;
+  std::vector<shared_ptr<Fence>> releases;
+  Layer *GetSDMLayer() { return &layer; }
+  void ResetGeometryChanges() { ++geometry_resets; }
+  void PushBackReleaseFence(shared_ptr<Fence> fence) { releases.push_back(fence); }
+};
+struct ToneMapper {
+  int posts = 0;
+  bool IsActive() { return true; }
+  void PostCommit(LayerStack *) { ++posts; }
+};
+struct DisplayInterface {
+  HWDeviceDRM device;
+  int flushes = 0;
+  DisplayError Flush(LayerStack *stack) {
+    ++flushes; HWLayers layers; layers.info.stack = stack; return device.Flush(&layers);
+  }
+};
+enum class GeometryChanges { kNone, kChanged };
+class HWCDisplay {
+ public:
+  DisplayInterface display;
+  DisplayInterface *display_intf_ = &display;
+  TestLayer target;
+  TestLayer *client_target_ = &target;
+  ToneMapper *tone_mapper_ = nullptr;
+  std::set<TestLayer *> layer_set_;
+  LayerStack layer_stack_;
+  std::set<int> layer_changes_, layer_requests_;
+  shared_ptr<Fence> fbt_release_fence_;
+  bool has_client_composition_ = false, flush_ = false, flush_on_error_ = true;
+  bool client_connected_ = true, is_cmd_mode_ = false, validated_ = true;
+  bool swap_interval_zero_ = false, skip_commit_ = false;
+  bool display_pause_pending_ = false, display_paused_ = false;
+  bool pending_first_commit_config_ = false;
+  int pending_first_commit_config_index_ = 0, last_config = -1;
+  int secure_event_ = kSecureEventMax, sdm_id_ = 0, type_ = 0;
+  int dump_frame_count_ = 0, dump_frame_index_ = 0;
+  GeometryChanges geometry_changes_ = GeometryChanges::kChanged;
+  void SetActiveConfig(int config) { last_config = config; }
+  HWC2::Error ValidateEmpty(uint32_t *out_num_types, uint32_t *out_num_requests) {
+    auto status = HWC2::Error::None;
+    @EMPTY_VALIDATE@
+    return status;
+  }
+  HWC2::Error PostCommitLayerStack(shared_ptr<Fence> *);
+};
+@POST_COMMIT@
+
+bool pending(const shared_ptr<Fence> &fence) {
+  assert(fence && fcntl(fence->fd, F_GETFD) >= 0);
+  pollfd poller{fence->fd, POLLIN, 0};
+  return poll(&poller, 1, 0) == 0;
+}
+void signal_and_close(shared_ptr<Fence> &fence) {
+  int fd = fence->fd; uint64_t value = 1;
+  assert(write(fd, &value, sizeof(value)) == sizeof(value));
+  assert(!pending(fence));
+  fence.reset(); errno = 0;
+  assert(fcntl(fd, F_GETFD) == -1 && errno == EBADF);
+}
+
+int main() {
+#if ORIGINAL
+  int failures = 0;
+  HWCDisplay h; uint32_t types = 17, requests = 18;
+  h.ValidateEmpty(&types, &requests);
+  if (!h.flush_) { std::puts("EMPTY_VIDEO_NOT_FLUSHED"); ++failures; }
+  LayerStack stack; HWLayers layers; layers.info.stack = &stack;
+  assert(h.display.device.Flush(&layers) == kErrorNone);
+  if (!stack.retire_fence) { std::puts("FLUSH_PRESENT_MISSING"); ++failures; }
+  h.flush_ = true; h.display.device.atomic.result = -EIO;
+  shared_ptr<Fence> present;
+  if (h.PostCommitLayerStack(&present) == HWC2::Error::None && !h.flush_) {
+    std::puts("FLUSH_ERROR_SWALLOWED"); ++failures;
+  }
+  return failures;
+#else
+  // Video panels flush even while a framework client remains connected.
+  for (bool command : {false, true}) for (bool connected : {false, true}) {
+    HWCDisplay h; h.is_cmd_mode_ = command; h.client_connected_ = connected;
+    h.layer_changes_.insert(7); h.layer_requests_.insert(8); h.has_client_composition_ = true;
+    uint32_t types = 17, requests = 18;
+    assert(h.ValidateEmpty(&types, &requests) == HWC2::Error::None);
+    assert(h.flush_ == (!command || !connected));
+    assert(types == 0 && requests == 0 && h.layer_changes_.empty() && h.layer_requests_.empty());
+    assert(!h.has_client_composition_ && h.validated_);
+  }
+  // Actual Flush calls actual NullCommit, detaches planes, and exports only a present fd.
+  HWDeviceDRM device; LayerStack stack; HWLayers layers; layers.info.stack = &stack;
+  assert(device.Flush(&layers) == kErrorNone);
+  assert(device.atomic.calls == 1 && !device.atomic.last_retain && !device.atomic.last_sync);
+  assert(device.atomic.retire_requests == 1 && device.atomic.release_requests == 0);
+  assert(pending(stack.retire_fence));
+  signal_and_close(stack.retire_fence);
+  HWLayers missing_stack;
+  assert(device.Flush(nullptr) == kErrorParameters);
+  assert(device.Flush(&missing_stack) == kErrorParameters);
+  assert(device.atomic.calls == 1);
+  // Scoped real fds are owned once; errors neither return stale success nor export a new fence.
+  for (bool request_error : {false, true}) {
+    HWDeviceDRM failing; LayerStack failed_stack; HWLayers failed_layers; failed_layers.info.stack = &failed_stack;
+    if (request_error) failing.atomic.request_result = -ENOSPC; else failing.atomic.result = -EIO;
+    assert(failing.Flush(&failed_layers) != kErrorNone);
+    assert(!failed_stack.retire_fence && failing.atomic.last_fd == -1);
+  }
+  // The downstream path preserves its legacy contract and does not request Linux retire output.
+  HWDeviceDRM legacy; legacy.dpu_info_.kernel_managed_dpu = false;
+  assert(legacy.Flush(&layers) == kErrorNone);
+  assert(legacy.atomic.calls == 1 && legacy.atomic.retire_requests == 0 && legacy.atomic.release_requests == 0);
+  // HWC must preserve failed flush state for retry, clear the caller's old output, and propagate failure.
+  HWCDisplay failed; failed.flush_ = true; failed.display.device.atomic.result = -EIO;
+  auto old = Fence::Create(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK), "old");
+  shared_ptr<Fence> present = old;
+  assert(failed.PostCommitLayerStack(&present) == HWC2::Error::NoResources);
+  assert(!present && failed.flush_ && failed.display.flushes == 1);
+  assert(failed.target.geometry_resets == 0 && failed.geometry_changes_ == GeometryChanges::kChanged);
+  failed.display.device.atomic.result = 0;
+  assert(failed.PostCommitLayerStack(&present) == HWC2::Error::None);
+  assert(pending(present) && !failed.flush_ && failed.display.flushes == 2);
+  failed.layer_stack_.retire_fence.reset(); signal_and_close(present); old.reset();
+  // Exercise the present handoff and ordinary release circulation through 100 transitions.
+  HWCDisplay h; TestLayer layer;
+  for (int cycle = 0; cycle < 100; ++cycle) {
+    h.layer_set_.insert(&layer); h.flush_ = false;
+    auto release = Fence::Create(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK), "release");
+    layer.layer.input_buffer.release_fence = release;
+    h.layer_stack_.retire_fence = Fence::Create(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK), "normal-present");
+    assert(h.PostCommitLayerStack(&present) == HWC2::Error::None);
+    assert(layer.releases.back() == release && pending(present));
+    h.layer_stack_.retire_fence.reset(); signal_and_close(present);
+    h.layer_set_.clear(); layer.releases.clear(); layer.layer.input_buffer.release_fence.reset(); release.reset();
+    uint32_t types = 3, requests = 4; h.ValidateEmpty(&types, &requests);
+    assert(h.PostCommitLayerStack(&present) == HWC2::Error::None);
+    assert(!h.flush_ && pending(present));
+    h.layer_stack_.retire_fence.reset(); signal_and_close(present);
+  }
+  assert(h.display.flushes == 100 && h.display.device.atomic.calls == 100);
+  assert(h.display.device.atomic.release_requests == 0);
+  std::puts("PASS actual empty flush/present, fd ownership, error/retry, panel boundary, 100 transitions");
+  return 0;
+#endif
+}

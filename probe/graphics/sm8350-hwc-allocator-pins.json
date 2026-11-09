@@ -1,0 +1,23 @@
+{
+  "source_commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+  "patch": "patches/sm8350-hwc-allocator-mapper5.patch",
+  "patch_sha256": "f8171f297a4eda36f48554cf323d2946368841a5d79e4e2bfca1cdd53824cb89",
+  "files": {
+    "composer/hwc_buffer_allocator.h": {
+      "original": "2efad13cd664fab83dc1d92731e9c08d5c31964b306d529d59c0bbe9dfa585a1",
+      "patched": "a4cda5f326b4662395dc5c14331686fc59c5732478f21d058c355208e3512d71"
+    },
+    "composer/hwc_buffer_allocator.cpp": {
+      "original": "f9aef21f7405f71f38cddab0841d646754e5072a59dbc43cf7c7fcf10cbcfb17",
+      "patched": "1c2abc3f9ecb2f6eaf8b06ac3546a2c9f858aa2c39ebd734e917aa3bd39dd6d7"
+    },
+    "sdm/include/core/buffer_allocator.h": {
+      "original": "00f4fb49ff7d938aec421187c6b08d022da9b8017d169503c770437a53d2f79d",
+      "patched": "59dd04a05ac5daffffdc879d8922c2c803064cd62c88aefa2b87464a6ed670a5"
+    },
+    "sdm/libs/core/drm/hw_device_drm.cpp": {
+      "original": "7aee44a2b9646cff9802cc3154e0789ba814c01aa7c23ded17ca1a8c7eb55bff",
+      "patched": "4e7c9e31be439f58b4e70b9ed7fa3f624d02a7ecc18977b5047843ae0dd149e6"
+    }
+  }
+}

@@ -63,6 +63,67 @@ def apply_late_events(directory):
     path.write_text(text)
 
 
+def apply_flush_lock(directory, root):
+    path = directory/'core.h'
+    text = path.read_text()
+    anchor = '\tstruct mutex ctx_q_lock;'
+    fields = ('\n\tu32 sq2_omx_flush_flags;'
+              '\n\tbool sq2_omx_flush_output_pending;')
+    if text.count(anchor) != 1 or 'sq2_omx_flush_flags' in text:
+        raise ValueError('Unknown or already modified OMX queue lock layout')
+    decoder = directory/'vdec.c'
+    source = decoder.read_text()
+    anchor_flush = '\t\tret = hfi_session_flush(inst, HFI_FLUSH_OUTPUT, false);'
+    if source.count(anchor_flush) != 1:
+        raise ValueError('Unknown DRC output flush anchor')
+    source = source.replace(anchor_flush,
+        '\t\tret = IS_SQ2_HFI(inst->core) ? sq2_omx_flush_output(inst) :\n'
+        '\t\t\thfi_session_flush(inst, HFI_FLUSH_OUTPUT, false);', 1)
+    path.write_text(text.replace(anchor, anchor + fields, 1))
+    decoder.write_text(source)
+    shutil.copyfile(root/'probe/video/venus-sq2-omx.h', directory/'venus-sq2-omx.h')
+
+
+
+def apply_capture_start(directory):
+    path = directory/'helpers.c'
+    source = path.read_text()
+    begin = source.index('void venus_helper_vb2_buf_queue(')
+    end = source.index('\n}', begin) + 2
+    function = source[begin:end]
+    anchor = '\tcache_payload(inst, vb);'
+    guard = ('\t/* OMX may STREAMON capture before the decoder has actually started. */\n'
+             '\tif (IS_SQ2_HFI(inst->core) &&\n'
+             '\t    inst->session_type == VIDC_SESSION_TYPE_DEC &&\n'
+             '\t    V4L2_TYPE_IS_CAPTURE(vb->vb2_queue->type) &&\n'
+             '\t    !inst->streamon_cap)\n'
+             '\t\treturn;\n\n')
+    if (function.count(anchor) != 1 or guard in function or
+            function.count('v4l2_m2m_buf_queue(m2m_ctx, vbuf);') != 1 or
+            function.count('inst->codec_state == VENUS_DEC_STATE_DRC') != 1):
+        raise ValueError('Unknown or already modified capture queue start anchor')
+    function = function.replace(anchor, guard + anchor, 1)
+    path.write_text(source[:begin] + function + source[end:])
+
+
+
+def apply_unsubmitted_capture(directory, root):
+    path = directory/'helpers.c'
+    source = path.read_text()
+    begin = source.index('static int session_register_bufs(')
+    end = source.index('\n}', begin) + 2
+    function = source[begin:end]
+    anchor = '\t\tret = hfi_session_set_buffers(inst, &bd);'
+    binding = ('\t\tif (IS_SQ2_HFI(core) && inst->session_type == VIDC_SESSION_TYPE_DEC) {\n'
+               '\t\t\tret = sq2_venus_scope_bind(inst, buf->vb.vb2_buf.planes[0].mem_priv);\n'
+               '\t\t\tif (ret)\n\t\t\t\tbreak;\n\t\t}\n')
+    if function.count(anchor) != 1 or binding in function:
+        raise ValueError('Unknown or already modified static buffer registration anchor')
+    function = function.replace(anchor, binding + anchor, 1)
+    path.write_text(source[:begin] + function + source[end:])
+    shutil.copyfile(root/'probe/video/venus-sq2-vb2.h', directory/'venus-sq2-vb2.h')
+
+
 def apply(directory, root):
     def replace(path, before, after):
         s = path.read_text()
@@ -91,6 +152,9 @@ def apply(directory, root):
 
     apply_codec_config(directory, root)
     apply_late_events(directory)
+    apply_flush_lock(directory, root)
+    apply_capture_start(directory)
+    apply_unsubmitted_capture(directory, root)
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
@@ -99,8 +163,17 @@ if __name__ == '__main__':
     mode = p.add_mutually_exclusive_group()
     mode.add_argument('--codec-config-only', action='store_true')
     mode.add_argument('--late-events-only', action='store_true')
+    mode.add_argument('--flush-lock-only', action='store_true')
+    mode.add_argument('--capture-start-only', action='store_true')
+    mode.add_argument('--unsubmitted-capture-only', action='store_true')
     a = p.parse_args()
-    if a.late_events_only:
+    if a.unsubmitted_capture_only:
+        apply_unsubmitted_capture(a.directory, a.root)
+    elif a.capture_start_only:
+        apply_capture_start(a.directory)
+    elif a.flush_lock_only:
+        apply_flush_lock(a.directory, a.root)
+    elif a.late_events_only:
         apply_late_events(a.directory)
     else:
         (apply_codec_config if a.codec_config_only else apply)(a.directory, a.root)

@@ -61,7 +61,8 @@
       "/lib64/android.hardware.graphics.composer@2.1.so",
       "/lib64/android.hardware.graphics.composer@2.2.so",
       "/lib64/android.hardware.graphics.composer@2.3.so",
-      "/lib64/android.hardware.graphics.composer@2.4.so"
+      "/lib64/android.hardware.graphics.composer@2.4.so",
+      "/lib64/libhidltransport.so"
     ],
     "optional_2d_and_diagnostics": [
       "/lib64/libC2D2.so",
@@ -172,7 +173,8 @@
     "/lib64/vendor.qti.hardware.display.mapper@2.0.so": "1c9e759c77ab43bbb16ea011d11f6d1901b7b34c03af564f322edda3b96ffffb",
     "/lib64/vendor.qti.hardware.display.mapper@3.0.so": "5d767f3e71e9e90f5ffb0c2174eb41e93af1583a4f04499f02047ecb685e5bde",
     "/lib64/vendor.qti.hardware.display.mapperextensions@1.0.so": "e0a9c84249d49b3170744d88095e116cc486ab41373061db0d9ad2f1a5d50ece",
-    "/lib64/vendor.qti.hardware.display.mapperextensions@1.1.so": "31620247d56dbf67165b9c14ae905f5718c3b14a3cc2ba75044b77faaef236af"
+    "/lib64/vendor.qti.hardware.display.mapperextensions@1.1.so": "31620247d56dbf67165b9c14ae905f5718c3b14a3cc2ba75044b77faaef236af",
+    "/lib64/libhidltransport.so": "568b1049d690decfba54d3ba9b8c485c7a2c9aef09fc5b40e9384bc711a2c057"
   },
   "not_present_in_vendor_image": [
     "/lib64/libion.so",

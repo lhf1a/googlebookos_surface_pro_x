@@ -1,0 +1,425 @@
+{
+  "schema": 1,
+  "purpose": "SM8350 modern Android integration reference and opt-in mapper5 ComposerHandleImporter source candidate; not complete HWC",
+  "repositories": [
+    {
+      "repo": "LineageOS/android_device_oneplus_sm8350-common",
+      "branch": "lineage-24.0",
+      "commit": "34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5",
+      "git_tree": "34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5"
+    },
+    {
+      "repo": "LineageOS/android_hardware_qcom_display",
+      "branch": "lineage-23.2-caf-sm8350",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_tree": "e9bbe9a980d408af36b52f2abaae7c35647b7425"
+    },
+    {
+      "repo": "LineageOS/android_hardware_qcom-caf_common",
+      "branch": "lineage-23.2",
+      "commit": "5cd53603d36aaddd9ba9d882dad5411f1b30fbed",
+      "git_tree": "5cd53603d36aaddd9ba9d882dad5411f1b30fbed"
+    },
+    {
+      "repo": "LineageOS/android_device_xiaomi_sm8350-common",
+      "branch": "lineage-23.2",
+      "commit": "ea54a321886b99fcac3dcc8f72b287d6848f7434",
+      "git_tree": "ea54a321886b99fcac3dcc8f72b287d6848f7434"
+    }
+  ],
+  "files": [
+    {
+      "path": "android_device_oneplus_sm8350-common/extract-files.py",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_device_oneplus_sm8350-common/34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5/extract-files.py",
+      "commit": "34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5",
+      "git_blob": "cf91baba6c9f9127d6d1060b646545d2cc2b5898",
+      "sha256": "f1ccb0e19f5a15ee2732dcc263f182efd6a053ac6c7775b06ab61be3db76e3a3",
+      "bytes": 3034
+    },
+    {
+      "path": "android_hardware_qcom_display/Android.bp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/Android.bp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "042be01fb680cc8871c2517e906fc6d8f63f19a6",
+      "sha256": "d533f536140f026baeb05e5a11bc7d856388a7c51741b13a103f51ba964385e0",
+      "bytes": 2499
+    },
+    {
+      "path": "android_device_oneplus_sm8350-common/lineage.dependencies",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_device_oneplus_sm8350-common/34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5/lineage.dependencies",
+      "commit": "34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5",
+      "git_blob": "ff52b0c8a1dd537dec03dd3eefd8ec8324ecb55c",
+      "sha256": "8327eb87d7ff3b1984faf3b596d3c8d2ee963947f732f1d3fbade39613370a0d",
+      "bytes": 316
+    },
+    {
+      "path": "android_hardware_qcom_display/composer/Android.bp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/composer/Android.bp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "b7366a19c4017926b8af87d7d7433f1ad808e02c",
+      "sha256": "09e2ff5eb72ed4cb12934442792d65354362aa33d662803e3181f3439b95ecac",
+      "bytes": 2157
+    },
+    {
+      "path": "android_device_oneplus_sm8350-common/proprietary-files.txt",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_device_oneplus_sm8350-common/34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5/proprietary-files.txt",
+      "commit": "34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5",
+      "git_blob": "5e8efd76cbaaaf5ae0c89e94721abd5cdbd29392",
+      "sha256": "7b13897775e8c586cfbc53276bf39cf7f3bf6e77e15a9e5e6f426a68cde12634",
+      "bytes": 63567
+    },
+    {
+      "path": "android_hardware_qcom_display/composer/QtiComposerHandleImporter.cpp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/composer/QtiComposerHandleImporter.cpp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "72e15cfcb4c46ea1aa4eb09eb7ce07bf44530e69",
+      "sha256": "fa4b15fdce6761691d2ba9821e23139994129c964f447f455cb14c36b616b155",
+      "bytes": 5959
+    },
+    {
+      "path": "android_device_oneplus_sm8350-common/BoardConfigCommon.mk",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_device_oneplus_sm8350-common/34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5/BoardConfigCommon.mk",
+      "commit": "34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5",
+      "git_blob": "0822265e67bc516db23a54191f7eecae1f906600",
+      "sha256": "4c348e1f122fbebd6d99f3fb839c692d5d355522d29750d3733028a0d87f8f11",
+      "bytes": 6730
+    },
+    {
+      "path": "android_hardware_qcom_display/composer/service.cpp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/composer/service.cpp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "1654c928e955f8c54a0d07df6dd4e1971c13f906",
+      "sha256": "e28f93c442dbc54a3afd22f606382c3b1edd8dcf1d47b3b1375b03a98b7fb1b6",
+      "bytes": 3422
+    },
+    {
+      "path": "android_hardware_qcom_display/composer/hwc_buffer_allocator.cpp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/composer/hwc_buffer_allocator.cpp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "51b6012ea5343b29e5ba205cbe7c5a948c84c0f6",
+      "sha256": "f9aef21f7405f71f38cddab0841d646754e5072a59dbc43cf7c7fcf10cbcfb17",
+      "bytes": 18861
+    },
+    {
+      "path": "android_hardware_qcom_display/gralloc/Android.bp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/gralloc/Android.bp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "0d48b36e92b2e07e5141c4c3162f5dbb3706be6f",
+      "sha256": "5302442b2c831cccd1145992d2b2f0b30bbc8d38d0cb803b7da03fee9f49a6af",
+      "bytes": 5587
+    },
+    {
+      "path": "android_hardware_qcom_display/gralloc/QtiMapper4.cpp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/gralloc/QtiMapper4.cpp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "fe12dd0c0045c3b939eeb345b9c13828d6206eb1",
+      "sha256": "660c3cd51c7c4d46b7ec740bafe8f7ef53cc5f1175dd92cc6a87205322ab99e3",
+      "bytes": 18265
+    },
+    {
+      "path": "android_device_oneplus_sm8350-common/common.mk",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_device_oneplus_sm8350-common/34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5/common.mk",
+      "commit": "34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5",
+      "git_blob": "9ef4a57f67cecaf8ac87f44d69a0355832887ed2",
+      "sha256": "3695c3455f972682a1ed3e8061834b038127b9cccd95ff09d701fa9207899a8b",
+      "bytes": 16564
+    },
+    {
+      "path": "android_hardware_qcom_display/composer/vendor.qti.hardware.display.composer-service.xml",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/composer/vendor.qti.hardware.display.composer-service.xml",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "a0fdcce328f81b80af23c37179ea79855c490057",
+      "sha256": "944b74f6eba32f03cf63d5e3b956dc3f270bce4244b6babf441816c7e3b286b9",
+      "bytes": 2953
+    },
+    {
+      "path": "android_hardware_qcom_display/sde-drm/Android.bp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/sde-drm/Android.bp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "cdcba144b053bacb18fb2060bec45411e3617987",
+      "sha256": "c43d19a6838a59d27c4912ff4e114b7311805246f19f12c0c60e40c82caf2fc4",
+      "bytes": 867
+    },
+    {
+      "path": "android_hardware_qcom_display/gralloc/QtiMapper.cpp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/gralloc/QtiMapper.cpp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "d8dd675004fce5d30e0fba42f2fc020fc9429204",
+      "sha256": "664a38cc43e610f39276e4c145cbee8f3da13ab7166c1650ac8481ecedb192f7",
+      "bytes": 11042
+    },
+    {
+      "path": "android_hardware_qcom_display/sde-drm/drm_plane.cpp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/sde-drm/drm_plane.cpp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "7ffec3cdfeeaaf4f40bca045e30a08ea72771ac0",
+      "sha256": "133bee77caa5181f5edaae3687e65c398c892d7acad7fa974359e68131122edb",
+      "bytes": 48765
+    },
+    {
+      "path": "android_hardware_qcom_display/gralloc/vendor.qti.hardware.display.allocator-service.xml",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/gralloc/vendor.qti.hardware.display.allocator-service.xml",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "506c58b5e2caa88ea77e9b7c40cfdc7481742bea",
+      "sha256": "7a916b6ca645ff92e2f1df462ae44e8e7316ffe339d384cbfc352a8e395ae3f5",
+      "bytes": 2203
+    },
+    {
+      "path": "android_hardware_qcom_display/gralloc/android.hardware.graphics.mapper-impl-qti-display.xml",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/gralloc/android.hardware.graphics.mapper-impl-qti-display.xml",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "4e5c3ad81289665804289a3ae86101abb5028f6e",
+      "sha256": "00105bbff83fa177fff8c10776678fddcf99179464d866bd688a1bf61ee563b4",
+      "bytes": 2226
+    },
+    {
+      "path": "android_hardware_qcom_display/sde-drm/drm_manager.cpp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/sde-drm/drm_manager.cpp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "6a4571086f60047cfaa68c6132aa2f9c660d9af5",
+      "sha256": "04bd3a4eb14671c866c08f3eea5d92c2055d7c6abef1cbaa7634ee23e04c0ae4",
+      "bytes": 10911
+    },
+    {
+      "path": "android_hardware_qcom_display/libdrmutils/drm_interface.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/libdrmutils/drm_interface.h",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "b0510d349cf0626ab355f5aebb3363c88687af2c",
+      "sha256": "7eea1d65fdb85213815b681643df30352b8fa9f70e2c33385fb0039501138713",
+      "bytes": 29265
+    },
+    {
+      "path": "android_hardware_qcom_display/sde-drm/drm_property.cpp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/sde-drm/drm_property.cpp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "811978a2ec854951c1078207736700ebe9b51e60",
+      "sha256": "24cdac5fcf2a19231cadf42e26ae445fc2ebf82fd8ee9cfa0e5e2e767b737e01",
+      "bytes": 11529
+    },
+    {
+      "path": "android_hardware_qcom_display/sdm/libs/core/drm/hw_info_drm.cpp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/sdm/libs/core/drm/hw_info_drm.cpp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "a2844f6af33a27f8cb52ff36103efe8de6e47b9a",
+      "sha256": "91d5e933e52a00a73362f61f386820e8b6a9161d56221a18c6795a3c3647bab3",
+      "bytes": 37572
+    },
+    {
+      "path": "android_hardware_qcom-caf_common/common.mk",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom-caf_common/5cd53603d36aaddd9ba9d882dad5411f1b30fbed/common.mk",
+      "commit": "5cd53603d36aaddd9ba9d882dad5411f1b30fbed",
+      "git_blob": "1daf38ce8e0e464cfe95e5f41fc2712d58daecdd",
+      "sha256": "05093793bd43dd29e6e2d0c24d9d33705291b76155e809eb1060ff7821851369",
+      "bytes": 4003
+    },
+    {
+      "path": "android_hardware_qcom_display/sde-drm/drm_crtc.cpp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/sde-drm/drm_crtc.cpp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "06d911bc5b13c7f436799cf25f29e70fd4dcb390",
+      "sha256": "ae4dd88d2d5c5c4e396b1894e0a55720059bd9d19f5d2f05e18f909c41249652",
+      "bytes": 37382
+    },
+    {
+      "path": "android_hardware_qcom_display/gralloc/service.cpp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom_display/e9bbe9a980d408af36b52f2abaae7c35647b7425/gralloc/service.cpp",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "git_blob": "2b890ffdcb48a30ceb24ebfe5fd96ccb2a014cb5",
+      "sha256": "eb8e48e3e0b6f4f545adebb305af0b34e7f6cd0688ba592d9f90b56cde57b270",
+      "bytes": 2680
+    },
+    {
+      "path": "android_device_xiaomi_sm8350-common/proprietary-files.txt",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_device_xiaomi_sm8350-common/ea54a321886b99fcac3dcc8f72b287d6848f7434/proprietary-files.txt",
+      "commit": "ea54a321886b99fcac3dcc8f72b287d6848f7434",
+      "git_blob": "e60a8abdecc728150e74ac166e83bb21f2fca1aa",
+      "sha256": "91289b94c778dcaedb709a14d9c28a44b4ca2121f3373f34d43645cd8e7acf72",
+      "bytes": 30316
+    },
+    {
+      "path": "android_hardware_qcom-caf_common/BoardConfigQcom.mk",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_hardware_qcom-caf_common/5cd53603d36aaddd9ba9d882dad5411f1b30fbed/BoardConfigQcom.mk",
+      "commit": "5cd53603d36aaddd9ba9d882dad5411f1b30fbed",
+      "git_blob": "bea6391c2e5b57306aa318880946a11f495fefa7",
+      "sha256": "26b92f1d8455001108d9b7c7f7c1e6ffe9ec1b4d6a4a50f901042e179563145f",
+      "bytes": 17008
+    },
+    {
+      "path": "android_device_xiaomi_sm8350-common/BoardConfigCommon.mk",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_device_xiaomi_sm8350-common/ea54a321886b99fcac3dcc8f72b287d6848f7434/BoardConfigCommon.mk",
+      "commit": "ea54a321886b99fcac3dcc8f72b287d6848f7434",
+      "git_blob": "179566c98c71fd3317fd6ceaeb6a7f6cc9707551",
+      "sha256": "11fb6f5f805fa016ae6530349a9d9b5ea8ffdd7f85490ac5a193217867250c15",
+      "bytes": 6429
+    },
+    {
+      "path": "android_device_xiaomi_sm8350-common/common.mk",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_device_xiaomi_sm8350-common/ea54a321886b99fcac3dcc8f72b287d6848f7434/common.mk",
+      "commit": "ea54a321886b99fcac3dcc8f72b287d6848f7434",
+      "git_blob": "5bb2a9fa7d2288cf0973b451a3fa23af72041ca2",
+      "sha256": "862713e94d45152436702994614d080026c6432d96ef3072f5f9dba8ba2cf1eb",
+      "bytes": 22331
+    },
+    {
+      "path": "android_device_xiaomi_sm8350-common/lineage.dependencies",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_device_xiaomi_sm8350-common/ea54a321886b99fcac3dcc8f72b287d6848f7434/lineage.dependencies",
+      "commit": "ea54a321886b99fcac3dcc8f72b287d6848f7434",
+      "git_blob": "fbebe5405d715f96afe72838e35d28bbf18e5cd1",
+      "sha256": "15dbf9eae983b098f674e7caa6e8640ee3736742ab4f342db9c6af8e8e9af940",
+      "bytes": 195
+    },
+    {
+      "path": "android_device_xiaomi_sm8350-common/extract-files.py",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_device_xiaomi_sm8350-common/ea54a321886b99fcac3dcc8f72b287d6848f7434/extract-files.py",
+      "commit": "ea54a321886b99fcac3dcc8f72b287d6848f7434",
+      "git_blob": "ed30bd3894b3be482103d28ebb4ccebca051acd3",
+      "sha256": "6605e436c1f221006cbc49cf8bb20d0c500b170e9fc43dce04bdaf908f716f32",
+      "bytes": 2638
+    }
+  ],
+  "source_tree": {
+    "repo": "LineageOS/android_hardware_qcom_display",
+    "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+    "git_tree": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+    "git_blobs_verified": 304,
+    "archive_sha256": "f3fc34ac47c3d5312f9debefb62068a0e4e7e28ce4f989b966eb4851e69dcd7a",
+    "built": false,
+    "deployed": false
+  },
+  "importer_patch": {
+    "path": "patches/sm8350-composer-mapper5-import.patch",
+    "files": {
+      "composer/QtiComposerHandleImporter.h": {
+        "original": "4d6480c156c7d57e1bfc04af9e0256d6b1f855a12a4dcb66f478af35d8635090",
+        "patched": "7da3d37f3ae5d9256529bb9f532f2eec12c6401fcc0f30393b88846cf4bb77af"
+      },
+      "composer/QtiComposerHandleImporter.cpp": {
+        "original": "fa4b15fdce6761691d2ba9821e23139994129c964f447f455cb14c36b616b155",
+        "patched": "d9584457a986cbec28821a70f141c7481fe084adbbf60311bffe4b43033347c3"
+      }
+    }
+  },
+  "limits": [
+    "OnePlus device tree uses proprietary composer/SDM/libsdedrm; public CAF source is not established as its binary source",
+    "Source composer internal allocator still uses mapper3/2 and needs separate migration",
+    "Source sde-drm requires legacy capabilities and fence/scaler semantics; not current DPU-compatible",
+    "Surface SoC, firmware, panel and memory ABI remain independently validated; no SM8350 hardware identity substitution"
+  ],
+  "primary_cleanup_patch": {
+    "patch": "patches/sm8350-hwc-primary-cleanup.patch",
+    "sha256": "451fa2ddce985e24505ed6cb7c9e8f60019187ff6c5b5085b2e3b695ff181536",
+    "files": [
+      {
+        "path": "composer/hwc_session.cpp",
+        "base_sha256": "b9fa5c45bfb6db96e47ce7e5c3caedebdb4a079815c718597e80106ad6528b8a",
+        "result_sha256": "6b8fbabc817a3aa1d705e44b20e108459ca2899123c156e87627275dbe3ee1ec"
+      }
+    ]
+  },
+  "allocator_phase_patch": {
+    "patch": "patches/sm8350-hwc-allocator-phases.patch",
+    "sha256": "994e8946f85af66914086d92199bc2d1edfe998ab619f8c80944cd198d9c429e",
+    "files": [
+      {
+        "path": "composer/hwc_buffer_allocator.cpp",
+        "base_sha256": "1c2abc3f9ecb2f6eaf8b06ac3546a2c9f858aa2c39ebd734e917aa3bd39dd6d7",
+        "result_sha256": "4e0790eb067e6a17ca45d466611942efba6527bdcb3bafabacf0880da5aa02b1"
+      }
+    ]
+  },
+  "composer_system_binder_patch": {
+    "patch": "patches/sm8350-composer-system-binder.patch",
+    "sha256": "de1bb6ab74a7abbdd1e4c4f7df9fe30558d19190e8078cb4654d8edc16908fb7",
+    "files": [
+      {
+        "path": "composer/service.cpp",
+        "base_sha256": "e28f93c442dbc54a3afd22f606382c3b1edd8dcf1d47b3b1375b03a98b7fb1b6",
+        "result_sha256": "8fe2bab7d114bd3f37616e4f2dd62ded56aa6fa35ab57fcccebe43d88ed961f5"
+      }
+    ]
+  },
+  "client_target_property_patch": {
+    "patch": "patches/sm8350-hwc-client-target-property.patch",
+    "sha256": "3a6f73c40fb58b036820c00d3e7b31b70176ed21ec19d38e4bda21b569f8a054",
+    "files": [
+      {
+        "path": "composer/hwc_display.cpp",
+        "base_sha256": "5647892954bd3d1c1c4f4b7c0e4e428fadeb256872f9126d3bc95d8c7cc47913",
+        "result_sha256": "84abc8a5c0f03048cdf3973652d6ffa13e47fa0cc06401fcd856aabd16f9a033"
+      }
+    ],
+    "scope": "Initialize Composer 2.4 client-target output on no-update and error paths; preserve real requested format/dataspace conversion"
+  },
+  "empty_layer_output_patch": {
+    "patch": "patches/sm8350-hwc-empty-layer-output.patch",
+    "sha256": "86dd27684c2ed9e9b5ea6d70a9b72942a1870c5ca38df60b4abb5c63491ac70c",
+    "files": [
+      {
+        "path": "composer/hwc_display.cpp",
+        "base_sha256": "84abc8a5c0f03048cdf3973652d6ffa13e47fa0cc06401fcd856aabd16f9a033",
+        "result_sha256": "96de24f8f7d51c366f99613a1e17e81e8ceafe914aa31a087558e8862dc0f82b"
+      },
+      {
+        "path": "composer/hwc_display_builtin.cpp",
+        "base_sha256": "88fa91db34b7e0645bdcf8bb56aad1493b88a2aecbd331028cd27aedea7d79f7",
+        "result_sha256": "2e299c4a16695207e4d71a124be7862e43b80801112deb59134a4264e741af37"
+      }
+    ],
+    "scope": "Empty app-layer validation clears stale changes/requests and all query output counts; no client-target or KMS behavior change"
+  },
+  "empty_layer_flush_patch": {
+    "patch": "patches/sm8350-hwc-empty-layer-flush.patch",
+    "sha256": "4af6c2b48131e5e21d62a3a6eea9950be454b220c7e344fd4788ac7e2d0ee452",
+    "files": [
+      {
+        "path": "composer/hwc_display_builtin.cpp",
+        "base_sha256": "2e299c4a16695207e4d71a124be7862e43b80801112deb59134a4264e741af37",
+        "result_sha256": "563ca85117521521c515e3c77421796483067ea6e7ed3677748d96fac2f096f3"
+      },
+      {
+        "path": "composer/hwc_display.cpp",
+        "base_sha256": "96de24f8f7d51c366f99613a1e17e81e8ceafe914aa31a087558e8862dc0f82b",
+        "result_sha256": "8d458e92c83a106cbff89f7a0617f10f4841a869b5cf176665601ccaf582141b"
+      }
+    ],
+    "scope": "Flush an empty video-mode layer stack through real KMS plane removal; propagate failure and the real present fence"
+  },
+  "composer_color_matrix_patch": {
+    "patch": "patches/sm8350-hwc-color-matrix.patch",
+    "sha256": "edb2dd6bf2467860d43f6f534bee8334dd9cb7006f94ec70841234f0435bf829",
+    "files": [
+      {
+        "path": "composer/hwc_layers.cpp",
+        "base_sha256": "fbc78d554e2fa91d839708a7c5de0c3b4d88e5a671bb82734a3ed3af0f616ed2",
+        "result_sha256": "d006c2743c308681d56719a20e12e681b600a81e912daa4e6a6be584d74b87ed"
+      }
+    ]
+  },
+  "composer_command_errors_patch": {
+    "patch": "patches/sm8350-composer-command-errors.patch",
+    "sha256": "6715aecca30c60e76f5ea36dbefb1255c96f3e6c857bc190b4e2f3955f58627d",
+    "files": [
+      {
+        "path": "composer/QtiComposerClient.cpp",
+        "base_sha256": "239f8ddd6040807b242ad3002e5d3cdb41f849dcf55317410098f946cc1fe769",
+        "result_sha256": "d07d6765da5a3ade930a0eda74442e16077ca1616f020f4c0cddc1dd4416b7d7"
+      }
+    ]
+  },
+  "composer_acquire_fence_patch": {
+    "patch": "patches/sm8350-composer-acquire-fence.patch",
+    "sha256": "aa648ddf46fc19c44d3d890f34ba8b1b10e9fb4bac49dba2aac318a76efd9b19",
+    "files": [
+      {
+        "path": "composer/QtiComposerCommandBuffer.h",
+        "base_sha256": "6d49c18c7204a174cc1e9d30c0cbbdecaf2733676946850c4d8f048d8a99438b",
+        "result_sha256": "4980296c8a8e938cae4c1d855bcc64dbe9794e1fd32d17d734ca7a94c7a2b300"
+      },
+      {
+        "path": "composer/QtiComposerClient.cpp",
+        "base_sha256": "d07d6765da5a3ade930a0eda74442e16077ca1616f020f4c0cddc1dd4416b7d7",
+        "result_sha256": "869afa9abe52d1e26bf9c012e138003dca44a0af651b0ac8f0d3f6c7d4cf1cab"
+      }
+    ]
+  }
+}

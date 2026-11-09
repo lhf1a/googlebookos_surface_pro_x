@@ -1,0 +1,413 @@
+// Only platform and DRM boundaries are stubs. Algorithm bodies are extracted from real sources.
+#include <algorithm>
+#include <array>
+#include <bitset>
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <functional>
+#include <limits>
+#include <map>
+#include <mutex>
+#include <vector>
+using namespace std;
+#define DLOGE(...) ((void)0)
+#define DLOGW(...) ((void)0)
+#define DLOGV_IF(...) ((void)0)
+#define DLOGI_IF(...) ((void)0)
+#define DLOGE_IF(...) ((void)0)
+#define DTRACE_SCOPED() ((void)0)
+#define SCOPE_LOCK(...) ((void)0)
+#define FLOAT(x) float(x)
+#define UINT32(x) uint32_t(x)
+#define UINT8(x) uint8_t(x)
+#define ROUND_UP_ALIGN_DOWN(x,a) floorf(ceilf(x) / (a)) * (a)
+#define Log(...) ((void)0)
+using Handle = void*;
+enum DisplayError { kErrorNone, kErrorParameters, kErrorNotSupported, kErrorResources,
+ kErrorUndefined, kErrorPermission, kErrorHardware, kErrorShutDown };
+enum DisplayType { kBuiltIn, kPluggable };
+enum LayerComposition { kCompositionGPU, kCompositionGPUTarget, kCompositionSDE };
+enum LayerBlending { kBlendingOpaque, kBlendingPremultiplied };
+enum LayerBufferFormat { kFormatInvalid, kFormatRGBA8888, kFormatRGBA8888Ubwc,
+ kFormatRGBX8888, kFormatRGB565, kFormatYCbCr420SemiPlanarVenus, kFormatYCbCr420SemiPlanarVenusUbwc };
+enum HWSubBlockType { kHWVIGPipe };
+enum PipeType { kPipeTypeVIG, kPipeTypeRGB, kPipeTypeDMA, kPipeTypeUnused };
+enum HWBlockType { kHWBuiltIn, kHWPluggable, kHWBlockMax };
+enum BufferLayout { kLinear, kUBWC };
+BufferLayout GetBufferLayout(LayerBufferFormat f) { return f == kFormatRGBA8888Ubwc ? kUBWC : kLinear; }
+enum { ColorPrimaries_BT709_5, ColorPrimaries_BT601_6_525, ColorPrimaries_BT601_6_625, ColorPrimaries_BT2020,
+ Transfer_sRGB, Transfer_SMPTE_170M, Transfer_ST2084, Range_Full, Range_Limited,
+ MatrixCoEff_Identity, MatrixCoEff_BT601_6_525, MatrixCoEff_BT601_6_625, MatrixCoEff_BT709_5 };
+struct ColorMetaData {
+ int colorPrimaries=ColorPrimaries_BT709_5, transfer=Transfer_sRGB, range=Range_Full,
+ matrixCoefficients=MatrixCoEff_Identity;
+ struct { bool colorVolumeSEIEnabled=false; } masteringDisplayInfo;
+ struct { bool lightLevelSEIEnabled=false; } contentLightLevel;
+ bool dynamicMetaDataValid=false;
+ struct { bool criEnabled=false; } cRI;
+};
+namespace sde_drm { @COLOR@ }
+struct LayerRect {
+ float left=0,top=0,right=0,bottom=0;
+ LayerRect()=default;
+ LayerRect(float l,float t,float r,float b):left(l),top(t),right(r),bottom(b){}
+};
+bool IsValid(const LayerRect&r) { return r.left<r.right && r.top<r.bottom; }
+void Normalize(int,int,LayerRect*) {}
+struct LayerTransform { float rotation=0; bool flip_horizontal=false,flip_vertical=false; };
+// Supported overlay fixtures use identity transform and equal mixer/framebuffer dimensions.
+void TransformHV(const LayerRect&,const LayerRect&r,const LayerTransform&,LayerRect*out) { *out=r; }
+void MapRect(const LayerRect&,const LayerRect&,const LayerRect&r,LayerRect*out) { *out=r; }
+struct LayerBuffer {
+ LayerBufferFormat format=kFormatRGBA8888;
+ uint32_t width=2880,height=1920;
+ uint64_t buffer_id=1,handle_id=2;
+ struct { int fd=3; } planes[3];
+ struct { bool secure=false,secure_camera=false,secure_display=false,interlace=false,hdr=false,mask_layer=false; } flags;
+ ColorMetaData color_metadata;
+ int acquire_fence=11,release_fence=-1;
+};
+struct Layer {
+ LayerBuffer input_buffer;
+ LayerComposition composition=kCompositionGPU;
+ LayerBlending blending=kBlendingOpaque;
+ uint32_t plane_alpha=255;
+ LayerRect src_rect{0,0,2880,1920},dst_rect{0,0,2880,1920};
+ LayerTransform transform;
+ struct { bool skip=false,solid_fill=false,cursor=false,color_transform=false; } flags;
+ struct { struct { unsigned request_flags=0; } flags; } request;
+};
+struct LayerStack {
+ vector<Layer*> layers;
+ struct { bool secure_present=false,hdr_present=false,mask_present=false,s3d_mode_present=false,fast_path=false; } flags;
+};
+struct HWResourceInfo {
+ bool kernel_managed_dpu=true,is_src_split=true,has_non_scalar_rgb=false,has_decimation=false;
+ uint32_t num_vig_pipe=1,num_rgb_pipe=0,num_dma_pipe=2,max_pipe_width=2048,max_scaler_pipe_width=2048;
+ uint32_t max_scale_down=1,max_scale_up=1;
+ map<HWSubBlockType,vector<LayerBufferFormat>> supported_formats_map{{kHWVIGPipe,{kFormatYCbCr420SemiPlanarVenus}}};
+};
+struct HWPanelInfo { LayerTransform panel_orientation; };
+struct HWMixerAttributes { uint32_t width=2880,height=1920,split_left=1440; };
+struct HWDisplayAttributes {};
+struct DisplayConfigVariableInfo { uint32_t x_pixels=2880,y_pixels=1920; };
+struct HWLayersInfo {
+ LayerStack *stack=nullptr;
+ uint32_t app_layer_count=0,gpu_target_index=0;
+ vector<Layer> hw_layers;
+ vector<uint32_t> index,roi_index,layer_exts;
+ bool fast_path_composition=false,rc_pu_flag_status=false;
+};
+struct HWPipeInfo {
+ bool valid=false;
+ uint32_t pipe_id=0,z_order=0;
+ uint8_t horizontal_decimation=0,vertical_decimation=0;
+ LayerRect src_roi,dst_roi;
+};
+struct HWLayerConfig { HWPipeInfo left_pipe,right_pipe; };
+struct HWLayers { HWLayersInfo info; array<HWLayerConfig,16> config{}; bitset<8> updates_mask; };
+struct StrategyConstraints { bool safe_mode=false; uint32_t max_layers=2; };
+struct StrategyExt {
+ DisplayError Start(HWLayersInfo*,uint32_t*) { return kErrorNotSupported; }
+ DisplayError GetNextStrategy(StrategyConstraints*) { return kErrorNotSupported; }
+ bool CanSkipValidate(bool*) { return true; }
+ DisplayError Reconfigure(const HWPanelInfo&,const HWResourceInfo&,const HWMixerAttributes&,const DisplayConfigVariableInfo&) {return kErrorNone;}
+};
+struct PartialUpdate {};
+struct Extension {
+ void DestroyPartialUpdate(PartialUpdate*) {}
+ template<class... T> void CreatePartialUpdate(T&&...) {}
+};
+class Strategy {
+ public:
+ bool disable_gpu_comp_=false,extn_start_success_=false,dpu_overlay_attempted_=false;
+ Extension *extension_intf_=nullptr;
+ PartialUpdate *partial_update_intf_=nullptr;
+ int32_t display_id_=0;
+ HWDisplayAttributes display_attributes_;
+ StrategyExt *strategy_intf_=nullptr;
+ HWResourceInfo hw_resource_info_;
+ HWPanelInfo hw_panel_info_;
+ HWMixerAttributes mixer_attributes_;
+ DisplayConfigVariableInfo fb_config_;
+ DisplayType display_type_=kBuiltIn;
+ HWLayersInfo *hw_layers_info_=nullptr;
+ @STRATEGY_DECLS@
+};
+class ResourceDefault {
+ public:
+ enum PipeOwner { kPipeOwnerUserMode,kPipeOwnerKernelMode };
+ enum { kMaxDecimationDownScaleRatio=16 };
+ struct SourcePipe {
+  PipeType type=kPipeTypeUnused; PipeOwner owner=kPipeOwnerUserMode;
+  uint32_t mdss_pipe_id=0,index=0; HWBlockType hw_block_type=kHWBlockMax; int priority=0;
+  void ResetState() { hw_block_type=kHWBlockMax; }
+ };
+ struct DisplayResourceContext {
+  HWDisplayAttributes display_attributes; HWBlockType hw_block_type=kHWBuiltIn;
+  uint64_t frame_count=0; HWMixerAttributes mixer_attributes;
+ };
+ HWResourceInfo hw_res_info_;
+ uint32_t num_pipe_=3;
+ vector<SourcePipe> src_pipes_;
+ ResourceDefault() {
+  // Raw DRM caps order DMA0,DMA1,VIG; SDM vector order VIG,DMA0,DMA1.
+  src_pipes_={{kPipeTypeVIG,kPipeOwnerUserMode,101,2,kHWBlockMax,0},
+              {kPipeTypeDMA,kPipeOwnerUserMode,201,0,kHWBlockMax,1},
+              {kPipeTypeDMA,kPipeOwnerUserMode,202,1,kHWBlockMax,2}};
+ }
+ DisplayError Start(Handle) { return kErrorNone; }
+ DisplayError Stop(Handle,HWLayers*) { return kErrorNone; }
+ void ResourceStateLog() {}
+ @RESOURCEDEFAULT_DECLS@
+};
+struct DisplayCompositionContext {
+ Handle display_resource_ctx=nullptr;
+ Strategy *strategy=nullptr;
+ StrategyConstraints constraints;
+ uint32_t remaining_strategies=0;
+};
+class CompManager {
+ public:
+ ResourceDefault *resource_intf_=nullptr;
+ void PrepareStrategyConstraints(Handle,HWLayers*) {}
+ void PrePrepare(Handle h,HWLayers*l) {
+  auto*c=static_cast<DisplayCompositionContext*>(h);
+  assert(c->strategy->Start(&l->info,&c->remaining_strategies)==kErrorNone);
+ }
+ void PostPrepare(Handle,HWLayers*) {}
+ void GenerateROI(Handle,HWLayers*) {}
+ void ControlPartialUpdate(Handle,bool) {}
+ @COMPMANAGER_DECLS@
+};
+struct Hardware {
+ vector<unsigned> attempts;
+ bool reject_first=true,reject_all=false,shutdown=false;
+ DisplayError Validate(HWLayers*h) {
+  attempts.push_back(h->info.hw_layers.size());
+  if (shutdown) return kErrorShutDown;
+  return reject_all || (reject_first && attempts.size()==1) ? kErrorHardware : kErrorNone;
+ }
+};
+struct ColorManager {
+ void PrePrepare(HWLayers*){} bool NeedsPartialUpdateDisable(){return false;} void Validate(HWLayers*){}
+};
+enum { kPowerStateNone,kUpdateResources };
+class DisplayBase {
+ public:
+ recursive_mutex recursive_mutex_;
+ bool needs_validate_=true,active_=true,first_cycle_=true,rc_enable_prop_=false,
+ rc_panel_feature_init_=false,partial_update_control_=false,disable_pu_one_frame_=false,
+ disable_pu_on_dest_scaler_=false,rc_pu_flag_status_=false;
+ int pending_power_state_=kPowerStateNone;
+ void *rc_core_=nullptr,*pf_factory_=nullptr,*prop_intf_=nullptr;
+ ColorManager *color_mgr_=nullptr;
+ CompManager *comp_manager_=nullptr;
+ Handle display_comp_ctx_=nullptr;
+ Hardware *hw_intf_=nullptr;
+ HWLayers hw_layers_;
+ DisplayError BuildLayerStackStats(LayerStack*s) {
+  hw_layers_.info.stack=s;
+  hw_layers_.info.app_layer_count=s->layers.size()-1;
+  hw_layers_.info.gpu_target_index=s->layers.size()-1;
+  return kErrorNone;
+ }
+ DisplayError SetupRC(){return kErrorNotSupported;}
+ void SetRCData(LayerStack*){}
+ void DisablePartialUpdateOneFrame(){}
+ @DISPLAYBASE_DECLS@
+};
+@STRATEGY_METHODS@
+@RESOURCEDEFAULT_METHODS@
+@COMPMANAGER_METHODS@
+@DISPLAYBASE_METHODS@
+
+struct Fixture {
+ Layer video,ui,target;
+ LayerStack stack;
+ HWLayers layers;
+ Strategy strategy;
+ StrategyConstraints constraints;
+ ResourceDefault resources;
+ ResourceDefault::DisplayResourceContext context;
+ Fixture() {
+  video.input_buffer.format=kFormatYCbCr420SemiPlanarVenus;
+  video.input_buffer.width=512; video.input_buffer.height=512;
+  video.input_buffer.color_metadata.colorPrimaries=ColorPrimaries_BT601_6_525;
+  video.input_buffer.color_metadata.matrixCoefficients=MatrixCoEff_BT601_6_525;
+  video.input_buffer.color_metadata.range=Range_Limited;
+  video.input_buffer.color_metadata.transfer=Transfer_SMPTE_170M;
+  video.src_rect={0,0,320,240}; video.dst_rect={1400,100,1720,340};
+  target.composition=kCompositionGPUTarget; target.blending=kBlendingPremultiplied;
+  target.input_buffer.format=kFormatRGBA8888Ubwc;
+  stack.layers={&video,&ui,&target}; layers.info.stack=&stack;
+  layers.info.app_layer_count=2; layers.info.gpu_target_index=2;
+ }
+ uint32_t start() { uint32_t attempts=0; assert(strategy.Start(&layers.info,&attempts)==kErrorNone);return attempts; }
+ void next() { assert(strategy.GetNextStrategy(&constraints)==kErrorNone); }
+ unsigned claims() { unsigned n=0; for(auto&p:resources.src_pipes_)n+=p.hw_block_type==kHWBuiltIn;return n; }
+ void assert_gpu() {
+  assert(layers.info.hw_layers.size()==1 && layers.info.index==vector<uint32_t>{2});
+  assert(video.composition==kCompositionGPU && ui.composition==kCompositionGPU);
+  assert(layers.info.hw_layers[0].composition==kCompositionGPUTarget);
+ }
+ void assert_no_config() {
+  for(auto&c:layers.config)assert(!c.left_pipe.valid && !c.right_pipe.valid && !c.left_pipe.pipe_id && !c.right_pipe.pipe_id);
+ }
+};
+int main() {
+ unsigned cases=0;
+ { Fixture f; assert(f.start()==2);f.next();
+  assert(f.layers.info.index==vector<uint32_t>({0,2}));
+  assert(f.video.composition==kCompositionSDE && f.ui.composition==kCompositionGPU);
+  assert(f.layers.info.hw_layers[1].blending==kBlendingPremultiplied);
+  assert(f.layers.info.hw_layers[0].input_buffer.acquire_fence==11);
+  assert(f.resources.Prepare(&f.context,&f.layers)==kErrorNone);
+  assert(f.layers.config[0].left_pipe.pipe_id==101 && !f.layers.config[0].right_pipe.valid);
+  assert(f.layers.config[0].left_pipe.dst_roi.left==1400 && f.layers.config[0].left_pipe.dst_roi.right==1720);
+  assert(f.layers.config[0].left_pipe.z_order==0);
+  assert(f.layers.config[1].left_pipe.pipe_id==201 && f.layers.config[1].right_pipe.pipe_id==202);
+  assert(f.layers.config[1].left_pipe.z_order==1 && f.layers.config[1].right_pipe.z_order==1);
+  assert(f.claims()==3);
+  f.layers.info.layer_exts={1,2};f.layers.info.fast_path_composition=true;
+  f.next();f.assert_gpu();assert(f.layers.info.layer_exts.empty() && !f.layers.info.fast_path_composition);
+  assert(f.resources.Prepare(&f.context,&f.layers)==kErrorNone);assert(f.claims()==2);
+  assert(f.resources.src_pipes_[0].hw_block_type==kHWBlockMax);
+  assert(!f.layers.config[1].left_pipe.valid && !f.layers.config[1].right_pipe.valid);
+  ++cases;
+ }
+ { Fixture f;swap(f.stack.layers[0],f.stack.layers[1]);assert(f.start()==2);f.next();
+  assert(f.layers.info.index==vector<uint32_t>({2,1}));
+  assert(f.resources.Prepare(&f.context,&f.layers)==kErrorNone);
+  assert(f.layers.config[1].left_pipe.pipe_id==101 && f.layers.config[1].left_pipe.z_order==1);++cases;
+ }
+ const vector<function<void(Fixture&)>> unsupported={
+  [](auto&f){static Extension ext;f.strategy.extension_intf_=&ext;},
+  [](auto&f){f.strategy.hw_resource_info_.kernel_managed_dpu=false;},
+  [](auto&f){f.strategy.hw_resource_info_.num_vig_pipe=0;},
+  [](auto&f){f.strategy.display_type_=kPluggable;},
+  [](auto&f){f.strategy.mixer_attributes_.width=1920;},
+  [](auto&f){f.strategy.hw_panel_info_.panel_orientation.flip_vertical=true;},
+  [](auto&f){f.stack.flags.secure_present=true;},
+  [](auto&f){f.stack.flags.hdr_present=true;},
+  [](auto&f){f.stack.flags.mask_present=true;},
+  [](auto&f){f.stack.flags.s3d_mode_present=true;},
+  [](auto&f){f.ui.flags.color_transform=true;},
+  [](auto&f){f.target.input_buffer.format=kFormatRGBX8888;},
+  [](auto&f){f.target.input_buffer.format=kFormatRGB565;},
+  [](auto&f){f.target.plane_alpha=254;},
+  [](auto&f){f.target.blending=kBlendingOpaque;},
+  [](auto&f){f.target.input_buffer.color_metadata.range=Range_Limited;},
+  [](auto&f){f.strategy.hw_resource_info_.supported_formats_map.clear();},
+  [](auto&f){f.strategy.hw_resource_info_.supported_formats_map[kHWVIGPipe].clear();},
+  [](auto&f){f.video.flags.skip=true;},
+  [](auto&f){f.video.flags.solid_fill=true;},
+  [](auto&f){f.video.flags.cursor=true;},
+  [](auto&f){f.video.flags.color_transform=true;},
+  [](auto&f){f.video.plane_alpha=254;},
+  [](auto&f){f.video.blending=kBlendingPremultiplied;},
+  [](auto&f){f.video.transform.rotation=90;},
+  [](auto&f){f.video.transform.flip_horizontal=true;},
+  [](auto&f){f.video.input_buffer.format=kFormatYCbCr420SemiPlanarVenusUbwc;},
+  [](auto&f){f.video.input_buffer.flags.secure=true;},
+  [](auto&f){f.video.input_buffer.flags.secure_camera=true;},
+  [](auto&f){f.video.input_buffer.flags.secure_display=true;},
+  [](auto&f){f.video.input_buffer.flags.interlace=true;},
+  [](auto&f){f.video.input_buffer.flags.hdr=true;},
+  [](auto&f){f.video.input_buffer.flags.mask_layer=true;},
+  [](auto&f){f.video.input_buffer.planes[0].fd=-1;},
+  [](auto&f){f.video.input_buffer.buffer_id=0;},
+  [](auto&f){f.video.input_buffer.handle_id=0;},
+  [](auto&f){f.video.input_buffer.color_metadata.matrixCoefficients=MatrixCoEff_BT709_5;},
+  [](auto&f){f.video.input_buffer.color_metadata.range=Range_Full;},
+  [](auto&f){f.video.input_buffer.color_metadata.transfer=Transfer_ST2084;},
+  [](auto&f){f.video.input_buffer.color_metadata.masteringDisplayInfo.colorVolumeSEIEnabled=true;},
+  [](auto&f){f.video.src_rect.left=1;},
+  [](auto&f){f.video.src_rect.right=319;},
+  [](auto&f){f.video.src_rect.left=nanf("");},
+  [](auto&f){f.video.src_rect.right=numeric_limits<float>::infinity();},
+  [](auto&f){f.video.src_rect.left=-2;},
+  [](auto&f){f.video.src_rect.right=514;},
+  [](auto&f){f.video.dst_rect.right=2882;},
+  [](auto&f){f.video.dst_rect.top=100.5f;},
+  [](auto&f){f.video.dst_rect.right+=2;},
+  [](auto&f){f.video.src_rect.bottom=0;},
+ };
+ for(auto&change:unsupported){Fixture f;change(f);assert(f.start()==1);f.next();f.assert_gpu();++cases;}
+ { Fixture f; f.constraints.safe_mode=true;assert(f.start()==2);f.next();f.assert_gpu();++cases; }
+ { Fixture f; f.constraints.max_layers=1;assert(f.start()==2);f.next();f.assert_gpu();++cases; }
+ { Fixture f; Layer ui2;f.stack.layers={&f.ui,&f.video,&ui2,&f.target};
+  f.layers.info.app_layer_count=f.layers.info.gpu_target_index=3;
+  assert(f.start()==1);f.next();assert(f.layers.info.hw_layers.size()==1);++cases;
+ }
+ { Fixture f;f.target.input_buffer.format=kFormatRGBA8888;assert(f.start()==2);f.next();assert(f.layers.info.hw_layers.size()==2);++cases; }
+ { Fixture f;f.stack.layers[1]=nullptr;f.strategy.hw_layers_info_=&f.layers.info;
+  assert(f.strategy.GetDpuOverlayIndex()==-1);++cases;
+ }
+ { Fixture f;f.layers.info.app_layer_count=1;f.strategy.hw_layers_info_=&f.layers.info;
+  assert(f.strategy.GetDpuOverlayIndex()==-1);++cases;
+ }
+ { Fixture f;assert(!f.strategy.CanSkipValidate(nullptr));f.strategy.hw_resource_info_.kernel_managed_dpu=false;
+  assert(f.strategy.CanSkipValidate(nullptr));StrategyExt ext;f.strategy.strategy_intf_=&ext;
+  assert(f.strategy.CanSkipValidate(nullptr));++cases;
+ }
+ { Fixture f;f.start();f.next();f.resources.hw_res_info_.kernel_managed_dpu=false;
+  assert(f.resources.Prepare(&f.context,&f.layers)==kErrorNotSupported);assert(f.claims()==0);f.assert_no_config();++cases;
+ }
+ { Fixture f;f.start();f.next();f.resources.src_pipes_[2].owner=ResourceDefault::kPipeOwnerKernelMode;
+  assert(f.resources.Prepare(&f.context,&f.layers)==kErrorResources);assert(f.claims()==0);f.assert_no_config();
+  assert(f.resources.src_pipes_[2].owner==ResourceDefault::kPipeOwnerKernelMode);++cases;
+ }
+ { Fixture f;f.start();f.next();f.resources.src_pipes_[0].owner=ResourceDefault::kPipeOwnerKernelMode;
+  assert(f.resources.Prepare(&f.context,&f.layers)==kErrorResources);assert(f.claims()==0);f.assert_no_config();
+  f.next();f.assert_gpu();assert(f.resources.Prepare(&f.context,&f.layers)==kErrorNone);assert(f.claims()==2);++cases;
+ }
+ { Fixture f;f.start();f.next();f.layers.info.hw_layers.push_back(f.ui);
+  assert(f.resources.Prepare(&f.context,&f.layers)==kErrorNotSupported);assert(f.claims()==0);f.assert_no_config();++cases;
+ }
+ { Fixture f;f.start();f.next();assert(f.resources.Prepare(&f.context,&f.layers)==kErrorNone);
+  f.layers.info.hw_layers[1].src_rect={0,0,0,0};
+  assert(f.resources.Prepare(&f.context,&f.layers)==kErrorNotSupported);assert(f.claims()==0);f.assert_no_config();++cases;
+ }
+ for(unsigned scenario=0;scenario<4;++scenario) {
+  Fixture f;DisplayCompositionContext ctx{&f.context,&f.strategy,{},0};CompManager cm;cm.resource_intf_=&f.resources;
+  Hardware hw;hw.reject_all=scenario==1;hw.reject_first=scenario!=2;hw.shutdown=scenario==3;
+  DisplayBase d;d.comp_manager_=&cm;d.display_comp_ctx_=&ctx;d.hw_intf_=&hw;
+  DisplayError got=d.Prepare(&f.stack);
+  if(scenario==0){assert(got==kErrorNone);assert(hw.attempts==vector<unsigned>({2,1}));
+   assert(!d.needs_validate_);assert(f.video.composition==kCompositionGPU);assert(f.claims()==2);
+   assert(f.resources.src_pipes_[0].hw_block_type==kHWBlockMax);
+   assert(!d.hw_layers_.config[1].left_pipe.valid && !d.hw_layers_.config[1].right_pipe.valid);
+  }else if(scenario==1){assert(got==kErrorHardware);assert(hw.attempts==vector<unsigned>({2,1}));assert(d.needs_validate_);
+  }else if(scenario==2){assert(got==kErrorNone);assert(hw.attempts==vector<unsigned>({2}));assert(f.video.composition==kCompositionSDE);
+  }else{assert(got==kErrorShutDown);assert(hw.attempts==vector<unsigned>({2}));assert(d.needs_validate_);}
+  ++cases;
+ }
+ // Actual CompManager skips failed resource plan without asking hardware to validate it.
+ { Fixture f;f.resources.src_pipes_[0].owner=ResourceDefault::kPipeOwnerKernelMode;
+  DisplayCompositionContext ctx{&f.context,&f.strategy,{},0};CompManager cm;cm.resource_intf_=&f.resources;
+  Hardware hw;hw.reject_first=false;DisplayBase d;d.comp_manager_=&cm;d.display_comp_ctx_=&ctx;d.hw_intf_=&hw;
+  assert(d.Prepare(&f.stack)==kErrorNone);assert(hw.attempts==vector<unsigned>({1}));assert(f.claims()==2);++cases;
+ }
+ { Fixture f;HWPanelInfo panel;HWDisplayAttributes attrs;HWMixerAttributes mixer;
+  DisplayConfigVariableInfo fb;fb.x_pixels=1920;
+  assert(f.strategy.Reconfigure(panel,attrs,mixer,fb)==kErrorNone);
+  assert(f.strategy.fb_config_.x_pixels==1920 && f.start()==1);
+  fb.x_pixels=2880;panel.panel_orientation.flip_horizontal=true;
+  assert(f.strategy.Reconfigure(panel,attrs,mixer,fb)==kErrorNone);assert(f.start()==1);
+  panel.panel_orientation.flip_horizontal=false;
+  assert(f.strategy.Reconfigure(panel,attrs,mixer,fb)==kErrorNone);assert(f.start()==2);++cases;
+ }
+ { Fixture f;DisplayCompositionContext ctx{&f.context,&f.strategy,{},0};CompManager cm;cm.resource_intf_=&f.resources;
+  Hardware hw;DisplayBase d;d.comp_manager_=&cm;d.display_comp_ctx_=&ctx;d.hw_intf_=&hw;
+  for(unsigned frame=0;frame<50;++frame){hw.attempts.clear();hw.reject_first=bool(frame%2);
+   assert(d.Prepare(&f.stack)==kErrorNone);
+   assert(hw.attempts== (frame%2 ? vector<unsigned>{2,1} : vector<unsigned>{2}));
+   assert(f.claims()==(frame%2 ? 2u : 3u));
+   assert(f.video.composition==(frame%2 ? kCompositionGPU : kCompositionSDE));
+  }++cases;
+ }
+ printf("%u patched-source scenarios passed (ASan/UBSan); real TEST_ONLY retry, resource cleanup, edge z-order, alpha/CSC gates.\n",cases);
+}

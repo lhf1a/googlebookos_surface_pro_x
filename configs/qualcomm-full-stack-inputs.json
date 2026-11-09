@@ -1,0 +1,223 @@
+{
+  "schema": 1,
+  "binary_build": "51584880050400150",
+  "binary_manifests": [
+    "quest2-gles-v77-inputs.json",
+    "quest2-v77-graphics-reference.json",
+    "quest2-v77-display-reference.json",
+    "quest2-v77-video-reference.json"
+  ],
+  "source_files": [
+    {
+      "path": "kernel/Makefile",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/Makefile",
+      "sha256": "0847ff9cd94843bb756732a5940bc60055cb60863758059f83c7ada1f621c822",
+      "bytes": 66274
+    },
+    {
+      "path": "kernel/include/uapi/linux/msm_kgsl.h",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/include/uapi/linux/msm_kgsl.h",
+      "sha256": "8aeec9ea5cc0da711d7c590bd03eb5d641a4083b9c4762ca48d5b4425957bc6f",
+      "bytes": 61341
+    },
+    {
+      "path": "kernel/include/uapi/media/msm_vidc.h",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/include/uapi/media/msm_vidc.h",
+      "sha256": "632dcb775fbf5d0d1de381d72fe60f1e58baba517deda3772453ad1c55d30c13",
+      "bytes": 12804
+    },
+    {
+      "path": "kernel/include/uapi/drm/msm_drm.h",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/include/uapi/drm/msm_drm.h",
+      "sha256": "bd8c6751c1a1994287993375ce5327f3b7ffd482db94e0dca1fce307fcc91763",
+      "bytes": 18090
+    },
+    {
+      "path": "kernel/include/uapi/drm/sde_drm.h",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/include/uapi/drm/sde_drm.h",
+      "sha256": "89855eb8e6b46e9c9a564279d0fb4b30165ab5c6559ec3617e43b888c934ada7",
+      "bytes": 16504
+    },
+    {
+      "path": "kernel/drivers/staging/android/ion/ion_system_heap.c",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/drivers/staging/android/ion/ion_system_heap.c",
+      "sha256": "edb50f47e2c47eddb851df8b7718a5efec2fa760a57d0075e5e7243bbe11d215",
+      "bytes": 21425
+    },
+    {
+      "path": "kernel/drivers/staging/android/ion/ion.c",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/drivers/staging/android/ion/ion.c",
+      "sha256": "e62f8f52a8b0775eeb81375b26ed8da62565a311948399622d937dd8bc0976d3",
+      "bytes": 43358
+    },
+    {
+      "path": "kernel/drivers/gpu/msm/adreno-gpulist.h",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/drivers/gpu/msm/adreno-gpulist.h",
+      "sha256": "43ddb48626efc8af3c1fbccea20f5bffbd6d062c864d278ae54b3286110153d4",
+      "bytes": 56898
+    },
+    {
+      "path": "kernel/drivers/gpu/msm/kgsl_iommu.c",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/drivers/gpu/msm/kgsl_iommu.c",
+      "sha256": "0c6f76ca2824d3737f8a949f752b322e8ddb02a584f13e0e0c6b24c6ee8bbf0f",
+      "bytes": 86782
+    },
+    {
+      "path": "display/gralloc/gr_ion_alloc.cpp",
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display/+/484ca55710cb0bc6e5222922ced149b9068cbf5b/gralloc/gr_ion_alloc.cpp?format=TEXT",
+      "sha256": "de592e0830c82bd0b6641d21f0861237d74892cee5d5188919120ef0f97ed8c6",
+      "bytes": 9650
+    },
+    {
+      "path": "display/gralloc/gr_allocator.cpp",
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display/+/484ca55710cb0bc6e5222922ced149b9068cbf5b/gralloc/gr_allocator.cpp?format=TEXT",
+      "sha256": "93cb468f8ec8318e0fe67a3275993d8758ddacb3396cf8d6d2439fe30854dc0b",
+      "bytes": 8611
+    },
+    {
+      "path": "display/gralloc/gr_buf_mgr.cpp",
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display/+/484ca55710cb0bc6e5222922ced149b9068cbf5b/gralloc/gr_buf_mgr.cpp?format=TEXT",
+      "sha256": "82fe11f40afd9043bb360d4ad9a530a166d0f877662161ce75e8102bb48dbef4",
+      "bytes": 12339
+    },
+    {
+      "path": "kernel/drivers/staging/android/uapi/ion.h",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/drivers/staging/android/uapi/ion.h",
+      "sha256": "36dc5068b0c0352def3b8224dca9bc5c58505618c70e243e01d8740cb511d63e",
+      "bytes": 3178
+    },
+    {
+      "path": "kernel/drivers/staging/android/uapi/msm_ion.h",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/drivers/staging/android/uapi/msm_ion.h",
+      "sha256": "4b996912bfa32aa9132721cc841e55657d316372f2d9817d48b187a72a60ade5",
+      "bytes": 3389
+    },
+    {
+      "path": "display/gralloc/gr_utils.cpp",
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display/+/484ca55710cb0bc6e5222922ced149b9068cbf5b/gralloc/gr_utils.cpp?format=TEXT",
+      "sha256": "896b8ebde65bc71e768c9d83b76e9690aa9c0b67a0acc573ef8bdbc4b6e0eac7",
+      "bytes": 60162
+    },
+    {
+      "path": "display/gralloc/gr_device_impl.cpp",
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display/+/484ca55710cb0bc6e5222922ced149b9068cbf5b/gralloc/gr_device_impl.cpp?format=TEXT",
+      "sha256": "625dd97d853a2bb098ade0cf464e4ac010386b07655cf721c12de7a4383a5340",
+      "bytes": 32026
+    },
+    {
+      "path": "display/gralloc_priv.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/gralloc/gralloc_priv.h",
+      "sha256": "d6ef871b4db2ecf264388bf489a6ba15e4ce5dbc81395cc586d6c982763b6c59",
+      "bytes": 5916
+    },
+    {
+      "path": "display/QtiGrallocDefs.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/gralloc/QtiGrallocDefs.h",
+      "sha256": "4e893f90a16c8c3437eec81681672e2dda1365fce9ad9030bd34e90279b72de0",
+      "bytes": 8586
+    },
+    {
+      "path": "kernel/drivers/media/platform/msm/vidc_3x/msm_vdec.c",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/drivers/media/platform/msm/vidc_3x/msm_vdec.c",
+      "sha256": "5866f5e9e58ad20fba0e415f1a0564634a6b1cf61ad7eb56a1d6176b49901940",
+      "bytes": 79218
+    },
+    {
+      "path": "kernel/drivers/media/platform/msm/vidc_3x/msm_vidc_common.c",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/drivers/media/platform/msm/vidc_3x/msm_vidc_common.c",
+      "sha256": "b84f683aacfbeb8b17de6fcfbc4d68b14312bb26a3060800f27662b4282f1ca3",
+      "bytes": 143308
+    },
+    {
+      "path": "kernel/drivers/media/platform/msm/vidc_3x/hfi_packetization.c",
+      "url": "https://raw.githubusercontent.com/facebookincubator/oculus-linux-kernel/6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc/drivers/media/platform/msm/vidc_3x/hfi_packetization.c",
+      "sha256": "b6009c083e9ec039fc26270bd596ed7c429d6d16ef467e81b82d6b839a5cb543",
+      "bytes": 72086
+    },
+    {
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/media/+/810e6addccfd8913c3e82022699a7e61866f20b6/mm-video-v4l2/vidc/vdec/src/omx_vdec_v4l2.cpp?format=TEXT",
+      "sha256": "46851ed591b5620e0676602bbd80480ccf1858979c17f08b8ddd23a2d2005d9c",
+      "bytes": 614732,
+      "path": "omx-native/omx_vdec_v4l2.cpp"
+    },
+    {
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/media/+/810e6addccfd8913c3e82022699a7e61866f20b6/mm-video-v4l2/vidc/vdec/inc/omx_vdec.h?format=TEXT",
+      "sha256": "327763ea8bf238103347dc3c9ab77332a7b88c8fa60783eca582b557f8e4a966",
+      "bytes": 55747,
+      "path": "omx-native/omx_vdec.h"
+    }
+  ],
+  "source_pairing": {
+    "kernel": {
+      "repository": "https://github.com/facebookincubator/oculus-linux-kernel",
+      "commit": "6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc",
+      "published_build": "5158488.10240.150",
+      "match": "same 5158488 family; exact binary build match unproven",
+      "kernel_series": "4.19; reference only, must port to 6.18"
+    },
+    "display": {
+      "repository": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display",
+      "commit": "484ca55710cb0bc6e5222922ced149b9068cbf5b",
+      "match": "interface reference only; not Quest OEM source"
+    }
+  },
+  "components": {
+    "gpu": {
+      "current": "Qualcomm UMD + GSL DRM + MSM GPU; Direct",
+      "target": "KGSL/GMU on 6.18, actual SC8180X/A680.1",
+      "available": "Meta source KGSL UAPI and A680 entry; pinned v77 UMD",
+      "open": [
+        "6.18 kernel API port",
+        "Surface resources/SMMU/GMU firmware pairing",
+        "GPU driver ownership split from display DRM",
+        "GMEM pixels and PM"
+      ]
+    },
+    "memory": {
+      "current": "minigbm/mapper5 plus local QTI adapter",
+      "candidate": "private native QTI gralloc/mapper: RGB GPU/fence/exec and six-frame NV12/P010 VPU-to-GPU same-dma-buf verified",
+      "available": "pinned donor allocator/mapper/gralloc and public ION source",
+      "open": [
+        "Android mapper/allocator service integration",
+        "legacy P010 plane metadata, native OMX/Surface, DRC/flush/reuse",
+        "UBWC and protected layout validation",
+        "uncached backend independent of MSM GEM",
+        "secure heap unsupported"
+      ]
+    },
+    "video": {
+      "current": "OEM OMX/HIDL + VIDC bridge/Venus, AVC-only, software renderer",
+      "target": "native QTI buffers + matching msm_vidc",
+      "available": "pinned OMX and VIDC UAPI/extradata reference",
+      "open": [
+        "full matching vidc_3x source port",
+        "HFI/Surface firmware/resources",
+        "native Surface buffers and fences",
+        "PM resume timeout and rendered callbacks",
+        "codec/profile validation"
+      ]
+    },
+    "display": {
+      "current": "drm_hwcomposer + mainline KMS + Surface panel",
+      "target": "QTI HWC/SDM and matching SDE/display interfaces",
+      "available": "pinned HWC/SDM and SDE UAPI reference",
+      "open": [
+        "HWC DT_NEEDED and Android composer integration",
+        "SDE properties/private ioctls vs target KMS",
+        "Surface eDP/bridge/clocks/panel adaptation",
+        "SDR tone-map and external display"
+      ]
+    },
+    "security": {
+      "current": "nonsecure lab paths only",
+      "target": "only advertise genuinely supported protected/HDR paths",
+      "available": "existing nonsecure RGB10/HDR10/HLG pixel/metadata evidence",
+      "open": [
+        "secure allocator and SMMU/TZ/firmware support",
+        "protected GPU/display consumers",
+        "dynamic HDR and physical sink validation",
+        "distribution/license and OEM signature review"
+      ]
+    }
+  }
+}

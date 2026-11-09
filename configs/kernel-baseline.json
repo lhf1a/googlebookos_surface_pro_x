@@ -1,6 +1,6 @@
 {
   "kernel_version": "6.18.60",
-  "bundle_directory": "EFI/SQ2L618C",
+  "bundle_directory": "EFI/SQ2Nat",
   "private_identity_present": true,
   "gpu_profile": "700MHz / RPMh432 preserved from current accepted DT",
   "notes": [
@@ -9,18 +9,21 @@
     "Current accepted runtime is preserved exactly; compile outputs do not automatically replace it.",
     "Scene user-data symlink is device state; Scene GPU UI telemetry remains unadapted."
   ],
-  "hardware_scope": "SQ2 observed; SQ1 same-bundle cross-device validation not completed",
+  "hardware_scope": "User-accepted SQ2 v21 with diagnostic-only cleanup; SQ1 and long-term suspend not revalidated",
   "kernel_release": "6.18.60-sq2-android1",
-  "graphics": "mesa",
+  "graphics": "qualcomm-mapper5-gralloc-qti-hwc-sdm",
   "schema": 1,
   "files": {
     "Image": "db374853bb5df0cdaa5215b1226256adedda3292a93084e874438a4ba706c982",
-    "el2launch.efi": "e09929fc90b51e9fdad501eea0b912514e352e2f063c6169feed8641dbb3ae56",
-    "start.efi": "32905b2b9b872fb4ffef200534c4e4a2e7d97954519a542bedc0e376fb51c31b",
+    "el2launch.efi": "74817f58fe10337f23c00c62082ef917097c6648d94bc847e0d452584b8db72d",
+    "start.efi": "31a2edd5ec981c6a21b9e9302faaef0b49a6c3f0bc110e45e7e4372a800f2267",
     "tcblaunch.exe": "195997cf13a82f4715c92374b7918ab1f7231b2cc9be675b0846adf2995f8948",
-    "initramfs.cpio.gz": "5b3a70c349735e58b404b0d3825dc0dde12ae991706cbbab7e15ed65c9911185",
+    "initramfs.cpio.gz": "e826df919c358a61ff023f6021ba9dae43d166b1d781a3b107ed8320286456a0",
     "qebspilaa64.efi": "e3675e36a749176481742a8ac78b8d505a40e3ea2a87464b123c45dd3080fe95",
-    "kernel-options.txt": "77c0cbb1b1f895bf834722b133d383a0eaecba226ec788df046d9d0f6a53b860",
+    "kernel-options.txt": "938cd0aeb71b6ac0ef8976e8e346f519488bd9c960db554450e0e1c7d5e58fd2",
     "android-el2.dtb": "c137b9604b908e39aba4be6ecd98e55cd9986fe3fd7522c93069bef7489c956b"
-  }
+  },
+  "baseline": "v21-release",
+  "date": "2026-11-10",
+  "sole_supported_baseline": true
 }

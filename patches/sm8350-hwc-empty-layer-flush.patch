@@ -1,0 +1,35 @@
+--- a/composer/hwc_display_builtin.cpp
++++ b/composer/hwc_display_builtin.cpp
+@@ -347,8 +347,9 @@
+     has_client_composition_ = false;
+     *out_num_types = 0;
+     *out_num_requests = 0;
+-    // Avoid flush for Command mode panel.
+-    flush_ = !client_connected_;
++    // Video-mode scanout otherwise retains the last visible buffer forever.
++    // Preserve the connected command-mode panel's existing no-flush policy.
++    flush_ = !is_cmd_mode_ || !client_connected_;
+     validated_ = true;
+     return status;
+   }
+--- a/composer/hwc_display.cpp
++++ b/composer/hwc_display.cpp
+@@ -1701,10 +1701,16 @@
+ HWC2::Error HWCDisplay::PostCommitLayerStack(shared_ptr<Fence> *out_retire_fence) {
+   auto status = HWC2::Error::None;
+ 
+-  // Do no call flush on errors, if a successful buffer is never submitted.
++  *out_retire_fence = nullptr;
++  // Do not flush if a successful buffer has never been submitted.
+   if (flush_ && flush_on_error_) {
+-    display_intf_->Flush(&layer_stack_);
++    DisplayError error = display_intf_->Flush(&layer_stack_);
+     validated_ = false;
++    if (error != kErrorNone) {
++      DLOGE("Flush failed. Error = %d", error);
++      // Preserve flush_ and buffer/fence state so a failed blank is retried.
++      return HWC2::Error::NoResources;
++    }
+   }
+ 
+   if (tone_mapper_ && tone_mapper_->IsActive()) {

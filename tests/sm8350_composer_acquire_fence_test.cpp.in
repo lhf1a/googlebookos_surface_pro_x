@@ -1,0 +1,151 @@
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <memory>
+#include <string>
+#include <vector>
+#include <cerrno>
+#include <stdexcept>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <linux/sync_file.h>
+using std::shared_ptr;using std::string;
+enum class Error {NONE=0,BAD_PARAMETER=4,NO_RESOURCES=6};
+struct IQtiComposerClient {enum class HandleIndex {EMPTY=-1,CACHED=-2};};
+struct native_handle_t {int version=12,numFds=1,numInts=0;int data[2]={-1,-1};};
+struct Handle {native_handle_t *p;const native_handle_t *getNativeHandle()const{return p;}};
+static ino_t synthetic_sync_inode;
+static int synthetic_status,dup_failure,ioctl_failure,dup_interrupt,ioctl_interrupt;
+static unsigned waits=0;
+static int test_fcntl(int fd,int cmd,int arg) {
+ if(dup_interrupt){--dup_interrupt;errno=EINTR;return -1;}
+ if(dup_failure){errno=dup_failure;return -1;}
+ return fcntl(fd,cmd,arg);
+}
+static int test_ioctl(int fd,unsigned long cmd,void *data) {
+ if(ioctl_interrupt){--ioctl_interrupt;errno=EINTR;return -1;}
+ if(ioctl_failure){errno=ioctl_failure;return -1;}
+ struct stat st{};assert(!fstat(fd,&st));
+ if(st.st_ino==synthetic_sync_inode) {
+  auto *info=static_cast<struct sync_file_info*>(data);
+  info->num_fences=1;info->status=synthetic_status;return 0;
+ }
+ return ioctl(fd,cmd,data);
+}
+static int sync_wait(int,int){++waits;return -EINVAL;}
+#define ALOGE(...) ((void)0)
+#define ALOGW(...) ((void)0)
+struct Fence {
+ int fd;explicit Fence(int f):fd(f){}~Fence(){close(fd);}
+ static shared_ptr<Fence>Create(int f,const string&){return f<0?nullptr:std::make_shared<Fence>(f);}
+};
+struct Rect {};
+struct hwc_region {size_t count;const Rect *rects;};
+struct CommandWriter {
+ static constexpr uint16_t kSetLayerBufferLength=3,kSetOutputBufferLength=3;
+};
+class QtiComposerClient {
+public:
+ struct Session {
+  unsigned calls=0;
+  Error SetLayerBuffer(uint64_t,uint64_t,const native_handle_t*,const shared_ptr<Fence>&){++calls;return Error::NONE;}
+  Error SetClientTarget(uint64_t,const native_handle_t*,const shared_ptr<Fence>&,int32_t,hwc_region){++calls;return Error::NONE;}
+  Error SetOutputBuffer(uint64_t,const native_handle_t*,const shared_ptr<Fence>&){++calls;return Error::NONE;}
+ } session;
+ Session *hwc_session_=&session;
+ class CommandReader {
+ public:
+  QtiComposerClient &mClient;
+  explicit CommandReader(QtiComposerClient &c):mClient(c){}
+  uint64_t mDisplay=1,mLayer=2;
+  std::vector<Handle> mDataHandles;
+  std::vector<int32_t> words;
+  size_t pos=0;
+  unsigned lookups=0,updates=0;
+  enum class BufferCache {LAYER_BUFFERS,CLIENT_TARGETS,OUTPUT_BUFFERS};
+  struct Writer {unsigned errors=0;Error error=Error::NONE;
+   void setError(unsigned,Error e){++errors;error=e;}
+  }mWriter;
+  unsigned getCommandLoc(){return 0;}
+  uint32_t read(){if(pos>=words.size())throw std::logic_error("payload overread");return uint32_t(words[pos++]);}
+  int32_t readSigned(){return int32_t(read());}
+  const native_handle_t *readHandle(bool &cache) {
+   int32_t index=readSigned();cache=index==-2;
+   return index>=0&&size_t(index)<mDataHandles.size()?mDataHandles[index].p:nullptr;
+  }
+  const native_handle_t *readHandle(){bool cache;return readHandle(cache);}
+  std::vector<Rect> readRegion(unsigned n){for(unsigned i=0;i<n*4;i++)read();return std::vector<Rect>(n);}
+  Error lookupBuffer(BufferCache,unsigned,bool,const native_handle_t *in,const native_handle_t **out){
+   ++lookups;*out=in;return Error::NONE;
+  }
+  Error updateBuffer(BufferCache,unsigned,bool,const native_handle_t*){++updates;return Error::NONE;}
+#define fcntl test_fcntl
+#define ioctl test_ioctl
+@READ_FENCE@
+#undef ioctl
+#undef fcntl
+  bool parseSetLayerBuffer(uint16_t);
+  bool parseSetClientTarget(uint16_t);
+  bool parseSetOutputBuffer(uint16_t);
+ };
+};
+@LAYER@
+@TARGET@
+@OUTPUT@
+static unsigned fd_count() {
+ unsigned count=0;for(int fd=0;fd<512;fd++)if(fcntl(fd,F_GETFD)>=0)++count;return count;
+}
+int main() {
+ unsigned mismatches=0,cases=0;
+ int pipefd[2];assert(!pipe(pipefd));struct stat st{};assert(!fstat(pipefd[0],&st));synthetic_sync_inode=st.st_ino;
+ int nonsync=open("/dev/null",O_RDONLY|O_CLOEXEC);assert(nonsync>=0);
+ for(unsigned command=0;command<3;command++)for(unsigned scenario=0;scenario<15;scenario++) {
+  unsigned before=fd_count();QtiComposerClient c;QtiComposerClient::CommandReader reader(c);
+  native_handle_t buffer,fence;fence.data[0]=pipefd[0];
+  reader.mDataHandles={{&buffer},{&fence}};
+  int32_t index=1;Error expected=Error::NONE;
+  synthetic_status=0;dup_failure=ioctl_failure=dup_interrupt=ioctl_interrupt=0;
+  switch(scenario) {
+   case 0:index=-1;break;
+   case 1:fence.numFds=0;break;
+   case 2:break; // synthetic pending sync_file
+   case 3:synthetic_status=1;break;
+   case 4:synthetic_status=-ENOENT;break; // error status is not an invalid descriptor
+   case 5:fence.data[0]=nonsync;expected=Error::BAD_PARAMETER;break;
+   case 6:fence.data[0]=-1;expected=Error::BAD_PARAMETER;break;
+   case 7:fence.numFds=2;expected=Error::BAD_PARAMETER;break;
+   case 8:fence.numInts=1;expected=Error::BAD_PARAMETER;break;
+   case 9:index=-2;expected=Error::BAD_PARAMETER;break;
+   case 10:index=9;expected=Error::BAD_PARAMETER;break;
+   case 11:dup_failure=EMFILE;expected=Error::NO_RESOURCES;break;
+   case 12:ioctl_failure=ENOMEM;expected=Error::NO_RESOURCES;break;
+   case 13:dup_interrupt=ioctl_interrupt=1;break;
+   case 14:reader.mDataHandles[1].p=nullptr;expected=Error::BAD_PARAMETER;break;
+  }
+  reader.words={0,0,index};
+  if(command==1)reader.words.push_back(0x10c10000);
+  bool ok=command==0?reader.parseSetLayerBuffer(3):command==1?reader.parseSetClientTarget(4):reader.parseSetOutputBuffer(3);
+  assert(ok&&reader.pos==reader.words.size());
+  bool good=reader.mWriter.error==expected&&reader.mWriter.errors==unsigned(expected!=Error::NONE);
+  good&=c.session.calls==unsigned(expected==Error::NONE);
+  good&=reader.lookups==unsigned(expected==Error::NONE)&&reader.updates==unsigned(expected==Error::NONE);
+  mismatches+=!good;++cases;
+  assert(fd_count()==before); // imported duplicate must be owned or closed on all branches
+ }
+ unsigned short_cases=0,short_mismatches=0;
+ for(unsigned command=0;command<3;command++)for(unsigned length=0;length<8;length++) {
+  if(length==(command==1?4U:3U))continue;
+  QtiComposerClient c;QtiComposerClient::CommandReader reader(c);bool ok=true,threw=false;
+  try {ok=command==0?reader.parseSetLayerBuffer(length):command==1?reader.parseSetClientTarget(length):reader.parseSetOutputBuffer(length);}
+  catch(const std::logic_error&){threw=true;}
+  short_mismatches+=threw||ok||reader.pos||c.session.calls||reader.lookups||reader.updates;++short_cases;
+ }
+ assert(short_cases==21&&short_mismatches==EXPECTED_SHORT_MISMATCHES);
+ printf("SHORT_COMMAND cases=%u mismatches=%u\n",short_cases,short_mismatches);
+ close(nonsync);close(pipefd[0]);close(pipefd[1]);
+ printf("ACQUIRE_FENCE cases=%u mismatches=%u synchronous_wait_calls=%u\n",cases,mismatches,waits);
+ assert(cases==45 && mismatches==EXPECTED_MISMATCHES);
+ if(!EXPECTED_MISMATCHES)assert(!waits);
+}

@@ -43,17 +43,6 @@ else
     mount -t vfat -o sync /dev/vdg /media/esp || fail smoke-log-disk
 fi
 bootid=$(cat /proc/sys/kernel/random/boot_id)
-logdir=/media/esp/logs/googlebook-native-$bootid
-if [ "$debug" = 1 ]; then
-if mkdir -p "$logdir" && mount --bind "$logdir" /logs; then
-    if ! boot-kmsg /logs/kernel-live.txt; then
-        umount /logs || fail logs-unbind
-        echo 'Persistent logging unavailable; continuing with RAM logs.'
-    fi
-else
-    echo 'Persistent log directory unavailable; continuing with RAM logs.'
-fi
-fi
 # Normal-boot helper output stays in initramfs RAM, without synchronous ESP I/O.
 exec > /dev/console 2>&1
 echo "SQ2_GOOGLEBOOK_NATIVE_PREP bootid=$bootid" | tee /logs/status.txt
@@ -197,7 +186,6 @@ mkdir -p /android
 mount --rbind /newroot /android || fail android-debug-root
 cat /proc/mounts > /logs/mounts-before-init.txt
 echo "SQ2_NATIVE_HANDOFF: original Android init as real PID 1; debug=$debug" | tee -a /logs/status.txt
-if [ "$debug" = 1 ]; then native-monitor > /logs/monitor.txt 2>&1 & fi
 lab-keep-awake > /logs/lab-keep-awake.txt 2>&1 &
 if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
     if [ "$debug" = 0 ] && ! grep -q 'sq2.ssh=0' /proc/cmdline; then

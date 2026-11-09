@@ -1,0 +1,202 @@
+--- a/composer/QtiComposerHandleImporter.h
++++ b/composer/QtiComposerHandleImporter.h
+@@ -20,8 +20,11 @@
+ #ifndef __QTICOMPOSERHANDLEIMPORTER_H__
+ #define __QTICOMPOSERHANDLEIMPORTER_H__
+ 
+-#include <android/hardware/graphics/mapper/2.0/IMapper.h>
+-#include <android/hardware/graphics/mapper/3.0/IMapper.h>
++#include <android/hardware/graphics/mapper/IMapper.h>
++#include <hardware/hardware.h>
++#include <algorithm>
++#include <map>
++#include <vector>
+ #include <utils/Mutex.h>
+ #include <sys/types.h>
+ #include <sys/stat.h>
+@@ -36,11 +39,7 @@
+ 
+ #define MAX_INO_VALS 100
+ 
+-using IMapperV2 = ::android::hardware::graphics::mapper::V2_0::IMapper;
+-using IMapperV3 = ::android::hardware::graphics::mapper::V3_0::IMapper;
+-using ::android::sp;
+ using ::android::Mutex;
+-using ::android::hardware::hidl_handle;
+ 
+ class ComposerHandleImporter {
+  public:
+@@ -59,8 +58,7 @@
+  private:
+   Mutex mLock;
+   bool mInitialized = false;
+-  sp<IMapperV2> mMapper_V2;
+-  sp<IMapperV3> mMapper_V3;
++  AIMapper *mMapper = nullptr;
+   bool enable_memory_mapping_ = false;
+   std::map<uint64_t, std::vector<uint32_t>> ino_fds_map_;
+ };
+--- a/composer/QtiComposerHandleImporter.cpp
++++ b/composer/QtiComposerHandleImporter.cpp
+@@ -21,7 +21,7 @@
+ 
+ #include "QtiComposerHandleImporter.h"
+ #include <cutils/properties.h>
+-#include "display_properties.h"
++#include <dlfcn.h>
+ 
+ namespace vendor {
+ namespace qti {
+@@ -30,8 +30,6 @@
+ namespace composer {
+ namespace V3_0 {
+ 
+-using MapperV2Error = android::hardware::graphics::mapper::V2_0::Error;
+-using MapperV3Error = android::hardware::graphics::mapper::V3_0::Error;
+ 
+ ComposerHandleImporter::ComposerHandleImporter() : mInitialized(false) {}
+ 
+@@ -41,14 +39,23 @@
+     return;
+   }
+ 
+-  mMapper_V3 = IMapperV3::getService();
+-  if (mMapper_V3 == nullptr) {
+-    mMapper_V2 = IMapperV2::getService();
+-    if (mMapper_V2 == nullptr) {
+-      ALOGE("%s: cannnot acccess graphics mapper HAL!", __FUNCTION__);
+-      return;
+-    }
++  // Keep the SP-HAL loaded for the lifetime of every imported handle.
++  static void *support = dlopen("libvndksupport.so", RTLD_NOW | RTLD_LOCAL);
++  using LoadSphal = void *(*)(const char *, int);
++  static auto load_sphal = support ? reinterpret_cast<LoadSphal>(
++      dlsym(support, "android_load_sphal_library")) : nullptr;
++  static void *library = load_sphal ?
++      load_sphal("mapper.quest2.so", RTLD_NOW | RTLD_LOCAL) : nullptr;
++  using LoadMapper = AIMapper_Error (*)(AIMapper **);
++  static auto load_mapper = library ? reinterpret_cast<LoadMapper>(
++      dlsym(library, "AIMapper_loadIMapper")) : nullptr;
++  AIMapper *mapper = nullptr;
++  if (!load_mapper || load_mapper(&mapper) != AIMAPPER_ERROR_NONE ||
++      !mapper || mapper->version != AIMAPPER_VERSION_5) {
++    ALOGE("%s: cannot access Quest mapper5 HAL", __FUNCTION__);
++    return;
+   }
++  mMapper = mapper;
+ 
+   int value = 0;  // Default value when property is not present.
+   value = property_get_bool("vendor.display.enable_memory_mapping", 0);
+@@ -59,11 +66,7 @@
+ }
+ 
+ void ComposerHandleImporter::cleanup() {
+-  if (mMapper_V3 != nullptr) {
+-    mMapper_V3.clear();
+-  } else {
+-    mMapper_V2.clear();
+-  }
++  mMapper = nullptr;
+   mInitialized = false;
+ }
+ 
+@@ -122,54 +125,17 @@
+     initialize();
+   }
+ 
+-  if (mMapper_V3 == nullptr && mMapper_V2 == nullptr) {
+-    ALOGE("%s: mMapper is null!", __FUNCTION__);
++  if (!mMapper) {
++    ALOGE("%s: mapper5 is unavailable", __FUNCTION__);
+     return false;
+   }
+-
+-  if (mMapper_V3 != nullptr) {
+-    MapperV3Error error;
+-    buffer_handle_t importedHandle;
+-
+-    auto ret = mMapper_V3->importBuffer(
+-        hidl_handle(handle),
+-        [&](const auto &tmpError, const auto &tmpBufferHandle) {
+-          error = tmpError;
+-          importedHandle = static_cast<buffer_handle_t>(tmpBufferHandle);
+-        });
+-
+-    if (!ret.isOk()) {
+-      ALOGE("%s: mapper importBuffer failed: %s", __FUNCTION__, ret.description().c_str());
+-      return false;
+-    }
+-
+-    if (error != MapperV3Error::NONE) {
+-      return false;
+-    }
+-
+-    handle = importedHandle;
+-  } else {
+-    MapperV2Error error;
+-    buffer_handle_t importedHandle;
+-
+-    auto ret = mMapper_V2->importBuffer(
+-        hidl_handle(handle),
+-        [&](const auto &tmpError, const auto &tmpBufferHandle) {
+-          error = tmpError;
+-          importedHandle = static_cast<buffer_handle_t>(tmpBufferHandle);
+-        });
+-
+-    if (!ret.isOk()) {
+-      ALOGE("%s: mapper importBuffer failed: %s", __FUNCTION__, ret.description().c_str());
+-      return false;
+-    }
+-
+-    if (error != MapperV2Error::NONE) {
+-      return false;
+-    }
+-
+-    handle = importedHandle;
++  buffer_handle_t imported = nullptr;
++  AIMapper_Error error = mMapper->v5.importBuffer(handle, &imported);
++  if (error != AIMAPPER_ERROR_NONE) {
++    ALOGE("%s: mapper5 importBuffer failed: %d", __FUNCTION__, error);
++    return false;
+   }
++  handle = imported;
+ 
+   if (enable_memory_mapping_) {
+     for (int i = 0; i < handle->numFds; i++) {
+@@ -187,27 +153,18 @@
+ 
+   Mutex::Autolock lock(mLock);
+ 
+-  if (mMapper_V3 == nullptr && mMapper_V2 == nullptr) {
+-    ALOGE("%s: mMapper is null!", __FUNCTION__);
++  if (!mMapper) {
++    ALOGE("%s: mapper5 is unavailable", __FUNCTION__);
+     return;
+   }
+-
+-  if (mMapper_V3 != nullptr) {
+-    if (enable_memory_mapping_) {
+-      for (int i = 0; i < handle->numFds; i++) {
+-        // handle->data is the int array of fds. run remove on all fds.
+-        InoFdMapRemove(handle->data[i]);
+-      }
++  if (enable_memory_mapping_) {
++    for (int i = 0; i < handle->numFds; i++) {
++      InoFdMapRemove(handle->data[i]);
+     }
+-    auto ret = mMapper_V3->freeBuffer(const_cast<native_handle_t *>(handle));
+-
+-    if (!ret.isOk()) {
+-      ALOGE("%s: mapper freeBuffer failed: %s", __FUNCTION__, ret.description().c_str());
+-    }
+-  } else {
+-    auto ret = mMapper_V2->freeBuffer(const_cast<native_handle_t *>(handle));
+-    if (!ret.isOk()) {
+-      ALOGE("%s: mapper freeBuffer failed: %s", __FUNCTION__, ret.description().c_str()); }
++  }
++  AIMapper_Error error = mMapper->v5.freeBuffer(handle);
++  if (error != AIMAPPER_ERROR_NONE) {
++    ALOGE("%s: mapper5 freeBuffer failed: %d", __FUNCTION__, error);
+   }
+ }
+ 

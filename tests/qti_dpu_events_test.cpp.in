@@ -1,0 +1,199 @@
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cassert>
+#include <cerrno>
+#include <climits>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
+#include <map>
+#include <mutex>
+#include <poll.h>
+#include <pthread.h>
+#include <string>
+#include <sys/eventfd.h>
+#include <sys/inotify.h>
+#include <sys/prctl.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <utility>
+#include <vector>
+using std::vector;
+#define DLOGE(...) ((void)0)
+#define DLOGW(...) ((void)0)
+#define DLOGI(...) ((void)0)
+#define DTRACE_SCOPED() ((void)0)
+#define UINT32(x) uint32_t(x)
+constexpr int kThreadPriorityUrgent=0;
+constexpr char DISABLE_HW_RECOVERY_PROP[]="disable";
+constexpr char ENABLE_HISTOGRAM_INTR[]="hist";
+enum DisplayError {kErrorNone,kErrorParameters,kErrorResources,kErrorNotSupported};
+enum DisplayType {kPrimary};
+enum class HWEvent {VSYNC,EXIT,IDLE_NOTIFY,IDLE_POWER_COLLAPSE,PANEL_DEAD,HW_RECOVERY,HISTOGRAM,
+ BACKLIGHT_EVENT,CEC_READ_MESSAGE,SHOW_BLANK_EVENT,THERMAL_LEVEL,PINGPONG_TIMEOUT};
+enum HWRecoveryEvent {unused};
+namespace sde_drm {struct DRMDisplayToken {uint32_t crtc_id=3,conn_id=7,crtc_index=2;};}
+struct HWInterface {};
+struct HWDeviceDRM : HWInterface {
+ bool primary=true,kernel=true; std::string path; DisplayError brightness=kErrorNotSupported;
+ void GetDRMDisplayToken(sde_drm::DRMDisplayToken *t) const {*t={};}
+ bool IsPrimaryDisplay() const {return primary;}
+ bool IsKernelManagedDpu() const {return kernel;}
+ DisplayError GetPanelBrightnessBasePath(std::string *p) const {*p=path;return brightness;}
+};
+struct HWEventHandler {int callbacks=0;int64_t timestamp=0;void VSync(int64_t t){callbacks++;timestamp=t;}};
+struct HWEventsInterface {};
+struct Debug {static Debug *Get(){static Debug d;return &d;} DisplayError GetProperty(const char *,int *){return kErrorNotSupported;}};
+static int master_fd=-1,master_error=0,legacy_opens=0,vendor_calls=0;
+static bool master_null=false,path_null=false,fail_open=false,fail_fstat=false;
+static const char *device_path="/dev/null";
+namespace drm_utils {struct DRMMaster {
+ static int GetInstance(DRMMaster **m) {static DRMMaster d;*m=master_null?nullptr:&d;return master_error;}
+ void GetHandle(int *fd) {*fd=master_fd;}
+};}
+using drm_utils::DRMMaster;
+static char *drmGetDeviceNameFromFd2(int){return path_null?nullptr:strdup(device_path);}
+static int drmOpen(const char *,void *){legacy_opens++;return ::open("/dev/null",O_RDWR);}
+static std::vector<int> closed;
+static int tracked_close(int fd){closed.push_back(fd);return ::close(fd);}
+static int drmClose(int fd){return tracked_close(fd);}
+static int test_open(const char *p,int flags){if(fail_open){errno=EACCES;return -1;}return ::open(p,flags);}
+static int test_fstat(int fd,struct stat *s){if(fail_fstat){errno=EBADF;return -1;}return ::fstat(fd,s);}
+static bool fail_eventfd=false,fail_inotify=false,fail_watch=false,real_thread=false;
+static int create_error=0,thread_creates=0,thread_joins=0;
+static int test_pthread_create(pthread_t *t,const pthread_attr_t *a,void *(*fn)(void *),void *p){
+ thread_creates++;if(create_error)return create_error;if(real_thread)return ::pthread_create(t,a,fn,p);*t={};return 0;
+}
+static int test_pthread_join(pthread_t t,void **p){thread_joins++;return real_thread?::pthread_join(t,p):0;}
+namespace Sys {
+static int eventfd_(unsigned value,int flags){if(fail_eventfd){errno=EMFILE;return -1;}return ::eventfd(value,flags);}
+static int inotify_init_(){return fail_inotify? -1 : ::inotify_init1(IN_CLOEXEC);}
+static int inotify_add_watch_(int fd,const char *p,uint32_t mask){return fail_watch? -1 : ::inotify_add_watch(fd,p,mask);}
+static int inotify_rm_watch_(int fd,int wd){return ::inotify_rm_watch(fd,wd);}
+static int close_(int fd){return tracked_close(fd);}
+static int open_(const char *p,int flags){return ::open(p,flags);}
+static ssize_t read_(int fd,void *p,size_t n){return ::read(fd,p,n);}
+static ssize_t pread_(int fd,void *p,size_t n,off_t o){return ::pread(fd,p,n,o);}
+static ssize_t write_(int fd,const void *p,size_t n){return ::write(fd,p,n);}
+static int poll_(pollfd *p,nfds_t n,int timeout){return ::poll(p,n,timeout);}
+}
+enum drmVBlankSeqType {unused_seq, test_vblank_event=0x4000000};
+constexpr uint32_t DRM_VBLANK_HIGH_CRTC_SHIFT=1,DRM_VBLANK_HIGH_CRTC_MASK=0x3e;
+constexpr uint32_t DRM_VBLANK_RELATIVE=1,DRM_VBLANK_EVENT=0x4000000;
+struct drmVBlank {struct {drmVBlankSeqType type;uint32_t sequence;unsigned long signal;} request;};
+static drmVBlank last_vblank{};static int vblank_fd=-1,vblank_error=0,vblank_calls=0;
+static int drmWaitVBlank(int fd,drmVBlank *v){last_vblank=*v;vblank_fd=fd;vblank_calls++;return vblank_error;}
+constexpr int DRM_EVENT_CONTEXT_VERSION=4;
+struct drmEventContext {int version;void (*vblank_handler)(int,unsigned,unsigned,unsigned,void *);};
+static unsigned long queued_cookie=0;
+static int drmHandleEvent(int fd,drmEventContext *e){e->vblank_handler(fd,17,12,345,reinterpret_cast<void *>(queued_cookie));return 0;}
+@CLASS@
+std::atomic<unsigned long> HWEventsDRM::next_vsync_cookie_{1};
+thread_local HWEventsDRM *HWEventsDRM::vsync_dispatcher_=nullptr;
+void HWEventsDRM::HandleIdleTimeout(char *){}
+void HWEventsDRM::HandleCECMessage(char *){}
+void HWEventsDRM::HandleIdlePowerCollapse(char *){}
+void HWEventsDRM::HandlePanelDead(char *){}
+void HWEventsDRM::HandleHwRecovery(char *){}
+void HWEventsDRM::HandleHistogram(char *){}
+void HWEventsDRM::HandleBacklightEvent(char *){}
+DisplayError HWEventsDRM::RegisterPanelDead(bool){vendor_calls++;return kErrorNone;}
+DisplayError HWEventsDRM::RegisterIdleNotify(bool){vendor_calls++;return kErrorNone;}
+DisplayError HWEventsDRM::RegisterIdlePowerCollapse(bool){vendor_calls++;return kErrorNone;}
+DisplayError HWEventsDRM::RegisterHwRecovery(bool){vendor_calls++;return kErrorNone;}
+DisplayError HWEventsDRM::RegisterHistogram(bool){vendor_calls++;return kErrorNone;}
+#define open test_open
+#define close tracked_close
+#define fstat test_fstat
+#define pthread_create test_pthread_create
+#define pthread_join test_pthread_join
+@FUNCTIONS@
+#undef open
+#undef close
+#undef fstat
+#undef pthread_create
+#undef pthread_join
+static void reset(){
+ master_error=legacy_opens=vendor_calls=create_error=thread_creates=thread_joins=vblank_error=vblank_calls=0;
+ master_null=path_null=fail_open=fail_fstat=fail_eventfd=fail_inotify=fail_watch=real_thread=false;
+ device_path="/dev/null";closed.clear();
+}
+static void assert_closed(HWEventsDRM &e){for(auto fd:e.poll_fds_)assert(fd.fd==-1);assert(std::find(closed.begin(),closed.end(),master_fd)==closed.end());}
+int main(){
+ master_fd=::open("/dev/null",O_RDWR|O_CLOEXEC);assert(master_fd>=0);
+ HWEventHandler handler;HWDeviceDRM hw;vector<HWEvent> events={HWEvent::VSYNC,HWEvent::EXIT,
+ HWEvent::IDLE_NOTIFY,HWEvent::IDLE_POWER_COLLAPSE,HWEvent::PANEL_DEAD,HWEvent::HW_RECOVERY,
+ HWEvent::HISTOGRAM,HWEvent::BACKLIGHT_EVENT,HWEvent::CEC_READ_MESSAGE};
+ // Primary ownership, supported-event filtering, standard vblank, stale queued cookie rejection.
+ reset();HWEventsDRM e;assert(e.Init(1,kPrimary,&handler,events,&hw)==kErrorNone);
+ assert(e.event_data_list_.size()==2&&e.poll_fds_[0].fd==master_fd&&legacy_opens==0&&vendor_calls==0);
+ assert(e.SetEventState(HWEvent::BACKLIGHT_EVENT,true)==kErrorNotSupported);
+ assert(e.SetEventState(HWEvent::IDLE_NOTIFY,true)==kErrorNotSupported);
+ assert(e.SetEventState(HWEvent::VSYNC,true)==kErrorNone&&vblank_fd==master_fd);
+ assert(last_vblank.request.sequence==1&&last_vblank.request.signal==e.vsync_cookie_);
+ assert(uint32_t(last_vblank.request.type)==(DRM_VBLANK_RELATIVE|DRM_VBLANK_EVENT|4));
+ auto old_cookie=e.vsync_cookie_;queued_cookie=old_cookie;e.HandleVSync(nullptr);
+ assert(handler.callbacks==1&&handler.timestamp==12000345000LL);
+ assert(HWEventsDRM::vsync_dispatcher_==nullptr);
+ assert(e.Deinit()==kErrorNone&&thread_joins==1&&vendor_calls==0);assert_closed(e);
+ assert(e.Deinit()==kErrorNone&&thread_joins==1);assert(e.SetEventState(HWEvent::VSYNC,true)==kErrorNotSupported);
+ assert(e.Init(1,kPrimary,&handler,events,&hw)==kErrorNone&&old_cookie!=e.vsync_cookie_);
+ queued_cookie=old_cookie;e.HandleVSync(nullptr);assert(handler.callbacks==1);
+ queued_cookie=e.vsync_cookie_;e.HandleVSync(nullptr);assert(handler.callbacks==2);
+ e.Deinit();HWEventsDRM::KernelVSyncHandlerCallback(0,0,0,0,reinterpret_cast<void *>(old_cookie));
+ // Same selected character node, independent file description (not dup), all open failures.
+ reset();HWEventsDRM opener;int own=opener.OpenDrmEventFd();assert(own>=0&&own!=master_fd);
+ assert((fcntl(own,F_GETFL)&O_NONBLOCK)!=0&&(fcntl(master_fd,F_GETFL)&O_NONBLOCK)==0);::close(own);
+ master_error=-1;assert(opener.OpenDrmEventFd()==-1);master_error=0;
+ master_null=true;assert(opener.OpenDrmEventFd()==-1);master_null=false;
+ path_null=true;assert(opener.OpenDrmEventFd()==-1);path_null=false;
+ fail_open=true;assert(opener.OpenDrmEventFd()==-1);fail_open=false;
+ fail_fstat=true;assert(opener.OpenDrmEventFd()==-1);fail_fstat=false;
+ device_path="/dev/zero";assert(opener.OpenDrmEventFd()==-1);device_path="/dev/null";
+ // Failure before/after borrowed fd allocation never closes stdin, master, or uninitialized slots.
+ for(int stage=0;stage<5;stage++){
+  reset();HWEventsDRM failed;
+  if(stage==0)master_error=-1;
+  if(stage==1)master_null=true;
+  if(stage==2)fail_eventfd=true;
+  if(stage==3)create_error=EAGAIN;
+  if(stage==4){::close(master_fd);master_fd=-1;}
+  assert(failed.Init(1,kPrimary,&handler,events,&hw)!=kErrorNone);assert_closed(failed);
+  assert(std::find(closed.begin(),closed.end(),0)==closed.end());
+  if(stage==4)master_fd=::open("/dev/null",O_RDWR|O_CLOEXEC);
+ }
+ reset();HWEventsDRM missing;assert(missing.Init(1,kPrimary,&handler,{HWEvent::VSYNC},&hw)==kErrorParameters);
+ assert(missing.poll_fds_.empty());
+ assert(missing.Init(1,kPrimary,nullptr,events,&hw)==kErrorParameters);
+ assert(missing.Init(1,kPrimary,&handler,events,nullptr)==kErrorParameters);
+ // Nonprimary owns its reopen and closes it even if later allocation fails.
+ reset();hw.primary=false;HWEventsDRM secondary;fail_eventfd=true;
+ assert(secondary.Init(1,kPrimary,&handler,events,&hw)==kErrorResources);
+ assert(closed.size()==1&&closed[0]!=master_fd);assert_closed(secondary);
+ reset();assert(secondary.Init(1,kPrimary,&handler,events,&hw)==kErrorNone);
+ own=secondary.poll_fds_[0].fd;secondary.Deinit();assert(fcntl(own,F_GETFD)==-1&&errno==EBADF);hw.primary=true;
+ // Real brightness node/watch, positive pthread errors, inotify errors, real EXIT wake+join.
+ char directory[]="/tmp/qti-events-XXXXXX";assert(mkdtemp(directory));
+ hw.path=std::string(directory)+"/";std::string brightness=hw.path+"brightness";
+ int bf=::open(brightness.c_str(),O_CREAT|O_WRONLY,0600);assert(bf>=0);::close(bf);hw.brightness=kErrorNone;
+ reset();HWEventsDRM bl;fail_inotify=true;assert(bl.Init(1,kPrimary,&handler,events,&hw)==kErrorResources);assert_closed(bl);
+ reset();assert(bl.Init(1,kPrimary,&handler,events,&hw)==kErrorNone&&bl.event_data_list_.size()==3);
+ fail_watch=true;assert(bl.SetEventState(HWEvent::BACKLIGHT_EVENT,true)==kErrorResources);fail_watch=false;
+ assert(bl.SetEventState(HWEvent::BACKLIGHT_EVENT,true)==kErrorNone&&bl.backlight_wd_>=0);
+ assert(bl.SetEventState(HWEvent::BACKLIGHT_EVENT,false)==kErrorNone&&bl.backlight_wd_==-1);
+ bl.Deinit();assert_closed(bl);::unlink(brightness.c_str());::rmdir(directory);
+ reset();real_thread=true;HWEventsDRM thread;
+ assert(thread.Init(1,kPrimary,&handler,{HWEvent::EXIT},&hw)==kErrorNone);
+ assert(thread.Init(1,kPrimary,&handler,{HWEvent::EXIT},&hw)==kErrorParameters);
+ assert(thread.Deinit()==kErrorNone&&thread_joins==1);assert_closed(thread);real_thread=false;
+ // Invalid parser on legacy path propagates without touching any fd; legacy ioctls remain legacy.
+ reset();hw.kernel=false;HWEventsDRM legacy;
+ assert(legacy.Init(1,kPrimary,&handler,{HWEvent::EXIT,static_cast<HWEvent>(999)},&hw)==kErrorParameters);
+ assert_closed(legacy);assert(thread_creates==0);
+ reset();assert(legacy.Init(1,kPrimary,&handler,{HWEvent::VSYNC,HWEvent::EXIT},&hw)==kErrorNone);
+ assert(vendor_calls==4);legacy.Deinit();assert(vendor_calls==8);
+ ::close(master_fd);puts("actual QTI events: lifecycle/fd/vblank/error tests passed");
+}

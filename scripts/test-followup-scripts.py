@@ -46,14 +46,3 @@ for ready_later in [True,False]:
         else:
             assert rc==3 and 'SPI_READY_TIMEOUT' in log and not (b/'logs/check.txt').exists(),log
         print('PASS touch delayed-ready' if ready_later else 'PASS touch ready-timeout avoids feature ioctl')
-with tempfile.TemporaryDirectory(prefix='sq2-wifi-test-') as temp:
-    b=Path(temp);p=setup(b,'test-wifi');(b/'sys/class/net/wlan0/phy80211').mkdir(parents=True)
-    for name in ['wifi-services','modprobe','wpa_supplicant','ping','nslookup','sleep']:stub(b,name,'exit 0')
-    stub(b,'iw','case "$*" in *scan*) echo BAD_SCAN > "$TEST_ROOT/logs/bad-scan"; exit 93;; esac\necho "Interface wlan0"')
-    stub(b,'ip','[ "$1" != route ] || echo "default via 192.0.2.1 dev wlan0"\nexit 0')
-    stub(b,'wpa_cli','[ "$1" = -p ] && [ "$2" = "$TEST_ROOT/run/wpa_supplicant" ] || exit 94\necho wpa_state=COMPLETED')
-    stub(b,'udhcpc','echo DHCP_CALLED > "$TEST_ROOT/logs/dhcp-called"')
-    assert run(b,p,['network'])==0
-    assert (b/'logs/dhcp-called').exists() and not (b/'logs/bad-scan').exists()
-    assert 'wifi_association_and_dhcp_ok=1' in (b/'logs/wifi.txt').read_text()
-    print('PASS Wi-Fi explicit control path reaches DHCP; full scan skipped')

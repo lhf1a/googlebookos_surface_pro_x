@@ -1,0 +1,362 @@
+--- a/sdm/include/private/hw_info_types.h
++++ b/sdm/include/private/hw_info_types.h
+@@ -297,6 +297,7 @@
+ const int  kPipeRotationLimit  = (1 << 3);
+ 
+ struct HWResourceInfo {
++  bool kernel_managed_dpu = false;
+   uint32_t hw_version = 0;
+   uint32_t num_dma_pipe = 0;
+   uint32_t num_vig_pipe = 0;
+--- a/sdm/libs/core/drm/hw_info_drm.cpp
++++ b/sdm/libs/core/drm/hw_info_drm.cpp
+@@ -289,6 +289,7 @@
+ void HWInfoDRM::GetSystemInfo(HWResourceInfo *hw_resource) {
+   DRMCrtcInfo info;
+   drm_mgr_intf_->GetCrtcInfo(0 /* system_info */, &info);
++  hw_resource->kernel_managed_dpu = info.kernel_managed_dpu;
+   if (info.kernel_managed_dpu) hw_resource->max_mixer_width = info.max_mixer_width;
+   hw_resource->has_hdr = info.has_hdr;
+   hw_resource->is_src_split = info.has_src_split;
+--- a/sdm/libs/core/strategy.h
++++ b/sdm/libs/core/strategy.h
+@@ -61,6 +61,7 @@
+ 
+  private:
+   void GenerateROI();
++  int GetDpuOverlayIndex() const;
+ 
+   ExtensionInterface *extension_intf_ = NULL;
+   StrategyInterface *strategy_intf_ = NULL;
+@@ -75,6 +76,7 @@
+   DisplayConfigVariableInfo fb_config_ = {};
+   bool extn_start_success_ = false;
+   bool disable_gpu_comp_ = false;
++  bool dpu_overlay_attempted_ = false;
+   BufferAllocator *buffer_allocator_ = NULL;
+ };
+ 
+--- a/sdm/libs/core/strategy.cpp
++++ b/sdm/libs/core/strategy.cpp
+@@ -25,6 +25,9 @@
+ #include <utils/constants.h>
+ #include <utils/debug.h>
+ #include <vector>
++#include <cmath>
++#include <algorithm>
++#include "qti-dpu-sdm-contract.h"
+ 
+ #include "strategy.h"
+ #include "utils/rect.h"
+@@ -95,6 +98,7 @@
+   DisplayError error = kErrorNone;
+   hw_layers_info_ = hw_layers_info;
+   extn_start_success_ = false;
++  dpu_overlay_attempted_ = false;
+ 
+   if (!disable_gpu_comp_ && !hw_layers_info_->gpu_target_index) {
+     DLOGE("GPU composition is enabled and GPU target buffer not provided.");
+@@ -109,7 +113,7 @@
+     }
+   }
+ 
+-  *max_attempts = 1;
++  *max_attempts = GetDpuOverlayIndex() >= 0 ? 2 : 1;
+ 
+   return kErrorNone;
+ }
+@@ -120,6 +124,61 @@
+   }
+ 
+   return kErrorNone;
++}
++
++// The first Linux mixed strategy handles one opaque edge NV12 layer at 1:1 only.
++int Strategy::GetDpuOverlayIndex() const {
++  if (extension_intf_ || !hw_resource_info_.kernel_managed_dpu ||
++      !hw_resource_info_.num_vig_pipe || display_type_ != kBuiltIn || !hw_layers_info_ ||
++      !hw_layers_info_->stack || !hw_layers_info_->app_layer_count ||
++      hw_layers_info_->gpu_target_index != hw_layers_info_->app_layer_count ||
++      hw_layers_info_->stack->layers.size() != hw_layers_info_->app_layer_count + 1 ||
++      mixer_attributes_.width != fb_config_.x_pixels ||
++      mixer_attributes_.height != fb_config_.y_pixels ||
++      hw_panel_info_.panel_orientation.flip_horizontal ||
++      hw_panel_info_.panel_orientation.flip_vertical) return -1;
++  const auto &stack = *hw_layers_info_->stack;
++  if (stack.flags.secure_present || stack.flags.hdr_present || stack.flags.mask_present ||
++      stack.flags.s3d_mode_present) return -1;
++  for (const auto *layer : stack.layers) {
++    if (!layer || layer->flags.color_transform) return -1;
++  }
++  const Layer &target = *stack.layers[hw_layers_info_->gpu_target_index];
++  if (target.composition != kCompositionGPUTarget || target.plane_alpha != 255 ||
++      (target.input_buffer.format != kFormatRGBA8888 &&
++       target.input_buffer.format != kFormatRGBA8888Ubwc) ||
++      target.blending != kBlendingPremultiplied ||
++      !sde_drm::DpuColorSupported(false, target.input_buffer.color_metadata)) return -1;
++  auto formats = hw_resource_info_.supported_formats_map.find(kHWVIGPipe);
++  if (formats == hw_resource_info_.supported_formats_map.end()) return -1;
++  for (uint32_t index : {0u, hw_layers_info_->app_layer_count - 1}) {
++    const Layer &layer = *stack.layers[index];
++    const auto &buffer = layer.input_buffer;
++    if (layer.flags.skip || layer.flags.solid_fill || layer.flags.cursor ||
++        layer.plane_alpha != 255 || layer.blending != kBlendingOpaque ||
++        layer.transform.rotation || layer.transform.flip_horizontal || layer.transform.flip_vertical ||
++        buffer.format != kFormatYCbCr420SemiPlanarVenus ||
++        buffer.flags.secure || buffer.flags.secure_camera || buffer.flags.secure_display ||
++        buffer.flags.interlace || buffer.flags.hdr || buffer.flags.mask_layer ||
++        buffer.planes[0].fd < 0 || !buffer.buffer_id || !buffer.handle_id ||
++        !sde_drm::DpuColorSupported(true, buffer.color_metadata)) continue;
++    if (std::find(formats->second.begin(), formats->second.end(), buffer.format) == formats->second.end()) continue;
++    const auto &src = layer.src_rect;
++    const auto &dst = layer.dst_rect;
++    bool integral = true;
++    for (float value : {src.left, src.top, src.right, src.bottom, dst.left, dst.top, dst.right, dst.bottom})
++      integral &= std::isfinite(value) && value >= 0 && value == std::floor(value);
++    bool chroma_aligned = true;
++    for (float value : {src.left, src.top, src.right, src.bottom})
++      chroma_aligned &= std::isfinite(value) && std::fmod(value, 2.0f) == 0;
++    if (!integral || !chroma_aligned || !IsValid(src) || !IsValid(dst) ||
++        src.right > buffer.width || src.bottom > buffer.height ||
++        dst.right > fb_config_.x_pixels || dst.bottom > fb_config_.y_pixels ||
++        src.right - src.left != dst.right - dst.left ||
++        src.bottom - src.top != dst.bottom - dst.top) continue;
++    return int(index);
++  }
++  return -1;
+ }
+ 
+ DisplayError Strategy::GetNextStrategy(StrategyConstraints *constraints) {
+@@ -131,6 +190,17 @@
+   if (disable_gpu_comp_) {
+     return kErrorNotSupported;
+   }
++
++  int overlay = -1;
++  if (!dpu_overlay_attempted_ && constraints && !constraints->safe_mode && constraints->max_layers >= 2)
++    overlay = GetDpuOverlayIndex();
++  dpu_overlay_attempted_ = true;
++  // Every retry starts from an independent strategy, including after a real TEST_ONLY rejection.
++  hw_layers_info_->hw_layers.clear();
++  hw_layers_info_->index.clear();
++  hw_layers_info_->roi_index.clear();
++  hw_layers_info_->layer_exts.clear();
++  hw_layers_info_->fast_path_composition = false;
+ 
+   // Mark all application layers for GPU composition. Find GPU target buffer and store its index for
+   // programming the hardware.
+@@ -161,6 +231,20 @@
+   // Scale to mixer resolution.
+   MapRect(src_domain, dst_domain, layer.dst_rect, &layer.dst_rect);
+   hw_layers_info_->hw_layers.push_back(layer);
++  if (overlay >= 0) {
++    Layer *video = layer_stack->layers.at(uint32_t(overlay));
++    video->composition = kCompositionSDE;
++    if (overlay == 0) {
++      // Existing HWC ClearClientTarget request lets SF clear the opaque underlay before upper UI.
++      hw_layers_info_->hw_layers.insert(hw_layers_info_->hw_layers.begin(), *video);
++      hw_layers_info_->index.insert(hw_layers_info_->index.begin(), uint32_t(overlay));
++      hw_layers_info_->roi_index.insert(hw_layers_info_->roi_index.begin(), 0);
++    } else {
++      hw_layers_info_->hw_layers.push_back(*video);
++      hw_layers_info_->index.push_back(uint32_t(overlay));
++      hw_layers_info_->roi_index.push_back(0);
++    }
++  }
+ 
+   return kErrorNone;
+ }
+@@ -202,6 +286,10 @@
+   DisplayError error = kErrorNone;
+ 
+   if (!extension_intf_) {
++    hw_panel_info_ = hw_panel_info;
++    display_attributes_ = display_attributes;
++    mixer_attributes_ = mixer_attributes;
++    fb_config_ = fb_config;
+     return kErrorNone;
+   }
+ 
+@@ -278,7 +366,7 @@
+   if (strategy_intf_) {
+     return strategy_intf_->CanSkipValidate(need_buffer_swap);
+   }
+-  return true;
++  return !hw_resource_info_.kernel_managed_dpu;
+ }
+ 
+ DisplayError Strategy::SwapBuffers() {
+--- a/sdm/libs/core/resource_default.h
++++ b/sdm/libs/core/resource_default.h
+@@ -120,9 +120,12 @@
+   DisplayError Deinit();
+   uint32_t NextPipe(PipeType pipe_type, HWBlockType hw_block_type);
+   uint32_t SearchPipe(HWBlockType hw_block_type, SourcePipe *src_pipes, uint32_t num_pipe);
+-  uint32_t GetPipe(HWBlockType hw_block_type, bool need_scale);
++  uint32_t GetPipe(HWBlockType hw_block_type, bool need_scale, bool yuv);
+   bool IsScalingNeeded(const HWPipeInfo *pipe_info);
+-  DisplayError Config(DisplayResourceContext *display_resource_ctx, HWLayers *hw_layers);
++  DisplayError PrepareLayer(DisplayResourceContext *display_resource_ctx, HWLayers *hw_layers,
++                            uint32_t layer_index);
++  DisplayError Config(DisplayResourceContext *display_resource_ctx, HWLayers *hw_layers,
++                      uint32_t layer_index);
+   DisplayError DisplaySplitConfig(DisplayResourceContext *display_resource_ctx,
+                                  const LayerRect &src_rect, const LayerRect &dst_rect,
+                                  HWLayerConfig *layer_config);
+--- a/sdm/libs/core/resource_default.cpp
++++ b/sdm/libs/core/resource_default.cpp
+@@ -213,44 +213,55 @@
+ }
+ 
+ DisplayError ResourceDefault::Prepare(Handle display_ctx, HWLayers *hw_layers) {
+-  DisplayResourceContext *display_resource_ctx =
+-                          reinterpret_cast<DisplayResourceContext *>(display_ctx);
+-
++  auto *context = reinterpret_cast<DisplayResourceContext *>(display_ctx);
++  if (!context || !hw_layers) return kErrorParameters;
++  Purge(display_ctx);
++  for (auto &config : hw_layers->config) config = {};
++  const auto &layers = hw_layers->info.hw_layers;
++  bool single_target = layers.size() == 1 && layers[0].composition == kCompositionGPUTarget;
++  bool mixed = hw_res_info_.kernel_managed_dpu && layers.size() == 2;
++  unsigned target_count = 0, video_count = 0;
++  if (mixed) {
++    for (const auto &layer : layers) {
++      target_count += layer.composition == kCompositionGPUTarget;
++      video_count += layer.composition == kCompositionSDE &&
++                     layer.input_buffer.format == kFormatYCbCr420SemiPlanarVenus;
++    }
++    mixed = target_count == 1 && video_count == 1;
++  }
++  if (!single_target && !mixed) return kErrorNotSupported;
++  for (uint32_t index = 0; index < layers.size(); ++index) {
++    DisplayError error = PrepareLayer(context, hw_layers, index);
++    if (error != kErrorNone) {
++      Purge(display_ctx);
++      for (auto &config : hw_layers->config) config = {};
++      return error;
++    }
++  }
++  return kErrorNone;
++}
++
++DisplayError ResourceDefault::PrepareLayer(DisplayResourceContext *display_resource_ctx,
++                                           HWLayers *hw_layers, uint32_t layer_index) {
+   DisplayError error = kErrorNone;
+   const struct HWLayersInfo &layer_info = hw_layers->info;
+   HWBlockType hw_block_type = display_resource_ctx->hw_block_type;
+ 
+   DLOGV_IF(kTagResources, "==== Resource reserving start: hw_block_type = %d ====", hw_block_type);
+ 
+-  if (layer_info.hw_layers.size() > 1) {
+-    DLOGV_IF(kTagResources, "More than one FB layers");
+-    return kErrorResources;
+-  }
+-
+-  const Layer &layer = layer_info.hw_layers.at(0);
+-
+-  if (layer.composition != kCompositionGPUTarget) {
+-    DLOGV_IF(kTagResources, "Not an FB layer");
+-    return kErrorParameters;
+-  }
+-
+-  error = Config(display_resource_ctx, hw_layers);
++  const bool yuv = layer_info.hw_layers.at(layer_index).composition == kCompositionSDE;
++
++  error = Config(display_resource_ctx, hw_layers, layer_index);
+   if (error != kErrorNone) {
+     DLOGV_IF(kTagResources, "Resource config failed");
+     return error;
+-  }
+-
+-  for (uint32_t i = 0; i < num_pipe_; i++) {
+-    if (src_pipes_[i].hw_block_type == hw_block_type && src_pipes_[i].owner == kPipeOwnerUserMode) {
+-      src_pipes_[i].ResetState();
+-    }
+   }
+ 
+   uint32_t left_index = num_pipe_;
+   uint32_t right_index = num_pipe_;
+   bool need_scale = false;
+ 
+-  struct HWLayerConfig &layer_config = hw_layers->config[0];
++  struct HWLayerConfig &layer_config = hw_layers->config[layer_index];
+ 
+   HWPipeInfo *left_pipe = &layer_config.left_pipe;
+   HWPipeInfo *right_pipe = &layer_config.right_pipe;
+@@ -258,7 +269,7 @@
+   // left pipe is needed
+   if (left_pipe->valid) {
+     need_scale = IsScalingNeeded(left_pipe);
+-    left_index = GetPipe(hw_block_type, need_scale);
++    left_index = GetPipe(hw_block_type, need_scale, yuv);
+     if (left_index >= num_pipe_) {
+       DLOGV_IF(kTagResources, "Get left pipe failed: hw_block_type = %d, need_scale = %d",
+                hw_block_type, need_scale);
+@@ -283,7 +294,7 @@
+ 
+   need_scale = IsScalingNeeded(right_pipe);
+ 
+-  right_index = GetPipe(hw_block_type, need_scale);
++  right_index = GetPipe(hw_block_type, need_scale, yuv);
+   if (right_index >= num_pipe_) {
+     DLOGV_IF(kTagResources, "Get right pipe failed: hw_block_type = %d, need_scale = %d",
+              hw_block_type, need_scale);
+@@ -374,7 +385,7 @@
+   for (uint32_t i = 0; i < num_pipe; i++) {
+     src_pipe = &src_pipes[i];
+     if (src_pipe->owner == kPipeOwnerUserMode && src_pipe->hw_block_type == kHWBlockMax) {
+-      index = src_pipe->index;
++      index = uint32_t(src_pipe - src_pipes_.data());
+       src_pipe->hw_block_type = hw_block_type;
+       break;
+     }
+@@ -406,7 +417,8 @@
+   return SearchPipe(hw_block_type, src_pipes, num_pipe);
+ }
+ 
+-uint32_t ResourceDefault::GetPipe(HWBlockType hw_block_type, bool need_scale) {
++uint32_t ResourceDefault::GetPipe(HWBlockType hw_block_type, bool need_scale, bool yuv) {
++  if (yuv) return NextPipe(kPipeTypeVIG, hw_block_type);
+   uint32_t index = num_pipe_;
+ 
+   // The default behavior is to assume RGB and VG pipes have scalars
+@@ -525,17 +537,17 @@
+ }
+ 
+ DisplayError ResourceDefault::Config(DisplayResourceContext *display_resource_ctx,
+-                                HWLayers *hw_layers) {
++                                HWLayers *hw_layers, uint32_t layer_index) {
+   HWLayersInfo &layer_info = hw_layers->info;
+   DisplayError error = kErrorNone;
+-  const Layer &layer = layer_info.hw_layers.at(0);
++  const Layer &layer = layer_info.hw_layers.at(layer_index);
+ 
+   error = ValidateLayerParams(&layer);
+   if (error != kErrorNone) {
+     return error;
+   }
+ 
+-  struct HWLayerConfig *layer_config = &hw_layers->config[0];
++  struct HWLayerConfig *layer_config = &hw_layers->config[layer_index];
+   HWPipeInfo &left_pipe = layer_config->left_pipe;
+   HWPipeInfo &right_pipe = layer_config->right_pipe;
+ 
+@@ -570,7 +582,7 @@
+   }
+ 
+   // set z_order, left_pipe should always be valid
+-  left_pipe.z_order = 0;
++  left_pipe.z_order = layer_index;
+ 
+   DLOGV_IF(kTagResources, "==== FB layer Config ====");
+   Log(kTagResources, "input layer src_rect", layer.src_rect);
+@@ -580,7 +592,7 @@
+   Log(kTagResources, "left pipe src", layer_config->left_pipe.src_roi);
+   Log(kTagResources, "left pipe dst", layer_config->left_pipe.dst_roi);
+   if (right_pipe.valid) {
+-    right_pipe.z_order = 0;
++    right_pipe.z_order = layer_index;
+     Log(kTagResources, "right pipe src", layer_config->right_pipe.src_roi);
+     Log(kTagResources, "right pipe dst", layer_config->right_pipe.dst_roi);
+   }

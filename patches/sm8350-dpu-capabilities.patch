@@ -1,0 +1,303 @@
+--- a/libdrmutils/drm_interface.h
++++ b/libdrmutils/drm_interface.h
+@@ -529,6 +529,8 @@
+ 
+ /* Per CRTC Resource Info*/
+ struct DRMCrtcInfo {
++  bool kernel_managed_dpu = false;
++  uint32_t max_mixer_width = 0;
+   bool has_src_split;
+   bool has_hdr;
+   uint32_t max_blend_stages;
+--- a/sde-drm/drm_plane.h
++++ b/sde-drm/drm_plane.h
+@@ -96,7 +96,7 @@
+  public:
+   explicit DRMPlane(int fd, uint32_t priority);
+   ~DRMPlane();
+-  void InitAndParse(drmModePlane *plane);
++  int InitAndParse(drmModePlane *plane);
+   void GetId(uint32_t *id) { *id = drm_plane_->plane_id; }
+   void GetType(DRMPlaneType *type) { *type = plane_type_info_.type; }
+   void GetPriority(uint32_t *priority) { *priority = priority_; }
+@@ -127,8 +127,8 @@
+ 
+  private:
+   typedef std::map<DRMProperty, std::tuple<uint64_t, drmModePropertyRes *>> PropertyMap;
+-  void ParseProperties();
+-  void GetTypeInfo(const PropertyMap &props);
++  int ParseProperties();
++  int GetTypeInfo(const PropertyMap &props);
+   void PerformWrapper(DRMOps code, drmModeAtomicReq *req, ...);
+ 
+   int fd_ = -1;
+@@ -161,7 +161,7 @@
+ class DRMPlaneManager {
+  public:
+   explicit DRMPlaneManager(int fd);
+-  void Init();
++  int Init();
+   void DeInit() {}
+   void GetPlanesInfo(DRMPlanesInfo *info);
+   void DumpAll();
+--- a/sde-drm/drm_plane.cpp
++++ b/sde-drm/drm_plane.cpp
+@@ -85,6 +85,7 @@
+ 
+ #include "drm_utils.h"
+ #include "drm_plane.h"
++#include "qti-dpu-capabilities.h"
+ #include "drm_property.h"
+ 
+ namespace sde_drm {
+@@ -314,10 +315,10 @@
+ 
+ DRMPlaneManager::DRMPlaneManager(int fd) : fd_(fd) {}
+ 
+-void DRMPlaneManager::Init() {
++int DRMPlaneManager::Init() {
+   drmModePlaneRes *resource = drmModeGetPlaneResources(fd_);
+   if (!resource) {
+-    return;
++    return -ENODEV;
+   }
+ 
+   for (uint32_t i = 0; i < resource->count_planes; i++) {
+@@ -325,14 +326,22 @@
+     unique_ptr<DRMPlane> plane(new DRMPlane(fd_, i));
+     drmModePlane *libdrm_plane = drmModeGetPlane(fd_, resource->planes[i]);
+     if (libdrm_plane) {
+-      plane->InitAndParse(libdrm_plane);
++      int ret = plane->InitAndParse(libdrm_plane);
++      if (ret) {
++        DRM_LOGE("Plane %u capabilities failed: %d", resource->planes[i], ret);
++        drmModeFreePlaneResources(resource);
++        return ret;
++      }
+       plane_pool_[resource->planes[i]] = std::move(plane);
+     } else {
+       DRM_LOGE("Critical error: drmModeGetPlane() failed for plane %d.", resource->planes[i]);
++      drmModeFreePlaneResources(resource);
++      return -ENODEV;
+     }
+   }
+ 
+   drmModeFreePlaneResources(resource);
++  return 0;
+ }
+ 
+ void DRMPlaneManager::DumpByID(uint32_t id) {
+@@ -476,7 +485,9 @@
+   drmModeFreePlane(drm_plane_);
+ }
+ 
+-void DRMPlane::GetTypeInfo(const PropertyMap &prop_map) {
++int DRMPlane::GetTypeInfo(const PropertyMap &prop_map) {
++  if (!prop_map.count(DRMProperty::CAPABILITIES))
++    return dpu_caps::ReadPlane(fd_, drm_plane_->plane_id, &plane_type_info_);
+   uint64_t blob_id = 0;
+   drmModePropertyRes *prop = nullptr;
+   DRMPlaneTypeInfo *info = &plane_type_info_;
+@@ -484,11 +495,12 @@
+   std::tie(blob_id, prop) = prop_map.at(DRMProperty::CAPABILITIES);
+   drmModePropertyBlobRes *blob = drmModeGetPropertyBlob(fd_, blob_id);
+   if (!blob) {
+-    return;
++    return -EINVAL;
+   }
+ 
+   if (!blob->data) {
+-    return;
++    drmModeFreePropertyBlob(blob);
++    return -EINVAL;
+   }
+ 
+   char *fmt_str = new char[blob->length + 1];
+@@ -585,9 +597,10 @@
+ 
+   drmModeFreePropertyBlob(blob);
+   delete[] fmt_str;
+-}
+-
+-void DRMPlane::ParseProperties() {
++  return 0;
++}
++
++int DRMPlane::ParseProperties() {
+   // Map of property name to current value and property info pointer
+   PropertyMap prop_map;
+   bool csc = false;
+@@ -597,7 +610,7 @@
+       drmModeObjectGetProperties(fd_, drm_plane_->plane_id, DRM_MODE_OBJECT_PLANE);
+   if (!props || !props->props || !props->prop_values) {
+     drmModeFreeObjectProperties(props);
+-    return;
++    return -ENODEV;
+   }
+ 
+   for (uint32_t j = 0; j < props->count_props; j++) {
+@@ -676,22 +689,25 @@
+   }
+ 
+   plane_type_info_.type = type;
+-  GetTypeInfo(prop_map);
++  int result = GetTypeInfo(prop_map);
+ 
+   for (auto &prop : prop_map) {
+     drmModeFreeProperty(std::get<1>(prop.second));
+   }
+ 
+   drmModeFreeObjectProperties(props);
+-}
+-
+-void DRMPlane::InitAndParse(drmModePlane *plane) {
++  return result;
++}
++
++int DRMPlane::InitAndParse(drmModePlane *plane) {
+   drm_plane_ = plane;
+-  ParseProperties();
++  int ret = ParseProperties();
++  if (ret) return ret;
+ 
+   unique_ptr<DRMPPManager> pp_mgr(new DRMPPManager(fd_));
+   pp_mgr_ = std::move(pp_mgr);
+   pp_mgr_->Init(prop_mgr_, DRM_MODE_OBJECT_PLANE);
++  return 0;
+ }
+ 
+ bool DRMPlane::ConfigureScalerLUT(drmModeAtomicReq *req, uint32_t dir_lut_blob_id,
+--- a/sde-drm/drm_crtc.h
++++ b/sde-drm/drm_crtc.h
+@@ -49,7 +49,7 @@
+ class DRMCrtc {
+  public:
+   DRMCrtc(int fd, uint32_t crtc_index) : fd_(fd), crtc_index_(crtc_index) {}
+-  void InitAndParse(drmModeCrtc *crtc);
++  int InitAndParse(drmModeCrtc *crtc);
+   DRMStatus GetStatus() { return status_; }
+   void GetInfo(DRMCrtcInfo *info);
+   void SetModeBlobID(uint64_t blob_id);
+@@ -106,7 +106,7 @@
+ class DRMCrtcManager {
+  public:
+   explicit DRMCrtcManager(int fd) : fd_(fd) {}
+-  void Init(drmModeRes *res);
++  int Init(drmModeRes *res);
+   void DeInit() {}
+   void DumpAll();
+   void DumpByID(uint32_t id);
+--- a/sde-drm/drm_crtc.cpp
++++ b/sde-drm/drm_crtc.cpp
+@@ -44,6 +44,7 @@
+ 
+ #include "drm_utils.h"
+ #include "drm_crtc.h"
++#include "qti-dpu-capabilities.h"
+ #include "drm_property.h"
+ 
+ namespace sde_drm {
+@@ -163,17 +164,20 @@
+ 
+ #define __CLASS__ "DRMCrtcManager"
+ 
+-void DRMCrtcManager::Init(drmModeRes *resource) {
++int DRMCrtcManager::Init(drmModeRes *resource) {
+   for (int i = 0; i < resource->count_crtcs; i++) {
+     unique_ptr<DRMCrtc> crtc(new DRMCrtc(fd_, i));
+     drmModeCrtc *libdrm_crtc = drmModeGetCrtc(fd_, resource->crtcs[i]);
+     if (libdrm_crtc) {
+-      crtc->InitAndParse(libdrm_crtc);
++      int ret = crtc->InitAndParse(libdrm_crtc);
++      if (ret) { DRM_LOGE("CRTC capabilities failed: %d", ret); return ret; }
+       crtc_pool_[resource->crtcs[i]] = std::move(crtc);
+     } else {
+       DRM_LOGE("Critical error: drmModeGetCrtc() failed for crtc %d.", resource->crtcs[i]);
+-    }
+-  }
++      return -ENODEV;
++    }
++  }
++  return 0;
+ }
+ 
+ void DRMCrtcManager::DumpByID(uint32_t id) {
+@@ -607,11 +611,15 @@
+   mode_blob_id_ = blob_id;
+ }
+ 
+-void DRMCrtc::InitAndParse(drmModeCrtc *crtc) {
++int DRMCrtc::InitAndParse(drmModeCrtc *crtc) {
+   drm_crtc_ = crtc;
++  int ret = dpu_caps::ReadCrtc(fd_, crtc->crtc_id, &crtc_info_);
++  if (ret && ret != -ENOENT) return ret;
+   ParseProperties();
++  if (ret && !prop_mgr_.IsPropertyAvailable(DRMProperty::CAPABILITIES)) return -EOPNOTSUPP;
+   pp_mgr_ = std::unique_ptr<DRMPPManager>(new DRMPPManager(fd_));
+   pp_mgr_->Init(prop_mgr_, DRM_MODE_OBJECT_CRTC);
++  return 0;
+ }
+ 
+ void DRMCrtc::Perform(DRMOps code, drmModeAtomicReq *req, va_list args) {
+--- a/sde-drm/drm_manager.cpp
++++ b/sde-drm/drm_manager.cpp
+@@ -120,14 +120,16 @@
+     DRM_LOGE("Failed to get Crtc Mgr");
+     return DRM_ERR_INVALID;
+   }
+-  crtc_mgr_->Init(resource);
++  int ret = crtc_mgr_->Init(resource);
++  if (ret) { drmModeFreeResources(resource); return ret; }
+ 
+   plane_mgr_ = new DRMPlaneManager(fd_);
+   if (!plane_mgr_) {
+     DRM_LOGE("Failed to get Plane Mgr");
+     return DRM_ERR_INVALID;
+   }
+-  plane_mgr_->Init();
++  ret = plane_mgr_->Init();
++  if (ret) { drmModeFreeResources(resource); return ret; }
+ 
+   dpps_mgr_intf_ = GetDppsManagerIntf();
+   if (dpps_mgr_intf_)
+--- a/sde-drm/drm_connector.cpp
++++ b/sde-drm/drm_connector.cpp
+@@ -376,7 +376,8 @@
+     if (conn.second->GetStatus() == DRMStatus::FREE) {
+       uint32_t conn_type;
+       conn.second->GetType(&conn_type);
+-      if ((disp_type == DRMDisplayType::PERIPHERAL && conn_type == DRM_MODE_CONNECTOR_DSI) ||
++      if ((disp_type == DRMDisplayType::PERIPHERAL &&
++           (conn_type == DRM_MODE_CONNECTOR_DSI || conn_type == DRM_MODE_CONNECTOR_eDP)) ||
+           (disp_type == DRMDisplayType::VIRTUAL && conn_type == DRM_MODE_CONNECTOR_VIRTUAL) ||
+           (disp_type == DRMDisplayType::TV && IsTVConnector(conn_type))) {
+         if (conn.second->IsConnected()) {
+@@ -733,6 +734,10 @@
+   info->type = drm_connector_->connector_type;
+   info->type_id = drm_connector_->connector_type_id;
+   info->is_connected = IsConnected();
++  if (info->type == DRM_MODE_CONNECTOR_eDP) {
++    info->is_primary = true;
++    info->panel_mode = DRMPanelMode::VIDEO;
++  }
+ 
+   drmModeObjectProperties *props =
+       drmModeObjectGetProperties(fd_, drm_connector_->connector_id, DRM_MODE_OBJECT_CONNECTOR);
+--- a/sdm/libs/core/drm/hw_info_drm.cpp
++++ b/sdm/libs/core/drm/hw_info_drm.cpp
+@@ -288,6 +288,7 @@
+ void HWInfoDRM::GetSystemInfo(HWResourceInfo *hw_resource) {
+   DRMCrtcInfo info;
+   drm_mgr_intf_->GetCrtcInfo(0 /* system_info */, &info);
++  if (info.kernel_managed_dpu) hw_resource->max_mixer_width = info.max_mixer_width;
+   hw_resource->has_hdr = info.has_hdr;
+   hw_resource->is_src_split = info.has_src_split;
+   hw_resource->has_qseed3 = (info.qseed_version >= sde_drm::QSEEDVersion::V3);
+@@ -838,6 +839,7 @@
+     hw_info.display_id =
+         ((0 == iter.first) || (iter.first > INT32_MAX)) ? -1 : (int32_t)(iter.first);
+     switch (iter.second.type) {
++      case DRM_MODE_CONNECTOR_eDP:
+       case DRM_MODE_CONNECTOR_DSI:
+         hw_info.display_type = kBuiltIn;
+         break;

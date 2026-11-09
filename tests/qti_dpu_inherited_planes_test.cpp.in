@@ -1,0 +1,87 @@
+/* Actual inherited-plane initialization and commit tracking; hardware calls are injected. */
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
+using namespace std;
+#define DRM_LOGD(...) ((void)0)
+#define DRM_LOGE(...) ((void)0)
+struct drmModePlane {uint32_t plane_id=0,crtc_id=0;};
+struct drmModeAtomicReq {};
+enum class DRMProperty {CAPABILITIES};
+struct DRMPropertyManager {
+ bool legacy=false;
+ bool IsPropertyAvailable(DRMProperty) const {return legacy;}
+};
+struct DRMPPManager {
+ explicit DRMPPManager(int){}
+ void Init(DRMPropertyManager&,int){}
+};
+constexpr int DRM_MODE_OBJECT_PLANE=1;
+class DRMPlane {
+public:
+ explicit DRMPlane(int id,int crtc,bool legacy=false):value{uint32_t(id),uint32_t(crtc)} {prop_mgr_.legacy=legacy;}
+ drmModePlane value;
+ drmModePlane *drm_plane_=nullptr;
+ DRMPropertyManager prop_mgr_;
+ int fd_=1,parse_error=0;
+ uint32_t assigned_crtc_id_=0,requested_crtc_id_=0;
+ bool is_lut_configured_=false;
+ unordered_map<uint32_t,uint64_t> tmp_prop_val_map_,committed_prop_val_map_;
+ unique_ptr<DRMPPManager> pp_mgr_;
+ unsigned unsets=0,resets=0;
+ int ParseProperties(){return parse_error;}
+ void GetAssignedCrtc(uint32_t *x){*x=assigned_crtc_id_;}
+ void GetRequestedCrtc(uint32_t *x){*x=requested_crtc_id_;}
+ void SetAssignedCrtc(uint32_t x){assigned_crtc_id_=x;}
+ void SetRequestedCrtc(uint32_t x){requested_crtc_id_=x;}
+ void Unset(bool,drmModeAtomicReq*){++unsets;requested_crtc_id_=0;}
+ void ResetColorLUTs(bool,drmModeAtomicReq*){++resets;}
+ int InitAndParse(drmModePlane*);
+ void PostValidate(uint32_t,bool);
+ void PostCommit(uint32_t,bool);
+};
+class DRMPlaneManager {
+public:
+ map<uint32_t,unique_ptr<DRMPlane>> plane_pool_;
+ mutex lock_;
+ void UnsetUnusedResources(uint32_t,bool,drmModeAtomicReq*);
+};
+@INIT@
+@POSTVALIDATE@
+@POSTCOMMIT@
+@UNUSED@
+int main() {
+ DRMPlaneManager mgr;
+ auto create=[&](unsigned id,unsigned crtc,bool legacy=false) {
+  auto ptr=make_unique<DRMPlane>(id,crtc,legacy);auto *p=ptr.get();
+  assert(!p->InitAndParse(&p->value));mgr.plane_pool_[id]=std::move(ptr);return p;
+ };
+ auto *inherited=create(73,105);
+ auto *other=create(87,109);
+ auto *target=create(999,0);
+ auto *legacy=create(321,105,true);
+ DRMPlane broken(1234,105);broken.parse_error=-22;
+ assert(broken.InitAndParse(&broken.value)==-22 && !broken.assigned_crtc_id_ && !broken.pp_mgr_);
+ if(inherited->assigned_crtc_id_!=105) {puts("ORPHAN_NOT_TRACKED");return 3;}
+ assert(other->assigned_crtc_id_==109 && target->assigned_crtc_id_==0 && legacy->assigned_crtc_id_==0);
+ target->SetRequestedCrtc(105);
+ mgr.UnsetUnusedResources(105,false,nullptr);
+ assert(inherited->unsets==1 && !other->unsets && !target->unsets && !legacy->unsets);
+ inherited->PostValidate(105,true);target->PostValidate(105,true);other->PostValidate(105,true);
+ assert(inherited->assigned_crtc_id_==105 && target->assigned_crtc_id_==0 && other->assigned_crtc_id_==109);
+ target->SetRequestedCrtc(105);mgr.UnsetUnusedResources(105,true,nullptr);
+ inherited->PostCommit(105,false);target->PostCommit(105,false);
+ assert(inherited->assigned_crtc_id_==105 && !target->assigned_crtc_id_);
+ target->SetRequestedCrtc(105);mgr.UnsetUnusedResources(105,true,nullptr);
+ inherited->PostCommit(105,true);target->PostCommit(105,true);other->PostCommit(105,true);
+ assert(!inherited->assigned_crtc_id_ && target->assigned_crtc_id_==105 && other->assigned_crtc_id_==109);
+ inherited->SetRequestedCrtc(105);target->SetRequestedCrtc(105);
+ unsigned old=inherited->unsets;
+ mgr.UnsetUnusedResources(105,true,nullptr);inherited->PostCommit(105,true);
+ assert(inherited->unsets==old && inherited->assigned_crtc_id_==105);
+ puts("INHERITED_PLANES_PASS init_failure=1 legacy_unchanged=1 other_crtc_preserved=1 test_only_preserves_assignment=1 failed_commit_retries=1 replacement_unstages_old=1 requested_plane_retained=1 dynamic_ids=1");
+}

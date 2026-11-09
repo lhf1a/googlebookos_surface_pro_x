@@ -2,7 +2,7 @@
 """Attach the source-built P010 renderer without relocating any original code/data.
 
 Only the pinned libstagefright is accepted. New ELF lookup tables are appended in
-a read-only LOAD; three function pointers live in existing zeroed RELRO padding.
+a read-only LOAD; function pointers live in existing zeroed RELRO padding.
 The original Android packed relocations, RELR, exports and CFI code stay intact.
 """
 import argparse
@@ -158,8 +158,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("original", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--recipe", type=Path, default=ROOT / "configs/stagefright-p010-elf.json")
     args = parser.parse_args()
-    recipe = json.loads((ROOT / "configs/stagefright-p010-elf.json").read_text())
+    recipe = json.loads(args.recipe.read_text())
     data, audit = patch(args.original.read_bytes(), recipe)
     with args.output.open("xb") as out:
         out.write(data)

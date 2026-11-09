@@ -1,0 +1,111 @@
+/* Actual helpers.c functions are inserted by the source harness. */
+#include <assert.h>
+#include <stdbool.h>
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+#define VIDC_SESSION_TYPE_DEC 1
+#define VIDC_SESSION_TYPE_ENC 2
+#define VENUS_DEC_STATE_DRC 4
+#define V4L2_TYPE_IS_CAPTURE(type) ((type) == 9)
+#define IS_SQ2_HFI(core) ((core)->sq2)
+struct venus_inst;
+struct vb2_queue { int type, started; struct venus_inst *inst; };
+struct vb2_buffer { struct vb2_queue *vb2_queue; };
+struct vb2_v4l2_buffer { struct vb2_buffer vb2_buf; int owned, submits, errors; };
+struct v4l2_m2m_buffer { struct vb2_v4l2_buffer vb; struct v4l2_m2m_buffer *next; };
+struct v4l2_m2m_ctx { struct v4l2_m2m_buffer *first, *last; int queued; };
+struct venus_core { int sq2; };
+struct venus_inst {
+ struct venus_core *core;
+ struct v4l2_m2m_ctx *m2m_ctx;
+ int session_type, codec_state, streamon_out, streamon_cap;
+};
+static int cache_calls, ref_checks, ref_result, process_calls, fail_call, error_calls;
+static struct vb2_v4l2_buffer *to_vb2_v4l2_buffer(struct vb2_buffer *b){ return (void *)b; }
+static struct venus_inst *vb2_get_drv_priv(struct vb2_queue *q){ return q->inst; }
+static int vb2_start_streaming_called(struct vb2_queue *q){ return q->started; }
+static void v4l2_m2m_buf_queue(struct v4l2_m2m_ctx *ctx, struct vb2_v4l2_buffer *vb){
+ struct v4l2_m2m_buffer *buf=(void *)vb;
+ assert(!vb->owned);vb->owned=1;buf->next=NULL;
+ if(ctx->last)ctx->last->next=buf;else ctx->first=buf;
+ ctx->last=buf;ctx->queued++;
+}
+static void cache_payload(struct venus_inst *inst, struct vb2_buffer *vb){
+ assert(inst && vb);cache_calls++;
+}
+static int is_buf_refed(struct venus_inst *inst, struct vb2_v4l2_buffer *vb){
+ assert(inst && vb->owned);ref_checks++;return ref_result;
+}
+static int session_process_buf(struct venus_inst *inst, struct vb2_v4l2_buffer *vb){
+ assert(inst && vb->owned);assert(vb->submits==0);vb->submits++;process_calls++;
+ return process_calls==fail_call ? -EIO : 0;
+}
+static void return_buf_error(struct venus_inst *inst, struct vb2_v4l2_buffer *vb){
+ assert(inst && vb->owned);vb->owned=0;vb->errors++;error_calls++;
+}
+#define v4l2_m2m_for_each_dst_buf_safe(ctx, buf, next_buf) \
+ for((buf)=(ctx)->first; (buf) && (((next_buf)=(buf)->next),1); (buf)=(next_buf))
+@FUNCTIONS@
+
+struct test_case {
+ struct venus_core core;
+ struct v4l2_m2m_ctx ctx;
+ struct venus_inst inst;
+ struct vb2_queue q;
+ struct v4l2_m2m_buffer buf[3];
+};
+static void setup(struct test_case *t,int sq2,int decoder,int capture,int started,int streamon){
+ memset(t,0,sizeof(*t));t->core.sq2=sq2;
+ t->inst=(struct venus_inst){.core=&t->core,.m2m_ctx=&t->ctx,
+  .session_type=decoder?VIDC_SESSION_TYPE_DEC:VIDC_SESSION_TYPE_ENC,
+  .streamon_out=1,.streamon_cap=streamon};
+ t->q=(struct vb2_queue){.type=capture?9:10,.started=started,.inst=&t->inst};
+ for(int i=0;i<3;i++)t->buf[i].vb.vb2_buf.vb2_queue=&t->q;
+ cache_calls=ref_checks=ref_result=process_calls=fail_call=error_calls=0;
+}
+static void queue(struct test_case *t,int n){venus_helper_vb2_buf_queue(&t->buf[n].vb.vb2_buf);}
+int main(void){
+ struct test_case t;
+ /* Capture STREAMON succeeded at vb2, but actual decoder start was deferred. */
+ setup(&t,1,1,1,1,0);t.inst.streamon_out=0;
+ queue(&t,0);queue(&t,1);
+ assert(t.ctx.queued==2 && t.buf[0].vb.owned && t.buf[1].vb.owned);
+ assert(process_calls==0 && !cache_calls && !ref_checks && !error_calls);
+ /* The real capture start flushes pending ownership once, before setting its flag. */
+ t.inst.streamon_out=1;
+ assert(!venus_helper_process_initial_cap_bufs(&t.inst));
+ assert(!t.inst.streamon_cap && process_calls==2 && !error_calls);
+ assert(t.buf[0].vb.submits==1 && t.buf[1].vb.submits==1);
+ assert(t.buf[0].vb.owned && t.buf[1].vb.owned && t.ctx.queued==2);
+ t.inst.streamon_cap=1;queue(&t,2);
+ assert(process_calls==3 && t.buf[2].vb.submits==1 && cache_calls==1 && ref_checks==1);
+ /* Source buffers queued before their own STREAMON retain software ownership. */
+ setup(&t,1,1,0,0,0);t.inst.streamon_out=0;queue(&t,0);
+ assert(!process_calls && t.ctx.queued==1 && t.buf[0].vb.owned);
+ /* Input QBUF and non-SQ2 capture retain their existing path. */
+ setup(&t,1,1,0,1,0);queue(&t,0);assert(process_calls==1 && t.buf[0].vb.owned);
+ setup(&t,0,1,1,1,0);queue(&t,0);assert(process_calls==1 && t.buf[0].vb.owned);
+ /* The encoder still requires both streams, irrespective of hardware family. */
+ for(int sq2=0;sq2<2;sq2++){
+  setup(&t,sq2,0,1,1,0);queue(&t,0);assert(!process_calls && t.buf[0].vb.owned);
+  setup(&t,sq2,0,1,1,1);queue(&t,0);assert(process_calls==1 && t.buf[0].vb.owned);
+ }
+ /* Existing DRC deferral remains even when streamon_cap is true. */
+ for(int sq2=0;sq2<2;sq2++){
+  setup(&t,sq2,1,1,1,1);t.inst.codec_state=VENUS_DEC_STATE_DRC;queue(&t,0);
+  assert(!process_calls && !cache_calls && t.buf[0].vb.owned);
+ }
+ setup(&t,1,1,1,0,1);queue(&t,0);assert(!process_calls && t.buf[0].vb.owned);
+ setup(&t,1,1,1,1,1);ref_result=1;queue(&t,0);
+ assert(!process_calls && ref_checks==1 && !error_calls && t.buf[0].vb.owned);
+ /* Queue/start failures preserve their real error callback and return value. */
+ setup(&t,1,1,1,1,1);fail_call=1;queue(&t,0);
+ assert(process_calls==1 && error_calls==1 && !t.buf[0].vb.owned);
+ setup(&t,1,1,1,1,0);queue(&t,0);queue(&t,1);fail_call=1;
+ assert(venus_helper_process_initial_cap_bufs(&t.inst)==-EIO);
+ assert(process_calls==1 && error_calls==1 && !t.buf[0].vb.owned && t.buf[1].vb.owned);
+ assert(t.buf[1].vb.submits==0);
+ puts("CAPTURE_START_ACTUAL_SOURCE_PASS cases=14");
+ return 0;
+}

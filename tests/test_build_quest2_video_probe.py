@@ -19,7 +19,7 @@ SPEC = importlib.util.spec_from_file_location('quest2_builder', ROOT/'scripts/bu
 BUILDER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BUILDER)
 HEADERS = json.loads((ROOT/'configs/quest2-video-omx-headers.json').read_text())['sha256']
-BASE = {'quest2-omx-probe', 'libquest2-io-trace.so'}
+BASE = {'quest2-omx-probe'}
 
 
 class Quest2VideoBuilder(unittest.TestCase):
@@ -31,13 +31,15 @@ class Quest2VideoBuilder(unittest.TestCase):
         self.headers.mkdir()
         (self.root/'configs').mkdir()
         (self.root/'probe/video').mkdir(parents=True)
+        (self.root/'probe/graphics').mkdir()
+        (self.root/'probe/graphics/quest2-system-ion.h').write_text('synthetic shared memory backend')
         pins = {}
         for name in HEADERS:
             data = ('synthetic header fixture: '+name).encode()
             (self.headers/name).write_bytes(data)
             pins[name] = hashlib.sha256(data).hexdigest()
         (self.root/'configs/quest2-video-omx-headers.json').write_text(json.dumps({'sha256': pins}))
-        for name in ('quest2-omx-probe.c', 'quest2-video-io-trace.c',
+        for name in ('quest2-omx-probe.c',
                      'quest2-omx-decode.c', 'quest2-vidc-bridge.c', 'quest2-ion-probe.c', 'sq2-mediacodec-file.c'):
             (self.root/'probe/video'/name).write_text('synthetic source fixture '+name)
         self.calls = []
@@ -64,11 +66,11 @@ class Quest2VideoBuilder(unittest.TestCase):
             BUILDER.main()
         return output, json.loads((output/'BUILD.json').read_text())
 
-    def test_default_still_builds_exact_original_two(self):
+    def test_default_does_not_build_io_tracer(self):
         output, report = self.invoke()
         self.assertEqual(set(report['sha256']), BASE)
-        self.assertEqual(len(self.calls), 2)
-        self.assertEqual(report['optional_features'], {'decode_client': False, 'vidc_bridge': False, 'media_file': False})
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(report['optional_features'], {'decode_client': False, 'vidc_bridge': False, 'native_extra_default': False, 'media_file': False})
         self.assertEqual(len(report['header_sha256']), 9)
         self.assertEqual(report['target'], 'aarch64-linux-android35')
         self.assertEqual(report['status'], 'compiled-not-decoding-verified')
@@ -95,6 +97,17 @@ class Quest2VideoBuilder(unittest.TestCase):
                         self.assertIn('-pthread', command)
                         self.assertIn('-fPIC', command)
                         self.assertIn('-shared', command)
+
+    def test_native_extradata_default_requires_bridge_and_is_scoped_to_its_compile(self):
+        with self.assertRaises(SystemExit):
+            self.invoke('--native-extra-default')
+        self.assertFalse(self.calls)
+        self.assertFalse((self.root / 'output').exists())
+        _, report = self.invoke('--with-vidc-bridge', '--native-extra-default')
+        self.assertTrue(report['optional_features']['native_extra_default'])
+        for command in self.calls:
+            expected = any(x.endswith('/quest2-vidc-bridge.c') for x in command)
+            self.assertEqual('-DQUEST2_NATIVE_EXTRA_DEFAULT=1' in command, expected)
 
     def test_container_probe_requires_and_records_real_platform_dependency(self):
         binder = self.root/'libbinder_ndk.so'
@@ -131,7 +144,7 @@ class Quest2VideoBuilder(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.invoke('--with-decode-client', '--with-vidc-bridge')
         records = json.loads((self.root/'output/COMMANDS.json').read_text())
-        self.assertEqual(len(records), 3)
+        self.assertEqual(len(records), 2)
         self.assertEqual(records[-1]['exit'], 19)
         self.assertEqual(records[-1]['stdout'], 'literal compiler stdout')
         self.assertEqual(records[-1]['stderr'], 'literal compiler failure')

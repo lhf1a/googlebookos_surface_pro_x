@@ -1,4 +1,4 @@
-"""Host-only fixtures for the actual tracked OMX probe and transparent I/O tracer.
+"""Host-only fixtures for the actual tracked OMX probe .
 
 Set QUEST2_OMX_INCLUDE to official OpenMAX headers if the private downloaded
 headers are absent. No donor library or Android device is invoked by these tests.
@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/quest2_video'
 HEADERS = Path(os.environ.get('QUEST2_OMX_INCLUDE',
     ROOT / 'out/quest2-video-618-20261107/agent-probe/include'))
-CC = shutil.which('clang')
+CC = shutil.which(os.environ.get('CC', 'clang'))
 HOST_OK = platform.system() == 'Linux' and platform.machine() in ('x86_64', 'aarch64') and bool(CC)
 
 
@@ -31,7 +31,7 @@ def build(output, source, *flags):
         raise AssertionError(f'Host fixture compilation failed: {result.stderr}')
 
 
-@unittest.skipUnless(HOST_OK, 'requires Linux x86_64/aarch64 and host clang')
+@unittest.skipUnless(HOST_OK, 'requires Linux x86_64/aarch64 and a host C compiler')
 class Quest2OmxProbe(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -74,6 +74,18 @@ class Quest2OmxProbe(unittest.TestCase):
             self.assertIn(token, text)
         self.assertIn('decode_attempted=0 service_registered=0', text)
 
+    def test_native_parameter_abi_and_failures_keep_cleanup(self):
+        text = self.invoke('--native-buffers', 'OMX.fixture.decoder.avc')
+        self.assertIn('NATIVE_USAGE result=0x00000000 usage=0x20000000', text)
+        self.assertIn('NATIVE_PORT result=0x00000000 width=320 height=256 stride=384 scan=256 size=159744', text)
+        for env_name, expected in [('FIXTURE_NO_NATIVE', 10), ('FIXTURE_REFUSE_LINEAR', 12)]:
+            result = execute([self.probe, self.library, '--native-buffers', 'OMX.fixture.decoder.avc'],
+                             dict(os.environ, **{env_name: '1'}))
+            self.assertEqual(result.returncode, expected, result.stderr)
+            self.assertIn('FIXTURE_FREE_HANDLE', result.stdout)
+            self.assertIn('FIXTURE_DEINIT', result.stdout)
+            self.assertNotIn('NATIVE_USAGE', result.stdout)
+
     def test_unknown_component_retains_failure(self):
         text = self.invoke('--get-handle', 'OMX.fixture.unknown', expected=6)
         self.assertIn('FIXTURE_DEINIT', text)
@@ -88,61 +100,6 @@ class Quest2OmxProbe(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn('DLOPEN_ERROR', result.stderr)
         self.assertNotIn('OMX_INIT_BEGIN', result.stdout)
-
-
-@unittest.skipUnless(HOST_OK, 'requires Linux x86_64/aarch64 and host clang')
-class Quest2IoTrace(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        # These exact path names are required to test the opt-in remapping. Never
-        # open an existing hardware node on a host that happens to expose them.
-        for name in ('/dev/ion', '/dev/video32', '/dev/video99999999'):
-            if os.path.lexists(name):
-                raise unittest.SkipTest('hardware-like fixture path exists: ' + name)
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.addClassCleanup(cls.tmp.cleanup)
-        cls.directory = Path(cls.tmp.name)
-        cls.library = cls.directory / 'trace.so'
-        cls.fixture = cls.directory / 'io-calls'
-        build(cls.library, ROOT / 'probe/video/quest2-video-io-trace.c', '-shared', '-fPIC')
-        build(cls.fixture, FIXTURES / 'io-calls.c')
-        cls.base_env = dict(os.environ)
-        cls.base_env.pop('LD_PRELOAD', None)
-        cls.base_env.pop('QUEST2_VIDEO_NODE', None)
-        cls.baseline = execute([cls.fixture], cls.base_env)
-        if cls.baseline.returncode:
-            raise AssertionError(cls.baseline.stderr)
-
-    def invoke(self, mapping=None):
-        env = dict(self.base_env, LD_PRELOAD=str(self.library))
-        if mapping is not None:
-            env['QUEST2_VIDEO_NODE'] = mapping
-        result = execute([self.fixture], env)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, self.baseline.stdout)
-        return result
-
-    def test_forwarding_preserves_open_ioctl_results_and_errno(self):
-        result = self.invoke()
-        for token in ('open result=0 errno=77', 'open64 result=0 errno=77',
-                      'openat result=0 errno=77', '__open_2 result=0 errno=77',
-                      'ioctl-read result=0 errno=77 count=3',
-                      'ioctl-noarg result=0 errno=77 cloexec=1',
-                      'ioctl-error result=-1 errno=25'):
-            self.assertIn(token, result.stdout)
-        self.assertIn('request=0x4020565a return=-1 errno=25', result.stderr)
-        self.assertIn('map_video32=disabled', result.stderr)
-        self.assertIn('path=/dev/video32 effective=/dev/video32', result.stderr)
-
-    def test_explicit_video_mapping_never_maps_ion(self):
-        result = self.invoke('/dev/video99999999')
-        self.assertIn('path=/dev/video32 effective=/dev/video99999999', result.stderr)
-        self.assertIn('path=/dev/ion effective=/dev/ion', result.stderr)
-
-    def test_invalid_mapping_does_not_change_paths(self):
-        result = self.invoke('/dev/ion')
-        self.assertIn('invalid QUEST2_VIDEO_NODE ignored', result.stderr)
-        self.assertIn('path=/dev/video32 effective=/dev/video32', result.stderr)
 
 
 if __name__ == '__main__':

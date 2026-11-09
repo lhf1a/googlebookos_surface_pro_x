@@ -1,0 +1,80 @@
+{
+  "sources": [
+    {
+      "path": "include/android/hardware/graphics/mapper/IMapper.h",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/mapper/stable-c/include/android/hardware/graphics/mapper/IMapper.h?format=TEXT",
+      "sha256": "6ceeb9954652cc7fd3988a1e0ecb474f9be75fb59699a12e5c5b839cdf210442"
+    },
+    {
+      "path": "gr_utils.h",
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display/+/484ca55710cb0bc6e5222922ced149b9068cbf5b/gralloc/gr_utils.h?format=TEXT",
+      "sha256": "ac96578db111a47771d958f1743c16e88e6dbe47bc90817a403be51c3d8b7d11"
+    },
+    {
+      "path": "gr_device_impl.h",
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display/+/484ca55710cb0bc6e5222922ced149b9068cbf5b/gralloc/gr_device_impl.h?format=TEXT",
+      "sha256": "fc41fd5fcdf2802ea1dad93ec82b0664a129f9083c7c4ff2e89e5db2c2fcf09d"
+    },
+    {
+      "path": "include/android/hardware/graphics/mapper/utils/IMapperMetadataTypes.h",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/mapper/stable-c/implutils/include/android/hardware/graphics/mapper/utils/IMapperMetadataTypes.h?format=TEXT",
+      "sha256": "49dda8f1de00578e577e4f538f72c35aca00a1ac44f426c66283a3bc147ad370"
+    },
+    {
+      "path": "include/android/hardware/graphics/mapper/utils/IMapperProvider.h",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/mapper/stable-c/implutils/include/android/hardware/graphics/mapper/utils/IMapperProvider.h?format=TEXT",
+      "sha256": "c15da6b3d95f69adc023b929724a4f1bc78f2e4bdd04a8995537892060bf98f9"
+    },
+    {
+      "path": "allocator-aidl/android/hardware/graphics/allocator/AllocationError.aidl",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/allocator/aidl/aidl_api/android.hardware.graphics.allocator/2/android/hardware/graphics/allocator/AllocationError.aidl?format=TEXT",
+      "sha256": "50f4f06f5b7b4cf7ec1f63a3fd559325a1fd7e0adbbc0325b1ce22759155d416"
+    },
+    {
+      "path": "allocator-aidl/android/hardware/graphics/allocator/AllocationResult.aidl",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/allocator/aidl/aidl_api/android.hardware.graphics.allocator/2/android/hardware/graphics/allocator/AllocationResult.aidl?format=TEXT",
+      "sha256": "8cb5f19a606dbfa0a3f222086b3432ae64c0dc671fcd550b52fb32ff3f3f0523"
+    },
+    {
+      "path": "allocator-aidl/android/hardware/graphics/allocator/BufferDescriptorInfo.aidl",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/allocator/aidl/aidl_api/android.hardware.graphics.allocator/2/android/hardware/graphics/allocator/BufferDescriptorInfo.aidl?format=TEXT",
+      "sha256": "ffe29e599d317f119573fc19587131c3bb0eb7cdd690a722b73f1f8fbf0e482e"
+    },
+    {
+      "path": "allocator-aidl/android/hardware/graphics/allocator/IAllocator.aidl",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/allocator/aidl/aidl_api/android.hardware.graphics.allocator/2/android/hardware/graphics/allocator/IAllocator.aidl?format=TEXT",
+      "sha256": "e25054d807f63cd5f69060d986bf7ec2e01809ad008592b33ac166fbc8b3601a"
+    },
+    {
+      "path": "allocator-v2.hash",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/allocator/aidl/aidl_api/android.hardware.graphics.allocator/2/.hash?format=TEXT",
+      "sha256": "fcdd8c9f27c105b25b291834937fd6cd2031563e4c753379717890addd578b3d"
+    },
+    {
+      "path": "include/color_metadata.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/include/color_metadata.h",
+      "sha256": "4084a27a0fe358ab3068d2c498e6165c2979aa62781d6b4524d0caa26d677372"
+    },
+    {
+      "path": "qdMetaData.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/libqdmetadata/qdMetaData.h",
+      "sha256": "70cbefa25b56af82b6d37e220412c4d00f767b18f66befa7fe16d62f83f6a726"
+    },
+    {
+      "path": "include/QtiGrallocMetadata.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/gralloc/QtiGrallocMetadata.h",
+      "sha256": "e8fa89d057f4b690b8c22103f6f595b120489f9e06688546d1a28e229f0ae1e7"
+    },
+    {
+      "path": "include/QtiGrallocPriv.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/gralloc/QtiGrallocPriv.h",
+      "sha256": "a5415a09949b797ba469bfb91495ee284f252d132e23728d7f279f818bbf7144"
+    },
+    {
+      "path": "QtiGralloc-contract.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/gralloc/QtiGralloc.h",
+      "sha256": "837745e1455fad24a7e65312b810a11cf19c47741ba59aa1c0a129fbec673459"
+    }
+  ],
+  "scope": "Stable-C mapper5, allocator AIDL v2 and QTI utility ABI references"
+}

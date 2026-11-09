@@ -1,0 +1,92 @@
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <functional>
+#include <mutex>
+#include <vector>
+#include <inttypes.h>
+#include <stdexcept>
+#define ALOGE(...) ((void)0)
+enum class Error {NONE=0,BAD_PARAMETER=4,NO_RESOURCES=6};
+template<class T> using Return=int;
+int Void(){return 0;}
+template<class T> using hidl_vec=std::vector<T>;
+using hidl_handle=int;
+struct IComposerClient {enum class Command:uint32_t {SELECT_DISPLAY=0};};
+struct IQtiComposerClient {enum class Command:uint32_t {SET_LAYER_TYPE=0x1000000,SET_DISPLAY_ELAPSE_TIME=0x2000000};};
+class QtiComposerClient {
+public:
+ class CommandReader {
+ public:
+  std::vector<uint32_t> words;
+  size_t pos=0,end=0;
+  bool readable=true;
+  unsigned resets=0;
+  bool isEmpty(){return pos>=words.size();}
+  bool beginCommand(IQtiComposerClient::Command &cmd,uint16_t &length) {
+   assert(!isEmpty());uint32_t header=words[pos++];
+   cmd=IQtiComposerClient::Command(header&0xffff0000);length=header&0xffff;
+   if(pos+length>words.size()){--pos;return false;}
+   end=pos+length;return true;
+  }
+  uint32_t read(){assert(pos<words.size());return words[pos++];}
+  void endCommand(){if(pos!=end)throw std::logic_error("command payload not consumed");pos=end;}
+  bool parseSetLayerType(uint16_t length){return length==0;}
+  bool parseSetDisplayElapseTime(uint16_t length){return length==0;}
+  bool parseCommonCmd(IComposerClient::Command cmd,uint16_t length) {
+   if(cmd!=IComposerClient::Command::SELECT_DISPLAY || length!=2)return false;
+   read();read();return true;
+  }
+  bool readQueue(uint32_t,const hidl_vec<hidl_handle>&){return readable;}
+  void reset(){++resets;words.clear();pos=end=0;}
+  Error parse();
+ } mReader;
+ struct Writer {
+  bool writable=true;
+  unsigned writes=0,resets=0;
+  bool writeQueue(bool &changed,uint32_t &length,hidl_vec<hidl_handle>&) {
+   ++writes;changed=false;length=0;return writable;
+  }
+  void reset(){++resets;}
+ } mWriter;
+ std::mutex mCommandMutex;
+ using executeCommands_cb=std::function<void(Error,bool,uint32_t,const hidl_vec<hidl_handle>&)>;
+ using executeCommands_2_2_cb=executeCommands_cb;
+ using executeCommands_2_3_cb=executeCommands_cb;
+ Return<void> executeCommands(uint32_t,const hidl_vec<hidl_handle>&,executeCommands_cb);
+ Return<void> executeCommands_2_2(uint32_t,const hidl_vec<hidl_handle>&,executeCommands_2_2_cb);
+ Return<void> executeCommands_2_3(uint32_t,const hidl_vec<hidl_handle>&,executeCommands_2_3_cb);
+};
+@PARSE@
+@EXECUTE@
+@EXECUTE22@
+@EXECUTE23@
+int main() {
+ for(unsigned version=0;version<3;++version)for(unsigned scenario=0;scenario<8;++scenario) {
+  QtiComposerClient c;
+  Error expected=Error::NONE;
+  switch(scenario) {
+   case 0:break;
+   case 1:c.mReader.words={2,123,0};break;
+   case 2:c.mReader.words={0x7fff0000};expected=Error::BAD_PARAMETER;break;
+   case 3:c.mReader.words={0x7fff0000,2,123,0};expected=Error::BAD_PARAMETER;break;
+   case 4:c.mReader.words={2,123};expected=Error::BAD_PARAMETER;break;
+   case 5:c.mReader.words={1,123};expected=Error::BAD_PARAMETER;break;
+   case 6:c.mReader.readable=false;expected=Error::BAD_PARAMETER;break;
+   case 7:c.mWriter.writable=false;expected=Error::NO_RESOURCES;break;
+  }
+  Error actual=Error::NO_RESOURCES;unsigned callbacks=0;
+  auto callback=[&](Error e,bool,uint32_t,const auto&){actual=e;++callbacks;};
+  bool threw=false;
+  try {
+   if(!version)c.executeCommands(0,{},callback);
+   else if(version==1)c.executeCommands_2_2(0,{},callback);
+   else c.executeCommands_2_3(0,{},callback);
+  } catch(const std::logic_error&) {threw=true;}
+  assert(callbacks==(threw?0U:1U));
+  unsigned resets=scenario==6 || threw?0:1;
+  assert(c.mReader.resets==resets && c.mWriter.resets==resets);
+  printf("CASE version=%u scenario=%u actual=%d expected=%d writes=%u\n",
+    version,scenario,threw?-1:int(actual),int(expected),c.mWriter.writes);
+ }
+}

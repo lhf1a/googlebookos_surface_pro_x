@@ -1,0 +1,139 @@
+--- a/composer/hwc_session.h
++++ b/composer/hwc_session.h
+@@ -437,7 +437,7 @@
+   void SetNewThrottlingRate(uint32_t new_rate);
+ 
+   void ResetPanel();
+-  void InitSupportedDisplaySlots();
++  int InitSupportedDisplaySlots();
+   void InitSupportedNullDisplaySlots();
+   int GetDisplayIndex(int dpy);
+   int CreatePrimaryDisplay();
+--- a/composer/hwc_session.cpp
++++ b/composer/hwc_session.cpp
+@@ -213,7 +213,16 @@
+   DLOGI("async_vds_creation: %d", async_vds_creation_);
+ 
+   DLOGI("Initializing supported display slots");
+-  InitSupportedDisplaySlots();
++  status = InitSupportedDisplaySlots();
++  if (status) {
++    g_hwc_uevent_.Register(nullptr);
++    if (core_intf_) {
++      CoreInterface::DestroyCore();
++      core_intf_ = nullptr;
++    }
++    DLOGE("Initializing supported display slots failed: %d", status);
++    return status;
++  }
+   DLOGI("Initializing supported display slots...done!");
+ 
+   // Create primary display here. Remaining builtin displays will be created after client has set
+@@ -271,16 +280,19 @@
+   if (!null_display_mode_) {
+     g_hwc_uevent_.Register(nullptr);
+ 
+-    DisplayError error = CoreInterface::DestroyCore();
+-    if (error != kErrorNone) {
+-      DLOGE("Display core de-initialization failed. Error = %d", error);
++    if (core_intf_) {
++      DisplayError error = CoreInterface::DestroyCore();
++      core_intf_ = nullptr;
++      if (error != kErrorNone) {
++        DLOGE("Display core de-initialization failed. Error = %d", error);
++      }
+     }
+   }
+ 
+   return 0;
+ }
+ 
+-void HWCSession::InitSupportedDisplaySlots() {
++int HWCSession::InitSupportedDisplaySlots() {
+   // Default slots:
+   //    Primary = 0, External = 1
+   //    Additional external displays 2,3,...max_pluggable_count.
+@@ -293,7 +305,7 @@
+ 
+   if (null_display_mode_) {
+     InitSupportedNullDisplaySlots();
+-    return;
++    return 0;
+   }
+ 
+   ipc_intf_ = std::make_shared<IPCImpl>(IPCImpl());
+@@ -302,16 +314,15 @@
+   DisplayError error = CoreInterface::CreateCore(&buffer_allocator_, nullptr,
+                                                  &socket_handler_, ipc_intf_, &core_intf_);
+   if (error != kErrorNone) {
+-    DLOGE("Failed to create CoreInterface");
+-    return;
++    DLOGE("Failed to create CoreInterface: %d", error);
++    return -ENODEV;
+   }
+ 
+   HWDisplayInterfaceInfo hw_disp_info = {};
+   error = core_intf_->GetFirstDisplayInterfaceType(&hw_disp_info);
+   if (error != kErrorNone) {
+-    CoreInterface::DestroyCore();
+     DLOGE("Primary display type not recognized. Error = %d", error);
+-    return;
++    return -ENODEV;
+   }
+ 
+   int max_builtin = 0;
+@@ -320,23 +331,31 @@
+ 
+   error = core_intf_->GetMaxDisplaysSupported(kBuiltIn, &max_builtin);
+   if (error != kErrorNone) {
+-    CoreInterface::DestroyCore();
+     DLOGE("Could not find maximum built-in displays supported. Error = %d", error);
+-    return;
++    return -ENODEV;
+   }
+ 
+   error = core_intf_->GetMaxDisplaysSupported(kPluggable, &max_pluggable);
+   if (error != kErrorNone) {
+-    CoreInterface::DestroyCore();
+     DLOGE("Could not find maximum pluggable displays supported. Error = %d", error);
+-    return;
++    return -ENODEV;
+   }
+ 
+   error = core_intf_->GetMaxDisplaysSupported(kVirtual, &max_virtual);
+   if (error != kErrorNone) {
+-    CoreInterface::DestroyCore();
+     DLOGE("Could not find maximum virtual displays supported. Error = %d", error);
+-    return;
++    return -ENODEV;
++  }
++
++  if (max_builtin < 0 || max_pluggable < 0 || max_virtual < 0) {
++    DLOGE("Driver returned negative display counts");
++    return -EINVAL;
++  }
++  if ((hw_disp_info.type == kBuiltIn && max_builtin == 0) ||
++      (hw_disp_info.type == kPluggable && max_pluggable == 0) ||
++      (hw_disp_info.type != kBuiltIn && hw_disp_info.type != kPluggable)) {
++    DLOGE("Primary display has no matching hardware interface");
++    return -ENODEV;
+   }
+ 
+   if (max_virtual == 0) {
+@@ -375,7 +394,7 @@
+   is_hdr_display_.resize(UINT32(base_id));
+ 
+   if (!async_powermode_) {
+-    return;
++    return 0;
+   }
+ 
+   int start_index = HWCCallbacks::kNumRealDisplays;
+@@ -387,6 +406,7 @@
+           INT32(start_index));
+     map_hwc_display_.insert(std::make_pair(map.client_id, start_index++));
+   }
++  return 0;
+ }
+ 
+ void HWCSession::InitSupportedNullDisplaySlots() {

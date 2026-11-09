@@ -1,0 +1,279 @@
+--- a/sdm/libs/core/drm/hw_peripheral_drm.cpp
++++ b/sdm/libs/core/drm/hw_peripheral_drm.cpp
+@@ -27,6 +27,7 @@
+ IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+ 
++#include <errno.h>
+ #include <fcntl.h>
+ #include <utils/debug.h>
+ #include <utils/sys.h>
+@@ -353,10 +354,13 @@
+   uint32_t obj_id = 0, object_type = 0, feature_id = 0;
+   uint64_t value = 0;
+ 
+-  if (size != sizeof(DppsFeaturePayload)) {
++  if (!payload || size != sizeof(DppsFeaturePayload)) {
+     DLOGE("invalid payload size %zu, expected %zu", size, sizeof(DppsFeaturePayload));
+     return kErrorParameters;
+   }
++
++  // Linux DPU has no downstream DPPS cache/event contract. Never dirty its atomic request.
++  if (dpu_info_.kernel_managed_dpu) return kErrorNotSupported;
+ 
+   DppsFeaturePayload *feature_payload = reinterpret_cast<DppsFeaturePayload *>(payload);
+   object_type = feature_payload->object_type;
+@@ -383,9 +387,6 @@
+     }
+   }
+ 
+-  if (feature_id == sde_drm::kFeatureLtmHistCtrl)
+-    ltm_hist_en_ = value;
+-
+   if (object_type == DRM_MODE_OBJECT_CRTC) {
+     obj_id = token_.crtc_id;
+   } else if (object_type == DRM_MODE_OBJECT_CONNECTOR) {
+@@ -395,19 +396,29 @@
+     return kErrorUndefined;
+   }
+ 
+-  drm_atomic_intf_->Perform(DRMOps::DPPS_CACHE_FEATURE, obj_id, feature_id, value);
++  int ret = drm_atomic_intf_->Perform(DRMOps::DPPS_CACHE_FEATURE, obj_id, feature_id, value);
++  if (ret) {
++    DLOGE("DPPS feature %u rejected for object %u, ret %d", feature_id, obj_id, ret);
++    return ret == -ENOTSUP ? kErrorNotSupported : kErrorHardware;
++  }
++  if (feature_id == sde_drm::kFeatureLtmHistCtrl)
++    ltm_hist_en_ = value;
+   return kErrorNone;
+ }
+ 
+ DisplayError HWPeripheralDRM::GetDppsFeatureInfo(void *payload, size_t size) {
+-  if (size != sizeof(DRMDppsFeatureInfo)) {
++  if (!payload || size != sizeof(DRMDppsFeatureInfo)) {
+     DLOGE("invalid payload size %zu, expected %zu", size, sizeof(DRMDppsFeatureInfo));
+     return kErrorParameters;
+   }
+   DRMDppsFeatureInfo *feature_info = reinterpret_cast<DRMDppsFeatureInfo *>(payload);
++  feature_info->version = 0;
++  if (int(feature_info->id) < 0 || feature_info->id >= sde_drm::kDppsFeaturesMax)
++    return kErrorParameters;
++  if (dpu_info_.kernel_managed_dpu) return kErrorNotSupported;
+   feature_info->obj_id = token_.crtc_id;
+   drm_mgr_intf_->GetDppsFeatureInfo(feature_info);
+-  return kErrorNone;
++  return feature_info->version ? kErrorNone : kErrorNotSupported;
+ }
+ 
+ DisplayError HWPeripheralDRM::HandleSecureEvent(SecureEvent secure_event,
+@@ -944,6 +955,7 @@
+ }
+ 
+ DisplayError HWPeripheralDRM::SetBLScale(uint32_t level) {
++  if (dpu_info_.kernel_managed_dpu) return kErrorNotSupported;
+   int ret = drm_atomic_intf_->Perform(DRMOps::DPPS_CACHE_FEATURE,
+               token_.conn_id, sde_drm::kFeatureSvBlScale, level);
+   if (ret) {
+--- a/sde-drm/drm_dpps_mgr_imp.cpp
++++ b/sde-drm/drm_dpps_mgr_imp.cpp
+@@ -425,6 +425,12 @@
+     DRM_LOGE("Invalid feature id %d", id);
+     return;
+   }
++  // A compiled feature version is not evidence that its DRM property exists.
++  if ((id == kFeatureAbaHistCtrl || id == kFeatureAbaHistIRQ) &&
++      !dpps_feature_[id].prop_id) {
++    info->version = 0;
++    return;
++  }
+   info->version = dpps_feature_[id].version;
+ 
+   if ((id == kFeatureLtmBufferCtrl) && (dpps_feature_[kFeatureLtm].prop_id != 0)) {
+--- a/sdm/include/core/display_interface.h
++++ b/sdm/include/core/display_interface.h
+@@ -334,6 +334,7 @@
+   kDestinationScalar,
+   kCwbCrop,
+   kDedicatedCwb,
++  kColorSampling,
+ };
+ 
+ /*! @brief Display device event handler implemented by the client.
+--- a/sdm/libs/core/display_builtin.h
++++ b/sdm/libs/core/display_builtin.h
+@@ -137,6 +137,7 @@
+   DisplayError SetFrameTriggerMode(FrameTriggerMode mode) override;
+   DisplayError SetBLScale(uint32_t level) override;
+   DisplayError GetQSyncMode(QSyncMode *qsync_mode) override;
++  DisplayError IsSupportedOnDisplay(SupportedDisplayFeature feature, uint32_t *supported) override;
+   DisplayError colorSamplingOn() override;
+   DisplayError colorSamplingOff() override;
+   DisplayError GetStcColorModes(snapdragoncolor::ColorModeList *mode_list) override;
+--- a/sdm/libs/core/display_builtin.cpp
++++ b/sdm/libs/core/display_builtin.cpp
+@@ -332,6 +332,7 @@
+ 
+ void DisplayBuiltIn::initColorSamplingState() {
+   samplingState = SamplingState::Off;
++  histogramSetup = false;
+   histogramCtrl.object_type = DRM_MODE_OBJECT_CRTC;
+   histogramCtrl.feature_id = sde_drm::DRMDPPSFeatureID::kFeatureAbaHistCtrl;
+   histogramCtrl.value = sde_drm::HistModes::kHistDisabled;
+@@ -339,41 +340,54 @@
+   histogramIRQ.object_type = DRM_MODE_OBJECT_CRTC;
+   histogramIRQ.feature_id = sde_drm::DRMDPPSFeatureID::kFeatureAbaHistIRQ;
+   histogramIRQ.value = sde_drm::HistModes::kHistDisabled;
++  for (auto id : {sde_drm::kFeatureAbaHistCtrl, sde_drm::kFeatureAbaHistIRQ}) {
++    sde_drm::DRMDppsFeatureInfo info = {};
++    info.id = id;
++    DisplayError error = hw_intf_->GetDppsFeatureInfo(&info, sizeof(info));
++    if (error != kErrorNone || !info.version) {
++      DLOGI("Histogram feature %d unavailable, error %d version %u", int(id), error, info.version);
++      return;
++    }
++  }
+   histogramSetup = true;
+ }
+ 
++DisplayError DisplayBuiltIn::IsSupportedOnDisplay(SupportedDisplayFeature feature,
++                                                  uint32_t *supported) {
++  if (feature != kColorSampling) return DisplayBase::IsSupportedOnDisplay(feature, supported);
++  if (!supported) return kErrorParameters;
++  *supported = histogramSetup;
++  return kErrorNone;
++}
++
+ DisplayError DisplayBuiltIn::setColorSamplingState(SamplingState state) {
++  if (!histogramSetup) return kErrorNotSupported;
++  auto control = histogramCtrl;
++  control.value = state == SamplingState::On ? sde_drm::HistModes::kHistEnabled
++                                            : sde_drm::HistModes::kHistDisabled;
++  // Keep software state and the IRQ request unchanged if hardware rejects the control.
++  DisplayError error = DppsProcessOps(kDppsSetFeature, &control, sizeof(control));
++  if (error != kErrorNone) return error;
+   samplingState = state;
+-  if (samplingState == SamplingState::On) {
+-    histogramCtrl.value = sde_drm::HistModes::kHistEnabled;
+-    histogramIRQ.value = sde_drm::HistModes::kHistEnabled;
+-    if (hw_panel_info_.mode == kModeCommand) {
+-      uint32_t pending;
+-      ControlPartialUpdate(false /* enable */, &pending);
+-    }
+-  } else {
+-    histogramCtrl.value = sde_drm::HistModes::kHistDisabled;
+-    histogramIRQ.value = sde_drm::HistModes::kHistDisabled;
+-    if (hw_panel_info_.mode == kModeCommand) {
+-      uint32_t pending;
+-      ControlPartialUpdate(true /* enable */, &pending);
+-    }
+-  }
+-
+-  // effectively drmModeAtomicAddProperty for the SDE_DSPP_HIST_CTRL_V1
+-  return DppsProcessOps(kDppsSetFeature, &histogramCtrl, sizeof(histogramCtrl));
++  histogramCtrl = control;
++  histogramIRQ.value = control.value;
++  if (hw_panel_info_.mode == kModeCommand) {
++    uint32_t pending;
++    ControlPartialUpdate(state == SamplingState::Off, &pending);
++  }
++  return kErrorNone;
+ }
+ 
+ DisplayError DisplayBuiltIn::colorSamplingOn() {
+   if (!histogramSetup) {
+-    return kErrorParameters;
++    return kErrorNotSupported;
+   }
+   return setColorSamplingState(SamplingState::On);
+ }
+ 
+ DisplayError DisplayBuiltIn::colorSamplingOff() {
+   if (!histogramSetup) {
+-    return kErrorParameters;
++    return kErrorNotSupported;
+   }
+   return setColorSamplingState(SamplingState::Off);
+ }
+@@ -448,7 +462,8 @@
+   }
+   // effectively drmModeAtomicAddProperty for SDE_DSPP_HIST_IRQ_V1
+   if (histogramSetup) {
+-    DppsProcessOps(kDppsSetFeature, &histogramIRQ, sizeof(histogramIRQ));
++    error = DppsProcessOps(kDppsSetFeature, &histogramIRQ, sizeof(histogramIRQ));
++    if (error != kErrorNone) return error;
+   }
+ 
+   error = DisplayBase::Commit(layer_stack);
+--- a/composer/hwc_display_builtin.cpp
++++ b/composer/hwc_display_builtin.cpp
+@@ -1416,12 +1416,15 @@
+ 
+ HWC2::Error HWCDisplayBuiltIn::SetDisplayedContentSamplingEnabledVndService(bool enabled) {
+   std::unique_lock<decltype(sampling_mutex)> lk(sampling_mutex);
++  bool start = api_sampling_vote || enabled;
++  DisplayError error = start ? display_intf_->colorSamplingOn() : display_intf_->colorSamplingOff();
++  if (error != kErrorNone) {
++    return error == kErrorNotSupported ? HWC2::Error::Unsupported : HWC2::Error::NoResources;
++  }
+   vndservice_sampling_vote = enabled;
+-  if (api_sampling_vote || vndservice_sampling_vote) {
++  if (start) {
+     histogram.start();
+-    display_intf_->colorSamplingOn();
+   } else {
+-    display_intf_->colorSamplingOff();
+     histogram.stop();
+   }
+   return HWC2::Error::None;
+@@ -1435,21 +1438,18 @@
+     return HWC2::Error::BadParameter;
+ 
+   std::unique_lock<decltype(sampling_mutex)> lk(sampling_mutex);
+-  if (enabled == HWC2_DISPLAYED_CONTENT_SAMPLING_ENABLE) {
+-    api_sampling_vote = true;
+-  } else {
+-    api_sampling_vote = false;
+-  }
+-
+-  auto start = api_sampling_vote || vndservice_sampling_vote;
++  bool vote = enabled == HWC2_DISPLAYED_CONTENT_SAMPLING_ENABLE;
++  bool start = vote || vndservice_sampling_vote;
++  DisplayError error = start ? display_intf_->colorSamplingOn() : display_intf_->colorSamplingOff();
++  if (error != kErrorNone) {
++    return error == kErrorNotSupported ? HWC2::Error::Unsupported : HWC2::Error::NoResources;
++  }
++  api_sampling_vote = vote;
+   if (start && max_frames == 0) {
+     histogram.start();
+-    display_intf_->colorSamplingOn();
+   } else if (start) {
+     histogram.start(max_frames);
+-    display_intf_->colorSamplingOn();
+   } else {
+-    display_intf_->colorSamplingOff();
+     histogram.stop();
+   }
+   return HWC2::Error::None;
+@@ -1457,6 +1457,9 @@
+ 
+ HWC2::Error HWCDisplayBuiltIn::GetDisplayedContentSamplingAttributes(
+     int32_t *format, int32_t *dataspace, uint8_t *supported_components) {
++  uint32_t supported = 0;
++  if (display_intf_->IsSupportedOnDisplay(kColorSampling, &supported) != kErrorNone || !supported)
++    return HWC2::Error::Unsupported;
+   return histogram.getAttributes(format, dataspace, supported_components);
+ }
+ 
+@@ -1464,8 +1467,10 @@
+     uint64_t max_frames, uint64_t timestamp, uint64_t *numFrames,
+     int32_t samples_size[NUM_HISTOGRAM_COLOR_COMPONENTS],
+     uint64_t *samples[NUM_HISTOGRAM_COLOR_COMPONENTS]) {
+-  histogram.collect(max_frames, timestamp, samples_size, samples, numFrames);
+-  return HWC2::Error::None;
++  uint32_t supported = 0;
++  if (display_intf_->IsSupportedOnDisplay(kColorSampling, &supported) != kErrorNone || !supported)
++    return HWC2::Error::Unsupported;
++  return histogram.collect(max_frames, timestamp, samples_size, samples, numFrames);
+ }
+ 
+ DisplayError HWCDisplayBuiltIn::SetMixerResolution(uint32_t width, uint32_t height) {

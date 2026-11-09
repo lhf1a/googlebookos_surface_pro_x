@@ -1,0 +1,127 @@
+// Execute actual HWDeviceDRM validate/commit and SDM client-target refresh functions.
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <inttypes.h>
+#include <memory>
+#include <vector>
+#include <unordered_map>
+#define DTRACE_SCOPED() ((void)0)
+#define DLOGI(...) ((void)0)
+#define DLOGE(...) ((void)0)
+#define DLOGW(...) ((void)0)
+#define UINT32(x) uint32_t(x)
+enum DisplayError{kErrorNone,kErrorUndefined,kErrorNotSupported,kErrorParameters,kErrorResources,kErrorHardware};
+enum {kCompositionGPU,kCompositionGPUTarget,kFormatRGBA8888=10,kFormatRGBA8888Ubwc=11,kFormatYCbCr420Planar=100,kRotatorNone=0,kMaxSDELayers=16};
+struct Fence{struct ScopedRef{};};
+struct Flags{bool secure=false,secure_camera=false,secure_display=false,interlace=false,hdr=false;};
+struct Color{bool supported=true;int identity=17;};
+namespace sde_drm{bool DpuColorSupported(bool,const Color &color){return color.supported;}}
+struct LayerBuffer {
+ struct Plane{int fd=-1;uint32_t offset=0,stride=0;}planes[4];
+ uint32_t width=2880,height=1920,unaligned_width=2880,unaligned_height=1920,size=0;
+ int format=kFormatRGBA8888Ubwc;uint64_t buffer_id=0,handle_id=0;Flags flags;Color color_metadata;
+ std::shared_ptr<Fence> acquire_fence,release_fence;
+};
+static int live_fb,live_temp_fb;
+struct Fb {bool temporary;explicit Fb(bool t=false):temporary(t){++live_fb;if(temporary)++live_temp_fb;}~Fb(){--live_fb;if(temporary)--live_temp_fb;}};
+struct LayerBufferMap{std::unordered_map<uint64_t,std::shared_ptr<Fb>> buffer_map;};
+struct Layer{LayerBuffer input_buffer;int composition=kCompositionGPUTarget;std::shared_ptr<LayerBufferMap> buffer_map=std::make_shared<LayerBufferMap>();};
+struct LayerStack{std::vector<Layer*> layers;uint64_t elapse_timestamp=0;};
+struct HWLayers {
+ struct Info{std::vector<Layer>hw_layers;std::vector<uint32_t> index;uint32_t gpu_target_index=0;}info;
+ struct Config{bool use_solidfill_stage=false;struct{int mode=kRotatorNone;}hw_rotator_session;}config[16];
+ uint64_t elapse_timestamp=0;
+};
+struct BufferInfo {
+ struct{uint32_t width=0,height=0;int format=0;uint32_t buffer_count=0;bool cache=false,gfx_client=false;}buffer_config;
+ struct{int fd=-1;const void *native_handle=nullptr;uint64_t id=0;uint32_t size=0,stride=0,aligned_width=0,aligned_height=0;int format=0;}alloc_buffer_info;
+ void *private_data=nullptr;
+};
+static int allocate_calls,free_calls,alloc_fail,allocation_mismatch,free_fail,registry_fail,atomic_fail,setup_calls,atomic_calls,commit_calls;
+static uint64_t seen_handle;static Color seen_color;static Flags seen_flags;
+struct BufferAllocator {
+ int AllocateBuffer(BufferInfo *info){
+  ++allocate_calls;if(alloc_fail)return -12;
+  const auto &c=info->buffer_config;assert(c.cache&&c.gfx_client&&c.buffer_count==1);
+  info->private_data=new int(1);auto &a=info->alloc_buffer_info;
+  a.fd=73;a.native_handle=info->private_data;a.id=99;a.size=c.width*c.height*4;a.stride=c.width;
+  a.aligned_width=c.width;a.aligned_height=c.height;a.format=c.format;
+  if(allocation_mismatch==1)a.format=kFormatRGBA8888;
+  if(allocation_mismatch==2)++a.aligned_width;
+  if(allocation_mismatch==3)a.fd=-1;
+  if(allocation_mismatch==4)a.native_handle=nullptr;
+  if(allocation_mismatch==5)a.id=0;
+  if(allocation_mismatch==6)a.size=0;
+  if(allocation_mismatch==7)a.stride=0;
+  return 0;
+ }
+ int FreeBuffer(BufferInfo *info){assert(live_temp_fb==0);++free_calls;delete static_cast<int*>(info->private_data);info->private_data=nullptr;return free_fail;}
+};
+struct Registry {
+ DisplayError Register(HWLayers *layers){
+  if(registry_fail)return kErrorHardware;
+  for(auto &l:layers->info.hw_layers){auto &b=l.input_buffer;
+   if(b.planes[0].fd<0||!b.buffer_id)return kErrorHardware;
+   seen_handle=b.buffer_id;seen_color=b.color_metadata;seen_flags=b.flags;
+   l.buffer_map->buffer_map[b.handle_id]=std::make_shared<Fb>(b.handle_id==99);
+  }
+  return kErrorNone;
+ }
+};
+struct Atomic {int Validate(){++atomic_calls;return atomic_fail;}};
+struct HWDeviceDRM {
+ struct{bool kernel_managed_dpu=true;}dpu_info_;
+ BufferAllocator allocator;BufferAllocator *buffer_allocator_=&allocator;Registry registry_;Atomic atomic;Atomic *drm_atomic_intf_=&atomic;
+ bool default_mode_=false,first_cycle_=true,seamless_mode_switch_=true;int vrefresh_=60,panel_mode_changed_=1;const char *device_name_="test";
+ DisplayError ValidateDpuLayers(HWLayers*);DisplayError Validate(HWLayers*);DisplayError Commit(HWLayers*);
+ void SetupAtomic(Fence::ScopedRef&,HWLayers *layers,bool validate,int64_t*,int64_t*){
+  assert(validate);++setup_calls;assert(layers->info.hw_layers[0].input_buffer.planes[0].fd>=0);
+ }
+ void DumpHWLayers(HWLayers*){}
+ DisplayError DefaultCommit(HWLayers*){assert(false);return kErrorHardware;}
+ DisplayError AtomicCommit(HWLayers*){++commit_calls;return kErrorNone;}
+};
+struct DisplayBase{HWLayers hw_layers_;void CommitLayerParams(LayerStack*);};
+@VALIDATE_LAYERS@
+@VALIDATE@
+@COMMIT@
+@COMMIT_PARAMS@
+static void Reset(){assert(!live_fb);allocate_calls=free_calls=alloc_fail=allocation_mismatch=free_fail=registry_fail=atomic_fail=setup_calls=atomic_calls=commit_calls=0;seen_handle=0;}
+static HWLayers Placeholder(){HWLayers l;l.info.hw_layers.emplace_back();return l;}
+int main(){
+ Reset();{HWDeviceDRM d;auto l=Placeholder();auto map=l.info.hw_layers[0].buffer_map;
+  auto sentinel=std::make_shared<Fb>();map->buffer_map[123]=sentinel;
+  assert(d.Validate(&l)==kErrorNone);assert(allocate_calls==1&&free_calls==1&&setup_calls==1&&atomic_calls==1&&!commit_calls);
+  assert(l.info.hw_layers[0].input_buffer.planes[0].fd==-1&&!l.info.hw_layers[0].input_buffer.buffer_id);
+  assert(l.info.hw_layers[0].buffer_map==map&&map->buffer_map.size()==1&&map->buffer_map.at(123)==sentinel&&live_fb==1&&!live_temp_fb);
+  assert(d.Validate(&l)==kErrorNone&&allocate_calls==2&&free_calls==2);
+  atomic_fail=-22;assert(d.Validate(&l)==kErrorHardware&&allocate_calls==3&&free_calls==3);
+  assert(d.Commit(&l)==kErrorHardware&&allocate_calls==3&&!commit_calls);}
+ Reset();{HWDeviceDRM d;auto l=Placeholder();alloc_fail=1;assert(d.Validate(&l)==kErrorResources);assert(!free_calls&&!atomic_calls);}
+ for(int mismatch=1;mismatch<=7;++mismatch){Reset();HWDeviceDRM d;auto l=Placeholder();allocation_mismatch=mismatch;
+  assert(d.Validate(&l)==kErrorParameters);assert(free_calls==1&&!atomic_calls);}
+ Reset();{HWDeviceDRM d;auto l=Placeholder();atomic_fail=-22;assert(d.Validate(&l)==kErrorHardware);
+  assert(free_calls==1&&!live_fb&&d.vrefresh_==0&&!d.seamless_mode_switch_);}
+ Reset();{HWDeviceDRM d;auto l=Placeholder();registry_fail=1;assert(d.Validate(&l)==kErrorHardware);assert(free_calls==1&&!atomic_calls);}
+ Reset();{HWDeviceDRM d;auto l=Placeholder();free_fail=-5;assert(d.Validate(&l)==kErrorResources);}
+ for(int invalid=0;invalid<7;++invalid){Reset();HWDeviceDRM d;auto l=Placeholder();auto &b=l.info.hw_layers[0].input_buffer;
+  if(invalid==0)b.buffer_id=1;if(invalid==1)b.handle_id=1;if(invalid==2)b.unaligned_width=0;
+  if(invalid==3)l.info.hw_layers[0].composition=kCompositionGPU;
+  if(invalid==4)b.flags.secure=true;if(invalid==5)b.flags.hdr=true;if(invalid==6)b.color_metadata.supported=false;
+  assert(d.Validate(&l)!=kErrorNone);assert(!allocate_calls&&!atomic_calls);}
+ Reset();{HWDeviceDRM d;auto l=Placeholder();l.info.hw_layers.emplace_back();assert(d.Validate(&l)==kErrorParameters);assert(allocate_calls==1&&free_calls==1&&!atomic_calls);}
+ Reset();{HWDeviceDRM d;d.first_cycle_=false;auto l=Placeholder();assert(d.Validate(&l)!=kErrorNone);assert(!allocate_calls);}
+ Reset();{HWDeviceDRM d;d.dpu_info_.kernel_managed_dpu=false;auto l=Placeholder();assert(d.Validate(&l)==kErrorHardware);assert(!allocate_calls);}
+ Reset();{HWDeviceDRM d;DisplayBase base;base.hw_layers_=Placeholder();base.hw_layers_.info.index={0};
+  Layer actual;actual.input_buffer.planes[0].fd=64;actual.input_buffer.buffer_id=0x1234;actual.input_buffer.handle_id=44;
+  actual.input_buffer.format=kFormatRGBA8888;actual.input_buffer.width=3008;actual.input_buffer.unaligned_width=3000;
+  actual.input_buffer.color_metadata.identity=123;LayerStack stack{{&actual},77};base.CommitLayerParams(&stack);
+  const auto &b=base.hw_layers_.info.hw_layers[0].input_buffer;
+  assert(b.buffer_id==0x1234&&b.format==kFormatRGBA8888&&b.width==3008&&b.unaligned_width==3000&&b.color_metadata.identity==123);
+  assert(base.hw_layers_.elapse_timestamp==77);
+  assert(d.Commit(&base.hw_layers_)==kErrorNone&&seen_handle==0x1234&&seen_color.identity==123&&commit_calls==1&&!allocate_calls);
+  actual.input_buffer.flags.secure_camera=true;base.CommitLayerParams(&stack);assert(d.Commit(&base.hw_layers_)==kErrorNotSupported);
+ }
+ Reset();puts("DPU_REAL_TEST_ONLY_TARGET_AND_COMMIT_ISOLATION_ALL_PASS");
+}

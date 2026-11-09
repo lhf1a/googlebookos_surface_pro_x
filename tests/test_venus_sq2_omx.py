@@ -1,6 +1,7 @@
 """Test OMX kernel adapter metadata and real-acknowledgement ownership order."""
 from pathlib import Path
 import subprocess
+import importlib.util
 import tempfile
 import unittest
 
@@ -24,15 +25,27 @@ struct hfi_event_data {u32 sq2_sequence_fields,height,width,bit_depth,pic_struct
 struct vb2_buffer {int bytes;};
 struct vb2_v4l2_buffer {struct vb2_buffer vb2_buf;u32 flags;};
 struct core {int sq2;unsigned long sys_error;};
-struct venus_inst {struct core *core;int lock,state,session_error;void *m2m_ctx;};
+struct venus_inst {struct core *core;int lock,ctx_q_lock,state,session_error;u32 sq2_omx_flush_flags;int sq2_omx_flush_output_pending;void *m2m_ctx;};
+static int inject_sequence,inject_session_error,inject_core_error,fail_call;
+static int sq2_omx_flush_output(struct venus_inst *);
 static int error,acknowledged,calls,returned,last_type,in_count,out_count,cleared;
 static struct vb2_v4l2_buffer in_buf,out_buf;
 static void mutex_lock(int *p){assert(!*p);*p=1;}
 static void mutex_unlock(int *p){assert(*p);*p=0;}
 static int test_bit(int n,unsigned long *p){return (*p>>n)&1;}
 static int hfi_session_flush(struct venus_inst *i,u32 type,int block){
- assert(i->lock && block);calls++;last_type=type;
- if(error)return error;
+ calls++;last_type=type;
+ if(!block){assert(i->lock);return error;}
+ assert(!i->lock && i->ctx_q_lock);
+ if(inject_sequence){
+  inject_sequence=0;
+  mutex_lock(&i->lock);
+  assert(!sq2_omx_flush_output(i));
+  mutex_unlock(&i->lock);
+ }
+ if(inject_session_error)i->session_error=1;
+ if(inject_core_error)i->core->sys_error=1;
+ if(error || calls==fail_call)return error?error:-EIO;
  acknowledged=1;return 0;
 }
 static struct vb2_v4l2_buffer *v4l2_m2m_src_buf_remove(void *p){
@@ -48,6 +61,7 @@ static void v4l2_m2m_buf_done(struct vb2_v4l2_buffer *b,int state){
 static void *v4l2_m2m_get_dst_vq(void *p){return p;}
 static void vb2_clear_last_buffer_dequeued(void *p){(void)p;assert(acknowledged);cleared++;}
 #define true 1
+#define false 0
 #include "HEADER"
 #include "FLAGS_HEADER"
 int main(void){
@@ -69,6 +83,29 @@ int main(void){
  i.state=INST_START;in_count=1;out_count=1;
  assert(!sq2_omx_flush(&i,1) && last_type==HFI_FLUSH_INPUT && !in_count && out_count==1);
  assert(!sq2_omx_flush(&i,2) && last_type==HFI_FLUSH_OUTPUT && !out_count);
+ // A sequence callback runs during the blocking wait instead of stalling IRQ.
+ i.state=INST_START;int count=calls;inject_sequence=1;
+ assert(!sq2_omx_flush(&i,2) && calls==count+1 && !i.ctx_q_lock);
+ // Input-only flush still requires its own real output acknowledgement for DRC.
+ count=calls;inject_sequence=1;
+ assert(!sq2_omx_flush(&i,1) && calls==count+2 && last_type==HFI_FLUSH_OUTPUT);
+ assert(!i.sq2_omx_flush_flags && !i.sq2_omx_flush_output_pending);
+ // A failed extra DRC output reply cannot acknowledge input completion.
+ count=calls;inject_sequence=1;fail_call=count+2;int n=returned;
+ assert(sq2_omx_flush(&i,1)==-EIO && calls==count+2 && returned==n);
+ fail_call=0;
+ // Outside an OMX wait the original nonblocking DRC flush still runs.
+ mutex_lock(&i.lock);count=calls;
+ assert(!sq2_omx_flush_output(&i) && calls==count+1 && last_type==HFI_FLUSH_OUTPUT);
+ mutex_unlock(&i.lock);
+ // Errors arriving while unlocked must not return software-owned buffers.
+ in_count=out_count=1;int old_returned=returned;inject_session_error=1;
+ assert(sq2_omx_flush(&i,3)==-EIO && returned==old_returned);
+ inject_session_error=0;i.session_error=0;inject_core_error=1;
+ assert(sq2_omx_flush(&i,3)==-EIO && returned==old_returned);
+ inject_core_error=0;core.sys_error=0;inject_sequence=1;error=-ETIMEDOUT;count=calls;
+ assert(sq2_omx_flush(&i,1)==-ETIMEDOUT && calls==count+1 && returned==old_returned);
+ assert(!i.lock && !i.ctx_q_lock && !i.sq2_omx_flush_flags);
  return 0;
 }
 """
@@ -81,6 +118,33 @@ class VenusOmx(unittest.TestCase):
             subprocess.run(['cc','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
                             '-fno-pie','-no-pie',str(p/'test.c'),'-o',str(p/'test')],check=True)
             subprocess.run([str(p/'test')],check=True,timeout=10)
+
+    def test_flush_lock_source_adapter(self):
+        spec = importlib.util.spec_from_file_location('omx_patch', ROOT/'scripts/patch-sq2-venus-omx.py')
+        patch = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(patch)
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            (p/'core.h').write_text('struct venus_inst {\n\tstruct mutex ctx_q_lock;\n};\n')
+            original = '\t\tret = hfi_session_flush(inst, HFI_FLUSH_OUTPUT, false);\n'
+            (p/'vdec.c').write_text(original)
+            patch.apply_flush_lock(p, ROOT)
+            self.assertEqual((p/'core.h').read_text().count('u32 sq2_omx_flush_flags;'), 1)
+            self.assertIn('IS_SQ2_HFI(inst->core) ? sq2_omx_flush_output(inst)', (p/'vdec.c').read_text())
+            self.assertIn('hfi_session_flush(inst, HFI_FLUSH_OUTPUT, false)', (p/'vdec.c').read_text())
+            self.assertEqual((p/'venus-sq2-omx.h').read_bytes(), (ROOT/'probe/video/venus-sq2-omx.h').read_bytes())
+            before = {f.name:f.read_bytes() for f in p.iterdir()}
+            with self.assertRaises(ValueError):
+                patch.apply_flush_lock(p, ROOT)
+            self.assertEqual(before, {f.name:f.read_bytes() for f in p.iterdir()})
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            (p/'core.h').write_text('struct venus_inst {\n\tstruct mutex ctx_q_lock;\n};\n')
+            (p/'vdec.c').write_text('unknown decoder\n')
+            before = (p/'core.h').read_bytes()
+            with self.assertRaises(ValueError):
+                patch.apply_flush_lock(p, ROOT)
+            self.assertEqual(before, (p/'core.h').read_bytes())
 
 if __name__=='__main__':
     unittest.main()

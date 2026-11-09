@@ -1,0 +1,14 @@
+--- a/sde-drm/drm_plane.cpp
++++ b/sde-drm/drm_plane.cpp
+@@ -704,6 +704,11 @@
+   int ret = ParseProperties();
+   if (ret) return ret;
+ 
++  // Standard DPU can inherit fbcon/previous-master planes before the first commit.
++  if (!prop_mgr_.IsPropertyAvailable(DRMProperty::CAPABILITIES)) {
++    assigned_crtc_id_ = plane->crtc_id;
++  }
++
+   unique_ptr<DRMPPManager> pp_mgr(new DRMPPManager(fd_));
+   pp_mgr_ = std::move(pp_mgr);
+   pp_mgr_->Init(prop_mgr_, DRM_MODE_OBJECT_PLANE);

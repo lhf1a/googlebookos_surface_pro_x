@@ -41,6 +41,11 @@ DEVICE_FUNCTIONS(DECLARE)
 static unsigned submissions, presents, consumed, native_fences;
 typedef unsigned (*native_stats_fn)(uint64_t *);
 static native_stats_fn native_stats;
+#ifdef SQ2_NATIVE_GRALLOC
+#define STATS_REQUIREMENT "not-applicable-native-gralloc"
+#else
+#define STATS_REQUIREMENT "wrapper-log-required"
+#endif
 
 #define REQUIRE(condition, message) do { if(!(condition)) { \
     fprintf(stderr,"VULKAN_WINDOW_FAIL %s\n",message); goto cleanup; } } while(0)
@@ -97,18 +102,27 @@ static int consume(AImageReader *reader,unsigned width,unsigned height,unsigned 
     }}
     int32_t w=0,h=0,planes=0,row_stride=0,pixel_stride=0,length=0,format=0;
     uint8_t *data=NULL;AHardwareBuffer *buffer=NULL;uint64_t id=0;
-    REQUIRE(AImage_getWidth(image,&w)==AMEDIA_OK&&AImage_getHeight(image,&h)==AMEDIA_OK&&
-        AImage_getFormat(image,&format)==AMEDIA_OK&&AImage_getNumberOfPlanes(image,&planes)==AMEDIA_OK&&
-        AImage_getPlaneRowStride(image,0,&row_stride)==AMEDIA_OK&&
-        AImage_getPlanePixelStride(image,0,&pixel_stride)==AMEDIA_OK&&
-        AImage_getPlaneData(image,0,&data,&length)==AMEDIA_OK&&
-        AImage_getHardwareBuffer(image,&buffer)==AMEDIA_OK&&buffer&&
-        AHardwareBuffer_getId(buffer,&id)==0,"ImageReader metadata");
+#define IMAGE_GET(expression) do { media_status_t status=(expression); \
+    printf("VULKAN_WINDOW_GET cycle=%u frame=%u call=%s status=%d\n",cycle,frame,#expression,status); \
+    REQUIRE(status==AMEDIA_OK,"ImageReader getter: " #expression); } while(0)
+    IMAGE_GET(AImage_getHardwareBuffer(image,&buffer));
+    REQUIRE(buffer && AHardwareBuffer_getId(buffer,&id)==0,"ImageReader hardware buffer/id");
+    AHardwareBuffer_Desc description={0};AHardwareBuffer_describe(buffer,&description);
+    printf("VULKAN_WINDOW_AHB cycle=%u frame=%u id=%llu width=%u height=%u stride=%u format=%u usage=%llx\n",
+            cycle,frame,(unsigned long long)id,description.width,description.height,description.stride,
+            description.format,(unsigned long long)description.usage);
+    IMAGE_GET(AImage_getWidth(image,&w));
+    IMAGE_GET(AImage_getHeight(image,&h));
+    IMAGE_GET(AImage_getFormat(image,&format));
+    IMAGE_GET(AImage_getNumberOfPlanes(image,&planes));
+    IMAGE_GET(AImage_getPlaneRowStride(image,0,&row_stride));
+    IMAGE_GET(AImage_getPlanePixelStride(image,0,&pixel_stride));
+    IMAGE_GET(AImage_getPlaneData(image,0,&data,&length));
+#undef IMAGE_GET
     REQUIRE(w==(int32_t)width&&h==(int32_t)height&&format==AIMAGE_FORMAT_RGBA_8888&&
         planes==1&&pixel_stride==4&&row_stride>0&&(unsigned)row_stride>=width*4&&data&&length>0&&
         (uint64_t)(height-1)*(unsigned)row_stride+(uint64_t)width*4<=(uint64_t)length,
         "ImageReader RGBA layout/bounds");
-    AHardwareBuffer_Desc description={0};AHardwareBuffer_describe(buffer,&description);
     REQUIRE(description.width==width&&description.height==height&&description.layers==1&&
         description.format==AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM&&description.stride>=width&&
         (uint64_t)description.stride*4==(uint64_t)row_stride,"AHB/consumer stride agreement");
@@ -149,7 +163,12 @@ static int run_cycle(VkInstance instance,VkPhysicalDevice physical,VkDevice devi
     VkSurfaceFormatKHR *formats=NULL;VkPresentModeKHR *modes=NULL;
     uint32_t image_count=0,resource_count=0;int result=1,queue_touched=0,acquire_pending=0;
     unsigned before_submissions=submissions,before_presents=presents;
-    uint64_t usage=AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN|AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT;
+    /* ImageReader is the CPU consumer. Vulkan supplies GPU_COLOR_OUTPUT as
+     * producer usage when connecting the swapchain. AImage::lockImage forwards
+     * the reader usage to gralloc lock, whose mapper5 contract rejects non-CPU
+     * flags; putting the producer bit here prevents all AImage plane getters. */
+    uint64_t usage=AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN;
+    printf("VULKAN_WINDOW_READER consumer_usage=%llx producer=Vulkan\n",(unsigned long long)usage);
     REQUIRE(AImageReader_newWithUsage((int32_t)width,(int32_t)height,AIMAGE_FORMAT_RGBA_8888,usage,4,&reader)==AMEDIA_OK&&
         reader&&AImageReader_getWindow(reader,&window)==AMEDIA_OK&&window,"ImageReader window creation");
     VkAndroidSurfaceCreateInfoKHR surface_info={.sType=VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,.window=window};
@@ -316,7 +335,7 @@ cleanup:
         uint64_t bytes=0;unsigned live=native_stats(&bytes);
         printf("VULKAN_WINDOW_NATIVE_STATS cycle=%u views=%u bytes=%llu\n",cycle,live,(unsigned long long)bytes);
         if(live||bytes){fprintf(stderr,"VULKAN_WINDOW_FAIL native view leak after swapchain teardown\n");result=1;}
-    } else printf("VULKAN_WINDOW_NATIVE_STATS cycle=%u visibility=unavailable verification=wrapper-log-required\n",cycle);
+    } else printf("VULKAN_WINDOW_NATIVE_STATS cycle=%u visibility=unavailable verification=%s\n",cycle,STATS_REQUIREMENT);
     if(surface)vkDestroySurfaceKHR(instance,surface,NULL);
     if(reader)AImageReader_delete(reader); /* getWindow returns a borrowed ref. */
     free(rendered);free(framebuffers);free(views);free(images);free(formats);free(modes);
@@ -395,13 +414,15 @@ int main(int argc,char **argv) {
 #undef LOAD_DEVICE
     /* NOLOAD avoids silently constructing a second registry in another linker
      * namespace. Missing visibility is a failed diagnostic, never a fake zero. */
+#ifndef SQ2_NATIVE_GRALLOC
     stats_library=dlopen("/vendor/lib64/egl/libquest2-v77-ahb.so",RTLD_NOW|RTLD_LOCAL|RTLD_NOLOAD);
     if(stats_library)native_stats=(native_stats_fn)dlsym(stats_library,"sq2_v77_native_stats");
+#endif
     if(native_stats) {
         REQUIRE(dladdr((void*)native_stats,&origin),"live native-view stats entry provenance");
         printf("VULKAN_WINDOW_STATS visibility=probe-visible module=%s base=%p\n",origin.dli_fname,origin.dli_fbase);
         uint64_t bytes=0;REQUIRE(!native_stats(&bytes)&&!bytes,"native-view registry not empty before test");
-    } else puts("VULKAN_WINDOW_STATS visibility=unavailable verification=wrapper-log-required (no second adapter loaded)");
+    } else printf("VULKAN_WINDOW_STATS visibility=unavailable verification=%s (no second adapter loaded)\n",STATS_REQUIREMENT);
     VkQueue queue=VK_NULL_HANDLE;vkGetDeviceQueue(device,family,0,&queue);REQUIRE(queue,"device queue");
 #ifdef SQ2_COMBINED_HARNESS
     if(!strcmp(getenv("SQ2_COMBINED_ORDER"),"egl-first")) REQUIRE(!quest2_combined_audit(),"combined binding audit");
@@ -421,6 +442,6 @@ cleanup:
     free(extensions);free(families);free(physical_devices);
     printf("VULKAN_WINDOW_%s mode=%s cycles=%u frames_consumed=%u submits=%u presents=%u native_fences=%u native_stats=%s\n",
         result?"FAIL":"PASS",create_only?"create-only":"render-present-readback",cycles,consumed,submissions,presents,native_fences,
-        native_stats?"probe-visible":"wrapper-log-required");
+        native_stats?"probe-visible":STATS_REQUIREMENT);
     return result;
 }

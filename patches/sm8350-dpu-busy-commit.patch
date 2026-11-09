@@ -1,0 +1,14 @@
+--- a/sde-drm/drm_atomic_req.cpp
++++ b/sde-drm/drm_atomic_req.cpp
+@@ -240,6 +240,11 @@
+ 
+   if (!plane_error_) plane_error_ = output_fences_.Prepare(drm_atomic_req_);
+   int ret = plane_error_ ? plane_error_ : drmModeAtomicCommit(fd_, drm_atomic_req_, flags, nullptr);
++  if (!plane_error_ && !synchronous && dpu_contract_.Enabled() && ret == -EBUSY) {
++    // Mainline rejects a nonblocking update while the previous flip is pending.
++    ret = drmModeAtomicCommit(fd_, drm_atomic_req_, flags & ~DRM_MODE_ATOMIC_NONBLOCK, nullptr);
++    DRM_LOGI("DPU busy commit retried synchronously: result=%d", ret);
++  }
+   int fence_result = output_fences_.Complete(!ret);
+   if (!ret) ret = fence_result;
+   if (ret) {

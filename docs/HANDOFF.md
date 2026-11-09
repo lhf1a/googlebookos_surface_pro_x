@@ -1,3 +1,2649 @@
+## 2026-11-10：唯一主线基线 v21-release（验收版清理）
+
+清理版正常重启已验证：boot398dd33e…，第146秒首次SSH检查成功，7服务running；
+HEVC硬解6帧可见像素与已独立审计父版逐字节一致，PTS/EOS/stop/delete成功，
+Venus错误/实例/缓冲归零。50项相关主机测试与标准verify/package通过，临时复核客户端已删除。
+未新增听音、长时、休眠或SQ1验证；沿用用户对功能父版的听音/页面验收。
+
+用户确认 v21 听音、Bilibili 播放页/主页切换均正常，授权固定为唯一版本并提交主线，
+随后要求设备及提交源码一并清理开发工具、日志和探针。本节覆盖下方历史“未提交”、
+“当前 v20”及 Mesa 默认说明；旧日期的实验记录仅用于追溯，不是并列支持版本。
+
+唯一受支持发布基线为 **v21-release / Linux 6.18.60-sq2-android1**，默认 `EFI/SQ2Nat`，
+路线为 mapper5 + 原厂 gralloc + 源码 QTI HWC/SDM；initramfs SHA256 `e826df919c358a61ff023f6021ba9dae43d166b1d781a3b107ed8320286456a0`。
+原 v21 功能父包为 `71db2317…`；清理版保留 SoundWire 容量/AHB 串行修复、DPU EBUSY
+重提修复、原音频 HAL及原 OMX。HEVC CSD/HDR 实验候选未因基线整理被暗中提升。
+清理只移除诊断输出/入口：桥接逐缓冲日志及弱观测回调、Venus 启动/阶段/PM 诊断开关、
+启动持久日志采集器、随包测试工具；重编成对 Venus 模块与视频桥接，不热换提供者。
+
+源码同时删除废弃采集器、临时探针及对应入口；正式显示/mapper builder 不再顺带编译探针。
+保留真实错误处理、驱动安全边界、主机回归测试与构建记录。正常系统错误日志不是持续开发采集。
+本机 `/data/local/tmp` 历史工具/向量/采集已清理（17166388→30388 KiB），移除三个测试 APK，
+清除 ESP `googlebook-native-*` 日志；应用缓存、用户数据、校准和凭据保留。
+旧 `EFI/SQ2QDbg` 仅为现有应急恢复载荷，不是受支持的第二发布版本；未新增备份或启动项。
+
+`configs/kernel-baseline.json` 是唯一发布 pins，标准 `build.py verify/package` 默认选 SQ2Nat；
+`compile` 仍产生独立未验收候选，不能凭版本号相同覆盖发布包。私有库、固件、凭据和原始日志
+不提交。内屏仅 SDR，Main10 过滤保持，整栈长期目标尚未全部完成；
+`full_stack_complete/full_hwc_verified/full_fence_lifecycle_verified` 仍 false。
+清理、构建、完整性和本次启动记录位于 ignored `out/qualcomm-full-stack-20261108/v21-release-cleanup`。
+
+## 2026-11-10：无声与 Bili 整屏黑闪修复已持久部署并通过用户验收
+
+用户确认 4K→1080p→4K 无卡顿；独立 CSD RAM 候选下确有三个重建的硬解会话和非空输出，
+不是同会话 DRC。验收功能父版为 v21/原 OMX，CSD 候选尚未持久化；旧 EBD tag0 歧义保留。
+本轮用户另行授权排查无声、修复播放页/主页整屏黑闪，不自动恢复其他整栈开发。
+
+黑闪原采集三次均为 DRM EBUSY→HWC 错误 Flush→唯一全屏 plane 被撤→下一帧恢复；
+没有 eDP/CRTC 重启、欠载或超时。修复仅在 kernel-managed DPU 的真实非阻塞 EBUSY 时，
+同一请求改为阻塞重提一次；实际结果/fence 完成一次，其他失败照常传播，真实空画面仍清理。
+实际代码 12 场景 ASan/UBSan、旧版红例通过；42TU 配套构建。RAM v2 真机 fence/30 帧所有权/
+真实 empty flush/协议恢复通过，页面采集 1601 次提交、零 plane disable/显示超时，用户确认“不会了”。
+信息日志受 QTI tag 开关限制，本轮不能从无重提日志断言重提次数。恢复原库后启动期再见 EBUSY。
+v1 因 runner 的 set-e/pidof 空返回提前退出，fence 通过但未进入页面验收；v2 已修采集器且收尾0。
+
+无声重启音频服务无效；完整停 HAL 后 WSA 成对 runtime 周期也无效，未重复该路线。
+原声道/音量正常，PCM SETUP，SoundWire prepare -61。被动跟踪 40833 次读证明 FIFO 空、读取成功，
+但缓存 wr_fifo_depth=0。匹配 ABI 的只读能力探针 16 次均读到 params016840c6、实际 wr/rd16，
+缓存仍0；探针仅读 COMP_PARAMS，未重置主端/ADSP或改驱动内存，返回 ECANCELED 后无驻留。
+源码 AHB 地址/数据两步缺整体互斥，IRQ 已注册后才缓存容量；竞态可造成错误能力值是待实机验证的解释。
+候选补 AHB mutex，并在 IRQ 注册前读取/校验真实容量，恢复时不覆盖固定容量，不填假16、不吞错误。
+实际 read/write 并发旧红例、新绿例、四错误解锁路径通过；匹配6.18严格MODPOST完成。
+已通过正常重启应用模块，禁止热卸提供者、裸写容量或复位 ADSP。新候选正常重启后用户已确认听音恢复。
+
+证据仅 ignored out/qualcomm-full-stack-20261108：bili-page-blackout-v2、dpu-busy-commit-v1/v2、
+audio-blackout-20261109-v1/fifo-read-capture-v2、cap-read-module、soundwire-ahb-capacity-v1。
+音频 HAL774cd7e7…及原停流静音/增益/配对端口保持；不恢复旧 HAL pacing/MonoPipe 改动。
+v21 默认71db2317…已部署并完成一次正常重启，boot364dc453…；唯一回退5b9f7012…保持。
+匹配 SoundWire4671cc9d…/note f9dd9313…、显示e4f0e12a…实读核对；原音频HAL和OMX保持。
+等待120秒后首次SSH成功，Android/user10/原服务正常；缓存wr/rd16与16次真实能力读一致，
+本次启动无旧FIFO溢出/prepare -61；用户对新默认包Bili听音/页面切换反馈“全部正常”。
+无新备份、无提交推送。
+两次4秒/各192000帧 AAudio 标准媒体流均成功排空；间隔10秒重开通过，实际PCM RUNNING
+各29个样本且hw_ptr持续前进，AAudio XRUN0，无原FIFO溢出/prepare -61。重启后只读显示采集
+234提交、零撤层/欠载/超时，收尾0/无丢失；本段是受控输出和空闲UI观察，不能冒充Bili听音/页面复测。
+用户随后确认持久v21“全部正常”：内置扬声器恢复、Bili播放页/主页无整屏黑闪。反馈晚于采集收尾，
+不伪造精确时间对齐；受控PCM与RAM页面证据分别保留。所有临时trace/挂载已清理。
+本轮两项修复完成；整体显示栈目标继续暂停，未新增长时/休眠/跨设备声学验收。
+full_stack_complete/full_hwc_verified/full_fence_lifecycle_verified 仍 false。
+
+## 2026-11-09：按用户要求重启音频服务，听音恢复待确认
+
+Bili HEVC CSD RAM 候选期间用户反馈 4K→1080p→4K 无卡顿，但从开始无声；恢复原 OMX 后仍无声。
+已保存 SoundWire/WSA prepare -61 与 FIFO overflow 的实际日志，不能据此归因于 OMX 或改 HAL。
+按用户要求执行一次标准 `ctl.restart audioserver`，由原 init onrestart 连带重启音频 HAL；
+audioserver 10475→15125、HAL 10454→15130，两个服务 running、标准音频接口重新注册，
+实际 HAL SHA 774cd7e7…保持、同 boot，Venus 错误/实例/vb2_bytes 为0。未重启设备或修改驱动。
+本次只证明服务重启完成，声音是否恢复待用户重新播放确认；整体移植目标仍保持暂停。
+证据：`out/qualcomm-full-stack-20261108/audio-service-restart-20261109-v1`。
+
+## 2026-11-09：HEVC 独立 CSD 已通过普通 MediaCodec 基本组，继续实用场景验收
+
+执行路线继续 mapper5 + 原厂 gralloc + 源码 QTI HWC/SDM + Linux 6.18。
+当前仍是正常 v20（boot 1566c477…、默认 a65968ee…、唯一回退 5b9f7012…）；未写 EFI、未重启。
+源码 SM8250 OMX 候选 d8699271…在有界 RAM 单库绑定中，将独立参数头复制到组件私有存储，
+再放入首个完整 Annex-B AU 的既有 DMA 输入槽；保留图片 PTS/flags，不合成 SEQ/FLUSH/END。
+普通 MediaCodec 五阶段全部独立通过：原完整 AU Surface、候选完整 AU Surface、剥头 CSD
+ByteBuffer、剥头 CSD Surface、独立 CSD + 重复头 ByteBuffer；合计 30 帧像素/PTS 精确，
+EOS/stop/delete 均成功。真实 HFI 首包分别为 5161/5244 字节，没有孤立 83 字节参数包；
+全部实际 END、传输归还及最终错误/实例/vb2_bytes=0，原五文件与日志属性已恢复，七服务 running。
+Surface 是 AImageReader，不是本次物理屏像素验收；仍需真实 Bili 4K→1080p→4K、HEVC DRC、
+重复 flush/reset、五组件 HDR 联合与更宽输入契约验证。Main10 继续过滤，候选未持久部署，full_* false。
+
+原始 v1 因 map_files 在能力探测 dlclose 时消失而中止；前三组 18 帧实际精确，但 runner1，
+后两组未运行，不能记全通过。v2 只对同 PID 下已消失映射作有界重试，错误 SHA/存活 I/O 错误仍拒绝；
+27 项采集器故障注入通过，候选、向量与客户端字节未变。独立像素/HFI审计保留 v1 反例。
+此前直接 V4L2 重组 AU 对照也真实通过 6+6 帧；early-DPB 阴性结论不变，未作为正常修复引入。
+证据：`out/qualcomm-full-stack-20261108/omx-hevc-csd-prefix-v1/independent-basic-v2-pixels.json`、
+`independent-basic-v2-hfi.json`；直接对照见 `hevc-csd-assembled-au-control-v1/independent-control-audit.json`。
+私有产物/原始日志仍仅 ignored out；不提交推送。音频 HAL 774cd7e7…保持，原听感修复不回退。
+
+## 2026-11-09 当前状态：首 SEQ 对照阴性，已正常返回 v20
+
+当前 boot 为 1566c477-1442-4ac5-91d5-5d3ead54575f，实际 v20 core/dec note、原五组件和
+音频 HAL 774cd7e7…均核对；错误/实例/vb2_bytes 为 0，early-DPB 诊断参数已不存在。
+默认 SQ2Nat 为原 v20 a65968ee…，唯一 SQ2QDbg 回退 5b9f7012…保持，无新增启动项/备份。
+恢复期间 SSH 观察曾超时，但实际 EFI 恢复脚本成功，核对后才正常重启，未重复写入/重启。
+两次启动后的入站网络均在设备反向 ping 电脑后恢复；路由/ARP sysctl/SSH 监听和网络载荷
+未发现错误，不能把该关联当根因或修改正常网络策略。详见 network-arp-after-reverse-ping-v1。
+
+真实四组 first-SEQ 对照 runner=1、cleanup=0，测量可用但不是功能通过：关闭/开启 early-DPB
+时完整 AU 均产生有效 SEQ，原顺序 90B 独立参数头均等 12 秒超时。开启时各 18 个真实 DPB
+确实在 START 成功后、首 ETB 前成功提交，仍不足以修复 CSD。split 的 raw SEQ 只在收尾期
+出现，SID 属于本会话但回调已关闭；不得计为等待期首序列成功。全部真实 END/最终资源归零。
+两条 EBD 的未用范围字段异常原样保留，整体协议审计 false；实际参数 ABI/同步 packet 生命周期
+已核对，INPUT 回调不使用这些范围字段，不能据此宣称越界 DMA 或固件根因。
+证据：`hevc-csd-early-dpb-v1/{independent-first-sequence-audit.json,INDEPENDENT_CAPTURE_REVIEW.md}`。
+
+独立修复了原生成器 DPB extradata-size 错误分支重复 kfree：共同 fail 标签负责一次释放。
+已补精确增量 --dpb-cleanup-only，实际旧红例/新 ASan/UBSan 绿例和 4 项测试通过；只修主机源码，
+正常候选 376ae4e0…已严格构建/打包，独立解析核对仅两份 core 和清单变化，其余 1299 记录保持；
+尚未部署，不是 CSD 修复，也不包含 early-DPB 诊断模式。
+下一步核对原厂源码现有 HEVC arbitrary_bytes 组帧路径：正常下游 ETB 并不发送 ENDOFFRAME，
+不能盲加该标志；评估真实参数头与首 VCL 组合及输入所有权/flush/DRC/EOS契约。
+Bili 真实 4K 硬解切换仍必修、Main10 继续过滤，完整整栈目标及 full_* false 保持。
+
+## 2026-11-09：v20 五组件 HDR 联合回归完成，继续 HEVC 首序列定位
+
+默认仍为 v20-capture-lifecycle（a65968ee…），唯一 SQ2QDbg 回退保持。完整五组件 RAM 候选
+在同一 boot 上完成：源码 OMX、原生 P010 service/bridge、stagefright 与 renderer 联合回归。
+六项独立审计通过：同流 HDR10→SDR→HLG 30 帧、独立 HDR10/HLG/AVC 42 帧、
+正常组 150 帧及 BT709 60 帧，共 282 帧像素/PTS 精确；同流后 20 帧静态 HDR 正确清空。
+AVC SDR 320×240→1920×1080→320×240 完成 30 帧；物理窗口合计 150 输出/回调，
+多平面、缩放与 UI 遮挡通过。这不是严格 DPU 像素、HDR 分辨率切换或 4K 硬解验收。
+旧 bridge mixed 日志未记录，不能沿用其日志交叠结论；独立 HFI 另证最大并发 2。
+HFI 4269 条事件覆盖 80 个真实成功 END 世代（64 能力探测、16 解码）和 432 非空输出，
+全部传输及内部缓冲归还闭合，旧 DPB 在下一 CONTINUE 前归还；同步 flush 0.169–1.112ms。
+45 个 HEVC EBD 的未用 filled 字段异常、7 次 EOS 后空 OPB 入队/flush 归还单列保留；
+不据这些未用字段推断越界 DMA，也不把 quarantine 函数入口当真实隔离。
+
+两组件 DRC 对照也已独立通过：各 30 精确帧、真实 FTB/FBD 全归还，flush 0.163–0.329ms，
+无原 1 秒锁阻塞。历史 joint-v1 固件 fatal 和 v19 DMA 残留证据保留，当前通过不能反证其根因。
+完整联合 runner/cleanup 均 0，原五文件 SHA 已恢复、七服务 running，错误/实例/vb2_bytes 全 0；
+24 个 trace 丢失计数全 0，全局 tracing 设置未变。未持久部署五组件，Main10 仍过滤。
+
+用户复测“没有卡顿”记录保持；该次 Bili 采集显示 hard→soft，真实硬解清晰度切换仍为必修项。
+HEVC 独立 CSD 尚无首 SEQ。匹配下游源码显示 START_DONE 后先排内部 DPB、再交首 ETB；
+当前等 SEQ 才分配 DPB。下一有界实验只对照是否产生真实首 SEQ，并以真实 END 收尾，
+不伪造 SEQ、不把参数开关或首序列通过称为解码修复；诊断候选尚在本地准备。
+路线及 KGSL/msm_vidc/QTI C2/PM/性能/SQ1-SQ2 目标保持，全部 full_* 仍 false。
+证据：`source-omx-hdr-joint-v2/independent-summary.json`、`native-p010-drc-trace-v1/independent-hfi-summary.json`，
+均位于 ignored `out/qualcomm-full-stack-20261108`。源码手册尚未提交推送，私有资料不上传。
+
+## 2026-11-09：v20 正常启动与 capture 生命周期修复已验收
+
+当前默认qti-system-display-v20-capture-lifecycle a65968ee…，boot1faec9eb-96e7-4885-8e51-5b01569fceec。
+匹配corecf3d061d…/dece02fc528…，唯一SQ2QDbg回退5b9f7012…保持；原Image/固件/音频/OMX/桥/显示未改。
+120s等待后SSH成功，模块note和原显示/音频组件核对通过。路线仍mapper5 + 原厂gralloc + 源码QTI HWC/SDM + Linux6.18。
+
+修复SQ2 decoder的capture QBUF早于实际启动而提交固件：新队列先保留，真实capture开始时提交。
+独立原v18对照有18次preSTART FTB/18次FW state错误，v20实际同流两者均0，6帧像素/PTS精确。
+只加gate的v19曾在整组结束残留73211904字节，失败保留；v20配套回收证明未曾提交的VB2 lease，
+静态SET_BUFFERS发布前补scope绑定，已发布DMA仍等真实END/PAS，不改通用隔离规则。
+实际源码ASan/UBSan、旧版红例、14启动/6静态注册场景及五地址发布点审计通过，严格MODPOST完成。
+
+v20正常联合16客户端/150精确帧/120物理输出回调与额外BT70960精确帧/30物理回调，四独立审计0；
+各关闭阶段及最终Venus错误/实例/vb2_bytes均0。不是严格DPU像素或整栈完成证明。
+正常与仅P010候选service/bridge的DRC对照各30帧返回0，详细像素/真实HFI独立审计及源码OMX/HDR完整联合继续。
+HEVC独立CSD仍未修：直接7槽、无early capture、原顺序90B参数包也0SEQ；完整AU通过。
+用户“没有卡顿”仍对应已观察到的软解回退，不能关闭真实硬解清晰度切换或历史DRC fatal问题。
+内屏SDR，Main10继续过滤，full_*false；KGSL/下游msm_vidc/QTI C2/PM/性能/跨SQ1-SQ2目标不缩减。
+证据native-capture-start-v2、qti-system-display-v20-acceptance-v1、native-p010-drc-trace-v1；复建见BUILD。
+本轮源码手册未提交推送，私有库/凭据/固件/原始记录只在ignored out。
+
+## 2026-11-09 恢复推进：独立 CSD 对照与 capture 启动顺序修复回归
+
+任务已恢复active，完整整栈目标保持。当前默认暂为v19-capture-start（81a26af8…），
+boot17dca137-4844-40bf-9833-e5d76f5501d5，core59b2bc9c…/note83236722…；
+一次Android正常重启后120s首次SSH成功，boot-check含原显示/音频/OMX/bridge全部通过。
+唯一SQ2QDbg回退5b9f7012…未改，无新启动项或备份。v19尚未验收，原因如下。
+
+原v18实际trace证明18/19个capture FTB在HFI LOAD_RES/START之前提交，FW报state错误；
+下游msm_comm_qbuf等START_DONE，当前helpers只看VB2回调是否调用。
+新capture-start gate保留SQ2 DEC未实际启动的capture队列，真实start处理已有队列；
+旧实际源码host红例、新14场景ASan/UBSan、严格MODPOST通过；只有helpers.c改变。
+v19有效包只改两份core和native校验表，1299项及私有凭据尾/metadata保持。
+
+**v19完整回归失败，不能部署完成/验收通过：** runner0、图像/DRC/物理路径正常返回，
+但关闭后insts0而vb2_bytes累积到73211904；v18同组每阶段/最终均0。
+normal独立审计因此在最终DMA归零断言失败；overlay/composition审计0。
+BT709独立审计另因顶层normal-runner.exit缺失尚未运行完，不能报四审计通过。
+现已停止进一步解码，保留当前泄漏，不清quarantine/退休表，不热卸provider。
+根因候选是从未提交的VB2映射没有绑定session scope，旧保守retire将其永久挂到core列表。
+后续修复只对证明从未发布的VB2 lease回收，并补齐静态SET_BUFFERS发布前scope绑定；
+已发布DMA仍必须等真实END/PAS。v20构建/实机验证尚待完成。
+
+独立HEVC对照另得明确排除证据，不能归因于上述capture顺序：
+`hevc-csd-direct-v1`同7输入槽、等待真实SOURCE_CHANGE后才申请capture；完整AU6帧CRC/PTS/EOS全过，
+83字节CSD+全部6图片仍12s无SEQ/FTB，配置EBD成功，24项trace丢失全0。
+`hevc-csd-direct-order-v1`保持原始字节顺序（AUD+参数头90B、首图片5071B）也同样失败。
+四槽不足/早发capture/AUD重排不是本向量零帧的充分解释。
+实际v18二进制因CONFIG_INIT_STACK_ALL_ZERO已memset全部60B ETB，不能以源码未显式初始化为根因。
+对应independent-audit.json/packet-property-review.json均在ignored out。
+
+DRC只读审查：v18正常同一f41293e2…客户端30帧三分辨率通过；两次失败候选共同变化是
+servicebda6eccc…/bridgee4f5c50a…对，源码OMX/HDR helper不是失败必要条件。
+已准备native-p010-drc-trace-v1（尚未运行），须在健康内存基线恢复后测baseline与仅该pair；
+必须观察第三段低分辨率也已送入时的实际flush/continue/DPB归还，不凭fatal行号猜根因。
+其probe pins目前为v19，后续模块重编必须重新核对。Main10过滤和full_*false保持。
+
+## 2026-11-09 暂停接续：HEVC 分包队列与固件日志对照
+
+用户最新画质切换反馈“没有卡顿了”；上一采集已确认HEVC硬解转软解，故不关闭硬解/DRC问题。
+用户随后暂停任务，本节为暂停接续点；没有新实验在运行，未部署、重启或修改EFI。
+默认v18和唯一回退保持。各runner完成清理，最终Venus sys_error/insts/vb2_bytes均0。
+
+- `hevc-csd-v18-queues-v1`：83字节配置头在实际已加载bridge入口与向量逐字相同。
+  超时flush之前命令队列read/write均12322，消息队列read/write均65360；
+  本次不支持“未消费命令/未读回包积压”解释，不据此泛化排除所有时序问题。
+- `hevc-csd-v18-tag-v1`：仅诊断客户端先保留输入0，让相同配置头使用tag1，仍零帧；
+  不是配置头tag0的简单特殊值问题。两组正常首AU各6帧与新运行FFmpeg参考逐字精确，
+  各24项丢失计数全0，见各目录`independent-audit.json`。
+- `hevc-csd-v18-fwlog-v1`在无fw_level debugfs节点时退出，没有运行客户端或修改固件日志等级。
+  v2仅临时开启已有dynamic-debug打印，结束后原flags逐字恢复并卸载自己的debugfs挂载。
+- `hevc-csd-v18-rawdbg-v1`按精确模块反汇编在debug queue成功读取后只读采样，116包。
+  配置头仍失败，完整AU通过。原先按VenusFW单行过滤误看成空消息，实际字符串以换行开头，
+  后续行含内容；**不是已证实的日志ABI缺陷，不能据此修改包布局**。
+  两组都出现vDec_FillBuffer(2056) state错误（正常18次/CSD19次），CSD收尾另有flush type错误。
+  这些消息尚不能解释CSD专有故障。精确证据在`decoded-debug.json`及原始trace；原始记录仅ignored out。
+
+恢复后先比较完整stateful V4L2启动顺序与OMX桥：现有helpers在capture STREAMON已调用但
+codec仍INIT时可能提前发送capture缓冲，正常与失败都收到固件state错误。
+这是待验证假设，尚未改产品代码；应使用当前有界直接V4L2客户端派生对照，区分
+“等待真实SOURCE_CHANGE再提交capture”与OMX当前时序，同时控制输入缓冲数量。
+不要重跑历史挂起程序，不盲改CODECCONFIG/tag/queue内存屏障、不合成sequence或成功回包。
+保留独立候选DRC固件fatal问题，Main10仍过滤、full_*仍false。
+
+## 2026-11-09 当前任务：必须解决动态分辨率／清晰度切换故障
+
+用户在默认系统实际执行4K→1080p→4K后确认播放卡顿。动态分辨率／清晰度切换故障
+恢复到之前的优先级，是当前必须解决的执行项；修复和验收必须包含此项，不能只修HDR元数据后结束。
+以实际Bilibili清晰度切换为主线；先核对当前boot/实际加载组件、VPU/flush/重配置与音视频时间线，
+区分正常v18卡顿和新P010候选固件错误，禁止把二者未经证据合并为同一根因。
+
+本轮源码SM8250 OMX及SurfaceUtils两层缓存修复在RAM候选中已通过同流HDR10→SDR→HLG30帧
+和独立HDR10/HLG12帧+AVC30帧像素/PTS/metadata审计；同流用例固定320×240，不证明HDR分辨率切换。
+完整联合随后在AVC SDR的320×240→1920×1080→320×240过程中输出13帧后失败，
+固件报video_decoder_utils.c:4394 Err_Fatal。7图形和前4解码客户端返回0，未到物理窗口/BT709阶段。
+候选五文件已撤销绑定，未持久部署，Main10仍过滤。此前一次正常重启134s读回boot34d0c43a…；
+用户随后恢复连接，本次读回boot2fe924fb-3878-4806-ae14-7b6c3f6ca6ea、6.18.60-sq2-android1。
+正常五组件/音频HAL/内核note均匹配，七服务running，无候选绑定，Venus错误/实例/缓冲0。
+恢复证据source-omx-hdr-joint-v1/recovery-health-latest.txt；用户最新切换无卡顿，但采集显示HEVC转软解，硬件切换尚未验收。
+证据out/qualcomm-full-stack-20261108/{source-omx-hdr-sequence-v2,source-omx-hdr-joint-v1,bilibilihd-quality-switch-user-v1}。
+
+## 2026-11-09：Bili 本次无卡顿，HEVC 硬解首帧缺口已独立复现
+
+用户本轮明确反馈“没有卡顿了”。记录为本次未复现，原4K→1080p→4K卡顿与候选DRC错误仍是必须解决项。
+`bilibilihd-quality-switch-v18-v2`采集600次，runner0、24项trace丢失计数全0，全局trace逐字不变。
+日志显示Bili启动高通HEVC后无非空硬解输出，在201帧辅助解码后明确hard→soft；随后4K/1080p尺寸变化
+出现在软件路径。不能用本次流畅体验证明硬件清晰度切换已修。三次ALL flush成功且真实回包先于返回，
+耗时1.040/0.424/0.498ms；收尾INPUT flush真实error0x1002、返回-EIO，END成功。
+音频skip0，PCM采样仍有一次XRUN；用户未感到卡顿，不把该采样等同主观故障。
+
+固定同组六帧HEVC向量的HIDL对照已完成，见`hevc-csd-v18-v1/comparison-audit.json`：
+- 完整首AU：六帧像素与新运行FFmpeg参考逐字节相同，PTS/EOS/STOP/DELETE成功。
+- 独立83字节VPS/SPS/PPS + 去参数头首AU：HFI实际收到flag0x80配置及后续图片，12秒零帧。
+- 独立配置 + 重复完整首AU：仍零帧；不能只通过重复参数头修复。
+- 相同独立参数包去CODECCONFIG（仅生成的诊断客户端）：仍零帧，排除简单flag映射解释。
+三组失败都在停止flush后才捕获sequence；真实trace均无丢失，正常关闭后实例/缓冲归零。
+未重跑旧native-hevc-csd程序、未修改产品标志映射或合成事件。下一步对照真实输入内容、
+HFI队列读写/通知及解析状态，不能盲改标志或用软件回退作为硬解验收。
+
+现有`sq2-mediacodec-frames`增加真正HEVC csd-0及参数/图片拆分，保持AVC行为；
+实际函数ASan/UBSan覆盖VPS/SPS/PPS组合、缺失/截断、后续AU参数不能补首AU及SEI/VCL保留，ARM64编译通过。
+本轮未部署/重启/改EFI，默认v18及唯一回退保持；正常五组件与音频HAL哈希核对、七服务running、
+Venus错误/实例/缓冲0，临时kprobe/uprobe/trace/wakelock清理，证据`hevc-csd-v18-v1/final-health.txt`。
+原始日志及诊断程序仅ignored out，Main10继续过滤，full_*仍false。
+
+## 2026-11-09：Bili 声画异常取证，v18 已修一条真实 flush 锁依赖
+
+用户报告bilibilihd切换视频/拖动进度条后概率碎音与卡帧，输出为内置扬声器，
+已按提示复现，随后明确回复“听音也确认修复了”。后者记为本轮听感恢复；本轮未改音频HAL。
+主线保持mapper5 + 原厂gralloc + 源码QTI HWC/SDM + Linux6.18；内屏仍按SDR/HDR→SDR验收。
+
+### 原始声画证据
+
+bilibilihd-seek-av-v3完整取回，runner0、600采样、13218/13218 trace，24项丢失计数全0，
+全局trace逐字保持，临时kprobe/uprobe/trace/wakelock清理，运行core.sys_error始终0。
+1206次真实物理output transfer中一次skip确认4096帧而未执行StreamAlsa transfer（48kHz下85.33ms）；
+PCM采样RUNNING323、XRUN1，其余closed。XRUN与skip发生在不同时刻，不能合成一个精确听感事件。
+用户复现回复后的持久marker在uptime4479.46，晚于trace末尾4439.329，不能声称精确主观时点已对应。
+原HAL774cd7e7…精确ELF和入口/分支指令已核对，uprobes只读，没有修改pacing/MonoPipe/增益或麦克风。
+
+三次真实FLUSH_ALL(type0x1000004)分别1047.337/1037.482/1005.589ms后返回-ETIMEDOUT；
+同inst在进入约1ms后出现SEQ_CHANGED，20字节/packet0x221006/error0成功flush回包却在返回后42/46/49us才处理。
+另六个INPUT(type0x1000001)有真实error0x1002负回包，保留-EIO；不是旧错误误判，不得改成成功。
+注意HFI源码定义OUTPUT=0x1000002、ALL=0x1000004，不按枚举数值猜名称。
+独立汇总bilibilihd-seek-av-v3/independent-av-summary.json；v2的PCM/flush失败记录也保留。
+
+### 确定性复现与修复
+
+native-omx-flush-lock-v1/baseline-runtime/initial-flush由实际V4L2客户端派生，
+真实码流STREAMON后立即发私有OUTPUT flush。0/200us延迟两组分别约1033/1082ms超时，
+500/1000/2000us三组成功。真实vdec_event_change入口/返回显示回调被阻塞至超时之后，
+随后才处理成功flush回包。所有实例/缓冲自然归零，无provider卸载/服务重启/重复PAS。
+这组只验证flush，不输出解码帧，不能当作像素或解码验收。
+
+根因是sq2_omx_flush持inst.lock等待，HFI单IRQ工作线程的sequence回调也需要该锁。
+现持ctx_q_lock串行队列，等待回包时释放inst.lock，回来重新检查错误再归还软件队列。
+DRC回调遇显式OUTPUT/ALL共用其真实flush，不另发冲突completion；若显式INPUT-only，
+须再发送并等真实OUTPUT回包，不能以INPUT确认输出归还。保留错误/超时和END隔离语义。
+源码只变core.h、vdec.c及venus-sq2-omx.h；struct布局变化使完整Venus模块组一起重编。
+实际header ASan/UBSan覆盖回调重入、deferred输出失败与期间session/core错误；旧header红例保留。
+10项直接相关检查全过；较广38项unittest有33通过、5项因显式旧reference fixture未配置而skip，不能称38全通过。
+严格MODPOST和depmod/System.map通过；其他1296条有效记录/mode及凭据尾逐字保持。
+
+v18包caeb6a4b7bb5a2e28354025992af6a3c06fbe617001b17fcd0a792a29e536205，
+已原子替换现有EFI/SQ2Nat，唯一SQ2QDbg回退5b9f7012…保持，无新入口/备份。
+实际Android正常重启后boot659812ff-b787-436c-8f83-ebb5557d227a，core noteeffad183…匹配；
+原OMX/bridge/62显示文件/13链接/17HIDL记录和音频/ADSP检查通过。第一次root shell reboot未改变boot，
+随后才用已验证Android重启接口；SSH断开后沿原600s窗口连接，首次观测约209.2s，非启动耗时。
+旧boot-check复制的v17 literal hash失败已保留，改为新构建精确hash后通过，未放宽校验。
+
+同一客户端candidate-capture-v2五组全部0，真实flush耗时0.550/0.235/0.419/0.255/0.249ms；
+全部20字节成功回包先于return。两组sequence回调在等待期间完成，分别11/10us，无trace丢失。
+独立blocked-audit.json/unblocked-audit.json通过。v1仅因Bili收尾仍insts1/vb2_bytes0未开始，
+随后同OMX PID5542自然归零才启动v2，不为取零重启服务；原失败保留。
+完整normal/BT709联合回归qti-system-display-v18-acceptance-v2已通过：同OMX PID5542，
+16客户端/150精确像素PTS帧、4物理窗口120输出回调；额外BT70960精确帧、30物理输出回调、
+HWC DEVICE/KMS709 limited和720 CRC扫描通过，四独立审计全0。最终七服务running，
+Venus错误/实例/vb2_bytes全0，无试验绑定/探针/trace/进程，仅bootreceiver/wifi系统trace，
+用户wakelock1保留、Awake、无密码用户disabled=true/showing=false。ESP空余1181296KiB。
+SUMMARY.json/final-health.txt为本轮最终证据。v1嵌套SHA清单更新顺序导致
+采集前拒绝、没有启动任何客户端，失败保留，v2从子清单向根清单计算并逐项核验。
+
+### 下一执行范围
+
+用户听感确认与上述锁修复均记录；没有宣称HAL skip、所有切换/seek、PCM欠载或全部声画根因都消除。
+不因现象恢复重放历史pacing/MonoPipe或增益补丁。本组回归已完成，继续原厂OMX错误收尾/
+同流HDR静态缓存、Main10候选联合、严格DPU像素/fence、KGSL/下游msm_vidc/QTI C2、PM/性能与SQ1/SQ2。
+Main10仍过滤，P010候选未提升，full_*false。源码手册未提交推送，私有产物/原始日志仅ignored out。
+
+## 2026-11-09：v17 END 确认修复已正常启动，错误后收尾仍有明确限制
+
+原P010联合DRC失败恢复后，正常v16在Chrome/哔哩哔哩视频使用期间也进入quarantine，
+因此不能把故障仅归因于P010候选。首次正常/候选DRC比较未启动：正常应用占用实例，
+准入检查及时退出。随后保留正常应用现场，再正常重启到boot dc9c7f4c…做有界取证。
+
+### 真实硬件证据与修复
+
+native-session-end-v1：正常v16连续5组320→1080→320 DRC、1组普通解码，
+180帧对当场FFmpeg参考像素/PTS逐字精确，EOS/stop/delete通过；
+30个真实HFI END回包均16字节/type0x20007/error0，prior session_error均0。
+全局trace设置保持，CPU overrun/commit-overrun/dropped全0，探针/实例删除。
+这组成功不能解释历史失败，也不能验证prior-error分支。
+
+native-session-end-v2：仅将真实AVC slice EBSP置零，SPS/PPS保持，
+FFmpeg独立报告损坏；没有伪造FW event/END/像素。正常30帧control先通过。
+该损坏流导致真实session_error1，core.sys_error仍0；
+同inst的真实SESSION_END回包size16/type0x20007/reply_error0，
+但原hfi_session_deinit返回0xfffffffb(-EIO)，confirmed0，
+内核随后明确打印release-end quarantine。负例客户端timeout124，不算解码通过。
+对应独立审计independent-end-trace-audit.json/independent-end-failure-audit.json。
+
+根因是venus-sq2-session-end.h在独立END成功回包之后仍因旧inst->session_error拒绝确认。
+现只移除该错误否决条件；错误位保留给上层，真实END超时/错误回包/core.sys_error仍失败，
+scope_end仍严格在sq2_end_confirmed=true之后。不清quarantine、不伪造END、不重复PAS。
+20个实际生成函数/回包场景ASan/UBSan及12个实际close/PM失败/超时/新prior-error场景通过；
+旧header在新回归下失败、新header通过。源码变更只影响一个header，不改struct布局。
+
+运行字段偏移由匹配kernel/Kbuild和实际core.h编译获得，旧运行模块.note哈希逐字核对，
+新模块使用新.note哈希。未按猜测结构偏移读内核。
+scripts/audit-sq2-session-end-trace.py按线程deinit和实际inst配对回包/return，
+区分quarantine函数“被调用”与真的隔离，新增5个解析负例/源码检查。
+私有trace和指针仅out，不放进正常启动。
+
+### 部署和新负例的实际范围
+
+完整Venus模块集严格MODPOST构建、depmod/System.map检查通过；
+core709e2d42dab0e286ed6d8de08b103ef6ffb7dae30caae31abc0b1bca584caa60，
+dec267c8130…/encb47271fb…与原来逐字相同。
+使用既有pack-sq2-lts-venus-queue-lock.py，独立有效newc审计仅三项改变：
+etc/sq2-video-native/venus-core.ko、标准modules路径同core副本、native SHA256SUMS；
+其他1299条有效记录及metadata、凭据最终member逐字保持。
+
+v17包ae39c924d0bc9000e92673d37bd66f13e46d174f2b1eb51b4f6fe92339dc9306，
+已原子替换现有EFI/SQ2Nat默认载荷并正常重启，boot f5a7bd80-06cc-4d15-8298-55082411fa0c。
+唯一SQ2QDbg回退5b9f7012…保持，无新入口/备份或userdata清理。
+实际core note60da3060…匹配，原OMX/桥和62显示文件/13链接/17HIDL记录及音频/ADSP检查通过，
+内核仍6.18.60-sq2-android1，原Image/固件/mapper/HWC均未修改。
+
+native-session-end-v3复用同一损坏输入/客户端/字段采集，真实捕获prior1、
+reply_error0、deinit return0、confirmed1，旧session_error仍1，core_error0，DMA归零。
+但客户端仍timeout124，OMX逐output buffer约1秒WAIT FAILED使实例收尾超出原10秒观察窗，
+runner1失败保留；不能把它记成完整错误恢复通过或放宽窗口覆盖。
+稍后同一OMX PID5571已自然回到insts0/vb2_bytes0，未重启服务/热卸provider/再重启设备。
+独立观察independent-end-fix-observation.json明确overall_runner_pass=false；
+这是END独立确认修复和防止错误升级的证据，不是历史DRC/PM超时根因或全错误路径完成。
+
+随后同boot同PID开始qti-system-display-v17-acceptance的正常16客户端与自动BT709整组，
+结果见本节后续补充。Main10 profiles仍过滤，P010候选未持久部署；
+同流HDR静态缓存残留、严格DPU像素/fence故障、KGSL/下游msm_vidc/QTI C2、
+PM/性能/SQ1-SQ2目标保持，所有full_*仍false。
+源码手册尚未提交推送，私有产物/凭据/原始日志仅ignored out。
+
+正常v17联合验收现已完成：同boot f5a7bd80…、同OMX PID5571贯穿负例后正常回归，
+16客户端的7图形/5解码/4物理窗口全0；150帧像素/PTS对新FFmpeg参考精确，
+物理NV12 DEVICE四窗口120输出/回调，多窗2x/0.5x缩放、UI遮挡/撤窗平面与CRC回收通过。
+额外自动BT709三客户端：ByteBuffer/Surface60帧像素/PTS精确，物理30输出/回调、
+HWC0x10c10000 DEVICE、KMS709 limited、720 CRC扫描通过。四独立审计通过。
+kernel framebuffer创建者comm本轮为HwBinder:<实际composer PID>_N，
+审计按捕获的真实composer exe hash/PID验证worker身份，不再把线程名当成不同服务；
+异PID负例拒绝，原始捕获未修改。normal-runner状态仅按实际子runner原文件建立采集别名。
+
+最终七服务running、Awake，用户wakelock1保留；动态secure=false、disabled=true/showing=false，
+Venus error/sys_error/hfi_error/insts/vb2_bytes全0，无试验绑定/kprobe/图层，
+只保留系统原bootreceiver/wifi trace实例，音频card0正常。ESP剩余1188044KiB，
+/logs8380KiB、ESP日志219804KiB。证据qti-system-display-v17-acceptance/SUMMARY.json、
+四独立审计和final-health.txt；不把正常回归或本轮有限END修复称为完整错误策略/PM/整栈完成。
+
+## 2026-11-09：SDR 内屏物理 P010、同流缓存边界与联合 DRC 故障恢复
+
+路线保持mapper5 + 原厂gralloc + 源码QTI HWC/SDM + Linux6.18。用户确认内屏无HDR；
+内屏验收SDR输出和HDR→SDR映射，外接HDR按实际sink/link，不要求内屏HDR直显。
+正常v16-bounds c967ade0…和唯一SQ2QDbg回退5b9f7012…保持，Main10仍过滤，候选未持久部署。
+
+物理HDR10/HLG/BT2020 SDR Main10及AVC各30输出/定时release/回调（120合计）通过；
+P010最终CLIENT→SDR RGBA_8888_UBWC/0x08810000/KMS AB24，AVC仍DEVICE/NV12。
+另90帧lossless中性灰按实际10bit码值对照709、HLG和PQ≤名义300nit标准函数，误差<1个8bit级，
+灰阶单调、RGB差/平坦抖动最大1。500nit仅SF软件fallback，非面板实测/HDR能力。
+四组--require-dpu全部exit1（含AVC）；证据为色彩保持PNG/SF/HWC/KMS/CRC，
+严格DPU像素、面板色准、PQ高光精确曲线、性能/时延仍未验。不能把回调当物理present。
+
+最新桥修复10→8→10的隐式格式重协商：G_FMT规范化后与上一layout格式不同时，
+先真实unpadded S_FMT，再padding；fixture区分reported/applied格式并保留busy/失败恢复。
+同流30帧像素/PTS、真实AHB P010→NV12→P010和PQ→SDR→HLG VUI/dataspace精确；
+但第10..29帧继承首段mastering/CLL，严格metadata审计exit1，整体不通过。
+raw native记录证明首帧有0x15(40B)/0x16(8B)/VUI(56B)，之后29帧只有VUI，epoch1/2/3正确。
+匹配OEM源码HEVC优先internal缓存，SEI handler只在有record时更新；空SetConfig只改client，
+不能清旧internal。不能按“每帧无SEI”清空合法CVS持久状态、合成空FW record或只改mapper掩盖。
+
+联合候选joint-v1的7图形/5解码阶段0，诊断脚本尺寸初始化误插入cleanup，物理阶段未启动；
+修正并用真实SF fixture检验后，joint-v2的7图形/4解码阶段0，1080p DRC九帧后timeout124。
+Venus报release-end/close-power/close-end END unconfirmed并quarantine，
+sys_error1、insts0、vb2_bytes17698560；未到物理阶段，不能记新联合成功。
+已取回全部失败/dmesg，撤销绑定，正常service7a6aa750…/bridge2a120b31…恢复；
+坏固件准入未恢复时没有继续解码，没有热卸provider/清隔离/重复PAS。
+已一次正常重启，新boot fe5f1239-2837-4059-9df2-f45a9772e9b4，内核6.18.60-sq2-android1，
+七服务running，原service/bridge哈希正确，Venus错误/实例/vb2_bytes全0。
+首次SSH观测在请求后274秒（此前做本地工作，不是启动耗时）；未写EFI/部署新包。
+下一步相同DRC输入的正常基线/最新候选对照，记录在native-p010-drc-compare-v1。
+
+证据均在ignored out/qualcomm-full-stack-20261108：
+- native-p010-window-v4/audit-physical-p010.py与independent-physical-p010-audit.json（120输出/回调）；
+- native-p010-gray-v1/independent-gray-audit.json（90输出/回调，原PNG平坦区标准函数重算）；
+- native-p010-inband-v2/audit-inband.py，v2/v3各independent-inband-audit.json（像素通过/metadata失败）；
+- native-p010-joint-v1/v2的result.json、capture与v2/pre-reboot-dmesg.txt、post-reboot-first-health.txt。
+两个临时副本负例（回调PTS改错、PQ截图替代SDR）均拒绝，原始资料不改。
+物理/灰阶使用surface-v3旧桥；同流v2使用最新桥，二者不能宣称source/output hash相同。
+72项相关主机测试全过无skip，命令/结果在native-p010-joint-v1/host-test-command.json、host-tests.txt。
+SM8150完整源码810e6add…取到source-omx-v1/media，仅参考，未编译/替换原厂库。
+
+Main10能力声明/持久部署须等DRC和同流HDR状态修复、完整联合验收后再推进。
+full_fence_lifecycle_verified/full_hwc_verified/full_stack_complete仍false；
+继续严格DPU像素/fence实际故障、KGSL/下游msm_vidc/QTI C2、PM/性能与SQ1/SQ2目标。
+源码手册尚未提交推送，私有库/固件/凭据/原图/原始日志仅ignored out。
+
+## 2026-11-09：原生 P010 进入标准 Surface，HDR10/HLG/AVC 42 帧通过
+
+当前仍是正常v16-bounds c967ade0…、boot1ad3305b…和唯一SQ2QDbg回退。
+本组没有部署/重启/改EFI、内核、固件、mapper或HWC；仅成对RAM绑定原init OMX服务/桥，
+结束恢复正常OMX7a6aa750…、桥2a120b31…，composer仍b4a30a34…。
+内屏仅SDR，物理HDR→SDR仍待验，不要求内屏HDR直出。
+
+实质修复：
+- native布局/导入/OMX格式枚举支持线性P010 Venus，保持8-bit NV12；
+  V4L2 stride使用字节，ANW stride使用像素，不能把768字节当768个P010像素。
+- SOURCE_CHANGE最初可以仍为NV12；OEM随后选P010时，先真实标准S_FMT切到P010，
+  再按实际gralloc协商padding和kernel minimum。占用中仍拒绝切换；后半协商失败清除旧缓存，
+  后续可由真实G_FMT恢复。没有改metadata冒充内存布局，也没有更改kernel padding准入。
+- minimum-size回调命名为quest2_omx_capture_layout_for_usage_v2，原七参数ABI及固定usage入口保留；
+  packer识别桥的实际v2引用后要求服务导出v2，旧桥/旧包保持原契约。
+- 诊断按实际AHB格式决定sample宽度，复用mapper5 PLANE_LAYOUTS及同一AHB CPU lock读回。
+  P010的NDK私有格式读回路径与产品零拷贝路径分开；读回不分配替代像素缓冲给消费者。
+  真实consumer descriptor usage20402903、allocation20400903符合既有libui移除0x2400提示的契约。
+
+native-p010-surface-v9在同一候选服务生命周期依次运行三个独立decoder节点：
+
+| 阶段 | 帧/格式与色彩 | 实际 AHB 元数据及独立结果 |
+| --- | --- | --- |
+| HDR10 | 6帧P010 Venus0x7fa30c0a；SDK6/6/2 | dataspace0x11c60000；mastering R(.68,.32)/G(.265,.69)/B(.15,.06)/W(.3127,.329)、1000/.005nit、CLL1000/FALL400逐帧正确 |
+| HLG | 6帧P010；SDK6/7/2 | dataspace0x12060000；mastering/CTA均为空，未继承HDR10数据 |
+| AVC SDR | 30帧原生NV12；SDK4/3/2 | dataspace0x103；mastering/CTA均为空 |
+
+全部42帧可见像素对当场由实际编译向量重建的FFmpeg参考逐字精确，输出PTS及AImage
+timestamp精确；EOS/stop/delete均成功。P010实际为ANW320×256、像素stride384，
+V4L2字节stride768、scan256、UV offset196608、allocation294912；没有调用旧RGB10软件输出。
+这是ImageReader及不同decoder节点的证据，不是物理tone-map、同流HDR/SDR/bit-depth切换、
+完整fence错误策略或跨设备验收。Main10 profile仍过滤，系统默认未广告这项候选能力。
+
+证据：out/qualcomm-full-stack-20261108/native-p010-surface-v9/
+audit-native-p010.py、independent-native-p010-audit.json、reference-commands.json、
+fresh-*参考、pair-abi-check.json、host-tests.txt、final-health.txt。
+审计负例在临时副本改一个P010字节、给HLG添加陈旧mastering标志，均拒绝，未改原始记录。
+65个相关unittest全部通过，无skip；另实际布局ASan/UBSan二进制通过。
+构建/运行细节见BUILD；中间失败的v1..v8记录保留，trial-history.json解释设置/读回与真实失败。
+
+SPS-only路径也得到更直接的证据：vui-hfi-event-v1在hfi_event_notify入口、解析前捕获
+实际HFI_EVENT_NOTIFY固定头。两个同尺寸向量只有初始化SEQ_CHANGED；DRC有3个，
+均size176、event0x1000003、properties9，并与vdec_event_change对应；DRC末次是sufficient。
+69帧像素/PTS重复精确，trace无丢失且全局设置保持，私有kprobe/实例已删除。
+这是固定事件头，仍不是所有HFI包或属性payload捕获；不据此断言固件普遍不支持。
+证据vui-hfi-event-v1/independent-hfi-event-audit.json。停止重复编号/CSD盲试，
+后续比较匹配下游的实际HFI配置。
+
+最终正常OMX PID2308，七服务running，Awake、总wake locks=0；用户凭据/wake-lock设置未改，
+动态用户secure=false/disabled=true/showing=false。无试验进程/绑定/kprobe/trace实例，
+无sw_sync试验模块，Venus error/sys_error/hfi_error/insts/vb2_bytes为0。
+ESP剩余1,212,924KiB，/logs8,400KiB、ESP日志195,728KiB。
+
+下一组优先真实物理Main10/HDR→SDR及同流切换，再做完整正常联合回归和持久部署；
+继续严格DPU像素/fence故障、KGSL、下游msm_vidc、真实QTI C2、PM/性能及SQ1/SQ2。
+full_fence_lifecycle_verified/full_hwc_verified/full_stack_complete仍false。
+源码手册尚未提交推送；私有库/固件/凭据/图像及原始日志仅ignored out。
+
+## 2026-11-09：内屏 SDR 边界与 SPS-only / DRC 颜色对照
+
+内屏由用户确认无HDR能力；内屏验收是SDR显示和正确HDR→SDR映射。保留HDR解码、
+真实10-bit及metadata目标，HDR直出只在实际支持的外接sink/link验收。tone-map尚未通过。
+
+固定主线和正常v16-bounds c967ade0…保持；本组仅RAM日志版OMX/桥与诊断客户端，
+没有改正常kernel/HWC/mapper/固件/EFI，没有部署或重启。
+输入由FFmpeg编码、trace_headers核对SPS/PPS编号、FFprobe逐帧核对实际VUI；
+320×240三段各10帧的独立NV12参考SHA为3c5ee3a8…，两组参考逐字相同。
+
+| 对照 | 实际结果 |
+| --- | --- |
+| 同尺寸SPS/PPS复用0或分别0/1/2，OMX full-AU | 每组30帧像素/PTS精确，raw VUI60条全为(6,6,6)，SDK保持standard4 |
+| 相同两向量直接V4L2，绕过OMX/桥 | 每组30帧CRC/PTS及EOS/close正确，raw extradata60条仍全为(6,6,6) |
+| 每段实际SPS/PPS独立CODEC_CONFIG，再交图片AU | 两组各3个配置、30帧；60帧像素/PTS独立精确，raw VUI/SDK仍保持601 |
+| 真正DRC：320×240/601→640×480/709→320×240/601，各3帧 | 9帧像素/PTS精确；raw VUI为6→1→6，SDK standard4→1→4，EOS/stop/delete成功 |
+| 同一服务生命周期private function trace，复跑两组同尺寸及DRC | 69帧像素/PTS精确，raw/SDK结果重复；vdec_event_change次数1/1/3，包含各组初始化 |
+
+最后一项仅证明driver回调边界，尚无raw HFI包捕获。全局tracing设置逐字保持，
+各CPU overrun/commit overrun/dropped为0，私有实例已删除；不把回调缺失直接等同于
+固件没有任何事件。结论是同尺寸变化在OMX/桥之下已经没有新VUI，而真实DRC可刷新。
+下一步比对实际HFI事件/属性及匹配下游配置；不能从SPS在桥伪造固件VUI，也不再盲试编号/CSD。
+
+反例保留：vui-sps-id-v1的native ret1来自完成判定硬编码mask63，30帧实际已正确；
+vui-native-sps-v2按真实帧数判定后两组exit0。vui-drc-color-v1的150000us超出工具既有
+100000us范围，创建codec前exit64，没有固件结论；v2改100000并补齐逐帧动态几何后通过。
+诊断源码同时修复add_csd预读末组SPS/PPS：现在只取首组；split-CSD是显式诊断宏，
+不修改颜色/metadata。主机实际helper与帧数边界ASan/UBSan、既有runner清理检查通过。
+
+证据均在out/qualcomm-full-stack-20261108：
+vui-sps-id-v1/、vui-native-sps-v2/、vui-inband-csd-v1/independent-pixel-audit.json、
+vui-drc-color-v2/independent-pixel-vui-audit.json、
+vui-sequence-trace-v1/independent-sequence-audit.json及final-health.txt。
+最终boot仍1ad3305b…；正常OMX7a6aa750…/bridge2a120b31…/composerb4a30a34…恢复，
+OMX PID15944，七服务running，无试验进程/绑定/trace实例，无sw_sync试验模块，
+Venus error/sys_error/hfi_error/insts/vb2_bytes为0，无密码用户disabled=true/showing=false，
+Awake、用户wake lock1保留。ESP剩余1,212,936KiB；/logs8,388KiB、ESP日志195,728KiB。
+
+整栈仍进行中，full_*完成标志保持false；Main10/HDR→SDR、严格DPU像素、fence实际故障、
+KGSL/下游msm_vidc/真实QTI C2、PM/性能及SQ1/SQ2继续推进。源码手册尚未提交推送，
+私有二进制/固件/凭据/图像和原始日志仅ignored out。
+
+## 2026-11-09：v16 修复 Composer acquire 类型校验和 client-target 短命令
+
+用户已确认内屏不支持HDR：内屏按SDR验收，HDR内容验证解码/元数据和HDR→SDR映射；HDR直出仅按外接sink实际能力启用与验收。
+
+继续 mapper5 + 原厂gralloc + 源码QTI HWC/SDM + Linux6.18。v15自动BT709主线保持。
+本轮实机先保留一个反例：composer-fence-errors-v1中已打开的/dev/null作为acquire，
+原composer仍返回present成功；诊断134退出并恢复桌面，不算通过。
+未热卸GPU/显示/Venus provider，未对用户数据或凭据操作。
+
+新patch patches/sm8350-composer-acquire-fence.patch修改共享readFence和三个调用者：
+解析handle索引/形状、F_DUPFD_CLOEXEC固定真实文件后，用SYNC_IOC_FILE_INFO确认类型；
+有效负状态sync_file继续有效，不能把它当无效FD；EMPTY和0FD/0int兼容。
+EINTR重试，dup/ioctl资源错误转NO_RESOURCES，非法描述符转BAD_PARAMETER，
+拒绝后不查/改buffer cache、不调用HAL。取消dup失败时原有timeout=-1同步等待原fence的回退。
+layer、client-target、output-buffer都消费完整命令后传回实际错误，不留未消费payload。
+同时修复client-target length0可越过(length-4)%4检查的相邻缺口。
+
+主机运行实际共享reader及三入口：45个FD/错误/资源/兼容场景，原版27个不匹配、
+修复0；另21个短命令边界，原版1个越界、修复0，ASan/UBSan和FD总数检查通过。
+沿用三个execute接口实际parser测试24场景，原版15个不匹配、修复0。
+完整composer-v22构建46TU，配套仍display-v20（42TU），所有源码补丁/输入哈希可重放；
+v21和首版v16只作历史，最终部署候选为v16-bounds，不把旧候选当最新产物。
+
+composer-fence-errors-v2/v3使用匹配运行内核的标准sw_sync.c/sync_debug.c，
+完整MODPOST、运行.config逐字匹配；仅将debugfs目录改为私有测试路径、控制节点0600、
+加模块GPL说明。不是GPU/VPU生产者，也没有伪造eventfd。
+测试模块无module_exit，只在显式试验加载、后续核对note后复用，未热卸；
+正常启动包不含该模块，正常重启后必须确认/sys/module/sq2_sw_sync_trial不存在。
+
+最终v3独立审计通过四个输入情形：非法FD被拒绝且前后完整DRM状态逐字相同；
+真实已报错sync_file、pending后正常signal、pending后关闭timeline报-ENOENT。
+原始sync_file负状态仍可读；HAL按完成继续提交。这不等于向SurfaceFlinger传播生产者
+错误、自动丢弃失败图像或验证真实GPU/VPU硬件故障策略。
+三个实际context/seqno与构造区间/producer标记关联，后两者在真实DPU commit wait内
+signal/error；栈含drm_atomic_helper_wait_for_fences→commit_tail→commit_work。
+原有30帧/3buffer/27缓存复用/前一帧release与末帧flush继续通过，
+12个原FMQ异常恢复和三个execute接口各一次短client-target错误后恢复通过。
+trace统计无overrun/commit-overrun/dropped，全局tracing保持，sw_sync末尾无对象/点。
+证据composer-fence-errors-v3/independent-error-audit.json；审计负例和相关34项主机检查通过。
+物理负例限layer入口；另外两个入口的非法FD、资源错误及缓存不变由实际源码主机用例覆盖。
+
+默认SQ2Nat已写入v16-bounds，SHA256
+c967ade094a23e79dca3d756cfddf9b88007f213b81b290d4dffeb783bda725e。
+相对v15只变5条有效记录：composer、libqservice、libgpu_tonemapper与两个清单；
+1297其他有效记录/metadata和最后凭据member保持。service b4a30a34…，
+成对composer-v22/display-v20，原mapper5/v36、正常OMX7a6aa750…/桥2a120b31…、
+msm f3ba9cf7…与唯一SQ2QDbg回退5b9f7012…保持。无新备份/入口。
+已正常重启，boot 1ad3305b-af45-407b-bf17-96e14c3ad2b5，首次SSH观测在请求后195.5秒
+（此前没有探测，不作为启动耗时测量）。62显示文件/13链接/17HIDL记录核验通过，
+加载msm build-id保持；/sys/module/sq2_sw_sync_trial实际不存在。
+正式composer-gpu-acquire-v3的30帧2880×1920 GPU UBWC target、27复用与真实native
+acquire/前帧release链通过，165,888,000个GPU内存读回像素精确；29次真实GPU
+signal发生在DPU commit wait内，1次在进入wait前已完成。不是严格DPU像素/时延证明。
+原继承平面已撤下，成对composer-v22/display-v20实际hash由严格GPU独立审计核对。
+
+正式normal-v9的16客户端全部exit0：150解码帧可见像素/PTS精确、4物理窗口
+120输出/回调，多NV12缩放/UI遮挡/退窗恢复由normal/overlay/composition三审计通过。
+正常OMX/桥仍7a6aa750…/2a120b31…，OMX PID5571贯穿；自动BT709另3客户端，
+ByteBuffer/Surface各30精确帧、物理窗口30输出/回调和HWC0x10c10000 DEVICE、
+KMS709 limited、720CRC扫描/退窗回收均通过未放宽的BT709审计。
+
+完整mixed-trace审计仍拒绝：最后一个零字节DQ缺少ioctl配对。
+新增独立“非空输出完成”审计保留这个缺口，只统计两路各30个已配对成功的CAPTURE
+非空输出，实际区间交叠778ms、17次fd切换；删除非空输出或将未配对返回改成非空的
+两个负例均被拒绝。完整trace仍标false，不宣称同时硬件执行或吞吐/时延。
+证据normal-v9/independent-mixed-output-audit.json和可复跑audit-complete-output-pairs.py，
+原independent-normal-audit.json的mixed_trace_incomplete保留，未替换或放行。
+
+最终同boot、七服务running，用户secure=false/disabled=true/showing=false，
+总wake locks=1为用户应用；无试验进程/挂载或sw_sync模块，Venus各错误/insts/
+vb2_bytes=0。ESP可用1,215,300KiB，/logs6,024KiB、ESP日志195,728KiB。
+唯一回退保持，原始记录与构建输入位于本地out。
+
+下一步仍包括SPS-only流内色彩/HFI、真实GPU/VPU错误/多点合并/超时、严格DPU像素、
+HDR/secure/videoUBWC、KGSL、下游msm_vidc、真实QTI C2、PM/性能与跨SQ1/SQ2。
+full_fence_lifecycle_verified/full_hwc_verified/full_stack_complete保持false。
+私有库/固件/凭据/图像/原始日志仅ignored out；源码手册尚未提交推送。
+
+## 2026-11-09：v15 已正常启动，自动 BT709 VUI 到 HWC/KMS 闭环通过
+
+主线继续 mapper5 + 原厂 gralloc + 源码 QTI HWC/SDM + Linux6.18。
+vui-propagation-v1/v2/v3发现正常桥未启用原生 extradata，default0且init环境未覆盖；
+公开builder新增 --native-extra-default，只用于 --with-vidc-bridge，默认行为保持。
+启用真实元数据后，原厂OMX/ACodec正确报告BT709/transfer3/limited，ByteBuffer与
+ImageReader像素/PTS精确。所有VUI字段来自已完整校验的原生元数据链及DMA READ同步，
+未强制709、未在桥解析SPS伪造固件数据。
+
+HAL传递函数偏差的根因是实际系统 debug.sf.treat_170m_as_sRGB=1，
+SurfaceFlinger dump明确 treat170mAsSrgb=true；公开OutputLayer源码也明确将
+SMPTE170M改为sRGB。v4现代dataspace指导候选虽使SDK/mapper正确，HWC仍0x10810000，
+严格审计继续拒绝。该候选未采用、相关新增公开helper/test已撤回，仅out保存反例。
+最终只在QTI composer init rc将此SF配置设0，不修改原厂OMX、mapper或HWC转换表。
+
+vui-propagation-v5用原服务、native-extra1桥及临时SF配置0，通过未放宽的
+scripts/audit-sq2-bt709-video.py：ByteBuffer/Surface各30帧可见NV12与新FFmpeg
+参考逐字精确，PTS/Surface timestamp精确；物理窗口30输出/30回调，
+实际HWC为0x10c10000 DEVICE、KMS为BT709 limited，720扫描CRC及退窗平面回收。
+这是自动VUI传播与物理状态验证，不是严格DPU像素/完整色准、性能、HDR或全栈完成。
+
+同组normal-v7-vui的16客户端均exit0，150帧精确解码及物理120输出/回调；
+normal与overlay两个独立审计通过。composition审计保留一个真实失败：
+multi_lm0_desktop_restored=false，其他缩放/双NV12/UI遮挡/回收检查通过。
+未以猜测时钟变化放行CRC失败；正常启动后继续复验。
+框架重启后lock_settings尚未发布，早期恢复用户查询失败被记录；结束后核实原用户
+secure=false再恢复并核对disabled=true/showing=false，无凭据清除。
+后续等待真实服务就绪后才恢复动态发现的用户，不用system_server PID代替API可用。
+
+SPS-only同分辨率流内601→709→601仍不通过：FFprobe独立证明输入各10帧变色，
+v3桥边界90条真实VUI中恒定709的30条为1/1/1，两个switch客户端各30条始终6/6/6。
+当前只定位到native extradata/HFI边界，不据此排除驱动配置或断言所有固件不支持。
+保留错误和原始记录，不在桥合成VUI掩盖；下一步追踪HFI序列/元数据配置和下游msm_vidc。
+
+v15已部署为默认SQ2Nat并正常重启，SHA256 029a1a8a6c4d0370d8820535559511d813a750a33128bcd1b694192a16e4b09c。
+相对v14-color仅5条有效记录变化：native-extra1桥、composer init rc和三个校验清单；
+1297其他记录/metadata和最终凭据member逐字保持。正常service仍7a6aa750…，
+公开builder桥2a120b31…；display/composer-v20、mapper5/v36与msm f3ba9cf7…保持。
+唯一SQ2QDbg回退5b9f7012…保持，不新增备份/启动项，不热卸载provider。
+新boot f40274da-2b07-491e-bc0c-4002c9065b47，请求后151.2秒首次SSH观测成功；
+62显示文件/13链接/17HIDL记录、加载msm build-id均核对通过，SF实际flag=false。
+原动态用户自动进入，secure=false、disabled=true、showing=false，无凭据清除。
+
+正式v15的qti-system-display-v15-acceptance再次通过未放宽BT709独立审计；
+随后normal-v8的16客户端全部exit0、150解码帧可见像素/PTS精确，
+4物理窗口120输出/回调、多NV12缩放、UI遮挡及退窗回收由三个独立审计通过。
+多窗口CRC对照安排在单个时钟分钟内，并保留前后截图；未删除/放宽旧v7失败条件。
+本轮混合ByteBuffer/Surface两客户端均帧/像素/PTS通过，但桥构造/DQ诊断未完整采到，
+normal审计明确mixed_trace_incomplete（bridge_records=0），不新增实际解码输出交叠/
+同时硬件执行或吞吐结论；旧v14有界交叠证据独立保留，不替代本轮缺失的trace。
+最终同boot、OMX PID5493贯穿；七服务running，Venus error/sys_error/hfi_error/
+insts/vb2_bytes全0，无实验进程/挂载，holder释放后总wake locks=1（用户应用保留）。
+ESP可用1,225,548KiB，/logs4,160KiB、ESP日志187,344KiB，仅两个SQ2载荷目录。
+52项相关主机检查、git diff --check及正常ARM64服务逐字重建通过。
+不是完整项目/跨SQ1/SQ2/长期PM验收，原始证据仅本地out。
+
+strict DPU pixels、SPS-only颜色切换、fence错误、HDR/secure/videoUBWC、PM/性能、
+KGSL、下游msm_vidc、真实QTI C2与跨SQ1/SQ2仍待推进。
+full_fence_lifecycle_verified/full_hwc_verified/full_stack_complete保持false。
+私有库/固件/凭据/图像/原始日志仅ignored out，源码手册尚未提交推送。
+
+## 2026-11-09：VPU→HWC 真实缓冲归属通过；补上内核 SDR 色彩状态
+
+最终本轮61项相关主机检查及git diff --check通过；不是完整项目/跨设备/PM验收。
+
+主线仍为 mapper5 + 源码 QTI HWC/SDM + Linux6.18 + 原厂 gralloc。
+新增可重建直接 OMX/HIDL composer 诊断，原厂 OMX 的真实 mapper5 AHB 直接作为
+VPU CAPTURE DMA-BUF 与 HWC DEVICE 缓冲。V4L2 DQBUF 是同步完成契约，
+未伪造解码 acquire sync_file；CPU/GPU 读回仅验证同一存储，没有像素上传。
+
+vpu-hwc-v2 的独立审计通过常规30帧及物理DRC30帧
+320×240→1920×1080→320×240，实际KMS分别512×512和2048×1536的linear NV12，
+1080可见源1:1交给VIG。60帧每帧关联AHB ID/inode/PTS、真实QBUF/DQBUF、
+HAL present/前一帧release、实际kernel context/seqno、signal timestamp与refill。
+每个显示缓冲等下一替换的release后才还给OMX，末帧先替换/flush再释放旧池；
+全部57个实际分配最终free，39次HWC缓存复用，两个独立600扫描CRC观测完成，
+global trace保持且所有CPU overrun/commit-overrun/dropped=0。
+逐字匹配新生成FFmpeg参考共36,864,000 NV12可见字节；不是DPU严格像素或性能证明。
+KMS/HWC顺序快照跨越DRC/EOS时明确记录为空平面/层变化的过渡，不冒充原子逐帧采样。
+私有证据out/qualcomm-full-stack-20261108/vpu-hwc-v2/independent-vpu-audit.json。
+
+新DISPLAY所有权保护拒绝显示/组件仍占用的重入队和free，修复无关数组指针比较及
+空native返回的重入队，分配/释放均有真实单调时间。31个既有OMX/bridge检查继续保留，
+新增真实源码所有权与审计负例；主机硬件边界为注入。
+公开入口scripts/build-quest2-vpu-hwc.py、scripts/audit-quest2-vpu-hwc.py，
+原有run-sq2-composer-fence.sh扩展--vpu-hwc，仍保持正常服务恢复与动态无密码用户。
+
+BT709正常栈试验保留了两个真实失败：初版运行器在set-e下误将尚未出现的
+system_server当失败，改为有界等待；随后所有客户端exit0但实际NV12为CLIENT，
+原厂OMX也将真实BT709码流报告为BT601（ByteBuffer未给color元数据）。
+独立审计拒绝将这些返回0称为物理/颜色通过，证据sdr-color-v1/v2/。
+
+只读实际DRM属性证明当前内核没有COLOR_ENCODING/COLOR_RANGE，
+dpu_plane固定601系数；不是属性名/枚举猜测。新匹配内核补丁仅为真实YUV格式平面
+发布601/709 limited，默认601保持；每次flush读取真实plane atomic色彩状态，
+BT709系数来自公开QTI表并转换为Linux S15.16，8/10-bit CSC块的偏置/clamp分别处理。
+仅新增CSC块支持，不宣称10-bit视频/HDR开放。标准属性缺失/未知enum/添加失败继续
+返回原错误并GPU回退，601/709之外的full-range/2020/HDR/secure仍不放宽。
+
+源码入口probe/graphics/dpu-sdr-color.h、scripts/patch-sq2-dpu-sdr-color.py及
+patches/sm8350-dpu-sdr-color.patch；匹配display-v20/composer-v20为42/46TU，
+msm模块完整MODPOST通过，变更源码对象明确重新CC/LD且第二次无clock-skew警告。
+真实选择器/系数数值边界和未知源码拒绝在ASan/UBSan下通过；
+主机不能代替实机CSC像素。OMX VUI传播缺口独立保留，不能写成BT709端到端完成。
+
+v14-color已替换默认SQ2Nat并正常重启，包SHA256
+6e75d8c89c6a3a57ed1da710cfad7e1f8b497660fbad56bb8ec4d410ae96fa40，
+boot 8e0e0b08-549f-42b0-aa6d-9878e6ef898a；请求后145.3秒首次SSH成功，
+仍6.18.60-sq2-android1。实际msm build-id note逐字匹配封包模块f3ba9cf7…，
+真实四个YUV平面现在各有标准601/709 encoding与limited range枚举；编号由运行时发现。
+显示62文件/13链接、17HIDL核验通过，物理ALSA/ADSP attached保留，正常服务running；
+用户无密码锁屏disabled=true、showing=false。唯一SQ2QDbg回退5b9f7012…不变。
+相对v13仅9有效记录变化，1293其他记录/metadata与最终凭据member保持；无新入口/备份。
+首次部署因远端写盘超过SSH50秒超时，只留下已校验的.next公共前缀，旧默认仍在；
+核实没有部署进程后，后台完成续写/全hash/gzip校验再原子替换，失败和完成记录均保留。
+ESP部署后可用1,238,096KiB。
+
+v14正常init服务上的vpu-hwc-bt709-v1又完成60帧真实VPU/HWC归属验证，
+常规30帧及320×240→1920×1080→320×240物理DRC30帧，40次HWC缓存复用，
+全部56个分配free；新FFmpeg参考36,864,000可见NV12字节精确。
+实际NV12 KMS为BT709 limited，60个真实内核release context/seqno与sync_file
+signal时间关联、释放后才能refill，末帧由替换/flush安全撤下。每组600连续CRC扫描、
+trace无丢失且全局状态保持。顺序快照碰到CLIENT replacement或RGBA bootstrap时
+只记录为DRC/EOS边界过渡，不能据此宣称原子逐帧扫描采样。
+这里由已知BT709测试向量显式提供HWC dataspace；程序明确打印
+automatic_OMX_VUI_verified=0，未修复或伪装原厂OMX自动VUI传播。
+证据vpu-hwc-bt709-v1/independent-vpu-audit.json；正常整组回归见后续结果。
+
+下一执行重点：定位真实VUI记录→OMX color-aspects→ACodec输出dataspace的断点，
+不用硬编码709或忽略独立审计替代修复。严格DPU像素、fence错误注入、
+HDR/secure/videoUBWC、性能/PM、KGSL、下游msm_vidc、真实QTI C2和SQ1/SQ2仍待推进。
+full_fence_lifecycle_verified/full_hwc_verified/full_stack_complete保持false。
+源码/手册未提交推送；私有库、固件、凭据、图像/trace/raw仅ignored out/private。
+
+v14的qti-system-display-normal-v6正常联合回归已完成，16个客户端单项及runner exit0：
+7图形、5解码、4物理窗口。150帧可见解码像素/PTS对新FFmpeg参考精确，
+真实DRC320×240→1920×1080→320×240；原生NV12 DEVICE、多视频2x/0.5x、
+UI遮挡A/B/A、撤窗平面和CRC恢复分别由三个独立审计通过，4窗口120输出/回调。
+有节奏mixed重叠只说明实际输出区间，不作吞吐或时延验收。
+最终同boot，实际composer b8f80083…、libsdedrm0524b784…、
+libsdmcore09567cd5…、libsdmutils79ff4f9b…保持成对；OMX PID5354贯穿。
+七个正常服务running、Awake、用户secure=false/disabled=true/showing=false；
+实验holder释放，总wake locks=1（用户应用保留），无实验进程/挂载。
+Venus error/sys_error/hfi_error/insts/vb2_bytes全0。ESP可用1,232,180KiB，
+历次启动日志目录合计约185,096KiB；未额外删除旧日志。
+证据qti-system-display-normal-v6/三独立审计与final-health.txt；
+部署/正常启动与实际模块note证据qti-system-display-deployment-v8/。
+这补齐了内核属性接线后的正常回归，不将旧sdr-color-v2反例改成通过。
+
+## 2026-11-09：真实 GPU acquire/UBWC 缓冲归属通过，修复继承平面交接
+
+以已部署正常v12及真实NV12 release/FMQ修复为基线，整体目标仍进行中。
+继续既定mapper5 + 源码QTI HWC/SDM + Linux6.18 + 原厂gralloc，不重新比较mapper路线。
+
+新增GPU生产者直接HIDL诊断：3个真实AHB RGBA UBWC target，按运行时物理分辨率
+2880×1920各渲染10次，共30帧、27次缓存复用。GPU直接写入用于client target的同一AHB，
+EGL导出真实native sync_file后立即交HWC，不先在CPU等待该acquire；GPU读回逐像素
+验证放在物理present fence完成后。合计165,888,000个RGBA像素精确，是GPU内存读回，
+不作为DPU严格像素或面板端到端时延证明。
+
+每帧日志记录AHB ID/slot与导出、信号状态；独立tracefs实例记录同一生产者的render/
+export/present标记。以实际display commit wait的context/seqno，关联该帧render区间
+创建的唯一对应GPU scheduler fence，避免只按FD、anon-inode或相近时间猜身份。
+两轮均30个acquire导出时pending，30个内核display wait；实际在wait期间GPU发信号
+分别29/27次，其余为已完成后进入等待，不强称每次都阻塞。
+调用栈含drm_atomic_helper_wait_for_fences→commit_tail→commit_work。
+随后逐帧关联DPU release到下一target替换，重用前已完成；末帧由empty flush撤下。
+两轮全局tracing设置保持、所有CPU overrun/commit overrun/dropped events为0，
+原始trace统计分别1787与1786项。未注入fence错误。
+
+首轮正常v12实际KMS仍多出一个未由当前SDM提交的XR24/fbcon平面，虽然被不透明
+全屏GPU target覆盖，不能写成干净交接。根因是DRMPlane::InitAndParse将assigned CRTC
+置0，丢掉上个master/fbcon的实际绑定，既有UnsetUnusedResources无法找到它。
+新sm8350-dpu-inherited-planes.patch仅对无下游CAPABILITIES的标准DPU路径，采用
+drmModeGetPlane提供的真实CRTC作为初始assigned状态，复用原有TEST_ONLY/commit/
+失败重试/按CRTC清理。未按plane号、fbcon名字、样机或CRTC编号写特判；
+主机实际源码方法验证解析失败、legacy不变、其他CRTC保留、TEST_ONLY不改归属、
+失败commit重试、未请求平面撤下及被请求平面保留。硬件调用为注入，不冒充实机失败注入。
+
+匹配display-v19/composer-v19（42/46TU）在原init服务RAM成对绑定实测：
+30帧GPU/acquire/复用继续通过，目标CRTC仅预期AB24 UBWC client target；
+原继承平面已撤下，末帧flush和原服务/库/用户恢复完成。
+独立GPU审计与负例、实际源码和打包相关39项测试通过。
+证据：out/qualcomm-full-stack-20261108/composer-gpu-acquire-v1与v2/
+independent-gpu-audit.json；v1按显式baseline保留inherited_plane_handoff=false，
+v2严格验收且核对实际service/成对库hash，未用允许遗留选项放宽修复验收。
+
+qti-system-display-v13已部署为默认SQ2Nat并完成正常重启，SHA256
+c9e2eedae75c80b7e7d2662e5e685da23d2f94989432f64fedb788981a62a34f；
+boot d0af5276-5ab5-420e-8e66-efe44b5daf29，请求后第140秒首次SSH观测成功，
+仍为6.18.60-sq2-android1。62显示文件/13链接/17HIDL核验通过；
+实际composer进程67ed8868…、libsdedrm7ab1e17a…、libsdmutilsc33e0d21…匹配成对构建。
+在任何视频测试占用VIG前，独立boot-drm审计仅有预期AB24 UBWC client target，
+证实正常启动也完成继承平面交接。唯一SQ2QDbg回退5b9f7012…保持；
+没有新增备份或入口，5显示ELF+2校验清单变更、1295其他有效记录和凭据尾保持。
+
+正常v13的qti-system-display-normal-v5一次连续16客户端单项及runner均exit0：
+7图形、5解码、4物理窗口。150帧可见解码像素/PTS对新生成FFmpeg参考精确，
+含320×240→1920×1080→320×240真实DRC；paced mixed实际输出交叠793ms、
+17次fd切换，不作为吞吐或端到端时延。原生NV12 DEVICE、多视频2x/0.5x、
+UI遮挡A/B/A及撤窗平面/CRC恢复由三个独立审计通过，4物理窗口120输出/回调。
+最终同boot、OMX PID5288贯穿、六服务running、Awake、用户secure=false、
+disabled=true/showing=false，试验holder释放，总wake locks=1（用户应用保留）。
+无实验进程/挂载/图层，Venus error/sys_error/hfi_error/insts/vb2_bytes全0，
+ESP可用1,243,372KiB，/logs4,180KiB。证据：qti-system-display-deployment-v7/
+及qti-system-display-normal-v5/独立审计和final-health.txt，均在本地out。
+
+复跑主机检查：python3 -m unittest tests.test_qti_dpu_inherited_planes
+tests.test_sq2_composer_gpu_acquire_audit -v；GPU构建入口
+scripts/build-sq2-composer-fence-probe.py，服务端运行run-sq2-composer-fence.sh
+TRIAL --gpu-targets。独立审计入口scripts/audit-sq2-composer-gpu-acquire.py，
+修复验收必须传成对--composer-build/--display-build，不使用--allow-inherited-plane；
+后者仅用于保留首轮反例，不是正常放行条件。完整复跑参数/哈希在各BUILD.json。
+
+
+逐缓冲VPU/decoder acquire归属、真实fence错误处理、严格DPU像素、物理高分辨率视频/
+DRC/更多颜色格式、HDR/secure/videoUBWC、性能/PM、KGSL/下游msm_vidc、
+真实QTI C2与跨SQ1/SQ2仍待推进。full_fence_lifecycle_verified/full_hwc_verified/
+full_stack_complete保持false；本轮源码/手册尚未提交推送。私有库、截图/trace/raw仅out。
+
+## 2026-11-09：真实 Composer HAL 缓冲所有权与 FMQ 异常契约已闭合一条受控路径
+
+沿用 mapper5 + 源码 QTI HWC/SDM + Linux 6.18 + 原厂 gralloc 主线。
+新增标准 HIDL2.4/FMQ 诊断客户端，连接正常 init composer/allocator/Power HAL；
+不接管 DRM master，不使用 eventfd 模拟 sync_file。动态 hotplug 发现显示，
+先以真实透明 RGB client target 完成 CLIENT 启动帧，再转 NV12 DEVICE。
+ClearClientTarget 请求按已清零的目标处理；不放宽合成策略或硬件校验。
+
+HIDL SET_RELEASE_FENCES 属于前一帧，不能把返回 FD 关联到本帧。
+原正常服务与修复候选各完成30帧、3个不同 AHB ID、30个逐缓冲 release关联、
+27次HAL槽缓存复用；CPU重写前poll及SYNC_IOC_FILE_INFO均确认release已signal，
+各点无负error status。末帧先用CLIENT替换取回最后DEVICE的release，再destroy/empty flush。
+观察到真实msm-dpu/dpu-video-buffer-release点；FD号和anon-inode不作为唯一fence身份。
+
+实际负例发现并修复 QtiComposerClient.cpp 的两个错误：2.1/2.2/2.3三个execute接口
+固定回报NONE，掩盖parse/writeQueue失败；无效长度在parse失败后仍endCommand，
+触发底层未消费payload断言并终止服务。新patch在错误处直接返回BAD_PARAMETER，
+正常命令再endCommand，三接口回传实际err并保留reset。
+原末条无效命令也不再因isEmpty误报成功。主机运行实际parser/三接口方法的24场景，
+旧版15个契约不匹配、修复0；FMQ存储/写失败为注入，未称主机模拟完整Binder。
+实机12个错误矩阵（3接口×未知末条/未知前缀/截断/错误payload长度）
+全部BAD_PARAMETER，且每个之后正常validate/present及真实present fence通过。
+未等待异步present的早期恢复诊断曾触发真实EBUSY；保留失败，现按fence等待后继续。
+
+证据：composer-hal-ownership-v5与v8/independent-ownership-audit.json；
+v6/v7失败记录保留，v11包未部署并标记superseded。源码patch可重放：
+patches/sm8350-composer-command-errors.patch，匹配构建sm8350-composer-v18（46TU）/
+sm8350-display-v18（42TU），未直接修改ignored源码冒充保存。
+诊断/审计/打包相关26项测试通过。原始记录和私有产物仅out，不上传。
+
+qti-system-display-v12已替换默认SQ2Nat并完成正常重启：SHA256
+b435e962b5460dce3ba22b952f7f99567ff9e22e7a0e0f27f78815b81f25555d；
+boot ef82f1f3-61f1-46e3-ae78-7a934b13d85b，首次SSH在请求后140秒，内核仍6.18.60-sq2-android1。
+实际composer进程SHA c2429eeb49bfa18011155eaa94c1cb4f0e74e45b432e6c35c019ed46c113f42c，
+62显示文件/13链接/17HIDL核验通过。仅3显示ELF+2校验清单变更，1297其他有效
+记录保持，凭据尾逐字相同；唯一SQ2QDbg回退5b9f7012…保持，没有新增备份或启动项。
+
+正常启动后qti-system-display-normal-v4一次连续联合回归16个客户端单项及外层exit0：
+7图形、5解码、4物理窗口客户端。150解码帧可见像素/PTS对新生成FFmpeg参考精确，
+DRC320×240→1920×1080→320×240；paced mixed真实输出区间交叠825ms、19次fd切换，
+不作为吞吐/时延或硬件同时执行证明。物理NV12 DEVICE、多视频2x/0.5x缩放、
+UI遮挡A/B/A和撤窗硬件平面/CRC回收由三个独立审计通过，4窗口共120输出/回调。
+最终同boot、OMX PID5476贯穿、六服务running，实验holder释放，无试验进程/挂载/图层，
+Awake、总wake locks=1（用户应用保留），Venus error/sys_error/hfi_error/insts/vb2_bytes全0。
+动态用户经cmd lock_settings核对secure=false，disabled=true/showing=false。
+早期helper误用am is-user-secure的平台差异已修正并实机核验，没有清除凭据。
+证据：qti-system-display-deployment-v6/、qti-system-display-normal-v4/三独立审计及final-health/
+lockscreen-check.txt，全部位于out/qualcomm-full-stack-20261108。
+
+
+该受控证明限CPU写入linear NV12 320×240单DEVICE层。逐缓冲GPU/解码acquire归属、
+fence错误注入、严格视频DPU像素、更广物理分辨率/DRC/格式、HDR/secure/videoUBWC、
+性能/PM、KGSL/下游msm_vidc、真实QTI C2和跨SQ1/SQ2验收仍待完成。
+full_fence_lifecycle_verified/full_hwc_verified/full_stack_complete仍false。
+本轮源码/手册尚未提交推送。
+
+## 2026-11-09：v10 退窗时钟 CRC 对照与真实内核 fence 顺序/等待路径通过
+
+当前仍是正常v10、boot f36892b1-b79f-4562-bf8c-62fa96ec64a0、默认SHA5a753828…；
+本组没有更新系统包、EFI或重启。三轮各30帧全屏原生NV12继续DEVICE-only，
+无RGB client target，1080连续硬件CRC与撤窗回收通过；原始日志/截图/trace仅本地out。
+
+自然跨分钟对照显示，前后桌面仅1642像素变化，完整差异bbox[110,24,291,49]，
+全部在实际StatusBar frame[0,0,2880,68]内；裁剪目视确认时钟26→27及相邻日期排版变化，
+其他桌面像素逐字相同。随后用临时RGB图层遮住运行时发现的68高状态栏、
+置于全屏视频下方再跨分钟：前后5,529,600桌面RGB像素完全一致；
+双LM CRC在视频前保持192扫描，撤窗后原pair精确恢复179扫描，随后移除遮挡回正常桌面。
+遮挡期间视频仍为唯一HWC DEVICE/SDE/KMS NV12，未借新增client target规避全设备路径。
+
+这组受控复现将当前现场的内容变化与显示恢复路径区分开。历史最初v10全屏轮缺少
+before PNG，保留其左LM变化原始记录，不据新实验追溯证明所有历史差异原因；
+严格视频DPU像素仍未验收。临时遮挡、进程及图层均已移除，没有修改状态栏/时间设置。
+
+三轮使用独立tracefs实例，global tracing设置前后一致，所有CPU overrun/
+commit overrun/dropped events=0。新 scripts/audit-sq2-dpu-fence-trace.py 按context/seqno
+跨driver名称变化关联信号/销毁，而非依赖FD号或render callback；6个解析/负例测试通过。
+实际分别观测36/39/35组同任务相邻retire/release创建，所有可比较release信号均处于
+下一已观测commit的init→present区间；每轮最后一个standing-scanout release在trace末仍pending。
+销毁有限观测分别66/72/64，不把仍持有的signaled引用或末帧pending当成已证泄漏/错误。
+
+第三轮wait_start栈含dma_fence_wait_timeout→drm_atomic_helper_wait_for_fences→
+commit_tail→commit_work，4个真实GPU scheduler fence在显示commit等待期间发信号后结束等待。
+这证明实际kernel acquire等待路径；仍不提供每个HAL帧/缓冲身份映射或fence error status，
+full_fence_lifecycle_verified/full_hwc_verified/full_stack_complete保持false。
+下一步需用真实composer HAL ownership/reuse与release/present接口闭合逐缓冲契约，
+并继续高分辨率/物理DRC、HDR/secure/videoUBWC、性能/PM、KGSL/msm_vidc/C2与跨设备目标。
+
+最终同boot、六正常服务running，唤醒holder释放，总wake locks=1（用户应用保留），
+Venus error/sys_error/hfi_error/insts/vb2_bytes全0；无试验进程、挂载、图层或trace实例残留。
+证据：out/qualcomm-full-stack-20261108/display-sync-discovery-v1/result.json；
+display-sync-clock-v1及display-sync-clock-mask-v1/independent-clock-audit.json；
+三轮各自independent-fence-audit.json、independent-fullscreen-audit.json和final-health.txt。
+本组新增诊断源码与手册尚未提交推送。
+
+## 2026-11-09：v10 正常默认已实测多 NV12、缩放、UI 遮挡和全设备扫描
+
+qti-system-display-v10已部署并正常启动，SHA256
+5a753828ea820a55a29b1480a890bfd08a17e8479f2938d2b1488b5d27b1d110；
+boot f36892b1-b79f-4562-bf8c-62fa96ec64a0，144秒后首次SSH成功。
+62显示文件/13链接/17HIDL核验通过，唯一SQ2QDbg回退5b9f7012…保持。
+无密码用户disabled=true/showing=false，没有新增备份或清用户数据。
+
+display-v18/composer-v16分别42/46TU构建通过。源码按真实VIG、blend stage和缩放能力
+选择多个opaque NV12层，保留视频顺序并复用框架清洞；全设备合成时省略未重渲染的
+client target，资源/真实atomic拒绝仍有GPU回退。新71个ASan/UBSan源码场景通过；
+C数组类型与诊断SDK接口的实际编译失败已修正并保留失败记录。主机硬件边界为注入，
+最终直显/缩放/清洞以下列实机证据验收，完整fence仍未据此完成。
+
+主runner的16个图形/客户端单项exit及外层均0，含7图形、5解码、4物理窗口客户端。
+150帧ByteBuffer/native ImageReader/mixed/DRC像素与PTS对FFmpeg参考逐帧精确；
+paced mixed非空DQ输出交叠836ms、29次fd切换，不作吞吐/硬件同时执行或延迟证明。
+
+两个独立视频进程各30帧，实际同时为DEVICE：NV12 plane41/FB135为320×240→160×120，
+plane49/FB136为320×240→640×480，另有RGBA UBWC target plane89/FB113。
+两NV12真实FB512×512、pitch512/512、offset0/262144；编号仅本轮观测。
+左右LM各有六内容×五轮，前29帧各2扫描，撤窗后两侧原桌面均稳定656扫描。
+
+RGB UI覆盖层遮挡中心视频左半部，再撤下、再覆盖：同一NV12末帧仍DEVICE，
+硬件CRC出现A/B/A稳定87/90/90扫描，只有对应左LM变化，右LM保持。
+这是该部分UI遮挡/清洞功能证据，不能推广为所有UI效果或严格DPU像素验收。
+
+同boot另做全屏30帧：320×240原生NV12按9x/8x缩放到2880×1920，
+HWC仅一个DEVICE视频、SDM仅SDE，实际KMS无RGB client target，已实测全设备省略路径。
+1080连续CRC含六内容×五轮，前29帧各2扫描；撤窗后NV12释放，
+右LM匹配原桌面，两LM随后稳定659扫描。左LM与开始时不同，原因未确定；
+不写成完整CRC pair恢复，也不把这项小源缩放当成高分辨率解码验收。
+
+合计5个物理窗口客户端150个output/release/callback；原有150帧原始像素检查另计。
+最终仍同boot、六正常服务running，无试验进程/挂载/图层；holder均释放，
+最终总wake locks=1（用户应用保留），Venus error/sys_error/hfi_error/insts/vb2_bytes全0。
+完整逐帧fence/严格DPU像素、更广分辨率/物理DRC/格式、HDR/secure/videoUBWC、
+性能/PM、KGSL/下游msm_vidc、真实QTI C2解码及跨设备仍未完成，fullHWC/fullstack=false。
+
+证据：out/qualcomm-full-stack-20261108/qti-overlay-composition-v1/result.json、
+independent-normal-audit.json、independent-composition-audit.json，
+qti-overlay-fullscreen-v1/independent-fullscreen-audit.json及final-health.txt。
+部署/启动：qti-system-display-deployment-v5。源码/文档尚未提交推送。
+
+## 2026-11-09：v9 正常默认已验收首条原生 NV12 DEVICE 直显
+
+默认SQ2Nat的qti-system-display-v9（SHA1125875d…）已正常启动，新boot
+ce7df37a-84e1-4c94-b025-5e274d7af6e5；等待138秒后首次SSH成功。
+62显示文件/13链接/17HIDL记录与运行服务hash匹配，唯一SQ2QDbg回退5b9f7012…保持。
+无密码用户锁屏disabled=true/showing=false；没有新增备份或清理用户数据。
+
+display-v17/composer-v15成对42/46TU构建，通过正确矩阵metadata及源码策略/资源分配，
+将一个边缘opaque linear NV12 BT.601 limited 1:1层交给VIG；其他组合/资源失败/
+TEST_ONLY失败保留GPU回退。71个ASan/UBSan场景覆盖实际源码方法及注入硬件边界；
+主机注入不是实机TEST_ONLY。v8→v9仅5显示ELF+2校验文件变化，其余1295有效记录保持。
+
+qti-overlay-v1直接使用正常启动服务，连续13阶段和外层exit0。7项图形回归保持；
+五个解码阶段150帧像素/PTS对FFmpeg参考逐帧精确，mixed实际非空DQ输出区间交叠826ms、
+19次fd切换，DRC320×240→1920×1080→320×240通过；不作吞吐/时延证明。
+
+实际视频层已为DEVICE，SDM为SDE/VIG；同一msm/card0/crtc0上NV12 plane41/FB127，
+真实FB512×512、pitch512/512、offset0/262144，裁剪320×240→[1280,840,1600,1080]，
+BT.601 limited；RGBA UBWC client target为另一plane89/FB115。编号仅本次观测。
+这是原生NV12物理平面，已区别于此前SF CLIENT合成视频；不靠更改Java窗口层级或关闭SF优化。
+1080连续双LM CRC包含六内容×五轮；前29帧中index8仅1扫描，其余2扫描，末帧保持178扫描。
+sample299撤窗后完整桌面CRC pair恢复并稳定781扫描；NV12 plane和视频层均已释放。
+
+截图不作为DPU像素读回，render callback也不作为物理present；逐帧fence信号/复用、
+严格像素、UI遮挡全面覆盖、缩放/多层、视频UBWC、HDR/secure及性能/PM仍未验收。
+最终同boot、六正常服务running、实验holder释放且无残留试验进程/挂载；
+总wake locks=1（保留用户应用），Venus error/sys_error/hfi_error/insts/vb2_bytes全0。
+full_hwc_verified/full_stack_complete仍false，KGSL/下游msm_vidc与跨设备目标保持。
+证据：out/qualcomm-full-stack-20261108/qti-overlay-v1/result.json、
+independent-normal-audit.json、independent-overlay-audit.json和final-health.txt；
+部署/启动见qti-system-display-deployment-v4。源码和文档尚未提交推送。
+
+## 2026-11-09：v8 默认 native OMX 正常启动及13阶段连续回归通过
+
+**当前默认为 qti-system-display-v8，逐节点 native OMX 已持久接入原正常init服务并验收。**
+initramfs 278,606,849字节，SHA256
+f627e6835ab534e0a6fa2c55a768d7392a5d422898cb7c66a67df0c10bbdfd40；
+append SHA b6fce1ede1832bd35f5e7bf69b71f14f6fff97b2bfff1ee5a0ba51bc1e462529。
+仅更新etc/sq2-hidl的service、bridge和清单，其他显示/mapper/init/env及凭据尾保持；
+唯一SQ2QDbg回退SHA5b9f7012…未变。UTC2026-11-08T21:21:07.371128发出正常reboot，
+先等120秒；首次SSH成功观测为131秒，不代表最早网络就绪。新boot
+f1a784c2-080a-4528-ba3c-388c62777ff3，内核6.18.60-sq2-android1，boot_completed=1。
+HIDL17项、显示62文件/13链接全核验，实际/proc/5590/exe和service SHA7a6aa750…、
+bridge SHA282834a0…相符，原UID1046/GID1000/groups1003,1006与mediacodec域保持。
+
+qti-system-display-normal-v3 是**一次连续13phase及外层exit0**，不混用normal-v2的中断续跑。
+七项图形回归：27AHB/exec、45EGL/54BufferQueue、GLES1 pbuffer8帧/265224像素/8fence；
+Vulkan compute16/raster8、3AHB/12288精确像素/reexport3，ImageReader WSI24帧/
+795672像素/24native fence/192getter；135YUV（27YV12+36NV12+36P010+36VenusP010）/
+GPU/exec、126标准lockPlanes，最大GPU误差0.00048447；真实QTI extension的原AHB、
+共享数据、metadata和独立所有权通过。GLES1/Vulkan这组仍是pbuffer/ImageReader范围。
+
+五个解码phase各30帧，共150帧：ByteBuffer、native ImageReader、paced mixed两路、
+native ImageReader DRC。每路可见像素/PTS对实际H264新生成的FFmpeg参考逐帧精确；
+三路ImageReader各30 timestamp精确，EOS/stop/delete通过。四普通phase归一NV12 SHA
+fbc2d7c848ccf07b2a1a6d7e82fbbad71405df0acf6ee6b2f948ef01b48108e7；
+DRC SHA5d8692a0e5e3dba5a765e2797d37bf33ad02b3fba720225bba207461577b70dd。
+DRC可见320×240×10→1920×1080×10→320×240×10，真实分配320×512→1920×1536→320×512，
+stride/scan512/512→2048/1536→512/512；padded allocation与crop的严格合同保持。
+同OMX PID5590，mixed ByteBuffer token23/fd7与native token24/fd11各30非空CAPTURE
+DQBUF；完成输出区间重叠808ms、19次fd切换，交叠内native25/ByteBuffer27个输出。
+1ms日志精度和33333µs诊断输入节奏仅证明有界功能并发，不作同时硬件执行或性能指标。
+
+正常物理native窗口30 outputs/releases/callbacks、EOS/stop/delete/exit0，严格harness通过。
+1080连续CRC含六不同内容×五轮，前29帧各2扫描、末帧保持177扫描。
+sample300恢复原桌面双LM pair，稳定24扫描；sample324只有LM0变化，LM1至尾稳定780扫描。
+因此已观察撤窗回桌面，但不能写成完整pair稳定780扫描。SF测试层和native视频导入收尾消失。
+真实线性NV12 320×512、393216字节、usage0x20400900/modifier0，由SF CLIENT合成到
+RGBA8888 UBWC，KMS AB24/modifier0x0500000000000001。原生decoder→ANW消除该
+SoftwareRenderer输出拷贝；SF/GPU合成仍在，不是YUV overlay或端到端零拷贝。
+callback payload等于target、到达提前49.109–66.312ms，不作为物理present/显示时延。
+末帧320×240截图crop SHA9eaf3b68…与旧native证据逐字相同；固定源模型最大差2、
+MAE0.077921，未独立给出vendor量化容限，strict physical pixels/full HWC仍false。
+
+最终独立final-health再核同boot、同OMX PID5590，composer/allocator/SF/OMX/C2/Power
+六服务running，动态当前用户10、disabled=true/showing=false，Awake、wake locks0；
+临时holder释放，无试验进程/挂载或视频层，Venus sys_error/insts/vb2_bytes0。
+正常服务继续运行，未回退到v7软件输出。C2仍只注册/资源枚举，不是QTI C2解码验收。
+旧SoftwareRenderer回调缺口作为历史保留，不把新的native结果称为修改或修复其Framework通知。
+
+**整栈保持active/incomplete**。下一显示缺口是source strategy/resource fallback仅支持
+GPU_TARGET的路径，DEVICE/YUV overlay分配尚待推进。完整fence生命周期、严格物理像素、
+HDR/secure、KGSL、下游msm_vidc、统一内存后端、PM、性能/功耗、普通应用与跨机仍未完成。
+
+证据：本地out/qualcomm-full-stack-20261108/qti-system-display-deployment-v3/
+deploy.txt、reboot-request.json、first-boot-state.txt；qti-system-display-normal-v3/
+independent-normal-audit.json（完整）、independent-normal-summary.json、
+physical-independent-audit.json与final-health.txt。v1/v2失败、v3/v4 RAM验收及v7历史保留。
+私有库/原始日志/像素仅本地；本轮源码和文档尚未提交推送。
+
+## 历史阶段（2026-11-09，v8部署前）：native OMX 逐节点协商、混合实例与 DRC 联合通过
+
+**正常服务环境中的 RAM 候选 native-omx-node-v3 联合验收通过；默认 v7 尚未切换。**
+只暂停/重启原 sq2-omx，RAM bind 替换成对service/bridge，沿用原init配置及
+UID1046/GID1000、mediacodec域，不加 QUEST2_VIDC_NATIVE_LAYOUT 环境。正常Binder/HIDL
+manager、SurfaceFlinger、QTI HWC/allocator和6.18内核保持，未构造另一套私有显示服务。
+
+逐节点作用域捕获本地同步 HIDL_FETCH allocateNode 的唯一真实VIDC session；token不以fd号
+代替身份，外层callback在scope结束后调用。wrapper明确实现具名consumer-usage扩展，
+真实OEM producer usage与真实consumer协商；ByteBuffer和PRESET_ANW独立。保留错误传播、
+busy限制、close/dup生命周期及未知/secure/UBWC拒绝。真实handle经clone/RETAIN导入核实，
+不靠私有整数猜几何。ImageReader实际usage为0x20400903，物理Surface为0x20400900；
+GraphicBuffer请求usage保留0x2400，HAL实际usage按已核libui契约清除这两个旧hint。
+
+v1/v2是真实失败：ByteBuffer通过，native初始注册通过但SOURCE_CHANGE后首个UseBuffer
+返回BAD_VALUE、0帧。v2诊断确认ANW/真实port为320×512、visible crop320×240，
+stride/scan512×512、393216字节；把allocation height直接等于visible height是wrapper错误。
+v3每次查询真实port：ANW尺寸精确等于port、visible≤port≤storage，port nBufferSize不超过
+真实allocation；实际stride/scan/size/usage仍精确匹配session。首SOURCE_CHANGE前唯一
+EAGAIN只允许真实port/allocator预测，其余错误不吞。保留旧padded ANW合同和全部失败证据。
+
+五个解码phase各30帧，总150帧，外层及各phase均exit0：ByteBuffer、native ImageReader、
+同服务并发ByteBuffer/native ImageReader两路、native ImageReader DRC。每路30个数据
+OUTPUT+EOS，PTS为i×33333µs；三路ImageReader各30 IMAGE、timestamp=i×33333000ns。
+可见像素逐帧对实际H264重新FFmpeg解码精确；普通四路归一NV12 SHA fbc2d7c8…，
+DRC SHA5d8692a0…。DRC为320×240×10→1920×1080×10→320×240×10；
+实际port320×512→1920×1536→320×512，stride/scan512/512→2048/1536→512/512。
+mixed token3/4在同服务PID1598中生命周期重叠且真实ioctl交错，不作并发吞吐证明。
+各客户端EOS/stop/delete通过；内核最终insts/vb2_bytes0是另取的资源状态证据。
+
+随后v4使用完全相同service/bridge，仅令诊断输入间隔33333µs。并发两路各30帧
+可见像素/PTS精确，native ImageReader时间戳精确，EOS/stop/delete/exit0；归一SHA仍
+fbc2d7c8…。同服务PID32683，native token1/fd7、ByteBuffer token2/fd13，各30个真实
+非零CAPTURE DQBUF，输出区间05:11:04.998–05:11:05.800重叠802ms；交叠期间分别25/27
+个输出、60输出中19次fd切换。日志精度1ms，只证明完成输出活动交错，不证明同时硬件
+执行、吞吐或延迟。原件恢复/实验holder释放、wake1、Venus全0。独立证据：
+out/qualcomm-full-stack-20261108/native-omx-node-v4/independent-mixed-audit.json。
+
+物理窗口30 outputs/releases/callbacks、EOS/stop/delete及严格harness通过。callback payload
+等于target，但实际提前49.328386–66.322407ms到达，不是硬件present或延迟量测。
+1080连续CRC含六内容×五轮、30视频段齐；index6仅1扫描，其余前29中的28帧各2扫描，
+末帧保持178扫描；sample299后双LM恢复原桌面并恒定781扫描，观察器恢复source=none。
+真实线性NV12 320×512/393216字节/usage0x20400900，经SF CLIENT→RGBA8888 UBWC
+→QTI HWC/SDM/DPU；未证明YUV直显、视频UBWC。截图中央320×240与旧system-v14逐字同，
+固定源模型最大通道差2、MAE0.077921；量化容限未独立确定，strict physical pixels仍false。
+maps确认post-import使用正常vendor的grallocutils/gralloccore/kona/mapper.quest2，
+未载入旧mapper3/4实现或minigbm；路径检查不替代每个私有库hash/传递闭包审计。
+
+收尾原service SHA befc7786…和bridge SHA a3e1ee19…均恢复；五正常服务running、Awake，
+实验wake holder明确RELEASED，最终wake locks=1（不杀用户应用求0），Venus
+sys_error/insts/vb2_bytes均0。boot仍 bcd26c8c-cc5d-4858-8237-45ea3657c184；
+没有写EFI或重启。**当前默认qti-system-display-v7/mapper5-v36仍SoftwareRenderer**，
+这次native通过不追溯修复旧默认SoftwareRenderer回调缺口，也不等于默认native已部署。
+本组RAM试验结束时v8成对包待部署；随后已部署并请求正常重启，见本文最新节。完整fence生命周期、HDR/secure、性能/PM、
+KGSL、下游msm_vidc、普通应用及跨设备仍未完成，full_hwc_verified/full_stack_complete=false。
+
+证据均在本地 out/qualcomm-full-stack-20261108/native-omx-node-v3/：
+independent-decode-audit.json（150帧明细）、independent-decode-summary.json（含mixed审计）、
+capture/physical-independent-audit.json、capture/physical-source-contract-check.json、
+device.txt、final-health.txt及根任务result.json；v1/v2失败保留各自capture/result。候选构建：
+out/qualcomm-full-stack-20261108/native-omx-node-v1/service-build-v3/BUILD.json，service SHA
+7a6aa750f3db494457088ac7045cb253312510332568b15c5310f7b1e08c8ce2。
+私有库、原始日志/像素不上传；本轮源码/文档未提交推送。
+
+## 历史阶段（2026-11-09，native v3前）：正常视频尾部通知机制已区分，继续原生 OMX 逐实例接入
+
+当前默认仍为已正常启动的 **qti-system-display-v7 / mapper5-v36**，未再部署或重启。
+独立36帧诊断保持前30帧AU、PTS及FFmpeg解码像素逐字不变，只追加一个真实六帧GOP。
+36 output/release与EOS通过，callback32/36，缺口移到index32–35；原30帧回调全部出现。
+严格36回调harness仍exit1，不能写成回调缺口修复。这与配套SoftwareRenderer依赖后续dequeue
+回收FrameRenderTracker的源码机制一致；NDK明确允许已render但无信息性callback，不能据此认定API违规或显示丢帧。
+
+本轮1080个连续扫描CRC覆盖六种视频内容依序六轮，末帧后恢复原桌面LM1值并持续123扫描。
+一帧占3扫描，不宣称完美cadence；末帧中央320×240 RGB与normal-v2截图逐字一致，
+继承原量化未严格验收边界。SF撤窗无测试层，五个正常显示/视频服务running，
+wake locks0、临时holder释放、Awake，Venus sys_error/insts/vb2_bytes0；boot仍bcd26c8c…。
+证据：本地 out/native-video-window-normal-tail-v1/ 与
+out/qualcomm-full-stack-20261108/normal-tail-observation-v1/result.json。
+
+本节当时计划的逐节点usage、真实handle导入、ByteBuffer/Surface混合与DRC，
+已在后续native-omx-node-v3 RAM组完成；见最新节。此36帧SoftwareRenderer诊断本身
+不作为native验收，原默认软件输出的callback缺口仍按原证据保留。
+full_hwc_verified/full_stack_complete保持false；不为补齐允许缺失的信息回调伪造通知或重写Framework。
+
+## 2026-11-09：正常显示包 v7 已启动，默认 AVC 回归通过，窗口回调缺口仍在
+
+**qti-system-display-v7 已部署 SQ2Nat 并正常重启生效**，initramfs SHA4fb449db…；
+唯一 SQ2QDbg 回退5b9f7012…保持。新boot `bcd26c8c-cc5d-4858-8237-45ea3657c184`，
+内核仍6.18.60-sq2-android1，62个安装文件hash匹配。正常QTI composer、AIDL allocator、
+HIDL manager、SF/zygote、原Power HAL、OMX和C2服务运行/注册；当前用户动态发现为10，
+锁屏disabled/showing=false，仅记本轮观测，不作为正常启动条件。
+
+normal-v2九个独立phase最终均exit0：27AHB/exec、45EGL与54BufferQueue帧、GLES1
+pbuffer8帧/265,224像素/8fence、Vulkan计算/光栅/3AHB及ImageReader WSI24帧，
+135个YUV缓冲/GPU/exec（27YV12+108NV12/P010）、126次标准lockPlanes与真实QTI
+extension原AHB/共享数据/metadata/独立所有权通过。**原runner在extension启动环境错误处
+exit1**；只修诊断命令为system优先库路径后，extension及两视频phase续跑通过，
+不能写成一次连续九阶段外层exit0，也没有修改全局linker配置。
+
+默认原厂OMX AVC的ByteBuffer和Surface/ImageReader各30帧，经实际stride/crop与
+I420→NV12归一化后，逐帧像素/PTS对重新生成的FFmpeg参考精确，EOS/stop/delete通过。
+Surface/ImageReader使用SoftwareRenderer；这不证明默认native OMX零拷贝。
+物理SoftwareRenderer窗口两轮均未通过现有harness的严格回调计数：分别26/30和27/30；
+各660个连续硬件CRC样本中，右LM六内容依序五轮、全部30段出现，包括缺callback尾部。
+SF实测YV12 linear usage0x920 CLIENT合成到RGB UBWC，不能把回调缺失直接当显示丢帧，
+也不能据CRC代替完整回调/fence或严格物理像素验收。
+官方NDK r28c `media/NdkMediaCodec.h:510–512` 明确OnFrameRendered仅用于信息通知，
+可显著延迟/批量送达，已render的帧也可能没有callback。因此26/30、27/30仍是现有harness
+额外逐帧计数判据的失败，未被修复；单此结果不证明API违规或显示丢帧，也不构成继续推进
+native OMX前必须重写Framework的理由。实际呈现、fence及性能仍按独立证据验收。
+该官方头SHA256：`0a5d403b44dd13c915b3246ecc683376690b6c8ebc6c268e3a2472edb884fbc2`。
+第二轮截图源模型比对76,800像素：最大通道差1、MAE0.055026；尚无独立量化容限，full_frame_pixel_pass=false。两轮CRC均未覆盖窗口退出，不能据其证明退出后回到桌面。
+
+收尾另取final-desktop事后样本：正常launcher截图无视频窗口，60个连续CRC样本的59个
+frame delta均1、CRC pair恒定，观察器恢复source=none。Wake Locks size=0，旧wake.pid进程
+已退出，当前用户disabled=true/showing=false、Awake；Venus sys_error/insts/vb2_bytes均0，
+boot仍bcd26c8c…。这份独立事后样本确认收尾桌面和资源状态，不证明退出瞬间的切换时序。
+证据：`qti-system-display-normal-v2/final-desktop/{device.txt,crc.txt,sf.txt,desktop.png}`。
+
+C2兼容修复恢复其服务注册及全局codec资源枚举，实际视频回归仍为OMX，不是QTI C2解码验收。
+完整HWC/full_stack仍false；KGSL、下游msm_vidc、HDR/secure、PM、性能、完整fence生命周期、
+普通应用和跨机目标保持。原开发permissive域策略未改变，不作enforcing验收。
+证据为 `qti-system-display-normal-v2/normal-independent-audit.json`、`independent-window-v*/`
+及 `qti-system-display-deployment-v2/`；原始日志/私有库仅本地，本轮修改尚未提交推送。
+
+
+### v7 依赖修复与失败记录
+
+v5移除旧mapper后，原C2经mapper.qti/libmapperutils进入不匹配的Snap/gralloc C++闭包，
+阻塞全局资源枚举，连显式选择OMX的创建也受影响。现在仅对固定输入libqcodec2_utils
+移除libmapperutils的DT_NEEDED，保留其余依赖与所有可执行节；新companion安装在
+/vendor/lib64/mapper.qti.so，旧/vendor/lib64/hw/mapper.qti.so仍清理，不恢复旧HAL。
+67个实际vendor ELF闭包审计只发现qcodec2_utils直接依赖mapperutils；未宣称其它codec能力。
+
+v34原AHB getBaseView返回BAD_BUFFER(2)，原因是直接链接造成default/sphal两份registry；
+v35改用真实android_load_sphal_library后返回UNSUPPORTED(7)，原因是误将标准scalar metadata
+当作raw8。v36按固定IMapperMetadataTypes的完整name/type头做size query与正式decode；
+host测试改用同一真实编码器并加入raw8负对照。实际原AHB直接识别、单视图独立import、
+共享像素/fence、NAME/DATASPACE状态及父owner释放后存活均通过，正常路径也再次通过。
+状态查询读取真实显式set位；DATASPACE成功置true，HDR19/20按optional存在/清空置true/false，
+不由颜色aggregate操作推断所有分量；未知Snap类型仍UNSUPPORTED，不伪造多视图。
+
+YV12使用真实donor Y/Cr/Cb存储、独立三plane和subsampling1/2，保留EXTERNAL_DISP usage；
+旧v33的正常SoftwareRenderer YV12分配失败由新mapper/allocator处理。当前正常Surface仍走
+软件输出拷贝；受控native OMX窗口的历史system-v14/v16证据与本次默认链路分开保留。
+v5桌面/Settings/home的补充审计有300连续CRC、104变化及7个CLIENT层，不是物理像素金标。
+
+v7包277,788,786字节，SHA256
+`4fb449dbb165607d985088a8e3b4d9c8c7e79e9e9cef171af162626a30082251`；
+配套display-v16/composer-v14、mapper5/v36、native-vulkan-system-v5。
+2026-11-08T20:17:11.545212+00:00发出正常reboot（本地11月9日），先等120秒再SSH；
+首次成功SSH观测约在134秒，不能当作网络最早就绪时间；旧88.6秒属于boot b56c010f…历史轮次。
+当前完整boot/phase/物理窗口结果见以上最新节，v34/v35失败及pack-v6保留历史。
+
+## 历史阶段（2026-11-09，v5）：正常显示包启动及五阶段回归
+
+**qti-system-display-v5 已部署SQ2Nat并正常重启生效**，initramfs SHA2664c067…，
+唯一SQ2QDbg回退5b9f7012…保持。新boot `7bb4e664-cd35-4fe1-89f5-bef4350f0b8c`，
+内核仍6.18.60-sq2-android1，sys.boot_completed=1；真实hwservicemanager、QTI composer、
+AIDL allocator、SF/zygote和原Power HAL均running，标准allocator/SF/input/window与display.qservice均found。
+原composer3服务未运行；60个已安装文件hash与v5全匹配，composer/allocator/SF身份和实际加载闭包已核。
+这些进程未加载已退役的mapper/句柄桥。正常显示HIDL manager已独立于视频实验开关。
+
+`qti-system-display-normal-v1` 五阶段及外层均exit0：27 AHB与独立exec像素精确，
+45 EGL缓冲和54 BufferQueue帧，GLES1 pbuffer 8帧/265,224像素/8native fence，
+Vulkan计算/光栅、3AHB精确读回/重新导出及ImageReader WSI24帧/24native fence均通过。
+生产/vendor路径的Vulkan与原GLES1现已实测；GLES1 pbuffer和Vulkan ImageReader不冒充物理应用窗口。
+当前用户动态发现为10、showing=false、屏幕ON/AWAKE；用户编号仅本轮观测，不成为启动条件。
+
+本轮正常桌面物理KMS审阅及默认视频回归仍在采集，尚不提前计入本节。
+原permissive-domain开发策略保持，服务域正确和注册成功不等于enforcing权限验收。
+full_hwc_verified/full_stack_complete仍false；完整fence/power生命周期、HDR/secure、性能/PM、
+KGSL、下游msm_vidc与跨机目标不变。证据为`qti-system-display-deployment-v1/first-boot-state.txt`及
+`qti-system-display-normal-v1/`，原始记录/私有库仅本地，不上传。
+
+## 历史阶段（2026-11-09，system-v16）：联合验证与正常启动候选准备
+
+最新隔离实测配套是 **display-v16/composer-v14 + mapper5/v33 + native-video-window-v2 +
+native-vulkan-v6**，使用已部署caps-fence-ubwc-v1内核。外层及10个阶段exit均0，证据为
+`out/qualcomm-full-stack-20261108/sm8350-composer-system-v16/result.json`；Vulkan独立复核见同目录
+`vulkan-independent-audit.json`。这些隔离服务不是正常init的验收结果。
+
+- Vulkan计算16轮、光栅8帧、3轮AHB共12,288像素精确，3次重新导出在释放VkDeviceMemory后仍可用。
+  WSI为ImageReader的257×129窗口，两次swapchain生命周期各12帧：24submit/present/native fence，
+  795,672像素bad0，192次metadata/plane getter无错误。它不是物理可见Surface的Vulkan扫描证明。
+- 内存策略只保留已验证HOST_CACHED TLS选择，外部AHB/FD/host导入及export全部跳过。
+  type0/4各150×4KiB与16×16MiB GPU压力通过，type4覆盖CPU写/GPU读和GPU写/CPU读；
+  type2/3仅CPU/cache API覆盖，type1/5仅分配。实际GSL type4 flags从0xc2600到0xc0c2600，
+  显式cache位不改；这是真实GSL输入及固定GSL分支证据，不是独立内核ioctl追踪或全部类型GPU验收。
+- WSI先前CreateSwapchainKHR等待真实SF的refresh-cycle服务，已经由联合环境解决；v15的lock error3
+  实证是探针consumer usage误含GPU_COLOR_OUTPUT。v16仅让ImageReader consumer取CPU_READ_OFTEN，
+  实际生产者AHB仍为0x10000203；未改mapper5的CPU-only lock契约，也未伪造SF或修改libui。
+- 图案120连续CRC为两种各60/每15交替；视频420样本连续delta1，39黑→六内容依序五轮→146黑。
+  前29帧中一帧占1扫描、其余2，末帧保持178扫描；证明内容顺序，不能写成完美cadence。
+  两次撤窗各30连续双LM全0。图案/视频截图与v14逐字同SHA，继承原像素模型和量化范围。
+  30个ImageReader输出逐文件与v14相同且PTS精确；实际Surface30output/release/API callback/EOS通过。
+  回调仍不是物理present；实际视频仍是线性NV12→SF CLIENT GPU→RGB UBWC，不是YUV直显/压缩视频。
+- 收尾原DRM HWC/minigbm、Power HAL、SF/zygote/input/window恢复，屏幕ON/AWAKE，wakelock释放，
+  Venus sys_error/insts/vb2_bytes=0。此轮没有默认用户态/EFI写入。
+
+正常候选 `qti-system-display-v5/initramfs.cpio.gz` SHA256
+`2664c067b80c67629d7678d2b6acb9a3924e53861f46e6ef00b18bb66be8f8ac`，277,616,535字节，
+由基包330728ef…派生，原非init有效条目/元数据与私有凭据末成员保持；唯一回退5b9f7012…保持。
+包采用native-vulkan-system-v5生产路径；它与实测版本同源码，donor和TLS helper执行段同，
+policy因编译固定路径不同并非逐字相同，正常路径仍须启动验证。
+独立真实hwservicemanager与framework manifest不依赖video实验flag；开启时仅拆旧manager段，
+OMX其余字节保留，关闭时不创建codec。GLES1实体及alias明确安装，精确移除三旧mapper和五旧句柄适配器。
+60vendor文件/13alias/4HIDL支持文件、四项测试及完整生成stage的video开/关×两次apply通过；
+owner唯一且重入不增mount，旧接口和其他HAL保留。候选构建/主机验证详见BUILD与HOST_VALIDATION。
+
+2026-11-08 19:29:33.969 UTC已将v5写入SQ2Nat，远端hash/gzip/SHA256SUMS一致；
+已发出正常sys.powerctl reboot。唯一SQ2QDbg回退5b9f7012…保持，**当前为已部署、等待正常启动验收**；
+不提前写成新用户态已生效。证据`qti-system-display-deployment-v1/deploy.txt`及`reboot-request.json`。
+
+**正常init/生产路径和正常重启仍待实测，默认替换尚不提升为通过。** 继续沿用原开发permissive-domain
+策略，contexts类型存在不等于QService系统Binder add/find已通过enforcing权限验收。
+GLES1实绘、完整HWC fence/power生命周期、严格视频量化、HDR/secure、性能/PM、KGSL、下游msm_vidc及跨机未验收；
+full_hwc_firstframe=true、full_hwc_verified/full_stack_complete=false。原始日志和私有库仅本地，不上传。
+
+## 历史阶段（2026-11-09，system-v14）：空栈真实清屏与视频回归
+
+当前实机配套 **display-v16/composer-v14 + native-video-window-v2**，实验
+**sm8350-composer-system-v14**。此前 system-v13 的末帧残留已由本次真实atomic清空消除。
+
+- video-mode empty Validate置flush；DisplayBase→HWDeviceDRM执行NullCommit(retain_planes=false)，
+  解除旧plane，在同次atomic请求真实retire/present fence，返回LayerStack及SF。
+  不新增待释放buffer、不把前帧release当本帧present。原内核后续成功更新/disable释放规则保持。
+  PostCommit检查Flush错误，失败返回NoResources并保留buffer/flush重试状态。
+- 本轮6次DPU_FLUSH result=0、retire_fd=13。图案退出和视频Surface hide/release之后，
+  debugfs的8个唯一plane全部FB=0/crtc=null；别名目录重复同一组plane，不计为24个plane。
+  物理CRTC仍active，分别30/30个连续扫描样本双LM CRC=0，保留屏幕工作模式的黑场成立。
+- 控制图案回归120CRC样本，119个后续delta=1；两种内容各60、每15样本交替。
+  window.png与v13截图逐字节同hash；预先固定的四个中央矩形共1,382,400个RGB像素
+  与源图案1完全一致（最大差0）。全屏5,529,600像素中5,507,540为四种源色、22,060为边缘过渡；
+  实际BootAnimation缩放/滤波shader尚未源匹配，full_frame_pixel_pass=false。
+  错误的“居中640×480黑背景”参考已拒绝，不是设备像素失败；不继续扩大该诊断模型。
+- 新共享函数的独立ImageReader30帧I420输出交织为NV12，完整数据SHA
+  fbc2d7c848ccf07b2a1a6d7e82fbbad71405df0acf6ee6b2f948ef01b48108e7与参考精确一致；
+  PTS为0..29×33333us、EOS通过，验证引入native window没有破坏原消费路径。
+- 真实Surface AVC30 output/timed release/API callback、EOS、stop/delete通过。
+  线性NV12仍由SF CLIENT GPU合成至RGBA8888 UBWC client target后交QTI HWC/DPU，
+  不是YUV plane直显或压缩视频。video CRC420样本、419次delta=1：初38黑，六种内容顺序重复五遍；
+  前29视频帧各两个60Hz采样，末帧index96..272保持177采样，窗口移除后index273..419为147黑。
+  这同时证明图案→空栈→视频→空栈切换和本夹具30fps序列；非广泛码流/持续吞吐验收。
+- probe把时间字段更名callback_ns并新增callback_arrival_ns。payload全部等于target，
+  实际通知到达早于target约49.5–66.4ms，明确不是独立硬件present时间，不能据此算显示延迟。
+- video.png与v13逐字节同hash。固定AOSP GLConsumer/LayerFE crop公式全76800像素对照
+  MAE0.077921、最大通道差2；真实libgui对应YUV收缩分支另有反汇编核对。
+  厂商滤波/转换量化界限仍待核，full_frame_pixel_pass=false；不按观测选宽松阈值。
+  本轮video-source-contract-check.json保存输入与checker hash；未建模crop的ffmpeg比较只作历史诊断。
+
+outer、baseline、window、pattern/video CRC及两次blank观察均exit0，observer恢复source=none。
+原DRM HWC/minigbm、Power HAL、SF/zygote/input/window恢复，屏幕ON/AWAKE、showing=false；
+wake holder释放，Venus sys_error/insts/vb2_bytes=0。默认用户态/EFI没有修改，默认330728ef…、
+唯一回退5b9f7012…及此前UBWC内核保持。
+
+本轮可标物理空栈blank和窗口切换通过，不能替代完整HWC release/present信号、buffer复用及
+显示关闭/重新开启生命周期。HDR/secure、严格视频量化验收、性能/功耗/PM、KGSL/msm_vidc、
+SQ1/SQ2和默认服务接入仍待做。full_hwc_firstframe=true，full_hwc_verified/full_stack_complete/
+default replacement均false；原始证据和root综合result.json仅本地system-v14。
+
+## 历史阶段（2026-11-09，system-v13）：双图案/AVC扫描与退窗残留
+
+当前实机配套 **display-v15/composer-v13**，实验 **sm8350-composer-system-v13**。
+完整服务真实首帧基线保持；新增受控内容与 native video 扫描证据，不等同整栈验收。
+
+- composer-v13 修正 DestroyLayer 后空层 Validate/查询输出，实际源码负对照复现旧 layer 0 泄漏；
+  100 次空/非空切换通过，本轮 logcat 无 invalid layer 0。
+- 独立生成 640×480、4 fps 双图案，由原版 SF GPU 合成至 2880×1920 RGBA8888 UBWC target；
+  120 个 CRC 样本后续 delta 全为 1，两种双 LM CRC 各 60、每 15 样本交替。
+  window.png 四象限采样值精确匹配图案 1；这是独立截图采样加稳定扫描证据，非硬件 CRC
+  与独立全屏像素逐帧同一性证明。
+- 同轮原 native ImageReader 30 帧基线归一化 I420→NV12 与原 reference.nv12 完全一致，
+  PTS 精确，SHA256 fbc2d7c848ccf07b2a1a6d7e82fbbad71405df0acf6ee6b2f948ef01b48108e7。
+- 实际 Surface/ANativeWindow 的 AVC 30 帧按实际排序 PTS 定时 release，不用 ImageReader 或
+  callback 作为消费节拍；30 output、30 timed release、30 API callback、EOS、stop/delete 通过。
+  实际 producer usage=0x20400900；NV12 stride=512、scan=512、size=393216、UV offset=262144，
+  metadata 与 VIDC 桥布局一致。SF dump 明确 CLIENT composition：NV12 经 GPU 合成到
+  RGBA8888 UBWC client target，再由 QTI HWC/SDM/DPU 扫描；未验证 YUV plane 直显或视频 UBWC。
+- 视频 CRC 420 样本，后续 419 次 delta=1；最初 39 个为前一图案残留。随后六种视频 CRC
+  精确重复五遍，前 29 帧各两个扫描采样，最后帧从 index97 延续至 419。
+  这支持本次 30 fps 内容序列实际扫描；六种内容重复的夹具不是所有码流/吞吐/长期丢帧证明。
+- 30 个 callback actual_ns 均与 release target_ns 相同，不是独立硬件 present 时间，
+  不能据此计算零延迟或宣布历史 burst 30/25、旧 292/300 缺口修复。
+- 末帧 320×240、76800 像素按 AOSP GLConsumer YUV crop 收缩及 LayerFE transform 独立
+  CPU 公式对照，MAE 0.077921、最大通道差 2，无偏移拟合或按结果选阈值。
+  厂商转换/滤波顺序和量化验收界限仍待核，full_frame_pixel_pass=false。
+  旧 pixel-check.json 中直接 ffmpeg RGB 对照没有该 crop 模型，其 max210 保留为历史诊断，
+  不据此定性颜色失效。新模型见 video-sampling-reference-v1/cpu-source-contract.json。
+- 真实缺口：Surface hide/release 后，drm-video-after 仍为 plane89/FB115/UBWC、CRTC active，
+  硬件持续扫描最后帧；空层计数修复没有提交真实 blank。ID 仅为运行观测。
+  源码定位为 video 模式 empty Validate 不置 flush、Commit 跳空栈及 Flush 不返回 present。
+  display-v16/composer-v14 已加入真实 NullCommit(retain_planes=false)、retire fence 透传和
+  Flush 错误传播/重试，实际源码 ASan/UBSan 与 100 转换通过；system-v14 实机结果待记录。
+
+外层、baseline、window、两个 CRC observer 均 exit0；observer 恢复 source=none。
+原 DRM HWC/minigbm、Power HAL、SF/zygote/input/window 已恢复，屏幕 ON/AWAKE、showing=false，
+wake holder 释放；Venus sys_error/insts/vb2_bytes=0。默认用户态、SQ2Nat initramfs330728ef…与
+唯一 SQ2QDbg 回退5b9f7012…不变，仅此前 caps-fence-ubwc-v1 内核已持久化。
+
+本轮提升的是控制图案和实际视频窗口的扫描链：full_hwc_firstframe=true；完整 HWC fence
+信号/复用/disable、严格视频像素量化验收、HDR/secure、性能/功耗/PM、跨设备及默认替换仍未通过。
+本地 system-v13/result.json 汇总上述判定与真实文件 hash；STAGE/experiment、CRC、截图、
+allocator、SF、DRM、window/baseline client 与 device.txt 保留原始证据，不上传私有库/原始日志。
+
+## 历史阶段（2026-11-09，system-v12）：完整 QTI HWC/SF 真实 UBWC 首帧
+
+当前配套 **display-v15/composer-v12**，实机轮次 **sm8350-composer-system-v12**。
+full_hwc_firstframe=true：原版 SF 产生的真实 client target 已经源码 QTI HWC/SDM 提交到面板 KMS。
+这次已越过 TEST_ONLY；完整 HWC/显示视频栈验收、默认用户态替换仍为 false。
+
+- 私有 Binder 补齐已声明的真实 android.hardware.power.IPower/default，使用原
+  Pixel libperfmgr Power HAL 二进制、powerhint.json、UID/GID/调度身份及原 vendor 链接。
+  原 owner 在私有 owner 启动前停止，退出私有服务后恢复原 Power HAL，再恢复原桌面；
+  没有假 HAL、隐去声明或两个 owner 同时写全局 hint 节点。
+- GetClientTargetProperty 原来在 update_format=false 时返回成功却未写输出，
+  SF 曾收到 format=309009760。composer-v11 起先写 RGBA_8888/UNKNOWN 的确定空请求，
+  需要更新时仍做真实格式/色彩转换并传播错误，局部 dataspace 也不再未初始化。
+- system-v11 明确捕获 op57/object105/-95：DisplayBuiltIn 无条件初始化 histogram，
+  每帧 Commit 前发送 kFeatureAbaHistIRQ=0；Linux 拒绝 DPPS_CACHE_FEATURE 后将错误留在 atomic。
+  display-v15/composer-v12 只在真实 histogram CTRL/IRQ property 能力成立时启用；
+  Linux Set/GetDppsFeature、BLScale 在入口返回不支持，采样状态/线程/接口按实际结果处理。
+  没有把缺失功能当 no-op 成功，也没有放宽 contract 或改动 fence 语义。
+- system-v12 首个实际 target 为 id=15、fd=26、format=12（RGBA8888 UBWC），
+  AtomicCommit result=0，release_fd=29、retire_fd=28；后者是本次 present fence。
+  DRM 状态显示 plane89 → crtc0、FB118、modifier=0x0500000000000001
+  （QCOM_COMPRESSED）、2880×1920@60、CRTC105 active=1。
+  这些 fd/id 为本轮动态观测，不是构建/运行白名单。
+- 只观察硬件 CRC 的 helper 未打开 DRM 或取得 master，采集 120 样本；
+  第 2–120 样本的 frame delta 均为 1，共 28 对 CRC、27 次变化，退出恢复 source=none。
+  原 bootanimation 约 5 秒结束，尾部 CRC 双值为 0；没有可用于本轮逐帧比较的独立预期图案。
+  因而只证明真实提交和扫描活动，不能宣称预期像素/持续内容已验证。
+- 外层及 CRC helper 均 exit 0；默认 DRM HWC/minigbm、SF/zygote、原 Power HAL 恢复，
+  input/window 可用、屏幕 ON、锁屏 showing=false、临时 wake holder 已释放，
+  Venus sys_error/insts/vb2_bytes=0。动画退出后仍出现一次 invalid layer 0，
+  空层栈清理须另行验证，不能据此次首帧成功宣布所有窗口生命周期已过。
+
+本轮没有完整 HWC fence 信号/复用/关闭生命周期、原生视频物理窗口、HDR/secure、
+延迟/吞吐/功耗/PM或跨设备验收。独立源码 atomic 的 LINEAR/UBWC 八帧双 LM CRC、
+输入/present/release fence 与 disable 回收证据继续有效，不能替代完整服务对应验收。
+后续控制图案及 native video 正在准备，本条不记录其尚未取得的结果。
+
+本地证据目录 out/qualcomm-full-stack-20261108/sm8350-composer-system-v12/：
+STAGE.json、experiment.json、logcat.txt、drm-window-state.txt、hardware-crc.txt、
+hardware-crc.exit、sf-window-dump.txt、window.png、power-status.txt、power-maps.txt、device.txt、exit。
+源码输入、构建命令、产物 hash 与 actual-source ASan/UBSan 记录见
+sm8350-display-v15、sm8350-composer-v12 的 BUILD.json/HOST_VALIDATION.json；摘要见 BUILD 最新节。
+原始日志、截图、私有库、固件和凭据仅本地，不上传。
+
+默认 SQ2Nat initramfs 330728ef…、msm.ko build-id 1dacaf73…和
+SQ2QDbg 唯一回退 5b9f7012…保持。此前 caps-fence-ubwc-v1 显示内核已持久化；
+当前用户态仍是原 DRM HWC/minigbm、vendor.minigbm.debug=nocompression。
+新 composer/allocator/mapper/Power HAL 仅隔离实验，整体目标 active，未提交推送。
+
+## 历史阶段（2026-11-09，system-v9）：首次 TEST_ONLY 已通过，SF 等待真实 Power HAL
+
+最新配套为 display-v13/composer-v10，实机证据 sm8350-composer-system-v9。完整 HWC/SF
+物理首帧仍未通过，但当前等待原因已由实际线程栈定位，不再沿 GPU/HWC 挂死假设反复试验。
+
+- display-v12 引入 kernel-managed DPU 首次 Validate 的真实临时 allocator target，
+  display-v13 增加分阶段诊断。仅首轮、缺 client target 的 GPUTarget 使用同描述的真实缓冲
+  做 TEST_ONLY；原始 layer 不变，临时 FB 先释放再 free buffer。正常 Commit 必须导入
+  SetClientTarget 后的真实句柄/布局/色彩元数据，不能把临时 target 直接提交或当作可见帧。
+- composer-v10 在 QService/Core 初始化前将 ProcessState 选择为 /dev/binder，
+  使标准 AHB 的 AIDL allocator 与 QService 位于实际 system Binder。HIDL RPC 接线保持；
+  历史 /dev/vndbinder QService 消费者未据此验收。没有伪造 allocator 或改写 buffer metadata。
+- system-v9 分阶段日志已逐项完成：get_mapper、真实 2880×1920 RGBA AHB allocate、
+  native_client、mapper5 import、原 AHB 引用释放、标准 metadata、donor aligned geometry、
+  FB 注册、SetupAtomic、atomic TEST_ONLY、FB 释放与 mapper free。最终 done result=0，
+  aligned=2880×1920、真实 allocation size=22212608；初始化首次验证链已通过。
+- SF 主线程实际栈为 Output::composeSurfaces → PowerAdvisor →
+  PowerHalLoader::loadAidl → AServiceManager_waitForService。私有 Binder 中未运行已声明的
+  android.hardware.power.IPower/default，默认系统对应真实 Pixel libperfmgr Power HAL 仍在。
+  HWC 完成验证后回到等待工作，不能把本轮 SF 等待归为 GPU、allocator 或 HWC 挂死。
+  下一步在同一私有 Binder 接入真实已声明 Power HAL，再继续实际 first Commit/显示验收；
+  当前不写成 Power HAL 已补齐，也不以隐藏声明或假 HAL 替代。
+- drm-window-state.txt 仍为 plane FB=0、CRTC active=0；system-v9 外层退出码为 1。
+  TEST_ONLY 成功不等于帧已提交，完整 HWC 首帧/原生视频物理显示保持 false。
+  原服务/input/window 已恢复，wake holder 释放，Venus sys_error/insts/vb2_bytes=0。
+
+证据目录 out/qualcomm-full-stack-20261108/sm8350-composer-system-v9/：
+STAGE.json、experiment.json、logcat.txt、sf-backtrace-window.txt、composer-backtrace-window.txt、
+power-service-inspect.txt、power-service-default.txt、drm-window-state.txt、device.txt。
+构建及 actual-source ASan/UBSan 见 display-v13、composer-v10 的 BUILD.json/HOST_VALIDATION.json；
+验证覆盖临时 target 及 service main 的 Binder 选择/初始化失败传播，不能替代上述实机栈。
+
+已验收的独立 mapper5/GPU RGB UBWC 八帧/双 LM CRC/真实 fence/disable 回收保持，
+默认 initramfs 330728ef…、运行模块 build-id 1dacaf73…及 SQ2QDbg 5b9f7012…唯一回退保持。
+正常持久服务仍为 DRM HWC/minigbm，nocompression 不变；源码 composer 仅隔离实验。
+整体目标 active；Power HAL 后续工作尚在进行，未提交推送。原始日志/库/固件/凭据仅留本地。
+
+## 历史阶段（2026-11-09）：RGB UBWC 已过，完整 HWC 首帧策略失败
+
+当前主线及较大开发步幅保持。已跨过完整 HWC 初始化/注册与真实 SF 接线，当前失败位于
+首帧合成策略；注册成功、窗口实验结束或脚本 exit 0 均不得替代物理上屏证据。
+
+- display-kernel-caps-fence-ubwc-v1 已更新现有 SQ2Nat，并正常重启到
+  boot de79fbf3-b4e1-4e06-8fe7-9491ebc987e0；实际加载模块 build-id
+  1dacaf73eac94ebfacbe76f45a9429bc48e1a8f1，module SHA256
+  9ebaadd824d0b134a71700ef4fbc9d4727d2463f5355fc4682af63d68fd0ed6f。
+  默认 initramfs SHA256 为
+  330728ef37f8b4be0103784049808b767d30a67124945b2bc59f4d0146a73ab2。
+  从 caps-fence-v2 只恢复受现有硬件/格式检查约束的 QCOM_COMPRESSED 广告；能力与 fence
+  实现保持。打包仅改变 msm.ko，cpio 元数据完整核对，私有凭据成员保持末尾。
+  原 SQ2QDbg 回退 initramfs
+  5b9f7012ab43db5ec42f6169d57047527f19a0feff0fb824d77d7711ec68c351 及其他原载荷保持。
+  重启实测 vendor.minigbm.debug=nocompression，正常 DRM HWC/minigbm 和原桌面仍可用；
+  UBWC 广告不等于正常服务开始分配压缩缓冲。证据 package-dpu-display-ubwc-v1/
+  的 BUILD.json、deploy.txt、reboot-health.txt；未热卸模块或新建旧载荷备份。
+- display-v10/composer-v6 已跨过真实 msm DRM 发现、Core、eDP topology 和事件初始化，
+  随后在可选 downstream panel extension 创建失败处退出。
+  display-v11/composer-v7 按 kernel-managed DPU 能力处理这项可选扩展；
+  同时修正 primary 创建失败时持非递归锁调用 Deinit 的自死锁，真实错误返回后不得注册服务。
+  两构建的 HOST_VALIDATION.json 记录 actual-source ASan/UBSan、输入/产物 hash 与 ARM64 验证；
+  旧 v6 负对照可复现两秒自死锁，v7 失败路径不再卡死。
+- composer-system-v5 使用 display-v11/composer-v7、mapper5/v33 和新 UBWC 内核：
+  primary display 初始化成功，完整 HWC 服务完成注册，原版 SurfaceFlinger 实际连接并注册
+  Hotplug/Refresh/Vsync2.4 等回调。不是只运行独立 HWCLayer 或库加载探针。
+  当前首帧报 CompManager::Prepare: Composition strategies exhausted (first frame = True)，
+  drm-window-state.txt 仍为所有 plane FB=0、CRTC active=0。
+  SOURCE_QTI_COMPOSER_WINDOW_TRIAL_COMPLETED 和脚本 exit 0 只表示有界窗口试验完成，
+  不证明帧提交、像素或物理显示通过。下一步沿实际策略/资源分配错误继续推进。
+  证据 sm8350-composer-system-v5/{STAGE.json,experiment.json,logcat.txt,sf-window-dump.txt,
+  drm-window-state.txt,device.txt}；实验后原显示服务已恢复。
+- **sm8350-ubwc-scanout-v1 已通过真实 mapper5/GPU RGBA8888 UBWC 物理扫描。**
+  在同一 boot、新 UBWC 内核下，独立 probe 使用 display-v10 的源码 libsdedrm、mapper5/v33、
+  真实 AHB usage 0x1a00 和原厂 Adreno GPU shader，2880×1920@60Hz、双 VIG/双 LM；
+  两个真实 UBWC AHB 的标准 payload offset=94208，而 donor GetBufferLayout 给 KMS offset=0、
+  pitch=11520、allocation=22212608，不伪报标准 metadata，不做 CPU 像素上传。
+  四 FB TEST_ONLY 通过；L0→L1→U0→U1 重复两轮，每次内容变化，八帧 LINEAR/UBWC 的
+  双 LM 硬件 CRC 精确一致：图案 0 为 0xb3f31b86/0x8adf2ef3，
+  图案 1 为 0xb4e51740/0xcd789617；排除了停留在上一帧的假阳性。
+  真实 GPU producer fence 传给两个 plane；retire 已完成而自身 release 仍 pending，
+  下一次成功更新释放前帧，已验证 disable 后末帧释放及正常资源回收。
+  实验后默认显示服务、input/window 恢复，PARTIAL holder 释放，Venus sys_error/insts/vb2_bytes=0。
+  证据 sm8350-ubwc-scanout-v1/{result.json,probe.txt,device.txt,cleanup-health.txt}，
+  result.json 固定各证据 SHA256。原 scanout-v2 线性探针与证据保持。
+  本结果是独立源码 atomic 的 RGB UBWC 扫描，未使用完整 QTI HWC 服务，
+  不等于 SF/原生视频上屏、压缩 YUV、FP16/10bit、HDR/secure 或性能验收。
+
+正常持久 HWC/minigbm 及 AVC-only/RequiresSwRenderer=1 保持；完整 HWC 仍为隔离实验。
+PARTIAL holder 在正常 system Binder 下先取得锁，退出释放；恢复需 input/window 就绪、
+system_server 连续稳定及 wake/dismiss 成功，个别动作失败不能中断清理。按动态当前无密码
+用户恢复，不硬编码用户编号、不清凭据、不改持久 PM。正常重启先等待 120 秒再尝试 SSH。
+
+原始日志、私有库、固件和凭据仅留本地 out；源码及文档尚未提交或推送。整栈目标 active，
+物理 mapper/视频显示、KGSL/msm_vidc、HDR/secure、性能/PM 和突发回调缺口仍待完成。
+下方旧“LINEAR-only/未注册/旧 DRM 名称阻塞”仅是对应历史阶段，不是当前状态。
+
+## 历史阶段（2026-11-09）：QTI atomic 八帧与 HWCLayer 通过，完整 composer 初接入
+
+主线与较大步幅规则继续有效。当前已越过源码 DRM manager 和真实 atomic 扫描输出，
+完整 composer 正在按实际失败继续 debug；不能把下述组件通过写成 SF/QTI HWC 整链验收。
+
+- caps-fence-v2 模块已替换现有 SQ2Nat，正常重启并核对实际加载 build-id
+  52d1cfdec413ee85e00472f6f7d66de56ad20c73；module SHA
+  766387968f6941bdafc7c52b5058b203553f372b450250be1a782b8c925c21f5。
+  SQ2Nat initramfs 为 982bea4861011044daebe182a761663a48c2b2417ea6ed9a089bdd4d3ae204b2；
+  打包仅改变 msm.ko，cpio 有效条目/元数据完整审计，私有凭据成员保持末尾。
+  LINEAR-only 广告和 SQ2QDbg 唯一回退保持，无热卸模块或新备份。
+  证据 out/qualcomm-full-stack-20261108/package-dpu-display-v1/。
+- QCOM_DPU_CAPS 来自真实 catalog/已初始化硬件；QSEED 编码已按 SSPP_SCALER_VER 的
+  major<<16|minor 修正，测试直接提取固定 kernel catalog 宏，拒绝旧错误编码。
+  sm8350-display-v8 的 GetDRMManager 解析 8 planes/284 个线性格式组合/2 CRTC，
+  eDP 2880×1920@60、RegisterDisplay/CreateAtomicReq 均通过。
+- **sm8350-scanout-v2 已通过源码 QTI atomic 的 TEST_ONLY、8 帧真实扫描输出与两组稳定 LM 硬件 CRC。**
+  两组 CRC 为 0x7c280793/0x1feb1d21 与 0x18fb9861/0xdabc8166。
+  每帧 retire 已信号时自身 release 仍 pending，后一次成功更新释放前帧，
+  已验证 disable 后末帧 release 信号。运行使用配套 display-v8 和双平面 XRGB dumb buffer；
+  未使用 mapper 缓冲，不是完整 HWC、解码视频或 UBWC 上屏验收。
+  旧 v8/debug-v1 的 EINVAL 来自同请求先禁用再启用已选平面的重复 object/property，
+  修正请求构造后本轮已通过；旧失败保留为历史，不再列为当前 scanout 阻塞。
+  证据 sm8350-scanout-v2/{result.json,device.txt,cleanup-health.txt}。
+- 实际 HWC 内部分配器 sm8350-hwc-allocator-v4 与实际 HWCLayer（sm8350-composer-v4）
+  **分别完成 120 缓冲、36 次 RGB 像素检查、FD 稳定为 11**。
+  AllocatedBufferInfo.native_handle 显式传递真实借用句柄，整套 SDM 配套重建。
+  HWCLayer 证明本轮消费的共享句柄前缀可用；源码 108 字节结构与 donor 124 字节完整布局
+  不可互换，不构造短句柄交给 donor，tail/protected/全部可选 metadata 与 tonemapper 仍未验收。
+  证据 allocator-v4/result.json、composer-v4/{layer-result.json,PRIVATE_HANDLE_ABI.json}。
+- 最新配套构建为 sm8350-display-v9（42 TU/五库，五项补丁含 kernel-managed SDM contract）
+  与 sm8350-composer-v5（46 TU、完整服务及四个支持库、真实 HWCLayer 探针）。
+  composer-system-v2 已启动真实完整服务并进入 HWCSession/CoreImpl/HWInfoDRM；
+  当前在 DRMMaster::Init 的 drmOpen("msm_drm") 与内核实际驱动名 msm 不匹配处返回 -ENODEV，
+  导致 CoreInterface 创建失败，修复与后续整链验证进行中。
+  本轮仅在私有挂载中隐藏不匹配的可选 libsdmextension，走源码原有 absent-extension 分支，
+  不能据此宣称扩展、HDR、secure、生产 SELinux 或正式 composer 注册已通过。
+  证据 sm8350-composer-system-v2/{STAGE.json,logcat.txt,device.txt}。
+- display-v9 初次 host-tests.json 的 SDM 夹具曾对已打补丁的源码自动反向应用补丁；
+  runner 已改为识别完成状态、仅对原版使用 --forward，显式指定 v9/source 重跑两项
+  ASan/UBSan 全过，见 host-tests-sdm-corrected.json。原失败记录保留，不归为产品实现失败。
+
+正常恢复后仍为原 DRM HWC/minigbm，OMX 保持 AVC-only/RequiresSwRenderer=1。
+scanout-v2 恢复 trap 曾早于 input 服务就绪，后续已手动核对原显示/视频服务并释放 wake holder；
+composer-system-v2 记录真实 PARTIAL 持锁及 SIGTERM 释放成功。临时保活使用系统
+libhardware_legacy → suspend AIDL，须在正常 system Binder 下先看到 WAKELOCK_READY，
+实验结束释放，最长请求 600 秒、阻塞退出上限为请求时长+3 秒；不改变持久 PM 策略，也不证明 PM 已修复。
+
+用户允许实验恢复时跳过无密码锁屏。先动态发现当前用户并核对 passwordless/lockscreen disabled，
+再唤醒及 wm dismiss-keyguard；本轮观测到的用户编号只是现场记录，不硬编码用户 10，
+不清密码、不跳过安全凭据。恢复流程等待 input 服务，单项失败不得中断后续清理。
+正常重启后先等待 **120 秒** 再尝试 SSH，期间继续本地构建；不要过早要求人工唤醒。
+
+UBWC scanout、完整 QTI HWC/SF、mapper 原生视频物理显示、KGSL/msm_vidc、HDR/secure、
+性能/PM 与突发回调缺口仍未解决；目标 active，其他开发并行进行，尚无最终整栈通过结论。
+改动尚未提交推送；下方历史“未部署/未重启/无 scanout”仅描述对应旧实验。
+
+## 2026-11-08：已确认 mapper5 + 源码 QTI HWC/SDM 后续执行方案
+
+用户在比较现有进度、资料与完成度后，明确要求将推荐方案作为接下来的执行方案。
+主线为 mapper5 统一框架接口 + 可重建 QTI HWC/SDM + Linux 6.18 显示适配，
+保留已验证原厂 gralloc 后端；mapper3/4 整套替换降为有证据条件的备选。
+用户追加要求加大每轮开发步幅：合并有依赖的改动、集成与验证，尽早跑完整链路，
+遇到实际问题再 debug，修复后继续阶段目标，不以单个接口/探针通过作为本轮收尾。
+本节与 [开发方案](QUALCOMM-FULL-STACK-PORT.md) 的“当前执行方案”覆盖下方历史评估方向。
+用户随后将完整移植目标恢复为 active，后续按上述方案执行；本次文档落地未新增构建、
+设备操作、提交或推送。
+
+恢复执行时从真实 capabilities/输出 fence 契约及 DPU 初始化/提交链路成组继续，
+不重做已完成的 mapper5 基础；结合所需 HWC 消费者接线推进。
+随后补齐完整 HWC 的内部 allocator、metadata、句柄生命周期及正式服务接线，验证原生视频上屏。
+必要格式/usage/压缩视频随消费者接入补齐，KGSL/msm_vidc/统一内存/HDR/PM整体范围保持。
+
+暂停前已完成、此前尚未写入交接的源码显示进度：
+
+- configs/sm8350-display-build.json 固定 268 份源码输入与 100 份依赖；
+  scripts/build-sm8350-display.py 编译 42 个翻译单元，重建 displaydebug/drmutils/sdedrm/sdmutils/sdmcore。
+- sm8350-display-v2 验证五库真机 RTLD_NOW 加载/卸载；没有调用显示工厂初始化。
+- sm8350-display-v4 在上述源码应用 sm8350-dpu-plane-properties.patch：
+  按真实范围将 QTI alpha 0–255 转为 DRM 0–65535，按名称映射混合枚举，保留输入 fence 的 -1 语义；
+  属性错误传至 atomic 请求，失败请求不提交。没有将 OUT_FENCE_PTR 直接别名为旧 output_fence。
+- v4 真机八个平面共 2080 次实际 libdrm 请求属性构造通过；五库加载通过。
+  commits=0、hardware_initialized=0、physical_scanout_verified=0，不能写成 HWC 或物理上屏通过。
+- 两项属性/atomic 故障路径测试（ASan/UBSan）、两项构建输入测试及 diff 检查已通过。
+  v4 BUILD 的 1455 个输入记录和 8 个产物在此前核对一致。
+- 原始证据：out/qualcomm-full-stack-20261108/sm8350-display-v4/{BUILD.json,device.txt,experiment.json,run.sh}；
+  复现参数 sm8350-reference-v1/display-build-command-v4.json。
+  最后该次观测保持同 boot，HWC/SF/system_server/OMX PID 未变、Venus sys_error/insts/vb2_bytes 均 0。
+  未部署为默认、未重启或修改 EFI；这不是当前重新轮询设备的健康证明。
+
+仍未解决：真实显示能力描述、输出 fence、缩放/CSC/UBWC scanout、完整 HWC、物理视频，
+以及突发 25/30、历史 292/300 回调缺口和 PM。旧 donor gralloccore 缺新版 BufferManager API，
+公开 mapper4 不能直接链接替代；后续改线条件见开发方案，不凭手机适配成功就更换后端。
+
+## 历史评估与实验（2026-11-08）：SM8350现代Android参考与QTI显示后端阻塞
+
+用户调整路线：不必坚持mapper5，参考一加9 Pro/小米11第三方高版本Android的配套实现。
+Linux6.18、完整高通栈、原厂OMX→HIDL→ACodec仍保留；允许评估mapper3/4共用后端。
+优先使用可修改的QTI HWC/SDM源码处理真实显示接口，而非持续只绕闭源工厂崩溃。
+这不是授权将历史不完整mapper4诊断装为默认，亦不通过降低/伪造设备API跳过框架选择。
+
+已固定公开源码（configs/sm8350-display-reference.json）：
+- OnePlus sm8350-common lineage-24.0：34661bff0fe0d9ce4463c71f6d3b80f0b04b80d5。
+  common.mk装mapper3与4及allocator；composer可执行文件、libsdmcore/libsdmutils/libsdedrm
+  在proprietary-files.txt，BoardConfig使用lahaina-qgki_defconfig；shipping API30保留。
+- Xiaomi sm8350-common lineage-23.2：ea54a321886b99fcac3dcc8f72b287d6848f7434。
+  common.mk构建composer服务、mapper3/4、allocator；保留GPU/色彩/SDM扩展等二进制，
+  部分display库与DPU配置明确来自sunstone。不能将跨donor库直接假定适配Surface。
+- hardware/qcom/display lineage-23.2-caf-sm8350：e9bbe9a980d408af36b52f2abaae7c35647b7425。
+  全树304文件逐Git blob SHA1校验，31个选定参考另记SHA256，原件仅out。
+  公开composer使用HIDL2.4/QTI3.0，importer和内部allocator仍直接找mapper3/2；
+  mapper4直接接BufferManager，和mapper3共享gralloccore，不是层层mapper包装。
+  sde-drm仍使用capabilities/input_fence/output_fence/blend_op/scaler等下游契约。
+- qcom-caf/common lineage-23.2：5cd53603d36aaddd9ba9d882dad5411f1b30fbed。
+  以上分支是各自参考，不冒称同一次手机发行物的整套匹配源码，未测手机运行性能。
+  证据out/qualcomm-full-stack-20261108/sm8350-reference-v1/{FETCH,repositories,source-tree}.json。
+
+前轮QTI原厂SDM初始化诊断的实际结论：
+- quest2-sdedrm-probe在non-master msm primary调用原GetDRMManager；
+  不替换默认库，不提交atomic，不创建虚假属性；六个原厂DSO校验display reference pins。
+- hwc-sdm-v4透明记录原始property enum：capabilities=24、IN_FORMATS=0，
+  input_fence=17、IN_FENCE_FD=0；OUT_FENCE_PTR也不被识别。
+- SIGSEGV11 fault0x20、backend PC0x289c4/LR0x2879c，与反汇编GetTypeInfo缺key24后
+  解引用吻合。公开SM8350源码亦prop_map.at(CAPABILITIES)，不会自动兼容标准DPU。
+- v3的RTLD_NEXT查找失败是探针问题；v4显式查询RTLD_LOCAL原库修正，原厂崩溃仍在。
+  不能通过制造能力blob或猜测DPU参数掩盖。其余alpha范围/fence/scaler/CRTC也须实现。
+  证据hwc-sdm-v1..v4的build-commands/experiment/device/disassembly。
+
+未部署内核候选display-kernel-v1：
+- scripts/patch-sq2-qti-display.py只恢复QCOM_COMPRESSED广告，保留原has_no_ubwc和格式过滤。
+  msm模块构建/modpost通过，SHA99b1d8c3f1d366fdf7ce16a39ce8eb74b1bbf5d4c70f3c8b10e3a0fd0406c150。
+- 与父源差异除dpu_plane.c外还有生成a6xx.xml.h；已查清只有四个C++模板实例的排列改变，
+  每表内容及表外字节一致。NDEBUG C预处理结果SHAecd4ae3f73124a9cf371ccd1400da982e2b5b7f5761202865a8989e7dc728ee8一致；
+  普通预处理的assert字符串还含各自绝对源路径，不能写成原始全部预处理字节相同。
+  generated-header-audit.json保留完整对照，不伪称只有一个源文件变化。
+- 未打包/部署/重启，当前minigbm/HWC消费者仍不具新压缩转换；不能单独推广内核广告。
+
+实际源码导入类候选sm8350-importer-v3：
+- patches/sm8350-composer-mapper5-import.patch精确修改上述公开QtiComposerHandleImporter两文件，
+  通过SP-HAL加载真实mapper.quest2.so，使用Stable-C import/free，保留原调用接口/句柄所有权。
+  不加载旧mapper实现；没有完整composer二进制，内部allocator仍待迁移。
+- build-sm8350-composer-importer.py先校验原件hash，在新输出目录应用零fuzz补丁并核验结果，
+  ARM64 -Werror编译实际类/诊断，BUILD记录依赖头、命令和产物hash。
+- v1编译失败为诊断错误使用未公开AHB_getNativeHandle；改用已有EGL native client buffer。
+  v2实机失败为诊断将标准metadata序列化块当裸uint64；v3使用官方metadata decoder修复。
+  没有修改mapper/allocator来迎合诊断。v2失败证据保留。
+- v3实机两轮共66 AHB：五种线性RGB+NV12/P010，四种RGB UBWC，各三尺寸；
+  原QTI类共132次import，释放原AHB及同胞import后仍可读ID/尺寸/modifier，18缓冲可见CPU像素全匹配。
+  malformed/empty handle处理通过；热身后fd11稳定，maps无mapper3/4实现，最终exit0。
+  这是原类句柄生命周期验证，不是SDM/atomic/物理上屏或速度测试。
+  新用户路线允许不采用此mapper5候选，保留为已有工作和对照。
+- 1项未知源码拒绝测试、2项内核patch测试、diff-check通过，未重跑旧全套。
+  out/.../sm8350-importer-v3/{BUILD,experiment,device,health}与reference-v1/importer-build-command-v3.json。
+
+最终同boot b56c010f…，HWC23407/SF23546/system_server24809/OMX18434保持，
+v2/v3四个私有服务均退出；Venus sys_error0/insts0/vb2_bytes0。
+ESP可用1355372KiB、logs103396KiB。无重启、EFI写入、持久HAL替换。
+整体仍active，KGSL/msm_vidc/WC替换、物理显示、PM和回调缺口不变；未提交推送。
+
+## 2026-11-08：RGB UBWC统一分配/GPU通过，确认旧内核modifier限制
+
+最新候选 **mapper5/v33**，核心mapper/allocator/EGL探针与v32逐字节相同。
+v32验证新增UBWC；v33修正DRM诊断的换行输出、固定公开QTI压缩命名来源并完成原路径回归。
+本轮没有重启、EFI写入、持久HAL替换或用户数据改动，整体目标仍active，改动未提交推送。
+
+实现与真实契约：
+- 原厂gralloc公共API的45组原始布局调查：RGBA/RGBX/RGBA10/FP16在0x10000900与0x1a00下
+  实际为UBWC；BGRA即使这些usage仍线性。保持usage与原厂分类，不清hint、不伪报压缩。
+- 共享后端只接收已验证RGB压缩几何，拒绝压缩YUV/CPU usage/protected及错误容量。
+  原GetRGBPlaneInfo对UBWC返回payload offset却把整个allocation作为size，不能直接作为标准平面。
+- mapper5返回Compression={QTI,20001}与QCOM_COMPRESSED modifier；标准PlaneLayout offset是
+  真实payload位置，size排除前置metadata。压缩样本/行增量按标准设0、component offset/size设-1。
+  CPU lock返回UNSUPPORTED，未锁定flush/reread仍BAD_BUFFER，不提供压缩字节的伪线性CPU映射。
+- allocator接入COMPOSER_CLIENT_TARGET，接受真实RGB压缩请求，保留未知usage/options/secure拒绝。
+- DRM探针明确经原厂公开GetBufferLayout取得offset0及pitch，和标准payload metadata分开。
+  内核DPU自己在framebuffer base上加UBWC metadata大小；标准payload offset不能再加一次。
+  目前通用DRM HWC直接复制标准planes，仍须实现真实消费者适配，尚未接入此转换。
+- 编译实际6.18 msm_media_info.h独立核对130×74、1280×720、2880×1920：
+  pitch/scan/meta/total分别768/80/4096/65536、5120/720/24576/3710976、
+  11520/1920/94208/22212608，与原厂RGBA/RGBX/RGBA10布局一致；不扩大为FP16 KMS支持。
+
+真机结果：
+- 四种压缩RGB格式×两usage×三尺寸，共24个标准AHB；每个3轮不同象限图案，
+  GPU写UBWC→真实native fence→GPU采样→独立RGBA8读回，共72轮、逐像素误差≤1。
+  24次CPU lock均被拒；maps核实标准EGL/mapper5/原厂GPU，无旧mapper实现或CPU上传桥。
+- 两usage×五RGB格式×三尺寸，共30次PRIME/AddFB2/GETFB2/RMFB尝试：
+  18个压缩RGBA/RGBX/RGBA10加6个线性BGRA成功，6个FP16真实EINVAL，意外失败0。
+  **无master请求、无atomic commit、无物理上屏证据。**
+- 新增实际IN_FORMATS blob解析：8个plane、284个format/modifier组合，全部modifier=LINEAR。
+  对应uncached-native/source/kernel与external/edp-618的dpu_plane.c含
+  SQ2_NO_UBWC_MODIFIER: userspace (minigbm/mapper) only consumes linear；
+  supported_format_modifiers只剩LINEAR/INVALID，真实format_mod_supported的硬件检查仍在。
+  下一步核对有效显示模块来源，配套恢复硬件支持的modifier广告与HWC导入，再做atomic/真实窗口。
+  不能据AddFB成功绕过plane能力或把只删旧限制当作上屏完成。
+- v33回归：27标准AHB/exec像素精确、45RGB GPU、45 held-lock flush/reread同步、
+  54离屏BufferQueue帧、108 NV12/P010 GPU/exec、标准P010 lockPlanes通过。
+  线性DRM18通过/3FP16拒绝；同轮再验UBWC导入24通过/6FP16拒绝。
+- ARM64 -Werror、真实RGB布局validator ASan/UBSan边界与allocator输入边界测试通过。
+  未重复旧全套95测试；本轮未做ACodec/HDR/性能/休眠验收。
+
+证据：out/qualcomm-full-stack-20261108/mapper5/{ubwc-layout-v1,v32,v33}/及result-v33.json。
+v32/device-device.txt保存UBWC GPU与首轮DRM结果（两类新诊断行有字面\\n，v33已修正）；
+v33/device-device.txt是完整回归与修正后DRM枚举。build-command-v32/v33.json、BUILD.json、
+experiment.json、run.sh、host-tests.txt、final-health.txt与独立kernel-ubwc-layout.c/txt记录复现。
+公开QtiGralloc.h来自固定17ef14f5…，以精确字节固定为QtiGralloc-contract.h；仅用于命名契约，
+不是把该版本当作donor二进制精确来源。原始日志/私有库仍留out。
+
+最终boot仍b56c010f…；原HWC23407/SF23546/system_server24809/OMX18434保持；
+v32/v33四个临时服务PID均退出，Android根内Binder仍1ff:5、mode0666。
+从保留initramfs通过/proc/1/root/dev/binder直接stat会跟随绝对symlink到保留根的1ff:1，
+因此必须nsenter到Android根后stat -L核验，不能把这个差异误判成Binder恢复失败。
+libui/libgui/持久OMX原hash未变，Venus sys_error=0/insts=0/vb2_bytes=0；
+ESP可用1355380KiB、logs103388KiB。期间网络间歇不可达，随后恢复，同boot完成取证。
+v12突发30输出/25图、292/300回调、PM、KGSL/msm_vidc/QTI HWC/WC替换等目标仍未解决。
+
+## 2026-11-08：ACodec原生Surface受控30帧通过，HWC取得真实面板
+
+最终功能诊断 **mapper5/system-surface-v13**：
+OEM OMX→真实远程HIDL→ACodec→原生ANW→ImageReader BufferQueue，标准mapper5/AIDL/
+原厂gralloc后端，共30帧320×240 AVC的像素与独立FFmpeg参考逐字节一致，
+ImageReader PTS从0到966657000ns、步长33333000ns，EOS及释放通过。
+重组NV12共3456000字节，SHA256
+fbc2d7c848ccf07b2a1a6d7e82fbbad71405df0acf6ee6b2f948ef01b48108e7。
+初始4输入/30输出槽位，首次SOURCE_CHANGE后18输出；12个输出索引复用2次、6个使用1次。
+这是真实框架原生Surface功能验证，**按消费者收帧进度释放下一输出，不是吞吐或物理视频验收**。
+
+本轮落地修正：
+- 原start失败由真实Venus CAPTURE S_FMT EBUSY(16)导致：OMX先预留18槽位，
+  ACodec为BufferQueue调整数量时又设置格式。桥仅在显式native-layout、无开流/排队、
+  CAPTURE所有槽位未导入且无metadata映射时，真实REQBUFS(0)→S_FMT→恢复相同数量；
+  错误和数量变化保留为失败，已使用队列仍busy。随后ACodec实际协商到30槽位。
+- 私有实验把SF以root运行，原厂libgsl按getuid选择card而非render，SF在HWC连接时抢先成为master。
+  v7抓到实际SF primary fd；反汇编及字符串核实root选card、非root选render。
+  v8按实际init UID1000/GID1003/groups1026,3009/SYS_NICE启动SF，但私有Binder默认0600阻塞。
+  隔离器现继承三个原Binder节点uid/gid/mode，仅修改新命名空间内节点；v9起SF成功注册。
+  HWC实际drmSetMaster=0、drmIsMaster=1，SF使用renderD节点，真实LGD面板2880×1920@60Hz；
+  不再headless。服务SELinux仍为私有实验继承上下文，未验证正式init/SELinux部署。
+- 逐帧探针显式请求并回读allow-frame-drop=0，且收到上一张图像后才释放下一帧；
+  使用现有EOS后收帧逻辑。1ms轮询只用于诊断等待，不改变产品播放路径。
+
+保留的失败与剩余边界：
+- v3诊断DSO目录不在vendor linker路径，OMX未启动；v4修正后取得真实EBUSY证据。
+- v5/v6/v7六帧离屏原生Surface像素/PTS通过；当时HWC仍headless。
+- v9旧客户端6个解码输出只收到5张图；v10重编已有EOS drain逻辑后6张像素/PTS通过，
+  但v11仍出现缺首帧，不能归因仅为旧客户端。
+- **v12突发30输出只收到25张ImageReader图像**，尽管回读allow-frame-drop=0；
+  收到的25张像素按各自PTS全部正确，缺显示序号0、5、10、16、18。
+  v13受控30帧通过不消除这个突发交付问题，更不证明原292/300渲染回调缺口修复。
+- 实际启动动画以graphics身份运行：v10缺ANDROID_ROOT导致未创建图层；
+  v11补齐环境后申请RGBX usage=0x10000900，原厂判为UBWC，被当前线性mapper/allocator拒绝。
+  SF client-target usage=0x1a00也被拒，仍有0xb00 Planner缓冲退路。
+  v11截图为黑色，无成功提交的测试窗口；KMS中旧/空白FB不当作QTI图形缓冲上屏证明。
+  下一步实现真实UBWC布局、compression/modifier、planes与KMS/GPU导入，不能仅清usage或伪报线性。
+- 视频allocator实际收到0x20400903，无需因SurfaceUtils旧usage=0x20402903盲目放开bits。
+  native服务布局仍固定usage；流中尺寸DRC、全部codec/HDR/secure、物理窗口/视频、性能、PM仍待实现。
+
+证据out/qualcomm-full-stack-20261108/mapper5/system-surface-v1..v13/；
+v13/{result.json,fixture.json,client-build-command.json,BUILD.json,host-tests.txt,final-health.txt}、
+device/{client,logcat,allocator,composer,outer,sf-dump}.txt及frames/。
+v12/result.json明确失败；v10/result.json仅六帧及物理模式；v11保留UBWC拒绝、黑图与DRM状态。
+公共main MediaCodec/ACodec源码只作接口解释，不冒充目标二进制精确构建来源。
+9项VIDC桥测试（包含ASan/UBSan空队列错误/ownership/count边界）、1项allocator构建输入边界、
+ARM64 -Werror与共享HEVC/HDR探针编译、shell语法及diff-check通过；未重复旧95项整套验收。
+
+最终boot仍b56c010f…；默认SF23546/HWC23407/system_server24809/OMX18434已恢复，
+8个临时服务PID均退出，正常Binder仍1ff:5、面板2880×1920@60Hz；
+Venus sys_error=0/insts=0/vb2_bytes=0。libui/libgui/持久OMX原hash保持，
+ESP可用1355384KiB、logs103384KiB。测试期间有短暂SSH失联，重连后取证，没有要求用户再次唤醒。
+没有重启、EFI写入、持久HAL替换或用户数据改动。正常OMX继续AVC-only/RequiresSwRenderer=1。
+完整KGSL/msm_vidc/QTI HWC/WC替换与其余验收目标仍active；所有源码改动未提交推送。
+
+## 2026-11-08：补齐RGBX/BGRA，接通原生缓冲到真实DRM framebuffer
+
+最终图形候选 **mapper5/v30**，另有只更新DRM诊断的 **drm-v31**。
+本轮核对现机DRM HWC确实调用GraphicBufferMapper的FourCC/modifier/尺寸/平面metadata导入接口；
+公开drm_hwcomposer main源码仅用于解释接口，未当成目标二进制的精确源码或HWC完成证明。
+原厂公共gralloc API实测RGBX/BGRA在CPU/GPU及0xb00 GPU+composer usage下均为线性，
+真实component mask分别0x1c00/0x101c00。共享后端据此接受两格式；
+mapper5对RGBX只声明RGB三个分量、32位sampleIncrement，FourCC XB24；
+BGRA按B/G/R/A实际顺序声明8位分量，FourCC AR24，不调换缓冲内容或伪造RGBA布局。
+
+设备验证：
+- 五种RGB格式×三尺寸×三轮，共45缓冲metadata/CPU/独立exec共享字段/dump及生命周期通过；
+  fd稳定，不调用旧mapper实现。原标准AHB CPU/exec的27缓冲回归通过。
+- 标准AHB经原厂GPU采样/写回/native fence45轮，加保持CPU锁定的flush→GPU→reread45轮，
+  像素全部精确。RGBX写入非255的X字节，采样仍为alpha1；GPU写回仅验证有效RGB分量。
+  BGRA采样与CPU写回分别验证真实通道顺序，不通过CPU上传转换取得成功。
+- 原54帧EGLWindow/ImageReader及108 NV12/P010 AHB/GPU/exec（含VIDEO_DECODER usage）回归通过。
+- 新quest2-mapper5-drm-probe以**无CPU usage=0xb00**分配七种格式、三个尺寸：
+  64×64、130×74、1280×720。使用标准mapper5 metadata、实际pixel fd[0]执行
+  DRM PRIME import→AddFB2→GETFB2字段回读→RMFB→GEM_CLOSE；QTI第二fd是metadata，不当作UV fd。
+  RGBA/RGBX/BGRA/RGBA10/NV12/P010共18个FB创建及释放成功。
+  未调用SET_MASTER、没有atomic commit或modeset，没有触碰当前物理桌面的显示所有权。
+
+关键能力边界：
+- v30原DRM测试因三次FP16 AddFB2返回EINVAL而退出1，未删除失败证据。
+- drm-v31读取实际UNIVERSAL_PLANES目录，8个plane均无ABGR16161616F（AB4H）；
+  三次FP16拒绝单独计unsupported_rejected=3，非成功，也未改其GPU用途或伪报成整数格式。
+- 同一实际plane目录也无ABGR2101010（AB30，Android RGBA1010102），尽管三个AddFB2成功。
+  因此18次FB创建只有15次格式也被plane广告；仍未验证plane/CRTC组合、带宽、modifier或真实上屏。
+  对FP16/RGBA10，下一阶段应完成GPU合成转换到支持的目标或以硬件证据扩展显示格式；
+  不能将创建FB、GPU采样或旧HDR ImageReader结果拼接成HDR物理显示验收。
+- ACodec native Surface仍受私有Binder缺SurfaceFlingerAIDL阻塞；未修改libui查询、伪造compositor，
+  未采用私有getService拦截或替换全局allocator来掩盖该缺口。完整QTI HWC/显示内核移植仍待实施。
+
+构建及证据out/qualcomm-full-stack-20261108/mapper5/：
+build-command-v30.json、v30/BUILD.json、experiment-v30.json、test-framework-v30-device.txt、
+test-framework-v30-only-device.txt、drm-v31/{BUILD.json,experiment.json,device.txt}、
+display-integration-audit/{FETCH.json,rgb-layout-device.txt}、result-v30.json、
+host-validation-v30.json、final-health-v30.txt。
+v28仅编译RGB扩展；v29因本地主机DRM头路径错误未完成；v30改用NDK原有DRM UAPI头。
+ARM64 -Werror、旧EGL探针模式编译、1项父输入边界测试、Python/shell语法及diff-check通过；
+未重复旧整套95/30项回归。
+
+最终boot b56c010f…、SF2858/system_server3322/OMX18434及原allocator/composer保持，
+私有manager1745/allocator1823已退出。Venus sys_error=0/insts=0/vb2_bytes=0；
+系统libui/libgui/OMX hash和Android Binder1ff:5保持，ESP可用1355428KiB、logs103340KiB。
+无重启、EFI写入、全局服务替换或userdata改动；源码/文档未提交推送，目标仍active。
+下一步接入真实SF/HWC系统服务与ACodec Surface，并处理上述合成目标/usage/格式约束；
+KGSL、下游msm_vidc、WC后端替换、全部codec/HDR/secure、PM和跨设备/性能要求不缩减。
+
+## 2026-11-08：跨真实HIDL的原生AVC解码30帧通过
+
+最终候选 **mapper5/hidl-decode-v8**，使用未改surface-v3原生实验服务和mapper5/v27：
+真实远程IOmx/IOmxNode输入ashmem，输出通过标准AHB/AIDL allocator分配并以ANW_BUFFER导入，
+硬件直接写入这些原生缓冲。可见320×240 NV12共30帧，逐帧像素与独立FFmpeg解码完全一致；
+PTS为0至966657、步长33333，完整单调且无重复。总3456000字节，
+SHA256 fbc2d7c848ccf07b2a1a6d7e82fbbad71405df0acf6ee6b2f948ef01b48108e7。
+
+初始4输入/18输出缓冲；首个真实SOURCE_CHANGE触发禁用输出、归还释放、查询/提交port、
+启用并重分配6缓冲。新port为320×512、stride512/scan512，crop320×240；
+mapper5元数据UV offset262144、capacity393216与实际像素匹配。
+6个输出缓冲各填充5帧，EOS后等待Loaded→Idle→Executing→Idle→Loaded完整生命周期，
+全部输入/输出ownership归还，freeBuffer/freeNode成功。检查服务maps有mapper.quest2，
+无旧mapper实现。这里验证首次source change，尚不是流中尺寸往返DRC。
+
+诊断纠正：
+- v4误拒绝HIDL合法的零FD/零int NO_FENCE句柄，修正后仍校验真实单FD fence并等待。
+- v5/v6在第二个有像素FBD的PTS处失败。v7保留全部回调，六帧内容逐帧匹配参考，
+  时间戳0/66666/99999/33333/166665/133332对应原样本的I/B/B/P/B/P显示顺序。
+  ffprobe确认该输入含B帧，旧探针错误地将AU解码次序当作presentation time，非硬件丢帧或乱序。
+- v8由ffprobe frame pkt_pos建立AU到显示次序的PTS映射，重复闭合六帧序列5次；
+  保留严格帧数、唯一PTS、最终顺序与独立像素检查，没有重排回调或修改解码器掩盖问题。
+  历史普通软件输出六帧的像素证明保留，但旧合成时间戳测试不能证明原生B帧PTS契约。
+
+证据out/qualcomm-full-stack-20261108/mapper5/hidl-decode-v8/：
+build-command.json、build.txt、fixture.json、sq2-h264-vector.h、test.sh、run-command.sh、
+experiment.json、device.txt、frames/、reference.nv12、omx-maps.txt、result.json、
+BUILD.json、validation.txt、final-health.txt。v4-v7失败记录保留在同级相应目录。
+ARM64 -Wall/-Wextra/-Werror构建和实机自检通过；本轮未重复未修改的历史主机回归。
+
+最终boot b56c010f…、SF2858/system_server3322/OMX18434及系统allocator/composer保持；
+五个私有服务实际PID均已退出，Venus sys_error=0/insts=0/vb2_bytes=0，
+ESP可用1355432KiB、logs103336KiB，系统libui/libgui/OMX文件hash不变。
+未重启、写EFI或替换全局服务，源码/文档未提交推送。
+
+下一步是实际ACodec native Surface/compositor接入。当前私有Binder没有SurfaceFlingerAIDL，
+不能据HIDL解码成功宣称Surface完成。本轮没有HIDL输出GPU采样或真实fence产生的证明，
+不能借用v27私有OMX GPU结果拼接成全链路验收。服务仍仅实验preset ANW/固定CPU-readable
+NV12 usage，逐节点协商、流中DRC、flexible格式/其他usage和正式init/SELinux待做。
+完整目标包括SF/HWC、KGSL/下游msm_vidc、WC后端替换、全部codec/HDR/secure、
+PM/渲染回调及性能/功耗/跨设备验收，保持active。
+
+## 2026-11-08：真实HIDL原生缓冲注册及框架隔离基线
+
+surface-v3使用真实servicemanager、hwservicemanager、mediaserver、OMX和AIDL allocator，
+在私有Binder/挂载命名空间执行未改NDK MediaCodec/ACodec。私有VINTF屏蔽仅在该命名空间
+没有启动的两个C2声明；不删除全局软件C2服务，不恢复本项目退休C2实现。
+
+quest2-omx-native-hidl-probe-v3通过真实远程IOmx/IOmxNode，提交输出port definition，
+启动Loaded→Idle后注册4个ashmem输入和18个标准AHB/mapper5 ANW输出；
+实际完成Idle→Loaded、释放所有buffer及freeNode，客户端和服务maps无旧mapper实现。
+本次只验证导入和状态生命周期，**decoded_frames=0**。前节v27的30帧属于独立私有OMX诊断。
+
+显式QUEST2_NATIVE_SURFACE_TEST候选提供具体NV12及preset ANW，拒绝dynamic/secure。
+quest2-omx-native-layout.cpp通过公共gralloc几何临时分配取得布局，不将libandroid/EGL链接到vendor服务。
+当前固定consumer usage=0x20400b03，尚未完成逐节点协商或服务模式DRC，不能安装为持久服务。
+原生MediaCodec/ImageReader已经创建，但configure在私有Binder等待SurfaceFlingerAIDL，
+因此没有原生Surface解码帧；未伪造服务或修改libgui。公开main源码仅为定位参考，不当作目标ABI。
+
+未带实验宏的普通服务独立构建回归：6帧AVC、PTS全部精确，可见NV12 691200字节，
+SHA256 c1b286b63c77267d082430de52b30f8b1c71a91b78fb3b2ac75f00d4c198a6fd。
+参考由实际探针ELF内嵌码流提取后用FFmpeg生成；旧缓存ref.nv12属于另一输入，不用于本次判定。
+30项相关主机测试及ARM64 -Werror编译通过。
+
+证据out/qualcomm-full-stack-20261108/mapper5/：
+result-surface-v3.json、surface-v3/BUILD.json、surface-v3/probe-build-command-v3.json、
+surface-v3/default-build-command.json、test-hidl-native-v3-device.txt、hidl-native-v3-omx-maps.txt、
+test-surface-v3-device.txt、surface-v3-logcat.txt、default-regression-result.json、
+host-validation-surface-v3.txt、final-health-surface-v3.txt。最终源码hash以result-surface-v3.json为准；
+服务在最后注释修改后重编译，二进制逐字相同。原始数据和私有库只留out/private。
+
+当轮结束boot b56c010f…、SF2858/system_server3322/OMX18434保持，私有服务已退出。
+Venus sys_error=0/insts=0/vb2_bytes=0，ESP可用1355444KiB、logs103324KiB。
+无重启、EFI写入、全局服务替换或userdata改动；源码未提交推送，整栈目标仍active。
+下一步完成远程HIDL实际解码，再接真实ACodec Surface/compositor；全栈其余要求不缩减。
+
+## 2026-11-08：mapper5接通真实OMX原生解码缓冲，30帧往返DRC通过
+
+最终候选 **mapper5/v27** 在私有Binder/挂载命名空间，用未修改系统libui的标准
+AHardwareBuffer→AIDL allocator→原厂gralloc1分配真实OMX输出缓冲，Stable-C mapper5提供布局。
+HEVC/NV12共30帧、320×240→1920×1080→320×240、逐帧可见NV12 SHA与PTS全部匹配；
+GPU直接采样同一DMA-BUF，30帧bad=0、最大误差0.00048637（容差0.00055），真实native fence通过。
+首18帧六个buffer各复用3次，含初始配置共3次重配置，EOS及buffer/OMX实例回收通过。
+这不是系统ACodec Surface/HWC显示，也不是性能或解码延迟验收。
+
+实现：
+- allocator接受标准VIDEO_DECODER bit22（4194304），原样交给gralloc1；保留QTI uncached bit29。
+  实际OMX分配usage=0x20400103，CPU仅用于读取验证，不上传解码像素到GPU。
+- quest2-native-video-capture.c新增QUEST2_NATIVE_MAPPER5构建模式；AHB持有原生句柄，
+  新quest2-mapper5-video-buffer.cpp用标准metadata取stride/plane/capacity，临时mapper import随后free，
+  AHB存活到对应OMX buffer释放。GPU使用eglGetNativeClientBufferANDROID取得真实AHB。
+- SOURCE_CHANGE后释放CAPTURE再S_FMT/HFI协商保持，临时AHB决定新布局；未只改metadata伪造padding。
+  实测320×240使用512字节stride/512 scan，1080p使用2048/1536；不能按普通Venus对齐硬编码。
+- 每次AHB分配及finish检查maps，无旧mapper3/4实现、私有getService或CPU上传桥；
+  原厂旧HIDL接口库与EGL自身查询回退仍存在，不声称消除了所有旧接口。
+- 单实例、NV12、零crop原点的诊断限制保持；不能直接作为正式OMX服务或取消RequiresSwRenderer。
+  uncached仍使用MSM GEM WC，KGSL之前必须替换。
+
+回归：
+- 标准AHB的三种具体NV12/P010格式×三尺寸×三图案×四usage，共108个buffer。
+  usage为0x133/0x20000133/0x400133/0x20400133，各27个；原厂GPU108帧容差通过，最大0.00048447。
+  生产者释放后108次独立exec导入CPU像素精确；标准P010 lockPlanes共72次。
+- RGB直接metadata/dump/共享字段、27 AHB CPU/exec、27原GPU轮次、27 held-lock同步、
+  54 EGLWindow/ImageReader帧回归通过，FRAMEWORK_CLIENT_EXIT=0。
+- ARM64 -Werror构建、旧native capture构建模式语法检查、32项allocator/OMX/VIDC相关主机测试通过；
+  未重跑历史95项，未做延迟/功耗对比。
+
+证据out/qualcomm-full-stack-20261108/mapper5/：
+build-command-v27.json、v27/BUILD.json、experiment-v27.json、test-framework-v27-device.txt、
+test-omx-v27{,-inner}.sh、test-omx-v27-device.txt、omx-v27-expected.json、omx-v27-frames/、
+omx-v27-bridge.txt、result-v27.json、host-validation-v27.txt、final-health-v27.txt。
+mapper与v26相同cac9b3c5…；allocator1f8fe72b…，解码探针79d26075…，YUV探针1c99a297…。
+
+最终boot b56c010f…，SF2858/system_server3322、minigbm2826/composer2820/OMX18434保持；
+私有manager9367/allocator9689已退出，Venus sys_error=0/insts=0/vb2_bytes=0。
+system libui c6210d68…、Android namespace Binder1ff:5未变；必须在nsenter中stat，
+从initramfs跟随/proc/1/root/dev/binder的绝对symlink会落回调用者/dev，不能用于比较。
+ESP可用1355456KiB、logs103312KiB。本轮无重启、EFI写入或全局HAL替换，改动未提交推送。
+
+下一步必须把此缓冲契约接入OMX→HIDL→ACodec的系统Surface/BufferQueue，
+处理flexible/implementation-defined requested-format共享语义、其他实际usage和正式init/SELinux。
+SF/HWC/物理显示、KGSL、下游msm_vidc、全部codec/HDR/secure、PM/渲染回调及跨设备/性能验收
+仍未完成；完整显示栈目标保持active。
+
+## 2026-11-08：mapper5/v26接通NV12/P010标准AHB、GPU与独立exec导入
+
+新实现覆盖明确的非保护、线性、偶数宽高、progressive格式：
+vendor NV12 0x7fa30c04、标准P010 0x36、Venus P010 0x7fa30c0a。
+不把这些具体格式当成完整flexible YUV/implementation-defined支持。
+原厂原始gralloc1对0x23请求在本轮诊断中返回5，现代allocator仍明确拒绝该格式；
+后续须同时解决格式选择和PIXEL_FORMAT_REQUESTED跨进程持久语义，不能只换格式号后伪报metadata。
+
+布局来自原厂gralloc1尺寸/stride/format/usage和公共grallocutils函数：
+GetBufferSizeAndDimensions取得aligned宽高/容量，再以aligned尺寸调用GetYUVPlaneInfo。
+校验实际fd容量、Y/UV component/subsampling/步长/stride/scan/size与平面不重叠范围。
+诊断实证：130×74标准P010实际stride144、Y字节stride288；
+NV12某些GPU用途会得到512级padding，不能硬编码常见Venus128/32规则或直接使用逻辑宽高。
+原厂P010 Y step错误为1，按其物理16bit容器归一为2；标准P010还将UV scan报为全高、
+size包含一额外padding字节，验证原厂形态后归一scan为半高并保留真实size。
+这是metadata修正，不复制/重排像素，不修改原厂private_handle字段。
+
+mapper5输出两平面的标准PLANE_LAYOUTS与逐平面CROP：
+NV12 FourCC、8bit Y/Cb/Cr；P010 FourCC、16bit sample、10bit有效位、
+Y/Cb offset6、Cr offset22、UV sampleIncrement32bit，逻辑样本尺寸与实际padding分别描述。
+共享原厂metadata的interlaced YUV导入当前拒绝，未虚报交错支持。
+allocator新增上述具体格式和PRIVATE_UNCACHED bit29，usage原样传后端；
+UBWC偏好仍由原厂实际布局判定，真实压缩/保护请求继续拒绝。
+
+新增quest2-mapper5-yuv-probe：
+- 标准AHardwareBuffer_allocate经私有AIDL/default分配54缓冲：
+  3格式×128×72/130×74/1920×1080×3图案×cached/uncached。
+- stable mapper导入/metadata/range验证后写真实8/10bit图案，标准EGLImage与
+  GL_EXT_YUV_target原厂GPU采样到FP16，逐像素归一化比较，54帧bad=0。
+  容差0.00055，最大观测误差0.00048447；这是浮点采样容差通过，不写成GPU逐字节完全相同。
+  P010图案包含相邻10bit码值，未退化为8bit；真实native fence导出/等待通过。
+- 使用标准AHB socket传输给独立exec子进程；生产者先销毁GPU对象/释放所有import与AHB，
+  再发控制token；子进程54缓冲metadata/CPU逐字读回匹配，退出0。
+- 标准P010在父/子各18次，共36次AHardwareBuffer_lockPlanes成功返回三分量，
+  Y pixelStride2、Cb/Cr pixelStride4与真实行距、逐sample数据匹配。
+  vendor格式对NDK分类器仍opaque，通过Stable-C平面metadata访问，不伪称其NDK lockPlanes为3分量。
+- RGB直接metadata/exec/dump27缓冲、标准AHB27缓冲、原GPU27轮、
+  held-lock同步27轮和离屏BufferQueue54帧全部回归通过；无旧mapper实现/CPU上传桥。
+
+最终v26，v25仅编译初步后端、未部署。命令/证据位于out/qualcomm-full-stack-20261108/mapper5：
+build-command-v26.json、v26/BUILD.json、experiment-v26.json、test-framework-v26-device.txt、
+result-v26.json、final-health-v26.txt、host-validation-v26.txt；先行原厂几何诊断为yuv-utils-*。
+固定公共GetYUVPlaneInfo签名来自已有pins gr_utils.h；AOSP main参考Gralloc5/AHardwareBuffer源码
+仅帮助理解框架行为，最终以本机原版libui的lockPlanes实测为准。
+本轮ARM64 -Werror、shell语法、1项allocator父输入边界测试及diff-check通过，未重跑旧95项。
+
+最终boot b56c010f…、SF2858/system_server3322、minigbm2826/composer2820/OMX18434、
+manager1533/1536/18328保持；私有manager17956/allocator18034及YUV子进程退出。
+系统libui c6210d68…、global Binder1ff:5不变；Venus sys_error=0/insts=0/vb2_bytes=0。
+ESP可用1355460KiB、logs103308KiB。无重启、EFI写入、全局默认替换或用户数据清理；
+源码/文档仍未提交推送，整栈目标继续active。
+
+下一步接真实解码缓冲与系统OMX native Surface：旧native-gpu-v23的原厂codec usage
+为PRIVATE_UNCACHED 0x20000000，但具体gralloc producer还含VIDEO_DECODER；
+不能将本轮0x20000133 CPU图案验证当作完整视频usage/解码路径已验收。
+flexible/implementation-defined、动态重配置、YUV色彩/HDR、正式init/SELinux、
+SF/HWC/物理显示、KGSL/下游msm_vidc、WC后端替换、PM/回调缺口、性能和跨设备仍待完成。
+
+## 2026-11-08：mapper5/v24完成线性RGB缓存同步与metadata dump
+
+新增flushLockedBuffer/rereadLockedBuffer，不通过旧mapper实现。
+原厂IonAlloc::CleanBuffer反汇编确认clean为DMA_BUF_IOCTL_SYNC END|RW、invalidate为START|RW；
+新接口对已导入且locked的像素fd[0]执行相同操作，保留CPU指针和映射，不替代最终unlock。
+EINTR/EAGAIN重试，其他ioctl失败报告NO_RESOURCES；无效或未锁buffer报告BAD_BUFFER。
+在阻塞ioctl外释放mapper全局mutex，以pending引用防止释放句柄；原lock-fence的并发保护保持。
+metadata是实际/memfd:none共享内存，新增regular/tmpfs检查；共享字段用CPU屏障排序，
+不将普通shared memory冒充像素DMA-BUF，也不对未知非coherent metadata布局静默报成功。
+
+dumpBuffer/dumpAllBuffers对21类已支持metadata生成快照，然后在mutex外调用客户端回调。
+单buffer、所有import（同一底层buffer两个导入均枚举）、零buffer、invalid/free后错误通过；
+回调重入getMetadata并逐字段比较，以及回调释放正被dump的额外import均通过，无死锁/UAF观测。
+这里只dump当前支持的metadata，不代表动态HDR/YUV字段已经实现。
+
+v24最终设备测试退出0：
+- 27个直接分配/两次导入buffer，21metadata、共享NAME/blend/色彩27次独立exec、dump及重复flush/reread、
+  非法/未锁/已释放句柄、锁定生命周期检查通过，fd始终7。eventfd pending-lock并发回归通过。
+- 未改系统libui的标准AHB CPU/跨进程导入27缓冲通过。
+- 原27轮GPU采样/写回/native fence回归通过。
+- 新增27轮held-lock GPU：mapper lock RW后CPU写图案，flush后GPU采样逐像素验证；
+  GPU写回并等待真实native fence，reread后直接读取原始CPU地址逐像素验证，期间不unlock/relock/remap。
+  三格式RGBA8/RGB10A2/FP16、三尺寸64×65/129×65/1280×720各3轮全部匹配。
+- 9个EGLWindow→ImageReader窗口共54帧，像素/呈现时间戳全匹配；maps无旧mapper实现/CPU上传桥。
+
+v21/v22仅为C探针包含官方Stable-C头的编译失败，未部署；头中裸enum名需C前向typedef及
+stdalign/stddef，不复制接口布局。v23首次实机通过；v24进一步释放同步mutex、限制metadata backing
+并增加dump callback-free验证，为本轮最终候选。allocator服务业务逻辑保持v20，metadata输入校验更新。
+ARM64 -Werror、共享EGL探针旧模式编译、shell语法和1项allocator父输入边界主机测试通过。
+未重跑旧95项；未强制制造DMA ioctl内部等待竞争，因此不能把eventfd测试说成该情景实测。
+
+证据out/qualcomm-full-stack-20261108/mapper5/{build-command-v24.json,v24/BUILD.json,
+experiment-v24.json,test-framework-v24-device.txt,host-validation-v24.txt,final-health-v24.txt,result-v24.json}。
+最终boot b56c010f…、SF2858/system_server3322、minigbm2826/composer2820/OMX18434和三个manager保持；
+私有manager14721/allocator14808已退出。system libui c6210d68…、global Binder1ff:5不变。
+Venus sys_error=0/insts=0/vb2_bytes=0；ESP可用1355460KiB，logs103308KiB。
+本轮没有重启、EFI写入、全局默认替换或用户数据清理，源码/文档仍未提交推送。
+
+剩余：mapper5 YUV/P010、完整dataspace/动态HDR、实际UBWC/保护路径、reserved allocation、
+正式init/SELinux与系统默认；OMX原生Surface、SF/HWC/物理显示、KGSL/下游msm_vidc、
+MSM GEM WC后端替换、PM/渲染回调和性能/功耗/跨设备验收。完整显示栈目标继续active。
+
+## 2026-11-08：mapper5接通原厂EGL，27轮GPU与54帧离屏窗口通过
+
+最终候选 **mapper5/v20**：未修改系统libui，通过标准AIDL allocator/default与Stable-C mapper5，
+真实AHB分配/CPU读写/独立exec导入27缓冲，生产者先release后消费者读回全部匹配。
+RGBA8/RGB10A2/FP16、64×65/129×65/1280×720各3轮GPU采样与写回，共27轮像素精确，
+实际native fence导出并由AHB lock等待。9个真实EGLWindow→ImageReader/BufferQueue窗口，
+各6帧共54帧像素与呈现时间戳精确。FRAMEWORK_CLIENT_EXIT=0。
+maps检查在GPU阶段和窗口阶段均通过：系统EGL前端、原厂Adreno及mapper.quest2实际加载，
+没有旧mapper3/4实现、私有getService桥或CPU上传桥。旧HIDL接口库仍间接存在，
+EGL自身仍尝试mapper2/3查询，失败后走现有gralloc1回退；不能称为消除了所有旧接口调用。
+
+修正与诊断：
+1. v16只有AHB CPU通过，EGL配置选择失败。v17增加gralloc.default别名仍失败。
+   v18记录真实EGL状态：Android前端eglInitialize返回真但版本-1/-1，原厂初始化实际
+   EGL_BAD_ALLOC，后续EGL_NOT_INITIALIZED；日志明确gralloc1/QTI extension初始化失败。
+   设备libhardware反汇编确认它检查realpath必须在HAL hw目录内，v17指向父目录的别名被拒绝。
+2. v19将原厂gralloc实体移到私有/odm/lib64/hw/gralloc.kona.so；
+   hw/gralloc.default.so和父目录gralloc.kona.so均解析到该同一模块。没有修改系统加载器。
+   GPU27轮通过，但首个窗口dequeue请求usage=0x10000103被allocator白名单拒绝。
+3. v20允许QTI bit28 UBWC偏好，仍按原厂IsUBwcEnabled拒绝真实压缩布局，usage原样传后端。
+   原厂CPU访问规则使本轮窗口保持线性；没有清除压缩位、改像素布局或将压缩metadata标成linear。
+   新selftest确认CPU-readable hint可分配，GPU-only压缩请求及protected请求拒绝。
+   这是线性窗口兼容，不是实际UBWC、保护内存或无CPU usage显示缓冲验收。
+
+mapper.quest2.so与v15逐字节相同：
+defa559518350d612164fb298d8a7f3b27b38fb2ff4a729e3daf403d90eee2eb。
+allocator5-service新增usage支持与断言：
+64ec748098506cadaa245c977ede0ce29e41cee1be731c2a2fbc0995a4dd002e。
+builder继承已验allocator/v12的原厂EGL/GLES/子驱动库与配置并逐件验证父hash，
+新增quest2-ahb-egl5-probe；隔离器--mapper5 --egl不绑定旧libui补丁。
+完整命令/产物与原始证据保存在out/qualcomm-full-stack-20261108/mapper5：
+build-command-v20.json、v20/BUILD.json、test-framework-v20-device.txt、result-v20.json、
+final-health-v20.txt、host-validation-v20.txt；v16-v19失败及反汇编证据保留以说明修正依据。
+本轮ARM64 -Werror构建、shell语法及1项allocator父输入边界主机测试通过；未重跑旧95项。
+
+最终boot b56c010f…、SF2858/system_server3322、minigbm2826/composer2820/OMX18434保持，
+system/vend/hw managers为1533/1536/18328，v20私有manager22250/allocator22327已退出。
+系统libui SHA c6210d68…不变，global Binder仍1ff:5；
+Venus sys_error=0/insts=0/vb2_bytes=0，ESP可用1355464KiB、logs103304KiB。
+本轮未重启/写EFI/替换默认HAL/清用户数据，新增源码及记录仍未提交推送。
+
+这次完成的是mapper5的离屏GPU/BufferQueue接入，尚非系统视频Surface或物理显示。
+下一步补flush/reread/dump、YUV/P010与完整metadata，再接OMX原生Surface及SF/HWC；
+原目标KGSL、下游msm_vidc、MSM GEM WC后端替换、HDR/secure、PM/回调缺口均未完成。
+没有延迟、带宽、功耗或跨设备结论，整栈目标继续active。
+
+## 2026-11-08：mapper5完整共享字段推进，原版libui/AHardwareBuffer已贯通
+
+最终候选mapper5/v15：mapper/allocator/metadata探针与v8逐字节相同；v8通过21类metadata，
+v15通过未修改系统libui的标准AHardwareBuffer分配/CPU读写/独立exec导入27缓冲。
+这是私有Binder/挂载命名空间的框架接口验收，未替换系统默认、未验收GPU/Surface/物理显示。
+
+1. 新增NAME、BLEND_MODE、RGB INTERLACED/CHROMA_SITING/CROP，共21类标准metadata。
+   NAME由AIDL allocate2的byte[128] name初始化（空/短名/完整128字节三类均实测）；
+   blend四个标准枚举可写，非法值拒绝。子进程exec读名称、改blend后父进程读回，
+   与dataspace/静态HDR、CPU像素、释放/引用和fd稳定共27轮全过。
+   用原厂copyMetaDataHandleToVa独立读回，并逐字节确认blend只改字段及对应status位，
+   不覆盖其他metadata。metadata原厂API、常量setter、pending fence并发回归保持通过。
+2. 旧QTI C metadata API没有NAME/blend接口，采用固定公开QtiGrallocPriv.h/QtiGrallocMetadata.h
+   的共享结构前缀，只访问到reservedSize。static_assert关键布局，metadata fd容量检查，
+   零offset mmap与原厂copy API逐字节比对后才使用；仍不读private_handle固定字段。
+   原厂tail与公开结构不同，不用sizeof(公开struct)作为原厂完整大小，不覆盖未知尾部。
+   reservedSize非零当前明确拒绝；已支持分配的零保留区返回成功/nullptr/0。
+3. 新增--mapper5隔离模式：unshare/MS_PRIVATE后私有ODM/mapper、native VINTF及binderfs，
+   确认/dev/binder设备号与原系统不同，再起独立servicemanager和AIDL /default。
+   系统libui SHA c6210d68…未变，无兼容补丁、LD_PRELOAD或getService拦截。
+   标准libandroid→libui→真实AIDL allocate2→mapper5完成RGBA8/RGB10A2/FP16，
+   三尺寸各3个共27缓冲；socket传输至独立exec消费者，生产者释放后仍像素精确。
+   maps检查mapper.quest2.so/gralloc.kona.so与libui存在、旧私有mapper和minigbm mapper不加载。
+
+集成发现与失败证据保留：
+- v9：此内核binderfs挂载已建立默认节点，BINDER_CTL_ADD的EEXIST可接受；仍必须确认隔离设备号。
+- v10：vendor优先LD_LIBRARY_PATH加载vendor libbinder，实际打开/dev/vndbinder，孤立环境无context
+  manager而等待。以往/quest2探针是真实远程调用，但不能凭它证明标准framework Binder域接入。
+  v11起allocator按candidate→system→vendor加载库，使用系统Binder，隔离/default注册成功。
+- v11-v13：普通sphal dlopen可成功不等于libui选择成功。目标Android17调用
+  AServiceManager_openDeclaredPassthroughHal，需要native mapper @5.0/quest2的VINTF声明。
+  声明仅放私有/odm，配置源码configs/quest2-native-mapper5.xml；sphal搜索/odm/lib64，
+  本机不搜索/odm/lib64/hw，因此stable-C候选放前者。v14/v15标准框架全部通过。
+- v14最终健康检查发现此前kill timeout包装PID留下私有manager/allocator；按exe、输出目录及
+  独立mount namespace核实后清理10个测试进程。v15改为记录exec后真实服务PID，退出先停实际
+  子服务，再等待watcher。重复27缓冲验收后确认所有额外manager/allocator消失。
+  不能把v10-v14旧trap记成完整清理成功；清理证据framework-cleanup-v14.txt保留。
+
+最终仅原servicemanager1533/vnd1536/hw18328、minigbm2826、composer2820、OMX18434，
+SF2858/system_server3322及boot b56c010f…保持。Venus sys_error=0/insts=0/vb2_bytes=0，
+ESP可用1355468KiB/logs103300KiB，全局Binder仍1ff:5；私有native声明不出现在全局ODM。
+无板级重启、EFI写入、默认HAL切换或用户数据处理。ARM64 -Werror、完整输入/产物hash及符号
+检查通过；本轮仅跑1项既有allocator构建主机测试，通过，不复用此前其他测试数量。
+证据mapper5/{v15/BUILD.json,build-command-v15.json,test-v8-device.txt,test-framework-v15-device.txt,
+final-health-v15.txt,result-v15.json,undefined-symbols-v15.txt,host-validation-v14.txt}。
+源码和文档仍未提交/推送，整体目标active。
+
+下一步：实现flush/reread及dump、完善dataspace/动态HDR和YUV/P010；再用新mapper5验证
+EGL/GPU/真实GPU fence/BufferQueue，接系统OMX Surface与SF/HWC。当前AHB像素不能替代GPU证据，
+原v12 mapper3 GPU测试不能算mapper5通过。KGSL/下游msm_vidc/uncached后端/HDR显示/secure/PM保持待完成。
+
+## 2026-11-08：mapper5共享色彩元数据与非阻塞fence等待已验证
+
+mapper5/v6在原直接gralloc/AIDL候选上新增DATASPACE、SMPTE2086、CTA861_3读写和STRIDE查询，
+共16类标准metadata。色彩直接使用原厂libqdMetaData的getMetaData/setMetaData(COLOR_METADATA)，
+不经mapper3/4实现，不读private_handle偏移、不用进程本地map伪装共享元数据。
+固定公开color_metadata.h/qdMetaData.h来源17ef14f5…，sizeof(ColorMetaData)=2804与原厂复制长度
+0xaf4一致；头文件、库及源码hash入BUILD。动态HDR尚不支持。
+
+真实AIDL /quest2 allocate2的27个RGB缓冲全部通过原有独立导入、CPU逐字节读回、生命周期和fd稳定检查。
+每个缓冲另外exec独立进程：父写BT2020_PQ与静态HDR，子导入读取并改为DISPLAY_P3/900nits，
+父立即读回新值；共27次通过。SRGB、DISPLAY_P3、BT2020_PQ、BT2020_HLG、SCRGB_LINEAR、
+UNKNOWN六类dataspace分别读回通过，改变dataspace不丢失HDR，清除一个HDR字段不覆盖另一个。
+用原厂API读回QTI色度/亮度单位，含缓冲尾哨兵检查；NaN/Inf/负亮度/非法dataspace/截断payload
+明确拒绝且原值保持。常量WIDTH setter返回BAD_VALUE；其他必需常量同样修正。
+
+修正lock在poll acquire fence期间持有全局mutex的问题：pending计数保留句柄，等待时释放mutex，
+返回后重新取得iterator并减计数。free拒绝pending/locked句柄；unlock未锁句柄返回BAD_BUFFER。
+实机线程wchan确认实际进入阻塞poll后，metadata查询和第二份导入的CPU读锁仍完成；
+pending free拒绝、信号后lock完成、接收fd关闭、unlock通过。此同步测试使用eventfd，
+只证明调度/生命周期，不冒充真实GPU fence验收；mapper5实际GPU/BufferQueue仍未验证。
+
+边界：HDR按QTI整数单位量化（色度1/50000，最大/内容亮度整数cd/m²，最小亮度1/10000）。
+dataspace目前转换显式且QTI可表示的standard/transfer/range组合及UNKNOWN；
+旧命名值、部分未指定分量、gamma2.6尚拒绝，不能声称全部dataspace已覆盖。
+NAME、BLEND_MODE等必需metadata、flush/reread/dump/reserved、YUV/P010和默认框架接入仍未完成。
+本次是RGB缓冲上的metadata传递验收，不是视频HDR解码、色调映射或物理HDR显示验收。
+
+最终临时AIDL服务/manifest已清理，原minigbm2826、composer2820、OMX18434、SF2858/system_server3322
+保持；boot b56c010f…未变，系统libui SHA c6210d68…不变，Venus sys_error=0/insts=0/vb2_bytes=0。
+ESP可用1355476KiB、logs103292KiB。无重启/EFI写入、默认HAL替换或用户数据清理。
+ARM64 -Werror、产物hash、符号检查通过；本轮未新增运行主机测试，不复用旧测试数量。
+证据mapper5/{build-command-v6.json,v6/BUILD.json,test-v6-device.txt,final-health-v6.txt,result-v6.json,
+undefined-symbols-v6.txt}；v4仅编译、v5共享metadata先行验证，v6为最终完整候选。
+源码/文档仍未提交推送，整栈目标active；下一步补NAME/blend及同步契约，再接未修改libui/GPU/显示。
+KGSL/下游msm_vidc/uncached后端、系统OMX Surface、HDR显示/secure和PM仍在原目标内。
+
+## 2026-11-08：直接 gralloc 的 mapper5 与 AIDL allocator 真实 IPC 已贯通
+
+恢复目标后，mapper5/v3已实现独立Stable-C AIMapper_loadIMapper入口和配套AIDL allocator v2，
+直接调用原厂gralloc1的allocate/retain/release/lock/unlock及公开导出的grallocutils几何函数。
+不经mapper3/4实现，不读private_handle固定偏移；对外仍是原厂2fd+26ints真实句柄。
+mapper5缺完整能力，仍是显式非保护线性RGB候选，未切换系统默认。
+
+实测：
+- v2直接gralloc分配：三格式RGBA8/RGB10A2/FP16、64×65/129×65/1280×720各3个，
+  27缓冲、12类标准metadata经Stable-C官方编码/解码通过；两次独立导入（第二次从导入句柄
+  再导入），先释放原分配，写入后释放第一导入，第二导入仍逐字节读回正确，最终fd稳定7。
+- v3真实AIDL Binder服务注册android.hardware.graphics.allocator.IAllocator/quest2成功。
+  客户端AIBinder_isRemote=true，接口version=2/suffix=quest2；服务allocate2创建真实缓冲，
+  dup fd到AIDL结果后释放本地分配引用。客户端27缓冲同样完成两次独立mapper5导入、
+  释放传输句柄、12类metadata、逐字节写入/读回与释放，fd保持稳定。
+  这是远程服务，不是仅在进程内调用BnAllocator；另外保留先前local selftest证据。
+- 验证错误路径：无CPU usage的lock拒绝并关闭接收fence fd；越界rect拒绝；
+  lock持有时free拒绝、重复free返回BAD_BUFFER、free后metadata返回BAD_BUFFER、
+  未实现HDR metadata返回UNSUPPORTED，metadata输出尾部哨兵保持。fence错误路径用eventfd，
+  不是mapper5真实GPU fence等待验收；旧v12 GPU证据不能套用到新mapper5。
+
+重要纠正：v1像素/metadata27轮全部通过后，过严的“任何旧接口库都不得加载”检查失败。
+原厂gralloc/libqdMetaData的DT_NEEDED本来含旧mapper接口库、libhidlbase和libgralloctypes。
+v2/v3验证不加载旧mapper实现/private getService库；新mapper.quest2.so无IMapper/IQtiMapper
+调用符号。旧接口库仍间接映射，不能声称HIDL相关库全部删除；没有盲删原厂依赖。
+这里去掉的是运行时mapper3/4实现调用，不宣称二进制完全脱离旧接口依赖。
+
+新代码quest2-gralloc-backend.h统一直接分配/生命周期和CPU usage转换；
+quest2-gralloc-utils-abi.h只声明固定公共函数ABI结构，与固定gr_utils.h对应；
+尺寸/stride由原厂gralloc1读取，scan/size/plane用原厂函数计算并相互核对，拒绝UBWC/protected。
+mapper5的C稳定接口和metadata编码来自hardware/interfaces 488942f8…；
+allocator AIDL使用冻结v2、hash9499fec09c544e9de5be3c87125721600f8ade66。
+来源固定configs/quest2-mapper5-reference.json；原厂库及平台链接库/生成头hash记录BUILD。
+
+当前未实现：NAME/STRIDE等余下必需metadata，可写dataspace/HDR/blend及跨进程一致性、
+flush/reread/dump/reserved region、YUV/视频布局、现代allocator的其他格式/usage与扩展。
+AIDL只广告已覆盖RGB/单层/无保留区及已接CPU/纹理/渲染/合成usage，其他请求明确拒绝。
+完整mapper5契约和系统默认集成仍为false，不能凭C入口或27次IPC把它当正式可交付HAL。
+临时服务以root/shell环境运行，正式init身份/SELinux规则仍待接入。
+
+此次临时VINTF AIDL /quest2声明即可注册，无需重启servicemanager/hwservicemanager或OMX。
+退出trap结束服务并删除核对相同的临时manifest；最终service list只剩原/default。
+原minigbm2826、DRM composer2820、IOmx/IOmxStore18434正常，boot b56c010f…、
+SF2858/system_server3322未变，系统libui SHA c6210d68…不变，无旧版libui兼容补丁部署。
+Venus sys_error=0/insts=0/vb2_bytes=0，ESP可用1355480KiB、logs103288KiB。
+无重启/EFI写入/用户数据清理，当前改动仍未提交/推送。
+
+复现入口scripts/build-quest2-mapper5.py；最终命令mapper5/build-command-v3.json，
+AIDL头生成命令aidl-generate.json和输入pins保存在本地，builder核对固定引用及父库。
+ARM64 -Werror构建成功，产物hash、27远程buffer记录和未调用旧mapper实现符号已核验。
+证据mapper5/{v3/BUILD.json,test-v3-device.txt,final-health-v3.txt,result-v3.json,
+undefined-symbols-v3.txt}，v1失败保留。后续先补完整现代metadata/同步并接标准libui，
+再做GPU/BufferQueue/SF/HWC和视频Surface；KGSL、下游msm_vidc、HDR/secure、PM等目标不缩减。
+
+## 2026-11-08：原厂 RGB 元数据转为标准 mapper4 编码已验证
+
+allocator/v15增加显式mapper4导入/只读metadata候选，用于证明现代显示消费者所需的数据契约。
+它不是完整mapper4 HAL，也不是系统默认：createDescriptor、保留区、flush/reread、dump、
+可写metadata和HDR尚未实现并返回UNSUPPORTED，isSupported返回false，不广告可分配能力。
+客户端仍从真实原厂allocator3分配，标准passthrough loader显式加载mapper4候选并导入；
+mapper4内部通过标准mapper3 HAL转交原厂import/lock/free，尚未排除mapper3依赖。
+这项成果不能写成mapper5移植完成；最终直接mapper5/AIDL方案仍需实际实现。
+
+已通过三格式RGBA8/RGB10A2/FP16、三尺寸64×65/129×65/1280×720、各3个共27缓冲：
+12类标准metadata使用目标libgralloctypes编码，再用其公开解码函数逐项校验；
+含ID、可见宽高、层数、请求格式、DRM FourCC、线性modifier、usage、容量、
+非保护标志、无压缩及RGBA组件/平面布局。依据布局进行两次CPU lock写入和逐字节读回，
+释放通过；重复free返回BAD_BUFFER，未实现HDR请求返回UNSUPPORTED。
+不读private_handle固定偏移，也不另建像素存储或伪造保护/压缩能力。
+
+所有几何从原厂IQtiMapperExtensions取得，要求非保护线性RGB、单层、零offset、
+calculateBufferAttributes明确非UBWC、单平面、component/pixel step/stride/scan/容量一致。
+mapper4输出逻辑widthInSamples/heightInSamples为可见尺寸，stride/totalSize包含真实padding。
+v13/v14最初拒绝RGB，实机诊断与固定公开gr_utils.cpp一致：QTI RGB的subsampling=0/0；
+v15在严格确认完整RGB布局后将指数0转换为标准factor1，并未放宽到任意布局。
+FP16 1280×720的真实stride1408像素/11264字节、容量8110080被正确编码/读回。
+
+构建器可选mapper4-headers、aidl-headers、binder-headers、mapper4-platform，四项需一起提供；
+未提供时保持v12的mapper3/GPU路径。Gralloc4.h固定frameworks/native 2827a4a1…，
+完整SHA及来源见configs/quest2-mapper4-reference.json；实际target链接库/头文件hash记BUILD。
+配置仍只声明allocator3/mapper3，不将此不完整mapper4自动加入系统VINTF。
+隔离器可同时安放两版HAL，但包含mapper4的v15不能拿来代替v12跑一般libui分配。
+
+期间一次SSH No route to host，用户短按唤醒后恢复；boot b56c010f…及SF2858/system_server3322
+保持，未重启。不能据此称PM修复或确定故障根因。最终临时服务/manifest清理，
+IOmx/IOmxStore由18434恢复；原minigbm2826/DRM composer2820保持。
+Venus sys_error=0/insts=0/vb2_bytes=0，ESP可用1355484KiB、logs103284KiB。
+ARM64 -Werror、10项相关主机回归、产物hash验证通过，无EFI写入，未提交/推送。
+证据allocator/{v15/BUILD.json,test-v15-device.txt,final-health-v15.txt,result-v15.json}；
+失败v13/v14原始证据保留，源码quest2-native-mapper4.cpp、quest2-mapper4-probe.cpp。
+
+用户询问是否能跳过mapper3升级mapper5、整套高通视频栈是否仍需mapper：
+正常Android MediaCodec/Surface/GPU/HWC图形路径仍需要mapper职责，但不必保留旧版本3。
+直接mapper5配套AIDL allocator可避免长期HIDL转接和libui旧版后备补丁；升级本身不要求像素拷贝，
+性能要按实际同DMA-BUF、导入复用、fence、cache同步与解码到呈现时延测量，不承诺零损耗。
+下一步应将已验证几何契约用于现代mapper/allocator，不继续把导入验证层当最终显示栈。
+SF/HWC/物理显示、OMX原生Surface、KGSL/下游msm_vidc、HDR/secure/PM仍未完成。
+
+## 2026-11-08：标准 AHardwareBuffer→EGL/GPU 及真实 BufferQueue 通过
+
+allocator/v12在前阶段标准HAL与显式libui后备兼容候选上，实际接通系统libEGL/libGLES
+前端和原生高通驱动。构建器从已验父候选复制eglSubDriverAndroid.so，移除其旧私有
+libquest2-native-mapper.so依赖，使GPU也经标准HIDL loader选择mapper。原厂allocator未改。
+私有命名空间的--egl模式提供候选EGL目录及实际配置，清除LD_PRELOAD/LD_LIBRARY_PATH。
+实机renderer为Adreno680/ES3.2；maps确认标准mapper HAL、libEGL和原厂驱动，拒绝旧
+mapper3 CPU桥、v77 AHB上传桥、EGL wrapper和私有getService库，未发现这些库加载。
+
+1. 标准AHardwareBuffer_allocate→eglGetNativeClientBufferANDROID→EGL_NATIVE_BUFFER_ANDROID，
+   RGBA8888/RGBA1010102/FP16，64×65、129×65、1280×720，各3轮共27轮。
+   CPU写有界测试图案后原生EGLImage直接采样，GPU目标逐像素读回完全一致；
+   再GPU写入原AHB，导出真实native fence，交AHardwareBuffer_lockAndGetInfo等待，
+   按真实行距逐像素核对写回，EGLImage/texture/fence/AHB正常释放。
+   CPU写入仅生成测试源，不是生产路径上传桥；这不等于零CPU测试流程。
+2. AImageReader_newWithUsage→ANativeWindow→eglCreateWindowSurface→eglSwapBuffers→
+   acquireNextImageAsync→AImage_getHardwareBuffer，三格式三尺寸各6帧，共54帧。
+   实际获取acquire fence并经AHB lock等待，逐像素CPU校验；每帧归还AImage，销毁窗口/
+   context/reader成功。每种格式6帧都有不同图案，eglPresentationTimeANDROID设定的
+   时间戳与AImage_getTimestamp逐帧一致，防止重复旧帧被当作通过。
+   这是实际Android离屏Surface/BufferQueue消费者，不是SurfaceFlinger或物理屏幕显示。
+   保留先前native-video/OMX与系统Surface未集成的状态，不能用RGB窗口替代视频验收。
+
+v9的27轮AHB/GPU先通过。v10在RGBA8的18帧窗口通过后，尝试把RGBA8 context用于
+RGB10窗口时eglMakeCurrent拒绝；v11按每个EGLConfig创建匹配context后54帧通过。
+v12追加所有格式的逐帧不同图案及精确时间戳，27轮/54帧再次全过；不是修改驱动绕过检查。
+
+最终boot b56c010f…、SF2858/system_server3322未变；原minigbm2826、DRM composer2820
+仍运行，临时manifest与allocator已清理，IOmx/IOmxStore由6142重新注册。
+系统libui SHA仍c6210d68…；Venus sys_error=0/insts=0/vb2_bytes=0，ESP可用1355484KiB，
+logs103284KiB。无板级重启、EFI写入、全局HAL替换或用户数据清理。
+当前composer maps同时包含系统/vendor libui及minigbm mapper/gralloc，下一步不能只切应用端HAL。
+
+源码入口quest2-ahb-egl-probe.c；构建build-quest2-allocator.py、隔离器
+quest2-mapper-hal-namespace.c。ARM64 -Werror通过；10项既有相关主机回归通过，
+最终产物hash、移除的EGL依赖、27/54条实机通过记录均核验。没有新增镜像/启动备份。
+证据out/qualcomm-full-stack-20261108/allocator/{v12/BUILD.json,test-v12-device.txt,
+final-health-v12.txt,result-v12.json,composer-maps-v11.txt}，v9/v10/v11记录保留。
+
+下一步是SurfaceFlinger/RenderEngine/HWC对原生句柄及metadata的共同消费，以及OMX经
+系统Surface输出；不能把私有libui后备开关当成现代mapper4/5 metadata实现。
+KGSL、下游msm_vidc、QTI HWC/显示内核、HDR显示/secure、PM和rendered回调仍未完成。
+本轮源码和文档尚未提交/推送，整栈目标继续active。
+
+## 2026-11-08：标准 mapper HAL 与 libui/AHardwareBuffer 原生分配通过
+
+本阶段把原厂mapper从私有getService拦截推进到标准HIDL passthrough入口：
+allocator/v5的HAL导出HIDL_FETCH_IMapper、不定义IMapper::getService，实际平台loader
+在私有ODM中加载兼容HAL和重命名原厂mapper，27个Binder分配/CPU读写缓冲通过。
+测试进程已清除LD_PRELOAD/LD_LIBRARY_PATH；私有getService库未复制或加载。
+
+Android17真实libui与AOSP16参考存在关键差异：目标构造函数在mapper5/4失败后，
+调用android_get_device_api_level，API>35直接fatal，不尝试库中仍包含的mapper3/2。
+v6仅屏蔽高版本HAL时因此正常暴露失败（gralloc-mapper is missing），不是mapper3 ABI失败。
+目标libui SHA c6210d688bc2ac75f01ed3f34d4e32dd1fb840082406af6474ffa000a6bd8a07；
+反汇编0x598cc调用API、0x598d0比较35、0x598d4条件跳fatal。
+
+新增prepare-quest2-libui-mapper3.py仅对上述精确输入和指令上下文，将0x598d4的条件跳转
+改成NOP，让已包含的旧mapper后备代码可达；mapper5/4优先级不变，设备API未改写。
+这是显式私有兼容候选，不是“未修改libui通过”，不是新mapper4/5实现，也未安装全局。
+其他版本必须重新检查和固定输入，不能泛用偏移或绕过hash检查。
+
+allocator/v7：标准AHardwareBuffer_allocate/describe/lockAndGetInfo/unlock/release经实际
+libandroid→兼容libui→原厂远程allocator3→标准mapper HAL，RGBA8888/RGBA1010102/FP16，
+64×65、129×65、1280×720各3个，共27个缓冲逐字节读回通过。
+allocator/v8追加AHardwareBuffer_sendHandleToUnixSocket/recvHandleFromUnixSocket：
+独立exec消费者导入全部27个缓冲，生产者release后才允许消费者CPU读，全部像素及释放通过。
+没有拦截AHB或mapper getService，也没有复制像素来模拟跨进程共享。
+
+隔离器先unshare并递归MS_PRIVATE，在私有/odm提供HAL，--libui模式仅在该命名空间
+用空tmpfs屏蔽/vendor/lib64/hw以触发libui后备选择，可选绑定已核验的libui候选。
+标准运行时、系统allocator、桌面和EFI未替换；临时HIDL allocator/mapper声明在测试后删除，
+刷新hwservicemanager并显式重启原sq2-omx。最后lshal证实IOmx/IOmxStore由2124注册，
+allocator只剩原minigbm进程2826。服务测试仍root/shell身份，正式init/SELinux尚未集成。
+
+最终boot b56c010f…、SF2858/system_server3322未变，Venus sys_error=0/insts=0/vb2_bytes=0，
+ESP可用1355488KiB，logs103280KiB，系统libui SHA仍原值。无板级重启或EFI写入。
+10项相关主机测试通过（补丁边界/重复应用/错误来源2，RGB ASan/UBSan1，allocator父件1，
+native builder2，Gitiles4）；ARM64 -Werror构建通过。
+证据out/qualcomm-full-stack-20261108/allocator/{v5,v8,libui-compat-v1}/BUILD.json、
+test-v{5,6,7,8}-device.txt、libui-disassembly.txt、final-health-v8.txt。原始证据和私有库留out。
+
+下一步须把这批经标准AHB分配的缓冲接入实际EGL/GPU、BufferQueue/Surface与显示消费者；
+之前native-gpu-v24的GPU证明不能替代本轮AHB缓冲GPU验收。mapper3缺少现代metadata接口，
+要明确现代mapper适配方案后才可替换系统默认，不能把兼容后备开关当成HDR/显示移植完成。
+原生OMX Surface、MSM无关uncached内存、KGSL、下游msm_vidc、QTI HWC、HDR显示、
+PM和rendered回调仍未完成。当前整栈目标继续active，源码尚未提交/推送。
+
+## 2026-11-08：原厂 allocator 真实 Binder 服务与 RGB mapper 契约修正
+
+已从直接gralloc函数调用推进到原厂HIDL allocator服务：allocator/v4实际注册于现有
+hwservicemanager，client的isRemote=true，interfaceChain含IQtiAllocator和IAllocator，
+服务/客户端PID不同；原厂服务文件仍b7011cad…，无替代分配器或伪造句柄。
+RGBA8888/RGBA1010102/RGBA_FP16，64×65、129×65、1280×720三尺寸，
+每组3个、共27个缓冲。真实mapper3 createDescriptor→Binder allocate→importBuffer，
+在分配callback返回、传输句柄生命周期结束后，以mapper lock写入/解锁/再lock逐字节验证，
+全部通过并freeBuffer。此测试只证明跨进程分配和CPU访问，不是这些IPC缓冲的scanout验收。
+
+发现并修正原厂mapper3 RGB lock契约：返回的bytesPerStride实际是aligned pixel width。
+实机RGBA8：error=0、bpp=4、row=64、allocator stride=64；原厂反汇编也直接返回width字段。
+quest2-native-mapper-compat.h在公共IQtiMapper接口层转交原厂所有操作，只在已知固定RGB格式、
+bpp/原厂getWidth/getHeight/getSize一致且容量/整数范围允许时，把像素行距转为字节行距；
+已是字节或未知/不一致metadata不改写。原厂库字节及真实分配/导入/锁定/fence保持。
+不读私有handle固定偏移，不解决P010旧YCbCr/FLEX metadata缺陷，也不是mapper5替换。
+实际FP16 1280宽分配aligned stride1408，修正后bytesPerStride11264，读回通过。
+
+新mapper候选native-gpu-v24回归：三RGB格式27轮GPU采样/写入/native fence/CPU/exec import，
+fd稳定9、引用归1；NV12 VPU→原生buffer→GPU六帧CRC全匹配、bad=0、
+EOS/LAST/关闭成功。原生OMX30帧/DRC的已验收候选仍v23，本轮未拿v24重测那套客户端。
+原厂allocator在独立shell进程运行，未完成system身份、正式SELinux服务规则或init持久集成。
+
+临时配置需在hwservicemanager读取VINTF前生效；最初仅加文件被其缓存拒绝，服务正常退出。
+随后先停空闲sq2-omx、刷新HIDL管理器、再注册OMX及临时allocator。v2/v3探针因错误row严格拒绝，
+v4修正后通过。测试后allocator退出、临时quest2-native-allocator.xml删除，
+HIDL管理器再次刷新，lshal确认IOmx/IOmxStore已由18828注册。未重启板子或写EFI；
+boot b56c010f…、SF2858/system_server3322保持，系统仍minigbm AIDL3/mapper5和drm HWC3。
+最终Venus sys_error=0/insts=0/vb2_bytes=0，ESP可用1355492KiB、logs103276KiB。
+
+新增公共allocator@3.0头来自hardware/interfaces固定4a8246e3…，
+Git树1f6d3ec2…验证；fetch/generate链现覆盖29项接口输入（原donor/source审计133/23不混计）。
+8项本轮主机验证通过：RGB单位/容量/溢出实际C+ASan/UBSan、builder父件hash/路径/符号链接拒绝、
+2项native builder及4项Gitiles内容树测试；ARM64全-Werror构建成功。
+证据out/qualcomm-full-stack-20261108/allocator/{v4/BUILD.json,test-v4-device.txt,result.json,
+native-gpu-v24-rgb-device.txt,final-health.txt}及同级native-gpu-v24-device.txt；失败原始记录也留out。
+
+下一步仍须把兼容mapper提供为真正系统HAL入口，明确libui选择mapper3与现有mapper5/AIDL的切换，
+并解决显示消费者的原生句柄/metadata契约；当前进程私有getService拦截不可直接当系统HAL交付。
+原生OMX Surface、MSM无关uncached内存、KGSL/下游msm_vidc/QTI HWC、HDR显示、
+PM和rendered回调缺口仍未完成。所有工作仍未提交/推送，原始日志与私有库不进Git。
+
+## 2026-11-08：原厂 OMX 原生缓冲完整帧循环与分辨率往返通过
+
+当前新增实测是进程私有 OEM OMX→UseBuffer2 原厂 gralloc→Venus→GPU，
+持久系统服务仍 AVC-only/RequiresSwRenderer，系统 allocator/mapper/HWC 未替换。
+本阶段无重启、无 EFI 写入，boot b56c010f…、SF2858/system_server3322保持；
+结束时 Venus sys_error=0、insts=0、vb2_bytes=0，ESP可用1355500KiB、logs103268KiB。
+
+- v17 原厂 AVC native 接口：enable/useBuffer2/getUsage 三扩展实际成功；
+  usage=0x20000000（PRIVATE_UNCACHED），真实2fd+26ints句柄UseBuffer/FreeBuffer成功，
+  fd所有权仍归调用方。源参考审计input-audit-v5为133个donor文件、23份公开源码；
+  sm8150 media 810e6add…的接口参考不等于精确Quest二进制源码配套。
+- v20 原厂 HEVC Main/NV12 六帧：实际完整状态转换、UseBuffer、ETB/FTB、初次端口重配置、
+  EOS与释放通过；六帧紧凑NV12与独立软件参考逐字节相等，SHA325a21d7…。
+- 最终 native-gpu-v23：同一流30帧，320×240×18帧→1920×1080×6帧→320×240×6帧。
+  30帧逐帧SHA与参考相等，PTS全匹配；初始加两次尺寸变化共3次端口重配置。
+  首个六缓冲池每个buffer实际复用3次。30次GPU原始YUV采样bad=0，
+  最大误差0.00048637，每帧等待真实native fence后才归还OMX；EOS/Idle/Loaded/FreeHandle/Deinit全通过。
+- NV12实际gralloc usage=0x20400103（包含codec uncached要求），320布局512×512、
+  UV262144、393216字节；1080布局2048×1536、UV3145728、4718592字节。
+  CPU仅只读映射验证/保存，未把解码像素上传GPU。GPU每2×2检查一个Y及对应UV；
+  独立软件参考覆盖全部可见像素。不是物理屏幕呈现或性能验收。
+- v22同版桥的普通AllocateBuffer路径（不启用native-layout）六帧逐字节回归通过。
+  v23只进一步统一helper声明和安全查找buffer slot，桥与v22一致。
+  48项主机测试通过（21客户端、8桥、11接口/I/O、6视频builder、2native GPU builder）；
+  新增实际C/ASan/UBSan覆盖队列busy/协商失败/内核改写拒绝、不可访问opaque handle、
+  只读同步、过短/越界/损坏帧在GPU采样前拒绝，原路径默认行为保留。
+
+真实问题和修正：
+1. v19最后一次UseBuffer内STREAMON失败，因为此路径不替客户端申请输出队列。
+   按原厂契约在UseBuffer前SetParameter(OutputPortDefinition)，v20贯通；未伪造STREAMON成功。
+2. 仅在真实SOURCE_CHANGE后且CAPTURE已STREAMOFF/REQBUFS(0)，通过原厂临时allocation查询布局，
+   向现有capture-layout-v2内核提交真实S_FMT，再允许队列分配；失败保留原errno，禁止busy队列修改。
+3. v21切1080时OMX GetConfig尚返回旧320×240 crop，客户端容量检查拒绝了错误小分配。
+   最终按该代缓冲对应的真实G_SELECTION尺寸分配/验证，旧池的尾帧仍用旧尺寸。
+   没有修改原厂组件的crop缓存、输出header或全局metadata，系统HIDL仍需对应集成。
+
+入口：quest2-omx-decode.c的显式QUEST2_NATIVE_OUTPUT/--native-buffers；
+quest2-omx-native-output.h使用原始句柄，不能将header->pBuffer读成像素。
+QUEST2_VIDC_NATIVE_LAYOUT=1仅启用进程导出的quest2_omx_capture_layout；缺回调拒绝，
+默认桥不协商原生布局。当前helper仅支持单进程单解码器、非安全线性NV12/零crop原点，
+不能直接作为多实例服务。没有将OMX原生P010/HDR或系统Surface声明为完成。
+
+全部私有证据：out/qualcomm-full-stack-20261108/omx-native/
+import-v17-device.txt、decode-v{19,20,21,22,23}-device.txt、对应bridge/expected/result、
+decode-v22-legacy-device.txt、final-health.txt；最终构建native-gpu-v23/BUILD.json。
+v19/v21失败均已正常FreeHandle回收，未出现新的sys_error或板级重启。
+源码与记录仍未提交/推送；私有库、固件和原始日志不进Git。
+
+下一步：将原生buffer的usage、逐代crop/layout与fence契约接入HIDL/ACodec和系统分配服务；
+补显式flush后续播、多实例/长视频及原生P010/metadata。MSM GEM WC依赖须在KGSL前移除。
+KGSL、下游msm_vidc、QTI HWC、HDR显示、真实PM超时与292/300 rendered回调缺口仍未完成。
+
+## 2026-11-08：NV12/P010 解码到原厂 gralloc 再到 GPU 实机贯通
+
+当前默认为 EFI/SQ2Nat、sq2-qcom-618-native；initramfs
+f48e732a316dead047deb25a16b88af9ee2f9e1335a619fd3bed029844072f43。
+SQ2QDbg原运行包仍为唯一回退，8项hash保持，未创建备份或恢复旧入口。
+本阶段两次正常重启；最终wait窗口88.6秒恢复，boot b56c010f-5b1a-4730-95f3-df403a27689d。
+实际加载core/decoder的SHA与Build-ID与venus-capture-layout-v2一致；encoder成套打包但未加载实测。
+
+- native-gpu-v15：HEVC Main、320×240、NV12；原厂真实VIDEO_DECODER usage0x400103，
+  协商stride512/scan512、UV offset262144、393216字节。6帧独立CRC全部匹配，
+  原生EGLImage直接采样同一dma-buf，6帧bad=0，最大误差0.00048637。
+- native-gpu-v16：HEVC Main10/HDR10输入、320×240、P010_VENUS；
+  stride768/scan256、UV offset196608、294912字节，6帧独立CRC全匹配，
+  10-bit原始YUV GPU采样bad=0，最大误差0.00048733。严格检查16bit容器低6位为0。
+- 两条路径均真实native fence等待后再归还V4L2，6输入全部归还、EOS/LAST、
+  STREAMOFF/CLOSE、原厂句柄释放通过。CPU仅只读CRC/采样对照，没有上传解码像素。
+  每帧验证全部可见Y/UV行的CRC；GPU在每个2×2块中心取Y及该块UV，不宣称GPU检查每个Y像素。
+- v16 RGBA8/RGB10A2/FP16三尺寸共27轮GPU读写/native fence/CPU/SCM_RIGHTS-exec回归通过；
+  fd稳定9、引用归1。普通非native-gralloc的NV12/P010六帧解码路径也通过。
+- 结束时SF2858/system_server3322未变，Venus sys_error0/insts0/vb2_bytes0。
+  一次SSH连接超时后重试恢复，boot未变，不将其当成新的PM根因证据。
+
+实际修复：标准CAPTURE S_FMT协商分配几何，与编码尺寸/crop分开；
+使用HFI输出平面对齐约束并核验固件bufreq容量。HFI v4原先未封装该属性，
+现共用v4/v6线格式，补齐平面数1/2检查、未用平面清零。DRC事件清除旧布局。
+v1在STREAMON拒绝并保留DMA引用，正常重启释放；v2确认固件写出指定布局。
+初次GPU探针使用像素边界导致nearest采样选点差异，改为像素中心后通过；
+没有放宽误差阈值或跳过CRC。原厂旧P010 FLEX/YCbCr metadata缺陷仍未全局修复。
+
+收尾25项相关unittest、实际runner与HFI v4/v6封装的ASan/UBSan、git diff --check通过；
+最后ESP可用1359312KiB，logs99460KiB，两个入口各8项hash复核通过。
+本轮源码/记录仍在工作区，未提交或推送。
+
+这是进程私有native buffer验证，不是系统allocator/mapper替换或MediaCodec Surface零拷贝验收。
+持久OEM HIDL仍AVC-only/RequiresSwRenderer，系统仍MSM DRM、minigbm/mapper5/drm_hwcomposer。
+本次P010试验没有验证HDR metadata进原厂handle、显示tone-map、动态分辨率/长视频、UBWC或secure。
+KGSL/下游msm_vidc/HWC、真实PM超时、292/300渲染回调缺口均未完成。
+
+证据均在out/qualcomm-full-stack-20261108：
+capture-layout-build-v2.json、capture-layout-pack-v2.txt、capture-layout-v2-postboot.txt、
+native-gpu-v15-device.txt、native-gpu-v16-device.txt、native-gpu-v16-rgb-regression-retry.txt、
+native-gpu-v{15,16}-legacy-decode-regression.txt。原始日志和私有产物不进Git。
+下一步将已验证的layout/usage/fence契约接入原厂OMX native-buffer接口与系统分配服务，
+补做DRC/flush/复用生命周期及metadata验证，再推进KGSL/HWC；不能只取消SoftwareRenderer标志。
+
+## 2026-11-08：P010 原生 GPU 精度通过，推进 VPU 共享布局协商
+
+原厂 P010 的旧 FLEX/YCbCr metadata 不一致仍存在，但已经进一步验证物理像素：
+native-gpu-v9 标准 P010 128×72、v10 P010_VENUS 320×240，均三帧，
+以 GL_EXT_YUV_target 原始 YUV 采样到 RGBA16F，再浮点读回。Y 包含
+64/65/66、512/513/514、939/940，UV 也改变低位；零错点，最大误差0.00040907，
+低于0.00055阈值，真实 native fence 通过。没有全局改写原厂 metadata，
+不能由此声明 Android 系统已接通原生视频或 HDR tone-map。
+
+新增原生视频探针使用真实 VIDEO_DECODER producer usage，保留原厂句柄，
+将同一像素 dma-buf 的重复 fd 交给 V4L2；CPU只读验证，GPU直接采样。
+v12 实验在入队前拒绝布局不一致：Venus NV12 320×240 可见区域需要
+384×256，而 donor 分配/布局为512×512、UV offset262144、容量393216。
+此前假设 NV12 天然匹配已被否定。P010_VENUS 也有768对640行距差异。
+会话正常关闭，Venus错误/实例/存留字节均0，没有因此发生新重启或系统进程退出。
+
+mapper 查询/验证及 ANativeWindowBuffer usage 现在使用原厂 getUsageFlags，
+避免将 gralloc1 CPU_READ_OFTEN=6/WRITE_OFTEN=0x60误当legacy/HIDL值。
+v13编译包含此修正和共享EGL context；此前RGB实机证据以v6为准，须单独回归新构建。
+
+内核候选 scripts/patch-sq2-venus-capture-layout.py 将 CAPTURE S_FMT 的扩展
+bytesperline/height与编码宽高、可见crop分开，向实际OPB发送HFI平面对齐约束；
+检查尺寸/容量、格式与SOURCE_CHANGE阶段，DRC清除旧布局，默认路径保持。
+只允许线性NV12/P010，保留固件bufreq大小检查，不伪造G_FMT通过。
+配套6.18三模块已构建并打包，验证进展见HANDOFF最新记录。
+新源参考审计133个donor文件和21份公开参考通过；并不证明精确OEM源码配套。
+
+## 2026-11-08：YUV接口检查暴露P010布局兼容缺口
+
+原厂gralloc1 CPU写/CPU读+GPU_TEXTURE、128×72：标准YUV420_888(0x23)返回5，
+P010(0x36)分配成功，像素fd28672字节。但LOCK_FLEX把P010的Y plane报告成8/8bit、
+step1、stride256、subsample2,2，严格16/10bit检查在任何像素写入前失败。
+换原厂mapper3/QTI扩展取得不同入口的证据：getFormatLayout返回2 planes、总28672，
+Y offset0/step1/stride256/size18432；UV offset18432/step4/stride256/size9217；
+lockYCbCr成功但cb_offset18432、cr_offset18433，不符合P010两字节分量的Cb/Cr间距。
+不能直接拿旧通用8bit布局作为P010 CPU平面或把按要求分配成功当视频共享成功。
+此时未写像素、未提交YUV GPU工作、未调用VPU；不能据此判断真实内存排列错误。
+下一步须对照固定格式定义和真实GPU采样核验物理布局，再确定窄范围兼容修正。
+
+原始证据yuv-layout-v1-device.txt与native-gpu-v7-device.txt；两次均增加了区分性证据，
+没有重复同一挂死测试。探针assert134为预期拒绝不一致布局，不是系统崩溃；
+SF2854/system_server3316及Venus sys_error0/insts0/vb2_bytes0保持。
+新增quest2-yuv-layout-probe由native GPU builder一并构建；0x23/0x36显式参数，
+严格失败保留。最终源码native-gpu-v8已编译，RGB实测证据仍以v6为准，未将v8标为实机已验。
+
+## 2026-11-08：原厂mapper到GPU共享缓冲已实测，系统HAL未替换
+
+原厂HIDL_FETCH_IMapper通过私有getService入口接入，实际QTI cast/importBuffer/
+validateBufferSize/getTransportSize/freeBuffer均成功；没有伪造metadata或minigbm句柄视图。
+原厂gralloc生成RGBA8888、RGBA1010102、RGBA_FP16，三种尺寸各三轮共27轮。
+每轮EGLImage→真实GPU shader采样→同格式FBO逐字节读回，再GPU写原生缓冲、
+导出真实native fence、等待后原厂CPU lock逐字节验证；SCM_RIGHTS/exec独立导入仍通过。
+RGB10按真实10-bit packed值比较，FP16测试0/.25/.5/.75/1的精确half值，不能当任意FP16认证。
+父进程fd稳定9，原生buffer引用回到1；实际Adreno680 V@0819.0；SF2854/system_server3316
+未变，Venus sys_error0/insts0/vb2_bytes0，同boot 2a72e086…，没有额外重启或EFI改动。
+先前SSH短暂超时后用户已确认恢复，没有把暂时不可达认定为新的PM根因证据。
+
+新构建入口scripts/build-quest2-native-gpu-probe.py复用已固定6.18 Direct runtime，
+仅私有GSL/core使用共用system ION；原厂mapper3实现和空的donor libhidltransport配套。
+当前仍MSM DRM、系统minigbm/mapper5/drm_hwcomposer，未安装新allocator/mapper服务。
+YUV/VPU共享、KGSL、HWC、HDR tone-map、PM超时及292/300回调缺口仍未解决。
+结果out/qualcomm-full-stack-20261108/native-gpu-v6-{result.json,device.txt}和对应BUILD.json。
+
+构建输入恢复：21份Gitiles归档内容树与上游固定commit逐项一致，仅归档SHA变化；
+配置保留旧SHA并新增固定Git commit/tree，fetch对这些归档按Git对象内容校验，
+拒绝变化、重复/越界路径及未知tar类型，解包继续使用data filter。其余7项仍验SHA256。
+28项源恢复、HIDL头生成成功；4项Git树测试以真实git write-tree为对照，
+2项GPU构建输入拒绝测试与16项共享内存/VIDC/构建回归均通过。
+
+## 2026-11-08：原厂gralloc内存增量实机通过；EFI清理及回退重启通过
+
+本轮在work/qualcomm-618、5e04a6f基线上继续整体目标。
+132项donor文件与14份源码参考hash通过，新增可重复的输入/ELF依赖审计；
+公开Meta内核同5158488家族，但精确OEM build配套未证明，不冒称完整BSP。
+
+提取原VIDC cached/WC分配为共用后端，私有QTI gralloc用独立libion DSO；
+原件core/GSL仅重定向此依赖。实际原厂allocator、2fd+26ints句柄、三尺寸九轮
+CPU逐字节读写/引用回收/SCM_RIGHTS到exec新进程导入均通过，父进程fd稳定7。
+最终v7在重启后再次通过，SF/system_server未变，Venus健康。
+系统allocator仍minigbm/mapper5，持久HIDL服务仍原AVC-only；
+新VIDC库只编译未部署。NV12/P010原生共享、GPU/VPU/fence、KGSL/HWC仍未接通。
+详见[内存增量](QUALCOMM-GRALLOC-MEMORY.md)，不能标为整体移植完成。
+
+用户追加授权清理所有其他启动项、不做备份。核对实际cmdline/ESP/运行包和
+EFI路径依赖后，直接删除SQ2Buttons、SQ2Lts618、SQ2Backup638、
+SQ2Lts618Staging-20261106、SQ2L618、SQ2L618C、SQ2MesaDev、SQ2Fallback，
+以及旧grub历史菜单和SQ2QDbg内指向已删除旧入口的RECOVERY菜单恢复脚本。
+只保留SQ2QDbg为回退；BOOT及共享固件、SPX/LTE缓存hash保持。
+没有复制载荷或新增备份，没有删除用户数据/应用缓存。
+
+菜单只剩sq2-qcom-618-fallback，chainloader仍/EFI/SQ2QDbg/start.efi。
+8项载荷hash均未变，initramfs仍5b9f7012…；ESP可用从256448KiB增至1648076KiB。
+随后正常重启89秒SSH恢复，boot 2a72e086-942f-4fd8-831b-e8a16bb0ca2e；
+boot_completed=1、实际Qualcomm Adreno680 GLES、8项清单、音频卡、video0/KVM均通过。
+重启后ESP1644840KiB可用，Venus sys_error0/insts0/vb2_bytes0；
+这不是PM恢复根因修复或完整音视频回归。旧“须保留旧入口”被本次明确授权覆盖。
+
+私有证据out/qualcomm-full-stack-20261108：
+cleanup-efi.txt、cleanup-reboot-wait.jsonl、cleanup-reboot-verified.txt、
+gralloc-v7-device.txt、gralloc-v7/BUILD.json、input-audit-v2.json。
+下文为以前阶段记录，当前整体目标仍未完成。
+
 ## 2026-11-08：保存开发进度，后续按整体高通显示/视频栈方案推进
 
 用户要求保存并推送当前分支；新增[整体移植说明](QUALCOMM-FULL-STACK-PORT.md)，覆盖架构、

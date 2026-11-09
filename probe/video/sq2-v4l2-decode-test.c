@@ -32,6 +32,11 @@ typedef uint8_t u8;
 #define SQ2_INPUT_CODEC V4L2_PIX_FMT_H264
 #endif
 #define MAXBUF 32
+_Static_assert(SQ2_VEC_FRAMES>=1 && SQ2_VEC_FRAMES<=32, "vector must contain 1..32 frames");
+static int frames_complete(unsigned frames,uint32_t mask,unsigned returned) {
+ return frames==SQ2_VEC_FRAMES && returned==SQ2_VEC_FRAMES &&
+        mask==(UINT32_MAX>>(32-SQ2_VEC_FRAMES));
+}
 #ifndef SQ2_VEC_BYTES_PER_SAMPLE
 #define SQ2_VEC_BYTES_PER_SAMPLE 1
 #endif
@@ -43,10 +48,21 @@ typedef uint8_t u8;
 #error "Unsupported sample size"
 #endif
 #define SQ2_ROW_BYTES (SQ2_VEC_W * SQ2_VEC_BYTES_PER_SAMPLE)
+#ifdef SQ2_NATIVE_CAPTURE
+_Static_assert(SQ2_VEC_BYTES_PER_SAMPLE==1 || SQ2_VEC_BYTES_PER_SAMPLE==2, "Native capture requires NV12 or P010");
+#endif
 struct queue { unsigned type,n,memory,size; void *ptr[MAXBUF]; size_t len[MAXBUF]; int dmafd[MAXBUF]; int on; };
 static int fd=-1;
 static int heap=-1;
 static int graphic_fds=0;
+#ifdef SQ2_NATIVE_CAPTURE
+extern int quest2_capture_config(unsigned,unsigned,unsigned,unsigned,unsigned,unsigned);
+extern int quest2_capture_allocate(unsigned,int *,size_t *);
+extern int quest2_capture_layout(unsigned *,unsigned *,unsigned *);
+extern int quest2_capture_sample(unsigned,const uint8_t *,size_t);
+extern void quest2_capture_finish(void);
+static int native_capture;
+#endif
 static struct queue extra = {.type=V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE, .memory=V4L2_MEMORY_DMABUF};
 static const char *extra_directory;
 static unsigned extra_frames;
@@ -70,6 +86,14 @@ static int allocq(struct queue *q,unsigned count){
   if(q->memory==V4L2_MEMORY_DMABUF){
    size_t len=((size_t)q->size+4095)&~(size_t)4095;
    if(!len||len>16*1024*1024U||(total+=len)>128*1024*1024U)return -1;
+#ifdef SQ2_NATIVE_CAPTURE
+   if(native_capture&&q->type==V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE){
+    if(quest2_capture_allocate(i,&q->dmafd[i],&q->len[i]))return -1;
+    q->ptr[i]=mmap(NULL,q->len[i],PROT_READ,MAP_SHARED,q->dmafd[i],0);
+    if(q->ptr[i]==MAP_FAILED){q->ptr[i]=NULL;return -1;}
+    continue;
+   }
+#endif
    if(graphic_fds&&q->type==V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE){
     if(q->n!=9||q->size!=159744||len!=159744)return -1;
     int imported=dup(200+(int)i);if(imported<0)return -1;
@@ -131,7 +155,10 @@ static int put(struct queue *q,unsigned i,unsigned bytes){
   if(cpu_sync(&extra,i,DMA_BUF_SYNC_END|DMA_BUF_SYNC_WRITE))return -1;
   b.length=2;p[1].length=extra.len[i];p[1].m.fd=extra.dmafd[i];
  }
- if(q->type==V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)b.timestamp.tv_usec=(i+1)*33333;
+ if(q->type==V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE){
+  uint64_t stamp=(uint64_t)(i+1)*33333;
+  b.timestamp.tv_sec=stamp/1000000;b.timestamp.tv_usec=stamp%1000000;
+ }
  return x(VIDIOC_QBUF,&b,"QBUF");
 }
 static int start(struct queue *q){printf("STREAMON_BEGIN type=%u\n",q->type);if(x(VIDIOC_STREAMON,&q->type,"STREAMON"))return -1;q->on=1;printf("STREAMON_DONE type=%u\n",q->type);return 0;}
@@ -154,7 +181,13 @@ int main(int argc,char **argv){
   free(p);fclose(ref);printf("PADDED_REFERENCE_TEST bytes_per_sample=%u result=%d\n",SQ2_VEC_BYTES_PER_SAMPLE,bad);return bad;
  }
  if(argc==2&&!strcmp(argv[1],"--self-test")){
-  const u8 s[]="123456789";u32 c=crc_rows(s,9,9,1);printf("CRC_SELF_TEST=%08x vector_bytes=%zu frames=%u\n",c,sizeof(sq2_vec_stream),SQ2_VEC_FRAMES);return c!=0xcbf43926U;
+  const u8 s[]="123456789";u32 c=crc_rows(s,9,9,1),expected=UINT32_MAX>>(32-SQ2_VEC_FRAMES);
+  int coverage=frames_complete(SQ2_VEC_FRAMES,expected,SQ2_VEC_FRAMES) &&
+   !frames_complete(SQ2_VEC_FRAMES,expected^1U,SQ2_VEC_FRAMES) &&
+   !frames_complete(SQ2_VEC_FRAMES-1,expected,SQ2_VEC_FRAMES) &&
+   !frames_complete(SQ2_VEC_FRAMES,expected,SQ2_VEC_FRAMES-1);
+  printf("CRC_SELF_TEST=%08x vector_bytes=%zu frames=%u expected_mask=%08x coverage=%d\n",c,sizeof(sq2_vec_stream),SQ2_VEC_FRAMES,expected,coverage);
+  return c!=0xcbf43926U || !coverage;
  }
  int format_only=argc==3&&!strcmp(argv[1],"--format-only");
  int buffers_only=argc==3&&!strcmp(argv[1],"--buffers-only");
@@ -163,6 +196,10 @@ int main(int argc,char **argv){
  const char *dump_path=argc==4&&!strcmp(argv[1],"--dump-first")?argv[2]:NULL;
  extra_directory=argc==4&&!strcmp(argv[1],"--extradata")?argv[2]:NULL;
  int dmabuf=extra_directory||dump_path||graphic_fds||(argc==3&&!strcmp(argv[1],"--dmabuf"));
+#ifdef SQ2_NATIVE_CAPTURE
+ native_capture=argc==3&&!strcmp(argv[1],"--native-gralloc");
+ if(native_capture)dmabuf=1;
+#endif
  if(argc!=2&&!format_only&&!buffers_only&&!queue_only&&!dmabuf){fprintf(stderr,"usage: %s [--format-only|--buffers-only|--queue-only|--dmabuf] /dev/videoN | --dump-first NEW_FILE /dev/videoN | --extradata EXISTING_EMPTY_DIR /dev/videoN | --self-test\n",argv[0]);return 2;}
  struct queue out={.type=V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE},cap={.type=V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE};int result=1,source=0,eos=0,stop=0;unsigned returned=0,mask=0,frames=0;long long deadline=ms()+20000;
  out.memory=cap.memory=dmabuf?V4L2_MEMORY_DMABUF:V4L2_MEMORY_MMAP;
@@ -210,6 +247,23 @@ int main(int argc,char **argv){
  struct v4l2_control ctrl={.id=V4L2_CID_MIN_BUFFERS_FOR_CAPTURE};if(x(VIDIOC_G_CTRL,&ctrl,"MIN_CAPTURE"))goto done;
  if(ctrl.value<1||ctrl.value>28)goto done;
  if(graphic_fds&&(stride!=384||scan!=256||cap.size!=159744)){fprintf(stderr,"C2 geometry mismatch\n");goto done;}
+#ifdef SQ2_NATIVE_CAPTURE
+ if(native_capture) {
+  if(quest2_capture_config(SQ2_VEC_W,SQ2_VEC_H,stride,scan,cap.size,SQ2_VEC_BYTES_PER_SAMPLE))goto done;
+  unsigned allocation=0;
+  if(quest2_capture_layout(&stride,&scan,&allocation))goto done;
+  f.fmt.pix_mp.height=scan;f.fmt.pix_mp.plane_fmt[0].bytesperline=stride;
+  f.fmt.pix_mp.plane_fmt[0].sizeimage=allocation;
+  if(x(VIDIOC_S_FMT,&f,"S_FMT_NATIVE_CAPTURE") || x(VIDIOC_G_FMT,&f,"G_FMT_NATIVE_CAPTURE"))goto done;
+  if(f.fmt.pix_mp.width!=SQ2_VEC_W || f.fmt.pix_mp.height!=scan ||
+     f.fmt.pix_mp.pixelformat!=SQ2_OUTPUT_CODEC || f.fmt.pix_mp.plane_fmt[0].bytesperline!=stride ||
+     f.fmt.pix_mp.plane_fmt[0].sizeimage>allocation)goto done;
+  cap.size=f.fmt.pix_mp.plane_fmt[0].sizeimage;
+  if(x(VIDIOC_G_SELECTION,&sel,"G_SELECTION_NATIVE_CAPTURE") || sel.r.left || sel.r.top ||
+     sel.r.width!=SQ2_VEC_W || sel.r.height!=SQ2_VEC_H)goto done;
+  printf("NATIVE_CAPTURE_NEGOTIATED stride=%u scan=%u required=%u allocated=%u crop=%u,%u\n",stride,scan,cap.size,allocation,sel.r.width,sel.r.height);
+ }
+#endif
  if(allocq(&cap,ctrl.value+4))goto done;
  for(unsigned i=0;i<cap.n;i++)if(put(&cap,i,0))goto done;
  if(start(&cap))goto done;
@@ -233,20 +287,32 @@ int main(int argc,char **argv){
    if(p[0].bytesused>p[0].data_offset){size_t uv=(size_t)stride*scan;size_t need=uv+(SQ2_VEC_H/2-1)*stride+SQ2_ROW_BYTES;if(need>p[0].bytesused-p[0].data_offset){fprintf(stderr,"short frame\n");goto done;}
     if(cpu_sync(&cap,b.index,DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ))goto done;
     u8 *data=(u8*)cap.ptr[b.index]+p[0].data_offset;u32 y=crc_rows(data,stride,SQ2_ROW_BYTES,SQ2_VEC_H),uvcrc=crc_rows(data+uv,stride,SQ2_ROW_BYTES,SQ2_VEC_H/2);int match=-1;
-    if(cpu_sync(&cap,b.index,DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ))goto done;
     for(unsigned i=0;i<SQ2_VEC_FRAMES;i++)if(y==sq2_vec_crc_y[i]&&uvcrc==sq2_vec_crc_uv[i]&&!(mask&(1U<<i))){match=i;break;}
-    printf("FRAME crc_y=%08x crc_uv=%08x match=%d\n",y,uvcrc,match);if(match<0)goto done;mask|=1U<<match;frames++;
+    printf("FRAME crc_y=%08x crc_uv=%08x match=%d\n",y,uvcrc,match);
+#ifdef SQ2_NATIVE_CAPTURE
+    int gpu_error=native_capture && match>=0?quest2_capture_sample(b.index,data,p[0].data_offset):0;
+#endif
+    if(cpu_sync(&cap,b.index,DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ))goto done;
+#ifdef SQ2_NATIVE_CAPTURE
+    if(gpu_error)goto done;
+#endif
+    if(match<0)goto done;
+    mask|=1U<<match;frames++;
    }
    if(b.flags&V4L2_BUF_FLAG_LAST)eos=1;else if(put(&cap,b.index,0))goto done;
   }else if(errno!=EAGAIN){perror("DQ_CAPTURE");goto done;}
   struct v4l2_event ev={0};if(!ioctl(fd,VIDIOC_DQEVENT,&ev)){printf("EVENT type=%u\n",ev.type);/* LAST, not an early EOS event, terminates draining. */if(ev.type==V4L2_EVENT_SOURCE_CHANGE){fprintf(stderr,"unexpected second source change\n");goto done;}}else if(errno!=EAGAIN&&errno!=ENOENT){perror("DQEVENT");goto done;}
   struct pollfd pollfd={fd,POLLIN|POLLPRI|POLLOUT,0};poll(&pollfd,1,50);
  }
- if(eos&&frames==SQ2_VEC_FRAMES&&mask==63&&returned==SQ2_VEC_FRAMES&&(!extra_directory||extra_frames))result=0;
+ if(eos&&frames_complete(frames,mask,returned)&&(!extra_directory||extra_frames))result=0;
  done:
  printf("RESULT source=%d frames=%u mask=%x input_returned=%u drain=%d last=%d ret=%d\n",source,frames,mask,returned,stop,eos,result);
  if(end(&cap))result=1;
  if(end(&out))result=1;
  if(end(&extra))result=1;
- puts("CLOSE_BEGIN");fsync(STDOUT_FILENO);if(close(fd)){perror("close");result=1;}if(heap>=0){if(close(heap))result=1;heap=-1;}puts("CLOSE_DONE");fsync(STDOUT_FILENO);fsync(STDERR_FILENO);return result;
+ puts("CLOSE_BEGIN");fsync(STDOUT_FILENO);if(close(fd)){perror("close");result=1;}if(heap>=0){if(close(heap))result=1;heap=-1;}puts("CLOSE_DONE");
+#ifdef SQ2_NATIVE_CAPTURE
+ if(native_capture)quest2_capture_finish();
+#endif
+ fsync(STDOUT_FILENO);fsync(STDERR_FILENO);return result;
 }

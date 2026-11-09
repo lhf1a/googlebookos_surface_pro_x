@@ -1,0 +1,189 @@
+--- a/sdm/libs/core/drm/hw_device_drm.cpp
++++ b/sdm/libs/core/drm/hw_device_drm.cpp
+@@ -505,7 +505,7 @@
+ }
+ 
+ HWDeviceDRM::HWDeviceDRM(BufferAllocator *buffer_allocator, HWInfoInterface *hw_info_intf)
+-    : hw_info_intf_(hw_info_intf), registry_(buffer_allocator) {
++    : hw_info_intf_(hw_info_intf), buffer_allocator_(buffer_allocator), registry_(buffer_allocator) {
+   hw_info_intf_ = hw_info_intf;
+ }
+ 
+@@ -1595,25 +1595,88 @@
+ 
+ DisplayError HWDeviceDRM::Validate(HWLayers *hw_layers) {
+   DTRACE_SCOPED();
+-
+   DisplayError err = ValidateDpuLayers(hw_layers);
+   if (err != kErrorNone) return err;
+-  err = registry_.Register(hw_layers);
+-  if (err != kErrorNone) return err;
+-
+-  Fence::ScopedRef scoped_ref;
+-  SetupAtomic(scoped_ref, hw_layers, true /* validate */, nullptr, nullptr);
+-
+-  int ret = drm_atomic_intf_->Validate();
+-  if (ret) {
+-    DLOGE("failed with error %d for %s", ret, device_name_);
+-    DumpHWLayers(hw_layers);
+-    vrefresh_ = 0;
+-    panel_mode_changed_ = 0;
+-    seamless_mode_switch_ = false;
+-    err = kErrorHardware;
+-  }
+-
++
++  BufferInfo test_buffer{};
++  std::unique_ptr<HWLayers> test_layers;
++  auto validate = [&]() -> DisplayError {
++    if (dpu_info_.kernel_managed_dpu) {
++      for (size_t i = 0; i < hw_layers->info.hw_layers.size(); ++i) {
++        const auto &layer = hw_layers->info.hw_layers[i];
++        const auto &input = layer.input_buffer;
++        if (input.planes[0].fd >= 0) continue;
++        DLOGI("DPU validate missing buffer: layer=%zu composition=%d fd=%d format=%d "
++              "aligned=%ux%u requested=%ux%u handle=%" PRIu64,
++              i, layer.composition, input.planes[0].fd, input.format, input.width, input.height,
++              input.unaligned_width, input.unaligned_height, input.buffer_id);
++        // HWC validates before SF renders its first client target. Use real storage only for
++        // TEST_ONLY; the original layer remains bufferless and Commit still requires SF's target.
++        if (!first_cycle_ || layer.composition != kCompositionGPUTarget || input.buffer_id || input.handle_id ||
++            !input.unaligned_width || !input.unaligned_height || test_layers) {
++          return kErrorParameters;
++        }
++        test_buffer.buffer_config.width = input.unaligned_width;
++        test_buffer.buffer_config.height = input.unaligned_height;
++        test_buffer.buffer_config.format = input.format;
++        test_buffer.buffer_config.buffer_count = 1;
++        test_buffer.buffer_config.cache = true;
++        test_buffer.buffer_config.gfx_client = true;
++        int ret = buffer_allocator_->AllocateBuffer(&test_buffer);
++        if (ret) {
++          DLOGE("DPU TEST_ONLY target allocation failed: %d", ret);
++          return kErrorResources;
++        }
++        const auto &allocated = test_buffer.alloc_buffer_info;
++        if (!test_buffer.private_data || allocated.fd < 0 || !allocated.native_handle ||
++            !allocated.id || !allocated.size || !allocated.stride ||
++            allocated.format != input.format || allocated.aligned_width != input.width ||
++            allocated.aligned_height != input.height) {
++          DLOGE("DPU TEST_ONLY target allocation differs from the client target descriptor");
++          return kErrorParameters;
++        }
++        test_layers = std::make_unique<HWLayers>(*hw_layers);
++        auto &test_layer = test_layers->info.hw_layers[i];
++        test_layer.buffer_map = std::make_shared<LayerBufferMap>();
++        auto &buffer = test_layer.input_buffer;
++        buffer.planes[0].fd = allocated.fd;
++        buffer.planes[0].offset = 0;
++        buffer.planes[0].stride = allocated.stride;
++        buffer.size = allocated.size;
++        buffer.buffer_id = reinterpret_cast<uint64_t>(allocated.native_handle);
++        buffer.handle_id = allocated.id;
++        buffer.acquire_fence = nullptr;
++      }
++    }
++    HWLayers *layers = test_layers ? test_layers.get() : hw_layers;
++    DisplayError error = registry_.Register(layers);
++    if (error != kErrorNone) {
++      DLOGE("Framebuffer registration for validation failed: %d", error);
++      return error;
++    }
++    Fence::ScopedRef scoped_ref;
++    SetupAtomic(scoped_ref, layers, true /* validate */, nullptr, nullptr);
++    int ret = drm_atomic_intf_->Validate();
++    if (ret) {
++      DLOGE("failed with error %d for %s", ret, device_name_);
++      DumpHWLayers(layers);
++      vrefresh_ = 0;
++      panel_mode_changed_ = 0;
++      seamless_mode_switch_ = false;
++      return kErrorHardware;
++    }
++    return kErrorNone;
++  };
++  err = validate();
++  // Drop temporary FB references before freeing the temporary imported allocator handle.
++  test_layers.reset();
++  if (test_buffer.private_data) {
++    int ret = buffer_allocator_->FreeBuffer(&test_buffer);
++    if (ret) {
++      DLOGE("DPU TEST_ONLY target release failed: %d", ret);
++      if (err == kErrorNone) err = kErrorResources;
++    }
++  }
+   return err;
+ }
+ 
+--- a/sdm/libs/core/drm/hw_device_drm.h
++++ b/sdm/libs/core/drm/hw_device_drm.h
+@@ -253,6 +253,7 @@
+   sde_drm::DRMDisplayType disp_type_ = {};
+   HWInfoInterface *hw_info_intf_ = {};
+   int dev_fd_ = -1;
++  BufferAllocator *buffer_allocator_ = nullptr;
+   Registry registry_;
+   sde_drm::DRMDisplayToken token_ = {};
+   HWResourceInfo hw_resource_ = {};
+--- a/sdm/libs/core/display_base.cpp
++++ b/sdm/libs/core/display_base.cpp
+@@ -455,9 +455,13 @@
+ 
+   comp_manager_->PrePrepare(display_comp_ctx_, &hw_layers_);
+ 
++  DisplayError last_hw_validation_error = kErrorNone;
+   while (true) {
+     error = comp_manager_->Prepare(display_comp_ctx_, &hw_layers_);
+     if (error != kErrorNone) {
++      if (error == kErrorUndefined && last_hw_validation_error != kErrorNone) {
++        error = last_hw_validation_error;
++      }
+       break;
+     }
+ 
+@@ -474,6 +478,8 @@
+       needs_validate_ = false;
+       break;
+     }
++    last_hw_validation_error = error;
++    DLOGE("Hardware validation rejected the prepared strategy: %d", error);
+     if (error == kErrorShutDown) {
+       comp_manager_->PostPrepare(display_comp_ctx_, &hw_layers_);
+       return error;
+@@ -1997,16 +2003,11 @@
+     hw_layer.input_buffer.size = sdm_layer->input_buffer.size;
+     hw_layer.input_buffer.acquire_fence = sdm_layer->input_buffer.acquire_fence;
+     hw_layer.input_buffer.handle_id = sdm_layer->input_buffer.handle_id;
+-    // TODO(user): Other FBT layer attributes like surface damage, dataspace, secure camera and
+-    // secure display flags are also updated during SetClientTarget() called between validate and
+-    // commit. Need to revist this and update it accordingly for FBT layer.
++    hw_layer.input_buffer.buffer_id = sdm_layer->input_buffer.buffer_id;
++    // SetClientTarget runs after Validate. Commit must inspect the real handle, flags, layout,
++    // and color metadata; no validation-only descriptor can survive into framebuffer import.
+     if (hw_layers_.info.gpu_target_index == sdm_layer_index) {
+-      hw_layer.input_buffer.flags.secure = sdm_layer->input_buffer.flags.secure;
+-      hw_layer.input_buffer.format = sdm_layer->input_buffer.format;
+-      hw_layer.input_buffer.width = sdm_layer->input_buffer.width;
+-      hw_layer.input_buffer.height = sdm_layer->input_buffer.height;
+-      hw_layer.input_buffer.unaligned_width = sdm_layer->input_buffer.unaligned_width;
+-      hw_layer.input_buffer.unaligned_height = sdm_layer->input_buffer.unaligned_height;
++      hw_layer.input_buffer = sdm_layer->input_buffer;
+     }
+   }
+ 
+--- a/sdm/libs/core/comp_manager.cpp
++++ b/sdm/libs/core/comp_manager.cpp
+@@ -323,11 +323,13 @@
+     if (error != kErrorNone) {
+       // Composition strategies exhausted. Resource Manager could not allocate resources even for
+       // GPU composition. This will never happen.
++      DLOGE("Strategy generation failed: %d", error);
+       exit = true;
+     }
+ 
+     if (!exit) {
+       error = resource_intf_->Prepare(display_resource_ctx, hw_layers);
++      if (error != kErrorNone) DLOGE("Resource allocation for strategy failed: %d", error);
+       // Exit if successfully prepared resource, else try next strategy.
+       exit = (error == kErrorNone);
+     }

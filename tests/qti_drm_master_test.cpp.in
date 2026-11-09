@@ -1,0 +1,112 @@
+// Execute the complete patched DRMMaster translation unit against real UAPI declarations.
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+#include <fcntl.h>
+#include <cassert>
+#include <cerrno>
+#include <cstring>
+#include <set>
+#include <string>
+#include <vector>
+#include <cstdlib>
+#include <cstdio>
+#define __DRM_LOGGER_H__
+#define DRM_LOGE(...) ((void)0)
+struct Device { const char *driver; int primary = 1; int kms = 1; int node = DRM_NODE_PRIMARY; };
+static std::vector<Device> fixtures;
+static std::set<int> opened;
+static int enumerate_error, open_error, version_error, resources_error;
+static int close_probe_error=ENOENT, legacy_probe_error=ENOENT, release_error;
+static int versions, resources, device_arrays, open_calls, close_calls, legacy_calls, closefb_calls;
+static std::vector<unsigned long> requests;
+static int TestOpen(const char *path, int flags, ...) {
+  ++open_calls;
+  assert(flags == (O_RDWR | O_CLOEXEC | O_NOFOLLOW));
+  if (open_error) { errno=open_error; return -1; }
+  assert(std::string(path).rfind("/mock/primary",0)==0);
+  int fd=100+std::stoi(path+13); assert(opened.insert(fd).second); return fd;
+}
+#define open TestOpen
+#include "@SOURCE@"
+#undef open
+extern "C" int drmGetDevices2(uint32_t flags,drmDevicePtr *devices,int capacity) {
+  assert(!flags);
+  if (enumerate_error) return -enumerate_error;
+  if (!devices) return fixtures.size();
+  assert(capacity==int(fixtures.size())); ++device_arrays;
+  for (int i=0;i<capacity;++i) {
+    devices[i]=new drmDevice{};
+    devices[i]->available_nodes=fixtures[i].primary ? (1<<DRM_NODE_PRIMARY) : (1<<DRM_NODE_RENDER);
+    devices[i]->nodes=new char*[DRM_NODE_MAX]{};
+    devices[i]->nodes[DRM_NODE_PRIMARY]=strdup(("/mock/primary"+std::to_string(i)).c_str());
+  }
+  return capacity;
+}
+extern "C" void drmFreeDevices(drmDevicePtr *devices,int count) {
+  --device_arrays;
+  for(int i=0;i<count;++i) {free(devices[i]->nodes[DRM_NODE_PRIMARY]);delete[] devices[i]->nodes;delete devices[i];}
+}
+extern "C" int drmGetNodeTypeFromFd(int fd) {return fixtures.at(fd-100).node;}
+extern "C" drmVersionPtr drmGetVersion(int fd) {
+  if(version_error){errno=version_error;return nullptr;}
+  ++versions;auto p=new drmVersion{};p->name=strdup(fixtures.at(fd-100).driver);p->name_len=strlen(p->name);return p;
+}
+extern "C" void drmFreeVersion(drmVersionPtr p) {--versions;free(p->name);delete p;}
+extern "C" drmModeResPtr drmModeGetResources(int fd) {
+  if(resources_error){errno=resources_error;return nullptr;}
+  ++resources;auto p=new drmModeRes{};p->count_crtcs=p->count_connectors=fixtures.at(fd-100).kms;return p;
+}
+extern "C" void drmModeFreeResources(drmModeResPtr p) {--resources;delete p;}
+extern "C" int drmClose(int fd){assert(opened.erase(fd)==1);++close_calls;return 0;}
+extern "C" int drmPrimeFDToHandle(int,int,uint32_t*) {return -1;}
+extern "C" int drmIoctl(int fd,unsigned long request,void *data) {
+  assert(opened.count(fd));requests.push_back(request);int error;
+  if(request==DRM_IOCTL_MODE_CLOSEFB){
+    ++closefb_calls;auto p=static_cast<drm_mode_closefb*>(data);assert(!p->pad);
+    error=p->fb_id ? release_error : close_probe_error;
+  }else if(request==DRM_IOCTL_MSM_RMFB2){
+    ++legacy_calls;error=*static_cast<uint32_t*>(data) ? release_error : legacy_probe_error;
+  }else{assert(false);return -1;}
+  errno=error;return error ? -1 : 0;
+}
+static void Reset(std::vector<Device> devices={{"msm"}}){
+  drm_utils::DRMMaster::DestroyInstance();assert(opened.empty());
+  assert(versions==0&&resources==0&&device_arrays==0);
+  fixtures=devices;enumerate_error=open_error=version_error=resources_error=release_error=0;
+  close_probe_error=legacy_probe_error=ENOENT;requests.clear();
+  open_calls=close_calls=legacy_calls=closefb_calls=0;
+}
+static drm_utils::DRMMaster *Init(int expected){
+  drm_utils::DRMMaster *master=reinterpret_cast<drm_utils::DRMMaster*>(1);
+  assert(drm_utils::DRMMaster::GetInstance(&master)==expected);
+  assert(expected ? master==nullptr : master!=nullptr);
+  if(expected)assert(opened.empty());
+  assert(versions==0&&resources==0&&device_arrays==0);return master;
+}
+int main(){
+  Reset();assert(drm_utils::DRMMaster::GetInstance(nullptr)==-EINVAL);
+  auto m=Init(0);assert(m->IsRmFbRefCounted());int fd=-1;m->GetHandle(&fd);assert(fd==100);
+  assert(Init(0)==m&&open_calls==1);assert(m->RemoveFbId(12)==0);assert(m->RemoveFbId(0)==-EINVAL);
+  release_error=EBUSY;assert(m->RemoveFbId(12)==-EBUSY);assert(legacy_calls==0);
+  Reset({{"other"},{"msm",0},{"msm",1,0},{"msm"}});m=Init(0);m->GetHandle(&fd);assert(fd==103&&close_calls==2);
+  Reset({});Init(-ENODEV);
+  Reset({{"other"}});Init(-ENODEV);
+  Reset({{"msm"},{"msm_drm"}});Init(-ENOTUNIQ);assert(close_calls==2);
+  Reset();enumerate_error=EACCES;Init(-EACCES);
+  Reset();open_error=EPERM;Init(-EPERM);
+  Reset();version_error=EIO;Init(-EIO);
+  Reset();resources_error=ENOMEM;Init(-ENOMEM);
+  Reset({{"msm",1,1,DRM_NODE_RENDER}});Init(-EINVAL);
+  for(int error:{EINVAL,ENOTTY,EOPNOTSUPP}){
+    Reset();close_probe_error=error;Init(-EOPNOTSUPP);assert(legacy_calls==0);
+    Reset({{"msm_drm"}});close_probe_error=error;m=Init(0);assert(legacy_calls==1);
+    assert(m->RemoveFbId(19)==0);assert(legacy_calls==2&&closefb_calls==1);
+    release_error=EIO;assert(m->RemoveFbId(19)==-EIO);assert(closefb_calls==1);
+  }
+  Reset({{"msm_drm"}});close_probe_error=ENOTTY;legacy_probe_error=EINVAL;Init(-EOPNOTSUPP);
+  Reset({{"msm_drm"}});close_probe_error=ENOTTY;legacy_probe_error=0;Init(-EPROTO);
+  Reset({{"msm_drm"}});close_probe_error=ENOTTY;legacy_probe_error=EACCES;Init(-EACCES);
+  Reset();close_probe_error=0;Init(-EPROTO);
+  Reset({{"msm_drm"}});close_probe_error=EIO;Init(-EIO);assert(!legacy_calls);
+  Reset();puts("DRM_MASTER_DISCOVERY_AND_RELEASE_ALL_PASS");
+}

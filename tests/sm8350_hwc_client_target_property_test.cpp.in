@@ -1,0 +1,117 @@
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+
+namespace android::hardware::graphics::common::V1_2 {
+enum class PixelFormat : int32_t { RGBA_8888 = 1, RGBA_1010102 = 43 };
+}
+using PixelFormat = android::hardware::graphics::common::V1_2::PixelFormat;
+enum class Dataspace : int32_t { UNKNOWN = 0, SRGB = 142671872, BT2020_PQ = 163971072 };
+namespace HWC2 { enum class Error { None, BadParameter }; }
+enum DisplayError { kErrorNone, kErrorParameters };
+struct ColorMetaData {
+  int colorPrimaries = 1;
+  int transfer = 1;
+  Dataspace output = Dataspace::SRGB;
+  bool fail = false;
+};
+struct Layer {
+  struct {
+    struct { bool update_format = false; } flags;
+    int format = 1;
+    ColorMetaData color_metadata;
+  } request;
+};
+struct ClientTargetProperty { PixelFormat pixelFormat; Dataspace dataspace; };
+struct ClientLayer {
+  Layer layer;
+  Layer *GetSDMLayer() { return &layer; }
+};
+struct BufferAllocator {
+  unsigned calls = 0;
+  DisplayError SetBufferInfo(int requested, int32_t *format, uint64_t *flags) {
+    ++calls;
+    if (requested != 1 && requested != 43) return kErrorParameters;
+    *format = requested;
+    *flags = 0;
+    return kErrorNone;
+  }
+};
+unsigned color_calls = 0;
+DisplayError ColorMetadataToDataspace(const ColorMetaData &color, Dataspace *dataspace) {
+  ++color_calls;
+  if (color.fail) return kErrorParameters;
+  *dataspace = color.output;
+  return kErrorNone;
+}
+#define DLOGE(...) ((void)0)
+struct HWCDisplay {
+  ClientLayer *client_target_;
+  BufferAllocator *buffer_allocator_;
+  HWC2::Error GetClientTargetProperty(ClientTargetProperty *);
+};
+
+@METHOD@
+
+static ClientTargetProperty Poisoned() {
+  return {static_cast<PixelFormat>(309009760), static_cast<Dataspace>(0x12345678)};
+}
+static void NoRequest(const ClientTargetProperty &property) {
+  assert(property.pixelFormat == PixelFormat::RGBA_8888);
+  assert(property.dataspace == Dataspace::UNKNOWN);
+}
+int main() {
+  ClientLayer target;
+  BufferAllocator allocator;
+  HWCDisplay display{&target, &allocator};
+  auto property = Poisoned();
+  // The historical real failure returned success and leaked both poisoned fields.
+  assert(display.GetClientTargetProperty(&property) == HWC2::Error::None);
+  NoRequest(property);
+  assert(allocator.calls == 0 && color_calls == 0);
+  assert(display.GetClientTargetProperty(nullptr) == HWC2::Error::BadParameter);
+  assert(allocator.calls == 0 && color_calls == 0);
+
+  target.layer.request.flags.update_format = true;
+  target.layer.request.format = 43;
+  target.layer.request.color_metadata.output = Dataspace::BT2020_PQ;
+  assert(display.GetClientTargetProperty(&property) == HWC2::Error::None);
+  assert(property.pixelFormat == PixelFormat::RGBA_1010102);
+  assert(property.dataspace == Dataspace::BT2020_PQ);
+  assert(allocator.calls == 1 && color_calls == 1);
+
+  // A subsequent frame with no request must not re-emit stale HDR properties.
+  target.layer.request.flags.update_format = false;
+  assert(display.GetClientTargetProperty(&property) == HWC2::Error::None);
+  NoRequest(property);
+  assert(allocator.calls == 1 && color_calls == 1);
+
+  target.layer.request.flags.update_format = true;
+  target.layer.request.format = -999;
+  property = Poisoned();
+  assert(display.GetClientTargetProperty(&property) == HWC2::Error::BadParameter);
+  NoRequest(property);
+  assert(allocator.calls == 2 && color_calls == 1);
+
+  target.layer.request.format = 1;
+  target.layer.request.color_metadata.fail = true;
+  property = Poisoned();
+  assert(display.GetClientTargetProperty(&property) == HWC2::Error::BadParameter);
+  NoRequest(property);
+  assert(allocator.calls == 3 && color_calls == 2);
+
+  target.layer.request.color_metadata.fail = false;
+  target.layer.request.color_metadata.output = Dataspace::SRGB;
+  for (int i = 0; i != 100; ++i) {
+    target.layer.request.flags.update_format = (i % 2 != 0);
+    property = Poisoned();
+    assert(display.GetClientTargetProperty(&property) == HWC2::Error::None);
+    if (!target.layer.request.flags.update_format) {
+      NoRequest(property);
+    } else {
+      assert(property.pixelFormat == PixelFormat::RGBA_8888);
+      assert(property.dataspace == Dataspace::SRGB);
+    }
+  }
+  std::puts("Client target property: poisoned/no-update, transition, request, conversion failure passed");
+}

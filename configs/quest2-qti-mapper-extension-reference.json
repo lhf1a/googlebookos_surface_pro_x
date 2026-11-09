@@ -1,0 +1,52 @@
+{
+  "sources": [
+    {
+      "path": "probe/graphics/qti-mapper-abi/IQtiMapperExt.h",
+      "url": "https://github.com/LineageOS/android_vendor_qcom_opensource_interfaces/blob/b75ec20e94b35e067f3af67e628df294b49505d0/display/mapperextensions/stable-c/include/vendor/qti/hardware/display/mapperextensions/IQtiMapperExt.h",
+      "sha256": "14fd583d424b13ea1e100902094870846faff0912b372460da1c0d54337ff9fd"
+    },
+    {
+      "path": "probe/graphics/qti-mapper-abi/QtiViews.h",
+      "url": "https://github.com/LineageOS/android_vendor_qcom_opensource_display-intf/blob/19b5c055b40bc3d7af4309662eea98c7e7a72cee/common/QtiViews.h",
+      "sha256": "3e63e2f77ef65bc12aa1cc7a12de87b857caea7d60e58e6c9e4c8376a38a2b22"
+    },
+    {
+      "path": "probe/graphics/qti-mapper-abi/MetadataType.h",
+      "url": "https://github.com/LineageOS/android_vendor_qcom_opensource_display-intf/blob/19b5c055b40bc3d7af4309662eea98c7e7a72cee/common/MetadataType.h",
+      "sha256": "ea40ad7f5915757c6ac80498b490da131a47a7c7815c18985ae8b4aa6f94c192"
+    }
+  ],
+  "observed_aarch64_abi": {
+    "version": 2,
+    "size": 32,
+    "alignment": 16,
+    "function_offsets": [
+      8,
+      16,
+      24
+    ]
+  },
+  "scope": "Native mapper5 single-view stable-C extension; no old mapper HAL or Snap backend",
+  "codec2_compatibility": {
+    "input_sha256": "b1a2929ab27713d3effde4e8307dc85dd2a0de10de1bfc275f0527be8fe1c8f7",
+    "remove_needed": "libmapperutils.so",
+    "retained_needed": "mapper.qti.so",
+    "required_companion_exports": [
+      "IQtiMapperExt_loadIMapperExt",
+      "_ZN6mapper16GetMetadataStateEPK13native_handle47vendor_qti_hardware_display_common_MetadataTypePb"
+    ],
+    "scope": "Remove only the incompatible Snap mapperutils dependency; preserve executable code and resolve real state queries through the native companion"
+  },
+  "semantic_sources": [
+    {
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-intf/19b5c055b40bc3d7af4309662eea98c7e7a72cee/common/BufferUsage.h",
+      "sha256": "a996841f40b706484e68f8bb43e357c3a9c9e267200bba7f5c53dc8ac4a38e5c",
+      "contract": "MULTI_VIEW_INFO usage bit 58"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-intf/19b5c055b40bc3d7af4309662eea98c7e7a72cee/common/MetadataStatus.h",
+      "sha256": "8b57af58760679d8e9efb39c0f08894d5f2520ab85e181e3a4ad6d6680ca9e5f",
+      "contract": "Explicit-set state; 512 entries; standard[type], vendor[type-10000]"
+    }
+  ]
+}

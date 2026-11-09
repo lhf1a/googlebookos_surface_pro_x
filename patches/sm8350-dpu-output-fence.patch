@@ -1,0 +1,77 @@
+--- a/sde-drm/drm_atomic_req.h
++++ b/sde-drm/drm_atomic_req.h
+@@ -35,6 +35,7 @@
+ #include <xf86drm.h>
+ #include <xf86drmMode.h>
+ #include <vector>
++#include "qti-dpu-output-fence.h"
+ 
+ namespace sde_drm {
+ 
+@@ -54,6 +55,7 @@
+   DRMManager *drm_mgr_ = {};
+   int fd_ = -1;
+   int plane_error_ = 0;
++  DpuOutputFences output_fences_;
+   DRMDisplayToken token_ = {};
+ };
+ 
+--- a/sde-drm/drm_atomic_req.cpp
++++ b/sde-drm/drm_atomic_req.cpp
+@@ -56,13 +56,35 @@
+     return -ENOMEM;
+   }
+ 
+-  return 0;
++  return output_fences_.Init(fd_, tok.crtc_id, tok.conn_id);
+ }
+ 
+ int DRMAtomicReq::Perform(DRMOps opcode, uint32_t obj_id, ...) {
+   va_list args;
+   va_start(args, obj_id);
+   int result = 0;
++  if (output_fences_.Enabled()) {
++    bool handled = true;
++    switch (opcode) {
++      case DRMOps::CRTC_GET_RELEASE_FENCE:
++        result = output_fences_.RequestRelease(obj_id, va_arg(args, int64_t *));
++        break;
++      case DRMOps::CONNECTOR_GET_RETIRE_FENCE:
++        result = output_fences_.RequestRetire(obj_id, va_arg(args, int64_t *));
++        break;
++      case DRMOps::CRTC_SET_OUTPUT_FENCE_OFFSET:
++        result = output_fences_.SetOffset(obj_id, va_arg(args, uint32_t));
++        break;
++      default:
++        handled = false;
++        break;
++    }
++    if (handled) {
++      if (result && !plane_error_) plane_error_ = result;
++      va_end(args);
++      return result;
++    }
++  }
+   switch (opcode) {
+     case DRMOps::PLANE_SET_SRC_RECT:
+     case DRMOps::PLANE_SET_DST_RECT:
+@@ -153,6 +175,8 @@
+ }
+ 
+ int DRMAtomicReq::Validate() {
++  // TEST_ONLY must not export fences or retain pointers into the caller stack.
++  output_fences_.Reset();
+   // Call UnsetUnusedPlanes to find planes that need to be unset. Do not call CommitPlaneState,
+   // because we just want to validate, not actually mark planes as removed
+   drm_mgr_->GetPlaneMgr()->UnsetUnusedResources(token_.crtc_id, false/*is_commit*/,
+@@ -187,7 +211,10 @@
+     flags |= DRM_MODE_ATOMIC_NONBLOCK;
+   }
+ 
++  if (!plane_error_) plane_error_ = output_fences_.Prepare(drm_atomic_req_);
+   int ret = plane_error_ ? plane_error_ : drmModeAtomicCommit(fd_, drm_atomic_req_, flags, nullptr);
++  int fence_result = output_fences_.Complete(!ret);
++  if (!ret) ret = fence_result;
+   if (ret) {
+     DRM_LOGE("drmModeAtomicCommit failed with error %d (%s).", errno, strerror(errno));
+   }

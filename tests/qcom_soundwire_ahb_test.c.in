@@ -1,0 +1,77 @@
+
+#include <assert.h>
+#include <errno.h>
+#include <pthread.h>
+#include <sched.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdatomic.h>
+#include <unistd.h>
+typedef uint32_t u32;typedef uint8_t u8;
+#define SDW_CMD_OK 0
+#define SDW_CMD_FAIL 1
+#define SWRM_AHB_BRIDGE_RD_ADDR_0 0xc8d
+#define SWRM_AHB_BRIDGE_RD_DATA_0 0xc91
+#define SWRM_AHB_BRIDGE_WR_DATA_0 0xc85
+#define SWRM_AHB_BRIDGE_WR_ADDR_0 0xc89
+struct regmap {int unused;};
+struct qcom_swrm_ctrl { struct regmap *regmap; pthread_mutex_t ahb_lock; };
+static pthread_mutex_t bridge_lock=PTHREAD_MUTEX_INITIALIZER;
+static _Thread_local int owner;
+static atomic_int first,attempt,second,held;
+static int race_mode,fail_at;
+static atomic_int calls;
+static u32 address,data,committed[2],observed[2];
+static void mutex_lock(pthread_mutex_t *m) {if(owner==2)atomic_store(&attempt,1);pthread_mutex_lock(m);atomic_store(&held,1);}
+static void mutex_unlock(pthread_mutex_t *m) {atomic_store(&held,0);pthread_mutex_unlock(m);}
+static int io(int reg,void *buf,int len,int read) {
+ assert(len==4);++calls;if(fail_at==calls)return -EIO;
+ pthread_mutex_lock(&bridge_lock);
+ if(read) *(u32 *)buf=address;
+ else if(reg==SWRM_AHB_BRIDGE_RD_ADDR_0) address=*(u32 *)buf;
+ else if(reg==SWRM_AHB_BRIDGE_WR_DATA_0) data=*(u32 *)buf;
+ else if(reg==SWRM_AHB_BRIDGE_WR_ADDR_0) committed[owner-1]=data;
+ pthread_mutex_unlock(&bridge_lock);
+ if(race_mode && (reg==SWRM_AHB_BRIDGE_RD_ADDR_0 || reg==SWRM_AHB_BRIDGE_WR_DATA_0)) {
+  if(owner==1) {
+   atomic_store(&first,1);
+   while(!atomic_load(&attempt))sched_yield();
+   if(!atomic_load(&held))while(!atomic_load(&second))sched_yield();
+  } else atomic_store(&second,1);
+ }
+ return 0;
+}
+static int regmap_bulk_write(struct regmap *m,int reg,const void *buf,int len) {(void)m;return io(reg,(void *)buf,len,0);}
+static int regmap_bulk_read(struct regmap *m,int reg,void *buf,int len) {(void)m;return io(reg,buf,len,1);}
+@READ@
+@WRITE@
+static struct regmap map;
+static struct qcom_swrm_ctrl ctrl={.regmap=&map,.ahb_lock=PTHREAD_MUTEX_INITIALIZER};
+static void *worker(void *arg) {
+ owner=(int)(intptr_t)arg;
+ if(owner==2) {while(!atomic_load(&first))sched_yield();atomic_store(&attempt,1);}
+ if(race_mode==1)assert(qcom_swrm_ahb_reg_read(&ctrl,owner*0x100,&observed[owner-1])==0);
+ else assert(qcom_swrm_ahb_reg_write(&ctrl,owner*0x100,owner*123)==0);
+ return NULL;
+}
+int main(void) {
+ int errors=0;
+ for(int mode=1;mode<=2;mode++) {
+  race_mode=mode;first=attempt=second=held=0;calls=0;
+  pthread_t a,b;assert(!pthread_create(&a,NULL,worker,(void *)1));assert(!pthread_create(&b,NULL,worker,(void *)2));
+  pthread_join(a,NULL);pthread_join(b,NULL);
+  if(mode==1 && (observed[0]!=0x100 || observed[1]!=0x200))++errors;
+  if(mode==2 && (committed[0]!=123 || committed[1]!=246))++errors;
+ }
+ if(errors){printf("AHB_INTERLEAVING_CORRUPT paths=%d\n",errors);return 3;}
+ race_mode=0;owner=1;
+ for(int write=0;write<=1;write++)for(int fail=1;fail<=2;fail++) {
+  fail_at=fail;calls=0;u32 value=0;
+  int ret=write?qcom_swrm_ahb_reg_write(&ctrl,0x100,123):qcom_swrm_ahb_reg_read(&ctrl,0x100,&value);
+  assert(ret==SDW_CMD_FAIL && calls==fail && !atomic_load(&held));
+  fail_at=0;calls=0;
+  assert(qcom_swrm_ahb_reg_read(&ctrl,0x100,&value)==0 && value==0x100);
+ }
+ puts("AHB read/write interleaving and four error exits passed");return 0;
+}

@@ -99,6 +99,7 @@ int main(int argc,char **argv){
  else if(!strcmp(argv[1],"init-timeout")){i.state=INST_UNINIT;}
  else if(!strcmp(argv[1],"core-error")){c.sys_error=1;}
  else if(!strcmp(argv[1],"streaming")){streaming=1;}
+ else if(!strcmp(argv[1],"prior-session-error")){i.session_error=true;}
  else if(!strcmp(argv[1],"release-pm-fail")){power_fail_at=1;}
  else if(!strcmp(argv[1],"streamoff-pm-fail")){power_fail_at=1;}
  else if(strcmp(argv[1],"reqbufs"))return 2;
@@ -109,7 +110,7 @@ int main(int argc,char **argv){
  return 0;
 }
 """
-SCENARIOS=['never-init','reqbufs','streaming','outer-pm-fail','inner-pm-fail','stop-pm-fail','end-timeout','init-timeout','core-error','release-pm-fail','streamoff-pm-fail']
+SCENARIOS=['never-init','reqbufs','streaming','outer-pm-fail','inner-pm-fail','stop-pm-fail','end-timeout','init-timeout','core-error','release-pm-fail','streamoff-pm-fail','prior-session-error']
 def build(source, output):
  output.mkdir(parents=True,exist_ok=True)
  code=PREFIX
@@ -135,7 +136,7 @@ if __name__=='__main__':
    assert t['hfi_after_pm_failure']==0,t
    assert t['barrier_under_lock']==0 and t['unbarriered_retire']==0,t
    assert not t['unresolved_at_destroy'] or t['sys_error_at_destroy'],t
-   if t['scenario'] in ['never-init','reqbufs','streaming']:assert not t['sys_error_at_destroy'] and t['ret']==0,t
+   if t['scenario'] in ['never-init','reqbufs','streaming','prior-session-error']:assert not t['sys_error_at_destroy'] and t['ret']==0,t
   assert results[1]['end_sent']==1 and results[1]['end_confirmed'],results[1]
   assert results[6]['end_sent']==1 and not results[6]['end_confirmed'],results[6]
   assert results[7]['end_sent']==0 and results[7]['sys_error_at_destroy'],results[7]

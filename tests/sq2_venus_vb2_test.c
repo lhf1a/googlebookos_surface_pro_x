@@ -155,6 +155,33 @@ static void *producer(void *arg)
 }
 static void *stopper(void *arg)
 {for(int i=0;i<1000;i++)sq2_venus_retire_stopped(arg);return NULL;}
+static void unsubmitted_test(void)
+{
+ struct venus_core core={0};struct venus_inst inst={.core=&core};
+ struct vb2_queue q={&inst};struct vb2_buffer vb={&q};
+ struct dma_buf db={.refs=1,.size=8192};
+ const struct vb2_mem_ops *ops=&sq2_vb2_memops;
+ sq2_venus_retire_init(&core);
+ assert(!sq2_venus_scope_begin(&inst));
+ int old_maps=maps,old_unmaps=unmaps,old_detaches=detaches,old_put=put_count;
+ void *p=ops->attach_dmabuf(&vb,NULL,&db,4096);assert(!IS_ERR(p));
+ assert(!ops->map_dmabuf(p));ops->unmap_dmabuf(p);
+ assert(core.sq2_vb2_bytes==8192 && maps==old_maps+1 && unmaps==old_unmaps);
+ ops->detach_dmabuf(p);dma_buf_put(&db);
+ assert(!db.refs && !core.sq2_vb2_bytes && !allocations && !pins);
+ assert(unmaps==old_unmaps+1 && detaches==old_detaches+1);
+ assert(core.sq2_retired.next==&core.sq2_retired && !inst.sq2_scope->ended);
+ p=ops->alloc(&vb,NULL,4096);assert(!IS_ERR(p));ops->put(p);
+ assert(put_count==old_put+1 && !core.sq2_vb2_bytes && !pins && !allocations);
+ db.refs=1;p=ops->attach_dmabuf(&vb,NULL,&db,4096);assert(!IS_ERR(p));
+ fail_map=1;assert(ops->map_dmabuf(p)==-EIO);fail_map=0;
+ ops->detach_dmabuf(p);dma_buf_put(&db);
+ assert(!db.refs && !core.sq2_vb2_bytes && unmaps==old_unmaps+1);
+ assert(!pins && !allocations && core.sq2_retired.next==&core.sq2_retired);
+ sq2_venus_scope_drop(&inst);
+ assert(!pthread_mutex_destroy(&core.sq2_retire_lock));
+ printf("UNSUBMITTED_PASS: mapped, allocated and failed-map VB2 leases reclaimed without END/PAS; active scope unchanged\n");
+}
 static void scope_test(void)
 {
  struct venus_core core={0};struct venus_inst a={.core=&core},b={.core=&core};
@@ -190,12 +217,15 @@ int main(int argc,char **argv)
  const struct vb2_mem_ops *ops=&sq2_vb2_memops;
  if(argc>1 && argv[1][0]=='i') {internal_test(argv[1][1]=='1');return 0;}
  sq2_venus_retire_init(&core);
+ assert(!sq2_venus_scope_begin(&inst));
  if(argc>1) {
   ops=argv[1][0]=='s' ? &vb2_dma_contig_memops : &sq2_vb2_memops;
   p=ops->attach_dmabuf(&vb,NULL,&db,4096);assert(!IS_ERR(p));
+  if(ops==&sq2_vb2_memops)assert(!sq2_venus_scope_bind(&inst,p));
   assert(!ops->map_dmabuf(p));ops->unmap_dmabuf(p);ops->detach_dmabuf(p);dma_buf_put(&db);
   printf("VB2 close before PAS confirmation: refs=%d mappings=%d unmaps=%d detach=%d pins=%d\n",db.refs,maps-unmaps,unmaps,detaches,pins);
   sq2_venus_retire_stopped(&core);assert(!allocations&&!pins&&!db.refs);
+  sq2_venus_scope_drop(&inst);
   assert(!pthread_mutex_destroy(&core.sq2_retire_lock));return 0;
  }
  fail_alloc=1;assert(IS_ERR(ops->alloc(&vb,NULL,4096)));assert(!pins);fail_alloc=0;
@@ -207,6 +237,7 @@ int main(int argc,char **argv)
  assert(ops->alloc(&vb,NULL,1)==ERR_PTR(-ENOSPC)&&!allocations&&!pins);
  sq2_venus_vb2_unreserve(&core,SQ2_VENUS_VB2_BUDGET);
  p=ops->attach_dmabuf(&vb,NULL,&db,4096);assert(!IS_ERR(p)&&db.refs==2&&pins==1);
+ assert(!sq2_venus_scope_bind(&inst,p));
  fail_map=1;assert(ops->map_dmabuf(p)==-EIO);fail_map=0;
  assert(!ops->map_dmabuf(p));ops->unmap_dmabuf(p);assert(!unmaps);
  assert(!ops->map_dmabuf(p)&&maps==1); /* same retained mapping */
@@ -214,9 +245,10 @@ int main(int argc,char **argv)
  assert(db.refs==1&&allocations==1&&pins==1&&!unmaps&&!detaches);
  assert(core.sq2_vb2_bytes==8192); /* full exported size, not requested4096 */
  printf("before PAS confirmation: refs=%d mappings=%d unmaps=%d detach=%d pins=%d\n",db.refs,maps-unmaps,unmaps,detaches,pins);
- p=ops->alloc(&vb,NULL,4096);assert(!IS_ERR(p));ops->put(p);assert(!put_count&&allocations==2);
- void *late=ops->alloc(&vb,NULL,4096);assert(!IS_ERR(late));
+ p=ops->alloc(&vb,NULL,4096);assert(!IS_ERR(p));assert(!sq2_venus_scope_bind(&inst,p));ops->put(p);assert(!put_count&&allocations==2);
+ void *late=ops->alloc(&vb,NULL,4096);assert(!IS_ERR(late));assert(!sq2_venus_scope_bind(&inst,late));
  db.refs++;void *unmapped=ops->attach_dmabuf(&vb,NULL,&db,4096);assert(!IS_ERR(unmapped));
+ assert(!sq2_venus_scope_bind(&inst,unmapped));
  ops->detach_dmabuf(unmapped);dma_buf_put(&db);
  assert(core.sq2_vb2_bytes==24576);
  sq2_venus_retire_stopped(&core);
@@ -225,6 +257,7 @@ int main(int argc,char **argv)
  sq2_venus_retire_stopped(&core);assert(unmaps==1); /* no double release */
  assert(ops->alloc(&vb,NULL,4096)==ERR_PTR(-EIO));
  ops->put(late);assert(!allocations&&!pins&&put_count==2&&!core.sq2_vb2_bytes);
+ sq2_venus_scope_drop(&inst);
  printf("VB2 budget: zero/overflow/full rejected, full exporter charged, failed allocation refunded, retired bytes held, post-stop allocation refused\n");
  printf("confirmed stop: refs=%d outstanding_allocations=%d pins=%d; immediate late retirement OK\n",db.refs,allocations,pins);
  assert(!pthread_mutex_destroy(&core.sq2_retire_lock));
@@ -240,5 +273,6 @@ int main(int argc,char **argv)
  internal_test(true);
  internal_budget_test();
  scope_test();
+ unsubmitted_test();
  return 0;
 }

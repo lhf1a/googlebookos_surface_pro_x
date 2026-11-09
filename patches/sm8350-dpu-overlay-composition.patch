@@ -1,0 +1,182 @@
+--- a/sdm/libs/core/strategy.h
++++ b/sdm/libs/core/strategy.h
+@@ -61,7 +61,7 @@
+ 
+  private:
+   void GenerateROI();
+-  int GetDpuOverlayIndex() const;
++  std::vector<uint32_t> GetDpuOverlayIndices(uint32_t max_layers) const;
+ 
+   ExtensionInterface *extension_intf_ = NULL;
+   StrategyInterface *strategy_intf_ = NULL;
+--- a/sdm/libs/core/strategy.cpp
++++ b/sdm/libs/core/strategy.cpp
+@@ -113,7 +113,7 @@
+     }
+   }
+ 
+-  *max_attempts = GetDpuOverlayIndex() >= 0 ? 2 : 1;
++  *max_attempts = GetDpuOverlayIndices(hw_resource_info_.num_blending_stages).empty() ? 1 : 2;
+ 
+   return kErrorNone;
+ }
+@@ -126,8 +126,8 @@
+   return kErrorNone;
+ }
+ 
+-// The first Linux mixed strategy handles one opaque edge NV12 layer at 1:1 only.
+-int Strategy::GetDpuOverlayIndex() const {
++// Opaque video underlays preserve stack order; SF clears their areas before upper client layers.
++std::vector<uint32_t> Strategy::GetDpuOverlayIndices(uint32_t max_layers) const {
+   if (extension_intf_ || !hw_resource_info_.kernel_managed_dpu ||
+       !hw_resource_info_.num_vig_pipe || display_type_ != kBuiltIn || !hw_layers_info_ ||
+       !hw_layers_info_->stack || !hw_layers_info_->app_layer_count ||
+@@ -136,22 +136,17 @@
+       mixer_attributes_.width != fb_config_.x_pixels ||
+       mixer_attributes_.height != fb_config_.y_pixels ||
+       hw_panel_info_.panel_orientation.flip_horizontal ||
+-      hw_panel_info_.panel_orientation.flip_vertical) return -1;
++      hw_panel_info_.panel_orientation.flip_vertical) return {};
+   const auto &stack = *hw_layers_info_->stack;
+   if (stack.flags.secure_present || stack.flags.hdr_present || stack.flags.mask_present ||
+-      stack.flags.s3d_mode_present) return -1;
++      stack.flags.s3d_mode_present) return {};
+   for (const auto *layer : stack.layers) {
+-    if (!layer || layer->flags.color_transform) return -1;
+-  }
+-  const Layer &target = *stack.layers[hw_layers_info_->gpu_target_index];
+-  if (target.composition != kCompositionGPUTarget || target.plane_alpha != 255 ||
+-      (target.input_buffer.format != kFormatRGBA8888 &&
+-       target.input_buffer.format != kFormatRGBA8888Ubwc) ||
+-      target.blending != kBlendingPremultiplied ||
+-      !sde_drm::DpuColorSupported(false, target.input_buffer.color_metadata)) return -1;
++    if (!layer || layer->flags.color_transform) return {};
++  }
+   auto formats = hw_resource_info_.supported_formats_map.find(kHWVIGPipe);
+-  if (formats == hw_resource_info_.supported_formats_map.end()) return -1;
+-  for (uint32_t index : {0u, hw_layers_info_->app_layer_count - 1}) {
++  if (formats == hw_resource_info_.supported_formats_map.end()) return {};
++  std::vector<uint32_t> selected;
++  for (uint32_t index = 0; index < hw_layers_info_->app_layer_count; ++index) {
+     const Layer &layer = *stack.layers[index];
+     const auto &buffer = layer.input_buffer;
+     if (layer.flags.skip || layer.flags.solid_fill || layer.flags.cursor ||
+@@ -173,12 +168,30 @@
+       chroma_aligned &= std::isfinite(value) && std::fmod(value, 2.0f) == 0;
+     if (!integral || !chroma_aligned || !IsValid(src) || !IsValid(dst) ||
+         src.right > buffer.width || src.bottom > buffer.height ||
+-        dst.right > fb_config_.x_pixels || dst.bottom > fb_config_.y_pixels ||
+-        src.right - src.left != dst.right - dst.left ||
+-        src.bottom - src.top != dst.bottom - dst.top) continue;
+-    return int(index);
+-  }
+-  return -1;
++        dst.right > fb_config_.x_pixels || dst.bottom > fb_config_.y_pixels) continue;
++    const float src_width = src.right - src.left, src_height = src.bottom - src.top;
++    const float dst_width = dst.right - dst.left, dst_height = dst.bottom - dst.top;
++    if (!hw_resource_info_.max_scale_up || !hw_resource_info_.max_scale_down ||
++        dst_width > src_width * hw_resource_info_.max_scale_up ||
++        dst_height > src_height * hw_resource_info_.max_scale_up ||
++        src_width > dst_width * hw_resource_info_.max_scale_down ||
++        src_height > dst_height * hw_resource_info_.max_scale_down) continue;
++    selected.push_back(index);
++    if (selected.size() == hw_resource_info_.num_vig_pipe) break;
++  }
++  if (selected.empty() || !max_layers) return {};
++  // A fully device-composed stack must not scan an old, unrendered client target.
++  if (selected.size() == hw_layers_info_->app_layer_count && selected.size() <= max_layers)
++    return selected;
++  if (max_layers < 2) return {};
++  selected.resize(std::min(selected.size(), size_t(max_layers - 1)));
++  const Layer &target = *stack.layers[hw_layers_info_->gpu_target_index];
++  if (target.composition != kCompositionGPUTarget || target.plane_alpha != 255 ||
++      (target.input_buffer.format != kFormatRGBA8888 &&
++       target.input_buffer.format != kFormatRGBA8888Ubwc) ||
++      target.blending != kBlendingPremultiplied ||
++      !sde_drm::DpuColorSupported(false, target.input_buffer.color_metadata)) return {};
++  return selected;
+ }
+ 
+ DisplayError Strategy::GetNextStrategy(StrategyConstraints *constraints) {
+@@ -191,9 +204,9 @@
+     return kErrorNotSupported;
+   }
+ 
+-  int overlay = -1;
+-  if (!dpu_overlay_attempted_ && constraints && !constraints->safe_mode && constraints->max_layers >= 2)
+-    overlay = GetDpuOverlayIndex();
++  std::vector<uint32_t> overlays;
++  if (!dpu_overlay_attempted_ && constraints && !constraints->safe_mode)
++    overlays = GetDpuOverlayIndices(constraints->max_layers);
+   dpu_overlay_attempted_ = true;
+   // Every retry starts from an independent strategy, including after a real TEST_ONLY rejection.
+   hw_layers_info_->hw_layers.clear();
+@@ -222,28 +235,23 @@
+   LayerRect dst_domain = (LayerRect){0.0f, 0.0f, layer_mixer_width, layer_mixer_height};
+ 
+   Layer layer = *gpu_target_layer;
+-  hw_layers_info_->index.push_back(hw_layers_info_->gpu_target_index);
+-  hw_layers_info_->roi_index.push_back(0);
+   layer.transform.flip_horizontal ^= hw_panel_info_.panel_orientation.flip_horizontal;
+   layer.transform.flip_vertical ^= hw_panel_info_.panel_orientation.flip_vertical;
+   // Flip rect to match transform.
+   TransformHV(src_domain, layer.dst_rect, layer.transform, &layer.dst_rect);
+   // Scale to mixer resolution.
+   MapRect(src_domain, dst_domain, layer.dst_rect, &layer.dst_rect);
+-  hw_layers_info_->hw_layers.push_back(layer);
+-  if (overlay >= 0) {
+-    Layer *video = layer_stack->layers.at(uint32_t(overlay));
++  for (uint32_t index : overlays) {
++    Layer *video = layer_stack->layers.at(index);
+     video->composition = kCompositionSDE;
+-    if (overlay == 0) {
+-      // Existing HWC ClearClientTarget request lets SF clear the opaque underlay before upper UI.
+-      hw_layers_info_->hw_layers.insert(hw_layers_info_->hw_layers.begin(), *video);
+-      hw_layers_info_->index.insert(hw_layers_info_->index.begin(), uint32_t(overlay));
+-      hw_layers_info_->roi_index.insert(hw_layers_info_->roi_index.begin(), 0);
+-    } else {
+-      hw_layers_info_->hw_layers.push_back(*video);
+-      hw_layers_info_->index.push_back(uint32_t(overlay));
+-      hw_layers_info_->roi_index.push_back(0);
+-    }
++    hw_layers_info_->hw_layers.push_back(*video);
++    hw_layers_info_->index.push_back(index);
++    hw_layers_info_->roi_index.push_back(0);
++  }
++  if (overlays.size() != hw_layers_info_->app_layer_count) {
++    hw_layers_info_->hw_layers.push_back(layer);
++    hw_layers_info_->index.push_back(hw_layers_info_->gpu_target_index);
++    hw_layers_info_->roi_index.push_back(0);
+   }
+ 
+   return kErrorNone;
+--- a/sdm/libs/core/resource_default.cpp
++++ b/sdm/libs/core/resource_default.cpp
+@@ -219,17 +219,17 @@
+   for (auto &config : hw_layers->config) config = {};
+   const auto &layers = hw_layers->info.hw_layers;
+   bool single_target = layers.size() == 1 && layers[0].composition == kCompositionGPUTarget;
+-  bool mixed = hw_res_info_.kernel_managed_dpu && layers.size() == 2;
+   unsigned target_count = 0, video_count = 0;
+-  if (mixed) {
+-    for (const auto &layer : layers) {
+-      target_count += layer.composition == kCompositionGPUTarget;
+-      video_count += layer.composition == kCompositionSDE &&
+-                     layer.input_buffer.format == kFormatYCbCr420SemiPlanarVenus;
+-    }
+-    mixed = target_count == 1 && video_count == 1;
+-  }
+-  if (!single_target && !mixed) return kErrorNotSupported;
++  for (const auto &layer : layers) {
++    target_count += layer.composition == kCompositionGPUTarget;
++    video_count += layer.composition == kCompositionSDE &&
++                   layer.input_buffer.format == kFormatYCbCr420SemiPlanarVenus;
++  }
++  bool hardware = hw_res_info_.kernel_managed_dpu && video_count && target_count <= 1 &&
++                  layers.size() == target_count + video_count &&
++                  layers.size() <= hw_res_info_.num_blending_stages;
++  if (!single_target && !hardware) return kErrorNotSupported;
++  if (layers.size() > sizeof(hw_layers->config) / sizeof(hw_layers->config[0])) return kErrorResources;
+   for (uint32_t index = 0; index < layers.size(); ++index) {
+     DisplayError error = PrepareLayer(context, hw_layers, index);
+     if (error != kErrorNone) {

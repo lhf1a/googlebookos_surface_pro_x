@@ -18,8 +18,15 @@ int runner_main(int,char**);
 static unsigned req,maps,closed,queue,start;
 static unsigned events,gfmt,off;
 static int data_mode;
+static int native_mode,native_allocs,native_finished;
+int quest2_capture_config(unsigned w,unsigned h,unsigned stride,unsigned scan,unsigned size,unsigned bpp){assert(bpp==1&&native_mode&&w==320&&h==240&&stride==384&&scan==256&&size==159744);return 0;}
+int quest2_capture_allocate(unsigned i,int *fd,size_t *len);
+int quest2_capture_layout(unsigned *stride,unsigned *scan,unsigned *size){assert(native_mode);*stride=384;*scan=256;*size=159744;return 0;}
+int quest2_capture_sample(unsigned i,const unsigned char *p,size_t offset){(void)i;(void)p;(void)offset;assert(0);return -1;}
+void quest2_capture_finish(void){assert(native_mode&&closed==1);native_finished++;}
 static int dma_mode,allocs,dma_closed,heap_closed,fail_alloc;
 static unsigned syncs[32];
+int quest2_capture_allocate(unsigned i,int *fd,size_t *len){assert(native_mode&&i<2);native_allocs++;if(i)return -1;*fd=100+allocs++;*len=159744;return 0;}
 int __wrap_poll(struct pollfd *p,nfds_t n,int t){(void)p;(void)n;(void)t;return 0;}
 int __wrap_open(const char *p,int flags,...){(void)flags;if(!strcmp(p,"/dev/dma_heap/system")){assert(dma_mode);return 8;}assert(!strcmp(p,"/dev/test"));return 7;}
 int __wrap_fsync(int fd){(void)fd;return 0;}
@@ -41,7 +48,8 @@ int __wrap_ioctl(int fd,unsigned long op,...){va_list args;va_start(args,op);voi
  case VIDIOC_STREAMOFF:assert(data_mode);off++;return 0;
  case VIDIOC_DQEVENT:assert(data_mode);events++;if(events<3){errno=events==1?ENOENT:EAGAIN;return -1;}((struct v4l2_event*)p)->type=V4L2_EVENT_SOURCE_CHANGE;return 0;
  case VIDIOC_G_SELECTION:{assert(data_mode);struct v4l2_selection *s=p;assert(s->type==V4L2_BUF_TYPE_VIDEO_CAPTURE&&s->target==V4L2_SEL_TGT_COMPOSE);s->r=(struct v4l2_rect){0,0,320,240};return 0;}
- case VIDIOC_G_FMT:assert(data_mode);gfmt++;errno=EINVAL;return -1;
+ case VIDIOC_G_FMT:assert(data_mode);gfmt++;if(native_mode){struct v4l2_format *f=p;f->fmt.pix_mp.width=320;f->fmt.pix_mp.height=256;f->fmt.pix_mp.pixelformat=V4L2_PIX_FMT_NV12;f->fmt.pix_mp.num_planes=1;f->fmt.pix_mp.plane_fmt[0].bytesperline=384;f->fmt.pix_mp.plane_fmt[0].sizeimage=159744;return 0;}errno=EINVAL;return -1;
+ case VIDIOC_G_CTRL:assert(native_mode);((struct v4l2_control*)p)->value=2;return 0;
  }fprintf(stderr,"UNEXPECTED_IOCTL=%lx\n",op);abort();
 }
 int main(void){char *format[]={"runner","--format-only","/dev/test"};assert(runner_main(3,format)==0);assert(!req&&!maps&&closed==1&&!queue&&!start);
@@ -54,6 +62,10 @@ int main(void){char *format[]={"runner","--format-only","/dev/test"};assert(runn
  req=maps=closed=queue=start=events=gfmt=off=allocs=dma_closed=heap_closed=0;fail_alloc=1;memset(syncs,0,sizeof(syncs));
  assert(runner_main(3,dma)==1);assert(allocs==2&&dma_closed==2&&heap_closed==1&&maps==2&&!queue&&!start&&closed==1);
  puts("DMABUF_STAGE_PASS six-import-fds write-sync-pairs close-all; allocation-failure unwinds two");
+ req=maps=closed=queue=start=events=gfmt=off=allocs=dma_closed=heap_closed=0;fail_alloc=0;native_mode=1;memset(syncs,0,sizeof(syncs));
+ char *native[]={"runner","--native-gralloc","/dev/test"};assert(runner_main(3,native)==1);
+ assert(native_allocs==2&&allocs==7&&dma_closed==7&&maps==7&&heap_closed==1&&native_finished==1&&off==1&&closed==1);
+ puts("NATIVE_CAPTURE_UNWIND_PASS partial allocation closes imported fd before native-handle teardown after video close");
  puts("RUNNER_STAGE_PASS format:no-REQBUFS buffers:no-QBUF queue:6-QBUF all:no-STREAMON close=1");return 0;}
 '''
 with tempfile.TemporaryDirectory() as tmp:
@@ -69,7 +81,7 @@ static const u32 sq2_vec_au[7]={0,1,2,3,4,5,6};
 static const u32 sq2_vec_crc_y[6]={0};
 static const u32 sq2_vec_crc_uv[6]={0};
 ''')
- flags=['gcc','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie']
+ flags=['gcc','-DSQ2_NATIVE_CAPTURE','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie']
  subprocess.run(flags+['-Dmain=runner_main','-I',str(d),'-c',str(ROOT/'probe/video/sq2-v4l2-decode-test.c'),'-o',str(d/'runner.o')],check=True)
  subprocess.run(flags+[str(d/'test.c'),str(d/'runner.o')]+['-Wl,--wrap='+x for x in ['open','close','fsync','mmap','munmap','ioctl','poll']]+['-o',str(d/'test')],check=True)
  subprocess.run([str(d/'test')],check=True)

@@ -1,0 +1,26 @@
+--- a/composer/hwc_display.cpp
++++ b/composer/hwc_display.cpp
+@@ -2973,6 +2973,14 @@
+ }
+ 
+ HWC2::Error HWCDisplay::GetClientTargetProperty(ClientTargetProperty *out_client_target_property) {
++  if (!out_client_target_property) {
++    return HWC2::Error::BadParameter;
++  }
++  // Composer 2.4 uses UNKNOWN dataspace to mean no property change requested.
++  // Always initialize both fields before the no-update success path reaches FMQ.
++  out_client_target_property->pixelFormat =
++      android::hardware::graphics::common::V1_2::PixelFormat::RGBA_8888;
++  out_client_target_property->dataspace = Dataspace::UNKNOWN;
+ 
+   Layer *client_layer = client_target_->GetSDMLayer();
+   if (!client_layer->request.flags.update_format) {
+@@ -2986,7 +2994,7 @@
+     DLOGE("Invalid format: %s requested", GetFormatString(client_layer->request.format));
+     return HWC2::Error::BadParameter;
+   }
+-  Dataspace dataspace;
++  Dataspace dataspace = Dataspace::UNKNOWN;
+   DisplayError error = ColorMetadataToDataspace(client_layer->request.color_metadata,
+                                                    &dataspace);
+   if (error != kErrorNone) {

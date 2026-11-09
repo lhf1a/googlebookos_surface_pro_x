@@ -108,7 +108,9 @@ static void sq2_vb2_unmap(void *mem)
 static void sq2_vb2_retire(void *mem)
 {
  struct sq2_vb2_lease *lease = mem;
- sq2_venus_retire(lease->core, &lease->retired);
+ /* VB2 serializes detach against submission; no scope means no HFI publication. */
+ if (!lease->retired.scope) sq2_vb2_release(&lease->retired);
+ else sq2_venus_retire(lease->core, &lease->retired);
 }
 
 static void sq2_vb2_prepare(void *mem)

@@ -1,0 +1,174 @@
+/* Host fault injection around actual kernel helper functions; no hardware emulation claim. */
+#include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+typedef uint64_t u64;
+typedef uint32_t u32;
+typedef int32_t s32;
+typedef int spinlock_t;
+#define __user
+#define GFP_KERNEL 0
+#define WRITE_ONCE(x,v) ((x)=(v))
+#define spin_lock_init(x) (*(x)=0)
+#define spin_lock_irqsave(x,f) do { (void)(x); (f)=0; } while (0)
+#define spin_unlock_irqrestore(x,f) do { (void)(x); (void)(f); } while (0)
+#define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
+struct list_head { struct list_head *next,*prev; };
+#define INIT_LIST_HEAD(h) do {(h)->next=(h);(h)->prev=(h);} while(0)
+#define LIST_HEAD(n) struct list_head n={&n,&n}
+static void list_add_tail(struct list_head *n,struct list_head *h) {
+ n->prev=h->prev;n->next=h;h->prev->next=n;h->prev=n;
+}
+static void list_del_init(struct list_head *n) {
+ n->prev->next=n->next;n->next->prev=n->prev;INIT_LIST_HEAD(n);
+}
+static void list_move_tail(struct list_head *n,struct list_head *h) {list_del_init(n);list_add_tail(n,h);}
+static bool list_empty(const struct list_head *h) {return h->next==h;}
+#define list_entry(p,t,m) container_of(p,t,m)
+#define list_for_each_entry_safe(p,n,h,m) \
+ for(p=list_entry((h)->next,__typeof__(*p),m),n=list_entry(p->m.next,__typeof__(*p),m); \
+     &p->m!=(h); p=n,n=list_entry(n->m.next,__typeof__(*n),m))
+struct dma_fence {int refs,signaled,error;u64 context,seqno;};
+@TIMELINE@
+@FENCE@
+struct drm_device;
+struct drm_crtc_state;
+struct drm_crtc {struct drm_device *dev;struct drm_crtc_state *state;};
+struct drm_atomic_state {
+ struct drm_device *dev;bool async_update,legacy_cursor_update;int count;
+ struct drm_crtc *crtcs[2];struct drm_crtc_state *states[2];
+};
+struct drm_crtc_state {struct drm_crtc *crtc;struct drm_atomic_state *state;bool active,self_refresh_active;};
+struct dpu_crtc_state {struct drm_crtc_state base;u64 release_fence_ptr;struct dma_fence *release_fence;};
+struct dpu_crtc {struct drm_crtc base;struct dpu_release_timeline release_timeline;bool enabled;};
+struct drm_encoder {bool stopped;};
+struct drm_device {struct {int num_crtc;}mode_config;struct drm_encoder encoders[2];};
+struct msm_kms {int unused;};
+#define to_dpu_crtc(x) container_of(x,struct dpu_crtc,base)
+#define to_dpu_crtc_state(x) container_of(x,struct dpu_crtc_state,base)
+#define drm_for_each_encoder_mask(e,dev,mask) \
+ for(int _i=0;_i<2;++_i) if(((mask)&(1U<<_i)) && ((e)=&(dev)->encoders[_i]))
+#define for_each_new_crtc_in_state(s,c,cs,i) \
+ for((i)=0;(i)<(s)->count && (((c)=(s)->crtcs[i]),((cs)=(s)->states[i]),1);++(i))
+static struct drm_crtc_state *drm_atomic_get_new_crtc_state(struct drm_atomic_state *s,struct drm_crtc *c) {
+ for(int i=0;i<s->count;i++)if(s->crtcs[i]==c)return s->states[i];abort();
+}
+static bool dpu_encoder_video_stopped(struct drm_encoder *e){return e->stopped;}
+static int live_fences,alloc_count,fail_alloc,helper_calls,helper_error;
+static int fd_count,fail_fd,write_count,fail_write;
+static void *kcalloc(size_t n,size_t size,int flags){(void)flags;if(++alloc_count==fail_alloc)return NULL;return calloc(n,size);}
+static void *kzalloc(size_t size,int flags){(void)flags;if(++alloc_count==fail_alloc)return NULL;return calloc(1,size);}
+#define kfree free
+static int dpu_release_ops;
+static void dma_fence_init(struct dma_fence *f,void *ops,spinlock_t *lock,u64 context,u64 seq) {
+ (void)ops;(void)lock;f->refs=1;f->context=context;f->seqno=seq;++live_fences;
+}
+static struct dma_fence *dma_fence_get(struct dma_fence *f){if(f)++f->refs;return f;}
+static void dma_fence_put(struct dma_fence *f) {
+ if(f && !--f->refs){--live_fences;free(container_of(f,struct dpu_release_fence,base));}
+}
+static void dma_fence_set_error(struct dma_fence *f,int err){f->error=err;}
+static void dma_fence_signal(struct dma_fence *f){assert(!f->signaled);f->signaled=1;}
+struct sync_file;
+struct file {struct sync_file *owner;struct dma_fence *f;};
+struct sync_file {struct file *file;struct file store;};
+static struct file *fd_files[64];
+static bool fd_reserved[64];
+static struct sync_file *sync_file_create(struct dma_fence *f) {
+ struct sync_file *s=kzalloc(sizeof(*s),0);if(!s)return NULL;
+ s->file=&s->store;s->store.owner=s;s->store.f=dma_fence_get(f);return s;
+}
+static void fput(struct file *f){dma_fence_put(f->f);free(f->owner);}
+static int get_unused_fd_flags(int flags) {
+ (void)flags;if(++fd_count==fail_fd)return -EMFILE;
+ for(int i=3;i<64;i++)if(!fd_reserved[i]&&!fd_files[i]){fd_reserved[i]=true;return i;}
+ return -EMFILE;
+}
+static void put_unused_fd(int fd){assert(fd_reserved[fd]);fd_reserved[fd]=false;}
+static void fd_install(int fd,struct file *f){assert(fd_reserved[fd]&&!fd_files[fd]);fd_reserved[fd]=false;fd_files[fd]=f;}
+static void close_mock(int fd){assert(fd_files[fd]);fput(fd_files[fd]);fd_files[fd]=NULL;}
+static int put_user_impl(int value,s32 *p){if(++write_count==fail_write)return -EFAULT;*p=value;return 0;}
+#define put_user(v,p) put_user_impl(v,p)
+#define u64_to_user_ptr(v) ((void *)(uintptr_t)(v))
+#define drm_dbg_kms(...) ((void)0)
+static int drm_atomic_helper_commit(struct drm_device *d,struct drm_atomic_state *s,bool nb) {
+ (void)d;(void)s;(void)nb;++helper_calls;return helper_error;
+}
+@EXPORT@
+@FUNCTIONS@
+static void counters(void) {alloc_count=fail_alloc=fd_count=fail_fd=write_count=fail_write=helper_calls=helper_error=0;}
+static void no_fds(void) {for(int i=0;i<64;i++)assert(!fd_reserved[i]&&!fd_files[i]);}
+static void init_crtc(struct dpu_crtc *d,struct drm_device *dev) {
+ memset(d,0,sizeof(*d));d->base.dev=dev;INIT_LIST_HEAD(&d->release_timeline.pending);
+ d->release_timeline.context=(uintptr_t)d;d->enabled=true;
+}
+static void state(struct dpu_crtc *d,struct dpu_crtc_state *s,struct drm_atomic_state *a) {
+ memset(s,0,sizeof(*s));memset(a,0,sizeof(*a));s->base.crtc=&d->base;s->base.state=a;s->base.active=true;
+ a->dev=d->base.dev;a->count=1;a->crtcs[0]=&d->base;a->states[0]=&s->base;d->base.state=&s->base;
+}
+static void attach_fence(struct dpu_crtc_state *s) {
+ struct dpu_release_fence *f=calloc(1,sizeof(*f));INIT_LIST_HEAD(&f->link);
+ dma_fence_init(&f->base,NULL,&f->lock,1,1);s->release_fence=&f->base;
+}
+static void finish(struct dpu_crtc *d,int status,bool kick) {
+ if(kick)dpu_release_kickoff(&d->base);dpu_release_wait_result(&d->base,status);dpu_release_complete(&d->base);
+}
+int main(void) {
+ struct drm_device dev={.mode_config.num_crtc=2};
+ struct dpu_crtc d,e;struct dpu_crtc_state s[6],t;struct drm_atomic_state a[6],b;
+ init_crtc(&d,&dev);init_crtc(&e,&dev);
+ for(int i=0;i<6;i++){state(&d,&s[i],&a[i]);attach_fence(&s[i]);}
+ d.base.state=&s[0].base;dpu_release_begin(&d.base,&a[0]);finish(&d,0,true);
+ assert(!s[0].release_fence->signaled);
+ d.base.state=&s[1].base;dpu_release_begin(&d.base,&a[1]);finish(&d,0,true);
+ assert(s[0].release_fence->signaled&&!s[1].release_fence->signaled);
+ d.base.state=&s[2].base;dpu_release_begin(&d.base,&a[2]);finish(&d,-ETIMEDOUT,true);
+ assert(!s[1].release_fence->signaled&&!s[2].release_fence->signaled);
+ d.base.state=&s[3].base;dpu_release_begin(&d.base,&a[3]);finish(&d,0,false);
+ assert(!s[1].release_fence->signaled);
+ d.base.state=&s[4].base;a[4].legacy_cursor_update=true;dpu_release_begin(&d.base,&a[4]);finish(&d,0,true);
+ assert(!s[1].release_fence->signaled);
+ d.base.state=&s[5].base;dpu_release_begin(&d.base,&a[5]);finish(&d,0,true);
+ assert(s[1].release_fence->signaled&&s[2].release_fence->signaled&&s[3].release_fence->signaled);
+ assert(!s[5].release_fence->signaled);
+ state(&e,&t,&b);attach_fence(&t);dpu_release_begin(&e.base,&b);finish(&e,0,true);
+ dev.encoders[0].stopped=true;dev.encoders[1].stopped=false;
+ dpu_release_disable(&d.base,3);assert(!s[5].release_fence->signaled);
+ dev.encoders[1].stopped=true;dpu_release_disable(&d.base,3);
+ assert(s[5].release_fence->signaled&&!t.release_fence->signaled);
+ dpu_release_signal(&e.release_timeline,0,true,-ENODEV);
+ assert(t.release_fence->signaled&&t.release_fence->error==-ENODEV);
+ for(int i=0;i<6;i++)dma_fence_put(s[i].release_fence);dma_fence_put(t.release_fence);
+ assert(live_fences==0);
+ /* ioctl-owned export: multi-CRTC rollback, EDEADLK, allocator/fd/usercopy failures. */
+ for(int scenario=0;scenario<8;scenario++) {
+  struct dpu_crtc_state x,y;struct drm_atomic_state req;int32_t outx=-1,outy=-1;
+  state(&d,&x,&req);memset(&y,0,sizeof(y));y.base.crtc=&e.base;
+  req.count=2;req.crtcs[1]=&e.base;req.states[1]=&y.base;
+  x.release_fence_ptr=(uintptr_t)&outx;y.release_fence_ptr=(uintptr_t)&outy;
+  counters();
+  if(scenario<3)fail_alloc=scenario+1;
+  if(scenario==3)fail_fd=2;
+  if(scenario==4)fail_write=2;
+  if(scenario==5)helper_error=-EDEADLK;
+  if(scenario==6)helper_error=-EINVAL;
+  int ret=dpu_release_atomic_commit(NULL,&req,true);
+  if(scenario<7){
+   assert(ret<0&&outx==-1&&outy==-1);
+   assert(!x.release_fence&&!y.release_fence);no_fds();assert(live_fences==0);
+  }else{
+   assert(ret==0&&outx>=0&&outy>=0&&outx!=outy);
+   close_mock(outx);close_mock(outy);dma_fence_put(x.release_fence);dma_fence_put(y.release_fence);
+   no_fds();assert(live_fences==0);
+  }
+ }
+ struct dpu_crtc_state x;struct drm_atomic_state req;state(&d,&x,&req);
+ counters();fail_alloc=1;
+ assert(dpu_release_atomic_commit(NULL,&req,true)==0&&alloc_count==0&&helper_calls==1);
+ assert(live_fences==0);no_fds();
+}

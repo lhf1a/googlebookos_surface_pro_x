@@ -18,7 +18,4 @@ grep -q '<name>android.hardware.security.secretkeeper</name>' "$f"
 # This Surface has no working Trusty Secretkeeper; do not advertise it to AVF.
 # Only the ephemeral vendor overlay is changed, never /data or saved secrets.
 rm "$f"
-case " $(cat /proc/cmdline) " in
- *' sq2.el2=experimental '*|*' sq2.debug=1 '*) /bin/kvm-arm64-witness;;
-esac
 printf 'SQ2_EL2_TERMINAL_STAGE_READY: normal (non-protected) KVM only\n'

@@ -18,7 +18,10 @@ def main():
     for name in ("prepared", "toolchains", "omx-dir", "omx-headers", "stagefright", "output"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--with-system-adapter", action="store_true")
+    parser.add_argument("--clear-absent-hdr", action="store_true")
     args = parser.parse_args()
+    if args.clear_absent_hdr and not args.with_system_adapter:
+        parser.error("--clear-absent-hdr requires --with-system-adapter")
     paths = {name: path.resolve() for name, path in vars(args).items() if isinstance(path, Path)}
     source, cache, omx, output = (paths[k] for k in ("prepared", "toolchains", "omx_dir", "output"))
     recipe = json.loads((ROOT / "configs/stagefright-p010-renderer.json").read_text())
@@ -109,10 +112,26 @@ def main():
         helper = helper_source.read_text()
         start = helper.index("void setNativeWindowHdrMetadata(")
         end = helper.index("\n}\n", start) + 3
+        helper_body = helper[start:end]
+        if args.clear_absent_hdr:
+            for metadata in ("smpte2086", "cta861_3"):
+                marker = ('        ALOGW_IF(err != 0, "failed to set ' + metadata +
+                          ' metadata on surface (%d)", err);\n    }')
+                clear = (' else {\n        int err = native_window_set_buffers_' + metadata +
+                         '_metadata(nativeWindow, nullptr);\n'
+                         '        ALOGW_IF(err != 0, "failed to clear ' + metadata +
+                         ' metadata on surface (%d)", err);\n    }')
+                if helper_body.count(marker) != 1:
+                    raise ValueError("Unexpected HDR helper: " + metadata)
+                helper_body = helper_body.replace(marker, marker + clear)
         helper_file = output / "HdrMetadata.cpp"
         helper_file.write_text(
             '#include <utils/Log.h>\n#include <media/stagefright/SurfaceUtils.h>\n'
-            '#include <system/window.h>\n#include <media/hardware/VideoAPI.h>\nnamespace android {\n' + helper[start:end] + "\n}\n")
+            '#include <system/window.h>\n#include <media/hardware/VideoAPI.h>\nnamespace android {\n' + helper_body + "\n}\n" +
+            ('extern "C" __attribute__((visibility("default"))) void sq2_native_window_hdr_metadata('
+             'ANativeWindow *window, android::HDRStaticInfo *info) {\n'
+             '    android::setNativeWindowHdrMetadata(window, info);\n}\n'
+             if args.clear_absent_hdr else ""))
         adapter = ROOT / "probe/video/sq2-p010-renderer-adapter.cpp"
         run("libsq2-p010-renderer.so", common + [
             "-Wno-invalid-offsetof", "-Wno-return-type-c-linkage",
@@ -122,6 +141,7 @@ def main():
             "-Wl,-soname,libsq2-p010-renderer.so", "-Wl,-z,defs,-z,relro,-z,now,-z,noexecstack",
             "-o", output / "libsq2-p010-renderer.so"])
         records["libsq2-p010-renderer.so"]["sha256"] = sha(output / "libsq2-p010-renderer.so")
+        records["clear_absent_hdr"] = args.clear_absent_hdr
         records["adapter_inputs"] = {str(p): sha(p) for p in (helper_source, helper_file, adapter)}
     for name in ("p010-renderer-check", "p010-surface-check"):
         data = (output / name).read_bytes()

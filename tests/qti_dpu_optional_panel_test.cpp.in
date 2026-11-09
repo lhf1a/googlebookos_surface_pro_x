@@ -1,0 +1,125 @@
+// Actual SDM initialization and feature functions, with only external dependencies mocked.
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <mutex>
+#include <string>
+#include <vector>
+using std::lock_guard;using std::recursive_mutex;
+#define DLOGE(...) ((void)0)
+#define DLOGW(...) ((void)0)
+#define DLOGI(...) ((void)0)
+#define UINT32(x) uint32_t(x)
+#define DEFER_FPS_FRAME_COUNT "defer"
+#define ENABLE_SPR "spr"
+#define ENABLE_ROUNDED_CORNER "rc"
+#define DISABLE_DYNAMIC_FPS "fps"
+#define ENABLE_QSYNC_IDLE "qsync"
+#define ENHANCE_IDLE_TIME "idle"
+#define EXTENSION_LIBRARY_NAME "libsdmextension.so"
+enum DisplayError {kErrorNone,kErrorUndefined,kErrorNotSupported,kErrorResources,kErrorHardware};
+enum {kBuiltIn,kModeCommand,kModeVideo,kRCFeatureQueryDspp};
+enum class HWEvent {VSYNC,EXIT,IDLE_NOTIFY,SHOW_BLANK_EVENT,THERMAL_LEVEL,PINGPONG_TIMEOUT,PANEL_DEAD,HW_RECOVERY,HISTOGRAM,BACKLIGHT_EVENT,IDLE_POWER_COLLAPSE};
+static bool kernel=true,library_ok=true,symbol_ok=true,factory_ok=true,property_ok=true;
+static DisplayError hw_error=kErrorNone,base_error=kErrorNone,event_error=kErrorNone;
+static int hw_live,event_live,hw_destroy,event_destroy,unregisters,sampling,opens;
+struct Debug {
+  static Debug *Get(){static Debug d;return &d;}
+  static void GetProperty(const char *,int *out){*out=1;}
+  static bool IsVideoModeEnabled(){return false;}
+  static bool IsAVRDisabled(){return false;}
+};
+using DebugHandler=Debug;
+struct GenericPayload {};
+struct RCInputConfig {int display_id,display_type,display_xres,display_yres,max_mem_size;};
+struct SPRInputConfig {std::string panel_name;};
+struct MockFeature {int Init(){return 0;}int Deinit(){return 0;}int GetParameter(int,GenericPayload*){return 0;}};
+static MockFeature feature;
+struct Factory {MockFeature *CreateSPRIntf(SPRInputConfig,void*){return &feature;}MockFeature *CreateRCIntf(RCInputConfig,void*){return &feature;}};
+static Factory factory;
+static Factory *GetFactory(){return factory_ok ? &factory : nullptr;}
+struct DynLib {
+  bool Open(const char*){++opens;return library_ok;}
+  bool Sym(const char*,void **out){if(symbol_ok)*out=reinterpret_cast<void*>(GetFactory);return symbol_ok;}
+  const char *Error(){return "test failure";}
+};
+struct HWInterface {
+  static DisplayError Create(int,int,void*,void*,HWInterface**);
+  static void Destroy(HWInterface *p){if(p){--hw_live;++hw_destroy;delete p;}}
+  void GetDisplayId(int *p){*p=34;}
+  DisplayError SetDisplayMode(int){return kErrorNone;}
+  void UnsetScaleLutConfig(){}
+  void *GetPanelFeaturePropertyIntf(){return property_ok ? &factory : nullptr;}
+  virtual ~HWInterface()=default;
+};
+struct HWDeviceDRM:HWInterface {bool IsKernelManagedDpu()const{return kernel;}};
+DisplayError HWInterface::Create(int,int,void*,void*,HWInterface **out){
+  if(hw_error)return hw_error;++hw_live;*out=new HWDeviceDRM;return kErrorNone;
+}
+struct HWEventsInterface {
+  static DisplayError Create(int,int,void*,const std::vector<HWEvent>&,HWInterface*,HWEventsInterface **out){
+    if(event_error)return event_error;++event_live;*out=new HWEventsInterface;return kErrorNone;
+  }
+  static void Destroy(HWEventsInterface *p){if(p){--event_live;++event_destroy;delete p;}}
+};
+struct CompManager {void UnregisterDisplay(void*){++unregisters;}};
+static CompManager manager;
+struct ColorManager {void ColorMgrGetStcModes(void*){}};
+struct DisplayBase {
+  recursive_mutex recursive_mutex_;
+  int display_id_=-1,display_type_=kBuiltIn;
+  void *hw_info_intf_=nullptr,*buffer_allocator_=nullptr,*display_comp_ctx_=nullptr;
+  HWInterface *hw_intf_=nullptr;HWEventsInterface *hw_events_intf_=nullptr;
+  CompManager *comp_manager_=&manager;ColorManager *color_mgr_=nullptr;
+  struct {int mode=kModeVideo,max_fps=60;bool qsync_support=false;char panel_name[8]="panel";}hw_panel_info_;
+  struct {int x_pixels=2880,y_pixels=1920;}display_attributes_;
+  struct {int rc_total_mem_size=0;}hw_resource_info_;
+  bool rc_panel_feature_init_=false,rc_enable_prop_=false;
+  MockFeature *rc_core_=nullptr;Factory *pf_factory_=nullptr;void *prop_intf_=nullptr;
+  DisplayError Init(){if(!base_error)display_comp_ctx_=this;return base_error;}
+  DisplayError Deinit();DisplayError SetupRC();
+  bool IsPrimaryDisplay(){return true;}void ClearColorInfo(){}
+};
+struct DisplayBuiltIn:DisplayBase {
+  void *stc_color_modes_=nullptr;
+  std::vector<HWEvent> event_list_;
+  bool avr_prop_disabled_=false,spr_enable_=false,disable_dyn_fps_=false,enable_qsync_idle_=false,enhance_idle_time_=false;
+  int current_refresh_rate_=0,spr_prop_value_=0;
+  struct {uint32_t frame_count=0;}deferred_config_;
+  Factory *(*GetPanelFeatureFactoryIntfFunc_)()=nullptr;
+  MockFeature *spr_=nullptr;
+  void initColorSamplingState(){++sampling;}
+  DisplayError Init();DisplayError CreatePanelfeatures();DisplayError SetupSPR();DisplayError SetupDemura();DisplayError SetupPanelfeatures();
+};
+@BASE_DEINIT@
+@SETUP_RC@
+@BUILTIN_INIT@
+@CREATE_PANEL@
+@SETUP_SPR@
+@SETUP_DEMURA@
+@SETUP_PANEL@
+static void Reset(){
+  assert(!hw_live&&!event_live);kernel=library_ok=symbol_ok=factory_ok=property_ok=true;
+  hw_error=base_error=event_error=kErrorNone;hw_destroy=event_destroy=unregisters=sampling=opens=0;
+}
+int main(){
+  Reset();{DisplayBuiltIn d;assert(d.Init()==kErrorNone);assert(!opens);
+    assert(d.spr_prop_value_==0&&!d.spr_enable_&&!d.rc_enable_prop_&&!d.pf_factory_&&!d.prop_intf_);
+    assert(d.SetupSPR()==kErrorNotSupported&&d.SetupRC()==kErrorNotSupported);
+    assert(d.SetupPanelfeatures()!=kErrorNone);d.Deinit();
+    assert(!d.hw_intf_&&!d.hw_events_intf_&&!d.display_comp_ctx_);}
+  assert(hw_destroy==1&&event_destroy==1&&unregisters==1);
+  Reset();{event_error=kErrorHardware;DisplayBuiltIn d;assert(d.Init()==kErrorHardware);
+    assert(!sampling&&!opens&&!d.hw_intf_&&!d.hw_events_intf_);assert(hw_destroy==1&&event_destroy==0&&unregisters==1);}
+  Reset();{base_error=kErrorResources;DisplayBuiltIn d;assert(d.Init()==kErrorResources);
+    assert(!d.hw_intf_&&hw_destroy==1&&!sampling&&!unregisters);}
+  Reset();{hw_error=kErrorHardware;DisplayBuiltIn d;assert(d.Init()==kErrorHardware);assert(!hw_destroy&&!sampling);}
+  Reset();{kernel=false;library_ok=false;DisplayBuiltIn d;assert(d.Init()==kErrorNotSupported);
+    assert(opens==1&&hw_destroy==1&&event_destroy==1&&unregisters==1);}
+  Reset();{kernel=false;symbol_ok=false;DisplayBuiltIn d;assert(d.Init()==kErrorUndefined);assert(hw_destroy==1&&event_destroy==1);}
+  Reset();{kernel=false;factory_ok=false;DisplayBuiltIn d;assert(d.Init()==kErrorResources);assert(hw_destroy==1&&event_destroy==1);}
+  Reset();{kernel=false;property_ok=false;DisplayBuiltIn d;assert(d.Init()==kErrorResources);assert(!d.pf_factory_);}
+  Reset();{kernel=false;DisplayBuiltIn d;assert(d.Init()==kErrorNone);assert(opens==1&&d.spr_prop_value_==1&&d.rc_enable_prop_);
+    assert(d.SetupPanelfeatures()==kErrorNone&&d.SetupRC()==kErrorNone);d.Deinit();}
+  Reset();puts("DPU_OPTIONAL_PANEL_AND_INIT_CLEANUP_ALL_PASS");
+}

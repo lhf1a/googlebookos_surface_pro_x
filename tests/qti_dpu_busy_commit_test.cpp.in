@@ -1,0 +1,86 @@
+
+#include <cstdio>
+#define DTRACE_SCOPED() ((void)0)
+#define DRM_LOGE(...) ((void)0)
+#define DRM_LOGI(...) ((void)0)
+static std::vector<int> results;
+static std::vector<uint32_t> flags_seen;
+static int resets;
+static bool omit_fence;
+static drmModeAtomicReq *expected_req;
+extern "C" int drmModeAtomicCommit(int fd, drmModeAtomicReq *req, uint32_t flags, void *data) {
+  assert(fd==42 && req==expected_req && !data);
+  assert(flags_seen.size()<results.size());
+  int ret=results[flags_seen.size()]; flags_seen.push_back(flags);
+  if (!ret && !omit_fence) for (auto &item:requests) *item.second=newfd();
+  errno=EBUSY; // A stale errno must not override the real return value.
+  return ret;
+}
+extern "C" void drmModeAtomicSetCursor(drmModeAtomicReq *req, int cursor) {
+  assert(req==expected_req && cursor==0); ++resets;
+}
+struct Manager {
+  int retain=0,unset=0,post=0; bool success=false;
+  void RetainPlanes(uint32_t id) { assert(id==7); ++retain; }
+  void UnsetUnusedResources(uint32_t id,bool commit,drmModeAtomicReq *req) {
+    assert(id==7 && commit && req==expected_req); ++unset;
+  }
+  void PostCommit(uint32_t id,bool ok) { assert(id==7); ++post;success=ok; }
+};
+struct Managers {
+  Manager planes,crtc;
+  Manager *GetPlaneMgr() {return &planes;}
+  Manager *GetCrtcMgr() {return &crtc;}
+};
+struct Contract { bool enabled=true; bool Enabled() const { return enabled; } };
+class DRMAtomicReq {
+ public:
+  int Commit(bool synchronous,bool retain_planes);
+  int fd_=42,plane_error_=0;
+  drmModeAtomicReq *drm_atomic_req_=reinterpret_cast<drmModeAtomicReq *>(uintptr_t(1234));
+  Managers mgr; Managers *drm_mgr_=&mgr;
+  struct {uint32_t crtc_id=7;} token_;
+  Contract dpu_contract_;
+  DpuOutputFences output_fences_;
+};
+@COMMIT@
+static void run(bool enabled,bool sync,bool retain,int pre_error,int add_error,
+                std::vector<int> returns,int expected,int count,bool missing=false) {
+  requests.clear();flags_seen.clear();results=returns;resets=0;omit_fence=missing;
+  fail_add=add_error;mode=0;
+  DRMAtomicReq req;expected_req=req.drm_atomic_req_;
+  req.dpu_contract_.enabled=enabled;req.plane_error_=pre_error;
+  int64_t release=-1,retire=-1;
+  assert(req.output_fences_.Init(42,7,8)==0);
+  assert(req.output_fences_.RequestRelease(7,&release)==0);
+  assert(req.output_fences_.RequestRetire(8,&retire)==0);
+  int ret=req.Commit(sync,retain);
+  if (ret!=expected) {std::printf("COMMIT_RESULT expected=%d actual=%d\n",expected,ret);std::exit(3);}
+  assert(int(flags_seen.size())==count);
+  if(count) assert(flags_seen[0]==(DRM_MODE_ATOMIC_ALLOW_MODESET|(sync?0:DRM_MODE_ATOMIC_NONBLOCK)));
+  if(count==2) assert(flags_seen[1]==DRM_MODE_ATOMIC_ALLOW_MODESET);
+  assert(req.mgr.planes.retain==int(retain) && req.mgr.planes.unset==1);
+  assert(req.mgr.planes.post==1 && req.mgr.crtc.post==1);
+  assert(req.mgr.planes.success==!expected && req.mgr.crtc.success==!expected);
+  assert(resets==1 && req.plane_error_==0);
+  if(!expected) {assert(release>=0 && retire>=0 && release!=retire);close(release);close(retire);}
+  else assert(release==-1 && retire==-1);
+  // Complete must clear the stack output requests exactly once after the final ioctl.
+  requests.clear();fail_add=0;
+  assert(req.output_fences_.Prepare(expected_req)==0 && requests.empty());
+}
+int main() {
+  run(true,false,false,0,0,{-EBUSY,0},0,2);
+  run(true,false,true,0,0,{-EBUSY,0},0,2);
+  run(true,false,false,0,0,{0},0,1);
+  run(true,true,false,0,0,{0},0,1);
+  run(false,false,false,0,0,{-EBUSY},-EBUSY,1);
+  run(true,true,false,0,0,{-EBUSY},-EBUSY,1);
+  run(true,false,false,-EBUSY,0,{},-EBUSY,0);
+  run(true,false,false,0,1,{},-ENOMEM,0);
+  run(true,false,false,0,0,{-EINVAL},-EINVAL,1);
+  run(true,false,false,0,0,{-EBUSY,-EIO},-EIO,2);
+  run(true,false,false,0,0,{-EBUSY,-EBUSY},-EBUSY,2);
+  run(true,false,false,0,0,{-EBUSY,0},-EIO,2,true);
+  std::puts("12 actual Commit/fence boundary scenarios passed");
+}

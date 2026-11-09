@@ -1,0 +1,6 @@
+<manifest version="9.0" type="device">
+    <hal format="native">
+        <name>mapper</name>
+        <fqname>@5.0/quest2</fqname>
+    </hal>
+</manifest>

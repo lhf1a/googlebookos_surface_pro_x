@@ -1,0 +1,146 @@
+--- a/hfi_venus.c
++++ b/hfi_venus.c
+@@ -448,12 +448,11 @@
+ 	return 0;
+ }
+ 
+-#include "venus-sq2-boot-watch.h"
+ 
+ static int venus_boot_core(struct venus_hfi_device *hdev)
+ {
+ 	struct device *dev = hdev->core->dev;
+-	const unsigned int max_tries = sq2_boot_watch && IS_SQ2_HFI(hdev->core) ? 2000 : 100;
++	const unsigned int max_tries = 100;
+ 	u32 ctrl_status = 0, mask_val;
+ 	unsigned int count = 0;
+ 	void __iomem *cpu_cs_base = hdev->core->cpu_cs_base;
+@@ -476,8 +475,6 @@
+ 
+ 	while (!ctrl_status && count < max_tries) {
+ 		ctrl_status = readl(cpu_cs_base + CPU_CS_SCIACMDARG0);
+-		if (!count || count == 99 || count == 999 || count == 1999 || ctrl_status)
+-			sq2_boot_snapshot(hdev, ctrl_status, count);
+ 		if ((ctrl_status & CPU_CS_SCIACMDARG0_ERROR_STATUS_MASK) == 4) {
+ 			dev_err(dev, "invalid setting for UC_REGION\n");
+ 			ret = -EINVAL;
+--- a/vdec.c
++++ b/vdec.c
+@@ -35,15 +35,6 @@
+ module_param(sq2_omx_config_flag, uint, 0444);
+ MODULE_PARM_DESC(sq2_omx_config_flag, "Native V4L2 flag translated to HFI CODECCONFIG");
+ 
+-static bool sq2_stage_trace;
+-module_param(sq2_stage_trace, bool, 0400);
+-static atomic_t sq2_stage_records = ATOMIC_INIT(0);
+-static void sq2_vdec_trace(struct venus_inst *inst, const char *stage, int ret)
+-{
+- if (!sq2_stage_trace || !IS_SQ2_HFI(inst->core)) return;
+- if (!atomic_add_unless(&sq2_stage_records, 1, 128)) return;
+- dev_info(inst->core->dev, "SQ2_VDEC_STAGE %s ret=%d\n", stage, ret);
+-}
+ 
+ 
+ /*
+@@ -980,19 +971,13 @@
+ static int vdec_session_init(struct venus_inst *inst)
+ {
+ 	int ret;
+-
+-	sq2_vdec_trace(inst, "session_init_begin", 0);
+ 	ret = venus_helper_session_init(inst);
+-	sq2_vdec_trace(inst, "session_init_end", ret);
+ 	if (ret == -EALREADY)
+ 		return 0;
+ 	else if (ret)
+ 		return ret;
+-
+-	sq2_vdec_trace(inst, "input_resolution_begin", 0);
+ 	ret = venus_helper_set_input_resolution(inst, frame_width_min(inst),
+ 						frame_height_min(inst));
+-	sq2_vdec_trace(inst, "input_resolution_end", ret);
+ 	if (ret)
+ 		goto deinit;
+ 	ret = sq2_extra_enable(inst);
+@@ -1013,18 +998,12 @@
+ 	int ret;
+ 
+ 	*in_num = *out_num = 0;
+-
+-	sq2_vdec_trace(inst, "input_bufreq_begin", 0);
+ 	ret = venus_helper_get_bufreq(inst, HFI_BUFFER_INPUT, &bufreq);
+-	sq2_vdec_trace(inst, "input_bufreq_end", ret);
+ 	if (ret)
+ 		return ret;
+ 
+ 	*in_num = HFI_BUFREQ_COUNT_MIN(&bufreq, ver);
+-
+-	sq2_vdec_trace(inst, "output_bufreq_begin", 0);
+ 	ret = venus_helper_get_bufreq(inst, HFI_BUFFER_OUTPUT, &bufreq);
+-	sq2_vdec_trace(inst, "output_bufreq_end", ret);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -1076,28 +1055,16 @@
+ 		if (ret)
+ 			return ret;
+ 	}
+-
+-	sq2_vdec_trace(inst, "queue_pm_get_begin", 0);
+ 	ret = vdec_pm_get(inst);
+-	sq2_vdec_trace(inst, "queue_pm_get_end", ret);
+-	if (ret)
+-		return ret;
+-
+-	sq2_vdec_trace(inst, "queue_session_begin", 0);
++	if (ret)
++		return ret;
+ 	ret = vdec_session_init(inst);
+-	sq2_vdec_trace(inst, "queue_session_end", ret);
+ 	if (ret)
+ 		goto put_power;
+-
+-	sq2_vdec_trace(inst, "queue_counts_begin", 0);
+ 	ret = vdec_num_buffers(inst, &in_num, &out_num);
+-	sq2_vdec_trace(inst, "queue_counts_end", ret);
+ 	if (ret)
+ 		goto put_power;
+-
+-	sq2_vdec_trace(inst, "queue_pm_put_begin", 0);
+ 	ret = vdec_pm_put(inst, false);
+-	sq2_vdec_trace(inst, "queue_pm_put_end", ret);
+ 	if (ret)
+ 		return ret;
+ 
+--- a/venus-sq2-system-pm.h
++++ b/venus-sq2-system-pm.h
+@@ -5,8 +5,6 @@
+  * restart on resume. A failed stop/start remains quarantined until reboot. */
+ #ifndef VENUS_SQ2_SYSTEM_PM_INTEGRATION_H
+ #define VENUS_SQ2_SYSTEM_PM_INTEGRATION_H
+-static bool sq2_pm_trace;
+-module_param(sq2_pm_trace, bool, 0400);
+ 
+ /* Published SQ2 cores and this module remain pinned until reboot. Read-only
+  * observations do not clear errors or request firmware/PM transitions. */
+@@ -180,10 +178,6 @@
+  ret = sq2_system_pm_suspend(&core->sq2_system_pm, &venus_sq2_system_ops, core);
+  if (ret && core->sq2_system_pm.phase == SQ2_PM_BROKEN)
+   set_bit(0, &core->sys_error);
+- if (sq2_pm_trace)
+-  dev_info(dev, "SQ2_SYSTEM_PM suspend ret=%d phase=%u stops=%lu starts=%lu\n",
+-           ret, core->sq2_system_pm.phase,
+-           core->sq2_system_pm.stops, core->sq2_system_pm.starts);
+  mutex_unlock(&core->pm_lock);
+  return ret;
+ }
+@@ -194,10 +188,6 @@
+  if (!IS_SQ2_HFI(core)) return pm_runtime_force_resume(dev);
+  mutex_lock(&core->pm_lock);
+  ret = sq2_system_pm_resume(&core->sq2_system_pm, &venus_sq2_system_ops, core);
+- if (sq2_pm_trace)
+-  dev_info(dev, "SQ2_SYSTEM_PM resume ret=%d phase=%u stops=%lu starts=%lu\n",
+-           ret, core->sq2_system_pm.phase,
+-           core->sq2_system_pm.stops, core->sq2_system_pm.starts);
+  mutex_unlock(&core->pm_lock);
+  return ret;
+ }

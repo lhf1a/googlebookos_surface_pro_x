@@ -1,0 +1,62 @@
+--- a/composer/QtiComposerClient.cpp
++++ b/composer/QtiComposerClient.cpp
+@@ -588,7 +588,7 @@
+     err = Error::NO_RESOURCES;
+   }
+ 
+-  _hidl_cb(Error::NONE, outChanged, outLength, outHandles);
++  _hidl_cb(err, outChanged, outLength, outHandles);
+ 
+   mReader.reset();
+   mWriter.reset();
+@@ -811,7 +811,7 @@
+       err = Error::NO_RESOURCES;
+   }
+ 
+-  _hidl_cb(Error::NONE, outChanged, outLength, outHandles);
++  _hidl_cb(err, outChanged, outLength, outHandles);
+ 
+   mReader.reset();
+   mWriter.reset();
+@@ -927,7 +927,7 @@
+       err = Error::NO_RESOURCES;
+   }
+ 
+-  _hidl_cb(Error::NONE, outChanged, outLength, outHandles);
++  _hidl_cb(err, outChanged, outLength, outHandles);
+ 
+   mReader.reset();
+   mWriter.reset();
+@@ -1295,7 +1295,7 @@
+ 
+   while (!isEmpty()) {
+     if (!beginCommand(qticommand, length)) {
+-      break;
++      return Error::BAD_PARAMETER;
+     }
+ 
+     bool parsed = false;
+@@ -1318,16 +1318,16 @@
+       }
+     }
+ 
+-    endCommand();
+-
+     if (!parsed) {
+       ALOGE("failed to parse command 0x%x, length %" PRIu16,
+           qticommand, length);
+-      break;
+-    }
+-  }
+-
+-  return (isEmpty()) ? Error::NONE : Error::BAD_PARAMETER;
++      return Error::BAD_PARAMETER;
++    }
++
++    endCommand();
++  }
++
++  return Error::NONE;
+ }
+ 
+ bool QtiComposerClient::CommandReader::parseSelectDisplay(uint16_t length) {

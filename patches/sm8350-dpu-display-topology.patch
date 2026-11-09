@@ -1,0 +1,40 @@
+--- a/sdm/libs/core/drm/hw_info_drm.cpp
++++ b/sdm/libs/core/drm/hw_info_drm.cpp
+@@ -53,6 +53,7 @@
+ #include <vector>
+ 
+ #include "hw_info_drm.h"
++#include "qti-dpu-display-topology.h"
+ 
+ #ifndef DRM_FORMAT_MOD_QCOM_COMPRESSED
+ #define DRM_FORMAT_MOD_QCOM_COMPRESSED fourcc_mod_code(QCOM, 1)
+@@ -888,6 +889,29 @@
+     return kErrorCriticalResource;
+   }
+ 
++  sde_drm::DRMCrtcInfo crtc_info{};
++  if (drm_mgr_intf_->GetCrtcInfo(0, &crtc_info)) return kErrorHardware;
++  if (crtc_info.kernel_managed_dpu) {
++    DRMMaster *master = nullptr;
++    if (DRMMaster::GetInstance(&master)) return kErrorCriticalResource;
++    int fd = -1;
++    master->GetHandle(&fd);
++    std::array<int32_t, 4> counts{};
++    int error = qti_dpu::ReadDisplayCounts(fd, &counts);
++    if (error) {
++      DLOGE("Failed to read connector/encoder/CRTC routes: %d", error);
++      return kErrorHardware;
++    }
++    switch (type) {
++      case kBuiltIn: *max_displays = counts[0]; break;
++      case kPluggable: *max_displays = counts[1]; break;
++      case kVirtual: *max_displays = counts[2]; break;
++      case kDisplayTypeMax: *max_displays = counts[3]; break;
++      default: return kErrorParameters;
++    }
++    return kErrorNone;
++  }
++
+   sde_drm::DRMEncodersInfo encoders_info = {};
+   int drm_err = drm_mgr_intf_->GetEncodersInfo(&encoders_info);
+   if (drm_err) {

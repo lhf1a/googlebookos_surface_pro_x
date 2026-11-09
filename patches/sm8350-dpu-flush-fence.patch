@@ -1,0 +1,42 @@
+--- a/sdm/libs/core/drm/hw_device_drm.cpp
++++ b/sdm/libs/core/drm/hw_device_drm.cpp
+@@ -1885,6 +1885,13 @@
+ }
+ 
+ DisplayError HWDeviceDRM::Flush(HWLayers *hw_layers) {
++  if (dpu_info_.kernel_managed_dpu) {
++    if (!hw_layers || !hw_layers->info.stack) {
++      return kErrorParameters;
++    }
++    hw_layers->info.stack->retire_fence = nullptr;
++  }
++
+   ClearSolidfillStages();
+   ResetROI();
+   bool sync_commit = (tui_state_ == kTUIStateStart || tui_state_ == kTUIStateEnd ||
+@@ -1895,10 +1902,25 @@
+   sync_commit = true;
+ #endif
+ 
++  // An empty video frame must unstage the previous planes and report that
++  // real update's completion. The previous buffer's release fence is signalled
++  // by the kernel when this replacement completes; no new buffer is submitted.
++  int64_t retire_fence_fd = -1;
++  if (dpu_info_.kernel_managed_dpu) {
++    drm_atomic_intf_->Perform(DRMOps::CONNECTOR_GET_RETIRE_FENCE, token_.conn_id,
++                              &retire_fence_fd);
++  }
+   int ret = NullCommit(sync_commit /* synchronous */, false /* retain_planes*/);
++  shared_ptr<Fence> retire_fence = Fence::Create(INT(retire_fence_fd), "retire_flush");
++  if (dpu_info_.kernel_managed_dpu) {
++    DLOGI("DPU_FLUSH result=%d retire_fd=%" PRId64, ret, retire_fence_fd);
++  }
+   if (ret) {
+     DLOGE("failed with error %d", ret);
+     return kErrorHardware;
++  }
++  if (dpu_info_.kernel_managed_dpu) {
++    hw_layers->info.stack->retire_fence = retire_fence;
+   }
+   return kErrorNone;
+ }

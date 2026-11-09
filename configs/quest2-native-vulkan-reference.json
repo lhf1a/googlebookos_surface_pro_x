@@ -1,0 +1,23 @@
+{
+  "description": "Known mapper5/v34 native runtime closure for Vulkan integration; not a runtime validation claim",
+  "donor_sha256": "c6253f16ae790a5f845c563e2705e36a005aecf327ed312f7de4ddcbd0e60dce",
+  "native_sha256": {
+    "qgl_config.txt": "1f93a7a1446b2e934f12f23aa55514ee41852bf6df7851788d053cbd90e1f008",
+    "gralloc.kona.so": "2177fac5f1f5f938600eb3dff32c2cc258c2db454f4aae8e3ddd36293ee5ab1b",
+    "libgralloccore.so": "06f389063cde36ab9b9e554d5d3d735041aac290271f1113942f8d4923d9f91c",
+    "libgrallocutils.so": "0fb5d79eb206bd75d4eb8ae68be04cafe89dc4b0d267567a82a56303023a0724",
+    "libqdMetaData.so": "56b66ffb8bb8f7bb9f4135affa5de826f797223c14d1e6adc65cca92e4a9e6f9",
+    "libgsl.so": "ca8c2e494915ecb66b468278504d474862866554cde5ad7558d1fa661c219910",
+    "libquest2-system-ion.so": "84d2946f2bcdbfc0bdae3e4bad84c5b9655fffe2ac40150bb4a3b6bdbc9995a4",
+    "libadreno_utils.so": "6ef886f4b2d0d648e9ed3f6ee803ac70a2375421f90004bc6800fe8e229244ba",
+    "libq2v77glnext.so": "17a9cb625c816bf9560489b53e15f20ad356db04ee0f1e83e5fbac03cb0fe3f3",
+    "libq2v77qgl.so": "100a97a7c9cfa4b6d554cc1a8960a920de963aeba3b6c3a6bc2ea8d986472652",
+    "libEGL_adreno.so": "026b25fe82d174fe9e4a327d4e6f9b05be800a59853b5cb729cae53a6b2892fc",
+    "libGLESv2_adreno.so": "58e1aafe2de28dfb632df9c64b56b761906bf8aeae014975f71938f1061a4d83",
+    "eglSubDriverAndroid.so": "d6eb82b540462e103335e2871532e60d064a99ead8723a50c1eb8373385230a5",
+    "mapper.quest2.so": "8af79a070311b38bb0890a4ef0f6e96a186f923a83e7ed075dd199e5d5edbc0f",
+    "mapper.quest2.xml": "7914c41c20c7d4b51ac4acb06ff6e5c3dbb46f4ddc058981237ef14a9e134636",
+    "quest2-allocator5-service": "f6fab31f35a27d7843b8fcc4e45de0b3fc0f0ce26bf9453d4c7d7140cb9172bf",
+    "quest2-mapper-hal-namespace": "a14b229cffdc2d31f71ddf13f5b7ac1d06311fe973d0a1a6b4d84122e0f1134b"
+  }
+}

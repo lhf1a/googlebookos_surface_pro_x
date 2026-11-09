@@ -71,7 +71,7 @@ def main():
             shutil.copyfile(f, args.output / f.name)
     shutil.copyfile(ROOT / 'probe/video/venus-iris1.h', args.output / 'venus-iris1.h')
     for name in ('sq2-hfi-properties.h', 'venus-sq2-capabilities.h', 'venus-sq2-frame-sizes.h',
-                 'venus-sq2-vp9-eos.h', 'venus-sq2-crop.h', 'venus-sq2-boot-watch.h'):
+                 'venus-sq2-vp9-eos.h', 'venus-sq2-crop.h'):
         shutil.copyfile(ROOT / 'probe/video' / name, args.output / name)
     parser = (src / 'hfi_parser.c').read_text()
     parser = replace(parser, '#include "hfi_parser.h"',
@@ -157,40 +157,6 @@ def main():
                    '\t\tif (!bytesused && (!IS_SQ2_HFI(inst->core) ||\n'
                    '\t\t    !(vbuf->flags & V4L2_BUF_FLAG_LAST)))\n'
                    '\t\t\tstate = VB2_BUF_STATE_ERROR;')
-    trace = '''
-static bool sq2_stage_trace;
-module_param(sq2_stage_trace, bool, 0400);
-static atomic_t sq2_stage_records = ATOMIC_INIT(0);
-static void sq2_vdec_trace(struct venus_inst *inst, const char *stage, int ret)
-{
- if (!sq2_stage_trace || !IS_SQ2_HFI(inst->core)) return;
- if (!atomic_add_unless(&sq2_stage_records, 1, 128)) return;
- dev_info(inst->core->dev, "SQ2_VDEC_STAGE %s ret=%d\\n", stage, ret);
-}
-'''
-    vdec = replace(vdec, '#include "pm_helpers.h"', '#include "pm_helpers.h"\n' + trace)
-    # Observe the first unfinished native path without adding MMIO, delays,
-    # retries or changing any call/return value. Explicit opt-in, max 128 logs.
-    for first, last, calls in (
-        ('static int vdec_session_init(', 'static int vdec_num_buffers(', (
-            ('session_init', 'ret = venus_helper_session_init(inst);'),
-            ('input_resolution', 'ret = venus_helper_set_input_resolution(inst, frame_width_min(inst),\n\t\t\t\t\t\tframe_height_min(inst));'))),
-        ('static int vdec_num_buffers(', 'static int vdec_queue_setup(', (
-            ('input_bufreq', 'ret = venus_helper_get_bufreq(inst, HFI_BUFFER_INPUT, &bufreq);'),
-            ('output_bufreq', 'ret = venus_helper_get_bufreq(inst, HFI_BUFFER_OUTPUT, &bufreq);'))),
-        ('static int vdec_queue_setup(', 'static int vdec_verify_conf(', (
-            ('queue_pm_get', 'ret = vdec_pm_get(inst);'),
-            ('queue_session', 'ret = vdec_session_init(inst);'),
-            ('queue_counts', 'ret = vdec_num_buffers(inst, &in_num, &out_num);'),
-            ('queue_pm_put', 'ret = vdec_pm_put(inst, false);'))),
-    ):
-        begin, finish = vdec.index(first), vdec.index(last)
-        part = vdec[begin:finish]
-        for stage, call in calls:
-            part = replace(part, '\t' + call,
-                           f'\tsq2_vdec_trace(inst, "{stage}_begin", 0);\n\t' + call +
-                           f'\n\tsq2_vdec_trace(inst, "{stage}_end", ret);')
-        vdec = vdec[:begin] + part + vdec[finish:]
     start, end = vdec.index('static void vdec_stop_streaming('), vdec.index('static void vdec_session_release(')
     section = replace(vdec[start:end], '\tinst->session_error = 0;',
                       '\tif (IS_SQ2_HFI(inst->core)) {\n'
@@ -348,15 +314,6 @@ static void sq2_vdec_trace(struct venus_inst *inst, const char *stage, int ret)
     hfi = replace(hfi, '\tstruct venus_core *core;\n',
                   '\tstruct venus_core *core;\n\tstruct sq2_venus_dma sq2_dma;\n')
     hfi = replace(hfi, '#include "firmware.h"', '#include "firmware.h"\n#include "venus-iris1.h"')
-    hfi = replace(hfi, 'static int venus_boot_core(struct venus_hfi_device *hdev)',
-                  '#include "venus-sq2-boot-watch.h"\n\n'
-                  'static int venus_boot_core(struct venus_hfi_device *hdev)')
-    hfi = replace(hfi, '\tstatic const unsigned int max_tries = 100;',
-                  '\tconst unsigned int max_tries = sq2_boot_watch && IS_SQ2_HFI(hdev->core) ? 2000 : 100;')
-    hfi = replace(hfi, '\t\tctrl_status = readl(cpu_cs_base + CPU_CS_SCIACMDARG0);',
-                  '\t\tctrl_status = readl(cpu_cs_base + CPU_CS_SCIACMDARG0);\n'
-                  '\t\tif (!count || count == 99 || count == 999 || count == 1999 || ctrl_status)\n'
-                  '\t\t\tsq2_boot_snapshot(hdev, ctrl_status, count);')
     hfi = replace(hfi, '\\tif (count >= max_tries)\\n\\t\\tret = -ETIMEDOUT;',
                   '\\tif (!ctrl_status && count >= max_tries)\\n\\t\\tret = -ETIMEDOUT;')
     hfi = replace(hfi, '\tif (IS_V6(hdev->core)) {\n\t\tmask_val = readl(wrapper_base + WRAPPER_INTR_MASK);',

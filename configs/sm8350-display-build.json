@@ -1,0 +1,1340 @@
+{
+  "schema": 1,
+  "purpose": "Rebuild QTI SDE/SDM source for the Surface port; not a complete HWC or a deployment manifest",
+  "source_repository": "LineageOS/android_hardware_qcom_display",
+  "source_commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+  "source_files": {
+    "Android.bp": "d533f536140f026baeb05e5a11bc7d856388a7c51741b13a103f51ba964385e0",
+    "libqdutils/qd_utils.cpp": "e9a185f18cb6f4e9313fc1b072e3af3f8e594fb9e44f7ec9258dd3c49aafaec5",
+    "libqdutils/display_config.h": "6c67abd720db5c5a40c2e3ed6ff5d97ae3f55668f3839e64d5f07b7e4e67cfc5",
+    "libqdutils/Android.bp": "10e2116c17594295d0f326390327550dc79d9560ba87a1ed6071d40b116c991d",
+    "libqdutils/display_config.cpp": "6b88ead2b76b9386f85b1ff641b5bfe34ae67e64d34713bbae09e1822e89a1b3",
+    "libqdutils/qd_utils.h": "cf0384c756cbc1e3e5bf93f0f74ca95880a04312179cc6cde6a162a174474d3a",
+    "sde-drm/drm_crtc.h": "ef3243e6ed4ffee9f8916b73f4f6fffda394e4f4ccb19eb120b4fb58374393fb",
+    "sde-drm/drm_plane.h": "95ac6ff9d3e63f1f4edefdc313cb253bdc783f131938a0d209bde9b2ff61f95c",
+    "sde-drm/drm_utils.cpp": "148976913a7c5e45f62761cea59314f0a55de493aa52bae2816ce254c2cb1aa5",
+    "sde-drm/drm_manager.cpp": "04bd3a4eb14671c866c08f3eea5d92c2055d7c6abef1cbaa7634ee23e04c0ae4",
+    "sde-drm/drm_plane.cpp": "133bee77caa5181f5edaae3687e65c398c892d7acad7fa974359e68131122edb",
+    "sde-drm/drm_dpps_mgr_imp.cpp": "8ece763bfac95baf02af52150ac5980664eca82e7745e668f39744837d07c5f8",
+    "sde-drm/drm_panel_feature_mgr_intf.h": "09e3024337650fac5b15b5060c705a6306647086ecd9f7032b445efdd07c32f1",
+    "sde-drm/drm_panel_feature_mgr.h": "51dc3d51008329d52787f736b6fa592398973b5a9cf9b7ea4341d44f37cfa65f",
+    "sde-drm/drm_pp_manager.cpp": "b794bc0da37cf08f76bd924679c295d87b480cdee85bc566044af5c2710e73e0",
+    "sde-drm/drm_atomic_req.h": "ced2573f9ac7b383b150700d45e4894e49124886444f2c4d601e6eaee15bf10b",
+    "sde-drm/drm_connector.h": "ca20bbc6159bd2d8540519a57aba8212ccc674f1a104eeb45a3e7d7fcb084410",
+    "sde-drm/drm_encoder.cpp": "3730116f9ecf6243a806a0f879b2c775566f1af76d9d14cf66ca0105f4c8b916",
+    "sde-drm/Android.bp": "c43d19a6838a59d27c4912ff4e114b7311805246f19f12c0c60e40c82caf2fc4",
+    "sde-drm/drm_property.h": "f67dd09f3164bcfc014dd40d80eb47fb1ebf0837b04e2ef67d47fec84835da11",
+    "sde-drm/drm_panel_feature_mgr.cpp": "e3bd66be60d2727dc2772356ff95c6eac4fad981db0e67c0a0350722b909ad59",
+    "sde-drm/drm_dpps_mgr_imp.h": "33aea82882ae1ef4db088e6899bb7e76491dfd031910ebd667839793aaec2787",
+    "sde-drm/drm_dpps_mgr_intf.h": "611a4da121c0bc088ec68cb7319c3e4572e66f9d25761eaab821253d87d5f82f",
+    "sde-drm/drm_property.cpp": "24cdac5fcf2a19231cadf42e26ae445fc2ebf82fd8ee9cfa0e5e2e767b737e01",
+    "sde-drm/drm_connector.cpp": "4e6858d7fcb2cfcafa58acd03bf5d5d6806af3d98fcf9812567265cacf1a5970",
+    "sde-drm/drm_utils.h": "ae035aaf4ec14bd16e87179bb654a94c515364d9749bc9b239f598ee9d4b1b77",
+    "sde-drm/drm_encoder.h": "ca023519002a3427b3d9096b61f570d640a02d73ae817fd9a030ecbf99d1efd5",
+    "sde-drm/drm_atomic_req.cpp": "d033d0eadc0276c2ed4a2c80b608151f58f199a42fef9d655b4e14fa4c285881",
+    "sde-drm/drm_crtc.cpp": "ae4dd88d2d5c5c4e396b1894e0a55720059bd9d19f5d2f05e18f909c41249652",
+    "sde-drm/drm_manager.h": "feadff29b3ca8c5e4e77ea5a0ada67f6a6e6c7d804a854eac3a3f6eb96d86626",
+    "sde-drm/drm_pp_manager.h": "a45d5afcba5cb89ab91d5a4563a4e470a577c434dd129c2348f0aa592c54934d",
+    "init/Android.bp": "f2d2ef384e27fd1a8e94e2fb79fd74f8a381d202c12f92d5135615a260bd8768",
+    "qmaa/QtiQmaaComposer.cpp": "3fea2e0d5c8398d06d9d3d05c7cc1ad15dc0f95612329c0f32dc2098323ac344",
+    "qmaa/QtiQmaaComposerClient.cpp": "607ff3eb51619bbf9811eada7599a6ed47359a29f50bac3241131726999aaa35",
+    "qmaa/QtiQmaaComposerClient.h": "b9a8d832fd5e4b4cf7323536c9344ff0b816b74adedb8793cfb89e841af84251",
+    "qmaa/QtiQmaaComposerCommandBuffer.h": "234c0e32e7cd95805fd45744af07964c3295aa26e8c739824bca3a4557fd3707",
+    "qmaa/Android.bp": "f02bff756ca7fa192604b9f8819c11d19b0818a3737efd1140062ec1dc33d095",
+    "qmaa/QtiQmaaComposerHandleImporter.h": "32f54f3aadac147bf0acaf7d4b0c0450c4b38def5a6be081301cf691f822ba14",
+    "qmaa/QtiQmaaComposerHandleImporter.cpp": "7b0af0c27326b06f66820c946689441530b0461bf2b33ee079cf2e09f8c8034e",
+    "qmaa/service.cpp": "12084e1df904f61277a65206eeec1fbf0b415e45fb2855e76b0a175079be47ba",
+    "qmaa/QtiQmaaComposer.h": "e0ffeabba85e73299e6c378924cb22917ad245816d252831e42ce44d112ff682",
+    "libdrmutils/drm_master.h": "ed9da1387439e1eb305f906c65928e530b3c04164e6b9ca5f6522cbf0356a7d6",
+    "libdrmutils/Android.bp": "a535bacb86339913d880547c40d19db3452bafa2ef5e6bbc294195cc2fa9bad8",
+    "libdrmutils/drm_master.cpp": "18a15ce951a2371516f4735a28211c4923542992f947fe06f55db0e649a17f5c",
+    "libdrmutils/drm_logger.h": "394eac2c855a4f31a5f7e2581cb7c32aaa61c70b780d1b3fa2177fe85f0b3deb",
+    "libdrmutils/drm_interface.h": "7eea1d65fdb85213815b681643df30352b8fa9f70e2c33385fb0039501138713",
+    "libdrmutils/drm_lib_loader.cpp": "65aa7e924f0f70583d212319e3bcc1cc8b8180f9246d1ec3013ff5ca06803b04",
+    "libdrmutils/drm_res_mgr.cpp": "390d00d9e6e5b6bbc28cd599f19a81af159e0f872196f1d1243d292f4acf62dc",
+    "libdrmutils/drm_res_mgr.h": "2c157d30395a733161923347f2e60aedf22da529407b441bc6183226105e625b",
+    "libdrmutils/drm_lib_loader.h": "9c96bc12a1a5eede5e7f4eb7fefad2d680d750a17be142e50854c4fb934e5b58",
+    "libqservice/IQHDMIClient.cpp": "9fc6a74b6297d6d1448b9583d44f1b7c87c9510aa6af954f4b50bdbc7556e0a0",
+    "libqservice/IQService.h": "cc783334bec752fbbddcb0bd7ab68db0de3a4f73d46be2596fc4c96d9620ff70",
+    "libqservice/QService.h": "97360ebc1a4b6ed7baf3d80f8b924ea573c7eb6ed85b70194f03d4b685325491",
+    "libqservice/IQHDMIClient.h": "05c9f2b84ce12f6e5fcddc99f195d3fb581ac48f753fbc64fe278a538e1f5d33",
+    "libqservice/IQClient.h": "5f815de40e641ddb3e9777b228b59f32214d6d3b21d0f5f522655639cc83683c",
+    "libqservice/IQClient.cpp": "f83b17291e96f64d4a0d4cab7b986193e3d49fb79f53f34ab618463d75bbc64b",
+    "libqservice/Android.bp": "0a39b06cff94937c2a81f74420d3d052636c2437d64bce6b7ca7cade98d4d40c",
+    "libqservice/QServiceUtils.h": "27638912c7c993d86678826cb275532ae7d0cd58757b4574d33aca2f93fe0023",
+    "libqservice/QService.cpp": "f1b5fde2eaa481773fb36805dd3d11d1c7148a1129d60d9afc2fc90212720bae",
+    "libqservice/IQService.cpp": "a129369959e6c08e0ee0ebc2ede3df00bf1d7b5ae687e92e60b1dd6bdc9cf866",
+    "libhistogram/ringbuffer_test.cpp": "af4238b1447f100718b48c3775a197a3d1fe6aaa51ce5ef375d842ae2f2431fa",
+    "libhistogram/histogram_collector.cpp": "c5fcd96f250f5530935275e71a0a5919a8a74dc704ce3db1c8cad60feeb2c9ae",
+    "libhistogram/histogram_collector.h": "b0f15a9abffd8ac3db3eadc377660fc66c9cfc14337a09352183a521f94e7295",
+    "libhistogram/Android.bp": "2ad8e811f12f08d179bccb2ffd06eea100452d34317c8c88d639a1dfad0533c4",
+    "libhistogram/ringbuffer.cpp": "68821c4fa31cae5bb93c043f8745283d35709953584e709d9f8d3a90e29b60e1",
+    "libhistogram/ringbuffer.h": "4775585c2611a2925b0e3219525bcab72a2e2b95beed20b4e7875f6b6de81d2f",
+    "libhistogram/color_sampling_tool.cpp": "868bef465d893479726727bb7bcbb57a2286a5194a0e0ed571791a3c11b05756",
+    "libdebug/debug_handler.h": "44d32db4f7b4e9b2b01da091cc1bc0556facbbc9fdc0c02e19b19e4ef29f5d83",
+    "libdebug/debug_handler.cpp": "84ebe3363814105f4988baefb0b57a7c1a3ecbc4506dc1a08326c96911aa30d5",
+    "libdebug/Android.bp": "89858b80074d06b2755d453d3fc7fa0774837c85bc1a98dc563efe164e9f5e32",
+    "libmemutils/membuf_wrapper.cpp": "f48d24f0cb226c36aba7d55539abd4b54b482912707fbb4b9ac385cb59d3b10d",
+    "libmemutils/Android.bp": "fee7f9adbc0190abcc41ab3e3b462746fe42456285ce5ddd69021df2064a4256",
+    "libmemutils/membuf_wrapper.h": "205e5b66b4e2c61529633112a8564beda9dac8c7a36ea4269f076261079a01db",
+    "composer/hwc_color_manager.h": "5889ba37b8219d49b4289e982fba978c7bf6026487e5b5179acc3021cd9ce186",
+    "composer/gl_color_convert.h": "b513acfd630382849ce9fcf9810d9fbddb958a97a2e8596de85cdcf9655cca31",
+    "composer/hwc_socket_handler.h": "d27c7a38e9961a203c1d1b945e7ca3a6ce29c7fe3a3f95544def1592ddc36dfd",
+    "composer/hwc_display_virtual_factory.h": "c28ef84fe1b47e851cf4e3058694f7438bf02aaceb2514fe9b1ef8cd062070aa",
+    "composer/hwc_color_mode_stc.h": "c3003ac046c0ffa56c012e61046fc27b19e14e39be1283567f412c073ec612ba",
+    "composer/gl_color_convert_impl.cpp": "9e6b45212402b5a88ef950b0eec7f4e2961a3358ad92b0a911f6e1ac5570ffae",
+    "composer/hwc_debugger.h": "46421a997d547425d28bd98073c1885ccbe2f30b3d40cbf7106c2d84378b1938",
+    "composer/display_null.h": "fa2e3e3a3df579923d5290c60e13c5e41e96caec39b626a674ae64595fb6d181",
+    "composer/QtiComposerClient.h": "9cfdae80243aa17f4e0d52caacc5d27790caf603b7c11f25a6915d6d11d3dd4d",
+    "composer/hwc_buffer_allocator.h": "2efad13cd664fab83dc1d92731e9c08d5c31964b306d529d59c0bbe9dfa585a1",
+    "composer/hwc_color_mode_stc.cpp": "16ba3978adc156df04849748d7ff5b0a7ffe8c1a8314d4a37d50b2ac5bd42d95",
+    "composer/hwc_buffer_allocator.cpp": "f9aef21f7405f71f38cddab0841d646754e5072a59dbc43cf7c7fcf10cbcfb17",
+    "composer/display_null.cpp": "0dbbdf741f063e9499467c24772ff00e6acbe6dab3650934da1b97ef111fd279",
+    "composer/hwc_session.h": "1b2c0581e8ecadaf0674aaad80c8a92290782c91d6408a3d8e18600e1d74b629",
+    "composer/gl_layer_stitch_impl.cpp": "eae395ce7c0862a4585311cc74a927eda4dac8b64d418ebae4e02d8db077e853",
+    "composer/hwc_display_virtual_gpu.cpp": "c56ed00e1c70196623d6e05b2f1025171d84ccbb9243e77914b41d1cb3395891",
+    "composer/QtiComposerClient.cpp": "239f8ddd6040807b242ad3002e5d3cdb41f849dcf55317410098f946cc1fe769",
+    "composer/hwc_display_virtual_gpu.h": "cb2d5bf63ec839ee59b6df31dba03ecc872728277ee4e463c39397cfcda26374",
+    "composer/ipc_impl.cpp": "b063c87ec94e965eaac9333d78f6df2f1a541b0715c5d02ff34b61ab1a5f2cb5",
+    "composer/QtiComposer.cpp": "83a62e9964c86293c23e9216cf14cfbde790162cedf1d0ff1931c169a269cedb",
+    "composer/hwc_session_services.cpp": "cff3bea5319e5945378e9d6aff8f5bbe729f261553e97eab8ffba07d1f68a413",
+    "composer/hwc_tonemapper.h": "77703e1897eedc687bbca71245c1266d23f75526d4529d09f7e19ee1e55ac83f",
+    "composer/hwc_display_pluggable_test.cpp": "606ae062cc0faea3cf02f4888ae6096dcd28872cf504dbd8a7222365ccf58ebe",
+    "composer/hwc_buffer_sync_handler.cpp": "47bb5f25629de433a54828d806386523ebb632dd8cbdafcc087082d6d5a8dc90",
+    "composer/hwc_display_virtual_dpu.h": "d9a163fc697f1a9e17c3e40cda9aeac5ff0f82d88cff6413d63633ffeb29b3da",
+    "composer/gl_color_convert_impl.h": "4e7661c77f684efac967f60ee4986889b3fb786dc8f3819e190a00a584b4f973",
+    "composer/gl_common.h": "1dac0da08f4036550b4584f4858d2a831c1612a221d4f5a977f3e3497e0fc41c",
+    "composer/hwc_display.h": "58931dfffe9269e862d1ca4a986d6a7d42a54da8b030f67d0752ad359daa0181",
+    "composer/Android.bp": "09e2ff5eb72ed4cb12934442792d65354362aa33d662803e3181f3439b95ecac",
+    "composer/hwc_display_pluggable_test.h": "723c608d22de84185ca469634e2d20d10a969275bed4eb81c42885bfd11130ad",
+    "composer/hwc_display_builtin.h": "15c81e0e9b6ac8585699510037a2ff861324bb34cb6d2776736515d5dd9adde2",
+    "composer/hwc_display_virtual_dpu.cpp": "a67eefb7fafa362fd94ff053e6bd94e508aa1dce313e07187a7be7d4a6f41ba8",
+    "composer/hwc_tonemapper.cpp": "6ebda1b925f1e19773525903b3aa8bb5d5f34e1b47c1a43ed39e594af0e8c014",
+    "composer/hwc_display.cpp": "5647892954bd3d1c1c4f4b7c0e4e428fadeb256872f9126d3bc95d8c7cc47913",
+    "composer/QtiComposer.h": "feddde9b1d1f2ed01797bd7f8fba7e2790ad14452c1744aba69708e29cb46e6c",
+    "composer/hwc_color_manager.cpp": "c4f79d76956a4a098f9d9a1c080380b51227db104727f9884282748f3e9668f8",
+    "composer/hwc_callbacks.h": "562a0d482af6c116714b9b55b85279043107a00dae3bc61aa471b7f56360362e",
+    "composer/QtiComposerCommandBuffer.h": "6d49c18c7204a174cc1e9d30c0cbbdecaf2733676946850c4d8f048d8a99438b",
+    "composer/hwc_display_virtual_factory.cpp": "2aaef8924da49e2eda2c60c5cf04fdbce7c22132316fe8f053c4072de4698cbe",
+    "composer/hwc_display_virtual.cpp": "cb1814e50f3595ab108dd60bf81123776e06850a3a2fafda599bbf0a617d5d00",
+    "composer/hwc_socket_handler.cpp": "da0b23477b620487bd672265deb57828d920dfe8c9f9f00da193325a4491ad90",
+    "composer/hwc_display_builtin.cpp": "7767aac8b4f6cbb9627e594344399b197e0651ed0d66d51b78f495da7e37062c",
+    "composer/gl_layer_stitch.cpp": "e92f600f9f74695ef80ebdeb6364293df404708171614c562fbe745017de9d7f",
+    "composer/hwc_display_pluggable.h": "983fd5e5211b8a68907f8b6c42d5941ab56658cb855e43bdae7c08b46eef383f",
+    "composer/hwc_display_dummy.cpp": "606ce557cbc7cefd8a2a59a4c22151dae3b125c79cd96fc3d1093bacc67559f8",
+    "composer/QtiComposerHandleImporter.h": "4d6480c156c7d57e1bfc04af9e0256d6b1f855a12a4dcb66f478af35d8635090",
+    "composer/hwc_display_event_handler.h": "9892b9324782ec0143be7f505c86a7a1104b6396cb328ef71f7a45834664a4f9",
+    "composer/hwc_debugger.cpp": "0a2de3ee60b92d9b536d2f4ee6050c9c190edcd89aaa2385d44358743f8446f7",
+    "composer/hwc_display_pluggable.cpp": "ec29600d22cd9c20f0c1eec021abee4b458f30cda68f825cdbe9a0b050be0004",
+    "composer/cpuhint.h": "a7573b0fb4da827e5697c5cbfcecd847b8f59134daf61d86d12f1f1e7fcdc888",
+    "composer/gl_common.cpp": "42833e60511b98e2644e53edd2b1131fb5304ceb3da3f6dcc22d30e651f08bf4",
+    "composer/hwc_layers.cpp": "fbc78d554e2fa91d839708a7c5de0c3b4d88e5a671bb82734a3ed3af0f616ed2",
+    "composer/hwc_layers.h": "1e5fb304d588478c37a93affc647a3185390b042d07ebd9750d555eb60e1654f",
+    "composer/hwc_display_dummy.h": "99f04d7751b4085fdd12f317faf5c93144b8908b0899c30cc1b7e1e2e1437407",
+    "composer/ipc_impl.h": "46748a5c4cc5373fd54702bec22ced7c395aa2f5996008c4554d33c28dc8f915",
+    "composer/hwc_session.cpp": "b1a637d11c405ea49083c93025158c8d7e25d7b5f8b6b75cd2a89862e643e8cf",
+    "composer/hwc_buffer_sync_handler.h": "4a55589dbabf2c3365af33ca2e9611fb5b39294064d6ef19f317251ea38f80cf",
+    "composer/gl_color_convert.cpp": "a5a1838c0f6916782ca2bdd19353aca3eec154dfbcf34bf020fa788e9c10aae1",
+    "composer/service.cpp": "e28f93c442dbc54a3afd22f606382c3b1edd8dcf1d47b3b1375b03a98b7fb1b6",
+    "composer/hwc_callbacks.cpp": "97f0c7d52b63b45c82ac08e0a1ad654c5938d280b4ab5466d094082d2b9093c3",
+    "composer/cpuhint.cpp": "9b7e455e325c852124b44c195ff1c2c91d2e2eed37e44544a535e8aead75ef88",
+    "composer/gl_layer_stitch.h": "1928f935483b2f46a67a08660afd4fd4a42ac6090cf126214428e866c629de6c",
+    "composer/gl_layer_stitch_impl.h": "a800616c018c42c7740ea59671a7c0e6f811fee8adaf251909f552ab75f93385",
+    "composer/hwc_display_virtual.h": "026999d09c046bf53a3196ea0b500659e49a0802c335163d1b16ceede8278e26",
+    "composer/QtiComposerHandleImporter.cpp": "fa4b15fdce6761691d2ba9821e23139994129c964f447f455cb14c36b616b155",
+    "libdisplayconfig/DisplayConfig.h": "b80b79755aa24fb11ee921533a19172f049d405215866501934c7666addd000e",
+    "include/vm_interface.h": "81d0cc951fefb6566e3f1db18b63062d929c732f6f1fa2c967e40d983998ae75",
+    "include/dpps_control_interface.h": "7116361507749c232d0b44c566d2d38360b10e130be096eaddf8ac1192061cec",
+    "include/display_properties.h": "fd1b745a0d91f102f119580e48df20c114736a4769b5bb29a31424aebf804006",
+    "include/qrtr_client_interface.h": "a3aac2f4ab58fc9abdbf4928ab76f08483017087bb90b7e109402ef7d3f7afe4",
+    "gralloc/gr_adreno_info.h": "ef8af0894ac07db7d9333e5874baa954d37575409ce48cfb139e4be04af61cbc",
+    "gralloc/QtiAllocator.h": "a52219f5c38a957a4cc297ee116b0b7974c5bbf95ad6a9c648016d44226562db",
+    "gralloc/QtiMapperExtensions.cpp": "4cebb8c2569c6318592d8dab9d0653054a193887521011e930e3f09df72f7fe6",
+    "gralloc/gr_utils.cpp": "8382038dae2c6f985a78bebb54077054a1f96bec36cfda62d7a12541568246fb",
+    "gralloc/gr_adreno_info.cpp": "c52f305cab220b1c0569fddef2c4fdfd6567afbf8250cc52ceae5a20996a2d26",
+    "gralloc/QtiMapper4.h": "e89ff6066bc8a20ea695bf5bd64a4efac5081ddcbf905d9d7462f672f6ed4ccc",
+    "gralloc/gr_allocator.h": "1410452c5699794d8cc34ab8a9620aa5a60cc620bddd04d7cae4875a77eb6c7a",
+    "gralloc/QtiMapper4.cpp": "660c3cd51c7c4d46b7ec740bafe8f7ef53cc5f1175dd92cc6a87205322ab99e3",
+    "gralloc/Android.bp": "5302442b2c831cccd1145992d2b2f0b30bbc8d38d0cb803b7da03fee9f49a6af",
+    "gralloc/gr_camera_info.h": "c4fdba9c5336ef3fa6f93003dc025101ce96bc1e4a92ff4e5e10412c2e68865d",
+    "gralloc/gr_ion_alloc.h": "7f17887ac8aecea37ec3a0f7d1be020c2314d8c8ac0c675665eb54d5ff2735d6",
+    "gralloc/gr_buf_descriptor.h": "8162515a34e79ed64c8718a97b3ebc28e81141ddd37991e2ff9f4565e5684a0d",
+    "gralloc/QtiMapperExtensions.h": "e3a24e792af653727251695fd9bfb8225bfa1e1f6810e4465e5ebf95fcb855c1",
+    "gralloc/gr_ion_alloc.cpp": "98a6b19dc4a1f753c3a078232abdf1d92d2d8e4c408fb8000b9aa63914b5183d",
+    "gralloc/QtiAllocator.cpp": "cf6b98b86c02fc995a7b22169784e83acc1cf446abb8425826a78087560d94da",
+    "gralloc/gr_buf_mgr.h": "794871d78e2a8b7b8831476ee86a51345f0e58d51ae9d6c9764a614aa8a44943",
+    "gralloc/QtiMapper.cpp": "664a38cc43e610f39276e4c145cbee8f3da13ab7166c1650ac8481ecedb192f7",
+    "gralloc/gr_utils.h": "765ae081bc60dc13f4f36bddde961692a4bcaafb13f16af0d3c2f21dabe007a2",
+    "gralloc/gr_allocator.cpp": "428133550dca4366be230739262a7a1565f30ec04df71cc5500ad7e2198cdecd",
+    "gralloc/gr_camera_info.cpp": "fa09c4f63e35d9f8151749cb611a74edc9600e4cd4cae08083e5824764541890",
+    "gralloc/service.cpp": "eb8e48e3e0b6f4f545adebb305af0b34e7f6cd0688ba592d9f90b56cde57b270",
+    "gralloc/QtiMapper.h": "30db8b715983ae6258ef9d7040984bd8ec24a777b7d625959223027c8fbfc2b3",
+    "gralloc/gr_buf_mgr.cpp": "9fb9e74cdc87691b1fd0086b64f5b800900e4d83da7a54b71f246311d6b0d262",
+    "hdmi_cec/qhdmi_cec.h": "6e5819ed7b2f8ba67dbc4f226ea1b2d4d1b5dd7b83b70931025f4364cff4aa34",
+    "hdmi_cec/qhdmi_cec.cpp": "0c98b3a5bc13a39add7eb439da4fac0e26432fd5f673c042ee852bcf922fddc3",
+    "hdmi_cec/Android.bp": "d82b7116ca35dc667dc7c745f6ab9e8624fb7509e8400478c526bc28ade8fe44",
+    "hdmi_cec/QHDMIClient.h": "0818252beaa26f88cf17d613d977fec421b6ed32d3990f096d4f182e3606c868",
+    "hdmi_cec/QHDMIClient.cpp": "4111a601ca5b43cc5d52708e36ce06bdcf5ea7a356d39d6569223a0edaeff4b6",
+    "gpu_tonemapper/Tonemapper.h": "9198b567f1ce9f1bb829b230a582c8f03ab17540c804a11154ac5505e2aa91eb",
+    "gpu_tonemapper/EGLImageBuffer.h": "1259a9ba2836159b48025e289d958ddb0bc48b652d3e31dac625ba31f02a68d5",
+    "gpu_tonemapper/glengine.cpp": "9b00056eb5736c277a1993d02698a8db0f80384a321dcc3ab0a493069fd2febd",
+    "gpu_tonemapper/TonemapFactory.h": "fe188a7b7636b6b1e699a7f7441a4d2436e178ced0178817f6d1c43519620408",
+    "gpu_tonemapper/EGLImageWrapper.cpp": "bf403293fe7e6700dc331e31730fe26a65d91f82dcdc70f531e63c4c71db926e",
+    "gpu_tonemapper/TonemapFactory.cpp": "5b8062df2132479bf55463a71f72efec4c9bf0e70cd71421848067e0f7ebe8f7",
+    "gpu_tonemapper/Android.bp": "11007c6aed33f48ea988c930af4e64720543b5ae72ac6327d3363a1606ff2ecc",
+    "gpu_tonemapper/EGLImageWrapper.h": "b7bcdae230b8d419cfb6b477a40d6e32105f3543214a063e196b74686df9c3ea",
+    "gpu_tonemapper/EGLImageBuffer.cpp": "2913bfd9f4d1015d98f6aa67413e78ccafae625336515c46c302c993f7140d05",
+    "gpu_tonemapper/glengine.h": "cd992f0c32955aa7070d5d7409569a5124b99dbce385fc942ca76dffcf4fea00",
+    "gpu_tonemapper/engine.h": "26a38087d3c5dedc93804dfcec0b3be83849b5e995068c906b8c9b57f86e3369",
+    "gpu_tonemapper/Tonemapper.cpp": "48546fe5221957596dcefd63834c8dee698e6ebf84db6fe5f4b1439298f44582",
+    "sdm/include/core/buffer_sync_handler.h": "c58858398ea08b155f7073afc6eeb0532424ea8f6c5f8f8c79641a0063a2520b",
+    "sdm/include/core/sdm_types.h": "2a47f06b3b8b3eee5bdccee7a2afa403634a6221634e179943a4360609358fd6",
+    "sdm/include/core/layer_stack.h": "6c3c218f9fff183abd4a4ab74a1b4cfe042bbd4e86124ff649a63b08132ae544",
+    "sdm/include/core/buffer_allocator.h": "00f4fb49ff7d938aec421187c6b08d022da9b8017d169503c770437a53d2f79d",
+    "sdm/include/core/display_interface.h": "501e789ff3f0c47d4b26221bbf5e9ed50ce2a3523ae2f6167521751ce241c48c",
+    "sdm/include/core/ipc_interface.h": "51674299182503f6c39f841070faab370d7ff3893c8cf4e950b4c3d84cb11d99",
+    "sdm/include/core/layer_buffer.h": "3e42a01038c9d6447ceba88134c91aaecfd8e98e000ab845d53ab6d81b8ef18b",
+    "sdm/include/core/dpps_interface.h": "a1e596f11149f2b4f87ed337cf51bd555df1211d5e68d8ec35ef0824f9dd199a",
+    "sdm/include/core/core_interface.h": "6e044006ca69231265ed36f4ddb4c4e301be5b0cd4c571646017f3779514a840",
+    "sdm/include/core/socket_handler.h": "7c8ad5d75fd47743efa45391b83ab9025a60db60c3ae95e79dfe89e3ab08733c",
+    "sdm/include/utils/debug.h": "a0509835557b5a9a7c725e9603fcc75b0b5bf3db5a8a2a24963a9bcb0d6387e3",
+    "sdm/include/utils/factory.h": "2cd9d43978199d221cc53ad2289c2c63627d59daa67e82e4537fc59a1fbc99d4",
+    "sdm/include/utils/constants.h": "bbd9ab7eda3986a504d3cdcc3f1b026f7681d486296d5eaa2f6dd369cbe5f8cd",
+    "sdm/include/utils/locker.h": "edacf22070b2ea00d8bb7f183255db2f17561ae541020e254a203aedd72cc550",
+    "sdm/include/utils/fence.h": "20476ebfe8574ffc5167ab5c733e4cb30904ebf92a9b3bb9025dfd8d68b2ae9a",
+    "sdm/include/utils/sync_task.h": "ad1a9f63d9b93a469be793e6fa12157277d3b407a7fbaf52c5c6570fc2b94806",
+    "sdm/include/utils/utils.h": "d6f240682dcc6c9972759090f82cc78edcc7c71c78c7b468f6aa6038311a4d5d",
+    "sdm/include/utils/formats.h": "209ccf0f9d9d4f53f639dfe039926a25dcd9262f1604ff05d2141ccfa64d862c",
+    "sdm/include/utils/rect.h": "abb1d30168dad4524400f528975fa00c3863c522880331fb6de45dba43933385",
+    "sdm/include/utils/sys.h": "1b5ecd1755c307036a70a18bdf62e0ad172fbe11899f75336c1c591a4e8ca1a6",
+    "sdm/include/private/panel_feature_factory_intf.h": "8b4b037a8e3e9a157c075f53b709cfa616e9055109e9b08c680133900be5a46a",
+    "sdm/include/private/spr_intf.h": "27f02c581a538f9ff5719bc70978a32799df02dda0cb4430ce663618eac44169",
+    "sdm/include/private/resource_interface.h": "3d36db22ef274edf6c8c912acc1902c9c60865baef339666b8f012c5459ccc54",
+    "sdm/include/private/panel_feature_property_intf.h": "366de6a85cd21bf30bf826813cfd98700e0664b4bfe10509376f57dd09f67233",
+    "sdm/include/private/hw_info_types.h": "51023f74d955e2cfb47712802eb0175cf73079172201c8fc05a1d2f411aa5467",
+    "sdm/include/private/generic_intf.h": "9a1a76d628bba36923f23b81cafab316a858a9fac16e47e7d8a6a3f3b2bb4eee",
+    "sdm/include/private/strategy_interface.h": "444c912881c24be6e9a236a21018d2ae897364ad4fa780c61e389b4d3f31673c",
+    "sdm/include/private/color_interface.h": "b3183a2055833d1f60ec802efa48cec3ae5000e516d72cabdc98aa5fa1a57700",
+    "sdm/include/private/partial_update_interface.h": "63dd0b6fb667bfd5f9b68aa54656921104e99e58990eb35bca97a62e26d17da4",
+    "sdm/include/private/extension_interface.h": "178dc6d12e6b5ffdc2dbab2b432caf8ae27873d274797bbb620201cc12c1a6b6",
+    "sdm/include/private/generic_payload.h": "dec9448093dfbd122389cbbd757ba07a1f547ca37b679bd827af0f8e55f5b3fe",
+    "sdm/include/private/color_params.h": "13f69012a9989fc18810cfc4818527567fefc66df242b7c6b772acf3565f4dcc",
+    "sdm/include/private/rc_intf.h": "d9a882fc5d21ea2638fad1f9407335ee7b9b0b5f11f133250e3e2e1eae87c983",
+    "sdm/include/private/snapdragon_color_intf.h": "7c052291646a74939ca9ae20b6226891594cd202554eed479a1581f19c8a7780",
+    "sdm/libs/core/comp_manager.cpp": "405c38b0ee0470e77d5961e9e9bfa1148766ce5c24baa4dadb67b20c68d55c0d",
+    "sdm/libs/core/display_base.cpp": "d086a0d10d8892688f940fed5ee1a169aeba9ee9e8628d03bb5a6eb04cd589e6",
+    "sdm/libs/core/strategy.cpp": "9f8bafffd40888111fd0b066c405b984a4be2094ff20412caab9310afa1076bf",
+    "sdm/libs/core/display_virtual.cpp": "321ef2936035c14144de59faa64daee4131f3a9f87f827b3fad272ab84579ba6",
+    "sdm/libs/core/hw_events_interface.h": "001864c8fb8f7950859bb8cc8cb4bd59e6ebfff98481bc5e2be035af022da229",
+    "sdm/libs/core/core_impl.cpp": "27f32f6412e16f3620b1bb66b09fa87720a3bae30ff24f2b2df361072c9e5cac",
+    "sdm/libs/core/core_impl.h": "e87dc1eed3f09644e86d4cdcd84a6d1164523ce590d0e66404cbcfa450e79244",
+    "sdm/libs/core/display_builtin.h": "160e7c4a0174388d408abe1e0ce0e825aaf6d3cf33d7c9f54d464669628b2aa3",
+    "sdm/libs/core/display_builtin.cpp": "af8d773bcb6965c364f77c4dc6e68855b9f1d1e4417bb5c07fb84c3542ebe16b",
+    "sdm/libs/core/color_manager.h": "7330e98340a85cff35955c8302aba070c8c2607442591d80c8adb04f95b4f473",
+    "sdm/libs/core/Android.bp": "cb15412c95380fae2bb55baab7a4c2b2dc9a1e42a7b65ad5e35267427e524d23",
+    "sdm/libs/core/hw_events_interface.cpp": "8d4af147eede3f9cde3baf1f8f16268a7bab337510fad8010d9f81baf641269e",
+    "sdm/libs/core/core_interface.cpp": "c388bba8efbc600d121841342dfd635517b590f26327035058efb94ad07a1f9e",
+    "sdm/libs/core/display_pluggable.h": "26a0604a06fd59dd99af082df768d8b18fa136ccf030193d66b9481bdccc14fe",
+    "sdm/libs/core/hw_interface.h": "c25fd6cc981704b70ad077b21fb8b251e21562cca3fdc8397e616a94a3b7ed9d",
+    "sdm/libs/core/display_virtual.h": "fb6fcc38bc775713fe5ff853a698ea35631ef1c9f6e9cd90b8693a65d2edac96",
+    "sdm/libs/core/display_pluggable.cpp": "17fc8ec7028debd546f684333c2676d6319d6e756b59b51d1cba8d2e00444d77",
+    "sdm/libs/core/hw_info_interface.cpp": "fb0bbc831233ae2ff1887c8fea2368b52108dda67209919cfd19f2c31b7a84ef",
+    "sdm/libs/core/color_manager.cpp": "856d8982f15194445a0da04b2e25bc159fddc9b587f5d4aa149091a9d95845f4",
+    "sdm/libs/core/resource_default.cpp": "d77dd994e82e48b4f0d16180f07e05ccc7cc33bdb60043a12c467bd78dd0c0b3",
+    "sdm/libs/core/display_base.h": "9ab3218c479baa794d676e726a77dfd271d4636dde99c60558bed669be361c7b",
+    "sdm/libs/core/comp_manager.h": "f7ff393ab51ca0702c3140a81bca4136e453ea5b621f07e83c2194336b5780b7",
+    "sdm/libs/core/hw_info_interface.h": "37d109c1dd09c9c8f56c9c61fce3a8e3e9e5ec76be75ab239596893cfb8a7ca1",
+    "sdm/libs/core/resource_default.h": "79e3f33eafc86133dfb338c260d1e94b428aa37ec385fbcbd32d8d05685fdc48",
+    "sdm/libs/core/strategy.h": "5e158aa667deb13dc358a0981e7bc846d7acda134c5680e20394d076ff7c615d",
+    "sdm/libs/core/hw_interface.cpp": "d951f2f248eddd2e94aa022bf8c93869eaf76b3c5eac460e802b36572e42bf55",
+    "sdm/libs/utils/rect.cpp": "7c331571dc86ddfbfd9f0b44cfe2b93b803b81225cc1f79d8f144921601ff028",
+    "sdm/libs/utils/debug.cpp": "a8012dc7a3b60600b9c45e7fc5678d5f61108cfd5b4737abde94cf693a05cd25",
+    "sdm/libs/utils/sys.cpp": "b90829726c9e7564822c567d6ef29ebc2d66fa02c05107a10eb497e91e60ddcc",
+    "sdm/libs/utils/Android.bp": "c0616e02b949d1541f8d44f3d5ee453b5168558d790ba1ba9a8b1d46b6c88be0",
+    "sdm/libs/utils/fence.cpp": "f401d1cbd87dc95ca3fdfaec626c56953332299a0b0850fabe08df8d9ddda403",
+    "sdm/libs/utils/formats.cpp": "af015cd7ce745a88f4b8583faa4abb7f51b33981380dbe5bd5839c184256308e",
+    "sdm/libs/utils/utils.cpp": "a76d1a7bd41fa246e0d7a6ea3357a9840b22ed41eaaada22464cbe4434bdb477",
+    "sdm/libs/core/drm/hw_scale_drm.cpp": "22fc3f68c1c781950dccfc4b5b89691943f3a23731152183dfbe706a008cc9ff",
+    "sdm/libs/core/drm/hw_tv_drm.h": "535c5729d682435477346a313cb8a5bb70df0be78999ed80960c0a2c1880acf6",
+    "sdm/libs/core/drm/hw_events_drm.cpp": "b092475205e2636013404126aaccd2c2b6d0fbceffb9ab86db352c4791e6d45b",
+    "sdm/libs/core/drm/hw_events_drm.h": "580b9f2fb8b08441ab75c80e9e6ac054333a5e2deb60a4437864565422e0159a",
+    "sdm/libs/core/drm/hw_scale_drm.h": "2adbec27885c8357bed9a22bad7b8e87605d26c126bbd3c5709b8b64244acf91",
+    "sdm/libs/core/drm/hw_info_drm.h": "89426a6d372fea698ea38cb3dcd825f05d348aa381be6a8597e12c50cd878e10",
+    "sdm/libs/core/drm/hw_device_drm.h": "f824b1c3c010ae3b13fbddaeeebe99165694697b64a17213e88d86c876599b31",
+    "sdm/libs/core/drm/hw_color_manager_drm.cpp": "266cc10bb290a95fa8c01a70f9d7b1a9d224d1c7f1e29e496b54a06da448b07a",
+    "sdm/libs/core/drm/hw_info_drm.cpp": "91d5e933e52a00a73362f61f386820e8b6a9161d56221a18c6795a3c3647bab3",
+    "sdm/libs/core/drm/hw_peripheral_drm.h": "5a1fcfd43c48a0ac98df69d43e0fd86e6ab236395c6a1efac0cf7ac24c06901f",
+    "sdm/libs/core/drm/hw_virtual_drm.h": "0cb2ad1f59dd741f287609084632c636a16cf6c2d292b06215da6f8b24f9800b",
+    "sdm/libs/core/drm/hw_peripheral_drm.cpp": "7e156f45b8ac1395a8aca2c0895cf8412d93405ef276ddc20f07f41e0c700e8d",
+    "sdm/libs/core/drm/hw_tv_drm.cpp": "f20eebeebb6a82d9e7a39a7ab16f9d418032fb9e9fc86e0288647b74a345cd22",
+    "sdm/libs/core/drm/hw_virtual_drm.cpp": "19e5e191a193e7db455b4c0aabf8cdae9b2b2371f771c0f9e15d6dcf67293e10",
+    "sdm/libs/core/drm/hw_color_manager_drm.h": "363b3bcf5c3f59c17656dbd488e9c6955207d2e46880da9b9ff61752d64f0f5b",
+    "sdm/libs/core/drm/hw_device_drm.cpp": "7aee44a2b9646cff9802cc3154e0789ba814c01aa7c23ded17ca1a8c7eb55bff",
+    "sdm/libs/core/fb/hw_info.h": "bbdc201ba34633d3695b129dfa31f796ffc992391f3957d861504384f008e2d1",
+    "sdm/libs/core/fb/hw_info.cpp": "2984ad29ffecb1ca58a4760d7e9034a0930d9624d80d77c5620201f04fb6affb"
+  },
+  "dependency_files": [
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/QtiGrallocDefs.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/QtiGrallocDefs.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "14a779297ac9a57b9520801b42b3d809420e2476",
+      "sha256": "d013d916f4d3d76efecae4349c8236d680bed54cec47ce8154b8f1a2b71943c4",
+      "bytes": 9460
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/QtiGrallocPriv.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/QtiGrallocPriv.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "2d2debda4011bfbb70c85b72deaf219fca1adba3",
+      "sha256": "c86ef8f005bb466ef224a746a93e5196ad95f8497d9f08592a71762910b8f4cd",
+      "bytes": 8449
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/gralloc_priv.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/gralloc_priv.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "cf47b4d1d56f1c26af2e9dd24bd6b7212dd64b99",
+      "sha256": "f2903b0e7728436afccd848558027e93f52c61e8495d0d913ca2df6aa1656c78",
+      "bytes": 6153
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/QtiGrallocMetadata.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/QtiGrallocMetadata.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "6f37ee1d509a20d51f9dd49c7c07b1d730fe35fc",
+      "sha256": "f71f79a132dde6d88349af32b5d4ecc9bdfb0a4dd7fb09d2797e35339f6ef2d6",
+      "bytes": 8415
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/BufferUsage.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/BufferUsage.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "d4a276472e4915a6385f384e1446e6015a548e7c",
+      "sha256": "9cc16a3ed2c7bf8b46e474a1f73376603029ea298dbcdb6d17e60fbae934e3cf",
+      "bytes": 5018
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/QtiGralloc.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/QtiGralloc.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "c4e79d087991de84521467aeea94ccd1c12d82b1",
+      "sha256": "b5060bb6a374114b892292cc54bcbfd4c2bd8b592ecd938eda082dab3f75ee28",
+      "bytes": 9917
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/Dataspace.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/Dataspace.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "5250518d459d4570af478c66ff1654fe5335d8c9",
+      "sha256": "a74b23daf2b48369b7d53813693823d1513aaa46e3f5f22361d091fba0d11494",
+      "bytes": 984
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/Android.bp",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/Android.bp",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "f927eb7f3b132546ec27d49bc376c208bc005eae",
+      "sha256": "625ba8093e38df6168ea894e03e9414628b6c4eb981d8af4a330d0904491b5d6",
+      "bytes": 1007
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/PixelFormat.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/PixelFormat.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "1838fa07c85dbd8fb4e407ccbbfc8e54a499e70d",
+      "sha256": "42b27ce9f07d2c159ab63990c71fe9b131a4916aca0e37bfd4776087ef2b19e1",
+      "bytes": 14445
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/QtiColorPrimaries.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/QtiColorPrimaries.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "8309d8437add2941adc61767862128237228639b",
+      "sha256": "49d15af5907cae0f659dbc202fb2ad7d855dae465ef5e108b7f7f60e872b0d6a",
+      "bytes": 1242
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/MetadataType.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/MetadataType.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "3731d2bb94ef3305fc1e1d7ca577dc292e6b52cc",
+      "sha256": "08d4f0e1f7f805cf125fa246256607341bc1745b834b489d406dffd64c458ea5",
+      "bytes": 12122
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/QtiContentLightLevel.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/QtiContentLightLevel.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "7676818e27ced1d09a4e84ddc8764f17e2e7da28",
+      "sha256": "8252d2e99a3e8266663be5f757534879bc256d552ede35c2445d8c960be8081b",
+      "bytes": 747
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/QtiColorRemappingInfo.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/QtiColorRemappingInfo.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "eb2917c8136100315b11bdf36516e60fde5a9cb3",
+      "sha256": "9b68ead022f4752779328b54cd88714a122a4ac944c143bd92654ce033dd33a1",
+      "bytes": 1295
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/QtiDynamicMetadata.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/QtiDynamicMetadata.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "e6e086a75b7dbd8d389ba6f35fd1044d004236d5",
+      "sha256": "425828a63a950162230b61141a751fccc97080eeee60c65d10ae8332e52baae2",
+      "bytes": 705
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/QtiGammaTransfer.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/QtiGammaTransfer.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "765393b0a413cb65d726fbea19fabd04436fda48",
+      "sha256": "a43e6096c7d2b76c60c8adf0c3e07184b2c818cf20e0182e325cb839d47f3d57",
+      "bytes": 1318
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/QtiMatrixCoEfficients.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/QtiMatrixCoEfficients.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "a345b47cb7a70f1f98f5fa121abbaae4c542c599",
+      "sha256": "60c7e9c4b75624a91e55ce07df687d5aa00ce9b5c70305b46857775c34a107d1",
+      "bytes": 972
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/QtiMasteringDisplay.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/QtiMasteringDisplay.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "020769115c16d2818da2009e03b6254f35027c4a",
+      "sha256": "5675476c7a9281d553f386edb5aa89fee6cc141cadbfee50b0cd326132689606",
+      "bytes": 1401
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/include/color_metadata.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/include/color_metadata.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "c8a5890bfafc51c654ecc387998ea952ae3ca021",
+      "sha256": "4084a27a0fe358ab3068d2c498e6165c2979aa62781d6b4524d0caa26d677372",
+      "bytes": 7714
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/QtiColorRange.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/QtiColorRange.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "6267913fe739afc75f4f06ec750c63cef431d75f",
+      "sha256": "b4c2a451ddf982334f0be41ea3950985aa216e8aad80a34ab57c7c34031858c5",
+      "bytes": 468
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/include/composer_extn_intf.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/include/composer_extn_intf.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "d1dc87bbfdb924bfc4c54364bc887fe3ee1190e4",
+      "sha256": "375aa96c27a5bf9691361c3e443c0845e92f8ce8bebcc094b5a3f2570d47c240",
+      "bytes": 5939
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/XyColor.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/XyColor.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "d95556f70f9c7a889cd96a2bc894e01b7b79b56e",
+      "sha256": "9c243b2298d70f6567c99a1b1187cb44982ab850edb90279a697535bc883cba0",
+      "bytes": 477
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/include/display_color_processing.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/include/display_color_processing.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "f01cb520109b573d7a256ec3a2ce3c675e5baa9f",
+      "sha256": "0b316f1547cd0345a3e92da3156313b6f96e4a909869f00a9d744628d77a3854",
+      "bytes": 7039
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/mapperInterfaces/CustomContentMetadata.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/mapperInterfaces/CustomContentMetadata.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "f05df43b7d2bca2fdd2e9432a532cbc7482dc68d",
+      "sha256": "b34107c403a5306e61650f7a3e944d8127e13756bb3e7135ad2b1e01f0437505",
+      "bytes": 654
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/include/display_extn_intf.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/include/display_extn_intf.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "4df627423a2842b9112b0a102e821c8865721772",
+      "sha256": "75cc10d8a238ff4fb054cf902d9ac6e4c56c3a1e5c7c87dcee8293bfa956d14b",
+      "bytes": 4416
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/include/layer_extn_intf.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/include/layer_extn_intf.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "adf36bbe338320f1c6a3ba6ab50bb2991c7460f0",
+      "sha256": "24da47821997b050770e066b6813f08cf35eccdf4d11b889228634a7ba47b276",
+      "bytes": 2585
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/include/frame_extn_intf.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/include/frame_extn_intf.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "b6bfe41fef83534cd1ccf513168ef3101ea1bf49",
+      "sha256": "4d08aa60586865fc35a48c9d8aa0f057e8dc1348d07554dfa5cac90c4f7e5c1b",
+      "bytes": 3522
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/include/phase_offset_extn_intf.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/include/phase_offset_extn_intf.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "9beabba5195fde40fcfd6c20402d466f94234bfc",
+      "sha256": "f7b0ae71143a0c5fe468618a384a80cc96fd259d2c4c2ce7de5e800bc6fc8aff",
+      "bytes": 4063
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/include/smomo_config.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/include/smomo_config.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "ff409d6d0af0072ae52ff3e2015b0c2ac17bf8b2",
+      "sha256": "943743b259f99ede4b9a69731b44acc30c224a7c72dee341a4d59f5cc2102746",
+      "bytes": 2069
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/include/frame_scheduler_intf.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/include/frame_scheduler_intf.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "2d706e1b276122494e6719f5f8273bd45270f83a",
+      "sha256": "b61fbb8bf3ff482fee68c8178e8b264d378136d16d09bb243fe88bbfe99627db",
+      "bytes": 1940
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/libqdmetadata/qdMetaData.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/libqdmetadata/qdMetaData.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "ebf0175aa4f68b948e55cb170ddb7bbd757b1e22",
+      "sha256": "70cbefa25b56af82b6d37e220412c4d00f767b18f66befa7fe16d62f83f6a726",
+      "bytes": 7132
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/libqdmetadata/qd_utils.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/libqdmetadata/qd_utils.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "0b0816a08c2ad36492ed929d0005d677a4e63336",
+      "sha256": "e0fec243fc6cb50c68d0b56eca9476dc2fa7d2cf8863257172fc329c592c97ca",
+      "bytes": 2450
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/services/config/config_defs.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/services/config/config_defs.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "1abfd60906af41752a84aa693aabdeaf113bbe8f",
+      "sha256": "11583e9fc1b309d814aa4e3f176a64bae6acdb51c274d772db99d3bc46b6204c",
+      "bytes": 15578
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/services/config/client_interface.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/services/config/client_interface.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "faf772a594412dfad074586ae45a372e254e5dff",
+      "sha256": "2efada88ee6ae641a58412b8068a5be6f154c3cbb1191b3a19d380fd6493254c",
+      "bytes": 2010
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/allocator/3.0/IQtiAllocator.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/allocator/3.0/IQtiAllocator.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "a47f6e4aa8a5ffd5311ae5c78d6b2e251418a714",
+      "sha256": "7a1372c94ff50960e4f3c3c4262021527eb77c6d4eb8726ebdea9c36dc82eb56",
+      "bytes": 1720
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/composer/1.0/IQtiComposerClient.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/composer/1.0/IQtiComposerClient.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "a5a44b7372b1e0c4e22f39914afa2a8c1e2bc7f2",
+      "sha256": "6a1ce8d44bf75d2102ae54bddce02f2bc7bd064444c30402b6dea741114703de",
+      "bytes": 1734
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/composer/1.0/IQtiComposer.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/composer/1.0/IQtiComposer.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "23443f933f2d0ee5b799cac16adbcc36de7d1524",
+      "sha256": "f5c217947f9e7ddc9b20d339928adfb4c84fb91969119b2479e9993ca3e4db08",
+      "bytes": 1716
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/services/config/device_interface.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/services/config/device_interface.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "7d85910232479ed9175727f522d8381c7b1e88cc",
+      "sha256": "14ae8793d7264a6122e7a2574f57022b696b2f743fb422f60ad0e2af40668f0d",
+      "bytes": 2175
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/composer/2.0/IQtiComposer.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/composer/2.0/IQtiComposer.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "9def2d48e1786ffb286ded726970ebd844bf5ad4",
+      "sha256": "60c78b8bb8728d6826d8a57dd5d8112120541c2be130d7d7cd62345c3e9eaf1a",
+      "bytes": 1716
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/composer/2.0/IQtiComposerClient.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/composer/2.0/IQtiComposerClient.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "b8560410f76d3c11853febc60206a4fee182a214",
+      "sha256": "c22f5d631432b98b5f40a845a0797b5ed0fe42e9facb517fc8a98811835fb4a2",
+      "bytes": 2254
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/composer/2.1/IQtiComposerClient.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/composer/2.1/IQtiComposerClient.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "d4054d34ca31191412b06424eb5b798d57005f06",
+      "sha256": "97befe9b69d6ec918fdb76bee572aa95b07b789aa70ec3711c0c9a3e45a35fbe",
+      "bytes": 2079
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/allocator/1.0/IQtiAllocator.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/allocator/1.0/IQtiAllocator.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "22084a7a87efa3754ccfd751659858ebeb0555de",
+      "sha256": "44a03774c9931f3779affaa88bb0217a3666420c38ca0c98170a7cf40a581419",
+      "bytes": 1767
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/composer/3.1/IQtiComposer.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/composer/3.1/IQtiComposer.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "8a359edc8b76f9e6508bf65982a9210f87be2eee",
+      "sha256": "e609d77b00158060ca222ccd13e0ba8019a42336e3b6a6a32c6396f7b7ea2077",
+      "bytes": 2125
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/composer/3.0/IQtiComposerClient.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/composer/3.0/IQtiComposerClient.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "716e69db699b3c63301903201c33b65052f4d585",
+      "sha256": "f724000c84dd66ffaea8b3edc610f13381a62513854e35d89b3f4a4daad620d0",
+      "bytes": 2588
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/composer/3.0/IQtiComposer.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/composer/3.0/IQtiComposer.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "6fe58e0c59f6206d2b9ae3495a45396a7f6242be",
+      "sha256": "7f8c47a47524e1ac21646578c7545fffdc08cec60df37d28ce8796b6461ef0c2",
+      "bytes": 1716
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/composer/3.1/IQtiComposerClient.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/composer/3.1/IQtiComposerClient.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "4b1103cdd4627bcb5c9cfbdf818920d69caaa04a",
+      "sha256": "ee6870d17e33bf8e2365165637b75559ceffda57770b1a35f3a9a8bbf3769266",
+      "bytes": 3435
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.0/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.0/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "87925c8bbdf57fc6d684e01c33c4aaea8473fdd1",
+      "sha256": "0f53273ad37cc730b1fb4ea953fa0697ec0cc529b5b5a0a960aa5b276cea8143",
+      "bytes": 8088
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/include/smomo_interface.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/include/smomo_interface.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "68dfb17a5fe4cc4e02a2d697f3446fd6741bdf5a",
+      "sha256": "de66e123cf3db9386eb4ca88cf93d33a60feef2cf2554c52894e2477ddcbd967",
+      "bytes": 9272
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.1/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.1/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "d6987bdda76bcf0581a58ba663cf297457f62e90",
+      "sha256": "fcc31b8e0d422752cf4f4c69618488ea9cd5a4e0f21404adca087dc4ef23d6df",
+      "bytes": 1876
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.12/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.12/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "175fcff865e04b3def7b5a771bc731641139d7ec",
+      "sha256": "ec808064f9829b3c124edf70042b651aac29ec0c3ebc842626c42da4a327ff2c",
+      "bytes": 2067
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/allocator/4.0/IQtiAllocator.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/allocator/4.0/IQtiAllocator.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "76f41367d38f65aceefe6d6f3566d5e0789d9e2c",
+      "sha256": "c85fce19541fb31c8ce4927166a4b50da1e5d50a98594bcaae2f8b2eec12fb7d",
+      "bytes": 1726
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.10/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.10/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "bd9a5bbcd5ac1a78927a9211361ce24d85f364df",
+      "sha256": "f78bba2991501438ad9ca1a0812f6a2a3991cb178bec4c00bd8eec841777d8d9",
+      "bytes": 3841
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.13/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.13/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "a475a4cf300b51e49f105471af82a093af38765a",
+      "sha256": "c3ee03cf51ea11b6093a67d78be71085f1b5208e4ffbdbced1013c02246edc96",
+      "bytes": 2409
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.14/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.14/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "a37fa7f46d7543cbfebf907d75fe5bddd7339001",
+      "sha256": "fe3a84ee6c6231badb64b5331813fd29aa8df5146113cca0490255102a15a1be",
+      "bytes": 2122
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.15/IDisplayQsyncCallback.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.15/IDisplayQsyncCallback.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "1da47f7f195344167dea779e12149be56986889d",
+      "sha256": "be4de6eea1098375e80d26bd86d0e239a3d739ec7dfa43b1b2fa5e6f75c86966",
+      "bytes": 2024
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/composer/2.1/IQtiComposer.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/composer/2.1/IQtiComposer.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "d784c708787fd8bd02ec77716adb0c3ad40057df",
+      "sha256": "5c479b5d32d3d5eb669904dd05c004895625d79e0f2d65a307f43c3dd0fc5c44",
+      "bytes": 1694
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.16/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.16/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "d1b005b5c639f5f13c1669a6687a2ffc0ef198a7",
+      "sha256": "ada1c82f1ba85c9f403c4b91d24ebc6dfc2e796a7727bcca23f4e2ea68800f35",
+      "bytes": 1920
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.19/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.19/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "f933192ad51cde38f38fd6b50d1c7d266decfd4d",
+      "sha256": "cbc4f4bf866904bb4b57d32efff12666c60d2cf8306ffb7ceb81c45fca65a23e",
+      "bytes": 2894
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.18/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.18/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "48f63c922f537f42c1acdb6a7c6523048fdeeeda",
+      "sha256": "9c7bd67f95c98f95c0c97a80e7ab1d79cbe298a42cb6bcd2e915f749c30552b6",
+      "bytes": 2190
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.10/IDisplayCWBCallback.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.10/IDisplayCWBCallback.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "c5f69165c5d0a612403243e9e39cfb2ee544b18e",
+      "sha256": "50369a070405a1f0cac44648f39ca32864c1339896d6eb16524b32fff9e95f03",
+      "bytes": 2257
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.11/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.11/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "2d09aab2e95909c360de639001de62af1e1b5c8b",
+      "sha256": "10a290fc22df7680d00c53370870d5e941b7d60afcb94e90d2dd03369e7ccebc",
+      "bytes": 3330
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.4/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.4/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "84c257c9040a0522c9a5e566945df4546eff1e30",
+      "sha256": "cbdb70cc5999b9537497b1e56955278ce1c3510245c82f861bf847ed1609f05b",
+      "bytes": 2010
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.2/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.2/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "af8f154dc425fbc44a7f2598455b377e2b9e2063",
+      "sha256": "503415d1b4d8aefe231fd751cc36e374e91d561f3d3dd3459f31f3a67aa6dfe5",
+      "bytes": 2349
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.15/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.15/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "f4d84e387320d03ce3107b1be64bf2ab6f37aba1",
+      "sha256": "cc81da1cfc8f045fa4183a7ab2f5f34cb863b310b8d04bf7db661a58ec9ea5c3",
+      "bytes": 2091
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.17/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.17/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "861a57fbdfcf32ec995e89186ebf75fb93ed265c",
+      "sha256": "f0e4b206e3357cff0399f4a696dd57bb385d68d2c13865ea7bb5180eca06cd61",
+      "bytes": 2184
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.7/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.7/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "9f83c1e24a44e1fb63d5839dbfcbf69f432cf885",
+      "sha256": "ccf20944596b1cd140769257bdb93d10244b256d47e296ec84d41ed1261c1089",
+      "bytes": 3879
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.5/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.5/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "d8de3f174ffe709b797f01fd15312fa5395854f0",
+      "sha256": "f852a7cf003eaf02a26784dff919ea1f334308df888f406962bfdb08ab51b59e",
+      "bytes": 2460
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.20/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.20/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "2a5f464b17464dfe74b87a555930dd2f39f32928",
+      "sha256": "294d1a6f3e517fd676c320995db12fcdd895e7588d9f28449f126d0bc3be3408",
+      "bytes": 2245
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.8/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.8/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "2f092a871d21803555ad47c79c9f2767b101688a",
+      "sha256": "a34b984a4eee8b76a123390002843f050288a92f0f0c6b8d576930f738858f4c",
+      "bytes": 2120
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/demura/1.0/IDemuraFileFinder.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/demura/1.0/IDemuraFileFinder.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "7dd87df8a2608b8ea9771ca50998335f62aeb35f",
+      "sha256": "fa035077927f2dff68d2b1ad6e6379822d29364999aa3fd70c5d2ffe93707d9b",
+      "bytes": 1801
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.9/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.9/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "553c8bc1dc518a5ceb57a9d7fb01691653caa6fa",
+      "sha256": "fd36f8dbe80403d93f0e94651ae4efa1aa22053351e7783f5d99457cff9dbacc",
+      "bytes": 2563
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.6/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.6/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "6db156b8ece634327da9ed169958dbf5915f964b",
+      "sha256": "bff30d77ca2327e719a4bd6938bad222c5f1a87f0517b8baf9ef5c3edd0bdc35",
+      "bytes": 2178
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/2.0/IDisplayConfigCallback.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/2.0/IDisplayConfigCallback.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "ff145fc50e72028f0c7d7a79caed049631aa1f53",
+      "sha256": "14fcf170f04a9878bf085b2aa4d75ef5e3d241926bef18e58d6d254e000ff689",
+      "bytes": 2251
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapper/1.1/IQtiMapper.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapper/1.1/IQtiMapper.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "2272e0ef8553d74609028053d57d089e8b73847b",
+      "sha256": "f955d3cd7704809f64a6e1f5b1e6cf92b3765386af5e7e485ec4563c975467ba",
+      "bytes": 3456
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapper/2.0/IQtiMapper.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapper/2.0/IQtiMapper.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "1e5584d7dd1aa49c2ec20a2d49d0b23ef3304545",
+      "sha256": "f0ecedbb4db0cd2ed7336bc3209f9f3564e19a3981be9be124a0e126ec201483",
+      "bytes": 2169
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/1.3/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/1.3/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "8530b61778494bb5851aa77dfe1a8bac613bba63",
+      "sha256": "e89567ed6383dc0e5fd168babaf046352962b571f47fba26804c2c7690256b1f",
+      "bytes": 1985
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapper/4.0/IQtiMapper.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapper/4.0/IQtiMapper.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "cf116af54aaf3ee7c0901d8c679a5ea466de0b59",
+      "sha256": "f49205d41f011a96c6d238ea69f7b6c9d159809f4ecabef04ca4ccdb195d57b5",
+      "bytes": 2175
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/config/2.0/IDisplayConfig.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/config/2.0/IDisplayConfig.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "33d5be34a7f674d4f09fb5e745e5d8d2ceafe2ba",
+      "sha256": "5862c0c085c9e0b6d8b8a11e4a9765a6a9250874d7c1a9b0f6b566598da31593",
+      "bytes": 3456
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapper/3.0/IQtiMapper.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapper/3.0/IQtiMapper.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "23b9af7eda2670b97629d2ef963ecf04c13869d2",
+      "sha256": "72889f3c7812efb6e00cd59d17dca3ee392b029eef83622758d206e1e835722c",
+      "bytes": 2169
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapper/1.0/IQtiMapper.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapper/1.0/IQtiMapper.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "ab7e68242a4707ae04f531cfc0a5b89945cc1504",
+      "sha256": "db19f93c419a59c901c1530a9241480b047a0f026b2eef7fe0c55cf3874c56c0",
+      "bytes": 3735
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapperextensions/1.0/IQtiMapperExtensions.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapperextensions/1.0/IQtiMapperExtensions.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "fe2254fd5b62fc02ffab333fcb99fd609480b27b",
+      "sha256": "13eca267916c940ad44e08ee5e43e22bb24fa6afe7f2b824ea9d6c753d17e1d9",
+      "bytes": 6404
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapperextensions/1.1/IQtiMapperExtensions.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapperextensions/1.1/IQtiMapperExtensions.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "0c24e96ed6525edac1b4509e8a726eeff2d34c90",
+      "sha256": "9e960ad971bfeb1ccc3102caf0a2d94e95457a1ff9ff0c72156faa94f2500c5d",
+      "bytes": 1983
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapperextensions/1.2/IQtiMapperExtensions.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapperextensions/1.2/IQtiMapperExtensions.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "2e34cf418e04f182341ef343813d33c7b439b203",
+      "sha256": "9f484e68c3e4faef0a0f601ff7074d0431499cfaceba43b42fbc35c8264fbddf",
+      "bytes": 2324
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapperextensions/1.0/types.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapperextensions/1.0/types.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "18dafeb9ecf0bbd42236e19767bd37d989ff47d3",
+      "sha256": "b750c6dd2233e7d102f0a4f3d5124e358d134b80dfc86066d84e6f0722615881",
+      "bytes": 5696
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapperextensions/stable-c/implutils/include/vendor/qti/hardware/display/mapperextensions/IQtiMapperExtProvider.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapperextensions/stable-c/implutils/include/vendor/qti/hardware/display/mapperextensions/IQtiMapperExtProvider.h",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "2f07dc16fd6e7b85145c02f2c1deaeddbfe65709",
+      "sha256": "441f0593602540d4ffd3ae7736deb757621f2b8b51d7d08f6b9b56fdf99b84c9",
+      "bytes": 3535
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/demura/2.0/IDemuraFileFinder.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/demura/2.0/IDemuraFileFinder.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "6b2a9158f020328af18ca7e2840590c13e2dfa67",
+      "sha256": "550322847ebc31fd2c13a34aefa1f75df1c879cb423422831d5a5f35ba77aca4",
+      "bytes": 1937
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapperextensions/stable-c/include/vendor/qti/hardware/display/mapperextensions/IQtiMapperExt.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapperextensions/stable-c/include/vendor/qti/hardware/display/mapperextensions/IQtiMapperExt.h",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "0f66045673adac653a8b66339cfe0a817e8de0ec",
+      "sha256": "14fd583d424b13ea1e100902094870846faff0912b372460da1c0d54337ff9fd",
+      "bytes": 3122
+    },
+    {
+      "path": "android_vendor_qcom_opensource_interfaces/display/mapperextensions/1.3/IQtiMapperExtensions.hal",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/eb976d9d55f8e1c251aa9e20baf9b0c06cd30567/display/mapperextensions/1.3/IQtiMapperExtensions.hal",
+      "commit": "eb976d9d55f8e1c251aa9e20baf9b0c06cd30567",
+      "git_blob": "c37a40ca31a0d5b8b711d1355b75045a34ef1687",
+      "sha256": "1e8de36267058910c4a1b4b0d92322640c5c24f961d1c9e05b5b033e65e8e0e6",
+      "bytes": 2339
+    },
+    {
+      "path": "kernel-uapi/display/media/mmm_color_fmt.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8350/7ede20c8692e0e0fc044754429e33cfd1d75c40d/techpack/display/include/uapi/display/media/mmm_color_fmt.h",
+      "commit": "7ede20c8692e0e0fc044754429e33cfd1d75c40d",
+      "git_blob": "5e4d493046e9f5591ec0d257f13ab54e0d08dfbc",
+      "sha256": "9df93294fd050ed04c6f64b80304782fd645758e8c10b695fa84639313dd2ee5",
+      "bytes": 49441
+    },
+    {
+      "path": "kernel-uapi/display/media/msm_sde_rotator.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8350/7ede20c8692e0e0fc044754429e33cfd1d75c40d/techpack/display/include/uapi/display/media/msm_sde_rotator.h",
+      "commit": "7ede20c8692e0e0fc044754429e33cfd1d75c40d",
+      "git_blob": "e8a2083f90105fbb8d2db6467b018cb79d067c4e",
+      "sha256": "89999df2c996ac8161367e2f45ea2cd4c3b5a8a7c4becc189b366c60060e8579",
+      "bytes": 7198
+    },
+    {
+      "path": "kernel-uapi/drm/msm_drm.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8350/7ede20c8692e0e0fc044754429e33cfd1d75c40d/include/uapi/drm/msm_drm.h",
+      "commit": "7ede20c8692e0e0fc044754429e33cfd1d75c40d",
+      "git_blob": "4d11c047316015fb585a46da39c2972c3934d551",
+      "sha256": "09ee68d46862dd77835f298705a85d69fb43b68a8c2fe83e4d0abf2d955ccb44",
+      "bytes": 13266
+    },
+    {
+      "path": "kernel-uapi/display/hdcp/msm_hdmi_hdcp_mgr.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8350/7ede20c8692e0e0fc044754429e33cfd1d75c40d/techpack/display/include/uapi/display/hdcp/msm_hdmi_hdcp_mgr.h",
+      "commit": "7ede20c8692e0e0fc044754429e33cfd1d75c40d",
+      "git_blob": "78589ce9f40b1f6bdfad3ae7c8b95a8e799f2bf1",
+      "sha256": "6b4f86098e86193b720c9f8c984d43b3b8e5f8d56fa2c42a6a62858b3535e75a",
+      "bytes": 1028
+    },
+    {
+      "path": "kernel-uapi/linux/msm_ion.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8350/7ede20c8692e0e0fc044754429e33cfd1d75c40d/include/uapi/linux/msm_ion.h",
+      "commit": "7ede20c8692e0e0fc044754429e33cfd1d75c40d",
+      "git_blob": "e68fc55405671e76fd35a28f8ef32ba3f72bea71",
+      "sha256": "3359e848f4388128a6101968aaf0a3921a703e6dd0d7bc77d20948b84a602ca6",
+      "bytes": 2583
+    },
+    {
+      "path": "kernel-uapi/linux/ion.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8350/7ede20c8692e0e0fc044754429e33cfd1d75c40d/include/uapi/linux/ion.h",
+      "commit": "7ede20c8692e0e0fc044754429e33cfd1d75c40d",
+      "git_blob": "371e44662755322ca39e74c47e8882c6099d241f",
+      "sha256": "e3eab549b30a8dbff21613fa406b668f133b2406e4ea522f6211d03720fcf47f",
+      "bytes": 3978
+    },
+    {
+      "path": "kernel-uapi/display/drm/msm_drm_pp.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8350/7ede20c8692e0e0fc044754429e33cfd1d75c40d/techpack/display/include/uapi/display/drm/msm_drm_pp.h",
+      "commit": "7ede20c8692e0e0fc044754429e33cfd1d75c40d",
+      "git_blob": "eb18c90c729f5850439ba6e42cf48b9476f4f396",
+      "sha256": "e164b0a98d6a7f8148b9845d2ab449805fa1dcc1325439799090f26c2ae2e321",
+      "bytes": 17196
+    },
+    {
+      "path": "kernel-uapi/display/drm/sde_drm.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8350/7ede20c8692e0e0fc044754429e33cfd1d75c40d/techpack/display/include/uapi/display/drm/sde_drm.h",
+      "commit": "7ede20c8692e0e0fc044754429e33cfd1d75c40d",
+      "git_blob": "67fc98b4152c1139f00140b17e7f6e7fb8a836d5",
+      "sha256": "1c23255ecb7c636cfb36bee604f23da0b7476a29a87217e8fe40f80087293d6e",
+      "bytes": 22732
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/color_extensions.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/color_extensions.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "f670162b04520f648a78e6f9346af7a77c186a5b",
+      "sha256": "3f2976f0083b26e0f57918e25b54ec8ec2586ced9db39aacf80a51f28c05a883",
+      "bytes": 423
+    },
+    {
+      "path": "android_vendor_qcom_opensource_display-commonsys-intf/gralloc/gr_priv_handle.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/210909f163137c1fb1a5ddce0e5e623976a0a7ca/gralloc/gr_priv_handle.h",
+      "commit": "210909f163137c1fb1a5ddce0e5e623976a0a7ca",
+      "git_blob": "61c858568e109a732e2362617658612293f283d9",
+      "sha256": "419f04869830617d44c0cc35ff4c21f5d6b2f1d95511ddfdcdc7912c6c0dbefa",
+      "bytes": 7215
+    },
+    {
+      "path": "kernel-uapi/drm/drm_fourcc.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8350/7ede20c8692e0e0fc044754429e33cfd1d75c40d/include/uapi/drm/drm_fourcc.h",
+      "commit": "7ede20c8692e0e0fc044754429e33cfd1d75c40d",
+      "git_blob": "32b4d1e74b8ad1266d74a5a7464bfa5ef745f245",
+      "sha256": "14d48c0b41016d577124ea1f08656c7f81b2c2979991183cfc5139c641f9850e",
+      "bytes": 33417
+    },
+    {
+      "path": "kernel-uapi/drm/drm_mode.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8350/7ede20c8692e0e0fc044754429e33cfd1d75c40d/include/uapi/drm/drm_mode.h",
+      "commit": "7ede20c8692e0e0fc044754429e33cfd1d75c40d",
+      "git_blob": "7043c579f313877f7eb170efda8ceb155f9294c4",
+      "sha256": "fb7988e4f5bc8b8e1bc123ecb281b1a01e711fb2a96bfd5bee9d3f14466c73f1",
+      "bytes": 29041
+    },
+    {
+      "path": "kernel-uapi/drm/drm.h",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_kernel_xiaomi_sm8350/7ede20c8692e0e0fc044754429e33cfd1d75c40d/include/uapi/drm/drm.h",
+      "commit": "7ede20c8692e0e0fc044754429e33cfd1d75c40d",
+      "git_blob": "8a5b2f8f8eb98b0f1f170960239327d420971354",
+      "sha256": "427d2581a666f73876cf3f339d4809501e247e5f2e5228935f25206bbd69f9fc",
+      "bytes": 32376
+    }
+  ],
+  "modules": {
+    "displaydebug": {
+      "directory": "libdebug",
+      "libraries": []
+    },
+    "drmutils": {
+      "directory": "libdrmutils",
+      "libraries": [
+        "displaydebug",
+        "drm"
+      ]
+    },
+    "sdedrm": {
+      "directory": "sde-drm",
+      "libraries": [
+        "displaydebug",
+        "drmutils",
+        "drm"
+      ]
+    },
+    "sdmutils": {
+      "directory": "sdm/libs/utils",
+      "libraries": [
+        "displaydebug"
+      ]
+    },
+    "sdmcore": {
+      "directory": "sdm/libs/core",
+      "libraries": [
+        "displaydebug",
+        "sdmutils",
+        "drm",
+        "drmutils",
+        "sdedrm"
+      ]
+    }
+  },
+  "limitations": [
+    "No HWC/composer service built",
+    "No match to Quest donor C++ ABI is assumed; the five source libraries are a set",
+    "Downstream SM8350 UAPI headers describe this userspace build, not proof of kernel6.18 implementation",
+    "No secure/HDR/scanout capability inferred from compilation"
+  ],
+  "dpu_plane_properties": {
+    "patch": "patches/sm8350-dpu-plane-properties.patch",
+    "patch_sha256": "2f8ea424e79b267e8086958cc2e003bd323bb07a98bb2f1aee66c6fee944974c",
+    "header": "probe/graphics/qti-dpu-plane-properties.h",
+    "header_sha256": "a18a11dc1e6d3f43b6d49188924db253b39bf1f5c6d6ed3044dfa8ddd18ecd4f",
+    "patched_sources": {
+      "sde-drm/drm_plane.h": "895717318cd02a5cb7025cfebe4379e5990118b23afe0625ecfae9619781baa4",
+      "sde-drm/drm_plane.cpp": "d212b46e419fad8be014250014049961e26d49a5a881bff2ff222ef002135bc7",
+      "sde-drm/drm_atomic_req.h": "0d7fb5e2406c9e52a6d9bc48457b419d4387fa72cc156a327825d266511fb3c0",
+      "sde-drm/drm_atomic_req.cpp": "63d373d60144652c79ddbff7850da58f83473413cb0acaf150797c4c83a37b34"
+    },
+    "scope": "alpha, blend and input fence only; no capabilities, output fence or scanout claim"
+  },
+  "dpu_capabilities": {
+    "patch": "patches/sm8350-dpu-capabilities.patch",
+    "patch_sha256": "1698125141420b55dbe26893a34c4371fb168861329830451b37e9c9fe4a209d",
+    "header": "probe/graphics/qti-dpu-capabilities.h",
+    "header_sha256": "f45ca2c6343117d3342517255727aadc00efed880f03496745192b876c377538",
+    "patched_sources": {
+      "libdrmutils/drm_interface.h": "f7e754790d1d9d72326113de143654f6559ec722280b0e577202fb3df7e36f80",
+      "sde-drm/drm_plane.h": "336ec69023d4be5c4c06f163059085aeda4457673de7f85064cabe0d5b7debfa",
+      "sde-drm/drm_plane.cpp": "d872e196c8524f440470efd5f1942ec25c3e62e2c51f55c49eb70739e110d528",
+      "sde-drm/drm_crtc.h": "42334be40a9961e3464724c67953a3b7836601187e9d7037be7ec1254e411a4d",
+      "sde-drm/drm_crtc.cpp": "39adbbd39e267c93c64b863ca59b96cc095237953fa39878f72b35822e6336a1",
+      "sde-drm/drm_manager.cpp": "ad59f781e70de7be62346d0018865ff3662cfbd1f2e8de56bd431702e9d7d5e4",
+      "sde-drm/drm_connector.cpp": "62fbacdda88d6932930dca8ac4b76728bb1e7730e544c51a174d8164f4ba21ca",
+      "sdm/libs/core/drm/hw_info_drm.cpp": "607f2c995861ff32edabbc4029a115bbc1f908f65ef2d8ca5da8fcebaf9600bb"
+    },
+    "requires": "dpu_plane_properties",
+    "scope": "Real QCOM_DPU_CAPS and IN_FORMATS; strict failure if unavailable; eDP built-in classification"
+  },
+  "hwc_allocator_mapper5": {
+    "patch": "patches/sm8350-hwc-allocator-mapper5.patch",
+    "patch_sha256": "f8171f297a4eda36f48554cf323d2946368841a5d79e4e2bfca1cdd53824cb89",
+    "patched_sources": {
+      "composer/hwc_buffer_allocator.h": "a4cda5f326b4662395dc5c14331686fc59c5732478f21d058c355208e3512d71",
+      "composer/hwc_buffer_allocator.cpp": "1c2abc3f9ecb2f6eaf8b06ac3546a2c9f858aa2c39ebd734e917aa3bd39dd6d7",
+      "sdm/include/core/buffer_allocator.h": "59dd04a05ac5daffffdc879d8922c2c803064cd62c88aefa2b87464a6ed670a5",
+      "sdm/libs/core/drm/hw_device_drm.cpp": "4e7c9e31be439f58b4e70b9ed7fa3f624d02a7ecc18977b5047843ae0dd149e6"
+    }
+  },
+  "dpu_output_fence": {
+    "header": "probe/graphics/qti-dpu-output-fence.h",
+    "header_sha256": "190844d5a505c1e7825f40fa0d1fad7d732ff4a4d7e314bd535169584573d418",
+    "patch_sha256": "15a25c04d05cf142b05aa870f2d6b3b093bb54b6e6225edc2e31d9cb1be22c62",
+    "patched_sources": {
+      "sde-drm/drm_atomic_req.h": "045542defce27f06cfc864f50cd884ff7f146f4829f73be92c14007e029587d3",
+      "sde-drm/drm_atomic_req.cpp": "c6363c1b2194c12f07dd464be3afe1eb056732a668c49d812baf5975feac7977"
+    },
+    "patch": "patches/sm8350-dpu-output-fence.patch"
+  },
+  "dpu_sdm_contract": {
+    "patch": "patches/sm8350-dpu-sdm-contract.patch",
+    "patch_sha256": "adc66282aa3a0b3a5424ff944fa48e7ca8b35b787b4a3d966275581ac7041a98",
+    "headers": [
+      {
+        "path": "probe/graphics/qti-dpu-atomic-contract.h",
+        "sha256": "eb343fa053eb4eee16ebe18aab13c37419ece0c5f9bd79ae0d09a8e36fba603f"
+      },
+      {
+        "path": "probe/graphics/qti-dpu-sdm-contract.h",
+        "sha256": "727605f87951af926eae8f926fce9a9ae210c6d1ebb85fc71c14e41c4baf1d57"
+      }
+    ],
+    "patched_sources": {
+      "sde-drm/drm_atomic_req.h": "23688b977170ffe7a6e4881336ee4c84e7abab57b18bcacca39eed5aa63e0004",
+      "sde-drm/drm_atomic_req.cpp": "68dfa8d7ad8aa8591ec6f49bab02797e666f91c452055a2f6e133c9d8cee7b15",
+      "sdm/libs/core/drm/hw_device_drm.h": "2bdf2b860120b06011b600b4b55acb6778a856dfc08de6c84e65971c641d1034",
+      "sdm/libs/core/drm/hw_device_drm.cpp": "11f8804378ee5252373da70aec88d00addae6de990c80ee35c0877a9ea928f70",
+      "sdm/libs/core/drm/hw_peripheral_drm.cpp": "d6fc223bb05d8085260a6f9ddbdebd8988fe68e17e38f75ba18f3a2cc8c531fb"
+    }
+  },
+  "drm_device_lifecycle": {
+    "patch": "patches/sm8350-drm-device-lifecycle.patch",
+    "patch_sha256": "76cc86568789a11da0ab13553e0279b434b2fc41646bdfd3e63e657fb0c6c246",
+    "patched_sources": {
+      "libdrmutils/drm_master.cpp": "641e0fdf0346b59f7f705ecc1b399370504ee7c0aff202ef57e8003b04472d00",
+      "libdrmutils/drm_master.h": "8c23cede9e4a759b354405ebc76f9ed187417b90699ddfe7bdec89fcf63eaa6e"
+    }
+  },
+  "dpu_display_topology": {
+    "patch": "patches/sm8350-dpu-display-topology.patch",
+    "patch_sha256": "3c5ca1c1fc505752f5a1ff8fee19e93d401875b4d611923535606c2777d80f35",
+    "patched_sources": {
+      "sdm/libs/core/drm/hw_info_drm.cpp": "16bc85d2e378c5b03df19fe5e5f85cd524a6cd69f462220641bc97ecdab4f3c3"
+    },
+    "headers": [
+      {
+        "path": "probe/graphics/qti-dpu-display-topology.h",
+        "sha256": "e09ea21ac08124980baa08b65058969c591f0029dce5db20694cf8aa269f3e34"
+      }
+    ]
+  },
+  "hwc_session_init": {
+    "patch": "patches/sm8350-hwc-session-init.patch",
+    "patch_sha256": "c19910d20a8d4c3f29178556a1145b1f8dae3c635bb66fbc92ae5d54275fc208",
+    "files": {
+      "composer/hwc_session.h": {
+        "original": "1b2c0581e8ecadaf0674aaad80c8a92290782c91d6408a3d8e18600e1d74b629",
+        "patched": "504203b98fe3dc55c22914a05cbc53add3e3a0105892dcca940eaf4bd008478d"
+      },
+      "composer/hwc_session.cpp": {
+        "original": "b1a637d11c405ea49083c93025158c8d7e25d7b5f8b6b75cd2a89862e643e8cf",
+        "patched": "b9fa5c45bfb6db96e47ce7e5c3caedebdb4a079815c718597e80106ad6528b8a"
+      }
+    }
+  },
+  "dpu_events": {
+    "patch": "patches/sm8350-dpu-events.patch",
+    "patch_sha256": "fc917ab2af05d46780aae403a6b89c861b4767d9a916cc92a109a6bad7d20762",
+    "patched_sources": {
+      "sdm/libs/core/drm/hw_device_drm.h": "44bd46d8ff329e86d4ea3fb5b413c9fa0178e529a8132b8825b754c87c129dd9",
+      "sdm/libs/core/drm/hw_events_drm.h": "0fe7715848fe9f1778c2975503caf1f0995311e8ada6528d23056bce587a3b1b",
+      "sdm/libs/core/drm/hw_events_drm.cpp": "673813ffaf2661bd3cb1b944357ba3799cf4be68aa129ce5a9b94b0e48d1a0ca"
+    }
+  },
+  "dpu_optional_panel": {
+    "patch": "patches/sm8350-dpu-optional-panel.patch",
+    "patch_sha256": "51d7cf84af7b6fe7d96de2655e5244be1dcf666cb23628d7dcce4aeb62e8c5a2",
+    "patched_sources": {
+      "sdm/libs/core/display_builtin.cpp": "4b6a63a5f21a734530c1217d7b01dc2bf0ea6a39b2870f98b669b82a3e20ba6e",
+      "sdm/libs/core/display_base.cpp": "c9da89e29501a9953d73b78ba0173190efb86d17530ce14795b8fc2f88b3c334"
+    }
+  },
+  "dpu_validation_target": {
+    "patch": "patches/sm8350-dpu-validation-target.patch",
+    "patch_sha256": "e28d102fbe89675e719eb087b928426aa1259e1d433ac4999997be69040d52b1",
+    "patched_sources": {
+      "sdm/libs/core/drm/hw_device_drm.cpp": "d54f06695337c1116ae18fe8816b385f600c8b81b539860ca01ab6a1081f45b7",
+      "sdm/libs/core/drm/hw_device_drm.h": "4ee356a569666814129c479fc778afdc226185ef7c46cf6edf4199a5ccf16e0d",
+      "sdm/libs/core/display_base.cpp": "143fb3483979c7dffc497af0244d61ac6f038effb623c3d3f1c997f6f18bf47d",
+      "sdm/libs/core/comp_manager.cpp": "8d8ea2ee8b148f91ed48b29cc503e809421edacc56fcbcc2917592d098225459"
+    }
+  },
+  "dpu_validation_phases": {
+    "patch": "patches/sm8350-dpu-validation-phases.patch",
+    "patch_sha256": "cc10d1816f2af75c58ae1961ffbadb84d6f31303a63fcf52eaed1ff55062bd39",
+    "patched_sources": {
+      "sdm/libs/core/drm/hw_device_drm.cpp": "fb6712cbe1eab355831298139ad017253a7ba0873553486c5358c7885c6a346c",
+      "sde-drm/drm_atomic_req.cpp": "cb095d0212b0623284c086b0c66c15eee8dcf60395302b0cb47e0ce01add6bfb"
+    }
+  },
+  "dpu_histogram_capability": {
+    "patch": "patches/sm8350-dpu-histogram-capability.patch",
+    "patch_sha256": "630fe16030000af3a66106411a702bdb5ddd65c61703198239b973e275018a0b",
+    "patched_sources": {
+      "sdm/libs/core/drm/hw_peripheral_drm.cpp": "a32d0a05ec50c21cd8b9961e9f6b809d96e45b634265615d856b275deacf1e3a",
+      "sde-drm/drm_dpps_mgr_imp.cpp": "f5367b97c71201d2851608b81f65a0fd9ad7383715eb4916921bc01535246236",
+      "sdm/include/core/display_interface.h": "3b21713667a3e263d2b9591268bace6fceaab07d7618b6ceeef9796fe9624799",
+      "sdm/libs/core/display_builtin.h": "d905c2da54b396a15e27c3943f8a94302376589a4254ef8ff7e7233af368badb",
+      "sdm/libs/core/display_builtin.cpp": "01d48a273ac25944780ba63659207ffd7fbbd77c887bba8accd0c0d896050dd1",
+      "composer/hwc_display_builtin.cpp": "88fa91db34b7e0645bdcf8bb56aad1493b88a2aecbd331028cd27aedea7d79f7"
+    }
+  },
+  "dpu_flush_fence": {
+    "patch": "patches/sm8350-dpu-flush-fence.patch",
+    "patch_sha256": "f0a5a2b76d763961de8e0297927db6525f75fb3076a7233199f1894b31ad01f5",
+    "patched_sources": {
+      "sdm/libs/core/drm/hw_device_drm.cpp": "08dcc3255bfd7ce4419a09fce9e93d137b4dca8a37d662faea3212919113fe07"
+    }
+  },
+  "dpu_native_overlay": {
+    "patch": "patches/sm8350-dpu-native-overlay.patch",
+    "patch_sha256": "ab45e2348e1d8b1e1f09198e6f8b0c808abed2af4903cf6e5824516506822e8e",
+    "patched_sources": {
+      "sdm/include/private/hw_info_types.h": "5a9f6cf6374c0bd826e6f053cac940ae30833fedcd8e626a4b97b15a1e1ba4b8",
+      "sdm/libs/core/drm/hw_info_drm.cpp": "9db2bf8fcd6ee933783512946fa12a2d9319b4eb55ad3deab8634c0fb2f79f80",
+      "sdm/libs/core/strategy.h": "6df1fb5fadfde78092d96bce2fe5e36cbd0b180aaf3fba5c0176a222d16a1b74",
+      "sdm/libs/core/strategy.cpp": "45f67b978f566c13af016a06f10f3b289730bd04ca39a759fa793aa69ac2086a",
+      "sdm/libs/core/resource_default.h": "35727a5756cf7b93dd3dddf3ca6646c3645294c67932ff023754a78f71d38ee8",
+      "sdm/libs/core/resource_default.cpp": "b6192fc5481b1dc9be2aba94e1628c1a57670d321ac161cdb4f35aa610bd20dc"
+    },
+    "headers": [
+      {
+        "path": "probe/graphics/qti-dpu-sdm-contract.h",
+        "sha256": "727605f87951af926eae8f926fce9a9ae210c6d1ebb85fc71c14e41c4baf1d57"
+      }
+    ]
+  },
+  "dpu_overlay_composition": {
+    "patch": "patches/sm8350-dpu-overlay-composition.patch",
+    "patch_sha256": "1f0632ddf967ad8a8b372fa111d5ccf6165a24d87b3f4dfecc4ad58f7d97d0e2",
+    "patched_sources": {
+      "sdm/libs/core/strategy.h": "88291e1f810615b9f21967e520192641963f1633d997aabb3b3e905f44893c4d",
+      "sdm/libs/core/strategy.cpp": "4fe400f59736f5d76f3816a5a881573f38cde3809fab268fe1a781f14c05b683",
+      "sdm/libs/core/resource_default.cpp": "b942a193392388730f702bf5c1f98ae3e00ea686c98e0589b689779a913104b0"
+    }
+  },
+  "dpu_inherited_planes": {
+    "patch": "patches/sm8350-dpu-inherited-planes.patch",
+    "patch_sha256": "8f2656229dc8a3faa3b0acbe623da0ee2baeeb643c92cb4a467a25cf614298e3",
+    "patched_sources": {
+      "sde-drm/drm_plane.cpp": "ea04dfd08f1e77d80604f36fcc6d901f54ed265b5352ccd86c66cc0cf4e9693a"
+    },
+    "base_sources": {
+      "sde-drm/drm_plane.cpp": "d872e196c8524f440470efd5f1942ec25c3e62e2c51f55c49eb70739e110d528"
+    }
+  },
+  "dpu_sdr_color": {
+    "patch": "patches/sm8350-dpu-sdr-color.patch",
+    "patch_sha256": "39f0fe98cd9447495377e8a6b407b75f23201164036c7ddae83586912038d977",
+    "base_sources": {
+      "sde-drm/drm_plane.cpp": "ea04dfd08f1e77d80604f36fcc6d901f54ed265b5352ccd86c66cc0cf4e9693a"
+    },
+    "patched_sources": {
+      "sde-drm/drm_plane.cpp": "e06099922c91f00826e84623d973dface8c31d99c4e5085d0ced55c485b891de"
+    },
+    "headers": []
+  },
+  "dpu_busy_commit": {
+    "patch": "patches/sm8350-dpu-busy-commit.patch",
+    "patch_sha256": "2313d4d94a1ad546af0d04c764959c8ba49e6086a56dd21d251cde5ed9b92d76",
+    "base_sources": {
+      "sde-drm/drm_atomic_req.cpp": "cb095d0212b0623284c086b0c66c15eee8dcf60395302b0cb47e0ce01add6bfb"
+    },
+    "patched_sources": {
+      "sde-drm/drm_atomic_req.cpp": "df3819b869be82a43e462d511a9792145e0140e1a89ce52d14cd006f66f65290"
+    }
+  }
+}

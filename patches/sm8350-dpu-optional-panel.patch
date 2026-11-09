@@ -1,0 +1,97 @@
+--- a/sdm/libs/core/display_builtin.cpp
++++ b/sdm/libs/core/display_builtin.cpp
+@@ -39,6 +39,9 @@
+ #include "drm_master.h"
+ #include "hw_info_interface.h"
+ #include "hw_interface.h"
++#ifndef TARGET_HEADLESS
++#include "drm/hw_device_drm.h"
++#endif
+ 
+ #define __CLASS__ "DisplayBuiltIn"
+ 
+@@ -81,6 +84,7 @@
+   error = DisplayBase::Init();
+   if (error != kErrorNone) {
+     HWInterface::Destroy(hw_intf_);
++    hw_intf_ = nullptr;
+     return error;
+   }
+ 
+@@ -119,8 +123,8 @@
+                                     &hw_events_intf_);
+   if (error != kErrorNone) {
+     DisplayBase::Deinit();
+-    HWInterface::Destroy(hw_intf_);
+     DLOGE("Failed to create hardware events interface on. Error = %d", error);
++    return error;
+   }
+ 
+   current_refresh_rate_ = hw_panel_info_.max_fps;
+@@ -135,9 +139,21 @@
+   // Enable SPR as default is disabled.
+   Debug::GetProperty(ENABLE_SPR, &spr_prop_value_);
+ 
++  bool kernel_managed_dpu = false;
++#ifndef TARGET_HEADLESS
++  kernel_managed_dpu = static_cast<HWDeviceDRM *>(hw_intf_)->IsKernelManagedDpu();
++#endif
+   error = CreatePanelfeatures();
+-  if (error != kErrorNone) {
++  if (kernel_managed_dpu && error == kErrorNotSupported) {
++    // The Linux backend has no QTI panel-feature contract; do not advertise SPR or RC.
++    spr_prop_value_ = 0;
++    spr_enable_ = false;
++    rc_enable_prop_ = false;
++    error = kErrorNone;
++  } else if (error != kErrorNone) {
+     DLOGE("Failed to setup panel feature factory, error: %d", error);
++    DisplayBase::Deinit();
++    return error;
+   } else {
+     // Get status of RC enablement property. Default RC is disabled.
+     int rc_prop_value = 0;
+@@ -174,6 +190,9 @@
+ 
+ // Create instance for RC, SPR and demura feature.
+ DisplayError DisplayBuiltIn::CreatePanelfeatures() {
++#ifndef TARGET_HEADLESS
++  if (static_cast<HWDeviceDRM *>(hw_intf_)->IsKernelManagedDpu()) return kErrorNotSupported;
++#endif
+   if (pf_factory_ && prop_intf_) {
+     return kErrorNone;
+   }
+@@ -360,6 +379,7 @@
+ }
+ 
+ DisplayError DisplayBuiltIn::SetupSPR() {
++  if (!pf_factory_ || !prop_intf_) return kErrorNotSupported;
+   SPRInputConfig spr_cfg;
+   spr_cfg.panel_name = std::string(hw_panel_info_.panel_name);
+   spr_ = pf_factory_->CreateSPRIntf(spr_cfg, prop_intf_);
+--- a/sdm/libs/core/display_base.cpp
++++ b/sdm/libs/core/display_base.cpp
+@@ -188,12 +188,15 @@
+     lock_guard<recursive_mutex> obj(recursive_mutex_);
+     ClearColorInfo();
+     comp_manager_->UnregisterDisplay(display_comp_ctx_);
++    display_comp_ctx_ = nullptr;
+     if (IsPrimaryDisplay()) {
+       hw_intf_->UnsetScaleLutConfig();
+     }
+   }
+   HWEventsInterface::Destroy(hw_events_intf_);
++  hw_events_intf_ = nullptr;
+   HWInterface::Destroy(hw_intf_);
++  hw_intf_ = nullptr;
+   if (rc_panel_feature_init_) {
+     rc_core_->Deinit();
+     rc_panel_feature_init_ =  false;
+@@ -203,6 +206,7 @@
+ 
+ // Query the dspp capabilities and enable the RC feature.
+ DisplayError DisplayBase::SetupRC() {
++  if (!pf_factory_ || !prop_intf_) return kErrorNotSupported;
+   RCInputConfig input_cfg = {};
+   input_cfg.display_id = display_id_;
+   input_cfg.display_type = display_type_;

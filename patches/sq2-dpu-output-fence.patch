@@ -1,0 +1,644 @@
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
+@@ -13,6 +13,7 @@
+ #include <drm/drm_crtc.h>
+ #include "dpu_kms.h"
+ #include "dpu_core_perf.h"
++#include "dpu_release_fence.h"
+ 
+ #define DPU_CRTC_NAME_SIZE	12
+ 
+@@ -181,6 +182,8 @@
+ 	spinlock_t event_lock;
+ 
+ 	struct dpu_core_perf_params cur_perf;
++	struct dpu_release_timeline release_timeline;
++	struct drm_property *release_fence_property;
+ 
+ 	struct dpu_crtc_smmu_state_data smmu_state;
+ };
+@@ -207,6 +210,8 @@
+  */
+ struct dpu_crtc_state {
+ 	struct drm_crtc_state base;
++	u64 release_fence_ptr;
++	struct dma_fence *release_fence;
+ 
+ 	bool bw_control;
+ 	bool bw_split_vote;
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+@@ -752,6 +752,7 @@
+ {
+ 	trace_dpu_crtc_complete_commit(DRMID(crtc));
+ 	dpu_core_perf_crtc_update(crtc, 0);
++	dpu_release_complete(crtc);
+ 	_dpu_crtc_complete_flip(crtc);
+ }
+ 
+@@ -897,6 +898,7 @@
+ 	unsigned long flags;
+ 	struct dpu_crtc_state *cstate;
+ 
++	dpu_release_begin(crtc, state);
+ 	if (!crtc->state->enable) {
+ 		DRM_DEBUG_ATOMIC("crtc%d -> enable %d, skip atomic_flush\n",
+ 				crtc->base.id, crtc->state->enable);
+@@ -958,6 +960,7 @@
+ 
+ 	DRM_DEBUG_ATOMIC("crtc%d\n", crtc->base.id);
+ 
++	dma_fence_put(cstate->release_fence);
+ 	__drm_atomic_helper_crtc_destroy_state(state);
+ 
+ 	kfree(cstate);
+@@ -1080,6 +1083,7 @@
+ 	} else
+ 		DRM_DEBUG_ATOMIC("crtc%d commit\n", crtc->base.id);
+ 
++	dpu_release_kickoff(crtc);
+ 	dpu_crtc->play_count++;
+ 
+ 	reinit_completion(&dpu_crtc->frame_done_comp);
+@@ -1114,6 +1118,9 @@
+ 		DPU_ERROR("failed to allocate state\n");
+ 		return NULL;
+ 	}
++
++	cstate->release_fence_ptr = 0;
++	cstate->release_fence = NULL;
+ 
+ 	/* duplicate base helper */
+ 	__drm_atomic_helper_crtc_duplicate_state(crtc, &cstate->base);
+@@ -1147,6 +1154,8 @@
+ 	bool release_bandwidth = false;
+ 
+ 	DRM_DEBUG_KMS("crtc%d\n", crtc->base.id);
++
++	dpu_release_disable(crtc, old_crtc_state->encoder_mask);
+ 
+ 	/* If disable is triggered while in self refresh mode,
+ 	 * reset the encoder software state so that in enable
+@@ -1471,6 +1480,10 @@
+ 
+ 	bool needs_dirtyfb = dpu_crtc_needs_dirtyfb(crtc_state);
+ 
++	rc = dpu_release_check(crtc_state);
++	if (rc)
++		return rc;
++
+ 	/* don't reallocate resources if only ACTIVE has beeen changed */
+ 	if (crtc_state->mode_changed || crtc_state->connectors_changed) {
+ 		rc = dpu_crtc_assign_resources(crtc, crtc_state);
+@@ -1770,6 +1783,8 @@
+ 	.atomic_duplicate_state = dpu_crtc_duplicate_state,
+ 	.atomic_destroy_state = dpu_crtc_destroy_state,
+ 	.atomic_print_state = dpu_crtc_atomic_print_state,
++	.atomic_set_property = dpu_release_set_property,
++	.atomic_get_property = dpu_release_get_property,
+ 	.late_register = dpu_crtc_late_register,
+ 	.verify_crc_source = dpu_crtc_verify_crc_source,
+ 	.set_crc_source = dpu_crtc_set_crc_source,
+@@ -1833,6 +1848,10 @@
+ 				dpu_crtc_frame_event_work);
+ 	}
+ 
++	ret = dpu_release_init(crtc);
++	if (ret)
++		return ERR_PTR(ret);
++
+ 	drm_crtc_helper_add(crtc, &dpu_crtc_helper_funcs);
+ 
+ 	if (dpu_kms->catalog->dspp_count)
+--- a/drivers/gpu/drm/msm/msm_kms.h
++++ b/drivers/gpu/drm/msm/msm_kms.h
+@@ -96,6 +96,9 @@
+ 	 * post-commit cleanup.
+ 	 */
+ 	void (*complete_commit)(struct msm_kms *kms, unsigned crtc_mask);
++	/* Optional ioctl-thread preparation of backend output fence fds. */
++	int (*atomic_commit)(struct msm_kms *kms, struct drm_atomic_state *state,
++			     bool nonblock);
+ 
+ 	/*
+ 	 * Format handling:
+--- a/drivers/gpu/drm/msm/msm_kms.c
++++ b/drivers/gpu/drm/msm/msm_kms.c
+@@ -21,10 +21,20 @@
+ #include "msm_kms.h"
+ #include "msm_mmu.h"
+ 
++static int msm_kms_atomic_commit(struct drm_device *dev,
++				 struct drm_atomic_state *state, bool nonblock)
++{
++	struct msm_drm_private *priv = dev->dev_private;
++
++	if (priv->kms->funcs->atomic_commit)
++		return priv->kms->funcs->atomic_commit(priv->kms, state, nonblock);
++	return drm_atomic_helper_commit(dev, state, nonblock);
++}
++
+ static const struct drm_mode_config_funcs mode_config_funcs = {
+ 	.fb_create = msm_framebuffer_create,
+ 	.atomic_check = msm_atomic_check,
+-	.atomic_commit = drm_atomic_helper_commit,
++	.atomic_commit = msm_kms_atomic_commit,
+ };
+ 
+ static const struct drm_mode_config_helper_funcs mode_config_helper_funcs = {
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -492,7 +492,8 @@
+ {
+ 	struct drm_encoder *encoder;
+ 	struct drm_device *dev;
+-	int ret;
++	int ret, fence_status = 0;
++	bool waited = false;
+ 
+ 	if (!kms || !crtc || !crtc->state) {
+ 		DPU_ERROR("invalid params\n");
+@@ -500,6 +501,7 @@
+ 	}
+ 
+ 	dev = crtc->dev;
++	dpu_release_wait_result(crtc, -ENODEV);
+ 
+ 	if (!crtc->state->enable) {
+ 		DPU_DEBUG("[crtc:%d] not enable\n", crtc->base.id);
+@@ -521,11 +523,15 @@
+ 		 */
+ 		trace_dpu_kms_wait_for_commit_done(DRMID(crtc));
+ 		ret = dpu_encoder_wait_for_commit_done(encoder);
++		waited = true;
++		if (ret && !fence_status)
++			fence_status = ret;
+ 		if (ret && ret != -EWOULDBLOCK) {
+ 			DPU_ERROR("wait for commit done returned %d\n", ret);
+ 			break;
+ 		}
+ 	}
++	dpu_release_wait_result(crtc, waited ? fence_status : -ENODEV);
+ }
+ 
+ static void dpu_kms_wait_flush(struct msm_kms *kms, unsigned crtc_mask)
+@@ -1082,6 +1088,7 @@
+ 	.flush_commit    = dpu_kms_flush_commit,
+ 	.wait_flush      = dpu_kms_wait_flush,
+ 	.complete_commit = dpu_kms_complete_commit,
++	.atomic_commit = dpu_release_atomic_commit,
+ 	.enable_vblank   = dpu_kms_enable_vblank,
+ 	.disable_vblank  = dpu_kms_disable_vblank,
+ 	.destroy         = dpu_kms_destroy,
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys.h
+@@ -190,6 +190,8 @@
+ 	enum dpu_intf_mode intf_mode;
+ 	spinlock_t *enc_spinlock;
+ 	enum dpu_enc_enable_state enable_state;
++	/* Set only after video timing disable is read back from hardware. */
++	bool disable_verified;
+ 	int vblank_refcount;
+ 	atomic_t vsync_cnt;
+ 	atomic_t underrun_cnt;
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder_phys_vid.c
+@@ -580,6 +580,8 @@
+ 	int ret;
+ 	struct dpu_hw_intf_status intf_status = {0};
+ 
++	phys_enc->disable_verified = false;
++
+ 	if (!phys_enc->parent || !phys_enc->parent->dev) {
+ 		DPU_ERROR("invalid encoder/device\n");
+ 		return;
+@@ -643,6 +645,11 @@
+ 		}
+ 	}
+ 
++	if (phys_enc->hw_intf->ops.get_status) {
++		phys_enc->hw_intf->ops.get_status(phys_enc->hw_intf, &intf_status);
++		phys_enc->disable_verified = !intf_status.is_en;
++	}
++
+ 	dpu_encoder_helper_phys_cleanup(phys_enc);
+ 	phys_enc->enable_state = DPU_ENC_DISABLED;
+ }
+@@ -657,6 +664,7 @@
+ 	 * Video encoders need to turn on their interfaces now
+ 	 */
+ 	if (phys_enc->enable_state == DPU_ENC_ENABLING) {
++		phys_enc->disable_verified = false;
+ 		trace_dpu_enc_phys_vid_post_kickoff(DRMID(phys_enc->parent),
+ 				    phys_enc->hw_intf->idx - INTF_0);
+ 		spin_lock_irqsave(phys_enc->enc_spinlock, lock_flags);
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+@@ -1504,6 +1504,22 @@
+  * @drm_enc:	encoder pointer
+  * @crtc:	crtc pointer
+  */
++bool dpu_encoder_video_stopped(struct drm_encoder *encoder)
++{
++	struct dpu_encoder_virt *enc = to_dpu_encoder_virt(encoder);
++	int i;
++
++	if (!enc->num_phys_encs)
++		return false;
++	for (i = 0; i < enc->num_phys_encs; ++i) {
++		struct dpu_encoder_phys *phys = enc->phys_encs[i];
++
++		if (phys->intf_mode != INTF_MODE_VIDEO || !phys->disable_verified)
++			return false;
++	}
++	return true;
++}
++
+ void dpu_encoder_assign_crtc(struct drm_encoder *drm_enc, struct drm_crtc *crtc)
+ {
+ 	struct dpu_encoder_virt *dpu_enc = to_dpu_encoder_virt(drm_enc);
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.h
+@@ -37,6 +37,8 @@
+ 	bool is_cmd_mode;
+ 	enum dpu_vsync_source vsync_source;
+ };
++
++bool dpu_encoder_video_stopped(struct drm_encoder *encoder);
+ 
+ void dpu_encoder_assign_crtc(struct drm_encoder *encoder,
+ 			     struct drm_crtc *crtc);
+--- a/drivers/gpu/drm/msm/Makefile
++++ b/drivers/gpu/drm/msm/Makefile
+@@ -69,6 +69,7 @@
+ msm-display-$(CONFIG_DRM_MSM_DPU) += \
+ 	disp/dpu1/dpu_core_perf.o \
+ 	disp/dpu1/dpu_crtc.o \
++	disp/dpu1/dpu_release_fence.o \
+ 	disp/dpu1/dpu_encoder.o \
+ 	disp/dpu1/dpu_encoder_phys_cmd.o \
+ 	disp/dpu1/dpu_encoder_phys_vid.o \
+--- /dev/null
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_release_fence.h
+@@ -0,0 +1,40 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef __DPU_RELEASE_FENCE_H__
++#define __DPU_RELEASE_FENCE_H__
++
++#include <linux/dma-fence.h>
++#include <linux/list.h>
++#include <linux/spinlock.h>
++#include <drm/drm_crtc.h>
++
++struct drm_atomic_state;
++struct msm_kms;
++
++struct dpu_release_timeline {
++	spinlock_t lock;
++	struct list_head pending;
++	u64 context;
++	u64 next_fence;
++	u64 commit_seq;
++	bool commit_pending;
++	bool kicked;
++	bool disabled_verified;
++	int wait_status;
++};
++
++int dpu_release_init(struct drm_crtc *crtc);
++int dpu_release_set_property(struct drm_crtc *crtc, struct drm_crtc_state *state,
++			    struct drm_property *property, u64 val);
++int dpu_release_get_property(struct drm_crtc *crtc,
++			    const struct drm_crtc_state *state,
++			    struct drm_property *property, u64 *val);
++int dpu_release_check(struct drm_crtc_state *state);
++int dpu_release_atomic_commit(struct msm_kms *kms, struct drm_atomic_state *state,
++			      bool nonblock);
++void dpu_release_begin(struct drm_crtc *crtc, struct drm_atomic_state *state);
++void dpu_release_kickoff(struct drm_crtc *crtc);
++void dpu_release_wait_result(struct drm_crtc *crtc, int status);
++void dpu_release_disable(struct drm_crtc *crtc, u32 old_encoder_mask);
++void dpu_release_complete(struct drm_crtc *crtc);
++
++#endif
+--- /dev/null
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_release_fence.c
+@@ -0,0 +1,318 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * A video-mode buffer is reusable after a later update replaces it, not when
++ * its own OUT_FENCE_PTR signals. Keep that future dependency in a real
++ * dma_fence owned by the CRTC, independent of the requesting file's lifetime.
++ */
++#include <linux/file.h>
++#include <linux/slab.h>
++#include <linux/sync_file.h>
++#include <linux/uaccess.h>
++#include <drm/drm_atomic.h>
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_managed.h>
++#include <drm/drm_property.h>
++
++#include "dpu_crtc.h"
++#include "dpu_encoder.h"
++#include "dpu_release_fence.h"
++
++struct dpu_release_fence {
++	struct dma_fence base;
++	spinlock_t lock;
++	struct list_head link;
++	u64 commit_seq;
++};
++
++static const char *dpu_release_driver_name(struct dma_fence *fence)
++{
++	return "msm-dpu";
++}
++
++static const char *dpu_release_timeline_name(struct dma_fence *fence)
++{
++	return "dpu-video-buffer-release";
++}
++
++static void dpu_release_free(struct dma_fence *fence)
++{
++	struct dpu_release_fence *release =
++		container_of(fence, struct dpu_release_fence, base);
++
++	kfree_rcu(release, base.rcu);
++}
++
++static const struct dma_fence_ops dpu_release_ops = {
++	.get_driver_name = dpu_release_driver_name,
++	.get_timeline_name = dpu_release_timeline_name,
++	.release = dpu_release_free,
++};
++
++static void dpu_release_signal(struct dpu_release_timeline *timeline,
++			       u64 completed, bool all, int error)
++{
++	struct dpu_release_fence *fence, *next;
++	unsigned long flags;
++	LIST_HEAD(done);
++
++	spin_lock_irqsave(&timeline->lock, flags);
++	list_for_each_entry_safe(fence, next, &timeline->pending, link) {
++		if (all || fence->commit_seq < completed)
++			list_move_tail(&fence->link, &done);
++	}
++	spin_unlock_irqrestore(&timeline->lock, flags);
++
++	list_for_each_entry_safe(fence, next, &done, link) {
++		list_del_init(&fence->link);
++		if (error)
++			dma_fence_set_error(&fence->base, error);
++		dma_fence_signal(&fence->base);
++		dma_fence_put(&fence->base);
++	}
++}
++
++static void dpu_release_fini(struct drm_device *dev, void *data)
++{
++	struct dpu_release_timeline *timeline = data;
++
++	/* Managed teardown runs after the display has been shut down. */
++	dpu_release_signal(timeline, 0, true, -ENODEV);
++}
++
++int dpu_release_init(struct drm_crtc *crtc)
++{
++	struct dpu_crtc *dpu = to_dpu_crtc(crtc);
++	struct dpu_release_timeline *timeline = &dpu->release_timeline;
++	int ret;
++
++	spin_lock_init(&timeline->lock);
++	INIT_LIST_HEAD(&timeline->pending);
++	timeline->context = dma_fence_context_alloc(1);
++	timeline->wait_status = -EINPROGRESS;
++	ret = drmm_add_action_or_reset(crtc->dev, dpu_release_fini, timeline);
++	if (ret)
++		return ret;
++
++	dpu->release_fence_property = drm_property_create_range(crtc->dev,
++		DRM_MODE_PROP_ATOMIC, "QCOM_DPU_RELEASE_FENCE_PTR", 0, U64_MAX);
++	if (!dpu->release_fence_property)
++		return -ENOMEM;
++	drm_object_attach_property(&crtc->base, dpu->release_fence_property, 0);
++	return 0;
++}
++
++int dpu_release_set_property(struct drm_crtc *crtc, struct drm_crtc_state *state,
++			    struct drm_property *property, u64 val)
++{
++	struct dpu_crtc_state *cstate = to_dpu_crtc_state(state);
++
++	if (property != to_dpu_crtc(crtc)->release_fence_property)
++		return -EINVAL;
++	if (val && put_user(-1, (s32 __user *)u64_to_user_ptr(val)))
++		return -EFAULT;
++	cstate->release_fence_ptr = val;
++	return 0;
++}
++
++int dpu_release_get_property(struct drm_crtc *crtc,
++			    const struct drm_crtc_state *state,
++			    struct drm_property *property, u64 *val)
++{
++	if (property != to_dpu_crtc(crtc)->release_fence_property)
++		return -EINVAL;
++	*val = 0;
++	return 0;
++}
++
++int dpu_release_check(struct drm_crtc_state *state)
++{
++	struct dpu_crtc_state *cstate = to_dpu_crtc_state(state);
++	struct drm_encoder *encoder;
++	bool video = false;
++
++	if (!cstate->release_fence_ptr)
++		return 0;
++	if (state->state->async_update || state->state->legacy_cursor_update ||
++	    state->self_refresh_active || drm_crtc_in_clone_mode(state))
++		return -EOPNOTSUPP;
++	if (!state->active)
++		return 0;
++	drm_for_each_encoder_mask(encoder, state->crtc->dev, state->encoder_mask) {
++		if (dpu_encoder_get_intf_mode(encoder) != INTF_MODE_VIDEO)
++			return -EOPNOTSUPP;
++		video = true;
++	}
++	return video ? 0 : -EOPNOTSUPP;
++}
++
++struct dpu_release_export {
++	struct dpu_crtc_state *cstate;
++	struct sync_file *sync;
++	s32 __user *ptr;
++	int fd;
++};
++
++int dpu_release_atomic_commit(struct msm_kms *kms, struct drm_atomic_state *state,
++			      bool nonblock)
++{
++	struct drm_device *dev = state->dev;
++	struct dpu_release_export *exports;
++	struct drm_crtc_state *crtc_state;
++	struct drm_crtc *crtc;
++	int i, count = 0, requested = 0, ret;
++
++	/* Existing consumers keep the original allocation/error path. */
++	for_each_new_crtc_in_state(state, crtc, crtc_state, i)
++		if (to_dpu_crtc_state(crtc_state)->release_fence_ptr)
++			++requested;
++	if (!requested)
++		return drm_atomic_helper_commit(dev, state, nonblock);
++
++	/* TEST_ONLY never calls atomic_commit: setter left the output at -1. */
++	exports = kcalloc(requested, sizeof(*exports), GFP_KERNEL);
++	if (!exports)
++		return -ENOMEM;
++
++	for_each_new_crtc_in_state(state, crtc, crtc_state, i) {
++		struct dpu_crtc_state *cstate = to_dpu_crtc_state(crtc_state);
++		struct dpu_release_timeline *timeline = &to_dpu_crtc(crtc)->release_timeline;
++		struct dpu_release_export *export;
++		struct dpu_release_fence *fence;
++		unsigned long flags;
++		u64 seq;
++
++		if (!cstate->release_fence_ptr)
++			continue;
++		export = &exports[count++];
++		export->fd = -1;
++		export->cstate = cstate;
++		export->ptr = u64_to_user_ptr(cstate->release_fence_ptr);
++
++		fence = kzalloc(sizeof(*fence), GFP_KERNEL);
++		if (!fence) {
++			ret = -ENOMEM;
++			goto finish;
++		}
++		spin_lock_init(&fence->lock);
++		INIT_LIST_HEAD(&fence->link);
++		spin_lock_irqsave(&timeline->lock, flags);
++		seq = ++timeline->next_fence;
++		spin_unlock_irqrestore(&timeline->lock, flags);
++		dma_fence_init(&fence->base, &dpu_release_ops, &fence->lock,
++			       timeline->context, seq);
++		cstate->release_fence = &fence->base;
++		export->sync = sync_file_create(&fence->base);
++		if (!export->sync) {
++			ret = -ENOMEM;
++			goto finish;
++		}
++		export->fd = get_unused_fd_flags(O_CLOEXEC);
++		if (export->fd < 0) {
++			ret = export->fd;
++			goto finish;
++		}
++		if (put_user(export->fd, export->ptr)) {
++			ret = -EFAULT;
++			goto finish;
++		}
++	}
++
++	/*
++	 * This is still the ioctl caller's fd table. The helper may run the
++	 * hardware tail on another thread, which must never install user fds.
++	 */
++	ret = drm_atomic_helper_commit(dev, state, nonblock);
++
++finish:
++	for (i = 0; i < count; ++i) {
++		struct dpu_release_export *export = &exports[i];
++
++		if (!ret) {
++			fd_install(export->fd, export->sync->file);
++		} else {
++			if (export->fd >= 0)
++				put_unused_fd(export->fd);
++			if (export->sync)
++				fput(export->sync->file);
++			dma_fence_put(export->cstate->release_fence);
++			export->cstate->release_fence = NULL;
++			if (put_user(-1, export->ptr))
++				drm_dbg_kms(dev, "release fence rollback pointer became invalid\n");
++		}
++	}
++	kfree(exports);
++	return ret;
++}
++
++void dpu_release_begin(struct drm_crtc *crtc, struct drm_atomic_state *state)
++{
++	struct dpu_crtc *dpu = to_dpu_crtc(crtc);
++	struct dpu_release_timeline *timeline = &dpu->release_timeline;
++	struct drm_crtc_state *new_state = drm_atomic_get_new_crtc_state(state, crtc);
++	struct dpu_crtc_state *cstate = to_dpu_crtc_state(new_state);
++	struct dpu_release_fence *fence;
++	unsigned long flags;
++
++	/* Cursor-only/async updates do not prove replacement of scanout buffers. */
++	if (state->legacy_cursor_update || state->async_update)
++		return;
++	spin_lock_irqsave(&timeline->lock, flags);
++	++timeline->commit_seq;
++	if (new_state->active)
++		timeline->disabled_verified = false;
++	timeline->commit_pending = true;
++	timeline->kicked = false;
++	timeline->wait_status = -EINPROGRESS;
++	if (cstate->release_fence) {
++		fence = container_of(cstate->release_fence, struct dpu_release_fence, base);
++		if (list_empty(&fence->link)) {
++			fence->commit_seq = timeline->commit_seq;
++			dma_fence_get(&fence->base);
++			list_add_tail(&fence->link, &timeline->pending);
++		}
++	}
++	spin_unlock_irqrestore(&timeline->lock, flags);
++}
++
++void dpu_release_kickoff(struct drm_crtc *crtc)
++{
++	WRITE_ONCE(to_dpu_crtc(crtc)->release_timeline.kicked, true);
++}
++
++void dpu_release_wait_result(struct drm_crtc *crtc, int status)
++{
++	WRITE_ONCE(to_dpu_crtc(crtc)->release_timeline.wait_status, status);
++}
++
++void dpu_release_disable(struct drm_crtc *crtc, u32 old_encoder_mask)
++{
++	struct dpu_release_timeline *timeline = &to_dpu_crtc(crtc)->release_timeline;
++	struct drm_encoder *encoder;
++	bool seen = false, stopped = true;
++
++	drm_for_each_encoder_mask(encoder, crtc->dev, old_encoder_mask) {
++		seen = true;
++		stopped &= dpu_encoder_video_stopped(encoder);
++	}
++	timeline->disabled_verified = seen && stopped;
++	if (timeline->disabled_verified)
++		dpu_release_signal(timeline, 0, true, 0);
++}
++
++void dpu_release_complete(struct drm_crtc *crtc)
++{
++	struct dpu_crtc *dpu = to_dpu_crtc(crtc);
++	struct dpu_release_timeline *timeline = &dpu->release_timeline;
++	bool disabled = !crtc->state->active && !crtc->state->self_refresh_active &&
++			!dpu->enabled && timeline->disabled_verified;
++
++	if (!timeline->commit_pending)
++		return;
++	/*
++	 * wait_flush timeouts are otherwise only logged by DPU. They cannot
++	 * retire old buffers. A later proven replacement or disable may do so.
++	 */
++	if (disabled || (timeline->kicked && !timeline->wait_status))
++		dpu_release_signal(timeline, timeline->commit_seq, disabled, 0);
++	timeline->commit_pending = false;
++}

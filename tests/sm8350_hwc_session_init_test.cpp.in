@@ -1,0 +1,207 @@
+#include <algorithm>
+#include <assert.h>
+#include <errno.h>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <vector>
+#include <stdint.h>
+#include <sched.h>
+#include <cstring>
+@LOCKER@
+using sdm::Locker;
+#define DLOGI(...) ((void)0)
+#define DLOGE(...) ((void)0)
+#define DLOGW(...) ((void)0)
+#define ALOGI(...) ((void)0)
+#define ALOGE(...) ((void)0)
+#define UINT32(x) static_cast<uint32_t>(x)
+#define INT32(x) static_cast<int32_t>(x)
+#define HWC_DISPLAY_PRIMARY 0
+enum {ENABLE_NULL_DISPLAY_PROP,DISABLE_HOTPLUG_BWCHECK,DISABLE_MASK_LAYER_HINT,
+      ENABLE_ASYNC_POWERMODE,ENABLE_ASYNC_VDS_CREATION};
+enum DisplayType {kBuiltIn,kPluggable,kVirtual};
+enum DisplayError {kErrorNone,kErrorHardware};
+using hwc2_display_t=uint64_t;
+struct Counts {int creates=0,destroys=0,primary=0,starts=0,post=0,registers=0,rpc=0,joins=0,binder=0;} calls;
+static int failure_step,builtin_count=1,pluggable_count=1,virtual_count,primary_error,register_error;
+static bool want_null,want_async,uevent_ready=true;
+static DisplayType primary_type=kBuiltIn;
+namespace qClient {struct IQClient {virtual ~IQClient()=default;};}
+namespace android {
+template<class T> struct sp {
+ T*p=nullptr;sp()=default;sp(T*v):p(v){}T*get()const{return p;}T*operator->()const{return p;}
+ bool operator==(decltype(nullptr))const{return !p;}
+};
+struct String16 {explicit String16(const char*){}};
+struct Manager {void*getService(const String16&);};
+Manager*defaultServiceManager(){assert(calls.binder==1);static Manager m;return &m;}
+template<class T>sp<T>interface_cast(void*p){return sp<T>(static_cast<T*>(p));}
+struct ProcessState {
+ static void initWithDriver(const char *driver){
+  assert(std::strcmp(driver,"/dev/binder")==0);
+  assert(!calls.binder&&!calls.creates&&!calls.primary&&!calls.rpc);++calls.binder;
+ }
+ static ProcessState*self(){static ProcessState p;return &p;}
+ void setThreadPoolMaxThreadCount(int){}void startThreadPool(){}
+};
+constexpr int OK=0;
+}
+namespace qService {
+struct IQService {void connect(android::sp<qClient::IQClient>){}};
+struct QService:IQService {static void init(){assert(calls.binder==1);}};
+static QService service;
+}
+void*android::Manager::getService(const String16&){return &qService::service;}
+struct HWCDebugHandler {
+ static HWCDebugHandler*Get(){static HWCDebugHandler h;return &h;}
+ int GetProperty(int which,int*value){
+  *value=which==ENABLE_NULL_DISPLAY_PROP?want_null:which==ENABLE_ASYNC_POWERMODE?want_async:0;return 0;
+ }
+};
+using Debug=HWCDebugHandler;
+namespace qdutils {enum {DISPLAY_PRIMARY,DISPLAY_EXTERNAL};}
+struct HWCCallbacks {
+ static constexpr int kNumPluggable=2,kNumBuiltIn=2,kNumVirtual=1,kNumRealDisplays=6;
+};
+struct IPCImpl {int Init(){return 0;}};
+struct HWDisplayInterfaceInfo {DisplayType type=kBuiltIn;};
+struct HWDisplayInfo {DisplayType display_type=kBuiltIn;bool is_connected=true,is_primary=true,is_wb_ubwc_supported=false;int display_id=1;};
+using HWDisplaysInfo=std::map<int,HWDisplayInfo>;
+static bool no_primary=false,disconnected=false;
+struct CoreInterface {
+ static CoreInterface*live;
+ static DisplayError CreateCore(void*,void*,void*,std::shared_ptr<IPCImpl>,CoreInterface**out) {
+  ++calls.creates;if(failure_step==1)return kErrorHardware;
+  assert(!live);*out=live=new CoreInterface;return kErrorNone;
+ }
+ static DisplayError DestroyCore(){assert(live);++calls.destroys;delete live;live=nullptr;return kErrorNone;}
+ DisplayError GetFirstDisplayInterfaceType(HWDisplayInterfaceInfo*out){
+  assert(this==live);if(failure_step==2)return kErrorHardware;out->type=primary_type;return kErrorNone;
+ }
+ DisplayError GetDisplaysStatus(HWDisplaysInfo*out){
+  if(failure_step==6)return kErrorHardware;
+  HWDisplayInfo d;d.display_type=primary_type;d.is_primary=!no_primary;d.is_connected=!disconnected;
+  (*out)[1]=d;return kErrorNone;
+ }
+ DisplayError GetMaxDisplaysSupported(DisplayType type,int*out){
+  assert(this==live);if(failure_step==3+type)return kErrorHardware;
+  *out=type==kBuiltIn?builtin_count:type==kPluggable?pluggable_count:virtual_count;return kErrorNone;
+ }
+};
+CoreInterface*CoreInterface::live=nullptr;
+struct HWCSession;
+struct Event {
+ HWCSession*listener=nullptr;bool InitDone(){return uevent_ready;}
+ void Register(HWCSession*s){listener=s;}
+} g_hwc_uevent_;
+struct DisplayMapInfo {hwc2_display_t client_id=0;DisplayType disp_type=kBuiltIn;int sdm_id=0;};
+struct ColorManager {void DestroyColorManager(){}static ColorManager*CreateColorManager(void*){return nullptr;}};
+using HWCColorManager=ColorManager;
+struct HWCDisplay {};
+struct HWCDisplayBuiltIn {
+ template<class... Args>static int Create(Args... args){return create(args...);}
+ template<class T,class U,class V>static int create(CoreInterface*,T*,U*,V*,qService::QService*,hwc2_display_t,int,HWCDisplay**out){
+  ++calls.primary;if(primary_error)return primary_error;
+  static HWCDisplay display;*out=&display;return 0;
+ }
+};
+struct HWCDisplayPluggable {
+ template<class T,class U,class V>static int Create(CoreInterface*c,T*a,U*b,V*d,qService::QService*q,hwc2_display_t id,int sdm,int,int,bool,HWCDisplay**out){
+  return HWCDisplayBuiltIn::create(c,a,b,d,q,id,sdm,out);
+ }
+};
+struct HWCSession:qClient::IQClient {
+ static HWCSession instance;
+ static HWCSession*GetInstance(){return &instance;}
+ int Init(),Deinit(),InitSupportedDisplaySlots();void InitSupportedNullDisplaySlots();
+ static Locker locker_[16],hdr_locker_[16];
+ HWCDisplay*hwc_display_[16]{};int callbacks_=0;
+ int CreatePrimaryDisplay();
+ bool HasHDRSupport(HWCDisplay*d){assert(d);return false;}
+ void CreateDummyDisplay(hwc2_display_t){}
+ void StartServices(){++calls.starts;}void PostInit(){++calls.post;}
+ void DestroyDisplay(DisplayMapInfo*m){
+  // Match DestroyNonPluggableDisplay's actual first operation, even for an empty slot.
+  SCOPE_LOCK(locker_[m->client_id]);hwc_display_[m->client_id]=nullptr;
+ }
+ int buffer_allocator_=0,socket_handler_=0,null_display_mode_=0;
+ int disable_hotplug_bwcheck_=0,disable_mask_layer_hint_=0;
+ bool async_powermode_=false,async_vds_creation_=false,is_composer_up_=false;
+ qService::QService*qservice_=nullptr;ColorManager*color_mgr_=nullptr;
+ CoreInterface*core_intf_=nullptr;std::shared_ptr<IPCImpl>ipc_intf_;
+ DisplayMapInfo map_info_primary_;
+ std::vector<DisplayMapInfo>map_info_builtin_,map_info_pluggable_,map_info_virtual_;
+ std::vector<bool>is_hdr_display_;std::map<hwc2_display_t,int>map_hwc_display_;
+ struct Factory{bool IsGPUColorConvertSupported(){return false;}}virtual_display_factory_;
+};
+HWCSession HWCSession::instance;
+Locker HWCSession::locker_[16],HWCSession::hdr_locker_[16];
+struct IQtiComposer {virtual~IQtiComposer()=default;int registerAsService(){++calls.registers;return register_error;}};
+struct QtiComposer:IQtiComposer {
+ static QtiComposer*last;QtiComposer(){last=this;}static QtiComposer*initialize();
+};
+QtiComposer*QtiComposer::last=nullptr;
+using android::sp;using android::ProcessState;
+static int fake_scheduler(int,int,struct sched_param*){return 0;}
+#define sched_setscheduler fake_scheduler
+static void configureRpcThreadpool(int,bool){++calls.rpc;}
+static void joinRpcThreadpool(){++calls.joins;}
+@INIT_SLOTS@
+@INIT_NULL_SLOTS@
+@DEINIT@
+@SESSION_INIT@
+@CREATE_PRIMARY@
+@FACTORY@
+@SERVICE_MAIN@
+static void reset() {
+ if(CoreInterface::live)HWCSession::instance.Deinit();
+ delete QtiComposer::last;QtiComposer::last=nullptr;
+ HWCSession::instance=HWCSession();g_hwc_uevent_.listener=nullptr;calls={};
+ failure_step=0;builtin_count=1;pluggable_count=1;virtual_count=0;primary_error=register_error=0;
+ no_primary=disconnected=false;
+ want_null=want_async=false;uevent_ready=true;primary_type=kBuiltIn;
+}
+static void failed_service() {
+ assert(ServiceMain(0,nullptr)!=0);
+ assert(!HWCSession::instance.core_intf_&&!CoreInterface::live&&!g_hwc_uevent_.listener);
+ assert(!calls.primary&&!calls.starts&&!calls.post&&!calls.registers&&!calls.rpc&&!calls.joins);
+}
+int main() {
+ for(int step=1;step<=5;++step){
+  reset();failure_step=step;failed_service();
+  assert(calls.creates==1&&calls.destroys==(step==1?0:1));
+ }
+ for(int which=0;which<5;++which){
+  reset();
+  switch(which){
+   case 0:builtin_count=0;break;
+   case 1:builtin_count=-1;break;
+   case 2:pluggable_count=-1;break;
+   case 3:virtual_count=-1;break;
+   case 4:primary_type=kPluggable;pluggable_count=0;break;
+  }
+  failed_service();assert(calls.destroys==1);
+  assert(HWCSession::instance.map_info_builtin_.empty()&&HWCSession::instance.map_info_pluggable_.empty());
+ }
+ reset();assert(ServiceMain(0,nullptr)==0);
+ assert(calls.primary==1&&calls.starts==1&&calls.post==1&&calls.registers==1&&calls.rpc==1&&calls.joins==1);
+ assert(HWCSession::instance.map_info_builtin_.empty()&&HWCSession::instance.map_info_pluggable_.size()==1);
+ assert(HWCSession::instance.core_intf_==CoreInterface::live);
+ HWCSession::instance.Deinit();assert(!HWCSession::instance.core_intf_&&!CoreInterface::live&&calls.destroys==1);
+ HWCSession::instance.Deinit();assert(calls.destroys==1);
+ reset();want_async=true;builtin_count=2;pluggable_count=2;virtual_count=1;
+ assert(ServiceMain(0,nullptr)==0&&HWCSession::instance.map_hwc_display_.size()==4);
+ reset();primary_type=kPluggable;builtin_count=0;pluggable_count=1;
+ assert(ServiceMain(0,nullptr)==0&&HWCSession::instance.map_info_pluggable_.empty());
+ reset();want_null=true;assert(ServiceMain(0,nullptr)==0&&calls.creates==0&&calls.registers==1);
+ reset();primary_error=-ENODEV;
+ assert(ServiceMain(0,nullptr)!=0&&calls.primary==1&&calls.destroys==1&&!calls.registers);
+ assert(!HWCSession::instance.core_intf_);
+ reset();failure_step=6;assert(ServiceMain(0,nullptr)!=0&&!calls.primary&&!calls.registers&&calls.destroys==1);
+ reset();no_primary=true;assert(ServiceMain(0,nullptr)!=0&&!calls.primary&&!calls.registers&&calls.destroys==1);
+ reset();disconnected=true;assert(ServiceMain(0,nullptr)!=0&&!calls.primary&&!calls.registers&&calls.destroys==1);
+ reset();register_error=-EINVAL;
+ assert(ServiceMain(0,nullptr)!=0&&calls.registers==1&&!calls.joins);
+ reset();
+}

@@ -17,8 +17,10 @@ static int sq2_session_end(struct venus_inst *inst)
  ret = inst->core->ops->session_end(inst);
  if (ret) return ret;
  if (!wait_for_completion_timeout(&inst->sq2_end_done, TIMEOUT)) return -ETIMEDOUT;
+ /* A successful END confirms teardown even after an earlier session error.
+  * Preserve that error for clients; it does not invalidate this separate reply. */
  if (inst->sq2_end_error != HFI_ERR_NONE ||
-     test_bit(0, &inst->core->sys_error) || inst->session_error) return -EIO;
+     test_bit(0, &inst->core->sys_error)) return -EIO;
  inst->sq2_end_confirmed = true;
  sq2_venus_scope_end(inst);
  inst->state = INST_UNINIT;
