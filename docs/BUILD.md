@@ -1,3 +1,38 @@
+## 当前复建：v21-release-4k 与 debug 入口（2026-11-10）
+
+开发根仍为 WSL `/mnt/spx-workspace/chromebookOS/work/qualcomm-618`，pins 见 `configs/kernel-baseline.json`。
+本节覆盖下方 v21-release 的当前版本声明，历史原包和命令保留追溯。
+桥接必须匹配服务回调：优先 v2，只有实际 v1 导出时才用七参数接口，结果不能小于V4L2最小大小。
+`pack-sq2-release.py` 现在复用 native packer 的 ARM64/导出验证，不能绕开成对ABI检查。
+
+`build-sm8250-omx.py` 用原 pinned prepared/private inputs，加 `--hdr-sequence-reset --hevc-csd-prefix`；
+后一项无fuzz应用 `patches/sm8250-omx-hevc-csd-prefix.patch`，复制 `probe/video/sq2-hevc-csd-prefix.h`。
+功能与原已验收 CSD v2 相同，删除候选宏和高频/信息日志，正常输入拒绝仍打印错误。
+源码 OMX 不启用 Main10 广告、不安装新服务、不改变现有 mapper/HWC。
+
+```sh
+python3 -m unittest tests.test_quest2_vidc_bridge tests.test_pack_sq2_native_omx tests.test_sq2_release tests.test_sq2_618_debug_entry -v
+python3 tests/test_sm8250_omx_hevc_csd_prefix.py --source BUILT_MEDIA \
+  --parameters PARAMETERS_BIN --picture FIRST_PICTURE_BIN --output FRESH_HOST_OUTPUT
+python3 scripts/pack-sq2-release.py --base ACCEPTED_V21_INITRAMFS \
+  --expected-base-sha256 71db231753f4346f5cd6cdac4ef34410eb017f45b147c84aed424b894daf0d3a \
+  --bridge ABI_COMPATIBLE_CLEAN_BRIDGE --omx VALIDATED_CLEAN_SOURCE_OMX \
+  --modules MATCHED_RELEASE_VENUS --output FRESH_INITRAMFS
+python3 scripts/build.py verify
+python3 scripts/build.py package --output out/v21-release-4k-FRESH
+```
+
+具体已执行命令/输入hash在 ignored `out/qualcomm-full-stack-20261108/v21-debug-entry-4k/`：
+`bridge-compat-build.json`、`omx-csd-build-command.json`、`omx-stripped.json`、`release-pack-command.json`。
+`release-vs-baseline.json` 证明只有两个视频库和对应清单变化，SoundWire/DPU及身份保持。
+`release-pixel-audit.json` 对照旧独立审计过的参考，共30帧逐字节一致；不是4K60性能基准。
+新的CSD测试显式读取真实源码及既有私有83B参数/5078B图像向量，不内嵌私有资料。
+
+Debug入口生成器 `prepare-sq2-618-debug-entry.py` 支持已知 Mesa/QTI父包，验证唯一图形参数，
+只改未签名ARM64 EFI的等长路径，保留旧GRUB块/default并追加 `SQ2Dbg`。
+本次debug载荷是完整清理前v21 `71db2317…`，用于历史对照，未混入当前新CSD修复，未实启动验收。
+默认发布仍清理诊断文件/探针，不把debug入口的工具自动恢复到正常系统。
+
 ## 唯一发布基线：v21-release（2026-11-10）
 
 开发只在 WSL Ubuntu-24.04 的 `/mnt/spx-workspace/chromebookOS/work/qualcomm-618` 进行。

@@ -1,3 +1,41 @@
+## 2026-11-10：4K 软解回退修复与独立 debug 入口
+
+用户在 v21-release 下报告 Bilibili 4K 严重卡顿，并明确要求恢复一个带原 debug 信息的 GRUB 入口。
+已新增 `sq2-qcom-618-debug` / `EFI/SQ2Dbg`，名称为 `SQ2 Linux 6.18 LTS (Qualcomm graphics debug)`，
+载荷为清理前完整 v21 `71db2317…`，保留 SoundWire 和黑闪修复；未启用 `sq2.debug=1` 或更改网络策略。
+默认仍为 `sq2-qcom-618-native` / `EFI/SQ2Nat`；原 `SQ2QDbg` 应急载荷不变。
+这是本轮明确授权的诊断例外，覆盖下方历史“仅两个入口/不新增入口”；debug 入口尚未实启动验收。
+
+根因证据：清理时重编桥接源含 v2-only 布局回调依赖，原已验收服务只导出 v1，
+PresetANWBuffer 配置返回 -1010，Bili 在解码启动前 hard→soft；4K60 软解约87–90ms/帧。
+这推翻了历史“清理仅改变诊断、不影响功能”的范围判断；此前六帧 ByteBuffer 测试没有覆盖此接口。
+桥接现在优先 v2、兼容 v1，旧接口必须满足真实 V4L2 最小分配大小，错误/所有权/队列约束保留。
+新增实际源码旧红/新绿 ASan/UBSan 测试；native/release 打包均检查成对服务导出，拒绝旧失配。
+
+此前用户确认清晰度切换恢复是在临时 CSD 候选下，修复并未持久化。本轮一并整合源码 OMX 的
+独立 Annex-B HEVC CSD + 完整 AU 输入适配，不伪造 SEQ/EOS/QBUF，不改变 PTS/flags；
+保留真实 flush/释放时清理，完整上游碎片组帧、加密输入及 Main10 广告均不在本轮范围。
+正常源码补丁没有候选诊断宏或存储/合并信息日志，保留真实错误日志，发布库剥除 debug 符号。
+
+RAM实测：先只换桥接，原 OMX 的完整 AU Surface 六帧通过；再加入原 CSD 候选，
+Bili 720p→4K→1080p→4K 四次硬解配置/格式输出，无 PresetANWBuffer 失败或 hard→soft，
+真实映射 hash 和 Venus 活跃会话核对，用户明确回复“正常了”（画面及声音）。
+DynamicANWBuffer 仍不支持，但正常回落到 PresetANWBuffer，不是这次错误。
+应用启动统计的 avgDecTime 仍包含较大值，未据此声称稳定60fps性能基准通过。
+去日志正式 OMX 又完成五组30帧，逐字节对照已独立审计参考完全一致，EOS/stop/delete及资源归零；
+两轮 runner/cleanup均0，临时文件已取回，默认包将保留干净运行环境。
+
+新唯一发布基线为 `v21-release-4k`，initramfs `0ada8ee0db271abc7a25f5c6ee63b0d484b03bed75c5352ae8f5d65f0902beb5`；
+相较清理基线仅变 OMX、桥接和HIDL校验清单，其余有效记录/metadata一致；内核、音频、显示未改。
+桥接 `7a7c4f57…`，源码 OMX `29f5d1b0…`；原服务 `7a6aa750…` 保持。
+34项相关主机unittest、30项实际CSD源码场景、标准 verify/package通过。
+已写入默认包并正常重启，boot6fd60796…，等待162秒后首次SSH成功；实际两个库hash核对。
+启动后HEVC独立CSD Surface六帧与AVC Surface三十帧逐字节匹配参考，EOS/stop/delete与资源归零，
+七服务running；临时客户端已删除。默认启动后再捕获4K硬解及清晰度切换，用户明确回复“完成 正常”，
+确认4K、切换、声音及页面均正常；此次验收属于新默认包，不再依赖临时库。
+证据仅 ignored `out/qualcomm-full-stack-20261108/v21-debug-entry-4k`，私有库/凭据/原始日志不上传。
+内屏仅SDR，Main10过滤、PM/长时/SQ1及全部 full_* 未完成状态保持。
+
 ## 2026-11-10：唯一主线基线 v21-release（验收版清理）
 
 清理版正常重启已验证：boot398dd33e…，第146秒首次SSH检查成功，7服务running；

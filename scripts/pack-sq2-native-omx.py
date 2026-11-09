@@ -37,6 +37,13 @@ def read_elf(path, required):
     return data
 
 
+def service_layout_exports(bridge_data):
+    # A v2-only bridge cannot use the original NV12 service's seven-argument ABI.
+    legacy = b"quest2_omx_capture_layout_for_usage\0" in bridge_data
+    needs_v2 = LAYOUT_V2.encode() + b"\0" in bridge_data and not legacy
+    return SERVICE_EXPORTS | ({LAYOUT_V2} if needs_v2 else set())
+
+
 def checked_sums(data, records):
     entries = {}
     for line in data.decode().splitlines(keepends=True):
@@ -65,7 +72,7 @@ def build(base, service, bridge, output, expected_base):
                  init.index(pack.HOOK) < init.index(pack.NEW_HOOK), "Requires HIDL stage before QTI display stage")
     checksums = checked_sums(selected[SUMS], before)
     bridge_data = read_elf(bridge, BRIDGE_EXPORTS)
-    service_exports = SERVICE_EXPORTS | ({LAYOUT_V2} if LAYOUT_V2.encode() + b"\0" in bridge_data else set())
+    service_exports = service_layout_exports(bridge_data)
     delta = {SERVICE: read_elf(service, service_exports), BRIDGE: bridge_data}
     sums = []
     for relative, line in checksums.items():

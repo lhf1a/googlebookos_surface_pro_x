@@ -93,6 +93,21 @@ class EntryBuilder(unittest.TestCase):
         self.assertEqual((out/'rollback-check/EFI/BOOT/grub.cfg').read_bytes(), GRUB)
         for path in report['roles'].values(): self.assertTrue(Path(path).read_bytes())
 
+    def test_existing_qualcomm_baseline_keeps_effective_options(self):
+        for name in ('kernel-options.txt', 'el2launch.efi'):
+            old = 'sq2.vulkan=mesa'.encode('utf-16le' if name.endswith('.efi') else 'utf-8')
+            new = 'sq2.vulkan=qcom'.encode('utf-16le' if name.endswith('.efi') else 'utf-8')
+            self.files[name] = self.files[name].replace(old, new)
+        self.write_baseline()
+        report = M.build(self.args)
+        self.assertEqual(report['effective_utf16_options'],
+                         OPTIONS.replace('SQ2L618C', 'SQ2QDbg').replace('sq2.vulkan=mesa', 'sq2.vulkan=qcom'))
+
+    def test_ambiguous_or_unknown_graphics_option_rejected(self):
+        for options in ('sq2.vulkan=qcom sq2.vulkan=mesa', 'sq2.vulkan=unknown', ''):
+            with self.assertRaisesRegex(ValueError, 'graphics option'):
+                M.graphics_option(options)
+
     def test_unified_patch_reconstructs_menu(self):
         if not shutil.which('patch'): self.skipTest('patch command unavailable')
         M.build(self.args)

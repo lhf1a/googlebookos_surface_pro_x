@@ -89,6 +89,7 @@ struct q2_session {
     int node_bound, node_native, node_usage_valid;
     uint32_t source_changes;
     int (*native_layout_for_usage)(unsigned,unsigned,unsigned,uint64_t,unsigned,unsigned *,unsigned *,unsigned *);
+    int (*native_layout_for_usage_v1)(unsigned,unsigned,unsigned,uint64_t,unsigned *,unsigned *,unsigned *);
     int (*native_layout)(unsigned,unsigned,unsigned,unsigned *,unsigned *,unsigned *);
     struct q2_event_node *head, *tail;
     q2_backend backend;
@@ -241,7 +242,7 @@ static int q2_has_native_layout(const struct q2_session *s) {
 static int q2_native_layout(struct q2_session *s,unsigned requested_format) {
     if(!q2_has_native_layout(s) || (!s->layout_pending &&
        (!requested_format || requested_format==s->layout_format)))return 0;
-    if(s->node_native && (!s->node_usage_valid || !s->native_layout_for_usage))return q2_error(EAGAIN);
+    if(s->node_native && (!s->node_usage_valid || (!s->native_layout_for_usage && !s->native_layout_for_usage_v1)))return q2_error(EAGAIN);
     if(s->queues[1].count || (s->streaming&2))return q2_error(EBUSY);
     struct v4l2_format f={.type=V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE};
     struct v4l2_selection crop={.type=V4L2_BUF_TYPE_VIDEO_CAPTURE,.target=V4L2_SEL_TGT_COMPOSE};
@@ -261,11 +262,18 @@ static int q2_native_layout(struct q2_session *s,unsigned requested_format) {
         s->layout_pending=1;s->layout_stride=s->layout_scan=s->layout_size=0;
         if(f.fmt.pix_mp.pixelformat!=selected_format)return q2_error(EPROTO);
     }
-    int layout_result=s->node_native?
-        s->native_layout_for_usage(crop.r.width,crop.r.height,f.fmt.pix_mp.pixelformat,s->node_usage,
-                                   f.fmt.pix_mp.plane_fmt[0].sizeimage,&stride,&scan,&size):
-        s->native_layout(crop.r.width,crop.r.height,f.fmt.pix_mp.pixelformat,&stride,&scan,&size);
+    int layout_result;
+    if(s->node_native && s->native_layout_for_usage)
+        layout_result=s->native_layout_for_usage(crop.r.width,crop.r.height,f.fmt.pix_mp.pixelformat,
+            s->node_usage,f.fmt.pix_mp.plane_fmt[0].sizeimage,&stride,&scan,&size);
+    else if(s->node_native)
+        layout_result=s->native_layout_for_usage_v1(crop.r.width,crop.r.height,f.fmt.pix_mp.pixelformat,
+            s->node_usage,&stride,&scan,&size);
+    else
+        layout_result=s->native_layout(crop.r.width,crop.r.height,f.fmt.pix_mp.pixelformat,&stride,&scan,&size);
     if(layout_result)return q2_error(EOPNOTSUPP);
+    /* Older NV12 services cannot request extra allocation height; never underallocate. */
+    if(s->node_native && size<f.fmt.pix_mp.plane_fmt[0].sizeimage)return q2_error(EINVAL);
     const unsigned sample=f.fmt.pix_mp.pixelformat==V4L2_PIX_FMT_NV12?1:
         f.fmt.pix_mp.pixelformat==V4L2_PIX_FMT_P010?2:0;
     if(!sample || stride<(uint64_t)crop.r.width*sample || stride>16384 || stride%128 ||
@@ -989,11 +997,15 @@ int quest2_vidc_node_configure(uint64_t token,int native,uint64_t usage,int usag
         if(busy)result=q2_error(EBUSY);
         else {
             int (*callback)(unsigned,unsigned,unsigned,uint64_t,unsigned,unsigned*,unsigned*,unsigned*)=NULL;
-            if(native)callback=dlsym(RTLD_DEFAULT,"quest2_omx_capture_layout_for_usage_v2");
-            if(native && !callback)result=q2_error(ENOSYS);
+            int (*legacy)(unsigned,unsigned,unsigned,uint64_t,unsigned*,unsigned*,unsigned*)=NULL;
+            if(native) {
+                callback=dlsym(RTLD_DEFAULT,"quest2_omx_capture_layout_for_usage_v2");
+                if(!callback)legacy=dlsym(RTLD_DEFAULT,"quest2_omx_capture_layout_for_usage");
+            }
+            if(native && !callback && !legacy)result=q2_error(ENOSYS);
             else {
                 s->node_native=native;s->node_usage=usage;s->node_usage_valid=usage_valid;
-                s->native_layout_for_usage=callback;s->native_layout=NULL;
+                s->native_layout_for_usage=callback;s->native_layout_for_usage_v1=legacy;s->native_layout=NULL;
                 if(s->layout_stride || s->source_changes)s->layout_pending=native;
                 if(!native)s->layout_pending=0;
                 s->layout_stride=s->layout_scan=s->layout_width=s->layout_height=s->layout_format=s->layout_size=0;

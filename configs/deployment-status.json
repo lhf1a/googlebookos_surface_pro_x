@@ -1,7 +1,7 @@
 {
   "latest_full_stack": {
     "date": "2026-11-10",
-    "status": "sole-mainline-baseline-v21-release; full-stack-remains-incomplete",
+    "status": "sole-mainline-baseline-v21-release-4k; postboot-user-accepted; full-stack-remains-incomplete",
     "memory_candidate": "Normal original gralloc1 backend with standard mapper5/AIDL2 allocator; cached DMA heap and MSM GEM WC remain the current adaptation, not completed KGSL/unified-memory port",
     "system_allocator_replaced": true,
     "kgsl_ported": false,
@@ -12,19 +12,19 @@
     "new_backups_created": false,
     "retained_payload_hashes_unchanged": false,
     "normal_reboot_verified": true,
-    "ssh_recovery_seconds": 146,
-    "boot_id": "398dd33e-f194-4330-9399-a11f8307b124",
+    "ssh_recovery_seconds": 162,
+    "boot_id": "6fd60796-cdd6-4a09-89eb-fc7c01336f60",
     "evidence": "out/qualcomm-full-stack-20261108",
     "native_gpu_candidate": "native-gpu-v24: 27 RGB GPU/fence/CPU/exec cycles plus six NV12 VPU/GPU frames passed",
     "native_gpu_fd_count": 9,
     "system_mapper_replaced": true,
     "source_inputs_restored": 29,
     "native_gpu_evidence": "out/qualcomm-full-stack-20261108/native-gpu-v16-rgb-regression-retry.txt",
-    "yuv_status": "Normalv18:16 clients150 exact decodeframes+4 physical NV12 DEVICE clients120 outputs/callbacks passed; extraBT70960 exact frames+30physical passed. Five initial sequence/flush races passed. User listening recovery confirmed this round; audio HAL unchanged. P010 in-stream HDR and full error cleanup remain incomplete.",
+    "yuv_status": "v21-release-4k: fixed original service/native bridge callback pairing; HEVC independent CSD integrated. RAM Bili 720p/4K/1080p/4K hardware sessions and user audio/video accepted, 30 exact release HEVC frames; postboot HEVC6+AVC30 exact frames. Postboot user confirmed 4K, quality switching, audio and page switching normal; Main10 filtered.",
     "default_directory": "EFI/SQ2Nat",
-    "default_initramfs_sha256": "e826df919c358a61ff023f6021ba9dae43d166b1d781a3b107ed8320286456a0",
+    "default_initramfs_sha256": "0ada8ee0db271abc7a25f5c6ee63b0d484b03bed75c5352ae8f5d65f0902beb5",
     "fallback_initramfs_sha256": "5b9f7012ab43db5ec42f6169d57047527f19a0feff0fb824d77d7711ec68c351",
-    "native_video_kernel": "venus-omx-flush-lock-v1: matched complete Venus set; retain capture-layout-v2 and successful END confirmation; state lock released during private OMX flush, DRC flush coordinated",
+    "native_video_kernel": "v21-release matched Venus group, unchanged by 4K fix",
     "native_video_evidence": [
       "out/qualcomm-full-stack-20261108/native-gpu-v15-device.txt",
       "out/qualcomm-full-stack-20261108/native-gpu-v16-device.txt"
@@ -34,23 +34,26 @@
     "legacy_nv12_p010_regression_passed": true,
     "venus_final": {
       "sys_error": 0,
+      "hfi_error": 0,
       "insts": 0,
       "vb2_bytes": 0,
-      "evidence": "out/qualcomm-full-stack-20261108/native-p010-drc-trace-v1/capture/final-health.txt"
+      "evidence": "out/qualcomm-full-stack-20261108/v21-debug-entry-4k/capture-postboot/avc-health.txt"
     },
     "final_validation": {
-      "baseline": "v21-release",
-      "unittests_passed": 50,
-      "terminal_stage_shell_check_passed": true,
+      "baseline": "v21-release-4k",
+      "unittests_passed": 34,
+      "csd_actual_source_cases": 30,
       "standard_verify_package_passed": true,
-      "strict_modpost_depmod_passed": true,
       "normal_reboot_verified": true,
-      "hardware_hevc_frames_exact": 6,
+      "ram_release_hardware_hevc_frames_exact": 30,
+      "postboot_hevc_frames_exact": 6,
+      "postboot_avc_frames_exact": 30,
       "diagnostic_cleanup_verified": true,
-      "evidence": "out/qualcomm-full-stack-20261108/v21-release-cleanup",
-      "limits": "No new long-term/suspend/SQ1 or subjective listening acceptance"
+      "evidence": "out/qualcomm-full-stack-20261108/v21-debug-entry-4k",
+      "limits": "No new stable-4K60 benchmark, long-term, suspend or SQ1 acceptance.",
+      "postboot_bili_user_accepted": true
     },
-    "native_omx_candidate": "native-gpu-v23",
+    "native_omx_candidate": "source-sm8250-hevc-csd-prefix-release",
     "native_omx_codec": "HEVC Main / linear NV12 / non-secure",
     "native_omx_frames": 30,
     "native_omx_drc": "320x240 -> 1920x1080 -> 320x240",
@@ -60,7 +63,7 @@
     "native_omx_buffer_reuse": "six-buffer pool, each used three times before first dimension change",
     "native_omx_eos_and_cleanup": true,
     "native_omx_system_surface_integrated": true,
-    "native_omx_evidence": "out/qualcomm-full-stack-20261108/omx-native/decode-v23-result.json",
+    "native_omx_evidence": "out/qualcomm-full-stack-20261108/v21-debug-entry-4k",
     "source_files_audited": 23,
     "donor_files_audited": 133,
     "native_omx_host_tests": 48,
@@ -416,7 +419,7 @@
       "date": "2026-11-08",
       "status": "user-confirmed; implementation-goal-active",
       "document": "docs/QUALCOMM-FULL-STACK-PORT.md",
-      "section": "当前执行方案（2026-11-08 用户确认）",
+      "section": "\u5f53\u524d\u6267\u884c\u65b9\u6848\uff082026-11-08 \u7528\u6237\u786e\u8ba4\uff09",
       "framework_mapper": "mapper5",
       "display_backend": "source QTI HWC/SDM adapted to Linux 6.18 and actual Surface hardware",
       "iteration_policy": "Batch related implementation, consumer integration and end-to-end validation in each development turn; debug concrete failures then resume the stage, not stop at isolated helper/probe success",
@@ -716,7 +719,7 @@
         "chroma_offset": 262144,
         "ubwc": false
       },
-      "callback_semantics": "API payload equals target; actual arrival is 49.5–66.4ms before target, independently demonstrating that it is not hardware present time.",
+      "callback_semantics": "API payload equals target; actual arrival is 49.5\u201366.4ms before target, independently demonstrating that it is not hardware present time.",
       "baseline": {
         "frames": 30,
         "i420_normalized_to_nv12_exact": true,
@@ -3788,7 +3791,7 @@
           "chroma_offset": 262144,
           "ubwc": false
         },
-        "callback_semantics": "API payload equals target; actual arrival is 49.5–66.4ms before target, independently demonstrating that it is not hardware present time.",
+        "callback_semantics": "API payload equals target; actual arrival is 49.5\u201366.4ms before target, independently demonstrating that it is not hardware present time.",
         "baseline": {
           "frames": 30,
           "i420_normalized_to_nv12_exact": true,
@@ -6770,7 +6773,7 @@
       "status": "complete-user-verified-after-normal-reboot",
       "listening_verified": true,
       "postboot_bili_switch_verified": true,
-      "user_observation": "全部正常"
+      "user_observation": "\u5168\u90e8\u6b63\u5e38"
     },
     "release_cleanup": {
       "baseline": "v21-release",
@@ -6800,6 +6803,26 @@
       "esp_logs_kib": 234108,
       "evidence": "out/qualcomm-full-stack-20261108/native-omx-flush-lock-v1",
       "test_scope": "10 directly related unittests passed, actual header ASan/UBSan including reentrant sequence/deferred-output error cases; old header red. Wider focused38 has33 passed and5 explicit old reference-fixture skips. Strict MODPOST/depmod, five actual initial sequence/flush races and four normal runtime audits passed. No full-error/PM/performance claim."
+    },
+    "debug_entry": {
+      "id": "sq2-qcom-618-debug",
+      "directory": "EFI/SQ2Dbg",
+      "initramfs_sha256": "71db231753f4346f5cd6cdac4ef34410eb017f45b147c84aed424b894daf0d3a",
+      "installed": true,
+      "boot_verified": false
+    },
+    "video_4k_fix": {
+      "bridge_sha256": "7a7c4f57a3548c27aeae787ad6425cc89d6741b4ec3f2620c75017d98a9607f0",
+      "omx_sha256": "29f5d1b0bc6edba35c05c614daff17e5a02f3646113035be5e795486ab43b1ce",
+      "root_cause": "v2-only bridge paired with v1-only service rejects PresetANWBuffer; separate previously unpersisted HEVC CSD fix now integrated",
+      "ram_user_playback_audio_confirmed": true,
+      "release_exact_frames": 30,
+      "host_unittests": 34,
+      "csd_source_cases": 30,
+      "stable_4k60_benchmark_verified": false,
+      "evidence": "out/qualcomm-full-stack-20261108/v21-debug-entry-4k",
+      "normal_reboot_verified": true,
+      "postboot_user_playback_audio_page_switch_confirmed": true
     }
   },
   "latest_all_codec_development": {
@@ -8309,7 +8332,7 @@
     "effective_changed_entries": 22,
     "codec_service": "running",
     "video_node": "/dev/video0",
-    "operator_video_feedback": "视频正常",
+    "operator_video_feedback": "\u89c6\u9891\u6b63\u5e38",
     "codec_runtime": "v2u; v1 preserved and both hashes verified",
     "audio": "physical ALSA + AUDIO_READY + actual HAL774cd7e7 verified; no new listening claim",
     "storage": "emulated 0/10 MOUNTED, both users RUNNING_UNLOCKED",

@@ -2,6 +2,7 @@ import gzip
 import importlib.util
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,27 @@ if [ "$debug" = 1 ]; then native-monitor > /logs/monitor.txt 2>&1 & fi
         self.assertNotIn(b"native-monitor", after)
         self.assertIn(b"el2-terminal-autostart 10 &", after)
         self.assertIn(b"false || exit 7", after)
+
+    def test_release_rejects_mismatched_native_callbacks(self):
+        native_spec = importlib.util.spec_from_file_location("native", ROOT / "scripts/pack-sq2-native-omx.py")
+        native = importlib.util.module_from_spec(native_spec)
+        native_spec.loader.exec_module(native)
+        with tempfile.TemporaryDirectory() as temp:
+            d = Path(temp)
+            for name, symbols in (("service", native.SERVICE_EXPORTS), ("bridge", native.BRIDGE_EXPORTS)):
+                path = d / name
+                source = "\n".join("int " + symbol + "(void){return 0;}" for symbol in symbols)
+                subprocess.run(["cc", "-x", "c", "-shared", "-fPIC", "-o", str(path), "-"],
+                               input=source, text=True, check=True)
+                data = bytearray(path.read_bytes())
+                data[18:20] = (183).to_bytes(2, "little")
+                path.write_bytes(data)
+            bridge = d / "bridge"
+            bridge.write_bytes(bridge.read_bytes() + native.LAYOUT_V2.encode() + b"\0")
+            with self.assertRaisesRegex(ValueError, "Missing defined native API exports"):
+                m.validate_native_pair((d / "service").read_bytes(), bridge)
+            bridge.write_bytes(bridge.read_bytes() + b"quest2_omx_capture_layout_for_usage\0")
+            self.assertEqual(m.validate_native_pair((d / "service").read_bytes(), bridge), bridge.read_bytes())
 
     def test_unknown_init_rejected(self):
         with self.assertRaises(ValueError):

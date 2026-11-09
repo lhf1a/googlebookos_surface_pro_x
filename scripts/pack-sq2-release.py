@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import posixpath
 import subprocess
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("qti_pack", ROOT / "scripts/pack-sq2-qti-system-display.py")
@@ -26,6 +27,20 @@ REMOVED = {
     "etc/sq2-video-native/run-eos.sh", "etc/sq2-video-native/v4l2-decode-test",
     "etc/sq2-video-native/v4l2-query",
 }
+
+
+def validate_native_pair(service_data, bridge, omx=None):
+    spec = importlib.util.spec_from_file_location("native_pack", ROOT / "scripts/pack-sq2-native-omx.py")
+    native = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(native)
+    data = native.read_elf(bridge, native.BRIDGE_EXPORTS)
+    if omx is not None:
+        native.read_elf(omx, {"get_omx_component_factory_fn"})
+    with tempfile.TemporaryDirectory() as temp:
+        service = Path(temp) / "quest2-omx-service"
+        service.write_bytes(service_data)
+        native.read_elf(service, native.service_layout_exports(data))
+    return data
 
 
 def clean_init(body):
@@ -52,7 +67,7 @@ def encode(name, body, record):
     return header + b"\0" * (-len(header) % 4) + body + b"\0" * (-len(body) % 4)
 
 
-def build(base, output, bridge, modules, expected):
+def build(base, output, bridge, modules, expected, omx=None):
     if output.exists() or base.resolve() == output.resolve():
         raise ValueError("Use a fresh output file")
     if pack.file_hash(base) != expected:
@@ -71,7 +86,10 @@ def build(base, output, bridge, modules, expected):
     if terminal.count(witness) != 1:
         raise ValueError("Unknown EL2 terminal stage")
     bodies["bin/el2-terminal-stage"] = terminal.replace(witness, b"")
-    replacements = {"etc/sq2-hidl/lib64/libquest2-vidc-bridge.so": bridge.read_bytes()}
+    replacements = {"etc/sq2-hidl/lib64/libquest2-vidc-bridge.so":
+                    validate_native_pair(bodies["etc/sq2-hidl/quest2-omx-service"], bridge, omx)}
+    if omx is not None:
+        replacements["etc/sq2-hidl/lib64/libOmxVdec.so"] = omx.read_bytes()
     for name in ("venus-core.ko", "venus-dec.ko", "venus-enc.ko"):
         matches = [path for path in bodies if Path(path).name == name]
         if not matches:
@@ -132,8 +150,9 @@ def main():
     for name in ("base", "output", "bridge", "modules"):
         p.add_argument("--" + name, type=Path, required=True)
     p.add_argument("--expected-base-sha256", required=True)
+    p.add_argument("--omx", type=Path, help="Explicit separately validated OMX replacement")
     a = p.parse_args()
-    print(json.dumps(build(a.base, a.output, a.bridge, a.modules, a.expected_base_sha256), indent=2))
+    print(json.dumps(build(a.base, a.output, a.bridge, a.modules, a.expected_base_sha256, a.omx), indent=2))
 
 
 if __name__ == "__main__":

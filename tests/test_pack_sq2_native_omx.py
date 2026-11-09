@@ -60,6 +60,15 @@ class NativeOmxPack(unittest.TestCase):
             report=native.build(base,service,bridge,d/"matched",pack.file_hash(base))
             self.assertIn(native.LAYOUT_V2,report["required_exports"][native.SERVICE])
 
+    def test_dual_abi_bridge_accepts_original_service(self):
+        with tempfile.TemporaryDirectory() as temp:
+            d = Path(temp)
+            base, service, bridge, output, _ = self.fixture(d)
+            bridge.write_bytes(bridge.read_bytes() + native.LAYOUT_V2.encode() + b"\0" +
+                               b"quest2_omx_capture_layout_for_usage\0")
+            report = native.build(base, service, bridge, output, pack.file_hash(base))
+            self.assertNotIn(native.LAYOUT_V2, report["required_exports"][native.SERVICE])
+
     def fixture(self, temp):
         files = {native.SERVICE: b"old service", native.BRIDGE: b"old bridge",
                  native.PREFIX + "service.rc": b"old rc and environment", native.PREFIX + "lib64/unchanged.so": b"old unchanged library"}

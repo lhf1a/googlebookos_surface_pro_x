@@ -9,7 +9,7 @@
     "Current accepted runtime is preserved exactly; compile outputs do not automatically replace it.",
     "Scene user-data symlink is device state; Scene GPU UI telemetry remains unadapted."
   ],
-  "hardware_scope": "User-accepted SQ2 v21 with diagnostic-only cleanup; SQ1 and long-term suspend not revalidated",
+  "hardware_scope": "User-accepted SQ2 v21-release-4k: postboot Bili 4K/quality changes/audio/page switching normal; HEVC/AVC 36 exact frames; no new SQ1/PM/long-term or sustained-60fps benchmark",
   "kernel_release": "6.18.60-sq2-android1",
   "graphics": "qualcomm-mapper5-gralloc-qti-hwc-sdm",
   "schema": 1,
@@ -18,12 +18,12 @@
     "el2launch.efi": "74817f58fe10337f23c00c62082ef917097c6648d94bc847e0d452584b8db72d",
     "start.efi": "31a2edd5ec981c6a21b9e9302faaef0b49a6c3f0bc110e45e7e4372a800f2267",
     "tcblaunch.exe": "195997cf13a82f4715c92374b7918ab1f7231b2cc9be675b0846adf2995f8948",
-    "initramfs.cpio.gz": "e826df919c358a61ff023f6021ba9dae43d166b1d781a3b107ed8320286456a0",
+    "initramfs.cpio.gz": "0ada8ee0db271abc7a25f5c6ee63b0d484b03bed75c5352ae8f5d65f0902beb5",
     "qebspilaa64.efi": "e3675e36a749176481742a8ac78b8d505a40e3ea2a87464b123c45dd3080fe95",
     "kernel-options.txt": "938cd0aeb71b6ac0ef8976e8e346f519488bd9c960db554450e0e1c7d5e58fd2",
     "android-el2.dtb": "c137b9604b908e39aba4be6ecd98e55cd9986fe3fd7522c93069bef7489c956b"
   },
-  "baseline": "v21-release",
+  "baseline": "v21-release-4k",
   "date": "2026-11-10",
   "sole_supported_baseline": true
 }

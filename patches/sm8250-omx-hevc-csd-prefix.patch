@@ -1,0 +1,121 @@
+--- a/mm-video-v4l2/vidc/vdec/src/omx_vdec_v4l2.cpp
++++ b/mm-video-v4l2/vidc/vdec/src/omx_vdec_v4l2.cpp
+@@ -2664,6 +2664,10 @@
+         dec.flags = V4L2_CMD_FLUSH_OUTPUT | V4L2_CMD_FLUSH_CAPTURE;
+     }
+ 
++    if (input_flush_progress) {
++        auto_lock l(buf_lock);
++        m_sq2_hevc_csd.reset();
++    }
+     if (ioctl(drv_ctx.video_driver_fd, VIDIOC_DECODER_CMD, &dec)) {
+         DEBUG_PRINT_ERROR("Flush Port (%u) Failed ", (unsigned int)flushType);
+         bRet = false;
+@@ -2731,6 +2735,10 @@
+     unsigned long ident = 0;
+     bool bRet = true;
+ 
++    {
++        auto_lock l(buf_lock);
++        m_sq2_hevc_csd.reset();
++    }
+     /*Generate EBD for all Buffers in the ETBq*/
+     DEBUG_PRINT_LOW("Initiate Input Flush");
+ 
+@@ -4849,6 +4857,8 @@
+     }
+ 
+     if (port == OMX_CORE_INPUT_PORT_INDEX) {
++        // free_buffer already holds buf_lock; input-port release ends this CSD generation.
++        m_sq2_hevc_csd.reset();
+         if (!input_use_buffer)
+             nPortIndex = buffer - m_inp_mem_ptr;
+         else
+@@ -5136,10 +5146,42 @@
+ 
+     VIDC_TRACE_INT_LOW("ETB-TS", buffer->nTimeStamp / 1000);
+     VIDC_TRACE_INT_LOW("ETB-size", buffer->nFilledLen);
++    bool sq2_joined = false;
++    size_t sq2_joined_length = buffer->nFilledLen;
++    if (drv_ctx.decoder_format == VDEC_CODECTYPE_HEVC && !secure_mode &&
++        !m_input_pass_buffer_fd && !allocate_native_handle && !drv_ctx.disable_dmx &&
++        ((buffer->nFlags & OMX_BUFFERFLAG_CODECCONFIG) || m_sq2_hevc_csd.size())) {
++        OMX_BUFFERHEADERTYPE *source = input_use_buffer ?
++                (m_inp_heap_ptr ? &m_inp_heap_ptr[nPortIndex] : NULL) : buffer;
++        size_t capacity = drv_ctx.ip_buf.buffer_size;
++        if (capacity > temp_buffer->mmaped_size) capacity = temp_buffer->mmaped_size;
++        Sq2HevcCsdPrefix::Result result = Sq2HevcCsdPrefix::BadInput;
++        if (source && source->pBuffer && source->nOffset <= source->nAllocLen &&
++            buffer->nFilledLen <= source->nAllocLen - source->nOffset &&
++            temp_buffer->offset == 0) {
++            result = m_sq2_hevc_csd.consume(
++                    static_cast<uint8_t *>(temp_buffer->bufferaddr), capacity,
++                    source->pBuffer + source->nOffset, buffer->nFilledLen,
++                    buffer->nFlags & OMX_BUFFERFLAG_CODECCONFIG,
++                    buffer->nFlags & OMX_BUFFERFLAG_EOS, &sq2_joined_length);
++        }
++        if (result == Sq2HevcCsdPrefix::Stashed) {
++            // The private byte copy owns CSD now; return this original input once.
++            post_event((unsigned long)buffer, VDEC_S_SUCCESS, OMX_COMPONENT_GENERATE_EBD);
++            return OMX_ErrorNone;
++        }
++        if (result != Sq2HevcCsdPrefix::Joined && result != Sq2HevcCsdPrefix::Pass) {
++            DEBUG_PRINT_ERROR("HEVC CSD input rejected=%d", result);
++            m_sq2_hevc_csd.reset();
++            post_event((unsigned long)buffer, VDEC_S_SUCCESS, OMX_COMPONENT_GENERATE_EBD);
++            return result == Sq2HevcCsdPrefix::NoMemory ? OMX_ErrorInsufficientResources : OMX_ErrorBadParameter;
++        }
++        sq2_joined = result == Sq2HevcCsdPrefix::Joined;
++    }
+     /*for use buffer we need to memcpy the data*/
+-    temp_buffer->buffer_len = buffer->nFilledLen;
+-
+-    if (input_use_buffer && temp_buffer->bufferaddr && !secure_mode) {
++    temp_buffer->buffer_len = sq2_joined_length;
++
++    if (input_use_buffer && temp_buffer->bufferaddr && !secure_mode && !sq2_joined) {
+         if (buffer->nFilledLen <= temp_buffer->buffer_len) {
+             memcpy (temp_buffer->bufferaddr, (m_inp_heap_ptr[nPortIndex].pBuffer + m_inp_heap_ptr[nPortIndex].nOffset),
+                     buffer->nFilledLen);
+@@ -5249,9 +5291,15 @@
+         DEBUG_PRINT_ERROR("Failed to qbuf Input buffer to driver, send ETB back to client");
+         print_v4l2_buffer("QBUF failed", &buf);
+         print_omx_buffer("EBD on qbuf failed", buffer);
++        if (sq2_joined) {
++            m_sq2_hevc_csd.reset();
++            post_event((unsigned long)buffer, VDEC_S_SUCCESS, OMX_COMPONENT_GENERATE_EBD);
++            return OMX_ErrorHardware;
++        }
+         m_cb.EmptyBufferDone(hComp, m_app_data, buffer);
+         return OMX_ErrorHardware;
+     }
++    if (sq2_joined) m_sq2_hevc_csd.reset();
+ 
+     if (codec_config_flag && !(buffer->nFlags & OMX_BUFFERFLAG_CODECCONFIG)) {
+         codec_config_flag = false;
+@@ -5571,6 +5619,10 @@
+         DEBUG_PRINT_HIGH("Playback Ended - PASSED");
+     }
+ 
++    {
++        auto_lock l(buf_lock);
++        m_sq2_hevc_csd.reset();
++    }
+     /*Check if the output buffers have to be cleaned up*/
+     buffer = m_out_mem_ptr;
+     if (buffer) {
+--- a/mm-video-v4l2/vidc/vdec/inc/omx_vdec.h
++++ b/mm-video-v4l2/vidc/vdec/inc/omx_vdec.h
+@@ -1,3 +1,4 @@
++#include "sq2-hevc-csd-prefix.h"
+ /*--------------------------------------------------------------------------
+ Copyright (c) 2010 - 2020, The Linux Foundation. All rights reserved.
+ 
+@@ -1096,6 +1097,7 @@
+         bool external_meta_buffer;
+         bool external_meta_buffer_iommu;
+         OMX_QCOM_EXTRADATA_FRAMEINFO *m_extradata;
++        Sq2HevcCsdPrefix m_sq2_hevc_csd;
+         bool codec_config_flag;
+         uint32_t capture_capability;
+         int output_capability;

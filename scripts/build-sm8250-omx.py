@@ -25,6 +25,7 @@ def main():
     for name in ('prepared', 'toolchains', 'full-stack', 'renderer', 'omx-dir', 'private-libs', 'output'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--hdr-sequence-reset', action='store_true')
+    parser.add_argument('--hevc-csd-prefix', action='store_true')
     args = parser.parse_args()
     prepared, cache, stack, renderer, omx, libs, out = [getattr(args, n).resolve() for n in
         ('prepared', 'toolchains', 'full_stack', 'renderer', 'omx_dir', 'private_libs', 'output')]
@@ -41,6 +42,11 @@ def main():
     if args.hdr_sequence_reset:
         subprocess.run(['patch', '-p1', '--batch', '--fuzz=0', '-i',
                         str(ROOT / 'patches/sm8250-omx-hdr-sequence.patch')], cwd=media, check=True)
+    if args.hevc_csd_prefix:
+        subprocess.run(["patch", "-p1", "--batch", "--fuzz=0", "-i",
+                        str(ROOT / "patches/sm8250-omx-hevc-csd-prefix.patch")], cwd=media, check=True)
+        shutil.copy2(ROOT / "probe/video/sq2-hevc-csd-prefix.h",
+                     media / "mm-video-v4l2/vidc/vdec/inc/sq2-hevc-csd-prefix.h")
     includes = [prepared / 'headers', media / 'mm-video-v4l2/vidc/vdec/inc',
         media / 'mm-video-v4l2/vidc/common/inc', media / 'mm-core/inc',
         media / 'libplatformconfig', media / 'libc2dcolorconvert',
@@ -65,7 +71,7 @@ def main():
         '-Wno-deprecated-declarations', '-Wno-parentheses', '-Wno-c99-designator', '-Wno-vla-cxx-extension']
     for include in includes:
         flags += ['-I', str(include)]
-    record = {'source_commit': recipe['commit'], 'hdr_sequence_reset': args.hdr_sequence_reset,
+    record = {'source_commit': recipe['commit'], 'hdr_sequence_reset': args.hdr_sequence_reset, 'hevc_csd_prefix': args.hevc_csd_prefix,
               'commands': [], 'inputs': {}, 'scope': 'candidate only, no deployment or Main10 advertisement'}
 
     def run(name, command):
@@ -96,6 +102,9 @@ def main():
             record['inputs'][str(dep)] = sha(dep)
     for path in [cc, *libs.glob('*.so'), ROOT / 'patches/sm8250-omx-hdr-sequence.patch']:
         record['inputs'][str(path)] = sha(path)
+    if args.hevc_csd_prefix:
+        for path in (ROOT / 'patches/sm8250-omx-hevc-csd-prefix.patch', ROOT / 'probe/video/sq2-hevc-csd-prefix.h'):
+            record['inputs'][str(path)] = sha(path)
     data = so.read_bytes()
     if data[:6] != b'\x7fELF\x02\x01' or int.from_bytes(data[18:20], 'little') != 183:
         raise ValueError('Not ARM64 shared ELF')

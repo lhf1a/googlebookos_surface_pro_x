@@ -52,6 +52,14 @@ def unsigned_arm64_pe(data):
             'Unexpected nonzero PE checksum')
 
 
+def graphics_option(options):
+    values = [token for token in options.split() if token.startswith('sq2.vulkan=')]
+    require(len(values) == 1 and values[0] in
+            ('sq2.vulkan=mesa', 'sq2.vulkan=qcom', 'sq2.vulkan=qualcomm', 'sq2.vulkan=closed'),
+            'Missing, ambiguous or unsupported baseline graphics option')
+    return values[0]
+
+
 def rewrite_efi(data, old_directory, directory, expected, graphics_argument):
     unsigned_arm64_pe(data)
     old, new = '\\EFI\\'+old_directory+'\\', '\\EFI\\'+directory+'\\'
@@ -63,8 +71,7 @@ def rewrite_efi(data, old_directory, directory, expected, graphics_argument):
         require(text.startswith(old) or text.startswith('console='), 'Unexpected path constant')
         updated = text.replace(old, new)
         if text.startswith('console='):
-            require(text.split().count('sq2.vulkan=mesa') == 1, 'Accepted Mesa option missing')
-            updated = updated.replace('sq2.vulkan=mesa', graphics_argument)
+            updated = updated.replace(graphics_option(text), graphics_argument)
         encoded = updated.encode('utf-16le') + b'\0\0'
         require(len(encoded) <= end-start, 'New constant exceeds original UTF-16 allocation; use a shorter directory')
         result[start:end] = encoded + b'\0'*(end-start-len(encoded))
@@ -188,7 +195,7 @@ def build(a):
         files[name] = (a.baseline/name).read_bytes()
         require(sha(files[name]) == expected, 'Baseline hash mismatch: '+name)
     inspect_efi(files['start.efi'], files['el2launch.efi'], files['kernel-options.txt'].decode(),
-                source_directory, 'sq2.vulkan=mesa')
+                source_directory, graphics_option(files['kernel-options.txt'].decode()))
     require(files['Image'][0x38:0x3c] == b'ARMd', 'ARM64 Image header missing')
     require(files['android-el2.dtb'][:4] == b'\xd0\x0d\xfe\xed', 'DTB header missing')
     payload = a.payload.read_bytes()
@@ -268,13 +275,13 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--inspect-grub', type=Path)
     p.add_argument('--verify-output', type=Path)
-    p.add_argument('--baseline', type=Path, default=ROOT/'private/build-inputs/kernel-6.18/EFI/SQ2L618C')
+    p.add_argument('--baseline', type=Path, default=ROOT/'private/build-inputs/kernel-6.18/EFI/SQ2Nat')
     p.add_argument('--manifest', type=Path, default=ROOT/'configs/kernel-baseline.json')
     p.add_argument('--payload', type=Path)
     p.add_argument('--payload-sha256')
     p.add_argument('--grub-input', type=Path)
     p.add_argument('--output', type=Path)
-    p.add_argument('--directory', default='SQ2QDbg')
+    p.add_argument('--directory', default='SQ2Dbg')
     p.add_argument('--graphics-argument', default='sq2.vulkan=qcom')
     a = p.parse_args()
     try:

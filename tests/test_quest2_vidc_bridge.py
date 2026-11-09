@@ -447,6 +447,17 @@ class QuestVidcBridge(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("NODE_SYMBOL:", result.stdout)
 
+    def test_legacy_native_service_layout(self):
+        with tempfile.TemporaryDirectory() as td:
+            executable = str(Path(td) / "test")
+            subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+                            "-fsanitize=address,undefined", "-fno-pie", "-no-pie", "-rdynamic",
+                            str(ROOT / "tests/fixtures/quest2_video/bridge-legacy-layout.c"),
+                            "-ldl", "-pthread", "-o", executable], check=True)
+            result = subprocess.run([executable], capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("LEGACY_LAYOUT:", result.stdout)
+
     def test_native_metadata_dma_and_donor_record_contract(self):
         with tempfile.TemporaryDirectory() as td:
             executable = str(Path(td)/'test')
