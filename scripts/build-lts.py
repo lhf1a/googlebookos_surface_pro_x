@@ -12,6 +12,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 
 from kernel_baseline import ROOT, digest, policy, validate_build_tree, validate_kernel_source
 
@@ -166,6 +167,11 @@ def compile_kernel(args, selected=None):
         for number, group in enumerate(external['groups']):
             module_dir = work / group['source']
             label = 'external-' + str(number)
+            if 'spi-hid.ko' in group['modules']:
+                # The copied 6.18 sources can retain V1 PM but lose V2 input
+                # recovery. Reapply idempotently to the copy, never the input.
+                run(label + '-resume-recovery', [str(module_dir)],
+                    [sys.executable, str(ROOT / 'scripts/patch-sq2-spi-pm.py')])
             options = ['M=' + str(module_dir)] + group.get('make_options', [])
             run(label + '-clean', options + ['clean'], prefix)
             run(label, options + ['-j' + str(args.jobs), 'modules'], prefix)

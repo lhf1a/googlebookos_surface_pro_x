@@ -1971,3 +1971,11 @@ hwservicemanager会缓存VINTF；运行中添加不能当已注册，需真实in
 
 native GPU builder同时纳入quest2-native-mapper-compat.h/quest2-native-rgb-stride.h的源hash。
 兼容层只修正已知RGB行距单位，不能把它当P010 plane metadata、HDR或系统mapper5移植完成。
+
+
+## 2026-11-10：触摸恢复与用户0默认 Launcher 记录
+
+详见 [SQ2-TOUCH-HOME-20261110.md](SQ2-TOUCH-HOME-20261110.md)：SPI-HID V2恢复构建集成、
+Nexus HOME组件级修复、可复用维护/限定回滚脚本及验证范围。触摸候选已部署并正常重启；
+用户亮灭屏交互正常，但Venus挂起-110阻断真实休眠，完整PM验收仍未通过。
+本提交不包含通用镜像开发、私有载荷、凭据或原始日志，不提升发布pins/full_*。

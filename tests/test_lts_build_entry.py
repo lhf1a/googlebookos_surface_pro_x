@@ -187,6 +187,50 @@ class LtsEntry(unittest.TestCase):
         self.assertEqual(json.loads((args.output / 'commands.json').read_text())[0]['exit'], 7)
         self.assertFalse((args.output / 'build-audit.json').exists())
 
+    def spi_resume_fixture(self):
+        args = self.compile_fixture(core_only=False)
+        args.external_sources = self.root / 'external'
+        module = args.external_sources / 'spi'; module.mkdir(parents=True)
+        (module / 'Makefile').write_text('obj-m += spi-hid.o\n')
+        (module / 'spi-hid-core.c').write_text('preserved V1 source\n')
+        groups = {'groups': [{'source': 'spi', 'modules': {'spi-hid.ko': 'extra/spi-hid.ko'}}]}
+        return args, module, groups
+
+    def test_spi_resume_patch_runs_on_copy_before_compilation(self):
+        args, module, groups = self.spi_resume_fixture()
+        fake = self.fake_make(args)
+        def run(command, stdout, stderr):
+            if any(s.endswith('patch-sq2-spi-pm.py') for s in command):
+                copied = Path(command[-1])
+                self.assertEqual(copied.resolve(), (args.output / 'external-build/spi').resolve())
+                (copied / 'spi-hid-core.c').write_text('fixture patched recovery\n')
+            if 'modules' in command and any(s.startswith('M=') for s in command):
+                copied = Path(next(s[2:] for s in command if s.startswith('M=')))
+                self.assertEqual((copied / 'spi-hid-core.c').read_text(), 'fixture patched recovery\n')
+                (copied / 'spi-hid.ko').write_bytes(b'\x7fELF\x00vermagic=' + self.selected['kernel_release'].encode() + b' SMP\x00')
+            return fake(command, stdout, stderr)
+        with patch.object(build, 'external_manifest', return_value=groups), patch.object(build.subprocess, 'run', side_effect=run):
+            result = build.compile_kernel(args, self.selected)
+        self.assertEqual((module / 'spi-hid-core.c').read_text(), 'preserved V1 source\n')
+        commands = [x['command'] for x in result['commands']]
+        patch_index = next(i for i, c in enumerate(commands) if any(s.endswith('patch-sq2-spi-pm.py') for s in c))
+        self.assertEqual(commands[patch_index + 1][-1], 'clean')
+
+    def test_spi_resume_patch_failure_stops_before_module_compile(self):
+        args, module, groups = self.spi_resume_fixture()
+        fake = self.fake_make(args)
+        def run(command, stdout, stderr):
+            if any(s.endswith('patch-sq2-spi-pm.py') for s in command):
+                return subprocess.CompletedProcess(command, 17)
+            return fake(command, stdout, stderr)
+        with patch.object(build, 'external_manifest', return_value=groups), patch.object(build.subprocess, 'run', side_effect=run):
+            with self.assertRaisesRegex(RuntimeError, 'Compilation failed'):
+                build.compile_kernel(args, self.selected)
+        commands = json.loads((args.output / 'commands.json').read_text())
+        self.assertEqual(commands[-1]['exit'], 17)
+        self.assertFalse((args.output / 'external-build/spi/spi-hid.ko').exists())
+        self.assertEqual((module / 'spi-hid-core.c').read_text(), 'preserved V1 source\n')
+
 
 if __name__ == '__main__':
     unittest.main()
