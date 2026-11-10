@@ -1,3 +1,25 @@
+## 2026-11-10：触摸累加修复持久化与默认构建
+
+用户完成本机向导并要求保存修复、作为默认构建提交推送。静置/滑动/15点学习均保留
+已确认噪声和点触规则，检测残留并有界合并；无新证据不清零，复测确认后保存，取消
+仅撤销本轮预览。TapRuntime分离实际输出与残留观察，原真实信号/多指/掌压边界保持。
+两轮15点各15/15、每点1组/峰值1/取消0；独立复测USER_ACCEPTED匹配。最终tap为0帧，
+未人为增加续接；拇指复测10轮各1次，2次短接触记录保留，不外推长时或整栈验收。
+
+新默认pins为v21-release-4k-touch-cumulative：标准initramfs b66a8b2f…，只改bin/iptsd；
+本机现有单用户包独立更新为10cacda8…，不以标准包覆盖本机内核/单用户策略。
+新IPTSd e531874e…，其余有效记录/metadata及身份尾成员保持；恢复入口/GRUB不变。
+本机noise/tap/profile留在设备身份绑定私有存储，不嵌入通用包，不上传原始记录。
+
+正常重启boot a01507e5-8c79-4127-a6e5-25d53983f7c6，实际exe哈希正确且无/bin/iptsd绑定，
+三类保存规则自动加载并逐字匹配，Android完成启动。首次BusyBox请求未改变boot，
+随后改用Android正常重启接口；不能把首次请求当成功或把轮询时长当启动耗时。
+主机24项回归、原红/新绿ASan/UBSan、源码及包副本精确回滚/重应用、标准verify/package通过。
+本地full-image-runtime私有输入也同步且实际assemble_runtime核对新daemon；旧touch bundle
+缓存并不源码匹配，未伪造其manifest或复用。源码与pins提交，私有载荷只在ignored目录。
+证据沿用out/touch-cumulative-20261110四角色及persistent扩展，详见docs/TOUCH-CUMULATIVE-20261110.md。
+音视频/PM/长时及full_*未完成边界保持，下面旧发布名称仅为父版追溯。
+
 ## 2026-11-10：4K 软解回退修复与独立 debug 入口
 
 用户在 v21-release 下报告 Bilibili 4K 严重卡顿，并明确要求恢复一个带原 debug 信息的 GRUB 入口。

@@ -211,8 +211,8 @@ while true; do
                     # A timed-out preview must not silently become a baseline retest.
                     requested=$(sed -n 3p /run/touch-calibration-request)
                     if [ "$requested" = preview ] && [ "$noise_preview" != 1 ]; then reply ERROR;continue;fi
-                    # Observe original heatmaps again, WITHOUT restoring the active patch.
-                    # Android reports the post-mitigation contacts in the same window.
+                    # Observe residual heatmaps with all current noise and tap rules active.
+                    # Android reports post-mitigation contacts in the same window.
                     case "$(cat "$noise/version" 2>/dev/null)" in 7) ;; *) reply ERROR;continue;; esac
                     if [ "$noise_preview" = 1 ]; then noise_until=$(( $(cut -d . -f1 /proc/uptime) + 600 )); fi
                     power=$(cat /sys/class/power_supply/ADP1/online 2>/dev/null || printf unknown)

@@ -25,11 +25,11 @@ class NoiseRuntime {
             if(in>>op>>id>>n && !(in>>extra) && identity(id) && n.size()<=64 && !n.empty() && n.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-")==std::string::npos){
                 device=id;nonce=n;
                 tap.command(op,id,n);
-                if(op=="taplearn"){noiseBypass=tapBypass=true;probeUntil=time+600000;learner.learning=false;}
+                if(op=="taplearn"){noiseBypass=tapBypass=baselineProbe=false;probeUntil=time+600000;learner.learning=false;}
                 if(op=="tapreload")tapBypass=false;
                 try {
                     if(op=="learn" || op=="slide" || op=="learn-test" || op=="slide-test") {
-                        probeUntil=time+600000;baselineProbe=op=="learn"||op=="slide";noiseBypass=baselineProbe;tapBypass=true;
+                        probeUntil=time+600000;baselineProbe=noiseBypass=tapBypass=false; // Learn residuals with all accepted rules active.
                         std::remove((root+"candidate").c_str());learner.begin(id,vendor,product,rows,cols,time,op=="slide"||op=="slide-test");
                     }
                     else if(op=="reload"){
@@ -48,7 +48,7 @@ class NoiseRuntime {
         // Control-file/timer worker only, never HID IO. No idle status rewrite loop.
         if(!nonce.empty() && (status!=lastStatus || (learner.learning && time-published>=1000))){
             if(learner.state=="ready" || (learner.state=="line_noise"&&learner.result.band())){
-                try{auto candidate=AdaptiveNoise::refine(baselineProbe?Profile{}:active,learner.result);
+                try{auto candidate=AdaptiveNoise::refine(active,learner.result);
                     write(root+"candidate",candidate.encode());
                 }catch(...){learner.state="unresolved";std::remove((root+"candidate").c_str());}
             }
