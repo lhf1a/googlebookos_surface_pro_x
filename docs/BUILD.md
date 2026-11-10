@@ -1,3 +1,110 @@
+## 2026-11-10：原模板 v6 完整源码镜像已输出
+
+`D:/spx_img/template-source-618-20261110-v6` 为本轮完成的整包，HEAD8f5d964及当前工作区
+SQ1/SQ2分型、DPU/SPI-HID源码适配、user0/NexusLauncher、最新累加触摸和默认壁纸均纳入。
+使用固定private/build-inputs原20GiB模板，Linux6.18.60内核与完整模块组实际从源码重编。
+调用full-image的source默认路线/32任务；内核完成后修正storage_payload对单用户hook的
+旧紧邻假设，直接续接本次未完成的disk步骤，最终exit0。详情及失败原记录见HANDOFF。
+输出raw21474836480字节、gzip8295869453字节；未做verify/package、整盘校验、备份、
+回滚或设备部署。v5旧文件保持但不再作为本轮交付；新v6尚无实机启动验收。
+
+## 2026-11-10：最新 SPI-HID 和 user0 HOME 已接入通用源码构建
+
+当前本地提交6b790ba的build-lts外挂模块阶段会执行patch-sq2-spi-pm.py，
+保证源构建包含INPUT_RECOVERY_V2；本轮已在原配套构建树实际重编spi-hid/MODPOST并部署。
+full_image_home.py将本提交HOME维护脚本与有界一次性user0 HOME处理器装入通用镜像；
+仅替换默认LoginLauncherActivity，不覆盖用户自选桌面，不清数据。六个隔离guard场景通过。
+设备正常重启到新SPI模块/NexusLauncher，并移除临时早期SSH、Wi-Fi接管与采集脚本；
+原普通系统启动后SSH保留，最新地址192.168.5.115。SQ1分型、硬件GLES、user0保持。
+此为当前ESP启动包修复，非旧v5整盘已更新，也非真实suspend/resume完成证明。
+具体包/编译/设备证据见HANDOFF最新节和docs/FULL-IMAGE.md；不恢复内容哈希门槛或回滚测试。
+
+## 2026-11-10：通用镜像启动取消文件哈希门槛，磁盘识别已通过
+
+IMG_0460 已出现 provisioned system disk selected，旧 ldo10 电压错误和 image-disk-not-found 未再出现；新停止点 p010-renderer-stage，用户补充 libstagefright.so FAILED。
+定位为 full_image 错误重写 BASELINE.sha256：原系统 77292e86… 被改成待安装库 93312fd5…。用户明确要求取消启动和构建中的哈希校验，故改为无内容哈希门槛的通用流程，不继续扩展哈希清单。
+full-image/disk-image 已取消内容哈希对比、内部清单重写和 ESP/整盘 SHA 清单生成；仍保留 ABI/格式/路径/磁盘唯一性与真实命令失败。独立 verify/package 历史审计工具未改成假成功。
+新增 runtime_boot_policy.py 对独立输入生成 helper 副本，不改私有原件。15 个 helper 和存储配置变化，校准设备标识哈希保留（非校验），APK 每启动安装一次；权限/认证不改。
+新产物 D:/spx_img/startup-nohash-20261110/initramfs.cpio.gz，250224382 bytes，原压缩成员和末尾凭据保留；Image/模块/库/固件/单用户设置不变。37 项相关主机测试通过，有效归档记录及权限/设备元数据对照通过。最初主机审计误要求 cpio 文件长度字段不变而 exit1，已修审计并复核现有候选 exit0，没有暗中覆盖失败记录。
+当前未接 USB SSD，未写盘/重启；需接回后只更新正常/救援 initramfs，移除这两个入口旧 SHA256SUMS。已有 DTB/启动器修复保留。旧 v5 整盘未重打包，整体相似问题审阅尚不能声称全部完成。
+## 当前整包入口：原模板 + 源码内核 + 单用户（2026-11-10）
+
+最新集成使用 `scripts/build.py full-image`，默认源码编译并使用
+`private/build-inputs/template.img` 原布局/原容量，不再默认 64 GiB。
+私有依赖固定在 `private/build-inputs/`；构建命令、源码准备和输入目录见 [FULL-IMAGE.md](FULL-IMAGE.md)。
+本轮只构建、不额外测试或回滚；构建失败记录不能当成整包完成。
+
+## 历史独立 64 GiB 候选（已被上述原模板流程替代）
+
+用户最新要求本轮**只构建产物，不额外校验和回滚**，使用 `--build-only`；不重跑测试、文件系统/分区读回、
+整包解压校验或生成整盘 SHA256。已有输入匹配结果继续复用，不将未执行项写成已通过。
+
+新入口 `scripts/build.py disk-image` 只创建普通文件，不调用退休的 6.3.8 磁盘构建器，
+不打开块设备、不写盘、不部署、不重启。此前显式生成过 **64 GiB GPT raw 镜像及 gzip 压缩包**；不是原通用模板默认。
+
+```sh
+python3 scripts/build.py disk-image --recovery-zip ORIGINAL_MICA_RECOVERY_ZIP \
+  --resources EXTRACTED_V21_PRIVATE_RESOURCES \
+  --single-user-initramfs SINGLE_USER_INITRAMFS \
+  --expected-single-user-sha256 SINGLE_USER_SHA256 --output FRESH_OUTPUT \
+  --size-gib 64 --jobs 8 --build-only
+```
+
+基础 ZIP 和解出的 raw 必须分别匹配 `configs/sources.lock.json` 的 mica/16471258 固定 hash。
+内核、DT、默认 EFI、签名 TCB、固件及配套运行栈来自最新 v21-release-4k 私有资源，不混入旧镜像
+的用户数据。全部普通原厂分区复制后逐区 hash 比较；userdata、metadata 重新创建为空 ext4，misc 清零。
+新数据分区不含旧 user 10 的账号、应用、密钥或设置；此操作仅针对新文件里的新文件系统。
+
+此父包仍携带旧 512 GB/UUID 门禁，因此完整镜像会在单用户候选上额外叠加
+`prepare-image-ssd`、镜像分区表和 super 布局完整性参数；从 sysfs 的真实 PARTNAME 发现分区和父盘，
+只读探测本镜像的 ESP 标记，拒绝歧义及损坏布局。不再要求原盘 UUID、精确总容量、固定节点号或
+分区枚举顺序，已扩展的 userdata 允许保留；super 按动态 by-name 路径访问。去掉旧 SQ2TEST 伪序列号。
+不会在启动时格式化、缩放或迁移数据。磁盘镜像本身的 GPT/分区 GUID 与 ext4 UUID 是新生成的镜像状态，
+不是调试机身份白名单。
+
+新 ESP 含默认 `SQ2Nat` 和同载荷的 `SQ2Res` 救援入口，后者在挂载 Android data 前退出到救援流程。
+救援仅修改项目未签名 EFI 的等长路径/命令参数；内核、DT、签名组件与固件不变。
+非 build-only 模式提供全文件 FAT 读回、ext4 只读检查、主/备 GPT CRC 与分区边界、原厂分区 hash、完整 gzip 解压 hash；
+本轮按用户要求跳过，不做新的回滚演练。`--resume-build` 仅显式复用本次目录及已完成的原版解包，避免重复下载/解包。
+物理设备现有菜单、默认项和回退包不会因为制作新文件而改变。
+
+输出仍含父包私有 SSH/Wi-Fi 身份，**只供私人使用，不是匿名公共镜像**。制作完成不等于真机启动、
+user 0 应用兼容性、SQ1 跨机或长时稳定性验收通过；当前运行栈仍以已验收 SQ2 配套为依据。
+
+## 新通用镜像：单用户 user 0（2026-11-10）
+
+新制作的通用镜像采用 **full system user 0**，不再以 headless user 0 + 前台 user 10
+作为用户模型。应用自己的 CE 私有数据由 Android 正常建立在 `/data/user/0/<PACKAGE>`，
+兼容 `/data/data/<PACKAGE>`；不创建 `/0` 到 `/10` 的软链接，不修改应用 UID、DAC 或 SELinux
+以开放其他应用的数据。这里 0/10 是 Android userId，不是 Linux 应用 UID。
+
+统一入口增加必用的单用户候选制作步骤（在所选图形/Radio 等覆盖层组包完成后执行）：
+
+```sh
+python3 scripts/build.py single-user --base INPUT_INITRAMFS \
+  --expected-base-sha256 INPUT_SHA256 --output FRESH_SINGLE_USER_INITRAMFS
+python3 -m unittest tests.test_single_user_image -v
+```
+
+该步骤核验父包，保留全部原压缩成员和最后生效的私有 SSH member，在 Android init 接管前
+最后叠加 `apply-single-user`。它去除各分区 build.prop 中冲突的用户模型默认值，统一设置
+`ro.fw.mu.headless_system_user=false`、`ro.fw.headless_system_user=false`、
+`ro.fw.system_user_split=false`、`fw.max_users=1`、`fw.show_multiuserui=false`，并撤销该候选
+init 中 `el2-terminal-autostart` 的固定数字用户参数，避免再次强制登录 10。正常入口不打开 Terminal。
+输出与 `.audit.json` 必须是新文件；读回核验有效文件变更仅 init 和单用户 helper。
+不改内核、模块、固件、图形/音频/视频载荷、LTE 校准或发布 pins；不写设备、不重启。
+
+**仅用于新建且无用户状态的 userdata。不是已有 user 10 的原地迁移工具。**
+仅改属性不能把已有 headless user 0 安全转换成完整用户；不能将此候选直接覆盖现机并声称兼容已修。
+现有用户的账号、PIN、应用数据、密钥和设置保持原样，不自动删除用户、清数据或格式化。
+最终磁盘组装须选用此候选和独立的新 userdata，沿用真实磁盘识别/恢复约束；历史 6.3.8 磁盘脚本
+不是恢复入口。`package` 仍逐字节保存已验收私有基线，不能把它称作已生成单用户通用整盘镜像。
+父包若含实验室身份，输出仍私有；此步骤不会匿名化输入。
+
+主机 fixture 验证只覆盖真实 helper 的属性覆盖、用户选择取消、数据不触碰与包差异。
+新 userdata 真机首启、唯一 full user 0、应用实际 dataDir 与 `/data/data` 可达性、锁屏/存储/
+Terminal/电话功能以及 SQ1/SQ2 跨机仍须实测，不因生成候选而宣称通过。
+
 ## 当前复建：v21-release-4k 与 debug 入口（2026-11-10）
 
 开发根仍为 WSL `/mnt/spx-workspace/chromebookOS/work/qualcomm-618`，pins 见 `configs/kernel-baseline.json`。
@@ -1971,6 +2078,15 @@ hwservicemanager会缓存VINTF；运行中添加不能当已注册，需真实in
 
 native GPU builder同时纳入quest2-native-mapper-compat.h/quest2-native-rgb-stride.h的源hash。
 兼容层只修正已知RGB行距单位，不能把它当P010 plane metadata、HDR或系统mapper5移植完成。
+
+
+### 2026-11-10：防止 SPI-HID 唤醒恢复补丁在源码重编时丢失
+
+`build-lts.py compile` 对external-build副本中提供spi-hid.ko的组，在clean/build前执行既有
+`patch-sq2-spi-pm.py`。它幂等补齐V1→V2的IRQ启用顺序/无效header错误恢复，不修改输入归档，
+未知锚点失败停止构建；保留response-buffer修复。实际函数回归仍用`check-spi-hid-resume.py`；
+同一6.18已带V1/response的源码可调用其check函数分别检查baseline False、modified True。
+候选包/真实睡眠验收独立于compile成功；本轮运行证据在ignored out/sq2-user10-recovery-20261110/touch-resume-v2。
 
 
 ## 2026-11-10：触摸恢复与用户0默认 Launcher 记录

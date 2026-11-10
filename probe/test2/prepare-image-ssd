@@ -1,0 +1,61 @@
+#!/bin/busybox sh
+# Sourced before Android init. Discover this image's disk, not a lab machine.
+# No disk writes/formatting, no original UUID/serial/capacity admission check.
+ssd_disk=
+probe=/run/spx-image-probe
+mkdir -p "$probe" /media/esp /dev/block/by-name /dev/mapper
+for attempt in $(seq 1 45); do
+    matches=
+    for p in /sys/class/block/*; do
+        [ -f "$p/partition" ] || continue
+        grep -qx 'PARTNAME=SQ2PROBE' "$p/uevent" || continue
+        dev=/dev/$(basename "$p")
+        blkid "$dev" | grep -q 'TYPE="vfat"' || continue
+        mount -t vfat -o ro "$dev" "$probe" || continue
+        valid=0
+        if grep -qx 'SPX_IMAGE_FORMAT=1' "$probe/SPX-IMAGE.txt" 2>/dev/null &&
+           [ -f "$probe/EFI/SQ2Nat/start.efi" ]; then valid=1; fi
+        umount "$probe" || fail image-probe-unmount
+        [ "$valid" = 1 ] || continue
+        parent=$(basename "$(dirname "$(readlink -f "$p")")")
+        matches="$matches $parent:$(basename "$p")"
+    done
+    set -- $matches
+    [ "$#" -le 1 ] || fail ambiguous-image-disk
+    if [ "$#" = 1 ]; then
+        parent=${1%%:*}
+        espdev=/dev/${1#*:}
+        ssd_disk=/dev/$parent
+        break
+    fi
+    sleep 1
+done
+[ -n "$ssd_disk" ] || fail image-disk-not-found
+ssd_part=$ssd_disk
+case "$ssd_disk" in *[0-9]) ssd_part=${ssd_disk}p;; esac
+# Expected names/sizes describe the image format, not device identity or node
+# enumeration. An expanded userdata is allowed; never resize it during boot.
+while read name ignored_number expected_sectors; do
+    found=
+    for p in /sys/class/block/*; do
+        [ -f "$p/partition" ] || continue
+        resolved=$(readlink -f "$p")
+        [ "$(basename "$(dirname "$resolved")")" = "$parent" ] || continue
+        grep -qx "PARTNAME=$name" "$p/uevent" || continue
+        [ -z "$found" ] || fail "duplicate-partition-$name"
+        found=/dev/$(basename "$p")
+        actual=$(cat "$p/size")
+        if [ "$name" = userdata ]; then
+            [ "$actual" -ge "$expected_sectors" ] || fail userdata-shrunk
+        else
+            [ "$actual" = "$expected_sectors" ] || fail "partition-size-$name"
+        fi
+    done
+    [ -n "$found" ] || fail "missing-partition-$name"
+    alias=/dev/block/by-name/$name
+    if [ -e "$alias" ] || [ -L "$alias" ]; then
+        [ "$(readlink -f "$alias")" = "$(readlink -f "$found")" ] || fail "partition-alias-$name"
+    else ln -s "$found" "$alias" || fail "partition-alias-$name"; fi
+done < /etc/sq2-ssd-partitions
+mount -t vfat -o sync "$espdev" /media/esp || fail image-ESP-mount
+echo "$ssd_disk" > /run/sq2-ssd-device

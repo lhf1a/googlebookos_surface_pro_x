@@ -1,0 +1,58 @@
+#!/bin/busybox sh
+# Only the selected universal-image disk; online ext4 grow before swap.
+set -eu
+case " $(cat /proc/cmdline) " in *' sq2.rescue=1 '*) exit 0;; esac
+disk=$(cat /run/sq2-ssd-device)
+data=$(readlink -f /dev/block/by-name/userdata)
+node=${data##*/}
+parent=$(basename "$(dirname "$(readlink -f /sys/class/block/$node)")")
+[ "$disk" = "/dev/$parent" ]
+grep -qx SPX_IMAGE_FORMAT=1 /media/esp/SPX-IMAGE.txt
+[ "$(blockdev --getss "$disk")" = 512 ]
+number=$(cat /sys/class/block/$node/partition)
+start=$(cat /sys/class/block/$node/start)
+size=$(cat /sys/class/block/$node/size)
+sectors=$(cat /sys/class/block/$parent/size)
+# Never grow across another partition, even with an unfamiliar image layout.
+for p in /sys/class/block/$parent/*; do
+    [ -f "$p/partition" ] || continue
+    [ "$(basename "$p")" = "$node" ] && continue
+    [ $(( $(cat "$p/start") + $(cat "$p/size") )) -le "$start" ]
+done
+marker=/media/esp/SPX-USERDATA-GROWN.txt
+identity="$sectors:$number:$start:$size"
+if [ -f "$marker" ] && [ "$(cat "$marker")" = "$identity" ]; then
+    touch /run/spx-userdata-ready
+    exit 0
+fi
+a() { nsenter -t 1 -m -r -- /system/bin/"$@"; }
+dev=$(cat /sys/class/block/$node/dev)
+a cat /proc/self/mountinfo | awk -v dev="$dev" '$3==dev && $5=="/data" && / - ext4 / {ok=1} END {exit ok?0:1}'
+info=$(a sgdisk -i "$number" "$disk")
+guid=$(printf '%s\n' "$info" | awk '/Partition unique GUID:/ {print $4}')
+type=$(printf '%s\n' "$info" | awk '/Partition GUID code:/ {print $4}')
+attrs=$(printf '%s\n' "$info" | awk '/Attribute flags:/ {print $3}')
+first=$(printf '%s\n' "$info" | awk '/First sector:/ {print $3}')
+[ -n "$guid" ] && [ -n "$type" ] && [ -n "$attrs" ] && [ "$first" = "$start" ]
+# Relocate only GPT backup metadata; preserve userdata start/GUID/type/flags.
+a sgdisk -e "$disk"
+last=$(a sgdisk -p "$disk" | awk '/last usable sector is/ {print $NF}')
+case "$last" in ''|*[!0-9]*) exit 1;; esac
+[ "$last" -ge $((start+size-1)) ]
+newsize=$((last-start+1))
+if [ "$newsize" -gt "$size" ]; then
+    a sgdisk -d "$number" -n "$number:$start:$last" -u "$number:$guid" -t "$number:$type" -c "$number:userdata" --attributes="$number:=:0x$attrs" "$disk"
+    sync
+    # Update only this partition's length, retaining its start and live ext4;
+    # rereading the whole table would fail with mounted ESP/super/userdata.
+    resize-userdata-partition "$disk" "$number" "$((start*512))" "$((newsize*512))"
+fi
+[ "$(cat /sys/class/block/$node/size)" = "$newsize" ]
+a resize2fs "$data"
+sync
+printf '%s\n' "$sectors:$number:$start:$newsize" > "$marker.pending"
+sync
+mv "$marker.pending" "$marker"
+sync
+touch /run/spx-userdata-ready
+echo "USERDATA_GROWN device=$data sectors=$newsize; swap permitted after Android boot"

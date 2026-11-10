@@ -1,3 +1,214 @@
+## 2026-11-10：首启跳过向导 HOME 修正与扩容/swap 提交
+
+用户将v6部署到192.168.5.116，boot81aa2a4a…；配置完成两个settings均1，但HOME和前台
+仍为LoginLauncher。实际禁用该user0组件、设Nexus并显式am start HOME后exit0，
+焦点为NexusLauncher，用户确认“已正常进入桌面”。不禁用整个账号包，不清数据。
+根因是原有界helper只等boot_completed，向导临时HOME导致直接退出；修改为等待两个
+setup完成值，向导/Resolver过渡继续等，匹配Login后修正并启动HOME；保留其他用户桌面。
+窗口一小时，不是永久daemon；自动首启新流程尚未实机复测。
+
+实读内存7589056KiB、SwapTotal0、无zram，/data总4197052KiB/可用3378756KiB；
+固定6GiB swap需要7GiB空闲，日志明确不足。按用户要求增加首启在线userdata扩容，
+只处理已确认镜像盘且userdata必须在物理末尾，保留起点/GUID/type/attributes。
+Android启动后sgdisk扩展末尾，静态ARM64 BLKPG工具仅更新userdata长度，再resize2fs；
+成功marker后才允许swap判断；>=12GiB也扩容、仅跳过swap。无mkfs、无移动其他分区。
+未写116磁盘、未执行真实扩容或备份/回滚；新包不能宣称硬件扩容已通过。
+旧userdata-growth-20261110初稿使用启动前Android工具，已废弃，勿部署；后续包使用启动后工具。
+沿用out/single-user-image-20261110四角色，原历史2/0/2不重跑。私有资源、密钥和日志不提交。
+
+## 2026-11-10：v6 原模板完整磁盘镜像已构建（仅产物）
+
+用户明确要求最新提交/本轮改动/默认壁纸合入整包，原通用模板、源码内核、单用户，
+不做校验、备份、回滚测试。当前HEAD8f5d964；fetch后origin/main仍100b6d7，
+没有reset、切分支、提交推送或设备写入。固定private/build-inputs保持，不从父包取内核。
+本轮新工作树kernel-20261110-v6以32任务实际完成Image/modules/dtbs、全部外挂模块及depmod，
+build-only，不生成导出哈希清单。MSM四组DPU源码适配、SPI-HID V2均从源码构建；
+最新累加触摸IPTSd来自已同步的固定私有输入，不使用旧touch缓存，不嵌入本机校准文件。
+通用single-user/user0 HOME、SQ1 661MHz/RPMh416与SQ2原分型、无临时早期SSH、三份默认壁纸替换保持。
+当前touch-calibration-boot按最新源码装入；磁盘SPX_RELEASE使用当前baseline而非旧硬编码。
+
+首次整包在内核、DT和runtime完成后因旧HOOK+ANCHOR紧邻判断exit1；新HOME/壁纸步骤合法位于
+单用户设置与handoff之间。修正为一次单用户设置先于一次handoff，不删除单用户策略。
+只续接未完成disk阶段，复用本轮已编译的内核/runtime，没有重编或恢复旧模块；续接exit0。
+初始失败RUN.json/stdout/stderr保留，成功见out/single-user-image-20261110/full-build-v6-20261110。
+
+新完整产物D:/spx_img/template-source-618-20261110-v6/disk/：
+surface-pro-x-6.18-single-user-private.img，21474836480字节；
+surface-pro-x-6.18-single-user-private.img.gz，8295869453字节。
+同目录IMAGE-MANIFEST及上级FULL-IMAGE.json记录source_compiled=true、kernel_mode=source、
+template_layout_preserved=true、build_only_requested=true；内容hash为null，无硬件启动声明。
+没有运行verify/package、fsck、整盘/解压读回校验、校验套件、备份或回滚测试；没有SSH部署/重启。
+原v5和模板不改；后续刷机应选新v6而非旧失败镜像。新v6实际启动/唤醒/长期验收仍未进行。
+沿用四角色与历史2/0/2记录，不新增执行。完整镜像含私有身份，不公开上传。
+
+## 2026-11-10：SQ1 应用最新触摸/HOME 提交，退出临时早期 SSH
+
+用户在192.168.5.114确认之前SQ1正常启动，要求应用最新休眠唤醒触摸/Launcher修改并移除启动诊断SSH。
+fetch后origin/main仍100b6d7；保留当前本地最新6b790ba，不reset/覆盖dirty源码，不提交推送。
+在原v5配套构建树以新源码副本应用SPI-HID INPUT_RECOVERY_V2并重编/MODPOST，exit0；
+仅有原const返回类型qualifier警告。spi_hid_ll_open在复位成功后启IRQ，错误header排既有error_work。
+真机先运行本提交HOME脚本，LoginLauncherActivity→NexusLauncher，exit0；只禁该user0组件。
+通用full-image另集成有界一次性HOME修复，只处理fulluser0的Login HOME，不覆盖自选桌面；
+六个隔离命令fixture通过（含原失败19传播），未运行rollback测试。
+
+从当前DPU修复包撤销精确早期SSH init变换，移除spx-early-ssh、两个el2-early网络helper及marker，
+保留当前其他模块/库、私有身份、nohash/user0及普通系统启动后SSH；SQ1 DT/launcher未动。
+新包D:/spx_img/touch-home-normal-start-20261110/initramfs.cpio.gz，249578106字节，
+实际写入同一ESP的SQ2Nat/SQ2Res，两个pending写完才替换，exit0；无新备份/回滚/内容哈希门槛。
+正常重启一次，新boot67c01703-476c-4ef8-a85f-889c01a4fb0f；先等120秒，旧114连接超时255，
+以原受信主机公钥连接115成功，不重复写盘/重启。当前192.168.5.115，boot_completed1，SF/HWC running，
+user0/headlessfalse，HOME Nexus；实际SPI note a194f8a61151deb336e1d729873467c4415c67e5匹配新模块。
+四个临时文件实际不存在，无spx-early RAM挂载；IPTSD触屏/笔输入节点存在，Adreno680硬件GLES保持。
+/data/user/0与/data/data仍同dev:inode66305:128063。HOME one-shot正常无输出。
+当前suspend_stats success0/fail0：没有做实际休眠唤醒，输入节点存在不等于唤醒触摸已验收。
+原v5完整磁盘镜像尚未重打；后续交付新整盘必须重新full-image，不能冒充已包含本轮修复。
+证据在ignored out/single-user-image-20261110/latest-touch-home-clean-ssh-20261110，沿用四角色。
+
+## 2026-11-10：SQ1 原通用模板频率/功耗分型恢复
+
+用户明确6.3.8通用配置的SQ1/SQ2频率功耗不同。实际只读提取原template.img的
+EFI/SQ1EL2/android-el2.dtb：SQ1最高661MHz/RPMh416，GMU200/48及500/192。
+此前共用SQ2 DT错误带入700/432且661也是432，不能以共用内核等同共用OPP。
+full_image_models在原6.18 DT副本只转移原模板GPU/GMU数值OPP，不复制旧phandle/驱动/整张DT。
+实际属性差异仅删除700节点的两个属性、661的level432→416；GMU表和全部其他DT属性保持。
+保留两个GRUB入口与原SMBIOS识别；SQ1选择同目录el1launch.efi/android-sq1.dtb，
+SQ2仍选el2launch.efi/android-el2.dtb。el1launch只是SQ1文件名，执行仍是原EL2启动代码。
+Image/initramfs/固件共用，没有新增第三入口、备份或回滚测试，也未改SQ2发布pins。
+六文件候选D:/spx_img/sq1-opp-profile-20261110，已写同一ESP，两路先写DT/launcher再替换router，exit0。
+已正常重启应用分型，新地址192.168.5.113，bootd00b793d…；172s及214s实际
+boot_completed=1，SF/HWC均running。实际OPP661 level字节000001a0=416，700节点不存在，
+devfreq最高661MHz、空闲样本177MHz；早期捕获未出现原GMU GPU_SET/gpu hw init失败。
+SurfaceFlinger报告Qualcomm Adreno680 OpenGL ES3.2与2880x1920@60，非软件renderer替代。
+当前用户0，pm仅Owner0 running，headless=false/max_users=1；/data/user/0和/data/data
+实际同一dev:inode66305:128063。不能据此声称所有应用、SQ2、PM、长时或硬解性能已验收。
+临时早期SSH保留供调试，待用户确认屏幕/操作；旧v5整盘尚未重新打包，不能重新刷旧整盘冒充已修复包。
+
+前一显示候选已经实机启动：boot8c7257a8…，SSH地址改为192.168.5.112，137s与277s两次
+vendor.hwcomposer=running，surfaceflinger仍restarting，boot_completed为空；headless=false/max_users=1。
+新MSM实际note0a194b9e…；原HWC CRTC能力失败已越过。8MiB有界早期记录成功捕获
+37.025s GMU固件v2.2.264加载、37.038s首次GPU_SET超时，发生在38.28s Android init前。
+因此不是Android/user0/服务重启先导致首次GMU失败；仍不能从该日志单独判断固件、供电或协议根因。
+
+## 2026-11-10：早期 SSH 实机连通，发现源码整包遗漏 DPU 契约
+
+192.168.5.111 已通过既有密钥和固定主机公钥 SSH 连通，boot d8562c61…。
+内核6.18.60-sq2-android1；boot_completed为空，SF/HWC restarting；临时Wi-Fi/DHCP持有生效。
+本次设备仍用原磁盘，ESP PARTUUID fe17fe49-9bca-487a-baf8-087c2dba6690。
+早期ring已被审计消息覆盖，不能把后续GPU_SET超时当首次失败。实际SF tombstone为EGLConfig缺失，
+Adreno查询CHIPID/GMEM失败；HWC另有DRMCrtcManager CRTC capabilities -95。
+核对实际新编外部MSM源码：caps/release-fence/UBWC广告/SDR均缺失，历史Nov7归档早于这些适配。
+新full_image_display.prepare在full-image解包后的副本应用既有四组源码补丁，不使用父模块、无内容hash门槛。
+匹配当前Image的完整MSM已重编/MODPOST exit0；四项源码机制由false变true。
+五个可见GMU/Adreno函数的原始可重定位机器码与已验收模块相同；未比较重定位及全数据，不能据此排除全部差异。
+新候选 D:/spx_img/display-source-fix-20261110/initramfs.cpio.gz，251961751字节，
+仅换msm.ko与临时SSH helper，后者在GPU前将/dev/kmsg有界保存到RAM（8MiB/180秒）。
+BusyBox dmesg不支持-w，已按实际工具改为读取/dev/kmsg；不清ring、不屏蔽错误。
+GPU/GMU固件、Image、DT和频率未改；无备份/回滚测试。用户另明确允许热修改系统组件，
+但本次不强卸卡死中的resident MSM，使用正常重启加载匹配模块。部署/新boot结果见本轮checkpoint。
+原始记录仅ignored out/single-user-image-20261110/live-debug-192-168-5-111；未上传私有日志。
+
+## 2026-11-10：GMU/GPU 启动循环，临时早期 SSH 候选已构建
+
+用户新照片显示 318–327s 持续 GMU GPU_SET 超时、gpu hw init failed -110，SurfaceFlinger/vendor.hwcomposer 等反复退出及 audit backlog。照片不证明超时根因；不以屏蔽日志、改 GPU 身份或放宽驱动错误冒充修复。
+用户确认无法 SSH，授权在启动流程临时加入 SSH。当前正常 ssh-framework-boot 等待 sys.boot_completed；新候选在图形准备/Android PID1 前启用既有 Dropbear和私有Wi-Fi/DHCP，保留认证凭据。临时RAM init overlay移除已知Android Wi-Fi服务声明，维持诊断接口单一管理者，不再交接时停止bootstrap客户端；不修改保存的Wi-Fi设置、不调用旧wifi-rollback。正常构建不自动启用，sq2.ssh=0仍退出诊断分支。
+新增 probe/test2/spx-early-ssh、scripts/pack-spx-debug-ssh.py、tests/test_spx_debug_ssh.py。复用现有 network-up 生成器和DHCP报告，不复制旧包不存在的 boot-kmsg 或历史日志挂钩。GPU、内核、模块、库、user0策略不改。
+候选 D:/spx_img/early-ssh-debug-20261110/initramfs.cpio.gz，250866848 bytes，5记录变化。原无哈希包压缩前缀及SSH/Wi-Fi凭据保留。实际网络和GPU仍未验收。随后已检测同一USB SSD回连，已写正常/救援initramfs，两份250866848字节读回一致，部署exit0；DTB/启动器未改，旧校验清单保持删除。临时挂载移除、硬盘离线；无新增备份或回滚测试。等待启动后的实际DHCP地址/SSH连通性。
+## 2026-11-10：通用镜像启动取消文件哈希门槛，磁盘识别已通过
+
+IMG_0460 已出现 provisioned system disk selected，旧 ldo10 电压错误和 image-disk-not-found 未再出现；新停止点 p010-renderer-stage，用户补充 libstagefright.so FAILED。
+定位为 full_image 错误重写 BASELINE.sha256：原系统 77292e86… 被改成待安装库 93312fd5…。用户明确要求取消启动和构建中的哈希校验，故改为无内容哈希门槛的通用流程，不继续扩展哈希清单。
+full-image/disk-image 已取消内容哈希对比、内部清单重写和 ESP/整盘 SHA 清单生成；仍保留 ABI/格式/路径/磁盘唯一性与真实命令失败。独立 verify/package 历史审计工具未改成假成功。
+新增 runtime_boot_policy.py 对独立输入生成 helper 副本，不改私有原件。15 个 helper 和存储配置变化，校准设备标识哈希保留（非校验），APK 每启动安装一次；权限/认证不改。
+新产物 D:/spx_img/startup-nohash-20261110/initramfs.cpio.gz，250224382 bytes，原压缩成员和末尾凭据保留；Image/模块/库/固件/单用户设置不变。37 项相关主机测试通过，有效归档记录及权限/设备元数据对照通过。最初主机审计误要求 cpio 文件长度字段不变而 exit1，已修审计并复核现有候选 exit0，没有暗中覆盖失败记录。
+当前未接 USB SSD，未写盘/重启；需接回后只更新正常/救援 initramfs，移除这两个入口旧 SHA256SUMS。已有 DTB/启动器修复保留。旧 v5 整盘未重打包，整体相似问题审阅尚不能声称全部完成。
+## 2026-11-10：已越过EFI，修复DT源码往返的电压属性损坏
+
+IMG_0459显示Linux/initramfs已启动，停止于image-disk-not-found，同时pmc8180c ldo10报invalid voltage constraints/-22。
+本地定位为新增源码DT流程的真实回归：原00 32 4b 00经dtc字符串转义再编译成为02 4b 00，
+影响bob/ldo10/ldo11的regulator-min-microvolt。不是已证明的SQ1特有差异。
+新增board_dts.py按明确属性字节数组生成DTS，保留memory reservations；固定board.dts已更新。
+新DTB实际编译exit0，对原适配DT全部属性零差异、内存预留一致。未据此声称真机磁盘已恢复。
+修复包D:/spx_img/board-dts-fix-20261110/shared-618-dtb-and-router-fix.zip包含两套DTB、已有路由修复及清单。
+内核Image/模块/initramfs/固件/分区/userdata不变，没有重生成v5整盘或执行回滚。
+本轮主机只有NVMe系统盘，没有USB目标盘；待用户接回USB再只更新ESP对应文件。
+导出器初次失败因本机libfdt.get_mem_rsv返回(status,address,size)三元组，已适配后成功，未丢弃预留项。
+
+## 2026-11-10：纠正SQ1故障范围，修复共用载荷路由
+
+用户确认此前通用镜像在SQ1可启动；不能从EFI路径缺失推断需另做SQ1内核移植。
+实际旧router的SQ1分支指向未打包SQ1Default；新正常/救援router分别将两型号分支指向
+现有SQ2Nat/SQ2Res共用launcher。保留SMBIOS识别与本机LTE逻辑，不伪装型号，不回退6.3.8。
+生成器disk_image.shared_model_router已应用此路径修正；独立修复器实际构建exit0，
+两个EFI仅21/20字节路径变化，其余载荷不改。小包位于
+D:/spx_img/shared-router-fix-20261110/shared-sq1-sq2-efi-path-fix.zip。
+只覆盖ESP中对应start.efi和SHA256SUMS，不写整盘/格式化/清userdata。
+原v5整盘仍保留失败原件，本轮没有重生成整盘；没有新测试/回滚/部署，待SQ1启动复测。
+此节纠正上一轮“必须另做SQ1启动链/不能使用共用载荷”的过度判断，不把路径修复当成完整启动验收。
+
+## 2026-11-10：原模板整包流程与源码内核已完成一次实际构建
+
+用户要求合并最新提交到整包流程、使用原模板、应用单用户，并支持源码内核和固定私有输入。
+已 fetch/ff-only，远端与本地均为 100b6d75368c1bdf8a78d411d05efba0f2aa8256；本轮集成尚未提交/推送。
+统一 `build.py full-image` 默认 `--kernel-mode source`，私有输入固定 `private/build-inputs/`，详见 FULL-IMAGE.md。
+原 `template.img` 为20 GiB，GPT分区边界与主备表沿用；userdata4452233216字节、ESP2GiB。
+不再隐含64GiB容量，不覆盖原模板，不写物理设备。
+
+实际成功构建目录：`D:\spx_img\template-source-618-20261110-v5`，完整命令退出0。
+Linux6.18.60-sq2-android1 Image/modules/dtbs、12组外挂、depmod完成；runtime所有有效.ko副本来自新编译。
+板级DT由固定board.dts重新编译；initramfs由独立运行层文件及metadata组装，构建时不读取父initramfs或父Image。
+最新已接受私有用户态/签名组件/固件保留；不是声称这些私有库均由本次源码重建。
+单用户full user0属性与取消固定user10已应用；只在新输出文件创建新userdata/metadata、清零misc。
+实际`.img`与`.img.gz`均产出；不等于新盘启动、user0应用兼容、SQ1或长期性能已经验收。
+
+源准备的boot polling清理次序与等价条件拼写、工具链绝对链接/可选断链均已修正并保留失败日志。
+第3次构建后原workspace挂载消失；第4次改到WSL本地仍复现DTC缺include，实际原因进一步定位为
+历史source-only归档遗漏include-prefix相对链接，解包流程现从本源码树恢复这些链接，第5次构建完成。
+不能将此前DTC错误只归因于挂载消失。构建没有在失败时改用父包内核或忽略错误继续发布。
+
+沿用用户只构建要求：本轮未执行测试套件、文件系统/整盘读回、整盘SHA、额外回滚或部署/重启。
+必要编译/ABI/配对与运行时校验清单不被删除。此前BASELINE/MODIFIED/ROLLBACK为2/0/2，
+固定登录10→移除→10，仅为沿用旧记录，未重跑。四角色仍位于out/single-user-image-20261110，
+publisher追加本次完整命令与字面stdout/stderr，并重开同一tar/patch/VERIFICATION/ROLLBACK文件。
+私有依赖和生成镜像仍含私有身份，不提交或公开；原发布pins及full_*未完成状态保持。
+## 2026-11-10：完整磁盘镜像制作
+
+用户随后明确“避免校验和回滚，只构建产物”。已停止尚未完成的额外校验流程（原构建进程 -15），
+保留已完成的原版解包，改以 `--build-only --resume-build` 继续，不重跑测试/读回/整包解压检查或回滚。
+31项测试属于这条新要求之前的记录，不当作后续 build-only 改动的新测试结果；整盘 hash 不生成。
+
+用户要求制作完整磁盘镜像，新增统一入口 `build.py disk-image`，不恢复退休组装入口。
+使用 Google 原版 mica/16471258 ZIP/raw 双 hash、100b6d7 对应 v21-release-4k 私有资源及
+已完成的 98509b49… 单用户候选；创建新 GPT、空 userdata/metadata 和独立的普通磁盘镜像文件。
+发现原父包仍有旧 512 GB 容量与 UUID 门禁，因此为新完整镜像补运行时分区/父盘发现、动态 super
+by-name 路径，不要求原机器身份或固定节点号。保留完整性、歧义、实际分区边界与数据保护。
+新增默认/救援 EFI 文件只存在新镜像中，物理设备的现有菜单与回退不改。
+31项主机测试已通过；包含真实 helper 的不同枚举/UUID/容量、扩容及错误场景，GPT 双 CRC 与 EFI 救援改写。
+首次 EFI fixture 缺少必需 suspend/nohibernate 参数导致失败，已修 fixture，不放宽生产 EFI 校验。
+制作/校验的最终状态以 ignored `out/single-user-image-20261110/CHECKPOINT.json` 和
+`D:/spx_img/single-user-618-20261110/IMAGE-MANIFEST.json` 为准；不得把“开始制作”写成完成或已启动。
+既有四角色继续沿用，本次记录追加；不操作物理盘、不部署、不重启。
+
+## 2026-11-10：新镜像单用户 user 0 构建方式
+
+已按用户指定拉取到 100b6d75368c1bdf8a78d411d05efba0f2aa8256。
+用户要求新通用镜像使用单用户，解决应用依赖 `/data/user/0`、`/data/data` 而非 `/10` 的兼容问题。
+新增 `scripts/build.py single-user`：对明确 hash 的父 initramfs 生成独立候选，最后 pre-init
+覆盖 headless/split/max-users/UI 属性，并移除候选 init 中 Terminal 登录的固定用户参数。
+保留父包压缩成员与私有身份顺序；不修改发布 pins 或 kernel/graphics/audio/video/firmware。
+详见 BUILD 开头。现机 user 10 数据、凭据和设置未迁移/删除；未部署或重启。
+只用于新 userdata，不能把属性变更当作已有 headless 用户状态迁移；不使用跨用户软链接或放开权限。
+当前 Windows 工作区没有最新 SQ2Nat 私有父包，文档指定 WSL 工作树也不存在；未以旧本地
+SQ2L618C 冒充最新 v21-release-4k。真实最新父包候选/整盘制作与真机首启尚未执行。
+已按用户提供聊天定位并重算校验 `D:/spx-private-exports/qualcomm-618-20261107/qualcomm-618-private-resources.tar.gz`：
+3,982,179,763 字节，SHA256 `1a49d8039594f67a3341a184edb09e8a0acd1e4e380e47f00982ff43fdd8ae85`，
+与原发布记录一致。但该包属于 ce03b441/11月7日，manifest 不含 SQ2Nat 父包及最新 initramfs
+0ada8ee0…，不能替代 100b6d7 所需的 v21-release-4k 资源。私有包未展开或上传。
+27项相关主机测试通过；旧CLI帮助断言已随新增命令更新，初次失败记录保留。
+另在 WSL 隔离 mount namespace 中实际执行4次 bind mount，覆盖属性路径独立/软链接及重复运行，
+均退出0，原 userdata 哨兵未变。修正了复用/替换已挂载源 inode 的 ENOENT 问题，失败与修正记录保留；
+这仍不是 Android 真机首启或应用权限验证。
+本轮验证与四角色记录保存在 ignored `out/single-user-image-20261110/`，主机 fixture 不等于硬件验收。
+
 ## 2026-11-10：4K 软解回退修复与独立 debug 入口
 
 用户在 v21-release 下报告 Bilibili 4K 严重卡顿，并明确要求恢复一个带原 debug 信息的 GRUB 入口。
@@ -8672,6 +8883,40 @@ com.android.settings/.development.PageAgnosticNotificationService。
 **2026-10-31 KVM实机PASS后正常系统恢复已核验**：用户确认恢复，SSH读回bootffa7053f…、原baseline60 Mesa2.7-60、boot_completed1、guardY/nohibernate；菜单f7244134…与Mesa持久默认不变。完成/dev/kvm单vCPU验证及恢复闭环，没有追加实验。
 
 **2026-10-31 完整EL2内核8核/KVM通过，但NVMe未通过**：照片确认HOST_CPUS8、全CPU EL2、KVM PASS/EXIT0，同时/dev/nvme不存在；PCIe1c18000延迟probe。初版诊断遗漏tail，已修正新initramfs e743de2a…并增加SMMU/supplier信息。用户要求后续一次性GRUB自动选项：已装消费成功才选测试的白名单机制，默认Mesa不变，菜单6ef2e1f7…，fullram请求一次已发起重启，等待新照片与请求消费核验。完整Android KVM内核/331匹配模块及175744446B启动包仅本地准备，含实验性RAM Secretkeeper声明隐藏及protected_vm=0；未部署Android入口、未启动终端。详见SQ1-EL2-PREPARATION.md。
+
+
+## 2026-11-10：SQ2 现有单用户系统触摸唤醒修复候选（与 full-image 实验分开）
+
+本轮对象为现有内部 SQ2Nat、单用户0/headless关闭的98509b49…启动包，不是另一条full-image整包实验。
+运行SPI-HID04878205…及resident build-id b25cb2da…与Nov7 external-build完全匹配；源码含V1 PM和
+响应buffer修复，但缺失既有V2：open仍在power/reset完成前开IRQ，非法header分支不排error_work。
+同boot观察resume10恢复失败、11 notready，IPTSd退出；后来真实resume12又恢复ready/新PID，故不称永久坏死。
+零header/没有错误恢复与代码缺口相符；快速再次入睡是否有额外影响仍未单独排除。
+
+在源码副本应用既有patch-sq2-spi-pm.py，保留response路由与所有校准/阈值，实际函数ASan/UBSan测试
+覆盖旧/新/回滚；同一必需恢复契约exit1/0/1，旧/回滚在早IRQ断言失败。独立响应路由/长度拒绝用例通过。
+匹配6.18 MODPOST exit0（保留原有ignored-qualifiers编译警告），新模块a8504f49…/build-id a194f8a6…。
+新initramfs945520fe…相对98509b49…只有spi-hid.ko有效记录改变；single-user策略仍通过。
+精确binary patch重建、ROLLBACK.sh在独立副本恢复98509b49…及原模块均通过。
+同四角色路径保留于ignored out/sq2-user10-recovery-20261110；本次DIFF/ROLLBACK已基于立即前一单用户包，
+不会为撤回触摸修复恢复旧headless策略；历史角色保存到touch-resume-v2子目录。回滚不能恢复早先已格式化数据。
+
+compile入口现对复制后的spi-hid源码运行幂等V2补丁，未知源码失败即停，输入归档不变；Linux13项测试通过。
+Windows初跑保留两个失败：已有rooted-path平台语义用例，以及新增测试8.3路径比较（后者已用resolve修正）。
+已部署默认ESP且8文件清单实读通过，并发送一次正常Android重启；不热卸载、不改用户/HOME/音视频/休眠策略。
+**此记录尚非唤醒验收**：新boot及实际触摸睡眠/唤醒结果以同目录CHECKPOINT/VERIFICATION最新记录为准。
+未修改全局发布pins，未提交推送，其他full_*及长期PM仍未完成。
+
+### 触摸候选重启后的验收限制
+
+
+2026-11-10 TOUCH V2 CURRENT RESULT (not full PM acceptance):
+Normal boot855852eb, actual module a8504f49/build-id a194f8a6 verified; boot_completed1, sole full user0/headlessfalse/Nexus HOME persisted.
+User replied normal to pre/post sleep touch question. Actual touchscreen down/up/positions exist before framework sleep117470ms and after wake196778ms.
+Important counterevidence: SPI resume_count0; kernel suspend success0/fail9 (failed_suspend8/failed_freeze1; failed_resume1 separately), last_failed_dev aa00000.venus-sq2/-110. Venus status start:hfi-resume error-110/sys_error1,insts0/vb2_bytes0. The PM entry/exit log lines are ABORTED attempts, not successful sleep. Therefore cannot claim true hardware wake or permanent sleep repair verified.
+SPI code changes: spi_hid_ll_open IRQ enable after power/reset; spi_hid_input_header_complete malformed header schedules existing error_work. Baseline actual required recovery contract exit1; modified exit0; rollback exit1. All behavior/response guard tests pass; portable ROLLBACK.sh restores immediate single-user98509b49 image on separate copy; restored hash exact. No on-device old-driver rollback performed.
+Temporary 180s event capture ended; kmsg reader20570 terminated after exact cmdline match, grep20571 exited and flushed. No observer processes remain. Cleanup initially reported rmdir missing because upload dir disappeared at reboot; final set-e path/process absence check exit0 confirmed clean. Capture timeout143 means bounded slice expiration, NOT lost-input failure. No calibration, HOME, user data, sleep policy, GPU/video/audio module or firmware changes.
+Remaining: diagnose the independent Venus sleep blocker before true SPI resume acceptance; full PM remains unverified. Candidate retained; no new forced cycles or provider reset.
 
 
 ## 2026-11-10：触摸恢复与用户0默认 Launcher 记录

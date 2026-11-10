@@ -92,7 +92,7 @@ class LtsEntry(unittest.TestCase):
         for name in ('build.py', 'build-surface-pro-x.py', 'build-source-boot.py', 'build-source-disk.py', 'build-sq2-default.py'):
             p = subprocess.run([sys.executable, str(ROOT / 'scripts' / name), '--help'], capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, p.stderr)
-            self.assertIn('{verify,package,compile}', p.stdout)
+            self.assertIn('{import-private,full-image,verify,package,single-user,disk-image,compile}', p.stdout)
             p = subprocess.run([sys.executable, str(ROOT / 'scripts' / name), '--template', 'old.img'], capture_output=True)
             self.assertNotEqual(p.returncode, 0)
 

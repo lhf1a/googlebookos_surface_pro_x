@@ -11,9 +11,6 @@ if [ "${1:-}" != --android-data ]; then
     mem=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
     case "$mem" in ''|*[!0-9]*) echo SWAP_INVALID_MEMTOTAL >&2; exit 1;; esac
     [ "$mem" -gt 0 ] || { echo SWAP_INVALID_MEMTOTAL >&2; exit 1; }
-    if [ "$mem" -ge 12582912 ]; then
-        echo "SWAP_SKIPPED_MEMORY mem_kib=$mem"; exit 0
-    fi
     mkdir /run/surface-swap-lock 2>/dev/null || exit 0
     trap 'rmdir /run/surface-swap-lock' EXIT
     for n in $(seq 1 300); do
@@ -21,6 +18,15 @@ if [ "${1:-}" != --android-data ]; then
         sleep 1
     done
     [ "$(timeout 10 nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed)" = 1 ] || exit 1
+    # Android's filesystem tools/linker are usable only after Android startup.
+    # Grow even on >=12GiB devices; only the subsequent swap is RAM-dependent.
+    if [ -f /etc/sq2-ssd-partitions ]; then
+        grow-image-userdata > /logs/userdata-grow.txt 2>&1 || { echo SWAP_ERROR_USERDATA_GROW_FAILED >&2; exit 1; }
+        [ -f /run/spx-userdata-ready ] || exit 1
+    fi
+    if [ "$mem" -ge 12582912 ]; then
+        echo "SWAP_SKIPPED_MEMORY mem_kib=$mem"; exit 0
+    fi
     nsenter -t 1 -m -r -- /debug_ramdisk/busybox sh -s -- --android-data < "$0"
     exit $?
 fi

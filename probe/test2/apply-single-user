@@ -1,0 +1,31 @@
+#!/bin/busybox sh
+# Before Android init: fresh images use the full system user, never a /10 alias.
+# No access to /data, no credential changes, no user creation/deletion/migration.
+set -eu
+root=${1:-/newroot}
+test -f "$root/system/build.prop"
+mkdir -p "$root/debug_ramdisk/single-user"
+for rel in prop.default default.prop system/etc/prop.default vendor/default.prop odm/default.prop system/build.prop system/etc/build.prop vendor/build.prop vendor/etc/build.prop product/build.prop product/etc/build.prop odm/build.prop odm/etc/build.prop system_ext/build.prop system_ext/etc/build.prop system_dlkm/etc/build.prop vendor_dlkm/etc/build.prop; do
+    source="$root/$rel"
+    test -f "$source" || continue
+    target=$(mktemp "$root/debug_ramdisk/single-user/$(echo "$rel" | tr / _).XXXXXX")
+    # Remove conflicting donor defaults from every property source. Android's
+    # property loader trims whitespace; do not leave whitespace-prefixed copies.
+    awk '
+        /^[ \t]*(ro\.fw\.mu\.headless_system_user|ro\.fw\.headless_system_user|ro\.fw\.system_user_split|fw\.max_users|fw\.show_multiuserui)[ \t]*=/ {next}
+        {print}
+    ' "$source" > "$target"
+    # Keep earlier bind-source inodes alive. Reusing/truncating their path can
+    # destroy the source; unlinking them can make a later mount return ENOENT.
+    chmod 644 "$target"
+    mount --bind "$target" "$source"
+done
+# Publish canonical defaults last: build.prop and etc/build.prop can alias
+# the same inode. Filtering a later alias must not erase our final policy.
+source="$root/system/build.prop"
+target=$(mktemp "$root/debug_ramdisk/single-user/system-policy.XXXXXX")
+cat "$source" > "$target"
+printf '\n# Surface fresh-image single-user policy.\nro.fw.mu.headless_system_user=false\nro.fw.headless_system_user=false\nro.fw.system_user_split=false\nfw.max_users=1\nfw.show_multiuserui=false\n' >> "$target"
+chmod 644 "$target"
+mount --bind "$target" "$source"
+echo 'SURFACE_SINGLE_USER: fresh userdata, full user 0; existing users are not migrated'

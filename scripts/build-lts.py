@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Unified Linux 6.18 LTS entry: verify, preserve an accepted bundle, or compile.
+"""Unified Linux 6.18 LTS entry, including original-template full-image builds.
 
 package is an exact private baseline copy, NOT a source compilation or disk
 image. compile produces unvalidated source-build artifacts; it never splices a
-new Image into an existing initramfs. No command deploys, reboots or writes disks.
+new Image into an existing initramfs. single-user creates a separate fresh-data
+initramfs candidate, not a migration. No command deploys, reboots or writes disks.
 """
 import argparse
 import json
@@ -189,7 +190,7 @@ def compile_kernel(args, selected=None):
                         removed.append(old.relative_to(module_root).as_posix())
                         old.unlink()
                 shutil.copyfile(compiled, target)
-                external_results.append({'module': destination, 'sha256': digest(target),
+                external_results.append({'module': destination, 'sha256': None if getattr(args, 'build_only', False) else digest(target),
                                          'removed_duplicate_paths': removed})
         run('depmod', ['-b', str(stage), '-F', str(build / 'System.map'), selected['kernel_release']], ['depmod'])
     for src, dst in [('arch/arm64/boot/Image', 'Image'), ('System.map', 'System.map'),
@@ -212,14 +213,14 @@ def compile_kernel(args, selected=None):
         link = stage / 'lib/modules' / selected['kernel_release'] / name
         if link.is_symlink():
             link.unlink()
-    hashes = {p.relative_to(output).as_posix(): digest(p) for p in output.rglob('*')
+    hashes = {} if getattr(args, 'build_only', False) else {p.relative_to(output).as_posix(): digest(p) for p in output.rglob('*')
               if p.is_file() and p.relative_to(output).parts[0] != 'external-build'
               and p.suffix not in ('.stdout', '.stderr') and p.name != 'commands.json'}
     report = {'operation': 'source-compilation', 'kernel_release': selected['kernel_release'],
               'source_compiled': True, 'device_written': False, 'hardware_tested': False,
               'accepted_baseline_replaced': False, 'external_runtime_overrides_integrated': bool(external),
               'external_modules': external_results, 'core_only': args.core_only,
-              'input_config_sha256': __import__('hashlib').sha256(config).hexdigest(),
+              'input_config_sha256': None if getattr(args, 'build_only', False) else __import__('hashlib').sha256(config).hexdigest(),
               'files': hashes, 'commands': records,
               'note': 'This is not an accepted boot bundle. Generated Image, module stage and DTBs require explicit initramfs/helper/EFI pairing and runtime validation; package always preserves the separately pinned accepted bundle.'}
     (output / 'build-audit.json').write_text(json.dumps(report, indent=2) + '\n')
@@ -229,11 +230,38 @@ def compile_kernel(args, selected=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='operation', required=True)
+    from full_image import DEFAULT_PRIVATE
+    install = commands.add_parser('import-private', help='import standalone runtime/firmware/EFI dependencies into the fixed private directory')
+    install.add_argument('--resources', type=Path, required=True)
+    install.add_argument('--private-root', type=Path, default=DEFAULT_PRIVATE)
+    full = commands.add_parser('full-image', help='build an original-template single-user whole disk; source kernel is the default')
+    full.add_argument('--private-root', type=Path, default=DEFAULT_PRIVATE)
+    full.add_argument('--template', type=Path, help='default: PRIVATE_ROOT/template.img; size/layout are retained exactly')
+    full.add_argument('--kernel-mode', choices=('source','prebuilt'), default='source')
+    full.add_argument('--cross-compile', help='override the compiler; default extracts PRIVATE_ROOT/kernel-6.18/toolchain.tar.gz')
+    full.add_argument('--build-dir', type=Path, help='fresh Linux filesystem kernel build directory')
+    full.add_argument('--output', type=Path, required=True)
+    full.add_argument('--jobs', type=int, default=8)
     verify = commands.add_parser('verify', help='verify the exact accepted private baseline')
     verify.add_argument('--baseline', type=Path, default=DEFAULT_BUNDLE)
     pack = commands.add_parser('package', help='copy baseline exactly; does NOT compile or build a disk image')
     pack.add_argument('--baseline', type=Path, default=DEFAULT_BUNDLE)
     pack.add_argument('--output', type=Path, required=True)
+    single = commands.add_parser('single-user', help='prepare a fresh-userdata user-0 initramfs candidate; NOT a data migration or disk image')
+    single.add_argument('--base', type=Path, required=True)
+    single.add_argument('--expected-base-sha256', required=True)
+    single.add_argument('--output', type=Path, required=True)
+    disk = commands.add_parser('disk-image', help='assemble a fresh private 6.18 GPT disk image; never writes devices')
+    disk.add_argument('--recovery-zip', type=Path, help='required only for an explicit custom recovery layout')
+    disk.add_argument('--resources', type=Path, required=True)
+    disk.add_argument('--single-user-initramfs', type=Path, required=True)
+    disk.add_argument('--expected-single-user-sha256', help='legacy metadata option; universal disk builds no longer use hash gates')
+    disk.add_argument('--output', type=Path, required=True)
+    disk.add_argument('--size-gib', type=int, help='explicit custom recovery-layout capacity; no implicit 64 GiB default')
+    disk.add_argument('--template', type=Path, help='preserve the original template layout and capacity')
+    disk.add_argument('--jobs', type=int, default=8)
+    disk.add_argument('--build-only', action='store_true', help='construct only; omit postbuild filesystem/partition/gzip readback checks and whole-image checksums')
+    disk.add_argument('--resume-build', action='store_true', help='reuse this explicitly selected build directory and its completed pristine recovery extraction')
     build = commands.add_parser('compile', help='compile Image/modules/dtbs and export unvalidated outputs')
     build.add_argument('--source', type=Path, required=True)
     build.add_argument('--config', type=Path, default=ROOT / 'configs/kernel-6.18-baseline.config')
@@ -241,17 +269,36 @@ def main(argv=None):
     build.add_argument('--output', type=Path, required=True)
     build.add_argument('--cross-compile', required=True, help='explicit compiler prefix, e.g. /tools/bin/aarch64-linux-gnu-')
     build.add_argument('--jobs', type=int, default=4)
+    build.add_argument('--build-only', action='store_true', help='omit the final exported-file checksum inventory')
     build.add_argument('--resume-build', action='store_true', help='explicitly reuse an existing matching build directory/config')
     mode = build.add_mutually_exclusive_group()
     mode.add_argument('--core-only', action='store_true', help='explicit incomplete core compilation; excludes accepted external module overrides')
     mode.add_argument('--external-sources', type=Path, help='relocatable source root for the mandatory external module manifest')
     args = parser.parse_args(argv)
     try:
-        if args.operation == 'verify':
+        if args.operation == 'import-private':
+            from full_image import import_private
+            report = import_private(args.resources, args.private_root)
+        elif args.operation == 'full-image':
+            from full_image import build as full_image_build
+            report = full_image_build(args, compile_kernel)
+        elif args.operation == 'verify':
             report = {'operation': 'verify', 'kernel_release': policy()['kernel_release'],
                       'files': validate_bundle(args.baseline), 'private_identity_present': True}
         elif args.operation == 'package':
             report = package(args.baseline, args.output)
+        elif args.operation == 'single-user':
+            from single_user_payload import build as single_user_build
+            report = single_user_build(args.base, args.output, args.expected_base_sha256)
+        elif args.operation == 'disk-image':
+            from disk_image import build as disk_image_build
+            if args.jobs < 1 or (not args.template and (args.size_gib is None or args.size_gib < 1)):
+                parser.error('select --template or an explicit positive --size-gib; --jobs must be positive')
+            if args.template and args.size_gib is not None:
+                parser.error('--template preserves size; do not also set --size-gib')
+            if not args.template and args.recovery_zip is None:
+                parser.error('--recovery-zip is required without --template')
+            report = disk_image_build(args)
         else:
             if args.jobs < 1:
                 parser.error('--jobs must be positive')

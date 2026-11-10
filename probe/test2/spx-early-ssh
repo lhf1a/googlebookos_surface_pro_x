@@ -1,0 +1,92 @@
+#!/bin/busybox sh
+# Temporary universal-image diagnostics. No password/key or saved Wi-Fi changes.
+set -eu
+enabled() {
+    [ -f /etc/sq2-early-network.enabled ] || return 1
+    case " $(cat /proc/cmdline) " in *' sq2.el2=1 '*) ;; *) return 1;; esac
+    case " $(cat /proc/cmdline) " in *' sq2.ssh=0 '*) return 1;; esac
+}
+enabled || exit 0
+case "${1:-}" in
+    start)
+        mkdir -p /run /logs
+        # Diagnostic-only bounded RAM capture starts before GPU/Android. Keep
+        # the first failure even when later audit traffic wraps the kernel ring.
+        spx-early-ssh capture > /logs/early-kernel-capture.txt 2>&1 < /dev/null &
+        echo $! > /run/spx-early-kernel-capture.pid
+        # Existing Dropbear, host key, root shadow and authorized_keys are reused.
+        # Start listening before Wi-Fi, before GPU preparation and before PID1 handoff.
+        start-ssh
+        if el2-early-network-up; then
+            spx-early-ssh lan-watch > /logs/early-ssh-lan.txt 2>&1 < /dev/null &
+            echo $! > /run/spx-early-ssh-lan.pid
+            echo 'SPX_EARLY_SSH_NETWORK_READY: use the DHCP address printed above'
+            ip -4 -o addr show scope global
+        else
+            rc=$?
+            echo "SPX_EARLY_SSH_NETWORK_FAILED exit=$rc; listener alone is not connectivity"
+            exit "$rc"
+        fi
+        ;;
+    capture)
+        echo "SPX_EARLY_KERNEL_CAPTURE boot=$(cat /proc/sys/kernel/random/boot_id) limit=8MiB duration=180s"
+        # Bounded in both time and bytes; never persistent storage or log-level
+        # suppression. Killing the reader at the limit terminates this producer.
+        # This payload's BusyBox dmesg has no -w. /dev/kmsg supplies the
+        # retained records followed by new records without clearing the ring.
+        timeout 180 cat /dev/kmsg 2>&1 | head -c 8388608
+        echo 'SPX_EARLY_KERNEL_CAPTURE_END'
+        ;;
+    stage)
+        # Only this opt-in RAM overlay holds Wi-Fi ownership. Suppress the known
+        # Android owners so a failing framework cannot reset the debug interface.
+        # Other services/actions in the same rc files are retained.
+        stage=/newroot/debug_ramdisk/spx-early-ssh
+        mkdir -p "$stage"
+        for directory in /newroot/vendor/etc/init /newroot/system/etc/init /newroot/system_ext/etc/init; do
+            [ -d "$directory" ] || continue
+            find "$directory" -type f -name '*.rc' | while IFS= read -r target; do
+                grep -Eq '^service[[:space:]]+(vendor\.wifi_hal_legacy|wificond|wpa_supplicant|vendor\.wpa_supplicant)[[:space:]]' "$target" || continue
+                overlay=$(mktemp "$stage/init.XXXXXX")
+                awk '
+                  /^[^#[:space:]]/ {
+                    skip=($1=="service" && ($2=="vendor.wifi_hal_legacy" || $2=="wificond" || $2=="wpa_supplicant" || $2=="vendor.wpa_supplicant"))
+                  }
+                  !skip { print }
+                ' "$target" > "$overlay"
+                chmod 644 "$overlay"
+                if grep -Eq '^service[[:space:]]+vendor\.wifi_hal_legacy[[:space:]]' "$target"; then
+                    touch "$stage/hal-owner-held"
+                fi
+                mount --bind "$overlay" "$target"
+                echo "SPX_DEBUG_WIFI_RC=$target"
+            done
+        done
+        test -f "$stage/hal-owner-held"
+        echo 'SPX_DEBUG_WIFI_OWNERSHIP: initramfs owns Wi-Fi for this diagnostic boot'
+        ;;
+    lan-watch)
+        # Android netd can replace policy rules. Retain only the directly
+        # connected debug LAN route, never a VPN/Internet routing override.
+        dev=$(cat /run/sq2-early-network.iface)
+        case "$dev" in ''|*[!a-zA-Z0-9_.:-]*) exit 1;; esac
+        echo "SPX_DEBUG_LAN_WATCH interface=$dev"
+        while enabled; do
+            address=$(ip -4 -o addr show dev "$dev" scope global | awk '{print $4; exit}')
+            case "$address" in
+                */*)
+                    network=$(ipcalc -n "$address" | sed -n 's/^NETWORK=//p')
+                    prefix=$network/${address#*/}
+                    if [ -n "$network" ]; then
+                        ip -4 route replace "$prefix" dev "$dev" scope link table main
+                        if ! ip -4 rule show | grep -F "to $prefix lookup main" >/dev/null; then
+                            ip -4 rule add priority 49 to "$prefix" lookup main
+                        fi
+                    fi
+                    ;;
+            esac
+            sleep 2
+        done
+        ;;
+    *) echo 'Usage: spx-early-ssh start|stage|lan-watch|capture' >&2; exit 64;;
+esac

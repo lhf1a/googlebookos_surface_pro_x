@@ -86,13 +86,13 @@ def rewrite_efi(data, old_directory, directory, expected, graphics_argument):
     return bytes(result), edits
 
 
-def inspect_efi(router, launcher, options, directory, graphics_argument):
+def inspect_efi(router, launcher, options, directory, graphics_argument, router_target_count=1):
     unsigned_arm64_pe(router)
     unsigned_arm64_pe(launcher)
     prefix = '\\EFI\\'+directory+'\\'
     rs = [s for _, _, s in utf16_strings(router)]
     ls = [s for _, _, s in utf16_strings(launcher)]
-    require(rs.count(prefix+'el2launch.efi') == 1, 'Router target mismatch')
+    require(rs.count(prefix+'el2launch.efi') == router_target_count, 'Router target mismatch')
     for name in ('Image', 'android-el2.dtb', 'qebspilaa64.efi', 'tcblaunch.exe'):
         require(ls.count(prefix+name) == 1, 'Launcher target mismatch: '+name)
     commands = [s for s in ls if s.startswith('console=')]
