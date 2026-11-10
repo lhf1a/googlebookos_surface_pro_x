@@ -1,3 +1,10 @@
+## 2026-11-10：GPU 提交效率 v5 为独立、未晋升候选
+
+累计补丁与离线检查入口见 [GPU-SUBMIT-EFFICIENCY-20261110.md](GPU-SUBMIT-EFFICIENCY-20261110.md)。
+本分支只保存 paused 检查点：不把 v5 注入 compile/full-image，不变更 kernel-baseline pins。
+checker 的精确源码哈希只识别历史测试输入，不恢复通用镜像/启动中的内容哈希门槛。
+使用配套 msm/drm_exec/gpu-sched 和已验收显示修改；禁止只编 stock MSM 替换正式显示模块。
+
 ## 2026-11-10：原模板 v6 完整源码镜像已输出
 
 `D:/spx_img/template-source-618-20261110-v6` 为本轮完成的整包，HEAD8f5d964及当前工作区

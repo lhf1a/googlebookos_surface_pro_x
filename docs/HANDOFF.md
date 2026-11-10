@@ -1,3 +1,13 @@
+## 2026-11-10：通用 GPU 提交效率保存分支，继续保持暂停
+
+分支 codex/gpu-submit-efficiency-v5-20261110 保存完整五文件累计补丁、v4→v5 增量、
+源码提取式 ASan/UBSan 测试及检查点。详见 [GPU-SUBMIT-EFFICIENCY-20261110.md](GPU-SUBMIT-EFFICIENCY-20261110.md)。
+v4 已测提交 CPU 降低 13.19%–14.13%；v5 已正常启动，性能未测，不能混称收益。
+最后启动记录 boot f029ca42…、MSM 7ee05cae…、包 94b3f6bf…；音频服务 restarting 待复核。
+只保存与推送，不恢复暂停目标、不改设备、发布 pins 或无关的本机救援工作。
+四角色继续沿用 ignored out/ww-audio-gpu-20261110/buffer-mechanism-v1；索引已修正为 v5。
+恢复后先复核音频健康，再复用 v4 基线完成 v5 同输入对照及有界采样。full_* 仍 false。
+
 ## 2026-11-10：首启跳过向导 HOME 修正与扩容/swap 提交
 
 用户将v6部署到192.168.5.116，boot81aa2a4a…；配置完成两个settings均1，但HOME和前台

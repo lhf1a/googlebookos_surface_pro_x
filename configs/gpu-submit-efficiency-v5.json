@@ -1,0 +1,61 @@
+{
+  "revision": "combined-v5",
+  "status": "paused-performance-pending",
+  "default_build_enabled": false,
+  "kernel": "6.18.60-sq2-android1",
+  "patch": "patches/drm-msm-submit-efficiency-v5.patch",
+  "patch_sha256": "afb8c97d336724c360ab48ea2854c8da7768e276a124be7be999745836a10a36",
+  "incremental_patch": "tests/fixtures/gpu-submit-efficiency-v5/v4-to-v5.patch",
+  "incremental_patch_sha256": "384f6b026a5b26de4d8f551ece2cee10825efcb071903b08e0ec9b9c18f35c26",
+  "files": [
+    {
+      "path": "drivers/gpu/drm/msm/msm_gem.c",
+      "flat_name": "msm_gem.c",
+      "baseline_role": "BASELINE.c",
+      "modified_role": "MODIFIED_FILE.c",
+      "baseline_sha256": "4bfd15838d0d4e9e7b69623dd7ee1c9389ef737685b90afcf4de512abbacebdb",
+      "v4_sha256": "bf703447834022f5073e0e6ed0985f25f224655b730ce2fc1cccbb57b836c84e",
+      "v5_sha256": "bf703447834022f5073e0e6ed0985f25f224655b730ce2fc1cccbb57b836c84e"
+    },
+    {
+      "path": "drivers/gpu/drm/msm/msm_gem_submit.c",
+      "flat_name": "msm_gem_submit.c",
+      "baseline_role": "BASELINE.submit.c",
+      "modified_role": "MODIFIED_FILE.submit.c",
+      "baseline_sha256": "a6886e60686827877873108e8e6354d06016f08a3da4732cd3c7c39132caf5de",
+      "v4_sha256": "187aa7450b7da9e320c9f9ed3de937394f94cc098ba756e71377e95230e5a3b9",
+      "v5_sha256": "b6068137cb79faea90e6287c331fcad36f32f986f40bc29a6c31a2dc8391d447"
+    },
+    {
+      "path": "drivers/gpu/drm/scheduler/sched_main.c",
+      "flat_name": "sched_main.c",
+      "baseline_role": "BASELINE.scheduler.c",
+      "modified_role": "MODIFIED_FILE.scheduler.c",
+      "baseline_sha256": "ef311406e735c22955d093f27b69929e66f31d354d9c82151e989785d6b7ca05",
+      "v4_sha256": "45f6a3e24789cf11da3ef6144b886798017d4ceba73094908f8cf75c54c13041",
+      "v5_sha256": "45f6a3e24789cf11da3ef6144b886798017d4ceba73094908f8cf75c54c13041"
+    },
+    {
+      "path": "drivers/gpu/drm/drm_exec.c",
+      "flat_name": "drm_exec.c",
+      "baseline_role": "BASELINE.exec.c",
+      "modified_role": "MODIFIED_FILE.exec.c",
+      "baseline_sha256": "0e1e121dd161594f6290b72890cf81906b9461e240019fa01bc11597cb36cc8d",
+      "v4_sha256": "9f106d1919b28bb76563fd5505412cbfe54cb41c1a513bfd3762e9b039a65b1d",
+      "v5_sha256": "9f106d1919b28bb76563fd5505412cbfe54cb41c1a513bfd3762e9b039a65b1d"
+    },
+    {
+      "path": "include/drm/drm_exec.h",
+      "flat_name": "drm_exec.h",
+      "baseline_role": "BASELINE.exec.h",
+      "modified_role": "MODIFIED_FILE.exec.h",
+      "baseline_sha256": "98ec19aabea147b2c62f264a02bdbdad498ce0d8294d6628c27f710c7833bff0",
+      "v4_sha256": "88d8badb37a2321312b1fe5202f678c94e18621d2a5869319eee0db0e7997608",
+      "v5_sha256": "88d8badb37a2321312b1fe5202f678c94e18621d2a5869319eee0db0e7997608"
+    }
+  ],
+  "test_support": {
+    "path": "drivers/gpu/drm/msm/msm_gem_vma.c",
+    "sha256": "793174a52f3806f8357fc6689c8253ca0b296b0a51b1ea5cf5ba1d2117b221f0"
+  }
+}

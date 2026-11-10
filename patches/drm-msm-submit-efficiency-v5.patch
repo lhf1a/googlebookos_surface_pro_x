@@ -1,0 +1,371 @@
+--- a/drivers/gpu/drm/msm/msm_gem.c
++++ b/drivers/gpu/drm/msm/msm_gem.c
+@@ -147,7 +147,9 @@
+ 	GEM_WARN_ON(!msm_obj->pages);
+ 
+ 	if (msm_obj->pin_count) {
+-		drm_gem_lru_move_tail_locked(&priv->lru.pinned, obj);
++		/* Preserve pinned membership without refreshing its list position. */
++		if (obj->lru != &priv->lru.pinned)
++			drm_gem_lru_move_tail_locked(&priv->lru.pinned, obj);
+ 	} else if (msm_obj->madv == MSM_MADV_WILLNEED) {
+ 		drm_gem_lru_move_tail_locked(&priv->lru.willneed, obj);
+ 	} else {
+@@ -285,7 +287,9 @@
+ 	msm_gem_assert_locked(obj);
+ 
+ 	to_msm_bo(obj)->pin_count++;
+-	drm_gem_lru_move_tail_locked(&priv->lru.pinned, obj);
++	/* Keep every pin reference, but avoid relinking an already pinned BO. */
++	if (obj->lru != &priv->lru.pinned)
++		drm_gem_lru_move_tail_locked(&priv->lru.pinned, obj);
+ }
+ 
+ static void pin_obj_locked(struct drm_gem_object *obj)
+@@ -410,18 +414,16 @@
+ 	msm_gem_assert_locked(obj);
+ 
+ 	drm_gem_for_each_gpuvm_bo (vm_bo, obj) {
+-		struct drm_gpuva *vma;
+-
+-		drm_gpuvm_bo_for_each_va (vma, vm_bo) {
+-			if (vma->vm == vm) {
+-				/* lookup_vma() should only be used in paths
+-				 * with at most one vma per vm
+-				 */
+-				GEM_WARN_ON(!list_is_singular(&vm_bo->list.gpuva));
+-
+-				return vma;
+-			}
+-		}
++		/* GPUVM groups each object's mappings by VM.  Select that group
++		 * before touching individual VAs, including mappings in other VMs.
++		 */
++		if (vm_bo->vm != vm || list_empty(&vm_bo->list.gpuva))
++			continue;
++
++		/* lookup_vma() is only used with at most one VMA per VM. */
++		GEM_WARN_ON(!list_is_singular(&vm_bo->list.gpuva));
++		return list_first_entry(&vm_bo->list.gpuva,
++					struct drm_gpuva, gem.entry);
+ 	}
+ 
+ 	return NULL;
+@@ -500,15 +502,24 @@
+ {
+ 	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+ 	struct page **pages;
+-	int prot = msm_gem_prot(obj);
+-
+-	msm_gem_assert_locked(obj);
++	msm_gem_assert_locked(obj);
++
++	/* Both object/VM reservations are held by the caller.  Reuse the
++	 * established mapping only while its backing and madv remain valid.
++	 * Leave unusual states to the original page/error validation path.
++	 */
++	if (to_msm_vma(vma)->mapped && msm_obj->pages &&
++	    msm_obj->madv == MSM_MADV_WILLNEED) {
++		if (GEM_WARN_ON(!vma->va.addr))
++			return -EINVAL;
++		return 0;
++	}
+ 
+ 	pages = msm_gem_get_pages_locked(obj, MSM_MADV_WILLNEED);
+ 	if (IS_ERR(pages))
+ 		return PTR_ERR(pages);
+ 
+-	return msm_gem_vma_map(vma, prot, msm_obj->sgt);
++	return msm_gem_vma_map(vma, msm_gem_prot(obj), msm_obj->sgt);
+ }
+ 
+ void msm_gem_unpin_locked(struct drm_gem_object *obj)
+--- a/drivers/gpu/drm/msm/msm_gem_submit.c
++++ b/drivers/gpu/drm/msm/msm_gem_submit.c
+@@ -6,6 +6,8 @@
+ 
+ #include <linux/dma-fence-unwrap.h>
+ #include <linux/file.h>
++#include <linux/limits.h>
++#include <linux/prefetch.h>
+ #include <linux/sync_file.h>
+ #include <linux/uaccess.h>
+ 
+@@ -130,6 +132,8 @@
+ static int submit_lookup_objects(struct msm_gem_submit *submit,
+ 		struct drm_msm_gem_submit *args, struct drm_file *file)
+ {
++	struct drm_msm_gem_submit_bo batch[32];
++	bool batch_valid = false;
+ 	unsigned i;
+ 	int ret = 0;
+ 
+@@ -143,7 +147,19 @@
+ 		 */
+ 		submit->bos[i].flags = 0;
+ 
+-		if (copy_from_user(&submit_bo, userptr, sizeof(submit_bo))) {
++		/* Bound stack usage and amortize uaccess setup across descriptors.
++		 * On a bulk fault, retain scalar validation/error ordering.
++		 */
++		if (!(i % ARRAY_SIZE(batch))) {
++			unsigned count = min_t(unsigned, args->nr_bos - i,
++					       ARRAY_SIZE(batch));
++
++			batch_valid = !copy_from_user(batch, userptr,
++						     count * sizeof(batch[0]));
++		}
++		if (batch_valid) {
++			submit_bo = batch[i % ARRAY_SIZE(batch)];
++		} else if (copy_from_user(&submit_bo, userptr, sizeof(submit_bo))) {
+ 			ret = -EFAULT;
+ 			i = 0;
+ 			goto out;
+@@ -294,16 +310,64 @@
+ 	return ret;
+ }
+ 
++/* All descriptors have been looked up and own GEM references before these
++ * loops.  Hint a bounded future object, never userspace data or fence-list
++ * contents.  This changes neither traversal order nor synchronization.
++ */
++static inline struct drm_gem_object *
++submit_bo_lookahead(struct msm_gem_submit *submit, unsigned i)
++{
++	const unsigned distance = 8;
++
++	if (i >= submit->nr_bos || submit->nr_bos - i <= distance)
++		return NULL;
++	return submit->bos[i + distance].obj;
++}
++
++static inline void submit_prefetch_resv(struct msm_gem_submit *submit, unsigned i)
++{
++	struct drm_gem_object *obj = submit_bo_lookahead(submit, i);
++
++	if (obj) {
++		prefetch(obj);
++		prefetch(obj->resv);
++	}
++}
++
++static inline void submit_prefetch_object(struct msm_gem_submit *submit, unsigned i)
++{
++	struct drm_gem_object *obj = submit_bo_lookahead(submit, i);
++
++	if (obj) {
++		prefetch(&obj->gpuva);
++		prefetch(&obj->lru);
++		prefetch(&to_msm_bo(obj)->madv);
++	}
++}
++
+ /* This is where we make sure all the bo's are reserved and pin'd: */
+ static int submit_lock_objects(struct msm_gem_submit *submit)
+ {
+ 	unsigned flags = DRM_EXEC_INTERRUPTIBLE_WAIT;
++	unsigned nr_objects = submit->nr_bos;
+ 	int ret = 0;
+ 
+ 	if (msm_context_is_vmbind(submit->queue->ctx))
+ 		return submit_lock_objects_vmbind(submit);
+ 
+-	drm_exec_init(&submit->exec, flags, submit->nr_bos);
++	/* lookup_objects owns every BO until retirement.  Error retirement
++	 * follows exec_fini; asynchronous retirement must lock each BO before
++	 * dropping its reference, so it cannot free a still-locked entry.
++	 * The queue/context also keeps the VM reservation object alive.
++	 * VM_BIND's dynamically enumerated object set does not opt in.
++	 */
++	flags |= DRM_EXEC_OBJECTS_REF_HELD;
++	/* Track the VM reservation as well as the BOs.  Saturate rather than
++	 * wrapping the capacity; drm_exec retains its allocation-failure path.
++	 */
++	if (nr_objects != UINT_MAX)
++		nr_objects++;
++	drm_exec_init(&submit->exec, flags, nr_objects);
+ 
+ 	drm_exec_until_all_locked (&submit->exec) {
+ 		ret = drm_exec_lock_obj(&submit->exec,
+@@ -313,6 +377,7 @@
+ 			break;
+ 		for (unsigned i = 0; i < submit->nr_bos; i++) {
+ 			struct drm_gem_object *obj = submit->bos[i].obj;
++			submit_prefetch_resv(submit, i);
+ 			ret = drm_exec_prepare_obj(&submit->exec, obj, 1);
+ 			drm_exec_retry_on_contention(&submit->exec);
+ 			if (ret)
+@@ -330,6 +395,8 @@
+ 	for (i = 0; i < submit->nr_bos; i++) {
+ 		struct drm_gem_object *obj = submit->bos[i].obj;
+ 		bool write = submit->bos[i].flags & MSM_SUBMIT_BO_WRITE;
++
++		submit_prefetch_resv(submit, i);
+ 
+ 		/* Otherwise userspace can ask for implicit sync to be
+ 		 * disabled on specific buffers.  This is useful for internal
+@@ -356,6 +423,8 @@
+ 	for (i = 0; i < submit->nr_bos; i++) {
+ 		struct drm_gem_object *obj = submit->bos[i].obj;
+ 		struct drm_gpuva *vma;
++
++		submit_prefetch_object(submit, i);
+ 
+ 		/* if locking succeeded, pin bo: */
+ 		vma = msm_gem_get_vma_locked(obj, submit->vm);
+@@ -381,6 +450,7 @@
+ 	 */
+ 	mutex_lock(&priv->lru.lock);
+ 	for (i = 0; i < submit->nr_bos; i++) {
++		submit_prefetch_object(submit, i);
+ 		msm_gem_pin_obj_locked(submit->bos[i].obj);
+ 	}
+ 	mutex_unlock(&priv->lru.lock);
+@@ -424,6 +494,8 @@
+ 
+ 	for (unsigned i = 0; i < submit->nr_bos; i++) {
+ 		struct drm_gem_object *obj = submit->bos[i].obj;
++
++		submit_prefetch_resv(submit, i);
+ 
+ 		if (submit->bos[i].flags & MSM_SUBMIT_BO_WRITE)
+ 			dma_resv_add_fence(obj->resv, submit->user_fence,
+--- a/drivers/gpu/drm/scheduler/sched_main.c
++++ b/drivers/gpu/drm/scheduler/sched_main.c
+@@ -869,18 +869,9 @@
+ }
+ EXPORT_SYMBOL(drm_sched_job_arm);
+ 
+-/**
+- * drm_sched_job_add_dependency - adds the fence as a job dependency
+- * @job: scheduler job to add the dependencies to
+- * @fence: the dma_fence to add to the list of dependencies.
+- *
+- * Note that @fence is consumed in both the success and error cases.
+- *
+- * Returns:
+- * 0 on success, or an error on failing to expand the array.
+- */
+-int drm_sched_job_add_dependency(struct drm_sched_job *job,
+-				 struct dma_fence *fence)
++/* owned indicates that the caller transfers a fence reference. */
++static int drm_sched_job_add_dependency_ref(struct drm_sched_job *job,
++					    struct dma_fence *fence, bool owned)
+ {
+ 	struct dma_fence *entry;
+ 	unsigned long index;
+@@ -899,19 +890,38 @@
+ 			continue;
+ 
+ 		if (dma_fence_is_later(fence, entry)) {
++			if (!owned)
++				dma_fence_get(fence);
+ 			dma_fence_put(entry);
+ 			xa_store(&job->dependencies, index, fence, GFP_KERNEL);
+-		} else {
++		} else if (owned) {
+ 			dma_fence_put(fence);
+ 		}
+ 		return 0;
+ 	}
+ 
++	if (!owned)
++		dma_fence_get(fence);
+ 	ret = xa_alloc(&job->dependencies, &id, fence, xa_limit_32b, GFP_KERNEL);
+ 	if (ret != 0)
+ 		dma_fence_put(fence);
+ 
+ 	return ret;
++}
++/**
++ * drm_sched_job_add_dependency - adds the fence as a job dependency
++ * @job: scheduler job to add the dependencies to
++ * @fence: the dma_fence to add to the list of dependencies.
++ *
++ * Note that @fence is consumed in both the success and error cases.
++ *
++ * Returns:
++ * 0 on success, or an error on failing to expand the array.
++ */
++int drm_sched_job_add_dependency(struct drm_sched_job *job,
++				 struct dma_fence *fence)
++{
++	return drm_sched_job_add_dependency_ref(job, fence, true);
+ }
+ EXPORT_SYMBOL(drm_sched_job_add_dependency);
+ 
+@@ -966,12 +976,11 @@
+ 	dma_resv_assert_held(resv);
+ 
+ 	dma_resv_for_each_fence(&cursor, resv, usage, fence) {
+-		/*
+-		 * As drm_sched_job_add_dependency always consumes the fence
+-		 * reference (even when it fails), and dma_resv_for_each_fence
+-		 * is not obtaining one, we need to grab one before calling.
++		/* The reservation lock keeps this borrowed fence alive.  Only
++		 * acquire a job reference if it adds or replaces a dependency;
++		 * an already-covered fence needs no atomic get/put pair.
+ 		 */
+-		ret = drm_sched_job_add_dependency(job, dma_fence_get(fence));
++		ret = drm_sched_job_add_dependency_ref(job, fence, false);
+ 		if (ret)
+ 			return ret;
+ 	}
+--- a/drivers/gpu/drm/drm_exec.c
++++ b/drivers/gpu/drm/drm_exec.c
+@@ -68,7 +68,8 @@
+ 
+ 	drm_exec_for_each_locked_object_reverse(exec, obj) {
+ 		dma_resv_unlock(obj->resv);
+-		drm_gem_object_put(obj);
++		if (!(exec->flags & DRM_EXEC_OBJECTS_REF_HELD))
++			drm_gem_object_put(obj);
+ 	}
+ 
+ 	drm_exec_drop_prelocked(exec);
+@@ -169,7 +170,8 @@
+ 		exec->objects = tmp;
+ 		exec->max_objects += PAGE_SIZE / sizeof(void *);
+ 	}
+-	drm_gem_object_get(obj);
++	if (!(exec->flags & DRM_EXEC_OBJECTS_REF_HELD))
++		drm_gem_object_get(obj);
+ 	exec->objects[exec->num_objects++] = obj;
+ 
+ 	return 0;
+@@ -215,7 +217,8 @@
+  * @exec: the drm_exec object with the state
+  * @obj: the GEM object to lock
+  *
+- * Lock a GEM object for use and grab a reference to it.
++ * Lock a GEM object for use.  Unless DRM_EXEC_OBJECTS_REF_HELD is set,
++ * also grab a reference for the explicitly tracked objects array.
+  *
+  * Returns: -EDEADLK if a contention is detected, -EALREADY when object is
+  * already locked (can be suppressed by setting the DRM_EXEC_IGNORE_DUPLICATES
+@@ -280,7 +283,8 @@
+ 			for (++i; i < exec->num_objects; ++i)
+ 				exec->objects[i - 1] = exec->objects[i];
+ 			--exec->num_objects;
+-			drm_gem_object_put(obj);
++			if (!(exec->flags & DRM_EXEC_OBJECTS_REF_HELD))
++				drm_gem_object_put(obj);
+ 			return;
+ 		}
+ 
+--- a/include/drm/drm_exec.h
++++ b/include/drm/drm_exec.h
+@@ -8,6 +8,13 @@
+ 
+ #define DRM_EXEC_INTERRUPTIBLE_WAIT	BIT(0)
+ #define DRM_EXEC_IGNORE_DUPLICATES	BIT(1)
++
++/* Opt-in for callers that independently keep every explicitly tracked object
++ * alive until it is unlocked (including retries/error paths).  Only the
++ * objects[] references are borrowed; contended/prelocked references remain
++ * owned by drm_exec.  Do not set this when the object list can disappear.
++ */
++#define DRM_EXEC_OBJECTS_REF_HELD	BIT(2)
+ 
+ struct drm_gem_object;
+ 

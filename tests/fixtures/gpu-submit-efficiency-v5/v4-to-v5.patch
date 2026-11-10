@@ -1,0 +1,115 @@
+--- a/drivers/gpu/drm/msm/msm_gem_submit.c
++++ b/drivers/gpu/drm/msm/msm_gem_submit.c
+@@ -6,6 +6,8 @@
+ 
+ #include <linux/dma-fence-unwrap.h>
+ #include <linux/file.h>
++#include <linux/limits.h>
++#include <linux/prefetch.h>
+ #include <linux/sync_file.h>
+ #include <linux/uaccess.h>
+ 
+@@ -308,10 +310,46 @@
+ 	return ret;
+ }
+ 
++/* All descriptors have been looked up and own GEM references before these
++ * loops.  Hint a bounded future object, never userspace data or fence-list
++ * contents.  This changes neither traversal order nor synchronization.
++ */
++static inline struct drm_gem_object *
++submit_bo_lookahead(struct msm_gem_submit *submit, unsigned i)
++{
++	const unsigned distance = 8;
++
++	if (i >= submit->nr_bos || submit->nr_bos - i <= distance)
++		return NULL;
++	return submit->bos[i + distance].obj;
++}
++
++static inline void submit_prefetch_resv(struct msm_gem_submit *submit, unsigned i)
++{
++	struct drm_gem_object *obj = submit_bo_lookahead(submit, i);
++
++	if (obj) {
++		prefetch(obj);
++		prefetch(obj->resv);
++	}
++}
++
++static inline void submit_prefetch_object(struct msm_gem_submit *submit, unsigned i)
++{
++	struct drm_gem_object *obj = submit_bo_lookahead(submit, i);
++
++	if (obj) {
++		prefetch(&obj->gpuva);
++		prefetch(&obj->lru);
++		prefetch(&to_msm_bo(obj)->madv);
++	}
++}
++
+ /* This is where we make sure all the bo's are reserved and pin'd: */
+ static int submit_lock_objects(struct msm_gem_submit *submit)
+ {
+ 	unsigned flags = DRM_EXEC_INTERRUPTIBLE_WAIT;
++	unsigned nr_objects = submit->nr_bos;
+ 	int ret = 0;
+ 
+ 	if (msm_context_is_vmbind(submit->queue->ctx))
+@@ -324,7 +362,12 @@
+ 	 * VM_BIND's dynamically enumerated object set does not opt in.
+ 	 */
+ 	flags |= DRM_EXEC_OBJECTS_REF_HELD;
+-	drm_exec_init(&submit->exec, flags, submit->nr_bos);
++	/* Track the VM reservation as well as the BOs.  Saturate rather than
++	 * wrapping the capacity; drm_exec retains its allocation-failure path.
++	 */
++	if (nr_objects != UINT_MAX)
++		nr_objects++;
++	drm_exec_init(&submit->exec, flags, nr_objects);
+ 
+ 	drm_exec_until_all_locked (&submit->exec) {
+ 		ret = drm_exec_lock_obj(&submit->exec,
+@@ -334,6 +377,7 @@
+ 			break;
+ 		for (unsigned i = 0; i < submit->nr_bos; i++) {
+ 			struct drm_gem_object *obj = submit->bos[i].obj;
++			submit_prefetch_resv(submit, i);
+ 			ret = drm_exec_prepare_obj(&submit->exec, obj, 1);
+ 			drm_exec_retry_on_contention(&submit->exec);
+ 			if (ret)
+@@ -351,6 +395,8 @@
+ 	for (i = 0; i < submit->nr_bos; i++) {
+ 		struct drm_gem_object *obj = submit->bos[i].obj;
+ 		bool write = submit->bos[i].flags & MSM_SUBMIT_BO_WRITE;
++
++		submit_prefetch_resv(submit, i);
+ 
+ 		/* Otherwise userspace can ask for implicit sync to be
+ 		 * disabled on specific buffers.  This is useful for internal
+@@ -377,6 +423,8 @@
+ 	for (i = 0; i < submit->nr_bos; i++) {
+ 		struct drm_gem_object *obj = submit->bos[i].obj;
+ 		struct drm_gpuva *vma;
++
++		submit_prefetch_object(submit, i);
+ 
+ 		/* if locking succeeded, pin bo: */
+ 		vma = msm_gem_get_vma_locked(obj, submit->vm);
+@@ -402,6 +450,7 @@
+ 	 */
+ 	mutex_lock(&priv->lru.lock);
+ 	for (i = 0; i < submit->nr_bos; i++) {
++		submit_prefetch_object(submit, i);
+ 		msm_gem_pin_obj_locked(submit->bos[i].obj);
+ 	}
+ 	mutex_unlock(&priv->lru.lock);
+@@ -445,6 +494,8 @@
+ 
+ 	for (unsigned i = 0; i < submit->nr_bos; i++) {
+ 		struct drm_gem_object *obj = submit->bos[i].obj;
++
++		submit_prefetch_resv(submit, i);
+ 
+ 		if (submit->bos[i].flags & MSM_SUBMIT_BO_WRITE)
+ 			dma_resv_add_fence(obj->resv, submit->user_fence,
