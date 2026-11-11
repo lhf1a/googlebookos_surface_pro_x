@@ -1,3 +1,26 @@
+## 2026-11-11：真机 bring-up 准备，SQ2 候选启动载荷 staged（未启动）
+
+目标仍是"实现KGSL-SDE，并在真机调试运行"。本轮只做真机可达性/一致性核查与候选载荷准备，
+**未改启动默认、未重启**。
+
+- 设备：`root@192.168.5.110` 可达，运行 `6.18.60-sq2-android1`，显示为上游 mainline MSM 模块
+  (`msm_dpu`)，ESP=`/dev/nvme0n1p6`；默认 GRUB 入口 `EFI/SQ2Nat`，回退 `EFI/SQ2QDbg`。
+- 配置一致性：设备 `/proc/config.gz` 与候选 matched kernel `.config` 共 2564 项，**仅
+  CONFIG_LOCALVERSION 不同**；候选内核与已验收 android1 基线同源同配置，只多项目源码补丁。
+- 候选载荷：matched kernel `6.18.60-sq2-kgsl-sde-mst-dev1`（Image `e0afdadd…`）；模块 stage
+  497 个（全部 in-tree + 12 组 external override 以新 KOUT 重编 + native KGSL58
+  `msm_kgsl.ko`/两个 governor + SDE `msm_drm.ko`；vermagic 全匹配、depmod 0 错）；initramfs 取
+  设备当前 initramfs 仅替换 `/lib/modules/<release>`（sha `bb3247cd…`）。
+- QEMU 启动路径对等：候选与基线均到 `SQ2_GOOGLEBOOK_NATIVE_PREP`、从新 release 模块树成功
+  `modprobe af_key/fuse`、挂载全部 fake 分区，并同样停在 `security-overlay`（QEMU 假分区无
+  Android 内容）。这是启动路径 smoke，不是 Android/显示验收。
+- 候选 8 文件已上传真机 `EFI/SQ2Sde` 并逐项 sha256 校验通过；ESP 剩 819M；`boot_id` 未变
+  （无重启）。一键 one-shot 部署脚本用 grubenv `next_entry=sq2-qcom-618-sde`，GRUB 启动前消费
+  并清除→下次断电自动回 native；失败模式（init 前 panic，`panic=0`）需人工断电。
+- 未完成：真机候选启动、显示栈切换（SDE 替换上游 msm；native KGSL 与上游 drm/msm GPU 二选一）、
+  物理显示/提交/fence/PM/性能/SQ1-SQ2；`hardware_validated=false`。详细见
+  `docs/KGSL-SDE-DEVICE-BRINGUP-20261111.md` 与 `out/kgsl-resume-2/round3/DEVICE-BRINGUP-EVIDENCE.json`。
+
 ## 2026-11-11：Round2，匹配6.18内核与首个完整SDE模块（目标：真机运行）
 
 用户目标"实现KGSL-SDE，并在真机调试运行"；本轮只打通模块可构建门禁，未连设备、未部署/重启。

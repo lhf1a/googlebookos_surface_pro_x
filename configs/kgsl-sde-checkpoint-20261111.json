@@ -153,5 +153,77 @@
       "module requires the matched kernel (kernel-mst1); never mix with dev2 kernels/modules",
       "next: device bring-up with the matched kernel + module, internal eDP/DSI display, then real hardware validation"
     ]
+  },
+  "resume_round3_device": {
+    "device": {
+      "ip": "192.168.5.110",
+      "ssh_user": "root",
+      "ssh_key": "codex_sq2_port_20261026",
+      "running_kernel": "6.18.60-sq2-android1",
+      "running_display": "upstream msm (msm_dpu) module from initramfs",
+      "esp": "/dev/nvme0n1p6 mounted at /media/esp",
+      "boot_loader": "GRUB EFI/BOOT -> EFI/SQ2Nat/start.efi",
+      "fallback_entries": [
+        "EFI/SQ2QDbg (retained fallback)",
+        "EFI/SQ2Dbg (debug)"
+      ]
+    },
+    "config_parity": {
+      "device_options": 2564,
+      "candidate_options": 2564,
+      "differing": [
+        {
+          "option": "CONFIG_LOCALVERSION",
+          "device": "\"-sq2-android1\"",
+          "candidate": "\"-sq2-kgsl-sde-mst-dev1\""
+        }
+      ],
+      "note": "Only CONFIG_LOCALVERSION differs; the matched kernel uses the same source lineage and config as the accepted android1 baseline."
+    },
+    "matched_kernel": {
+      "release": "6.18.60-sq2-kgsl-sde-mst-dev1",
+      "image_sha256": "e0afdadd064c81c8c17b82b7a53f142581fe1b65bae4c32348a4b01ea4f3afc3",
+      "image_bytes": 35654144,
+      "symvers_sha256": "e6fc06cf9d038041cbb6ddc8308bda5b441c41d963ae5be819bc7f167e0410df",
+      "mst_core_patch": "patches/drm-618-mst-persistent-connector-lifecycle.patch",
+      "exports_drm_dp_atomic_release_port_payload": true
+    },
+    "module_stage": {
+      "release": "6.18.60-sq2-kgsl-sde-mst-dev1",
+      "module_count": 497,
+      "vermagic_bad": 0,
+      "native_kgsl": [
+        "msm_kgsl.ko"
+      ],
+      "kgsl_governors": [
+        "governor_gpubw_mon.ko",
+        "governor_msm_adreno_tz.ko"
+      ],
+      "sde_module": [
+        "msm_drm.ko"
+      ],
+      "external_overrides": "12 project external groups rebuilt against the matched KOUT (msm/venus/spi-hid/ssam/tsens/battery/ipa/identify/hfi/fw/videocc/rmnet)",
+      "evidence": "/mnt/spx-workspace/chromebookOS/work/qualcomm-618/sde-device-20261111/evidence"
+    },
+    "candidate_payload": {
+      "directory": "/mnt/spx-workspace/chromebookOS/work/qualcomm-618/sde-device-20261111/candidate-payload",
+      "initramfs_sha256": "bb3247cd3f3ca795dc248faa4baf9993c734b902d72b29ea4a06a58eae238863",
+      "image_sha256": "e0afdadd064c81c8c17b82b7a53f142581fe1b65bae4c32348a4b01ea4f3afc3"
+    },
+    "qemu_boot_result": "candidate and baseline behave identically through early init: both reach SQ2_GOOGLEBOOK_NATIVE_PREP, load af_key/fuse from the release module tree, mount all fake system/vendor partitions and stop at security-overlay only because the QEMU fake partitions carry no Android system content. Candidate kernel release reported correctly. This is a boot-path smoke test, not Android/display validation.",
+    "device_staging": {
+      "path": "/media/esp/EFI/SQ2Sde",
+      "verified_on_device": true,
+      "esp_before": "2.0G total, 946.9M used, 1.1G free",
+      "boot_config_untouched": true,
+      "deployment_mode": "one-shot GRUB next_entry prepared, not activated"
+    },
+    "evidence": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-2/round3/DEVICE-BRINGUP-EVIDENCE.json",
+    "not_done": [
+      "candidate kernel has not been booted on the device (staging only)",
+      "display bring-up (upstream msm vs SDE), HWC/SurfaceFlinger, native KGSL GPU, submit/fence, PM/performance and SQ1/SQ2 validation all remain",
+      "device fallback requires a power cycle if a future candidate boot hangs (panic=0)"
+    ],
+    "hardware_validated": false
   }
 }
