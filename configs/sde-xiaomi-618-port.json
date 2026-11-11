@@ -652,6 +652,366 @@
           "after": "5abcdabd1cc468219b0ca8c196fb2c9c49d95f19984a0b2871951398a6846df7"
         }
       }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-resume-round2.patch",
+      "sha256": "867af92adda1da08a1b81c0cdfafcf13683430e6d2c0525eb78a23933172dee2",
+      "files": {
+        "techpack/display/msm/dsi/dsi_clk_manager.c": {
+          "before": "8d882bac679b28464e0b9913fa32bdcb1db4aa1ad910f46c46afa6247ce58a12",
+          "after": "81a620861de1748c8121a21d7cccc615126a8e04403aece44aadfe0fe4c5afbe"
+        },
+        "techpack/display/msm/dsi/dsi_ctrl.c": {
+          "before": "113dcb67c8679aad0812822d7b1f08713ee9033f18e0ddda95909e29c5c138cf",
+          "after": "74483c8b68329ef08d36816c4cec36581feeb4276dca1af0c09d52a27e1c633d"
+        },
+        "techpack/display/msm/dsi/dsi_ctrl.h": {
+          "before": "5fc34fde3d5b741c488533bbd96f3a302888c6947c9947409dccc2910d485841",
+          "after": "caa15b3cad6beaf895dff092555d0cb4e8948368c0c5a0537939f5d3f8e903c4"
+        },
+        "techpack/display/msm/dsi/dsi_ctrl_hw_1_4.c": {
+          "before": "8b411f4b9491f97ef236d59810eb8e41f9e63c5aa15c65fb3b27b244fd205395",
+          "after": "0650f93aa8c863d422b3942b129255570b7d507b5f28ae7de47ad05651e2ad15"
+        },
+        "techpack/display/msm/dsi/dsi_ctrl_hw_2_0.c": {
+          "before": "15640b1dfc0e0e8425da6d9bab87e85ca888a5ed9ea9241af68e3024c0388106",
+          "after": "5128be334769ce11d719d42d8a0696d5d6701651c98190da2606f034321767c8"
+        },
+        "techpack/display/msm/dsi/dsi_ctrl_hw_cmn.c": {
+          "before": "62a8f0ef448b449e7bd98f44b8cdf67f5fe8aaae172e74c5a169637ff4d9ac55",
+          "after": "372fda163f1c05a1b4d1f4bca7dd80a065233bc7b78994f83a2e63e225909061"
+        },
+        "techpack/display/msm/dsi/dsi_defs.h": {
+          "before": "411e45c0e125c1e96fe2e221e0ef67a81e26b832d39dc91abd84bb380f11b520",
+          "after": "b6c721e58bcc940b6d715d4b21abd8df9a78c673b7384ab5c49dff1f9d51bdb1"
+        },
+        "techpack/display/msm/dsi/dsi_display.c": {
+          "before": "dca8d489dd9253bc5814574303990c161208c873656a5beefb41b213721c1472",
+          "after": "ee481bef3c2a1d816fe626405e2415ac74a4ecd70225ea4c9608c6e634d355a6"
+        },
+        "techpack/display/msm/dsi/dsi_display.h": {
+          "before": "c47c100f330de6981969bc64397d74595bb77e16c67350f59cdb78949045dff7",
+          "after": "5ff1e2d4393d2eda5ceb92b37b3675b1d3a6b1a24220ad329f5c7fbef21346c9"
+        },
+        "techpack/display/msm/dsi/dsi_panel.c": {
+          "before": "c1c72ee964ce3be91c5b6c031840ad6e2d81eb791edc04047251752e7555f615",
+          "after": "4314d44071cd2d4e3944433bfa09a4123c45913a1cf85219c5f541da281b12c9"
+        },
+        "techpack/display/msm/dsi/dsi_panel.h": {
+          "before": "899451a904cc3644e13f00fecb52af1c08fedb1092c5097dce65e2d5b8d08e8f",
+          "after": "dbc38a4a7cc0d18127a5a1c7800aa00589be799c5715ca5e85b41d08a77f21c3"
+        },
+        "techpack/display/msm/dsi/dsi_phy.c": {
+          "before": "e85ff0fec609a8712e6bf561c788f2d843da934de24a49c6fe797e17ca4024b9",
+          "after": "a9c6ce9ae379bda8b29b3d17fd676ef0dd5ac784e6d5e6529d28710996b1ddfb"
+        },
+        "techpack/display/msm/dsi/dsi_phy_hw_v2_0.c": {
+          "before": "a2ac268c81c0b3a0d0bdbcf8ea2e77262980a7cb4b1fba5b66d11eb1f1319749",
+          "after": "acafe01ea3644e95ef6150b6e21cbc1cc703a73250f4bccd131e88fb03e7cf3c"
+        },
+        "techpack/display/msm/dsi/dsi_pll_10nm.c": {
+          "before": "ffa5557c75c3406002b10a07e97fe32f67ecd440c5bf04314094a834f0f2bc38",
+          "after": "f180191ae57591ed6a02043422abd6a1afa0a4f6b262d719bcb1938a9eb013c4"
+        },
+        "techpack/display/msm/dsi/dsi_pll_5nm.c": {
+          "before": "8e4d5d758981441572ee5f898a4caf10200e65cf7daee27d57617f79d31d8dca",
+          "after": "ebf9b43b886257e6412e0ef5d7aa59ce5a7c0289c9fd5faa8eb77938c0c0f739"
+        },
+        "techpack/display/msm/mi_disp/mi_disp_notifier.c": {
+          "before": "ce053b72c48a93644c5da87444250e974e590f96f190279d2782ef05659d128b",
+          "after": "351b0c6693d85fccf94ecb99ced3564cbca00aa3d910a0d4851f78d900af418a"
+        },
+        "techpack/display/msm/msm_drv.c": {
+          "before": "7ab813c4d6d14bf20797bce9f3cc48edd6956d6a41b2762aa3bc552774c17be3",
+          "after": "89f19e96ae53c20cccf981bb4652137d2b9301a2b27e24204ef49ddf419b0240"
+        },
+        "techpack/display/msm/msm_drv.h": {
+          "before": "1763818a043ea4b819ff2340d0b48bee4853754cda1d33150845a392783e5a99",
+          "after": "523fcd042c4fca1bf27adec683f8b14701d313625a22d0414d7e182949f8a4f4"
+        },
+        "techpack/display/msm/msm_gem.c": {
+          "before": "5457c83cbda1809433b56cef04d120adfa7309addeebd2490b405247a72d1e85",
+          "after": "07559b006e67262f29691e16454d7d9509279c1d04fda42a408a4dafd66f6871"
+        },
+        "techpack/display/msm/sde/sde_connector.c": {
+          "before": "83747249770b00fac35c709b48cbe4c913f25a0667760d162d9b029b9ab21384",
+          "after": "467d79d2ae01f39fba09f1d93bed7616244cb03eb657bfa2c55db2164aa3d549"
+        },
+        "techpack/display/msm/sde/sde_connector.h": {
+          "before": "3dc7627f19fe3ee3999b24fe83116db8799d2b9d29f7f3b4c7db4dfa0149f448",
+          "after": "0d72a581dd162f723dca9d916119e7d4dcd699579ba5868e1a353d034ce0b3f0"
+        },
+        "techpack/display/msm/sde/sde_crtc.c": {
+          "before": "5505316052c6dee63885b4490e1c4cf350167c10bd88ef2a53367a2258074a1d",
+          "after": "a466ebb01ed3790c86f387f278f9330994080c97500958f4b8ea312d42d7677a"
+        },
+        "techpack/display/msm/sde/sde_crtc.h": {
+          "before": "12eb1b3feb25e5f6b2a2a831f23944adde117da063f11956c073b1ba96e59cf7",
+          "after": "acb9932224e3267ca806f94537f616d383eed2e4776ad3e0c62fcba461b7f208"
+        },
+        "techpack/display/msm/sde/sde_formats.h": {
+          "before": "589fe2fd3b3df6322261d0fbc02599d5072592c20f4f0c072390c0ca52878f19",
+          "after": "706bd03598fd6c26cdba790afa5ed51031584c8debb58407a3256afa0e6c63c8"
+        },
+        "techpack/display/msm/sde/sde_kms.c": {
+          "before": "43e30e187f4b01fbf1f8b86c4526ad8eca5afb087b71ef88152b29a471225e90",
+          "after": "d46511785f5a3810d4d312e0ebf5a1ac705754e823e8b51ec8ecbe91b8cc8b5d"
+        },
+        "techpack/display/msm/sde/sde_kms.h": {
+          "before": "5bf24d3356e5466d91269edde951fa8c7dc33ea1e28480eb6a465cc8fc7be37c",
+          "after": "e0eabe3a502786b691b41181998bfa3a5e357a5f564b0fa23a1fe158e79edb68"
+        },
+        "techpack/display/msm/sde/sde_plane.c": {
+          "before": "6ab0247039d5da3c1832472b8e49d54550c5bb07e906599abe3f46e9fdd0debc",
+          "after": "9c0168346b5bb28a98774318a08c553d3f4ad3e7c95d756948ff7835d801dd54"
+        },
+        "techpack/display/msm/sde/sde_plane.h": {
+          "before": "1aa8844b832c09ab4248a536d47680f7183da2225404d5f309c06dd229a2ddaa",
+          "after": "523b0fcb2eefa50ac7de9e674b68c97305d0ac16cce7bd0151fec62213b72173"
+        },
+        "techpack/display/msm/sde/sde_trace.h": {
+          "before": "01d02043236677cac8a72e1d3d488e094c739ae4cfa603463bf04e3e6e506b54",
+          "after": "ff6e784d55998e21baee279ffcd8d3a0ec71715be98c5f76cc07390fb63fdc56"
+        },
+        "techpack/display/msm/sde_dbg.c": {
+          "before": "462bc8cc73802c9902f6e1ec38ea1423c0edf9f2b7644a0e1178bcd5598b7945",
+          "after": "b0979df817c6c0f3f50d9d472f147f8102c9cd72a38fbaf691c6a658e9d120f9"
+        },
+        "techpack/display/msm/sde_dbg.h": {
+          "before": "e89535dc1a9482199faa32920a58e244b0b5e9f9e856a49448e1870678224b72",
+          "after": "dd1e12d5f58567dcba6d074affebeaea04a999bb80533d0c0b8267596c9dc494"
+        },
+        "techpack/display/msm/sde_dsc_helper.c": {
+          "before": "fbb8e1cb772f3fed120add9990e2ec33a1ac276778f469345a65615624162e65",
+          "after": "49898c21fd98d703d81c8c6d416bdd3f1c602653ecead3e918dd3695461973f0"
+        },
+        "techpack/display/msm/sde_vdc_helper.c": {
+          "before": "3c8baaa55bf69484d4588cca109d6249e3a7d2daeaa36d0417fe91a94ca2ca4f",
+          "after": "8cd331fd8e5eea9aec59e30918dc01266d4099285a1621ac1949bd2be9172ac5"
+        },
+        "techpack/display/include/drm/mi_disp_notifier.h": {
+          "before": null,
+          "after": "b90777ea514daa5ab6a694a55e9e794a78196b9b6bf621df5aedb6669d342322"
+        },
+        "techpack/display/include/dt-bindings/clock/mdss-10nm-pll-clk.h": {
+          "before": null,
+          "after": "e2cdce184dd4602518387ae394fece5e65ea7382cab72f30b3d66b0e41e2e9dc"
+        },
+        "techpack/display/include/dt-bindings/clock/mdss-5nm-pll-clk.h": {
+          "before": null,
+          "after": "e9894a4e87dbc10beb1854e8dd2d21462db250e31def8d912823f6292366c799"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-resume-round2b.patch",
+      "sha256": "079e01394870dda462167155dbef5378f23d6185513a9a5658c5c9ef17a0c6f6",
+      "files": {
+        "techpack/display/include/dt-bindings/clock/mdss-5nm-pll-clk.h": {
+          "before": "e9894a4e87dbc10beb1854e8dd2d21462db250e31def8d912823f6292366c799",
+          "after": "2c512e940c46870dbc23d25d113b060c73254f555c7205b953cbeee0a6a0d7e8"
+        },
+        "techpack/display/msm/Makefile": {
+          "before": "2e68014a53074f915191355c4f94b075f1afd2e746f4f1f359b78e540dbf9354",
+          "after": "325b3bcfd9689342a9df14017b9c978b23bf810d5b180960ca99682300fe0e00"
+        },
+        "techpack/display/msm/dp/dp_altmode.c": {
+          "before": "6f9cf799bebb4440e2dff34bda5318d1802694832005f7680e3da0ed562740c2",
+          "after": "2848703725e0d50801ab2ae33c33b7529ef5de6a53c39673165fed776a710fbb"
+        },
+        "techpack/display/msm/dp/dp_ctrl.c": {
+          "before": "f2a1b9cc192c6393dbe9fa2ad249b80b70fc0bd60e065fcff84526f720e2e59d",
+          "after": "b3c47efae71fd76d05a76640d367e2096d4e36f21fe8914850365aaad14aa8ff"
+        },
+        "techpack/display/msm/dp/dp_debug.c": {
+          "before": "4178d6394b767547e6bfb7873107143cc04d0f14d5bad199ad087ae0fafad390",
+          "after": "7f9afc494fe4b2d55c3722e137cb287aad7c11a4a35761759bd39c100b4972ce"
+        },
+        "techpack/display/msm/dp/dp_display.c": {
+          "before": "02e63646f2084b7f0523b76cb0513c48cc504c5a739c08df818dcf4f0b3a2a3f",
+          "after": "f8a76769f52199bfe5fe3f13ab4114a69b8d3c846d25362163ba0d4d39e60425"
+        },
+        "techpack/display/msm/dp/dp_drm.c": {
+          "before": "52915b43b6d546ad0b9d00022d00275b2b88075bfafd82db8646a94b288a11b7",
+          "after": "a195e7853a04909f3989cc561e3bec523f1cfdbcd69d40bec2ceba5fb845dfc6"
+        },
+        "techpack/display/msm/dp/dp_gpio_hpd.c": {
+          "before": "36f78df1b942c1e63ab54e087bbfed6691044609e66d56cfa2abaa1091e9c803",
+          "after": "613ddab7b1222a2edb4e2a2edb2a110a32b7cee508f8fcd02dd9d0364fdf9bc9"
+        },
+        "techpack/display/msm/dp/dp_hdcp2p2.c": {
+          "before": "1522e8b77048f80fb8bd71e82b97fd32657da146f281312791fc80aaccdaea3e",
+          "after": "be1c56b346146ddf17c8f18c8a98ef39d61ebd2afc72a6286557706f205470b2"
+        },
+        "techpack/display/msm/dp/dp_lphw_hpd.c": {
+          "before": "9f36032ff471d23de5a115cf3a127f4e068e71d4983c9fec07a493fcacf8f239",
+          "after": "d57066a7d07fc0e25f5b4f4f09ad7ab42bc7ef9730096272a7a8ec3eaa87629a"
+        },
+        "techpack/display/msm/dp/dp_panel.c": {
+          "before": "8f8b79b7ea2848c1082e8905973686c6794ac335ecd71479a3e87d7784caaed3",
+          "after": "25f311d55ad1f8c067bf870efbc898a2278e1cdbe7c98f0aaec688de90151ef5"
+        },
+        "techpack/display/msm/dp/dp_pll.h": {
+          "before": "d5574117238d8486f63919c2ecfb19e004377c1fe0a88dcd5071d6fbf8b17b1b",
+          "after": "e3cbf38b0803610432d1df5908e510a50193c2abb8265e30c9982ba810dfe884"
+        },
+        "techpack/display/msm/dp/dp_pll_5nm.c": {
+          "before": "eabab1e62b5455db5bd429f79d58b86ea0d882cfbc433fa7a60446ccf314f10a",
+          "after": "cacf8e02dd2cfba88ebac563b39b3b8bd3ac4028d34759a998070025cc3c13ec"
+        },
+        "techpack/display/msm/dp/dp_power.c": {
+          "before": "0ec3cf1c64483c5e45aedd2e48a4bf70c9b9c91cdff43c2a81e5d7d7680879f4",
+          "after": "0132b104222d2192e28b292b4e7ead8bc668b9f024c25d8834f5ba06e708320f"
+        },
+        "techpack/display/msm/dp/edp_pll_7nm.c": {
+          "before": "8fa7b2c7bf4ab9c63b5661418e5c6b81700eb23d27f7a51407cd0f2fb9f5b973",
+          "after": "7decc5aebf2e4687b9d164b32280007938060475c6415ceb11b4e3589acdb934"
+        },
+        "techpack/display/msm/msm_drv.c": {
+          "before": "89f19e96ae53c20cccf981bb4652137d2b9301a2b27e24204ef49ddf419b0240",
+          "after": "9905644abd9749039493027cb373efc70a94b72c99ea6acae87ae8acc3200aba"
+        },
+        "techpack/display/msm/sde/sde_color_processing.c": {
+          "before": "792be1ac4b2a9571b40aaf7daa7cb69812c1ff7eaf45083832bda838e3ec1d89",
+          "after": "54021b1114c179a2b88be17d7ec6bf9d56dd45dc73ebca463e74bd600ef59dc1"
+        },
+        "techpack/display/msm/sde/sde_encoder.c": {
+          "before": "a7a3c4d54df621f64c4ae68a57543caa6297cccfec41f959ea7591ae4ea79e4d",
+          "after": "e56e4cf2fc0427493e2979e94d2f75eee3366ec0078ff7af4167c68416bd338c"
+        },
+        "techpack/display/msm/sde/sde_encoder_dce.c": {
+          "before": "135bc91af836a569ef64d028d7e979a17f48f4352f8608b7c6ea25fe78a0fd0f",
+          "after": "7c79d635c209acd9f009fcff0eee87be2cbf1c109c4cb7f15667dc6a83e2ada0"
+        },
+        "techpack/display/msm/sde/sde_encoder_dce.h": {
+          "before": "f853927ad67641f7ae3a0a8c31f8897d1fff4677527df2a8e7efed117f5d0b5a",
+          "after": "8426c22cfda55159fa6407f23b863689c7bb37f58013333e601bc2b3cf6ac69c"
+        },
+        "techpack/display/msm/sde/sde_encoder_phys_cmd.c": {
+          "before": "72bae5acd462d421f3c3196d14c8449532f8cc53a1914787a12da19ff34c8208",
+          "after": "1a6ecb4b2033586492e7f4fb8e4b893438505b4d49f4f3ab528d67803cced9c8"
+        },
+        "techpack/display/msm/sde/sde_formats.h": {
+          "before": "706bd03598fd6c26cdba790afa5ed51031584c8debb58407a3256afa0e6c63c8",
+          "after": "137ec6e6a0475b60b141f93a095246778b70333e397a1dc6caed76763d386112"
+        },
+        "techpack/display/msm/sde/sde_hw_catalog.c": {
+          "before": "257f831f921c6f5a2c1de062db282ca9d8ae9e30071951de02b062fa05979223",
+          "after": "15effc2535758f748f2934b1526a3d030be2cd2222df1fabca5092d8e9b07837"
+        },
+        "techpack/display/msm/sde/sde_hw_catalog_format.h": {
+          "before": "2ef72fe4aa0a17c4b5350474c2acff4cf07d60a6b8433efaba656b931205ddb1",
+          "after": "93b08b32cad6d7cc10de75fefb18e9c133af1868bc29e976ae9e6a64cf66edde"
+        },
+        "techpack/display/msm/sde/sde_hw_cdm.c": {
+          "before": "b6b9a7999bd75c9e04d9f72571b990d30291be4fd4cd17716f124f18039120df",
+          "after": "962c5442fa9fb717caebb82cf3908e48deade2244c2ce9c284b66de0e61fbfbd"
+        },
+        "techpack/display/msm/sde/sde_hw_dsc_1_2.c": {
+          "before": "768896a8fc5686c2a7b822b690acf5a26046972240c6b197f8406bd0a059db45",
+          "after": "3c631202850819e8afa1e8ed931e378e6c1b4d5f86ab3e7a571f5955caf7b024"
+        },
+        "techpack/display/msm/sde/sde_hw_mdss.h": {
+          "before": "6868459b6a8e9862fadbbd404ce7c52293047a74f07f81c392ad9d8a4a0f4609",
+          "after": "02ebdd310d6cbbe7eb3f6847438ca0588bef01d08bcc17976af764c0abbacb18"
+        },
+        "techpack/display/msm/sde/sde_hw_rc.c": {
+          "before": "e594c1d0eb8c006a4baa39a2510c4dd212aabffcaaa1063b474673656b8cc748",
+          "after": "11236663bfb4e1240b1420361664aa32c7343e04d1dc335a610291346338d7fd"
+        },
+        "techpack/display/msm/sde/sde_hw_reg_dma_v1.c": {
+          "before": "4750b9d8887f3f57517c559efe01a3134380f41e8e4b9ec17af6a3df14a4e10b",
+          "after": "a28e7fd93c56c4873c30c937039ece022f008b2558721bf7bc281929d41ee86e"
+        },
+        "techpack/display/msm/sde/sde_hw_reg_dma_v1_color_proc.c": {
+          "before": "406d373257f7868d4aac84d2c7056cb0c69b476453523bb313b4ea3ed1f40206",
+          "after": "8c66ae88299c5a4fe0d44296035caa71e69e9bc2c12f5643349c44b9a07c1015"
+        },
+        "techpack/display/msm/sde/sde_hw_sspp.c": {
+          "before": "fabefb1f7cdda17e2488b37634815e9ae395be34eefd91e73cd568be4b0ded39",
+          "after": "e75ef069da7fb87fca335dc29c91f8dbfa0415d991024f83e95110ac4253df9d"
+        },
+        "techpack/display/msm/sde/sde_hw_top.c": {
+          "before": "fe8ce8a15d99e04bc8eaf7eb09b5fa4e2325d4e5bbddaacb36539581c3caef69",
+          "after": "29f7f839dec0b73f698a18d5a03bda3703627cf50b9a981a9266fd53bbc5561e"
+        },
+        "techpack/display/msm/sde/sde_hw_uidle.c": {
+          "before": "77f209191e71a70c1a006781998087f1e51b19dc5f492a43a45a99bb1edb2033",
+          "after": "4ad47ce328b454ee608244a20e1b52249e954987e84adb710a0e711afee50389"
+        },
+        "techpack/display/msm/sde/sde_kms.c": {
+          "before": "d46511785f5a3810d4d312e0ebf5a1ac705754e823e8b51ec8ecbe91b8cc8b5d",
+          "after": "d25161ef160d7da0d7cdcdd7568877d06642c22fef7e8ed0e282bf4ece0fed8e"
+        },
+        "techpack/display/msm/sde/sde_reg_dma.c": {
+          "before": "9649f5940f8d7d6b556d96b76c4cf8dc7ca1020fc35e64899df052734d72650a",
+          "after": "32d43449b2f9aebb7faea203e1e8f056a187be84fc2ae8500ed9b0fec299b904"
+        },
+        "techpack/display/msm/sde/sde_rm.c": {
+          "before": "9dfa2b50fc67221331521c2b5dcfd0ce20efe28a0a54b9764c5812daee9c89fb",
+          "after": "4479674b4251ad8e1ffef3cbbbda12f34f1863dfec7a0b751bb05ee6a5e4e0b2"
+        },
+        "techpack/display/msm/sde/sde_vbif.c": {
+          "before": "580466bcb9297f103d408a0eb6237c2a2b4e5b35a7f6f521232512186d33a4a1",
+          "after": "6514a0ccfbb220c938354d9ecfbbb32175b2e801153dd66e4803487e0224ee54"
+        },
+        "techpack/display/msm/sde_edid_parser.c": {
+          "before": "cb4db903f2e574d975114b066ef8731c621772add590afb746b5d80819224a5e",
+          "after": "9299122b86f9192d1dcf009b39015c59ab148f193d447ebb8095657794e41682"
+        },
+        "techpack/display/msm/sde_io_util.c": {
+          "before": "1a3e515f9e9c3260ced92cfd14553c1a06c9c6a3ad68aab035e3767692ed8a56",
+          "after": "8598a98ccfe81811bd278175d48d8fffcc100e71d4ae53de894b89fcfe5f21fc"
+        },
+        "techpack/display/msm/sde_power_handle.c": {
+          "before": "3bffacca89d757f4bda4328ccefc653e9a24f7ab3695517b11e79cd717c161d5",
+          "after": "df38805bb895873fe5020fb2e1e8aac220576f1a65ee572d1dd220a555f51824"
+        },
+        "techpack/display/include/drm/sde_drm_fourcc.h": {
+          "before": null,
+          "after": "653065f51490e4d9802cd047bfc450110409a2acbc53ef1265a7ce854cfde486"
+        },
+        "techpack/display/include/dt-bindings/clock/mdss-7nm-pll-clk.h": {
+          "before": null,
+          "after": "acf70ed7761859053ccadced8cf3a1592e969d6f26b45ea998eb508438b92d24"
+        },
+        "techpack/display/include/linux/hdcp_qseecom.h": {
+          "before": null,
+          "after": "58a286157dd70ab8172891720cd3842899eafe6b9d1a34b5eab51f4683e883f0"
+        },
+        "techpack/display/include/linux/msm_ext_display.h": {
+          "before": null,
+          "after": "2c459bffd813be428b8f0819d789116ed25e3a2ed6a44301f43248f331a93fd0"
+        },
+        "techpack/display/include/linux/qcom_scm.h": {
+          "before": null,
+          "after": "5ca445fb4834993eece059952d81d61170517c8a8cabd765d877e03e4a18c275"
+        },
+        "techpack/display/include/linux/soc/qcom/altmode-glink.h": {
+          "before": null,
+          "after": "845596c1f8863793bb9589d5d2b6dfcdc3d016a050fba9715100dfbd7439b298"
+        },
+        "techpack/display/include/linux/soc/qcom/fsa4480-i2c.h": {
+          "before": null,
+          "after": "4bdbc784a38d361cdc1357a26cf962d0e01d1a05e34e94b1071a8b0c13e62896"
+        },
+        "techpack/display/include/linux/soc/qcom/spmi-pmic-arb.h": {
+          "before": null,
+          "after": "d3e0aad80117ae14802d79db8fc721bb308bc1ef80dfdf543501042afa46d293"
+        },
+        "techpack/display/include/linux/usb/dwc3-msm.h": {
+          "before": null,
+          "after": "0a41ac328345384aa6c81caa715a6f2764402ce19fa6d9984f64d5ef2ab28039"
+        },
+        "techpack/display/include/soc/qcom/minidump.h": {
+          "before": null,
+          "after": "7219fdb2e707337150145df53b3d319a940f290a1edc7afefa634f60a51c37aa"
+        },
+        "techpack/display/msm/dp/dp_vendor_shims.c": {
+          "before": null,
+          "after": "0f0c0d6865325cd4d0cb2d3eb41d160fc4ecca4e4aaeee323123a30144b88644"
+        }
+      }
     }
   ],
   "scope": "Pinned full downstream display source plus its MSM UAPI, prepared for explicit Linux 6.18 API diagnostics. This is not a Surface hardware configuration or a loadable port.",
@@ -671,7 +1031,10 @@
     "integrated-18 remaining 13 dp_mst_drm.c diagnostics are exactly the new MST core symbols (cbs.connector_lifetime/disconnect_connector, DRM_DP_MST_CONNECTOR_*, drm_dp_atomic_release_port_payload) that the existing dev2 KOUT does not provide. A separately built patched 6.18 kernel + fresh KOUT is required (Lead-only) before the MST candidate can compile or link; the new msm_drm.ko must never be mixed with dev2 modules.",
     "Remaining whole-module errors are pre-existing 6.18 API drift outside round-1 scope: dsi_panel (MIPI_DSI_MSG_*/mipi_dsi_msg ctrl+wait_ms, drm_dsc_config.dsc_panel_id, drm_panel_init, devm_of_pwm_get, PTR_RET), sde_crtc (evtlog format, of_fdt_get_ddrtype, vzalloc/vfree), sde_dsc_helper dsc_panel_id, sde_connector prototypes/drm_framebuffer_get/lookup and drm_connector.panel, sde_plane/encoder drm_encoder::bridge, and msm_drv iommu_present.",
     "mode-userland product proposal (configs/sm8350-display-build.json, qti-sde-mode-request-v1/v2.patch, probe header, build script) is prepared but there is no HWC service, joint kernel+userspace runtime or device validation; library link is not display acceptance.",
-    "No device access, deployment, reboot, performance/PM measurement, real submit/fence retirement or SQ1/SQ2 acceptance was performed in round 1; full_* remain unclaimed. The run-1 goal continues."
+    "No device access, deployment, reboot, performance/PM measurement, real submit/fence retirement or SQ1/SQ2 acceptance was performed in round 1; full_* remain unclaimed. The run-1 goal continues.",
+    "Round2 stage A leaves the remaining whole-module blockers exactly in the surfaces owned by the next stage (SDE hw/encoder/DP) plus vendor-provider-free link symbols. Source/host only: no module link, no device ops, hardware_validated=false.",
+    "Round2 disabled/not-ported features remain unvalidated and must be listed in any claim: HDCP (SDE hdcp1/hdcp2 + DP hdcp2p2 objects excluded; HDCP reported unavailable), fbdev emulation (4.19 fb_helper API not ported), secure-VMID SCM/QTEE/HAVEN paths, panel notifier, VA-minidump, USB-C DP altmode / FSA4480 / DWC3 SS-lane / SPMI arb / external-display providers (explicit -EOPNOTSUPP shims), and the splash buffer staying reserved until reboot.",
+    "The module requires the separately built matched kernel (paired source + MST CORE.patch; kernel-mst1 / kernel-out-mst1). It must never be loaded against the dev2 kernel/modules. Next milestone is device bring-up and hardware validation: deployment, boot, module load, display bring-up, then real submit/fence retirement and PM/performance; no device operations have been performed in this phase."
   ],
   "host_validated": [
     "First group: driver-owned legacy DP AUX transactions; 80 actual-function host scenarios and seven compiled runtime negatives, eleven wiring checks. AUX/sleep modeled; no eDP supported-rate-table or hardware validation.",
@@ -694,6 +1057,9 @@
     "Group16 sde_fence diagnostics remove obsolete dma_fence_ops string callbacks and use an identity-checked local formatter for own context, with READ_ONCE done_count. Foreign fences receive unavailable, not a guessed timeline or private cast; target seqno still printed separately. Actual functions/current ops declaration47 HOST checks; B1/M0/R1, three source mutants compile0/run1. Real ARM64 caller/header probe B2/M0/R2; full original consumer TU remains2. Thirteen synchronization/lifecycle functions byte-identical; no signaling/wait/release policy removed or claimed hardware-verified.",
     "Group17 framebuffer: accept modern core-selected format_info in fb_create and propagate the same pointer to size admission and real fill helper. Internal writeback/stolen API retained through once-only format lookup using actual modern pixel_format/modifier arguments. Preserve vendor modified-format validation and acquired/borrowed GEM reference ownership, including partial lookup failures and repeated handles. Linear extents use real rounded plane dimensions/min_pitch and u64 size to avoid old truncation/wrap.327 extracted-source HOST assertions with actual format/fill helpers pass; five compile0/run1 mutants. Real ARM64 API probe B2/M0/R2; complete msm_fb TU remains2. No scanout or provider-retirement claim.",
     "Round1 resume 2026-11-11 (integrated-18): five parallel candidates integrated over integrated-17. irq/vblank: real Linux IRQ line (platform_get_irq -> preinstall -> request_irq -> postinstall, partial rollback, free_irq before provider tables), 6.18 drm_driver irq_*/vblank/lastclose migration to drm_client_funcs, per-crtc prepared-vblank gate; 56 host checks + 5 mutants, narrow ARM64 msm_drv diagnostics 51->9 with all IRQ-family diagnostics 0. mode-kernel: driver-owned requested/adjusted/selected state + SDE_MODE_REQUEST_V1/SDE_MODE_CATALOG_V1 uapi, msm_kms helpers take CRTC state, DSI bridge/catalog publisher, sde_crtc/connector/encoder/atomic consumers, real <drm/drm_fourcc.h>; private_flags/DRM_MODE_FLAG_SEAMLESS eliminated (364+120 -> 0); 112 host checks + 5 mutants. mode-userland: final-uapi-aligned adapter, 42 TU / 5 source-library strict Android aarch64 link, 103 host checks + 5 mutants, 90 checks against actual kernel ingest/derive/commit inline state. MST persistent-primary: explicit per-connector driver-managed lifecycle added to 6.18 core with NULL-default historical behavior unchanged, new drm_dp_atomic_release_port_payload; core and driver patches byte-exact apply/rollback, 59 host checks + 4 mutants, core narrow ARM64 TU 0/0/0. Late GEM/private-owner: drmm-managed msm_drm_private, owner/device refs on GEM and file contexts, admission/retirement wait, reversible PRIME import, late VRAM free; 28 host cases + 5 mutants, 3 real ARM64 probes, adds 0 new diagnostics. Integrated three-state full build: BASELINE exit2/25 objects, MODIFIED exit2/54 objects, ROLLBACK exit2/25 objects; error lines 978->254; 16/16 host checker groups exit0; 317-file exact rollback/reapply; KOUT hashes unchanged. Source/host level only: hardware_validated=false, deployment_ready=false.",
-    "Two host checkers needed model-only updates for the owner-agent's real *_active() split and owner admission helpers (list_empty/list_del_init/drm_dev_get/drm_dev_put/msm_drm_owner_* models and owner/drm_device fields in tests/sde_active_lock_test.c and tests/sde_prime_test.c): all assertions and scenario lists are unchanged, and both checkers pass on integrated-18 (21/21 active-lock cases, 31 PRIME scenarios). This is harness plumbing for new real source, not a weakened gate."
+    "Two host checkers needed model-only updates for the owner-agent's real *_active() split and owner admission helpers (list_empty/list_del_init/drm_dev_get/drm_dev_put/msm_drm_owner_* models and owner/drm_device fields in tests/sde_active_lock_test.c and tests/sde_prime_test.c): all assertions and scenario lists are unchanged, and both checkers pass on integrated-18 (21/21 active-lock cases, 31 PRIME scenarios). This is harness plumbing for new real source, not a weakened gate.",
+    "Round2 stage A (2026-11-11 resume): Lead device-based IOMMU check (msm_drv/msm_gem, msm_device_iommu_configured() replaces removed iommu_present()), dsi+dsc 6.18 migration (81 narrow-TU errors -> 0 in 25 built dsi/dsc TUs: DSI message flags/ctrl sidecar, panel/pwm/bridge/class/tear-off, dsc_panel_id driver-owned field, PLL divider flags) and SDE graphics migration (sde_crtc/connector/plane/formats/kms/dbg: 6 TUs 47 errors -> 0, including drm_atomic_state helper callbacks, connector-owned panel, framebuffer helpers, DT-based sde_get_ddrtype(), 6.18 tracepoint macros, three explicitly gated absent vendor features). All candidates had fuzz=0 byte-exact patch replay and narrow real ARM64 -Werror matrices. This stage's full SDE build is recorded separately; it is not a module build.",
+    "Round2 stage B (2026-11-11 resume): SDE hw/encoder/DP 6.18 migration (33 sources + 11 compat headers): 32 narrow ARM64 -Werror TUs went from 101 errors to 1 (the remaining of_fdt_get_ddrtype, then resolved by Lead). Lead semantic seams: donor-4.19 vendor format modifiers unified in include/drm/sde_drm_fourcc.h (DX=0x2/TIGHT=0x4/TILE=0x8, numeric collision with mainline TILED2/3 documented), unified 5nm PLL clock-ID header (DSI enum + DP IDs), sde_hw_catalog DDR type via sde_get_ddrtype(), HDCP-qseecom SDE/DP code compiled out (CONFIG_HDCP_QSEECOM absent; DP reports HDCP disabled and stays alive), fbdev emulation not built (4.19 fb_helper API absent), explicit -EOPNOTSUPP shims for absent vendor providers (altmode-glink, fsa4480, dwc3-msm, spmi-pmic-arb, msm_ext_display), MODULE_IMPORT_NS(DMA_BUF), sched_setattr_nocheck FIFO helper, and splash-buffer release documented as reserved-until-reboot because memblock/free_reserved_area are not module-safe/exported.",
+    "Round2 module link milestone: first complete external msm_drm.ko build against the matched 6.18 kernel (MST CORE.patch, release 6.18.60-sq2-kgsl-sde-mst-dev1): 114 objects, exit 0, 0 errors and 0 warnings with KCFLAGS=-Werror, msm_drm.ko sha256 cb34d88e78e2d1240a031936327a250199f3cb6c9e9ba38d4375ee966b94dcf9 (4161544 bytes), MODPOST clean, vermagic 6.18.60-sq2-kgsl-sde-mst-dev1 SMP mod_unload aarch64, depends llcc-qcom. This is compile/link/MODPOST evidence only: the module was not booted, not deployed and no hardware was validated."
   ]
 }

@@ -1,3 +1,34 @@
+## 2026-11-11：Round2，匹配6.18内核与首个完整SDE模块（目标：真机运行）
+
+用户目标"实现KGSL-SDE，并在真机调试运行"；本轮只打通模块可构建门禁，未连设备、未部署/重启。
+Lead独占匹配内核与全部完整构建；三代理并行 dsi+dsc / sde graphics / sde hw-encoder-dp。
+
+匹配内核：paired source + `patches/drm-618-mst-persistent-connector-lifecycle.patch`（MST opt-in
+persistent core）→ kernel-mst1/kernel-out-mst1，release `6.18.60-sq2-kgsl-sde-mst-dev1`，
+Image `e0afdadd…`、Module.symvers `e6fc06cf…`，486模块、0 error/37既有warning，导出
+`drm_dp_atomic_release_port_payload`；`dp_mst_drm.c` 诊断113→0；旧dev2 KOUT/模块未动。
+
+三候选窄TU：dsi+dsc 25TU 81→0；sde graphics 6TU 47→0（sde_kms fatal include后暴露的94条真实
+漂移全部解决）；hw/encoder/DP 32TU 101→1（最后 of_fdt_get_ddrtype 由Lead闭合）。均fuzz=0字节精确、
+三态/负例、真实ARM64 -Werror；Lead独立复验后语义合并。
+
+Lead seam/link：vendor QCOM format modifiers统一为donor值 DX=0x2/TIGHT=0x4/TILE=0x8（与TILED2/3
+数值冲突已注明）；5nm PLL头合并DSI enum+DP IDs；catalog改 sde_get_ddrtype()；HDCP-qseecom代码
+编译关闭（DP保持alive、HDCP不可用）；fbdev不构建（4.19 fb_helper API不存在）；altmode/fsa4480/
+dwc3/spmi/ext-display提供显式 -EOPNOTSUPP shim；MODULE_IMPORT_NS(DMA_BUF)；sched_setattr_nocheck
+FIFO helper；splash释放改"保留至重启"并记录（memblock/free_reserved_area非模块安全/未导出）。
+
+两阶段真实整编：integrated-19（19补丁/321源）B/M/R = exit2/55、exit2/78、exit2/55，16/16 checker0；
+integrated-20（20补丁/332源，patch sha `079e0139…`）B/M/R = exit2/78、**exit0/114对象/1模块**、
+exit2/78；MODIFIED 0 error/0 warning（-Werror），MODPOST clean，`msm_drm.ko` sha256 `cb34d88e…`
+（4161544 B），vermagic `6.18.60-sq2-kgsl-sde-mst-dev1`，depends llcc-qcom；16/16 checker0；
+四角色 8fbff6be/c52a3229/aa4b1b07/c1b7f563。
+
+边界：模块未部署/未加载/未启动；显示、真实提交/fence退休、PM/性能/SQ1-SQ2全部未验证；禁用特性
+（HDCP/fbdev/secure-VM/panel notifier/minidump/vendor shims/splash保留）必须随任何声明列出；模块必须
+配匹配内核，禁止与dev2混装。下一阶段：真机bring-up（匹配内核+模块部署、加载、内部eDP/DSI显示），
+再做硬件验收；`full_*`不提升，目标active。
+
 ## 2026-11-11：用户恢复并行开发，SDE第18组整编（IRQ/mode/MST/GEM-owner）
 
 用户明确要求“使用多agent并行可以并行开发的部分，推进恢复工作”，暂停解除。本轮仅源码/主机阶段：

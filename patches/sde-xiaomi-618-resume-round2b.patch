@@ -1,0 +1,1981 @@
+--- a/techpack/display/include/dt-bindings/clock/mdss-5nm-pll-clk.h
++++ b/techpack/display/include/dt-bindings/clock/mdss-5nm-pll-clk.h
+@@ -84,4 +84,18 @@
+ 	SHADOW_CPHY_PCLK_SRC_1_CLK,
+ };
+ 
++/*
++ * DP PLL 5nm clock-source IDs (same compatibility file: the donor
++ * binding was shared by the DSI and DP 5nm PLL consumers). Derived
++ * from dp_pll_5nm.c's mdss_dp_pllcc_5nm[] designators and the
++ * consecutive DP_VCO_CLK..DP_PHY_PLL_VCO_DIV_CLK loop; donor DT
++ * numbering remains unvalidated.
++ */
++#define DP_VCO_CLK			0
++#define DP_LINK_CLK_DIVSEL_TEN		1
++#define DP_VCO_DIVIDED_TWO_CLK_SRC	2
++#define DP_VCO_DIVIDED_FOUR_CLK_SRC	3
++#define DP_VCO_DIVIDED_SIX_CLK_SRC	4
++#define DP_PHY_PLL_VCO_DIV_CLK		5
++
+ #endif /* _DT_BINDINGS_CLK_MDSS_5NM_PLL_CLK_H */
+--- a/techpack/display/msm/Makefile
++++ b/techpack/display/msm/Makefile
+@@ -25,9 +25,7 @@
+ 	dp/dp_lphw_hpd.o \
+ 	dp/dp_display.o \
+ 	dp/dp_drm.o \
+-	dp/dp_hdcp2p2.o \
+-	sde_hdcp_1x.o \
+-	sde_hdcp_2x.o \
++	dp/dp_vendor_shims.o \
+ 	dp/dp_pll.o \
+ 	dp/dp_pll_5nm.o \
+ 	dp/edp_pll_7nm.o
+@@ -165,7 +163,18 @@
+ 
+ obj-$(CONFIG_DISPLAY_BUILD)	+= msm_drm.o
+ 
++# Port phase: msm_fbdev.c is not ported to the 6.18 fbdev API yet, so it is
++# intentionally not part of the external module (obj- lines are ignored by an
++# external-module build). FBDEV emulation stays disabled; see msm_drv.c.
+ obj-$(CONFIG_DRM_FBDEV_EMULATION) += msm_fbdev.o
+ 
+ # Match the MST object-selection variable for out-of-tree configurations.
+ ccflags-$(CONFIG_DRM_MSM_DP_MST) += -DCONFIG_DRM_MSM_DP_MST=1
++
++# Port phase note: sde_hdcp_1x.o, sde_hdcp_2x.o and dp/dp_hdcp2p2.o are
++# not built. The HDCP-qseecom provider (hdcp1_*/hdcp2_* APIs) is absent
++# from the paired 6.18 kernel, so HDCP is disabled for the display
++# bring-up (dp_display_initialize_hdcp() reports it disabled through
++# CONFIG_HDCP_QSEECOM) and remains unvalidated. Re-add these objects when
++# the HDCP provider is ported. dp/dp_vendor_shims.o provides explicit
++# -EOPNOTSUPP shims for other absent vendor providers (see that file).
+--- a/techpack/display/msm/dp/dp_altmode.c
++++ b/techpack/display/msm/dp/dp_altmode.c
+@@ -6,6 +6,7 @@
+ #include <linux/slab.h>
+ #include <linux/device.h>
+ #include <linux/delay.h>
++#include <linux/of_platform.h>
+ #include <linux/module.h>
+ #include <linux/kthread.h>
+ #include <linux/soc/qcom/altmode-glink.h>
+@@ -213,7 +214,7 @@
+ 
+ 	altmode->amclient = altmode_register_client(altmode->dev, &cd);
+ 	if (IS_ERR_OR_NULL(altmode->amclient))
+-		DP_ERR("failed to register as client: %d\n",
++		DP_ERR("failed to register as client: %ld\n",
+ 				PTR_ERR(altmode->amclient));
+ 	else
+ 		DP_DEBUG("success\n");
+--- a/techpack/display/msm/dp/dp_ctrl.c
++++ b/techpack/display/msm/dp/dp_ctrl.c
+@@ -1489,7 +1489,7 @@
+ 	SDE_EVT32_EXTERNAL(SDE_EVTLOG_FUNC_EXIT);
+ }
+ 
+-void dp_ctrl_set_sim_mode(struct dp_ctrl *dp_ctrl, bool en)
++static void dp_ctrl_set_sim_mode(struct dp_ctrl *dp_ctrl, bool en)
+ {
+ 	struct dp_ctrl_private *ctrl;
+ 
+--- a/techpack/display/msm/dp/dp_debug.c
++++ b/techpack/display/msm/dp/dp_debug.c
+@@ -996,7 +996,7 @@
+ 	list_for_each_entry(mode, &connector->modes, head) {
+ 		ret = snprintf(buf + len, max_size,
+ 		"%s %d %d %d %d %d 0x%x\n",
+-		mode->name, mode->vrefresh, mode->picture_aspect_ratio,
++		mode->name, drm_mode_vrefresh(mode), mode->picture_aspect_ratio,
+ 		mode->htotal, mode->vtotal, mode->clock, mode->flags);
+ 		if (dp_debug_check_buffer_overflow(ret, &max_size, &len))
+ 			break;
+@@ -1071,7 +1071,7 @@
+ 	list_for_each_entry(mode, &connector->modes, head) {
+ 		ret = snprintf(buf + len, max_size,
+ 				"%s %d %d %d %d %d 0x%x\n",
+-				mode->name, mode->vrefresh,
++				mode->name, drm_mode_vrefresh(mode),
+ 				mode->picture_aspect_ratio, mode->htotal,
+ 				mode->vtotal, mode->clock, mode->flags);
+ 		if (dp_debug_check_buffer_overflow(ret, &max_size, &len))
+@@ -2310,7 +2310,7 @@
+ 	return rc;
+ }
+ 
+-u8 *dp_debug_get_edid(struct dp_debug *dp_debug)
++static u8 *dp_debug_get_edid(struct dp_debug *dp_debug)
+ {
+ 	struct dp_debug_private *debug;
+ 
+--- a/techpack/display/msm/dp/dp_display.c
++++ b/techpack/display/msm/dp/dp_display.c
+@@ -13,6 +13,7 @@
+ #include <linux/soc/qcom/fsa4480-i2c.h>
+ #include <linux/usb/phy.h>
+ #include <linux/jiffies.h>
++#include <linux/pinctrl/consumer.h>
+ 
+ #include "sde_connector.h"
+ 
+@@ -236,7 +237,7 @@
+ 	{}
+ };
+ 
+-bool is_skip_required(struct dp_display *display)
++static bool is_skip_required(struct dp_display *display)
+ {
+ 	if (!display)
+ 		return false;
+@@ -684,7 +685,7 @@
+ 	dp_display_hdcp_process_state(dp);
+ }
+ 
+-static void dp_display_notify_hdcp_status_cb(void *ptr,
++static void __maybe_unused dp_display_notify_hdcp_status_cb(void *ptr,
+ 		enum sde_hdcp_state state)
+ {
+ 	struct dp_display_private *dp = ptr;
+@@ -706,6 +707,7 @@
+ 
+ static void dp_display_deinitialize_hdcp(struct dp_display_private *dp)
+ {
++#if IS_ENABLED(CONFIG_HDCP_QSEECOM)
+ 	if (!dp) {
+ 		DP_ERR("invalid input\n");
+ 		return;
+@@ -713,10 +715,16 @@
+ 
+ 	sde_hdcp_1x_deinit(dp->hdcp.dev[HDCP_VERSION_1X].fd);
+ 	sde_dp_hdcp2p2_deinit(dp->hdcp.dev[HDCP_VERSION_2P2].fd);
++#endif
+ }
+ 
+ static int dp_display_initialize_hdcp(struct dp_display_private *dp)
+ {
++#if !IS_ENABLED(CONFIG_HDCP_QSEECOM)
++	/* HDCP-qseecom provider is not ported in this 6.18 phase. The caller
++	 * treats a non-zero return as "HDCP disabled" and keeps DP alive. */
++	return -EOPNOTSUPP;
++#else
+ 	struct sde_hdcp_init_data hdcp_init_data;
+ 	struct dp_parser *parser;
+ 	void *fd;
+@@ -772,6 +780,7 @@
+ 	sde_hdcp_1x_deinit(dp->hdcp.dev[HDCP_VERSION_1X].fd);
+ 
+ 	return rc;
++#endif
+ }
+ 
+ static void dp_display_pause_audio(struct dp_display_private *dp, bool pause)
+@@ -1097,7 +1106,7 @@
+ 
+ 	/* add extra delay if MST state is not cleared */
+ 	if (old_mstm_ctrl) {
+-		DP_MST_DEBUG("MSTM_CTRL is not cleared, wait %dus\n",
++		DP_MST_DEBUG("MSTM_CTRL is not cleared, wait %luus\n",
+ 				clear_mstm_ctrl_timeout_us);
+ 		usleep_range(clear_mstm_ctrl_timeout_us,
+ 			clear_mstm_ctrl_timeout_us + 1000);
+@@ -3093,7 +3102,7 @@
+ 
+ 	if (num_lm > avail_res->num_lm) {
+ 		DP_DEBUG("mode %sx%d is invalid, not enough lm %d %d\n",
+-				mode->name, fps, num_lm, num_lm, avail_res->num_lm);
++				mode->name, fps, num_lm, avail_res->num_lm);
+ 		return -EPERM;
+ 	} else if (num_dsc > avail_res->num_dsc) {
+ 		DP_DEBUG("mode %sx%d is invalid, not enough dsc %d %d\n",
+@@ -3157,7 +3166,7 @@
+ 
+ 		_hdis = mode->hdisplay;
+ 		_vdis = mode->vdisplay;
+-		_vref = mode->vrefresh;
++		_vref = drm_mode_vrefresh(mode);
+ 		_ar = mode->picture_aspect_ratio;
+ 
+ 		if (hdis == _hdis && vdis == _vdis && vref == _vref &&
+@@ -3243,7 +3252,7 @@
+ 
+ 	if (debug->debug_en && (mode->hdisplay != debug->hdisplay ||
+ 			mode->vdisplay != debug->vdisplay ||
+-			mode->vrefresh != debug->vrefresh ||
++			drm_mode_vrefresh(mode) != debug->vrefresh ||
+ 			mode->picture_aspect_ratio != debug->aspect_ratio))
+ 		goto end;
+ 
+@@ -4196,12 +4205,13 @@
+ 		dp->mst.cbs.set_drv_state(dp_display, mst_state);
+ }
+ 
+-static int dp_display_remove(struct platform_device *pdev)
++/* 6.18 platform_driver.remove returns void */
++static void dp_display_remove(struct platform_device *pdev)
+ {
+ 	struct dp_display_private *dp;
+ 
+ 	if (!pdev)
+-		return -EINVAL;
++		return;
+ 
+ 	dp = platform_get_drvdata(pdev);
+ 
+@@ -4212,8 +4222,6 @@
+ 
+ 	platform_set_drvdata(pdev, NULL);
+ 	devm_kfree(&pdev->dev, dp);
+-
+-	return 0;
+ }
+ 
+ static int dp_pm_prepare(struct device *dev)
+--- a/techpack/display/msm/dp/dp_drm.c
++++ b/techpack/display/msm/dp/dp_drm.c
+@@ -41,7 +41,7 @@
+ 			      dp_mode->timing.v_sync_width;
+ 	drm_mode->vtotal = drm_mode->vsync_end + dp_mode->timing.v_back_porch;
+ 
+-	drm_mode->vrefresh = dp_mode->timing.refresh_rate;
++	/* 6.18 computes vrefresh from the timings via drm_mode_vrefresh() */
+ 	drm_mode->clock = dp_mode->timing.pixel_clk_khz;
+ 
+ 	if (dp_mode->timing.h_active_low)
+@@ -60,7 +60,9 @@
+ 	drm_mode_set_name(drm_mode);
+ }
+ 
+-static int dp_bridge_attach(struct drm_bridge *dp_bridge)
++static int dp_bridge_attach(struct drm_bridge *dp_bridge,
++		struct drm_encoder *encoder,
++		enum drm_bridge_attach_flags flags)
+ {
+ 	struct dp_bridge *bridge = to_dp_bridge(dp_bridge);
+ 
+@@ -426,7 +428,7 @@
+ 	topology->num_enc = no_enc;
+ 	topology->num_intf = single_intf;
+ 
+-	mode_info->frame_rate = drm_mode->vrefresh;
++	mode_info->frame_rate = drm_mode_vrefresh(drm_mode);
+ 	mode_info->vtotal = drm_mode->vtotal;
+ 
+ 	mode_info->wide_bus_en = dp_panel->widebus_en;
+@@ -635,40 +637,45 @@
+ 	struct dp_display *display = data;
+ 	struct msm_drm_private *priv = NULL;
+ 
+-	bridge = kzalloc(sizeof(*bridge), GFP_KERNEL);
+-	if (!bridge) {
+-		rc = -ENOMEM;
++	dev = display->drm_dev;
++
++	/*
++	 * 6.18 requires a refcount-initialized bridge object and drives attach
++	 * through encoder->bridge_chain; allocate the container with
++	 * devm_drm_bridge_alloc() so the core initialises funcs/kref and owns
++	 * the object lifetime.
++	 */
++	bridge = devm_drm_bridge_alloc(dev->dev, struct dp_bridge, base,
++			&dp_bridge_ops);
++	if (IS_ERR(bridge))
++		return PTR_ERR(bridge);
++
++	bridge->display = display;
++
++	priv = dev->dev_private;
++
++	/* flags 0 keeps the legacy bridge/connector split this driver uses:
++	 * the sde connector is created separately by sde_connector_init().
++	 */
++	rc = drm_bridge_attach(encoder, &bridge->base, NULL, 0);
++	if (rc) {
++		DP_ERR("failed to attach bridge, rc=%d\n", rc);
+ 		goto error;
+ 	}
+ 
+-	dev = display->drm_dev;
+-	bridge->display = display;
+-	bridge->base.funcs = &dp_bridge_ops;
+-	bridge->base.encoder = encoder;
+-
+-	priv = dev->dev_private;
+-
+-	rc = drm_bridge_attach(encoder, &bridge->base, NULL);
+-	if (rc) {
+-		DP_ERR("failed to attach bridge, rc=%d\n", rc);
+-		goto error_free_bridge;
+-	}
+-
+ 	rc = display->request_irq(display);
+ 	if (rc) {
+ 		DP_ERR("request_irq failed, rc=%d\n", rc);
+-		goto error_free_bridge;
+-	}
+-
+-	encoder->bridge = &bridge->base;
++		/* core drm_encoder_cleanup() detaches the chain on destroy */
++		goto error;
++	}
++
+ 	priv->bridges[priv->num_bridges++] = &bridge->base;
+ 	display->bridge = bridge;
+ 	display->max_mixer_count = max_mixer_count;
+ 	display->max_dsc_count = max_dsc_count;
+ 
+ 	return 0;
+-error_free_bridge:
+-	kfree(bridge);
+ error:
+ 	return rc;
+ }
+@@ -678,10 +685,16 @@
+ 	struct dp_display *display = data;
+ 	struct dp_bridge *bridge = display->bridge;
+ 
+-	if (bridge && bridge->base.encoder)
+-		bridge->base.encoder->bridge = NULL;
+-
+-	kfree(bridge);
++	if (!bridge)
++		return;
++
++	/*
++	 * 6.18 does not export drm_bridge_detach() to drivers; the encoder
++	 * chain is detached by drm_encoder_cleanup() when the encoder is
++	 * destroyed, and the bridge object itself is devm-owned by
++	 * dp_drm_bridge_init().  Only the driver's own pointer is cleared.
++	 */
++	display->bridge = NULL;
+ }
+ 
+ enum drm_mode_status dp_connector_mode_valid(struct drm_connector *connector,
+@@ -705,7 +718,7 @@
+ 	}
+ 
+ 	dp_disp = display;
+-	mode->vrefresh = drm_mode_vrefresh(mode);
++	/* 6.18: do not mutate the mode; vrefresh is derived on demand */
+ 
+ 	rc = dp_disp->get_available_dp_resources(dp_disp, avail_res,
+ 			&avail_dp_res);
+@@ -758,7 +771,8 @@
+ 	 */
+ 	if (!base_conn->colorspace_property) {
+ 		/* This is the base connector. create the drm property */
+-		rc = drm_mode_create_dp_colorspace_property(base_conn);
++		/* 0 == use the core's full DP colorspace set, matching 4.19 */
++		rc = drm_mode_create_dp_colorspace_property(base_conn, 0);
+ 		if (rc)
+ 			return rc;
+ 	} else {
+--- a/techpack/display/msm/dp/dp_gpio_hpd.c
++++ b/techpack/display/msm/dp/dp_gpio_hpd.c
+@@ -183,7 +183,7 @@
+ 	return rc;
+ }
+ 
+-int dp_gpio_hpd_register(struct dp_hpd *dp_hpd)
++static int dp_gpio_hpd_register(struct dp_hpd *dp_hpd)
+ {
+ 	struct dp_gpio_hpd_private *gpio_hpd;
+ 	int edge;
+--- a/techpack/display/msm/dp/dp_hdcp2p2.c
++++ b/techpack/display/msm/dp/dp_hdcp2p2.c
+@@ -405,7 +405,8 @@
+ 	diff_ms = ktime_ms_delta(finish_read, start_read);
+ 
+ 	if (ctrl->transaction_timeout && diff_ms > ctrl->transaction_timeout) {
+-		DP_ERR("HDCP read timeout exceeded (%dms > %dms)\n", diff_ms,
++		DP_ERR("HDCP read timeout exceeded (%lldms > %dms)\n",
++				(long long)diff_ms,
+ 				ctrl->transaction_timeout);
+ 		rc = -ETIMEDOUT;
+ 	}
+@@ -929,6 +930,10 @@
+ 
+ void *sde_dp_hdcp2p2_init(struct sde_hdcp_init_data *init_data)
+ {
++#if !IS_ENABLED(CONFIG_HDCP_QSEECOM)
++	/* HDCP-qseecom provider not ported in this 6.18 phase. */
++	return ERR_PTR(-EOPNOTSUPP);
++#else
+ 	int rc;
+ 	struct dp_hdcp2p2_ctrl *ctrl;
+ 	static struct sde_hdcp_ops ops = {
+@@ -1024,6 +1029,7 @@
+ error:
+ 	kfree(ctrl);
+ 	return ERR_PTR(rc);
++#endif
+ }
+ 
+ struct sde_hdcp_ops *sde_dp_hdcp2p2_get(void *input)
+--- a/techpack/display/msm/dp/dp_lphw_hpd.c
++++ b/techpack/display/msm/dp/dp_lphw_hpd.c
+@@ -241,7 +241,7 @@
+ 	return 0;
+ }
+ 
+-int dp_lphw_hpd_register(struct dp_hpd *dp_hpd)
++static int dp_lphw_hpd_register(struct dp_hpd *dp_hpd)
+ {
+ 	struct dp_lphw_hpd_private *lphw_hpd;
+ 	int rc = 0;
+--- a/techpack/display/msm/dp/dp_panel.c
++++ b/techpack/display/msm/dp/dp_panel.c
+@@ -25,6 +25,15 @@
+ #define DP_COMPRESSION_RATIO_2_TO_1 2
+ #define DP_COMPRESSION_RATIO_3_TO_1 3
+ #define DP_COMPRESSION_RATIO_NONE 1
++
++/*
++ * 6.18 drm_panel_init() requires a funcs table and connector type.  The DP
++ * controller drives the link itself and this panel object only exists to be
++ * registered so the (vendor-only) eDP panel-notifier hookup can find it, so
++ * no panel callbacks are implemented here.
++ */
++static const struct drm_panel_funcs dp_panel_drm_funcs = {
++};
+ 
+ enum dp_panel_hdr_pixel_encoding {
+ 	RGB,
+@@ -2945,7 +2954,7 @@
+ 	dp_mode->timing.v_front_porch = drm_mode->vsync_start -
+ 					 drm_mode->vdisplay;
+ 
+-	dp_mode->timing.refresh_rate = drm_mode->vrefresh;
++	dp_mode->timing.refresh_rate = drm_mode_vrefresh(drm_mode);
+ 
+ 	dp_mode->timing.pixel_clk_khz = drm_mode->clock;
+ 
+@@ -3103,15 +3112,20 @@
+ 		if (!of_node) {
+ 			DP_ERR("phandle for default panel not found\n");
+ 		} else {
+-			drm_panel_init(&dp_panel->drm_panel);
+-			dp_panel->drm_panel.dev = dev;
++			drm_panel_init(&dp_panel->drm_panel, dev,
++					&dp_panel_drm_funcs,
++					DRM_MODE_CONNECTOR_eDP);
+ 			dev->of_node = of_node;
+ 
+-			rc = drm_panel_add(&dp_panel->drm_panel);
+-			if (rc)
+-				DP_ERR("Failed to add drm_panel\n");
+-
+-			dp_panel->connector->panel = &dp_panel->drm_panel;
++			/* 6.18: drm_panel_add() returns void */
++			drm_panel_add(&dp_panel->drm_panel);
++
++			/*
++			 * 6.18 has no vendor-only drm_connector.panel field, so no
++			 * connector->panel link is installed.  The eDP panel-notifier
++			 * feature this hookup served has no 6.18 core counterpart and
++			 * stays unwired/unvalidated (reported).
++			 */
+ 		}
+ 	}
+ 
+--- a/techpack/display/msm/dp/dp_pll.h
++++ b/techpack/display/msm/dp/dp_pll.h
+@@ -33,8 +33,9 @@
+ })
+ 
+ #define dp_pll_write(x, offset, data) ({ \
+-		DP_DEBUG(#offset", addr=0x%x, val=0x%x\n", \
+-				(dp_pll_get_base(x)) + (offset), (data)); \
++		DP_DEBUG(#offset", addr=0x%lx, val=0x%x\n", \
++				(unsigned long)((dp_pll_get_base(x)) + (offset)), \
++				(data)); \
+ 		SDE_EVT32_VERBOSE((dp_pll_get_base(x)) + (offset), (data)); \
+ 		writel_relaxed((data), (dp_pll_get_base(x)) + (offset)); \
+ })
+--- a/techpack/display/msm/dp/dp_pll_5nm.c
++++ b/techpack/display/msm/dp/dp_pll_5nm.c
+@@ -432,7 +432,7 @@
+ 	TSYNC_DONE,
+ };
+ 
+-char *dp_5nm_pll_get_status_name(enum dp_5nm_pll_status status)
++static char *dp_5nm_pll_get_status_name(enum dp_5nm_pll_status status)
+ {
+ 	switch (status) {
+ 	case C_READY:
+@@ -574,7 +574,7 @@
+ 	.max_register = 0x910,
+ };
+ 
+-int dp_mux_set_parent_5nm(void *context, unsigned int reg, unsigned int val)
++static int dp_mux_set_parent_5nm(void *context, unsigned int reg, unsigned int val)
+ {
+ 	struct dp_pll *pll = context;
+ 	u32 auxclk_div;
+@@ -602,7 +602,7 @@
+ 	return 0;
+ }
+ 
+-int dp_mux_get_parent_5nm(void *context, unsigned int reg, unsigned int *val)
++static int dp_mux_get_parent_5nm(void *context, unsigned int reg, unsigned int *val)
+ {
+ 	u32 auxclk_div = 0;
+ 	struct dp_pll *pll = context;
+--- a/techpack/display/msm/dp/dp_power.c
++++ b/techpack/display/msm/dp/dp_power.c
+@@ -207,7 +207,7 @@
+ 
+ 		power->pixel_clk_rcg = clk_get(dev, "pixel_clk_rcg");
+ 		if (IS_ERR(power->pixel_clk_rcg)) {
+-			DP_ERR("Unable to get DP pixel clk RCG: %d\n",
++			DP_ERR("Unable to get DP pixel clk RCG: %ld\n",
+ 					PTR_ERR(power->pixel_clk_rcg));
+ 			rc = PTR_ERR(power->pixel_clk_rcg);
+ 			power->pixel_clk_rcg = NULL;
+@@ -216,7 +216,7 @@
+ 
+ 		power->pixel_parent = clk_get(dev, "pixel_parent");
+ 		if (IS_ERR(power->pixel_parent)) {
+-			DP_ERR("Unable to get DP pixel RCG parent: %d\n",
++			DP_ERR("Unable to get DP pixel RCG parent: %ld\n",
+ 					PTR_ERR(power->pixel_parent));
+ 			rc = PTR_ERR(power->pixel_parent);
+ 			power->pixel_parent = NULL;
+@@ -226,7 +226,7 @@
+ 		if (power->parser->has_mst) {
+ 			power->pixel1_clk_rcg = clk_get(dev, "pixel1_clk_rcg");
+ 			if (IS_ERR(power->pixel1_clk_rcg)) {
+-				DP_ERR("Unable to get DP pixel1 clk RCG: %d\n",
++				DP_ERR("Unable to get DP pixel1 clk RCG: %ld\n",
+ 						PTR_ERR(power->pixel1_clk_rcg));
+ 				rc = PTR_ERR(power->pixel1_clk_rcg);
+ 				power->pixel1_clk_rcg = NULL;
+--- a/techpack/display/msm/dp/edp_pll_7nm.c
++++ b/techpack/display/msm/dp/edp_pll_7nm.c
+@@ -670,7 +670,7 @@
+ 
+ 	rc = edp_vco_set_rate_7nm(pll, rate);
+ 	if (rc < 0) {
+-		DP_ERR("pll rate %s set failed\n", rate);
++		DP_ERR("pll rate %lu set failed\n", rate);
+ 		return rc;
+ 	}
+ 
+--- a/techpack/display/msm/msm_drv.c
++++ b/techpack/display/msm/msm_drv.c
+@@ -56,6 +56,18 @@
+ #include "sde_wb.h"
+ #include "sde_dbg.h"
+ 
++/* 6.18 removed the exported sched_setscheduler(); use the in-kernel helper. */
++static int msm_thread_set_fifo(struct task_struct *thread,
++		const struct sched_param *param);
++
++/*
++ * Legacy fbdev emulation is not ported in this phase: the 4.19-era
++ * drm_fb_helper fb_probe and sys helper families no longer exist in 6.18.
++ * Android HWC brings the display up through DRM/KMS; fbcon on this
++ * display stays disabled until msm_fbdev.c is ported.
++ */
++#define MSM_FBDEV_PORTED 0
++
+ /*
+  * MSM driver version:
+  * - 1.0.0 - initial interface
+@@ -170,7 +182,7 @@
+ #define reglog 0
+ #endif
+ 
+-#ifdef CONFIG_DRM_FBDEV_EMULATION
++#if defined(CONFIG_DRM_FBDEV_EMULATION) && MSM_FBDEV_PORTED
+ static bool fbdev = true;
+ MODULE_PARM_DESC(fbdev, "Enable fbdev compat layer");
+ module_param(fbdev, bool, 0600);
+@@ -534,7 +546,7 @@
+ 		priv->registered = false;
+ 	}
+ 
+-#ifdef CONFIG_DRM_FBDEV_EMULATION
++#if defined(CONFIG_DRM_FBDEV_EMULATION) && MSM_FBDEV_PORTED
+ 	if (fbdev && priv->fbdev)
+ 		msm_fbdev_free(ddev);
+ #endif
+@@ -726,8 +738,7 @@
+ 			kthread_run(kthread_worker_fn,
+ 				&priv->disp_thread[i].worker,
+ 				"crtc_commit:%d", priv->disp_thread[i].crtc_id);
+-		ret = sched_setscheduler(priv->disp_thread[i].thread,
+-							SCHED_FIFO, &param);
++		ret = msm_thread_set_fifo(priv->disp_thread[i].thread, &param);
+ 		if (ret)
+ 			pr_warn("display thread priority update failed: %d\n",
+ 									ret);
+@@ -752,8 +763,7 @@
+ 		 * frame_pending counters beyond 2. This can lead to commit
+ 		 * failure at crtc commit level.
+ 		 */
+-		ret = sched_setscheduler(priv->event_thread[i].thread,
+-							SCHED_FIFO, &param);
++		ret = msm_thread_set_fifo(priv->event_thread[i].thread, &param);
+ 		if (ret)
+ 			pr_warn("display event thread priority update failed: %d\n",
+ 									ret);
+@@ -792,8 +802,7 @@
+ 	priv->pp_event_thread = kthread_run(kthread_worker_fn,
+ 			&priv->pp_event_worker, "pp_event");
+ 
+-	ret = sched_setscheduler(priv->pp_event_thread,
+-						SCHED_FIFO, &param);
++	ret = msm_thread_set_fifo(priv->pp_event_thread, &param);
+ 	if (ret)
+ 		pr_warn("pp_event thread priority update failed: %d\n",
+ 								ret);
+@@ -1028,7 +1037,7 @@
+ 		drm_client_register(&kms->client);
+ 	}
+ 
+-#ifdef CONFIG_DRM_FBDEV_EMULATION
++#if defined(CONFIG_DRM_FBDEV_EMULATION) && MSM_FBDEV_PORTED
+ 	if (fbdev)
+ 		priv->fbdev = msm_fbdev_init(ddev);
+ #endif
+@@ -2325,6 +2334,24 @@
+ 	return funcs->get_dsc_count(priv->kms, hdisplay, num_dsc);
+ }
+ 
++MODULE_IMPORT_NS("DMA_BUF");
++
++/* 6.18 removed the exported sched_setscheduler(); use the in-kernel helper. */
++static int msm_thread_set_fifo(struct task_struct *thread,
++		const struct sched_param *param)
++{
++	struct sched_attr attr = {
++		.size = sizeof(attr),
++		.sched_policy = SCHED_FIFO,
++		.sched_priority = param->sched_priority,
++	};
++
++	if (IS_ERR_OR_NULL(thread))
++		return -EINVAL;
++
++	return sched_setattr_nocheck(thread, &attr);
++}
++
+ static int msm_drm_bind(struct device *dev)
+ {
+ 	return msm_drm_component_init(dev);
+--- a/techpack/display/msm/sde/sde_color_processing.c
++++ b/techpack/display/msm/sde/sde_color_processing.c
+@@ -7,6 +7,8 @@
+ #define pr_fmt(fmt)	"%s: " fmt, __func__
+ 
+ #include <linux/dma-buf.h>
++#include <linux/vmalloc.h>
++#include <drm/drm_framebuffer.h>
+ #include <linux/string.h>
+ #include <drm/msm_drm_pp.h>
+ #include "sde_color_processing.h"
+@@ -1678,7 +1680,7 @@
+ 	}
+ }
+ 
+-void sde_cp_dspp_flush_helper(struct sde_crtc *sde_crtc, u32 feature)
++static void sde_cp_dspp_flush_helper(struct sde_crtc *sde_crtc, u32 feature)
+ {
+ 	u32 i, sub_blk, num_mixers;
+ 	struct sde_hw_dspp *dspp;
+--- a/techpack/display/msm/sde/sde_encoder.c
++++ b/techpack/display/msm/sde/sde_encoder.c
+@@ -21,6 +21,7 @@
+ #include <linux/kthread.h>
+ #include <linux/debugfs.h>
+ #include <linux/input.h>
++#include <linux/delay.h>
+ #include <linux/seq_file.h>
+ #include <linux/sde_rsc.h>
+ 
+@@ -34,6 +35,7 @@
+ #include "sde_hw_intf.h"
+ #include "sde_hw_ctl.h"
+ #include "sde_formats.h"
++#include <drm/drm_bridge.h>
+ #include "sde_encoder.h"
+ #include "sde_encoder_phys.h"
+ #include "sde_hw_dsc.h"
+@@ -3086,7 +3088,7 @@
+ 	return WB_MAX;
+ }
+ 
+-void sde_encoder_perf_uidle_status(struct sde_kms *sde_kms,
++static void sde_encoder_perf_uidle_status(struct sde_kms *sde_kms,
+ 	struct drm_crtc *crtc)
+ {
+ 	struct sde_hw_uidle *uidle;
+@@ -5350,6 +5352,7 @@
+ 	struct sde_connector *sde_conn = NULL;
+ 	struct sde_connector_state *sde_conn_state = NULL;
+ 	struct drm_display_mode *drm_mode = NULL;
++	struct drm_bridge *bridge;
+ 	struct sde_encoder_phys *phys_enc;
+ 	int ret = 0, i;
+ 
+@@ -5451,7 +5454,8 @@
+ 			drm_mode->hdisplay, drm_mode->vdisplay);
+ 	drm_set_preferred_mode(conn, drm_mode->hdisplay, drm_mode->vdisplay);
+ 
+-	if (encoder->bridge) {
++	bridge = drm_bridge_chain_get_first_bridge(encoder);
++	if (bridge) {
+ 		SDE_DEBUG_ENC(sde_enc, "Bridge mapped to encoder\n");
+ 		/*
+ 		 * For cont-splash use case, we update the mode
+@@ -5459,13 +5463,13 @@
+ 		 * usually mode set call when actual frame is
+ 		 * pushed from framework. The bridge needs to
+ 		 * be updated with the current drm mode by
+-		 * calling the bridge mode set ops.
++		 * calling the bridge chain mode set ops.
++		 * drm_bridge_chain_get_first_bridge() returns
++		 * an extra reference, drop it after use.
+ 		 */
+-		if (encoder->bridge->funcs) {
+-			SDE_DEBUG_ENC(sde_enc, "calling mode_set\n");
+-			encoder->bridge->funcs->mode_set(encoder->bridge,
+-						drm_mode, drm_mode);
+-		}
++		SDE_DEBUG_ENC(sde_enc, "calling mode_set\n");
++		drm_bridge_chain_mode_set(bridge, drm_mode, drm_mode);
++		drm_bridge_put(bridge);
+ 	} else {
+ 		SDE_ERROR_ENC(sde_enc, "No bridge attached to encoder\n");
+ 	}
+--- a/techpack/display/msm/sde/sde_encoder_dce.c
++++ b/techpack/display/msm/sde/sde_encoder_dce.c
+@@ -19,6 +19,7 @@
+ #include "sde_hw_ctl.h"
+ #include "sde_formats.h"
+ #include "sde_encoder_phys.h"
++#include "sde_encoder_dce.h"
+ #include "sde_power_handle.h"
+ #include "sde_hw_dsc.h"
+ #include "sde_hw_vdc.h"
+@@ -804,7 +805,7 @@
+ 	 */
+ }
+ 
+-bool _dce_dsc_is_dirty(struct sde_encoder_virt *sde_enc)
++static bool _dce_dsc_is_dirty(struct sde_encoder_virt *sde_enc)
+ {
+ 	int i;
+ 
+@@ -820,7 +821,7 @@
+ 	return false;
+ }
+ 
+-bool _dce_vdc_is_dirty(struct sde_encoder_virt *sde_enc)
++static bool _dce_vdc_is_dirty(struct sde_encoder_virt *sde_enc)
+ {
+ 	int i;
+ 
+@@ -855,7 +856,7 @@
+ 	}
+ }
+ 
+-void _dce_helper_flush_vdc(struct sde_encoder_virt *sde_enc)
++static void _dce_helper_flush_vdc(struct sde_encoder_virt *sde_enc)
+ {
+ 	int i;
+ 	struct sde_hw_ctl *hw_ctl = NULL;
+--- a/techpack/display/msm/sde/sde_encoder_dce.h
++++ b/techpack/display/msm/sde/sde_encoder_dce.h
+@@ -35,7 +35,7 @@
+  * sde_encoder_dce_flush :function to flush the compression configuration
+  * @sde_enc: pointer to virtual encoder structure
+  */
+-void sde_encoder_dce_flush(struct sde_encoder_virt *sde_enc);
++int sde_encoder_dce_flush(struct sde_encoder_virt *sde_enc);
+ 
+ /**
+  * sde_encoder_has_dsc_hw_rev_2 :checks if dsc_hw_rev_1_2 feature is enabled
+--- a/techpack/display/msm/sde/sde_encoder_phys_cmd.c
++++ b/techpack/display/msm/sde/sde_encoder_phys_cmd.c
+@@ -6,6 +6,7 @@
+ 
+ #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
+ #include "sde_encoder_phys.h"
++#include <linux/delay.h>
+ #include "sde_hw_interrupts.h"
+ #include "sde_core_irq.h"
+ #include "sde_formats.h"
+@@ -854,7 +855,7 @@
+ 	return ret;
+ }
+ 
+-void sde_encoder_phys_cmd_irq_control(struct sde_encoder_phys *phys_enc,
++static void sde_encoder_phys_cmd_irq_control(struct sde_encoder_phys *phys_enc,
+ 		bool enable)
+ {
+ 	struct sde_encoder_phys_cmd *cmd_enc;
+--- a/techpack/display/msm/sde/sde_formats.h
++++ b/techpack/display/msm/sde/sde_formats.h
+@@ -31,9 +31,13 @@
+  * path until the donor ABI values can be reconciled. Linear (0) and
+  * DRM_FORMAT_MOD_QCOM_COMPRESSED keep their standard UAPI values.
+  */
+-#define DRM_FORMAT_MOD_QCOM_TILE	fourcc_mod_code(QCOM, 16)
+-#define DRM_FORMAT_MOD_QCOM_DX		fourcc_mod_code(QCOM, 32)
+-#define DRM_FORMAT_MOD_QCOM_TIGHT	fourcc_mod_code(QCOM, 64)
++/*
++ * Vendor modifier values are defined once in the driver's fourcc header
++ * (donor-faithful QCOM values: DX=0x2, TIGHT=0x4, TILE=0x8; they collide
++ * numerically with mainline TILED2/TILED3, which is a documented donor ABI
++ * property, not a userspace guarantee of this port).
++ */
++#include <drm/sde_drm_fourcc.h>
+ 
+ /**
+  * sde_get_sde_format_ext() - Returns sde format structure pointer.
+--- a/techpack/display/msm/sde/sde_hw_catalog.c
++++ b/techpack/display/msm/sde/sde_hw_catalog.c
+@@ -6,6 +6,7 @@
+ #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
+ #include <linux/slab.h>
+ #include <linux/of_address.h>
++#include <linux/of_platform.h>
+ #include <linux/platform_device.h>
+ #include <linux/soc/qcom/llcc-qcom.h>
+ #include <linux/pm_qos.h>
+@@ -3764,7 +3765,7 @@
+ 		for (i = 0; i < props->counts[BANK_BIT]; i++) {
+ 			ddr_type = PROP_BITVALUE_ACCESS(props->values,
+ 					BANK_BIT, i, 0);
+-			if (!ddr_type || (of_fdt_get_ddrtype() == ddr_type))
++			if (!ddr_type || (sde_get_ddrtype() == ddr_type))
+ 				cfg->mdp[0].highest_bank_bit =
+ 					PROP_BITVALUE_ACCESS(props->values,
+ 					BANK_BIT, i, 1);
+@@ -4058,7 +4059,7 @@
+ 			cfg->perf.danger_lut[i] =
+ 				PROP_VALUE_ACCESS(prop_value,
+ 						QOS_DANGER_LUT, i);
+-			SDE_DEBUG("danger usage:%i lut:0x%x\n",
++			SDE_DEBUG("danger usage:%i lut:0x%llx\n",
+ 					i, cfg->perf.danger_lut[i]);
+ 		}
+ 	}
+@@ -4069,7 +4070,7 @@
+ 			cfg->perf.safe_lut[i] =
+ 				PROP_VALUE_ACCESS(prop_value,
+ 					QOS_SAFE_LUT, i);
+-			SDE_DEBUG("safe usage:%d lut:0x%x\n",
++			SDE_DEBUG("safe usage:%d lut:0x%llx\n",
+ 				i, cfg->perf.safe_lut[i]);
+ 		}
+ 	}
+--- a/techpack/display/msm/sde/sde_hw_catalog_format.h
++++ b/techpack/display/msm/sde/sde_hw_catalog_format.h
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include <drm/drm_fourcc.h>
++#include <drm/sde_drm_fourcc.h>
+ 
+ #include "sde_hw_mdss.h"
+ 
+--- a/techpack/display/msm/sde/sde_hw_cdm.c
++++ b/techpack/display/msm/sde/sde_hw_cdm.c
+@@ -213,7 +213,7 @@
+ 	return 0;
+ }
+ 
+-int sde_hw_cdm_enable(struct sde_hw_cdm *ctx,
++static int sde_hw_cdm_enable(struct sde_hw_cdm *ctx,
+ 		struct sde_hw_cdm_cfg *cdm)
+ {
+ 	struct sde_hw_blk_reg_map *c = &ctx->hw;
+@@ -256,7 +256,7 @@
+ 	return 0;
+ }
+ 
+-void sde_hw_cdm_disable(struct sde_hw_cdm *ctx)
++static void sde_hw_cdm_disable(struct sde_hw_cdm *ctx)
+ {
+ 	struct cdm_output_cfg cdm_cfg = { 0 };
+ 
+--- a/techpack/display/msm/sde/sde_hw_dsc_1_2.c
++++ b/techpack/display/msm/sde/sde_hw_dsc_1_2.c
+@@ -7,6 +7,7 @@
+ #include "sde_hwio.h"
+ #include "sde_hw_catalog.h"
+ #include "sde_hw_dsc.h"
++#include "sde_hw_dsc_1_2.h"
+ #include "sde_hw_pingpong.h"
+ #include "sde_dbg.h"
+ #include "sde_kms.h"
+--- a/techpack/display/msm/sde/sde_hw_mdss.h
++++ b/techpack/display/msm/sde/sde_hw_mdss.h
+@@ -8,6 +8,8 @@
+ 
+ #include <linux/kernel.h>
+ #include <linux/err.h>
++/* driver-owned downstream QCOM format modifiers (see comment there) */
++#include <drm/sde_drm_fourcc.h>
+ 
+ #include "msm_drv.h"
+ 
+--- a/techpack/display/msm/sde/sde_hw_rc.c
++++ b/techpack/display/msm/sde/sde_hw_rc.c
+@@ -844,7 +844,7 @@
+ 
+ 	rc = _sde_hw_rc_get_merge_mode(hw_cfg, &merge_mode);
+ 	if (rc) {
+-		SDE_ERROR("invalid merge_mode, rc:%d\n");
++		SDE_ERROR("invalid merge_mode, rc:%d\n", rc);
+ 		return rc;
+ 	}
+ 
+@@ -923,7 +923,7 @@
+ 
+ 	rc = _sde_hw_rc_get_merge_mode(hw_cfg, &merge_mode);
+ 	if (rc) {
+-		SDE_ERROR("invalid merge_mode, rc:%d\n");
++		SDE_ERROR("invalid merge_mode, rc:%d\n", rc);
+ 		return rc;
+ 	}
+ 
+@@ -1019,7 +1019,7 @@
+ 	SDE_DEBUG("cfg_param_07:%u\n", cfg_param_07);
+ 
+ 	for (i = 0; i < rc_mask_cfg->cfg_param_08; i++) {
+-		SDE_DEBUG("cfg_param_09[%d] = 0x%016lX at %u\n", i,
++		SDE_DEBUG("cfg_param_09[%d] = 0x%016llX at %u\n", i,
+ 				rc_mask_cfg->cfg_param_09[i], i + cfg_param_07);
+ 
+ 		data = (i == 0) ? (BIT(30) | (cfg_param_07 << 18)) : 0;
+--- a/techpack/display/msm/sde/sde_hw_reg_dma_v1.c
++++ b/techpack/display/msm/sde/sde_hw_reg_dma_v1.c
+@@ -1008,7 +1008,7 @@
+ 	int rc = 0;
+ 
+ 	if (!size || SIZE_DWORD(size) > MAX_DWORDS_SZ) {
+-		DRM_ERROR("invalid buffer size %d, max %d\n",
++		DRM_ERROR("invalid buffer size %lu, max %lu\n",
+ 				SIZE_DWORD(size), MAX_DWORDS_SZ);
+ 		return ERR_PTR(-EINVAL);
+ 	}
+@@ -1075,9 +1075,7 @@
+ 	msm_gem_address_space_unregister_cb(aspace,
+ 			sde_reg_dma_aspace_cb_locked, dma_buf);
+ free_gem:
+-	mutex_lock(&reg_dma->drm_dev->struct_mutex);
+-	msm_gem_free_object(dma_buf->buf);
+-	mutex_unlock(&reg_dma->drm_dev->struct_mutex);
++	drm_gem_object_put(dma_buf->buf);
+ fail:
+ 	kfree(dma_buf);
+ 	return ERR_PTR(rc);
+@@ -1094,9 +1092,7 @@
+ 		msm_gem_put_iova(dma_buf->buf, 0);
+ 		msm_gem_address_space_unregister_cb(dma_buf->aspace,
+ 				sde_reg_dma_aspace_cb_locked, dma_buf);
+-		mutex_lock(&reg_dma->drm_dev->struct_mutex);
+-		msm_gem_free_object(dma_buf->buf);
+-		mutex_unlock(&reg_dma->drm_dev->struct_mutex);
++		drm_gem_object_put(dma_buf->buf);
+ 	}
+ 
+ 	kfree(dma_buf);
+--- a/techpack/display/msm/sde/sde_hw_reg_dma_v1_color_proc.c
++++ b/techpack/display/msm/sde/sde_hw_reg_dma_v1_color_proc.c
+@@ -406,11 +406,11 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	if (hw_cfg->dspp == NULL) {
+-		DRM_ERROR("Invalid sde_hw_dspp structure provided in hw_cfg\n");
+-		return -EINVAL;
+-	}
+-
++	/*
++	 * hw_cfg->dspp is an embedded array (sde_hw_cp_cfg.dspp[DSPP_MAX]),
++	 * so its address is never NULL; the per-index NULL check below is
++	 * the real validation.
++	 */
+ 	if (blk == NULL) {
+ 		DRM_ERROR("Invalid payload provided\n");
+ 		return -EINVAL;
+@@ -1171,7 +1171,7 @@
+ 
+ 	rc = reg_dma_dspp_check(ctx, cfg, RC_DATA);
+ 	if (rc) {
+-		DRM_ERROR("invalid dma dspp check rc = %d\n");
++		DRM_ERROR("invalid dma dspp check rc = %d\n", rc);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -1207,7 +1207,7 @@
+ 	cfg_param_07 = rc_mask_cfg->cfg_param_07;
+ 	for (i = 0; i < rc_mask_cfg->cfg_param_08; i++) {
+ 		cfg_param_09 =  rc_mask_cfg->cfg_param_09[i];
+-		DRM_DEBUG_DRIVER("cfg_param_09[%d] = 0x%016lX at %u\n", i,
++		DRM_DEBUG_DRIVER("cfg_param_09[%d] = 0x%016llX at %u\n", i,
+ 				 cfg_param_09,
+ 				 i + cfg_param_07);
+ 		data[i * 2] = (i == 0) ? (BIT(30) | (cfg_param_07 << 18)) : 0;
+@@ -1287,7 +1287,7 @@
+ 		DRM_ERROR("failed to kick off ret %d\n", rc);
+ }
+ 
+-void reg_dmav1_setup_dspp_pcc_common(struct sde_hw_dspp *ctx, void *cfg)
++static void reg_dmav1_setup_dspp_pcc_common(struct sde_hw_dspp *ctx, void *cfg)
+ {
+ 	struct sde_hw_reg_dma_ops *dma_ops;
+ 	struct sde_reg_dma_kickoff_cfg kick_off;
+@@ -4005,7 +4005,7 @@
+ 				hw_cfg->dspp[i]->sb_dma_in_use = true;
+ 		}
+ 	} else if (rc == -EOPNOTSUPP) {
+-		DRM_DEBUG("Falling back to dbdma\n", rc);
++		DRM_DEBUG("Falling back to dbdma, rc=%d\n", rc);
+ 
+ 		REG_DMA_SETUP_KICKOFF(kick_off, hw_cfg->ctl,
+ 				dspp_buf[feature][ctx->idx], REG_DMA_WRITE,
+@@ -4509,7 +4509,7 @@
+ 	kvfree(data);
+ }
+ 
+-int reg_dmav1_setup_spr_cfg3_params(struct sde_hw_dspp *ctx,
++static int reg_dmav1_setup_spr_cfg3_params(struct sde_hw_dspp *ctx,
+ 		struct drm_msm_spr_init_cfg *payload,
+ 		struct sde_reg_dma_setup_ops_cfg *dma_write_cfg,
+ 		struct sde_hw_reg_dma_ops *dma_ops)
+@@ -4556,7 +4556,7 @@
+ 	return rc;
+ }
+ 
+-int reg_dmav1_setup_spr_cfg4_params(struct sde_hw_dspp *ctx,
++static int reg_dmav1_setup_spr_cfg4_params(struct sde_hw_dspp *ctx,
+ 		struct drm_msm_spr_init_cfg *payload,
+ 		struct sde_reg_dma_setup_ops_cfg *dma_write_cfg,
+ 		struct sde_hw_reg_dma_ops *dma_ops)
+@@ -4588,7 +4588,7 @@
+ 	return rc;
+ }
+ 
+-void reg_dmav1_disable_spr(struct sde_hw_dspp *ctx, void *cfg)
++static void reg_dmav1_disable_spr(struct sde_hw_dspp *ctx, void *cfg)
+ {
+ 	struct sde_reg_dma_setup_ops_cfg dma_write_cfg;
+ 	struct sde_hw_cp_cfg *hw_cfg = cfg;
+--- a/techpack/display/msm/sde/sde_hw_sspp.c
++++ b/techpack/display/msm/sde/sde_hw_sspp.c
+@@ -775,7 +775,7 @@
+ 	}
+ }
+ 
+-u32 sde_hw_sspp_get_source_addr(struct sde_hw_pipe *ctx, bool is_virtual)
++static u32 sde_hw_sspp_get_source_addr(struct sde_hw_pipe *ctx, bool is_virtual)
+ {
+ 	u32 idx;
+ 	u32 offset = 0;
+--- a/techpack/display/msm/sde/sde_hw_top.c
++++ b/techpack/display/msm/sde/sde_hw_top.c
+@@ -413,7 +413,7 @@
+ 	SDE_REG_WRITE(c, DCE_SEL, dce_sel);
+ }
+ 
+-void sde_hw_reset_ubwc(struct sde_hw_mdp *mdp, struct sde_mdss_cfg *m)
++static void sde_hw_reset_ubwc(struct sde_hw_mdp *mdp, struct sde_mdss_cfg *m)
+ {
+ 	struct sde_hw_blk_reg_map c;
+ 	u32 ubwc_version;
+--- a/techpack/display/msm/sde/sde_hw_uidle.c
++++ b/techpack/display/msm/sde/sde_hw_uidle.c
+@@ -7,6 +7,7 @@
+ 
+ #include "sde_hwio.h"
+ #include "sde_hw_catalog.h"
++#include "sde_hw_uidle.h"
+ #include "sde_hw_top.h"
+ #include "sde_dbg.h"
+ #include "sde_kms.h"
+@@ -66,7 +67,7 @@
+ 	return ERR_PTR(-EINVAL);
+ }
+ 
+-void sde_hw_uidle_get_status(struct sde_hw_uidle *uidle,
++static void sde_hw_uidle_get_status(struct sde_hw_uidle *uidle,
+ 		struct sde_uidle_status *status)
+ {
+ 	struct sde_hw_blk_reg_map *c = &uidle->hw;
+@@ -94,7 +95,7 @@
+ 		(status->uidle_status & BIT(2)) ? 1 : 0;
+ }
+ 
+-void sde_hw_uidle_get_cntr(struct sde_hw_uidle *uidle,
++static void sde_hw_uidle_get_cntr(struct sde_hw_uidle *uidle,
+ 		struct sde_uidle_cntr *cntr)
+ {
+ 	struct sde_hw_blk_reg_map *c = &uidle->hw;
+@@ -123,7 +124,7 @@
+ 	SDE_REG_WRITE(c, UIDLE_GATE_CNTR_CTL, reg_val);
+ }
+ 
+-void sde_hw_uidle_setup_cntr(struct sde_hw_uidle *uidle, bool enable)
++static void sde_hw_uidle_setup_cntr(struct sde_hw_uidle *uidle, bool enable)
+ {
+ 	struct sde_hw_blk_reg_map *c = &uidle->hw;
+ 	u32 reg_val;
+@@ -134,7 +135,7 @@
+ 	SDE_REG_WRITE(c, UIDLE_GATE_CNTR_CTL, reg_val);
+ }
+ 
+-void sde_hw_uidle_setup_wd_timer(struct sde_hw_uidle *uidle,
++static void sde_hw_uidle_setup_wd_timer(struct sde_hw_uidle *uidle,
+ 		struct sde_uidle_wd_cfg *cfg)
+ {
+ 	struct sde_hw_blk_reg_map *c = &uidle->hw;
+@@ -158,7 +159,7 @@
+ 	SDE_REG_WRITE(c, UIDLE_WD_TIMER_LOAD_VALUE, val_ld);
+ }
+ 
+-void sde_hw_uidle_setup_ctl(struct sde_hw_uidle *uidle,
++static void sde_hw_uidle_setup_ctl(struct sde_hw_uidle *uidle,
+ 		struct sde_uidle_ctl_cfg *cfg)
+ {
+ 	struct sde_hw_blk_reg_map *c = &uidle->hw;
+--- a/techpack/display/msm/sde/sde_kms.c
++++ b/techpack/display/msm/sde/sde_kms.c
+@@ -869,9 +869,6 @@
+ 					unsigned int ramdump_base,
+ 					unsigned int ramdump_buffer_size)
+ {
+-	unsigned long pfn_start, pfn_end, pfn_idx;
+-	int ret = 0;
+-
+ 	if (!mem_addr || !splash_buffer_size) {
+ 		SDE_ERROR("invalid params\n");
+ 		return -EINVAL;
+@@ -884,21 +881,20 @@
+ 		splash_buffer_size -= ramdump_buffer_size;
+ 	}
+ 
+-	pfn_start = mem_addr >> PAGE_SHIFT;
+-	pfn_end = (mem_addr + splash_buffer_size) >> PAGE_SHIFT;
+-
+ 	/*
+-	 * 6.18 split the physical-address free out of memblock_free(): the
+-	 * physical variant is memblock_phys_free() (formerly
+-	 * memblock_free(phys_addr, size)) and returns void, while
+-	 * memblock_free() now takes a virtual address. It cannot fail here.
++	 * Port phase limitation (explicit, not a success claim):
++	 * 6.18 exports neither memblock_phys_free() nor free_reserved_area() to
++	 * modules. memblock_phys_free() is __init_memblock and is invalid after
++	 * initmem is freed; releasing bootloader-reserved splash pages to the
++	 * buddy allocator from an external module is not proven safe (the pages
++	 * are not guaranteed to be part of the buddy-eligible map). The splash
++	 * buffer therefore stays reserved until reboot. Revisit with a
++	 * paired-kernel helper when the splash handoff path is validated on
++	 * hardware.
+ 	 */
+-	memblock_phys_free(mem_addr, splash_buffer_size);
+-	for (pfn_idx = pfn_start; pfn_idx < pfn_end; pfn_idx++)
+-		free_reserved_page(pfn_to_page(pfn_idx));
+-
+-	return ret;
+-
++	pr_warn("sde: splash buffer %u@0x%x stays reserved until reboot (port phase)\n",
++		splash_buffer_size, mem_addr);
++	return 0;
+ }
+ 
+ static int _sde_kms_splash_mem_get(struct sde_kms *sde_kms,
+--- a/techpack/display/msm/sde/sde_reg_dma.c
++++ b/techpack/display/msm/sde/sde_reg_dma.c
+@@ -44,13 +44,13 @@
+ 	return -EINVAL;
+ }
+ 
+-struct sde_reg_dma_buffer *default_alloc_reg_dma_buf(u32 size)
++static struct sde_reg_dma_buffer *default_alloc_reg_dma_buf(u32 size)
+ {
+ 	DRM_ERROR("not implemented\n");
+ 	return ERR_PTR(-EINVAL);
+ }
+ 
+-int default_dealloc_reg_dma(struct sde_reg_dma_buffer *lut_buf)
++static int default_dealloc_reg_dma(struct sde_reg_dma_buffer *lut_buf)
+ {
+ 	DRM_ERROR("not implemented\n");
+ 	return -EINVAL;
+@@ -80,7 +80,7 @@
+ 
+ static void set_default_dma_ops(struct sde_hw_reg_dma *reg_dma)
+ {
+-	const static struct sde_hw_reg_dma_ops ops = {
++	static const struct sde_hw_reg_dma_ops ops = {
+ 		default_check_support, default_setup_payload,
+ 		default_kick_off, default_reset, default_alloc_reg_dma_buf,
+ 		default_dealloc_reg_dma, default_buf_reset_reg_dma,
+--- a/techpack/display/msm/sde/sde_rm.c
++++ b/techpack/display/msm/sde/sde_rm.c
+@@ -5,6 +5,7 @@
+ 
+ #define pr_fmt(fmt)	"[drm:%s] " fmt, __func__
+ #include "sde_kms.h"
++#include <linux/delay.h>
+ #include "sde_hw_lm.h"
+ #include "sde_hw_ctl.h"
+ #include "sde_hw_cdm.h"
+@@ -1003,7 +1004,7 @@
+ 	is_conn_secondary = (reqs->hw_res.display_type ==
+ 				 SDE_CONNECTOR_SECONDARY) ? true : false;
+ 
+-	SDE_DEBUG("check lm %d: dspp %d ds %d pp %d features %d disp type %d\n",
++	SDE_DEBUG("check lm %d: dspp %d ds %d pp %d features %lu disp type %d\n",
+ 		 lm_cfg->id, lm_cfg->dspp, lm_cfg->ds, lm_cfg->pingpong,
+ 		 lm_cfg->features, (int)reqs->hw_res.display_type);
+ 
+@@ -1051,7 +1052,7 @@
+ 	} else if ((!is_conn_primary && lm_primary_pref) ||
+ 			(!is_conn_secondary && lm_secondary_pref)) {
+ 		SDE_DEBUG(
+-			"display preference is not met. display_type: %d lm_features: %x\n",
++			"display preference is not met. display_type: %d lm_features: %lx\n",
+ 			(int)reqs->hw_res.display_type, lm_cfg->features);
+ 		return false;
+ 	}
+@@ -2416,7 +2417,7 @@
+ }
+ 
+ /* call this only after rm_mutex held */
+-struct sde_rm_rsvp *_sde_rm_poll_get_rsvp_nxt_locked(struct sde_rm *rm,
++static struct sde_rm_rsvp *_sde_rm_poll_get_rsvp_nxt_locked(struct sde_rm *rm,
+ 		struct drm_encoder *enc)
+ {
+ 	int i;
+--- a/techpack/display/msm/sde/sde_vbif.c
++++ b/techpack/display/msm/sde/sde_vbif.c
+@@ -6,6 +6,7 @@
+ #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
+ 
+ #include <linux/debugfs.h>
++#include <linux/delay.h>
+ 
+ #include "sde_vbif.h"
+ #include "sde_hw_vbif.h"
+--- a/techpack/display/msm/sde_edid_parser.c
++++ b/techpack/display/msm/sde_edid_parser.c
+@@ -215,7 +215,11 @@
+ 		}
+ 	}
+ 
+-	disp_info->edid_hdmi_dc_modes |= hdmi_dc_yuv_modes;
++	/* 6.18 split the vendor combined mask: this branch only collects the
++	 * YCbCr 4:2:0 deep-color modes, so store them in the YCbCr444/420
++	 * deep-color field instead of the removed combined mask.
++	 */
++	disp_info->edid_hdmi_ycbcr444_dc_modes |= hdmi_dc_yuv_modes;
+ 
+ 	SDE_EDID_DEBUG("%s -\n", __func__);
+ }
+--- a/techpack/display/msm/sde_io_util.c
++++ b/techpack/display/msm/sde_io_util.c
+@@ -142,8 +142,6 @@
+ 	struct list_head temp_head;
+ 	struct msm_io_mem_entry *io_mem;
+ 	struct resource *res = NULL;
+-	struct property *prop;
+-	const __be32 *cur;
+ 	int rc = 0;
+ 	u32 val;
+ 
+@@ -154,7 +152,7 @@
+ 		return -ENOMEM;
+ 
+ 	of_property_for_each_u32(pdev->dev.of_node, "qcom,pmic-arb-address",
+-			prop, cur, val) {
++			val) {
+ 		rc = spmi_pmic_arb_map_address(&pdev->dev, val, res);
+ 		if (rc < 0) {
+ 			DEV_ERR("%pS - failed to map pmic address, rc:%d\n",
+@@ -320,7 +318,7 @@
+ 			curr_vreg = &in_vreg[i];
+ 			curr_vreg->vreg = regulator_get(dev,
+ 				curr_vreg->vreg_name);
+-			rc = PTR_RET(curr_vreg->vreg);
++			rc = PTR_ERR_OR_ZERO(curr_vreg->vreg);
+ 			if (rc) {
+ 				DEV_ERR("%pS->%s: %s get failed. rc=%d\n",
+ 					 __builtin_return_address(0), __func__,
+@@ -379,7 +377,7 @@
+ 
+ 	if (enable) {
+ 		for (i = 0; i < num_vreg; i++) {
+-			rc = PTR_RET(in_vreg[i].vreg);
++			rc = PTR_ERR_OR_ZERO(in_vreg[i].vreg);
+ 			if (rc) {
+ 				DEV_ERR("%pS->%s: %s regulator error. rc=%d\n",
+ 					__builtin_return_address(0), __func__,
+@@ -515,7 +513,7 @@
+ 
+ 	for (i = 0; i < num_clk; i++) {
+ 		clk_arry[i].clk = clk_get(dev, clk_arry[i].clk_name);
+-		rc = PTR_RET(clk_arry[i].clk);
++		rc = PTR_ERR_OR_ZERO(clk_arry[i].clk);
+ 		if (rc) {
+ 			DEV_ERR("%pS->%s: '%s' get failed. rc=%d\n",
+ 				__builtin_return_address(0), __func__,
+--- a/techpack/display/msm/sde_power_handle.c
++++ b/techpack/display/msm/sde_power_handle.c
+@@ -322,7 +322,7 @@
+ 
+ 	SDE_ATRACE_END("msm_bus_scale_req");
+ 	pr_err("failed to set data bus vote ab=%llu ib=%llu rc=%d\n",
+-	       rc, in_ab_quota, in_ib_quota);
++	       in_ab_quota, in_ib_quota, rc);
+ 
+ 	return rc;
+ }
+@@ -471,7 +471,7 @@
+ 	rc = of_property_read_u32(pdev->dev.of_node,
+ 			"qcom,sde-min-core-ib-kbps", &tmp);
+ 	if (rc)
+-		pr_err("error reading min core ib vote. rc=%d, np=%x\n", rc, pdev->dev.of_node);
++		pr_err("error reading min core ib vote. rc=%d, np=%pOF\n", rc, pdev->dev.of_node);
+ 
+ 	phandle->ib_quota[SDE_POWER_HANDLE_DBUS_ID_MNOC] = (!rc ? tmp*1000 :
+ 							SDE_POWER_HANDLE_ENABLE_BUS_IB_QUOTA);
+--- /dev/null
++++ b/techpack/display/include/drm/sde_drm_fourcc.h
+@@ -0,0 +1,61 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Driver-owned downstream Qualcomm format modifiers (Round2 6.18 port).
++ *
++ * 6.18's <drm/drm_fourcc.h> only carries the mainline QCOM codes:
++ *     DRM_FORMAT_MOD_QCOM_COMPRESSED   fourcc_mod_code(QCOM, 1)
++ *     DRM_FORMAT_MOD_QCOM_TILED2       fourcc_mod_code(QCOM, 2)
++ *     DRM_FORMAT_MOD_QCOM_TILED3       fourcc_mod_code(QCOM, 3)
++ * The downstream SDE format tables (sde/sde_hw_catalog_format.h, and the
++ * sibling-owned sde/sde_formats.c matcher) compose the vendor UBWC modifier as
++ * a bit field of COMPRESSED | DX | TIGHT | TILE, so they need the vendor-only
++ * TILE/DX/TIGHT bits that mainline never took.
++ *
++ * DONOR VALUES (fourcc_mod_code(QCOM, n) = vendor 0x05 << 56 | n):
++ *     DRM_FORMAT_MOD_QCOM_COMPRESSED = 0x1  (also present in 6.18 core)
++ *     DRM_FORMAT_MOD_QCOM_DX         = 0x2
++ *     DRM_FORMAT_MOD_QCOM_TIGHT      = 0x4
++ *     DRM_FORMAT_MOD_QCOM_TILE       = 0x8
++ *
++ * PROVENANCE: the same values are used by the captured SQ2 Android display
++ * stack that this driver serves:
++ *   <workspace>/work/qualcomm-618/sde-resume-20261111/mode-userland-inputs/
++ *       references/kernel-uapi/drm/drm_fourcc.h  (lines 448-472:
++ *       COMPRESSED 1, DX 0x2, TIGHT 0x4, TILE 0x8)
++ *   <same>/source/sdm/libs/core/drm/hw_device_drm.cpp  (lines 112-116 local
++ *       fallbacks define DX as fourcc_mod_code(QCOM, 0x2) and TIGHT as
++ *       fourcc_mod_code(QCOM, 0x4); format selection at lines 274-294)
++ * This mirrors what the vendor kernel uapi carried; it is NOT a core-header
++ * edit and NOT a re-definition of the mainline TILED2/TILED3 codes.
++ *
++ * LIMITS:
++ *  - DRM_FORMAT_MOD_QCOM_DX (0x2) is numerically equal to mainline
++ *    DRM_FORMAT_MOD_QCOM_TILED2 (0x2), and COMPRESSED|DX (0x3) is numerically
++ *    equal to mainline TILED3.  The downstream tables only ever use the
++ *    vendor bit-field encoding and never mix it with the mainline TILED2/3
++ *    symbolic names; do not compare a vendor-derived modifier against the
++ *    mainline TILED2/TILED3 semantics.
++ *  - These constants only restore the downstream tables' compilability.  The
++ *    actual UBWC modifier acceptance path is unvalidated (hardware_validated =
++ *    false); the 6.18 core must not be assumed to understand these bits.
++ *  - The #ifndef guards keep this header safe if a future core header starts
++ *    defining the same vendor names.
++ */
++#ifndef __DRM_SDE_DRM_FOURCC_H__
++#define __DRM_SDE_DRM_FOURCC_H__
++
++#include <drm/drm_fourcc.h>
++
++#ifndef DRM_FORMAT_MOD_QCOM_DX
++#define DRM_FORMAT_MOD_QCOM_DX fourcc_mod_code(QCOM, 0x2)
++#endif
++
++#ifndef DRM_FORMAT_MOD_QCOM_TIGHT
++#define DRM_FORMAT_MOD_QCOM_TIGHT fourcc_mod_code(QCOM, 0x4)
++#endif
++
++#ifndef DRM_FORMAT_MOD_QCOM_TILE
++#define DRM_FORMAT_MOD_QCOM_TILE fourcc_mod_code(QCOM, 0x8)
++#endif
++
++#endif /* __DRM_SDE_DRM_FOURCC_H__ */
+--- /dev/null
++++ b/techpack/display/include/dt-bindings/clock/mdss-7nm-pll-clk.h
+@@ -0,0 +1,21 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * MINIMAL COMPATIBILITY HEADER - NOT A VENDOR-EQUIVALENT HEADER
++ *
++ * Round2 KGSL+SDE 6.18 port, sde-hw-encoder-dp agent.
++ *
++ * The 6.18 prepared kernel has no <dt-bindings/clock/mdss-7nm-pll-clk.h>.
++ * The only in-tree consumer is techpack/display/msm/dp/edp_pll_7nm.c; auditing
++ * that call site shows no MDSS PLL clock ID from this binding is referenced
++ * (the eDP PLL registers its own clk_hw objects), so the include is vestigial.
++ *
++ * PROVENANCE / LIMITS (recorded in STATUS.json):
++ *  - Deliberately empty: no clock ID is invented.  The corresponding DT
++ *    binding/provider is absent from 6.18; eDP PLL DT/clock linkage remains an
++ *    unvalidated blocker.
++ *  - hardware_validated = false.
++ */
++#ifndef __DT_BINDINGS_CLOCK_MDSS_7NM_PLL_CLK_COMPAT_H
++#define __DT_BINDINGS_CLOCK_MDSS_7NM_PLL_CLK_COMPAT_H
++
++#endif /* __DT_BINDINGS_CLOCK_MDSS_7NM_PLL_CLK_COMPAT_H */
+--- /dev/null
++++ b/techpack/display/include/linux/hdcp_qseecom.h
+@@ -0,0 +1,39 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * MINIMAL COMPATIBILITY HEADER - NOT A VENDOR-EQUIVALENT HEADER
++ *
++ * Round2 KGSL+SDE 6.18 port, sde-hw-encoder-dp agent.
++ *
++ * The 6.18 prepared kernel has no <linux/hdcp_qseecom.h> and no QSEECom HDCP
++ * TZ transport driver.  The downstream display tree includes this header from
++ * techpack/display/msm/sde_hdcp.h only.  An actual call-site audit of the
++ * include consumers shows that neither sde_hdcp.h nor the DP/eDP HDCP 2.2
++ * transport (dp/dp_hdcp2p2.c) references any symbol from this vendor header;
++ * the HDCP TZ command surface used by sde_hdcp_2x.c comes from
++ * <linux/msm_hdcp.h> (in-tree minimal port) and local headers.
++ *
++ * PROVENANCE / LIMITS (recorded in STATUS.json):
++ *  - No declarations are invented here: the file only satisfies the include
++ *    path so the owned consumers can be compiled and audited.
++ *  - The QSEECom-backed HDCP TrustZone firmware interface is absent from the
++ *    6.18 kernel.  Any consumer that later needs it must not treat this header
++ *    as equivalent to the vendor one; sde_hdcp_1x.c / sde_hdcp_2x.c are only
++ *    partly unblocked (see VERIFICATION.txt).
++ *  - hardware_validated = false; HDCP 1.x/2.2 is unvalidated.
++ */
++#ifndef __LINUX_HDCP_QSEECOM_COMPAT_H
++#define __LINUX_HDCP_QSEECOM_COMPAT_H
++
++#include <linux/types.h>
++
++/*
++ * Message buffer shape derived from dp/dp_hdcp2p2.c usage:
++ *   ctrl->response.data / .length, ctrl->request.data / .length
++ * (data is a byte buffer, length a byte count).
++ */
++struct hdcp2_buffer {
++	u8 *data;
++	u32 length;
++};
++
++#endif /* __LINUX_HDCP_QSEECOM_COMPAT_H */
+--- /dev/null
++++ b/techpack/display/include/linux/msm_ext_display.h
+@@ -0,0 +1,121 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * MINIMAL COMPATIBILITY HEADER - NOT A VENDOR-EQUIVALENT HEADER
++ *
++ * Round2 KGSL+SDE 6.18 port, sde-hw-encoder-dp agent.
++ *
++ * The 6.18 prepared kernel has no <linux/msm_ext_display.h> and no
++ * CONFIG_MSM_EXT_DISPLAY provider (that config is not set in the prepared
++ * .config).  This header is derived strictly from the actual call sites in
++ * techpack/display/msm/dp/dp_audio.c:
++ *   struct msm_ext_disp_init_data ext_audio_data;   (embedded by value)
++ *     ext->codec.type / .ctrl_id / .stream_id
++ *     ext->codec_ops.{audio_info_setup,get_audio_edid_blk,cable_status,
++ *                     get_intf_id,teardown_done,acknowledge,ready}
++ *     ext->pdev, ext->intf_data
++ *     ext->intf_ops.audio_notify / ext->intf_ops.audio_config
++ *   struct msm_ext_disp_data *ext_data; ext_data->intf_data;
++ *   static int dp_audio_info_setup(struct platform_device *,
++ *       struct msm_ext_disp_audio_setup_params *params) -> params->num_of_channels
++ *   static int dp_audio_get_edid_blk(struct platform_device *,
++ *       struct msm_ext_disp_audio_edid_blk *blk) -> blk->audio_data_blk,
++ *       audio_data_blk_size, spk_alloc_data_blk, spk_alloc_data_blk_size
++ *   EXT_DISPLAY_TYPE_DP, EXT_DISPLAY_CABLE_CONNECT,
++ *   EXT_DISPLAY_CABLE_DISCONNECT
++ *   msm_ext_disp_register_intf()/deregister_intf() (guarded by
++ *   #if defined(CONFIG_MSM_EXT_DISPLAY), which is not set here)
++ *
++ * PROVENANCE / LIMITS (recorded in STATUS.json):
++ *  - Member types/layout are inferred from the call-site assignments only;
++ *    they are NOT copied from the absent vendor header.
++ *  - The external-display audio bridge does not exist in the 6.18 kernel, so
++ *    this header only restores compilability.  The coded paths are compiled
++ *    out by the absent CONFIG_MSM_EXT_DISPLAY; feature is unvalidated.
++ *  - hardware_validated = false.
++ */
++#ifndef __LINUX_MSM_EXT_DISPLAY_COMPAT_H
++#define __LINUX_MSM_EXT_DISPLAY_COMPAT_H
++
++#include <linux/device.h>
++#include <linux/platform_device.h>
++#include <linux/types.h>
++
++/* Display interface type.  Value 0x1 is the DP interface type used by the
++ * call site (EXT_DISPLAY_TYPE_DP); no in-tree provider consumes it here. */
++enum msm_ext_disp_type {
++	EXT_DISPLAY_TYPE_DP = 0x1,
++};
++
++/* Cable state values passed through the notify/config callbacks.  Only these
++ * two states are used by the call sites. */
++enum msm_ext_disp_cable_state {
++	EXT_DISPLAY_CABLE_CONNECT = 0x1,
++	EXT_DISPLAY_CABLE_DISCONNECT = 0x2,
++};
++
++/*
++ * Audio ACK bit flags consumed by dp/dp_audio.c: ack & SET_ENABLE
++ * selects the ACK feature, ack & ENABLE is its value and ack &
++ * CONNECT reports the HPD ack line.  Bit positions are inferred
++ * from those tests (single distinct bits); no in-tree provider
++ * exists (CONFIG_MSM_EXT_DISPLAY is unset) so they are not
++ * runtime-authoritative here.
++ */
++#define AUDIO_ACK_SET_ENABLE	BIT(0)
++#define AUDIO_ACK_ENABLE	BIT(1)
++#define AUDIO_ACK_CONNECT	BIT(2)
++
++struct msm_ext_disp_audio_codec {
++	u32 type;
++	u32 ctrl_id;
++	u32 stream_id;
++};
++
++struct msm_ext_disp_audio_setup_params {
++	u32 num_of_channels;
++};
++
++struct msm_ext_disp_audio_edid_blk {
++	u8 *audio_data_blk;
++	int audio_data_blk_size;
++	u8 *spk_alloc_data_blk;
++	int spk_alloc_data_blk_size;
++};
++
++struct msm_ext_disp_audio_codec_ops {
++	int (*audio_info_setup)(struct platform_device *pdev,
++			struct msm_ext_disp_audio_setup_params *params);
++	int (*get_audio_edid_blk)(struct platform_device *pdev,
++			struct msm_ext_disp_audio_edid_blk *blk);
++	int (*cable_status)(struct platform_device *pdev, u32 vote);
++	int (*get_intf_id)(struct platform_device *pdev);
++	void (*teardown_done)(struct platform_device *pdev);
++	int (*acknowledge)(struct platform_device *pdev, u32 ack);
++	int (*ready)(struct platform_device *pdev);
++};
++
++struct msm_ext_disp_intf_ops {
++	int (*audio_notify)(struct platform_device *pdev,
++			struct msm_ext_disp_audio_codec *codec, u32 state);
++	int (*audio_config)(struct platform_device *pdev,
++			struct msm_ext_disp_audio_codec *codec, u32 state);
++};
++
++struct msm_ext_disp_init_data {
++	struct platform_device *pdev;
++	struct msm_ext_disp_audio_codec codec;
++	struct msm_ext_disp_audio_codec_ops codec_ops;
++	struct msm_ext_disp_intf_ops intf_ops;
++	void *intf_data;
++};
++
++struct msm_ext_disp_data {
++	void *intf_data;
++};
++
++int msm_ext_disp_register_intf(struct platform_device *pdev,
++		struct msm_ext_disp_init_data *data);
++int msm_ext_disp_deregister_intf(struct platform_device *pdev,
++		struct msm_ext_disp_init_data *data);
++
++#endif /* __LINUX_MSM_EXT_DISPLAY_COMPAT_H */
+--- /dev/null
++++ b/techpack/display/include/linux/qcom_scm.h
+@@ -0,0 +1,28 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * MINIMAL COMPATIBILITY HEADER - NOT A VENDOR-EQUIVALENT HEADER
++ *
++ * Round2 KGSL+SDE 6.18 port, sde-hw-encoder-dp agent.
++ *
++ * The 6.18 prepared kernel has no <linux/qcom_scm.h>; the upstream SCM API
++ * lives in <linux/firmware/qcom/qcom_scm.h>.  This mapping header forwards to
++ * the real 6.18 header so that display consumers include the actual core
++ * declarations instead of a fabricated copy.
++ *
++ * PROVENANCE / LIMITS (recorded in STATUS.json):
++ *  - This header intentionally does NOT provide the downstream-only additions
++ *    the display tree also expects, notably:
++ *      qcom_scm_mem_protect_sd_ctrl()   (sde/sde_kms.c, rotator/)
++ *      qtee_shmbridge_*()               (sde/sde_kms.c)
++ *    Neither exists in the 6.18 prepared kernel.  Consequently sde/sde_kms.c
++ *    (sibling "kms" scope) and rotator/ remain compile-blocked on that vendor
++ *    secure-VM interface; they are reported, not stubbed.
++ *  - sde-hw-encoder-dp owns no file that includes this path.
++ *  - hardware_validated = false.
++ */
++#ifndef __LINUX_QCOM_SCM_COMPAT_H
++#define __LINUX_QCOM_SCM_COMPAT_H
++
++#include <linux/firmware/qcom/qcom_scm.h>
++
++#endif /* __LINUX_QCOM_SCM_COMPAT_H */
+--- /dev/null
++++ b/techpack/display/include/linux/soc/qcom/altmode-glink.h
+@@ -0,0 +1,65 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * MINIMAL COMPATIBILITY HEADER - NOT A VENDOR-EQUIVALENT HEADER
++ *
++ * Round2 KGSL+SDE 6.18 port, sde-hw-encoder-dp agent.
++ *
++ * The 6.18 prepared kernel has no <linux/soc/qcom/altmode-glink.h> and no
++ * QCOM altmode GLINK provider.  Declarations are derived strictly from the
++ * actual call sites in techpack/display/msm/dp/dp_altmode.c:
++ *   struct altmode_client *amclient;                    (opaque handle)
++ *   struct altmode_pan_ack_msg ack; ack.cmd_type / ack.port_index;
++ *   ALTMODE_PAN_ACK;
++ *   altmode_send_data(amclient, &ack, sizeof(ack));
++ *   struct altmode_client_data cd = { .callback = &dp_altmode_notify };
++ *     cd.name = "displayport"; cd.svid = USB_SID_DISPLAYPORT;
++ *     cd.priv = altmode;
++ *   altmode_register_client(altmode->dev, &cd);
++ *   altmode_deregister_client(altmode->amclient);
++ *   altmode_register_notifier(dev, dp_altmode_register, altmode);
++ *   altmode_deregister_notifier(altmode->dev, altmode);
++ *
++ * PROVENANCE / LIMITS (recorded in STATUS.json):
++ *  - Struct layout/enum values are inferred from the call-site usage only;
++ *    they are NOT copied from the absent vendor header.  This is sufficient
++ *    for compilation but is not evidence of wire/ABI equivalence.
++ *  - altmode_send_data/register/deregister are extern: the GLINK altmode
++ *    subsystem does not exist in the prepared 6.18 kernel, so a full module
++ *    link would need a provider (unresolved-symbol blocker).
++ *  - hardware_validated = false; USB Type-C DisplayPort altmode is
++ *    unvalidated.
++ */
++#ifndef __LINUX_SOC_QCOM_ALTMODE_GLINK_COMPAT_H
++#define __LINUX_SOC_QCOM_ALTMODE_GLINK_COMPAT_H
++
++#include <linux/device.h>
++#include <linux/types.h>
++
++struct altmode_client;
++
++struct altmode_client_data {
++	u16 svid;
++	char *name;
++	void *priv;
++	int (*callback)(void *priv, void *data, size_t len);
++};
++
++struct altmode_pan_ack_msg {
++	u8 cmd_type;
++	u8 port_index;
++};
++
++enum altmode_pan_msg_type {
++	ALTMODE_PAN_ACK = 0,
++};
++
++struct altmode_client *altmode_register_client(struct device *dev,
++		struct altmode_client_data *data);
++void altmode_deregister_client(struct altmode_client *client);
++int altmode_send_data(struct altmode_client *client, void *data, size_t len);
++
++int altmode_register_notifier(struct device *dev,
++		void (*callback)(void *priv), void *priv);
++void altmode_deregister_notifier(struct device *dev, void *priv);
++
++#endif /* __LINUX_SOC_QCOM_ALTMODE_GLINK_COMPAT_H */
+--- /dev/null
++++ b/techpack/display/include/linux/soc/qcom/fsa4480-i2c.h
+@@ -0,0 +1,52 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * MINIMAL COMPATIBILITY HEADER - NOT A VENDOR-EQUIVALENT HEADER
++ *
++ * Round2 KGSL+SDE 6.18 port, sde-hw-encoder-dp agent.
++ *
++ * The 6.18 prepared kernel has no <linux/soc/qcom/fsa4480-i2c.h>.  The only
++ * upstream fsa4480 driver in 6.18 is drivers/usb/typec/mux/fsa4480.c, which
++ * implements the generic Type-C mux API and does NOT provide the downstream
++ * QCOM notifier/switch-event entry points used by the DP AUX code.
++ *
++ * Declarations below are derived strictly from the actual call sites:
++ *   techpack/display/msm/dp/dp_aux.c
++ *     enum fsa_function event = FSA_USBC_DISPLAYPORT_DISCONNECTED;
++ *     event = FSA_USBC_ORIENTATION_CC1 / FSA_USBC_ORIENTATION_CC2;
++ *     fsa4480_switch_event(aux->aux_switch_node, event);
++ *   techpack/display/msm/dp/dp_display.c
++ *     fsa4480_reg_notifier(&nb, dp->aux_switch_node);
++ *     fsa4480_unreg_notifier(&nb, dp->aux_switch_node);
++ * where aux_switch_node is a struct device_node parsed from the
++ * "qcom,dp-aux-switch" phandle.
++ *
++ * PROVENANCE / LIMITS (recorded in STATUS.json):
++ *  - Only the enumerators visible at the call sites are declared.  Their
++ *    numeric order is NOT sourced from the absent vendor header and no
++ *    in-tree 6.18 provider consumes them.
++ *  - The three functions are declared extern, not stubbed: the AUX-switch
++ *    feature has no provider in the prepared 6.18 kernel, so any future full
++ *    module link must supply them (currently an unresolved-symbol blocker).
++ *  - hardware_validated = false; the aux-switch/redriver feature is
++ *    unvalidated.
++ */
++#ifndef __LINUX_SOC_QCOM_FSA4480_I2C_COMPAT_H
++#define __LINUX_SOC_QCOM_FSA4480_I2C_COMPAT_H
++
++#include <linux/notifier.h>
++#include <linux/types.h>
++
++struct device_node;
++
++enum fsa_function {
++	FSA_USBC_DISPLAYPORT_DISCONNECTED,
++	FSA_USBC_DISPLAYPORT_CONNECTED,
++	FSA_USBC_ORIENTATION_CC1,
++	FSA_USBC_ORIENTATION_CC2,
++};
++
++int fsa4480_switch_event(struct device_node *node, enum fsa_function event);
++int fsa4480_reg_notifier(struct notifier_block *nb, struct device_node *node);
++int fsa4480_unreg_notifier(struct notifier_block *nb, struct device_node *node);
++
++#endif /* __LINUX_SOC_QCOM_FSA4480_I2C_COMPAT_H */
+--- /dev/null
++++ b/techpack/display/include/linux/soc/qcom/spmi-pmic-arb.h
+@@ -0,0 +1,35 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * MINIMAL COMPATIBILITY HEADER - NOT A VENDOR-EQUIVALENT HEADER
++ *
++ * Round2 KGSL+SDE 6.18 port, sde-hw-encoder-dp agent.
++ *
++ * The 6.18 prepared kernel has no <linux/soc/qcom/spmi-pmic-arb.h> and no
++ * vendor spmi-pmic-arb address-map helper (checking drivers/spmi and include/
++ * finds no spmi_pmic_arb_map_address()).
++ *
++ * The declaration is derived strictly from the single call site in
++ * techpack/display/msm/sde_io_util.c:
++ *   rc = spmi_pmic_arb_map_address(&pdev->dev, val, res);
++ *     &pdev->dev : struct device *   (platform device of the display node)
++ *     val        : u32               (qcom,pmic-arb-address entry)
++ *     res        : struct resource * (filled with base/size, then list_add'ed)
++ *
++ * PROVENANCE / LIMITS (recorded in STATUS.json):
++ *  - Signature is inferred from the call site, not copied from the absent
++ *    vendor header.
++ *  - No 6.18 provider exists, so this is an unresolved-symbol blocker for a
++ *    full module link; the PMIC-arb address mapping path is unvalidated.
++ *  - hardware_validated = false.
++ */
++#ifndef __LINUX_SOC_QCOM_SPMI_PMIC_ARB_COMPAT_H
++#define __LINUX_SOC_QCOM_SPMI_PMIC_ARB_COMPAT_H
++
++#include <linux/device.h>
++#include <linux/ioport.h>
++#include <linux/types.h>
++
++int spmi_pmic_arb_map_address(struct device *dev, u32 address,
++		struct resource *res);
++
++#endif /* __LINUX_SOC_QCOM_SPMI_PMIC_ARB_COMPAT_H */
+--- /dev/null
++++ b/techpack/display/include/linux/usb/dwc3-msm.h
+@@ -0,0 +1,31 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * MINIMAL COMPATIBILITY HEADER - NOT A VENDOR-EQUIVALENT HEADER
++ *
++ * Round2 KGSL+SDE 6.18 port, sde-hw-encoder-dp agent.
++ *
++ * The 6.18 prepared kernel has no <linux/usb/dwc3-msm.h>.  The only consumer in
++ * this agent's scope is techpack/display/msm/dp/dp_altmode.c, which uses
++ * exactly one entry point:
++ *   rc = dwc3_msm_release_ss_lane(&usb_pdev->dev, multi_func);
++ *     (&usb_pdev->dev : struct device * of the "usb-controller" phandle;
++ *      multi_func     : bool, request single-function vs multi-function
++ *                       SuperSpeed lane release)
++ *
++ * PROVENANCE / LIMITS (recorded in STATUS.json):
++ *  - Signature is inferred from the call site; the vendor dwc3-msm driver and
++ *    its header are absent from the 6.18 kernel.
++ *  - Declared extern, not stubbed: a full module link would need the vendor USB
++ *    controller glue (unresolved-symbol blocker); DP-USB lane release is
++ *    unvalidated.
++ *  - hardware_validated = false.
++ */
++#ifndef __LINUX_USB_DWC3_MSM_COMPAT_H
++#define __LINUX_USB_DWC3_MSM_COMPAT_H
++
++#include <linux/device.h>
++#include <linux/types.h>
++
++int dwc3_msm_release_ss_lane(struct device *dev, bool multi_func);
++
++#endif /* __LINUX_USB_DWC3_MSM_COMPAT_H */
+--- /dev/null
++++ b/techpack/display/include/soc/qcom/minidump.h
+@@ -0,0 +1,55 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * MINIMAL COMPATIBILITY HEADER - NOT A VENDOR-EQUIVALENT HEADER
++ *
++ * Round2 KGSL+SDE 6.18 port, sde-hw-encoder-dp agent.
++ *
++ * The 6.18 prepared kernel has no public <soc/qcom/minidump.h>.  The only
++ * in-tree consumer is techpack/display/msm/sde_dbg.c (sibling "dbg" scope),
++ * which uses exactly:
++ *   struct md_region md_entry;
++ *   strscpy(md_entry.name, name, sizeof(md_entry.name));
++ *   md_entry.virt_addr = (uintptr_t)virt_addr;
++ *   md_entry.phys_addr = virt_to_phys(virt_addr);
++ *   md_entry.size = size;
++ *   return msm_minidump_add_region(&md_entry);    (CONFIG_QCOM_VA_MINIDUMP)
++ *
++ * The prepared KOUT .config does NOT set CONFIG_QCOM_VA_MINIDUMP, so this
++ * header mirrors the vendor convention of a no-op inline helper when the
++ * config is disabled.  In that configuration the display driver does not
++ * publish any minidump region; that behaviour is unvalidated but is not a
++ * fake success path (it returns 0 exactly like the vendor stub).
++ *
++ * PROVENANCE / LIMITS (recorded in STATUS.json):
++ *  - Struct shape is derived from the call site; when CONFIG_QCOM_VA_MINIDUMP
++ *    is enabled a real kernel provider must be supplied (none exists in the
++ *    6.18 prepared tree), which is listed as a remaining blocker.
++ *  - The file is created under the display include path so sibling-owned
++ *    sde_dbg.c can compile; sde-hw-encoder-dp does not modify sde_dbg.c.
++ *  - hardware_validated = false; minidump capture is unvalidated.
++ */
++#ifndef __SOC_QCOM_MINIDUMP_COMPAT_H
++#define __SOC_QCOM_MINIDUMP_COMPAT_H
++
++#include <linux/types.h>
++
++#define MAX_NAME_LENGTH 20
++
++struct md_region {
++	char name[MAX_NAME_LENGTH];
++	uintptr_t virt_addr;
++	uintptr_t phys_addr;
++	u64 size;
++	u32 id;
++};
++
++#if IS_ENABLED(CONFIG_QCOM_VA_MINIDUMP)
++int msm_minidump_add_region(const struct md_region *entry);
++#else
++static inline int msm_minidump_add_region(const struct md_region *entry)
++{
++	return 0;
++}
++#endif
++
++#endif /* __SOC_QCOM_MINIDUMP_COMPAT_H */
+--- /dev/null
++++ b/techpack/display/msm/dp/dp_vendor_shims.c
+@@ -0,0 +1,91 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Explicit port shims for vendor providers that do not exist in the paired
++ * 6.18 kernel.  These are NOT vendor-equivalent implementations: every call
++ * fails with -EOPNOTSUPP so the affected feature is disabled and reported,
++ * never silently faked.
++ *
++ * Disabled/unvalidated features in this port phase:
++ *  - USB-C DP altmode discovery (altmode-glink)
++ *  - FSA4480 USB-C AUX orientation switch
++ *  - DWC3 SS-lane release on DP disconnect
++ *  - SPMI PMIC arbiter address mapping used by sde_io_util
++ *  - external-display (msm_ext_display) bridge registration
++ *
++ * Re-enable only by porting the real provider drivers and replacing these
++ * shims; hardware validation is required before claiming any of them.
++ */
++#include <linux/err.h>
++#include <linux/device.h>
++#include <linux/notifier.h>
++#include <linux/types.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/soc/qcom/altmode-glink.h>
++#include <linux/soc/qcom/fsa4480-i2c.h>
++#include <linux/usb/dwc3-msm.h>
++#include <linux/soc/qcom/spmi-pmic-arb.h>
++#include <linux/msm_ext_display.h>
++
++struct altmode_client *altmode_register_client(struct device *dev,
++		struct altmode_client_data *data)
++{
++	return ERR_PTR(-EOPNOTSUPP);
++}
++
++void altmode_deregister_client(struct altmode_client *client)
++{
++}
++
++int altmode_send_data(struct altmode_client *client, void *data, size_t len)
++{
++	return -EOPNOTSUPP;
++}
++
++void altmode_deregister_notifier(struct device *dev, void *priv)
++{
++}
++
++int altmode_register_notifier(struct device *dev,
++		void (*callback)(void *priv), void *priv)
++{
++	return -EOPNOTSUPP;
++}
++
++int fsa4480_switch_event(struct device_node *node, enum fsa_function event)
++{
++	return -EOPNOTSUPP;
++}
++
++int fsa4480_reg_notifier(struct notifier_block *nb, struct device_node *node)
++{
++	return -EOPNOTSUPP;
++}
++
++int fsa4480_unreg_notifier(struct notifier_block *nb, struct device_node *node)
++{
++	return -EOPNOTSUPP;
++}
++
++int dwc3_msm_release_ss_lane(struct device *dev, bool multi_func)
++{
++	return -EOPNOTSUPP;
++}
++
++int spmi_pmic_arb_map_address(struct device *dev, u32 address,
++		struct resource *res)
++{
++	return -EOPNOTSUPP;
++}
++
++int msm_ext_disp_register_intf(struct platform_device *pdev,
++		struct msm_ext_disp_init_data *data)
++{
++	return -EOPNOTSUPP;
++}
++
++int msm_ext_disp_deregister_intf(struct platform_device *pdev,
++		struct msm_ext_disp_init_data *data)
++{
++	return -EOPNOTSUPP;
++}

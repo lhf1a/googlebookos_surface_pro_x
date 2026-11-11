@@ -67,6 +67,49 @@
 3. mode-userland 仅是库级链接与主机 round-trip；没有 HWC 服务、联合内核+用户态运行或设备验收。
 4. 未做设备访问/部署/重启/性能/PM/真实提交/fence 退休/SQ1-SQ2 验收；`full_*` 不提升。
 
+## Round 2 (2026-11-11)：匹配 6.18 内核、SDE 整组 API 迁移与首个完整模块
+
+用户目标为"实现KGSL-SDE，并在真机调试运行"；本轮先打通"完整模块可编译链接"这一设备运行前置门禁。
+
+- 三个并行代理：dsi+dsc、sde graphics、sde hw/encoder/DP；Lead 独占匹配内核构建、语义合并与链接修复。
+- 匹配内核（Lead）：paired 6.18 source + `out/kgsl-resume-2/mst/CORE.patch` → `kernel-mst1` / `kernel-out-mst1`，
+  release `6.18.60-sq2-kgsl-sde-mst-dev1`，Image `e0afdadd…`，Module.symvers `e6fc06cf…`，486 模块，
+  0 error / 37 既有 warning；`Module.symvers` 导出 `drm_dp_atomic_release_port_payload`。旧 dev2 KOUT/模块未动。
+  结果：`dp_mst_drm.c` 诊断 113 → 0。
+- 三候选均独立交付窄 ARM64 -Werror 矩阵、负例/三态、`--fuzz=0` 字节精确 patch；Lead 逐一独立复验后合并：
+  - dsi+dsc：25 个 TU 81→0；真实 6.18 DSI message flags/ctrl sidecar、panel/pwm/bridge/class/tear-off、
+    driver-owned `dsc_panel_id`、PLL divider flags。
+  - sde graphics：6 个 TU 47→0（含 sde_kms 修复 fatal include 后暴露的 94 条真实漂移）；const mode_valid、
+    connector-owned panel、framebuffer helpers、DT 版 `sde_get_ddrtype()`、6.18 tracepoint 宏；显式关闭
+    secure-VM/panel-notifier/minidump（6.18 无 provider）。
+  - sde hw/encoder/DP：32 个 TU 101→1（剩余 DDR type 由 Lead 闭合）；4 参 `drm_bridge_attach`/
+    `devm_drm_bridge_alloc`、`drm_mode_vrefresh`、colorspace、platform remove、`drm_gem_object_put`、11 个兼容头。
+- Lead 语义/链接修复：vendor format modifier 统一为 donor 值（DX=0x2/TIGHT=0x4/TILE=0x8，与 TILED2/3
+  数值冲突已注明）；5nm PLL 头合并 DSI enum + DP IDs；catalog 用 `sde_get_ddrtype()`；HDCP-qseecom 代码
+  编译关闭（DP 报告 HDCP 不可用但保持 alive）；fbdev 不构建（4.19 fb_helper API 不存在）；
+  altmode/fsa4480/dwc3/spmi/ext-display 提供显式 `-EOPNOTSUPP` shim；`MODULE_IMPORT_NS("DMA_BUF")`；
+  `sched_setattr_nocheck()` FIFO helper；splash buffer 释放改为"保留至重启"并记录（memblock/free_reserved_area
+  非模块安全/未导出）。
+
+两次真实整编事务：
+
+| 事务 | 补丁/源 | BASELINE | MODIFIED | ROLLBACK | checker |
+|---|---|---|---|---|---|
+| integrated-19（stage A） | 19 / 321 | exit2, 55 对象, 0 模块 | exit2, 78 对象, 0 模块 | exit2, 55 对象 | 16/16 exit0 |
+| **integrated-20（stage B）** | **20 / 332** | exit2, 78 对象 | **exit 0, 114 对象, 1 模块** | exit2, 78 对象 | 16/16 exit0 |
+
+- `integrated-20` MODIFIED：0 error、0 warning（KCFLAGS=-Werror），MODPOST clean；
+  `msm_drm.ko` sha256 `cb34d88e78e2d1240a031936327a250199f3cb6c9e9ba38d4375ee966b94dcf9`（4161544 B），
+  vermagic `6.18.60-sq2-kgsl-sde-mst-dev1 SMP mod_unload aarch64`，depends `llcc-qcom`。
+- 四角色：MODIFIED_FILE `8fbff6be…`、DIFF `c52a3229…`、VERIFICATION `aa4b1b07…`、ROLLBACK `c1b7f563…`；
+  新增配置补丁 `patches/sde-xiaomi-618-resume-round2b.patch` sha256 `079e0139…`。
+- 明确边界：模块**未部署、未加载、未启动**；真机显示/真实提交/fence 退休/PM/性能/SQ1-SQ2 全部未验证。
+  禁用/未移植特性（HDCP、fbdev、secure-VM、panel notifier、minidump、USB-C altmode/FSA4480/DWC3/SPMI/
+  ext-display shim、splash 保留内存）必须随任何声明列出。模块必须与匹配内核（kernel-mst1）配套，
+  禁止与 dev2 内核/模块混装。
+- 下一阶段：设备 bring-up（部署匹配内核与模块、模块加载、内部 eDP/DSI 显示点亮），再做真实提交/fence/
+  PM/性能验收；在得到真机证据前不提升 `full_*`。
+
 ## 续接入口
 
 - 本地提交：`codex/kgsl-sde-port-v83` 上的 SDE18 集成提交（未推送；暂停保存提交 `d51ff3e` 保留）

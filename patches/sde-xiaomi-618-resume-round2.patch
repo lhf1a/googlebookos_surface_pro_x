@@ -1,0 +1,2612 @@
+--- a/techpack/display/msm/dsi/dsi_clk_manager.c
++++ b/techpack/display/msm/dsi/dsi_clk_manager.c
+@@ -233,7 +233,7 @@
+ 	clk_disable_unprepare(clk->byte_clk);
+ }
+ 
+-int dsi_core_clk_start(struct dsi_core_clks *c_clks)
++static int dsi_core_clk_start(struct dsi_core_clks *c_clks)
+ {
+ 	int rc = 0;
+ 
+@@ -296,7 +296,7 @@
+ 	return rc;
+ }
+ 
+-int dsi_core_clk_stop(struct dsi_core_clks *c_clks)
++static int dsi_core_clk_stop(struct dsi_core_clks *c_clks)
+ {
+ 	int rc = 0;
+ 
+@@ -1123,7 +1123,7 @@
+ 	return rc;
+ }
+ 
+-int dsi_clk_req_state(void *client, enum dsi_clk_type clk,
++static int dsi_clk_req_state(void *client, enum dsi_clk_type clk,
+ 	enum dsi_clk_state state)
+ {
+ 	int rc = 0;
+--- a/techpack/display/msm/dsi/dsi_ctrl.c
++++ b/techpack/display/msm/dsi/dsi_ctrl.c
+@@ -1485,7 +1485,7 @@
+ 	if (((*flags & DSI_CTRL_CMD_FIFO_STORE) ||
+ 		*flags & DSI_CTRL_CMD_READ ||
+ 		*flags & DSI_CTRL_CMD_NON_EMBEDDED_MODE ||
+-		msg->wait_ms ||
++		dsi_msg_wait_ms(msg) ||
+ 		(dsi_ctrl->host_config.panel_mode == DSI_OP_VIDEO_MODE)) &&
+ 		!(msg->flags & MIPI_DSI_MSG_ASYNC_OVERRIDE))
+ 		*flags &= ~DSI_CTRL_CMD_ASYNC_WAIT;
+@@ -1753,6 +1753,7 @@
+ 	u32 dlen, diff, rlen;
+ 	unsigned char *buff;
+ 	char cmd;
++	u16 wait_ms;
+ 
+ 	if (!msg) {
+ 		DSI_CTRL_ERR(dsi_ctrl, "Invalid msg\n");
+@@ -1798,9 +1799,9 @@
+ 		 * wait before reading rdbk_data register, if any delay is
+ 		 * required after sending the read command.
+ 		 */
+-		if (msg->wait_ms)
+-			usleep_range(msg->wait_ms * 1000,
+-				     ((msg->wait_ms * 1000) + 10));
++		wait_ms = dsi_msg_wait_ms(msg);
++		if (wait_ms)
++			usleep_range(wait_ms * 1000, ((wait_ms * 1000) + 10));
+ 
+ 		dlen = dsi_ctrl->hw.ops.get_cmd_read_data(&dsi_ctrl->hw,
+ 					buff, total_bytes_read,
+@@ -1976,9 +1977,12 @@
+ 
+ 		msm_gem_put_iova(dsi_ctrl->tx_cmd_buf, aspace);
+ 
+-		mutex_lock(&dsi_ctrl->drm_dev->struct_mutex);
+-		msm_gem_free_object(dsi_ctrl->tx_cmd_buf);
+-		mutex_unlock(&dsi_ctrl->drm_dev->struct_mutex);
++		/*
++		 * 6.18 removed drm_device.struct_mutex.  Release the GEM through
++		 * the refcounted API, which invokes msm_gem_free_object() when
++		 * the last reference is dropped.
++		 */
++		drm_gem_object_put(dsi_ctrl->tx_cmd_buf);
+ 		dsi_ctrl->tx_cmd_buf = NULL;
+ 	}
+ 
+@@ -2238,7 +2242,7 @@
+ 	return rc;
+ }
+ 
+-static int dsi_ctrl_dev_remove(struct platform_device *pdev)
++static void dsi_ctrl_dev_remove(struct platform_device *pdev)
+ {
+ 	int rc = 0;
+ 	struct dsi_ctrl *dsi_ctrl;
+@@ -2280,7 +2284,6 @@
+ 	devm_kfree(&pdev->dev, dsi_ctrl);
+ 
+ 	platform_set_drvdata(pdev, NULL);
+-	return 0;
+ }
+ 
+ static struct platform_driver dsi_ctrl_driver = {
+--- a/techpack/display/msm/dsi/dsi_ctrl.h
++++ b/techpack/display/msm/dsi/dsi_ctrl.h
+@@ -886,4 +886,12 @@
+  */
+ void dsi_ctrl_mask_overflow(struct dsi_ctrl *dsi_ctrl, bool enable);
+ 
++/**
++ * dsi_ctrl_buffer_init() - allocate the controller command DMA buffer
++ * @dsi_ctrl:	DSI controller handle.
++ *
++ * Return: error code.
++ */
++int dsi_ctrl_buffer_init(struct dsi_ctrl *dsi_ctrl);
++
+ #endif /* _DSI_CTRL_H_ */
+--- a/techpack/display/msm/dsi/dsi_ctrl_hw_1_4.c
++++ b/techpack/display/msm/dsi/dsi_ctrl_hw_1_4.c
+@@ -7,6 +7,7 @@
+ #include <linux/iopoll.h>
+ 
+ #include "dsi_ctrl_hw.h"
++#include "dsi_catalog.h"
+ #include "dsi_ctrl_reg.h"
+ #include "dsi_hw.h"
+ 
+--- a/techpack/display/msm/dsi/dsi_ctrl_hw_2_0.c
++++ b/techpack/display/msm/dsi/dsi_ctrl_hw_2_0.c
+@@ -7,6 +7,7 @@
+ #include <linux/iopoll.h>
+ 
+ #include "dsi_ctrl_hw.h"
++#include "dsi_catalog.h"
+ #include "dsi_ctrl_reg.h"
+ #include "dsi_hw.h"
+ 
+--- a/techpack/display/msm/dsi/dsi_ctrl_hw_cmn.c
++++ b/techpack/display/msm/dsi/dsi_ctrl_hw_cmn.c
+@@ -1372,8 +1372,8 @@
+ 	DSI_W32(ctrl, DSI_INT_CTRL, int_ctrl);
+ 	DSI_W32(ctrl, DSI_ERR_INT_MASK0, int_mask0);
+ 
+-	DSI_CTRL_HW_DBG(ctrl, "[DSI_%d] enable errors = 0x%llx, int_mask0=0x%x\n",
+-		 errors, int_mask0);
++	DSI_CTRL_HW_DBG(ctrl, "enable errors = 0x%llx, int_mask0=0x%x\n",
++		 (unsigned long long)errors, int_mask0);
+ }
+ 
+ /**
+--- a/techpack/display/msm/dsi/dsi_defs.h
++++ b/techpack/display/msm/dsi/dsi_defs.h
+@@ -360,17 +360,52 @@
+ 	DSI_VIDEO_TRAFFIC_BURST_MODE,
+ };
+ 
++/*
++ * 6.18's struct mipi_dsi_msg (include/drm/drm_mipi_dsi.h) has no storage for
++ * the vendor `ctrl` (DSI controller index used for unicast) or `wait_ms`
++ * fields that the 4.19 vendor header added.  The core struct must not be
++ * patched, so the two values live in this driver-owned container, which embeds
++ * the standard message as its first member.  Messages built by core helpers
++ * (mipi_dsi_dcs_*) are plain struct mipi_dsi_msg and never carry
++ * DSI_MSG_DRIVER_CMD; for those both values read as zero.
++ *
++ * Every dsi_cmd_desc producer must set DSI_MSG_DRIVER_CMD in msg.flags.  The
++ * flag lives in the u16 flags field, while the raw command-buffer ABI only
++ * supplies flags in its low byte, so userspace cannot set it by accident.
++ */
++#define DSI_MSG_DRIVER_CMD	BIT(15)
++
+ /**
+  * struct dsi_cmd_desc - description of a dsi command
+  * @msg:		dsi mipi msg packet
+  * @last_command:   indicates whether the cmd is the last one to send
+- * @post_wait_ms:   post wait duration
++ * @post_wait_ms:   post wait duration (also the vendor msg.wait_ms value)
++ * @ctrl:           DSI controller index for MIPI_DSI_MSG_UNICAST commands
+  */
+ struct dsi_cmd_desc {
+ 	struct mipi_dsi_msg msg;
+ 	bool last_command;
+ 	u32  post_wait_ms;
+-};
++	u8   ctrl;
++};
++
++/* Vendor msg.wait_ms equivalent: zero for messages that are not dsi_cmd_desc. */
++static inline u16 dsi_msg_wait_ms(const struct mipi_dsi_msg *msg)
++{
++	if (!(msg->flags & DSI_MSG_DRIVER_CMD))
++		return 0;
++
++	return (u16)container_of(msg, struct dsi_cmd_desc, msg)->post_wait_ms;
++}
++
++/* Vendor msg.ctrl equivalent: only meaningful for MIPI_DSI_MSG_UNICAST. */
++static inline u8 dsi_msg_ctrl(const struct mipi_dsi_msg *msg)
++{
++	if (!(msg->flags & DSI_MSG_DRIVER_CMD))
++		return 0;
++
++	return container_of(msg, struct dsi_cmd_desc, msg)->ctrl;
++}
+ 
+ /**
+  * struct dsi_panel_cmd_set - command set of the panel
+--- a/techpack/display/msm/dsi/dsi_display.c
++++ b/techpack/display/msm/dsi/dsi_display.c
+@@ -15,6 +15,8 @@
+ #include "sde_connector.h"
+ #include "sde_mode_state.h"
+ #include "msm_mmu.h"
++#include <video/mipi_display.h>
++
+ #include "dsi_display.h"
+ #include "dsi_panel.h"
+ #include "dsi_ctrl.h"
+@@ -575,9 +577,12 @@
+ 	msm_gem_address_space_unregister_cb(display->aspace,
+ 			dsi_display_aspace_cb_locked, display);
+ free_gem:
+-	mutex_lock(&display->drm_dev->struct_mutex);
+-	msm_gem_free_object(display->tx_cmd_buf);
+-	mutex_unlock(&display->drm_dev->struct_mutex);
++	/*
++	 * 6.18 removed drm_device.struct_mutex.  Release the GEM through the
++	 * refcounted API, which invokes msm_gem_free_object() when the last
++	 * reference is dropped.
++	 */
++	drm_gem_object_put(display->tx_cmd_buf);
+ error:
+ 	return rc;
+ }
+@@ -926,8 +931,9 @@
+ 	cmd->last_command = (cmd_buf[1] == 1);
+ 	cmd->msg.channel = cmd_buf[2];
+ 	cmd->msg.flags = cmd_buf[3];
+-	cmd->msg.ctrl = 0;
+-	cmd->post_wait_ms = cmd->msg.wait_ms = cmd_buf[4];
++	cmd->msg.flags |= DSI_MSG_DRIVER_CMD;
++	cmd->ctrl = 0;
++	cmd->post_wait_ms = cmd_buf[4];
+ 	cmd->msg.tx_len = ((cmd_buf[5] << 8) | (cmd_buf[6]));
+ 
+ 	if (cmd->msg.tx_len > payload_len) {
+@@ -3375,7 +3381,7 @@
+ 		}
+ 	} else {
+ 		int ctrl_idx = (msg->flags & MIPI_DSI_MSG_UNICAST) ?
+-				msg->ctrl : 0;
++				dsi_msg_ctrl(msg) : 0;
+ 		u32 cmd_flags = DSI_CTRL_CMD_FETCH_MEMORY;
+ 
+ 		if (display->queue_cmd_waits ||
+@@ -5689,16 +5695,18 @@
+ 	int disp_id = mi_get_disp_id(display);
+ 
+ 	if (IS_ERR_OR_NULL(display->class)) {
+-		display->class = class_create(THIS_MODULE, "mi_display");
++		display->class = class_create("mi_display");
+ 		if (IS_ERR(display->class))
+-			DSI_ERR("class_create failed, rc: %d\n", PTR_ERR(display->class));
++			DSI_ERR("class_create failed, rc: %d\n",
++				(int)PTR_ERR(display->class));
+ 	}
+ 
+ 	if (IS_ERR_OR_NULL(display->dev)) {
+ 		display->dev = device_create_with_groups(display->class, &display->pdev->dev,
+ 				0, display, mi_display_groups, "disp-DSI-%d", disp_id);
+ 		if (IS_ERR(display->dev))
+-			DSI_ERR("device_create_with_groups failed for disp-DSI-%d, ret: %d\n", disp_id, PTR_ERR(display->dev));
++			DSI_ERR("device_create_with_groups failed for disp-DSI-%d, ret: %d\n",
++					disp_id, (int)PTR_ERR(display->dev));
+ 	}
+ }
+ 
+@@ -6190,21 +6198,21 @@
+ 	return rc;
+ }
+ 
+-int dsi_display_dev_remove(struct platform_device *pdev)
+-{
+-	int rc = 0, i = 0;
++void dsi_display_dev_remove(struct platform_device *pdev)
++{
++	int i = 0;
+ 	struct dsi_display *display;
+ 	struct dsi_display_ctrl *ctrl;
+ 
+ 	if (!pdev) {
+ 		DSI_ERR("Invalid device\n");
+-		return -EINVAL;
++		return;
+ 	}
+ 
+ 	display = platform_get_drvdata(pdev);
+ 	if (!display || !display->panel_node) {
+ 		DSI_ERR("invalid display\n");
+-		return -EINVAL;
++		return;
+ 	}
+ 
+ 	/* decrement ref count */
+@@ -6226,7 +6234,6 @@
+ 
+ 	platform_set_drvdata(pdev, NULL);
+ 	devm_kfree(&pdev->dev, display);
+-	return rc;
+ }
+ 
+ int dsi_display_get_num_of_displays(void)
+@@ -6533,6 +6540,7 @@
+ 
+ static enum drm_mode_status dsi_display_drm_ext_bridge_mode_valid(
+ 		struct drm_bridge *bridge,
++		const struct drm_display_info *info,
+ 		const struct drm_display_mode *mode)
+ {
+ 	struct dsi_display_ext_bridge *ext_bridge;
+@@ -6544,7 +6552,7 @@
+ 
+ 	tmp = *mode;
+ 	dsi_display_drm_ext_adjust_timing(ext_bridge->display, &tmp);
+-	return ext_bridge->orig_funcs->mode_valid(bridge, &tmp);
++	return ext_bridge->orig_funcs->mode_valid(bridge, info, &tmp);
+ }
+ 
+ static bool dsi_display_drm_ext_bridge_mode_fixup(
+@@ -6690,20 +6698,30 @@
+ 		return -EINVAL;
+ 
+ 	drm = encoder->dev;
+-	bridge = encoder->bridge;
++	/*
++	 * 6.18 removed drm_encoder.bridge.  The bridge the encoder was created
++	 * with is the first bridge of its chain (which may be empty at this
++	 * point); the getter returns a reference that must be dropped on every
++	 * exit path below.
++	 */
++	bridge = drm_bridge_chain_get_first_bridge(encoder);
+ 	sde_conn = to_sde_connector(connector);
+ 	prev_bridge = bridge;
+ 
+-	if (display->panel && !display->panel->host_config.ext_bridge_mode)
+-		return 0;
++	if (display->panel && !display->panel->host_config.ext_bridge_mode) {
++		rc = 0;
++		goto out_put_bridge;
++	}
+ 
+ 	for (i = 0; i < display->ext_bridge_cnt; i++) {
+ 		struct dsi_display_ext_bridge *ext_bridge_info =
+ 				&display->ext_bridge[i];
+ 
+ 		/* return if ext bridge is already initialized */
+-		if (ext_bridge_info->bridge)
+-			return 0;
++		if (ext_bridge_info->bridge) {
++			rc = 0;
++			goto out_put_bridge;
++		}
+ 
+ 		ext_bridge = of_drm_find_bridge(ext_bridge_info->node_of);
+ 		if (IS_ERR_OR_NULL(ext_bridge)) {
+@@ -6728,7 +6746,7 @@
+ 			ext_bridge->funcs = &ext_bridge_info->bridge_funcs;
+ 		}
+ 
+-		rc = drm_bridge_attach(encoder, ext_bridge, prev_bridge);
++		rc = drm_bridge_attach(encoder, ext_bridge, prev_bridge, 0);
+ 		if (rc) {
+ 			DSI_ERR("[%s] ext brige attach failed, %d\n",
+ 				display->name, rc);
+@@ -6745,8 +6763,12 @@
+ 		spin_lock_irq(&drm->mode_config.connector_list_lock);
+ 		ext_conn = list_last_entry(&drm->mode_config.connector_list,
+ 			struct drm_connector, head);
++		/*
++		 * 6.18 removed drm_connector.encoder_ids; the equivalent
++		 * association test is the connector's encoder bit mask.
++		 */
+ 		if (ext_conn && ext_conn != connector &&
+-			ext_conn->encoder_ids[0] == bridge->encoder->base.id) {
++		    (ext_conn->possible_encoders & drm_encoder_mask(encoder))) {
+ 			list_del_init(&ext_conn->head);
+ 			display->ext_conn = ext_conn;
+ 		}
+@@ -6788,8 +6810,14 @@
+ 		display->host.ops = &dsi_host_ext_ops;
+ 	}
+ 
+-	return 0;
++	rc = 0;
++out_put_bridge:
++	if (bridge)
++		drm_bridge_put(bridge);
++	return rc;
+ error:
++	if (bridge)
++		drm_bridge_put(bridge);
+ 	return rc;
+ }
+ 
+@@ -8852,7 +8880,8 @@
+ 	}
+ 
+ 	dsi = &panel->mipi_device;
+-	rc = mipi_dsi_dcs_set_tear_off(dsi);
++	/* 6.18 keeps only the multi-context helper; send the same DCS command. */
++	rc = mipi_dsi_dcs_write(dsi, MIPI_DCS_SET_TEAR_OFF, NULL, 0);
+ 
+ error:
+ 	mutex_unlock(&panel->panel_lock);
+--- a/techpack/display/msm/dsi/dsi_display.h
++++ b/techpack/display/msm/dsi/dsi_display.h
+@@ -315,7 +315,7 @@
+ };
+ 
+ int dsi_display_dev_probe(struct platform_device *pdev);
+-int dsi_display_dev_remove(struct platform_device *pdev);
++void dsi_display_dev_remove(struct platform_device *pdev);
+ 
+ /**
+  * dsi_display_get_num_of_displays() - returns number of display devices
+@@ -886,4 +886,13 @@
+  */
+ int dsi_display_ctrl_vreg_off(struct dsi_display *display);
+ 
++/* Internal DSI display helpers also used across dsi_display.c units. */
++bool is_skip_op_required(struct dsi_display *display);
++void dsi_display_update_byte_intf_div(struct dsi_display *display);
++int dsi_display_get_fps(struct dsi_display *display, u32 *fps);
++void dsi_mi_display_init(struct dsi_display *display);
++void dsi_mi_display_deinit(struct dsi_display *display);
++void dsi_display_adjust_mode_timing(struct dsi_display *display,
++		struct dsi_display_mode *dsi_mode, int lanes, int bpp);
++
+ #endif /* _DSI_DISPLAY_H_ */
+--- a/techpack/display/msm/dsi/dsi_panel.c
++++ b/techpack/display/msm/dsi/dsi_panel.c
+@@ -81,7 +81,7 @@
+ 	for (i = 0; i < panel->power_info.count; i++) {
+ 		vreg = devm_regulator_get(panel->parent,
+ 					  panel->power_info.vregs[i].vreg_name);
+-		rc = PTR_RET(vreg);
++		rc = IS_ERR(vreg) ? PTR_ERR(vreg) : 0;
+ 		if (rc) {
+ 			DSI_ERR("failed to get %s regulator\n",
+ 			       panel->power_info.vregs[i].vreg_name);
+@@ -598,8 +598,8 @@
+ 
+ 	rc = pwm_config(bl->pwm_bl, duty, period_ns);
+ 	if (rc) {
+-		DSI_ERR("[%s] failed to change pwm config, rc=\n", panel->name,
+-			rc);
++		DSI_ERR("[%s] failed to change pwm config, rc=%d\n",
++			panel->name, rc);
+ 		goto error;
+ 	}
+ 
+@@ -612,8 +612,8 @@
+ 	if (bl_lvl != 0 && !bl->pwm_enabled) {
+ 		rc = pwm_enable(bl->pwm_bl);
+ 		if (rc) {
+-			DSI_ERR("[%s] failed to enable pwm, rc=\n", panel->name,
+-				rc);
++			DSI_ERR("[%s] failed to enable pwm, rc=%d\n",
++				panel->name, rc);
+ 			goto error;
+ 		}
+ 
+@@ -750,7 +750,8 @@
+ 	}
+ 
+ 	if (tx_buf[0] != 0x51) {
+-		DSI_ERR("cmd %d tx_buf[0] is not for register 0x51\n", type, tx_buf[0]);
++		DSI_ERR("cmd %d tx_buf[0]=0x%02x is not for register 0x51\n",
++			type, tx_buf[0]);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -915,9 +916,24 @@
+ 	int rc = 0;
+ 	struct dsi_backlight_config *bl = &panel->bl_config;
+ 
+-	bl->pwm_bl = devm_of_pwm_get(panel->parent, panel->panel_of_node, NULL);
++	/*
++	 * 6.18 pwm consumer API: devm_of_pwm_get() (removed) resolved the "pwms"
++	 * property against an explicit OF node; devm_fwnode_pwm_get() is its
++	 * resource-managed replacement and keeps that explicit-node semantics
++	 * (pwm_get() would look at panel->parent's node instead).  There is no
++	 * devm_pwm_put() any more: the handle is owned by the device's devres
++	 * list for its whole lifetime, so it is requested once and reused across
++	 * backlight enable/disable cycles (re-getting on every cycle would grow
++	 * the devres list without bound).
++	 */
++	if (bl->pwm_bl)
++		return 0;
++
++	bl->pwm_bl = devm_fwnode_pwm_get(panel->parent,
++			of_fwnode_handle(panel->panel_of_node), NULL);
+ 	if (IS_ERR_OR_NULL(bl->pwm_bl)) {
+ 		rc = PTR_ERR(bl->pwm_bl);
++		bl->pwm_bl = NULL;
+ 		DSI_ERR("[%s] failed to request pwm, rc=%d\n", panel->name,
+ 			rc);
+ 		return rc;
+@@ -965,9 +981,11 @@
+ 
+ static void dsi_panel_pwm_unregister(struct dsi_panel *panel)
+ {
+-	struct dsi_backlight_config *bl = &panel->bl_config;
+-
+-	devm_pwm_put(panel->parent, bl->pwm_bl);
++	/*
++	 * The handle is devres-owned (6.18 has no devm_pwm_put()), so it is not
++	 * released here; it stays valid so a later backlight register reuses the
++	 * same pwm_device instead of accumulating devres entries.
++	 */
+ }
+ 
+ static int dsi_panel_bl_unregister(struct dsi_panel *panel)
+@@ -2077,8 +2095,9 @@
+ 		cmd[i].last_command = (data[1] == 1);
+ 		cmd[i].msg.channel = data[2];
+ 		cmd[i].msg.flags |= data[3];
+-		cmd[i].msg.ctrl = 0;
+-		cmd[i].post_wait_ms = cmd[i].msg.wait_ms = data[4];
++		cmd[i].msg.flags |= DSI_MSG_DRIVER_CMD;
++		cmd[i].ctrl = 0;
++		cmd[i].post_wait_ms = data[4];
+ 		cmd[i].msg.tx_len = ((data[5] << 8) | (data[6]));
+ 
+ 		size = cmd[i].msg.tx_len * sizeof(u8);
+@@ -2812,12 +2831,14 @@
+ 		return 0;
+ 	}
+ 
+-	rc = utils->read_u64(utils->data, "mi,mdss-dsc-panel-id", &priv_info->dsc.config.dsc_panel_id);
+-	if (rc) {
+-		priv_info->dsc.config.dsc_panel_id = 0;
++	rc = utils->read_u64(utils->data, "mi,mdss-dsc-panel-id",
++			&priv_info->dsc.dsc_panel_id);
++	if (rc) {
++		priv_info->dsc.dsc_panel_id = 0;
+ 		DSI_DEBUG("mi,mdss-dsc-panel-id not specified\n");
+ 	} else {
+-		DSI_DEBUG("mi,mdss-dsc-panel-id is 0x%llx\n", priv_info->dsc.config.dsc_panel_id);
++		DSI_DEBUG("mi,mdss-dsc-panel-id is 0x%llx\n",
++			priv_info->dsc.dsc_panel_id);
+ 	}
+ 
+ 	rc = utils->read_u32(utils->data, "qcom,mdss-dsc-version", &data);
+@@ -3986,8 +4007,13 @@
+ 	}
+ 
+ 	panel->power_mode = SDE_MODE_DPMS_OFF;
+-	drm_panel_init(&panel->drm_panel);
+-	panel->drm_panel.dev = &panel->mipi_device.dev;
++	/*
++	 * 6.18 drm_panel_init() takes the parent device, the optional funcs and
++	 * a connector type, and returns void.  This driver never used the panel
++	 * registry callbacks, so funcs stay NULL.
++	 */
++	drm_panel_init(&panel->drm_panel, &panel->mipi_device.dev, NULL,
++		       DRM_MODE_CONNECTOR_DSI);
+ 	panel->mipi_device.dev.of_node = of_node;
+ 	panel->doze_mode_active = DSI_DOZE_MODE_NOLP;
+ 	panel->doze_mode_requested = DSI_DOZE_MODE_NOLP;
+@@ -3995,9 +4021,8 @@
+ 	panel->fod_hbm_enabled = false;
+ 	panel->fod_hbm_requested = false;
+ 
+-	rc = drm_panel_add(&panel->drm_panel);
+-	if (rc)
+-		goto error_vreg_put;
++	/* 6.18 drm_panel_add() returns void and cannot fail. */
++	drm_panel_add(&panel->drm_panel);
+ 
+ 	rc = dsi_panel_sysfs_init(panel);
+ 	if (rc)
+@@ -4006,8 +4031,6 @@
+ 	mutex_init(&panel->panel_lock);
+ 
+ 	return panel;
+-error_vreg_put:
+-	(void)dsi_panel_vreg_put(panel);
+ error:
+ 	kfree(panel);
+ 	return ERR_PTR(rc);
+@@ -4824,25 +4847,25 @@
+ 	}
+ 	set->cmds[0].msg.channel = 0;
+ 	set->cmds[0].msg.type = MIPI_DSI_DCS_LONG_WRITE;
+-	set->cmds[0].msg.flags = unicast ? MIPI_DSI_MSG_UNICAST : 0;
+-	set->cmds[0].msg.ctrl = unicast ? ctrl_idx : 0;
++	set->cmds[0].msg.flags = (unicast ? MIPI_DSI_MSG_UNICAST : 0) |
++				 DSI_MSG_DRIVER_CMD;
++	set->cmds[0].ctrl = unicast ? ctrl_idx : 0;
+ 	set->cmds[0].msg.tx_len = ROI_CMD_LEN;
+ 	set->cmds[0].msg.tx_buf = caset;
+ 	set->cmds[0].msg.rx_len = 0;
+ 	set->cmds[0].msg.rx_buf = 0;
+-	set->cmds[0].msg.wait_ms = 0;
+ 	set->cmds[0].last_command = 0;
+ 	set->cmds[0].post_wait_ms = 0;
+ 
+ 	set->cmds[1].msg.channel = 0;
+ 	set->cmds[1].msg.type = MIPI_DSI_DCS_LONG_WRITE;
+-	set->cmds[1].msg.flags = unicast ? MIPI_DSI_MSG_UNICAST : 0;
+-	set->cmds[1].msg.ctrl = unicast ? ctrl_idx : 0;
++	set->cmds[1].msg.flags = (unicast ? MIPI_DSI_MSG_UNICAST : 0) |
++				 DSI_MSG_DRIVER_CMD;
++	set->cmds[1].ctrl = unicast ? ctrl_idx : 0;
+ 	set->cmds[1].msg.tx_len = ROI_CMD_LEN;
+ 	set->cmds[1].msg.tx_buf = paset;
+ 	set->cmds[1].msg.rx_len = 0;
+ 	set->cmds[1].msg.rx_buf = 0;
+-	set->cmds[1].msg.wait_ms = 0;
+ 	set->cmds[1].last_command = 1;
+ 	set->cmds[1].post_wait_ms = 0;
+ 
+--- a/techpack/display/msm/dsi/dsi_panel.h
++++ b/techpack/display/msm/dsi/dsi_panel.h
+@@ -33,9 +33,45 @@
+  * Defining custom dsi msg flag,
+  * continued from drm_mipi_dsi.h
+  * Override to use async transfer
++ *
++ * The 4.19 vendor drm_mipi_dsi.h carried extra mipi_dsi_msg.flags bits that
++ * mainline/6.18 do not define.  They are driver-private bits stored in the
++ * (still present) u16 mipi_dsi_msg.flags field, produced and consumed only by
++ * this driver, so they are defined here instead of in the core header:
++ *
++ *   MIPI_DSI_MSG_LASTCOMMAND  BIT(3)
++ *     Value derived from real call-site evidence in this driver: the batch
++ *     "set maximum return packet size" path in dsi_ctrl.c clears the last
++ *     command bit with `dflags &= ~BIT(3)` commented "remove last message
++ *     flag to batch max packet cmd to read command".  The same bit is part of
++ *     the raw command-buffer ABI (dsi_display.c tests
++ *     cmd_buf[3] & MIPI_DSI_MSG_LASTCOMMAND), so the value is load-bearing.
++ *
++ *   MIPI_DSI_MSG_UNICAST  BIT(6)
++ *     No donor header or call site exposes the vendor number on this host;
++ *     BIT(6) is the next free bit after the vendor bits BIT(3..5) used here.
++ *     It is only set/tested through this macro so internal behaviour is
++ *     self-consistent, but the value is UNVALIDATED vendor ABI.
+  */
++/*
++ * Vendor-only MIPI DSI video mode_flags bits (4.19 downstream drm_mipi_dsi.h).
++ * They select LP11 insertion during HSA/HBP/HFP/BLLP and EOF-BLLP regions and
++ * are set by out-of-tree external bridge drivers on mipi_dsi_device.mode_flags.
++ * 6.18 keeps MIPI_DSI_MODE_VIDEO_NO_HFP/NO_HBP/NO_HSA (BIT(5..7)) with the
++ * opposite polarity, so the two are NOT interchangeable.  The numeric values
++ * are not recoverable from any donor header on this host; BIT(13..17) are free
++ * bits in the core header.  UNVALIDATED vendor ABI.
++ */
++#define MIPI_DSI_MODE_VIDEO_HSA		BIT(13)
++#define MIPI_DSI_MODE_VIDEO_HBP		BIT(14)
++#define MIPI_DSI_MODE_VIDEO_HFP		BIT(15)
++#define MIPI_DSI_MODE_VIDEO_BLLP	BIT(16)
++#define MIPI_DSI_MODE_VIDEO_EOF_BLLP	BIT(17)
++
++#define MIPI_DSI_MSG_LASTCOMMAND BIT(3)
+ #define MIPI_DSI_MSG_ASYNC_OVERRIDE BIT(4)
+ #define MIPI_DSI_MSG_CMD_DMA_SCHED BIT(5)
++#define MIPI_DSI_MSG_UNICAST BIT(6)
+ 
+ enum dsi_panel_rotation {
+ 	DSI_PANEL_ROTATE_NONE = 0,
+--- a/techpack/display/msm/dsi/dsi_phy.c
++++ b/techpack/display/msm/dsi/dsi_phy.c
+@@ -209,7 +209,7 @@
+ 	regs = &phy->pwr_info.digital;
+ 	for (i = 0; i < regs->count; i++) {
+ 		vreg = devm_regulator_get(&pdev->dev, regs->vregs[i].vreg_name);
+-		rc = PTR_RET(vreg);
++		rc = IS_ERR(vreg) ? PTR_ERR(vreg) : 0;
+ 		if (rc) {
+ 			DSI_PHY_ERR(phy, "failed to get %s regulator\n",
+ 			       regs->vregs[i].vreg_name);
+@@ -221,7 +221,7 @@
+ 	regs = &phy->pwr_info.phy_pwr;
+ 	for (i = 0; i < regs->count; i++) {
+ 		vreg = devm_regulator_get(&pdev->dev, regs->vregs[i].vreg_name);
+-		rc = PTR_RET(vreg);
++		rc = IS_ERR(vreg) ? PTR_ERR(vreg) : 0;
+ 		if (rc) {
+ 			DSI_PHY_ERR(phy, "failed to get %s regulator\n",
+ 			       regs->vregs[i].vreg_name);
+@@ -489,7 +489,7 @@
+ 	return rc;
+ }
+ 
+-static int dsi_phy_driver_remove(struct platform_device *pdev)
++static void dsi_phy_driver_remove(struct platform_device *pdev)
+ {
+ 	int rc = 0;
+ 	struct msm_dsi_phy *phy = platform_get_drvdata(pdev);
+@@ -497,7 +497,7 @@
+ 
+ 	if (!pdev || !phy) {
+ 		DSI_PHY_ERR(phy, "Invalid device\n");
+-		return -EINVAL;
++		return;
+ 	}
+ 
+ 	mutex_lock(&dsi_phy_list_lock);
+@@ -533,8 +533,6 @@
+ 	devm_kfree(&pdev->dev, phy);
+ 
+ 	platform_set_drvdata(pdev, NULL);
+-
+-	return 0;
+ }
+ 
+ static struct platform_driver dsi_phy_platform_driver = {
+--- a/techpack/display/msm/dsi/dsi_phy_hw_v2_0.c
++++ b/techpack/display/msm/dsi/dsi_phy_hw_v2_0.c
+@@ -7,6 +7,7 @@
+ #include <linux/delay.h>
+ #include "dsi_hw.h"
+ #include "dsi_phy_hw.h"
++#include "dsi_catalog.h"
+ 
+ #define DSIPHY_CMN_REVISION_ID0                   0x0000
+ #define DSIPHY_CMN_REVISION_ID1                   0x0004
+--- a/techpack/display/msm/dsi/dsi_pll_10nm.c
++++ b/techpack/display/msm/dsi/dsi_pll_10nm.c
+@@ -1014,7 +1014,7 @@
+ 	rsc->pll_on = false;
+ }
+ 
+-long vco_10nm_round_rate(struct clk_hw *hw, unsigned long rate,
++static long vco_10nm_round_rate(struct clk_hw *hw, unsigned long rate,
+ 				unsigned long *parent_rate)
+ {
+ 	unsigned long rrate = rate;
+@@ -1418,7 +1418,73 @@
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_pll_out_div = {
++/*
++ * struct clk_regmap_div in 6.18 no longer carries the divider-encoding flags
++ * (CLK_DIVIDER_ONE_BASED / ALLOW_ZERO / POWER_OF_TWO); its helpers are fixed to
++ * the plain zero-based encoding.  The downstream PLL clock trees need the
++ * vendor encodings (POWER_OF_TWO for the PLL output dividers, ONE_BASED |
++ * ALLOW_ZERO for the pclk sources), so keep them with this local regmap
++ * divider clock.  The clkr nesting is retained so the existing designated
++ * initializers and the devm_clk_register()/regmap wiring stay unchanged.
++ */
++struct dsi_pll_div_clk {
++	struct clk_regmap clkr;
++	u32 reg;
++	u32 shift;
++	u32 width;
++	unsigned long flags;
++};
++
++static inline struct dsi_pll_div_clk *to_dsi_pll_div_clk(struct clk_hw *hw)
++{
++	return container_of(hw, struct dsi_pll_div_clk, clkr.hw);
++}
++
++static unsigned long dsi_pll_div_recalc_rate(struct clk_hw *hw,
++		unsigned long parent_rate)
++{
++	struct dsi_pll_div_clk *div = to_dsi_pll_div_clk(hw);
++	u32 val;
++
++	regmap_read(div->clkr.regmap, div->reg, &val);
++	val >>= div->shift;
++	val &= BIT(div->width) - 1;
++
++	return divider_recalc_rate(hw, parent_rate, val, NULL, div->flags,
++				   div->width);
++}
++
++static int dsi_pll_div_determine_rate(struct clk_hw *hw,
++		struct clk_rate_request *req)
++{
++	struct dsi_pll_div_clk *div = to_dsi_pll_div_clk(hw);
++
++	return divider_determine_rate(hw, req, NULL, div->width, div->flags);
++}
++
++static int dsi_pll_div_set_rate(struct clk_hw *hw, unsigned long rate,
++		unsigned long parent_rate)
++{
++	struct dsi_pll_div_clk *div = to_dsi_pll_div_clk(hw);
++	int div_val;
++
++	div_val = divider_get_val(rate, parent_rate, NULL, div->width,
++				  div->flags);
++	if (div_val < 0)
++		return div_val;
++
++	return regmap_update_bits(div->clkr.regmap, div->reg,
++				  (BIT(div->width) - 1) << div->shift,
++				  div_val << div->shift);
++}
++
++static const struct clk_ops dsi_pll_div_ops = {
++	.determine_rate = dsi_pll_div_determine_rate,
++	.set_rate = dsi_pll_div_set_rate,
++	.recalc_rate = dsi_pll_div_recalc_rate,
++};
++
++static struct dsi_pll_div_clk dsi0pll_pll_out_div = {
+ 	.reg = PLL_PLL_OUTDIV_RATE,
+ 	.shift = 0,
+ 	.width = 2,
+@@ -1429,12 +1495,12 @@
+ 			.parent_names = (const char *[]){"dsi0pll_vco_clk"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_shadow_pll_out_div = {
++static struct dsi_pll_div_clk dsi0pll_shadow_pll_out_div = {
+ 	.reg = PLL_PLL_OUTDIV_RATE,
+ 	.shift = 0,
+ 	.width = 2,
+@@ -1446,12 +1512,12 @@
+ 				"dsi0pll_shadow_vco_clk"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_pll_out_div = {
++static struct dsi_pll_div_clk dsi1pll_pll_out_div = {
+ 	.reg = PLL_PLL_OUTDIV_RATE,
+ 	.shift = 0,
+ 	.width = 2,
+@@ -1462,12 +1528,12 @@
+ 			.parent_names = (const char *[]){"dsi1pll_vco_clk"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_shadow_pll_out_div = {
++static struct dsi_pll_div_clk dsi1pll_shadow_pll_out_div = {
+ 	.reg = PLL_PLL_OUTDIV_RATE,
+ 	.shift = 0,
+ 	.width = 2,
+@@ -1479,12 +1545,12 @@
+ 				"dsi1pll_shadow_vco_clk"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_bitclk_src = {
++static struct dsi_pll_div_clk dsi0pll_bitclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.clkr = {
+@@ -1493,12 +1559,12 @@
+ 			.parent_names = (const char *[]){"dsi0pll_pll_out_div"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_shadow_bitclk_src = {
++static struct dsi_pll_div_clk dsi0pll_shadow_bitclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.clkr = {
+@@ -1508,12 +1574,12 @@
+ 				"dsi0pll_shadow_pll_out_div"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_bitclk_src = {
++static struct dsi_pll_div_clk dsi1pll_bitclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.clkr = {
+@@ -1522,12 +1588,12 @@
+ 			.parent_names = (const char *[]){"dsi1pll_pll_out_div"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_shadow_bitclk_src = {
++static struct dsi_pll_div_clk dsi1pll_shadow_bitclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.clkr = {
+@@ -1537,7 +1603,7 @@
+ 				"dsi1pll_shadow_pll_out_div"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+@@ -1792,7 +1858,7 @@
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_pclk_src = {
++static struct dsi_pll_div_clk dsi0pll_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.clkr = {
+@@ -1802,12 +1868,12 @@
+ 					"dsi0pll_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_shadow_pclk_src = {
++static struct dsi_pll_div_clk dsi0pll_shadow_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.clkr = {
+@@ -1817,12 +1883,12 @@
+ 					"dsi0pll_shadow_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_pclk_src = {
++static struct dsi_pll_div_clk dsi1pll_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.clkr = {
+@@ -1832,12 +1898,12 @@
+ 					"dsi1pll_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_shadow_pclk_src = {
++static struct dsi_pll_div_clk dsi1pll_shadow_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.clkr = {
+@@ -1847,7 +1913,7 @@
+ 					"dsi1pll_shadow_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = (CLK_GET_RATE_NOCACHE | CLK_SET_RATE_PARENT),
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+--- a/techpack/display/msm/dsi/dsi_pll_5nm.c
++++ b/techpack/display/msm/dsi/dsi_pll_5nm.c
+@@ -1374,7 +1374,7 @@
+ 	rsc->pll_on = false;
+ }
+ 
+-long vco_5nm_round_rate(struct clk_hw *hw, unsigned long rate,
++static long vco_5nm_round_rate(struct clk_hw *hw, unsigned long rate,
+ 				unsigned long *parent_rate)
+ {
+ 	unsigned long rrate = rate;
+@@ -1761,7 +1761,73 @@
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_pll_out_div = {
++/*
++ * struct clk_regmap_div in 6.18 no longer carries the divider-encoding flags
++ * (CLK_DIVIDER_ONE_BASED / ALLOW_ZERO / POWER_OF_TWO); its helpers are fixed to
++ * the plain zero-based encoding.  The downstream PLL clock trees need the
++ * vendor encodings (POWER_OF_TWO for the PLL output dividers, ONE_BASED |
++ * ALLOW_ZERO for the pclk sources), so keep them with this local regmap
++ * divider clock.  The clkr nesting is retained so the existing designated
++ * initializers and the devm_clk_register()/regmap wiring stay unchanged.
++ */
++struct dsi_pll_div_clk {
++	struct clk_regmap clkr;
++	u32 reg;
++	u32 shift;
++	u32 width;
++	unsigned long flags;
++};
++
++static inline struct dsi_pll_div_clk *to_dsi_pll_div_clk(struct clk_hw *hw)
++{
++	return container_of(hw, struct dsi_pll_div_clk, clkr.hw);
++}
++
++static unsigned long dsi_pll_div_recalc_rate(struct clk_hw *hw,
++		unsigned long parent_rate)
++{
++	struct dsi_pll_div_clk *div = to_dsi_pll_div_clk(hw);
++	u32 val;
++
++	regmap_read(div->clkr.regmap, div->reg, &val);
++	val >>= div->shift;
++	val &= BIT(div->width) - 1;
++
++	return divider_recalc_rate(hw, parent_rate, val, NULL, div->flags,
++				   div->width);
++}
++
++static int dsi_pll_div_determine_rate(struct clk_hw *hw,
++		struct clk_rate_request *req)
++{
++	struct dsi_pll_div_clk *div = to_dsi_pll_div_clk(hw);
++
++	return divider_determine_rate(hw, req, NULL, div->width, div->flags);
++}
++
++static int dsi_pll_div_set_rate(struct clk_hw *hw, unsigned long rate,
++		unsigned long parent_rate)
++{
++	struct dsi_pll_div_clk *div = to_dsi_pll_div_clk(hw);
++	int div_val;
++
++	div_val = divider_get_val(rate, parent_rate, NULL, div->width,
++				  div->flags);
++	if (div_val < 0)
++		return div_val;
++
++	return regmap_update_bits(div->clkr.regmap, div->reg,
++				  (BIT(div->width) - 1) << div->shift,
++				  div_val << div->shift);
++}
++
++static const struct clk_ops dsi_pll_div_ops = {
++	.determine_rate = dsi_pll_div_determine_rate,
++	.set_rate = dsi_pll_div_set_rate,
++	.recalc_rate = dsi_pll_div_recalc_rate,
++};
++
++static struct dsi_pll_div_clk dsi0pll_pll_out_div = {
+ 	.reg = PLL_PLL_OUTDIV_RATE,
+ 	.shift = 0,
+ 	.width = 2,
+@@ -1772,12 +1838,12 @@
+ 			.parent_names = (const char *[]){"dsi0pll_vco_clk"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_shadow_pll_out_div = {
++static struct dsi_pll_div_clk dsi0pll_shadow_pll_out_div = {
+ 	.reg = PLL_PLL_OUTDIV_RATE,
+ 	.shift = 0,
+ 	.width = 2,
+@@ -1789,12 +1855,12 @@
+ 				"dsi0pll_shadow_vco_clk"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_pll_out_div = {
++static struct dsi_pll_div_clk dsi1pll_pll_out_div = {
+ 	.reg = PLL_PLL_OUTDIV_RATE,
+ 	.shift = 0,
+ 	.width = 2,
+@@ -1805,12 +1871,12 @@
+ 			.parent_names = (const char *[]){"dsi1pll_vco_clk"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_shadow_pll_out_div = {
++static struct dsi_pll_div_clk dsi1pll_shadow_pll_out_div = {
+ 	.reg = PLL_PLL_OUTDIV_RATE,
+ 	.shift = 0,
+ 	.width = 2,
+@@ -1822,12 +1888,12 @@
+ 				"dsi1pll_shadow_vco_clk"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_bitclk_src = {
++static struct dsi_pll_div_clk dsi0pll_bitclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -1837,12 +1903,12 @@
+ 			.parent_names = (const char *[]){"dsi0pll_pll_out_div"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_shadow_bitclk_src = {
++static struct dsi_pll_div_clk dsi0pll_shadow_bitclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -1853,12 +1919,12 @@
+ 				"dsi0pll_shadow_pll_out_div"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_bitclk_src = {
++static struct dsi_pll_div_clk dsi1pll_bitclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -1868,12 +1934,12 @@
+ 			.parent_names = (const char *[]){"dsi1pll_pll_out_div"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_shadow_bitclk_src = {
++static struct dsi_pll_div_clk dsi1pll_shadow_bitclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -1884,7 +1950,7 @@
+ 				"dsi1pll_shadow_pll_out_div"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+@@ -2277,7 +2343,7 @@
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_pclk_src = {
++static struct dsi_pll_div_clk dsi0pll_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -2288,12 +2354,12 @@
+ 					"dsi0pll_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_shadow_pclk_src = {
++static struct dsi_pll_div_clk dsi0pll_shadow_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -2304,12 +2370,12 @@
+ 					"dsi0pll_shadow_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_cphy_pclk_src = {
++static struct dsi_pll_div_clk dsi0pll_cphy_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -2320,12 +2386,12 @@
+ 				"dsi0pll_cphy_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi0pll_shadow_cphy_pclk_src = {
++static struct dsi_pll_div_clk dsi0pll_shadow_cphy_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -2336,12 +2402,12 @@
+ 				"dsi0pll_shadow_cphy_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_pclk_src = {
++static struct dsi_pll_div_clk dsi1pll_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -2352,12 +2418,12 @@
+ 					"dsi1pll_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_shadow_pclk_src = {
++static struct dsi_pll_div_clk dsi1pll_shadow_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -2368,12 +2434,12 @@
+ 				"dsi1pll_shadow_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_cphy_pclk_src = {
++static struct dsi_pll_div_clk dsi1pll_cphy_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -2384,12 +2450,12 @@
+ 				"dsi1pll_cphy_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+ 
+-static struct clk_regmap_div dsi1pll_shadow_cphy_pclk_src = {
++static struct dsi_pll_div_clk dsi1pll_shadow_cphy_pclk_src = {
+ 	.shift = 0,
+ 	.width = 4,
+ 	.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
+@@ -2400,7 +2466,7 @@
+ 				"dsi1pll_shadow_cphy_pclk_src_mux"},
+ 			.num_parents = 1,
+ 			.flags = CLK_SET_RATE_PARENT,
+-			.ops = &clk_regmap_div_ops,
++			.ops = &dsi_pll_div_ops,
+ 		},
+ 	},
+ };
+--- a/techpack/display/msm/mi_disp/mi_disp_notifier.c
++++ b/techpack/display/msm/mi_disp/mi_disp_notifier.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <linux/notifier.h>
++#include <drm/mi_disp_notifier.h>
+ 
+ static BLOCKING_NOTIFIER_HEAD(mi_disp_notifier_list);
+ 
+--- a/techpack/display/msm/msm_drv.c
++++ b/techpack/display/msm/msm_drv.c
+@@ -640,7 +640,7 @@
+ 		 * Grab the entire CMA chunk carved out in early startup in
+ 		 * mach-msm:
+ 		 */
+-	} else if (!iommu_present(&platform_bus_type)) {
++	} else if (!msm_device_iommu_configured(dev->dev)) {
+ 		u32 vram_size;
+ 
+ 		ret = of_property_read_u32(dev->dev->of_node,
+@@ -2249,10 +2249,13 @@
+ 	const struct msm_kms_funcs *funcs;
+ 	struct msm_gem_address_space *aspace;
+ 
+-	if (!iommu_present(&platform_bus_type))
++	if ((!dev) || (!dev->dev))
++		return ERR_PTR(-EINVAL);
++
++	if (!msm_device_iommu_configured(dev->dev))
+ 		return ERR_PTR(-ENODEV);
+ 
+-	if ((!dev) || (!dev->dev_private))
++	if (!dev->dev_private)
+ 		return ERR_PTR(-EINVAL);
+ 
+ 	priv = dev->dev_private;
+--- a/techpack/display/msm/msm_drv.h
++++ b/techpack/display/msm/msm_drv.h
+@@ -32,7 +32,26 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/slab.h>
+ #include <linux/list.h>
++#include <linux/device.h>
+ #include <linux/iommu.h>
++#include <linux/of.h>
++
++/**
++ * msm_device_iommu_configured - true when this device's DMA is IOMMU translated
++ *
++ * 6.18 removed iommu_present(&platform_bus_type).  The QTI display devices are
++ * DT-described: treat the device as IOMMU-backed once it is mapped or when its
++ * DT node declares an iommus property (probe time, before attachment).  This
++ * preserves the historical "IOMMU present" decision for the VRAM fallbacks.
++ */
++static inline bool msm_device_iommu_configured(struct device *dev)
++{
++	if (!dev)
++		return false;
++	if (device_iommu_mapped(dev))
++		return true;
++	return dev->of_node && of_property_present(dev->of_node, "iommus");
++}
+ #include <linux/types.h>
+ #include <linux/of_graph.h>
+ #include <linux/of_device.h>
+@@ -390,6 +409,7 @@
+  */
+ struct msm_display_dsc_info {
+ 	struct drm_dsc_config config;
++	u64 dsc_panel_id;	/* vendor mi,mdss-dsc-panel-id; absent from 6.18 drm_dsc_config */
+ 	u8 scr_rev;
+ 
+ 	int initial_lines;
+--- a/techpack/display/msm/msm_gem.c
++++ b/techpack/display/msm/msm_gem.c
+@@ -1155,7 +1155,7 @@
+ 
+ 	size = PAGE_ALIGN(size);
+ 
+-	if (!iommu_present(&platform_bus_type))
++	if (!msm_device_iommu_configured(dev->dev))
+ 		use_vram = true;
+ 	else if ((flags & (MSM_BO_STOLEN | MSM_BO_SCANOUT)) && priv->vram.size)
+ 		use_vram = true;
+--- a/techpack/display/msm/sde/sde_connector.c
++++ b/techpack/display/msm/sde/sde_connector.c
+@@ -20,6 +20,8 @@
+ #include "sde_rm.h"
+ #include "sde_vm.h"
+ #include <drm/drm_probe_helper.h>
++#include <drm/drm_framebuffer.h>
++#include <linux/vmalloc.h>
+ 
+ #define BL_NODE_NAME_SIZE 32
+ #define HDR10_PLUS_VSIF_TYPE_CODE      0x81
+@@ -2424,7 +2426,7 @@
+ 
+ static enum drm_mode_status
+ sde_connector_mode_valid(struct drm_connector *connector,
+-		struct drm_display_mode *mode)
++		const struct drm_display_mode *mode)
+ {
+ 	struct sde_connector *c_conn;
+ 	struct msm_resource_caps_info avail_res;
+@@ -2441,8 +2443,14 @@
+ 	sde_connector_get_avail_res_info(connector, &avail_res);
+ 
+ 	if (c_conn->ops.mode_valid)
+-		return c_conn->ops.mode_valid(connector, mode, c_conn->display,
+-				&avail_res);
++		/*
++		 * The internal sde_connector_ops callback still takes a mutable
++		 * mode pointer (the dsi/dp implementations are migrated
++		 * separately); it only reads the mode.
++		 */
++		return c_conn->ops.mode_valid(connector,
++				(struct drm_display_mode *)mode,
++				c_conn->display, &avail_res);
+ 
+ 	/* assume all modes okay by default */
+ 	return MODE_OK;
+@@ -2467,8 +2475,9 @@
+ 
+ static struct drm_encoder *
+ sde_connector_atomic_best_encoder(struct drm_connector *connector,
+-		struct drm_connector_state *connector_state)
+-{
++		struct drm_atomic_state *state)
++{
++	struct drm_connector_state *connector_state;
+ 	struct sde_connector *c_conn;
+ 	struct drm_encoder *encoder = NULL;
+ 
+@@ -2476,6 +2485,11 @@
+ 		SDE_ERROR("invalid connector\n");
+ 		return NULL;
+ 	}
++
++	connector_state = drm_atomic_get_new_connector_state(state,
++			connector);
++	if (!connector_state)
++		return NULL;
+ 
+ 	c_conn = to_sde_connector(connector);
+ 
+@@ -3028,7 +3042,7 @@
+ 			conn, sde_connector_attr_groups, "sde-conn-%d-%s", conn->index,
+ 			conn->name);
+ 	if (IS_ERR_OR_NULL(c_conn->sysfs_dev)) {
+-		SDE_ERROR("connector:%d sysfs create failed rc:%ld\n", &c_conn->base.index,
++		SDE_ERROR("connector:%d sysfs create failed rc:%ld\n", c_conn->base.index,
+ 			PTR_ERR(c_conn->sysfs_dev));
+ 		if (!c_conn->sysfs_dev)
+ 			rc = -EINVAL;
+@@ -3083,7 +3097,7 @@
+ 
+ 	spin_lock_init(&c_conn->event_lock);
+ 
+-	c_conn->base.panel = panel;
++	c_conn->panel = panel;
+ 	c_conn->connector_type = connector_type;
+ 	c_conn->encoder = encoder;
+ 	c_conn->display = display;
+--- a/techpack/display/msm/sde/sde_connector.h
++++ b/techpack/display/msm/sde/sde_connector.h
+@@ -504,6 +504,7 @@
+ 	int connector_type;
+ 
+ 	struct drm_encoder *encoder;
++	struct drm_panel *panel;
+ 	void *display;
+ 	void *drv_panel;
+ 	void *mst_port;
+@@ -848,6 +849,18 @@
+ void sde_connector_set_qsync_params(struct drm_connector *connector);
+ 
+ /**
++ * sde_connector_set_colorspace - apply the connector's pending colorspace
++ * @c_conn: pointer to sde connector
++ */
++void sde_connector_set_colorspace(struct sde_connector *c_conn);
++
++/**
++ * sde_connector_fod_pre_kickoff - prepare FOD handling before a commit
++ * @connector: pointer to drm connector
++ */
++void sde_connector_fod_pre_kickoff(struct drm_connector *connector);
++
++/**
+  * sde_connector_complete_qsync_commit - callback signalling completion
+  *			of qsync, if modified for the current commit
+  * @conn   - Pointer to drm connector object
+--- a/techpack/display/msm/sde/sde_crtc.c
++++ b/techpack/display/msm/sde/sde_crtc.c
+@@ -21,6 +21,7 @@
+ #include <linux/sort.h>
+ #include <linux/debugfs.h>
+ #include <linux/ktime.h>
++#include <linux/vmalloc.h>
+ #include <drm/sde_drm.h>
+ #include <drm/drm_mode.h>
+ #include <drm/drm_crtc.h>
+@@ -363,7 +364,7 @@
+ 	fps_int = (uint64_t) sde_crtc->fps_info.measured_fps;
+ 	fps_decimal = do_div(fps_int, 10);
+ 	return scnprintf(buf, PAGE_SIZE,
+-	"fps: %d.%d duration:%d frame_count:%lld\n", fps_int, fps_decimal,
++	"fps: %llu.%llu duration:%d frame_count:%lld\n", fps_int, fps_decimal,
+ 			sde_crtc->fps_info.fps_periodic_duration, frame_count);
+ }
+ 
+@@ -3285,8 +3286,9 @@
+ }
+ 
+ static void sde_crtc_atomic_begin(struct drm_crtc *crtc,
+-		struct drm_crtc_state *old_state)
+-{
++		struct drm_atomic_state *atomic_state)
++{
++	struct drm_crtc_state *old_state;
+ 	struct sde_crtc *sde_crtc;
+ 	struct drm_encoder *encoder;
+ 	struct drm_device *dev;
+@@ -3299,6 +3301,8 @@
+ 		SDE_ERROR("invalid crtc\n");
+ 		return;
+ 	}
++
++	old_state = drm_atomic_get_old_crtc_state(atomic_state, crtc);
+ 
+ 	if (!crtc->state->enable) {
+ 		SDE_DEBUG("crtc%d -> enable %d, skip atomic_begin\n",
+@@ -3393,7 +3397,7 @@
+ }
+ 
+ static void sde_crtc_atomic_flush(struct drm_crtc *crtc,
+-		struct drm_crtc_state *old_crtc_state)
++		struct drm_atomic_state *atomic_state)
+ {
+ 	struct drm_encoder *encoder;
+ 	struct sde_crtc *sde_crtc;
+@@ -4298,7 +4302,7 @@
+ }
+ 
+ static void sde_crtc_enable(struct drm_crtc *crtc,
+-		struct drm_crtc_state *old_crtc_state)
++		struct drm_atomic_state *atomic_state)
+ {
+ 	struct sde_crtc *sde_crtc;
+ 	struct drm_encoder *encoder;
+@@ -5032,11 +5036,12 @@
+ }
+ 
+ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
+-		struct drm_crtc_state *state)
++		struct drm_atomic_state *atomic_state)
+ {
+ 	struct drm_device *dev;
+ 	struct sde_crtc *sde_crtc;
+ 	struct plane_state *pstates = NULL;
++	struct drm_crtc_state *state;
+ 	struct sde_crtc_state *cstate;
+ 	struct drm_display_mode *mode;
+ 	int rc = 0;
+@@ -5046,6 +5051,12 @@
+ 
+ 	if (!crtc) {
+ 		SDE_ERROR("invalid crtc\n");
++		return -EINVAL;
++	}
++
++	state = drm_atomic_get_new_crtc_state(atomic_state, crtc);
++	if (!state) {
++		SDE_ERROR("crtc%d missing new state\n", crtc->base.id);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -5330,6 +5341,8 @@
+ static void sde_crtc_setup_capabilities_blob(struct sde_kms_info *info,
+ 		struct sde_mdss_cfg *catalog)
+ {
++	int ddr_type;
++
+ 	sde_kms_info_reset(info);
+ 
+ 	sde_kms_info_add_keyint(info, "hw_version", catalog->hwversion);
+@@ -5356,8 +5369,18 @@
+ 				catalog->mdp[0].ubwc_swizzle);
+ 	}
+ 
+-	if (of_fdt_get_ddrtype() == LP_DDR4_TYPE)
++	/*
++	 * The donor kernel exported of_fdt_get_ddrtype() from drivers/of/fdt.c;
++	 * that helper is not part of the paired 6.18 kernel. The DDR type is
++	 * read from the real DT memory nodes by the display driver instead
++	 * (sde_get_ddrtype()). If the board does not describe the type, report
++	 * "unknown" explicitly instead of guessing a DDR generation.
++	 */
++	ddr_type = sde_get_ddrtype();
++	if (ddr_type == LP_DDR4_TYPE)
+ 		sde_kms_info_add_keystr(info, "DDR version", "DDR4");
++	else if (ddr_type < 0)
++		sde_kms_info_add_keystr(info, "DDR version", "unknown");
+ 	else
+ 		sde_kms_info_add_keystr(info, "DDR version", "DDR5");
+ 
+@@ -6844,10 +6867,10 @@
+ 	kthread_init_delayed_work(&sde_crtc->static_cache_read_work,
+ 			__sde_crtc_static_cache_read_work);
+ 
+-	SDE_DEBUG("crtc=%d new_llcc=%d, old_llcc=%d\n",
++	SDE_DEBUG("crtc=%d new_llcc[0]=%d, old_llcc[0]=%d\n",
+ 		crtc->base.id,
+-		sde_crtc->new_perf.llcc_active,
+-		sde_crtc->cur_perf.llcc_active);
++		sde_crtc->new_perf.llcc_active[0],
++		sde_crtc->cur_perf.llcc_active[0]);
+ 
+ 	SDE_DEBUG("%s: successfully initialized crtc\n", sde_crtc->name);
+ 	return crtc;
+--- a/techpack/display/msm/sde/sde_crtc.h
++++ b/techpack/display/msm/sde/sde_crtc.h
+@@ -949,6 +949,13 @@
+ void sde_crtc_static_cache_read_kickoff(struct drm_crtc *crtc);
+ 
+ /**
++ * __sde_crtc_static_cache_read_work - delayed worker that advances the
++ *	static image cache state to FRAME_READ
++ * @work: Pointer to kthread work item
++ */
++void __sde_crtc_static_cache_read_work(struct kthread_work *work);
++
++/**
+  * sde_crtc_get_num_datapath - get the number of datapath active
+  *				of primary connector
+  * @crtc: Pointer to DRM crtc object
+--- a/techpack/display/msm/sde/sde_formats.h
++++ b/techpack/display/msm/sde/sde_formats.h
+@@ -9,6 +9,31 @@
+ #include <drm/drm_fourcc.h>
+ #include "msm_gem.h"
+ #include "sde_hw_mdss.h"
++
++/*
++ * Donor-private SDE format modifiers.
++ *
++ * The donor msm-4.19 kernel defined DRM_FORMAT_MOD_QCOM_TILE/DX/TIGHT in
++ * its own include/uapi/drm/msm_drm.h. The 6.18 DRM UAPI only keeps
++ * DRM_FORMAT_MOD_QCOM_COMPRESSED (QCOM,1) and the QCOM TILED2/TILED3
++ * modifiers (QCOM,2/QCOM,3): QCOM_TILE/QCOM_DX/QCOM_TIGHT are not part of
++ * it, and the donor UAPI header is not retained anywhere in the prepared
++ * tree, so their original numeric values cannot be recovered from the
++ * local inputs.
++ *
++ * They are used here purely as SDE-internal capability bits: the techpack
++ * only ORs/compares them against each other to pick one of its internal
++ * format maps (sde_get_sde_format_ext()). The values below are chosen so
++ * that every combination used by that switch is distinct and so that they
++ * cannot alias a modifier defined by the 6.18 UAPI. They are therefore NOT
++ * claimed to be the donor userspace ABI: a donor userspace that negotiates
++ * these vendor modifiers hits the explicit "unsupported format modifier"
++ * path until the donor ABI values can be reconciled. Linear (0) and
++ * DRM_FORMAT_MOD_QCOM_COMPRESSED keep their standard UAPI values.
++ */
++#define DRM_FORMAT_MOD_QCOM_TILE	fourcc_mod_code(QCOM, 16)
++#define DRM_FORMAT_MOD_QCOM_DX		fourcc_mod_code(QCOM, 32)
++#define DRM_FORMAT_MOD_QCOM_TIGHT	fourcc_mod_code(QCOM, 64)
+ 
+ /**
+  * sde_get_sde_format_ext() - Returns sde format structure pointer.
+--- a/techpack/display/msm/sde/sde_kms.c
++++ b/techpack/display/msm/sde/sde_kms.c
+@@ -20,6 +20,7 @@
+ #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
+ 
+ #include <drm/drm_crtc.h>
++#include <drm/drm_framebuffer.h>
+ #include <drm/drm_fixed.h>
+ #include <drm/drm_panel.h>
+ #include <linux/debugfs.h>
+@@ -55,10 +56,65 @@
+ #include "sde_connector.h"
+ #include "sde_vm.h"
+ 
+-#include <linux/qcom_scm.h>
++/*
++ * MSM_SDE_SECURE_VM_PORTED: the donor secure-display/trusted-VM path needs
++ * kernel facilities the paired 6.18 tree does not provide:
++ *   - qcom_scm_mem_protect_sd_ctrl(): the downstream SCM SMMU secure-mode
++ *     switch call. 6.18 only ships linux/firmware/qcom/qcom_scm.h and does
++ *     not export this API.
++ *   - the QTEE shmbridge allocator (linux/qtee_shmbridge.h;
++ *     CONFIG_QCOM_TZMEM_MODE_SHMBRIDGE is not set and the header is
++ *     absent).
++ *   - the Gunyah HAVEN IRQ-lend API (linux/haven/hh_irq_lend.h).
++ * Until the paired kernel grows these providers the secure-VMID switch is
++ * compiled out and _sde_kms_scm_call() returns -EOPNOTSUPP to its callers
++ * instead of pretending the VMIDs were switched. Normal (non-secure)
++ * display paths never call it.
++ */
++#define MSM_SDE_SECURE_VM_PORTED 0
++
++/*
++ * Donor soc/qcom/secure_buffer.h stage-2 VMID identifiers. That header is
++ * absent from the paired 6.18 tree and the donor header is not retained in
++ * the prepared tree, so these numeric values cannot be verified here. They
++ * are used only as opaque identifiers by the secure-VMID transition state
++ * machine: the SCM secure-VMID switch that consumes them is unported
++ * (MSM_SDE_SECURE_VM_PORTED == 0) and rejects every request with
++ * -EOPNOTSUPP, so no hardware VMID programming depends on these values.
++ * They must be reconciled against the donor header before secure-VMID /
++ * trusted-VM display is enabled.
++ */
++#define VMID_CP_PIXEL		0
++#define VMID_CP_SEC_DISPLAY	1
++#define VMID_CP_CAMERA_PREVIEW	2
++
++/*
++ * Donor HAVEN IRQ-lend label for the MDSS interrupt. linux/haven/hh_irq_lend.h
++ * is absent from the paired 6.18 tree; msm_dss_get_io_irq() only stores the
++ * label in the MDSS io-resource list and no 6.18 consumer interprets it, so
++ * an opaque local value is used and IRQ lending is explicitly unavailable
++ * (see MSM_SDE_SECURE_VM_PORTED).
++ */
++#define HH_IRQ_LABEL_SDE	0
++
++/*
++ * MSM_SDE_PANEL_NOTIFIER_PORTED: the donor kernel added a drm_panel notifier
++ * API (DRM_PANEL_EARLY_EVENT_BLANK / DRM_PANEL_EVENT_BLANK /
++ * DRM_PANEL_BLANK_* / struct drm_panel_notifier /
++ * drm_panel_notifier_call_chain()) on top of drm_panel.h. Core 6.18
++ * drm_panel.h has none of it, so the per-commit blank/fps notification to
++ * the panel is compiled out here. Panel LP-mode/fps-change signalling is
++ * therefore unvalidated in this port phase and must be reimplemented on the
++ * 6.18 panel/bridge callbacks before it is claimed.
++ */
++#define MSM_SDE_PANEL_NOTIFIER_PORTED 0
++
++#if MSM_SDE_SECURE_VM_PORTED
++#include <linux/firmware/qcom/qcom_scm.h>
+ #include "soc/qcom/secure_buffer.h"
+ #include <linux/qtee_shmbridge.h>
+ #include <linux/haven/hh_irq_lend.h>
++#endif
+ 
+ #define CREATE_TRACE_POINTS
+ #include "sde_trace.h"
+@@ -68,6 +124,38 @@
+ #define MDP_DEVICE_ID            0x1A
+ 
+ EXPORT_TRACEPOINT_SYMBOL(tracing_mark_write);
++
++/**
++ * sde_get_ddrtype - read the DDR device type described by the DT memory
++ *	nodes (replacement for the donor-only of_fdt_get_ddrtype())
++ *
++ * The donor kernel decoded the DDR type inside drivers/of/fdt.c. That
++ * helper is not part of the paired 6.18 kernel, so the display driver reads
++ * the same information from the real DT memory nodes: every node of type
++ * "memory" may carry the bootloader-provided "ddr_device_type" property.
++ * Missing property, missing memory node or conflicting values are reported
++ * as a negative errno; callers must fall back to a documented default
++ * instead of assuming a DDR generation.
++ *
++ * Return: DDR type value on success, -ENOENT/-EINVAL otherwise.
++ */
++int sde_get_ddrtype(void)
++{
++	struct device_node *node;
++	u32 value;
++	int type = -ENOENT;
++
++	for_each_node_by_type(node, "memory") {
++		if (of_property_read_u32(node, "ddr_device_type", &value))
++			continue;
++		if (value > INT_MAX || (type >= 0 && value != type)) {
++			of_node_put(node);
++			return -EINVAL;
++		}
++		type = value;
++	}
++	return type;
++}
+ 
+ static const char * const iommu_ports[] = {
+ 		"mdp_0",
+@@ -313,6 +401,7 @@
+  */
+ static int _sde_kms_scm_call(struct sde_kms *sde_kms, int vmid)
+ {
++#if MSM_SDE_SECURE_VM_PORTED
+ 	struct device dummy = {};
+ 	dma_addr_t dma_handle;
+ 	uint32_t num_sids;
+@@ -393,6 +482,17 @@
+ 		kfree(sec_sid);
+ 
+ 	return ret;
++#else /* !MSM_SDE_SECURE_VM_PORTED */
++	/*
++	 * The paired 6.18 kernel has no SCM secure-VMID switch, QTEE
++	 * shmbridge allocator or HAVEN IRQ-lend provider. Report the absence to
++	 * the caller; do not pretend the VMIDs were switched. Secure-VMID
++	 * (trusted-VM) display is disabled in this port phase and unvalidated.
++	 */
++	SDE_ERROR("secure-VMID SCM switch unsupported (ported=%d, vmid 0x%x)\n",
++			MSM_SDE_SECURE_VM_PORTED, vmid);
++	return -EOPNOTSUPP;
++#endif /* MSM_SDE_SECURE_VM_PORTED */
+ }
+ 
+ static int _sde_kms_detach_all_cb(struct sde_kms *sde_kms, u32 vmid)
+@@ -787,11 +887,13 @@
+ 	pfn_start = mem_addr >> PAGE_SHIFT;
+ 	pfn_end = (mem_addr + splash_buffer_size) >> PAGE_SHIFT;
+ 
+-	ret = memblock_free(mem_addr, splash_buffer_size);
+-	if (ret) {
+-		SDE_ERROR("continuous splash memory free failed:%d\n", ret);
+-		return ret;
+-	}
++	/*
++	 * 6.18 split the physical-address free out of memblock_free(): the
++	 * physical variant is memblock_phys_free() (formerly
++	 * memblock_free(phys_addr, size)) and returns void, while
++	 * memblock_free() now takes a virtual address. It cannot fail here.
++	 */
++	memblock_phys_free(mem_addr, splash_buffer_size);
+ 	for (pfn_idx = pfn_start; pfn_idx < pfn_end; pfn_idx++)
+ 		free_reserved_page(pfn_to_page(pfn_idx));
+ 
+@@ -839,7 +941,15 @@
+ 	return ret;
+ }
+ 
+-static int _sde_kms_map_all_splash_regions(struct sde_kms *sde_kms)
++/*
++ * NOTE(port): the aspace-creation loop that used to call this moved out of
++ * sde_kms.c (sde_kms_mmu_attach() is now handled by the paired msm_drv/aspace
++ * owner), so continuous-splash region mapping currently has no caller here.
++ * Keep the implementation available and flagged as unused instead of
++ * deleting the splash handoff code.
++ */
++static int __maybe_unused _sde_kms_map_all_splash_regions(
++		struct sde_kms *sde_kms)
+ {
+ 	int i = 0;
+ 	int ret = 0;
+@@ -910,6 +1020,7 @@
+ 	return ret;
+ }
+ 
++#if MSM_SDE_PANEL_NOTIFIER_PORTED
+ static int _sde_kms_get_blank(struct drm_crtc_state *crtc_state,
+ 		struct drm_connector_state *conn_state)
+ {
+@@ -996,6 +1107,7 @@
+ 	}
+ 
+ }
++#endif /* MSM_SDE_PANEL_NOTIFIER_PORTED */
+ 
+ static struct drm_crtc *sde_kms_vm_get_vm_crtc(
+ 		struct drm_atomic_state *state)
+@@ -1190,7 +1302,9 @@
+ 		vm_ops->vm_prepare_commit(sde_kms, state);
+ 
+ end_vm:
++#if MSM_SDE_PANEL_NOTIFIER_PORTED
+ 	_sde_kms_drm_check_dpms(state, DRM_PANEL_EARLY_EVENT_BLANK);
++#endif
+ end:
+ 	SDE_ATRACE_END("prepare_commit");
+ }
+@@ -1485,7 +1599,7 @@
+ 		return;
+ 	priv = sde_kms->dev->dev_private;
+ 
+-	if (sde_kms_power_resource_is_enabled(sde_kms->dev) < 0) {
++	if (!sde_kms_power_resource_is_enabled(sde_kms->dev)) {
+ 		SDE_ERROR("power resource is not enabled\n");
+ 		return;
+ 	}
+@@ -1528,7 +1642,9 @@
+ 			SDE_ERROR("vm post commit failed, rc = %d\n",
+ 				  rc);
+ 	}
++#if MSM_SDE_PANEL_NOTIFIER_PORTED
+ 	_sde_kms_drm_check_dpms(old_state, DRM_PANEL_EVENT_BLANK);
++#endif
+ 
+ 	pm_runtime_put_sync(sde_kms->dev->dev);
+ 
+@@ -3261,7 +3377,7 @@
+ 		rc = dsi_display_get_info(NULL, &info, display);
+ 		if (rc) {
+ 			SDE_ERROR("%s: dsi get_info failed: %d\n",
+-					rc, __func__);
++					__func__, rc);
+ 			encoder = NULL;
+ 		}
+ 	}
+@@ -3277,8 +3393,8 @@
+ 			if (!dsi_display || !encoder) {
+ 				sde_conn->ops.cont_splash_res_disable
+ 						(sde_conn->display);
+-			} else if (connector->encoder_ids[0]
+-					== encoder->base.id) {
++			} else if (drm_connector_has_possible_encoder(connector,
++				encoder)) {
+ 				/**
+ 				 * This handles dual DSI
+ 				 * configuration where one DSI
+@@ -3469,7 +3585,7 @@
+ 			 * ever have to support continuous splash for
+ 			 * external displays in MST configuration.
+ 			 */
+-			if (connector->encoder_ids[0] == encoder->base.id)
++			if (drm_connector_has_possible_encoder(connector, encoder))
+ 				break;
+ 		}
+ 		drm_connector_list_iter_end(&conn_iter);
+@@ -3550,7 +3666,7 @@
+ 			 * ever have to support continuous splash for
+ 			 * external displays in MST configuration.
+ 			 */
+-			if (connector->encoder_ids[0] == encoder->base.id)
++			if (drm_connector_has_possible_encoder(connector, encoder))
+ 				break;
+ 		}
+ 
+@@ -3636,7 +3752,7 @@
+ 	hdisplay_fp = drm_int2fixp(mode->hdisplay);
+ 	htotal_fp = drm_int2fixp(mode->htotal);
+ 	vtotal_fp = drm_int2fixp(mode->vtotal);
+-	vrefresh_fp = drm_int2fixp(mode->vrefresh);
++	vrefresh_fp = drm_int2fixp(drm_mode_vrefresh(mode));
+ 	mdp_fudge_factor = drm_fixp_from_fraction(105, 100);
+ 
+ 	/* mode clock = [(h * v * fps * 1.05) / (num_lm)] */
+@@ -3663,16 +3779,18 @@
+ 
+ 		mode_clock_hz = lm_clk_fp;
+ 	}
+-	SDE_DEBUG("[%s] h=%d v=%d fps=%d lm=%d mode_clk=%llu max_clk=%llu\n",
+-			mode->name, mode->htotal, mode->vtotal, mode->vrefresh,
++	SDE_DEBUG("[%s] h=%d v=%d fps=%d lm=%d mode_clk=%d max_clk=%llu\n",
++			mode->name, mode->htotal, mode->vtotal,
++			drm_mode_vrefresh(mode),
+ 			*num_lm, drm_fixp2int(mode_clock_hz),
+ 			sde_kms->perf.max_core_clk_rate);
+ 	return 0;
+ 
+ error:
+ 	SDE_ERROR("required mode clk exceeds max mdp clk\n");
+-	SDE_ERROR("[%s] h=%d v=%d fps=%d lm=%d mode_clk=%llu max_clk=%llu\n",
+-			mode->name, mode->htotal, mode->vtotal, mode->vrefresh,
++	SDE_ERROR("[%s] h=%d v=%d fps=%d lm=%d mode_clk=%d max_clk=%llu\n",
++			mode->name, mode->htotal, mode->vtotal,
++			drm_mode_vrefresh(mode),
+ 			*num_lm, drm_fixp2int(mode_clock_hz),
+ 			sde_kms->perf.max_core_clk_rate);
+ 	return rc;
+@@ -4791,7 +4909,7 @@
+ 				sde_kms->sid_len, sde_kms->catalog);
+ 		if (IS_ERR_OR_NULL(sde_kms->hw_sid)) {
+ 			rc = PTR_ERR(sde_kms->hw_sid);
+-			SDE_ERROR("failed to init sid %ld\n", rc);
++			SDE_ERROR("failed to init sid %d\n", rc);
+ 			sde_kms->hw_sid = NULL;
+ 			goto power_error;
+ 		}
+@@ -4904,7 +5022,12 @@
+ 	/*
+ 	 * Support format modifiers for compression etc.
+ 	 */
+-	dev->mode_config.allow_fb_modifiers = true;
++	/*
++	 * 6.18 dropped drm_mode_config.allow_fb_modifiers: modifiers are allowed
++	 * by default and drivers that cannot support them set the (default
++	 * false) fb_modifiers_not_supported flag instead. SDE supports them.
++	 */
++	dev->mode_config.fb_modifiers_not_supported = false;
+ 
+ 	sde_kms->affinity_notify.notify = sde_kms_irq_affinity_notify;
+ 	sde_kms->affinity_notify.release = sde_kms_irq_affinity_release;
+--- a/techpack/display/msm/sde/sde_kms.h
++++ b/techpack/display/msm/sde/sde_kms.h
+@@ -514,6 +514,15 @@
+ 							: 0)
+ 
+ /**
++ * sde_get_ddrtype - read the DDR device type from the DT memory nodes
++ *
++ * Replacement for the donor-only of_fdt_get_ddrtype().
++ * Return: DDR type value on success, negative errno if the board does not
++ *	describe it (callers use their documented fallback).
++ */
++int sde_get_ddrtype(void);
++
++/**
+  * sde_kms_info_reset - reset sde_kms_info structure
+  * @info: Pointer to sde_kms_info structure
+  */
+@@ -718,6 +727,23 @@
+ void sde_kms_vm_trusted_resource_deinit(struct sde_kms *sde_kms);
+ 
+ /**
++ * sde_kms_display_early_wakeup - early wakeup for the display pipeline
++ * @dev: DRM device
++ * @connector_id: connector to wake up
++ */
++void sde_kms_display_early_wakeup(struct drm_device *dev,
++				  const int32_t connector_id);
++
++/**
++ * sde_kms_vm_pre_release - prepare the current VM before releasing HW
++ * @sde_kms: pointer to sde_kms
++ * @state: current frame atomic commit state
++ * @is_display: whether the display path is being released
++ */
++int sde_kms_vm_pre_release(struct sde_kms *sde_kms,
++			   struct drm_atomic_state *state, bool is_display);
++
++/**
+  * sde_kms_vm_trusted_post_commit - function to prepare the VM after the
+  *				    last commit before releasing the HW
+  *				    resources from trusted VM
+--- a/techpack/display/msm/sde/sde_plane.c
++++ b/techpack/display/msm/sde/sde_plane.c
+@@ -26,6 +26,8 @@
+ #include <drm/msm_drm_pp.h>
+ #include <drm/drm_framebuffer.h>
+ #include <drm/drm_fourcc.h>
++#include <drm/drm_blend.h>
++#include <linux/vmalloc.h>
+ 
+ #include "msm_prop.h"
+ #include "msm_drv.h"
+@@ -246,7 +248,7 @@
+ 	struct msm_drm_private *priv;
+ 
+ 	if (!plane || !plane->dev) {
+-		SDE_ERROR("invalid plane %d\n");
++		SDE_ERROR("invalid plane %d\n", plane ? plane->base.id : -1);
+ 		return;
+ 	}
+ 
+@@ -287,7 +289,7 @@
+ 		return;
+ 	}
+ 
+-	frame_rate = crtc->mode.vrefresh;
++	frame_rate = drm_mode_vrefresh(&crtc->mode);
+ 	perf = &psde->catalog->perf;
+ 	qos_count = perf->qos_refresh_count;
+ 	while ((fps_index < qos_count) && perf->qos_refresh_rate) {
+@@ -478,7 +480,7 @@
+ 	ot_params.width = psde->pipe_cfg.src_rect.w;
+ 	ot_params.height = psde->pipe_cfg.src_rect.h;
+ 	ot_params.is_wfd = !psde->is_rt_pipe;
+-	ot_params.frame_rate = crtc->mode.vrefresh;
++	ot_params.frame_rate = drm_mode_vrefresh(&crtc->mode);
+ 	ot_params.vbif_idx = VBIF_RT;
+ 	ot_params.clk_ctrl = psde->pipe_hw->cap->clk_ctrl;
+ 	ot_params.rd = true;
+@@ -628,7 +630,7 @@
+ 
+ 			switch (rc) {
+ 			case 0:
+-				SDE_ERROR_PLANE(psde, "%ums timeout on %08X fd %d\n",
++				SDE_ERROR_PLANE(psde, "%ums timeout on %08X fd %llu\n",
+ 						wait_ms, prefix, sde_plane_get_property(pstate,
+ 						PLANE_PROP_INPUT_FENCE));
+ 				psde->is_error = true;
+@@ -2676,15 +2678,23 @@
+ }
+ 
+ static int sde_plane_atomic_check(struct drm_plane *plane,
+-		struct drm_plane_state *state)
++		struct drm_atomic_state *atomic_state)
+ {
+ 	int ret = 0;
+ 	struct sde_plane *psde;
++	struct drm_plane_state *state;
+ 	struct sde_plane_state *pstate;
+ 
+-	if (!plane || !state) {
++	if (!plane || !atomic_state) {
+ 		SDE_ERROR("invalid arg(s), plane %d state %d\n",
+-				!plane, !state);
++				!plane, !atomic_state);
++		ret = -EINVAL;
++		goto exit;
++	}
++
++	state = drm_atomic_get_new_plane_state(atomic_state, plane);
++	if (!state) {
++		SDE_ERROR("plane%d has no new state\n", plane->base.id);
+ 		ret = -EINVAL;
+ 		goto exit;
+ 	}
+@@ -3372,7 +3382,7 @@
+ 				multirect_index, SDE_SSPP_MULTIRECT_TIME_MX);
+ }
+ 
+-static void sde_plane_atomic_update(struct drm_plane *plane,
++static void _sde_plane_atomic_update(struct drm_plane *plane,
+ 				struct drm_plane_state *old_state)
+ {
+ 	struct sde_plane *psde;
+@@ -3401,6 +3411,13 @@
+ 		/* atomic_check should have ensured that this doesn't fail */
+ 		WARN_ON(ret < 0);
+ 	}
++}
++
++static void sde_plane_atomic_update(struct drm_plane *plane,
++		struct drm_atomic_state *atomic_state)
++{
++	_sde_plane_atomic_update(plane,
++			drm_atomic_get_old_plane_state(atomic_state, plane));
+ }
+ 
+ void sde_plane_restore(struct drm_plane *plane)
+@@ -3424,7 +3441,7 @@
+ 	SDE_DEBUG_PLANE(psde, "\n");
+ 
+ 	/* last plane state is same as current state */
+-	sde_plane_atomic_update(plane, plane->state);
++	_sde_plane_atomic_update(plane, plane->state);
+ }
+ 
+ bool sde_plane_is_cache_required(struct drm_plane *plane,
+--- a/techpack/display/msm/sde/sde_plane.h
++++ b/techpack/display/msm/sde/sde_plane.h
+@@ -351,4 +351,12 @@
+ void sde_plane_static_img_control(struct drm_plane *plane,
+ 		enum sde_crtc_cache_state state);
+ 
++/**
++ * sde_plane_danger_signal_ctrl - control the plane danger signal
++ * @plane: Pointer to drm plane structure
++ * @enable: enable/disable the danger signal
++ * Returns: 0 on success or error code
++ */
++int sde_plane_danger_signal_ctrl(struct drm_plane *plane, bool enable);
++
+ #endif /* _SDE_PLANE_H_ */
+--- a/techpack/display/msm/sde/sde_trace.h
++++ b/techpack/display/msm/sde/sde_trace.h
+@@ -66,7 +66,7 @@
+ 	unsigned long long ib_quota, u32 paths),
+ 	TP_ARGS(bus_id, ab_quota, ib_quota, paths),
+ 	TP_STRUCT__entry(
+-			__field(u32, bus_id);
++			__field(u32, bus_id)
+ 			__field(u64, ab_quota)
+ 			__field(u64, ib_quota)
+ 			__field(u32, paths)
+@@ -126,7 +126,7 @@
+ 	TP_fast_assign(
+ 			__entry->trace_type = trace_type;
+ 			__entry->pid = task ? task->tgid : 0;
+-			__assign_str(trace_name, name);
++			__assign_str(trace_name);
+ 			__entry->value = value;
+ 	),
+ 	TP_printk("%c|%d|%s|%d", __entry->trace_type,
+@@ -145,7 +145,7 @@
+ 	),
+ 	TP_fast_assign(
+ 			__entry->pid = current->tgid;
+-			__assign_str(evtlog_tag, tag);
++			__assign_str(evtlog_tag);
+ 			__entry->tag_id = tag_id;
+ 			if (cnt > SDE_TRACE_EVTLOG_SIZE)
+ 				cnt = SDE_TRACE_EVTLOG_SIZE;
+--- a/techpack/display/msm/sde_dbg.c
++++ b/techpack/display/msm/sde_dbg.c
+@@ -13,12 +13,27 @@
+ #include <linux/uaccess.h>
+ #include <linux/dma-buf.h>
+ #include <linux/slab.h>
++#include <linux/vmalloc.h>
+ #include <linux/list_sort.h>
+ #include <linux/pm.h>
+ #include <linux/pm_runtime.h>
+ 
+ #include "sde_dbg.h"
++
++/*
++ * MSM_SDE_MINIDUMP_PORTED: dump-region registration used the donor kernel's
++ * VA-minidump provider (soc/qcom/minidump.h, msm_minidump_add_region()).
++ * The paired 6.18 tree does not have that provider (no
++ * CONFIG_QCOM_VA_MINIDUMP, no such header/symbols), so the entry point is
++ * kept for its callers but reports -EOPNOTSUPP instead of pretending a
++ * region was registered. Callers keep their error-path logging.
++ */
++#define MSM_SDE_MINIDUMP_PORTED 0
++
++#if MSM_SDE_MINIDUMP_PORTED
+ #include <soc/qcom/minidump.h>
++#endif
++
+ #include "sde/sde_hw_catalog.h"
+ 
+ #define SDE_DBG_BASE_MAX		10
+@@ -103,11 +118,12 @@
+ 	dev_info(sde_dbg_base.dev, "======== %s %s dump =========\n", marker, name)
+ 
+ #define SDE_DBG_LOG_ENTRY(off, x0, x4, x8, xc) \
+-	dev_info(sde_dbg_base.dev, "0x%lx : %08x %08x %08x %08x\n", off, x0, x4, x8, xc)
++	dev_info(sde_dbg_base.dev, "0x%lx : %08x %08x %08x %08x\n", \
++			(unsigned long)(off), x0, x4, x8, xc)
+ 
+ #define SDE_DBG_LOG_DUMP_ADDR(name, addr, size, off) \
+-	dev_info(sde_dbg_base.dev, "%s: start_addr:0x%pK len:0x%x offset=0x%lx\n", \
+-			name, addr, size, off)
++	dev_info(sde_dbg_base.dev, "%s: start_addr:0x%pK len:0x%zx offset=0x%lx\n", \
++			name, addr, (size_t)(size), (unsigned long)(off))
+ 
+ #define SDE_DBG_LOG_DEBUGBUS(name, addr, block_id, test_id, val) \
+ 	dev_err(sde_dbg_base.dev, "%s 0x%x %d %d 0x%x\n", \
+@@ -292,8 +308,9 @@
+ /* sde_dbg_base_reglog - global pointer to main sde reg log for macro use */
+ struct sde_dbg_reglog *sde_dbg_base_reglog;
+ 
+-u32 sde_mini_dump_add_region(const char *name, u32 size, void *virt_addr)
+-{
++int sde_mini_dump_add_region(const char *name, u32 size, void *virt_addr)
++{
++#if MSM_SDE_MINIDUMP_PORTED
+ 	struct md_region md_entry;
+ 
+ 	strscpy(md_entry.name, name, sizeof(md_entry.name));
+@@ -302,6 +319,15 @@
+ 	md_entry.size = size;
+ 
+ 	return msm_minidump_add_region(&md_entry);
++#else /* !MSM_SDE_MINIDUMP_PORTED */
++	/*
++	 * No VA-minidump provider in the paired 6.18 kernel: report it to the
++	 * callers instead of a fake success. The return type is int so that the
++	 * existing "< 0" error checks keep working (the donor prototype was
++	 * unsigned, which silently defeated them).
++	 */
++	return -EOPNOTSUPP;
++#endif /* MSM_SDE_MINIDUMP_PORTED */
+ }
+ 
+ static void _sde_debug_bus_xbar_dump(u32 wr_addr, u32 block_id, u32 test_id, u32 val)
+@@ -596,10 +622,10 @@
+ 	return size;
+ }
+ 
+-static int _sde_dump_reg_range_cmp(void *priv, struct list_head *a,
+-		struct list_head *b)
+-{
+-	struct sde_dbg_reg_range *ar, *br;
++static int _sde_dump_reg_range_cmp(void *priv, const struct list_head *a,
++		const struct list_head *b)
++{
++	const struct sde_dbg_reg_range *ar, *br;
+ 
+ 	if (!a || !b)
+ 		return 0;
+@@ -1729,7 +1755,7 @@
+ 	if (cmn->content_idx < cmn->content_size) {
+ 		data = &cmn->dumped_content[cmn->content_idx];
+ 		len = scnprintf(log_buf, max_size,
+-				"0x%.8X | %.8X %.8X %.8X %.8X\n",
++				"0x%.8zX | %.8X %.8X %.8X %.8X\n",
+ 				cmn->content_idx * sizeof(*data),
+ 				data[0], data[1], data[2], data[3]);
+ 
+--- a/techpack/display/msm/sde_dbg.h
++++ b/techpack/display/msm/sde_dbg.h
+@@ -249,7 +249,7 @@
+ #define SDE_DBG_CTRL(...) sde_dbg_ctrl(__func__, ##__VA_ARGS__, \
+ 		SDE_DBG_DUMP_DATA_LIMITER)
+ 
+-u32 sde_mini_dump_add_region(const char *name, u32 size, void *virt_addr);
++int sde_mini_dump_add_region(const char *name, u32 size, void *virt_addr);
+ 
+ /**
+  * sde_evtlog_init - allocate a new event log object
+--- a/techpack/display/msm/sde_dsc_helper.c
++++ b/techpack/display/msm/sde_dsc_helper.c
+@@ -261,7 +261,7 @@
+ 	return -EINVAL;
+ }
+ 
+-u8 _get_dsc_v1_2_bpg_offset(struct drm_dsc_config *dsc)
++static u8 _get_dsc_v1_2_bpg_offset(struct drm_dsc_config *dsc)
+ {
+ 	u8 bpg_offset = 0;
+ 	u8 uncompressed_bpg_rate;
+@@ -301,6 +301,15 @@
+ 	int data;
+ 	int final_value, final_scale;
+ 	int i, ratio_idx;
++	struct msm_display_dsc_info *dsc_info;
++
++	/*
++	 * 6.18's struct drm_dsc_config has no vendor dsc_panel_id member.  The
++	 * id is driver-owned state stored in the enclosing
++	 * struct msm_display_dsc_info; both in-tree callers pass &info->config
++	 * (dsi_panel.c and dp_panel.c), so the enclosing object is recoverable.
++	 */
++	dsc_info = container_of(dsc, struct msm_display_dsc_info, config);
+ 
+ 	dsc->rc_model_size = 8192;
+ 
+@@ -332,22 +341,22 @@
+ 		dsc->rc_buf_thresh[i] = sde_dsc_rc_buf_thresh[i];
+ 
+ 	for (i = 0; i < DSC_NUM_BUF_RANGES; i++) {
+-		if (((dsc->dsc_panel_id >> 8) == 0x4D3230003602)) {
++		if (((dsc_info->dsc_panel_id >> 8) == 0x4D3230003602)) {
+ 			dsc->rc_range_params[i].range_min_qp =
+ 				sde_dsc_rc_range_min_qp_nt37703[ratio_idx][i];
+ 		} else {
+ 			dsc->rc_range_params[i].range_min_qp =
+ 				sde_dsc_rc_range_min_qp[ratio_idx][i];
+ 		}
+-		if (((dsc->dsc_panel_id >> 8) == 0x4B39003602) || ((dsc->dsc_panel_id >> 8) == 0x4B38004202)
+-			|| ((dsc->dsc_panel_id >> 24) == 0x4B335300)||((dsc->dsc_panel_id >> 8) == 0x4B3944003602)
+-			|| ((dsc->dsc_panel_id >> 8) == 0x4B3942004202)||((dsc->dsc_panel_id >> 8) == 0x4C39004202)
+-			|| ((dsc->dsc_panel_id >> 8) == 0x4C39003602)||((dsc->dsc_panel_id >> 8) == 0x4B3945003502)
+-			|| ((dsc->dsc_panel_id >> 8) == 0x4B3945004202)) {
++		if (((dsc_info->dsc_panel_id >> 8) == 0x4B39003602) || ((dsc_info->dsc_panel_id >> 8) == 0x4B38004202)
++			|| ((dsc_info->dsc_panel_id >> 24) == 0x4B335300)||((dsc_info->dsc_panel_id >> 8) == 0x4B3944003602)
++			|| ((dsc_info->dsc_panel_id >> 8) == 0x4B3942004202)||((dsc_info->dsc_panel_id >> 8) == 0x4C39004202)
++			|| ((dsc_info->dsc_panel_id >> 8) == 0x4C39003602)||((dsc_info->dsc_panel_id >> 8) == 0x4B3945003502)
++			|| ((dsc_info->dsc_panel_id >> 8) == 0x4B3945004202)) {
+ 			dsc->rc_range_params[i].range_max_qp =
+ 				sde_dsc_rc_range_max_qp_nt[ratio_idx][i];
+ 
+-		} else if (((dsc->dsc_panel_id >> 8) == 0x4D3230003602)) {
++		} else if (((dsc_info->dsc_panel_id >> 8) == 0x4D3230003602)) {
+ 			dsc->rc_range_params[i].range_max_qp =
+ 				sde_dsc_rc_range_max_qp_nt37703[ratio_idx][i];
+ 		} else {
+@@ -355,7 +364,7 @@
+ 				sde_dsc_rc_range_max_qp[ratio_idx][i];
+ 		}
+ 
+-		if (((dsc->dsc_panel_id >> 8) == 0x4D3230003602)) {
++		if (((dsc_info->dsc_panel_id >> 8) == 0x4D3230003602)) {
+ 			dsc->rc_range_params[i].range_bpg_offset =
+ 				sde_dsc_rc_range_bpg_nt37703[ratio_idx][i];
+ 		} else {
+@@ -637,7 +646,7 @@
+ 	}
+ 
+ 	if (dsc->dsc_version_minor == 0x2) {
+-		if (((dsc->dsc_panel_id >> 8) == 0x4D3230003602)) {
++		if (((dsc_info->dsc_panel_id >> 8) == 0x4D3230003602)) {
+ 			data = 0;
+ 		}
+ 		if (dsc->native_422)
+--- a/techpack/display/msm/sde_vdc_helper.c
++++ b/techpack/display/msm/sde_vdc_helper.c
+@@ -244,8 +244,8 @@
+ 			 vdc_info->tot_pad_bits);
+ 	pr_debug("vdc_info->rc_stuffing_bits = %d\n",
+ 			 vdc_info->rc_stuffing_bits);
+-	pr_debug("vdc_info->slice_num_bits = %d\n",
+-			vdc_info->slice_num_bits);
++	pr_debug("vdc_info->slice_num_bits = %llu\n",
++			(unsigned long long)vdc_info->slice_num_bits);
+ 	pr_debug("vdc_info->chunk_adj_bits = %d\n",
+ 			 vdc_info->chunk_adj_bits);
+ 	pr_debug("vdc_info->rc_buf_init_size_temp = %d\n",
+@@ -280,8 +280,8 @@
+ 			 vdc_info->rc_fullness_offset_thresh);
+ 	pr_debug("vdc_info->ramp_blocks = %d\n",
+ 			 vdc_info->ramp_blocks);
+-	pr_debug("vdc_info->ramp_bits = %d\n",
+-			 vdc_info->ramp_bits);
++	pr_debug("vdc_info->ramp_bits = %llu\n",
++			 (unsigned long long)vdc_info->ramp_bits);
+ 	pr_debug("vdc_info->rc_fullness_offset_slope = %d\n",
+ 			 vdc_info->rc_fullness_offset_slope);
+ 	pr_debug("vdc_info->num_extra_mux_bits_init = %d\n",
+--- /dev/null
++++ b/techpack/display/include/drm/mi_disp_notifier.h
+@@ -0,0 +1,52 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Minimal compatibility header for the downstream (Xiaomi) display notifier.
++ *
++ * PROVENANCE / LIMITS -- READ BEFORE TRUSTING
++ * -------------------------------------------
++ * The 4.19 vendor tree shipped <drm/mi_disp_notifier.h> inside its kernel tree.
++ * Neither the prepared 6.18 kernel tree (/mnt/.../kgsl-sde-fence-20261111-build/
++ * kernel) nor the 315-source donor set nor any tree on this host contains that
++ * header, so this is a MODELLED header, not the real vendor header.
++ *
++ * It declares only what the in-tree call sites actually use:
++ *   - struct mi_disp_notifier { void *data; int disp_id; }
++ *       dsi_drm.c and dsi_display.c fill .data (pointer to an int power mode
++ *       or fps) and .disp_id (mi_get_disp_id()), then pass &notify_data to
++ *       mi_disp_notifier_call_chain().
++ *   - mi_disp_notifier_call_chain() / mi_disp_register_client() /
++ *       mi_disp_unregister_client() prototypes: the implementation lives in
++ *       techpack/display/msm/mi_disp/mi_disp_notifier.c (exports these names).
++ *   - the three event values the DSI code raises.
++ *
++ * The event VALUES are NOT derived from a donor header -- no in-tree consumer
++ * registers for them, so the numeric ABI cannot be validated on this host.
++ * They are ordered as early-DPMS -> DPMS -> fps-change to match the call order
++ * in dsi_drm.c (EARLY_EVENT is raised before EVENT). Treat them as
++ * unvalidated vendor ABI: if a userspace/other-module consumer of the Xiaomi
++ * notifier is ever added, re-audit these numbers against the real vendor
++ * header first.
++ */
++#ifndef _DRM_MI_DISP_NOTIFIER_H_
++#define _DRM_MI_DISP_NOTIFIER_H_
++
++#include <linux/notifier.h>
++#include <linux/types.h>
++
++struct mi_disp_notifier {
++	void *data;
++	int disp_id;
++};
++
++/* MODELLED values -- see provenance note above. */
++enum mi_disp_notifier_event {
++	MI_DISP_DPMS_EARLY_EVENT = 0,
++	MI_DISP_DPMS_EVENT = 1,
++	MI_DISP_FPS_CHANGE_EVENT = 2,
++};
++
++int mi_disp_register_client(struct notifier_block *nb);
++int mi_disp_unregister_client(struct notifier_block *nb);
++int mi_disp_notifier_call_chain(unsigned long val, void *v);
++
++#endif /* _DRM_MI_DISP_NOTIFIER_H_ */
+--- /dev/null
++++ b/techpack/display/include/dt-bindings/clock/mdss-10nm-pll-clk.h
+@@ -0,0 +1,71 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Minimal compatibility header for the downstream 10nm DSI PLL clock IDs.
++ *
++ * PROVENANCE / LIMITS -- READ BEFORE TRUSTING
++ * -------------------------------------------
++ * MODELLED header: the real vendor mdss-10nm-pll-clk.h is not present in the
++ * prepared 6.18 kernel tree, the 315-source donor set, or anywhere on this
++ * host (searched whole repo + workspace). It is reconstructed from the only
++ * in-tree consumer, dsi_pll_10nm.c:
++ *   - dsi_pllcc_10nm[] is a designated-initializer array indexed by every name
++ *     below;
++ *   - the two registration loops use the order VCO_CLK_0 ..
++ *     SHADOW_PCLK_SRC_0_CLK and VCO_CLK_1 .. SHADOW_PCLK_SRC_1_CLK;
++ *   - num_clks = ARRAY_SIZE(dsi_pllcc_10nm), so the enum must be contiguous
++ *     with exactly 18 entries per PLL block (36 total) for the array size and
++ *     the of_clk onecell provider indices to stay consistent.
++ * The names are therefore ordered exactly as the designated initializers
++ * appear; numeric values are the resulting contiguous indices.
++ *
++ * These numeric IDs are exposed to DT via of_clk_add_provider()/
++ * of_clk_src_onecell_get(), i.e. they are an unvalidated vendor DT ABI: the
++ * internal array/loop consistency is provable, but that the IDs match the
++ * vendor DTS clock-index encoding is NOT validated on this host.
++ */
++#ifndef _DT_BINDINGS_CLK_MDSS_10NM_PLL_CLK_H
++#define _DT_BINDINGS_CLK_MDSS_10NM_PLL_CLK_H
++
++enum mdss_dsi_pll_10nm_clk_type {
++	/* PLL 0 block */
++	VCO_CLK_0 = 0,
++	PLL_OUT_DIV_0_CLK,
++	BITCLK_SRC_0_CLK,
++	BYTECLK_SRC_0_CLK,
++	POST_BIT_DIV_0_CLK,
++	POST_VCO_DIV_0_CLK,
++	BYTECLK_MUX_0_CLK,
++	PCLK_SRC_MUX_0_CLK,
++	PCLK_SRC_0_CLK,
++	PCLK_MUX_0_CLK,
++	SHADOW_VCO_CLK_0,
++	SHADOW_PLL_OUT_DIV_0_CLK,
++	SHADOW_BITCLK_SRC_0_CLK,
++	SHADOW_BYTECLK_SRC_0_CLK,
++	SHADOW_POST_BIT_DIV_0_CLK,
++	SHADOW_POST_VCO_DIV_0_CLK,
++	SHADOW_PCLK_SRC_MUX_0_CLK,
++	SHADOW_PCLK_SRC_0_CLK,
++
++	/* PLL 1 block */
++	VCO_CLK_1,
++	PLL_OUT_DIV_1_CLK,
++	BITCLK_SRC_1_CLK,
++	BYTECLK_SRC_1_CLK,
++	POST_BIT_DIV_1_CLK,
++	POST_VCO_DIV_1_CLK,
++	BYTECLK_MUX_1_CLK,
++	PCLK_SRC_MUX_1_CLK,
++	PCLK_SRC_1_CLK,
++	PCLK_MUX_1_CLK,
++	SHADOW_VCO_CLK_1,
++	SHADOW_PLL_OUT_DIV_1_CLK,
++	SHADOW_BITCLK_SRC_1_CLK,
++	SHADOW_BYTECLK_SRC_1_CLK,
++	SHADOW_POST_BIT_DIV_1_CLK,
++	SHADOW_POST_VCO_DIV_1_CLK,
++	SHADOW_PCLK_SRC_MUX_1_CLK,
++	SHADOW_PCLK_SRC_1_CLK,
++};
++
++#endif /* _DT_BINDINGS_CLK_MDSS_10NM_PLL_CLK_H */
+--- /dev/null
++++ b/techpack/display/include/dt-bindings/clock/mdss-5nm-pll-clk.h
+@@ -0,0 +1,87 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Minimal compatibility header for the downsteam 5nm DSI PLL clock IDs.
++ *
++ * PROVENANCE / LIMITS -- READ BEFORE TRUSTING
++ * -------------------------------------------
++ * MODELLED header: the real vendor mdss-5nm-pll-clk.h is not present in the
++ * prepared 6.18 kernel tree, the 315-source donor set, or anywhere on this
++ * host (searched whole repo + workspace). It is reconstructed from the only
++ * in-tree consumer, dsi_pll_5nm.c:
++ *   - dsi_pllcc_5nm[] is a designated-initializer array indexed by every name
++ *     below;
++ *   - the two registration loops use the order VCO_CLK_0 ..
++ *     SHADOW_CPHY_PCLK_SRC_0_CLK and VCO_CLK_1 .. CPHY_PCLK_SRC_1_CLK;
++ *   - num_clks = ARRAY_SIZE(dsi_pllcc_5nm), so the enum must be contiguous
++ *     with exactly 26 entries per PLL block (52 total) for the array size and
++ *     the of_clk onecell provider indices to stay consistent.
++ * The names are therefore ordered exactly as the designated initializers
++ * appear; numeric values are the resulting contiguous indices.
++ *
++ * These numeric IDs are exposed to DT via of_clk_add_provider()/
++ * of_clk_src_onecell_get(), i.e. they are an unvalidated vendor DT ABI: the
++ * internal array/loop consistency is provable, but that the IDs match the
++ * vendor DTS clock-index encoding is NOT validated on this host.
++ */
++#ifndef _DT_BINDINGS_CLK_MDSS_5NM_PLL_CLK_H
++#define _DT_BINDINGS_CLK_MDSS_5NM_PLL_CLK_H
++
++enum mdss_dsi_pll_5nm_clk_type {
++	/* PLL 0 block */
++	VCO_CLK_0 = 0,
++	PLL_OUT_DIV_0_CLK,
++	BITCLK_SRC_0_CLK,
++	BYTECLK_SRC_0_CLK,
++	CPHY_BYTECLK_SRC_0_CLK,
++	POST_BIT_DIV_0_CLK,
++	POST_VCO_DIV_0_CLK,
++	POST_VCO_DIV3_5_0_CLK,
++	BYTECLK_MUX_0_CLK,
++	PCLK_SRC_MUX_0_CLK,
++	PCLK_SRC_0_CLK,
++	PCLK_MUX_0_CLK,
++	CPHY_PCLK_SRC_MUX_0_CLK,
++	CPHY_PCLK_SRC_0_CLK,
++	SHADOW_VCO_CLK_0,
++	SHADOW_PLL_OUT_DIV_0_CLK,
++	SHADOW_BITCLK_SRC_0_CLK,
++	SHADOW_BYTECLK_SRC_0_CLK,
++	SHADOW_CPHY_BYTECLK_SRC_0_CLK,
++	SHADOW_POST_BIT_DIV_0_CLK,
++	SHADOW_POST_VCO_DIV_0_CLK,
++	SHADOW_POST_VCO_DIV3_5_0_CLK,
++	SHADOW_PCLK_SRC_MUX_0_CLK,
++	SHADOW_PCLK_SRC_0_CLK,
++	SHADOW_CPHY_PCLK_SRC_MUX_0_CLK,
++	SHADOW_CPHY_PCLK_SRC_0_CLK,
++
++	/* PLL 1 block */
++	VCO_CLK_1,
++	PLL_OUT_DIV_1_CLK,
++	BITCLK_SRC_1_CLK,
++	BYTECLK_SRC_1_CLK,
++	CPHY_BYTECLK_SRC_1_CLK,
++	POST_BIT_DIV_1_CLK,
++	POST_VCO_DIV_1_CLK,
++	POST_VCO_DIV3_5_1_CLK,
++	BYTECLK_MUX_1_CLK,
++	PCLK_SRC_MUX_1_CLK,
++	PCLK_SRC_1_CLK,
++	PCLK_MUX_1_CLK,
++	CPHY_PCLK_SRC_MUX_1_CLK,
++	CPHY_PCLK_SRC_1_CLK,
++	SHADOW_VCO_CLK_1,
++	SHADOW_PLL_OUT_DIV_1_CLK,
++	SHADOW_BITCLK_SRC_1_CLK,
++	SHADOW_BYTECLK_SRC_1_CLK,
++	SHADOW_CPHY_BYTECLK_SRC_1_CLK,
++	SHADOW_POST_BIT_DIV_1_CLK,
++	SHADOW_POST_VCO_DIV_1_CLK,
++	SHADOW_POST_VCO_DIV3_5_1_CLK,
++	SHADOW_PCLK_SRC_MUX_1_CLK,
++	SHADOW_PCLK_SRC_1_CLK,
++	SHADOW_CPHY_PCLK_SRC_MUX_1_CLK,
++	SHADOW_CPHY_PCLK_SRC_1_CLK,
++};
++
++#endif /* _DT_BINDINGS_CLK_MDSS_5NM_PLL_CLK_H */

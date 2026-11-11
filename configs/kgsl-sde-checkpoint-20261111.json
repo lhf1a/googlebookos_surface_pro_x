@@ -1,5 +1,5 @@
 {
-  "status": "resumed-round1",
+  "status": "resumed-round2",
   "date": "2026-11-11",
   "branch": "codex/kgsl-sde-port-v83",
   "parent_commit": "690acd69ea98402aec01f3251d670b28516f0010",
@@ -7,38 +7,38 @@
   "hardware_validated": false,
   "deployment_ready": false,
   "kgsl_patch_count": 58,
-  "sde_patch_count": 18,
-  "sde_source_count": 318,
+  "sde_patch_count": 20,
+  "sde_source_count": 332,
   "sde_checker_groups": 16,
   "sde_checker_groups_exit0": true,
   "sde_full_build": {
     "BASELINE": {
       "exit": 2,
-      "objects": 25,
+      "objects": 78,
       "modules": 0
     },
     "MODIFIED": {
-      "exit": 2,
-      "objects": 54,
-      "modules": 0
+      "exit": 0,
+      "objects": 114,
+      "modules": 1
     },
     "ROLLBACK": {
       "exit": 2,
-      "objects": 25,
+      "objects": 78,
       "modules": 0
     },
     "error_lines": {
-      "BASELINE": 978,
-      "MODIFIED": 254,
-      "ROLLBACK": 978
+      "BASELINE": null,
+      "MODIFIED": 0,
+      "ROLLBACK": null
     },
-    "target_diagnostics_cleared": {
-      "private_flags": "364 -> 0",
-      "DRM_MODE_FLAG_SEAMLESS": "120 -> 0",
-      "drm_irq_install": "1 -> 0",
-      "DRM_UNLOCKED": "1 -> 0",
-      "dp_mst_drm.c": "113 -> 13",
-      "msm_drv.c": "42 -> 1"
+    "warning_lines_MODIFIED_Werror": 0,
+    "module": {
+      "path": "techpack/display/msm/msm_drm.ko",
+      "sha256": "cb34d88e78e2d1240a031936327a250199f3cb6c9e9ba38d4375ee966b94dcf9",
+      "bytes": 4161544,
+      "vermagic": "6.18.60-sq2-kgsl-sde-mst-dev1 SMP mod_unload aarch64",
+      "depends": "llcc-qcom"
     }
   },
   "exact_rollback_and_reapply_files": 320,
@@ -76,22 +76,22 @@
   },
   "latest_roles": {
     "MODIFIED_FILE.tar.gz": {
-      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-18/MODIFIED_FILE.tar.gz",
-      "sha256": "5cbb54e4f0b92fac08cc151c822646bf9bbc3cb4aad416f5c0d6cfbcd9fe8063",
-      "bytes": 1235584
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-20/MODIFIED_FILE.tar.gz",
+      "sha256": "8fbff6befe7084e12aeee61eb00989100138e13775c631ec0b03511f8ea0bdac",
+      "bytes": 1262300
     },
     "DIFF_FILE.patch": {
-      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-18/DIFF_FILE.patch",
-      "sha256": "f6e200c354fa95be9131169190c53fce862b8087b8534c141faa54c64c6662cf",
-      "bytes": 203439
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-20/DIFF_FILE.patch",
+      "sha256": "c52a3229f01038f60b3addf688c4f9663b277d4a55cf9958e040a7095c7d82a1",
+      "bytes": 107793
     },
     "VERIFICATION.txt": {
-      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-18/VERIFICATION.txt",
-      "sha256": "db063a5d7d5d0e34abdf6280ccc65d9cbce54ca4f3bde0924d6800ac5b31f4de",
-      "bytes": 76370
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-20/VERIFICATION.txt",
+      "sha256": "aa4b1b0743203feb9a838b7adca2464316c0b2cc85c575d907d428b7e12f4cad",
+      "bytes": 80549
     },
     "ROLLBACK.sh": {
-      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-18/ROLLBACK.sh",
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-20/ROLLBACK.sh",
       "sha256": "c1b7f5638fb1ffaf720aee8dddf3f158b92f625e6e051e2d41d10fee2473a845",
       "bytes": 507
     }
@@ -101,10 +101,10 @@
   "unfinished_groups": 7,
   "unfinished_changed_files": 52,
   "remaining": [
-    "Build matched patched 6.18 kernel (MST core API) with fresh KOUT; re-run full B/M/R and the blocked dp_mst_drm TU",
-    "Migrate remaining pre-existing 6.18 API drift (dsi_panel/sde_crtc/sde_dsc_helper/sde_connector/sde_plane/encoder bridge/iommu_present) toward full module + MODPOST",
-    "Complete mode catalog/bridge/CRTC/encoder consumers and paired userspace HWC path; joint runtime still unverified",
-    "Late GEM/file/private-owner retirement beyond host tests and KGSL+SDE joint runtime display/submit/DDR/PM/performance/SQ1-SQ2 acceptance"
+    "module not deployed/loaded/booted; no device bring-up, display, submit, fence retirement, PM or performance evidence",
+    "disabled features: HDCP, fbdev, secure-VM, panel notifier, minidump, USB-C altmode/FSA4480/DWC3/SPMI/ext-display shims, splash memory retained until reboot",
+    "module requires the matched kernel (kernel-mst1); never mix with dev2 kernels/modules",
+    "next: device bring-up with the matched kernel + module, internal eDP/DSI display, then real hardware validation"
   ],
   "resume_requires_explicit_user_request": false,
   "excluded_from_commit": [
@@ -112,5 +112,46 @@
     "Compiled modules/ELFs/kernel Image/archive payloads",
     "out/ evidence trees (ignored local)",
     "Six pre-existing rescue-console untracked files"
-  ]
+  ],
+  "resume_round2": {
+    "matched_kernel": {
+      "source": "/mnt/spx-workspace/chromebookOS/work/qualcomm-618/kgsl-sde-fence-20261111-build/kernel-mst1",
+      "kout": "/mnt/spx-workspace/chromebookOS/work/qualcomm-618/kgsl-sde-fence-20261111-build/kernel-out-mst1",
+      "release": "6.18.60-sq2-kgsl-sde-mst-dev1",
+      "core_patch": "patches/drm-618-mst-persistent-connector-lifecycle.patch",
+      "core_patch_sha256": "f91c2e87a9dba1bfe494f9d170f67adf28aba7d6d6abb360c5f690b54d32bb39",
+      "image_sha256": "e0afdadd064c81c8c17b82b7a53f142581fe1b65bae4c32348a4b01ea4f3afc3",
+      "symvers_sha256": "e6fc06cf9d038041cbb6ddc8308bda5b441c41d963ae5be819bc7f167e0410df",
+      "modules_built": 486,
+      "build_exit": 0,
+      "error_lines": 0,
+      "warning_lines": 37
+    },
+    "agents": [
+      "dsi-dsc (task-7): DSI + DSC 6.18 migration, 25 TUs 81->0",
+      "sde-graphics (task-8): CRTC/connector/plane/KMS/dbg, 6 TUs 47->0",
+      "sde-hw-encoder-dp (task-9): hw/encoder/DP, 32 TUs 101->1 then Lead closed the last"
+    ],
+    "lead_fixes": [
+      "unified vendor QCOM format modifiers on donor values in include/drm/sde_drm_fourcc.h",
+      "unified 5nm PLL clock ID header (DSI enum + DP IDs)",
+      "sde_hw_catalog DDR type via sde_get_ddrtype()",
+      "HDCP-qseecom SDE/DP code compiled out (CONFIG_HDCP_QSEECOM absent; DP stays alive, HDCP unavailable)",
+      "fbdev emulation not built (4.19 fb_helper API absent)",
+      "explicit -EOPNOTSUPP shims for altmode/fsa4480/dwc3/spmi/ext-display",
+      "MODULE_IMPORT_NS(DMA_BUF), sched_setattr_nocheck FIFO helper",
+      "splash buffer release documented as reserved-until-reboot (memblock not module-safe)"
+    ],
+    "evidence": "out/kgsl-resume-20261111/sde-integration-19 (stage A) and sde-integration-20 (stage B)",
+    "candidate_evidence": "out/kgsl-resume-2/round2/{dsi-dsc,sde-graphics,sde-hw-encoder-dp}/",
+    "module_build_evidence": "out/kgsl-resume-2/round2/merged-build/",
+    "new_patch": "patches/sde-xiaomi-618-resume-round2b.patch",
+    "new_patch_sha256": "079e01394870dda462167155dbef5378f23d6185513a9a5658c5c9ef17a0c6f6",
+    "remaining": [
+      "module not deployed/loaded/booted; no device bring-up, display, submit, fence retirement, PM or performance evidence",
+      "disabled features: HDCP, fbdev, secure-VM, panel notifier, minidump, USB-C altmode/FSA4480/DWC3/SPMI/ext-display shims, splash memory retained until reboot",
+      "module requires the matched kernel (kernel-mst1); never mix with dev2 kernels/modules",
+      "next: device bring-up with the matched kernel + module, internal eDP/DSI display, then real hardware validation"
+    ]
+  }
 }
