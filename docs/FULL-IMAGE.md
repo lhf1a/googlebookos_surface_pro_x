@@ -1,5 +1,9 @@
 # 原模板整包构建（2026-11-10）
 
+> 2026-11-12：`full-image` 新增 `--graphics mesa` 全 Mesa 通用镜像选项与 `--kernel-patches`；
+> 构建命令、产物哈希与未验证边界见 [FULL-MESA-IMAGE](FULL-MESA-IMAGE-20261112.md)。
+> 默认 `baseline` 行为不变，已验收发布包与设备回退未被修改。
+
 ## 临时启动期 SSH 调试入口（不改变正常构建默认）
 
 取消哈希门槛的包已写盘，后续照片进入 Android 服务反复退出阶段：GMU GPU_SET 超时、

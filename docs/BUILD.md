@@ -1,3 +1,12 @@
+## 2026-11-12：统一入口新增全 Mesa 通用镜像选项
+
+`scripts/build.py full-image --graphics mesa [--kernel-patches DIR]` 构建全 Mesa 链路
+（Mesa freedreno EGL/GLES/Turnip、minigbm、drm HWC3 client 合成）的通用整盘镜像；默认
+`--graphics baseline` 保持已验收混合图形栈。`mesa` 模式默认应用
+`patches/drm-618-a6xx-upstream` 的 11 个 A6xx 修复，并把启动 token 等长改为
+`sq2.vulkan=mesa`。本轮实际产物、哈希、独立校验与“未接设备/未验证渲染”的边界见
+[FULL-MESA-IMAGE](FULL-MESA-IMAGE-20261112.md)。构建为 host-only，不写设备、不改发布 pins。
+
 ## 2026-11-10：原模板 v6 完整源码镜像已输出
 
 `D:/spx_img/template-source-618-20261110-v6` 为本轮完成的整包，HEAD8f5d964及当前工作区

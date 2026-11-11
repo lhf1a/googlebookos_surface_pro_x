@@ -25,7 +25,8 @@ DEFAULT_A6XX_PATCHES = ROOT / 'patches/drm-618-a6xx-upstream'
 # Full Mesa chain: keep the Mesa/minigbm/drm-HWC vendor overlay, remove the
 # closed Qualcomm graphics payloads and their pre-Android stage helpers.
 CLOSED_GRAPHICS_DIRS = ('etc/sq2-qti-system', 'etc/sq2-graphics-full', 'etc/sq2-vulkan-closed')
-CLOSED_GRAPHICS_HELPERS = ('bin/qti-system-display-stage', 'bin/qualcomm-full-start')
+CLOSED_GRAPHICS_HELPERS = ('bin/qti-system-display-stage', 'bin/qualcomm-full-start',
+                           'bin/closed-vulkan-start')
 MESA_REQUIRED_PROPS = ('ro.hardware.egl=freedreno', 'ro.hardware.vulkan=freedreno',
                        'ro.vendor.hwcomposer.mode=client')
 MESA_STAGE_LINES = (
@@ -311,6 +312,15 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline'):
 
 
 def build(args, compile_kernel):
+    # A prebuilt Image cannot carry new patches; never silently ignore them.
+    if args.kernel_mode == 'prebuilt' and args.kernel_patches:
+        raise ValueError('--kernel-patches requires --kernel-mode source')
+    # Make every derived path absolute: make interprets CROSS_COMPILE and
+    # O= relative to the kernel source directory, so a relative output path
+    # would silently break the toolchain prefix.
+    args.output = args.output.resolve()
+    if args.build_dir is not None:
+        args.build_dir = args.build_dir.resolve()
     private=args.private_root.resolve()
     source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     template=regular(args.template or private/'template.img')
@@ -406,6 +416,8 @@ def build(args, compile_kernel):
         graphics=args.graphics,graphics_boot_option=graphics_token,
         graphics_report=graphics_report,
         kernel_patches=patch_report['patch_count'] if patch_report else 0,
+        kernel_patches_note=('prebuilt accepted Image: no patches applied' if args.kernel_mode=='prebuilt'
+                             else None),
         hardware_validated=False)
     (args.output/'FULL-IMAGE.json').write_text(json.dumps(report,indent=2)+'\n')
     return report

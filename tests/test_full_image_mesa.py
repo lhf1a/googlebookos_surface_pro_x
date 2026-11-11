@@ -66,7 +66,7 @@ class MesaRuntimeFixture(unittest.TestCase):
         records, bodies = fixture_runtime()
         report = fi.mesa_runtime(records, bodies)
         self.assertEqual(report['graphics'], 'mesa')
-        self.assertEqual(report['removed_count'], 6 + 2)
+        self.assertEqual(report['removed_count'], 6 + len(fi.CLOSED_GRAPHICS_HELPERS))
         self.assertFalse(report['hardware_validated'])
         for directory in fi.CLOSED_GRAPHICS_DIRS:
             self.assertNotIn(directory, bodies)
@@ -214,6 +214,14 @@ class RealBundleMesaSelection(unittest.TestCase):
             self.assertEqual(commands, [(bundle / 'kernel-options.txt').read_text().strip()])
             token = tool.graphics_option(commands[0])
             self.assertEqual(token, 'sq2.vulkan=mesa')
+
+
+class PrebuiltKernelWithPatches(unittest.TestCase):
+    def test_patches_with_prebuilt_kernel_are_rejected_loudly(self):
+        args = __import__('argparse').Namespace(
+            kernel_mode='prebuilt', kernel_patches=ROOT / 'patches/drm-618-a6xx-upstream')
+        with self.assertRaisesRegex(ValueError, 'requires --kernel-mode source'):
+            fi.build(args, None)
 
 
 class FullImageCli(unittest.TestCase):

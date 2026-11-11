@@ -2,6 +2,10 @@
 
 更新：2026-11-07。当前版本 **6.18.60-sq2-android1**。6.3.8专用编译链已退休；历史记录不是可执行入口。
 
+2026-11-12：统一入口 `scripts/build.py full-image` 新增 `--graphics mesa` 全 Mesa 通用镜像
+选项与 `--kernel-patches`；默认 baseline 不变，实际构建与边界见
+[FULL-MESA-IMAGE](FULL-MESA-IMAGE-20261112.md)。
+
 ## 保持当前验收内容
 
 以 `configs/kernel-baseline.json` 的文件清单为准，不重新混装旧模块。当前原件：
