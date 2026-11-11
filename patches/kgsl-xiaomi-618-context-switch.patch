@@ -1,0 +1,136 @@
+--- a/drivers/gpu/msm/adreno_drawctxt.c
++++ b/drivers/gpu/msm/adreno_drawctxt.c
+@@ -538,13 +538,30 @@
+ 	kfree(drawctxt);
+ }
+ 
++struct adreno_context_switch {
++	struct list_head node;
++	struct adreno_context *drawctxt;
++	unsigned int timestamp;
++	int result;
++};
++
+ static void _drawctxt_switch_wait_callback(struct kgsl_device *device,
+-		struct kgsl_event_group *group,
+-		void *priv, int result)
+-{
+-	struct adreno_context *drawctxt = (struct adreno_context *) priv;
+-
+-	kgsl_context_put(&drawctxt->base);
++		struct kgsl_event_group *group, void *priv, int result)
++{
++	struct adreno_context_switch *switch_ref = priv;
++
++	spin_lock(&group->lock);
++	switch_ref->result = result;
++	if (result == KGSL_EVENT_RETIRED)
++		list_del(&switch_ref->node);
++	spin_unlock(&group->lock);
++
++	/* shortcut: cancelled owners need a checked GPU retirement path. */
++	if (result != KGSL_EVENT_RETIRED)
++		return;
++
++	kgsl_context_put(&switch_ref->drawctxt->base);
++	kfree(switch_ref);
+ }
+ 
+ /**
+@@ -562,11 +579,15 @@
+ {
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct kgsl_pagetable *new_pt;
++	struct adreno_context_switch *switch_ref = NULL;
+ 	int ret = 0;
+ 
+ 	/* We always expect a valid rb */
+ 	if (!rb)
+ 		return -EINVAL;
++
++	if (READ_ONCE(device->pwrctrl.transition_error))
++		return READ_ONCE(device->pwrctrl.transition_error);
+ 
+ 	/* already current? */
+ 	if (rb->drawctxt_active == drawctxt)
+@@ -592,23 +613,46 @@
+ 		new_pt = device->mmu.defaultpagetable;
+ 	}
+ 
++	/* Reserve ownership storage before publishing a switch to the GPU. */
++	if (rb->drawctxt_active) {
++		switch_ref = kzalloc(sizeof(*switch_ref), GFP_KERNEL);
++		if (!switch_ref) {
++			ret = -ENOMEM;
++			goto err;
++		}
++		switch_ref->drawctxt = rb->drawctxt_active;
++		switch_ref->result = -EINPROGRESS;
++	}
++
+ 	ret = adreno_iommu_set_pt_ctx(rb, new_pt, drawctxt);
+ 	if (ret)
+ 		goto err;
+ 
+-	if (rb->drawctxt_active) {
+-		/* Wait for the timestamp to expire */
+-		if (kgsl_add_event(device, &rb->events, rb->timestamp,
+-			_drawctxt_switch_wait_callback,
+-			rb->drawctxt_active)) {
+-			kgsl_context_put(&rb->drawctxt_active->base);
++	/* The submitted switch now owns the new active-context reference. */
++	rb->drawctxt_active = drawctxt;
++	trace_adreno_drawctxt_switch(rb, drawctxt);
++
++	if (switch_ref) {
++		switch_ref->timestamp = rb->timestamp;
++		spin_lock(&rb->events.lock);
++		list_add_tail(&switch_ref->node, &rb->context_switches);
++		spin_unlock(&rb->events.lock);
++
++		ret = kgsl_add_event(device, &rb->events, rb->timestamp,
++			_drawctxt_switch_wait_callback, switch_ref);
++		if (ret) {
++			/* Neither old nor new ownership may unwind after submit. */
++			spin_lock(&rb->events.lock);
++			switch_ref->result = ret;
++			spin_unlock(&rb->events.lock);
++			if (!READ_ONCE(device->pwrctrl.transition_error))
++				WRITE_ONCE(device->pwrctrl.transition_error, ret);
++			return ret;
+ 		}
+ 	}
+-	trace_adreno_drawctxt_switch(rb, drawctxt);
+-
+-	rb->drawctxt_active = drawctxt;
+ 	return 0;
+ err:
++	kfree(switch_ref);
+ 	if (drawctxt)
+ 		kgsl_context_put(&drawctxt->base);
+ 	return ret;
+--- a/drivers/gpu/msm/adreno_ringbuffer.c
++++ b/drivers/gpu/msm/adreno_ringbuffer.c
+@@ -237,6 +237,11 @@
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct adreno_ringbuffer *rb = &adreno_dev->ringbuffers[id];
+ 	unsigned int priv = 0;
++
++	/* Reinitialization must not orphan pending or cancelled switch owners. */
++	if (rb->context_switches.next && !list_empty(&rb->context_switches))
++		return -EBUSY;
++	INIT_LIST_HEAD(&rb->context_switches);
+ 
+ 	/*
+ 	 * Allocate mem for storing RB pagetables and commands to
+--- a/drivers/gpu/msm/adreno_ringbuffer.h
++++ b/drivers/gpu/msm/adreno_ringbuffer.h
+@@ -112,6 +112,8 @@
+ 	unsigned int timestamp;
+ 	struct kgsl_event_group events;
+ 	struct adreno_context *drawctxt_active;
++	/* Pending and cancelled switch owners, protected by events.lock. */
++	struct list_head context_switches;
+ 	struct kgsl_memdesc *preemption_desc;
+ 	struct kgsl_memdesc *secure_preemption_desc;
+ 	struct kgsl_memdesc *perfcounter_save_restore_desc;

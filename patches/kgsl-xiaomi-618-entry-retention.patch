@@ -1,0 +1,283 @@
+--- a/drivers/gpu/msm/kgsl.c
++++ b/drivers/gpu/msm/kgsl.c
+@@ -21,6 +21,8 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/security.h>
+ #include <linux/sort.h>
++#include <linux/module.h>
++#include <linux/seq_file.h>
+ 
+ #include "kgsl_compat.h"
+ #include "kgsl_debugfs.h"
+@@ -78,7 +80,8 @@
+ 	return pt;
+ }
+ 
+-static void kgsl_mem_entry_detach_process(struct kgsl_mem_entry *entry);
++static int kgsl_mem_entry_detach_process(struct kgsl_mem_entry *entry);
++static int kgsl_mem_entry_unmap(struct kgsl_mem_entry *entry);
+ 
+ static const struct file_operations kgsl_fops;
+ 
+@@ -390,6 +393,56 @@
+ 	memdesc->sgt = NULL;
+ }
+ 
++/* Do not replay failed unmaps: a backend may have removed only a prefix. */
++static LIST_HEAD(kgsl_retained_entries);
++static DEFINE_MUTEX(kgsl_retained_lock);
++
++static void kgsl_mem_entry_retain(struct kgsl_mem_entry *entry, int error)
++{
++	mutex_lock(&kgsl_retained_lock);
++	if (!entry->release_error) {
++		entry->release_error = error;
++		entry->retained_pt = entry->memdesc.pagetable;
++		if (entry->retained_pt)
++			kref_get(&entry->retained_pt->refcount);
++		__module_get(THIS_MODULE);
++		list_add_tail(&entry->retained_node, &kgsl_retained_entries);
++		pr_err("KGSL: retaining failed release gpuaddr=%llx size=%llu error=%d\n",
++			entry->memdesc.gpuaddr, entry->memdesc.size, error);
++	}
++	mutex_unlock(&kgsl_retained_lock);
++}
++
++int kgsl_retained_mem_show(struct seq_file *s, void *unused)
++{
++	struct kgsl_mem_entry *entry;
++
++	seq_puts(s, "pagetable gpuaddr size error\n");
++	mutex_lock(&kgsl_retained_lock);
++	list_for_each_entry(entry, &kgsl_retained_entries, retained_node)
++		seq_printf(s, "%u %llx %llu %d\n",
++			entry->retained_pt ? entry->retained_pt->name : 0,
++			entry->memdesc.gpuaddr, entry->memdesc.size,
++			entry->release_error);
++	mutex_unlock(&kgsl_retained_lock);
++	return 0;
++}
++
++/* Allocation errors have not yet charged the process accounting. */
++static void kgsl_mem_entry_free_unattached(struct kgsl_mem_entry *entry)
++{
++	int ret;
++
++	if (entry->release_error)
++		return;
++	ret = kgsl_sharedmem_free(&entry->memdesc);
++	if (ret) {
++		kgsl_mem_entry_retain(entry, ret);
++		return;
++	}
++	kfree(entry);
++}
++
+ static void kgsl_process_sub_stats(struct kgsl_process_private *priv,
+ 	unsigned int type, uint64_t size)
+ {
+@@ -411,31 +464,29 @@
+ 	atomic64_sub(size, &priv->stats[type].cur);
+ }
+ 
+-void
+-kgsl_mem_entry_destroy(struct kref *kref)
++void kgsl_mem_entry_destroy(struct kref *kref)
+ {
+ 	struct kgsl_mem_entry *entry = container_of(kref,
+-						    struct kgsl_mem_entry,
+-						    refcount);
+-	unsigned int memtype;
+-
+-	if (entry == NULL)
++		struct kgsl_mem_entry, refcount);
++	unsigned int memtype = kgsl_memdesc_usermem_type(&entry->memdesc);
++	u64 size = entry->memdesc.size;
++	int ret;
++
++	if (entry->release_error)
+ 		return;
+-
+-	/* pull out the memtype before the flags get cleared */
+-	memtype = kgsl_memdesc_usermem_type(&entry->memdesc);
+-
+-	kgsl_process_sub_stats(entry->priv, memtype, entry->memdesc.size);
+-
+-	/* Detach from process list */
+-	kgsl_mem_entry_detach_process(entry);
+-
++	ret = kgsl_mem_entry_unmap(entry);
++	if (!ret)
++		ret = kgsl_sharedmem_free(&entry->memdesc);
++	if (ret) {
++		kgsl_mem_entry_retain(entry, ret);
++		return;
++	}
++
++	kgsl_process_sub_stats(entry->priv, memtype, size);
+ 	if (memtype != KGSL_MEM_ENTRY_KERNEL)
+-		atomic_long_sub(entry->memdesc.size,
+-			&kgsl_driver.stats.mapped);
+-
+-	kgsl_sharedmem_free(&entry->memdesc);
+-
++		atomic_long_sub(size, &kgsl_driver.stats.mapped);
++	kgsl_process_private_put(entry->priv);
++	entry->priv = NULL;
+ 	kfree(entry);
+ }
+ 
+@@ -492,6 +543,7 @@
+ 		return ret;
+ 	}
+ 
++	entry->priv = process;
+ 	idr_preload(GFP_KERNEL);
+ 	spin_lock(&process->mem_lock);
+ 	/* Allocate the ID but don't attach the pointer just yet */
+@@ -500,9 +552,7 @@
+ 	idr_preload_end();
+ 
+ 	if (id < 0) {
+-		if (!kgsl_memdesc_use_cpu_map(&entry->memdesc))
+-			kgsl_mmu_put_gpuaddr(&entry->memdesc);
+-		kgsl_process_private_put(process);
++		kgsl_mem_entry_detach_process(entry);
+ 		return id;
+ 	}
+ 
+@@ -528,27 +578,32 @@
+ }
+ 
+ /* Detach a memory entry from a process and unmap it from the MMU */
+-static void kgsl_mem_entry_detach_process(struct kgsl_mem_entry *entry)
+-{
+-	if (entry == NULL)
+-		return;
+-
+-	/*
+-	 * First remove the entry from mem_idr list
+-	 * so that no one can operate on obsolete values
+-	 */
+-	spin_lock(&entry->priv->mem_lock);
+-	if (entry->id != 0)
+-		idr_remove(&entry->priv->mem_idr, entry->id);
+-	entry->id = 0;
+-
+-	spin_unlock(&entry->priv->mem_lock);
+-
+-	kgsl_mmu_put_gpuaddr(&entry->memdesc);
+-
++static int kgsl_mem_entry_unmap(struct kgsl_mem_entry *entry)
++{
++	if (entry->release_error)
++		return entry->release_error;
++
++	if (entry->priv) {
++		spin_lock(&entry->priv->mem_lock);
++		if (entry->id)
++			idr_remove(&entry->priv->mem_idr, entry->id);
++		entry->id = 0;
++		spin_unlock(&entry->priv->mem_lock);
++	}
++	return kgsl_mmu_put_gpuaddr(&entry->memdesc);
++}
++
++static int kgsl_mem_entry_detach_process(struct kgsl_mem_entry *entry)
++{
++	int ret = kgsl_mem_entry_unmap(entry);
++
++	if (ret) {
++		kgsl_mem_entry_retain(entry, ret);
++		return ret;
++	}
+ 	kgsl_process_private_put(entry->priv);
+-
+ 	entry->priv = NULL;
++	return 0;
+ }
+ 
+ #ifdef CONFIG_QCOM_KGSL_CONTEXT_DEBUG
+@@ -2874,8 +2929,8 @@
+ 	return 0;
+ 
+ unmap:
+-	kgsl_sharedmem_free(&entry->memdesc);
+-
++	kgsl_mem_entry_free_unattached(entry);
++	return ret;
+ out:
+ 	kfree(entry);
+ 	return ret;
+@@ -3205,11 +3260,11 @@
+ 	return result;
+ 
+ error_attach:
+-	kgsl_sharedmem_free(&entry->memdesc);
++	kgsl_mem_entry_free_unattached(entry);
++	param->gpuaddr = 0;
++	return result;
+ error:
+-	/* Clear gpuaddr here so userspace doesn't get any wrong ideas */
+ 	param->gpuaddr = 0;
+-
+ 	kfree(entry);
+ 	return result;
+ }
+@@ -3611,8 +3666,8 @@
+ 
+ 	ret = kgsl_mem_entry_attach_process(dev_priv->device, private, entry);
+ 	if (ret != 0) {
+-		kgsl_sharedmem_free(&entry->memdesc);
+-		goto err;
++		kgsl_mem_entry_free_unattached(entry);
++		return ERR_PTR(ret);
+ 	}
+ 
+ 	kgsl_process_add_stats(private,
+--- a/drivers/gpu/msm/kgsl.h
++++ b/drivers/gpu/msm/kgsl.h
+@@ -264,6 +264,10 @@
+  * @work: Work struct used to schedule a kgsl_mem_entry_put in atomic contexts
+  */
+ struct kgsl_mem_entry {
++	/* Failed release owns this object until explicit GPU recovery. */
++	struct list_head retained_node;
++	int release_error;
++	struct kgsl_pagetable *retained_pt;
+ 	struct kref refcount;
+ 	struct kgsl_memdesc memdesc;
+ 	void *priv_data;
+--- a/drivers/gpu/msm/kgsl_debugfs.c
++++ b/drivers/gpu/msm/kgsl_debugfs.c
+@@ -374,6 +374,8 @@
+ 			"Unable to create 'mem' file for %s\n", name);
+ }
+ 
++DEFINE_SHOW_ATTRIBUTE(kgsl_retained_mem);
++
+ void kgsl_core_debugfs_init(void)
+ {
+ 	struct dentry *debug_dir;
+@@ -387,6 +389,9 @@
+ 	debugfs_create_file("strict_memory", 0644, debug_dir, NULL,
+ 		&_strict_fops);
+ 
++	debugfs_create_file("retained_memory", 0400, kgsl_debugfs_dir, NULL,
++		&kgsl_retained_mem_fops);
++
+ 	proc_d_debugfs = debugfs_create_dir("proc", kgsl_debugfs_dir);
+ }
+ 
+--- a/drivers/gpu/msm/kgsl_debugfs.h
++++ b/drivers/gpu/msm/kgsl_debugfs.h
+@@ -4,6 +4,9 @@
+  */
+ #ifndef _KGSL_DEBUGFS_H
+ #define _KGSL_DEBUGFS_H
++
++struct seq_file;
++int kgsl_retained_mem_show(struct seq_file *s, void *unused);
+ 
+ struct kgsl_device;
+ struct kgsl_process_private;

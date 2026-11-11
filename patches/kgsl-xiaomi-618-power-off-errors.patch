@@ -1,0 +1,317 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -2828,8 +2828,13 @@
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	int ret = 0;
+ 
+-	if (device->gmu_fault)
++	if (gmu->power_error)
++		return gmu->power_error;
++
++	if (device->gmu_fault) {
++		ret = -EIO;
+ 		goto error;
++	}
+ 
+ 	/* Wait for the lowest idle level we requested */
+ 	ret = a6xx_gmu_wait_for_lowest_idle(adreno_dev);
+@@ -2845,12 +2850,16 @@
+ 		goto error;
+ 
+ 	ret = a6xx_rscc_sleep_sequence(adreno_dev);
++	if (ret)
++		goto error;
+ 
+ 	a6xx_rdpm_mx_freq_update(gmu, 0);
+ 
+ 	/* Now that we are done with GMU and GPU, Clear the GBIF */
+ 	if (!adreno_is_a630(adreno_dev)) {
+ 		ret = a6xx_halt_gbif(adreno_dev);
++		if (ret)
++			goto error;
+ 		/* De-assert the halts */
+ 		kgsl_regwrite(device, A6XX_GBIF_HALT, 0x0);
+ 	}
+@@ -2871,6 +2880,8 @@
+ 	return ret;
+ 
+ error:
++	/* No further MMIO/replay until a checked recovery owns the failed state. */
++	gmu->power_error = ret;
+ 	a6xx_hfi_stop(adreno_dev);
+ 	a6xx_gmu_suspend(adreno_dev);
+ 
+@@ -2981,6 +2992,9 @@
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	int ret;
++
++	if (gmu->power_error)
++		return gmu->power_error;
+ 
+ 	WARN_ON(test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags));
+ 
+@@ -3105,7 +3119,10 @@
+ {
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+-	int ret;
++	int ret, shutdown;
++
++	if (gmu->power_error)
++		return gmu->power_error;
+ 
+ 	WARN_ON(!test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags));
+ 
+@@ -3141,7 +3158,9 @@
+ no_gx_power:
+ 	kgsl_pwrctrl_irq(device, KGSL_PWRFLAGS_OFF);
+ 
+-	a6xx_gmu_power_off(adreno_dev);
++	shutdown = a6xx_gmu_power_off(adreno_dev);
++	if (shutdown)
++		return shutdown;
+ 
+ 	adreno_set_active_ctxs_null(adreno_dev);
+ 
+@@ -3232,6 +3251,9 @@
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	int ret = 0;
+ 
++	if (gmu->power_error)
++		return gmu->power_error;
++
+ 	if (WARN_ON(!mutex_is_locked(&device->mutex)))
+ 		return -EINVAL;
+ 
+@@ -3256,6 +3278,9 @@
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	int ret;
++
++	if (gmu->power_error)
++		return gmu->power_error;
+ 
+ 	if (test_bit(GMU_PRIV_PM_SUSPEND, &gmu->flags))
+ 		return 0;
+@@ -3277,8 +3302,11 @@
+ 	if (ret)
+ 		goto err;
+ 
+-	if (test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
+-		a6xx_power_off(adreno_dev);
++	if (test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags)) {
++		ret = a6xx_power_off(adreno_dev);
++		if (ret)
++			return ret;
++	}
+ 
+ 	set_bit(GMU_PRIV_PM_SUSPEND, &gmu->flags);
+ 
+@@ -3414,6 +3442,9 @@
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 
++	if (gmu->power_error)
++		return gmu->power_error;
++
+ 	a6xx_hfi_stop(adreno_dev);
+ 
+ 	a6xx_disable_gpu_irq(adreno_dev);
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.h
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.h
+@@ -169,6 +169,8 @@
+ 	struct gmu_memdesc *gmu_log;
+ 	struct a6xx_hfi hfi;
+ 	/** @pwrlevels: Array of GMU power levels */
++	/* Latched shutdown failure; checked recovery is not implemented yet. */
++	int power_error;
+ 	struct regulator *cx_gdsc;
+ 	struct regulator *gx_gdsc;
+ 	struct clk_bulk_data *clks;
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched.c
+@@ -357,8 +357,13 @@
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	int ret = 0;
+ 
+-	if (device->gmu_fault)
++	if (gmu->power_error)
++		return gmu->power_error;
++
++	if (device->gmu_fault) {
++		ret = -EIO;
+ 		goto error;
++	}
+ 
+ 	/* Wait for the lowest idle level we requested */
+ 	ret = a6xx_gmu_wait_for_lowest_idle(adreno_dev);
+@@ -374,11 +379,15 @@
+ 		goto error;
+ 
+ 	ret = a6xx_rscc_sleep_sequence(adreno_dev);
++	if (ret)
++		goto error;
+ 
+ 	a6xx_rdpm_mx_freq_update(gmu, 0);
+ 
+ 	/* Now that we are done with GMU and GPU, Clear the GBIF */
+ 	ret = a6xx_halt_gbif(adreno_dev);
++	if (ret)
++		goto error;
+ 	/* De-assert the halts */
+ 	kgsl_regwrite(device, A6XX_GBIF_HALT, 0x0);
+ 
+@@ -396,6 +405,8 @@
+ 	return ret;
+ 
+ error:
++	/* No further MMIO/replay until a checked recovery owns the failed state. */
++	gmu->power_error = ret;
+ 	a6xx_hwsched_hfi_stop(adreno_dev);
+ 	a6xx_gmu_suspend(adreno_dev);
+ 
+@@ -527,6 +538,9 @@
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	int ret;
+ 
++	if (gmu->power_error)
++		return gmu->power_error;
++
+ 	if (test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
+ 		return 0;
+ 
+@@ -609,7 +623,10 @@
+ {
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+-	int ret;
++	int ret, shutdown;
++
++	if (gmu->power_error)
++		return gmu->power_error;
+ 
+ 	if (!test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
+ 		return 0;
+@@ -643,7 +660,9 @@
+ no_gx_power:
+ 	kgsl_pwrctrl_irq(device, KGSL_PWRFLAGS_OFF);
+ 
+-	a6xx_hwsched_gmu_power_off(adreno_dev);
++	shutdown = a6xx_hwsched_gmu_power_off(adreno_dev);
++	if (shutdown)
++		return shutdown;
+ 
+ 	read_lock(&device->context_lock);
+ 	idr_for_each(&device->context_idr, unregister_context_hwsched, NULL);
+@@ -722,6 +741,9 @@
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	int ret = 0;
+ 
++	if (gmu->power_error)
++		return gmu->power_error;
++
+ 	if (WARN_ON(!mutex_is_locked(&device->mutex)))
+ 		return -EINVAL;
+ 
+@@ -836,6 +858,9 @@
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	int ret;
++
++	if (gmu->power_error)
++		return gmu->power_error;
+ 
+ 	if (test_bit(GMU_PRIV_PM_SUSPEND, &gmu->flags))
+ 		return 0;
+@@ -880,7 +905,9 @@
+ 			goto err;
+ 		}
+ 
+-		a6xx_hwsched_power_off(adreno_dev);
++		ret = a6xx_hwsched_power_off(adreno_dev);
++		if (ret)
++			return ret;
+ 	}
+ 
+ 	set_bit(GMU_PRIV_PM_SUSPEND, &gmu->flags);
+@@ -927,11 +954,14 @@
+ 	read_unlock(&hfi->msglock);
+ }
+ 
+-void a6xx_hwsched_restart(struct adreno_device *adreno_dev)
++int a6xx_hwsched_restart(struct adreno_device *adreno_dev)
+ {
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	int ret;
++
++	if (gmu->power_error)
++		return gmu->power_error;
+ 
+ 	/*
+ 	 * Any pending context unregister packets will be lost
+@@ -947,7 +977,7 @@
+ 
+ 
+ 	if (!test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
+-		return;
++		return 0;
+ 
+ 	a6xx_hwsched_hfi_stop(adreno_dev);
+ 
+@@ -959,7 +989,9 @@
+ 
+ 	ret = a6xx_hwsched_boot(adreno_dev);
+ 
+-	BUG_ON(ret);
++	if (ret)
++		gmu->power_error = ret;
++	return ret;
+ }
+ 
+ const struct adreno_power_ops a6xx_hwsched_power_ops = {
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched.h
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched.h
+@@ -38,7 +38,7 @@
+  * a6xx_hwsched_restart - Restart the gmu and gpu
+  * @adreno_dev: Pointer to the adreno device
+  */
+-void a6xx_hwsched_restart(struct adreno_device *adreno_dev);
++int a6xx_hwsched_restart(struct adreno_device *adreno_dev);
+ 
+ /**
+  * a6xx_hwsched_snapshot - take a6xx hwsched snapshot
+--- a/drivers/gpu/msm/adreno_hwsched.c
++++ b/drivers/gpu/msm/adreno_hwsched.c
+@@ -1325,8 +1325,8 @@
+ 	 */
+ 	kgsl_drawobj_put(drawobj);
+ done:
+-	a6xx_hwsched_restart(adreno_dev);
+-	adreno_hwsched_init_replay(hwsched);
++	if (!a6xx_hwsched_restart(adreno_dev))
++		adreno_hwsched_init_replay(hwsched);
+ }
+ 
+ static void adreno_hwsched_recovery(struct adreno_device *adreno_dev)
+@@ -1335,12 +1335,18 @@
+ 	struct adreno_hwsched *hwsched = to_hwsched(adreno_dev);
+ 
+ 	mutex_lock(&device->mutex);
++
++	if (to_a6xx_gmu(adreno_dev)->power_error)
++		goto out;
+ 
+ 	if ((atomic_cmpxchg(&hwsched->fault, ADRENO_HWSCHED_FAULT_RESTART,
+ 		ADRENO_HWSCHED_FAULT_REPLAY) == ADRENO_HWSCHED_FAULT_RESTART))
+ 		reset_and_snapshot(adreno_dev);
+ 
+-	adreno_hwsched_complete_replay(adreno_dev);
++	if (!to_a6xx_gmu(adreno_dev)->power_error)
++		adreno_hwsched_complete_replay(adreno_dev);
++
++out:
+ 
+ 	mutex_unlock(&device->mutex);
+ }

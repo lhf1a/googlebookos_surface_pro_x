@@ -1,0 +1,518 @@
+--- a/drivers/gpu/msm/adreno_a6xx.c
++++ b/drivers/gpu/msm/adreno_a6xx.c
+@@ -156,35 +156,7 @@
+ 	return 0;
+ }
+ 
+-static int match_name(struct device *dev, void *data)
+-{
+-	struct device *parent = data;
+-
+-	return (!strcmp(dev_name(dev), dev_name(parent)));
+-}
+-
+-static void find_ddr_qos_device(struct adreno_device *adreno_dev)
+-{
+-	struct device *devfreq_dev, *ddr_qos_dev;
+-	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+-
+-	if (device->pwrctrl.ddr_qos_devfreq)
+-		return;
+-
+-	ddr_qos_dev = bus_find_device_by_name(&platform_bus_type, NULL,
+-			"soc:qcom,kgsl-ddr-qos");
+-
+-	if (!ddr_qos_dev)
+-		return;
+-
+-	/* Devfreq device has the same name as its parent device */
+-	devfreq_dev = device_find_child(ddr_qos_dev, ddr_qos_dev, match_name);
+-	if (!devfreq_dev)
+-		return;
+-
+-	device->pwrctrl.ddr_qos_devfreq = container_of(devfreq_dev,
+-					struct devfreq, dev);
+-}
++
+ 
+ int a6xx_init(struct adreno_device *adreno_dev)
+ {
+@@ -214,8 +186,6 @@
+ 			return PTR_ERR(adreno_dev->pwrup_reglist);
+ 	}
+ 
+-	find_ddr_qos_device(adreno_dev);
+-
+ 	return a6xx_get_cp_init_cmds(adreno_dev);
+ }
+ 
+@@ -240,8 +210,6 @@
+ 		if (IS_ERR(adreno_dev->pwrup_reglist))
+ 			return PTR_ERR(adreno_dev->pwrup_reglist);
+ 	}
+-
+-	find_ddr_qos_device(adreno_dev);
+ 
+ 	return a6xx_get_cp_init_cmds(adreno_dev);
+ }
+--- a/drivers/gpu/msm/kgsl_bus.c
++++ b/drivers/gpu/msm/kgsl_bus.c
+@@ -5,155 +5,114 @@
+  */
+ 
+ #include <linux/interconnect.h>
++#include <linux/math64.h>
+ #include <linux/of.h>
+-#include <linux/devfreq.h>
+ 
+-#include "../../devfreq/governor.h"
+ #include "kgsl_bus.h"
+ #include "kgsl_device.h"
+ #include "kgsl_trace.h"
+ 
++static int _ab_buslevel_update(struct kgsl_pwrctrl *pwr, u32 ib,
++		bool reset, u32 *ab)
++{
++	u64 value;
+ 
+-static u32 _ab_buslevel_update(struct kgsl_pwrctrl *pwr,
+-		u32 ib)
+-{
+ 	if (!ib)
+-		return 0;
++		value = 0;
++	else if (reset || (!pwr->bus_percent_ab && !pwr->bus_ab_mbytes))
++		value = div_u64((u64)25 * ib, 100000);
++	else if (pwr->bus_width)
++		value = pwr->bus_ab_mbytes;
++	else {
++		if (pwr->bus_percent_ab > 100)
++			return -EINVAL;
++		value = div_u64((u64)pwr->bus_percent_ab *
++			pwr->ddr_table[pwr->ddr_table_count - 1], 100000);
++	}
+ 
+-	/*
+-	 * In the absence of any other settings, make ab 25% of ib
+-	 * where the ib vote is in kbps
+-	 */
+-	if ((!pwr->bus_percent_ab) && (!pwr->bus_ab_mbytes))
+-		return 25 * ib / 100000;
+-
+-	if (pwr->bus_width)
+-		return pwr->bus_ab_mbytes;
+-
+-	return (pwr->bus_percent_ab * pwr->bus_max) / 100;
++	/* Setters convert MB/s to the ICC u32 kB/s unit. */
++	if (value > U32_MAX / 1000)
++		return -ERANGE;
++	*ab = value;
++	return 0;
+ }
+ 
+-static void set_ddr_qos(struct kgsl_device *device, int buslevel)
+-{
+-	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-	struct devfreq *dev = pwr->ddr_qos_devfreq;
+-	static unsigned long cur_min_freq;
+-	unsigned long new_min_freq = DEVFREQ_MIN_FREQ;
+-	int ret;
+-
+-	if (!dev)
+-		return;
+-
+-	/*
+-	 * Instead of creating a new dummy governor, we are using powersave
+-	 * governor for this devfreq device. Therefore, modify the minimum
+-	 * frequency to point to the desired QOS level.
+-	 */
+-	if (buslevel == pwr->pwrlevels[0].bus_max)
+-		new_min_freq = DEVFREQ_MAX_FREQ;
+-
+-	if (new_min_freq == cur_min_freq)
+-		return;
+-
+-	/*
+-	 * We need the event lock to protect against concurrent governor
+-	 * re-assignments.
+-	 */
+-	event_mutex_lock(dev);
+-	mutex_lock(&dev->lock);
+-	/*
+-	 * Update both min/max to make sure correct vote is set regardless
+-	 * of the governor, which can be changed from sysfs
+-	 */
+-	dev->min_freq = new_min_freq;
+-	dev->max_freq = new_min_freq;
+-	ret = update_devfreq(dev);
+-	mutex_unlock(&dev->lock);
+-	event_mutex_unlock(dev);
+-
+-	if (!ret)
+-		cur_min_freq = new_min_freq;
+-}
+-
++/* SC8180X uses gfx-mem/RPMh; the phone-only AOP DDR perfmode policy is absent. */
+ int kgsl_bus_update(struct kgsl_device *device,
+ 			 enum kgsl_bus_vote vote_state)
+ {
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-	/* FIXME: this might be wrong? */
+-	int cur = pwr->pwrlevels[pwr->active_pwrlevel].bus_freq;
+ 	int ret, buslevel = 0;
+ 	u32 ab;
++	bool reset = vote_state != KGSL_BUS_VOTE_ON;
+ 
+-	/* the bus should be ON to update the active frequency */
+-	if ((vote_state != KGSL_BUS_VOTE_OFF) &&
+-		!(test_bit(KGSL_PWRFLAGS_AXI_ON, &pwr->power_flags)))
++	if (vote_state != KGSL_BUS_VOTE_ON &&
++		vote_state != KGSL_BUS_VOTE_MINIMUM &&
++		vote_state != KGSL_BUS_VOTE_OFF)
++		return -EINVAL;
++	if (vote_state != KGSL_BUS_VOTE_OFF &&
++		!test_bit(KGSL_PWRFLAGS_AXI_ON, &pwr->power_flags))
+ 		return 0;
+-	/*
+-	 * If the bus should remain on calculate our request and submit it,
+-	 * otherwise request bus level 0, off.
+-	 */
++	if (!pwr->ddr_table || pwr->ddr_table_count < 2)
++		return -EINVAL;
++
+ 	if (vote_state == KGSL_BUS_VOTE_ON) {
+-		buslevel = min_t(int, pwr->pwrlevels[0].bus_max,
+-				cur + pwr->bus_mod);
+-		buslevel = max_t(int, buslevel, 1);
++		s64 requested;
++
++		if (!pwr->num_pwrlevels ||
++			pwr->num_pwrlevels > KGSL_MAX_PWRLEVELS ||
++			pwr->active_pwrlevel >= pwr->num_pwrlevels ||
++			!pwr->pwrlevels[0].bus_max ||
++			pwr->pwrlevels[0].bus_max >= (u32)pwr->ddr_table_count)
++			return -EINVAL;
++		requested = (s64)pwr->pwrlevels[pwr->active_pwrlevel].bus_freq +
++			pwr->bus_mod;
++		buslevel = clamp_t(s64, requested, 1, pwr->pwrlevels[0].bus_max);
+ 	} else if (vote_state == KGSL_BUS_VOTE_MINIMUM) {
+-		/* Request bus level 1, minimum non-zero value */
+ 		buslevel = 1;
+-		pwr->bus_mod = 0;
+-		pwr->bus_percent_ab = 0;
+-		pwr->bus_ab_mbytes = 0;
+-	} else if (vote_state == KGSL_BUS_VOTE_OFF) {
+-		/* If the bus is being turned off, reset to default level */
++	}
++
++	ret = _ab_buslevel_update(pwr, pwr->ddr_table[buslevel], reset, &ab);
++	if (ret)
++		return ret;
++	ret = device->ftbl->gpu_bus_set(device, buslevel, ab);
++	if (ret)
++		return ret;
++
++	/* Keep the governor request intact when a hardware vote fails. */
++	if (reset) {
+ 		pwr->bus_mod = 0;
+ 		pwr->bus_percent_ab = 0;
+ 		pwr->bus_ab_mbytes = 0;
+ 	}
+-
+-	/* buslevel is the IB vote, update the AB */
+-	ab = _ab_buslevel_update(pwr, pwr->ddr_table[buslevel]);
+-
+-	ret = device->ftbl->gpu_bus_set(device, buslevel, ab);
+-	if (ret)
+-		return ret;
+-
+-	set_ddr_qos(device, buslevel);
+-
+ 	return 0;
+ }
+ 
+-static void validate_pwrlevels(struct kgsl_device *device, u32 *ibs,
++static int validate_pwrlevels(struct kgsl_device *device, u32 *ibs,
+ 		int count)
+ {
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-	int i;
++	unsigned int i;
+ 
+-	for (i = 0; i < pwr->num_pwrlevels - 1; i++) {
+-		struct kgsl_pwrlevel *pwrlevel = &pwr->pwrlevels[i];
++	if (count < 2 || ibs[0] || !pwr->num_pwrlevels ||
++		pwr->num_pwrlevels > KGSL_MAX_PWRLEVELS ||
++		pwr->active_pwrlevel >= pwr->num_pwrlevels ||
++		pwr->default_pwrlevel >= pwr->num_pwrlevels)
++		return -EINVAL;
++	for (i = 1; i < (u32)count; i++)
++		if (ibs[i] <= ibs[i - 1])
++			return -EINVAL;
++	for (i = 0; i < pwr->num_pwrlevels; i++) {
++		struct kgsl_pwrlevel *level = &pwr->pwrlevels[i];
+ 
+-		if (pwrlevel->bus_freq >= count) {
+-			dev_err(device->dev, "Bus setting for GPU freq %d is out of bounds\n",
+-				pwrlevel->gpu_freq);
+-			pwrlevel->bus_freq = count - 1;
+-		}
+-
+-		if (pwrlevel->bus_max >= count) {
+-			dev_err(device->dev, "Bus max for GPU freq %d is out of bounds\n",
+-				pwrlevel->gpu_freq);
+-			pwrlevel->bus_max = count - 1;
+-		}
+-
+-		if (pwrlevel->bus_min >= count) {
+-			dev_err(device->dev, "Bus min for GPU freq %d is out of bounds\n",
+-				pwrlevel->gpu_freq);
+-			pwrlevel->bus_min = count - 1;
+-		}
+-
+-		if (pwrlevel->bus_min > pwrlevel->bus_max) {
+-			dev_err(device->dev, "Bus min is bigger than bus max for GPU freq %d\n",
+-				pwrlevel->gpu_freq);
+-			pwrlevel->bus_min = pwrlevel->bus_max;
+-		}
++		if (!level->gpu_freq || !level->bus_min ||
++			level->bus_min > level->bus_freq ||
++			level->bus_freq > level->bus_max ||
++			level->bus_max >= (u32)count ||
++			level->bus_max > pwr->pwrlevels[0].bus_max)
++			return -EINVAL;
+ 	}
++	return 0;
+ }
+ 
+ u32 *kgsl_bus_get_table(struct platform_device *pdev,
+@@ -185,56 +144,54 @@
+ int kgsl_bus_init(struct kgsl_device *device, struct platform_device *pdev)
+ {
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-	int count;
++	int count, ret;
+ 	int ddr = kgsl_get_ddrtype();
+ 
+ 	if (ddr >= 0) {
+ 		char str[32];
+ 
+ 		snprintf(str, sizeof(str), "qcom,bus-table-ddr%d", ddr);
+-
+ 		pwr->ddr_table = kgsl_bus_get_table(pdev, str, &count);
+ 		if (!IS_ERR(pwr->ddr_table))
+ 			goto done;
+-		if (PTR_ERR(pwr->ddr_table) != -ENOENT) {
+-			int ret = PTR_ERR(pwr->ddr_table);
++		if (PTR_ERR(pwr->ddr_table) != -ENOENT)
++			goto table_error;
++	}
++	pwr->ddr_table = kgsl_bus_get_table(pdev, "qcom,bus-table-ddr", &count);
++	if (IS_ERR(pwr->ddr_table))
++		goto table_error;
++done:
++	ret = validate_pwrlevels(device, pwr->ddr_table, count);
++	if (ret)
++		goto free_table;
+ 
+-			pwr->ddr_table = NULL;
+-			return ret;
+-		}
++	/* GMU also needs CPU ICC votes for AB and firmware bootstrap. */
++	pwr->icc_path = of_icc_get(&pdev->dev, "gfx-mem");
++	if (IS_ERR_OR_NULL(pwr->icc_path)) {
++		ret = pwr->icc_path ? PTR_ERR(pwr->icc_path) : -ENODEV;
++		pwr->icc_path = NULL;
++		goto free_table;
+ 	}
++	pwr->ddr_table_count = count;
++	return 0;
+ 
+-	/* Look if a generic table is present */
+-	pwr->ddr_table = kgsl_bus_get_table(pdev, "qcom,bus-table-ddr", &count);
+-	if (IS_ERR(pwr->ddr_table)) {
+-		int ret = PTR_ERR(pwr->ddr_table);
+-
+-		pwr->ddr_table = NULL;
+-		return ret;
+-	}
+-done:
+-	pwr->ddr_table_count = count;
+-
+-	validate_pwrlevels(device, pwr->ddr_table, pwr->ddr_table_count);
+-
+-	pwr->icc_path = of_icc_get(&pdev->dev, "gpu_icc_path");
+-	if (IS_ERR(pwr->icc_path) && !gmu_core_scales_bandwidth(device)) {
+-		WARN(1, "The CPU has no way to set the GPU bus levels\n");
+-
+-		kfree(pwr->ddr_table);
+-		pwr->ddr_table = NULL;
+-		return PTR_ERR(pwr->icc_path);
+-	}
+-
+-	return 0;
++table_error:
++	ret = PTR_ERR(pwr->ddr_table);
++	pwr->ddr_table = NULL;
++free_table:
++	kfree(pwr->ddr_table);
++	pwr->ddr_table = NULL;
++	pwr->ddr_table_count = 0;
++	return ret;
+ }
+ 
+ void kgsl_bus_close(struct kgsl_device *device)
+ {
+-	kfree(device->pwrctrl.ddr_table);
+-	device->pwrctrl.ddr_table = NULL;
+-	icc_put(device->pwrctrl.icc_path);
+-	device->pwrctrl.icc_path = NULL;
+-	if (device->pwrctrl.ddr_qos_devfreq)
+-		put_device(&device->pwrctrl.ddr_qos_devfreq->dev);
++	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
++
++	icc_put(pwr->icc_path);
++	pwr->icc_path = NULL;
++	kfree(pwr->ddr_table);
++	pwr->ddr_table = NULL;
++	pwr->ddr_table_count = 0;
+ }
+--- a/drivers/gpu/msm/kgsl_pwrctrl.c
++++ b/drivers/gpu/msm/kgsl_pwrctrl.c
+@@ -1289,24 +1289,28 @@
+ int kgsl_pwrctrl_axi(struct kgsl_device *device, int state)
+ {
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-
++	bool was_on = test_bit(KGSL_PWRFLAGS_AXI_ON, &pwr->power_flags);
++	int ret;
++
++	if (state != KGSL_PWRFLAGS_OFF && state != KGSL_PWRFLAGS_ON)
++		return -EINVAL;
+ 	if (test_bit(KGSL_PWRFLAGS_AXI_ON, &pwr->ctrl_flags))
+ 		return 0;
+-
+-	if (state == KGSL_PWRFLAGS_OFF) {
+-		if (test_and_clear_bit(KGSL_PWRFLAGS_AXI_ON,
+-			&pwr->power_flags)) {
+-			trace_kgsl_bus(device, state);
+-			return kgsl_bus_update(device, KGSL_BUS_VOTE_OFF);
+-		}
+-	} else if (state == KGSL_PWRFLAGS_ON) {
+-		if (!test_and_set_bit(KGSL_PWRFLAGS_AXI_ON,
+-			&pwr->power_flags)) {
+-			trace_kgsl_bus(device, state);
+-			return kgsl_bus_update(device, KGSL_BUS_VOTE_ON);
+-		}
+-	}
+-
++	/* A failed combined vote can leave GMU and ICC in different states. */
++
++	/* ON must be visible to bus_update; restore it if the vote fails. */
++	if (state == KGSL_PWRFLAGS_ON)
++		set_bit(KGSL_PWRFLAGS_AXI_ON, &pwr->power_flags);
++	ret = kgsl_bus_update(device, state == KGSL_PWRFLAGS_ON ?
++		KGSL_BUS_VOTE_ON : KGSL_BUS_VOTE_OFF);
++	if (ret) {
++		if (!was_on)
++			clear_bit(KGSL_PWRFLAGS_AXI_ON, &pwr->power_flags);
++		return ret;
++	}
++	if (state == KGSL_PWRFLAGS_OFF)
++		clear_bit(KGSL_PWRFLAGS_AXI_ON, &pwr->power_flags);
++	trace_kgsl_bus(device, state);
+ 	return 0;
+ }
+ 
+--- a/drivers/gpu/msm/kgsl_pwrctrl.h
++++ b/drivers/gpu/msm/kgsl_pwrctrl.h
+@@ -159,8 +159,6 @@
+ 	int ddr_table_count;
+ 	/** cur_buslevel: The last buslevel voted by the driver */
+ 	int cur_buslevel;
+-	/** @bus_max: The maximum bandwidth available to the device */
+-	unsigned long bus_max;
+ 	struct kgsl_pwr_constraint constraint;
+ 	bool superfast;
+ 	unsigned int gpu_bimc_int_clk_freq;
+@@ -173,8 +171,6 @@
+ 	struct timer_list minbw_timer;
+ 	/** @minbw_timeout - Timeout for entering minimum bandwidth state */
+ 	u32 minbw_timeout;
+-	/** @ddr_qos_devfreq: Devfreq device for setting DDR qos policy */
+-	struct devfreq *ddr_qos_devfreq;
+ 	/** @time_in_pwrlevel: Each pwrlevel active duration in usec */
+ 	u64 time_in_pwrlevel[KGSL_MAX_PWRLEVELS];
+ 	/** @last_stat_updated: The last time stats were updated */
+--- a/drivers/gpu/msm/kgsl_pwrscale.c
++++ b/drivers/gpu/msm/kgsl_pwrscale.c
+@@ -542,7 +542,10 @@
+ 	struct kgsl_device *device = dev_get_drvdata(dev);
+ 	struct kgsl_pwrctrl *pwr;
+ 	struct kgsl_pwrlevel *pwr_level;
+-	int  level, b;
++	int level, b, ret;
++	u32 old_percent;
++	unsigned long old_ab;
++	s64 requested;
+ 	u32 bus_flag;
+ 	unsigned long ab_mbytes;
+ 
+@@ -559,6 +562,11 @@
+ 		return 0;
+ 
+ 	mutex_lock(&device->mutex);
++	if (!pwr->num_pwrlevels || pwr->num_pwrlevels > KGSL_MAX_PWRLEVELS ||
++		pwr->active_pwrlevel >= pwr->num_pwrlevels) {
++		mutex_unlock(&device->mutex);
++		return -EINVAL;
++	}
+ 	level = pwr->active_pwrlevel;
+ 	pwr_level = &pwr->pwrlevels[level];
+ 	bus_flag = device->pwrscale.bus_profile.flag;
+@@ -577,26 +585,28 @@
+ 	}
+ 
+ 	b = pwr->bus_mod;
++	old_percent = pwr->bus_percent_ab;
++	old_ab = pwr->bus_ab_mbytes;
++	requested = (s64)pwr_level->bus_freq + b;
+ 	if (_check_fast_hint(bus_flag))
+-		pwr->bus_mod++;
++		requested++;
+ 	else if (_check_slow_hint(bus_flag))
+-		pwr->bus_mod--;
+-
+-	/* trim calculated change to fit range */
+-	if (pwr_level->bus_freq + pwr->bus_mod < pwr_level->bus_min)
+-		pwr->bus_mod = -(pwr_level->bus_freq - pwr_level->bus_min);
+-	else if (pwr_level->bus_freq + pwr->bus_mod > pwr_level->bus_max)
+-		pwr->bus_mod = pwr_level->bus_max - pwr_level->bus_freq;
+-
+-	/* Update bus vote if AB or IB is modified */
+-	if ((pwr->bus_mod != b) || (pwr->bus_ab_mbytes != ab_mbytes)) {
+-		pwr->bus_percent_ab = device->pwrscale.bus_profile.percent_ab;
+-		pwr->bus_ab_mbytes = ab_mbytes;
+-		kgsl_bus_update(device, KGSL_BUS_VOTE_ON);
+-	}
+-
++		requested--;
++	requested = clamp_t(s64, requested, pwr_level->bus_min,
++		pwr_level->bus_max);
++	pwr->bus_mod = requested - pwr_level->bus_freq;
++	pwr->bus_percent_ab = device->pwrscale.bus_profile.percent_ab;
++	pwr->bus_ab_mbytes = ab_mbytes;
++
++	/* Also retry an earlier partial GMU/ICC vote with the same request. */
++	ret = kgsl_bus_update(device, KGSL_BUS_VOTE_ON);
++	if (ret) {
++		pwr->bus_mod = b;
++		pwr->bus_percent_ab = old_percent;
++		pwr->bus_ab_mbytes = old_ab;
++	}
+ 	mutex_unlock(&device->mutex);
+-	return 0;
++	return ret;
+ }
+ 
+ int kgsl_busmon_get_cur_freq(struct device *dev, unsigned long *freq)

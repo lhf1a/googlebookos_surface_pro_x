@@ -1,0 +1,259 @@
+--- a/drivers/gpu/msm/kgsl.h
++++ b/drivers/gpu/msm/kgsl.h
+@@ -266,6 +266,8 @@
+  * @work: Work struct used to schedule a kgsl_mem_entry_put in atomic contexts
+  */
+ struct kgsl_mem_entry {
++	/* Published only after a successful complete GPU mapping. */
++	u64 published_gpuaddr;
+ 	/* Failed release owns this object until explicit GPU recovery. */
+ 	struct list_head retained_node;
+ 	int release_error;
+@@ -558,6 +560,11 @@
+ 	queue_work(kgsl_driver.workqueue, work);
+ }
+ 
++static inline u64 kgsl_mem_entry_gpuaddr(const struct kgsl_mem_entry *entry)
++{
++	return smp_load_acquire(&entry->published_gpuaddr);
++}
++
+ static inline int
+ kgsl_mem_entry_get(struct kgsl_mem_entry *entry)
+ {
+--- a/drivers/gpu/msm/kgsl.c
++++ b/drivers/gpu/msm/kgsl.c
+@@ -573,6 +573,9 @@
+ 			kgsl_mem_entry_detach_process(entry);
+ 	}
+ 
++	if (!ret)
++		smp_store_release(&entry->published_gpuaddr, entry->memdesc.gpuaddr);
++
+ 	kgsl_memfree_purge(entry->memdesc.pagetable, entry->memdesc.gpuaddr,
+ 		entry->memdesc.size);
+ 
+@@ -582,6 +585,8 @@
+ /* Detach a memory entry from a process and unmap it from the MMU */
+ static int kgsl_mem_entry_unmap(struct kgsl_mem_entry *entry)
+ {
++	smp_store_release(&entry->published_gpuaddr, 0);
++
+ 	if (entry->release_error)
+ 		return entry->release_error;
+ 
+@@ -1336,10 +1341,6 @@
+ 	return result;
+ }
+ 
+-#define GPUADDR_IN_MEMDESC(_val, _memdesc) \
+-	(((_val) >= (_memdesc)->gpuaddr) && \
+-	 ((_val) < ((_memdesc)->gpuaddr + (_memdesc)->size)))
+-
+ /**
+  * kgsl_sharedmem_find() - Find a gpu memory allocation
+  *
+@@ -1365,7 +1366,9 @@
+ 
+ 	spin_lock(&private->mem_lock);
+ 	idr_for_each_entry(&private->mem_idr, entry, id) {
+-		if (GPUADDR_IN_MEMDESC(gpuaddr, &entry->memdesc)) {
++		u64 base = kgsl_mem_entry_gpuaddr(entry);
++
++		if (base && gpuaddr >= base && gpuaddr - base < entry->memdesc.size) {
+ 			if (!entry->pending_free)
+ 				ret = kgsl_mem_entry_get(entry);
+ 			break;
+@@ -3792,6 +3795,7 @@
+ 	struct kgsl_gpumem_get_info *param = data;
+ 	struct kgsl_mem_entry *entry = NULL;
+ 	int result = 0;
++	u64 gpuaddr;
+ 
+ 	if (param->id != 0)
+ 		entry = kgsl_sharedmem_find_id(private, param->id);
+@@ -3806,10 +3810,11 @@
+ 	 * truncated, return -ERANGE.  That will signal the user that they
+ 	 * should use a more modern API
+ 	 */
+-	if (entry->memdesc.gpuaddr > ULONG_MAX)
++	gpuaddr = kgsl_mem_entry_gpuaddr(entry);
++	if (gpuaddr > ULONG_MAX)
+ 		result = -ERANGE;
+ 
+-	param->gpuaddr = (unsigned long) entry->memdesc.gpuaddr;
++	param->gpuaddr = (unsigned long) gpuaddr;
+ 	param->id = entry->id;
+ 	param->flags = (unsigned int) entry->memdesc.flags;
+ 	param->size = (size_t) entry->memdesc.size;
+@@ -3840,7 +3845,7 @@
+ 		return -EINVAL;
+ 
+ 	param->id = entry->id;
+-	param->gpuaddr = entry->memdesc.gpuaddr;
++	param->gpuaddr = kgsl_mem_entry_gpuaddr(entry);
+ 	param->flags = entry->memdesc.flags;
+ 	param->size = entry->memdesc.size;
+ 	param->va_len = kgsl_memdesc_footprint(&entry->memdesc);
+@@ -4091,6 +4096,8 @@
+ 			kgsl_mem_entry_detach_process(entry);
+ 		return (unsigned long) ret;
+ 	}
++
++	smp_store_release(&entry->published_gpuaddr, addr);
+ 
+ 	kgsl_memfree_purge(private->pagetable, entry->memdesc.gpuaddr,
+ 		entry->memdesc.size);
+--- a/drivers/gpu/msm/kgsl_device.h
++++ b/drivers/gpu/msm/kgsl_device.h
+@@ -201,6 +201,8 @@
+  * @priv: Internal flags set by the driver
+  */
+ struct kgsl_memobj_node {
++	/* Keep validated IB backing alive until the command object is released. */
++	struct kgsl_mem_entry *entry;
+ 	struct list_head node;
+ 	unsigned int id;
+ 	uint64_t offset;
+--- a/drivers/gpu/msm/kgsl_drawobj.h
++++ b/drivers/gpu/msm/kgsl_drawobj.h
+@@ -201,6 +201,12 @@
+ 	CMDOBJ_FAULT,
+ };
+ 
++struct kgsl_process_private;
++struct kgsl_memobj_node;
++
++int kgsl_drawobj_pin_ib(struct kgsl_process_private *process,
++	struct kgsl_memobj_node *ib);
++
+ struct kgsl_ibdesc;
+ struct kgsl_cmd_syncpoint;
+ 
+--- a/drivers/gpu/msm/kgsl_drawobj.c
++++ b/drivers/gpu/msm/kgsl_drawobj.c
+@@ -390,12 +390,14 @@
+ 	/* Destroy the command list */
+ 	list_for_each_entry_safe(mem, tmpmem, &cmdobj->cmdlist, node) {
+ 		list_del_init(&mem->node);
++		kgsl_mem_entry_put_deferred(mem->entry);
+ 		kmem_cache_free(memobjs_cache, mem);
+ 	}
+ 
+ 	/* Destroy the memory list */
+ 	list_for_each_entry_safe(mem, tmpmem, &cmdobj->memlist, node) {
+ 		list_del_init(&mem->node);
++		kgsl_mem_entry_put_deferred(mem->entry);
+ 		kmem_cache_free(memobjs_cache, mem);
+ 	}
+ }
+@@ -716,6 +718,30 @@
+ 	return -EINVAL;
+ }
+ 
++int kgsl_drawobj_pin_ib(struct kgsl_process_private *process,
++	struct kgsl_memobj_node *ib)
++{
++	struct kgsl_mem_entry *entry;
++	u64 base;
++
++	if (ib->entry)
++		return 0;
++	entry = kgsl_sharedmem_find(process, ib->gpuaddr);
++	if (!entry)
++		return -EINVAL;
++
++	base = kgsl_mem_entry_gpuaddr(entry);
++	if (!base || !ib->size || ib->gpuaddr < base ||
++		ib->gpuaddr - base >= entry->memdesc.size ||
++		ib->size > entry->memdesc.size - (ib->gpuaddr - base)) {
++		kgsl_mem_entry_put(entry);
++		return -EINVAL;
++	}
++
++	ib->entry = entry;
++	return 0;
++}
++
+ static void add_profiling_buffer(struct kgsl_device *device,
+ 		struct kgsl_drawobj_cmd *cmdobj,
+ 		uint64_t gpuaddr, uint64_t size,
+@@ -738,6 +764,11 @@
+ 	else
+ 		entry = kgsl_sharedmem_find(drawobj->context->proc_priv,
+ 			gpuaddr);
++
++	if (entry && !kgsl_mem_entry_gpuaddr(entry)) {
++		kgsl_mem_entry_put(entry);
++		entry = NULL;
++	}
+ 
+ 	if (entry != NULL) {
+ 		start = id ? (entry->memdesc.gpuaddr + offset) : gpuaddr;
+@@ -797,7 +828,7 @@
+ 	if (drawobj->type & (SYNCOBJ_TYPE | MARKEROBJ_TYPE))
+ 		return 0;
+ 
+-	mem = kmem_cache_alloc(memobjs_cache, GFP_KERNEL);
++	mem = kmem_cache_zalloc(memobjs_cache, GFP_KERNEL);
+ 	if (mem == NULL)
+ 		return -ENOMEM;
+ 
+@@ -1170,7 +1201,7 @@
+ {
+ 	struct kgsl_memobj_node *mem;
+ 
+-	mem = kmem_cache_alloc(memobjs_cache, GFP_KERNEL);
++	mem = kmem_cache_zalloc(memobjs_cache, GFP_KERNEL);
+ 	if (mem == NULL)
+ 		return -ENOMEM;
+ 
+--- a/drivers/gpu/msm/adreno_dispatch.c
++++ b/drivers/gpu/msm/adreno_dispatch.c
+@@ -1115,7 +1115,8 @@
+ 	struct kgsl_process_private *private = dev_priv->process_priv;
+ 
+ 	/* The maximum allowable size for an IB in the CP is 0xFFFFF dwords */
+-	if (ib->size == 0 || ((ib->size >> 2) > 0xFFFFF)) {
++	if (ib->size == 0 || !IS_ALIGNED(ib->size, 4) ||
++		((ib->size >> 2) > 0xFFFFF)) {
+ 		pr_context(device, context, "ctxt %d invalid ib size %lld\n",
+ 			context->id, ib->size);
+ 		return false;
+@@ -1129,7 +1130,7 @@
+ 		return false;
+ 	}
+ 
+-	return true;
++	return kgsl_drawobj_pin_ib(private, ib) == 0;
+ }
+ 
+ static inline int _verify_cmdobj(struct kgsl_device_private *dev_priv,
+--- a/drivers/gpu/msm/adreno_hwsched.c
++++ b/drivers/gpu/msm/adreno_hwsched.c
+@@ -651,7 +651,8 @@
+ 	struct kgsl_process_private *private = dev_priv->process_priv;
+ 
+ 	/* The maximum allowable size for an IB in the CP is 0xFFFFF dwords */
+-	if (ib->size == 0 || ((ib->size >> 2) > 0xFFFFF)) {
++	if (ib->size == 0 || !IS_ALIGNED(ib->size, 4) ||
++		((ib->size >> 2) > 0xFFFFF)) {
+ 		pr_context(device, context, "ctxt %d invalid ib size %lld\n",
+ 			context->id, ib->size);
+ 		return false;
+@@ -659,13 +660,13 @@
+ 
+ 	/* Make sure that the address is mapped */
+ 	if (!kgsl_mmu_gpuaddr_in_range(private->pagetable, ib->gpuaddr,
+-		ib->size)) {
++		ib->size) || !IS_ALIGNED(ib->gpuaddr, 4)) {
+ 		pr_context(device, context, "ctxt %d invalid ib gpuaddr %llX\n",
+ 			context->id, ib->gpuaddr);
+ 		return false;
+ 	}
+ 
+-	return true;
++	return kgsl_drawobj_pin_ib(private, ib) == 0;
+ }
+ 
+ static inline int _verify_cmdobj(struct kgsl_device_private *dev_priv,

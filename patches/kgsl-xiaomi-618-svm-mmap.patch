@@ -1,0 +1,246 @@
+--- a/drivers/gpu/msm/kgsl.c
++++ b/drivers/gpu/msm/kgsl.c
+@@ -4112,27 +4112,42 @@
+ 	return SZ_4K;
+ }
+ 
+-static unsigned long set_svm_area(struct file *file,
+-		struct kgsl_mem_entry *entry,
+-		unsigned long addr, unsigned long len,
+-		unsigned long flags)
++/* Address selection must not reserve a GPU VA or create a mapping. */
++static unsigned long check_svm_area(struct file *file,
++		struct kgsl_mem_entry *entry, unsigned long addr,
++		unsigned long len, unsigned long flags)
+ {
+ 	struct kgsl_device_private *dev_priv = file->private_data;
+-	struct kgsl_process_private *private = dev_priv->process_priv;
++	u64 start, end;
+ 	unsigned long ret;
+-
+-	/*
+-	 * Do additoinal constraints checking on the address. Passing MAP_FIXED
+-	 * ensures that the address we want gets checked
+-	 */
+-	ret = mm_get_unmapped_area(current->mm, file, addr, len, 0,
+-		flags & MAP_FIXED);
+-
+-	/* If it passes, attempt to set the region in the SVM */
+-	if (!IS_ERR_VALUE(ret))
+-		return _gpu_set_svm_region(private, entry, addr, len);
+-
+-	return ret;
++	int error;
++
++	if (!addr || !len || !IS_ALIGNED(len, PAGE_SIZE) ||
++		!IS_ALIGNED(addr, get_align(entry)))
++		return -EINVAL;
++	if (len > TASK_SIZE || addr > TASK_SIZE - len)
++		return -ENOMEM;
++
++	error = kgsl_mmu_svm_range(dev_priv->process_priv->pagetable,
++		&start, &end, entry->memdesc.flags);
++	if (error)
++		return error;
++	if (addr < start || addr >= end || len > end - addr)
++		return -ENOMEM;
++
++	ret = kgsl_mmu_find_svm_region(dev_priv->process_priv->pagetable,
++		addr, addr + len, len, get_align(entry));
++	if (IS_ERR_VALUE(ret))
++		return ret;
++	if (ret != addr)
++		return -EINVAL;
++
++	ret = mm_get_unmapped_area(current->mm, file, addr, len, 0, flags);
++	if (IS_ERR_VALUE(ret))
++		return ret;
++
++	/* A relocated CPU hint cannot be used as the requested GPU address. */
++	return ret == addr ? addr : (unsigned long) -ENOMEM;
+ }
+ 
+ static unsigned long get_svm_unmapped_area(struct file *file,
+@@ -4144,57 +4159,53 @@
+ 	struct kgsl_process_private *private = dev_priv->process_priv;
+ 	unsigned long align = get_align(entry);
+ 	unsigned long ret, iova;
+-	u64 start = 0, end = 0;
++	u64 start, end;
+ 	struct vm_area_struct *vma;
+-
+-	if (flags & MAP_FIXED) {
+-		/* Even fixed addresses need to obey alignment */
+-		if (!IS_ALIGNED(addr, align))
++	int error;
++
++	if (entry->release_error)
++		return entry->release_error;
++	if (READ_ONCE(entry->memdesc.gpuaddr))
++		return -EBUSY;
++
++	if (flags & MAP_FIXED)
++		return check_svm_area(file, entry, addr, len, flags);
++
++	if (addr) {
++		ret = check_svm_area(file, entry, addr, len, flags);
++		if (!IS_ERR_VALUE(ret))
++			return ret;
++	}
++
++	error = kgsl_mmu_svm_range(private->pagetable, &start, &end,
++		entry->memdesc.flags);
++	if (error)
++		return error;
++	end = min_t(u64, end, TASK_SIZE);
++	if (!len)
++		return -EINVAL;
++
++	while (end > start && len <= end - start) {
++		iova = kgsl_mmu_find_svm_region(private->pagetable, start, end,
++			len, align);
++		if (IS_ERR_VALUE(iova))
++			return iova;
++		if (iova < start || iova > end - len ||
++			!IS_ALIGNED(iova, align))
+ 			return -EINVAL;
+ 
+-		return set_svm_area(file, entry, addr, len, flags);
+-	}
+-
+-	/* If a hint was provided, try to use that first */
+-	if (addr) {
+-		if (IS_ALIGNED(addr, align)) {
+-			ret = set_svm_area(file, entry, addr, len, flags);
++		/* The MM API takes an exclusive end, as does the GPU VA search. */
++		vma = find_vma_intersection(current->mm, iova, iova + len);
++		if (vma) {
++			end = vma->vm_start;
++		} else {
++			ret = check_svm_area(file, entry, iova, len, flags);
+ 			if (!IS_ERR_VALUE(ret))
+ 				return ret;
++			if ((long) ret != -ENOMEM)
++				return ret;
++			end = iova;
+ 		}
+-	}
+-
+-	/* Get the SVM range for the current process */
+-	if (kgsl_mmu_svm_range(private->pagetable, &start, &end,
+-		entry->memdesc.flags))
+-		return -ERANGE;
+-
+-	/* Find the first gap in the iova map */
+-	iova = kgsl_mmu_find_svm_region(private->pagetable, start, end,
+-		len, align);
+-
+-	while (!IS_ERR_VALUE(iova)) {
+-		vma = find_vma_intersection(current->mm, iova, iova + len - 1);
+-		if (vma) {
+-			iova = vma->vm_start;
+-		} else {
+-			ret = set_svm_area(file, entry, iova, len, flags);
+-			if (!IS_ERR_VALUE(ret))
+-				return ret;
+-
+-			/*
+-			 * set_svm_area will return -EBUSY if we tried to set up
+-			 * SVM on an object that already has a GPU address. If
+-			 * that happens don't bother walking the rest of the
+-			 * region
+-			 */
+-			if ((long) ret == -EBUSY)
+-				return -EBUSY;
+-
+-		}
+-
+-		iova = kgsl_mmu_find_svm_region(private->pagetable,
+-			start, iova - 1, len, align);
+ 	}
+ 
+ 	return -ENOMEM;
+@@ -4271,9 +4282,22 @@
+ 	if (ret)
+ 		return ret;
+ 
++	/* The entry is looked up again after address selection; recheck it. */
++	if (entry->release_error) {
++		ret = entry->release_error;
++		goto err_put;
++	}
++	if (kgsl_memdesc_is_secured(&entry->memdesc)) {
++		ret = -EPERM;
++		goto err_put;
++	}
++	if (kgsl_memdesc_use_cpu_map(&entry->memdesc) &&
++		!IS_ALIGNED(vma->vm_start, get_align(entry))) {
++		ret = -EINVAL;
++		goto err_put;
++	}
++
+ 	vm_flags_set(vma, entry->memdesc.ops->vmflags);
+-
+-	vma->vm_private_data = entry;
+ 
+ 	/* Determine user-side caching policy */
+ 
+@@ -4296,30 +4320,50 @@
+ 		break;
+ 	}
+ 
+-	vma->vm_ops = &kgsl_gpumem_vm_ops;
+-
+ 	if (cache == KGSL_CACHEMODE_WRITEBACK
+ 		|| cache == KGSL_CACHEMODE_WRITETHROUGH) {
+ 		int i;
+ 		unsigned long addr = vma->vm_start;
+ 		struct kgsl_memdesc *m = &entry->memdesc;
+ 
++		if ((m->page_count && !m->pages) ||
++			m->page_count > (vma->vm_end - vma->vm_start) >> PAGE_SHIFT) {
++			ret = -EINVAL;
++			goto err_put;
++		}
+ 		for (i = 0; i < m->page_count; i++) {
+-			struct page *page = m->pages[i];
+-
+-			vm_insert_page(vma, addr, page);
++			ret = vm_insert_page(vma, addr, m->pages[i]);
++			if (ret)
++				goto err_put;
+ 			addr += PAGE_SIZE;
+ 		}
+ 	}
+ 
++	/* All core admission and CPU insertion failures precede GPU binding. */
++	if (kgsl_memdesc_use_cpu_map(&entry->memdesc)) {
++		unsigned long gpuaddr = _gpu_set_svm_region(private, entry,
++			vma->vm_start, vma->vm_end - vma->vm_start);
++
++		if (IS_ERR_VALUE(gpuaddr)) {
++			ret = (long) gpuaddr;
++			goto err_put;
++		}
++	}
++
++	vma->vm_private_data = entry;
++	vma->vm_ops = &kgsl_gpumem_vm_ops;
+ 	vma->vm_file = file;
+ 
+-	atomic64_add(entry->memdesc.size, &entry->priv->gpumem_mapped);
+-
+-	atomic_inc(&entry->map_count);
++	if (atomic_inc_return(&entry->map_count) == 1)
++		atomic64_add(entry->memdesc.size, &entry->priv->gpumem_mapped);
+ 
+ 	trace_kgsl_mem_mmap(entry, vma->vm_start);
+ 	return 0;
++
++err_put:
++	/* The MM core removes any partial CPU PTEs on a failing .mmap(). */
++	kgsl_mem_entry_put(entry);
++	return ret;
+ }
+ 
+ static irqreturn_t kgsl_irq_handler(int irq, void *data)

@@ -88,6 +88,7 @@ def build(base, output, bridge, modules, expected, omx=None):
     bodies["bin/el2-terminal-stage"] = terminal.replace(witness, b"")
     replacements = {"etc/sq2-hidl/lib64/libquest2-vidc-bridge.so":
                     validate_native_pair(bodies["etc/sq2-hidl/quest2-omx-service"], bridge, omx)}
+    pack.validate_memory_pair(bodies.get(pack.MEMORY_ION, b""), replacements[pack.MEMORY_BRIDGE], bodies.get(pack.MEMORY_MODULE, b""))
     if omx is not None:
         replacements["etc/sq2-hidl/lib64/libOmxVdec.so"] = omx.read_bytes()
     for name in ("venus-core.ko", "venus-dec.ko", "venus-enc.ko"):

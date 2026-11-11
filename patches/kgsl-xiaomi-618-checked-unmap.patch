@@ -1,0 +1,41 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -2955,8 +2955,16 @@
+ 	iommu_set_fault_handler(gmu->domain,
+ 		a6xx_gmu_iommu_fault_handler, gmu);
+ 	ret = iommu_attach_device(gmu->domain, &gmu->pdev->dev);
+-	if (!ret)
+-		return 0;
++	if (!ret) {
++		ret = arm_smmu_enable_checked_unmap(gmu->domain);
++		if (!ret)
++			return 0;
++		iommu_detach_device(gmu->domain, &gmu->pdev->dev);
++		if (iommu_get_domain_for_dev(&gmu->pdev->dev) == gmu->domain) {
++			gmu->power_error = ret;
++			return ret;
++		}
++	}
+ 
+ 	iommu_domain_free(gmu->domain);
+ 	gmu->domain = NULL;
+--- a/drivers/gpu/msm/kgsl_iommu.c
++++ b/drivers/gpu/msm/kgsl_iommu.c
+@@ -9,6 +9,7 @@
+ #include <linux/compat.h>
+ #include <linux/io.h>
+ #include <linux/iommu.h>
++#include <linux/arm-smmu-priv.h>
+ #include <linux/iopoll.h>
+ #include <linux/of_platform.h>
+ #include <linux/seq_file.h>
+@@ -924,6 +925,9 @@
+ 	if (ret)
+ 		goto fail;
+ 	priv->attached = true;
++	ret = arm_smmu_enable_checked_unmap(priv->domain);
++	if (ret)
++		goto fail;
+ 	if (!smmu->cookie || !smmu->get_ttbr1_cfg || !smmu->get_context_bank ||
+ 	    !smmu->set_ttbr0_cfg || !smmu->reset_ttbr0 || !smmu->flush_tlb ||
+ 	    !smmu->get_fault_info || !smmu->set_fault_policy ||

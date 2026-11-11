@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "status": "linked-in-isolated-matched-kernel-not-device-validated",
+  "kernel_series": "6.18",
+  "prerequisite": "configs/kgsl-618-smmu-provider.json",
+  "patch": "patches/kgsl-618-smmu-drain.patch",
+  "sha256": "14a1c4a1c9d55db81128ec104c8a1f1f588183df80eab348c46e639913904ebb",
+  "files": {
+    "drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c": {
+      "before": "67ee19495099a85150a410fb585559b61dd59369805c3d7c31ada93587d1e9d3",
+      "after": "f3e072ee786625bdd19e8eeea10daeaa32dedaca8d7277e610b8013451992efe"
+    },
+    "drivers/iommu/arm/arm-smmu/arm-smmu.c": {
+      "before": "41445bd625ddaeab5d934ba0c09e1eaac5aa5bc9b383e3a98c93b435b9dc2dd1",
+      "after": "0996b50379904975dd64f7af327e81e4810d1f0abba3d01e88b5d9560b24f958"
+    },
+    "drivers/iommu/arm/arm-smmu/arm-smmu.h": {
+      "before": "b7221ee9b767594ba79cfc139fca838236f81ba949fb5e0be81e31ef42b1911c",
+      "after": "ea9259c5d2c5ab52c7a8c9f17649e291563fc13eafaaf18fff7fd68f63fe493e"
+    },
+    "include/linux/arm-smmu-priv.h": {
+      "before": null,
+      "after": "756c8158326c56692966394df51ece332f53d42b36397341a0d28827806b7c99"
+    }
+  }
+}

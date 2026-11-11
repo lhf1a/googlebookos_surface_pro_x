@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "status": "linked-in-isolated-matched-kernel-not-device-validated",
+  "kernel_series": "6.18",
+  "patch": "patches/kgsl-618-clock-retention.patch",
+  "sha256": "2f74e35d5740f008afb818b8ff625fb450ab425d0e783ccac3c26d43f4ea1472",
+  "files": {
+    "drivers/clk/qcom/clk-branch.c": {
+      "before": "a0840dff3927c93b5ece621cd799415d3827428fdb8c67e3ac682561d30efc72",
+      "after": "e1190e14fff2f6f8d3d39d69c5decf013db38c4cc549a7a05be8d44095948961"
+    },
+    "drivers/clk/qcom/clk-branch.h": {
+      "before": "d1cdd6eda43aaf475916c3e429ed70f83786b63a2cf1037d2639abf159b6519a",
+      "after": "477d64b8da48c328122e233a7a64a4b7dc635be0fbb2e051338092b7e757afff"
+    },
+    "drivers/clk/qcom/clk-regmap.c": {
+      "before": "2438f057d67c3cd0229e710494dcf0a381bc69021591fe9cb89219734b8e633d",
+      "after": "d85f3c2c23b184589976f84ec0adb1234661119973ed7bf561bd87e73ebca0f7"
+    },
+    "include/linux/clk/qcom.h": {
+      "before": null,
+      "after": "2aedec5444fa96747da9c1d0dae6a58efdb7bab7450dd2093c417c84923c0c13"
+    }
+  }
+}

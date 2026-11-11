@@ -1,0 +1,35 @@
+--- a/drivers/gpu/msm/adreno_a6xx_rpmh.c
++++ b/drivers/gpu/msm/adreno_a6xx_rpmh.c
+@@ -491,8 +491,9 @@
+ 	struct rpmh_bw_votes *ddr, *cnoc;
+ 	struct bcm ddr_bcms[ARRAY_SIZE(sc8180x_ddr_bcms)];
+ 	struct bcm cnoc_bcms[ARRAY_SIZE(sc8180x_cnoc_bcms)];
+-	u32 *cnoc_table;
+-	int count = 0, ret;
++	/* SDMSHRIKE/A680 OFF/ON votes; see the pinned bandwidth reference. */
++	u32 cnoc_table[MAX_CNOC_LEVELS] = { 0, 100 };
++	int ret;
+ 
+ 	if (!adreno_is_a680(adreno_dev))
+ 		return -EOPNOTSUPP;
+@@ -504,18 +505,8 @@
+ 	if (IS_ERR(ddr))
+ 		return PTR_ERR(ddr);
+ 
+-	cnoc_table = kgsl_bus_get_table(device->pdev, "qcom,bus-table-cnoc", &count);
+-	if (IS_ERR(cnoc_table)) {
+-		ret = PTR_ERR(cnoc_table);
+-		goto free_ddr;
+-	}
+-	if (count != MAX_CNOC_LEVELS) {
+-		ret = -EINVAL;
+-		kfree(cnoc_table);
+-		goto free_ddr;
+-	}
+-	cnoc = build_rpmh_bw_votes(cnoc_bcms, ARRAY_SIZE(cnoc_bcms), cnoc_table, count);
+-	kfree(cnoc_table);
++	cnoc = build_rpmh_bw_votes(cnoc_bcms, ARRAY_SIZE(cnoc_bcms),
++		cnoc_table, ARRAY_SIZE(cnoc_table));
+ 	if (IS_ERR(cnoc)) {
+ 		ret = PTR_ERR(cnoc);
+ 		goto free_ddr;

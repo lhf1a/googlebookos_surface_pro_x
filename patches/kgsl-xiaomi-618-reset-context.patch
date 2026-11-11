@@ -1,0 +1,139 @@
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -591,7 +591,7 @@
+  * all the HW logic, restores GPU registers to default state and
+  * flushes out pending VBIF transactions.
+  */
+-static void _soft_reset(struct adreno_device *adreno_dev)
++static int _soft_reset(struct adreno_device *adreno_dev)
+ {
+ 	const struct adreno_gpudev *gpudev  = ADRENO_GPU_DEVICE(adreno_dev);
+ 	unsigned int reg;
+@@ -607,7 +607,9 @@
+ 	/* The SP/TP regulator gets turned off after a soft reset */
+ 
+ 	if (gpudev->regulator_enable)
+-		gpudev->regulator_enable(adreno_dev);
++		return gpudev->regulator_enable(adreno_dev);
++
++	return 0;
+ }
+ 
+ /**
+@@ -2077,12 +2079,13 @@
+ 	struct adreno_ringbuffer *rb;
+ 
+ 	FOR_EACH_RINGBUFFER(adreno_dev, rb, i) {
+-		if (rb->drawctxt_active)
+-			kgsl_context_put(&(rb->drawctxt_active->base));
++		struct adreno_context *drawctxt = rb->drawctxt_active;
++
+ 		rb->drawctxt_active = NULL;
+-
+ 		kgsl_sharedmem_writel(rb->pagetable_desc,
+ 			PT_INFO_OFFSET(current_rb_ptname), 0);
++		if (drawctxt)
++			kgsl_context_put(&drawctxt->base);
+ 	}
+ }
+ 
+@@ -2346,21 +2349,23 @@
+ 	if (status)
+ 		goto error_pwr_off;
+ 
+-	/* Set any stale active contexts to NULL */
+-	adreno_set_active_ctxs_null(adreno_dev);
+-
+ 	/* Set the bit to indicate that we've just powered on */
+ 	set_bit(ADRENO_DEVICE_PWRON, &adreno_dev->priv);
+ 
+ 	/* Soft reset the GPU if a regulator is stuck on*/
+-	if (regulator_left_on)
+-		_soft_reset(adreno_dev);
+-
+-	adreno_ringbuffer_set_global(adreno_dev, 0);
++	if (regulator_left_on) {
++		status = _soft_reset(adreno_dev);
++		if (status)
++			goto error_pwr_off;
++	}
+ 
+ 	status = kgsl_mmu_start(device);
+ 	if (status)
+ 		goto error_pwr_off;
++
++	/* Keep old context ownership until the default root is restored. */
++	adreno_set_active_ctxs_null(adreno_dev);
++	adreno_ringbuffer_set_global(adreno_dev, 0);
+ 
+ 	adreno_get_bus_counters(adreno_dev);
+ 
+@@ -3011,7 +3016,6 @@
+ 	ret = kgsl_pwrctrl_change_state(device, KGSL_STATE_AWARE);
+ 	if (ret)
+ 		return ret;
+-	adreno_set_active_ctxs_null(adreno_dev);
+ 
+ 	adreno_irqctrl(adreno_dev, 0);
+ 
+@@ -3022,7 +3026,9 @@
+ 	/* save physical performance counter values before GPU soft reset */
+ 	adreno_perfcounter_save(adreno_dev);
+ 
+-	_soft_reset(adreno_dev);
++	ret = _soft_reset(adreno_dev);
++	if (ret)
++		return ret;
+ 
+ 	/* Clear the busy_data stats - we're starting over from scratch */
+ 	adreno_dev->busy_data.gpu_busy = 0;
+@@ -3037,6 +3043,7 @@
+ 	ret = kgsl_mmu_set_pt(&device->mmu, device->mmu.defaultpagetable);
+ 	if (ret)
+ 		return ret;
++	adreno_set_active_ctxs_null(adreno_dev);
+ 	adreno_ringbuffer_set_global(adreno_dev, 0);
+ 
+ 	/* Reinitialize the GPU */
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -3114,13 +3114,13 @@
+ 	/* Clear any GPU faults that might have been left over */
+ 	adreno_clear_gpu_fault(adreno_dev);
+ 
++	ret = kgsl_mmu_start(device);
++	if (ret)
++		goto err;
++
++	/* Keep old context ownership until the default root is restored. */
+ 	adreno_set_active_ctxs_null(adreno_dev);
+-
+ 	adreno_ringbuffer_set_global(adreno_dev, 0);
+-
+-	ret = kgsl_mmu_start(device);
+-	if (ret)
+-		goto err;
+ 
+ 	ret = a6xx_gmu_oob_set(device, oob_gpu);
+ 	if (ret)
+--- a/drivers/gpu/msm/adreno_a6xx_rgmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_rgmu.c
+@@ -752,13 +752,13 @@
+ 	/* Clear any GPU faults that might have been left over */
+ 	adreno_clear_gpu_fault(adreno_dev);
+ 
++	ret = kgsl_mmu_start(device);
++	if (ret)
++		goto err;
++
++	/* Keep old context ownership until the default root is restored. */
+ 	adreno_set_active_ctxs_null(adreno_dev);
+-
+ 	adreno_ringbuffer_set_global(adreno_dev, 0);
+-
+-	ret = kgsl_mmu_start(device);
+-	if (ret)
+-		goto err;
+ 
+ 	ret = a6xx_rgmu_oob_set(device, oob_gpu);
+ 	if (ret)

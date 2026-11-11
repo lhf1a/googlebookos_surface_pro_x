@@ -1,0 +1,203 @@
+--- a/drivers/gpu/msm/kgsl_snapshot.c
++++ b/drivers/gpu/msm/kgsl_snapshot.c
+@@ -8,7 +8,8 @@
+ #include <linux/of.h>
+ #include <linux/slab.h>
+ #include <linux/utsname.h>
+-#include <soc/qcom/minidump.h>
++#include <linux/panic_notifier.h>
++#include <linux/timekeeping.h>
+ 
+ #include "adreno_cp_parser.h"
+ #include "kgsl_device.h"
+@@ -32,25 +33,6 @@
+ 	size_t write;   /* Bytes written so far */
+ };
+ 
+-static void add_to_minidump(struct kgsl_device *device)
+-{
+-	struct md_region md_entry;
+-	int ret;
+-
+-	if (!msm_minidump_enabled() || device->snapshot_memory.in_minidump)
+-		return;
+-
+-	scnprintf(md_entry.name, sizeof(md_entry.name), "GPU_SNAPSHOT");
+-	md_entry.virt_addr = (u64)(device->snapshot_memory.ptr);
+-	md_entry.phys_addr = __pa(device->snapshot_memory.ptr);
+-	md_entry.size = device->snapshot_memory.size;
+-	ret = msm_minidump_add_region(&md_entry);
+-	if (ret < 0)
+-		dev_err(device->dev, "Failed to register snapshot with minidump: %d\n", ret);
+-	else
+-		device->snapshot_memory.in_minidump = true;
+-}
+-
+ static void obj_itr_init(struct snapshot_obj_itr *itr, u8 *buf,
+ 	loff_t offset, size_t remain)
+ {
+@@ -128,13 +110,13 @@
+ 	header->osid = KGSL_SNAPSHOT_OS_LINUX_V3;
+ 
+ 	/* Get the kernel build information */
+-	strlcpy(header->release, init_utsname()->release,
++	strscpy(header->release, init_utsname()->release,
+ 			sizeof(header->release));
+-	strlcpy(header->version, init_utsname()->version,
++	strscpy(header->version, init_utsname()->version,
+ 			sizeof(header->version));
+ 
+ 	/* Get the Unix time for the timestamp */
+-	header->seconds = get_seconds();
++	header->seconds = ktime_get_real_seconds();
+ 
+ 	/* Remember the power information */
+ 	header->power_flags = pwr->power_flags;
+@@ -158,7 +140,7 @@
+ 	if (context) {
+ 
+ 		header->pid = context->tid;
+-		strlcpy(header->comm, context->proc_priv->comm,
++		strscpy(header->comm, context->proc_priv->comm,
+ 				sizeof(header->comm));
+ 		kgsl_context_put(context);
+ 		context = NULL;
+@@ -215,13 +197,13 @@
+ 	header->osid = KGSL_SNAPSHOT_OS_LINUX_V3;
+ 
+ 	/* Get the kernel build information */
+-	strlcpy(header->release, init_utsname()->release,
++	strscpy(header->release, init_utsname()->release,
+ 			sizeof(header->release));
+-	strlcpy(header->version, init_utsname()->version,
++	strscpy(header->version, init_utsname()->version,
+ 			sizeof(header->version));
+ 
+ 	/* Get the Unix time for the timestamp */
+-	header->seconds = get_seconds();
++	header->seconds = ktime_get_real_seconds();
+ 
+ 	/* Remember the power information */
+ 	header->power_flags = pwr->power_flags;
+@@ -745,21 +727,6 @@
+ 	if (device->ftbl->snapshot)
+ 		device->ftbl->snapshot(device, snapshot, NULL);
+ 
+-	if (msm_minidump_enabled()) {
+-		struct md_region md_entry;
+-		int ret;
+-
+-		scnprintf(md_entry.name, sizeof(md_entry.name),
+-				"ATOMIC_GPU_SNAPSHOT");
+-		md_entry.virt_addr = (u64)(device->snapshot_memory_atomic.ptr);
+-		md_entry.phys_addr = __pa(device->snapshot_memory_atomic.ptr);
+-		md_entry.size = device->snapshot_memory_atomic.size;
+-		ret = msm_minidump_add_region(&md_entry);
+-		if (ret < 0)
+-			dev_err(device->dev,
+-				"Fail to add atomic snapshot with minidump: %d\n", ret);
+-	}
+-
+ 	/* log buffer info to aid in ramdump fault tolerance */
+ 	pa = __pa(device->snapshot_memory_atomic.ptr);
+ 	dev_err(device->dev, "Atomic GPU snapshot created at pa %pa++0x%zx\n",
+@@ -780,7 +747,7 @@
+ {
+ 	struct kgsl_snapshot_header *header = device->snapshot_memory.ptr;
+ 	struct kgsl_snapshot *snapshot;
+-	struct timespec boot;
++	struct timespec64 boot;
+ 	phys_addr_t pa;
+ 
+ 	set_isdb_breakpoint_registers(device);
+@@ -870,8 +837,8 @@
+ 	 * the kernel log
+ 	 */
+ 
+-	getboottime(&boot);
+-	snapshot->timestamp = get_seconds() - boot.tv_sec;
++	getboottime64(&boot);
++	snapshot->timestamp = ktime_get_real_seconds() - boot.tv_sec;
+ 
+ 	/* Store the instance in the device until it gets dumped */
+ 	device->snapshot = snapshot;
+@@ -881,8 +848,6 @@
+ 	pa = __pa(device->snapshot_memory.ptr);
+ 	dev_err(device->dev, "%s snapshot created at pa %pa++0x%zx\n",
+ 			gmu_fault ? "GMU" : "GPU", &pa, snapshot->size);
+-
+-	add_to_minidump(device);
+ 
+ 	if (device->skip_ib_capture)
+ 		BUG_ON(device->force_panic);
+@@ -964,7 +929,7 @@
+ 
+ /* Dump the sysfs binary data to the user */
+ static ssize_t snapshot_show(struct file *filep, struct kobject *kobj,
+-	struct bin_attribute *attr, char *buf, loff_t off,
++	const struct bin_attribute *attr, char *buf, loff_t off,
+ 	size_t count)
+ {
+ 	struct kgsl_device *device = kobj_to_device(kobj);
+@@ -1085,7 +1050,7 @@
+ static ssize_t force_panic_store(struct kgsl_device *device, const char *buf,
+ 	size_t count)
+ {
+-	if (strtobool(buf, &device->force_panic))
++	if (kstrtobool(buf, &device->force_panic))
+ 		return -EINVAL;
+ 	return count;
+ }
+@@ -1118,7 +1083,7 @@
+ static ssize_t prioritize_unrecoverable_store(
+ 		struct kgsl_device *device, const char *buf, size_t count)
+ {
+-	if (strtobool(buf, &device->prioritize_unrecoverable))
++	if (kstrtobool(buf, &device->prioritize_unrecoverable))
+ 		return -EINVAL;
+ 
+ 	return count;
+@@ -1135,7 +1100,7 @@
+ static ssize_t snapshot_crashdumper_store(struct kgsl_device *device,
+ 	const char *buf, size_t count)
+ {
+-	if (strtobool(buf, &device->snapshot_crashdumper))
++	if (kstrtobool(buf, &device->snapshot_crashdumper))
+ 		return -EINVAL;
+ 	return count;
+ }
+@@ -1159,7 +1124,7 @@
+ static ssize_t snapshot_legacy_store(struct kgsl_device *device,
+ 	const char *buf, size_t count)
+ {
+-	if (strtobool(buf, &device->snapshot_legacy))
++	if (kstrtobool(buf, &device->snapshot_legacy))
+ 		return -EINVAL;
+ 
+ 	return count;
+@@ -1275,7 +1240,6 @@
+ 		return;
+ 	}
+ 
+-	device->snapshot_memory.in_minidump = false;
+ 	device->snapshot = NULL;
+ 	device->snapshot_faultcount = 0;
+ 	device->force_panic = false;
+@@ -1312,17 +1276,6 @@
+  */
+ void kgsl_device_snapshot_close(struct kgsl_device *device)
+ {
+-	if (msm_minidump_enabled() && device->snapshot_memory.in_minidump) {
+-		struct md_region md_entry;
+-
+-		scnprintf(md_entry.name, sizeof(md_entry.name), "GPU_SNAPSHOT");
+-		md_entry.virt_addr = (u64)(device->snapshot_memory.ptr);
+-		md_entry.phys_addr = __pa(device->snapshot_memory.ptr);
+-		md_entry.size = device->snapshot_memory.size;
+-		if (msm_minidump_remove_region(&md_entry) < 0)
+-			dev_err(device->dev, "Failed to remove snapshot with minidump\n");
+-	}
+-
+ 	atomic_notifier_chain_unregister(&panic_notifier_list,
+ 			&device->panic_nb);
+ 

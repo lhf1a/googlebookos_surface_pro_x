@@ -1,3 +1,697 @@
+## 小米 KGSL v83：中间页表 checked walk 同步（2026-11-11）
+
+候选 `kgsl-618-v83`：54补丁/109源，配套 `native-kernel-v3`，source-linked-not-device-ready。`configs/kgsl-618-smmu-walk.json` 固定6输入（5改变、qcom源保持），在 smmu-drain 之后准备；GPU父域和GMU域均在映射前调用新导出 `arm_smmu_enable_checked_unmap`。
+
+```sh
+python3 scripts/check-kgsl-smmu-walk.py --source PREPARED_SMMU_WALK --output FRESH_LPAE_CHECK
+python3 scripts/check-kgsl-gmu-drain.py --source PREPARED_SMMU_WALK --output FRESH_PROVIDER_CHECK
+```
+
+真实 ARM LPAE 撤销/递归释放/映射替换18场景，提供者32、GMU76、父域45场景和15编译后运行反例通过；两套准备器共18项。54补丁/109源复现，KGSL仅2源改变；91,246内核源核对，仅5源改变。完整内核 Image/486模块和3个IOMMU对象 -Werror通过，首编47条警告保留，最终增量零错误警告；KGSL60对象/3模块严格MODPOST零错误警告，489模块depmod无输出。
+证据 `xiaomi-sm8350-audit/checked-unmap-v83-audit.json`；LPAE以 `smmu-walk-v1/host-lpae-final` 为准，provider以 `host-provider-final2` 为准。内核最终哈希见 `native-kernel-v3/COMPILE-RECHECK-RESULT.json`。新的io-pgtable与SMMU结构布局必须使用整套重编消费者，版本字符串相同不代表可混装。
+主机页、DMA、MMIO/PM/锁为模型；整个domain/root销毁和安全停机/解绑未完成。无候选部署或原生KGSL/SDE实机验收，DDR/SQE与最终双机目标保持未完成。
+
+## 小米 KGSL v82：GMU checked drain 与导入撤销（2026-11-11）
+
+最终候选 `kgsl-618-v82-final`：53补丁/109源，配套 `native-kernel-v2`，source-linked-not-device-ready。新增提供者补丁由 `configs/kgsl-618-smmu-drain.json` 固定，在现有 v3 SMMU 补丁之后应用；普通 GMU 和 HWSCHED 退出实际调用新增导出 arm_smmu_flush_tlb_checked。
+22提供者、74GMU、47genpd/remove、43父域、17释放场景和13编译后运行反例通过；两套准备器共18检查。53补丁/109源独立复现，9源改变、100源保持。新内核完整 Image/486模块通过，两个SMMU对象 -Werror；KGSL60对象/3模块 -Werror/MODPOST无错误警告，489模块depmod无输出。
+内核首编45条驱动/WSL时钟警告、后续4条时钟警告均保留；最终增量复核无错误警告。91,245个既有源对照仅3源改变、1新头；新旧内核版本字符串相同但产物不同，必须整套配对，不能混装。证据 `gmu-drain-v82-audit.json`、`native-kernel-v2/COMPILE-RECHECK-RESULT.json` 与 `SOURCE-COMPARE.json`。
+主机MMIO/PM/锁及部分上层调用为模型，未证明实际硬件停机、内部页表释放、安全component/devres解绑或错误恢复。尚无部署；DDR、SQE、原生KGSL执行及SDE/eDP目标保持未完成。
+
+## 小米 KGSL v81：GMU 映射错误归属（2026-11-11）
+
+52补丁/109源，source-linked-not-device-ready。`check-kgsl-gmu.py` 提取真实 HWSCHED 分配/发布与共享内存释放函数，69场景；`check-kgsl-firmware.py` 含错误锁存后的加载拒绝，69场景（使用已捕获 A680 文件）。17释放、42 genpd/remove 回归、11编译后运行反例和9准备器通过。
+两个源改变、107源保持，独立准备109源一致；完整60对象/3模块 -Werror/MODPOST 零错误警告，489模块依赖检查通过。证据 gmu-map-retain-check-v81、gmu-map-firmware-v81、gmu-map-release-v81、gmu-map-genpd-v81、gmu-map-retain-negative-v81 和 gmu-map-retain-v81-audit.json。
+模型验证失败归属与拒绝释放，不证明实际DMA/IOMMU撤销、硬件退休或safe unbind。错误后恢复、成功导入的最终撤销、SQE边界、DDR校准及原生KGSL/SDE实机验收仍未完成；无部署/重启。
+
+## 小米 KGSL v80：GMU 全局撤销错误（2026-11-11）
+
+51补丁/109源，source-linked-not-device-ready。`check-kgsl-genpd.py` 新增提取真实 a6xx_free_gmu_globals，与 remove 串联执行，42场景；`check-kgsl-gmu.py` 的58分配/SG/QMP回归通过。10个编译后运行反例、9准备器、109源独立复现通过。
+完整60对象/3模块 -Werror/MODPOST 零错误警告，489模块depmod无输出；只改变GMU源，provider ABI保持。证据 gmu-unmap-check-v80、gmu-unmap-regression-v80、gmu-unmap-negative-v80 和 gmu-unmap-v80-audit.json。
+这是显式释放路径的字节数检查，不是硬件TLB/退休证明；映射错误隐式回滚、HWSCHED backing归属与外层解绑仍未闭合。无候选部署/重启，KGSL/SDE实机目标未完成。
+
+## 小米 KGSL v79：GMU VMA 实例归属（2026-11-11）
+
+50补丁/109源，source-linked-not-device-ready。`check-kgsl-firmware.py` 现在提取真实 VMA 初始化函数、两个 const 模板和 flags/结构定义，包含 probe 接线顺序及内嵌数组源码检查。最终67场景/14编译后运行反例通过，分别见 gmu-vma-check-v79-final 与 gmu-vma-negative-v79-final。
+只有 adreno_a6xx_gmu.c/.h 改变；内部结构布局变化，已完整重编60对象/3模块，-Werror/MODPOST零错误警告，489模块depmod、109源独立复现和9准备器通过。不可混用旧KGSL对象；provider ABI保持。
+初版短复制反例暴露夹具缺口，已修复并留下 INCOMPLETE.json。硬件、内核并发和完整probe未测试；部分撤销/解绑、DDR及KGSL/SDE实机验收未完成，未部署。详见 gmu-vma-v79-audit.json。
+
+## 小米 KGSL v78：GMU 固件边界与写入前验证（2026-11-11）
+
+49补丁/109源，source-linked-not-device-ready。新检查入口：
+
+```sh
+python3 scripts/check-kgsl-firmware.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK --firmware CAPTURED_A680_GMU.bin
+```
+
+省略 `--firmware` 运行合成边界场景；指定已捕获A680文件额外执行实际解析/载荷拷贝与分配失败重试。54场景、12最终运行反例、9准备器通过；DMA/MMIO与固件请求为模型。完整60对象/3模块 -Werror/MODPOST及489模块depmod通过，只有 adreno_a6xx_gmu.c 改变。
+证据为 firmware-bounds-check-v78、firmware-bounds-negative-v78-final、kgsl-618-v78 和 firmware-bounds-v78-audit.json。固件源字节只留 ignored out；无实机KGSL启动、部署或重启，剩余生命周期/DDR/执行/SDE验收未完成。
+
+## 小米 KGSL v77：现有 A680 固件路径（2026-11-11）
+
+第48项 `kgsl-xiaomi-618-native-firmware.patch` 仅修改 A680 的 GMU/SQE 文件名为现有 `qcom/a680_*`。109源独立准备一致，只有 adreno-gpulist.h 改变；实际完整60对象/3模块通过 -Werror/MODPOST，489模块依赖无错误，准备器9项通过。
+`firmware-target-v77/RESULT.json` 是现机文件边界/VMA/载荷布局的离线检查，非原生函数执行或硬件启动；没有新增名称专用模拟测试，也未重复无变化的 RPMh 检查。固件只在 ignored out 中保留，不进通用源码。
+仍 source-linked-not-device-ready：DDR 校准、固件加载/失败回收及真实执行未闭合，禁止将此构建当作可部署验收。构建命令/结果位于 kgsl-618-v77，汇总为 native-firmware-v77-audit.json。
+
+## 小米 KGSL v76：原生 CNOC 输入（2026-11-11）
+
+47补丁/109源，source-linked-not-device-ready。新增 `patches/kgsl-xiaomi-618-native-cnoc.patch`，来源固定在 `configs/kgsl-sc8180x-bandwidth-reference.json`；仅 RPMh 源改变，独立准备源码完全一致。
+`native-cnoc-check-v76/RESULT.json`：59 RPMh/18 DDR；`native-cnoc-negative-v76/RESULT.json`：9编译后运行反例；准备器9项通过。`kgsl-618-v76/COMPILE-COMMAND.json` 使用 native-kernel-v1 的实际头与符号，60对象/3模块 -Werror/MODPOST 零错误警告；`dependency-audit-v76/RESULT.json` 为489模块无缺失符号。
+CNOC 不再依赖缺失 DT 属性，但目标 OPP DDR 峰值仍未校准；不能部署。A680 revision0 来源与目标 revision1 的硬件差异、HFI 实际投票/提交与完整 SDE/eDP 验收未验证。详见 HANDOFF 与 native-cnoc-v76-audit.json。
+
+## SQ1原始GPU带宽参考提取（2026-11-11，KGSL候选仍v75）
+
+```sh
+python3 scripts/inspect-sq1-gpu-bandwidth-reference.py --dsdt PINNED_DSDT.dat --driver PINNED_qcdxkm8180.sys --output FRESH_IGNORED_OUT
+python3 -m unittest discover -s tests -p test_sq1_gpu_bandwidth_reference.py -v
+```
+
+需要现有`iasl`/`acpiexec`；固定原始SHA、ACPI校验和、Package数量/索引、原始AML实选值与Windows指令，输出仅为offline-reference-not-target-calibration。10项边界测试和两次独立语义提取通过，最终证据windows-bandwidth-check-v3及其repro；3条既有BAUD初始化错误原样保留，不称完整ACPI无错。
+不得将raw带宽当作已确认kBps，或将9档频率与11档带宽按行对应。尚无目标GPU带宽/CNOC校准，也无硬件HFI验证。本轮没有内核源变化，未重复编译内核或KGSL；v75原构建证据保持，不新增可部署产物。
+
+## 小米 KGSL v75：原生带宽输入与CNOC拓扑（2026-11-11）
+
+46补丁/109源，source-linked-not-device-ready。`check-kgsl-bus.py`新增实际OPP表helper与probe接线，99场景；`check-kgsl-rpmh.py`增加目标SH2元数据，51 RPMh/18 DDR场景；7编译后运行反例、9准备器、109源重复通过。
+`kgsl-618-v75/COMPILE-COMMAND.json`使用native-kernel-v1实际头和符号，完整60对象/3模块-Werror零错误警告；489模块depmod无输出。仅kgsl_bus.c/adreno_a6xx_rpmh.c改变，provider ABI保持。
+捕获DT没有GPU OPP峰值带宽或旧CNOC表，因此候选仍不能probe。合成带宽测试不等于实机校准/投票；不可部署。详见native-bandwidth-target-v75.json、native-bandwidth-v75-audit.json与HANDOFF。
+
+## 小米 KGSL v74：空闲重试与关机准入（2026-11-11）
+
+45补丁/109源，source-linked-not-device-ready。`check-kgsl-power-off.py`现在提取实际gmu_idle_check，84关机/PM/idle/恢复场景与10运行反例通过；另21硬重置和9准备器回归通过。最终host证据用idle-retry-check-v74-final及idle-retry-negative-v74-final。
+`kgsl-618-v74/COMPILE-COMMAND.json`使用匹配native-kernel-v1，60对象/3模块-Werror链接；首次完整构建有2条WSL时间偏移警告（COMPILE-INITIAL-RESULT.json/compile.log），最终增量复核零错误警告（COMPILE-RESULT.json/compile-recheck.log）。489模块depmod无输出，109源重复准备。
+只有adreno_a6xx_gmu.c改变，provider ABI保持。确定性交错/硬件/定时器仍为模型，未部署；根/回放/fatal恢复、安全解绑、原生执行与SDE/eDP未完成。详见idle-retry-v74-audit.json。
+
+## 小米 KGSL v73：正常休眠引用回收（2026-11-11）
+
+44补丁/109源，source-linked-not-device-ready。`check-kgsl-power-off.py`提取共享回收helper及普通/HWSCHED关机、PM、重启调用；63场景与8运行反例通过。21硬重置、30 switch、36默认根、47 dispatcher和9准备器回归通过。
+`kgsl-618-v73/COMPILE-COMMAND.json`使用匹配native-kernel-v1，60对象/3模块-Werror零错误警告；109源重复和489模块depmod通过。只改变GMU源和抢占helper注释，未变provider ABI。
+硬件停机/默认根/provider/CP与引用仍含模型；idle worker错误重排、其他恢复/页表/回放回收及safe unbind未闭合，不能部署。证据见slumber-retire-v73-audit.json；完整目标和SDE/eDP未完成。
+
+## 小米 KGSL v72：硬重置与switch引用回收（2026-11-11）
+
+43补丁/109源，source-linked-not-device-ready。新增及扩展检查：
+
+```sh
+python3 scripts/check-kgsl-hard-reset.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_RESET_CHECK
+python3 scripts/check-kgsl-context-switch.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_SWITCH_CHECK
+```
+
+21实际reset/record场景、30实际switch/event场景、12编译后运行反例；36默认根、47 dispatcher、47电源、55关机恢复、9准备器通过。实际record结构和内存写代码被执行，硬件ACK/provider/引用/锁仍为模型，不能等同实机退休证明。
+`kgsl-618-v72/COMPILE-COMMAND.json`使用匹配native-kernel-v1，完整60对象/3模块-Werror零错误/警告；109源重复和489模块depmod通过。provider ABI未改，未重复整内核构建。
+回收只接普通A6xx硬重置，正常PM/soft/HWSCHED/fatal恢复、页表及回放回收、safe unbind和SDE/eDP未完成，不能部署。详见HANDOFF和hard-reset-v72-audit.json。
+
+## 小米 KGSL v71：context切换引用归属（2026-11-11）
+
+42补丁/109源，source-linked-not-device-ready。新增检查入口：
+
+```sh
+python3 scripts/check-kgsl-context-switch.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_SWITCH_CHECK
+```
+
+23实际switch/set_pt/event/ringbuffer-init场景、10编译后运行反例；36默认根、16 fence、47 dispatcher及9准备器回归通过。模型包含立即/延迟/乱序callback，未验证内核并发或真实GPU退休；保留record的测试清理不是驱动回收。
+`kgsl-618-v71/COMPILE-COMMAND.json`使用native-kernel-v1实际头/符号，完整60对象/3模块-Werror零错误/警告；109源重复、489模块depmod无输出。ringbuffer内部布局改变，整个KGSL重编，provider ABI未变。
+未部署；取消/注册失败保留项仍需安全回收，真实退休/强制解绑/正常PM、原生提交和SDE/eDP未完成，见HANDOFF和context-switch-v71-audit.json。
+
+## 小米 KGSL v70：默认根恢复与context释放（2026-11-11）
+
+41补丁/109源，source-linked-not-device-ready。扩展既有检查入口：
+
+```sh
+python3 scripts/check-kgsl-default-root.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_RESET_CHECK
+```
+
+36实际恢复/reset/boot/context场景，9编译后运行反例；47 dispatcher、47电源回归与9准备器通过。硬件、PM回退、引用叶节点仍为模型，不证明GPU退休。
+`kgsl-618-v70/COMPILE-COMMAND.json`沿用native-kernel-v1实际头/符号，完整60对象/3模块-Werror零错误/警告；109源重复、489模块depmod无输出。未改provider ABI，不重复整内核构建。
+未部署；真实退休、保留对象回收、safe unbind、原生提交及SDE/Surface eDP未完成，详见HANDOFF和reset-context-v70-audit.json。
+
+## 小米 KGSL v69：普通dispatcher回放失败归属（2026-11-11）
+
+40补丁/109源，source-linked-not-device-ready。沿用并扩展既有检查入口：
+
+```sh
+python3 scripts/check-kgsl-dispatch.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_DISPATCH_CHECK
+python3 scripts/check-kgsl-power-callbacks.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_POWER_CHECK
+```
+
+47 dispatcher/replay/send/stop/wait、9运行反例、47电源/20发布回归、9准备器通过。模拟8槽而目标128槽；硬件/事件/锁/fault-policy叶节点为模型，未证明真实GPU退休或安全解绑。
+kgsl-618-v69/COMPILE-COMMAND.json使用native-kernel-v1实际头/符号表，完整60对象/3模块-Werror零错误/警告；40补丁/109源重复、489模块depmod干净。新增内部queue字段，整个KGSL已重编，provider ABI保持。
+错误保留数组暂不可安全回收，普通dispatcher回放ENOSPC亦锁存；强制close/devres/PM及原生提交/SDE/eDP未完成，不能部署。详见dispatcher-replay-v69-audit.json及HANDOFF。
+
+## 小米 KGSL v68：HWSCHED重启与重放归属（2026-11-11）
+
+39补丁/109源，source-linked-not-device-ready。新增检查：
+
+```sh
+python3 scripts/check-kgsl-hwsched-recovery.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_HWSCHED_CHECK
+```
+
+26实际函数场景、11编译后运行反例、16 fence/20发布回归及9准备器通过；硬件/事件/锁/引用为模型，不证明真实GPU退休。最终反例以hwsched-recovery-negative-v68/FINAL-RESULT.json为准。
+完整kgsl-618-v68/COMPILE-COMMAND.json沿用真实native-kernel-v1内核头和符号，60对象/3模块-Werror零错误/警告；489模块depmod干净，39补丁/109源可重复准备。只改变三个HWSCHED源/头，已整KGSL重编，内核/提供者ABI保持。
+当前仅修复重启状态和命令归属；正常dispatcher、SMMU退休、fatal-error恢复、PM/unbind、原生提交和SDE/eDP仍待完成，不能部署。完整边界见HANDOFF和hwsched-recovery-v68-audit.json。
+
+## 小米 KGSL v67：事件取消与每个fence的结果（2026-11-11）
+
+38补丁/109源，source-linked-not-device-ready。新增检查入口：
+
+```sh
+python3 scripts/check-kgsl-fence-result.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_FENCE_CHECK
+```
+
+16实际函数场景、8运行反例、20发布回归、9准备器及109源重复准备通过；模型不证明GPU退役/内核并发。38项补丁仍由prepare-kgsl-618.py按固定hash/no-fuzz应用。
+最终`kgsl-618-v67/COMPILE-COMMAND.json`沿用native-kernel-v1真实头/符号表。完整60对象/3模块-Werror链接，补齐TZ MODULE_DESCRIPTION后无编译器/MODPOST警告；首次完整构建的WSL时间戳警告保留于COMPILE-RESULT，随后COMPILE-FINAL-RESULT增量复核干净。489模块dependency-audit-v67无缺失符号。
+历史v64零警告说法有误：原日志中一条大写MODPOST WARNING被旧统计漏掉，保留历史产物不覆盖；当前parser大小写不敏感。v65/v66保留为中间候选。运行硬件保持B0m，实际退休/错误fence时机/HWSCHED/PM/SDE验收未完成，不能部署。
+
+## 小米 KGSL v64：映射发布与顶层IB生命周期（2026-11-11）
+
+37补丁/109源，source-linked-not-device-ready。新发布地址用release/acquire保护；两条提交路径为完成映射的顶层IB持有引用，命令销毁deferred put。
+
+```sh
+python3 scripts/check-kgsl-publication.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_PUBLICATION_CHECK
+python3 scripts/check-kgsl-entry-release.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_ENTRY_CHECK
+python3 scripts/check-kgsl-svm.py --source FRESH_KGSL/drivers/gpu/msm --kernel-source MATCHING_618_KERNEL --output FRESH_SVM_CHECK
+```
+
+20发布/IB场景含3个pthread阻塞map交错，8运行反例、20释放、39 SVM和9准备器通过。主机引用/IDR/MMU/worker为模型，不是弱内存litmus、硬件提交或退役证明。
+`xiaomi-sm8350-audit/kgsl-618-v64/COMPILE-COMMAND.json`完整-Werror构建60对象/3模块/零错误警告；109源重复、489模块depmod干净。KGSL内部结构变化已全模块重编，提供者/内核/两个governor保持v61产物。
+完整运行前仍须审计故障/强制清队列与真实GPU停止、嵌套IB/数据资源、根退休/回收、safe unbind和PM。详见publication-v64-audit.json及HANDOFF。
+
+## 小米 KGSL v63：SVM选择/实际mmap与失败回收（2026-11-11）
+
+36补丁/109源，仍source-linked-not-device-ready。仅kgsl.c改变；GPU绑定从地址选择移到实际mmap的最后可失败步骤，检查CPU插页、精确地址和实际对象重查。
+
+```sh
+python3 scripts/check-kgsl-svm.py --source FRESH_KGSL/drivers/gpu/msm --kernel-source MATCHING_618_KERNEL --output FRESH_SVM_CHECK
+python3 scripts/check-kgsl-entry-release.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_RELEASE_CHECK
+```
+
+39 SVM/核心包装场景、10运行反例、19释放/25模块接口回归、9准备器及109源重复准备通过。实际MMU/PTE/VMA/LSM叶节点为模型，不能替代并发ioctl、真实mmap/compat或GPU测试。
+`xiaomi-sm8350-audit/kgsl-618-v63/COMPILE-COMMAND.json`沿用native-kernel-v1真实头和符号表；完整-Werror通过，60对象/3模块/零错误警告。两个governor和内核产物保持v61，KGSL模块SHA见HANDOFF；489模块dependency-audit-v63无缺失符号。
+仍未闭合gpuaddr/map-ready发布、根退休、安全解绑、正常PM、DDR/CNOC及硬件执行，不能部署。源码/核心/测试/产物固定于svm-v63-audit.json。
+
+## 小米 KGSL v61：真实提供者全内核及三个模块链接（2026-11-11）
+
+35补丁/109源，当前source-linked-not-device-ready。第35补丁处理DMA_BUF导入、导出的MM/调度API、线程释放、格式和OF头。
+
+```sh
+python3 scripts/prepare-kgsl-618.py --config configs/kgsl-xiaomi-618-port.json --source PINNED_XIAOMI_DONOR --output FRESH_KGSL
+python3 scripts/check-kgsl-module-api.py --source FRESH_KGSL/drivers/gpu/msm --kernel-source MATCHING_618_KERNEL --output FRESH_MODULE_API_CHECK
+```
+
+25场景使用实际helper/callback及6.18外层mmap函数，线程/VMA/LSM为模型；8运行反例、9准备器及109源重复准备通过。v61被测函数与v60b完全一致后复用结果。
+
+独立内核在`out/kgsl-sde-port-20261110/native-kernel-v1`：从匹配6.18.60完整源复制，再按SOURCE.json的before/after/patch SHA无fuzz应用三个提供者补丁。新.config只改LOCALVERSION=-sq2-kgsl-dev1；91,245普通源文件只10提供者文件改变。使用记录的COMPILE-COMMAND.json执行Image和modules，成功得到486模块（含MSM）；最终结果以COMPILE-FINAL-RESULT.json为准。初次完整编译37个既有警告和WSL时间戳问题保留，最终增量复核无警告，未声称全内核-Werror。
+
+KGSL完整构建入口为`xiaomi-sm8350-audit/kgsl-618-v61/COMPILE-COMMAND.json`，用新内核真实头和符号表；不再强制包含临时提供者头。保留donor外部devfreq/governor.h和EXTERNAL-KCONFIG.json；源码以-Werror完整构建，得到msm_kgsl.ko及两个governor，60对象/零错误/警告。489模块含实际builtin/order清单的depmod -e -F System.map检查无输出。
+
+构建命令是JSON argv，重放可用Python `subprocess.run(json.load(open(COMMAND_JSON)), check=True)`，不要把转义的governor字符串再拼接为shell命令。旧v61/SOURCE.json的准备前状态字不代表最终链接结果；当前config/COMPILE-RESULT和审计为准。
+
+目前仅构建与主机模型证明：SVM验证/回滚、根退休、保留对象回收、safe unbind、正常SMMU PM与DDR/CNOC尚未闭合。禁止部署、热卸载或混装旧内核/MSM；完整镜像打包和实机/SQ1+SQ2验收仍未完成。详见HANDOFF v61。
+
+## 小米 KGSL v59：父域接入与首次MODPOST（2026-11-11）
+
+当前34补丁/109源。parent-domain补丁替换GPU SMMU父域/probe/global mapping入口，仍不可生成可部署模块。依赖SMMU provider-v3、SCM-DCVS-v1、clock-provider-v1；须整体重建内核及全部私有接口消费者。
+
+```sh
+python3 scripts/prepare-kgsl-618.py --config configs/kgsl-xiaomi-618-port.json --source PINNED_XIAOMI_DONOR --output FRESH_KGSL
+python3 scripts/check-kgsl-parent.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_PARENT_CHECK
+python3 scripts/check-kgsl-process-table.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_PROCESS_CHECK
+python3 scripts/check-kgsl-mmu-required.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_ACQUIRE_CHECK
+```
+
+41父域、39后端＋31映射调用、28获取、14反例、9准备器检查与109源重复准备通过。七对象严格命令/结果在 `kgsl-618-v59/PARENT-COMPILE-{COMMAND,RECHECK-RESULT}.json`。
+全量首次到MODPOST：56对象/0源码错误/15链接或namespace错误/3格式警告/无.ko。必须修复DMA_BUF导入、scheduler/VA内核接口并链接真实提供者；不能以MODPOST_WARN降级。
+当前SMMU PM按绑定寿命保持，已启动根保留无退休协议；主机模型不等于硬件隔离或PM通过，禁止部署。详细符号清单与证据见HANDOFF v59。
+
+## 小米 KGSL v56：进程表和默认根恢复（2026-11-11）
+
+当前33补丁/109源，仍partial-source-port-not-buildable；沿用SMMU provider-v3、SCM-DCVS-v1和clock-provider-v1，所有私有接口消费者须整体重建。
+
+```sh
+python3 scripts/prepare-kgsl-618.py --config configs/kgsl-xiaomi-618-port.json --source PINNED_XIAOMI_DONOR --output FRESH_KGSL
+python3 scripts/check-kgsl-process-table.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_PROCESS_CHECK
+python3 scripts/check-kgsl-default-root.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_RESTORE_CHECK
+```
+
+39后端＋23调用、18默认根/soft-reset、32 MMU回归、两组各7反例和9准备器检查通过；109源可重复准备。
+`kgsl-618-v56/DEFAULT-ROOT-COMPILE-COMMAND.json` 编译5对象-Werror，最终RECHECK-RESULT为零错误/警告。
+完整54对象/18错误/3警告，无MODPOST/.ko；原生父域/空TTBR0安装、GPU退休与安全解绑未完成，不能部署。主机PM/GPU模型不替代实机验证。
+
+## 小米 KGSL v53 / SMMU provider v3故障协议（2026-11-11）
+
+31补丁/109 KGSL源；provider现含3源，私有结构扩展须全量重编所有使用者。构建强制包含provider-v3头，不混用旧MSM模块。
+
+```sh
+python3 scripts/prepare-kgsl-smmu-provider.py --source MATCHING_618_KERNEL --output FRESH_PROVIDER
+python3 scripts/check-kgsl-smmu-fault.py --provider FRESH_PROVIDER --source FRESH_KGSL/drivers/gpu/msm --kernel MATCHING_618_KERNEL --output FRESH_CHECK
+```
+
+28实际fault/helper场景、8反例、29 dispatcher场景/1反例、31 provider回归及18准备器测试通过；109＋3源重复准备一致。
+`kgsl-618-v53/FAULT-COMPILE-COMMAND.json` 五个KGSL对象-Werror通过；`smmu-provider-v3/COMPILE-COMMAND.json` 完整提供者对象-Werror通过。
+完整仍54对象/25错误/3警告，无MODPOST/.ko；原生父域/进程页表未接入，不能部署。测试模拟MMIO/PM/IRQ时序，安全解绑与终止失败最终回收未完成。
+
+## 小米 KGSL v52 SCM接口（2026-11-11）
+
+30补丁/109源；使用已有匹配6.18 SCM实现，新增实际源码检查：
+
+```sh
+python3 scripts/check-kgsl-scm-api.py --source FRESH_KGSL/drivers/gpu/msm --kernel MATCHING_618_KERNEL --output FRESH_CHECK
+```
+
+256合法bank＋17边界/能力/重试/ZAP检查、5运行反例、47电源回调回归与9准备器检查通过；109源重复准备一致。
+`kgsl-618-v52/SCM-COMPILE-COMMAND.json` 强制重编A5xx完整对象-Werror通过；`COMPILE-RECHECK-RESULT.json` 整体仍54对象/29错误/3警告，无MODPOST/.ko。
+SCM头阻塞解除，实际IOMMU对象仍依赖旧domain/fault API，必须接入原生SMMU；此候选不可部署。新接口检查使用模拟firmware transport，不能证明目标固件调用成功。
+
+## 小米 KGSL v50 dispatcher恢复（2026-11-11）
+
+29补丁/109源；新增实际dispatcher及内部等待检查：
+
+```sh
+python3 scripts/check-kgsl-dispatch.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK
+```
+
+27 host场景/9运行反例、47电源回调回归和9准备器检查通过；109源重复准备一致，三源变化/106源保持。
+`kgsl-618-v50/DISPATCH-COMPILE-COMMAND.json` 对dispatcher/Adreno/GMU/RGMU/HWSCHED五对象-Werror通过。
+新增dispatcher字段须重编所有消费者，完整构建仍53对象/2错误/3警告，无MODPOST/.ko；IOMMU/A5xx旧SCM头仍阻断。
+msm_performance私有观察接口未移植；现有KGSL trace/帧统计/sysfs属性保留。reset/事件/重放的host模型不等于实际GPU退休；后续失败回收和SMMU/SDE尚缺，不可部署。
+
+## 小米 KGSL v47 电源回调错误链（2026-11-11）
+
+28补丁/109源；clock-provider-v1头及先前SMMU/SCM provider编译输入继续使用。新增检查：
+
+```sh
+python3 scripts/check-kgsl-power-callbacks.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK
+```
+
+47场景/7运行反例、27/33/52相关回归及9准备器检查通过；10源改变/99源保持，109源重复准备一致。
+`kgsl-618-v47/CALLBACK-COMPILE-COMMAND.json` 对五个对象强制-Werror重编通过，复核结果见 `CALLBACK-COMPILE-RECHECK-RESULT.json`。
+函数指针类型与pwrctrl字段改变须重编全部KGSL；整模块52对象/3错误/3警告，无MODPOST/.ko。A5xx新函数仅host测试，整对象仍受旧SCM头阻断。
+transition_error无恢复/清除协议；通用dispatcher故障退休/BUG、原生BW/SMMU/固件及SDE/eDP尚未完成，不可部署。
+
+## 原生时钟保持提供者 / KGSL v46（2026-11-11）
+
+```sh
+python3 scripts/prepare-kgsl-smmu-provider.py --source MATCHING_618_KERNEL --output FRESH_CLOCK_PROVIDER --config configs/kgsl-618-clock-retention.json
+python3 scripts/check-kgsl-clock-retention.py --source FRESH_CLOCK_PROVIDER --output FRESH_CHECK
+```
+
+27提供者host场景/6运行反例、9准备器检查、clk-branch/clk-regmap两个-Werror对象通过；四源可重复准备。
+共享准备器现在支持before:null新文件，拒绝覆盖/越界；已有SMMU/SCM使用方式保持。提供者须进完整内核clk-qcom构建，原匹配内核未写入。
+v46 KGSL编译沿用27补丁/109源并添加 `-I FRESH_CLOCK_PROVIDER/include`，A3xx.o -Werror通过；完整仍51对象/5错误/4警告，无MODPOST/.ko。
+旧void保持回调及SPTPRAC关闭类型/错误链未修复；不得热替换活动时钟提供者或称本候选可部署。详细命令与哈希见HANDOFF。
+
+## 小米 KGSL v45 时钟归属（2026-11-11）
+
+小米配置27补丁/109源。检查实际原生初始化及旧路径行为：
+
+```sh
+python3 scripts/check-kgsl-clock-owner.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK
+```
+
+27 host场景/5运行反例、9准备器检查通过；`kgsl-618-v45/CLOCK-COMPILE-COMMAND.json` 对kgsl_pwrctrl.o强制-Werror成功。
+整体50对象/5错误/3警告，无MODPOST/.ko；109源重复准备相同。GPU init不再重复获取/设置GMU管理的资源，目标OPP保持原值。
+clock/DT/PM供应者仅模拟，原生带宽/SMMU/固件和实际运行尚缺，不可部署；v44为未完成警告修正的中间快照。
+
+## 小米 KGSL v43 原生GPU OPP（2026-11-11）
+
+小米配置26补丁/109源；使用目标DT与cmd-db原始数据验证OPP→ARC→HFI：
+
+```sh
+python3 scripts/check-kgsl-gpu-opp.py --source FRESH_KGSL/drivers/gpu/msm --dtb CAPTURED_TARGET_DTB --cmd-db-dump TARGET_CMD_DB_DUMP --output FRESH_CHECK
+```
+
+本轮输入为audit/bandwidth-target/effective.dtb与audit/rpmh-target/cmd-db-private-mount.txt。
+25场景/8运行反例、28 DT回归及9准备器检查通过；adreno.o -Werror成功，五项OPP符号对应实际symvers导出。
+整体50对象/5错误/14警告，无MODPOST/.ko；109源重复准备一致。频率/电压已读原生表，bus index未构建、validator会拒绝，不能部署。
+
+## 小米 KGSL v42 DT引用与早期清理（2026-11-11）
+
+小米配置25补丁/109源；新增检查：
+
+```sh
+python3 scripts/check-kgsl-dt-ownership.py --source FRESH_KGSL/drivers/gpu/msm --kernel-source MATCHED_618_KERNEL --output FRESH_CHECK
+```
+
+28 host场景/6运行反例、9准备器检查通过；早期probe仅测试前缀与公共错误块，范围见HANDOFF。
+`kgsl-618-v42/DT-COMPILE-COMMAND.json`强制-Werror编译adreno.o成功、零警告；整体50对象/5错误/14警告，无MODPOST/.ko。
+109源重复准备一致；未做目标probe/IRQ/供电或运行时验证，候选不可部署。
+
+## 小米 KGSL v41 原生GPU probe接线（2026-11-11）
+
+小米配置24补丁/109源。身份/IRQ/组件状态与实际6.18驱动注册回滚检查：
+
+```sh
+python3 scripts/check-kgsl-gpu-probe.py --source FRESH_KGSL/drivers/gpu/msm --kernel-source MATCHED_618_KERNEL --dtb CAPTURED_TARGET_DTB --output FRESH_CHECK
+```
+
+27场景/9运行反例、9准备器检查通过；`kgsl-618-v41/PROBE-COMPILE-COMMAND.json`三个对象强制-Werror退出0、零警告。
+新增gmu_core_device字段必须重编全部消费者，本候选全量重编仍50对象/5错误/14警告，无MODPOST/.ko。
+109源可重复准备，platform注册API与现有symvers导出匹配；不代表完整probe/硬件IRQ或运行退出通过，当前不可部署。
+
+## 小米 KGSL v40 GMU资源与IRQ（2026-11-11）
+
+小米配置23补丁/109源。新资源检查从捕获DTB读取范围并抽取实际候选函数：
+
+```sh
+python3 scripts/check-kgsl-gmu-resources.py --source FRESH_KGSL/drivers/gpu/msm --dtb CAPTURED_TARGET_DTB --output FRESH_CHECK
+```
+
+本轮DTB为audit/bandwidth-target/effective.dtb；36场景/8运行反例、9准备器检查通过。
+`kgsl-618-v40/RESOURCES-COMPILE-COMMAND.json`强制-Werror编译adreno/GMU/HWSCHED HFI/GMU core四对象，退出0、零警告。
+整体仍50对象/5错误/14警告，无MODPOST/.ko。109源重复prepare一致；资源/API测试不证明IRQ/固件/目标probe或运行中解绑，当前不可部署。
+
+## 小米 KGSL v39 原生GMU genpd（2026-11-11）
+
+小米配置现22补丁/109源，genpd补丁要求PM与PM_GENERIC_DOMAINS；匹配内核实际均为y。
+`python3 scripts/check-kgsl-genpd.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK`执行34原生域所有权场景。
+v39同时通过33 reset/52 power-off/53 bootstrap/36 OPP相关检查、8运行反例和9准备器检查。
+真实严格编译命令在kgsl-618-v39/GENPD-COMPILE-COMMAND.json，GMU/HWSCHED两对象退出0、零警告，PM调用与现有symvers导出已核对。
+整体仍50对象/5错误/14警告，无MODPOST/.ko；v38未请求votable CX同步关闭，已由v39替代。
+109源hash可重复准备，目标执行、共享域协调与外层解绑/错误资源回收仍缺，不可部署或热卸载。
+
+## 小米 KGSL v37 硬复位错误（2026-11-11）
+
+小米prepare配置现21补丁/109源。新reset-errors补丁将底层SPTPRAC、GMU reset和CX关闭结果传递到启动/关闭/重启调用方。
+`python3 scripts/check-kgsl-reset.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK`执行33底层实际函数场景。
+power-off检查现52场景，bootstrap现53场景；7运行断言反例与9准备器检查通过，证据位置见HANDOFF。
+`kgsl-618-v37/RESET-COMPILE-COMMAND.json`强制-Werror编译GMU/HWSCHED对象，退出0、零警告。
+整体仍50对象/5错误/14警告，无MODPOST/.ko；adreno_a6xx.c的CX helper只有host证据，完整对象仍被旧clock头阻断。
+109源可重复prepare，目标genpd/真实硬件关闭和恢复仍未完成，不可部署。
+
+## 小米 KGSL v36 关闭错误链（2026-11-11）
+
+小米配置现20补丁/109源。新增power-off-errors修复有返回值的关闭错误到上层PM/调度恢复的传递，并阻止错误后继续运行。
+`python3 scripts/check-kgsl-power-off.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK`执行48个实际函数host场景。
+结果为audit/power-off-check-v36-b，5组反例见power-off-negative-v36；MMIO/供电/硬复位模拟，不能证明物理断电。
+GMU/HWSCHED/调度对象强制-Werror命令在kgsl-618-v36/POWER-COMPILE-COMMAND.json，退出0、零警告。
+整模块仍50对象/5错误/14警告，无MODPOST/.ko；更改结构字段后全候选对象已重新构建，不能复用旧KGSL对象。
+准备器9项检查及重新生成109源hash一致通过；实际genpd绑定、底层void错误接口及故障恢复仍未完成，不可部署。
+
+## 小米 KGSL v35 GMU时钟/OPP/HFI（2026-11-11）
+
+小米配置现19补丁/109源，gmu-opp补丁选择PM_OPP并读取目标GMU OPP表。
+实际函数检查使用匹配source以及此前只读取得的cmd-db原始记录：
+
+```sh
+python3 scripts/check-kgsl-gmu-opp.py --source FRESH_KGSL/drivers/gpu/msm --cmd-db-dump TARGET_CMD_DB_DUMP --output FRESH_CHECK
+```
+
+本次dump为audit/rpmh-target/cmd-db-private-mount.txt，最终36场景结果为gmu-opp-check-v35-final；时钟、OPP API和固件仍模拟。
+三个对象的真实强制-Werror命令见kgsl-618-v35/GMU-OPP-COMPILE-COMMAND.json，退出0、零警告。
+完整构建仍50对象/5错误/14警告，无MODPOST/.ko；不能部署。重新prepare的109源hash与v35完全一致。
+51 RPMh/18 DDR/49 bootstrap/58 GMU相关回归、5运行反例和9准备器检查通过。
+尚未把手机regulator资源替换为cx/gx genpd，不能把OPP接入称为GMU启动/PM硬件验证；其余缺口见HANDOFF。
+
+## 小米 KGSL v34 ZAP/MDT适配（2026-11-11）
+
+小米prepare配置现18补丁/109源；新的ZAP依赖由Kconfig选择QCOM_SCM与QCOM_MDT_LOADER，移除下游SSR依赖。
+`python3 scripts/check-kgsl-zap.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK`验证29个真实函数host场景。
+v34/COMPILE-COMMAND.json沿用两项provider头，并增加缺失KGSL Kconfig符号的donor默认编译宏；来源/限制见EXTERNAL-KCONFIG.json。
+完整内核集成时必须改用实际Kconfig/autoconf；timeout100000只是外置编译默认，尚非验证后的目标值。
+adreno.o匹配ARM64 -Werror通过（ADRENO-COMPILE-RECHECK.json零警告）；整体50对象/5错误/14警告、无MODPOST/.ko。
+SCM=y/MDT_LOADER=m的依赖必须成套发布；当前不可部署，ZAP认证/成功PAS生命周期及真实KGSL切换尚未硬件验证。
+
+## 小米 KGSL v31 SCM DCVS接口（2026-11-11）
+
+小米配置现17补丁/109源；另需SCM provider与已有SMMU provider都应用到匹配6.18内核。
+准备器保留原SMMU默认行为，新增显式provider配置：
+
+```sh
+python3 scripts/prepare-kgsl-smmu-provider.py --config configs/kgsl-618-scm-dcvs.json --source MATCHED_618_KERNEL --output FRESH_SCM
+python3 scripts/check-kgsl-dcvs.py --provider FRESH_SCM --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK
+python3 -m unittest tests.test_kgsl_618 tests.test_kgsl_provider -v
+```
+
+当前源码对象验证通过forced-include固定SCM公共头与SMMU私有头；准确命令在v31/COMPILE-COMMAND.json和
+scm-dcvs-v1/COMPILE-COMMAND.json。发布必须完整重建provider和Image/Module.symvers，不能只复制头或复用旧symvers伪造导出。
+v31 governor与独立qcom_scm对象-Werror通过，符号配对已核对；整体49对象/6错误/14警告、无MODPOST/.ko，不可部署。
+provider与governor的60 host场景只检查软件契约，实机SCM v2/CA能力、固件响应与PM仍需验证。
+
+## 小米 KGSL v29 失败映射归属（2026-11-11）
+
+小米prepare配置现16补丁/109源。匹配内核/provider头和外置devfreq头规则不变。
+check-kgsl-dmabuf.py的xiaomi模式现在抽取真实guard分配/映射函数；check-kgsl-release.py覆盖map到free拒绝；
+check-kgsl-entry-release.py新增SVM路径。接口依赖及页表硬件在host夹具中模拟，不是运行时隔离/硬件TLB证明。
+v29/RETENTION-COMPILE-*对kgsl.o、kgsl_mmu.o、kgsl_sharedmem.o使用-Werror通过。
+整模块48对象/7错误/14警告，无MODPOST/.ko；kgsl_iommu.o仍缺SCM旧头，不能部署。
+不确定映射保守保留且无回收，全局退出/原生后端和完整KGSL＋SDE验收保持未完成。
+
+## 小米 KGSL v28 上层失败对象保留（2026-11-11）
+
+prepare配置现15补丁/109源；匹配内核与provider头规则保持，新增结构字段要求所有KGSL对象重编。
+`python3 scripts/check-kgsl-entry-release.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK`执行14 host场景。
+v28/ENTRY-COMPILE-*是kgsl.o的-Werror成功证据；完整COMPILE-*仍48对象/7错误/14警告，无MODPOST/.ko。
+retained_memory仅debugfs只读检查，不提供unsafe强制free。当前缺退休后的回收、global/解绑与失败map回滚归属，不可部署。
+
+## 小米 KGSL v27 释放错误契约（2026-11-11）
+
+小米prepare现14补丁/109源；匹配内核/provider头规则保持。
+检查：`python3 scripts/check-kgsl-release.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK`。
+11 host场景/3反例仅覆盖底层释放，上层owner尚未接收错误；候选不可部署。
+v27/RELEASE-COMPILE-*为MMU/sharedmem的-Werror通过；整模块48对象/7错误/14警告，无MODPOST/.ko。
+
+## 小米 KGSL v26 SMMU私有接口布局（2026-11-11）
+
+小米prepare配置现13补丁/109源。kgsl_device以adreno_smmu_priv为首字段并编译期断言offset0；
+必须用provider v2头重新编译全部KGSL对象，不能混用旧结构偏移。SMMU及其全部消费者也仍需配对重建。
+v26/COMPILE-*：48对象/7错误/14警告，无MODPOST/.ko；LAYOUT-COMPILE-*：MMU/table强制-Werror通过。
+原生attach、默认root、process后端、fault和退出尚未接线，不可部署；现有准备/外置devfreq头规则保持。
+
+## 小米 KGSL v25 快照API适配（2026-11-11）
+
+小米准备config现含12补丁；prepare-kgsl-618.py入口及匹配内核devfreq头复制规则保持。
+快照源码使用6.18时间、字符串、panic notifier和const sysfs回调API；OEM msm_minidump通道未移植。
+v25/COMPILE-COMMAND.json为48对象/7错误/14警告，无MODPOST/.ko；SNAPSHOT-COMPILE-COMMAND.json单对象-Werror退出0。
+原生SMMU生命周期、SCM/ZAP、时钟provider与PM错误传播、SDE/eDP仍未完成；不可部署，无硬件快照或panic后提取证明。
+
+## 小米 KGSL v21 必需 MMU 与错误传播检查（2026-11-11）
+
+准备命令仍用小米config，当前11补丁/109源；独立SMMU provider v2仍须成对重建消费者。
+
+```sh
+python3 scripts/prepare-kgsl-618.py --config configs/kgsl-xiaomi-618-port.json --source VERIFIED_XIAOMI_KERNEL --output FRESH_KGSL
+python3 scripts/check-kgsl-mmu-required.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_CHECK
+python3 -m unittest tests.test_kgsl_618 -v
+```
+
+外置模块编译还需把**匹配6.18源**的drivers/devfreq/governor.h复制到FRESH_KGSL/drivers/devfreq/governor.h，
+不要复制手机内核该头。v21的BUILD-INPUTS.json记录实际来源/SHA/config/symvers；编译参数见COMPILE-COMMAND.json。
+32场景和5组旧行为反例为host-only；kgsl_mmu.o的-Werror通过不代表kgsl_iommu.c或完整模块通过。
+完整模块仍47对象/8项旧接口头错误、无MODPOST/.ko；后端接线和硬件验证未完成，不可部署。
+
+## 小米 KGSL v20 原生页表后端与 SMMU provider v2（2026-11-11）
+
+当前10项donor补丁准备109份源，另需独立6.18 SMMU provider补丁。旧KGSL调用链尚未切换，以下仅源码候选和局部检查。
+
+```sh
+python3 scripts/prepare-kgsl-smmu-provider.py --source MATCHED_618_KERNEL --output FRESH_PROVIDER
+python3 scripts/check-kgsl-smmu-provider.py --source FRESH_PROVIDER --kernel-source MATCHED_618_KERNEL --output FRESH_PROVIDER_CHECK
+python3 scripts/prepare-kgsl-618.py --config configs/kgsl-xiaomi-618-port.json --source VERIFIED_XIAOMI_KERNEL --output FRESH_KGSL
+python3 scripts/check-kgsl-pagetable.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_TABLE_CHECK
+python3 -m unittest tests.test_kgsl_618 -v
+```
+
+provider v2含真实bank/ASID、reset_ttbr0和返回错误的flush_tlb。31 provider＋39后端主机场景通过；
+io-pgtable实际分配/页表遍历、PM和MMIO在夹具中被替换，不是硬件隔离/真实提交验证。
+后端整个源及头进入测试；处理物理SG、部分map成功/回滚、4K guard、mutex、PM/kref及TLB失败后的拒绝释放。
+调用方仍须实现异常buffer的持续归属与恢复后回收；当前旧kgsl_iommu.c未接后端，不可部署。
+
+精确构建命令/完整配置与Module.symvers hash见`out/kgsl-sde-port-20261110/xiaomi-sm8350-audit/kgsl-618-v20/COMPILE-*.json`。
+编译需新provider私有头（本次对象检查forced-include它），实际发布须在独立内核树应用补丁并重建Image及全部消费者，不能只替换头或.o。
+provider和native table两个对象-Werror通过；完整KGSL仍47个.o、8错误/14警告、退出2，无MODPOST/.ko。
+准备器的新文件before=null表示必须不存在，之后校验固定after hash，已覆盖新增文件、覆盖拒绝、路径逃逸及原有输入保护。
+原106源逐字未改，本轮没有重复全部历史子系统测试；实际结果和待接入生命周期见HANDOFF最新节。
+
+## KGSL 的主线 SMMU provider 前置补丁（2026-11-11）
+
+此补丁针对匹配Linux6.18源码，独立于小米5.4 donor补丁链；目前只完成provider，不能部署。
+
+```sh
+python3 scripts/prepare-kgsl-smmu-provider.py --source MATCHED_618_KERNEL --output FRESH_PROVIDER
+python3 scripts/check-kgsl-smmu-provider.py --source FRESH_PROVIDER --kernel-source MATCHED_618_KERNEL --output FRESH_PROVIDER_CHECK
+```
+
+准备器核对`configs/kgsl-618-smmu-provider.json`的输入/补丁/输出hash，不改原内核源。
+检查抽取真实provider函数及匹配内核TCR转换/寄存器常量，28个ASan/UBSan场景仅验证PM/缓存/寄存器调用/超时契约。
+真实页表遍历、DMA可见性、GPU静止、并发和硬件TLB完成均不由夹具证明。
+独立ARM64对象编译命令与全部输入hash见`out/kgsl-sde-port-20261110/smmu-provider-v1/COMPILE-*.json`，
+该检查只验证真实内核头/API可编译，没有MODPOST、全内核链接或KGSL模块。
+后续完整构建必须先在独立6.18树应用此补丁，成对重建Image和所有使用`adreno-smmu-priv.h`的消费者，
+包括回退若复用此Image时的MSM；私有结构体大小已变，禁止只替换provider与旧模块混用。
+KGSL调用方、DT/资源和页表生命周期尚待接入，当前小米候选仍为下方v17。
+
+## 小米 KGSL v17 首次启动带宽检查（2026-11-11）
+
+当前小米配置固定9项补丁，准备入口保持`prepare-kgsl-618.py --config configs/kgsl-xiaomi-618-port.json`。
+
+```sh
+python3 scripts/check-kgsl-bootstrap.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_BOOTSTRAP_CHECK
+python3 scripts/check-kgsl-bus.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_BUS_CHECK
+python3 scripts/check-kgsl-icc.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_ICC_CHECK
+```
+
+bootstrap checker提取实际first_boot和ICC helper，49场景ASan/UBSan；bus/ICC为80/39场景。
+ICC直接请求、状态缓存与启动下限在真实helper中，reset/clock/HFI/provider由夹具替换，仅验证控制流和错误处理。
+provider返回错误后不相信旧缓存，允许同值重试；主机反例不是实际DDR/固件或完整PM验收。
+具体v17来源、6组反例、复用依赖验证及匹配Kbuild命令见HANDOFF；107源码、9补丁pins保持。
+
+真实构建仍退出2、46个.o、8错误/14警告、无MODPOST/.ko。目标OPP/DDR/CNOC表、低层PM错误传播与
+每进程SMMU/SCM/clock尚未完成，不部署、不切发布pins；以下v15/v12仅为历史阶段。
+
+## 小米 KGSL v15 带宽与调用方检查（2026-11-11）
+
+当前小米配置固定8项补丁，仍为partial-source-port-not-buildable；准备命令保持原入口：
+
+```sh
+python3 scripts/prepare-kgsl-618.py --config configs/kgsl-xiaomi-618-port.json --source VERIFIED_XIAOMI_KERNEL --output FRESH_KGSL
+python3 scripts/check-kgsl-bus.py --source FRESH_KGSL/drivers/gpu/msm --output FRESH_BUS_CHECK
+```
+
+新检查提取实际bus初始化/验证/计算、AXI、busmon和三个setter，gcc+ASan/UBSan覆盖80场景，
+包含真实setter的GMU成功/ICC失败/重试与撤销；外部provider、锁和DT table getter仍为注入依赖。
+有效DT及donor QoS语义的证据见HANDOFF最新节；没有目标带宽值时不生成虚构OPP/DDR/CNOC表。
+源采用必需gfx-mem ICC，移除目标不存在的phone-only AOP perfmode dummy devfreq发现和字段。
+
+真实候选`out/kgsl-sde-port-20261110/xiaomi-sm8350-audit/kgsl-618-v15`固定107源码及完整编译命令。
+严格Kbuild退出2，46个.o、8错误/14警告，无MODPOST/.ko；bus/pwrctrl/pwrscale自身通过不代表整个驱动可用。
+未改标准发布入口或部署设备。以下v12等章节保留历史，不是当前补丁数量/候选状态。
+
+## 小米 KGSL v12 RPMh/DDR 检查（2026-11-11）
+
+当前固定配置共7项补丁，仍用`prepare-kgsl-618.py --config configs/kgsl-xiaomi-618-port.json`生成新目录。
+新增源函数检查需要匹配内核与一次只读cmd-db文本；该次实际输入位置见HANDOFF，不读取SSH凭据：
+
+```sh
+python3 scripts/check-kgsl-rpmh.py --source FRESH_XIAOMI_KGSL/drivers/gpu/msm   --kernel-source MATCHED_618_SOURCE --cmd-db-dump OWN_CMD_DB_DUMP --output FRESH_RPMH_CHECK
+```
+
+该checker提取真实RPMh/DDR函数、相关结构/宏及6.18 BCM命令编码，输出只在out保存的目标fixture。
+51 RPMh＋18 DDR场景检查目标元数据转换和失败路径；手算向量对应本次SC8180X捕获，其他输入需重新核对数值，
+这不是产品设备白名单，也不验证真正发给固件后的行为。原生GPU/SDE/性能/PM验证仍未完成。
+目标暂只接入A680/SC8180X BCM拓扑；必须从目标固件读取地址/unit，不复制手机配置或固定采集值。
+需要显式DDR/CNOC带宽表，CNOC为两个off/on级别；有效OPP/ICC/DT接线尚未完成，不能部署。
+
+真实v12构建45个.o、12错误/14警告、退出2；RPMh和kgsl.c通过，整模块无MODPOST/.ko。
+命令/日志在`out/kgsl-sde-port-20261110/xiaomi-sm8350-audit/kgsl-618-v12/`；保留严格符号策略。
+剩余devfreq QoS、SMMU/SCM、时钟、ZAP和下游诊断接口仍待适配；原有10项prepare/heap单测及回归通过。
+
+## 小米 KGSL v10 GMU/QMP 检查（2026-11-11）
+
+沿用下方固定donor与`prepare-kgsl-618.py --config configs/kgsl-xiaomi-618-port.json`，当前6项有序补丁。
+新增检查入口抽取实际GMU分配、SG映射、域初始化、QMP发送/切换函数：
+
+```sh
+python3 scripts/check-kgsl-gmu.py --source FRESH_XIAOMI_KGSL/drivers/gpu/msm --output FRESH_GMU_CHECK
+```
+
+58个主机场景验证物理SG、DMA handle与PA不相等、errno/短映射、VMA边界、延后发布、分配清理、
+secure拒绝、identity-domain前提/attach失败，以及QMP状态/错误；不是硬件cache/PM或GPU completion验证。
+使用现有ASan/UBSan编译，记录抽取函数/源/harness SHA。三组反例见HANDOFF。
+最新严格Kbuild命令/日志在`out/kgsl-sde-port-20261110/xiaomi-sm8350-audit/kgsl-618-v10/`，
+43个.o、15错误/14警告、退出2、无MODPOST/.ko；GMU与HWSCHED HFI自身编译无诊断。
+GMU运行还需实际qcom,adreno-gmu绑定、identity默认DMA域、目标资源与QMP phandle（若启用ACD），
+不得用手机DT或强制set_dma_ops替代这些接口。GPU每进程SMMU、DDR/devfreq/SCM/clock等仍未完成。
+旧v6/v9记录是历史/复用主机证据，不是当前可部署版本。现机B0m与发布pins保持。
+
+## 小米 KGSL v6 内存、MM、fence 主机验证（2026-11-10）
+
+固定源码与现有准备命令保持；小米配置现含ICC、DMA-BUF、核心API、MM四项有序补丁。
+`--variant xiaomi`使用该候选实际函数，额外需要匹配6.18源码提取真实fence初始化/比较实现：
+
+```sh
+python3 scripts/prepare-kgsl-618.py --source XIAOMI_DONOR_KERNEL --output FRESH_XIAOMI_KGSL \
+  --config configs/kgsl-xiaomi-618-port.json
+python3 scripts/check-kgsl-dmabuf.py --source FRESH_XIAOMI_KGSL/drivers/gpu/msm/kgsl.c \
+  --variant xiaomi --kernel-source MATCHED_618_SOURCE --output FRESH_MEMORY_CHECK
+python3 scripts/check-kgsl-icc.py --source FRESH_XIAOMI_KGSL/drivers/gpu/msm --output FRESH_ICC_CHECK
+python3 -m unittest tests.test_kgsl_618 tests.test_system_uncached_heap -v
+```
+
+当前176个内存/MM/软件fence场景通过；匹配内核fence文件和抽取函数SHA写入RESULT.json。
+主机mock覆盖错误传播、引用、范围拒绝和状态顺序，不模拟硬件cache、真实SMMU或GPU/显示completion。
+默认Oculus模式保持90＋42检查，不要求kernel-source参数。未知exporter/部分范围仍未实现，准确返回EOPNOTSUPP。
+
+v6实际构建命令在 `out/kgsl-sde-port-20261110/xiaomi-sm8350-audit/kgsl-618-v6/COMPILE-COMMAND.json`。
+除了严格 `KBUILD_MODPOST_WARN=`，增加 `-Werror=int-conversion`，避免旧fence调用签名只警告却生成错误.o。
+当前41个.o不等于完整编译：仍17错误/19警告、退出2、未到MODPOST，不能打包部署。
+后续必须处理DDR/QoS、SMMU/SCM/QMP/GMU、QCOM clock、ZAP及诊断接口真实替代，并清理剩余警告。
+
+## 小米 SM8350 KGSL 并列候选（2026-11-10）
+
+原显示参考的同一提交 `7ede20c8692e0e0fc044754429e33cfd1d75c40d` 为Linux5.4.302，
+完整归档URL/SHA/大小及426份相关源码hash见 `configs/kgsl-xiaomi-source-inputs.json`。
+对已解压的固定完整源码目录，使用现有准备器选择独立配置；不修改默认Oculus候选或发布pins：
+
+```sh
+python3 scripts/prepare-kgsl-618.py --source XIAOMI_DONOR_KERNEL --output FRESH_XIAOMI_KGSL \
+  --config configs/kgsl-xiaomi-618-port.json
+python3 scripts/check-kgsl-icc.py --source FRESH_XIAOMI_KGSL/drivers/gpu/msm --output FRESH_ICC_CHECK
+```
+
+准备器校验107份KGSL/UAPI及ICC补丁前后SHA；原donor不修改，不复制旧core头或编译产物。
+ICC检查抽取三个实际bus setter，ASan/UBSan测试39个失败/重试/状态/单位场景；原版反例必须失败。
+该检查只验证局部运行时投票控制流，不能替代目标ICC/GMU、启动清理或上层错误处理验证。
+完整原版和修正候选Kbuild命令分别保存于 `out/kgsl-sde-port-20261110/xiaomi-sm8350-audit/`
+`compile-pristine/COMPILE-COMMAND.json`、`kgsl-618-v1/COMPILE-COMMAND.json`。
+相对包含依赖使用匹配6.18源的 `drivers/devfreq/governor.h`（hash记录），严格MODPOST策略保持。
+两次均编译退出2，尚无模块；ION/SMMU/SCM/devfreq/timer/fence/shrinker等仍须移植。
+ARM64 ioctl和结构布局比较证据为同目录 `IOCTL-ABI.json`、`UAPI-LAYOUT.json`，不等于UMD运行通过。
+
+Oculus候选现有三项补丁：import、SG、cache；以下默认准备/检查命令保持。
+v3实际90导入/生命周期/SG＋42cache场景通过。cache仅支持固定system/WC完整缓冲，未知exporter及部分范围
+EOPNOTSUPP；仍须实现真实范围同步和通用属性契约。新测试入口不能当作完整KGSL构建入口。
+
+## KGSL 6.18 源码适配与主机失败注入（2026-11-10）
+
+以下仅准备/验证原生源码适配，尚无可运行的完整KGSL模块；不部署或修改发布pins。
+先按下节完整donor准备命令得到 `oculus-linux-kernel-6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc`：
+
+```sh
+python3 scripts/prepare-kgsl-618.py --source VERIFIED_DONOR_KERNEL --output FRESH_KGSL
+python3 scripts/check-kgsl-dmabuf.py --source FRESH_KGSL/drivers/gpu/msm/kgsl.c --output FRESH_HOST_CHECK
+python3 -m unittest tests.test_kgsl_618 tests.test_system_uncached_heap -v
+```
+
+`configs/kgsl-618-port.json`固定有序补丁及输入/输出SHA；只复制清单内KGSL和UAPI104文件。
+检查程序抽取实际函数，以gcc+ASan/UBSan验证导入失败清理、发布/引用、映射存活保护、
+物理SG合并和部分映射回滚。mock通过不是真实DMA/cache/IOMMU/fence验收。
+
+本批实际6.18编译尝试命令及失败清单在ignored
+`out/kgsl-sde-port-20261110/kgsl-618-v3/COMPILE-COMMAND.json`、`COMPILE-RESULT.json`、`compile.log`。
+以匹配6.18完整config/Module.symvers和ARM64工具链执行external-module Kbuild，启用KGSL/IOMMU和配套governor，
+严格 `KBUILD_MODPOST_WARN=`；MSM bus/devfreq/SCM等接口尚未适配（v3已移除旧ION头依赖），编译退出2，未进入MODPOST。
+不得将此源码准备入口或主机检查称为完整KGSL/SDE构建成功。禁止忽略未解析符号或安装4.19模块。
+
+## KGSL/SDE 独立共享内存候选（2026-11-10）
+
+此入口仅构建B0m内存阶段，不声称构建了KGSL或SDE。使用当前6.18匹配build的config/Module.symvers；
+完整源由 `configs/kgsl-sde-source-inputs.json` 固定，原4.19源只作移植输入。
+
+```sh
+# 先按 configs/kgsl-sde-source-inputs.json 的 archive_url 下载完整公开归档。
+python3 scripts/prepare-kgsl-sde-source.py --archive PINNED_ARCHIVE --output FRESH_DONOR
+python3 scripts/build-system-uncached-heap.py --kernel-build MATCHED_618_BUILD \
+  --cc ANDROID_NDK_CLANG --output FRESH_MEMORY_BUNDLE
+python3 scripts/pack-sq2-memory-backend.py --base ACTUAL_V5_PARENT_INITRAMFS \
+  --expected-base-sha256 ACTUAL_PARENT_SHA256 --bundle FRESH_MEMORY_BUNDLE --output FRESH_PACKAGE
+python3 -m unittest tests.test_system_uncached_heap tests.test_quest2_system_ion \
+  tests.test_quest2_vidc_bridge tests.test_pack_sq2_native_omx tests.test_sq2_release -v
+```
+
+exporter 从 `drivers/dma-buf/heaps/system_heap.c` 的固定原hash应用无fuzz补丁；未知源拒绝，
+不从4.19复制模块。严格MODPOST必须 `KBUILD_MODPOST_WARN=`（不能写0，非空值会开启warning模式）。
+输出包括独立module、两份ARM64库、全部本地头依赖、config/符号/工具链/命令/产物hash。
+库内共享后端标记用于打包配套检查；旧mapper父包仍能如实记录MSM GEM WC，不虚报独立heap。
+主构建pins/verify/package仍服务既有发布包，新候选通过独立入口，不能把旧源compile称为重建当前v5。
+
+pack保留原initramfs前缀与凭据末member，更新两处ION、视频桥和对应清单，在HIDL/QTI启动前校验并加载
+独立模块。实际已有ueventd定义`system-uncached 0444 system system`及dmabuf_system_heap_device标签，
+本批未新增permissive或改变SELinux。模块无卸载出口；正常重启切换，禁止强卸。
+默认包不包含本轮测试客户端。开发用`probe/graphics/system-heap-check.c`独立编译，不能混入发布包。
+
+本轮复现路径：`out/kgsl-sde-port-20261110/memory-v3`、`package-memory-v3`；父包94b3f6bf…，
+新包180b1900…，正常启动/验收见HANDOFF。恢复应使用该实际父包或既有SQ2QDbg，不用main旧包覆盖现机用户配置。
+包仍保留操作者身份，只能私有使用。未将新候选写入 `configs/kernel-baseline.json`。
+
 ## 当前复建：v21-release-4k 与 debug 入口（2026-11-10）
 
 开发根仍为 WSL `/mnt/spx-workspace/chromebookOS/work/qualcomm-618`，pins 见 `configs/kernel-baseline.json`。

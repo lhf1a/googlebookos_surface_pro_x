@@ -11,9 +11,6 @@
 static int q2_real_ioctl(int fd,unsigned long request,void *argument) {
     return (int)syscall(SYS_ioctl,fd,request,argument);
 }
-static void q2_trace(const char *format,...) {
-    va_list args;va_start(args,format);vfprintf(stderr,format,args);va_end(args);
-}
 #include "quest2-system-ion.h"
 int ion_open(void) {return open("/dev/dma_heap/system",O_RDONLY|O_CLOEXEC);}
 int ion_close(int fd) {return close(fd);}

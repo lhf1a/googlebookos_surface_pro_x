@@ -1,0 +1,347 @@
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -3862,18 +3862,14 @@
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+ 	int ret;
+ 
+-	if ((level == pwr->cur_buslevel) && (ab == pwr->cur_ab))
+-		return 0;
+-
+-	ret = icc_set_bw(pwr->icc_path, MBps_to_icc(ab),
+-		kBps_to_icc(pwr->ddr_table[level]));
++	ret = kgsl_bus_set_icc(device, ab, pwr->ddr_table[level]);
+ 	if (ret)
+ 		return ret;
+ 
+-	pwr->cur_buslevel = level;
+-	pwr->cur_ab = ab;
+-
+-	trace_kgsl_buslevel(device, pwr->active_pwrlevel, level);
++	if (level != pwr->cur_buslevel) {
++		pwr->cur_buslevel = level;
++		trace_kgsl_buslevel(device, pwr->active_pwrlevel, level);
++	}
+ 
+ 	return 0;
+ }
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -2192,9 +2192,8 @@
+ static int a6xx_gmu_first_boot(struct adreno_device *adreno_dev)
+ {
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+-	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+-	int level, ret;
++	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
++	int ret, cleanup;
+ 
+ 	trace_kgsl_pwr_request_state(device, KGSL_STATE_AWARE);
+ 
+@@ -2202,9 +2201,13 @@
+ 	if (ret)
+ 		return ret;
+ 
++	ret = kgsl_bus_vote_bootstrap(device, true);
++	if (ret)
++		goto clear_boot_bw;
++
+ 	ret = a6xx_gmu_enable_gdsc(adreno_dev);
+ 	if (ret)
+-		return ret;
++		goto clear_boot_bw;
+ 
+ 	ret = a6xx_gmu_enable_clks(adreno_dev);
+ 	if (ret)
+@@ -2223,10 +2226,6 @@
+ 	a6xx_gmu_version_info(adreno_dev);
+ 
+ 	a6xx_gmu_irq_enable(adreno_dev);
+-
+-	/* Vote for minimal DDR BW for GMU to init */
+-	level = pwr->pwrlevels[pwr->default_pwrlevel].bus_min;
+-	icc_set_bw(pwr->icc_path, 0, kBps_to_icc(pwr->ddr_table[level]));
+ 
+ 	ret = a6xx_gmu_device_start(adreno_dev);
+ 	if (ret)
+@@ -2263,7 +2262,9 @@
+ 	if (ret)
+ 		goto err;
+ 
+-	icc_set_bw(pwr->icc_path, 0, 0);
++	ret = kgsl_bus_vote_bootstrap(device, false);
++	if (ret)
++		goto err;
+ 
+ 	device->gmu_fault = false;
+ 
+@@ -2272,12 +2273,10 @@
+ 	return 0;
+ 
+ err:
+-	if (device->gmu_fault) {
+-		a6xx_gmu_suspend(adreno_dev);
+-		return ret;
+-	}
+-
+-	a6xx_gmu_irq_disable(adreno_dev);
++	/* The CM3 may be running even when its startup handshake failed. */
++	a6xx_hfi_stop(adreno_dev);
++	a6xx_gmu_suspend(adreno_dev);
++	goto clear_boot_bw;
+ 
+ clks_gdsc_off:
+ 	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
+@@ -2287,7 +2286,15 @@
+ 	a6xx_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
+ 
+ 	a6xx_rdpm_cx_freq_update(gmu, 0);
+-
++	device->state = KGSL_STATE_NONE;
++
++clear_boot_bw:
++	cleanup = kgsl_bus_vote_bootstrap(device, false);
++	if (cleanup)
++		dev_err(device->dev, "Failed to release GMU boot bandwidth: %d\n", cleanup);
++	cleanup = kgsl_pwrctrl_axi(device, KGSL_PWRFLAGS_OFF);
++	if (cleanup)
++		dev_err(device->dev, "Failed to clear GPU bus vote: %d\n", cleanup);
+ 	return ret;
+ }
+ 
+@@ -2431,14 +2438,7 @@
+ 		trace_kgsl_buslevel(device, pwr->active_pwrlevel, buslevel);
+ 	}
+ 
+-	if (ab != pwr->cur_ab) {
+-		ret = icc_set_bw(pwr->icc_path, MBps_to_icc(ab), 0);
+-		if (ret)
+-			return ret;
+-		pwr->cur_ab = ab;
+-	}
+-
+-	return ret;
++	return kgsl_bus_set_icc(device, ab, 0);
+ }
+ 
+ static void a6xx_free_gmu_globals(struct a6xx_gmu_device *gmu)
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched.c
+@@ -12,6 +12,7 @@
+ #include "adreno_a6xx.h"
+ #include "adreno_a6xx_hwsched.h"
+ #include "adreno_snapshot.h"
++#include "kgsl_bus.h"
+ #include "kgsl_device.h"
+ #include "kgsl_trace.h"
+ #include "kgsl_util.h"
+@@ -143,9 +144,8 @@
+ static int a6xx_hwsched_gmu_first_boot(struct adreno_device *adreno_dev)
+ {
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+-	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+-	int level, ret = 0;
++	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
++	int ret, cleanup;
+ 
+ 	trace_kgsl_pwr_request_state(device, KGSL_STATE_AWARE);
+ 
+@@ -153,9 +153,13 @@
+ 	if (ret)
+ 		return ret;
+ 
++	ret = kgsl_bus_vote_bootstrap(device, true);
++	if (ret)
++		goto clear_boot_bw;
++
+ 	ret = a6xx_gmu_enable_gdsc(adreno_dev);
+ 	if (ret)
+-		return ret;
++		goto clear_boot_bw;
+ 
+ 	ret = a6xx_gmu_enable_clks(adreno_dev);
+ 	if (ret)
+@@ -184,11 +188,6 @@
+ 
+ 	a6xx_gmu_irq_enable(adreno_dev);
+ 
+-	/* Vote for minimal DDR BW for GMU to init */
+-	level = pwr->pwrlevels[pwr->default_pwrlevel].bus_min;
+-
+-	icc_set_bw(pwr->icc_path, 0, MBps_to_icc(pwr->ddr_table[level]));
+-
+ 	ret = a6xx_gmu_device_start(adreno_dev);
+ 	if (ret)
+ 		goto err;
+@@ -197,7 +196,9 @@
+ 	if (ret)
+ 		goto err;
+ 
+-	icc_set_bw(pwr->icc_path, 0, 0);
++	ret = kgsl_bus_vote_bootstrap(device, false);
++	if (ret)
++		goto err;
+ 
+ 	device->gmu_fault = false;
+ 
+@@ -206,13 +207,10 @@
+ 	return 0;
+ 
+ err:
+-	if (device->gmu_fault) {
+-		a6xx_gmu_suspend(adreno_dev);
+-
+-		return ret;
+-	}
+-
+-	a6xx_gmu_irq_disable(adreno_dev);
++	/* The CM3 may be running even when its startup handshake failed. */
++	a6xx_hwsched_hfi_stop(adreno_dev);
++	a6xx_gmu_suspend(adreno_dev);
++	goto clear_boot_bw;
+ 
+ clks_gdsc_off:
+ 	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
+@@ -222,7 +220,15 @@
+ 	a6xx_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
+ 
+ 	a6xx_rdpm_cx_freq_update(gmu, 0);
+-
++	device->state = KGSL_STATE_NONE;
++
++clear_boot_bw:
++	cleanup = kgsl_bus_vote_bootstrap(device, false);
++	if (cleanup)
++		dev_err(device->dev, "Failed to release GMU boot bandwidth: %d\n", cleanup);
++	cleanup = kgsl_pwrctrl_axi(device, KGSL_PWRFLAGS_OFF);
++	if (cleanup)
++		dev_err(device->dev, "Failed to clear GPU bus vote: %d\n", cleanup);
+ 	return ret;
+ }
+ 
+@@ -822,14 +828,7 @@
+ 		trace_kgsl_buslevel(device, pwr->active_pwrlevel, buslevel);
+ 	}
+ 
+-	if (ab != pwr->cur_ab) {
+-		ret = icc_set_bw(pwr->icc_path, MBps_to_icc(ab), 0);
+-		if (ret)
+-			return ret;
+-		pwr->cur_ab = ab;
+-	}
+-
+-	return ret;
++	return kgsl_bus_set_icc(device, ab, 0);
+ }
+ 
+ static int a6xx_hwsched_pm_suspend(struct adreno_device *adreno_dev)
+--- a/drivers/gpu/msm/kgsl_bus.c
++++ b/drivers/gpu/msm/kgsl_bus.c
+@@ -11,6 +11,59 @@
+ #include "kgsl_bus.h"
+ #include "kgsl_device.h"
+ #include "kgsl_trace.h"
++
++/* Track the effective CPU vote separately from the GMU bandwidth index. */
++int kgsl_bus_set_icc(struct kgsl_device *device, u32 ab, u32 ib)
++{
++	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
++	int ret;
++
++	if (IS_ERR_OR_NULL(pwr->icc_path))
++		return pwr->icc_path ? PTR_ERR(pwr->icc_path) : -ENODEV;
++	if (ab > U32_MAX / 1000)
++		return -ERANGE;
++	ib = max(ib, pwr->bootstrap_ib);
++	if (!pwr->icc_dirty && ab == pwr->cur_ab && ib == pwr->cur_ib)
++		return 0;
++
++	ret = icc_set_bw(pwr->icc_path, MBps_to_icc(ab), kBps_to_icc(ib));
++	if (ret) {
++		/* Provider rollback can fail too; retry even the cached old vote. */
++		pwr->icc_dirty = true;
++		return ret;
++	}
++	pwr->icc_dirty = false;
++	pwr->cur_ab = ab;
++	pwr->cur_ib = ib;
++	return 0;
++}
++
++/* GMU boot owns a temporary peak floor, including while HFI sets normal AB. */
++int kgsl_bus_vote_bootstrap(struct kgsl_device *device, bool on)
++{
++	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
++	u32 old = pwr->bootstrap_ib, ib = 0;
++	int ret;
++
++	if (on) {
++		u32 level;
++
++		if (!pwr->num_pwrlevels || pwr->num_pwrlevels > KGSL_MAX_PWRLEVELS ||
++			pwr->default_pwrlevel >= pwr->num_pwrlevels ||
++			!pwr->ddr_table || pwr->ddr_table_count < 2)
++			return -EINVAL;
++		level = pwr->pwrlevels[pwr->default_pwrlevel].bus_min;
++		if (!level || level >= (u32)pwr->ddr_table_count || !pwr->ddr_table[level])
++			return -EINVAL;
++		ib = pwr->ddr_table[level];
++	}
++
++	pwr->bootstrap_ib = ib;
++	ret = kgsl_bus_set_icc(device, pwr->cur_ab, 0);
++	if (ret)
++		pwr->bootstrap_ib = old;
++	return ret;
++}
+ 
+ static int _ab_buslevel_update(struct kgsl_pwrctrl *pwr, u32 ib,
+ 		bool reset, u32 *ab)
+@@ -173,6 +226,10 @@
+ 		goto free_table;
+ 	}
+ 	pwr->ddr_table_count = count;
++	pwr->cur_ab = 0;
++	pwr->cur_ib = 0;
++	pwr->bootstrap_ib = 0;
++	pwr->icc_dirty = false;
+ 	return 0;
+ 
+ table_error:
+--- a/drivers/gpu/msm/kgsl_bus.h
++++ b/drivers/gpu/msm/kgsl_bus.h
+@@ -5,6 +5,8 @@
+ 
+ #ifndef _KGSL_BUS_H
+ #define _KGSL_BUS_H
++
++#include <linux/types.h>
+ 
+ enum kgsl_bus_vote {
+ 	KGSL_BUS_VOTE_OFF = 0,
+@@ -15,6 +17,9 @@
+ struct kgsl_device;
+ struct platform_device;
+ 
++int kgsl_bus_set_icc(struct kgsl_device *device, u32 ab, u32 ib);
++int kgsl_bus_vote_bootstrap(struct kgsl_device *device, bool on);
++
+ int kgsl_bus_init(struct kgsl_device *device, struct platform_device *pdev);
+ void kgsl_bus_close(struct kgsl_device *device);
+ int kgsl_bus_update(struct kgsl_device *device, enum kgsl_bus_vote vote_state);
+--- a/drivers/gpu/msm/kgsl_pwrctrl.h
++++ b/drivers/gpu/msm/kgsl_pwrctrl.h
+@@ -167,6 +167,12 @@
+ 	struct icc_path *icc_path;
+ 	/** cur_ab: The last ab voted by the driver */
+ 	u32 cur_ab;
++	/** @cur_ib: Last successful CPU ICC peak vote in kB/s */
++	u32 cur_ib;
++	/** @bootstrap_ib: GMU startup peak floor in kB/s */
++	u32 bootstrap_ib;
++	/** @icc_dirty: A failed provider request requires a real retry */
++	bool icc_dirty;
+ 	/** @minbw_timer - Timer struct for entering minimum bandwidth state */
+ 	struct timer_list minbw_timer;
+ 	/** @minbw_timeout - Timeout for entering minimum bandwidth state */

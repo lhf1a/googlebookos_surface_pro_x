@@ -1,0 +1,89 @@
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -15,6 +15,7 @@
+ #include <linux/module.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/nvmem-consumer.h>
++#include <linux/pm_opp.h>
+ #include <linux/soc/qcom/llcc-qcom.h>
+ #include <linux/firmware/qcom/qcom_scm.h>
+ #include <linux/of_reserved_mem.h>
+@@ -1024,12 +1025,13 @@
+ static void adreno_of_get_initial_pwrlevel(struct kgsl_pwrctrl *pwr,
+ 		struct device_node *node)
+ {
+-	int init_level = 1;
++	int default_level = pwr->num_pwrlevels > 1 ? 1 : 0;
++	int init_level = default_level;
+ 
+ 	of_property_read_u32(node, "qcom,initial-pwrlevel", &init_level);
+ 
+ 	if (init_level < 0 || init_level >= pwr->num_pwrlevels)
+-		init_level = 1;
++		init_level = default_level;
+ 
+ 	pwr->active_pwrlevel = init_level;
+ 	pwr->default_pwrlevel = init_level;
+@@ -1052,6 +1054,52 @@
+ 			pwrctrl->num_pwrlevels - 1 - throttle_level);
+ 
+ 	adreno_dev->lm_enabled = true;
++}
++
++static int adreno_of_get_native_pwrlevels(struct adreno_device *adreno_dev)
++{
++	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
++	struct device *dev = &device->pdev->dev;
++	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
++	struct kgsl_pwrlevel levels[KGSL_MAX_PWRLEVELS] = {};
++	unsigned long freq = ULONG_MAX;
++	int count, ret, i;
++
++	if (!of_property_present(dev->of_node, "operating-points-v2"))
++		return -ENODEV;
++	ret = devm_pm_opp_of_add_table(dev);
++	if (ret)
++		return ret;
++	count = dev_pm_opp_get_opp_count(dev);
++	if (count <= 0)
++		return count ? count : -ENODEV;
++	/* The firmware performance table also needs an OFF entry. */
++	if (count > ARRAY_SIZE(levels) || count >= MAX_GX_LEVELS)
++		return -E2BIG;
++
++	for (i = 0; i < count; i++) {
++		struct dev_pm_opp *opp = dev_pm_opp_find_freq_floor(dev, &freq);
++		unsigned int voltage;
++
++		if (IS_ERR(opp))
++			return PTR_ERR(opp);
++		voltage = dev_pm_opp_get_level(opp);
++		dev_pm_opp_put(opp);
++		if (!freq || freq > U32_MAX || freq % 1000 ||
++			!voltage || voltage > U16_MAX ||
++			(i && freq >= levels[i - 1].gpu_freq))
++			return -ERANGE;
++		levels[i].gpu_freq = freq;
++		levels[i].voltage_level = voltage;
++		freq--;
++	}
++
++	/* Bus indices remain unset until target bandwidth mapping is available. */
++	memcpy(pwr->pwrlevels, levels, sizeof(levels));
++	pwr->num_pwrlevels = count;
++	adreno_of_get_initial_pwrlevel(pwr, dev->of_node);
++	adreno_of_get_limits(adreno_dev, dev->of_node);
++	return 0;
+ }
+ 
+ static int adreno_of_get_legacy_pwrlevels(struct adreno_device *adreno_dev,
+@@ -1086,6 +1134,9 @@
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct device_node *node, *child;
+ 	unsigned int bin = 0;
++
++	if (of_device_is_compatible(parent, "qcom,adreno-680.1"))
++		return adreno_of_get_native_pwrlevels(adreno_dev);
+ 
+ 	node = of_get_child_by_name(parent, "qcom,gpu-pwrlevel-bins");
+ 	if (node == NULL)

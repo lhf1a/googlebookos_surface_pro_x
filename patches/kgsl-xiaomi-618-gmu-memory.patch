@@ -1,0 +1,362 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -11,6 +11,7 @@
+ #include <linux/interconnect.h>
+ #include <linux/io.h>
+ #include <linux/iommu.h>
++#include <linux/dma-mapping.h>
+ #include <linux/of_platform.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/slab.h>
+@@ -1394,50 +1395,99 @@
+ 	a6xx_gmu_enable_lm(adreno_dev);
+ }
+ 
++int a6xx_gmu_map_sg(struct a6xx_gmu_device *gmu, u32 addr,
++	struct sg_table *sgt, u32 size, int attrs)
++{
++	struct scatterlist *sg;
++	u64 total = 0;
++	unsigned int i;
++	ssize_t mapped;
++
++	if (!gmu->domain || IS_ERR_OR_NULL(sgt) || !sgt->sgl ||
++		!sgt->orig_nents || !size || !IS_ALIGNED(addr, PAGE_SIZE) ||
++		!IS_ALIGNED(size, PAGE_SIZE) || (u64)addr + size > U32_MAX)
++		return -EINVAL;
++
++	for_each_sg(sgt->sgl, sg, sgt->orig_nents, i) {
++		if (!sg->length || !IS_ALIGNED(sg_phys(sg), PAGE_SIZE) ||
++			!IS_ALIGNED(sg->length, PAGE_SIZE) || sg_dma_is_bus_address(sg))
++			return -EINVAL;
++		total += sg->length;
++		if (total > size)
++			return -EINVAL;
++	}
++	if (total != size)
++		return -EINVAL;
++
++	mapped = iommu_map_sg(gmu->domain, addr, sgt->sgl, sgt->orig_nents,
++		attrs, GFP_KERNEL);
++	/* The 6.18 core already unwinds a negative return. */
++	if (mapped < 0)
++		return mapped;
++	if (mapped != size) {
++		if (mapped)
++			iommu_unmap(gmu->domain, addr, mapped);
++		return -EIO;
++	}
++	return 0;
++}
++
+ struct gmu_memdesc *reserve_gmu_kernel_block(struct a6xx_gmu_device *gmu,
+ 	u32 addr, u32 size, u32 vma_id)
+ {
+-	int ret;
+-	struct gmu_memdesc *md;
+-	struct gmu_vma_entry *vma = &gmu->vma[vma_id];
+-
+-	if (gmu->global_entries == ARRAY_SIZE(gmu->gmu_globals))
++	struct gmu_memdesc pending = { 0 }, *md;
++	struct gmu_vma_entry *vma;
++	struct sg_table sgt;
++	u64 end;
++	int ret, i;
++
++	if (!gmu->domain || vma_id >= GMU_MEM_TYPE_MAX || !size ||
++		size > U32_MAX - (PAGE_SIZE - 1))
++		return ERR_PTR(-EINVAL);
++	if (gmu->global_entries >= ARRAY_SIZE(gmu->gmu_globals))
+ 		return ERR_PTR(-ENOMEM);
+ 
+-	md = &gmu->gmu_globals[gmu->global_entries];
+-
+-	md->size = PAGE_ALIGN(size);
+-
+-	md->hostptr = dma_alloc_attrs(&gmu->pdev->dev, (size_t)md->size,
+-		&md->physaddr, GFP_KERNEL, 0);
+-
+-	if (md->hostptr == NULL)
+-		return ERR_PTR(-ENOMEM);
+-
+-	memset(md->hostptr, 0x0, size);
+-
++	vma = &gmu->vma[vma_id];
+ 	if (!addr)
+ 		addr = vma->next_va;
+-
+-	md->gmuaddr = addr;
+-
+-	ret = iommu_map(gmu->domain, addr,
+-		md->physaddr, md->size, IOMMU_READ | IOMMU_WRITE | IOMMU_PRIV);
+-	if (ret) {
+-		dev_err(&gmu->pdev->dev,
+-			"Unable to map GMU kernel block: addr:0x%08x size:0x%x :%d\n",
+-			md->gmuaddr, md->size, ret);
+-		dma_free_attrs(&gmu->pdev->dev, (size_t)size,
+-			(void *)md->hostptr, md->physaddr, 0);
+-		memset(md, 0, sizeof(*md));
+-		return ERR_PTR(ret);
+-	}
+-
+-	vma->next_va = md->gmuaddr + md->size;
+-
+-	gmu->global_entries++;
+-
++	pending.size = PAGE_ALIGN(size);
++	end = (u64)addr + pending.size;
++	if (!IS_ALIGNED(addr, PAGE_SIZE) || addr < vma->start ||
++		end > (u64)vma->start + vma->size || end > U32_MAX)
++		return ERR_PTR(-EINVAL);
++	for (i = 0; i < gmu->global_entries; i++) {
++		md = &gmu->gmu_globals[i];
++		if (addr < (u64)md->gmuaddr + md->size && md->gmuaddr < end)
++			return ERR_PTR(-EEXIST);
++	}
++
++	pending.hostptr = dma_alloc_attrs(&gmu->pdev->dev, pending.size,
++		&pending.dma_handle, GFP_KERNEL, 0);
++	if (!pending.hostptr)
++		return ERR_PTR(-ENOMEM);
++	memset(pending.hostptr, 0, pending.size);
++
++	/* Obtain physical pages through DMA ops; a DMA handle is not a PA. */
++	ret = dma_get_sgtable_attrs(&gmu->pdev->dev, &sgt, pending.hostptr,
++		pending.dma_handle, pending.size, 0);
++	if (ret)
++		goto free_dma;
++	ret = a6xx_gmu_map_sg(gmu, addr, &sgt, pending.size,
++		IOMMU_READ | IOMMU_WRITE | IOMMU_PRIV);
++	sg_free_table(&sgt);
++	if (ret)
++		goto free_dma;
++
++	pending.gmuaddr = addr;
++	md = &gmu->gmu_globals[gmu->global_entries++];
++	*md = pending;
++	vma->next_va = max_t(u32, vma->next_va, end);
+ 	return md;
++
++free_dma:
++	dma_free_attrs(&gmu->pdev->dev, pending.size, pending.hostptr,
++		pending.dma_handle, 0);
++	return ERR_PTR(ret);
+ }
+ 
+ static int reserve_entire_vma(struct a6xx_gmu_device *gmu, u32 vma_id)
+@@ -2405,14 +2455,14 @@
+ 	for (i = 0; i < gmu->global_entries; i++) {
+ 		struct gmu_memdesc *md = &gmu->gmu_globals[i];
+ 
+-		if (!md->gmuaddr)
++		if (!md->hostptr)
+ 			continue;
+ 
+ 		iommu_unmap(gmu->domain,
+ 			md->gmuaddr, md->size);
+ 
+ 		dma_free_attrs(&gmu->pdev->dev, (size_t) md->size,
+-				(void *)md->hostptr, md->physaddr, 0);
++				(void *)md->hostptr, md->dma_handle, 0);
+ 
+ 		memset(md, 0, sizeof(*md));
+ 	}
+@@ -2577,56 +2627,37 @@
+ static int a6xx_gmu_iommu_fault_handler(struct iommu_domain *domain,
+ 		struct device *dev, unsigned long addr, int flags, void *token)
+ {
+-	char *fault_type = "unknown";
+-
+-	if (flags & IOMMU_FAULT_TRANSLATION)
+-		fault_type = "translation";
+-	else if (flags & IOMMU_FAULT_PERMISSION)
+-		fault_type = "permission";
+-	else if (flags & IOMMU_FAULT_EXTERNAL)
+-		fault_type = "external";
+-	else if (flags & IOMMU_FAULT_TRANSACTION_STALLED)
+-		fault_type = "transaction stalled";
+-
+-	dev_err(dev, "GMU fault addr = %lX, context=kernel (%s %s fault)\n",
+-			addr,
+-			(flags & IOMMU_FAULT_WRITE) ? "write" : "read",
+-			fault_type);
+-
++	dev_err(dev, "GMU fault addr = %lX, context=kernel (%s fault)\n",
++		addr, (flags & IOMMU_FAULT_WRITE) ? "write" : "read");
+ 	return 0;
+ }
+ 
+ static int a6xx_gmu_iommu_init(struct a6xx_gmu_device *gmu)
+ {
++	struct iommu_domain *default_domain;
+ 	int ret;
+-	int no_stall = 1;
+-
+-	gmu->domain = iommu_domain_alloc(&platform_bus_type);
+-	if (gmu->domain == NULL) {
+-		dev_err(&gmu->pdev->dev, "Unable to allocate GMU IOMMU domain\n");
+-		return -ENODEV;
+-	}
+-
+-	/*
+-	 * Disable stall on fault for the GMU context bank.
+-	 * This sets SCTLR.CFCFG = 0.
+-	 * Also note that, the smmu driver sets SCTLR.HUPCF = 0 by default.
+-	 */
+-	iommu_domain_set_attr(gmu->domain,
+-		DOMAIN_ATTR_FAULT_MODEL_NO_STALL, &no_stall);
+-
++
++	/* qcom,adreno-gmu has an identity default for DMA backing allocations. */
++	default_domain = iommu_get_domain_for_dev(&gmu->pdev->dev);
++	if (!default_domain || default_domain->type != IOMMU_DOMAIN_IDENTITY)
++		return -EOPNOTSUPP;
++
++	gmu->domain = iommu_paging_domain_alloc(&gmu->pdev->dev);
++	if (IS_ERR(gmu->domain)) {
++		ret = PTR_ERR(gmu->domain);
++		gmu->domain = NULL;
++		return ret;
++	}
++
++	/* arm-smmu defaults to non-stalling faults for this GMU domain. */
++	iommu_set_fault_handler(gmu->domain,
++		a6xx_gmu_iommu_fault_handler, gmu);
+ 	ret = iommu_attach_device(gmu->domain, &gmu->pdev->dev);
+-	if (!ret) {
+-		iommu_set_fault_handler(gmu->domain,
+-			a6xx_gmu_iommu_fault_handler, gmu);
++	if (!ret)
+ 		return 0;
+-	}
+-
+-	dev_err(&gmu->pdev->dev,
+-		"Unable to attach GMU IOMMU domain: %d\n", ret);
++
+ 	iommu_domain_free(gmu->domain);
+ 	gmu->domain = NULL;
+-
+ 	return ret;
+ }
+ 
+@@ -2640,9 +2671,9 @@
+ 
+ 	gmu->pdev = pdev;
+ 
+-	dma_set_coherent_mask(&gmu->pdev->dev, DMA_BIT_MASK(64));
+-	gmu->pdev->dev.dma_mask = &gmu->pdev->dev.coherent_dma_mask;
+-	set_dma_ops(&gmu->pdev->dev, NULL);
++	ret = dma_set_mask_and_coherent(&gmu->pdev->dev, DMA_BIT_MASK(64));
++	if (ret)
++		return ret;
+ 
+ 	res = platform_get_resource_byname(device->pdev, IORESOURCE_MEM,
+ 						"rscc");
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.h
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.h
+@@ -95,13 +95,13 @@
+  * struct gmu_memdesc - Gmu shared memory object descriptor
+  * @hostptr: Kernel virtual address
+  * @gmuaddr: GPU virtual address
+- * @physaddr: Physical address of the memory object
++ * @dma_handle: DMA allocation handle (not a GMU address or physical address)
+  * @size: Size of the memory object
+  */
+ struct gmu_memdesc {
+ 	void *hostptr;
+ 	u32 gmuaddr;
+-	phys_addr_t physaddr;
++	dma_addr_t dma_handle;
+ 	u32 size;
+ };
+ 
+@@ -522,4 +522,7 @@
+  */
+ int a6xx_gmu_enable_gdsc(struct adreno_device *adreno_dev);
+ 
++int a6xx_gmu_map_sg(struct a6xx_gmu_device *gmu, u32 addr,
++	struct sg_table *sgt, u32 size, int attrs);
++
+ #endif
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c
+@@ -463,46 +463,39 @@
+ 	struct mem_alloc_entry *entry, u32 flags)
+ {
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+-	int attrs = get_attrs(flags);
+-	struct sg_table *sgt;
+ 	struct kgsl_memdesc *gpu_md = entry->gpu_md;
+-	int mapped = 0;
+ 	struct gmu_vma_entry *vma = &gmu->vma[GMU_NONCACHED_KERNEL];
+ 	struct hfi_mem_alloc_desc *desc = &entry->desc;
++	struct sg_table *sgt;
++	u64 end;
++	int ret;
++
++	if ((flags & MEMFLAG_GFX_SECURE) || kgsl_memdesc_is_secured(gpu_md))
++		return -EOPNOTSUPP;
+ 
+ 	if (flags & MEMFLAG_GMU_CACHEABLE)
+ 		vma = &gmu->vma[GMU_CACHE];
+-
+-	if ((vma->next_va + desc->size) > (vma->start + vma->size)) {
+-		dev_err(&gmu->pdev->dev,
+-			"GMU mapping too big. available: %d required: %d\n",
+-			vma->next_va - vma->start, desc->size);
++	if (!desc->size || desc->size != gpu_md->size)
++		return -EINVAL;
++	end = (u64)vma->next_va + desc->size;
++	if (vma->next_va < vma->start ||
++		end > (u64)vma->start + vma->size || end > U32_MAX)
+ 		return -ENOMEM;
+-	}
+-
+-	/* Alloc sgt for map and then free it */
+-	if (gpu_md->pages != NULL)
+-		sgt = kgsl_alloc_sgt_from_pages(gpu_md);
+-	else
+-		sgt = gpu_md->sgt;
+-
++
++	sgt = gpu_md->pages ? kgsl_alloc_sgt_from_pages(gpu_md) : gpu_md->sgt;
+ 	if (IS_ERR(sgt))
+-		return -ENOMEM;
++		return PTR_ERR(sgt);
++
++	ret = a6xx_gmu_map_sg(gmu, vma->next_va, sgt, desc->size,
++		get_attrs(flags));
++	if (gpu_md->pages && sgt)
++		kgsl_free_sgt(sgt);
++	if (ret)
++		return ret;
+ 
+ 	desc->gmu_addr = vma->next_va;
+-
+-	mapped = iommu_map_sg(gmu->domain,
+-			desc->gmu_addr, sgt->sgl, sgt->nents, attrs);
+-	if (mapped == 0)
+-		dev_err(&gmu->pdev->dev, "gmu map sg err: 0x%08x, %d, %x, %zd\n",
+-			desc->gmu_addr, sgt->nents, attrs, mapped);
+-	else
+-		vma->next_va += desc->size;
+-
+-	if (gpu_md->pages != NULL)
+-		kgsl_free_sgt(sgt);
+-
+-	return ((mapped == 0) ? -ENOMEM : 0);
++	vma->next_va = end;
++	return 0;
+ }
+ 
+ static struct mem_alloc_entry *lookup_mem_alloc_table(
+@@ -536,6 +529,9 @@
+ 	int ret;
+ 	const char *memkind_string = desc->mem_kind < NUM_HFI_MEMKINDS ?
+ 			memkind_strings[desc->mem_kind] : "UNKNOWN";
++
++	if (desc->flags & MEMFLAG_GFX_SECURE)
++		return ERR_PTR(-EOPNOTSUPP);
+ 
+ 	if (entry)
+ 		return entry;

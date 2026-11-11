@@ -1,0 +1,341 @@
+--- a/drivers/gpu/msm/Makefile
++++ b/drivers/gpu/msm/Makefile
+@@ -22,7 +22,7 @@
+ 
+ msm_kgsl-$(CONFIG_COMPAT) += kgsl_compat.o
+ msm_kgsl-$(CONFIG_DEBUG_FS) += kgsl_debugfs.o
+-msm_kgsl-$(CONFIG_ARM_SMMU) += kgsl_iommu.o
++msm_kgsl-$(CONFIG_ARM_SMMU) += kgsl_iommu.o kgsl_iommu_table.o
+ msm_kgsl-$(CONFIG_SYNC_FILE) += kgsl_sync.o
+ 
+ msm_kgsl-y += \
+--- /dev/null
++++ b/drivers/gpu/msm/kgsl_iommu_table.c
+@@ -0,0 +1,286 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Linux 6.18 io-pgtable backend for independent KGSL process address spaces. */
++#include <linux/err.h>
++#include <linux/iommu.h>
++#include <linux/pm_runtime.h>
++#include <linux/slab.h>
++#include "kgsl_device.h"
++#include "kgsl_iommu_table.h"
++
++/* All io-pgtable operations below hold a runtime PM reference. */
++static void kgsl_table_flush_all(void *cookie)
++{
++	struct kgsl_iommu_table *table = cookie;
++
++	table->parent_tlb->tlb_flush_all((void *)table->cookie);
++}
++
++static void kgsl_table_flush_walk(unsigned long addr, size_t size,
++		size_t granule, void *cookie)
++{
++	struct kgsl_iommu_table *table = cookie;
++
++	table->parent_tlb->tlb_flush_walk(addr, size, granule,
++			(void *)table->cookie);
++}
++
++static const struct iommu_flush_ops kgsl_table_tlb_ops = {
++	.tlb_flush_all = kgsl_table_flush_all,
++	.tlb_flush_walk = kgsl_table_flush_walk,
++	/* unmap uses a NULL gather and flushes the full ASID before returning. */
++};
++
++struct kgsl_iommu_table *kgsl_iommu_table_create(
++		struct kgsl_pagetable *parent, struct adreno_smmu_priv *smmu)
++{
++	struct kgsl_iommu_table *table;
++	const struct io_pgtable_cfg *cfg;
++	u32 cb_num, asid;
++	int ret;
++
++	if (!parent || !smmu || !smmu->cookie || !smmu->get_ttbr1_cfg ||
++	    !smmu->get_context_bank || !smmu->flush_tlb)
++		return ERR_PTR(-ENODEV);
++	if (!kref_get_unless_zero(&parent->refcount))
++		return ERR_PTR(-ENODEV);
++
++	ret = smmu->get_context_bank(smmu->cookie, &cb_num, &asid);
++	if (ret)
++		goto put_parent;
++	cfg = smmu->get_ttbr1_cfg(smmu->cookie);
++	ret = -EOPNOTSUPP;
++	if (!cfg || !(cfg->quirks & IO_PGTABLE_QUIRK_ARM_TTBR1) ||
++	    cfg->ias < 39 || cfg->ias > 48 || cfg->oas < 32 || cfg->oas > 48 ||
++	    PAGE_SIZE != SZ_4K || !(cfg->pgsize_bitmap & PAGE_SIZE) ||
++	    !cfg->iommu_dev || !cfg->tlb || !cfg->tlb->tlb_flush_all ||
++	    !cfg->tlb->tlb_flush_walk || cb_num > U8_MAX || asid > U16_MAX)
++		goto put_parent;
++
++	table = kzalloc(sizeof(*table), GFP_KERNEL);
++	if (!table) {
++		ret = -ENOMEM;
++		goto put_parent;
++	}
++	mutex_init(&table->lock);
++	table->cfg = *cfg;
++	table->cfg.quirks &= ~IO_PGTABLE_QUIRK_ARM_TTBR1;
++	/* Prevent a later 4K unmap from requiring an unsupported block split. */
++	table->cfg.pgsize_bitmap = PAGE_SIZE;
++	table->cfg.alloc = NULL;
++	table->cfg.free = NULL;
++	table->cfg.tlb = &kgsl_table_tlb_ops;
++	table->parent_tlb = cfg->tlb;
++	table->cookie = smmu->cookie;
++	table->flush_tlb = smmu->flush_tlb;
++	table->parent = parent;
++	table->cb_num = cb_num;
++	get_device(table->cfg.iommu_dev);
++
++	ret = pm_runtime_resume_and_get(table->cfg.iommu_dev);
++	if (ret < 0)
++		goto free_table;
++	table->ops = alloc_io_pgtable_ops(ARM_64_LPAE_S1, &table->cfg, table);
++	pm_runtime_put_autosuspend(table->cfg.iommu_dev);
++	if (!table->ops) {
++		ret = -ENOMEM;
++		goto free_table;
++	}
++
++	/* ARM_64_LPAE_S1 returns a physical root, without an ASID. */
++	table->ttbr0 = table->cfg.arm_lpae_s1_cfg.ttbr | ((u64)asid << 48);
++	return table;
++
++free_table:
++	put_device(table->cfg.iommu_dev);
++	kfree(table);
++put_parent:
++	kgsl_mmu_putpagetable(parent);
++	return ERR_PTR(ret);
++}
++
++static bool kgsl_table_range_valid(u64 addr, u64 size, unsigned int bits)
++{
++	u64 limit = 1ULL << bits;
++
++	return size && IS_ALIGNED(addr | size, PAGE_SIZE) &&
++		size <= limit && addr <= limit - size;
++}
++
++/* Caller holds PM. Account each prefix so rollback cannot discard live pages. */
++static int kgsl_table_unmap_pages(struct kgsl_iommu_table *table,
++		u64 addr, size_t size)
++{
++	int ret = 0;
++
++	while (size) {
++		size_t done = table->ops->unmap_pages(table->ops, addr,
++				PAGE_SIZE, size >> PAGE_SHIFT, NULL);
++
++		if (!done || done > size || !IS_ALIGNED(done, PAGE_SIZE) ||
++		    done > table->mapped_bytes) {
++			table->poisoned = true;
++			ret = -EUCLEAN;
++			break;
++		}
++		table->mapped_bytes -= done;
++		addr += done;
++		size -= done;
++	}
++	if (table->flush_tlb(table->cookie)) {
++		table->poisoned = true;
++		ret = -EUCLEAN;
++	}
++	return ret;
++}
++
++int kgsl_iommu_table_unmap(struct kgsl_iommu_table *table, u64 addr, size_t size)
++{
++	int ret;
++
++	guard(mutex)(&table->lock);
++
++	if (!kgsl_table_range_valid(addr, size, table->cfg.ias))
++		return -EINVAL;
++	/* A partial failed unmap needs recovery, not blind replay over holes. */
++	if (table->poisoned)
++		return -EUCLEAN;
++	if (size > table->mapped_bytes)
++		return -EINVAL;
++	ret = pm_runtime_resume_and_get(table->cfg.iommu_dev);
++	if (ret < 0)
++		return ret;
++	ret = kgsl_table_unmap_pages(table, addr, size);
++	pm_runtime_put_autosuspend(table->cfg.iommu_dev);
++	return ret;
++}
++
++static int kgsl_table_map_pages(struct kgsl_iommu_table *table,
++		u64 *addr, phys_addr_t phys, size_t size, int prot)
++{
++	while (size) {
++		size_t done = 0;
++		int ret = table->ops->map_pages(table->ops, *addr, phys,
++				PAGE_SIZE, size >> PAGE_SHIFT, prot, GFP_KERNEL, &done);
++
++		if (done > size || !IS_ALIGNED(done, PAGE_SIZE)) {
++			table->poisoned = true;
++			return -EUCLEAN;
++		}
++		/* io-pgtable can return an error after mapping a nonzero prefix. */
++		table->mapped_bytes += done;
++		*addr += done;
++		phys += done;
++		size -= done;
++		if (ret)
++			return ret;
++		if (!done)
++			return -EIO;
++	}
++	return 0;
++}
++
++static int kgsl_table_rollback(struct kgsl_iommu_table *table,
++		u64 start, u64 end, int error)
++{
++	if (table->poisoned)
++		return -EUCLEAN;
++	if (end != start && kgsl_table_unmap_pages(table, start, end - start))
++		return -EUCLEAN;
++	return error;
++}
++
++int kgsl_iommu_table_map(struct kgsl_iommu_table *table, u64 addr,
++		struct sg_table *sgt, size_t size, int prot)
++{
++	struct scatterlist *sg;
++	u64 cursor = addr;
++	size_t total = 0;
++	unsigned int i;
++	int ret;
++
++	guard(mutex)(&table->lock);
++
++	if (table->poisoned)
++		return -EUCLEAN;
++	if (!kgsl_table_range_valid(addr, size, table->cfg.ias) ||
++	    !sgt || !sgt->sgl || !sgt->orig_nents)
++		return -EINVAL;
++	/* Validate the entire physical SG before changing any page table. */
++	for_each_sg(sgt->sgl, sg, sgt->orig_nents, i) {
++		if (!kgsl_table_range_valid(sg_phys(sg), sg->length, table->cfg.oas) ||
++		    sg->length > size - total)
++			return -EINVAL;
++		total += sg->length;
++	}
++	if (total != size)
++		return -EINVAL;
++
++	ret = pm_runtime_resume_and_get(table->cfg.iommu_dev);
++	if (ret < 0)
++		return ret;
++	for_each_sg(sgt->sgl, sg, sgt->orig_nents, i) {
++		ret = kgsl_table_map_pages(table, &cursor, sg_phys(sg), sg->length, prot);
++		if (ret) {
++			ret = kgsl_table_rollback(table, addr, cursor, ret);
++			break;
++		}
++	}
++	pm_runtime_put_autosuspend(table->cfg.iommu_dev);
++	return ret;
++}
++
++int kgsl_iommu_table_map_guard(struct kgsl_iommu_table *table, u64 addr,
++		phys_addr_t phys, size_t size, int prot)
++{
++	u64 cursor = addr, end;
++	int ret;
++
++	guard(mutex)(&table->lock);
++
++	if (table->poisoned)
++		return -EUCLEAN;
++	if (!kgsl_table_range_valid(addr, size, table->cfg.ias) ||
++	    !kgsl_table_range_valid(phys, PAGE_SIZE, table->cfg.oas))
++		return -EINVAL;
++	end = addr + size;
++	ret = pm_runtime_resume_and_get(table->cfg.iommu_dev);
++	if (ret < 0)
++		return ret;
++	while (cursor < end) {
++		ret = kgsl_table_map_pages(table, &cursor, phys, PAGE_SIZE, prot & ~IOMMU_WRITE);
++		if (ret) {
++			ret = kgsl_table_rollback(table, addr, cursor, ret);
++			break;
++		}
++	}
++	pm_runtime_put_autosuspend(table->cfg.iommu_dev);
++	return ret;
++}
++
++int kgsl_iommu_table_destroy(struct kgsl_iommu_table *table)
++{
++	int ret;
++
++	mutex_lock(&table->lock);
++	if (table->poisoned || table->mapped_bytes) {
++		ret = -EBUSY;
++		goto unlock;
++	}
++	ret = pm_runtime_resume_and_get(table->cfg.iommu_dev);
++	if (ret < 0)
++		goto unlock;
++	ret = table->flush_tlb(table->cookie);
++	if (!ret)
++		free_io_pgtable_ops(table->ops);
++	pm_runtime_put_autosuspend(table->cfg.iommu_dev);
++	if (ret)
++		goto unlock;
++	put_device(table->cfg.iommu_dev);
++	kgsl_mmu_putpagetable(table->parent);
++	mutex_unlock(&table->lock);
++	kfree(table);
++	return 0;
++unlock:
++	mutex_unlock(&table->lock);
++	return ret;
++}
+--- /dev/null
++++ b/drivers/gpu/msm/kgsl_iommu_table.h
+@@ -0,0 +1,38 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef __KGSL_IOMMU_TABLE_H
++#define __KGSL_IOMMU_TABLE_H
++
++#include <linux/adreno-smmu-priv.h>
++#include <linux/scatterlist.h>
++#include <linux/mutex.h>
++
++struct kgsl_pagetable;
++
++/* The parent must stay attached; GPU retirement precedes destroy. */
++struct kgsl_iommu_table {
++	struct mutex lock;
++	struct io_pgtable_ops *ops;
++	struct io_pgtable_cfg cfg;
++	const struct iommu_flush_ops *parent_tlb;
++	const void *cookie;
++	int (*flush_tlb)(const void *cookie);
++	struct kgsl_pagetable *parent;
++	u64 ttbr0;
++	u64 mapped_bytes;
++	u32 cb_num;
++	/* Incomplete rollback: retain the table AND buffer backing. */
++	bool poisoned;
++};
++
++struct kgsl_iommu_table *kgsl_iommu_table_create(
++		struct kgsl_pagetable *parent, struct adreno_smmu_priv *smmu);
++/* The owner must exclude destruction while a map/unmap caller holds the table. */
++int kgsl_iommu_table_map(struct kgsl_iommu_table *table, u64 addr,
++		struct sg_table *sgt, size_t size, int prot);
++int kgsl_iommu_table_map_guard(struct kgsl_iommu_table *table, u64 addr,
++		phys_addr_t phys, size_t size, int prot);
++int kgsl_iommu_table_unmap(struct kgsl_iommu_table *table, u64 addr, size_t size);
++/* On error the table, parent reference and all backing remain owned by caller. */
++int kgsl_iommu_table_destroy(struct kgsl_iommu_table *table);
++
++#endif

@@ -1,0 +1,246 @@
+--- a/drivers/gpu/msm/kgsl_pwrctrl.c
++++ b/drivers/gpu/msm/kgsl_pwrctrl.c
+@@ -553,7 +553,7 @@
+ 	struct kgsl_device *device = dev_get_drvdata(dev);
+ 
+ 	/* Show the idle_timeout converted to msec */
+-	return scnprintf(buf, PAGE_SIZE, "%u\n", device->pwrctrl.interval_timeout);
++	return scnprintf(buf, PAGE_SIZE, "%lu\n", device->pwrctrl.interval_timeout);
+ }
+ 
+ static ssize_t minbw_timer_store(struct device *dev,
+@@ -1526,21 +1526,30 @@
+ 	int i, result, freq;
+ 	struct platform_device *pdev = device->pdev;
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-
+-	result = _get_clocks(device);
+-	if (result)
+-		return result;
+-
+-	/* Make sure we have a source clk for freq setting */
+-	if (pwr->grp_clks[0] == NULL)
+-		pwr->grp_clks[0] = pwr->grp_clks[1];
+-
+-	/* Getting gfx-bimc-interface-clk frequency */
+-	if (!of_property_read_u32(pdev->dev.of_node,
+-			"qcom,gpu-bimc-interface-clk-freq",
+-			&pwr->gpu_bimc_int_clk_freq))
+-		pwr->gpu_bimc_int_clk = devm_clk_get(&pdev->dev,
+-					"bimc_gpu_clk");
++	bool gmu_managed = of_device_is_compatible(pdev->dev.of_node,
++		"qcom,adreno-680.1");
++
++	if (gmu_managed) {
++		/* GMU bind owns the clocks; GPU frequency votes go through HFI. */
++		if (!device->gmu_core.components_bound ||
++			!gmu_core_gpmu_isenabled(device))
++			return -ENODEV;
++	} else {
++		result = _get_clocks(device);
++		if (result)
++			return result;
++
++		/* Make sure we have a source clk for freq setting */
++		if (pwr->grp_clks[0] == NULL)
++			pwr->grp_clks[0] = pwr->grp_clks[1];
++
++		/* Getting gfx-bimc-interface-clk frequency */
++		if (!of_property_read_u32(pdev->dev.of_node,
++				"qcom,gpu-bimc-interface-clk-freq",
++				&pwr->gpu_bimc_int_clk_freq))
++			pwr->gpu_bimc_int_clk = devm_clk_get(&pdev->dev,
++						"bimc_gpu_clk");
++	}
+ 
+ 	if (of_property_read_bool(pdev->dev.of_node, "qcom,no-nap"))
+ 		device->pwrctrl.ctrl_flags |= BIT(KGSL_PWRFLAGS_NAP_OFF);
+@@ -1549,8 +1558,8 @@
+ 		device->pwrctrl.ctrl_flags |= BIT(KGSL_PWRFLAGS_NAP_OFF);
+ 	}
+ 
+-	if (pwr->num_pwrlevels == 0) {
+-		dev_err(device->dev, "No power levels are defined\n");
++	if (!pwr->num_pwrlevels || pwr->num_pwrlevels > KGSL_MAX_PWRLEVELS) {
++		dev_err(device->dev, "Invalid number of power levels\n");
+ 		return -EINVAL;
+ 	}
+ 
+@@ -1567,47 +1576,48 @@
+ 
+ 	pwr->wakeup_maxpwrlevel = 0;
+ 
+-	for (i = 0; i < pwr->num_pwrlevels; i++) {
+-		freq = pwr->pwrlevels[i].gpu_freq;
+-
++	if (!gmu_managed) {
++		for (i = 0; i < pwr->num_pwrlevels; i++) {
++			freq = pwr->pwrlevels[i].gpu_freq;
++
++			if (freq > 0)
++				freq = clk_round_rate(pwr->grp_clks[0], freq);
++
++			if (freq >= pwr->pwrlevels[i].gpu_freq)
++				pwr->pwrlevels[i].gpu_freq = freq;
++		}
++
++		clk_set_rate(pwr->grp_clks[0],
++			pwr->pwrlevels[pwr->num_pwrlevels - 1].gpu_freq);
++
++		freq = clk_round_rate(pwr->grp_clks[6], KGSL_RBBMTIMER_CLK_FREQ);
+ 		if (freq > 0)
+-			freq = clk_round_rate(pwr->grp_clks[0], freq);
+-
+-		if (freq >= pwr->pwrlevels[i].gpu_freq)
+-			pwr->pwrlevels[i].gpu_freq = freq;
+-	}
+-
+-	clk_set_rate(pwr->grp_clks[0],
+-		pwr->pwrlevels[pwr->num_pwrlevels - 1].gpu_freq);
+-
+-	freq = clk_round_rate(pwr->grp_clks[6], KGSL_RBBMTIMER_CLK_FREQ);
+-	if (freq > 0)
+-		kgsl_pwrctrl_clk_set_rate(pwr->grp_clks[6],
+-			freq, clocks[6]);
+-
+-	_isense_clk_set_rate(pwr, pwr->num_pwrlevels - 1);
+-
+-	if (of_property_read_bool(pdev->dev.of_node, "vddcx-supply"))
+-		pwr->cx_gdsc = devm_regulator_get(&pdev->dev, "vddcx");
+-
+-	if (of_property_read_bool(pdev->dev.of_node, "vdd-supply"))
+-		pwr->gx_gdsc = devm_regulator_get(&pdev->dev, "vdd");
+-
+-	if (of_property_read_bool(pdev->dev.of_node, "vdd-parent-supply")) {
+-		pwr->gx_gdsc_parent = devm_regulator_get(&pdev->dev,
+-				"vdd-parent");
+-		if (IS_ERR(pwr->gx_gdsc_parent)) {
+-			dev_err(device->dev,
+-				"Failed to get vdd-parent regulator:%d\n",
+-				PTR_ERR(pwr->gx_gdsc_parent));
+-			return -ENODEV;
+-		}
+-		if (of_property_read_u32(pdev->dev.of_node,
+-					"vdd-parent-min-corner",
+-					&pwr->gx_gdsc_parent_min_corner)) {
+-			dev_err(device->dev,
+-				"vdd-parent-min-corner not found\n");
+-			return -ENODEV;
++			kgsl_pwrctrl_clk_set_rate(pwr->grp_clks[6],
++				freq, clocks[6]);
++
++		_isense_clk_set_rate(pwr, pwr->num_pwrlevels - 1);
++		if (of_property_read_bool(pdev->dev.of_node, "vddcx-supply"))
++			pwr->cx_gdsc = devm_regulator_get(&pdev->dev, "vddcx");
++
++		if (of_property_read_bool(pdev->dev.of_node, "vdd-supply"))
++			pwr->gx_gdsc = devm_regulator_get(&pdev->dev, "vdd");
++
++		if (of_property_read_bool(pdev->dev.of_node, "vdd-parent-supply")) {
++			pwr->gx_gdsc_parent = devm_regulator_get(&pdev->dev,
++					"vdd-parent");
++			if (IS_ERR(pwr->gx_gdsc_parent)) {
++				dev_err(device->dev,
++					"Failed to get vdd-parent regulator:%ld\n",
++					PTR_ERR(pwr->gx_gdsc_parent));
++				return -ENODEV;
++			}
++			if (of_property_read_u32(pdev->dev.of_node,
++						"vdd-parent-min-corner",
++						&pwr->gx_gdsc_parent_min_corner)) {
++				dev_err(device->dev,
++					"vdd-parent-min-corner not found\n");
++				return -ENODEV;
++			}
+ 		}
+ 	}
+ 
+@@ -1818,21 +1828,21 @@
+ 
+ 	switch (device->state) {
+ 	case KGSL_STATE_MINBW:
+-		/* fall through */
++		fallthrough;
+ 	case KGSL_STATE_NAP:
+ 		timer_delete_sync(&device->pwrctrl.minbw_timer);
+ 		/* Force power on to do the stop */
+ 		status = kgsl_pwrctrl_enable(device);
+-		/* fall through */
++		fallthrough;
+ 	case KGSL_STATE_ACTIVE:
+ 		kgsl_pwrctrl_irq(device, KGSL_PWRFLAGS_OFF);
+ 		timer_delete_sync(&device->idle_timer);
+ 		kgsl_pwrscale_midframe_timer_cancel(device);
+ 		device->ftbl->stop(device);
+-		/* fall through */
++		fallthrough;
+ 	case KGSL_STATE_AWARE:
+ 		kgsl_pwrctrl_disable(device);
+-		/* fall through */
++		fallthrough;
+ 	case KGSL_STATE_SLUMBER:
+ 	case KGSL_STATE_NONE:
+ 		kgsl_pwrctrl_set_state(device, KGSL_STATE_INIT);
+@@ -1857,7 +1867,7 @@
+ 		complete_all(&device->hwaccess_gate);
+ 		/* Call the GPU specific resume function */
+ 		device->ftbl->resume(device);
+-		/* fall through */
++		fallthrough;
+ 	case KGSL_STATE_SLUMBER:
+ 		kgsl_pwrctrl_clk_set_options(device, true);
+ 		status = device->ftbl->start(device,
+@@ -1874,10 +1884,10 @@
+ 		kgsl_pwrctrl_irq(device, KGSL_PWRFLAGS_ON);
+ 		trace_gpu_frequency(
+ 			pwr->pwrlevels[pwr->active_pwrlevel].gpu_freq/1000, 0);
+-		/* fall through */
++		fallthrough;
+ 	case KGSL_STATE_MINBW:
+ 		kgsl_bus_update(device, KGSL_BUS_VOTE_ON);
+-		/* fall through */
++		fallthrough;
+ 	case KGSL_STATE_NAP:
+ 		/* Turn on the core clocks */
+ 		kgsl_pwrctrl_clk(device, KGSL_PWRFLAGS_ON, KGSL_STATE_ACTIVE);
+@@ -1941,10 +1951,10 @@
+ 		break;
+ 	/* The following 4 cases shouldn't occur, but don't panic. */
+ 	case KGSL_STATE_MINBW:
+-		/* Fall through */
++		fallthrough;
+ 	case KGSL_STATE_NAP:
+ 		status = _wake(device);
+-		/* Fall through */
++		fallthrough;
+ 	case KGSL_STATE_ACTIVE:
+ 		kgsl_pwrctrl_irq(device, KGSL_PWRFLAGS_OFF);
+ 		timer_delete_sync(&device->idle_timer);
+@@ -1989,13 +1999,13 @@
+ 
+ 		kgsl_pwrctrl_clk(device, KGSL_PWRFLAGS_OFF, KGSL_STATE_NAP);
+ 		kgsl_pwrctrl_set_state(device, KGSL_STATE_NAP);
+-		/* fallthrough */
++		fallthrough;
+ 	case KGSL_STATE_SLUMBER:
+ 		break;
+ 	case KGSL_STATE_AWARE:
+ 		dev_warn(device->dev,
+ 			"transition AWARE -> NAP is not permitted\n");
+-		/* fallthrough */
++		fallthrough;
+ 	default:
+ 		kgsl_pwrctrl_request_state(device, KGSL_STATE_NONE);
+ 		break;
+@@ -2034,9 +2044,9 @@
+ 			kgsl_pwrctrl_request_state(device, KGSL_STATE_NONE);
+ 			return -EBUSY;
+ 		}
+-		/* fall through */
++		fallthrough;
+ 	case KGSL_STATE_NAP:
+-		/* fall through */
++		fallthrough;
+ 	case KGSL_STATE_MINBW:
+ 		timer_delete_sync(&device->pwrctrl.minbw_timer);
+ 		timer_delete_sync(&device->idle_timer);

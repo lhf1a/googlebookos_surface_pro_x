@@ -1,0 +1,13 @@
+--- a/drivers/gpu/msm/adreno-gpulist.h
++++ b/drivers/gpu/msm/adreno-gpulist.h
+@@ -1384,8 +1384,8 @@
+ 	.prim_fifo_threshold = 0x00400000,
+ 	.gmu_major = 2,
+ 	.gmu_minor = 0,
+-	.sqefw_name = "a630_sqe.fw",
+-	.gmufw_name = "a640_gmu.bin",
++	.sqefw_name = "qcom/a680_sqe.fw",
++	.gmufw_name = "qcom/a680_gmu.bin",
+ 	.zap_name = "a640_zap",
+ 	.hwcg = a680_hwcg_regs,
+ 	.hwcg_count = ARRAY_SIZE(a680_hwcg_regs),

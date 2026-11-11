@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "status": "kernel-linked-host-tested-not-device-validated",
+  "kernel_series": "6.18",
+  "prerequisite": "configs/kgsl-618-smmu-drain.json",
+  "patch": "patches/kgsl-618-smmu-walk.patch",
+  "sha256": "ebe5e257e5f6e1233e72da282a575dc4c6a100285468b85538e4a7d8a28a64db",
+  "files": {
+    "drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c": {
+      "before": "f3e072ee786625bdd19e8eeea10daeaa32dedaca8d7277e610b8013451992efe",
+      "after": "f3e072ee786625bdd19e8eeea10daeaa32dedaca8d7277e610b8013451992efe"
+    },
+    "drivers/iommu/arm/arm-smmu/arm-smmu.c": {
+      "before": "0996b50379904975dd64f7af327e81e4810d1f0abba3d01e88b5d9560b24f958",
+      "after": "9b6c675797c0b6d8d63e34ede672545b22e41ea32d4d9dacce17c249342301d5"
+    },
+    "drivers/iommu/arm/arm-smmu/arm-smmu.h": {
+      "before": "ea9259c5d2c5ab52c7a8c9f17649e291563fc13eafaaf18fff7fd68f63fe493e",
+      "after": "9bcdec800777abca1a1ff908806ea60a4d0a4a780e623e0d0724826b7caf3f00"
+    },
+    "drivers/iommu/io-pgtable-arm.c": {
+      "before": "4fe68a63e54f9244bfcc1c72b6f0814863dbf0cf3f1c4e9bdf880c3575029c44",
+      "after": "ae09cd2cbc81c60b8af54367b1b657ea8b534624eec3868ebfe5a8d90884ee43"
+    },
+    "include/linux/arm-smmu-priv.h": {
+      "before": "756c8158326c56692966394df51ece332f53d42b36397341a0d28827806b7c99",
+      "after": "11f7f3fa3cd04c6387f7dbae2579c5faa483514cf7bb317cc1fcc7772adbc8b5"
+    },
+    "include/linux/io-pgtable.h": {
+      "before": "f3ba243514424cd4e6fad8acfa2f9bd47663a8f38f78e03913db64d96debfda2",
+      "after": "e04875c839f0a2cbfa119686eb7a31338dfcd967e4e42389668103bc3303f023"
+    }
+  },
+  "validation": {
+    "kernel": "native-kernel-v3",
+    "lpae_cases": 18,
+    "provider_cases": 32,
+    "negative_controls": "xiaomi-sm8350-audit/checked-unmap-negative-v83/RESULT.json",
+    "limits": [
+      "Whole-domain/root free remains void-callback based",
+      "MMIO/PM/locks/DMA modeled; no hardware or concurrency validation",
+      "Requires full kernel and all consumer rebuild"
+    ]
+  }
+}

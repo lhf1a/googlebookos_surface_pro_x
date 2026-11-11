@@ -269,32 +269,8 @@ static int allocator(int fd,request_t request,...) {
     int data=(int)syscall(SYS_memfd_create,"mock-ion-allocation",1);assert(data>=0);
     assert(!ftruncate(data,4096));a->fd=data;return 0;
 }
-static int wc_stage,wc_failure,wc_export,wc_closed;
-static int wc_backend(int fd,request_t request,...) {
-    va_list ap;va_start(ap,request);void *arg=va_arg(ap,void *);va_end(ap);
-    assert(fd==92);wc_stage++;
-    if(request==DRM_IOCTL_GEM_CLOSE) {wc_closed++;assert(((struct drm_gem_close *)arg)->handle==12);}
-    if(wc_stage==wc_failure)return q2_error(EIO);
-    if(request==DRM_IOCTL_MSM_GEM_NEW) {
-        struct drm_msm_gem_new *p=arg;assert(p->size==16384 && p->flags==MSM_BO_WC);p->handle=12;
-    } else if(request==DRM_IOCTL_MSM_GEM_INFO) {
-        struct drm_msm_gem_info *p=arg;assert(p->handle==12 && p->info==5);p->value=MSM_BO_WC;
-    } else if(request==DRM_IOCTL_PRIME_HANDLE_TO_FD) {
-        struct drm_prime_handle *p=arg;assert(p->flags==(DRM_CLOEXEC|DRM_RDWR) && p->handle==12);
-        wc_export=(int)syscall(SYS_memfd_create,"mock-wc-export",1);assert(wc_export>=0);p->fd=wc_export;
-    } else assert(request==DRM_IOCTL_GEM_CLOSE);
-    return 0;
-}
 int main(void) {
-    for(int failure=0;failure<=4;failure++) {
-        wc_stage=wc_closed=0;wc_export=-1;wc_failure=failure;q2_next_ioctl=wc_backend;int data=-1;
-        int result=q2_wc_allocate_on_fd(92,16384,&data);
-        if(!failure) {assert(!result && data>=0 && wc_closed==1);close(data);}
-        else {assert(result<0 && errno==EIO && data==-1);
-            assert(wc_closed==(failure==1?0:1));
-            if(wc_export>=0)assert(fcntl(wc_export,F_GETFD)<0 && errno==EBADF);}
-    }
-    puts("WC: exact native cache flags verified, export lifetime independent, failure cleanup retained");
+    assert(dup2(STDIN_FILENO,91)==91);
     q2_enabled=1;q2_next_ioctl=allocator;int fd=42;
     assert(ion_alloc_fd(91,4096,0,1U<<25,1,&fd)==0 && fd>=0 && calls==1);
     assert(fcntl(fd,F_GETFD)>=0 && !ion_close(fd));
@@ -304,6 +280,7 @@ int main(void) {
     assert(ion_alloc_fd(91,4096,2*(size_t)sysconf(_SC_PAGESIZE),1U<<25,1,&fd)==-EOPNOTSUPP && calls==1);
     assert(ion_alloc_fd(91,0,0,1U<<25,1,&fd)==-EINVAL && calls==1);
     fail_alloc=1;assert(ion_alloc_fd(91,4096,0,1U<<25,1,&fd)==-ENOMEM && errno==ENOMEM && fd==-1 && calls==2);
+    assert(!ion_close(91));
     puts("ION: exact cached system request, real fd ownership, unsupported security/cache/heap/alignment rejected, backend errors retained");
     return 0;
 }

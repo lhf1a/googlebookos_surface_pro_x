@@ -1,0 +1,582 @@
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -2125,6 +2125,9 @@
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+ 	const struct adreno_power_ops *ops = ADRENO_POWER_OPS(adreno_dev);
+ 
++	if (READ_ONCE(KGSL_DEVICE(adreno_dev)->pwrctrl.transition_error))
++		return READ_ONCE(KGSL_DEVICE(adreno_dev)->pwrctrl.transition_error);
++
+ 	return ops->first_open(adreno_dev);
+ }
+ 
+@@ -2214,6 +2217,9 @@
+ {
+ 	const struct adreno_power_ops *ops = ADRENO_POWER_OPS(adreno_dev);
+ 
++	if (READ_ONCE(KGSL_DEVICE(adreno_dev)->pwrctrl.transition_error))
++		return READ_ONCE(KGSL_DEVICE(adreno_dev)->pwrctrl.transition_error);
++
+ 	return ops->active_count_get(adreno_dev);
+ }
+ 
+@@ -2485,6 +2491,9 @@
+ 	int ret = -EINVAL;
+ 	int i;
+ 
++	if (READ_ONCE(KGSL_DEVICE(adreno_dev)->pwrctrl.transition_error))
++		return READ_ONCE(KGSL_DEVICE(adreno_dev)->pwrctrl.transition_error);
++
+ 	if (gpudev->reset)
+ 		return gpudev->reset(device);
+ 
+@@ -2498,7 +2507,9 @@
+ 
+ 	if (ret) {
+ 		/* If soft reset failed/skipped, then pull the power */
+-		kgsl_pwrctrl_change_state(device, KGSL_STATE_INIT);
++		ret = kgsl_pwrctrl_change_state(device, KGSL_STATE_INIT);
++		if (ret)
++			return ret;
+ 		/* since device is officially off now clear start bit */
+ 		clear_bit(ADRENO_DEVICE_STARTED, &adreno_dev->priv);
+ 
+@@ -2524,9 +2535,9 @@
+ 	 */
+ 
+ 	if (atomic_read(&device->active_cnt))
+-		kgsl_pwrctrl_change_state(device, KGSL_STATE_ACTIVE);
++		ret = kgsl_pwrctrl_change_state(device, KGSL_STATE_ACTIVE);
+ 	else
+-		kgsl_pwrctrl_change_state(device, KGSL_STATE_NAP);
++		ret = kgsl_pwrctrl_change_state(device, KGSL_STATE_NAP);
+ 
+ 	return ret;
+ }
+@@ -3878,18 +3889,22 @@
+ 	return true;
+ }
+ 
+-static void adreno_regulator_disable(struct kgsl_device *device)
++static int adreno_regulator_disable(struct kgsl_device *device)
+ {
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+ 	const struct adreno_gpudev *gpudev  = ADRENO_GPU_DEVICE(adreno_dev);
++	int ret;
+ 
+ 	if (gpudev->regulator_disable &&
+ 		test_bit(ADRENO_DEVICE_GPU_REGULATOR_ENABLED,
+ 			&adreno_dev->priv)) {
+-		gpudev->regulator_disable(adreno_dev);
++		ret = gpudev->regulator_disable(adreno_dev);
++		if (ret)
++			return ret;
+ 		clear_bit(ADRENO_DEVICE_GPU_REGULATOR_ENABLED,
+ 			&adreno_dev->priv);
+ 	}
++	return 0;
+ }
+ 
+ static void adreno_pwrlevel_change_settings(struct kgsl_device *device,
+@@ -3903,12 +3918,13 @@
+ 					postlevel, post);
+ }
+ 
+-static void adreno_clk_set_options(struct kgsl_device *device, const char *name,
++static int adreno_clk_set_options(struct kgsl_device *device, const char *name,
+ 	struct clk *clk, bool on)
+ {
+ 	if (ADRENO_GPU_DEVICE(ADRENO_DEVICE(device))->clk_set_options)
+-		ADRENO_GPU_DEVICE(ADRENO_DEVICE(device))->clk_set_options(
++		return ADRENO_GPU_DEVICE(ADRENO_DEVICE(device))->clk_set_options(
+ 			ADRENO_DEVICE(device), name, clk, on);
++	return 0;
+ }
+ 
+ static void adreno_regulator_disable_poll(struct kgsl_device *device)
+--- a/drivers/gpu/msm/adreno.h
++++ b/drivers/gpu/msm/adreno.h
+@@ -786,7 +786,7 @@
+ 	void (*start)(struct adreno_device *adreno_dev);
+ 	bool (*is_sptp_idle)(struct adreno_device *adreno_dev);
+ 	int (*regulator_enable)(struct adreno_device *adreno_dev);
+-	void (*regulator_disable)(struct adreno_device *adreno_dev);
++	int (*regulator_disable)(struct adreno_device *adreno_dev);
+ 	void (*pwrlevel_change_settings)(struct adreno_device *adreno_dev,
+ 				unsigned int prelevel, unsigned int postlevel,
+ 				bool post);
+@@ -808,7 +808,7 @@
+ 	void (*preemption_schedule)(struct adreno_device *adreno_dev);
+ 	int (*preemption_context_init)(struct kgsl_context *context);
+ 	void (*context_detach)(struct adreno_context *drawctxt);
+-	void (*clk_set_options)(struct adreno_device *adreno_dev,
++	int (*clk_set_options)(struct adreno_device *adreno_dev,
+ 				const char *name, struct clk *clk, bool on);
+ 	void (*pre_reset)(struct adreno_device *adreno_dev);
+ 	void (*gpu_keepalive)(struct adreno_device *adreno_dev,
+--- a/drivers/gpu/msm/adreno_a3xx.c
++++ b/drivers/gpu/msm/adreno_a3xx.c
+@@ -1160,27 +1160,35 @@
+ }
+ 
+ #if IS_ENABLED(CONFIG_COMMON_CLK_QCOM)
+-static void a3xx_clk_set_options(struct adreno_device *adreno_dev,
++static int a3xx_clk_set_options(struct adreno_device *adreno_dev,
+ 	const char *name, struct clk *clk, bool on)
+ {
++	int ret;
+ 	if (!adreno_is_a306a(adreno_dev))
+-		return;
++		return 0;
+ 
+ 	/* Handle clock settings for GFX PSCBCs */
+ 	if (on) {
+ 		if (!strcmp(name, "mem_iface_clk")) {
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
++			ret = qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
++			if (ret)
++				return ret;
++			return qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
+ 		} else if (!strcmp(name, "core_clk")) {
+-			qcom_clk_set_flags(clk, CLKFLAG_RETAIN_PERIPH);
+-			qcom_clk_set_flags(clk, CLKFLAG_RETAIN_MEM);
++			ret = qcom_clk_set_flags(clk, CLKFLAG_RETAIN_PERIPH);
++			if (ret)
++				return ret;
++			return qcom_clk_set_flags(clk, CLKFLAG_RETAIN_MEM);
+ 		}
+ 	} else {
+ 		if (!strcmp(name, "core_clk")) {
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
++			ret = qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
++			if (ret)
++				return ret;
++			return qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
+ 		}
+ 	}
++	return 0;
+ }
+ #endif
+ 
+--- a/drivers/gpu/msm/adreno_a5xx.c
++++ b/drivers/gpu/msm/adreno_a5xx.c
+@@ -426,13 +426,14 @@
+  * on a power down to prevent current spikes.  Clocks must be on
+  * during this call.
+  */
+-static void a5xx_regulator_disable(struct adreno_device *adreno_dev)
++static int a5xx_regulator_disable(struct adreno_device *adreno_dev)
+ {
+ 	unsigned int reg;
++	int ret;
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 
+ 	if (adreno_is_a512(adreno_dev) || adreno_is_a508(adreno_dev))
+-		return;
++		return 0;
+ 
+ 	/* If feature is not supported or not enabled */
+ 	if (!adreno_dev->sptp_pc_enabled) {
+@@ -443,30 +444,42 @@
+ 		 * droop.
+ 		 */
+ 		udelay(3);
+-		if (_poll_gdsc_status(adreno_dev,
+-					A5XX_GPMU_SP_PWR_CLK_STATUS, 0))
++		ret = _poll_gdsc_status(adreno_dev,
++			A5XX_GPMU_SP_PWR_CLK_STATUS, 0);
++		if (ret) {
+ 			dev_warn(device->dev, "SPTP GDSC disable failed\n");
++			return ret;
++		}
+ 
+ 		kgsl_regwrite(device, A5XX_GPMU_RBCCU_POWER_CNTL, 0x778001);
+-		if (_poll_gdsc_status(adreno_dev,
+-					A5XX_GPMU_RBCCU_PWR_CLK_STATUS, 0))
++		ret = _poll_gdsc_status(adreno_dev,
++			A5XX_GPMU_RBCCU_PWR_CLK_STATUS, 0);
++		if (ret) {
+ 			dev_warn(device->dev, "RBCCU GDSC disable failed\n");
++			return ret;
++		}
+ 	} else if (test_bit(ADRENO_DEVICE_GPMU_INITIALIZED,
+ 			&adreno_dev->priv)) {
+ 		/* GPMU firmware is supposed to turn off SPTP & RAC GDSCs. */
+ 		kgsl_regread(device, A5XX_GPMU_SP_PWR_CLK_STATUS, &reg);
+-		if (reg & BIT(20))
++		if (reg & BIT(20)) {
+ 			dev_warn(device->dev, "SPTP GDSC is not disabled\n");
++			return -EBUSY;
++		}
+ 		kgsl_regread(device, A5XX_GPMU_RBCCU_PWR_CLK_STATUS, &reg);
+-		if (reg & BIT(20))
++		if (reg & BIT(20)) {
+ 			dev_warn(device->dev, "RBCCU GDSC is not disabled\n");
++			return -EBUSY;
++		}
+ 		/*
+ 		 * GPMU firmware is supposed to set GMEM to non-retention.
+ 		 * Bit 14 is the memory core force on bit.
+ 		 */
+ 		kgsl_regread(device, A5XX_GPMU_RBCCU_CLOCK_CNTL, &reg);
+-		if (reg & BIT(14))
++		if (reg & BIT(14)) {
+ 			dev_warn(device->dev, "GMEM is forced on\n");
++			return -EBUSY;
++		}
+ 	}
+ 
+ 	if (adreno_is_a530(adreno_dev)) {
+@@ -475,6 +488,7 @@
+ 			0x003C0000);
+ 		kgsl_regwrite(device, A5XX_RBBM_BLOCK_SW_RESET_CMD, 0);
+ 	}
++	return 0;
+ }
+ 
+ /*
+@@ -1171,28 +1185,36 @@
+ }
+ 
+ #if IS_ENABLED(CONFIG_COMMON_CLK_QCOM)
+-static void a5xx_clk_set_options(struct adreno_device *adreno_dev,
++static int a5xx_clk_set_options(struct adreno_device *adreno_dev,
+ 	const char *name, struct clk *clk, bool on)
+ {
++	int ret;
+ 	if (!adreno_is_a540(adreno_dev) && !adreno_is_a512(adreno_dev) &&
+ 		!adreno_is_a508(adreno_dev))
+-		return;
++		return 0;
+ 
+ 	/* Handle clock settings for GFX PSCBCs */
+ 	if (on) {
+ 		if (!strcmp(name, "mem_iface_clk")) {
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
++			ret = qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
++			if (ret)
++				return ret;
++			return qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
+ 		} else if (!strcmp(name, "core_clk")) {
+-			qcom_clk_set_flags(clk, CLKFLAG_RETAIN_PERIPH);
+-			qcom_clk_set_flags(clk, CLKFLAG_RETAIN_MEM);
++			ret = qcom_clk_set_flags(clk, CLKFLAG_RETAIN_PERIPH);
++			if (ret)
++				return ret;
++			return qcom_clk_set_flags(clk, CLKFLAG_RETAIN_MEM);
+ 		}
+ 	} else {
+ 		if (!strcmp(name, "core_clk")) {
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
++			ret = qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
++			if (ret)
++				return ret;
++			return qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
+ 		}
+ 	}
++	return 0;
+ }
+ #endif
+ 
+--- a/drivers/gpu/msm/adreno_a6xx.c
++++ b/drivers/gpu/msm/adreno_a6xx.c
+@@ -1356,7 +1356,7 @@
+ 	return adj;
+ }
+ #define GPU_CPR_FSM_CTL_OFFSET	 0x4
+-void a6xx_gx_cpr_toggle(struct kgsl_device *device)
++static void a6xx_gx_cpr_toggle(struct kgsl_device *device)
+ {
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+ 	const struct adreno_a6xx_core *a6xx_core = to_a6xx_core(adreno_dev);
+@@ -1458,7 +1458,7 @@
+ 	device->pwrctrl.ctrl_flags = flags;
+ 
+ 	/* Toggle GX CPR on demand */
+-	 a6xx_gx_cpr_toggle(device);
++	a6xx_gx_cpr_toggle(device);
+ 
+ 	/*
+ 	 * If active_cnt is zero, there is no need to keep the GPU active. So,
+@@ -2543,24 +2543,32 @@
+ }
+ 
+ #if IS_ENABLED(CONFIG_COMMON_CLK_QCOM)
+-static void a6xx_clk_set_options(struct adreno_device *adreno_dev,
++static int a6xx_clk_set_options(struct adreno_device *adreno_dev,
+ 	const char *name, struct clk *clk, bool on)
+ {
++	int ret;
+ 	/* Handle clock settings for GFX PSCBCs */
+ 	if (on) {
+ 		if (!strcmp(name, "mem_iface_clk")) {
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
++			ret = qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
++			if (ret)
++				return ret;
++			return qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
+ 		} else if (!strcmp(name, "core_clk")) {
+-			qcom_clk_set_flags(clk, CLKFLAG_RETAIN_PERIPH);
+-			qcom_clk_set_flags(clk, CLKFLAG_RETAIN_MEM);
++			ret = qcom_clk_set_flags(clk, CLKFLAG_RETAIN_PERIPH);
++			if (ret)
++				return ret;
++			return qcom_clk_set_flags(clk, CLKFLAG_RETAIN_MEM);
+ 		}
+ 	} else {
+ 		if (!strcmp(name, "core_clk")) {
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
+-			qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
++			ret = qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_PERIPH);
++			if (ret)
++				return ret;
++			return qcom_clk_set_flags(clk, CLKFLAG_NORETAIN_MEM);
+ 		}
+ 	}
++	return 0;
+ }
+ #endif
+ 
+--- a/drivers/gpu/msm/adreno_a6xx.h
++++ b/drivers/gpu/msm/adreno_a6xx.h
+@@ -314,7 +314,7 @@
+ int a6xx_gmu_sptprac_enable(struct adreno_device *adreno_dev);
+ int a6xx_gmu_sptprac_disable(struct adreno_device *adreno_dev);
+ int a6xx_holi_gmu_sptprac_enable(struct adreno_device *adreno_dev);
+-void a6xx_holi_gmu_sptprac_disable(struct adreno_device *adreno_dev);
++int a6xx_holi_gmu_sptprac_disable(struct adreno_device *adreno_dev);
+ 
+ bool a6xx_gmu_sptprac_is_on(struct adreno_device *adreno_dev);
+ bool a6xx_holi_gmu_sptprac_is_on(struct adreno_device *adreno_dev);
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -1047,10 +1047,11 @@
+  * a6xx_holi_gmu_sptprac_disable() - Power of SPTPRAC
+  * @adreno_dev: Pointer to Adreno device
+  */
+-void a6xx_holi_gmu_sptprac_disable(struct adreno_device *adreno_dev)
++int a6xx_holi_gmu_sptprac_disable(struct adreno_device *adreno_dev)
+ {
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	u32 val;
++	int ret;
+ 	void __iomem *addr = adreno_dev->gmu_wrapper_virt +
+ 			(A6XX_GMU_SPTPRAC_PWR_CLK_STATUS << 2) -
+ 			adreno_dev->gmu_wrapper_base;
+@@ -1062,9 +1063,11 @@
+ 	adreno_write_gmu_wrapper(adreno_dev, A6XX_GMU_GX_SPTPRAC_POWER_CONTROL,
+ 		SPTPRAC_POWEROFF_CTRL_MASK);
+ 
+-	if (readl_poll_timeout(addr, val, (val & SPTPRAC_POWEROFF_STATUS_MASK) ==
+-		SPTPRAC_POWEROFF_STATUS_MASK, 10, 10 * 1000))
++	ret = readl_poll_timeout(addr, val, (val & SPTPRAC_POWEROFF_STATUS_MASK) ==
++		SPTPRAC_POWEROFF_STATUS_MASK, 10, 10 * 1000);
++	if (ret)
+ 		dev_err(device->dev, "power off SPTPRAC fail\n");
++	return ret;
+ }
+ 
+ #define SPTPRAC_POWER_OFF	BIT(2)
+--- a/drivers/gpu/msm/kgsl_device.h
++++ b/drivers/gpu/msm/kgsl_device.h
+@@ -153,11 +153,11 @@
+ 	void (*resume)(struct kgsl_device *device);
+ 	int (*regulator_enable)(struct kgsl_device *device);
+ 	bool (*prepare_for_power_off)(struct kgsl_device *device);
+-	void (*regulator_disable)(struct kgsl_device *device);
++	int (*regulator_disable)(struct kgsl_device *device);
+ 	void (*pwrlevel_change_settings)(struct kgsl_device *device,
+ 		unsigned int prelevel, unsigned int postlevel, bool post);
+ 	void (*regulator_disable_poll)(struct kgsl_device *device);
+-	void (*clk_set_options)(struct kgsl_device *device,
++	int (*clk_set_options)(struct kgsl_device *device,
+ 		const char *name, struct clk *clk, bool on);
+ 	void (*gpu_model)(struct kgsl_device *device, char *str,
+ 		size_t bufsz);
+--- a/drivers/gpu/msm/kgsl_pwrctrl.c
++++ b/drivers/gpu/msm/kgsl_pwrctrl.c
+@@ -1791,31 +1791,47 @@
+ 			     status);
+ }
+ 
+-static void kgsl_pwrctrl_disable(struct kgsl_device *device)
+-{
++static int kgsl_pwrctrl_transition_failed(struct kgsl_device *device, int ret)
++{
++	if (!READ_ONCE(device->pwrctrl.transition_error))
++		WRITE_ONCE(device->pwrctrl.transition_error, ret);
++	kgsl_pwrctrl_request_state(device, KGSL_STATE_NONE);
++	return ret;
++}
++
++static int kgsl_pwrctrl_disable(struct kgsl_device *device)
++{
++	int ret;
++
++	/* Keep clocks and rails while a dependent block failed to power off. */
++	ret = device->ftbl->regulator_disable(device);
++	if (ret)
++		return kgsl_pwrctrl_transition_failed(device, ret);
++	ret = kgsl_pwrctrl_axi(device, KGSL_PWRFLAGS_OFF);
++	if (ret)
++		return kgsl_pwrctrl_transition_failed(device, ret);
+ 	kgsl_pwrctrl_clear_l3_vote(device);
+-
+-	/* Order pwrrail/clk sequence based upon platform */
+-	device->ftbl->regulator_disable(device);
+-	kgsl_pwrctrl_axi(device, KGSL_PWRFLAGS_OFF);
+ 	kgsl_pwrctrl_clk(device, KGSL_PWRFLAGS_OFF, KGSL_STATE_SLUMBER);
+-	kgsl_pwrctrl_pwrrail(device, KGSL_PWRFLAGS_OFF);
+-}
+-
+-static void
++	return kgsl_pwrctrl_pwrrail(device, KGSL_PWRFLAGS_OFF);
++}
++
++static int
+ kgsl_pwrctrl_clk_set_options(struct kgsl_device *device, bool on)
+ {
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-	int i;
+-
++	int i, ret;
++
++	if (!device->ftbl->clk_set_options)
++		return 0;
+ 	for (i = 0; i < KGSL_MAX_CLKS; i++) {
+ 		if (pwr->grp_clks[i] == NULL)
+ 			continue;
+-
+-		if (device->ftbl->clk_set_options)
+-			device->ftbl->clk_set_options(device, clocks[i],
+-				pwr->grp_clks[i], on);
+-	}
++		ret = device->ftbl->clk_set_options(device, clocks[i],
++			pwr->grp_clks[i], on);
++		if (ret)
++			return kgsl_pwrctrl_transition_failed(device, ret);
++	}
++	return 0;
+ }
+ 
+ /**
+@@ -1833,15 +1849,21 @@
+ 		timer_delete_sync(&device->pwrctrl.minbw_timer);
+ 		/* Force power on to do the stop */
+ 		status = kgsl_pwrctrl_enable(device);
++		if (status)
++			return kgsl_pwrctrl_transition_failed(device, status);
+ 		fallthrough;
+ 	case KGSL_STATE_ACTIVE:
+ 		kgsl_pwrctrl_irq(device, KGSL_PWRFLAGS_OFF);
+ 		timer_delete_sync(&device->idle_timer);
+ 		kgsl_pwrscale_midframe_timer_cancel(device);
+-		device->ftbl->stop(device);
++		status = device->ftbl->stop(device);
++		if (status)
++			return kgsl_pwrctrl_transition_failed(device, status);
+ 		fallthrough;
+ 	case KGSL_STATE_AWARE:
+-		kgsl_pwrctrl_disable(device);
++		status = kgsl_pwrctrl_disable(device);
++		if (status)
++			return kgsl_pwrctrl_transition_failed(device, status);
+ 		fallthrough;
+ 	case KGSL_STATE_SLUMBER:
+ 	case KGSL_STATE_NONE:
+@@ -1869,7 +1891,9 @@
+ 		device->ftbl->resume(device);
+ 		fallthrough;
+ 	case KGSL_STATE_SLUMBER:
+-		kgsl_pwrctrl_clk_set_options(device, true);
++		status = kgsl_pwrctrl_clk_set_options(device, true);
++		if (status)
++			break;
+ 		status = device->ftbl->start(device,
+ 				device->pwrctrl.superfast);
+ 		device->pwrctrl.superfast = false;
+@@ -1913,7 +1937,9 @@
+ 		timer_delete_sync(&device->pwrctrl.minbw_timer);
+ 		break;
+ 	case KGSL_STATE_AWARE:
+-		kgsl_pwrctrl_clk_set_options(device, true);
++		status = kgsl_pwrctrl_clk_set_options(device, true);
++		if (status)
++			break;
+ 		/* Enable state before turning on irq */
+ 		kgsl_pwrctrl_set_state(device, KGSL_STATE_ACTIVE);
+ 		kgsl_pwrctrl_irq(device, KGSL_PWRFLAGS_ON);
+@@ -2054,10 +2080,20 @@
+ 		kgsl_pwrctrl_irq(device, KGSL_PWRFLAGS_OFF);
+ 		/* make sure power is on to stop the device*/
+ 		status = kgsl_pwrctrl_enable(device);
+-		device->ftbl->suspend_context(device);
+-		device->ftbl->stop(device);
+-		kgsl_pwrctrl_clk_set_options(device, false);
+-		kgsl_pwrctrl_disable(device);
++		if (status)
++			return kgsl_pwrctrl_transition_failed(device, status);
++		status = device->ftbl->suspend_context(device);
++		if (status)
++			return kgsl_pwrctrl_transition_failed(device, status);
++		status = device->ftbl->stop(device);
++		if (status)
++			return kgsl_pwrctrl_transition_failed(device, status);
++		status = kgsl_pwrctrl_clk_set_options(device, false);
++		if (status)
++			return kgsl_pwrctrl_transition_failed(device, status);
++		status = kgsl_pwrctrl_disable(device);
++		if (status)
++			return kgsl_pwrctrl_transition_failed(device, status);
+ 		kgsl_pwrscale_sleep(device);
+ 		trace_gpu_frequency(0, 0);
+ 		kgsl_pwrctrl_set_state(device, KGSL_STATE_SLUMBER);
+@@ -2068,7 +2104,9 @@
+ 		kgsl_pwrctrl_set_state(device, KGSL_STATE_SLUMBER);
+ 		break;
+ 	case KGSL_STATE_AWARE:
+-		kgsl_pwrctrl_disable(device);
++		status = kgsl_pwrctrl_disable(device);
++		if (status)
++			return kgsl_pwrctrl_transition_failed(device, status);
+ 		trace_gpu_frequency(0, 0);
+ 		kgsl_pwrctrl_set_state(device, KGSL_STATE_SLUMBER);
+ 		break;
+@@ -2114,7 +2152,8 @@
+ 	return ret;
+ 
+ err:
+-	device->ftbl->resume(device);
++	if (!READ_ONCE(device->pwrctrl.transition_error))
++		device->ftbl->resume(device);
+ 	dev_err(device->dev, "device failed to SUSPEND %d\n", ret);
+ 	return ret;
+ }
+@@ -2134,7 +2173,10 @@
+  */
+ int kgsl_pwrctrl_change_state(struct kgsl_device *device, int state)
+ {
+-	int status = 0;
++	int status = READ_ONCE(device->pwrctrl.transition_error);
++
++	if (status)
++		return status;
+ 
+ 	if (device->state == state)
+ 		return status;
+--- a/drivers/gpu/msm/kgsl_pwrctrl.h
++++ b/drivers/gpu/msm/kgsl_pwrctrl.h
+@@ -181,6 +181,8 @@
+ 	u64 time_in_pwrlevel[KGSL_MAX_PWRLEVELS];
+ 	/** @last_stat_updated: The last time stats were updated */
+ 	ktime_t last_stat_updated;
++	/** @transition_error: Failed generic power transition; no unchecked retry */
++	int transition_error;
+ };
+ 
+ int kgsl_pwrctrl_init(struct kgsl_device *device);

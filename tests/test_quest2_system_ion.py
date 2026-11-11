@@ -11,7 +11,6 @@ class SystemIonTest(unittest.TestCase):
             exe = pathlib.Path(directory) / "ion-test"
             subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
                             "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
-                            "-I/usr/include/libdrm",
                             str(ROOT / "tests/quest2_system_ion_test.c"), "-o", str(exe)], check=True)
             result = subprocess.run([str(exe)], check=True, text=True, capture_output=True)
             self.assertIn("SYSTEM_ION_TEST_PASS", result.stdout)

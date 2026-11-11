@@ -1,0 +1,114 @@
+--- a/drivers/gpu/msm/kgsl_mmu.c
++++ b/drivers/gpu/msm/kgsl_mmu.c
+@@ -415,23 +415,25 @@
+  * @pagetable: Pagetable to release the memory from
+  * @memdesc: Memory descriptor containing the GPU address to free
+  */
+-void kgsl_mmu_put_gpuaddr(struct kgsl_memdesc *memdesc)
++int kgsl_mmu_put_gpuaddr(struct kgsl_memdesc *memdesc)
+ {
+ 	struct kgsl_pagetable *pagetable = memdesc->pagetable;
+ 	int unmap_fail = 0;
+ 
+ 	if (memdesc->size == 0 || memdesc->gpuaddr == 0)
+-		return;
++		return 0;
++
++	if (!PT_OP_VALID(pagetable, put_gpuaddr))
++		return -ENODEV;
+ 
+ 	if (!kgsl_memdesc_is_global(memdesc) && (KGSL_MEMDESC_MAPPED & memdesc->priv))
+ 		unmap_fail = kgsl_mmu_unmap(pagetable, memdesc);
+ 
+-	/*
+-	 * Do not free the gpuaddr/size if unmap fails. Because if we
+-	 * try to map this range in future, the iommu driver will throw
+-	 * a BUG_ON() because it feels we are overwriting a mapping.
+-	 */
+-	if (PT_OP_VALID(pagetable, put_gpuaddr) && (unmap_fail == 0))
++	/* Failed unmaps retain the address, pagetable and backing ownership. */
++	if (unmap_fail)
++		return unmap_fail;
++
++	if (PT_OP_VALID(pagetable, put_gpuaddr))
+ 		pagetable->pt_ops->put_gpuaddr(memdesc);
+ 
+ 	memdesc->pagetable = NULL;
+@@ -444,7 +446,7 @@
+ 	 */
+ 	if (!kgsl_memdesc_is_global(memdesc))
+ 		memdesc->gpuaddr = 0;
+-
++	return 0;
+ }
+ 
+ /**
+@@ -469,7 +471,12 @@
+ 		struct kgsl_memdesc *memdesc)
+ {
+ 	int ret = 0;
+-	struct kgsl_device *device = KGSL_MMU_DEVICE(pagetable->mmu);
++	struct kgsl_device *device;
++
++	if (!PT_OP_VALID(pagetable, mmu_unmap))
++		return -ENODEV;
++
++	device = KGSL_MMU_DEVICE(pagetable->mmu);
+ 
+ 	if (memdesc->size == 0)
+ 		return -EINVAL;
+--- a/drivers/gpu/msm/kgsl_mmu.h
++++ b/drivers/gpu/msm/kgsl_mmu.h
+@@ -172,7 +172,7 @@
+ 		 struct kgsl_memdesc *memdesc);
+ int kgsl_mmu_unmap(struct kgsl_pagetable *pagetable,
+ 		    struct kgsl_memdesc *memdesc);
+-void kgsl_mmu_put_gpuaddr(struct kgsl_memdesc *memdesc);
++int kgsl_mmu_put_gpuaddr(struct kgsl_memdesc *memdesc);
+ unsigned int kgsl_virtaddr_to_physaddr(void *virtaddr);
+ unsigned int kgsl_mmu_log_fault_addr(struct kgsl_mmu *mmu,
+ 		u64 ttbr0, uint64_t addr);
+--- a/drivers/gpu/msm/kgsl_sharedmem.c
++++ b/drivers/gpu/msm/kgsl_sharedmem.c
+@@ -724,19 +724,23 @@
+ 	spin_lock_init(&memdesc->lock);
+ }
+ 
+-void kgsl_sharedmem_free(struct kgsl_memdesc *memdesc)
+-{
++int kgsl_sharedmem_free(struct kgsl_memdesc *memdesc)
++{
++	int ret;
++
+ 	if (!memdesc || !memdesc->size)
+-		return;
++		return 0;
+ 
+ 	/* Make sure the memory object has been unmapped */
+-	kgsl_mmu_put_gpuaddr(memdesc);
++	ret = kgsl_mmu_put_gpuaddr(memdesc);
++	if (ret)
++		return ret;
+ 
+ 	/* Assume if no operations were specified something went bad early */
+ 	if (!memdesc->ops || !memdesc->ops->free)
+-		return;
+-
+-	memdesc->ops->free(memdesc);
++		return 0;
++
++	memdesc->ops->free(memdesc);	return 0;
+ }
+ 
+ #if IS_ENABLED(CONFIG_QCOM_SECURE_BUFFER)
+--- a/drivers/gpu/msm/kgsl_sharedmem.h
++++ b/drivers/gpu/msm/kgsl_sharedmem.h
+@@ -20,7 +20,7 @@
+ #define KGSL_CACHE_OP_FLUSH     0x02
+ #define KGSL_CACHE_OP_CLEAN     0x03
+ 
+-void kgsl_sharedmem_free(struct kgsl_memdesc *memdesc);
++int kgsl_sharedmem_free(struct kgsl_memdesc *memdesc);
+ 
+ int kgsl_sharedmem_readl(const struct kgsl_memdesc *memdesc,
+ 			uint32_t *dst,

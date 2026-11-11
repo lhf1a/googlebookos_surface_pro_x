@@ -1,0 +1,243 @@
+--- a/drivers/gpu/msm/adreno_drawctxt.c
++++ b/drivers/gpu/msm/adreno_drawctxt.c
+@@ -265,18 +265,6 @@
+ 	spin_lock(&drawctxt->lock);
+ 	set_bit(KGSL_CONTEXT_PRIV_INVALID, &context->priv);
+ 
+-	/*
+-	 * set the timestamp to the last value since the context is invalidated
+-	 * and we want the pending events for this context to go away
+-	 */
+-	kgsl_sharedmem_writel(device->memstore,
+-			KGSL_MEMSTORE_OFFSET(context->id, soptimestamp),
+-			drawctxt->timestamp);
+-
+-	kgsl_sharedmem_writel(device->memstore,
+-			KGSL_MEMSTORE_OFFSET(context->id, eoptimestamp),
+-			drawctxt->timestamp);
+-
+ 	/* Get rid of commands still waiting in the queue */
+ 	count = drawctxt_detach_drawobjs(drawctxt, list);
+ 	spin_unlock(&drawctxt->lock);
+@@ -427,7 +415,6 @@
+ 	struct adreno_context *drawctxt)
+ {
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+-	struct kgsl_context *context = &drawctxt->base;
+ 	int ret;
+ 
+ 	/*
+@@ -474,14 +461,6 @@
+ 					msecs_to_jiffies(5000));
+ 		return;
+ 	}
+-
+-	kgsl_sharedmem_writel(device->memstore,
+-			KGSL_MEMSTORE_OFFSET(context->id, soptimestamp),
+-			drawctxt->timestamp);
+-
+-	kgsl_sharedmem_writel(device->memstore,
+-			KGSL_MEMSTORE_OFFSET(context->id, eoptimestamp),
+-			drawctxt->timestamp);
+ 
+ 	adreno_profile_process_results(adreno_dev);
+ 
+--- a/drivers/gpu/msm/governor_msm_adreno_tz.c
++++ b/drivers/gpu/msm/governor_msm_adreno_tz.c
+@@ -583,4 +583,5 @@
+ 
+ module_exit(msm_adreno_tz_exit);
+ 
++MODULE_DESCRIPTION("Qualcomm Adreno TrustZone devfreq governor");
+ MODULE_LICENSE("GPL v2");
+--- a/drivers/gpu/msm/kgsl_events.c
++++ b/drivers/gpu/msm/kgsl_events.c
+@@ -288,6 +288,15 @@
+ 		return 0;
+ 	}
+ 
++	/* Serialize late registrations with the terminal context's flush. */
++	if (context && (kgsl_context_invalid(context) ||
++			kgsl_context_detached(context))) {
++		event->result = KGSL_EVENT_CANCELLED;
++		queue_work(device->events_wq, &event->work);
++		spin_unlock(&group->lock);
++		return 0;
++	}
++
+ 	/* Add the event to the group list */
+ 	list_add_tail(&event->node, &group->events);
+ 
+--- a/drivers/gpu/msm/kgsl_sync.c
++++ b/drivers/gpu/msm/kgsl_sync.c
+@@ -9,9 +9,6 @@
+ 
+ #include "kgsl_device.h"
+ #include "kgsl_sync.h"
+-
+-static void kgsl_sync_timeline_signal(struct kgsl_sync_timeline *timeline,
+-	unsigned int timestamp);
+ 
+ static const struct dma_fence_ops kgsl_sync_fence_ops;
+ 
+@@ -68,24 +65,34 @@
+ 	kfree(kfence);
+ }
+ 
+-/* Called with ktimeline->lock held */
+-static bool kgsl_sync_fence_has_signaled(struct dma_fence *fence)
+-{
+-	struct kgsl_sync_fence *kfence = (struct kgsl_sync_fence *)fence;
++static bool kgsl_enable_signaling(struct dma_fence *fence)
++{
++	/* The timestamp event is armed before the sync file is installed. */
++	return true;
++}
++
++static void kgsl_sync_fence_signal(struct kgsl_sync_fence *kfence, int result)
++{
+ 	struct kgsl_sync_timeline *ktimeline = kfence->parent;
+-	unsigned int ts = kfence->timestamp;
+-
+-	return (timestamp_cmp(ktimeline->last_timestamp, ts) >= 0);
+-}
+-
+-static bool kgsl_enable_signaling(struct dma_fence *fence)
+-{
+-	return !kgsl_sync_fence_has_signaled(fence);
++	unsigned long flags;
++
++	spin_lock_irqsave(&ktimeline->lock, flags);
++	if (!dma_fence_is_signaled_locked(&kfence->fence)) {
++		if (result != KGSL_EVENT_RETIRED)
++			dma_fence_set_error(&kfence->fence,
++				result == KGSL_EVENT_CANCELLED ? -ECANCELED : -EIO);
++		dma_fence_signal_locked(&kfence->fence);
++	}
++	if (!list_empty(&kfence->child_list)) {
++		list_del_init(&kfence->child_list);
++		dma_fence_put(&kfence->fence);
++	}
++	spin_unlock_irqrestore(&ktimeline->lock, flags);
+ }
+ 
+ struct kgsl_sync_fence_event_priv {
+ 	struct kgsl_context *context;
+-	unsigned int timestamp;
++	struct kgsl_sync_fence *kfence;
+ };
+ 
+ /**
+@@ -103,13 +110,14 @@
+ {
+ 	struct kgsl_sync_fence_event_priv *ev = priv;
+ 
+-	kgsl_sync_timeline_signal(ev->context->ktimeline, ev->timestamp);
++	kgsl_sync_fence_signal(ev->kfence, result);
++	dma_fence_put(&ev->kfence->fence);
+ 	kgsl_context_put(ev->context);
+ 	kfree(ev);
+ }
+ 
+ static int _add_fence_event(struct kgsl_device *device,
+-	struct kgsl_context *context, unsigned int timestamp)
++	struct kgsl_context *context, struct kgsl_sync_fence *kfence)
+ {
+ 	struct kgsl_sync_fence_event_priv *event;
+ 	int ret;
+@@ -128,12 +136,14 @@
+ 	}
+ 
+ 	event->context = context;
+-	event->timestamp = timestamp;
+-
+-	ret = kgsl_add_event(device, &context->events, timestamp,
++	event->kfence = kfence;
++	dma_fence_get(&kfence->fence);
++
++	ret = kgsl_add_event(device, &context->events, kfence->timestamp,
+ 		kgsl_sync_fence_event_cb, event);
+ 
+ 	if (ret) {
++		dma_fence_put(&kfence->fence);
+ 		kgsl_context_put(context);
+ 		kfree(event);
+ 	}
+@@ -213,9 +223,9 @@
+ 
+ 	if (timestamp_cmp(cur, timestamp) >= 0) {
+ 		ret = 0;
+-		kgsl_sync_timeline_signal(context->ktimeline, cur);
++		kgsl_sync_fence_signal(kfence, KGSL_EVENT_RETIRED);
+ 	} else {
+-		ret = _add_fence_event(device, context, timestamp);
++		ret = _add_fence_event(device, context, kfence);
+ 		if (ret)
+ 			goto out;
+ 	}
+@@ -279,7 +289,6 @@
+ 		current->comm, current->pid);
+ 
+ 	ktimeline->fence_context = dma_fence_context_alloc(1);
+-	ktimeline->last_timestamp = 0;
+ 	INIT_LIST_HEAD(&ktimeline->child_list_head);
+ 	spin_lock_init(&ktimeline->lock);
+ 	ktimeline->device = context->device;
+@@ -295,31 +304,6 @@
+ 	return 0;
+ }
+ 
+-static void kgsl_sync_timeline_signal(struct kgsl_sync_timeline *ktimeline,
+-					unsigned int timestamp)
+-{
+-	unsigned long flags;
+-	struct kgsl_sync_fence *kfence, *next;
+-
+-	if (!kref_get_unless_zero(&ktimeline->kref))
+-		return;
+-
+-	spin_lock_irqsave(&ktimeline->lock, flags);
+-	if (timestamp_cmp(timestamp, ktimeline->last_timestamp) > 0)
+-		ktimeline->last_timestamp = timestamp;
+-
+-	list_for_each_entry_safe(kfence, next, &ktimeline->child_list_head,
+-				child_list) {
+-		if (dma_fence_is_signaled_locked(&kfence->fence)) {
+-			list_del_init(&kfence->child_list);
+-			dma_fence_put(&kfence->fence);
+-		}
+-	}
+-
+-	spin_unlock_irqrestore(&ktimeline->lock, flags);
+-	kgsl_sync_timeline_put(ktimeline);
+-}
+-
+ void kgsl_sync_timeline_detach(struct kgsl_sync_timeline *ktimeline)
+ {
+ 	unsigned long flags;
+@@ -350,7 +334,6 @@
+ 	.get_driver_name = kgsl_sync_fence_driver_name,
+ 	.get_timeline_name = kgsl_sync_timeline_name,
+ 	.enable_signaling = kgsl_enable_signaling,
+-	.signaled = kgsl_sync_fence_has_signaled,
+ 	.wait = dma_fence_default_wait,
+ 	.release = kgsl_sync_fence_release,
+ 
+--- a/drivers/gpu/msm/kgsl_sync.h
++++ b/drivers/gpu/msm/kgsl_sync.h
+@@ -16,7 +16,6 @@
+  *		   this context
+  * @child_list_head: List head for all fences on this timeline
+  * @lock: Spinlock to protect this timeline
+- * @last_timestamp: Last timestamp when signaling fences
+  * @device: kgsl device
+  * @context: kgsl context
+  */
+@@ -29,7 +28,6 @@
+ 	struct list_head child_list_head;
+ 
+ 	spinlock_t lock;
+-	unsigned int last_timestamp;
+ 	struct kgsl_device *device;
+ 	struct kgsl_context *context;
+ };

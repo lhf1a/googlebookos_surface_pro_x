@@ -1,0 +1,276 @@
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -819,10 +819,23 @@
+ 
+ static int adreno_get_chipid(struct platform_device *pdev, u32 *chipid)
+ {
+-	u32 hwrev = adreno_efuse_read_soc_hw_rev(pdev);
++	u32 hwrev, legacy;
+ 	struct device_node *node;
+ 	int ret;
+ 
++	if (of_device_is_compatible(pdev->dev.of_node, "qcom,adreno-680.1")) {
++		if (of_property_present(pdev->dev.of_node, "qcom,chipid")) {
++			ret = of_property_read_u32(pdev->dev.of_node, "qcom,chipid", &legacy);
++			if (ret)
++				return ret;
++			if (legacy != 0x06080001)
++				return -EINVAL;
++		}
++		*chipid = 0x06080001;
++		return 0;
++	}
++
++	hwrev = adreno_efuse_read_soc_hw_rev(pdev);
+ 	node = adreno_get_soc_hw_revision_node(pdev, hwrev);
+ 	if (!node)
+ 		node = of_node_get(pdev->dev.of_node);
+@@ -865,10 +878,12 @@
+ adreno_identify_gpu(struct platform_device *pdev, u32 *chipid)
+ {
+ 	const struct adreno_gpu_core *gpucore;
+-
+-	if (adreno_get_chipid(pdev, chipid)) {
+-		dev_crit(&pdev->dev, "Unable to get the GPU chip ID\n");
+-		return ERR_PTR(-ENODEV);
++	int ret;
++
++	ret = adreno_get_chipid(pdev, chipid);
++	if (ret) {
++		dev_crit(&pdev->dev, "Unable to get the GPU chip ID: %d\n", ret);
++		return ERR_PTR(ret);
+ 	}
+ 
+ 	gpucore = _get_gpu_core(pdev, *chipid);
+@@ -895,6 +910,7 @@
+ }
+ 
+ static const struct of_device_id adreno_match_table[] = {
++	{ .compatible = "qcom,adreno-680.1", .data = &device_3d0 },
+ 	{ .compatible = "qcom,kgsl-3d0", .data = &device_3d0 },
+ 	{ },
+ };
+@@ -1511,6 +1527,36 @@
+ 	{},
+ };
+ 
++static int adreno_bind_gmu(struct kgsl_device *device)
++{
++	struct device *dev = &device->pdev->dev;
++	struct device_node *node;
++	int ret;
++
++	if (device->gmu_core.components_bound)
++		return -EBUSY;
++	if (!of_property_present(dev->of_node, "qcom,gmu")) {
++		if (of_device_is_compatible(dev->of_node, "qcom,adreno-680.1"))
++			return -EINVAL;
++		node = of_find_matching_node(NULL, adreno_gmu_match);
++		if (!node)
++			return 0;
++		of_node_put(node);
++	}
++	ret = component_bind_all(dev, NULL);
++	if (!ret)
++		device->gmu_core.components_bound = true;
++	return ret;
++}
++
++static void adreno_unbind_gmu(struct kgsl_device *device)
++{
++	if (!device->gmu_core.components_bound)
++		return;
++	component_unbind_all(&device->pdev->dev, NULL);
++	device->gmu_core.components_bound = false;
++}
++
+ int adreno_device_probe(struct platform_device *pdev,
+ 		struct adreno_device *adreno_dev)
+ {
+@@ -1547,13 +1593,9 @@
+ 	 * Bind the GMU components (if applicable) before doing the KGSL
+ 	 * platform probe
+ 	 */
+-	if (of_find_matching_node(dev->of_node, adreno_gmu_match)) {
+-		status = component_bind_all(dev, NULL);
+-		if (status) {
+-			kgsl_bus_close(device);
+-			return status;
+-		}
+-	}
++	status = adreno_bind_gmu(device);
++	if (status)
++		goto err;
+ 
+ 	/*
+ 	 * The SMMU APIs use unsigned long for virtual addresses which means
+@@ -1657,13 +1699,11 @@
+ 
+ 	return 0;
+ err:
+-	device->pdev = NULL;
+-
+-	if (of_find_matching_node(dev->of_node, adreno_gmu_match))
+-		component_unbind_all(dev, NULL);
+-
++	adreno_unbind_gmu(device);
+ 	idr_destroy(&device->context_idr);
+ 	kgsl_bus_close(device);
++	device->pdev = NULL;
++	dev_set_drvdata(dev, NULL);
+ 
+ 	return status;
+ }
+@@ -1758,8 +1798,7 @@
+ 
+ 	kgsl_device_platform_remove(device);
+ 
+-	if (of_find_matching_node(dev->of_node, adreno_gmu_match))
+-		component_unbind_all(dev, NULL);
++	adreno_unbind_gmu(device);
+ 
+ 	clear_bit(ADRENO_DEVICE_PWRON_FIXUP, &adreno_dev->priv);
+ 	clear_bit(ADRENO_DEVICE_INITIALIZED, &adreno_dev->priv);
+@@ -4133,11 +4172,16 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	gmu_core_register();
++	ret = gmu_core_register();
++	if (ret)
++		goto error_core;
+ 	ret = platform_driver_register(&adreno_platform_driver);
+-	if (ret)
+-		kgsl_core_exit();
+-
++	if (!ret)
++		return 0;
++
++	gmu_core_unregister();
++error_core:
++	kgsl_core_exit();
+ 	return ret;
+ }
+ 
+--- a/drivers/gpu/msm/kgsl.c
++++ b/drivers/gpu/msm/kgsl.c
+@@ -4549,6 +4549,22 @@
+ 	return of_property_read_u32(node, base, ptr);
+ }
+ 
++static int kgsl_request_gpu_irq(struct kgsl_device *device)
++{
++	struct platform_device *pdev = device->pdev;
++	int irq, ret;
++
++	if (of_device_is_compatible(pdev->dev.of_node, "qcom,adreno-680.1"))
++		irq = platform_get_irq(pdev, 0);
++	else
++		irq = platform_get_irq_byname(pdev, "kgsl_3d0_irq");
++	if (irq < 0)
++		return irq;
++	ret = devm_request_irq(&pdev->dev, irq, kgsl_irq_handler,
++		IRQF_TRIGGER_HIGH | IRQF_NO_AUTOEN, "kgsl_3d0_irq", device);
++	return ret ? ret : irq;
++}
++
+ int kgsl_device_platform_probe(struct kgsl_device *device)
+ {
+ 	struct platform_device *pdev = device->pdev;
+@@ -4579,13 +4595,11 @@
+ 		goto error_pwrctrl_close;
+ 	}
+ 
+-	status = kgsl_request_irq(pdev, "kgsl_3d0_irq",
+-		kgsl_irq_handler, device);
++	status = kgsl_request_gpu_irq(device);
+ 	if (status < 0)
+ 		goto error_pwrctrl_close;
+ 
+ 	device->pwrctrl.interrupt_num = status;
+-	disable_irq(device->pwrctrl.interrupt_num);
+ 
+ 	device->events_wq = alloc_workqueue("kgsl-events",
+ 		WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_SYSFS | WQ_HIGHPRI, 0);
+--- a/drivers/gpu/msm/kgsl_gmu_core.c
++++ b/drivers/gpu/msm/kgsl_gmu_core.c
+@@ -10,39 +10,19 @@
+ #include "kgsl_gmu_core.h"
+ #include "kgsl_trace.h"
+ 
+-static const struct of_device_id gmu_match_table[] = {
+-	{ .compatible = "qcom,adreno-gmu-680.1", .data = &a6xx_gmu_driver },
+-	{ .compatible = "qcom,gpu-gmu", .data = &a6xx_gmu_driver },
+-	{ .compatible = "qcom,gpu-rgmu", .data = &a6xx_rgmu_driver },
+-	{},
++static struct platform_driver * const gmu_drivers[] = {
++	&a6xx_gmu_driver,
++	&a6xx_rgmu_driver,
+ };
+ 
+-void __init gmu_core_register(void)
+-{
+-	const struct of_device_id *match;
+-	struct device_node *node;
+-
+-	node = of_find_matching_node_and_match(NULL, gmu_match_table,
+-		&match);
+-	if (!node)
+-		return;
+-
+-	platform_driver_register((struct platform_driver *) match->data);
+-	of_node_put(node);
+-}
+-
+-void __exit gmu_core_unregister(void)
+-{
+-	const struct of_device_id *match;
+-	struct device_node *node;
+-
+-	node = of_find_matching_node_and_match(NULL, gmu_match_table,
+-		&match);
+-	if (!node)
+-		return;
+-
+-	platform_driver_unregister((struct platform_driver *) match->data);
+-	of_node_put(node);
++int __init gmu_core_register(void)
++{
++	return platform_register_drivers(gmu_drivers, ARRAY_SIZE(gmu_drivers));
++}
++
++void gmu_core_unregister(void)
++{
++	platform_unregister_drivers(gmu_drivers, ARRAY_SIZE(gmu_drivers));
+ }
+ 
+ bool gmu_core_isenabled(struct kgsl_device *device)
+--- a/drivers/gpu/msm/kgsl_gmu_core.h
++++ b/drivers/gpu/msm/kgsl_gmu_core.h
+@@ -117,6 +117,7 @@
+  * @reg_len: GMU registers length
+  * @reg_virt: GMU CSR virtual address
+  * @dev_ops: Pointer to gmu device operations
++ * @components_bound: GMU components successfully bound to this GPU
+  * @flags: GMU flags
+  */
+ struct gmu_core_device {
+@@ -126,6 +127,7 @@
+ 	void __iomem *reg_virt;
+ 	const struct gmu_dev_ops *dev_ops;
+ 	unsigned long flags;
++	bool components_bound;
+ };
+ 
+ extern struct platform_driver a6xx_gmu_driver;
+@@ -134,8 +136,8 @@
+ 
+ /* GMU core functions */
+ 
+-void __init gmu_core_register(void);
+-void __exit gmu_core_unregister(void);
++int __init gmu_core_register(void);
++void gmu_core_unregister(void);
+ 
+ bool gmu_core_gpmu_isenabled(struct kgsl_device *device);
+ bool gmu_core_scales_bandwidth(struct kgsl_device *device);

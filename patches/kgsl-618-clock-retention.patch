@@ -1,0 +1,199 @@
+--- a/drivers/clk/qcom/clk-branch.c
++++ b/drivers/clk/qcom/clk-branch.c
+@@ -10,6 +10,13 @@
+ #include <linux/delay.h>
+ #include <linux/export.h>
+ #include <linux/clk-provider.h>
++#include <linux/clk/qcom.h>
++#include <linux/device.h>
++#include <linux/err.h>
++#include <linux/list.h>
++#include <linux/mutex.h>
++#include <linux/pm_runtime.h>
++#include <linux/slab.h>
+ #include <linux/regmap.h>
+ 
+ #include "clk-branch.h"
+@@ -198,3 +205,120 @@
+ 	.is_prepared = clk_is_enabled_regmap,
+ };
+ EXPORT_SYMBOL_GPL(clk_branch2_prepare_ops);
++
++/* Only registered branch2 clocks may be interpreted as struct clk_branch. */
++struct qcom_branch_retention {
++	struct list_head node;
++	struct clk_hw *hw;
++	struct device *dev;
++	struct regmap *regmap;
++	u32 halt_reg;
++};
++
++static LIST_HEAD(qcom_branch_retention_list);
++static DEFINE_MUTEX(qcom_branch_retention_lock);
++
++static void qcom_branch_retention_remove(void *data)
++{
++	struct qcom_branch_retention *entry = data;
++
++	mutex_lock(&qcom_branch_retention_lock);
++	list_del(&entry->node);
++	mutex_unlock(&qcom_branch_retention_lock);
++}
++
++int qcom_branch_register_retention(struct device *dev, struct clk_regmap *rclk,
++	const struct clk_ops *ops)
++{
++	struct qcom_branch_retention *entry;
++	struct clk_branch *branch;
++
++	if (ops != &clk_branch2_ops && ops != &clk_branch2_aon_ops &&
++		ops != &clk_branch2_mem_ops && ops != &clk_branch2_prepare_ops)
++		return 0;
++	if (!dev || !rclk->regmap)
++		return -EINVAL;
++
++	entry = devm_kzalloc(dev, sizeof(*entry), GFP_KERNEL);
++	if (!entry)
++		return -ENOMEM;
++
++	branch = to_clk_branch(&rclk->hw);
++	entry->hw = &rclk->hw;
++	entry->dev = dev;
++	entry->regmap = rclk->regmap;
++	entry->halt_reg = branch->halt_reg;
++	mutex_lock(&qcom_branch_retention_lock);
++	list_add_tail(&entry->node, &qcom_branch_retention_list);
++	mutex_unlock(&qcom_branch_retention_lock);
++
++	/* Registered after the clock: remove lookup before its devres teardown. */
++	return devm_add_action_or_reset(dev, qcom_branch_retention_remove, entry);
++}
++
++int qcom_clk_set_flags(struct clk *clk, unsigned long flags)
++{
++	struct qcom_branch_retention *entry;
++	struct clk_hw *hw;
++	u32 mask, value = 0;
++	int ret = -EOPNOTSUPP, pm_ret;
++	bool runtime_pm;
++
++	if (IS_ERR(clk))
++		return PTR_ERR(clk);
++	if (!clk)
++		return -EINVAL;
++	hw = __clk_get_hw(clk);
++	if (!hw)
++		return -ENODEV;
++
++	switch (flags) {
++	case CLKFLAG_RETAIN_PERIPH:
++		value = CBCR_FORCE_MEM_PERIPH_ON;
++		fallthrough;
++	case CLKFLAG_NORETAIN_PERIPH:
++		mask = CBCR_FORCE_MEM_PERIPH_ON;
++		break;
++	case CLKFLAG_RETAIN_MEM:
++		value = CBCR_FORCE_MEM_CORE_ON;
++		fallthrough;
++	case CLKFLAG_NORETAIN_MEM:
++		mask = CBCR_FORCE_MEM_CORE_ON;
++		break;
++	case CLKFLAG_PERIPH_OFF_SET:
++		value = CBCR_FORCE_MEM_PERIPH_OFF;
++		fallthrough;
++	case CLKFLAG_PERIPH_OFF_CLEAR:
++		mask = CBCR_FORCE_MEM_PERIPH_OFF;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	/* Serialize register access with lookup removal and other flag changes. */
++	mutex_lock(&qcom_branch_retention_lock);
++	list_for_each_entry(entry, &qcom_branch_retention_list, node) {
++		if (entry->hw != hw)
++			continue;
++		runtime_pm = pm_runtime_enabled(entry->dev);
++		if (runtime_pm) {
++			ret = pm_runtime_resume_and_get(entry->dev);
++			if (ret < 0)
++				break;
++		}
++		ret = regmap_update_bits(entry->regmap, entry->halt_reg,
++			mask, value);
++		/* Preserve the downstream write ordering and settling interval. */
++		mb();
++		udelay(1);
++		if (runtime_pm) {
++			pm_ret = pm_runtime_put(entry->dev);
++			if (!ret && pm_ret < 0)
++				ret = pm_ret;
++		}
++		break;
++	}
++	mutex_unlock(&qcom_branch_retention_lock);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(qcom_clk_set_flags);
+--- a/drivers/clk/qcom/clk-branch.h
++++ b/drivers/clk/qcom/clk-branch.h
+@@ -117,4 +117,7 @@
+ #define to_clk_mem_branch(_hw) \
+ 	container_of(to_clk_branch(_hw), struct clk_mem_branch, branch)
+ 
++int qcom_branch_register_retention(struct device *dev, struct clk_regmap *rclk,
++	const struct clk_ops *ops);
++
+ #endif
+--- a/drivers/clk/qcom/clk-regmap.c
++++ b/drivers/clk/qcom/clk-regmap.c
+@@ -9,6 +9,7 @@
+ #include <linux/export.h>
+ 
+ #include "clk-regmap.h"
++#include "clk-branch.h"
+ 
+ /**
+  * clk_is_enabled_regmap - standard is_enabled() for regmap users
+@@ -96,11 +97,18 @@
+  */
+ int devm_clk_register_regmap(struct device *dev, struct clk_regmap *rclk)
+ {
++	const struct clk_ops *ops = rclk->hw.init->ops;
++	int ret;
++
+ 	if (dev && dev_get_regmap(dev, NULL))
+ 		rclk->regmap = dev_get_regmap(dev, NULL);
+ 	else if (dev && dev->parent)
+ 		rclk->regmap = dev_get_regmap(dev->parent, NULL);
+ 
+-	return devm_clk_hw_register(dev, &rclk->hw);
++	ret = devm_clk_hw_register(dev, &rclk->hw);
++	if (ret)
++		return ret;
++
++	return qcom_branch_register_retention(dev, rclk, ops);
+ }
+ EXPORT_SYMBOL_GPL(devm_clk_register_regmap);
+--- /dev/null
++++ b/include/linux/clk/qcom.h
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef __LINUX_CLK_QCOM_H_
++#define __LINUX_CLK_QCOM_H_
++
++struct clk;
++
++enum branch_mem_flags {
++	CLKFLAG_RETAIN_PERIPH,
++	CLKFLAG_NORETAIN_PERIPH,
++	CLKFLAG_RETAIN_MEM,
++	CLKFLAG_NORETAIN_MEM,
++	CLKFLAG_PERIPH_OFF_SET,
++	CLKFLAG_PERIPH_OFF_CLEAR,
++};
++
++/* Sleepable; caller must hold its clock reference throughout this call. */
++int qcom_clk_set_flags(struct clk *clk, unsigned long flags);
++
++#endif

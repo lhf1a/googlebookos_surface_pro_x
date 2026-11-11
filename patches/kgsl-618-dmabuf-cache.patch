@@ -1,0 +1,191 @@
+--- a/drivers/gpu/msm/kgsl.c
++++ b/drivers/gpu/msm/kgsl.c
+@@ -11,7 +11,6 @@
+ #include <linux/dma-buf.h>
+ #include <linux/fdtable.h>
+ #include <linux/io.h>
+-#include <linux/ion.h>
+ #include <linux/mman.h>
+ #include <linux/module.h>
+ #include <linux/msm-bus.h>
+@@ -2809,14 +2808,6 @@
+ 		return ret;
+ 	}
+ 
+-	/* Setup the cache mode for cache operations */
+-	_setup_cache_mode(entry, vma);
+-
+-	if (kgsl_mmu_has_feature(device, KGSL_MMU_IO_COHERENT))
+-		entry->memdesc.flags |= KGSL_MEMFLAGS_IOCOHERENT;
+-	else
+-		entry->memdesc.flags &= ~((u64) KGSL_MEMFLAGS_IOCOHERENT);
+-
+ 	up_read(&current->mm->mmap_sem);
+ 	return 0;
+ }
+@@ -2891,10 +2882,8 @@
+ 		struct kgsl_gpuobj_import *param,
+ 		int *fd)
+ {
+-	bool iocoherent = (param->flags & KGSL_MEMFLAGS_IOCOHERENT);
+ 	struct kgsl_gpuobj_import_dma_buf buf;
+ 	struct dma_buf *dmabuf;
+-	unsigned long flags = 0;
+ 	int ret;
+ 
+ 	param->flags &= KGSL_MEMFLAGS_GPUREADONLY |
+@@ -2933,25 +2922,6 @@
+ 	if (IS_ERR_OR_NULL(dmabuf))
+ 		return (dmabuf == NULL) ? -EINVAL : PTR_ERR(dmabuf);
+ 
+-	/*
+-	 * ION cache ops are routed through kgsl, so record if the dmabuf is
+-	 * cached or not in the memdesc. Assume uncached if dma_buf_get_flags
+-	 * fails.
+-	 */
+-	dma_buf_get_flags(dmabuf, &flags);
+-	if (flags & ION_FLAG_CACHED) {
+-		entry->memdesc.flags |=
+-			KGSL_CACHEMODE_WRITEBACK << KGSL_CACHEMODE_SHIFT;
+-
+-		/*
+-		 * Enable I/O coherency if it is 1) a thing, and either
+-		 * 2) enabled by default or 3) enabled by the caller
+-		 */
+-		if (kgsl_mmu_has_feature(device, KGSL_MMU_IO_COHERENT) &&
+-		    (IS_ENABLED(CONFIG_QCOM_KGSL_IOCOHERENCY_DEFAULT) ||
+-		     iocoherent))
+-			entry->memdesc.flags |= KGSL_MEMFLAGS_IOCOHERENT;
+-	}
+ 
+ 	ret = kgsl_setup_dma_buf(device, pagetable, entry, dmabuf);
+ 	if (ret)
+@@ -3105,6 +3075,20 @@
+ #endif
+ 
+ #ifdef CONFIG_DMA_SHARED_BUFFER
++/* shortcut: these pinned heaps have known mmap/cache contracts; add real
++ * exporter metadata and range callbacks before accepting other exporters. */
++static int kgsl_dmabuf_cachemode(struct dma_buf *dmabuf)
++{
++	if (!dmabuf->exp_name || !dmabuf->ops->begin_cpu_access ||
++	    !dmabuf->ops->end_cpu_access)
++		return -EOPNOTSUPP;
++	if (!strcmp(dmabuf->exp_name, "system"))
++		return KGSL_CACHEMODE_WRITEBACK;
++	if (!strcmp(dmabuf->exp_name, "system-uncached"))
++		return KGSL_CACHEMODE_WRITECOMBINE;
++	return -EOPNOTSUPP;
++}
++
+ static int kgsl_setup_dma_buf(struct kgsl_device *device,
+ 				struct kgsl_pagetable *pagetable,
+ 				struct kgsl_mem_entry *entry,
+@@ -3115,7 +3099,7 @@
+ 	struct sg_table *table;
+ 	struct scatterlist *sg;
+ 	u64 size = 0;
+-	int i, ret;
++	int i, ret, cachemode;
+ 
+ 	/* PagePrivate is not a DMA-BUF security contract on mainline. Secure
+ 	 * imports need a real protected-domain/exporter integration first. */
+@@ -3123,6 +3107,10 @@
+ 		return -EOPNOTSUPP;
+ 	if (!dmabuf->size || !IS_ALIGNED(dmabuf->size, PAGE_SIZE))
+ 		return -EINVAL;
++
++	cachemode = kgsl_dmabuf_cachemode(dmabuf);
++	if (cachemode < 0)
++		return cachemode;
+ 
+ 	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
+ 	if (!meta)
+@@ -3176,8 +3164,9 @@
+ 	entry->memdesc.ops = &kgsl_dmabuf_ops;
+ 	entry->memdesc.sgt = table;
+ 	entry->memdesc.flags &= ~((u64)KGSL_MEMFLAGS_USE_CPU_MAP |
+-				 KGSL_MEMFLAGS_IOCOHERENT);
+-	entry->memdesc.flags |= (u64)KGSL_MEMFLAGS_USERMEM_ION;
++				 KGSL_MEMFLAGS_IOCOHERENT | KGSL_CACHEMODE_MASK);
++	entry->memdesc.flags |= (u64)KGSL_MEMFLAGS_USERMEM_ION |
++				((u64)cachemode << KGSL_CACHEMODE_SHIFT);
+ 	entry->memdesc.priv &= ~(KGSL_MEMDESC_LAZY_ALLOCATION |
+ 			       KGSL_MEMDESC_USE_SHMEM);
+ 	add_dmabuf_list(meta);
+@@ -3400,6 +3389,42 @@
+ 	return result;
+ }
+ 
++#ifdef CONFIG_DMA_SHARED_BUFFER
++static int kgsl_dmabuf_sync_cache(struct kgsl_mem_entry *entry,
++		u64 offset, u64 length, unsigned int op)
++{
++	struct kgsl_dma_buf_meta *meta = entry->priv_data;
++	int ret;
++
++	if (!meta || !meta->dmabuf)
++		return -EINVAL;
++	if (!length)
++		return -EINVAL;
++	if (offset > entry->memdesc.size || length > entry->memdesc.size - offset)
++		return -ERANGE;
++	/* Whole-buffer callbacks cannot safely invalidate outside this range. */
++	if (offset || length != entry->memdesc.size)
++		return -EOPNOTSUPP;
++
++	/* These exporters have stateless cache callbacks. CLEAN ends CPU writes;
++	 * INV begins CPU reads. FLUSH must clean before invalidating dirty data.
++	 * No reservation lock is held: begin_cpu_access also waits its fences. */
++	switch (op) {
++	case KGSL_CACHE_OP_CLEAN:
++		return dma_buf_end_cpu_access(meta->dmabuf, DMA_TO_DEVICE);
++	case KGSL_CACHE_OP_INV:
++		return dma_buf_begin_cpu_access(meta->dmabuf, DMA_FROM_DEVICE);
++	case KGSL_CACHE_OP_FLUSH:
++		ret = dma_buf_end_cpu_access(meta->dmabuf, DMA_TO_DEVICE);
++		if (ret)
++			return ret;
++		return dma_buf_begin_cpu_access(meta->dmabuf, DMA_FROM_DEVICE);
++	default:
++		return -EINVAL;
++	}
++}
++#endif
++
+ static int _kgsl_gpumem_sync_cache(struct kgsl_mem_entry *entry,
+ 		uint64_t offset, uint64_t length, unsigned int op)
+ {
+@@ -3435,6 +3460,11 @@
+ 		length = entry->memdesc.size;
+ 	}
+ 
++#ifdef CONFIG_DMA_SHARED_BUFFER
++	if (kgsl_memdesc_usermem_type(&entry->memdesc) == KGSL_MEM_ENTRY_ION)
++		return kgsl_dmabuf_sync_cache(entry, offset, length, cacheop);
++#endif
++
+ 	if (kgsl_cachemode_is_cached(entry->memdesc.flags)) {
+ 		trace_kgsl_mem_sync_cache(entry, offset, length, op);
+ 		ret = kgsl_cache_range_op(&entry->memdesc, offset,
+@@ -3547,7 +3577,8 @@
+ 
+ 		/* skip uncached memory */
+ 		cachemode = kgsl_memdesc_get_cachemode(&entry->memdesc);
+-		if (cachemode != KGSL_CACHEMODE_WRITETHROUGH &&
++		if (kgsl_memdesc_usermem_type(&entry->memdesc) != KGSL_MEM_ENTRY_ION &&
++		    cachemode != KGSL_CACHEMODE_WRITETHROUGH &&
+ 		    cachemode != KGSL_CACHEMODE_WRITEBACK) {
+ 			kgsl_mem_entry_put(entry);
+ 			continue;
+@@ -3568,8 +3599,8 @@
+ 	param->op &= ~KGSL_GPUMEM_CACHE_RANGE;
+ 
+ 	for (i = 0; i < actual_count; i++) {
+-		if (!full_flush)
+-			_kgsl_gpumem_sync_cache(entries[i], 0,
++		if (!full_flush && !ret)
++			ret = _kgsl_gpumem_sync_cache(entries[i], 0,
+ 						entries[i]->memdesc.size,
+ 						param->op);
+ 		kgsl_mem_entry_put(entries[i]);

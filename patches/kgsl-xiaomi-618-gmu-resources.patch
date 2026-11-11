@@ -1,0 +1,309 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -185,6 +185,28 @@
+ 	}
+ }
+ 
++static bool a6xx_gmu_resource_fits(struct resource *res, resource_size_t minimum)
++{
++	return res && res->end >= res->start && !(res->start & 3) &&
++		!(resource_size(res) & 3) && resource_size(res) >= minimum;
++}
++
++int a6xx_gmu_request_irq(struct adreno_device *adreno_dev, bool hfi,
++		irq_handler_t handler, void *data)
++{
++	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
++	const char *name = adreno_is_a680(adreno_dev) ?
++		(hfi ? "hfi" : "gmu") : (hfi ? "kgsl_hfi_irq" : "kgsl_gmu_irq");
++	int irq, ret;
++
++	irq = platform_get_irq_byname(gmu->pdev, name);
++	if (irq < 0)
++		return irq;
++	ret = devm_request_irq(&gmu->pdev->dev, irq, handler,
++		IRQF_TRIGGER_HIGH | IRQF_NO_AUTOEN, name, data);
++	return ret ? ret : irq;
++}
++
+ int a6xx_load_pdc_ucode(struct adreno_device *adreno_dev)
+ {
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+@@ -242,10 +264,19 @@
+ 	 * Map the starting address for pdc_cfg programming. If the pdc_cfg
+ 	 * resource is not available use an offset from the base PDC resource.
+ 	 */
+-	res_pdc = platform_get_resource_byname(gmu->pdev, IORESOURCE_MEM,
++	res_pdc = NULL;
++	if (!adreno_is_a680(adreno_dev))
++		res_pdc = platform_get_resource_byname(gmu->pdev, IORESOURCE_MEM,
+ 			"kgsl_gmu_pdc_reg");
+ 	res_cfg = platform_get_resource_byname(gmu->pdev, IORESOURCE_MEM,
+-			"kgsl_gmu_pdc_cfg");
++		adreno_is_a680(adreno_dev) ? "gmu_pdc" : "kgsl_gmu_pdc_cfg");
++	if (adreno_is_a680(adreno_dev)) {
++		if (!res_cfg)
++			return -ENODEV;
++		if (!a6xx_gmu_resource_fits(res_cfg,
++			(PDC_GPU_TCS3_CMD0_DATA + PDC_CMD_OFFSET * 3 + 1) * sizeof(u32)))
++			return -EINVAL;
++	}
+ 	if (res_cfg)
+ 		cfg = ioremap(res_cfg->start, resource_size(res_cfg));
+ 	else if (res_pdc)
+@@ -253,7 +284,7 @@
+ 
+ 	if (!cfg) {
+ 		dev_err(&gmu->pdev->dev, "Failed to map PDC CFG\n");
+-		return -ENODEV;
++		return (res_cfg || res_pdc) ? -ENOMEM : -ENODEV;
+ 	}
+ 
+ 	/* PDC is programmed in AOP for newer platforms */
+@@ -265,7 +296,12 @@
+ 	 * resource is not available use an offset from the base PDC resource.
+ 	 */
+ 	res_seq = platform_get_resource_byname(gmu->pdev, IORESOURCE_MEM,
+-			"kgsl_gmu_pdc_seq");
++		adreno_is_a680(adreno_dev) ? "gmu_pdc_seq" : "kgsl_gmu_pdc_seq");
++	if (adreno_is_a680(adreno_dev) &&
++		!a6xx_gmu_resource_fits(res_seq, (PDC_GPU_SEQ_MEM_0 + 5) * sizeof(u32))) {
++		iounmap(cfg);
++		return res_seq ? -EINVAL : -ENODEV;
++	}
+ 	if (res_seq)
+ 		seq = ioremap(res_seq->start, resource_size(res_seq));
+ 	else if (res_pdc)
+@@ -274,7 +310,7 @@
+ 	if (!seq) {
+ 		dev_err(&gmu->pdev->dev, "Failed to map PDC SEQ\n");
+ 		iounmap(cfg);
+-		return -ENODEV;
++		return (res_seq || res_pdc) ? -ENOMEM : -ENODEV;
+ 	}
+ 
+ 	/* Load PDC sequencer uCode for power up and power down sequence */
+@@ -2648,29 +2684,27 @@
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	struct resource *res;
++	resource_size_t length, offset;
++	void __iomem *mapping;
+ 
+ 	res = platform_get_resource_byname(gmu->pdev, IORESOURCE_MEM,
+-			"kgsl_gmu_reg");
+-	if (!res) {
+-		dev_err(&gmu->pdev->dev, "The GMU register region isn't defined\n");
++		adreno_is_a680(adreno_dev) ? "gmu" : "kgsl_gmu_reg");
++	if (!res)
+ 		return -ENODEV;
+-	}
+-
+-	device->gmu_core.gmu2gpu_offset = (res->start - device->reg_phys) >> 2;
+-	device->gmu_core.reg_len = resource_size(res);
+-
+-	/*
+-	 * We can't use devm_ioremap_resource here because we purposely double
+-	 * map the gpu_cc registers for debugging purposes
+-	 */
+-	device->gmu_core.reg_virt = devm_ioremap(&gmu->pdev->dev, res->start,
+-		resource_size(res));
+-
+-	if (!device->gmu_core.reg_virt) {
+-		dev_err(&gmu->pdev->dev, "Unable to map the GMU registers\n");
++	if (!a6xx_gmu_resource_fits(res, adreno_is_a680(adreno_dev) ? 0x30000 : 4) ||
++		res->start < device->reg_phys || (device->reg_phys & 3))
++		return -EINVAL;
++	length = resource_size(res);
++	offset = (res->start - device->reg_phys) >> 2;
++	if (length > U32_MAX || offset > U32_MAX)
++		return -ERANGE;
++	/* The DT range overlaps GPUCC; its provider retains register ownership. */
++	mapping = devm_ioremap(&gmu->pdev->dev, res->start, length);
++	if (!mapping)
+ 		return -ENOMEM;
+-	}
+-
++	device->gmu_core.gmu2gpu_offset = offset;
++	device->gmu_core.reg_len = length;
++	device->gmu_core.reg_virt = mapping;
+ 	return 0;
+ }
+ 
+@@ -2918,17 +2952,13 @@
+ 
+ 	device->gmu_core.dev_ops = &a6xx_gmudev;
+ 
+-	gmu->irq = kgsl_request_irq(gmu->pdev, "kgsl_gmu_irq",
++	gmu->irq = a6xx_gmu_request_irq(adreno_dev, false,
+ 		a6xx_gmu_irq_handler, device);
+ 
+ 	if (gmu->irq < 0) {
+ 		ret = gmu->irq;
+ 		goto error;
+ 	}
+-
+-	/* Don't enable GMU interrupts until GMU started */
+-	/* We cannot use irq_disable because it writes registers */
+-	disable_irq(gmu->irq);
+ 
+ 	return 0;
+ 
+@@ -3642,15 +3672,13 @@
+ 	 * since HFI interrupts are handled differently in hwscheduling, move
+ 	 * out HFI interrupt setup from a6xx_gmu_probe().
+ 	 */
+-	hfi->irq = kgsl_request_irq(gmu->pdev, "kgsl_hfi_irq",
++	hfi->irq = a6xx_gmu_request_irq(ADRENO_DEVICE(device), true,
+ 		a6xx_hfi_irq_handler, device);
+ 	if (hfi->irq < 0) {
+ 		a6xx_gmu_remove(device);
+ 		return hfi->irq;
+ 	}
+ 
+-	disable_irq(gmu->hfi.irq);
+-
+ 	return 0;
+ }
+ 
+@@ -3678,6 +3706,7 @@
+ }
+ 
+ static const struct of_device_id a6xx_gmu_match_table[] = {
++	{ .compatible = "qcom,adreno-gmu-680.1" },
+ 	{ .compatible = "qcom,gpu-gmu" },
+ 	{ },
+ };
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.h
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.h
+@@ -4,6 +4,8 @@
+  */
+ #ifndef __ADRENO_A6XX_GMU_H
+ #define __ADRENO_A6XX_GMU_H
++
++#include <linux/interrupt.h>
+ 
+ struct qmp;
+ 
+@@ -424,6 +426,8 @@
+  * to recover from the fault
+  */
+ int a6xx_gmu_suspend(struct adreno_device *adreno_dev);
++int a6xx_gmu_request_irq(struct adreno_device *adreno_dev, bool hfi,
++		irq_handler_t handler, void *data);
+ int a6xx_gmu_disable_clks(struct adreno_device *adreno_dev);
+ int a6xx_gmu_disable_cx(struct adreno_device *adreno_dev);
+ 
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c
+@@ -986,15 +986,13 @@
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	struct a6xx_hwsched_hfi *hw_hfi = to_a6xx_hwsched_hfi(adreno_dev);
+ 
+-	gmu->hfi.irq = kgsl_request_irq(gmu->pdev, "kgsl_hfi_irq",
++	gmu->hfi.irq = a6xx_gmu_request_irq(adreno_dev, true,
+ 		a6xx_hwsched_hfi_handler, adreno_dev);
+ 
+ 	if (gmu->hfi.irq < 0)
+ 		return gmu->hfi.irq;
+ 
+ 	hw_hfi->irq_mask = HFI_IRQ_MASK;
+-
+-	disable_irq(gmu->hfi.irq);
+ 
+ 	rwlock_init(&hw_hfi->msglock);
+ 
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -1505,6 +1505,7 @@
+ }
+ 
+ static const struct of_device_id adreno_gmu_match[] = {
++	{ .compatible = "qcom,adreno-gmu-680.1" },
+ 	{ .compatible = "qcom,gpu-gmu" },
+ 	{ .compatible = "qcom,gpu-rgmu" },
+ 	{},
+@@ -4047,29 +4048,45 @@
+ 	of_node_put(data);
+ }
+ 
+-static void adreno_add_gmu_components(struct device *dev,
++static int adreno_add_gmu_components(struct device *dev,
+ 		struct component_match **match)
+ {
+ 	struct device_node *node;
+ 
+-	node = of_find_matching_node(NULL, adreno_gmu_match);
++	if (of_property_present(dev->of_node, "qcom,gmu")) {
++		node = of_parse_phandle(dev->of_node, "qcom,gmu", 0);
++		if (!node)
++			return -EINVAL;
++		if (!of_match_node(adreno_gmu_match, node)) {
++			of_node_put(node);
++			return -ENODEV;
++		}
++	} else {
++		if (of_device_is_compatible(dev->of_node, "qcom,adreno-680.1"))
++			return -EINVAL;
++		node = of_find_matching_node(NULL, adreno_gmu_match);
++	}
+ 	if (!node)
+-		return;
++		return 0;
+ 
+ 	if (!of_device_is_available(node)) {
+ 		of_node_put(node);
+-		return;
++		return -ENODEV;
+ 	}
+ 
+ 	component_match_add_release(dev, match, _release_of,
+ 		_compare_of, node);
++	return 0;
+ }
+ 
+ static int adreno_probe(struct platform_device *pdev)
+ {
+ 	struct component_match *match = NULL;
+-
+-	adreno_add_gmu_components(&pdev->dev, &match);
++	int ret;
++
++	ret = adreno_add_gmu_components(&pdev->dev, &match);
++	if (ret)
++		return ret;
+ 
+ 	if (match)
+ 		return component_master_add_with_match(&pdev->dev,
+@@ -4080,11 +4097,18 @@
+ 
+ static void adreno_remove(struct platform_device *pdev)
+ {
+-	if (of_find_matching_node(NULL, adreno_gmu_match))
++	struct device_node *node;
++
++	if (of_property_present(pdev->dev.of_node, "qcom,gmu")) {
+ 		component_master_del(&pdev->dev, &adreno_ops);
+-	else
++		return;
++	}
++	node = of_find_matching_node(NULL, adreno_gmu_match);
++	if (node) {
++		of_node_put(node);
++		component_master_del(&pdev->dev, &adreno_ops);
++	} else
+ 		adreno_unbind(&pdev->dev);
+-
+ }
+ 
+ static const struct dev_pm_ops adreno_pm_ops = {
+--- a/drivers/gpu/msm/kgsl_gmu_core.c
++++ b/drivers/gpu/msm/kgsl_gmu_core.c
+@@ -11,6 +11,7 @@
+ #include "kgsl_trace.h"
+ 
+ static const struct of_device_id gmu_match_table[] = {
++	{ .compatible = "qcom,adreno-gmu-680.1", .data = &a6xx_gmu_driver },
+ 	{ .compatible = "qcom,gpu-gmu", .data = &a6xx_gmu_driver },
+ 	{ .compatible = "qcom,gpu-rgmu", .data = &a6xx_rgmu_driver },
+ 	{},

@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "source_manifest": "kgsl-sde-source-inputs.json",
+  "patches": [
+    {
+      "path": "patches/kgsl-618-dmabuf-import.patch",
+      "sha256": "77fe923df771eac63e9b86537660cf178754e7e00b5e4b937b390e0c19ee3d18",
+      "files": {
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "9c72ac74472905d3416260b75f786b688dd83d8cb2a73ddd8cfb95d721eff28d",
+          "after": "cd302a2a7a0c847a0ecc3ec5c3bf7c97ec696273d9fb6362acb338df0d76f383"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-618-sg-map.patch",
+      "sha256": "483160281fcbd80485daf264c36533660cf5445f75cbfc85b555a45973f73a3d",
+      "files": {
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "0c6f76ca2824d3737f8a949f752b322e8ddb02a584f13e0e0c6b24c6ee8bbf0f",
+          "after": "fcc12b0cedfc2f43541a65575d5100100b765ad9c9f042d1968ad940ac9279b7"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-618-dmabuf-cache.patch",
+      "sha256": "6bc6c0c76d74eb01c223c6789e45b5904497006b43509e0b2886ffbafefd5174",
+      "files": {
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "cd302a2a7a0c847a0ecc3ec5c3bf7c97ec696273d9fb6362acb338df0d76f383",
+          "after": "58de3574d9128a0c806831bc6c7f12f832d35d49a3d771f4d9b566b8df638b9c"
+        }
+      }
+    }
+  ],
+  "status": "partial-source-port-not-buildable",
+  "open": [
+    "DMA-BUF partial-range synchronization and general exporter cache metadata (full-buffer pinned system heaps implemented, not hardware validated)",
+    "legacy MSM bus/devfreq to ICC/OPP",
+    "SMMU domains/per-process page tables",
+    "SCM/GMU/resource ownership",
+    "remaining 4.19-to-6.18 core APIs"
+  ],
+  "dma_buf_cache_contract": {
+    "system": "writeback; pinned 6.18 system_heap.c mmap and stateless callbacks",
+    "system_uncached": "writecombine; pinned independent heap v1 mmap and barrier callbacks",
+    "unknown_exporter": "EOPNOTSUPP; do not infer uncached",
+    "partial_range": "EOPNOTSUPP pending real exporter range API; required before full UMD compatibility",
+    "source_config": "configs/system-uncached-heap.json"
+  }
+}

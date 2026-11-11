@@ -1,0 +1,234 @@
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -2457,8 +2457,11 @@
+ 	/* Save physical performance counter values before GPU power down*/
+ 	adreno_perfcounter_save(adreno_dev);
+ 
+-	if (gpudev->clear_pending_transactions)
+-		gpudev->clear_pending_transactions(adreno_dev);
++	if (gpudev->clear_pending_transactions) {
++		error = gpudev->clear_pending_transactions(adreno_dev);
++		if (error)
++			return error;
++	}
+ 
+ 	adreno_dispatcher_stop(adreno_dev);
+ 
+--- a/drivers/gpu/msm/adreno_dispatch.c
++++ b/drivers/gpu/msm/adreno_dispatch.c
+@@ -1940,118 +1940,74 @@
+  * @fault: Faults caused by the command in the dispatch q
+  * @base: The IB1 base during the fault
+  */
+-static void recover_dispatch_q(struct kgsl_device *device,
++static int recover_dispatch_q(struct kgsl_device *device,
+ 		struct adreno_dispatcher_drawqueue *dispatch_q,
+-		int fault,
+-		unsigned int base)
++		int fault, unsigned int base)
+ {
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+ 	struct kgsl_drawobj_cmd **replay;
+-	unsigned int ptr;
+-	int first = 0;
+-	int count = 0;
+-	int i;
+-
+-	/* Allocate memory to store the inflight commands */
+-	replay = kcalloc(dispatch_q->inflight, sizeof(*replay), GFP_KERNEL);
+-
+-	if (replay == NULL) {
+-		unsigned int ptr = dispatch_q->head;
+-
+-		/* Recovery failed - mark everybody on this q guilty */
+-		while (ptr != dispatch_q->tail) {
+-			struct kgsl_drawobj_cmd *cmdobj =
+-						dispatch_q->cmd_q[ptr];
+-			struct kgsl_drawobj *drawobj = DRAWOBJ(cmdobj);
+-
+-			adreno_mark_guilty_context(device,
+-				drawobj->context->id);
+-			adreno_drawctxt_invalidate(device, drawobj->context);
+-			kgsl_drawobj_destroy(drawobj);
+-
+-			ptr = DRAWQUEUE_NEXT(ptr,
+-				ADRENO_DISPATCH_DRAWQUEUE_SIZE);
+-		}
+-
+-		/*
+-		 * Set the replay count to zero - this will ensure that the
+-		 * hardware gets reset but nothing else gets played
+-		 */
+-
+-		count = 0;
+-		goto replay;
+-	}
+-
+-	/* Copy the inflight cmdobj's into the temporary storage */
++	unsigned int ptr, count = 0;
++	int first = 0, i, ret;
++
++	/* Recovery failure must not overwrite the previous retained owner. */
++	if (dispatch_q->retained_replay ||
++		dispatch_q->head >= ADRENO_DISPATCH_DRAWQUEUE_SIZE ||
++		dispatch_q->tail >= ADRENO_DISPATCH_DRAWQUEUE_SIZE)
++		return -EUCLEAN;
+ 	ptr = dispatch_q->head;
+-
+ 	while (ptr != dispatch_q->tail) {
+-		replay[count++] = dispatch_q->cmd_q[ptr];
++		if (!dispatch_q->cmd_q[ptr])
++			return -EUCLEAN;
++		count++;
+ 		ptr = DRAWQUEUE_NEXT(ptr, ADRENO_DISPATCH_DRAWQUEUE_SIZE);
+ 	}
+-
+-	if (fault && count)
+-		process_cmdobj_fault(device, replay,
+-					count, base, fault);
+-replay:
++	if (count != dispatch_q->inflight)
++		return -EUCLEAN;
++	if (!count)
++		return 0;
++
++	replay = kcalloc(count, sizeof(*replay), GFP_KERNEL);
++	if (!replay)
++		return -ENOMEM;
++
++	ptr = dispatch_q->head;
++	for (i = 0; i < count; i++) {
++		replay[i] = dispatch_q->cmd_q[ptr];
++		ptr = DRAWQUEUE_NEXT(ptr, ADRENO_DISPATCH_DRAWQUEUE_SIZE);
++	}
++
++	/* Transfer old-queue ownership before a new submission can fail. */
++	dispatch_q->retained_replay = replay;
++	dispatch_q->retained_replay_count = count;
++	memset(dispatch_q->cmd_q, 0, sizeof(dispatch_q->cmd_q));
+ 	dispatch_q->inflight = 0;
+ 	dispatch_q->head = dispatch_q->tail = 0;
+-	/* Remove any pending cmdobj's that have been invalidated */
++
++	if (fault)
++		process_cmdobj_fault(device, replay, count, base, fault);
+ 	remove_invalidated_cmdobjs(device, replay, count);
+ 
+-	/* Replay the pending command buffers */
+ 	for (i = 0; i < count; i++) {
+-
+-		int ret;
+-
+-		if (replay[i] == NULL)
++		if (!replay[i])
+ 			continue;
+-
+-		/*
+-		 * Force the preamble on the first command (if applicable) to
+-		 * avoid any strange stage issues
+-		 */
+-
+-		if (first == 0) {
++		if (adreno_gpu_fault(adreno_dev))
++			return -EPROTO;
++		if (!first) {
+ 			set_bit(CMDOBJ_FORCE_PREAMBLE, &replay[i]->priv);
+ 			first = 1;
+ 		}
+-
+-		/*
+-		 * Force each cmdobj to wait for idle - this avoids weird
+-		 * CP parse issues
+-		 */
+-
+ 		set_bit(CMDOBJ_WFI, &replay[i]->priv);
+-
+ 		ret = sendcmd(adreno_dev, replay[i]);
+-
+-		/*
+-		 * If sending the command fails, then try to recover by
+-		 * invalidating the context
+-		 */
+-
+-		if (ret) {
+-			pr_context(device, replay[i]->base.context,
+-				"gpu reset failed ctx %d ts %d\n",
+-				replay[i]->base.context->id,
+-				replay[i]->base.timestamp);
+-
+-			/* Mark this context as guilty (failed recovery) */
+-			adreno_mark_guilty_context(device,
+-				replay[i]->base.context->id);
+-
+-			adreno_drawctxt_invalidate(device,
+-				replay[i]->base.context);
+-			remove_invalidated_cmdobjs(device, &replay[i],
+-				count - i);
+-		}
+-	}
+-
+-	/* Clear the fault bit */
+-	clear_bit(ADRENO_DEVICE_FAULT, &adreno_dev->priv);
++		if (ret)
++			return ret;
++		/* sendcmd now owns this object through the dispatch queue. */
++		replay[i] = NULL;
++	}
+ 
+ 	kfree(replay);
++	dispatch_q->retained_replay = NULL;
++	dispatch_q->retained_replay_count = 0;
++	return adreno_gpu_fault(adreno_dev) ? -EPROTO : 0;
+ }
+ 
+ static void do_header_and_snapshot(struct kgsl_device *device, int fault,
+@@ -2276,18 +2232,31 @@
+ 	dispatcher->inflight = 0;
+ 	mutex_unlock(&device->mutex);
+ 
+-	/* recover all the dispatch_q's starting with the one that hung */
+-	if (dispatch_q)
+-		recover_dispatch_q(device, dispatch_q, fault, base);
++	/* Stop at the first failed replay; preserve every remaining owner. */
++	if (dispatch_q) {
++		ret = recover_dispatch_q(device, dispatch_q, fault, base);
++		if (ret)
++			goto replay_failed;
++	}
+ 	FOR_EACH_RINGBUFFER(adreno_dev, rb, i) {
+ 		dispatch_q_temp = &(rb->dispatch_q);
+-		if (dispatch_q_temp != dispatch_q)
+-			recover_dispatch_q(device, dispatch_q_temp, 0, base);
++		if (dispatch_q_temp == dispatch_q)
++			continue;
++		ret = recover_dispatch_q(device, dispatch_q_temp, 0, base);
++		if (ret)
++			goto replay_failed;
+ 	}
+ 
+ 	atomic_add(halt, &adreno_dev->halt);
+-
++	clear_bit(ADRENO_DEVICE_FAULT, &adreno_dev->priv);
+ 	return 1;
++
++replay_failed:
++	atomic_add(halt, &adreno_dev->halt);
++	mutex_lock(&device->mutex);
++	ret = dispatcher_fault_failed(adreno_dev, fault, ret);
++	mutex_unlock(&device->mutex);
++	return ret;
+ }
+ 
+ static inline int drawobj_consumed(struct kgsl_drawobj *drawobj,
+--- a/drivers/gpu/msm/adreno_dispatch.h
++++ b/drivers/gpu/msm/adreno_dispatch.h
+@@ -34,6 +34,9 @@
+ struct adreno_dispatcher_drawqueue {
+ 	struct kgsl_drawobj_cmd *cmd_q[ADRENO_DISPATCH_DRAWQUEUE_SIZE];
+ 	unsigned int inflight;
++	/* Unsubmitted replay owners retained on recovery failure. */
++	struct kgsl_drawobj_cmd **retained_replay;
++	unsigned int retained_replay_count;
+ 	unsigned int head;
+ 	unsigned int tail;
+ 	int active_context_count;

@@ -1,3 +1,542 @@
+## 2026-11-11：小米 KGSL v83 保留同步失败的中间页表
+
+新增 smmu-walk-v1 提供者补丁。ARM LPAE 撤销非叶项时使用可返回错误的 walk 同步；失败恢复完整父项及非一致性 DMA 可见性，保留子树，只返回此前成功撤销的前缀长度。原有映射替换调用收到短撤销后拒绝覆盖。未启用的其他调用者保留原有回调行为；整个 domain/root 销毁仍未改为可检查同步。
+第54项 checked-unmap 补丁使 GPU 父域和 GMU 域在发布映射前启用此能力；启用验证实际域/context、PM 和 checked drain，失败沿保留归属的路径退出。GMU 启用失败后先 detach 并核对实际域，再释放空域；仍附着则保留并锁存错误。提供者 map/unmap 的 PM 获取失败在修改页表前返回。
+18个真实 ARM LPAE 子树/映射替换、32个提供者、76个GMU及45个父域场景通过；15个反例均编译成功后运行失败，另18项准备器检查通过。首个缺屏障反例因 mock 未使用而编译失败，已修正为禁用调用并验证运行断言，初始记录保留。
+54补丁/109源独立复现，仅KGSL两个源改变。native-kernel-v3 完整 Image/486模块成功，SMMU两个对象和 ARM LPAE 对象均 -Werror；首编47条既有驱动/WSL时钟警告原样保留，最终增量零错误警告。KGSL60对象/3模块 -Werror/MODPOST零错误警告，489模块依赖无输出。91,246个内核源逐项核对，仅5个预期文件改变，native-kernel-v2保持。内部 io-pgtable/SMMU 布局改变，必须整套重编配对，不能按相同版本字符串混装。
+**实际索引/撤销/递归释放代码已执行，但物理地址、DMA、MMIO、PM和锁仍为主机模型；没有硬件TLB或并发正确性证明。整个根/域销毁、完整GPU/GMU/HFI/worker/IRQ停机、错误保留恢复及component/devres解绑仍未闭合。** SQE边界、目标DDR校准、真实提交、KGSL+DPU、下游SDE/Surface eDP及双机验收继续待完成。本轮只读复核调试设备不锁屏/接电常亮已生效，未部署或重启；设备保持B0m。
+
+## 2026-11-11：小米 KGSL v82 接通 GMU 撤销后的 checked TLB drain
+
+新增独立 smmu-drain-v1 提供者：arm_smmu_flush_tlb_checked 校验实际 domain owner、AArch64 S1/context bank，持初始化锁与 runtime-PM 引用，在 cb_lock 下执行 PTE 写屏障、真实 ASID invalidation 和 Qualcomm checked 同步，返回 PM/超时错误；不改变根或替调用者停止设备。不支持的提供者返回 EOPNOTSUPP。
+第53项 gmu-drain 补丁将真实接口接入普通 GMU 全局内存释放。只有撤销字节数精确匹配且 checked drain 成功才释放 DMA backing；失败锁存并保留对象/domain，不重试带洞区间。HWSCHED 成功导入设置 GMU_MAPPED，GPU 父域/共享释放和直接析构保留该对象；退出时逐项撤销并同步后才清标记，最后清导入表。a6xx_gmu_remove 改为返回错误，HWSCHED unbind 收到错误不再继续销毁 dispatcher。
+22个实际提供者、74个GMU/导入/共享释放、47个genpd/remove、43个父域/全局和17个释放场景，13个编译后运行反例及18准备器检查通过。53补丁/109源独立复现；9源改变、100源保持。native-kernel-v2 完整 Image/486模块成功，SMMU两个对象 -Werror；KGSL完整60对象/3模块 -Werror/MODPOST 零错误警告，489模块依赖无输出。
+内核首次构建45条原有驱动/WSL时钟警告，随后4条时钟警告，最终增量复核零错误警告；不称首次整内核严格零警告。91,245原有源逐项核对，仅3源改变、1头新增，native-kernel-v1保持。
+**checked同步的源码链已接通，但MMIO/PM/锁仍为模型，不能据此宣称真实GPU/GMU停机、硬件TLB或安全unbind已验证。通用unmap中的页表页释放仍使用void回调，外层component/devres及错误保留恢复继续未闭合。** 本轮未访问/部署/重启设备。SQE边界、目标DDR校准、原生提交、KGSL+DPU、下游SDE/Surface eDP及双机验收继续待完成。
+
+## 2026-11-11：小米 KGSL v81 保留映射失败的 GMU 内存归属
+
+第52项 gmu-map-retain 补丁将失败保留接到两个实际分配调用方。a6xx_gmu_map_sg 对真实映射尝试的负值、零和非完整长度锁存错误，不再重复撤销不确定区间；输入校验失败仍正常释放。普通 DMA 分配把 backing、尝试地址和完整大小保留在 gmu_globals，推进 VA 游标但向调用者返回原错误；后续分配、固件解析/加载拒绝继续使用该实例。
+HWSCHED 导入失败复用 KGSL_MEMDESC_MAP_UNCERTAIN，保留 mem_alloc_entry、GPU 全局对象与尝试的 GMU 地址。process_mem_alloc 不发布成功句柄；已有共享内存释放入口拒绝不确定对象，保留地址和 backing。纯校验失败的未使用 GPU 对象仍由 device->globals 持有至正常清理，不宣称即时回收。
+69个实际 GMU/导入/共享释放场景、69个固件场景（含捕获 A680 字节比对）、17释放和42 genpd/remove 回归、11编译后运行反例与9准备器通过。52补丁/109源重复准备一致，仅两个源改变；60对象/3模块 -Werror/MODPOST 零错误警告，489模块依赖无输出。
+**这是分配/导入错误归属保留，尚无不确定映射的安全回收协议。IOMMU/DMA/PM/全局分配仍为模型；并未证明真实TLB排空、GPU退休或外层devres安全解绑。** 未部署/重启，设备保持B0m。SQE边界、目标DDR校准、真实KGSL提交/退休、KGSL+DPU、下游SDE/Surface eDP及SQ1/SQ2完整验收继续待完成。
+
+## 2026-11-11：小米 KGSL v80 保留未完整撤销的 GMU 全局内存
+
+第51项 gmu-unmap-errors 补丁让 a6xx_free_gmu_globals 返回真实清理结果，逐段核对 iommu_unmap 撤销长度后才释放 DMA backing。长度不符锁存 EUCLEAN，保留当前及后续对象、global_entries 和 domain；已有错误或对象缺失domain时停止清理，不对带洞区间自动重试。此前已完整释放的前缀槽位保持清零。
+remove 在释放 QMP、固件、ITCM shadow 或 genpd 前检查全局清理结果；失败立即保留这些资源。成功释放后清空 fw_image/itcm_shadow 指针，重复 remove 不再重复释放它们。42个真实 genpd/全局释放/remove 场景（新增8个）与58个GMU回归通过；10反例均编译后被断言拦截。
+51补丁/109源复现一致，仅GMU源改变；完整60对象/3模块 -Werror/MODPOST 零错误警告，489模块依赖与9准备器通过。**撤销长度相符不等于已证明TLB排空或硬件退休，provider/PM/DMA仍为模型，外层devres解绑仍未安全闭合。** 未部署或重启，设备保持B0m。
+同时核对匹配6.18源码：iommu_map_sg 在错误回滚中忽略 iommu_unmap 的长度。因此负返回值不足以证明 backing 已安全脱离。当前 reserve_gmu_kernel_block 的映射失败释放和 HWSCHED 导入失败的归属仍未修复，已明确列为下一步；本轮只修复显式全局释放路径，未把映射失败风险标为完成。SQE边界、DDR校准、真实KGSL提交/退休、KGSL+DPU及下游SDE/eDP双机验收继续待完成。
+
+## 2026-11-11：小米 KGSL v79 将 GMU VMA 游标归属到各实例
+
+第50项 gmu-vma-owner 补丁把 GMU 的 VMA 指针改为内嵌数组，两个家族模板改为 const 且显式覆盖 GMU_MEM_TYPE_MAX（含不支持区间的零槽位）。分配和 HWSCHED 导入仍更新所属 GMU 的 next_va，不再改变全局模板或另一实例的游标。
+probe 在修改 pdev 和请求任何 provider 资源之前初始化 VMA；存在 domain、global对象、fw引用、preallocation、原生genpd、时钟/电源引用、power_error 或 GMU_ENABLED 时返回 EBUSY，保持原对象和游标。这只是重复初始化的防覆盖检查，不能代替安全解绑/硬件退休协议；旧释放流程残留的状态不会被偷偷清零。
+67场景通过（13个新增实例隔离/家族/保留对象场景＋54个固件回归），14个反例均编译后断言失败。初版“少复制最后槽位”未被全零夹具发现；已改为非零初始存储，最终完整检查通过并保留初版缺口记录。
+50补丁/109源复现一致，GMU源和头两文件改变；完整60对象/3模块 -Werror/MODPOST 零错误警告，489模块依赖与9项准备器通过。**内部KGSL对象布局已改变，必须使用整套重编模块；provider ABI不变。测试执行初始化/固件函数，完整probe接线只做源码检查，未验证内核并发或真实GPU。** 部分map/unmap失败归属、safe unbind、SQE边界、目标DDR校准、真实提交/退休、KGSL+DPU和下游SDE/eDP仍未完成。未部署或重启，设备保持B0m。
+
+## 2026-11-11：小米 KGSL v78 校验完整 GMU 固件后再分配/写入
+
+第49项 firmware-bounds 补丁新增共享块解码与完整检查：使用 size_t/剩余长度检查头和载荷，局部复制并按 little-endian 解码以支持非对齐头；VMA/已分配区域的终点比较改为 u64，拒绝空区间与回绕造成的错误命中。
+解析阶段先验证完整文件的结构、VMA、TCM地址对齐和预分配页扩展范围，再处理元数据；加载阶段在任何载荷拷贝前检查全部非TCM段的有效 backing。遵守元数据在载荷前的来源约定，保留未知版本元数据及现有 A680 载荷的非零 type 字段。旧 raw 固件分支检查空值/最大长度，按 raw 数据处理。
+新增检查器提取真实解析/加载函数、VMA与结构定义。54场景通过 ASan/UBSan，包含实际 A680 文件的6个 backing 分配、9段完整载荷逐字节比对、重复加载、6个分配失败和重试，以及截断/回绕/缺映射。12反例均编译后被断言或UBSan拦截；两个顺序反例将检查移到分配/拷贝之后，确认测试观察到提前副作用。
+49补丁/109源复现一致，仅 GMU 源改变；60对象/3模块 -Werror/MODPOST 零错误警告，489模块依赖和9项准备器通过。**分配/DMA/MMIO/固件请求仍为模型，未证明硬件执行或IOMMU失败回收；部分分配失败仍保留原有对象，不宣称完整回滚。** 静态VMA归属、SQE边界、目标DDR校准、真实提交/退休、KGSL+DPU及下游SDE/eDP双机验收仍未完成。未部署或重启，设备保持B0m。
+
+## 2026-11-11：小米 KGSL v77 修正 A680 固件请求路径
+
+实机只提供 `qcom/a680_gmu.bin` 和 `qcom/a680_sqe.fw`，匹配的 MSM catalog 也使用这两个 A680 文件；KGSL 仍请求旧的 a640/a630 名称。第48项 native-firmware 补丁只把 A680 descriptor 的两条请求改为现有 `qcom/a680_*` 路径，保留其他 GPU 定义和 ZAP 的独立生命周期。
+从调试机只读采集固件到 ignored out，并与远端 SHA256 比对。离线检查20个 GMU 块（11个预分配元数据、9段载荷），6个非TCM页对齐分配区间无重叠且覆盖相应载荷；SQE 的32452字节载荷按双方 loader 相同的跳过4字节头规则检查。**这是实际文件的路径/边界/布局证据，未执行原生 KGSL loader 或 GMU/SQE 硬件，不能称为启动成功。** 数据块 type 字段为已有固件的非零值，不能擅自按 DATA=0 拒绝这些块。
+48补丁/109源独立准备一致，仅 adreno-gpulist.h 改变；60对象/3模块 -Werror 与 MODPOST 零错误警告，489模块依赖检查通过，准备器9项通过。没有因两条名称变化新增模拟功能测试；v76 的 RPMh 函数和测试输入保持，既有验证仅按相同源码复用。
+原生 DDR 带宽仍缺校准；固件截断/边界检查、静态 VMA 生命周期、部分分配失败回收与完整 KGSL 提交/退休仍待完成。KGSL+DPU、下游 SDE/Surface eDP、性能/PM/双机验收均未完成。本候选未部署或重启，设备保持 B0m。
+
+## 2026-11-11：小米 KGSL v76 接入有来源的原生 CNOC OFF/ON 输入
+
+第47项 native-cnoc 补丁移除不存在的 `qcom,bus-table-cnoc` 属性依赖，使用固定 SDMSHRIKE/A680 下游来源的 OFF=0、ON=100 输入（KGSL 消费单位 kBps）。SH2/SN15/SN3/CN0 拓扑保持；地址、unit、width、VCD 仍读取目标运行时 cmd-db，未复制来源 DT 的资源或 DDR/频点表。
+来源固定为 graphics-devicetree 提交 b8c849e838ca1ce51342ececd79dc8e8dc46611b 的 gpu/sdmshrike-gpu.dtsi，配置记录 SHA256。来源是 A680 revision0，目标为 A680.1，故只作为家族输入依据，不能声称已完成 SQ1/SQ2 硬件校准。
+59项 RPMh、18项 DDR 解析、9个编译后运行反例和9项准备器通过；47补丁/109源独立准备一致，仅 RPMh 源改变。60对象/3模块通过 -Werror 编译与 MODPOST，489模块依赖检查通过。测试覆盖目标 OFF/ON 命令、运行时地址/unit 变化、CNOC 元数据错误、全部分配失败及 HFI 消息失败时不变。
+**CNOC 输入已接通，硬件投票未验证。当前 GPU OPP 仍没有 DDR 峰值带宽，不能从主线占位 OFF 表、手机表或 SQ1 ACPI 未确认单位直接补值。原生 probe/submit、根/回放回收、KGSL+DPU、下游 SDE/Surface eDP 与双机验收仍未完成。** 本候选未部署；调试机保持 B0m，常亮/无锁屏偏好已另行实机复核。
+
+## 2026-11-11：SQ1原始ACPI带宽证据已可重复提取（KGSL仍v75）
+
+新增`inspect-sq1-gpu-bandwidth-reference.py`，固定SQ1存档DSDT和Windows GPU驱动SHA，校验ACPI长度/校验和，以ACPICA离线执行原始AML的PMCL，只用SSDT包装读取graphics两张表。实际选中P004/P007，完整返回值与反编译的原始Package逐项一致；SOID=0x154、SIDV=0x20001、SIDT=1仅是该存档的静态身份，不代表当前SQ2。
+P004含9个频率状态（含OFF），P007含11个带宽状态（含OFF），不能按行配对生成GPU OPP。P007非零原始数值1198000000～8369000000；**单位尚未证实，不将其直接标为GB/s或写入DT。** 固定Windows指令证明查询结果还乘`((device_u32_at_0x46c4 >> 14) & 31) * 2`；该字段会被其他路径更新，运行时因子/物理含义及HFI投票路径未闭合。
+10项解析/边界/哈希拒绝测试通过；两次独立执行的语义结果一致。完整DSDT离线加载有3条既有BAUD buffer-field初始化错误，保留原日志且明确列入结果；BWQR/PMCL返回成功，不把这称为整个ACPI无错误。STA/INI禁用，无设备访问。
+本轮是目标带宽依据的进展，未改KGSL补丁/内核/DT、未部署重启，不新建v76候选。v75仍缺已校准的GPU带宽与CNOC输入；首次KGSL执行、生命周期收束、KGSL+DPU、下游SDE/Surface eDP及SQ1/SQ2验收继续待完成。
+
+## 2026-11-11：小米 KGSL v75 接入原生OPP带宽输入并补齐SH2
+
+第46项native-bandwidth补丁让原生A680.1的DDR表按实际GPU频率精确查询OPP peak kBps，不再读取手机DDR表。保留OFF项、合并相同带宽、校验频率/带宽顺序、u32/HFI容量与gfx-mem索引；缺带宽返回ENODATA，显式average floor尚未接入governor则返回EOPNOTSUPP，不静默忽略。
+在ICC路径成功获取后才发布各GPU频点的bus索引，默认/最大档取该OPP峰值、最低档取表中最小非零值。OPP引用逐项归还，查找/分配/ICC失败不改变原频点bus索引。
+沿匹配内核真实ICC图核对GPU→GEM_NOC_SNOC→SNOC_CNOC→GPUSS_CFG，修复原CNOC表遗漏SH2；现在含SH2/SN15/SN3/CN0，地址/unit/width/VCD继续读运行时cmd-db，不复制手机地址。
+99实际bus场景、51 RPMh＋18 DDR解析场景、7编译后运行反例和9准备器通过。46补丁/109源重复，2源改变；60对象/3模块-Werror零错误警告，489模块depmod无输出。
+**这只接通带宽输入与修正拓扑。捕获目标的10个GPU OPP均无peak带宽，CNOC输入仍要求当前DT没有的qcom,bus-table-cnoc；原生probe仍不能通过。测试带宽值为合成输入，cmd-db为真实捕获，未证明硬件投票/性能。** 未部署/重启；真实带宽依据、固件/执行、根/回放回收、KGSL+DPU、SDE/eDP和双机验收仍待完成。
+
+## 2026-11-11：小米 KGSL v74 修复空闲重试与解锁后的关机竞态
+
+第45项idle-retry补丁让普通GMU idle worker检查关机返回值：仅仍启动且无power_error/transition_error的GPU重新安排空闲定时器；已有致命错误时不再运行调频或重新排定时器。
+adreno_dispatcher_idle等待期间会释放device->mutex。a6xx_power_off在重新持锁后、OOB请求前重查新增故障、GPU_STARTED和active_cnt；其他线程已关机则直接结束，出现新活跃引用则返回EBUSY，不继续断电。
+PM suspend遇到仍运行且无锁存错误的早期空闲失败，恢复dispatcher提交门；低层关机/默认根/记录失败继续保留关闭的门与引用，不发布PM_SUSPEND。未新增自动清除错误或未经停机证明的回收。
+84实际关机/idle worker/PM/恢复场景、10编译后运行反例、21硬重置回归和9准备器通过。45补丁/109源重复，只有GMU源改变；60对象/3模块-Werror编译及489模块depmod通过。首次全编译有2条WSL时间偏移警告，日志保留，最终增量复核无错误警告。
+**解锁交错/OOB/定时器/引用和硬件为模型，并非内核并发或物理退休证明。soft/HWSCHED/fatal恢复、submitted页表/回放回收、正常SMMU runtime-PM和safe unbind未完成。** 未部署/重启，B0m保持；原生带宽/固件/执行、KGSL+DPU、SDE/eDP与SQ1/SQ2验收继续推进。
+
+## 2026-11-11：小米 KGSL v73 接通正常休眠后的context引用回收
+
+第44项slumber-retire补丁让普通A6xx正常休眠与硬重置共用回收顺序：checked完整停机后清GPU_STARTED，恢复默认页表、清抢占记录，再回收switch/active引用。默认根或记录恢复失败保留引用，锁存首个power_error/transition_error，阻止误唤醒。
+正常关机开始检查adreno_suspend_context返回值，空闲失败不继续OOB/断电；原OOB失败但底层停机成功的返回语义保留。回收失败不发布PM_SUSPEND，不继续dispatcher/ringbuffer/LLCC清理。
+63实际关机/PM/恢复场景、8编译后运行反例、21硬重置/30 switch/36默认根/47 dispatcher回归与9准备器通过。44补丁/109源重复准备一致，2源改变、107源保持；60对象/3模块-Werror零错误警告，489模块depmod无输出。
+**停机/provider/CP/引用/锁仍为模型，未证明硬件退休或缓存可见性。idle worker尚未针对早期空闲失败重排定时器；soft reset/HWSCHED/fatal恢复、submitted页表和回放回收、安全unbind仍待完成。** 未部署或重启；B0m保持，原生执行、KGSL+DPU、SDE/Surface eDP及双机验收未完成。
+
+## 2026-11-11：小米 KGSL v72 接通硬重置后的context切换引用回收
+
+第43项hard-reset-retire补丁在普通A6xx GMU restart中串联checked GMU/GPU shutdown、checked默认根恢复、CPU抢占记录清理，然后回收旧switch引用/active引用，最后重启。任一步失败停止后续阶段，未解除submitted/started页表保留，也不清除既有transition_error。
+记录清理先校验所有CPU映射/范围，非secure路径清除用户保存地址scratch、整个非secure CP保存记录和ringbuffer页表记录，重建默认TTBR0/contextidr及固定CP头，清wptr/next/prev，停止preemption timer。禁止把未实现的secure记录重写当成功。
+回收区分尚有callback与callback已完成/注册失败：前者标记stopped、取消事件后由callback最终释放；后者摘到局部列表解锁后put。callback在锁内决定是否释放，解锁后不重新读取可能被另一条回收路径释放的record。
+21实际硬重置/记录场景、30实际switch/event归属场景、12编译后运行反例、36默认根/47 dispatcher/47电源/55关机恢复回归及9准备器通过；43补丁/109源重复，5源改变、104源保持。60对象/3模块-Werror零错误/警告，489模块depmod无输出。
+**这是普通A6xx硬重置路径的源码回收实现，硬件停机/provider/CP/引用仍为模型，未实机验证。普通休眠、soft reset、HWSCHED、已锁存transition_error后的恢复入口、保留回放队列及submitted页表回收仍未闭合，强制unbind/devres仍不安全。** 未访问/部署/重启设备；B0m保持，原生执行、KGSL+DPU、SDE/eDP和双机验收仍待完成。
+
+## 2026-11-11：小米 KGSL v71 保留context切换取消/注册失败的引用
+
+第42项context-switch补丁在提交切换命令前分配旧context引用记录；提交成功后先让新context成为active，再把旧引用交给ringbuffer的context_switches列表。只有KGSL_EVENT_RETIRED回调摘链并put，CANCELLED或未知结果保留记录和引用，不冒充GPU完成。
+事件注册失败发生在提交之后，因此保留新旧引用并锁存transition_error，返回原errno；后续切换先检查该错误。提交前的分配/引用/命令失败正常回收新增临时资源，旧active保持。ringbuffer重新初始化拒绝覆盖非空引用列表。
+23实际switch/set_pt/event/ringbuffer-init场景、10编译后运行反例、36默认根/16 fence/47 dispatcher回归和9准备器通过；42补丁/109源重复一致，3源改变、106源保持。60对象/3模块-Werror零错误/警告，489模块depmod无输出。
+**取消/注册失败现在有可追踪的引用归属，但尚无安全回收流程。CP提交、锁、引用、workqueue为模型；新列表仍须接入真实GPU/CP/preemption停止后的回收，强制close/devres和started/submitted根退休未完成。** 未访问/部署/重启设备，B0m保持；原生执行、KGSL+DPU、SDE/Surface eDP和双机验收继续待完成。
+
+## 2026-11-11：小米 KGSL v70 修正默认根恢复与旧 context 释放顺序
+
+第41项reset-context补丁让普通启动、GMU/RGMU启动在kgsl_mmu_start成功恢复默认根之后，再释放旧active context和更新ringbuffer全局状态；soft reset同样在checked默认根恢复之后释放。失败保留旧引用，避免恢复失败时先丢归属。
+_soft_reset改为返回SP/TP regulator_enable的真实错误，普通启动和soft-reset两个调用者均检查并停止后续启动；共享context清理先清软件指针和页表元数据，再put引用，避免析构时仍暴露旧指针。
+36实际默认根/reset/context/boot场景、9编译后断言反例、47 dispatcher/47电源回归和9准备器通过。41补丁/109源重复一致，3源改变、106源保持；60对象/3模块-Werror零错误/警告，489模块depmod无输出。
+**这是启动/恢复失败的引用顺序修复，不是GPU退休证明。reset寄存器、SMMU/PM和引用叶节点仍为模型；未解除started/submitted根保留，未修复preemption record、context-switch事件取消/注册失败、强制close/devres或完整回收协议。** 未部署/重启，B0m保持；原生提交、KGSL+DPU、SDE/Surface eDP及双机验收继续待完成。
+
+## 2026-11-11：小米 KGSL v69 保留普通dispatcher回放失败归属
+
+第40项dispatcher-replay补丁将未重新提交的命令保存在队列retained_replay中；成功sendcmd后由在途队列接管并清空对应replay槽，失败保留其余槽。检查head/tail、槽指针和计数；分配失败保持原队列，不再失效/销毁context。已有保留owner拒绝覆盖。
+恢复主流程收到错误立即停止其余队列回放，恢复原halt计数，锁存错误并停止定时器；已发布命令继续由在途队列持有，故障不会伪装成完成。adreno_stop也检查clear_pending_transactions返回值，失败时不继续清理ringbuffer、active context或STARTED状态。
+47实际dispatcher/replay/send/stop/wait场景、9运行反例、47电源/20发布回归和9准备器通过；40补丁/109源重复一致，3源改变、106源保持。完整60对象/3模块-Werror零错误/警告，489模块depmod无输出。
+**这是失败归属保留，不是完整恢复/回收。普通dispatcher的ENOSPC等回放失败目前同样锁存，保留数组尚无安全回收协议；强制close/component/devres解绑仍不安全。真实GPU/CP/preemption/SMMU退休、正常PM、原生提交及SDE/eDP未验证。** 本轮未访问/部署/重启设备，B0m保持，完整目标继续进行。
+
+## 2026-11-11：小米 KGSL v68 修复HWSCHED重启与重放归属
+
+第39项hwsched-recovery补丁删除reset前force_retire_timestamp，加入RESETTING状态；restart成功且未被新fault覆盖才初始化重放。inactive/未启动GPU不能当作已完成重启；失败保留旧命令、fault引用及计数并锁存错误。
+故障策略要求的context失效移到成功重启之后、任何重放之前。提交成功才设置REPLAY位和增加inflight；已重放的命令不能仅因后来detach/invalid就销毁，必须等实际EOP。旧队列故障命令取消对应事件，不制造完成时间戳。
+ENOSPC且有已发布在途命令时保留待提交项，靠完成通知继续重放；无进展来源或其他错误保留全部不确定owner并阻止继续提交。重复fault通知只取一次额外引用，退休时归还；profiling映射失败也不再漏掉已退休命令的释放。
+26实际函数场景、11编译后运行反例、16 fence/20发布回归、9准备器通过；39补丁/109源重复，3源改变、106源保持。完整60对象/3模块-Werror零错误/警告，489模块depmod无输出。
+**这些是恢复控制流与归属的源码/主机证明，硬件reset/HFI/时间戳/引用/锁仍为模型。真实GPU/CP/preemption/SMMU退休、context unregister ACK、halt引用、错误后恢复和safe unbind/PM未完成；普通dispatcher的回放失败/强制close仍待修复。** 未访问/部署/重启设备，B0m保持；原生提交、KGSL+DPU、SDE/Surface eDP及SQ1/SQ2验收继续待完成。
+
+## 2026-11-11：小米 KGSL v67 区分 fence 取消与真实完成
+
+第38项fence-result补丁让事件持有具体fence引用，仅回传该事件的完成/取消结果；取消先设置-ECANCELED再signal，未知结果为-EIO，不再推进整条timeline或提前完成其他fence。错误ioctl释放与异步回调之间的引用也已接通。
+移除context invalidate和wait_rb中的合成SOP/EOP写入；真实已退休事件可成功，未退休事件取消。事件注册在group锁下检查terminal context，避免与flush交错后挂入永不处理的事件。
+16实际函数场景、8编译后运行反例、20发布/IB回归及9准备器检查通过；38补丁/109源重复一致，5源改变、104源保持。60对象/3模块-Werror链接成功，489模块depmod无输出。
+补齐TZ governor模块描述；**更正历史v64“零警告”：原compile.log存在一条大写WARNING的MODULE_DESCRIPTION警告，旧结果统计漏记。** v67无编译器/MODPOST警告，首次完整构建有WSL时钟偏移警告，保留原日志；随后增量复核零错误/警告。
+**错误结果不等于已停止GPU。HWSCHED仍有reset前force_retire_timestamp，强制close/回放失败/context teardown/内存释放回调、嵌套IB/数据缓冲、根退休/回收及safe unbind/PM继续未闭合。** 本轮未访问/部署/重启设备，B0m保持；KGSL硬件提交和SDE/eDP目标仍进行中。
+
+## 2026-11-11：小米 KGSL v64 接通映射发布与顶层IB引用
+
+第37项map-publication补丁增加独立published_gpuaddr：attach/SVM映射完整成功后release发布，unmap前撤销；地址查找、两种info和profiling读取已发布状态，ID查找仍允许未映射SVM对象进入mmap。
+dispatcher/HWSCHED均检查IB大小和地址dword对齐、进程范围及实际已映射对象边界；顶层IB持有entry引用，重复验证不重复取引用，命令对象销毁通过现有deferred put归还，两个mem-node分配点清零新指针。
+20实际函数场景（含3个pthread阻塞map交错）、8编译后运行反例、20释放/39 SVM回归及9准备器通过；37补丁/109源重复一致，7源改变、102源保持。
+完整60对象/3模块-Werror零错误警告，489模块depmod无输出；msm_kgsl SHA 71b0be98cf0bec07441e54f529f90953d449ec491b00950eb32c645040badc5e，内核和两个governor保持。
+**这是映射发布及顶层IB到命令对象的引用归属，不是GPU退休证明。嵌套IB/其他数据缓冲、强制/错误清队列和context teardown是否已停GPU、页表退休/保留对象回收、正常PM与safe unbind仍未闭合。主机交错不是弱内存模型或实机压力验证。**
+本轮未访问/部署/重启设备，B0m保持；实际带宽/固件/首次提交、SDE/Surface eDP和完整SQ1/SQ2验收继续待完成。
+
+## 2026-11-11：小米 KGSL v63 将SVM绑定推迟到实际mmap，收紧失败归属
+
+第36项svm-mmap补丁使get_unmapped_area只选择地址，不保留GPU VA或建立映射；CPU/GPU候选地址必须精确一致，修正VMA exclusive end并限制搜索到当前TASK_SIZE，避免减1下溢。
+GPU绑定改在实际mmap回调的最后一个可失败步骤，排在核心准入和所有CPU页插入之后；检查vm_insert_page错误及页数组边界，成功后才发布VMA私有数据/回调和映射计数。
+实际mmap重新lookup后再检查release_error、安全内存和SVM对齐，防止地址选择后对象状态变化绕过检查。多VMA仅第一次增加mapped字节；失败由核心撤CPU PTE，清洁GPU失败释放VA，不确定回滚保留entry/页表/后备内存并撤ID。
+39个实际KGSL/核心mmap包装场景、10个编译后运行反例、19释放与25模块接口回归及9准备器检查通过；36补丁/109源可重复准备，仅kgsl.c改变、108源保持。
+匹配native-kernel-v1下完整60对象和3模块-Werror零错误/警告，489模块depmod无输出；新msm_kgsl SHA为777cc28e59d123df3e5b627280e2f03bae4a8eaa137219334c428f9c7b19d9b6。两个governor/内核保持v61产物。
+**主机模型不证明实际MMU/PTE、并发ioctl/提交或compat/fork/split行为。现有_gpu_set_svm_region仍在map完成前发布gpuaddr；后续须审计map-ready发布与跨调用串行化、根退休、保留对象回收、安全解绑及正常PM。**
+未部署/访问/重启设备，B0m保持。DDR/CNOC、首次KGSL提交、下游SDE/Surface eDP及双机/长期验收仍未完成，完整目标保持进行中。
+
+## 2026-11-11：小米 KGSL v61 首次完整模块链接，原生提供者全内核构建通过
+
+第35项module-api补丁导入DMA_BUF命名空间；memstore使用已导出的mm_get_unmapped_area，保留外层mmap地址/对齐/LSM检查。
+工作线程用sched_setattr_nocheck保留FIFO优先级2，设置成功后才唤醒；创建/调度错误返回原errno，失败停止线程，core退出先drain/stop并清指针。**仍要求设备先停止所有生产者，不证明安全外层解绑。**
+修复三个格式警告及TZ governor缺少的显式OF头；35补丁/109源可重复准备，六源改变、103源保持。25实际helper/核心mmap包装场景、8编译后运行反例、9准备器检查通过。
+独立native-kernel-v1整合SMMU-v3、SCM-DCVS-v1、clock-v1：完整Image及486模块成功，含回退MSM；版本6.18.60-sq2-kgsl-dev1。91,245个普通源文件比对，仅10个固定提供者文件改变。
+KGSL使用真实新内核头及Module.symvers，无强制提供者头：全部60对象（含链接/模块元数据）及msm_kgsl、两个governor模块以-Werror零错误/警告链接。489模块depmod无缺失符号/警告。
+初次内核全编译保留37条已有KernelSU/ashmem等警告及WSL时间戳警告；后续最终增量复核零错误/警告，**不称整个内核首次严格零警告或二进制可重复构建**。
+状态为source-linked-not-device-ready：仍缺实际GPU启动/提交、SVM精确地址和失败回收、根退休/保留对象回收、安全解绑、正常runtime-PM交接及DDR/CNOC带宽。SDE/Surface eDP和SQ1/SQ2验收未完成。
+本轮未部署/重启或访问设备；运行B0m保持。禁止把新KGSL/私有SMMU接口与旧内核/MSM二进制混装。
+
+## 2026-11-11：小米 KGSL v59 接入原生父域，完整源码进入MODPOST
+
+第34项parent-domain补丁将paging domain附加到实际GPU `pdev->dev`，而非KGSL字符设备；从GPU iommus引用找到真实SMMU，持有其device/runtime-PM引用。
+使用提供者返回的TTBR1配置与真实context bank，建立独立空默认TTBR0并保持其寿命；进程表仍是独立根。移除手机子节点/domain属性/私有SMMU MMIO和重复时钟控制。
+secure/LPAC未支持则明确拒绝；目标捕获DT不存在的手机qtimer/QDSS属性保持不可用，不伪造寄存器地址。原生IOMMU完整对象首次编译通过。
+全局map返回值接到三个分配入口，失败保留不确定映射及物理内存；检查完整SG长度、guard只读、父域unmap与checked TLB drain。全局位图覆盖完整footprint/padding并修复满区随机取模边界。
+默认根安装/禁用/销毁或detach失败保留归属；初始化失败不再无条件释放外层PT，retained_dev保存准确设备引用。子表或启动暴露的根阻止父域关闭，且拒绝发生在全局unmap之前。
+41父域/probe/global、39后端＋31进程/父映射、28获取检查、14运行反例和9准备器检查通过；18默认根及28故障检查的实际函数与v58逐个哈希保持。
+34补丁/109源重复准备一致；7个ARM64对象-Werror零警告。完整56对象/0源码编译错误，首次进入MODPOST后仍有15项错误、3项既有格式警告，无.ko。
+**目前按绑定寿命持有SMMU PM，启动暴露根尚无GPU/CP/preemption退休回收；正常runtime-PM交接、保留对象回收及外层void组件/devres安全解绑未完成。主机模型不证明硬件隔离/运行。**
+下一步解决DMA_BUF命名空间、未导出的scheduler/VA接口及真实SCM/clock/SMMU提供者全内核链接，继续完成生命周期与SDE/eDP。不能部署；本轮未访问或重启设备，B0m保持。
+
+## 2026-11-11：小米 KGSL v56 接通进程页表与默认根恢复
+
+第32项process-table补丁把进程创建/物理SG/guard/unmap接到独立原生io-pgtable后端；不再分配手机dynamic子域。
+失败回滚不确定时保留memdesc归属；销毁回调改int，失败保留外层页表、父域、device/module引用，close拒绝仍有子表引用的父域。
+实际CP命令生成入口先标记根已导出；已导出根和非空VA树拒绝销毁。**尚无GPU/CP/preemption退休回收协议，已提交根暂时持续保留，不能用于长期运行。**
+第33项default-root补丁取消split模式下CPU恢复直接成功的旧行为，改调原生provider reset_ttbr0；仅允许已附加的默认根，失败锁存错误。
+soft-reset检查AWARE与默认根恢复返回值，成功后才发布ringbuffer默认状态并重启GPU；移除该路径旧私有SMMU寄存器写入/轮询。
+39后端＋23实际进程调用场景、18默认根/soft-reset场景、两组各7运行反例、32 MMU回归和9准备器检查通过；5个完整ARM64对象-Werror零警告。
+33补丁/109源重复准备一致；全量54对象/18错误/3警告，无MODPOST/.ko。**全局父域/空默认TTBR0安装仍是旧接口，kgsl_iommu整对象未编译通过，候选不能部署。**
+主机模型不证明硬件页表隔离/恢复；外层void组件解绑仍可能释放devres，get_device不能代替安全解绑。SDE/eDP和双机验收尚未完成。
+本轮源码阶段未部署/重启；之前已实机复核B0m调试设备不锁屏/接电常亮。
+
+## 2026-11-11：小米 KGSL v53 接入原生SMMU故障保留与恢复接口
+
+匹配6.18核心对EBUSY仍清FSR并终止事务，与KGSL“保留停滞等待恢复”的语义不符。独立SMMU provider v3新增显式opt-in策略、checked terminate/rearm与Adreno IRQ处理。
+提供者在调用GPU fault handler前屏蔽CFIE、发布pending并持有PM引用；EBUSY保持停滞，终止成功仅清pending，复位后的rearm才恢复中断/策略并释放持有引用。
+第31项KGSL smmu-fault补丁通过provider读取真实FSR/TTBR0/CONTEXTIDR，移除四个不存在的下游IOMMU fault flags；setup/策略/终止/rearm改用原生回调。
+MMU两个恢复回调改int；dispatcher终止失败保留队列/故障/暂停引用并停止reset/replay，四条启动路径检查rearm错误，不继续ringbuffer/CP启动。
+28实际provider＋KGSL IRQ/helper host场景、8运行反例、29 dispatcher场景及1反例、31 provider回归与18准备器测试通过；provider和五个KGSL对象-Werror零警告。
+31补丁/109源与3个provider源重复准备一致；整体54对象/25错误/3警告，无MODPOST/.ko。原生父域/进程页表和safe detach仍未完成，不能部署。
+**PM/MMIO/调度是主机模型，嵌套回调不是并发压力或实机故障恢复证明。终止错误保留PM引用，尚无终止失败后的最终回收；HWSCHED独立故障恢复也未闭环。**
+本轮未访问/部署/重启设备；B0m与常亮偏好保持。provider私有接口扩展须重建所有消费者，包括回退MSM，禁止只替换提供者。
+
+## 2026-11-11：小米 KGSL v52 接入6.18 SCM aperture接口
+
+第30项scm-api补丁将IOMMU/A5xx切到原生SCM头；aperture保留实际context bank，检查8位范围、SCM就绪和调用能力，EBUSY仅重试一次并返回实际错误。
+核对donor与6.18：MP服务0x0c/命令0x1b/四参数布局一致；A5xx ZAP仍为BOOT状态0/PAS13，保留transport及固件结果语义。没有新建SCM替代实现。
+实际KGSL＋匹配SCM描述符函数覆盖256个合法bank与17个边界/能力/重试/ZAP检查，5运行断言反例、47电源回调回归及9准备器检查通过。
+A5xx完整ARM64对象-Werror零警告，30补丁/109源重复准备一致；相对v50仅2源改变、107源保持。
+完整构建54对象/29错误/3警告，无MODPOST/.ko；旧SCM头解除后暴露的错误全部在kgsl_iommu的旧domain属性/故障接口，必须接原生父域与进程页表。
+**固件transport仍为主机模型，IOMMU整对象未通过；不是实际SCM调用、页表隔离或GPU运行证明。** 原生BW/生命周期和SDE/eDP尚缺，候选不能部署。
+本轮未部署/重启；B0m和调试设备不锁屏/接电常亮已重新核验。v51为带A5xx两项警告的中间候选。
+
+## 2026-11-11：小米 KGSL v50 保留复位失败队列，移除伪完成
+
+第29项dispatcher-recovery补丁删除reset失败BUG_ON和reset前强制写ringbuffer完成timestamp；失败保留未退休队列/count/halt/fault，锁存transition_error。
+已知失败状态下sendcmd/worker/issue/timer停止新的提交与硬件检查；成功reset后仅取消旧内部ringbuffer等待事件，等待方重新检查真实timestamp，未退休返回EAGAIN。
+新recovery_active保护reset内启动函数的fault清除，保留恢复期间到达的新故障；该情况拒绝重放。SMMU待IRQ处理的EBUSY分支也归还取出的fault位。
+删除4处仅写OEM游戏PID事件缓冲的msm_performance旁路，保留所有KGSL trace调用/帧计数；补strscpy和sysfs default_groups，未用空接口代替。
+27实际dispatcher/ringbuffer-wait host场景、9运行反例、47电源回调回归及9准备器检查通过；dispatcher/Adreno/GMU/RGMU/HWSCHED五对象-Werror零警告。
+29补丁/109源可重复准备，3源改变/106源保持；整体53对象/2错误/3警告，无MODPOST/.ko。剩IOMMU/A5xx旧SCM头阻断。
+**这是复位结果与队列保留的源码接线；reset/MMIO/replay/events仍为host模型。后续重放失败、异步竞态、故障回收/解绑与原生SMMU尚未闭环。**
+完整KGSL及SDE/eDP、双机运行验证未完成；本轮未部署/重启，设备B0m/常亮保持。v48/v49仅中间检查点。
+
+## 2026-11-11：小米 KGSL v47 接通时钟保持/供电关闭错误
+
+第28项power-callbacks补丁将两层时钟保持与regulator_disable回调改为int，失败不继续写下一保持位、不清GPU供电标志。
+A5xx实际轮询/状态失败及Holi SPTPRAC超时返回错误；A6xx两处GMU SPTPRAC关闭回调类型匹配，不作强转。GX CPR局部helper改static。
+通用INIT/WAKE/SLUMBER检查enable/context/stop/clock/regulator返回值，失败停止后续关钟/断电或状态发布；已不确定的切换记transition_error。
+该错误阻止后续状态请求、first-open、active-count和reset入口；失败suspend不重新开放提交。没有未经验证的自动清除/重试。
+47实际函数host场景/7运行反例、27 clock-owner＋33 reset＋52 power-off回归及9准备器检查通过；五个ARM64对象-Werror零警告。
+28补丁/109源重复准备一致；整模块52对象/3错误/3警告，无MODPOST/.ko。A5xx完整对象仍被旧SCM头阻断，其新函数只有host证据。
+**通用dispatcher仍有reset失败BUG和reset前强制timestamp退休；完整故障队列、直接MMIO、regulator_disable_poll与恢复/解绑未闭环。**
+原生BW/SMMU/固件和SDE/eDP继续推进；禁止把本候选部署或称完整PM通过。本轮未部署/重启，当前B0m/常亮保持。
+
+## 2026-11-11：原生时钟保持提供者与小米 KGSL v46 编译检查
+
+独立clock-provider-v1为6.18实现真实branch2保持位接口；只接受已注册的受支持分支时钟，使用实际halt_reg和BIT12/13/14，保留写后屏障/1us间隔。
+提供者注册/移除与操作加锁，devres先移除查询项再注销时钟；PM恢复失败不写寄存器，写入/PM释放错误返回，不把未知时钟或缺失指针当成功。
+27实际函数host场景、6运行反例、9准备器检查通过；clk-branch/clk-regmap两个ARM64对象-Werror通过，四个提供者源重复准备一致。
+v46沿用v45的27补丁/109源，增加提供者头后A3xx对象-Werror通过；全量51对象/5错误/4警告，无MODPOST/.ko。
+**KGSL旧void时钟回调仍忽略返回错误，尚未完成调用方接线；新编译暴露两处SPTPRAC int关闭函数绑定到void regulator_disable槽。**
+下轮必须修复真实调用链，不能用强转或空实现。SMMU/原生带宽/固件/SDE/eDP仍缺；未部署/重启，不热替换活动时钟提供者。
+
+## 2026-11-11：小米 KGSL v45 明确原生GPU时钟/供电归属
+
+第27项clock-owner补丁让A680.1电源初始化先确认GMU组件绑定完成和dev_ops，再跳过手机CPU侧时钟获取/舍入/设频及regulator获取。
+目标频率表原值保留，GMU继续拥有自身时钟和cx/gx域；公共约束、waitqueue、runtime-PM和timer初始化照常执行。0/超限档位返回EINVAL。
+27实际初始化函数host场景、5编译后运行反例、9准备器检查通过；kgsl_pwrctrl.o ARM64 -Werror零警告，27补丁/109源重复准备一致。
+另修正同文件2处格式类型和13处显式fallthrough标记；不是修复旧电源状态机的错误传播。整体仍50对象/5错误，警告14降至3，无MODPOST/.ko。
+原生带宽、运行时clock/PM错误传播、SMMU/固件/生命周期和SDE/eDP未完成；不可部署。本轮未部署/重启，B0m/调试设备常亮保持。
+
+## 2026-11-11：小米 KGSL v43 接入原生GPU OPP频率/电压
+
+第26项gpu-opp补丁让原生A680.1直接注册并读取OPP-v2，按KGSL降序生成频率/电压等级；错误不回退手机档位。
+检查完整枚举、u32 Hz/u16电压等级、kHz无损转换和HFI预留OFF项容量；逐项put OPP引用，全部验证后才发布档位数组/数量。
+初始档位保持多档默认index1，单档改为合法index0。总线索引保持未设置，现有validator明确拒绝，未伪造DDR/CNOC映射。
+25原生OPP/实际ARC/HFI host场景＋28 DT回归、8运行反例、9准备器检查通过；adreno.o ARM64 -Werror零警告，26补丁/109源重复准备一致。
+目标10档177–700MHz及实际GFX/MX cmd-db转换通过主机核对，不是硬件调频/HFI执行证明。整体仍50对象/5错误/14警告，无MODPOST/.ko。
+带宽、原生时钟所有权、SMMU/固件/生命周期及SDE/eDP未完成；当前不可部署，本轮未部署/重启，B0m/常亮保持。
+
+## 2026-11-11：小米 KGSL v42 修正 DT 引用与早期 probe 清理
+
+第25项dt-ownership补丁将5个手机节点全局查询改为当前GPU直接子节点查询，保留借用parent引用，不会选中其他GPU的同名节点。
+型号匹配释放返回的model或显式持有的fallback节点；powerlevel bins在成功/失败/不匹配路径释放父节点，L3正常/异常路径释放迭代与表引用。
+speed-bin与电源解析失败接入已有common err，保留原始errno并清理IDR/bus/pdev/driver data。
+28个实际函数/早期probe片段host场景、6运行反例、9准备器检查通过；adreno.o真实ARM64 -Werror零警告，25补丁/109源重复准备一致。
+整模块仍50对象/5错误/14警告，无MODPOST/.ko；原生GPU OPP/BW、SMMU/固件、完整生命周期与SDE/eDP仍未完成，不可部署。
+目标OPP缺带宽属性，主线A680没有动态BCM表；未引入手机固定BW表作为目标校准。未部署/重启，B0m/常亮保持。
+
+## 2026-11-11：小米 KGSL v41 接通原生 GPU 身份、IRQ 与组件注册
+
+第24项gpu-probe补丁增加原生qcom,adreno-680.1平台匹配，按该精确compatible识别0x06080001；若同时给出旧chipid必须一致，解析错误原样返回。
+GPU IRQ从目标第0项取得Linux virq，申请即NO_AUTOEN；不依赖目标未提供的kgsl_3d0_irq名称，也不把SPI300当Linux IRQ。
+GMU组件按成功绑定状态配对解绑，移除device probe/error/unbind里会消耗借用GPU节点的全局搜索；失败清理先unbind再清pdev/driver data。
+GMU/RGMU使用标准platform_register_drivers成组注册，传播失败并自动反向回滚；GPU驱动注册失败也撤销GMU组，unregister可用于init错误路径。
+27实际函数host场景、9运行断言反例、9准备器检查通过；adreno/kgsl/GMU core三个ARM64对象-Werror零警告，24补丁/109源重复准备一致。
+整模块仍50对象/5错误/14警告，无MODPOST/.ko。原生GPU OPP/带宽、余下DT引用与早期失败清理、SMMU/固件和SDE/eDP未完成，不能部署。
+本轮未部署/重启；B0m和调试设备常亮保持。组件状态跟踪不是运行中quiesce/unsafe unbind解决方案。
+
+## 2026-11-11：小米 KGSL v40 接入目标 GMU MMIO/IRQ 与组件引用
+
+第23项gmu-resources补丁使用A680目标gmu/gmu_pdc/gmu_pdc_seq资源及hfi/gmu IRQ名称，校验映射范围、对齐与GPU相对偏移；映射成功后才发布指针/长度。
+GMU与两套HFI申请IRQ时使用IRQF_NO_AUTOEN，删除随后多余的disable，避免上电前短暂开启IRQ；保留实际申请/延迟错误。
+三处GMU匹配加入qcom,adreno-gmu-680.1；GPU组件按qcom,gmu引用绑定，原生A680缺失/无效/禁用引用返回错误，不搜索其他GMU替代。
+36实际函数host场景、8编译后运行断言反例、9准备器检查通过，4个ARM64对象-Werror零警告；23补丁/109源重复准备一致。
+整模块仍50对象/5错误/14警告，无MODPOST/.ko；原生GPU兼容/芯片识别/OPP、SMMU接线、固件和SDE/eDP尚未完成，不可部署。
+匹配6.18组件框架已有bind失败devres group清理；运行中unsafe unbind/失败资源最终回收仍未闭环。测试模拟IRQ/MMIO，不是硬件启动证明。
+本轮未部署/重启；当前B0m与用户要求的常亮设置保持。
+
+## 2026-11-11：小米 KGSL v39 接入A680原生cx/gx电源域
+
+第22项genpd补丁把A680供电probe从手机vddcx/vdd regulator改为目标cx/gx命名域；必需域缺失/延迟错误原样返回。
+上电顺序CX→GX，GX引用仅记账、实际上电仍由GMU固件负责；跟踪两域引用与时钟持有，失败回滚不重复put。
+关闭先释放GX并确认provider OFF/可读GX状态，再停时钟和释放CX；每次put前请求dev_pm_genpd_synced_poweroff，强制votable CX执行硬件poll。
+同步PM返回0后仍检查genpd OFF，失败记入power_error；probe后续失败释放空闲域，unsafe remove保留GMU资源。
+34 genpd＋33 reset＋52 power-off＋53 bootstrap＋36 OPP host场景、8运行反例及9准备器检查通过；GMU/HWSCHED对象-Werror通过。
+真实对象引用六项匹配内核导出的PM符号，CONFIG_PM/PM_GENERIC_DOMAINS均启用；22补丁/109源可重复准备，4源改变/105源相对v37未变。
+整模块仍50对象/5错误/14警告，无MODPOST/.ko。v38缺少votable CX同步关闭请求，保留作中间快照，由v39替代。
+**源码已接原生genpd，尚未在目标运行；domain OFF仅是瞬时状态，共享域必须协调，不能当完整电源周期证明。**
+外层void组件/master解绑及失败资源owner回收仍未闭环，禁止热卸载；SMMU/IRQ/寄存器/固件、完整KGSL及SDE/eDP尚未完成。
+本轮未部署/重启，设备B0m和常亮设置保持。
+
+## 2026-11-11：小米 KGSL v37 接通硬复位与CX关闭错误
+
+第21项reset-errors补丁将SPTPRAC关闭、GMU硬复位和CX关闭改为返回实际错误，修复RPMh errno按位合并与GBIF第一次halt错误被覆盖。
+GX regulator enable失败不再继续disable；缺GX句柄且硬件仍开、关闭后GX仍开均返回错误；A660临时CPR位仍配对恢复。
+硬复位失败不继续关时钟/发布NONE，restart不清GPU_STARTED或继续boot；HWSCHED解除上下文/唤醒unregister等待移到复位成功后。
+启动清理中的reset/CX失败保留原始启动errno、记录power_error并保留带宽floor；CX模式/disable/实际状态轮询错误向上传递。
+33个实际底层函数＋52调用方＋53 bootstrap host场景、7运行反例与9准备器检查通过；GMU/HWSCHED两个ARM64对象-Werror通过。
+21补丁/109源重新准备hash一致，5源改变、104源相对v36不变；整模块仍50对象/5错误/14警告，无MODPOST/.ko。
+**cx/gx genpd尚未接入，MMIO/regulator/时序仍只做host注入；不能称物理断电或恢复已验收。**
+修改的adreno_a6xx.c内CX helper未获完整ARM64对象证明（仍被旧clock头阻断）；非GMU void调用方也尚不能向上传递错误。
+失败状态仍需重启；原生SMMU、完整生命周期/故障退休、SDE/eDP和双机验收未完成。本轮未部署/重启。
+
+## 2026-11-11：小米 KGSL v36 保留关闭错误，禁止失败后的休眠/重放
+
+第20项power-off-errors补丁修复GMU/HWSCHED的RSCC错误被后续GBIF结果覆盖、已有gmu_fault返回成功，以及上层忽略power_off返回值。
+报告的关闭失败记录power_error；上层保留GPU_STARTED与资源/上下文清理状态，PM不置SUSPEND、不重新打开提交。
+后续boot/active-count/power-off/PM/restart拒绝已记录失败；HWSCHED重启失败返回errno而非BUG_ON，恢复路径不再执行replay。
+48个实际函数host场景及5组运行断言反例通过；GMU/HWSCHED/调度三个ARM64对象-Werror通过。
+20补丁/109源重新准备hash一致；5源改变、104源相对v35不变，整模块仍50对象/5错误/14警告，无MODPOST/.ko。
+**这是接入genpd前的错误链修复，尚未绑定cx/gx；底层硬复位/CX关闭仍为void，不能据此证明物理断电。**
+失败状态目前保持到重启，没有自动恢复/资源回收；既有HWSCHED强制退休也未证明真实fence完成。当前不可部署。
+本轮未部署/重启；原生SMMU、完整KGSL运行、SDE/eDP与双机验收仍未完成。
+
+## 2026-11-11：小米 KGSL v35 接入目标GMU时钟与OPP表
+
+第19项gmu-opp补丁绑定A680目标的ahb/gmu/cxo/axi/memnoc时钟，并从GMU设备树读取真实OPP。
+启动200MHz必须存在于已构建的表；速率设置/实际速率/时钟启用失败返回错误，成功后才更新RDPM和AWARE状态。
+GMU电压等级通过既有ARC算法转换；HFI v1发送全部GMU条目，修复固定复制两项会漏掉500MHz档的问题。
+36个实际函数host场景使用真实HFI结构/消息头与捕获SQ2 cmd-db，5组反例均编译后断言失败；时钟/OPP/固件调用仍模拟。
+三个改变对象GMU/RPMh/HFI匹配ARM64 -Werror通过；相关51 RPMh＋18 DDR＋49 bootstrap＋58 GMU回归、9准备器检查通过。
+19补丁/109源重新准备逐hash一致，5源改变、104源相对v34不变；整模块仍50对象/5错误/14警告，无MODPOST/.ko。
+**仍未接入目标cx/gx电源域：probe在新时钟绑定前仍请求旧regulator，不能称资源启动完成。**
+匹配6.18 genpd suspend忽略物理power_off返回，PM成功不能当断电证明；GX上电由GMU固件控制，需通知/真实握手与完整失败清理。
+本轮未部署/重启；原生SMMU、完整KGSL提交/退休/PM、SDE/eDP与双机验收保持未完成。
+
+## 2026-11-11：小米 KGSL v34 接入目标ZAP加载与显式非安全路径
+
+第18项zap-loader补丁替换subsystem_get：使用设备树firmware-name/预留内存、request_firmware_direct、qcom_mdt_load及GPU PAS13认证。
+禁止从手机core名推导签名镜像。缺节点/文件、MDT错误及认证失败原样返回；失败后shutdown失败记录zap_load_error，拒绝再次覆盖。
+仅“节点显式disabled且mmu.secured为false”允许未加载ZAP返回，实际A6xx调用方随后执行SECVID_TRUST_CNTL切换。
+29个实际loader＋A6xx启动host场景、5运行断言反例和9准备器检查通过；adreno.o匹配ARM64 -Werror通过。
+同boot只读确认当前SQ2节点disabled和Surface专用固件路径；没有运行新KGSL或写设备。该事实不是签名固件认证证明。
+整模块现50对象/5错误/14警告，无MODPOST/.ko；3源改变、106源相对v31不变。v32/v33保留为中间失败检查点。
+**成功PAS生命周期/退出与恢复尚未完成；不能热卸载GPU。** 原生SMMU、时钟/性能接口、SDE/eDP和完整实机验收仍未完成。
+
+## 2026-11-11：小米 KGSL v31 接入6.18 SCM DCVS调频
+
+第17项tz-dcvs补丁适配governor，独立三文件SCM provider补丁提供真实DCVS v2 init/update/reset/CA调用。
+provider使用现有SCM共享qcom_tzmem池，检查精确v2能力与ARM64 SCM约定；不把GPU物理地址冒充DMA映射。
+调频返回值拆为transport errno与有符号delta；governor在SCM失败时返回错误、保留采样和原频率，不把负errno当升频增量。
+初始化只发送已填充频率表；拒绝不支持版本/请求的CA失败；启动资源错误清理，suspend reset失败不伪报成功。
+35 provider＋25 governor实际源码host场景、5组运行断言反例与14准备器测试通过；两侧对象匹配ARM64 -Werror通过。
+整模块现49对象/6错误/14警告，无MODPOST/.ko。v31仅1个KGSL源改变，108源与v29一致；v30为中间编译检查点。
+**未验证实机固件DCVS能力、响应与电源行为；必须重建SCM及完整内核/消费者，现有symvers尚无新增导出。**
+原生SMMU生命周期、SCM aperture/安全固件、时钟/性能接口、SDE/eDP与完整验收仍未完成。本轮未部署/重启。
+
+## 2026-11-11：小米 KGSL v29 保留无法确认回滚的映射
+
+第16项map-retention补丁新增MAP_UNCERTAIN状态，覆盖payload、guard与SVM失败清理，5源改变、104源相对v28未变。
+核对匹配6.18的iommu_map_sg/map_nosync/map：内核尝试回滚但忽略unmap返回值，负errno不能证明无残留。
+旧domain API调用失败保留原errno并标记不确定；短映射/guard失败的外部回滚也检查返回值。
+MMU拒绝重map/unmap/释放不确定VA，backing析构也拒绝释放；SVM清理失败撤下ID并接入v28对象保留。
+32映射/guard、17核心释放、19外层/SVM场景及相关导入/缓存/userptr/fence回归通过；5运行断言反例、9准备器测试通过。
+kgsl/MMU/sharedmem三个对象匹配ARM64 -Werror通过；整模块仍48对象/7错误/14警告，无MODPOST/.ko。
+**旧API无法区分干净失败，因此部分实际已回滚的对象也会保留；尚无退休后的回收。** 不是长期可部署的内存策略。
+原生io-pgtable接线、全局域/对象退出、设备解绑、fault/PM和SDE/eDP仍未完成。本轮未部署/重启，设备B0m/常亮保持。
+
+## 2026-11-11：小米 KGSL v28 接住上层释放错误并登记保留对象
+
+第15项entry-retention补丁改kgsl.c/发起对象结构/debugfs，105源相对v27未变。
+普通mem_entry销毁先移除ID/解除映射，失败时保留entry和process引用、增加pagetable与模块引用，统计不提前扣减。
+attach的ID/映射失败出口及三处已分配backing的ioctl/allocate清理接入同一保留机制，登记后不盲目重放unmap。
+新增只读root debugfs retained_memory列出表名、地址、大小和errno。14实际函数host场景/4运行断言反例及9准备器测试通过。
+kgsl.o匹配ARM64 -Werror通过；整模块仍48对象/7错误/14警告，无MODPOST/.ko。
+**尚无恢复后回收实现，错误对象持续占用内存/进程/页表/模块引用；global close、设备解绑和失败map回滚归属仍未解决。**
+本轮未部署/重启，B0m/常亮保持；不能称完整生命周期、native KGSL或SDE已完成。
+
+## 2026-11-11：小米 KGSL v27 保留解除映射失败的地址归属
+
+第14项release-errors补丁修改MMU/sharedmem释放函数和声明（4源，105源相对v26不变）。
+put_gpuaddr返回int，unmap失败不清pagetable/gpuaddr、不释放VA；缺少地址释放或unmap回调返回ENODEV。
+sharedmem_free传播错误，不调用backing free。11项实际函数host场景及3组编译后断言失败反例通过。
+MMU/sharedmem对象ARM64 -Werror通过，整模块仍48对象/7错误/14警告，无MODPOST/.ko。
+**上层entry/process/global拥有者仍忽略返回值，生命周期安全尚未完成。** 失败映射回滚与异常对象归属/退休回收仍缺。
+本轮未部署/重启，B0m及常亮保持，完整KGSL＋SDE目标未完成。
+
+## 2026-11-11：小米 KGSL v26 修正GPU drvdata与SMMU私有接口布局
+
+第13项固定smmu-layout补丁在kgsl_device首字段放置真实adreno_smmu_priv，并static_assert偏移0。
+6.18 provider通过dev_get_drvdata直接写接口；旧首字段是device指针，若直接native attach会覆盖KGSL对象。
+现有adreno_device_probe仍发布同一个kgsl_device指针，KGSL消费者强转保持；没有把drvdata改成另一个独立分配对象。
+完整48对象重编，仍7错误/14警告、无MODPOST/.ko；MMU核心与原生页表对象使用provider v2头以-Werror重编通过。
+这是域绑定的必要布局修正，尚未接入native attach/默认TTBR0/进程表及退出/fault生命周期；不能称SMMU接线完成。
+本轮未操作设备，B0m/常亮偏好保持；完整KGSL＋SDE目标仍未完成。
+
+## 2026-11-11：小米 KGSL v25 快照源码适配6.18
+
+第12项固定snapshot补丁仅改kgsl_snapshot.c，109准备源中108份相对v21不变。
+移除目标没有的OEM msm_minidump注册/撤销，保留普通sysfs快照、原子采集和panic notifier；未移植固件minidump通道。
+时间/字符串/通知头及const sysfs回调换为6.18接口。快照对象ARM64 -Werror通过，准备器9项检查通过。
+整模块48个.o、7错误/14警告、退出2，无MODPOST/.ko；时钟、SCM/ZAP、性能接口和原生页表生命周期仍缺。
+本轮未部署或重启，现机B0m/常亮保持。对象编译不是硬件快照或原生提交验证，完整KGSL＋SDE目标未完成。
+
+## 2026-11-11：小米 KGSL v21 禁止 MMU 失败降为物理地址或共享进程页表
+
+第11项固定补丁 `kgsl-xiaomi-618-mmu-required.patch` 已进入准备链，109份源中仅3份相对v20改变。
+IOMMU probe原始错误直接返回，删除NOMMU实现；进程页表创建失败不再返回defaultpagetable或切换global位。
+缺少init/get回调返回ENODEV，失败对象不发布；qcom,global_pt配置明确拒绝，内核global/secure/LPAC表名称仍保留。
+32项实际函数主机测试通过，恢复5种旧行为的反例均编译成功后触发断言；准备器9项测试通过。
+匹配6.18 ARM64的kgsl_mmu.o以-Werror通过。整模块仍失败、47个.o、8项缺失旧接口头错误，无MODPOST/.ko。
+原生页表后端仍未接入旧生命周期，不能称运行时进程隔离完成；本轮未部署或重启，现机B0m/常亮偏好保持。
+
+## 2026-11-11：小米 KGSL v20 加入原生 io-pgtable 后端，尚未切换旧调用链
+
+第10项固定补丁新增`kgsl_iommu_table.c/h`和Kbuild接线，共109 prepared源。后端使用真实alloc_io_pgtable_ops、
+独立root、父pagetable/device引用、物理SG和4K叶子映射；处理部分映射错误、精确前缀回滚及只读重复guard页。
+每表mutex保护映射计数和异常状态；未清空映射或回滚不完整的表拒绝销毁。调用方仍须保留对应buffer backing并负责GPU退休。
+SMMU provider v2新增返回错误的ASID flush，后端unmap/rollback/destroy已调用；该操作自身不写TTBR0/CONTEXTIDR。
+39个后端＋31个provider实际源码主机场景、9＋6组反例通过；9项准备器测试通过，新增源支持也有输入/输出hash。
+两个新/改对象均通过匹配6.18 ARM64的-Werror编译；整KGSL仍退出2、47个.o、8错误/14警告，无MODPOST/.ko。
+旧`kgsl_iommu.c`初始化、分配与释放调用链尚未切到后端，不能称已实现运行时进程隔离或提交；当前候选仍不可部署。
+发现旧unmap错误路径会丢失外层owner：底层MAPPED检查已有，但mem_entry/process/pagetable引用仍可能被释放；必须配套修正。
+本轮未访问/部署/重启设备，B0m与常亮偏好保持。完整KGSL＋SDE目标不变；证据和接入条件见HANDOFF/BUILD。
+
+## 2026-11-11：KGSL 的 SMMU provider 前置接口已实现，调用方未接入
+
+新增独立 `kgsl-618-smmu-provider.patch`，以匹配的Linux6.18主线SMMU为输入；不是第10项小米donor补丁。
+修正TTBR0 setup在runtime PM失败前污染恢复缓存的问题，原errno返回；新接口读取真实bank/ASID，
+在GPU已静止的前提下恢复长期保留的默认TTBR0并清CONTEXTIDR、按真实ASID失效TLB，明确返回同步超时。
+28个实际源码ASan/UBSan场景通过，原版缓存缺陷及4项故障变体均触发预期断言；3项准备器拒绝检查通过。
+匹配ARM64配置下provider对象以-Werror编译通过，仅为单对象，没有完整内核链接、KGSL接线或硬件证明。
+小米v17的107源码与9补丁保持，之前整KGSL构建仍失败；原生提交、每进程隔离、SDE/eDP与完整目标未完成。
+新增私有接口改变结构体大小，后续必须成对重建SMMU与所有使用该头的GPU消费者；禁止只换provider配旧msm模块。
+默认页表必须长期存活；停GPU、禁用TTBR0并成功drain后才可回收，错误时不能提前释放。不得复制MSM最后页表忽略返回值的释放路径。
+本轮无设备部署/重启，B0m与常亮设置保持；源码、失败取证与下一步见HANDOFF，准备命令见BUILD。
+
+## 2026-11-11：小米 KGSL v17 修正首次启动带宽生命周期
+
+新增第9项固定bootstrap补丁，候选仍不可部署。GPU ICC请求统一经过真实helper，跟踪已成功的AB/CPU峰值和启动峰值下限；
+HFI设置正常AB时保留启动下限，初始化成功后仅释放启动下限，修复原first_boot直接清零正常AB的问题。
+普通GMU/HWSCHED均传播初始/释放投票错误；CM3启动尝试后失败走HFI stop＋既有GMU suspend，再清理ICC，保留首个错误。
+ICC失败后即使回到旧缓存值也重新请求，不能假设provider回滚成功。49启动场景、6组反例、80 bus＋39 ICC回归通过。
+58 GMU、69 RPMh/DDR与10项unittest本轮通过；未改内存函数176场景及最终源依赖hash复核，证据见HANDOFF。
+严格6.18仍46个.o、8错误/14警告、退出2，无MODPOST/.ko。未访问设备或部署/重启；B0m与常亮偏好保持。
+**校正v15范围：** bus测试mock了DCVS provider；实际GMU零档由slumber处理，软件OFF/缓存清理不证明硬件投票已撤销。
+底层GMU suspend/rail helper仍有void/吞错路径，新增测试只证明调用顺序；完整PM、OPP/SMMU/SCM和原生KGSL＋SDE仍未完成。
+
+## 2026-11-11：小米 KGSL v15 接上目标 ICC 契约并修正带宽失败状态
+
+新增第8项固定bus补丁，候选v15仍不可部署。只读取得当前B0m的有效DT：GPU为gfx-mem路径，
+177–700MHz十档OPP有opp-level但无带宽属性；没有手机qcom,devfreq-qoslat节点。
+核对donor后移除其仅用于AOP DDR perfmode的dummy devfreq发现/状态，不声称实现该手机策略或等价DDR频率控制。
+目标带宽走真实ICC/RPMh；本批修正空/错误ICC句柄、全部powerlevel边界、64位单位换算、失败状态保留及AXI/调速回调重试。
+80个实际源码bus场景、4组反例通过；176内存/MM/fence、58 GMU、39 ICC、69 RPMh/DDR及10项unittest通过或输入hash复核。
+严格6.18构建46个.o、8错误/14警告、退出2，未到MODPOST，无.ko；不能据错误减少宣称可启动。
+实际OPP/DDR/CNOC档位生成、启动投票清理、上层时钟/PM错误传播及每进程SMMU/SCM/clock仍待完成。
+现机仅只读取证，B0m/常亮与发布pins保持，未部署/重启/提交/推送，完整KGSL＋SDE目标继续。
+
+## 2026-11-11：小米 KGSL v12 接入 SC8180X RPMh 表生成
+
+本轮新增第7项固定RPMh/DDR补丁，候选v12仍不可部署。按目标ICC拓扑选择MC0/SH0/ACV和SN15/SN3/CN0，
+地址/unit/width/VCD从cmd-db运行时读取；禁止用A660配置或把本机采集值固化成通用运行条件。
+已只读采集同一B0m boot的cmd-db，使用私有临时mount namespace挂载只读debugfs后清理，没有投票/重启/部署。
+修正cmd-db错误指针/短数据/除零、分配回滚、HFI表越界、CNOC错误指针释放及DDR节点/属性读取错误。
+51 RPMh＋18 DDR场景与3组反例通过；176内存/MM/fence、58 GMU/QMP、39 ICC及10项unittest回归通过。
+严格6.18构建45个.o、12错误/14警告、退出2、无MODPOST/.ko；RPMh与kgsl.c新通过编译。
+仍缺实际OPP/DDR/CNOC级别构建、legacy dummy devfreq QoS替代、每进程SMMU/SCM/clock及运行验证。
+SC8180X以外的RPMh拓扑本候选明确拒绝；不是通用手机KGSL移植。现机B0m/常亮、发布pins与完整SDE目标保持。
+
+## 2026-11-11：小米 KGSL v10 完成 GMU 内存与 QMP 一批适配
+
+本轮源码候选推进至v10，新增固定GMU memory/domain与QMP两项补丁（共6项），仍不可部署。
+GMU使用DMA API取得物理SG，不把DMA handle当PA；映射负errno、长度不符与临时SG清理已覆盖，
+成功后才发布地址/推进VMA，拒绝secure降为普通GMU映射。分配/释放使用相同页对齐大小。
+GMU域改用6.18 paging-domain API，要求已有identity默认域；移除强制set_dma_ops。参考SC8180X DTS
+及qcom arm-smmu有该配置，但有效目标绑定/资源仍须实测，GPU每进程SMMU未实现。
+QMP改为qmp_get/send/put，传播初始化/首次启动/ACD切换错误，发送失败不提前更改ACD状态。
+58新增主机场景、3组v9反例、既有176内存/MM/fence＋39ICC场景与10项unittest通过。
+真实匹配6.18构建：43个.o、15错误/14警告、退出2，未到MODPOST，无.ko；GMU/HWSCHED HFI两源编译无诊断。
+未访问/部署/重启设备，B0m与常亮偏好保持。继续SMMU/DDR/devfreq/SCM/clock及资源接线，完整目标不缩减。
+
+## 2026-11-10：调试设备按用户要求不自动锁屏、接电常亮
+
+用户本轮明确要求“调试设备改为不锁屏常亮”，覆盖历史30分钟熄屏偏好，仅作用于当前调试设备。
+重新核对仍为B0m boot f7f2a4f5… / Linux6.18.60，动态发现当前Android用户0、原本无安全凭据且lockscreen disabled。
+已持久设置当前用户screen_off_timeout=2147483647（电池模式约24.9天）、sleep_timeout=-1，
+global stay_on_while_plugged_in=15，确认lockscreen disabled并唤醒屏幕。
+运行时mWakefulness=Awake、mIsPowered=true、mPlugType=1、mStayOn=true；接电不会因空闲熄屏。
+没有清除凭据、重启、写EFI或替换图形载荷；电池模式不是无限时长保证。后续不得恢复旧30分钟值，
+也不把此次单机偏好强加于通用镜像/其他用户。取证仅ignored out/kgsl-sde-port-20261110/display-awake-settings。
+
+## 2026-11-10：小米 KGSL v6 继续源码适配，尚无可部署模块
+
+小米四项有序补丁已覆盖ICC、DMA-BUF生命周期/完整buffer cache、核心API、长期用户页pin/unpin和shrinker。
+176个实际函数主机场景通过，三组旧行为反例成立；软件fence测试包含真实6.18比较函数，但非GPU/显示completion。
+未知exporter/部分cache范围仍未实现，不能扩范围invalidate或伪报成功。每进程SMMU/GMU仍须真实接入。
+当前Kbuild虽生成41个.o，仍17错误/19警告、未到MODPOST；新增int-conversion错误检查，禁止把生成.o当可运行证明。
+设备、B0m用户验收和发布pins保持；本轮无设备操作/提交/推送。完整目标与所有full_*仍未完成。
+下一阶段转DDR/ICC/OPP及SMMU/GMU资源接口，不能靠旧核心头/恒成功stub满足编译。详见HANDOFF/BUILD首节。
+
+## 2026-11-10：小米 SM8350 KGSL 参考已接回，下一阶段优先适配
+
+用户指明小米骁龙888并提供旧Quest2会话；已核对同一LineageOS kernel提交7ede20c8…为5.4.302，
+旧Oculus为4.19.315，目标仍6.18.60/SC8180X A680.1。mapper5＋原厂gralloc＋源码QTI HWC保持。
+小米完整参考固定426文件，ARM64共有62ioctl编码与92结构体876布局项一致；尚非UMD运行/32位证明。
+小米作为下一阶段优先适配候选，Oculus保留UMD语义对照；两份源码配置均不可构建，不切换设备。
+小米ICC错误传播补丁实际函数39场景及旧版反例成立；Oculus v3内存/cache共90＋42场景通过。
+cache仅固定system/WC完整buffer，范围同步/通用属性契约尚缺；不能推广名字判断或伪造成功。
+两份严格6.18编译均未到MODPOST，仍须DMA-BUF/SMMU/GMU/ICC/OPP和核心API实质适配。
+33项主机unittest、发布verify通过；本轮无设备访问/部署/重启，现机B0m与发布pins保持。
+真实提交、DPU/SDE/eDP、fence、性能/PM/长时/SQ1及完整目标继续未完成。详情见HANDOFF/BUILD首节。
+
+## 2026-11-10：KGSL/SDE 开始实施，独立 WC 内存候选已正常重启
+
+用户已要求按 `docs/QUALCOMM-KGSL-SDE-PORT.md` 推进完整目标。完成第一批独立内存实现与当前 SQ2 分项回归：
+6.18 `system-uncached` exporter + 成对图形 ION/视频桥，原 cached heap 保持；uncached 不再借 MSM GEM。
+实际 v5 父包 `94b3f6bf…` → 内存候选 `180b1900…`，正常启动 `f7f2a4f5…`；Image/DT/MSM/DPU/OMX/用户配置保持。
+mapper5 AHB/GLES/BufferQueue/YUV/P010、Vulkan 三轮 AHB 和 AVC30/HEVC6 精确帧通过；全部临时客户端已取回删除。
+这只是 B0m 内存阶段，原生 KGSL、SDE、性能/PM/完整显示 fence 及 SQ1 尚未完成；`full_*` 保持 false。
+发布 pins 仍 v21-release-4k，当前设备是独立实验候选，不把 main 旧包覆盖现机 v5/用户修复。
+完整 donor 已固定，406 个关键源码文件校验；SDE donor 仅候选，SC8180X catalog/eDP 配对仍待完成。
+详见 HANDOFF/BUILD 最新节；原回退与既有菜单保持，后续不得热卸活动 GPU/显示提供者。
+用户已确认本次B0m候选B站HD播放/清晰度/页面/声音正常。KGSL源码导入/SG回滚87个主机场景通过，
+真实6.18编译仍因旧ION/MSM bus/devfreq/SCM等接口失败；尚无可部署KGSL模块，不能把mock验收当硬件通过。
+
+## 2026-11-10：KGSL＋DRM/SDE 专项移植方案已编写
+
+用户要求结合当前工程及鸣潮 v5 实测编写下游 KGSL＋DRM/SDE 方案，见
+[专项方案](docs/QUALCOMM-KGSL-SDE-PORT.md)。本轮是方案整理，尚未开始实现或部署。
+后续技术顺序为独立共享内存后端＋原生 KGSL → 现有 DPU 上系统/性能闭环 → 下游 SDE/eDP → 联合验收。
+保留 mapper5、原厂 gralloc、源码 QTI HWC/SDM 和当前视频/音频修复；SDE 全目标保留，默认晋升独立验收。
+当前 main 发布仍 v21-release-4k；已拉取 v5 不等于合并或标准构建已启用。v5 实测热点为 GLES 提交/对象管理，
+没有 KGSL/SDE 提升百分比。既存记录与私有证据保持，不恢复用户迁移或历史故障压力脚本。
+
+## 2026-11-10：用户报告手动修复，停止迁移与救援操作
+
+用户已报告自行修复，当前任务改为归档主线100b6d7/v21-release-4k的私有镜像资源；不再继续迁移或启动诊断候选。
+手动修复步骤和设备最终状态未由代理重新采集，不把此前379文件恢复记为黑屏修复验收。
+禁止继续未部署的user0迁移v2或全局重定向/data/data。迁移失败与已执行恢复的事实见HANDOFF首节。
+私有归档不包含临时救援、用户数据或新Wi-Fi配置；验收启动包原有私有身份仍需保留并明确标注。
+
 ## 2026-11-10：4K 软解回退修复与独立 debug 入口
 
 用户在 v21-release 下报告 Bilibili 4K 严重卡顿，并明确要求恢复一个带原 debug 信息的 GRUB 入口。

@@ -1,0 +1,60 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -3358,6 +3358,17 @@
+ 	if (ret)
+ 		return ret;
+ 
++	/* Dispatcher idle can drop device->mutex while waiting. */
++	if (gmu->power_error)
++		return gmu->power_error;
++	ret = READ_ONCE(device->pwrctrl.transition_error);
++	if (ret)
++		return ret;
++	if (!test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
++		return 0;
++	if (atomic_read(&device->active_cnt))
++		return -EBUSY;
++
+ 	ret = a6xx_gmu_oob_set(device, oob_gpu);
+ 	if (ret) {
+ 		a6xx_gmu_oob_clear(device, oob_gpu);
+@@ -3425,12 +3436,20 @@
+ 
+ 	mutex_lock(&device->mutex);
+ 
+-	if (test_bit(GMU_DISABLE_SLUMBER, &device->gmu_core.flags))
++	if (test_bit(GMU_DISABLE_SLUMBER, &device->gmu_core.flags) ||
++		gmu->power_error || READ_ONCE(device->pwrctrl.transition_error))
+ 		goto done;
+ 
+ 	if (!atomic_read(&device->active_cnt)) {
+-		if (test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
+-			a6xx_power_off(adreno_dev);
++		if (test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags)) {
++			int ret = a6xx_power_off(adreno_dev);
++
++			/* Retry only while the live GPU has no latched failure. */
++			if (ret && !gmu->power_error &&
++				!READ_ONCE(device->pwrctrl.transition_error) &&
++				test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
++				kgsl_start_idle_timer(device);
++		}
+ 	} else {
+ 		kgsl_pwrscale_update(device);
+ 		kgsl_start_idle_timer(device);
+@@ -3533,8 +3552,14 @@
+ 
+ 	if (test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags)) {
+ 		ret = a6xx_power_off(adreno_dev);
+-		if (ret)
++		if (ret) {
++			/* An idle failure leaves the live GPU safe to resume work. */
++			if (!gmu->power_error &&
++				!READ_ONCE(device->pwrctrl.transition_error) &&
++				test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
++				goto err;
+ 			return ret;
++		}
+ 	}
+ 
+ 	set_bit(GMU_PRIV_PM_SUSPEND, &gmu->flags);

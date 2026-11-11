@@ -1,0 +1,126 @@
+--- a/drivers/gpu/msm/kgsl_bus.c
++++ b/drivers/gpu/msm/kgsl_bus.c
+@@ -7,6 +7,7 @@
+ #include <linux/interconnect.h>
+ #include <linux/math64.h>
+ #include <linux/of.h>
++#include <linux/pm_opp.h>
+ 
+ #include "kgsl_bus.h"
+ #include "kgsl_device.h"
+@@ -194,12 +195,80 @@
+ 	return levels;
+ }
+ 
++/* Use the GPU OPP peak bandwidths; no phone table or inferred frequency ratio. */
++static u32 *kgsl_bus_get_opp_table(struct kgsl_device *device,
++		struct device *dev, u32 *indices, int *count)
++{
++	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
++	u32 levels[MAX_GX_LEVELS] = {};
++	unsigned long previous_freq = 0;
++	u32 *table;
++	int i, num = 1;
++
++	*count = 0;
++	if (!pwr->num_pwrlevels || pwr->num_pwrlevels > KGSL_MAX_PWRLEVELS ||
++		pwr->active_pwrlevel >= pwr->num_pwrlevels ||
++		pwr->default_pwrlevel >= pwr->num_pwrlevels)
++		return ERR_PTR(-EINVAL);
++	if (of_property_count_strings(dev->of_node, "interconnect-names") != 1 ||
++		of_property_match_string(dev->of_node, "interconnect-names", "gfx-mem") != 0)
++		return ERR_PTR(-EINVAL);
++
++	for (i = pwr->num_pwrlevels - 1; i >= 0; i--) {
++		unsigned long freq = pwr->pwrlevels[i].gpu_freq;
++		struct dev_pm_opp *opp;
++		unsigned long peak, avg;
++
++		if (!freq || freq <= previous_freq)
++			return ERR_PTR(-EINVAL);
++		opp = dev_pm_opp_find_freq_exact(dev, freq, true);
++		if (IS_ERR(opp))
++			return ERR_PTR(PTR_ERR(opp));
++		peak = dev_pm_opp_get_bw(opp, true, 0);
++		avg = dev_pm_opp_get_bw(opp, false, 0);
++		dev_pm_opp_put(opp);
++		if (!peak)
++			return ERR_PTR(-ENODATA);
++		if (peak > U32_MAX)
++			return ERR_PTR(-ERANGE);
++		/* Explicit average floors need integration with the bus governor. */
++		if (avg)
++			return ERR_PTR(-EOPNOTSUPP);
++		if (peak < levels[num - 1])
++			return ERR_PTR(-EINVAL);
++		if (peak != levels[num - 1]) {
++			/* Reserve HFI level zero for OFF. */
++			if (num >= MAX_GX_LEVELS)
++				return ERR_PTR(-E2BIG);
++			levels[num++] = peak;
++		}
++		indices[i] = num - 1;
++		previous_freq = freq;
++	}
++
++	table = kcalloc(num, sizeof(*table), GFP_KERNEL);
++	if (!table)
++		return ERR_PTR(-ENOMEM);
++	memcpy(table, levels, num * sizeof(*table));
++	*count = num;
++	return table;
++}
++
+ int kgsl_bus_init(struct kgsl_device *device, struct platform_device *pdev)
+ {
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-	int count, ret;
+-	int ddr = kgsl_get_ddrtype();
+-
++	u32 indices[KGSL_MAX_PWRLEVELS];
++	bool native = of_device_is_compatible(pdev->dev.of_node, "qcom,adreno-680.1");
++	int count, ret, ddr;
++	unsigned int i;
++
++	if (native) {
++		pwr->ddr_table = kgsl_bus_get_opp_table(device, &pdev->dev, indices, &count);
++		if (IS_ERR(pwr->ddr_table))
++			goto table_error;
++		goto get_path;
++	}
++	ddr = kgsl_get_ddrtype();
+ 	if (ddr >= 0) {
+ 		char str[32];
+ 
+@@ -218,12 +287,21 @@
+ 	if (ret)
+ 		goto free_table;
+ 
++get_path:
+ 	/* GMU also needs CPU ICC votes for AB and firmware bootstrap. */
+ 	pwr->icc_path = of_icc_get(&pdev->dev, "gfx-mem");
+ 	if (IS_ERR_OR_NULL(pwr->icc_path)) {
+ 		ret = pwr->icc_path ? PTR_ERR(pwr->icc_path) : -ENODEV;
+ 		pwr->icc_path = NULL;
+ 		goto free_table;
++	}
++	/* Publish per-frequency indices only after all fallible probe steps. */
++	if (native) {
++		for (i = 0; i < pwr->num_pwrlevels; i++) {
++			pwr->pwrlevels[i].bus_freq = indices[i];
++			pwr->pwrlevels[i].bus_min = 1;
++			pwr->pwrlevels[i].bus_max = indices[i];
++		}
+ 	}
+ 	pwr->ddr_table_count = count;
+ 	pwr->cur_ab = 0;
+--- a/drivers/gpu/msm/adreno_a6xx_rpmh.c
++++ b/drivers/gpu/msm/adreno_a6xx_rpmh.c
+@@ -435,6 +435,7 @@
+ };
+ 
+ static const struct bcm sc8180x_cnoc_bcms[] = {
++	{ .name = "SH2", .buswidth = 8, .channels = 1 },
+ 	{ .name = "SN15", .buswidth = 8, .channels = 1 },
+ 	{ .name = "SN3", .buswidth = 8, .channels = 1 },
+ 	{ .name = "CN0", .buswidth = 8, .channels = 1 },

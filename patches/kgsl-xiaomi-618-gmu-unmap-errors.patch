@@ -1,0 +1,75 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -1537,7 +1537,7 @@
+ 
+ 	mapped = iommu_map_sg(gmu->domain, addr, sgt->sgl, sgt->orig_nents,
+ 		attrs, GFP_KERNEL);
+-	/* The 6.18 core already unwinds a negative return. */
++	/* Core attempts rollback, but does not report short unmaps to us. */
+ 	if (mapped < 0)
+ 		return mapped;
+ 	if (mapped != size) {
+@@ -2659,9 +2659,17 @@
+ 	return kgsl_bus_set_icc(device, ab, 0);
+ }
+ 
+-static void a6xx_free_gmu_globals(struct a6xx_gmu_device *gmu)
++static int a6xx_free_gmu_globals(struct a6xx_gmu_device *gmu)
+ {
+ 	int i;
++
++	/* A partial unmap leaves holes; never retry it as an intact range. */
++	if (gmu->power_error)
++		return gmu->power_error;
++	if (gmu->global_entries && !gmu->domain) {
++		gmu->power_error = -ENODEV;
++		return gmu->power_error;
++	}
+ 
+ 	for (i = 0; i < gmu->global_entries; i++) {
+ 		struct gmu_memdesc *md = &gmu->gmu_globals[i];
+@@ -2669,8 +2677,10 @@
+ 		if (!md->hostptr)
+ 			continue;
+ 
+-		iommu_unmap(gmu->domain,
+-			md->gmuaddr, md->size);
++		if (iommu_unmap(gmu->domain, md->gmuaddr, md->size) != md->size) {
++			gmu->power_error = -EUCLEAN;
++			return gmu->power_error;
++		}
+ 
+ 		dma_free_attrs(&gmu->pdev->dev, (size_t) md->size,
+ 				(void *)md->hostptr, md->dma_handle, 0);
+@@ -2685,6 +2695,7 @@
+ 	}
+ 
+ 	gmu->global_entries = 0;
++	return 0;
+ }
+ 
+ static int a6xx_gmu_aop_qmp_init(struct adreno_device *adreno_dev,
+@@ -2847,6 +2858,11 @@
+ 		return;
+ 	}
+ 
++	if (a6xx_free_gmu_globals(gmu)) {
++		dev_err(device->dev, "GMU backing retained after incomplete unmap\n");
++		return;
++	}
++
+ 	qmp_put(gmu->qmp);
+ 	gmu->qmp = NULL;
+ 
+@@ -2855,9 +2871,10 @@
+ 	if (gmu->fw_image)
+ 		release_firmware(gmu->fw_image);
+ 
+-	a6xx_free_gmu_globals(gmu);
++	gmu->fw_image = NULL;
+ 
+ 	vfree(gmu->itcm_shadow);
++	gmu->itcm_shadow = NULL;
+ 	if (gmu->native_domains) {
+ 		dev_pm_domain_detach(gmu->gxpd, false);
+ 		dev_pm_domain_detach(gmu->cxpd, false);

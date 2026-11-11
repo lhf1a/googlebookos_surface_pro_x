@@ -1,0 +1,142 @@
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -713,22 +713,30 @@
+ 	unsigned int patchid = ADRENO_CHIPID_PATCH(chipid);
+ 	int i;
+ 	struct device_node *node;
++	const struct adreno_gpu_core *match = NULL;
+ 
+ 	/*
+ 	 * When "qcom,gpu-models" is defined, use gpu model node to match
+ 	 * on a compatible string, otherwise match using legacy way.
+ 	 */
+ 	node = adreno_get_gpu_model_node(pdev);
+-	if (!node || !of_find_property(node, "compatible", NULL))
+-		node = pdev->dev.of_node;
++	if (!node || !of_find_property(node, "compatible", NULL)) {
++		of_node_put(node);
++		node = of_node_get(pdev->dev.of_node);
++	}
+ 
+ 	/* Check to see if any of the entries match on a compatible string */
+ 	for (i = 0; i < ARRAY_SIZE(adreno_gpulist); i++) {
+ 		if (adreno_gpulist[i]->compatible &&
+ 			of_device_is_compatible(node,
+-				adreno_gpulist[i]->compatible))
+-			return adreno_gpulist[i];
+-	}
++				adreno_gpulist[i]->compatible)) {
++			match = adreno_gpulist[i];
++			break;
++		}
++	}
++	of_node_put(node);
++	if (match)
++		return match;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(adreno_gpulist); i++) {
+ 		if (core == adreno_gpulist[i]->core &&
+@@ -764,7 +772,7 @@
+ {
+ 	struct device_node *node, *child;
+ 
+-	node = of_find_node_by_name(pdev->dev.of_node, "qcom,soc-hw-revisions");
++	node = of_get_child_by_name(pdev->dev.of_node, "qcom,soc-hw-revisions");
+ 	if (node == NULL)
+ 		return NULL;
+ 
+@@ -1053,7 +1061,7 @@
+ 	struct device_node *node;
+ 	int ret;
+ 
+-	node = of_find_node_by_name(parent, "qcom,gpu-pwrlevels");
++	node = of_get_child_by_name(parent, "qcom,gpu-pwrlevels");
+ 
+ 	if (node == NULL) {
+ 		dev_err(&device->pdev->dev,
+@@ -1079,7 +1087,7 @@
+ 	struct device_node *node, *child;
+ 	unsigned int bin = 0;
+ 
+-	node = of_find_node_by_name(parent, "qcom,gpu-pwrlevel-bins");
++	node = of_get_child_by_name(parent, "qcom,gpu-pwrlevel-bins");
+ 	if (node == NULL)
+ 		return adreno_of_get_legacy_pwrlevels(adreno_dev, parent);
+ 
+@@ -1094,6 +1102,7 @@
+ 			ret = adreno_of_parse_pwrlevels(adreno_dev, child);
+ 			if (ret) {
+ 				of_node_put(child);
++				of_node_put(node);
+ 				return ret;
+ 			}
+ 
+@@ -1107,10 +1116,12 @@
+ 			adreno_of_get_limits(adreno_dev, child);
+ 
+ 			of_node_put(child);
++			of_node_put(node);
+ 			return 0;
+ 		}
+ 	}
+ 
++	of_node_put(node);
+ 	dev_err(&device->pdev->dev,
+ 		"GPU speed_bin:%d mismatch for efused bin:%d\n",
+ 		device->speed_bin, bin);
+@@ -1122,7 +1133,7 @@
+ {
+ 	struct device_node *pwrlevel_node, *child;
+ 
+-	pwrlevel_node = of_find_node_by_name(node, "qcom,l3-pwrlevels");
++	pwrlevel_node = of_get_child_by_name(node, "qcom,l3-pwrlevels");
+ 
+ 	if (pwrlevel_node == NULL)
+ 		return;
+@@ -1130,8 +1141,11 @@
+ 	for_each_available_child_of_node(pwrlevel_node, child) {
+ 		unsigned int index;
+ 
+-		if (of_property_read_u32(child, "reg", &index))
++		if (of_property_read_u32(child, "reg", &index)) {
++			of_node_put(child);
++			of_node_put(pwrlevel_node);
+ 			return;
++		}
+ 		if (index >= MAX_L3_LEVELS)
+ 			continue;
+ 
+@@ -1141,6 +1155,8 @@
+ 		of_property_read_u32(child, "qcom,l3-freq",
+ 				&device->l3_freq[index]);
+ 	}
++
++	of_node_put(pwrlevel_node);
+ 
+ 	device->l3_icc = of_icc_get(&device->pdev->dev, "l3_path");
+ 
+@@ -1356,7 +1372,7 @@
+ 	if (fuse_model < 0)
+ 		return NULL;
+ 
+-	node = of_find_node_by_name(pdev->dev.of_node, "qcom,gpu-models");
++	node = of_get_child_by_name(pdev->dev.of_node, "qcom,gpu-models");
+ 	if (node == NULL)
+ 		return NULL;
+ 
+@@ -1577,13 +1593,13 @@
+ 
+ 	status = adreno_read_speed_bin(pdev);
+ 	if (status < 0)
+-		return status;
++		goto err;
+ 
+ 	device->speed_bin = status;
+ 
+ 	status = adreno_of_get_power(adreno_dev, pdev);
+ 	if (status)
+-		return status;
++		goto err;
+ 
+ 	status = kgsl_bus_init(device, pdev);
+ 	if (status)

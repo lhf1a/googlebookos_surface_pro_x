@@ -128,6 +128,7 @@ def main():
     (args.output / "BUILD.json").write_text(json.dumps({
         "status": "compiled-not-device-validated", "purpose": __doc__, "allocation_build": allocation_build,
         "inputs": inputs, "commands": commands, "sha256": hashes,
+        "memory_backend": allocation_build["memory_backend"],
         "limits": ["Private process only; no system allocator replacement", "MSM DRM GPU backend, not KGSL",
                    "Build is not validation; optional YUV/VPU probes need device results; no scanout, UBWC or protected validation"],
     }, indent=2) + "\n")

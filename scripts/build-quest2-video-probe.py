@@ -79,6 +79,7 @@ def main():
                                              media_file=bool(a.media_file_binder)),
                       media_file_binder_sha256=hashlib.sha256(a.media_file_binder.read_bytes()).hexdigest() if a.media_file_binder else None,
                       header_sha256=cfg['sha256'],
+                      memory_backend='dma-heap-system-uncached-v1' if a.with_vidc_bridge else None,
                       memory_backend_sha256=hashlib.sha256((ROOT/'probe/graphics/quest2-system-ion.h').read_bytes()).hexdigest() if a.with_vidc_bridge else None,
                       source_sha256={source: hashlib.sha256((ROOT/'probe/video'/source).read_bytes()).hexdigest()
                                      for source, _, _ in products},

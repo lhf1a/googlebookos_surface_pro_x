@@ -1,0 +1,314 @@
+--- a/drivers/gpu/msm/adreno.h
++++ b/drivers/gpu/msm/adreno.h
+@@ -1337,6 +1337,9 @@
+ 
+ static inline void adreno_clear_gpu_fault(struct adreno_device *adreno_dev)
+ {
++	if (READ_ONCE(adreno_dev->dispatcher.recovery_active))
++		return;
++
+ 	atomic_set(&adreno_dev->dispatcher.fault, 0);
+ 
+ 	/* make sure other CPUs see the update */
+--- a/drivers/gpu/msm/adreno_dispatch.h
++++ b/drivers/gpu/msm/adreno_dispatch.h
+@@ -74,6 +74,8 @@
+ 	struct timer_list fault_timer;
+ 	unsigned int inflight;
+ 	atomic_t fault;
++	/** @recovery_active: Preserve faults reported during dispatcher reset */
++	bool recovery_active;
+ 	/** @jobs - Array of dispatch job lists for each priority level */
+ 	struct llist_head jobs[16];
+ 	/** @requeue - Array of lists for dispatch jobs that got requeued */
+--- a/drivers/gpu/msm/adreno_dispatch.c
++++ b/drivers/gpu/msm/adreno_dispatch.c
+@@ -5,7 +5,6 @@
+ 
+ #include <linux/slab.h>
+ #include <linux/sysfs.h>
+-#include <soc/qcom/msm_performance.h>
+ #include "adreno.h"
+ #include "adreno_sysfs.h"
+ #include "adreno_trace.h"
+@@ -299,10 +298,6 @@
+ 	info.wptr = rb->wptr;
+ 	info.timestamp = drawobj->timestamp;
+ 
+-	msm_perf_events_update(MSM_PERF_GFX, MSM_PERF_RETIRED,
+-				pid_nr(context->proc_priv->pid),
+-				context->id, drawobj->timestamp,
+-				!!(drawobj->flags & KGSL_DRAWOBJ_END_OF_FRAME));
+ 
+ 	if (drawobj->flags & KGSL_DRAWOBJ_END_OF_FRAME)
+ 		atomic64_inc(&context->proc_priv->frame_count);
+@@ -577,7 +572,6 @@
+ 	const struct adreno_gpudev *gpudev = ADRENO_GPU_DEVICE(adreno_dev);
+ 	struct adreno_dispatcher *dispatcher = &adreno_dev->dispatcher;
+ 	struct adreno_context *drawctxt = ADRENO_CONTEXT(drawobj->context);
+-	struct kgsl_context *context = drawobj->context;
+ 	struct adreno_dispatcher_drawqueue *dispatch_q =
+ 				ADRENO_DRAWOBJ_DISPATCH_DRAWQUEUE(drawobj);
+ 	struct adreno_submit_time time;
+@@ -587,6 +581,11 @@
+ 	struct submission_info info = {0};
+ 
+ 	mutex_lock(&device->mutex);
++	ret = READ_ONCE(device->pwrctrl.transition_error);
++	if (ret) {
++		mutex_unlock(&device->mutex);
++		return ret;
++	}
+ 	if (adreno_gpu_halt(adreno_dev) != 0) {
+ 		mutex_unlock(&device->mutex);
+ 		return -EBUSY;
+@@ -699,10 +698,6 @@
+ 	info.wptr = drawctxt->rb->wptr;
+ 	info.gmu_dispatch_queue = -1;
+ 
+-	msm_perf_events_update(MSM_PERF_GFX, MSM_PERF_SUBMIT,
+-			       pid_nr(context->proc_priv->pid),
+-			       context->id, drawobj->timestamp,
+-			       !!(drawobj->flags & KGSL_DRAWOBJ_END_OF_FRAME));
+ 
+ 	trace_adreno_cmdbatch_submitted(drawobj, &info,
+ 			time.ticks, (unsigned long) secs, nsecs / 1000,
+@@ -847,7 +842,8 @@
+ 
+ static bool adreno_gpu_stopped(struct adreno_device *adreno_dev)
+ {
+-	return (adreno_gpu_fault(adreno_dev) || adreno_gpu_halt(adreno_dev));
++	return (READ_ONCE(KGSL_DEVICE(adreno_dev)->pwrctrl.transition_error) ||
++		adreno_gpu_fault(adreno_dev) || adreno_gpu_halt(adreno_dev));
+ }
+ 
+ static void dispatcher_handle_jobs_list(struct adreno_device *adreno_dev,
+@@ -948,7 +944,8 @@
+ 	int i;
+ 
+ 	/* Leave early if the dispatcher isn't in a happy state */
+-	if (adreno_gpu_fault(adreno_dev) != 0)
++	if (READ_ONCE(KGSL_DEVICE(adreno_dev)->pwrctrl.transition_error) ||
++		adreno_gpu_fault(adreno_dev) != 0)
+ 		return;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(dispatcher->jobs); i++)
+@@ -1218,17 +1215,12 @@
+ static void _queue_drawobj(struct adreno_context *drawctxt,
+ 	struct kgsl_drawobj *drawobj)
+ {
+-	struct kgsl_context *context = drawobj->context;
+ 
+ 	/* Put the command into the queue */
+ 	drawctxt->drawqueue[drawctxt->drawqueue_tail] = drawobj;
+ 	drawctxt->drawqueue_tail = (drawctxt->drawqueue_tail + 1) %
+ 			ADRENO_CONTEXT_DRAWQUEUE_SIZE;
+ 	drawctxt->queued++;
+-	msm_perf_events_update(MSM_PERF_GFX, MSM_PERF_QUEUE,
+-				pid_nr(context->proc_priv->pid),
+-				context->id, drawobj->timestamp,
+-				!!(drawobj->flags & KGSL_DRAWOBJ_END_OF_FRAME));
+ 	trace_adreno_cmdbatch_queued(drawobj, drawctxt->queued);
+ }
+ 
+@@ -1666,7 +1658,7 @@
+ static inline const char *_kgsl_context_comm(struct kgsl_context *context)
+ {
+ 	if (context && context->proc_priv)
+-		strlcpy(_pidname, context->proc_priv->comm, sizeof(_pidname));
++		strscpy(_pidname, context->proc_priv->comm, sizeof(_pidname));
+ 	else
+ 		snprintf(_pidname, TASK_COMM_LEN, "unknown");
+ 
+@@ -2085,6 +2077,23 @@
+ 					fault & ADRENO_GMU_FAULT);
+ }
+ 
++static int dispatcher_fault_failed(struct adreno_device *adreno_dev,
++	int fault, int ret)
++{
++	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
++	struct adreno_dispatcher *dispatcher = &adreno_dev->dispatcher;
++
++	/* Keep unretired owners until a checked recovery can retire the GPU. */
++	if (!READ_ONCE(device->pwrctrl.transition_error))
++		WRITE_ONCE(device->pwrctrl.transition_error, ret);
++	atomic_or(fault, &dispatcher->fault);
++	timer_delete_sync(&dispatcher->timer);
++	timer_delete_sync(&dispatcher->fault_timer);
++	if (adreno_is_preemption_enabled(adreno_dev))
++		timer_delete_sync(&adreno_dev->preempt.timer);
++	return ret;
++}
++
+ static int dispatcher_do_fault(struct adreno_device *adreno_dev)
+ {
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+@@ -2101,17 +2110,32 @@
+ 	int halt;
+ 	bool gx_on;
+ 
++	ret = READ_ONCE(device->pwrctrl.transition_error);
++	if (ret)
++		return ret;
++
+ 	fault = atomic_xchg(&dispatcher->fault, 0);
+ 	if (fault == 0)
+ 		return 0;
+ 
+ 	mutex_lock(&device->mutex);
++	ret = READ_ONCE(device->pwrctrl.transition_error);
++	if (ret) {
++		atomic_or(fault, &dispatcher->fault);
++		mutex_unlock(&device->mutex);
++		return ret;
++	}
+ 
+ 	/*
+ 	 * In the very unlikely case that the power is off, do nothing - the
+ 	 * state will be reset on power up and everybody will be happy
+ 	 */
+ 	if (!kgsl_state_is_awake(device)) {
++		if (dispatcher->inflight) {
++			ret = dispatcher_fault_failed(adreno_dev, fault, -EIO);
++			mutex_unlock(&device->mutex);
++			return ret;
++		}
+ 		mutex_unlock(&device->mutex);
+ 		if (fault & ADRENO_SOFT_FAULT) {
+ 			/* Clear the existing register values */
+@@ -2147,6 +2171,7 @@
+ 
+ 		adreno_readreg(adreno_dev, ADRENO_REG_RBBM_STATUS3, &val);
+ 		if (val & BIT(24)) {
++			atomic_or(fault, &dispatcher->fault);
+ 			mutex_unlock(&device->mutex);
+ 			dev_err(device->dev,
+ 				"SMMU is stalled without a pagefault\n");
+@@ -2221,41 +2246,28 @@
+ 	if (fault & ADRENO_IOMMU_PAGE_FAULT)
+ 		kgsl_mmu_pagefault_resume(&device->mmu);
+ 
+-	/* Reset the dispatcher queue */
+-	dispatcher->inflight = 0;
+-
+-	/* Reset the GPU and make sure halt is not set during recovery */
++	/* Temporarily drop the halt reference only while attempting reset. */
+ 	halt = adreno_gpu_halt(adreno_dev);
+ 	adreno_clear_gpu_halt(adreno_dev);
+ 
+-	/*
+-	 * If there is a stall in the ringbuffer after all commands have been
+-	 * retired then we could hit problems if contexts are waiting for
+-	 * internal timestamps that will never retire
+-	 */
+-
+-	if (hung_rb != NULL) {
+-		kgsl_sharedmem_writel(device->memstore,
+-			MEMSTORE_RB_OFFSET(hung_rb, soptimestamp),
+-			hung_rb->timestamp);
+-
+-		kgsl_sharedmem_writel(device->memstore,
+-				MEMSTORE_RB_OFFSET(hung_rb, eoptimestamp),
+-				hung_rb->timestamp);
+-
+-		/* Schedule any pending events to be run */
+-		kgsl_process_event_group(device, &hung_rb->events);
+-	}
+-
++	WRITE_ONCE(dispatcher->recovery_active, true);
+ 	ret = adreno_reset(device, fault);
+-
++	WRITE_ONCE(dispatcher->recovery_active, false);
++	/* A new fault during restart is not a successful recovery. */
++	if (!ret && atomic_read(&dispatcher->fault))
++		ret = -EIO;
++	if (ret) {
++		atomic_add(halt, &adreno_dev->halt);
++		ret = dispatcher_fault_failed(adreno_dev, fault, ret);
++		mutex_unlock(&device->mutex);
++		return ret;
++	}
++
++	/* Old waits are cancelled, not reported as GPU timestamp completion. */
++	FOR_EACH_RINGBUFFER(adreno_dev, rb, i)
++		kgsl_cancel_events(device, &rb->events);
++	dispatcher->inflight = 0;
+ 	mutex_unlock(&device->mutex);
+-
+-	/* If adreno_reset() fails then what hope do we have for the future? */
+-	BUG_ON(ret);
+-
+-	/* if any other fault got in until reset then ignore */
+-	atomic_set(&dispatcher->fault, 0);
+ 
+ 	/* recover all the dispatch_q's starting with the one that hung */
+ 	if (dispatch_q)
+@@ -2353,10 +2365,6 @@
+ 	info.sop = start;
+ 	info.eop = end;
+ 
+-	msm_perf_events_update(MSM_PERF_GFX, MSM_PERF_RETIRED,
+-			       pid_nr(context->proc_priv->pid),
+-			       context->id, drawobj->timestamp,
+-			       !!(drawobj->flags & KGSL_DRAWOBJ_END_OF_FRAME));
+ 
+ 	if (drawobj->flags & KGSL_DRAWOBJ_END_OF_FRAME)
+ 		atomic64_inc(&context->proc_priv->frame_count);
+@@ -2533,10 +2541,12 @@
+ 		container_of(dispatcher, struct adreno_device, dispatcher);
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	const struct adreno_gpudev *gpudev = ADRENO_GPU_DEVICE(adreno_dev);
+-	int count = 0;
++	int count = 0, ret;
+ 	unsigned int i = 0;
+ 
+ 	mutex_lock(&dispatcher->mutex);
++	if (READ_ONCE(device->pwrctrl.transition_error))
++		goto out;
+ 
+ 	/*
+ 	 * As long as there are inflight commands, process retired comamnds from
+@@ -2558,7 +2568,10 @@
+ 	 * dispatcher_do_fault() returns 0 if no faults occurred. If that is the
+ 	 * case, then clean up preemption and try to schedule more work
+ 	 */
+-	if (dispatcher_do_fault(adreno_dev) == 0) {
++	ret = dispatcher_do_fault(adreno_dev);
++	if (READ_ONCE(device->pwrctrl.transition_error))
++		goto out;
++	if (ret == 0) {
+ 
+ 		/* Clean up after preemption */
+ 		if (gpudev->preemption_schedule)
+@@ -2577,6 +2590,7 @@
+ 	else
+ 		_dispatcher_power_down(adreno_dev);
+ 
++out:
+ 	mutex_unlock(&dispatcher->mutex);
+ }
+ 
+@@ -2619,6 +2633,9 @@
+ 							t, fault_timer);
+ 	struct adreno_device *adreno_dev = container_of(dispatcher,
+ 					struct adreno_device, dispatcher);
++
++	if (READ_ONCE(KGSL_DEVICE(adreno_dev)->pwrctrl.transition_error))
++		return;
+ 
+ 	/* Leave if the user decided to turn off fast hang detection */
+ 	if (!adreno_soft_fault_detect(adreno_dev))
+@@ -2964,9 +2981,11 @@
+ 	.store = dispatcher_sysfs_store
+ };
+ 
++ATTRIBUTE_GROUPS(dispatcher);
++
+ static struct kobj_type ktype_dispatcher = {
+ 	.sysfs_ops = &dispatcher_sysfs_ops,
+-	.default_attrs = dispatcher_attrs,
++	.default_groups = dispatcher_groups,
+ };
+ 
+ /**

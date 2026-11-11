@@ -1,0 +1,142 @@
+--- a/drivers/gpu/msm/kgsl.c
++++ b/drivers/gpu/msm/kgsl.c
+@@ -4213,7 +4213,9 @@
+ 	struct kgsl_mem_entry *entry = NULL;
+ 
+ 	if (vma_offset == (unsigned long) KGSL_MEMSTORE_TOKEN_ADDRESS)
+-		return get_unmapped_area(NULL, addr, len, pgoff, flags);
++		/* The outer mmap path applies range/alignment/LSM checks. */
++		return mm_get_unmapped_area(current->mm, file, addr, len,
++			pgoff, flags);
+ 
+ 	val = get_mmap_entry(private, &entry, pgoff, len);
+ 	if (val)
+@@ -4678,8 +4680,48 @@
+ 	_unregister_device(device);
+ }
+ 
++static int __init kgsl_worker_init(void)
++{
++	const struct sched_attr attr = {
++		.size = sizeof(attr),
++		.sched_policy = SCHED_FIFO,
++		.sched_priority = 2,
++	};
++	struct task_struct *thread;
++	int ret;
++
++	kthread_init_worker(&kgsl_driver.worker);
++	thread = kthread_create(kthread_worker_fn, &kgsl_driver.worker,
++		"kgsl_worker_thread");
++	if (IS_ERR(thread))
++		return PTR_ERR(thread);
++
++	/* Set the driver's original priority before the worker can execute. */
++	ret = sched_setattr_nocheck(thread, &attr);
++	if (ret) {
++		kthread_stop(thread);
++		return ret;
++	}
++
++	kgsl_driver.worker_thread = thread;
++	wake_up_process(thread);
++	return 0;
++}
++
++static void kgsl_worker_close(void)
++{
++	/* Device removal must have stopped all dispatcher/HWSCHED producers. */
++	if (kgsl_driver.worker_thread) {
++		kthread_flush_worker(&kgsl_driver.worker);
++		kthread_stop(kgsl_driver.worker_thread);
++		kgsl_driver.worker_thread = NULL;
++	}
++}
++
+ void kgsl_core_exit(void)
+ {
++	kgsl_worker_close();
++
+ 	kgsl_exit_page_pools();
+ 
+ 	if (kgsl_driver.workqueue) {
+@@ -4723,7 +4765,6 @@
+ int __init kgsl_core_init(void)
+ {
+ 	int result = 0;
+-	struct sched_param param = { .sched_priority = 2 };
+ 
+ 	/* alloc major and minor device numbers */
+ 	result = alloc_chrdev_region(&kgsl_driver.major, 0,
+@@ -4806,17 +4847,11 @@
+ 		goto err;
+ 	}
+ 
+-	kthread_init_worker(&kgsl_driver.worker);
+-
+-	kgsl_driver.worker_thread = kthread_run(kthread_worker_fn,
+-		&kgsl_driver.worker, "kgsl_worker_thread");
+-
+-	if (IS_ERR(kgsl_driver.worker_thread)) {
+-		pr_err("kgsl: unable to start kgsl thread\n");
++	result = kgsl_worker_init();
++	if (result) {
++		pr_err("kgsl: unable to start FIFO worker: %d\n", result);
+ 		goto err;
+ 	}
+-
+-	sched_setscheduler(kgsl_driver.worker_thread, SCHED_FIFO, &param);
+ 
+ 	kgsl_events_init();
+ 
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -4286,4 +4286,5 @@
+ 
+ MODULE_DESCRIPTION("3D Graphics driver");
+ MODULE_LICENSE("GPL v2");
++MODULE_IMPORT_NS("DMA_BUF");
+ MODULE_SOFTDEP("pre: qcom-arm-smmu-mod nvmem_qfprom");
+--- a/drivers/gpu/msm/kgsl_debugfs.c
++++ b/drivers/gpu/msm/kgsl_debugfs.c
+@@ -206,7 +206,7 @@
+ 			 * Show zero for the useraddr - we can't reliably track
+ 			 * that value for multiple vmas anyway
+ 			 */
+-			0, m->size, entry->id, flags,
++			NULL, m->size, entry->id, flags,
+ 			memtype_str(usermem_type),
+ 			usage, (m->sgt ? m->sgt->nents : 0), map_count,
+ 			egl_surface_count, egl_image_count, inode_number);
+--- a/drivers/gpu/msm/adreno_debugfs.c
++++ b/drivers/gpu/msm/adreno_debugfs.c
+@@ -151,7 +151,7 @@
+ 		struct event_timeline_info *info = sync_event->priv;
+ 
+ 		for (j = 0; info && info[j].timeline; j++)
+-			seq_printf(s, "timeline: %d seqno: %d",
++			seq_printf(s, "timeline: %d seqno: %llu",
+ 				info[j].timeline, info[j].seqno);
+ 		break;
+ 	}
+--- a/drivers/gpu/msm/governor_gpubw_mon.c
++++ b/drivers/gpu/msm/governor_gpubw_mon.c
+@@ -41,7 +41,7 @@
+ 					struct msm_busmon_extended_profile,
+ 					profile);
+ 
+-	return scnprintf(buf, PAGE_SIZE, "%llu\n", bus_profile->ab_mbytes);
++	return scnprintf(buf, PAGE_SIZE, "%lu\n", bus_profile->ab_mbytes);
+ }
+ 
+ static ssize_t sampling_interval_show(struct device *dev,
+--- a/drivers/gpu/msm/governor_msm_adreno_tz.c
++++ b/drivers/gpu/msm/governor_msm_adreno_tz.c
+@@ -7,6 +7,7 @@
+ #include <linux/devfreq.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/math64.h>
++#include <linux/of.h>
+ #include <linux/of_platform.h>
+ #include <linux/spinlock.h>
+ #include <linux/slab.h>

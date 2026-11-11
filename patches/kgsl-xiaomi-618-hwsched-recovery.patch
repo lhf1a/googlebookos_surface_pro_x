@@ -1,0 +1,325 @@
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched.c
+@@ -988,7 +988,7 @@
+ 		return gmu->power_error;
+ 
+ 	if (!test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
+-		return 0;
++		return -EIO;
+ 
+ 	a6xx_hwsched_hfi_stop(adreno_dev);
+ 
+--- a/drivers/gpu/msm/adreno_hwsched.c
++++ b/drivers/gpu/msm/adreno_hwsched.c
+@@ -326,6 +326,14 @@
+ 		return -ENOMEM;
+ 
+ 	mutex_lock(&device->mutex);
++	ret = READ_ONCE(device->pwrctrl.transition_error);
++	if (!ret)
++		ret = to_a6xx_gmu(adreno_dev)->power_error;
++	if (ret) {
++		mutex_unlock(&device->mutex);
++		kmem_cache_free(obj_cache, obj);
++		return ret;
++	}
+ 
+ 	if (adreno_gpu_halt(adreno_dev) != 0) {
+ 		mutex_unlock(&device->mutex);
+@@ -850,6 +858,10 @@
+ 	struct adreno_dispatch_job *job;
+ 	int ret;
+ 	unsigned int i, user_ts;
++
++	ret = READ_ONCE(device->pwrctrl.transition_error);
++	if (ret)
++		return ret;
+ 
+ 	/*
+ 	 * There is always a possibility that dispatcher may end up pushing
+@@ -987,13 +999,13 @@
+ 			profile_buffer = kgsl_gpuaddr_to_vaddr(&entry->memdesc,
+ 					cmdobj->profiling_buffer_gpuaddr);
+ 
+-			if (profile_buffer == NULL)
+-				return;
+-
+-			kgsl_memdesc_unmap(&entry->memdesc);
+-		}
+-	}
+-
++			if (profile_buffer != NULL)
++				kgsl_memdesc_unmap(&entry->memdesc);
++		}
++	}
++
++	if (test_and_clear_bit(CMDOBJ_FAULT, &cmdobj->priv))
++		kgsl_drawobj_put(drawobj);
+ 	kgsl_drawobj_destroy(drawobj);
+ }
+ 
+@@ -1167,76 +1179,83 @@
+ 	sysfs_remove_files(&device->dev->kobj, _hwsched_attr_list);
+ }
+ 
+-static void adreno_hwsched_init_replay(struct adreno_hwsched *hwsched)
+-{
+-	struct cmd_list_obj *obj, *tmp;
+-
+-	list_for_each_entry_safe(obj, tmp, &hwsched->cmd_list, node) {
++static void adreno_hwsched_init_replay(struct adreno_device *adreno_dev)
++{
++	struct adreno_hwsched *hwsched = to_hwsched(adreno_dev);
++	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
++	struct cmd_list_obj *obj;
++
++	/* A checked restart retired the old dispatch queues, not their fences. */
++	hwsched->inflight = 0;
++	list_for_each_entry(obj, &hwsched->cmd_list, node) {
+ 		struct kgsl_drawobj_cmd *cmdobj = obj->cmdobj;
++		struct kgsl_context *context = cmdobj->base.context;
+ 
+ 		clear_bit(KGSL_FT_REPLAY, &cmdobj->fault_policy);
+-	}
+-}
+-
+-static void force_retire_timestamp(struct kgsl_device *device,
+-	struct kgsl_drawobj *drawobj)
+-{
+-	kgsl_sharedmem_writel(device->memstore,
+-		KGSL_MEMSTORE_OFFSET(drawobj->context->id, soptimestamp),
+-		drawobj->timestamp);
+-
+-	kgsl_sharedmem_writel(device->memstore,
+-		KGSL_MEMSTORE_OFFSET(drawobj->context->id, eoptimestamp),
+-		drawobj->timestamp);
+-}
+-
+-static void adreno_hwsched_complete_replay(struct adreno_device *adreno_dev)
++		/* Invalidate all faulted contexts before any command is replayed. */
++		if (test_bit(CMDOBJ_FAULT, &cmdobj->priv) &&
++			(context->flags & KGSL_CONTEXT_INVALIDATE_ON_FAULT) &&
++			!kgsl_context_invalid(context)) {
++			adreno_mark_guilty_context(device, context->id);
++			adreno_drawctxt_invalidate(device, context);
++		}
++	}
++}
++
++static int adreno_hwsched_complete_replay(struct adreno_device *adreno_dev)
+ {
+ 	struct adreno_hwsched *hwsched = to_hwsched(adreno_dev);
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct cmd_list_obj *obj, *tmp;
+-	u32 retired = 0;
++	int ret;
+ 
+ 	list_for_each_entry_safe(obj, tmp, &hwsched->cmd_list, node) {
+ 		struct kgsl_drawobj_cmd *cmdobj = obj->cmdobj;
+ 		struct kgsl_drawobj *drawobj = DRAWOBJ(cmdobj);
+ 		struct kgsl_context *context = drawobj->context;
+-
+-		/*
+-		 * Get rid of retired objects or objects that belong to detached
+-		 * or invalidated contexts
+-		 */
+-		if ((kgsl_check_timestamp(device, context, drawobj->timestamp))
+-			|| kgsl_context_invalid(context)
+-			|| kgsl_context_detached(context)) {
+-
++		bool replayed = test_bit(KGSL_FT_REPLAY, &cmdobj->fault_policy);
++		bool retired;
++
++		if (atomic_read(&hwsched->fault) != ADRENO_HWSCHED_FAULT_REPLAY)
++			return -EIO;
++
++		retired = kgsl_check_timestamp(device, context, drawobj->timestamp);
++		if (retired || (!replayed &&
++			(test_bit(CMDOBJ_FAULT, &cmdobj->priv) ||
++			kgsl_context_invalid(context) || kgsl_context_detached(context)))) {
++			if (!retired)
++				kgsl_cancel_events_timestamp(device, &context->events,
++					drawobj->timestamp);
++			if (replayed)
++				hwsched->inflight--;
+ 			retire_cmdobj(cmdobj);
+-			retired++;
+ 			list_del_init(&obj->node);
+ 			kmem_cache_free(obj_cache, obj);
+-
+ 			continue;
+ 		}
+ 
+-		if (!test_and_set_bit(KGSL_FT_REPLAY, &cmdobj->fault_policy))
+-			a6xx_hwsched_submit_cmdobj(adreno_dev, cmdobj);
+-	}
+-
+-	/* Signal fences */
+-	if (retired)
+-		kgsl_process_event_groups(device);
+-
+-	hwsched->inflight = 0;
+-
+-	/*
+-	 * We have nothing to replay. So clear the fault so that
+-	 * dispatcher starts accepting new submissions.
+-	 */
+-	if (list_empty(&hwsched->cmd_list)) {
+-		atomic_set(&hwsched->fault, 0);
++		/* A later detach does not retire a command already replayed. */
++		if (replayed)
++			continue;
++
++		ret = a6xx_hwsched_submit_cmdobj(adreno_dev, cmdobj);
++		/* Published commands will notify us when queue space is available. */
++		if (ret == -ENOSPC && hwsched->inflight)
++			return 0;
++		if (ret)
++			return ret;
++		set_bit(KGSL_FT_REPLAY, &cmdobj->fault_policy);
++		hwsched->inflight++;
++	}
++
++	kgsl_process_event_groups(device);
++	if (list_empty(&hwsched->cmd_list) &&
++		atomic_cmpxchg(&hwsched->fault, ADRENO_HWSCHED_FAULT_REPLAY, 0) ==
++			ADRENO_HWSCHED_FAULT_REPLAY) {
+ 		adreno_clear_gpu_halt(adreno_dev);
+ 		adreno_hwsched_trigger(adreno_dev);
+ 	}
++	return 0;
+ }
+ 
+ static void do_fault_header(struct adreno_device *adreno_dev,
+@@ -1286,69 +1305,65 @@
+ 	return NULL;
+ }
+ 
+-static void reset_and_snapshot(struct adreno_device *adreno_dev)
+-{
+-	struct kgsl_drawobj *drawobj = NULL;
++static int reset_and_snapshot(struct adreno_device *adreno_dev)
++{
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
++	struct cmd_list_obj *obj = get_fault_cmdobj(adreno_dev);
+ 	struct kgsl_context *context = NULL;
+-	struct cmd_list_obj *obj = get_fault_cmdobj(adreno_dev);
+-	struct adreno_hwsched *hwsched = to_hwsched(adreno_dev);
+ 
+ 	if (device->state != KGSL_STATE_ACTIVE)
+-		return;
+-
+-	if (!obj) {
+-		kgsl_device_snapshot(device, NULL, false);
+-		goto done;
+-	}
+-
+-	drawobj = DRAWOBJ(obj->cmdobj);
+-
+-	context = drawobj->context;
+-
+-	do_fault_header(adreno_dev, drawobj);
+-
++		return -EIO;
++
++	if (obj) {
++		struct kgsl_drawobj *drawobj = DRAWOBJ(obj->cmdobj);
++
++		context = drawobj->context;
++		do_fault_header(adreno_dev, drawobj);
++	}
+ 	kgsl_device_snapshot(device, context, false);
+ 
+-	force_retire_timestamp(device, drawobj);
+-
+-	if (context->flags & KGSL_CONTEXT_INVALIDATE_ON_FAULT) {
+-		adreno_mark_guilty_context(device, context->id);
+-		adreno_drawctxt_invalidate(device, context);
+-	}
+-
+-	/* This must always happen after taking snapshot */
+-	clear_bit(CMDOBJ_FAULT, &obj->cmdobj->priv);
+-
+-	/*
+-	 * Put back the reference which we incremented when marking the faulty
+-	 *  cmdobj
+-	 */
+-	kgsl_drawobj_put(drawobj);
+-done:
+-	if (!a6xx_hwsched_restart(adreno_dev))
+-		adreno_hwsched_init_replay(hwsched);
++	/* Keep fault references and timestamps intact if restart fails. */
++	return a6xx_hwsched_restart(adreno_dev);
+ }
+ 
+ static void adreno_hwsched_recovery(struct adreno_device *adreno_dev)
+ {
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct adreno_hwsched *hwsched = to_hwsched(adreno_dev);
++	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
++	int ret;
+ 
+ 	mutex_lock(&device->mutex);
+-
+-	if (to_a6xx_gmu(adreno_dev)->power_error)
++	if (gmu->power_error || READ_ONCE(device->pwrctrl.transition_error))
+ 		goto out;
+ 
+-	if ((atomic_cmpxchg(&hwsched->fault, ADRENO_HWSCHED_FAULT_RESTART,
+-		ADRENO_HWSCHED_FAULT_REPLAY) == ADRENO_HWSCHED_FAULT_RESTART))
+-		reset_and_snapshot(adreno_dev);
+-
+-	if (!to_a6xx_gmu(adreno_dev)->power_error)
+-		adreno_hwsched_complete_replay(adreno_dev);
+-
++	if (atomic_cmpxchg(&hwsched->fault, ADRENO_HWSCHED_FAULT_RESTART,
++		ADRENO_HWSCHED_FAULT_RESETTING) == ADRENO_HWSCHED_FAULT_RESTART) {
++		ret = reset_and_snapshot(adreno_dev);
++		if (ret)
++			goto fail;
++		if (atomic_cmpxchg(&hwsched->fault, ADRENO_HWSCHED_FAULT_RESETTING,
++			ADRENO_HWSCHED_FAULT_REPLAY) != ADRENO_HWSCHED_FAULT_RESETTING) {
++			ret = -EIO;
++			goto fail;
++		}
++		adreno_hwsched_init_replay(adreno_dev);
++	}
++
++	if (atomic_read(&hwsched->fault) != ADRENO_HWSCHED_FAULT_REPLAY)
++		goto out;
++	ret = adreno_hwsched_complete_replay(adreno_dev);
++	if (ret)
++		goto fail;
++	goto out;
++
++fail:
++	/* Retain every uncertain owner; a failed replay is not completion. */
++	if (!gmu->power_error)
++		gmu->power_error = ret;
++	if (!READ_ONCE(device->pwrctrl.transition_error))
++		WRITE_ONCE(device->pwrctrl.transition_error, ret);
+ out:
+-
+ 	mutex_unlock(&device->mutex);
+ }
+ 
+@@ -1433,7 +1448,8 @@
+ 		if (ctxt_id == drawobj->context->id &&
+ 			ts == drawobj->timestamp) {
+ 
+-			if (kref_get_unless_zero(&drawobj->refcount))
++			if (!test_bit(CMDOBJ_FAULT, &obj->cmdobj->priv) &&
++				kref_get_unless_zero(&drawobj->refcount))
+ 				set_bit(CMDOBJ_FAULT, &obj->cmdobj->priv);
+ 			break;
+ 		}
+--- a/drivers/gpu/msm/adreno_hwsched.h
++++ b/drivers/gpu/msm/adreno_hwsched.h
+@@ -32,6 +32,7 @@
+ 	ADRENO_HWSCHED_POWER = 0,
+ 	ADRENO_HWSCHED_FAULT_RESTART,
+ 	ADRENO_HWSCHED_FAULT_REPLAY,
++	ADRENO_HWSCHED_FAULT_RESETTING,
+ };
+ 
+ /**

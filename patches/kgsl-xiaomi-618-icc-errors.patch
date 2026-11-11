@@ -1,0 +1,50 @@
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -3865,15 +3865,18 @@
+ {
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
++	int ret;
+ 
+ 	if ((level == pwr->cur_buslevel) && (ab == pwr->cur_ab))
+ 		return 0;
+ 
++	ret = icc_set_bw(pwr->icc_path, MBps_to_icc(ab),
++		kBps_to_icc(pwr->ddr_table[level]));
++	if (ret)
++		return ret;
++
+ 	pwr->cur_buslevel = level;
+ 	pwr->cur_ab = ab;
+-
+-	icc_set_bw(pwr->icc_path, MBps_to_icc(ab),
+-		kBps_to_icc(pwr->ddr_table[level]));
+ 
+ 	trace_kgsl_buslevel(device, pwr->active_pwrlevel, level);
+ 
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -2389,7 +2389,9 @@
+ 	}
+ 
+ 	if (ab != pwr->cur_ab) {
+-		icc_set_bw(pwr->icc_path, MBps_to_icc(ab), 0);
++		ret = icc_set_bw(pwr->icc_path, MBps_to_icc(ab), 0);
++		if (ret)
++			return ret;
+ 		pwr->cur_ab = ab;
+ 	}
+ 
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched.c
+@@ -821,7 +821,9 @@
+ 	}
+ 
+ 	if (ab != pwr->cur_ab) {
+-		icc_set_bw(pwr->icc_path, MBps_to_icc(ab), 0);
++		ret = icc_set_bw(pwr->icc_path, MBps_to_icc(ab), 0);
++		if (ret)
++			return ret;
+ 		pwr->cur_ab = ab;
+ 	}
+ 

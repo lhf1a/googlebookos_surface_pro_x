@@ -55,11 +55,12 @@ def main():
         "status": "compiled-not-device-validated",
         "purpose": "private gralloc1 allocation probe; no global HAL registration",
         "donor_build": reference["build"],
+        "memory_backend": "dma-heap-system-uncached-v1",
         "inputs": {name: reference["files"]["/lib64/" + name] for name in sorted(LIBRARIES)},
         "sha256": hashes, "commands": commands,
         "source_sha256": {name: sha(ROOT / "probe/graphics" / name) for name in (
             "quest2-system-ion.c", "quest2-system-ion.h", "quest2-gralloc-probe.c")},
-        "limits": ["nonsecure system heap only", "uncached depends on MSM GEM WC",
+        "limits": ["nonsecure system heap only", "requires matching independent system-uncached DMA heap",
                    "no KGSL, VPU, scanout, UBWC or protected-path validation"],
     }
     (args.output / "BUILD.json").write_text(json.dumps(report, indent=2) + "\n")

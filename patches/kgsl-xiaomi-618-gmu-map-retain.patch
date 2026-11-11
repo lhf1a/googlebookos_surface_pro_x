@@ -1,0 +1,160 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -759,6 +759,9 @@
+ 	size_t offset = 0;
+ 	int ret;
+ 
++	if (gmu->power_error)
++		return gmu->power_error;
++
+ 	if (adreno_is_a630(adreno_dev) || adreno_is_a615_family(adreno_dev))
+ 		return _load_legacy_gmu_fw(KGSL_DEVICE(adreno_dev), gmu);
+ 
+@@ -1519,6 +1522,9 @@
+ 	unsigned int i;
+ 	ssize_t mapped;
+ 
++	if (gmu->power_error)
++		return gmu->power_error;
++
+ 	if (!gmu->domain || IS_ERR_OR_NULL(sgt) || !sgt->sgl ||
+ 		!sgt->orig_nents || !size || !IS_ALIGNED(addr, PAGE_SIZE) ||
+ 		!IS_ALIGNED(size, PAGE_SIZE) || (u64)addr + size > U32_MAX)
+@@ -1537,15 +1543,13 @@
+ 
+ 	mapped = iommu_map_sg(gmu->domain, addr, sgt->sgl, sgt->orig_nents,
+ 		attrs, GFP_KERNEL);
+-	/* Core attempts rollback, but does not report short unmaps to us. */
+-	if (mapped < 0)
+-		return mapped;
+-	if (mapped != size) {
+-		if (mapped)
+-			iommu_unmap(gmu->domain, addr, mapped);
+-		return -EIO;
+-	}
+-	return 0;
++	if (mapped == size)
++		return 0;
++
++	/* The core hides rollback extent; retain backing until checked recovery. */
++	if (!gmu->power_error)
++		gmu->power_error = mapped < 0 ? mapped : -EIO;
++	return mapped < 0 ? mapped : -EIO;
+ }
+ 
+ struct gmu_memdesc *reserve_gmu_kernel_block(struct a6xx_gmu_device *gmu,
+@@ -1556,6 +1560,9 @@
+ 	struct sg_table sgt;
+ 	u64 end;
+ 	int ret, i;
++
++	if (gmu->power_error)
++		return ERR_PTR(gmu->power_error);
+ 
+ 	if (!gmu->domain || vma_id >= GMU_MEM_TYPE_MAX || !size ||
+ 		size > U32_MAX - (PAGE_SIZE - 1))
+@@ -1591,14 +1598,15 @@
+ 	ret = a6xx_gmu_map_sg(gmu, addr, &sgt, pending.size,
+ 		IOMMU_READ | IOMMU_WRITE | IOMMU_PRIV);
+ 	sg_free_table(&sgt);
+-	if (ret)
++	if (ret && !gmu->power_error)
+ 		goto free_dma;
+ 
+ 	pending.gmuaddr = addr;
+ 	md = &gmu->gmu_globals[gmu->global_entries++];
+ 	*md = pending;
+ 	vma->next_va = max_t(u32, vma->next_va, end);
+-	return md;
++	/* Failed map attempts still own their backing and reserved address. */
++	return ret ? ERR_PTR(ret) : md;
+ 
+ free_dma:
+ 	dma_free_attrs(&gmu->pdev->dev, pending.size, pending.hostptr,
+@@ -1688,6 +1696,9 @@
+ 	struct gmu_block_header blk;
+ 	size_t offset = 0;
+ 	int ret;
++
++	if (gmu->power_error)
++		return gmu->power_error;
+ 
+ 	/* Keep the firmware reference through parsing and all later loads. */
+ 	if (!gmu->fw_image) {
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c
+@@ -470,6 +470,11 @@
+ 	u64 end;
+ 	int ret;
+ 
++	if (gmu->power_error)
++		return gmu->power_error;
++	if (gpu_md->priv & KGSL_MEMDESC_MAP_UNCERTAIN)
++		return -EUCLEAN;
++
+ 	if ((flags & MEMFLAG_GFX_SECURE) || kgsl_memdesc_is_secured(gpu_md))
+ 		return -EOPNOTSUPP;
+ 
+@@ -490,12 +495,15 @@
+ 		get_attrs(flags));
+ 	if (gpu_md->pages && sgt)
+ 		kgsl_free_sgt(sgt);
+-	if (ret)
++	if (ret && !gmu->power_error)
+ 		return ret;
+-
++	if (ret)
++		gpu_md->priv |= KGSL_MEMDESC_MAP_UNCERTAIN;
++
++	/* On failure these fields describe a retained attempt, not a usable map. */
+ 	desc->gmu_addr = vma->next_va;
+ 	vma->next_va = end;
+-	return 0;
++	return ret;
+ }
+ 
+ static struct mem_alloc_entry *lookup_mem_alloc_table(
+@@ -530,11 +538,15 @@
+ 	const char *memkind_string = desc->mem_kind < NUM_HFI_MEMKINDS ?
+ 			memkind_strings[desc->mem_kind] : "UNKNOWN";
+ 
++	if (gmu->power_error)
++		return ERR_PTR(gmu->power_error);
++
+ 	if (desc->flags & MEMFLAG_GFX_SECURE)
+ 		return ERR_PTR(-EOPNOTSUPP);
+ 
+ 	if (entry)
+-		return entry;
++		return entry->gpu_md->priv & KGSL_MEMDESC_MAP_UNCERTAIN ?
++			ERR_PTR(-EUCLEAN) : entry;
+ 
+ 	if (hfi->mem_alloc_entries == ARRAY_SIZE(hfi->mem_alloc_table)) {
+ 		dev_err(&gmu->pdev->dev,
+@@ -568,16 +580,18 @@
+ 
+ 	entry->desc.size = entry->gpu_md->size;
+ 
+-	 /*
+-	  * Map all buffers in GMU. If this fails, then we have to live with
+-	  * leaking the gpu global buffer allocated above.
+-	  */
+ 	ret = gmu_import_buffer(adreno_dev, entry, desc->flags);
+ 	if (ret) {
+-		dev_err(&gmu->pdev->dev,
+-			"gpuaddr: 0x%llx size: %llu bytes lost\n",
+-			entry->gpu_md->gpuaddr, entry->gpu_md->size);
+-		memset(entry, 0, sizeof(*entry));
++		if (entry->gpu_md->priv & KGSL_MEMDESC_MAP_UNCERTAIN) {
++			/* Keep the association for recovery; sharedmem_free also refuses it. */
++			hfi->mem_alloc_entries++;
++			dev_err(&gmu->pdev->dev,
++				"Retaining uncertain GMU import: gpuaddr=%llx gmuaddr=%x error=%d\n",
++				entry->gpu_md->gpuaddr, entry->desc.gmu_addr, ret);
++		} else {
++			/* The unused GPU allocation remains owned by device->globals. */
++			memset(entry, 0, sizeof(*entry));
++		}
+ 		return ERR_PTR(ret);
+ 	}
+ 

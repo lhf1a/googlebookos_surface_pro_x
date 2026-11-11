@@ -1,0 +1,436 @@
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -2380,7 +2380,9 @@
+ 	adreno_perfcounter_start(adreno_dev);
+ 
+ 	/* Clear FSR here in case it is set from a previous pagefault */
+-	kgsl_mmu_clear_fsr(&device->mmu);
++	status = kgsl_mmu_clear_fsr(&device->mmu);
++	if (status)
++		goto error_pwr_off;
+ 
+ 	status = gpudev->rb_start(adreno_dev);
+ 	if (status)
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -3143,7 +3143,9 @@
+ 	adreno_perfcounter_start(adreno_dev);
+ 
+ 	/* Clear FSR here in case it is set from a previous pagefault */
+-	kgsl_mmu_clear_fsr(&device->mmu);
++	ret = kgsl_mmu_clear_fsr(&device->mmu);
++	if (ret)
++		goto oob_clear;
+ 
+ 	a6xx_enable_gpu_irq(adreno_dev);
+ 
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched.c
+@@ -464,7 +464,9 @@
+ 	adreno_perfcounter_start(adreno_dev);
+ 
+ 	/* Clear FSR here in case it is set from a previous pagefault */
+-	kgsl_mmu_clear_fsr(&device->mmu);
++	ret = kgsl_mmu_clear_fsr(&device->mmu);
++	if (ret)
++		goto err;
+ 
+ 	a6xx_enable_gpu_irq(adreno_dev);
+ 
+--- a/drivers/gpu/msm/adreno_a6xx_rgmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_rgmu.c
+@@ -777,7 +777,9 @@
+ 	adreno_perfcounter_start(adreno_dev);
+ 
+ 	/* Clear FSR here in case it is set from a previous pagefault */
+-	kgsl_mmu_clear_fsr(&device->mmu);
++	ret = kgsl_mmu_clear_fsr(&device->mmu);
++	if (ret)
++		goto err_oob_clear;
+ 
+ 	a6xx_enable_gpu_irq(adreno_dev);
+ 
+--- a/drivers/gpu/msm/adreno_dispatch.c
++++ b/drivers/gpu/msm/adreno_dispatch.c
+@@ -2243,8 +2243,14 @@
+ 		gpudev->gpu_keepalive(adreno_dev, false);
+ 
+ 	/* Terminate the stalled transaction and resume the IOMMU */
+-	if (fault & ADRENO_IOMMU_PAGE_FAULT)
+-		kgsl_mmu_pagefault_resume(&device->mmu);
++	if (fault & ADRENO_IOMMU_PAGE_FAULT) {
++		ret = kgsl_mmu_pagefault_resume(&device->mmu);
++		if (ret) {
++			ret = dispatcher_fault_failed(adreno_dev, fault, ret);
++			mutex_unlock(&device->mutex);
++			return ret;
++		}
++	}
+ 
+ 	/* Temporarily drop the halt reference only while attempting reset. */
+ 	halt = adreno_gpu_halt(adreno_dev);
+--- a/drivers/gpu/msm/kgsl_iommu.c
++++ b/drivers/gpu/msm/kgsl_iommu.c
+@@ -615,6 +615,8 @@
+ 	struct device *dev, unsigned long addr, int flags, void *token)
+ {
+ 	int ret = 0;
++	struct adreno_smmu_fault_info info;
++	struct adreno_smmu_priv *smmu;
+ 	struct kgsl_pagetable *pt = token;
+ 	struct kgsl_mmu *mmu = pt->mmu;
+ 	struct kgsl_iommu_context *ctx;
+@@ -644,19 +646,25 @@
+ 	adreno_dev = ADRENO_DEVICE(device);
+ 	gpudev = ADRENO_GPU_DEVICE(adreno_dev);
+ 
++	smmu = &device->smmu;
++	if (!smmu->cookie || !smmu->get_fault_info ||
++	    !smmu->set_fault_policy || !smmu->terminate_fault || !smmu->rearm_fault)
++		return -ENODEV;
++	/* Called inside the provider IRQ with its PM reference held. */
++	smmu->get_fault_info(smmu->cookie, &info);
+ 	write = (flags & IOMMU_FAULT_WRITE) ? 1 : 0;
+-	if (flags & IOMMU_FAULT_TRANSLATION)
++	if (info.fsr & KGSL_IOMMU_FSR_TF)
+ 		fault_type = "translation";
+-	else if (flags & IOMMU_FAULT_PERMISSION)
++	else if (info.fsr & KGSL_IOMMU_FSR_PF)
+ 		fault_type = "permission";
+-	else if (flags & IOMMU_FAULT_EXTERNAL)
++	else if (info.fsr & KGSL_IOMMU_FSR_EF)
+ 		fault_type = "external";
+-	else if (flags & IOMMU_FAULT_TRANSACTION_STALLED)
++	else if (info.fsr & BIT(KGSL_IOMMU_FSR_SS_SHIFT))
+ 		fault_type = "transaction stalled";
+ 
+ 	ctx = iommu_context_by_name(_IOMMU_PRIV(mmu), pt->name);
+ 
+-	ptbase = KGSL_IOMMU_GET_CTX_REG_Q(ctx, KGSL_IOMMU_CTX_TTBR0);
++	ptbase = info.ttbr0;
+ 	private = kgsl_iommu_get_process(ptbase);
+ 
+ 	if (private) {
+@@ -666,7 +674,7 @@
+ 
+ 	if (test_bit(KGSL_FT_PAGEFAULT_GPUHALT_ENABLE,
+ 		&adreno_dev->ft_pf_policy) &&
+-		(flags & IOMMU_FAULT_TRANSACTION_STALLED)) {
++		(info.fsr & BIT(KGSL_IOMMU_FSR_SS_SHIFT))) {
+ 		/*
+ 		 * Turn off GPU IRQ so we don't get faults from it too.
+ 		 * The device mutex must be held to change power state
+@@ -689,7 +697,7 @@
+ 			skip_fault = true;
+ 	}
+ 
+-	contextidr = KGSL_IOMMU_GET_CTX_REG(ctx, KGSL_IOMMU_CTX_CONTEXTIDR);
++	contextidr = info.contextidr;
+ 	ptname = test_bit(KGSL_MMU_GLOBAL_PAGETABLE, &mmu->features) ?
+ 		KGSL_MMU_GLOBAL_PT : pid;
+ 	/*
+@@ -720,15 +728,14 @@
+ 		if (gpudev->iommu_fault_block) {
+ 			unsigned int fsynr1;
+ 
+-			fsynr1 = KGSL_IOMMU_GET_CTX_REG(ctx,
+-				KGSL_IOMMU_CTX_FSYNR1);
++			fsynr1 = info.fsynr1;
+ 			dev_crit(ctx->kgsldev->dev,
+ 				"FAULTING BLOCK: %s\n",
+ 				gpudev->iommu_fault_block(device, fsynr1));
+ 		}
+ 
+ 		/* Don't print the debug if this is a permissions fault */
+-		if (!(flags & IOMMU_FAULT_PERMISSION)) {
++		if (!(info.fsr & KGSL_IOMMU_FSR_PF)) {
+ 			_check_if_freed(ctx, addr, ptname);
+ 
+ 			/*
+@@ -768,18 +775,9 @@
+ 	 */
+ 	if (!skip_fault && test_bit(KGSL_FT_PAGEFAULT_GPUHALT_ENABLE,
+ 		&adreno_dev->ft_pf_policy) &&
+-		(flags & IOMMU_FAULT_TRANSACTION_STALLED)) {
+-		uint32_t sctlr_val;
+-
++		(info.fsr & BIT(KGSL_IOMMU_FSR_SS_SHIFT))) {
++		/* Provider masked CFIE and retained a PM reference before callback. */
+ 		ret = -EBUSY;
+-		/*
+-		 * Disable context fault interrupts
+-		 * as we do not clear FSR in the ISR.
+-		 * Will be re-enabled after FSR is cleared.
+-		 */
+-		sctlr_val = KGSL_IOMMU_GET_CTX_REG(ctx, KGSL_IOMMU_CTX_SCTLR);
+-		sctlr_val &= ~(0x1 << KGSL_IOMMU_SCTLR_CFIE_SHIFT);
+-		KGSL_IOMMU_SET_CTX_REG(ctx, KGSL_IOMMU_CTX_SCTLR, sctlr_val);
+ 
+ 		/* This is used by reset/recovery path */
+ 		ctx->stalled_on_fault = true;
+@@ -1490,45 +1488,21 @@
+ 	struct kgsl_iommu_context *ctx = &iommu->user_context;
+ 	struct kgsl_device *device = KGSL_MMU_DEVICE(mmu);
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
++	struct adreno_smmu_priv *smmu = &device->smmu;
+ 	struct kgsl_iommu_pt *iommu_pt;
+-	unsigned int  sctlr_val;
+ 
+ 	if (IS_ERR_OR_NULL(mmu->defaultpagetable))
+ 		return -ENODEV;
+-
+ 	iommu_pt = mmu->defaultpagetable->priv;
+-	if (WARN_ON(!iommu_pt->attached))
++	if (!iommu_pt->attached || !smmu->cookie || !smmu->set_fault_policy ||
++	    !smmu->terminate_fault || !smmu->rearm_fault)
+ 		return -ENODEV;
+-
+ 	ctx->default_pt = mmu->defaultpagetable;
+-
+-	kgsl_iommu_enable_clk(mmu);
+-
+-	sctlr_val = KGSL_IOMMU_GET_CTX_REG(ctx, KGSL_IOMMU_CTX_SCTLR);
+-
+-	/*
+-	 * If pagefault policy is GPUHALT_ENABLE,
+-	 * 1) Program CFCFG to 1 to enable STALL mode
+-	 * 2) Program HUPCF to 0 (Stall or terminate subsequent
+-	 *    transactions in the presence of an outstanding fault)
+-	 * else
+-	 * 1) Program CFCFG to 0 to disable STALL mode (0=Terminate)
+-	 * 2) Program HUPCF to 1 (Process subsequent transactions
+-	 *    independently of any outstanding fault)
+-	 */
+-
+-	if (test_bit(KGSL_FT_PAGEFAULT_GPUHALT_ENABLE,
+-				&adreno_dev->ft_pf_policy)) {
+-		sctlr_val |= (0x1 << KGSL_IOMMU_SCTLR_CFCFG_SHIFT);
+-		sctlr_val &= ~(0x1 << KGSL_IOMMU_SCTLR_HUPCF_SHIFT);
+-	} else {
+-		sctlr_val &= ~(0x1 << KGSL_IOMMU_SCTLR_CFCFG_SHIFT);
+-		sctlr_val |= (0x1 << KGSL_IOMMU_SCTLR_HUPCF_SHIFT);
+-	}
+-	KGSL_IOMMU_SET_CTX_REG(ctx, KGSL_IOMMU_CTX_SCTLR, sctlr_val);
+-	kgsl_iommu_disable_clk(mmu);
+-
+-	return 0;
++	/* Recovery keeps faults masked until the GPU boot reaches clear_fsr. */
++	if (READ_ONCE(ctx->stalled_on_fault))
++		return 0;
++	return smmu->set_fault_policy(smmu->cookie,
++		test_bit(KGSL_FT_PAGEFAULT_GPUHALT_ENABLE, &adreno_dev->ft_pf_policy));
+ }
+ 
+ static int _setup_lpac_context(struct kgsl_mmu *mmu)
+@@ -1743,82 +1717,37 @@
+ }
+ 
+ /* This function must be called with context bank attached */
+-static void kgsl_iommu_clear_fsr(struct kgsl_mmu *mmu)
+-{
+-	struct kgsl_iommu *iommu = _IOMMU_PRIV(mmu);
+-	struct kgsl_iommu_context  *ctx = &iommu->user_context;
+-	unsigned int sctlr_val;
+-
+-	if (ctx->default_pt != NULL && ctx->stalled_on_fault) {
+-		kgsl_iommu_enable_clk(mmu);
+-		KGSL_IOMMU_SET_CTX_REG(ctx, KGSL_IOMMU_CTX_FSR, 0xffffffff);
+-		/*
+-		 * Re-enable context fault interrupts after clearing
+-		 * FSR to prevent the interrupt from firing repeatedly
+-		 */
+-		sctlr_val = KGSL_IOMMU_GET_CTX_REG(ctx, KGSL_IOMMU_CTX_SCTLR);
+-		sctlr_val |= (0x1 << KGSL_IOMMU_SCTLR_CFIE_SHIFT);
+-		KGSL_IOMMU_SET_CTX_REG(ctx, KGSL_IOMMU_CTX_SCTLR, sctlr_val);
+-		/*
+-		 * Make sure the above register writes
+-		 * are not reordered across the barrier
+-		 * as we use writel_relaxed to write them
+-		 */
+-		wmb();
+-		kgsl_iommu_disable_clk(mmu);
+-		ctx->stalled_on_fault = false;
+-	}
+-}
+-
+-static void kgsl_iommu_pagefault_resume(struct kgsl_mmu *mmu)
+-{
+-	struct kgsl_iommu *iommu = _IOMMU_PRIV(mmu);
+-	struct kgsl_iommu_context *ctx = &iommu->user_context;
+-
+-	if (ctx->default_pt != NULL && ctx->stalled_on_fault) {
+-		u32 sctlr_val = KGSL_IOMMU_GET_CTX_REG(ctx,
+-						KGSL_IOMMU_CTX_SCTLR);
+-
+-		/*
+-		 * As part of recovery, GBIF halt sequence should be performed.
+-		 * In a worst case scenario, if any GPU block is generating a
+-		 * stream of un-ending faulting transactions, SMMU would enter
+-		 * stall-on-fault mode again after resuming and not let GBIF
+-		 * halt succeed. In order to avoid that situation and terminate
+-		 * those faulty transactions, set CFCFG and HUPCF to 0.
+-		 */
+-		sctlr_val &= ~(0x1 << KGSL_IOMMU_SCTLR_CFCFG_SHIFT);
+-		sctlr_val &= ~(0x1 << KGSL_IOMMU_SCTLR_HUPCF_SHIFT);
+-		KGSL_IOMMU_SET_CTX_REG(ctx, KGSL_IOMMU_CTX_SCTLR, sctlr_val);
+-		/*
+-		 * Make sure the above register write is not reordered across
+-		 * the barrier as we use writel_relaxed to write it.
+-		 */
+-		wmb();
+-
+-		/*
+-		 * This will only clear fault bits in FSR. FSR.SS will still
+-		 * be set. Writing to RESUME (below) is the only way to clear
+-		 * FSR.SS bit.
+-		 */
+-		KGSL_IOMMU_SET_CTX_REG(ctx, KGSL_IOMMU_CTX_FSR, 0xffffffff);
+-		/*
+-		 * Make sure the above register write is not reordered across
+-		 * the barrier as we use writel_relaxed to write it.
+-		 */
+-		wmb();
+-
+-		/*
+-		 * Write 1 to RESUME.TnR to terminate the stalled transaction.
+-		 * This will also allow the SMMU to process new transactions.
+-		 */
+-		KGSL_IOMMU_SET_CTX_REG(ctx, KGSL_IOMMU_CTX_RESUME, 1);
+-		/*
+-		 * Make sure the above register writes are not reordered across
+-		 * the barrier as we use writel_relaxed to write them.
+-		 */
+-		wmb();
+-	}
++static int kgsl_iommu_clear_fsr(struct kgsl_mmu *mmu)
++{
++	struct kgsl_device *device = KGSL_MMU_DEVICE(mmu);
++	struct kgsl_iommu_context *ctx = &_IOMMU_PRIV(mmu)->user_context;
++	struct adreno_smmu_priv *smmu = &device->smmu;
++	int ret;
++
++	if (!ctx->default_pt || !smmu->cookie || !smmu->rearm_fault)
++		return -ENODEV;
++	ret = smmu->rearm_fault(smmu->cookie);
++	if (ret && !READ_ONCE(device->pwrctrl.transition_error))
++		WRITE_ONCE(device->pwrctrl.transition_error, ret);
++	if (!ret)
++		WRITE_ONCE(ctx->stalled_on_fault, false);
++	return ret;
++}
++
++static int kgsl_iommu_pagefault_resume(struct kgsl_mmu *mmu)
++{
++	struct kgsl_device *device = KGSL_MMU_DEVICE(mmu);
++	struct kgsl_iommu_context *ctx = &_IOMMU_PRIV(mmu)->user_context;
++	struct adreno_smmu_priv *smmu = &device->smmu;
++	int ret;
++
++	if (!ctx->default_pt || !smmu->cookie || !smmu->terminate_fault)
++		return -ENODEV;
++	ret = smmu->terminate_fault(smmu->cookie);
++	if (ret && !READ_ONCE(device->pwrctrl.transition_error))
++		WRITE_ONCE(device->pwrctrl.transition_error, ret);
++
++	return ret;
+ }
+ 
+ static u64
+@@ -1913,38 +1842,17 @@
+ static int kgsl_iommu_set_pf_policy(struct kgsl_mmu *mmu,
+ 				unsigned long pf_policy)
+ {
+-	struct kgsl_iommu *iommu = _IOMMU_PRIV(mmu);
+-	struct kgsl_iommu_context *ctx = &iommu->user_context;
+ 	struct kgsl_device *device = KGSL_MMU_DEVICE(mmu);
+-	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+-
+-	if ((adreno_dev->ft_pf_policy &
+-		BIT(KGSL_FT_PAGEFAULT_GPUHALT_ENABLE)) ==
+-		(pf_policy & BIT(KGSL_FT_PAGEFAULT_GPUHALT_ENABLE)))
++	struct kgsl_iommu_context *ctx = &_IOMMU_PRIV(mmu)->user_context;
++	struct adreno_smmu_priv *smmu = &device->smmu;
++
++	/* No hardware policy exists before an attached context is published. */
++	if (!ctx->default_pt)
+ 		return 0;
+-
+-	/* If not attached, policy will be updated during the next attach */
+-	if (ctx->default_pt != NULL) {
+-		unsigned int sctlr_val;
+-
+-		kgsl_iommu_enable_clk(mmu);
+-
+-		sctlr_val = KGSL_IOMMU_GET_CTX_REG(ctx, KGSL_IOMMU_CTX_SCTLR);
+-
+-		if (test_bit(KGSL_FT_PAGEFAULT_GPUHALT_ENABLE, &pf_policy)) {
+-			sctlr_val |= (0x1 << KGSL_IOMMU_SCTLR_CFCFG_SHIFT);
+-			sctlr_val &= ~(0x1 << KGSL_IOMMU_SCTLR_HUPCF_SHIFT);
+-		} else {
+-			sctlr_val &= ~(0x1 << KGSL_IOMMU_SCTLR_CFCFG_SHIFT);
+-			sctlr_val |= (0x1 << KGSL_IOMMU_SCTLR_HUPCF_SHIFT);
+-		}
+-
+-		KGSL_IOMMU_SET_CTX_REG(ctx, KGSL_IOMMU_CTX_SCTLR, sctlr_val);
+-
+-		kgsl_iommu_disable_clk(mmu);
+-	}
+-
+-	return 0;
++	if (!smmu->cookie || !smmu->set_fault_policy)
++		return -ENODEV;
++	return smmu->set_fault_policy(smmu->cookie,
++		test_bit(KGSL_FT_PAGEFAULT_GPUHALT_ENABLE, &pf_policy));
+ }
+ 
+ static struct kgsl_iommu_addr_entry *_find_gpuaddr(
+--- a/drivers/gpu/msm/kgsl_iommu.h
++++ b/drivers/gpu/msm/kgsl_iommu.h
+@@ -68,7 +68,10 @@
+ #define KGSL_IOMMU_SCTLR_CFCFG_SHIFT		7
+ #define KGSL_IOMMU_SCTLR_CFIE_SHIFT		6
+ 
+-/* FSR fields */
++/* Architectural SMMUv2 FSR fields, not iommu_fault_handler flags. */
++#define KGSL_IOMMU_FSR_TF BIT(1)
++#define KGSL_IOMMU_FSR_PF BIT(3)
++#define KGSL_IOMMU_FSR_EF BIT(4)
+ #define KGSL_IOMMU_FSR_SS_SHIFT		30
+ 
+ /* offset at which a nop command is placed in setstate */
+--- a/drivers/gpu/msm/kgsl_mmu.h
++++ b/drivers/gpu/msm/kgsl_mmu.h
+@@ -61,8 +61,8 @@
+ 	int (*mmu_start)(struct kgsl_mmu *mmu);
+ 	int (*mmu_set_pt)(struct kgsl_mmu *mmu, struct kgsl_pagetable *pt);
+ 	uint64_t (*mmu_get_current_ttbr0)(struct kgsl_mmu *mmu);
+-	void (*mmu_pagefault_resume)(struct kgsl_mmu *mmu);
+-	void (*mmu_clear_fsr)(struct kgsl_mmu *mmu);
++	int (*mmu_pagefault_resume)(struct kgsl_mmu *mmu);
++	int (*mmu_clear_fsr)(struct kgsl_mmu *mmu);
+ 	void (*mmu_enable_clk)(struct kgsl_mmu *mmu);
+ 	void (*mmu_disable_clk)(struct kgsl_mmu *mmu);
+ 	bool (*mmu_pt_equal)(struct kgsl_mmu *mmu,
+@@ -279,16 +279,18 @@
+ 	return 0;
+ }
+ 
+-static inline void kgsl_mmu_pagefault_resume(struct kgsl_mmu *mmu)
++static inline int kgsl_mmu_pagefault_resume(struct kgsl_mmu *mmu)
+ {
+ 	if (MMU_OP_VALID(mmu, mmu_pagefault_resume))
+ 		return mmu->mmu_ops->mmu_pagefault_resume(mmu);
+-}
+-
+-static inline void kgsl_mmu_clear_fsr(struct kgsl_mmu *mmu)
++	return -ENODEV;
++}
++
++static inline int kgsl_mmu_clear_fsr(struct kgsl_mmu *mmu)
+ {
+ 	if (MMU_OP_VALID(mmu, mmu_clear_fsr))
+ 		return mmu->mmu_ops->mmu_clear_fsr(mmu);
++	return -ENODEV;
+ }
+ 
+ static inline bool kgsl_mmu_is_perprocess(struct kgsl_mmu *mmu)

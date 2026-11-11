@@ -1,0 +1,292 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -16,7 +16,7 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/slab.h>
+ #include <linux/soc/qcom/llcc-qcom.h>
+-#include <linux/mailbox/qmp.h>
++#include <linux/soc/qcom/qcom_aoss.h>
+ #include <soc/qcom/cmd-db.h>
+ 
+ #include "adreno.h"
+@@ -2125,28 +2125,12 @@
+ 
+ }
+ 
+-void a6xx_gmu_aop_send_acd_state(struct a6xx_gmu_device *gmu, bool flag)
+-{
+-	struct qmp_pkt msg;
+-	char msg_buf[36];
+-	u32 size;
+-	int ret;
+-
+-	if (IS_ERR_OR_NULL(gmu->mailbox.channel))
+-		return;
+-
+-	size = scnprintf(msg_buf, sizeof(msg_buf),
+-			"{class: gpu, res: acd, val: %d}", flag);
+-
+-	/* mailbox controller expects 4-byte aligned buffer */
+-	msg.size = ALIGN((size + 1), SZ_4);
+-	msg.data = msg_buf;
+-
+-	ret = mbox_send_message(gmu->mailbox.channel, &msg);
+-
+-	if (ret < 0)
+-		dev_err(&gmu->pdev->dev,
+-			"AOP mbox send message failed: %d\n", ret);
++int a6xx_gmu_aop_send_acd_state(struct a6xx_gmu_device *gmu, bool flag)
++{
++	if (IS_ERR_OR_NULL(gmu->qmp))
++		return flag ? -ENODEV : 0;
++
++	return qmp_send(gmu->qmp, "{class: gpu, res: acd, val: %d}", flag);
+ }
+ 
+ int a6xx_gmu_enable_gdsc(struct adreno_device *adreno_dev)
+@@ -2214,7 +2198,9 @@
+ 
+ 	trace_kgsl_pwr_request_state(device, KGSL_STATE_AWARE);
+ 
+-	a6xx_gmu_aop_send_acd_state(gmu, adreno_dev->acd_enabled);
++	ret = a6xx_gmu_aop_send_acd_state(gmu, adreno_dev->acd_enabled);
++	if (ret)
++		return ret;
+ 
+ 	ret = a6xx_gmu_enable_gdsc(adreno_dev);
+ 	if (ret)
+@@ -2385,28 +2371,35 @@
+ 	return ret;
+ }
+ 
++struct a6xx_acd_change {
++	bool enabled;
++	int error;
++};
++
+ static void set_acd(struct adreno_device *adreno_dev, void *priv)
+ {
+-	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+-
+-	adreno_dev->acd_enabled = *((bool *)priv);
+-	a6xx_gmu_aop_send_acd_state(gmu, adreno_dev->acd_enabled);
++	struct a6xx_acd_change *change = priv;
++
++	change->error = a6xx_gmu_aop_send_acd_state(to_a6xx_gmu(adreno_dev),
++		change->enabled);
++	if (!change->error)
++		adreno_dev->acd_enabled = change->enabled;
+ }
+ 
+ static int a6xx_gmu_acd_set(struct kgsl_device *device, bool val)
+ {
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+-
+-	if (IS_ERR_OR_NULL(gmu->mailbox.channel))
+-		return -EINVAL;
+-
+-	/* Don't do any unneeded work if ACD is already in the correct state */
++	struct a6xx_acd_change change = { .enabled = val };
++	int ret;
++
++	if (IS_ERR_OR_NULL(gmu->qmp))
++		return -ENODEV;
+ 	if (adreno_dev->acd_enabled == val)
+ 		return 0;
+ 
+-	/* Power cycle the GPU for changes to take effect */
+-	return adreno_power_cycle(adreno_dev, set_acd, &val);
++	ret = adreno_power_cycle(adreno_dev, set_acd, &change);
++	return ret ? ret : change.error;
+ }
+ 
+ static const struct gmu_dev_ops a6xx_gmudev = {
+@@ -2476,25 +2469,20 @@
+ 	gmu->global_entries = 0;
+ }
+ 
+-static int a6xx_gmu_aop_mailbox_init(struct adreno_device *adreno_dev,
++static int a6xx_gmu_aop_qmp_init(struct adreno_device *adreno_dev,
+ 		struct a6xx_gmu_device *gmu)
+ {
+-	struct kgsl_mailbox *mailbox = &gmu->mailbox;
+-
+-	mailbox->client.dev = &gmu->pdev->dev;
+-	mailbox->client.tx_block = true;
+-	mailbox->client.tx_tout = 1000;
+-	mailbox->client.knows_txdone = false;
+-
+-	mailbox->channel = mbox_request_channel(&mailbox->client, 0);
+-	if (IS_ERR(mailbox->channel))
+-		return PTR_ERR(mailbox->channel);
+-
++	struct qmp *qmp = qmp_get(&gmu->pdev->dev);
++
++	if (IS_ERR(qmp))
++		return PTR_ERR(qmp);
++
++	gmu->qmp = qmp;
+ 	adreno_dev->acd_enabled = true;
+ 	return 0;
+ }
+ 
+-static void a6xx_gmu_acd_probe(struct kgsl_device *device,
++static int a6xx_gmu_acd_probe(struct kgsl_device *device,
+ 		struct a6xx_gmu_device *gmu, struct device_node *node)
+ {
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+@@ -2505,7 +2493,7 @@
+ 	int ret, i, cmd_idx = 0;
+ 
+ 	if (!ADRENO_FEATURE(adreno_dev, ADRENO_ACD))
+-		return;
++		return 0;
+ 
+ 	cmd->hdr = CREATE_MSG_HDR(H2F_MSG_ACD_TBL, sizeof(*cmd), HFI_MSG_CMD);
+ 
+@@ -2527,14 +2515,15 @@
+ 	}
+ 
+ 	if (!cmd->enable_by_level)
+-		return;
++		return 0;
+ 
+ 	cmd->num_levels = cmd_idx;
+ 
+-	ret = a6xx_gmu_aop_mailbox_init(adreno_dev, gmu);
++	ret = a6xx_gmu_aop_qmp_init(adreno_dev, gmu);
+ 	if (ret)
+ 		dev_err(&gmu->pdev->dev,
+-			"AOP mailbox init failed: %d\n", ret);
++			"AOP QMP init failed: %d\n", ret);
++	return ret;
+ }
+ 
+ static int a6xx_gmu_reg_probe(struct adreno_device *adreno_dev)
+@@ -2611,8 +2600,8 @@
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 
+-	if (!IS_ERR_OR_NULL(gmu->mailbox.channel))
+-		mbox_free_channel(gmu->mailbox.channel);
++	qmp_put(gmu->qmp);
++	gmu->qmp = NULL;
+ 
+ 	adreno_dev->acd_enabled = false;
+ 
+@@ -2739,7 +2728,9 @@
+ 	else
+ 		gmu->idle_level = GPU_HW_ACTIVE;
+ 
+-	a6xx_gmu_acd_probe(device, gmu, pdev->dev.of_node);
++	ret = a6xx_gmu_acd_probe(device, gmu, pdev->dev.of_node);
++	if (ret)
++		goto error;
+ 
+ 	set_bit(GMU_ENABLED, &device->gmu_core.flags);
+ 
+@@ -3456,10 +3447,9 @@
+ 	return component_add(&pdev->dev, &a6xx_gmu_component_ops);
+ }
+ 
+-static int a6xx_gmu_remove_dev(struct platform_device *pdev)
++static void a6xx_gmu_remove_dev(struct platform_device *pdev)
+ {
+ 	component_del(&pdev->dev, &a6xx_gmu_component_ops);
+-	return 0;
+ }
+ 
+ static const struct of_device_id a6xx_gmu_match_table[] = {
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.h
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.h
+@@ -5,7 +5,7 @@
+ #ifndef __ADRENO_A6XX_GMU_H
+ #define __ADRENO_A6XX_GMU_H
+ 
+-#include <linux/mailbox_client.h>
++struct qmp;
+ 
+ #include "adreno_a6xx_hfi.h"
+ #include "kgsl_gmu_core.h"
+@@ -108,11 +108,6 @@
+ struct rpmh_votes_t {
+ 	uint32_t gx_votes[MAX_GX_LEVELS];
+ 	uint32_t cx_votes[MAX_CX_LEVELS];
+-};
+-
+-struct kgsl_mailbox {
+-	struct mbox_client client;
+-	struct mbox_chan *channel;
+ };
+ 
+ struct icc_path;
+@@ -180,7 +175,7 @@
+ 	/** @num_clks: Number of entries in the @clks array */
+ 	int num_clks;
+ 	unsigned int idle_level;
+-	struct kgsl_mailbox mailbox;
++	struct qmp *qmp;
+ 	bool preallocations;
+ 	/** @gmu_globals: Array to store gmu global buffers */
+ 	struct gmu_memdesc gmu_globals[GMU_KERNEL_ENTRIES];
+@@ -341,7 +336,7 @@
+  *
+  * This function enables or disables gpu acd feature using mailbox
+  */
+-void a6xx_gmu_aop_send_acd_state(struct a6xx_gmu_device *gmu, bool flag);
++int a6xx_gmu_aop_send_acd_state(struct a6xx_gmu_device *gmu, bool flag);
+ 
+ /**
+  * a6xx_gmu_enable_clocks - Enable gmu clocks
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched.c
+@@ -149,7 +149,9 @@
+ 
+ 	trace_kgsl_pwr_request_state(device, KGSL_STATE_AWARE);
+ 
+-	a6xx_gmu_aop_send_acd_state(gmu, adreno_dev->acd_enabled);
++	ret = a6xx_gmu_aop_send_acd_state(gmu, adreno_dev->acd_enabled);
++	if (ret)
++		return ret;
+ 
+ 	ret = a6xx_gmu_enable_gdsc(adreno_dev);
+ 	if (ret)
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c
+@@ -118,7 +118,7 @@
+ 
+ 	if (size_bytes > sizeof(cmd->results))
+ 		dev_err_ratelimited(&gmu->pdev->dev,
+-			"Ack result too big: %d Truncating to: %d\n",
++			"Ack result too big: %u Truncating to: %zu\n",
+ 			size_bytes, sizeof(cmd->results));
+ 
+ 	read_lock(&hfi->msglock);
+@@ -193,7 +193,7 @@
+ 
+ 	if (size > sizeof(pkt->rcvd))
+ 		dev_err_ratelimited(&gmu->pdev->dev,
+-			"f2h packet too big: %d allowed: %d\n",
++			"f2h packet too big: %u allowed: %zu\n",
+ 			size, sizeof(pkt->rcvd));
+ 
+ 	memcpy(pkt->rcvd, msg, min_t(u32, size, sizeof(pkt->rcvd)));
+@@ -313,7 +313,7 @@
+ 
+ 	if (status & ~hfi->irq_mask)
+ 		dev_err_ratelimited(&gmu->pdev->dev,
+-			"Unhandled HFI interrupts 0x%lx\n",
++			"Unhandled HFI interrupts 0x%x\n",
+ 			status & ~hfi->irq_mask);
+ 
+ 	return IRQ_HANDLED;
+@@ -575,7 +575,7 @@
+ 	ret = gmu_import_buffer(adreno_dev, entry, desc->flags);
+ 	if (ret) {
+ 		dev_err(&gmu->pdev->dev,
+-			"gpuaddr: 0x%llx size: %zd bytes lost\n",
++			"gpuaddr: 0x%llx size: %llu bytes lost\n",
+ 			entry->gpu_md->gpuaddr, entry->gpu_md->size);
+ 		memset(entry, 0, sizeof(*entry));
+ 		return ERR_PTR(ret);

@@ -1,0 +1,78 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -39,7 +39,7 @@
+ #define ARC_VOTE_SET(pri, sec, vlvl) \
+ 	((((vlvl) & 0xFFFF) << 16) | (((sec) & 0xFF) << 8) | ((pri) & 0xFF))
+ 
+-static struct gmu_vma_entry a6xx_gmu_vma_legacy[] = {
++static const struct gmu_vma_entry a6xx_gmu_vma_legacy[GMU_MEM_TYPE_MAX] = {
+ 	[GMU_ITCM] = {
+ 			.start = 0x00000,
+ 			.size = SZ_16K
+@@ -65,7 +65,7 @@
+ 		},
+ };
+ 
+-static struct gmu_vma_entry a6xx_gmu_vma[] = {
++static const struct gmu_vma_entry a6xx_gmu_vma[GMU_MEM_TYPE_MAX] = {
+ 	[GMU_ITCM] = {
+ 			.start = 0x00000000,
+ 			.size = SZ_16K
+@@ -2946,6 +2946,23 @@
+ 	return 0;
+ }
+ 
++/* A fresh bind owns its cursors; live or retained owners must not be reset. */
++static int a6xx_gmu_vma_init(struct adreno_device *adreno_dev)
++{
++	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
++	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
++
++	if (gmu->domain || gmu->global_entries || gmu->fw_image ||
++		gmu->preallocations || gmu->native_domains || gmu->cx_held ||
++		gmu->gx_held || gmu->clks_on || gmu->power_error ||
++		test_bit(GMU_ENABLED, &device->gmu_core.flags))
++		return -EBUSY;
++
++	memcpy(gmu->vma, adreno_is_a650_family(adreno_dev) ?
++		a6xx_gmu_vma : a6xx_gmu_vma_legacy, sizeof(gmu->vma));
++	return 0;
++}
++
+ int a6xx_gmu_probe(struct kgsl_device *device,
+ 		struct platform_device *pdev)
+ {
+@@ -2953,6 +2970,10 @@
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	struct resource *res;
+ 	int ret;
++
++	ret = a6xx_gmu_vma_init(adreno_dev);
++	if (ret)
++		return ret;
+ 
+ 	gmu->pdev = pdev;
+ 
+@@ -2987,11 +3008,6 @@
+ 	ret = a6xx_gmu_iommu_init(gmu);
+ 	if (ret)
+ 		goto error;
+-
+-	if (adreno_is_a650_family(adreno_dev))
+-		gmu->vma = a6xx_gmu_vma;
+-	else
+-		gmu->vma = a6xx_gmu_vma_legacy;
+ 
+ 	/* Map and reserve GMU CSRs registers */
+ 	ret = a6xx_gmu_reg_probe(adreno_dev);
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.h
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.h
+@@ -193,7 +193,7 @@
+ 	struct gmu_memdesc gmu_globals[GMU_KERNEL_ENTRIES];
+ 	/** @global_entries: To keep track of number of gmu buffers */
+ 	u32 global_entries;
+-	struct gmu_vma_entry *vma;
++	struct gmu_vma_entry vma[GMU_MEM_TYPE_MAX];
+ 	unsigned int log_wptr_retention;
+ 	/** @cm3_fault: whether gmu received a cm3 fault interrupt */
+ 	atomic_t cm3_fault;

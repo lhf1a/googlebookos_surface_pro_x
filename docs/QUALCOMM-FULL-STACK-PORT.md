@@ -1,3 +1,13 @@
+## 2026-11-10：KGSL＋DRM/SDE 专项方案入口
+
+下游 GPU/显示迁移的最新设计见 [KGSL＋DRM/SDE 移植方案](QUALCOMM-KGSL-SDE-PORT.md)。
+它基于鸣潮 v5 的真实 CPU 提交瓶颈，细化本总方案的内存、KGSL、显示部分：
+先独立共享内存＋KGSL/现有 DPU，再下游 SDE/Surface eDP，最后联合验收；完整 SDE 目标保留。
+mapper5＋原厂 gralloc＋源码 QTI HWC/SDM 继续复用。新方案尚未实施，不表示 KGSL/SDE 已可运行。
+当前 main 发布为 v21-release-4k（100b6d7）；已拉取 v5（50c0d47）和本机运行包单独记录，未晋升发布 pins。
+下方各日期章节是历史进展，旧“当前”状态不覆盖 [HANDOFF](HANDOFF.md) 与 [BUILD](BUILD.md) 最新记录；
+本页长期视频/HDR/安全/跨设备目标保持，专项方案不把它们误记为已完成。
+
 ## 2026-11-10：唯一主线基线 v21-release（验收版清理）
 
 清理版正常重启已验证：boot398dd33e…，第146秒首次SSH检查成功，7服务running；

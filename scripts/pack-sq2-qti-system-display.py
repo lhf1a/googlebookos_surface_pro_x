@@ -45,6 +45,18 @@ def require(ok, message):
         raise ValueError(message)
 
 
+MEMORY_MARKER = b"dma-heap-system-uncached-v1\0"
+MEMORY_ION = "etc/sq2-qti-system/root/lib64/libquest2-system-ion.so"
+MEMORY_BRIDGE = "etc/sq2-hidl/lib64/libquest2-vidc-bridge.so"
+MEMORY_MODULE = "etc/sq2-memory/system_uncached_heap.ko"
+
+
+def validate_memory_pair(ion, bridge, module):
+    if MEMORY_MARKER in ion or MEMORY_MARKER in bridge:
+        require(MEMORY_MARKER in ion and MEMORY_MARKER in bridge and MEMORY_MARKER in module,
+                "Independent heap requires paired graphics/video libraries and exporter; use pack-sq2-memory-backend.py")
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -230,7 +242,7 @@ def main():
     require(file_hash(args.base) == args.expected_base_sha256, "Base artifact hash differs")
     hidl_names = {"etc/sq2-hidl/" + name for name in
                   ("hwservicemanager", "framework-manifest.xml", "service.rc", "SHA256SUMS")}
-    before, selected = scan(args.base, {"init", BASE_GLES1} | hidl_names)
+    before, selected = scan(args.base, {"init", BASE_GLES1, MEMORY_BRIDGE, MEMORY_MODULE} | hidl_names)
     hidl_hashes = dict((name, expected) for expected, name in
                        (line.split() for line in selected["etc/sq2-hidl/SHA256SUMS"].decode().splitlines()))
     for name in ("hwservicemanager", "framework-manifest.xml", "service.rc"):
@@ -345,6 +357,8 @@ def main():
     for name in MAPPER_LIBS:
         require(vulkan["sha256"][name] == builds["mapper"]["sha256"][name], "Vulkan/native graphics closure differs: " + name)
     require(vulkan["sha256"]["qgl_config.txt"] == builds["mapper"]["sha256"]["qgl_config.txt"], "Vulkan config differs")
+    validate_memory_pair((args.mapper_build / "libquest2-system-ion.so").read_bytes(),
+                         selected.get(MEMORY_BRIDGE, b""), selected.get(MEMORY_MODULE, b""))
     allocator = "quest2-allocator5-service"
     put("bin/hw/vendor.qti.hardware.display.allocator-service", read_verified(args.mapper_build / allocator,
         builds["mapper"]["sha256"][allocator]), 0o100755)

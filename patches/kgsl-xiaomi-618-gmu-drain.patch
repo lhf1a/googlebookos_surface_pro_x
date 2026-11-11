@@ -1,0 +1,276 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -15,6 +15,7 @@
+ #include <linux/interconnect.h>
+ #include <linux/io.h>
+ #include <linux/iommu.h>
++#include <linux/arm-smmu-priv.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/of_platform.h>
+ #include <linux/regulator/consumer.h>
+@@ -26,6 +27,7 @@
+ #include "adreno.h"
+ #include "adreno_a6xx.h"
+ #include "adreno_hwsched.h"
++#include "adreno_a6xx_hwsched_hfi.h"
+ #include "adreno_trace.h"
+ #include "kgsl_bus.h"
+ #include "kgsl_device.h"
+@@ -2670,6 +2672,29 @@
+ 	return kgsl_bus_set_icc(device, ab, 0);
+ }
+ 
++int a6xx_gmu_unmap_buffer(struct a6xx_gmu_device *gmu, u32 addr, u32 size)
++{
++	int ret;
++
++	if (gmu->power_error)
++		return gmu->power_error;
++	if (!gmu->domain || !size || !IS_ALIGNED(addr, PAGE_SIZE) ||
++	    !IS_ALIGNED(size, PAGE_SIZE) || (u64)addr + size > U32_MAX) {
++		ret = -EINVAL;
++		goto retain;
++	}
++	if (iommu_unmap(gmu->domain, addr, size) != size) {
++		ret = -EUCLEAN;
++		goto retain;
++	}
++	ret = arm_smmu_flush_tlb_checked(gmu->domain);
++	if (!ret)
++		return 0;
++retain:
++	gmu->power_error = ret;
++	return ret;
++}
++
+ static int a6xx_free_gmu_globals(struct a6xx_gmu_device *gmu)
+ {
+ 	int i;
+@@ -2688,10 +2713,8 @@
+ 		if (!md->hostptr)
+ 			continue;
+ 
+-		if (iommu_unmap(gmu->domain, md->gmuaddr, md->size) != md->size) {
+-			gmu->power_error = -EUCLEAN;
++		if (a6xx_gmu_unmap_buffer(gmu, md->gmuaddr, md->size))
+ 			return gmu->power_error;
+-		}
+ 
+ 		dma_free_attrs(&gmu->pdev->dev, (size_t) md->size,
+ 				(void *)md->hostptr, md->dma_handle, 0);
+@@ -2858,7 +2881,7 @@
+ }
+ 
+ 
+-void a6xx_gmu_remove(struct kgsl_device *device)
++int a6xx_gmu_remove(struct kgsl_device *device)
+ {
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+@@ -2866,12 +2889,19 @@
+ 	/* Unbind must quiesce the GPU before releasing shared backing or domains. */
+ 	if (gmu->power_error || gmu->cx_held || gmu->gx_held || gmu->clks_on) {
+ 		dev_err(device->dev, "GMU resources retained after unsafe remove\n");
+-		return;
++		return gmu->power_error ? gmu->power_error : -EBUSY;
++	}
++
++	if (test_bit(GMU_DISPATCH, &device->gmu_core.flags)) {
++		int ret = a6xx_hwsched_free_gmu_imports(adreno_dev);
++
++		if (ret)
++			return ret;
+ 	}
+ 
+ 	if (a6xx_free_gmu_globals(gmu)) {
+ 		dev_err(device->dev, "GMU backing retained after incomplete unmap\n");
+-		return;
++		return gmu->power_error;
+ 	}
+ 
+ 	qmp_put(gmu->qmp);
+@@ -2893,6 +2923,7 @@
+ 		gmu->cxpd = NULL;
+ 		gmu->native_domains = false;
+ 	}
++	return 0;
+ }
+ 
+ static int a6xx_gmu_iommu_fault_handler(struct iommu_domain *domain,
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.h
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.h
+@@ -515,7 +515,8 @@
+  * a6xx_gmu_remove - Clean up gmu probed resources
+  * @device: Pointer to the kgsl device
+  */
+-void a6xx_gmu_remove(struct kgsl_device *device);
++int a6xx_gmu_remove(struct kgsl_device *device);
++int a6xx_gmu_unmap_buffer(struct a6xx_gmu_device *gmu, u32 addr, u32 size);
+ 
+ /**
+  * a6xx_gmu_enable_clks - Enable gmu clocks
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched.c
+@@ -1097,7 +1097,8 @@
+ {
+ 	struct kgsl_device *device = dev_get_drvdata(master);
+ 
+-	a6xx_gmu_remove(device);
++	if (a6xx_gmu_remove(device))
++		return;
+ 
+ 	adreno_hwsched_dispatcher_close(ADRENO_DEVICE(device));
+ }
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c
+@@ -499,11 +499,49 @@
+ 		return ret;
+ 	if (ret)
+ 		gpu_md->priv |= KGSL_MEMDESC_MAP_UNCERTAIN;
++	else
++		gpu_md->priv |= KGSL_MEMDESC_GMU_MAPPED;
+ 
+ 	/* On failure these fields describe a retained attempt, not a usable map. */
+ 	desc->gmu_addr = vma->next_va;
+ 	vma->next_va = end;
+ 	return ret;
++}
++
++/* Called only after stopping HFI/GPU access and before destroying its domain. */
++int a6xx_hwsched_free_gmu_imports(struct adreno_device *adreno_dev)
++{
++	struct a6xx_hwsched_hfi *hfi = to_a6xx_hwsched_hfi(adreno_dev);
++	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
++	unsigned int i;
++	int ret;
++
++	if (gmu->power_error)
++		return gmu->power_error;
++	if (hfi->mem_alloc_entries > ARRAY_SIZE(hfi->mem_alloc_table)) {
++		gmu->power_error = -EUCLEAN;
++		return gmu->power_error;
++	}
++	for (i = 0; i < hfi->mem_alloc_entries; i++) {
++		struct mem_alloc_entry *entry = &hfi->mem_alloc_table[i];
++		struct kgsl_memdesc *md = entry->gpu_md;
++
++		if (IS_ERR_OR_NULL(md) || (md->priv & KGSL_MEMDESC_MAP_UNCERTAIN)) {
++			gmu->power_error = -EUCLEAN;
++			return gmu->power_error;
++		}
++		if (!(md->priv & KGSL_MEMDESC_GMU_MAPPED))
++			continue;
++		ret = a6xx_gmu_unmap_buffer(gmu, entry->desc.gmu_addr, entry->desc.size);
++		if (ret) {
++			md->priv |= KGSL_MEMDESC_MAP_UNCERTAIN;
++			return ret;
++		}
++		md->priv &= ~KGSL_MEMDESC_GMU_MAPPED;
++	}
++	memset(hfi->mem_alloc_table, 0, sizeof(hfi->mem_alloc_table));
++	hfi->mem_alloc_entries = 0;
++	return 0;
+ }
+ 
+ static struct mem_alloc_entry *lookup_mem_alloc_table(
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.h
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched_hfi.h
+@@ -151,6 +151,7 @@
+  * Return: 0 on success and negative error on failure.
+  */
+ int a6xx_hwsched_hfi_init(struct adreno_device *adreno_dev);
++int a6xx_hwsched_free_gmu_imports(struct adreno_device *adreno_dev);
+ 
+ /**
+  * a6xx_hwsched_hfi_start - Start hfi resources
+--- a/drivers/gpu/msm/kgsl.h
++++ b/drivers/gpu/msm/kgsl.h
+@@ -186,6 +186,8 @@
+ #define KGSL_MEMDESC_SYSMEM BIT(9)
+ /* Mapping rollback is unproven; retain backing and VA until recovery. */
+ #define KGSL_MEMDESC_MAP_UNCERTAIN BIT(10)
++/* Backing is also mapped into the GMU address space. */
++#define KGSL_MEMDESC_GMU_MAPPED BIT(11)
+ 
+ /**
+  * struct kgsl_memdesc - GPU memory object descriptor
+--- a/drivers/gpu/msm/kgsl_iommu.c
++++ b/drivers/gpu/msm/kgsl_iommu.c
+@@ -83,6 +83,8 @@
+ 	list_for_each_entry(md, &device->globals, node) {
+ 		if (md->memdesc.priv & KGSL_MEMDESC_MAP_UNCERTAIN)
+ 			return -EUCLEAN;
++		if (md->memdesc.priv & KGSL_MEMDESC_GMU_MAPPED)
++			return -EBUSY;
+ 		if (!(md->memdesc.priv & KGSL_MEMDESC_MAPPED))
+ 			continue;
+ 		ret = kgsl_mmu_unmap(pagetable, &md->memdesc);
+--- a/drivers/gpu/msm/kgsl_mmu.c
++++ b/drivers/gpu/msm/kgsl_mmu.c
+@@ -455,6 +455,8 @@
+ 
+ 	if (memdesc->priv & KGSL_MEMDESC_MAP_UNCERTAIN)
+ 		return -EUCLEAN;
++	if (memdesc->priv & KGSL_MEMDESC_GMU_MAPPED)
++		return -EBUSY;
+ 
+ 	if (memdesc->size == 0 || memdesc->gpuaddr == 0)
+ 		return 0;
+--- a/drivers/gpu/msm/kgsl_sharedmem.c
++++ b/drivers/gpu/msm/kgsl_sharedmem.c
+@@ -957,7 +957,7 @@
+ 		return;
+ 
+ 	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
+-			KGSL_MEMDESC_MAP_UNCERTAIN))
++			KGSL_MEMDESC_MAP_UNCERTAIN | KGSL_MEMDESC_GMU_MAPPED))
+ 		return;
+ 
+ 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.coherent);
+@@ -979,7 +979,7 @@
+ 	int order = get_order(PAGE_SIZE);
+ 
+ 	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
+-			KGSL_MEMDESC_MAP_UNCERTAIN))
++			KGSL_MEMDESC_MAP_UNCERTAIN | KGSL_MEMDESC_GMU_MAPPED))
+ 		return;
+ 
+ 	ret = unlock_sgt(memdesc->sgt);
+@@ -1019,7 +1019,7 @@
+ 	int ret;
+ 
+ 	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
+-			KGSL_MEMDESC_MAP_UNCERTAIN))
++			KGSL_MEMDESC_MAP_UNCERTAIN | KGSL_MEMDESC_GMU_MAPPED))
+ 		return;
+ 
+ 	ret = unlock_sgt(memdesc->sgt);
+@@ -1053,7 +1053,7 @@
+ 	WARN_ON(memdesc->hostptr);
+ 
+ 	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
+-			KGSL_MEMDESC_MAP_UNCERTAIN))
++			KGSL_MEMDESC_MAP_UNCERTAIN | KGSL_MEMDESC_GMU_MAPPED))
+ 		return;
+ 
+ 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.page_alloc);
+@@ -1074,7 +1074,7 @@
+ 	WARN_ON(memdesc->hostptr);
+ 
+ 	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
+-			KGSL_MEMDESC_MAP_UNCERTAIN))
++			KGSL_MEMDESC_MAP_UNCERTAIN | KGSL_MEMDESC_GMU_MAPPED))
+ 		return;
+ 
+ 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.page_alloc);
+@@ -1373,6 +1373,10 @@
+ 
+ static void kgsl_fixed_global_free(struct kgsl_memdesc *memdesc)
+ {
++	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
++		KGSL_MEMDESC_MAP_UNCERTAIN | KGSL_MEMDESC_GMU_MAPPED))
++		return;
++
+ 	sg_free_table(memdesc->sgt);
+ 	kfree(memdesc->sgt);
+ 	memdesc->sgt = NULL;

@@ -1,0 +1,191 @@
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -16,7 +16,9 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/nvmem-consumer.h>
+ #include <linux/soc/qcom/llcc-qcom.h>
+-#include <soc/qcom/subsystem_restart.h>
++#include <linux/firmware/qcom/qcom_scm.h>
++#include <linux/of_reserved_mem.h>
++#include <linux/soc/qcom/mdt_loader.h>
+ 
+ #include "adreno.h"
+ #include "adreno_a3xx.h"
+@@ -114,17 +116,96 @@
+ int adreno_zap_shader_load(struct adreno_device *adreno_dev,
+ 		const char *name)
+ {
+-	void *ptr;
+-
+-	if (!name || adreno_dev->zap_loaded)
++	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
++	struct device *dev = device->dev;
++	const struct firmware *fw;
++	struct device_node *node;
++	struct resource region;
++	const char *fwname, *status;
++	void *memory;
++	ssize_t size;
++	int ret;
++
++	lockdep_assert_held(&device->mutex);
++	if (adreno_dev->zap_load_error)
++		return adreno_dev->zap_load_error;
++	if (adreno_dev->zap_loaded)
+ 		return 0;
+-
+-	ptr = subsystem_get(name);
+-
+-	if (!IS_ERR(ptr))
++	if (!name || !*name)
++		return -ENOENT;
++
++	node = of_get_child_by_name(dev->of_node, "zap-shader");
++	if (!node)
++		return -ENOENT;
++	if (!of_device_is_available(node)) {
++		/* Only an explicit nonsecure policy permits the caller's register path. */
++		ret = of_property_read_string(node, "status", &status);
++		if (!ret)
++			ret = strcmp(status, "disabled") ? -ENODEV :
++				(device->mmu.secured ? -EOPNOTSUPP : 0);
++		goto put_node;
++	}
++	if (!qcom_scm_is_available()) {
++		ret = -EPROBE_DEFER;
++		goto put_node;
++	}
++
++	ret = of_reserved_mem_region_to_resource(node, 0, &region);
++	if (ret)
++		goto put_node;
++	if (region.end < region.start || !IS_ALIGNED(region.start, SZ_4K)) {
++		ret = -EINVAL;
++		goto put_node;
++	}
++	/* Signed images are board-specific; never substitute the phone core name. */
++	ret = of_property_read_string(node, "firmware-name", &fwname);
++	if (ret)
++		goto put_node;
++	if (!*fwname) {
++		ret = -EINVAL;
++		goto put_node;
++	}
++	ret = request_firmware_direct(&fw, fwname, dev);
++	if (ret)
++		goto put_node;
++
++	size = qcom_mdt_get_size(fw);
++	if (size <= 0) {
++		ret = size < 0 ? size : -EINVAL;
++		goto release_fw;
++	}
++	if (size > resource_size(&region)) {
++		ret = -E2BIG;
++		goto release_fw;
++	}
++	memory = memremap(region.start, size, MEMREMAP_WC);
++	if (!memory) {
++		ret = -ENOMEM;
++		goto release_fw;
++	}
++
++	/* GPU PAS 13 is shared by the matching mainline A5xx/A6xx loader. */
++	ret = qcom_mdt_load(dev, fw, fwname, 13, memory, region.start, size, NULL);
++	if (!ret)
++		ret = qcom_scm_pas_auth_and_reset(13);
++	if (!ret) {
+ 		adreno_dev->zap_loaded = true;
+-
+-	return PTR_ERR_OR_ZERO(ptr);
++	} else {
++		int cleanup = qcom_scm_pas_shutdown(13);
++
++		if (cleanup) {
++			/* Do not overwrite a PAS image whose shutdown is unconfirmed. */
++			adreno_dev->zap_load_error = cleanup;
++			dev_err(dev, "ZAP shutdown after failed load: %d (load: %d)\n",
++				cleanup, ret);
++		}
++	}
++	memunmap(memory);
++release_fw:
++	release_firmware(fw);
++put_node:
++	of_node_put(node);
++	return ret;
+ }
+ 
+ void adreno_reglist_write(struct adreno_device *adreno_dev,
+@@ -1298,7 +1379,7 @@
+ 	of_node_put(node);
+ 
+ 	if (!ret)
+-		strlcpy(gpu_model, model, sizeof(gpu_model));
++		strscpy(gpu_model, model, sizeof(gpu_model));
+ 	else
+ 		scnprintf(gpu_model, sizeof(gpu_model), "Adreno%d%d%dv%d",
+ 			ADRENO_CHIPID_CORE(ADRENO_DEVICE(device)->chipid),
+@@ -2373,7 +2454,7 @@
+ {
+ 	struct kgsl_gpu_model model = {0};
+ 
+-	strlcpy(model.gpu_model, adreno_get_gpu_model(device),
++	strscpy(model.gpu_model, adreno_get_gpu_model(device),
+ 			sizeof(model.gpu_model));
+ 
+ 	return copy_prop(param, &model, sizeof(model));
+@@ -3997,14 +4078,13 @@
+ 		return adreno_bind(&pdev->dev);
+ }
+ 
+-static int adreno_remove(struct platform_device *pdev)
++static void adreno_remove(struct platform_device *pdev)
+ {
+ 	if (of_find_matching_node(NULL, adreno_gmu_match))
+ 		component_master_del(&pdev->dev, &adreno_ops);
+ 	else
+ 		adreno_unbind(&pdev->dev);
+ 
+-	return 0;
+ }
+ 
+ static const struct dev_pm_ops adreno_pm_ops = {
+--- a/drivers/gpu/msm/adreno.h
++++ b/drivers/gpu/msm/adreno.h
+@@ -570,6 +570,8 @@
+ 	void *gpuhtw_llc_slice;
+ 	bool gpuhtw_llc_slice_enable;
+ 	unsigned int zap_loaded;
++	/* PAS shutdown failed; loading must wait for verified recovery. */
++	int zap_load_error;
+ 	/**
+ 	 * @critpkts: Memory descriptor for 5xx critical packets if applicable
+ 	 */
+@@ -1786,9 +1788,11 @@
+ /**
+  * adreno_zap_shader_load - Helper function for loading the zap shader
+  * adreno_dev: A handle to an Adreno GPU device
+- * name: Name of the zap shader to load
+- *
+- * A target indepedent helper function for loading the zap shader.
++ * name: Legacy core descriptor; the signed image path comes from device tree
++ *
++ * Load the board-specific signed image. An explicitly disabled, nonsecure
++ * target returns success without setting zap_loaded; the caller must perform
++ * its SECVID_TRUST_CNTL transition. Missing firmware and load errors propagate.
+  *
+  * Return: 0 on success or negative on failure.
+  */
+--- a/drivers/gpu/msm/Kconfig
++++ b/drivers/gpu/msm/Kconfig
+@@ -3,7 +3,8 @@
+ 	tristate "Qualcomm Technologies, Inc. 3D Graphics driver"
+ 	depends on ARCH_QCOM
+ 	depends on QCOM_QFPROM
+-	select MSM_SUBSYSTEM_RESTART
++	select QCOM_SCM
++	select QCOM_MDT_LOADER
+ 	select TRACE_GPU_MEM
+ 	help
+ 	  3D graphics driver for the Adreno family of GPUs from QTI.

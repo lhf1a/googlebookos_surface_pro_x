@@ -1,0 +1,214 @@
+--- a/drivers/gpu/msm/adreno_a6xx.h
++++ b/drivers/gpu/msm/adreno_a6xx.h
+@@ -290,6 +290,7 @@
+ /* Preemption functions */
+ void a6xx_preemption_trigger(struct adreno_device *adreno_dev);
+ void a6xx_preemption_schedule(struct adreno_device *adreno_dev);
++int a6xx_preemption_reset_records(struct adreno_device *adreno_dev);
+ void a6xx_preemption_start(struct adreno_device *adreno_dev);
+ int a6xx_preemption_init(struct adreno_device *adreno_dev);
+ 
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -3657,6 +3657,16 @@
+ 
+ 	clear_bit(GMU_PRIV_GPU_STARTED, &gmu->flags);
+ 
++	ret = kgsl_mmu_set_pt(&device->mmu, device->mmu.defaultpagetable);
++	if (ret)
++		return ret;
++	ret = a6xx_preemption_reset_records(adreno_dev);
++	if (ret)
++		return ret;
++
++	adreno_drawctxt_retire_switches(adreno_dev);
++	adreno_set_active_ctxs_null(adreno_dev);
++
+ 	/* Attempt to reboot the gmu and gpu */
+ 	return a6xx_boot(adreno_dev);
+ }
+--- a/drivers/gpu/msm/adreno_a6xx_preempt.c
++++ b/drivers/gpu/msm/adreno_a6xx_preempt.c
+@@ -587,6 +587,88 @@
+ 	*cmds++ = 0;
+ 
+ 	return (unsigned int) (cmds - cmds_orig);
++}
++
++static bool a6xx_reset_mem_valid(struct kgsl_memdesc *memdesc, u64 size)
++{
++	return !IS_ERR_OR_NULL(memdesc) && memdesc->hostptr &&
++		memdesc->size >= size;
++}
++
++/* Called with device->mutex and GPU IRQs off, after checked hard shutdown. */
++int a6xx_preemption_reset_records(struct adreno_device *adreno_dev)
++{
++	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
++	struct kgsl_iommu *iommu = KGSL_IOMMU_PRIV(device);
++	struct adreno_preemption *preempt = &adreno_dev->preempt;
++	struct adreno_ringbuffer *rb;
++	bool enabled = adreno_is_preemption_enabled(adreno_dev);
++	u32 cntl = A6XX_CP_RB_CNTL_DEFAULT |
++		(ADRENO_FEATURE(adreno_dev, ADRENO_APRIV) ? 0 : (1 << 27));
++	unsigned int i;
++
++	/* Secure restore records cannot be rewritten through a CPU mapping. */
++	if (device->mmu.secured)
++		return -EOPNOTSUPP;
++	if (IS_ERR_OR_NULL(device->mmu.defaultpagetable) ||
++		!MMU_DEFAULT_TTBR0(device))
++		return -ENODEV;
++	if (!adreno_dev->num_ringbuffers)
++		return -EINVAL;
++
++	/* Validate every buffer before changing any restore state. */
++	FOR_EACH_RINGBUFFER(adreno_dev, rb, i) {
++		if (!a6xx_reset_mem_valid(rb->pagetable_desc,
++				sizeof(struct adreno_ringbuffer_pagetable_info)))
++			return -EINVAL;
++		if (enabled && (!a6xx_reset_mem_valid(rb->preemption_desc,
++				sizeof(struct a6xx_cp_preemption_record)) ||
++				IS_ERR_OR_NULL(rb->buffer_desc)))
++			return -EINVAL;
++	}
++	if (enabled && (!a6xx_reset_mem_valid(iommu->smmu_info,
++			sizeof(struct a6xx_cp_smmu_info)) ||
++		!a6xx_reset_mem_valid(preempt->scratch,
++			adreno_dev->num_ringbuffers * sizeof(u64))))
++		return -EINVAL;
++
++	if (enabled) {
++		timer_delete_sync(&preempt->timer);
++		adreno_set_preempt_state(adreno_dev, ADRENO_PREEMPT_NONE);
++		memset(preempt->scratch->hostptr, 0, preempt->scratch->size);
++		memset(iommu->smmu_info->hostptr, 0, iommu->smmu_info->size);
++		kgsl_sharedmem_writel(iommu->smmu_info,
++			PREEMPT_SMMU_RECORD(magic), A6XX_CP_SMMU_INFO_MAGIC_REF);
++		kgsl_sharedmem_writeq(iommu->smmu_info,
++			PREEMPT_SMMU_RECORD(ttbr0), MMU_DEFAULT_TTBR0(device));
++		kgsl_sharedmem_writel(iommu->smmu_info,
++			PREEMPT_SMMU_RECORD(asid), 0xDECAFBAD);
++		kgsl_sharedmem_writel(iommu->smmu_info,
++			PREEMPT_SMMU_RECORD(context_idr), MMU_DEFAULT_CONTEXTIDR(device));
++	}
++
++	FOR_EACH_RINGBUFFER(adreno_dev, rb, i) {
++		if (enabled) {
++			memset(rb->preemption_desc->hostptr, 0, rb->preemption_desc->size);
++			kgsl_sharedmem_writel(rb->preemption_desc,
++				PREEMPT_RECORD(magic), A6XX_CP_CTXRECORD_MAGIC_REF);
++			kgsl_sharedmem_writel(rb->preemption_desc,
++				PREEMPT_RECORD(cntl), cntl);
++			kgsl_sharedmem_writeq(rb->preemption_desc,
++				PREEMPT_RECORD(rptr_addr), SCRATCH_RPTR_GPU_ADDR(device, rb->id));
++			kgsl_sharedmem_writeq(rb->preemption_desc,
++				PREEMPT_RECORD(rbase), rb->buffer_desc->gpuaddr);
++		}
++		memset(rb->pagetable_desc->hostptr, 0, rb->pagetable_desc->size);
++		adreno_ringbuffer_set_pagetable(rb, device->mmu.defaultpagetable);
++		rb->wptr = rb->_wptr = 0;
++		rb->skip_inline_wptr = false;
++	}
++	adreno_dev->next_rb = NULL;
++	adreno_dev->prev_rb = NULL;
++	adreno_dev->cur_rb = &adreno_dev->ringbuffers[0];
++	wmb();
++	return 0;
+ }
+ 
+ void a6xx_preemption_start(struct adreno_device *adreno_dev)
+--- a/drivers/gpu/msm/adreno_drawctxt.c
++++ b/drivers/gpu/msm/adreno_drawctxt.c
+@@ -543,25 +543,61 @@
+ 	struct adreno_context *drawctxt;
+ 	unsigned int timestamp;
+ 	int result;
++	bool event_pending;
++	bool stopped;
+ };
+ 
+ static void _drawctxt_switch_wait_callback(struct kgsl_device *device,
+ 		struct kgsl_event_group *group, void *priv, int result)
+ {
+ 	struct adreno_context_switch *switch_ref = priv;
++	bool release;
+ 
+ 	spin_lock(&group->lock);
+ 	switch_ref->result = result;
+-	if (result == KGSL_EVENT_RETIRED)
++	switch_ref->event_pending = false;
++	release = result == KGSL_EVENT_RETIRED || switch_ref->stopped;
++	if (release)
+ 		list_del(&switch_ref->node);
+ 	spin_unlock(&group->lock);
+ 
+-	/* shortcut: cancelled owners need a checked GPU retirement path. */
+-	if (result != KGSL_EVENT_RETIRED)
++	/* A cancellation alone does not prove that the GPU stopped. */
++	if (!release)
+ 		return;
+ 
+ 	kgsl_context_put(&switch_ref->drawctxt->base);
+ 	kfree(switch_ref);
++}
++
++/* Caller holds device->mutex; GPU is reset, roots and restore records replaced. */
++void adreno_drawctxt_retire_switches(struct adreno_device *adreno_dev)
++{
++	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
++	struct adreno_ringbuffer *rb;
++	struct adreno_context_switch *switch_ref, *tmp;
++	int i;
++
++	FOR_EACH_RINGBUFFER(adreno_dev, rb, i) {
++		LIST_HEAD(release);
++
++		spin_lock(&rb->events.lock);
++		list_for_each_entry_safe(switch_ref, tmp,
++				&rb->context_switches, node) {
++			if (switch_ref->event_pending)
++				switch_ref->stopped = true;
++			else
++				list_move_tail(&switch_ref->node, &release);
++		}
++		spin_unlock(&rb->events.lock);
++
++		/* Queued callbacks keep their records until they run. */
++		kgsl_cancel_events(device, &rb->events);
++		list_for_each_entry_safe(switch_ref, tmp, &release, node) {
++			list_del(&switch_ref->node);
++			kgsl_context_put(&switch_ref->drawctxt->base);
++			kfree(switch_ref);
++		}
++	}
+ }
+ 
+ /**
+@@ -634,6 +670,7 @@
+ 
+ 	if (switch_ref) {
+ 		switch_ref->timestamp = rb->timestamp;
++		switch_ref->event_pending = true;
+ 		spin_lock(&rb->events.lock);
+ 		list_add_tail(&switch_ref->node, &rb->context_switches);
+ 		spin_unlock(&rb->events.lock);
+@@ -644,6 +681,7 @@
+ 			/* Neither old nor new ownership may unwind after submit. */
+ 			spin_lock(&rb->events.lock);
+ 			switch_ref->result = ret;
++			switch_ref->event_pending = false;
+ 			spin_unlock(&rb->events.lock);
+ 			if (!READ_ONCE(device->pwrctrl.transition_error))
+ 				WRITE_ONCE(device->pwrctrl.transition_error, ret);
+--- a/drivers/gpu/msm/adreno_drawctxt.h
++++ b/drivers/gpu/msm/adreno_drawctxt.h
+@@ -111,6 +111,8 @@
+ void adreno_drawctxt_destroy(struct kgsl_context *context);
+ 
+ struct adreno_ringbuffer;
++void adreno_drawctxt_retire_switches(struct adreno_device *adreno_dev);
++
+ int adreno_drawctxt_switch(struct adreno_device *adreno_dev,
+ 				struct adreno_ringbuffer *rb,
+ 				struct adreno_context *drawctxt);

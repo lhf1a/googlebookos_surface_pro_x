@@ -66,12 +66,13 @@ def checked_sums(data, records):
 def build(base, service, bridge, output, expected_base):
     pack.require(not output.exists(), "Choose a fresh private output directory")
     pack.require(pack.file_hash(base) == expected_base, "Base artifact hash differs")
-    before, selected = pack.scan(base, {"init", SUMS})
+    before, selected = pack.scan(base, {"init", SUMS, pack.MEMORY_ION, pack.MEMORY_MODULE})
     init = selected.get("init", b"")
     pack.require(init.count(pack.HOOK) == 1 and init.count(pack.NEW_HOOK) == 1 and
                  init.index(pack.HOOK) < init.index(pack.NEW_HOOK), "Requires HIDL stage before QTI display stage")
     checksums = checked_sums(selected[SUMS], before)
     bridge_data = read_elf(bridge, BRIDGE_EXPORTS)
+    pack.validate_memory_pair(selected.get(pack.MEMORY_ION, b""), bridge_data, selected.get(pack.MEMORY_MODULE, b""))
     service_exports = service_layout_exports(bridge_data)
     delta = {SERVICE: read_elf(service, service_exports), BRIDGE: bridge_data}
     sums = []

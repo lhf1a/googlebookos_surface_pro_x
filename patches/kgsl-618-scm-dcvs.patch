@@ -1,0 +1,161 @@
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -952,6 +952,127 @@
+ EXPORT_SYMBOL_GPL(qcom_scm_restore_sec_cfg);
+ 
+ #define QCOM_SCM_CP_APERTURE_CONTEXT_MASK	GENMASK(7, 0)
++
++/* DCVS v2: return transport status separately from the signed level delta. */
++static int qcom_scm_gpu_dcvs_buffer(u32 command, const void *data, size_t size,
++				  struct qcom_scm_res *res)
++{
++	struct qcom_scm_desc desc = {
++		.svc = QCOM_SCM_SVC_DCVS,
++		.cmd = command,
++		.arginfo = QCOM_SCM_ARGS(2, QCOM_SCM_RW, QCOM_SCM_VAL),
++		.owner = ARM_SMCCC_OWNER_SIP,
++	};
++	void *buffer;
++	int ret;
++
++	buffer = qcom_tzmem_alloc(__scm->mempool, size, GFP_KERNEL);
++	if (!buffer)
++		return -ENOMEM;
++	memcpy(buffer, data, size);
++	desc.args[0] = qcom_tzmem_to_phys(buffer);
++	desc.args[1] = size;
++	if (!desc.args[0]) {
++		ret = -EFAULT;
++		goto out;
++	}
++	/* The SCM pool is coherent and handles the configured SHM bridge mode. */
++	wmb();
++	ret = qcom_scm_call(__scm->dev, &desc, res);
++out:
++	qcom_tzmem_free(buffer);
++	return ret;
++}
++
++int qcom_scm_gpu_dcvs_init(const u32 *levels, size_t count, u32 *version)
++{
++	struct qcom_scm_res res = {};
++	int ret;
++
++	if (!__scm)
++		return -EPROBE_DEFER;
++	if (!levels || !version || count < 2 || count > PAGE_SIZE / sizeof(u32) ||
++		levels[0] != count - 1)
++		return -EINVAL;
++	if (__get_convention() != SMC_CONVENTION_ARM_64 ||
++		!__qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_DCVS,
++			QCOM_SCM_DCVS_INIT_V2) ||
++		!__qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_DCVS,
++			QCOM_SCM_DCVS_UPDATE_V2) ||
++		!__qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_DCVS,
++			QCOM_SCM_DCVS_RESET))
++		return -EOPNOTSUPP;
++
++	ret = qcom_scm_gpu_dcvs_buffer(QCOM_SCM_DCVS_INIT_V2, levels,
++				     count * sizeof(u32), &res);
++	if (ret)
++		return ret;
++	if (res.result[0] > U32_MAX)
++		return -EOVERFLOW;
++	*version = res.result[0];
++	return 0;
++}
++EXPORT_SYMBOL_GPL(qcom_scm_gpu_dcvs_init);
++
++int qcom_scm_gpu_dcvs_init_ca(u32 target_level, u32 busy_penalty)
++{
++	u32 data[] = { target_level, busy_penalty };
++
++	if (!__scm)
++		return -EPROBE_DEFER;
++	if (__get_convention() != SMC_CONVENTION_ARM_64 ||
++		!__qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_DCVS,
++			QCOM_SCM_DCVS_INIT_CA_V2) ||
++		!__qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_DCVS,
++			QCOM_SCM_DCVS_UPDATE_CA_V2))
++		return -EOPNOTSUPP;
++	return qcom_scm_gpu_dcvs_buffer(QCOM_SCM_DCVS_INIT_CA_V2, data,
++				      sizeof(data), NULL);
++}
++EXPORT_SYMBOL_GPL(qcom_scm_gpu_dcvs_init_ca);
++
++int qcom_scm_gpu_dcvs_update(u32 level, u64 total, u64 busy, bool context_aware,
++			   u32 contexts, s32 *delta)
++{
++	struct qcom_scm_desc desc = {
++		.svc = QCOM_SCM_SVC_DCVS,
++		.cmd = context_aware ? QCOM_SCM_DCVS_UPDATE_CA_V2 :
++			QCOM_SCM_DCVS_UPDATE_V2,
++		.arginfo = context_aware ? QCOM_SCM_ARGS(4) : QCOM_SCM_ARGS(3),
++		.args = { level, total, busy, contexts },
++		.owner = ARM_SMCCC_OWNER_SIP,
++	};
++	struct qcom_scm_res res = {};
++	int ret;
++
++	if (!__scm)
++		return -EPROBE_DEFER;
++	if (!delta || !total || busy > total)
++		return -EINVAL;
++	if (__get_convention() != SMC_CONVENTION_ARM_64)
++		return -EOPNOTSUPP;
++	ret = qcom_scm_call(__scm->dev, &desc, &res);
++	if (!ret)
++		*delta = (s32)res.result[0];
++	return ret;
++}
++EXPORT_SYMBOL_GPL(qcom_scm_gpu_dcvs_update);
++
++int qcom_scm_gpu_dcvs_reset(void)
++{
++	struct qcom_scm_desc desc = {
++		.svc = QCOM_SCM_SVC_DCVS,
++		.cmd = QCOM_SCM_DCVS_RESET,
++		.owner = ARM_SMCCC_OWNER_SIP,
++	};
++
++	if (!__scm)
++		return -EPROBE_DEFER;
++	if (__get_convention() != SMC_CONVENTION_ARM_64)
++		return -EOPNOTSUPP;
++	return qcom_scm_call(__scm->dev, &desc, NULL);
++}
++EXPORT_SYMBOL_GPL(qcom_scm_gpu_dcvs_reset);
+ 
+ bool qcom_scm_set_gpu_smmu_aperture_is_available(void)
+ {
+--- a/drivers/firmware/qcom/qcom_scm.h
++++ b/drivers/firmware/qcom/qcom_scm.h
+@@ -105,6 +105,13 @@
+ #define QCOM_SCM_PIL_PAS_SHUTDOWN	0x06
+ #define QCOM_SCM_PIL_PAS_IS_SUPPORTED	0x07
+ #define QCOM_SCM_PIL_PAS_MSS_RESET	0x0a
++
++#define QCOM_SCM_SVC_DCVS                 0x0d
++#define QCOM_SCM_DCVS_RESET               0x07
++#define QCOM_SCM_DCVS_UPDATE_V2           0x0a
++#define QCOM_SCM_DCVS_INIT_V2             0x0b
++#define QCOM_SCM_DCVS_INIT_CA_V2          0x0c
++#define QCOM_SCM_DCVS_UPDATE_CA_V2        0x0d
+ 
+ #define QCOM_SCM_SVC_IO			0x05
+ #define QCOM_SCM_IO_READ		0x01
+--- a/include/linux/firmware/qcom/qcom_scm.h
++++ b/include/linux/firmware/qcom/qcom_scm.h
+@@ -99,6 +99,12 @@
+ 
+ bool qcom_scm_restore_sec_cfg_available(void);
+ int qcom_scm_restore_sec_cfg(u32 device_id, u32 spare);
++int qcom_scm_gpu_dcvs_init(const u32 *levels, size_t count, u32 *version);
++int qcom_scm_gpu_dcvs_init_ca(u32 target_level, u32 busy_penalty);
++int qcom_scm_gpu_dcvs_update(u32 level, u64 total, u64 busy, bool context_aware,
++			   u32 contexts, s32 *delta);
++int qcom_scm_gpu_dcvs_reset(void);
++
+ int qcom_scm_set_gpu_smmu_aperture(unsigned int context_bank);
+ bool qcom_scm_set_gpu_smmu_aperture_is_available(void);
+ int qcom_scm_iommu_secure_ptbl_size(u32 spare, size_t *size);

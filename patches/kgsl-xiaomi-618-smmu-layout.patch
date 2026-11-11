@@ -1,0 +1,30 @@
+--- a/drivers/gpu/msm/kgsl_device.h
++++ b/drivers/gpu/msm/kgsl_device.h
+@@ -5,6 +5,9 @@
+ #ifndef __KGSL_DEVICE_H
+ #define __KGSL_DEVICE_H
+ 
++#include <linux/adreno-smmu-priv.h>
++#include <linux/build_bug.h>
++#include <linux/stddef.h>
+ #include <linux/sched/mm.h>
+ #include <linux/sched/task.h>
+ #include <trace/events/gpu_mem.h>
+@@ -208,6 +211,8 @@
+ };
+ 
+ struct kgsl_device {
++	/* arm-smmu initializes this interface through dev_get_drvdata(). */
++	struct adreno_smmu_priv smmu;
+ 	struct device *dev;
+ 	const char *name;
+ 	uint32_t flags;
+@@ -326,6 +331,8 @@
+ 	spinlock_t timelines_lock;
+ };
+ 
++static_assert(offsetof(struct kgsl_device, smmu) == 0);
++
+ #define KGSL_MMU_DEVICE(_mmu) \
+ 	container_of((_mmu), struct kgsl_device, mmu)
+ 

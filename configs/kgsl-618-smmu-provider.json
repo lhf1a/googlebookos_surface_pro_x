@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "status": "linked-in-isolated-matched-kernel-not-device-validated",
+  "kernel_series": "6.18",
+  "patch": "patches/kgsl-618-smmu-provider.patch",
+  "sha256": "368048cfa8ba78b4899cfcb44e4d46a7b13fd8d7e4d5233feb71b4ec8c1555f8",
+  "files": {
+    "drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c": {
+      "before": "c603f51fa2fbc7f9f166ce99599cdaae2be9c408e00d8c1d10d022d992c7473e",
+      "after": "67ee19495099a85150a410fb585559b61dd59369805c3d7c31ada93587d1e9d3"
+    },
+    "include/linux/adreno-smmu-priv.h": {
+      "before": "57e2f5e4e7146018e36b5447c2118f44152b38aa4d6d9ca040fcf0654872ce4b",
+      "after": "f7c58839501fae9dd2afaabe9e3218db75e30c4241165f19e381bf00f6f52292"
+    },
+    "drivers/iommu/arm/arm-smmu/arm-smmu-qcom.h": {
+      "before": "e1708d98fb3a8e5ce3e2c4a4b2b5ed82c27eb1452305200d4bd756c0b818f3f7",
+      "after": "2a39a5ff6b61719c11e560a7d4ce9c11093bfa7c7dc79d7c2e70ac535af0a54f"
+    }
+  }
+}

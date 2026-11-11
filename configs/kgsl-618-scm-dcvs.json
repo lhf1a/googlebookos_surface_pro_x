@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "status": "linked-in-isolated-matched-kernel-not-device-validated",
+  "kernel_series": "6.18",
+  "patch": "patches/kgsl-618-scm-dcvs.patch",
+  "sha256": "323b94f489978e92b6f12bbfbef95f060de3ea7fb0ddbb071cd4db77378584d4",
+  "files": {
+    "drivers/firmware/qcom/qcom_scm.c": {
+      "before": "1ba0256a7d3c2f059f821632f5f93a39ded68291f1aa29200721b46a342e65c3",
+      "after": "e223f82380e74a96067d3946374054d4c6f36fd0f45572c1190e399ae433455d"
+    },
+    "drivers/firmware/qcom/qcom_scm.h": {
+      "before": "ca58b99bd1c2d8886319b0a64f98f5a2d9827c63589c4a84f3f52e9fc7135a09",
+      "after": "cbed2583bad4b4106a562e6bfd62d103edd021b30756fde05ccde622d31ddff9"
+    },
+    "include/linux/firmware/qcom/qcom_scm.h": {
+      "before": "930d3542811bfb0bd098c4444b98a45a6fa549caefcf1b2126ba607dd82ab94f",
+      "after": "fe94385a05c51900a1267d26e446c5115dae9c520d9f0033eb2afee06bc2dfc3"
+    }
+  }
+}

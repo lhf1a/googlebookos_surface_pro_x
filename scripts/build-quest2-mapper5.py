@@ -43,6 +43,7 @@ def main():
         if path.is_symlink() or sha(path)!=parent["sha256"][name]:
             parser.error("Native parent library mismatch: "+name)
         inputs[str(path)]=sha(path)
+    independent_memory=b"dma-heap-system-uncached-v1\0" in (args.parent/"libquest2-system-ion.so").read_bytes()
     args.output.mkdir(parents=True,exist_ok=False)
     for name in LIBS:
         (args.output/name).write_bytes((args.parent/name).read_bytes())
@@ -88,12 +89,13 @@ def main():
     (args.output/"BUILD.json").write_text(json.dumps({
         "status":"compiled-not-device-validated","inputs":inputs,"commands":commands,"sha256":hashes,
         "parent_build_sha256":sha(args.parent/"BUILD.json"),
+        "memory_backend":"dma-heap-system-uncached-v1" if independent_memory else "msm-gem-wc",
         "qti_mapper_extension_companion":{"file":"mapper.qti.so","framework_hal":False,
             "backend":"mapper.quest2.so","single_view_only":True,"metadata_state":"verified shared explicit-set bits"},
         "limits":["RGB linear/UBWC and linear NV12/P010; compressed CPU mapping rejected; full contract incomplete",
                   "No mapper3/4 implementation calls; donor interface libraries still linked",
                   "Optional AIDL allocator requires real Binder validation; YUV, dynamic HDR and system integration incomplete",
-                  "Memory backend still MSM GEM WC for uncached allocation"]
+                  "Requires matching independent system-uncached DMA heap" if independent_memory else "Uncached memory still requires MSM GEM WC"]
     },indent=2)+"\n")
     print("QUEST2_MAPPER5_BUILT",args.output)
 

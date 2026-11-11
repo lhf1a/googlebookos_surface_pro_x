@@ -1,0 +1,264 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -619,11 +619,14 @@
+ {
+ 	int i;
+ 
++	if (!size)
++		return NULL;
++
+ 	for (i = 0; i < gmu->global_entries; i++) {
+ 		struct gmu_memdesc *md = &gmu->gmu_globals[i];
+ 
+-		if ((addr >= md->gmuaddr) &&
+-		(((addr + size) <= (md->gmuaddr + md->size))))
++		if (addr >= md->gmuaddr &&
++			(u64)addr + size <= (u64)md->gmuaddr + md->size)
+ 			return md;
+ 	}
+ 
+@@ -633,16 +636,93 @@
+ static int find_vma_block(struct a6xx_gmu_device *gmu, u32 addr, u32 size)
+ {
+ 	int i;
++
++	if (!size)
++		return -EINVAL;
+ 
+ 	for (i = 0; i < GMU_MEM_TYPE_MAX; i++) {
+ 		struct gmu_vma_entry *vma = &gmu->vma[i];
+ 
+-		if ((addr >= vma->start) &&
+-			((addr + size) <= (vma->start + vma->size)))
++		if (addr >= vma->start &&
++			(u64)addr + size <= (u64)vma->start + vma->size)
+ 			return i;
+ 	}
+ 
+ 	return -ENOENT;
++}
++
++/* Decode locally: the previous payload need not align the next header. */
++static int a6xx_gmu_next_fw_block(const struct firmware *fw, size_t *offset,
++	struct gmu_block_header *blk)
++{
++	if (*offset > fw->size || fw->size - *offset < sizeof(*blk))
++		return -EINVAL;
++
++	memcpy(blk, fw->data + *offset, sizeof(*blk));
++	blk->addr = le32_to_cpu(blk->addr);
++	blk->size = le32_to_cpu(blk->size);
++	blk->type = le32_to_cpu(blk->type);
++	blk->value = le32_to_cpu(blk->value);
++	*offset += sizeof(*blk);
++	if (blk->size > fw->size - *offset)
++		return -EINVAL;
++	*offset += blk->size;
++	return 0;
++}
++
++/* Validate the entire image before allocating metadata or writing any payload. */
++static int a6xx_gmu_validate_fw(struct a6xx_gmu_device *gmu, bool backing)
++{
++	const struct firmware *fw = gmu->fw_image;
++	struct gmu_block_header blk;
++	size_t offset = 0;
++	bool payload = false;
++	int id, ret;
++
++	if (!fw || !fw->data || !fw->size)
++		return -EINVAL;
++
++	while (offset < fw->size) {
++		ret = a6xx_gmu_next_fw_block(fw, &offset, &blk);
++		if (ret)
++			return ret;
++		if (!blk.size) {
++			if (payload)
++				return -EINVAL;
++			if (blk.type != GMU_BLK_TYPE_PREALLOC_REQ &&
++				blk.type != GMU_BLK_TYPE_PREALLOC_PERSIST_REQ)
++				continue;
++			id = find_vma_block(gmu, blk.addr, blk.value);
++			if (id < 0)
++				return -EINVAL;
++			if (id != GMU_ITCM && id != GMU_DTCM &&
++				id != GMU_NONCACHED_USER) {
++				if (!IS_ALIGNED(blk.addr, PAGE_SIZE) ||
++					blk.value > U32_MAX - (PAGE_SIZE - 1) ||
++					find_vma_block(gmu, blk.addr,
++						PAGE_ALIGN(blk.value)) != id)
++					return -EINVAL;
++			}
++			continue;
++		}
++
++		payload = true;
++		id = find_vma_block(gmu, blk.addr, blk.size);
++		if (id < 0)
++			return -EINVAL;
++		if (id == GMU_ITCM || id == GMU_DTCM) {
++			if (!IS_ALIGNED(blk.addr, sizeof(u32)))
++				return -EINVAL;
++		} else if (backing) {
++			struct gmu_memdesc *md =
++				find_gmu_memdesc(gmu, blk.addr, blk.size);
++
++			if (!md || IS_ERR_OR_NULL(md->hostptr))
++				return -EINVAL;
++		}
++	}
++
++	return payload ? 0 : -EINVAL;
+ }
+ 
+ static int _load_legacy_gmu_fw(struct kgsl_device *device,
+@@ -650,7 +730,7 @@
+ {
+ 	const struct firmware *fw = gmu->fw_image;
+ 
+-	if (fw->size > MAX_GMUFW_SIZE)
++	if (!fw || !fw->data || !fw->size || fw->size > MAX_GMUFW_SIZE)
+ 		return -EINVAL;
+ 
+ 	gmu_core_blkwrite(device, A6XX_GMU_CM3_ITCM_START, fw->data,
+@@ -675,55 +755,42 @@
+ int a6xx_gmu_load_fw(struct adreno_device *adreno_dev)
+ {
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+-	const u8 *fw = (const u8 *)gmu->fw_image->data;
++	struct gmu_block_header blk;
++	size_t offset = 0;
++	int ret;
+ 
+ 	if (adreno_is_a630(adreno_dev) || adreno_is_a615_family(adreno_dev))
+ 		return _load_legacy_gmu_fw(KGSL_DEVICE(adreno_dev), gmu);
+ 
+-	while (fw < gmu->fw_image->data + gmu->fw_image->size) {
+-		const struct gmu_block_header *blk  =
+-					(const struct gmu_block_header *)fw;
++	ret = a6xx_gmu_validate_fw(gmu, true);
++	if (ret)
++		return ret;
++
++	while (offset < gmu->fw_image->size) {
++		const u8 *data;
+ 		int id;
+ 
+-		fw += sizeof(*blk);
+-
+-		/* Don't deal with zero size blocks */
+-		if (blk->size == 0)
++		ret = a6xx_gmu_next_fw_block(gmu->fw_image, &offset, &blk);
++		if (ret)
++			return ret;
++		if (!blk.size)
+ 			continue;
+ 
+-		id = find_vma_block(gmu, blk->addr, blk->size);
+-
+-		if (id < 0) {
+-			dev_err(&gmu->pdev->dev,
+-				"Unknown block in GMU FW addr:0x%x size:0x%x\n",
+-				blk->addr, blk->size);
+-			return -EINVAL;
+-		}
+-
++		data = gmu->fw_image->data + offset - blk.size;
++		id = find_vma_block(gmu, blk.addr, blk.size);
+ 		if (id == GMU_ITCM) {
+-			load_tcm(adreno_dev, fw,
+-				A6XX_GMU_CM3_ITCM_START,
+-				gmu->vma[GMU_ITCM].start, blk);
++			load_tcm(adreno_dev, data, A6XX_GMU_CM3_ITCM_START,
++				gmu->vma[GMU_ITCM].start, &blk);
+ 		} else if (id == GMU_DTCM) {
+-			load_tcm(adreno_dev, fw,
+-				A6XX_GMU_CM3_DTCM_START,
+-				gmu->vma[GMU_DTCM].start, blk);
++			load_tcm(adreno_dev, data, A6XX_GMU_CM3_DTCM_START,
++				gmu->vma[GMU_DTCM].start, &blk);
+ 		} else {
+ 			struct gmu_memdesc *md =
+-				find_gmu_memdesc(gmu, blk->addr, blk->size);
+-
+-			if (!md) {
+-				dev_err(&gmu->pdev->dev,
+-					"No backing memory for GMU FW block addr:0x%x size:0x%x\n",
+-					blk->addr, blk->size);
+-				return -EINVAL;
+-			}
+-
+-			memcpy(md->hostptr + (blk->addr - md->gmuaddr), fw,
+-				blk->size);
++				find_gmu_memdesc(gmu, blk.addr, blk.size);
++
++			memcpy(md->hostptr + (blk.addr - md->gmuaddr), data,
++				blk.size);
+ 		}
+-
+-		fw += blk->size;
+ 	}
+ 
+ 	/* Proceed only after the FW is written */
+@@ -1618,10 +1685,11 @@
+ {
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	const struct adreno_a6xx_core *a6xx_core = to_a6xx_core(adreno_dev);
+-	struct gmu_block_header *blk;
+-	int ret, offset = 0;
+-
+-	/* GMU fw already saved and verified so do nothing new */
++	struct gmu_block_header blk;
++	size_t offset = 0;
++	int ret;
++
++	/* Keep the firmware reference through parsing and all later loads. */
+ 	if (!gmu->fw_image) {
+ 
+ 		if (a6xx_core->gmufw_name == NULL)
+@@ -1636,29 +1704,23 @@
+ 		}
+ 	}
+ 
+-	/*
+-	 * Zero payload fw blocks contain meta data and are
+-	 * guaranteed to precede fw load data. Parse the
+-	 * meta data blocks.
+-	 */
++	if (adreno_is_a630(adreno_dev) || adreno_is_a615_family(adreno_dev))
++		return (!gmu->fw_image->data || !gmu->fw_image->size ||
++			gmu->fw_image->size > MAX_GMUFW_SIZE) ? -EINVAL : 0;
++
++	ret = a6xx_gmu_validate_fw(gmu, false);
++	if (ret)
++		return ret;
++
+ 	while (offset < gmu->fw_image->size) {
+-		blk = (struct gmu_block_header *)&gmu->fw_image->data[offset];
+-
+-		if (offset + sizeof(*blk) > gmu->fw_image->size) {
+-			dev_err(&gmu->pdev->dev, "Invalid FW Block\n");
+-			return -EINVAL;
+-		}
+-
+-		/* Done with zero length blocks so return */
+-		if (blk->size)
++		ret = a6xx_gmu_next_fw_block(gmu->fw_image, &offset, &blk);
++		if (ret)
++			return ret;
++		if (blk.size)
+ 			break;
+-
+-		offset += sizeof(*blk);
+-
+-		if (blk->type == GMU_BLK_TYPE_PREALLOC_REQ ||
+-				blk->type == GMU_BLK_TYPE_PREALLOC_PERSIST_REQ) {
+-			ret = a6xx_gmu_process_prealloc(gmu, blk);
+-
++		if (blk.type == GMU_BLK_TYPE_PREALLOC_REQ ||
++			blk.type == GMU_BLK_TYPE_PREALLOC_PERSIST_REQ) {
++			ret = a6xx_gmu_process_prealloc(gmu, &blk);
+ 			if (ret)
+ 				return ret;
+ 		}

@@ -153,7 +153,8 @@
       "commit": "6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc",
       "published_build": "5158488.10240.150",
       "match": "same 5158488 family; exact binary build match unproven",
-      "kernel_series": "4.19; reference only, must port to 6.18"
+      "kernel_series": "4.19; reference only, must port to 6.18",
+      "complete_source_manifest": "kgsl-sde-source-inputs.json"
     },
     "display": {
       "repository": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display",
@@ -174,19 +175,17 @@
       ]
     },
     "memory": {
-      "current": "minigbm/mapper5 plus local QTI adapter",
-      "candidate": "private native QTI gralloc/mapper: RGB GPU/fence/exec and six-frame NV12/P010 VPU-to-GPU same-dma-buf verified",
+      "current": "mapper5/AIDL allocator + original QTI gralloc; accepted runtime still MSM GEM WC",
+      "candidate": "independent cached/WC DMA-heap bundle; source compiled, hardware/system acceptance in progress",
       "available": "pinned donor allocator/mapper/gralloc and public ION source",
       "open": [
-        "Android mapper/allocator service integration",
-        "legacy P010 plane metadata, native OMX/Surface, DRC/flush/reuse",
-        "UBWC and protected layout validation",
-        "uncached backend independent of MSM GEM",
-        "secure heap unsupported"
+        "independent exporter GPU/VPU/display cache and fence lifetime validation",
+        "secure heap unsupported",
+        "PM and cross-device qualification"
       ]
     },
     "video": {
-      "current": "OEM OMX/HIDL + VIDC bridge/Venus, AVC-only, software renderer",
+      "current": "source OMX/HIDL + VIDC bridge/Venus; AVC/HEVC native buffers and HEVC CSD on v21-release-4k",
       "target": "native QTI buffers + matching msm_vidc",
       "available": "pinned OMX and VIDC UAPI/extradata reference",
       "open": [
@@ -198,7 +197,7 @@
       ]
     },
     "display": {
-      "current": "drm_hwcomposer + mainline KMS + Surface panel",
+      "current": "source QTI HWC/SDM + mainline DPU/eDP with private-property translation",
       "target": "QTI HWC/SDM and matching SDE/display interfaces",
       "available": "pinned HWC/SDM and SDE UAPI reference",
       "open": [

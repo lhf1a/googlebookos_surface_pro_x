@@ -1,0 +1,65 @@
+--- a/drivers/gpu/msm/adreno_a5xx.c
++++ b/drivers/gpu/msm/adreno_a5xx.c
+@@ -8,7 +8,7 @@
+ #include <linux/firmware.h>
+ #include <linux/of.h>
+ #include <linux/of_device.h>
+-#include <linux/qcom_scm.h>
++#include <linux/firmware/qcom/qcom_scm.h>
+ #include <linux/slab.h>
+ 
+ #include "adreno.h"
+@@ -217,7 +217,7 @@
+ 	return a5xx_get_cp_init_cmds(adreno_dev);
+ }
+ 
+-const static struct {
++static const struct {
+ 	u32 reg;
+ 	u32 base;
+ 	u32 count;
+@@ -2312,7 +2312,7 @@
+ 					A5XX_GPMU_CM3_SYSRESET, 1);
+ 				kgsl_schedule_work(&adreno_dev->gpmu_work);
+ 			}
+-			/* fallthrough */
++			fallthrough;
+ 		case BIT(FW_INTR_INFO):
+ 		case BIT(LLM_ACK_ERR_INTR):
+ 		case BIT(ISENS_TRIM_ERR_INTR):
+--- a/drivers/gpu/msm/kgsl_iommu.c
++++ b/drivers/gpu/msm/kgsl_iommu.c
+@@ -13,10 +13,12 @@
+ #include <linux/of_platform.h>
+ #include <linux/seq_file.h>
+ #include <linux/delay.h>
+-#include <linux/qcom_scm.h>
++#include <linux/firmware/qcom/qcom_scm.h>
+ #include <linux/random.h>
+ #include <linux/regulator/consumer.h>
++#if IS_ENABLED(CONFIG_QCOM_SECURE_BUFFER)
+ #include <soc/qcom/secure_buffer.h>
++#endif
+ #include <linux/io-64-nonatomic-hi-lo.h>
+ 
+ #include "adreno.h"
+@@ -1085,9 +1087,17 @@
+ 	if (!test_bit(KGSL_MMU_SMMU_APERTURE, &device->mmu.features))
+ 		return 0;
+ 
+-	ret = qcom_scm_kgsl_set_smmu_aperture(cb_num);
++	/* The firmware encodes the actual context bank in an eight-bit field. */
++	if (cb_num < 0 || cb_num > U8_MAX)
++		return -EINVAL;
++	if (!qcom_scm_is_available())
++		return -EPROBE_DEFER;
++	if (!qcom_scm_set_gpu_smmu_aperture_is_available())
++		return -EOPNOTSUPP;
++
++	ret = qcom_scm_set_gpu_smmu_aperture(cb_num);
+ 	if (ret == -EBUSY)
+-		ret = qcom_scm_kgsl_set_smmu_aperture(cb_num);
++		ret = qcom_scm_set_gpu_smmu_aperture(cb_num);
+ 
+ 	if (ret)
+ 		dev_err(device->dev, "Unable to set the SMMU aperture: %d. The aperture needs to be set to use per-process pagetables\n",

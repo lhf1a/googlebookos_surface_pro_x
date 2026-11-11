@@ -1,0 +1,448 @@
+--- a/drivers/gpu/msm/adreno_a6xx_rpmh.c
++++ b/drivers/gpu/msm/adreno_a6xx_rpmh.c
+@@ -3,7 +3,8 @@
+  * Copyright (c) 2020, The Linux Foundation. All rights reserved.
+  */
+ 
+-#include <dt-bindings/regulator/qcom,rpmh-regulator-levels.h>
++#include <dt-bindings/power/qcom,rpmhpd.h>
++#include <linux/unaligned.h>
+ #include <linux/types.h>
+ #include <soc/qcom/cmd-db.h>
+ #include <soc/qcom/tcs.h>
+@@ -15,7 +16,7 @@
+ 
+ struct rpmh_arc_vals {
+ 	u32 num;
+-	const u16 *val;
++	const __le16 *val;
+ };
+ 
+ struct bcm {
+@@ -49,21 +50,32 @@
+ static int rpmh_arc_cmds(struct rpmh_arc_vals *arc, const char *res_id)
+ {
+ 	size_t len = 0;
+-
+-	arc->val = cmd_db_read_aux_data(res_id, &len);
+-
+-	/*
+-	 * cmd_db_read_aux_data() gives us a zero-padded table of
+-	 * size len that contains the arc values. To determine the
+-	 * number of arc values, we loop through the table and count
+-	 * them until we get to the end of the buffer or hit the
+-	 * zero padding.
+-	 */
+-	for (arc->num = 1; arc->num < (len >> 1); arc->num++) {
+-		if (arc->val[arc->num - 1] != 0 &&  arc->val[arc->num] == 0)
+-			break;
+-	}
+-
++	const __le16 *values;
++	u16 previous = 0;
++	u32 i, count;
++
++	arc->num = 0;
++	arc->val = NULL;
++	values = cmd_db_read_aux_data(res_id, &len);
++	if (IS_ERR(values))
++		return PTR_ERR(values);
++	if (!values || !len || len % sizeof(*values) || len / sizeof(*values) > 256)
++		return -EINVAL;
++	if (get_unaligned_le16(values) != 0)
++		return -EINVAL;
++
++	count = len / sizeof(*values);
++	for (i = 1; i < len / sizeof(*values); i++) {
++		u16 value = get_unaligned_le16(&values[i]);
++
++		if (!value && count == len / sizeof(*values))
++			count = i;
++		if ((i >= count && value) || (value && value < previous))
++			return -EINVAL;
++		previous = value;
++	}
++	arc->val = values;
++	arc->num = count;
+ 	return 0;
+ }
+ 
+@@ -74,6 +86,10 @@
+ 	int i, j, k;
+ 	uint16_t cur_vlvl;
+ 	bool found_match;
++
++	if (!pri_rail->val || !sec_rail->val || !pri_rail->num ||
++		!sec_rail->num || pri_rail->num > 256 || sec_rail->num > 256)
++		return -EINVAL;
+ 
+ 	/* i tracks current KGSL GPU frequency table entry
+ 	 * j tracks secondary rail voltage table entry
+@@ -84,8 +100,8 @@
+ 
+ 		/* Look for a primary rail voltage that matches a VLVL level */
+ 		for (k = 0; k < pri_rail->num; k++) {
+-			if (pri_rail->val[k] >= vlvl[i]) {
+-				cur_vlvl = pri_rail->val[k];
++			if (get_unaligned_le16(&pri_rail->val[k]) >= vlvl[i]) {
++				cur_vlvl = get_unaligned_le16(&pri_rail->val[k]);
+ 				found_match = true;
+ 				break;
+ 			}
+@@ -101,7 +117,7 @@
+ 		 * corresponding index of the primary rail
+ 		 */
+ 		for (j = 0; j < sec_rail->num; j++) {
+-			if (sec_rail->val[j] >= cur_vlvl ||
++			if (get_unaligned_le16(&sec_rail->val[j]) >= cur_vlvl ||
+ 					j + 1 == sec_rail->num)
+ 				break;
+ 		}
+@@ -129,11 +145,7 @@
+ 		if (i == count - 1 || bcms[i].vcd != bcms[i + 1].vcd)
+ 			commit = true;
+ 
+-		/*
+-		 * On a660, the "ACV" y vote should be 0x08 if there is a valid
+-		 * vote and 0x00 if not. This is kind of hacky and a660 specific
+-		 * but we can clean it up when we add a new target
+-		 */
++		/* ACV bit 3 is the enable mask on the supported topologies. */
+ 		if (bcms[i].fixed) {
+ 			if (!ab && !ib)
+ 				data[i] = BCM_TCS_CMD(commit, false, 0x0, 0x0);
+@@ -199,13 +211,17 @@
+ 		int bcm_count, u32 *levels, int levels_count)
+ {
+ 	struct rpmh_bw_votes *votes;
+-	int i;
++	int i, ret;
++
++	if (!bcms || !levels || bcm_count <= 0 || bcm_count > MAX_BW_CMDS ||
++		levels_count <= 0 || levels_count > MAX_GX_LEVELS)
++		return ERR_PTR(-EINVAL);
+ 
+ 	votes = kzalloc(sizeof(*votes), GFP_KERNEL);
+ 	if (!votes)
+ 		return ERR_PTR(-ENOMEM);
+ 
+-	votes->addrs = kcalloc(bcm_count, sizeof(*votes->cmds), GFP_KERNEL);
++	votes->addrs = kcalloc(bcm_count, sizeof(*votes->addrs), GFP_KERNEL);
+ 	if (!votes->addrs) {
+ 		free_rpmh_bw_votes(votes);
+ 		return ERR_PTR(-ENOMEM);
+@@ -226,12 +242,30 @@
+ 		const struct bcm_data *data;
+ 
+ 		data = cmd_db_read_aux_data(bcms[i].name, &l);
++		if (IS_ERR(data)) {
++			ret = PTR_ERR(data);
++			goto error;
++		}
++		if (!data || l < sizeof(*data)) {
++			ret = -EINVAL;
++			goto error;
++		}
+ 
+ 		votes->addrs[i] = cmd_db_read_addr(bcms[i].name);
+-
+-		bcms[i].unit = le32_to_cpu(data->unit);
+-		bcms[i].width = le16_to_cpu(data->width);
++		if (!votes->addrs[i] || cmd_db_read_slave_id(bcms[i].name) != CMD_DB_HW_BCM) {
++			ret = -EINVAL;
++			goto error;
++		}
++
++		bcms[i].unit = get_unaligned_le32(&data->unit);
++		bcms[i].width = get_unaligned_le16(&data->width);
+ 		bcms[i].vcd = data->vcd;
++		if (!bcms[i].fixed && (!bcms[i].unit || !bcms[i].width ||
++			!bcms[i].buswidth || !bcms[i].channels ||
++			(u64)bcms[i].buswidth * bcms[i].channels > U32_MAX)) {
++			ret = -EINVAL;
++			goto error;
++		}
+ 	}
+ 
+ 	for (i = 0; i < bcm_count; i++) {
+@@ -250,6 +284,10 @@
+ 	}
+ 
+ 	return votes;
++
++error:
++	free_rpmh_bw_votes(votes);
++	return ERR_PTR(ret);
+ }
+ 
+ /*
+@@ -309,8 +347,7 @@
+ 	/* Add the zero powerlevel for the perf table */
+ 	table->gpu_level_num = device->pwrctrl.num_pwrlevels + 1;
+ 
+-	if (table->gpu_level_num > pri_rail->num ||
+-		table->gpu_level_num > ARRAY_SIZE(vlvl_tbl)) {
++	if (table->gpu_level_num > ARRAY_SIZE(vlvl_tbl)) {
+ 		dev_err(&gmu->pdev->dev,
+ 			"Defined more GPU DCVS levels than RPMh can support\n");
+ 		return -ERANGE;
+@@ -371,22 +408,34 @@
+  * List of Bus Control Modules (BCMs) that need to be configured for the GPU
+  * to access DDR. For each bus level we will generate a vote each BC
+  */
+-static struct bcm a660_ddr_bcms[] = {
+-	{ .name = "SH0", .buswidth = 16 },
+-	{ .name = "MC0", .buswidth = 4 },
++/* SC8180X GPU -> LLCC/EBI and GPU -> SNOC -> CNOC, from the ICC topology. */
++static const struct bcm sc8180x_ddr_bcms[] = {
++	{ .name = "MC0", .buswidth = 4, .channels = 8 },
++	{ .name = "SH0", .buswidth = 16, .channels = 8 },
+ 	{ .name = "ACV", .fixed = true },
+ };
+ 
+-/* Same as above, but for the CNOC BCMs */
+-static struct bcm a660_cnoc_bcms[] = {
+-	{ .name = "CN0", .buswidth = 4 },
++static const struct bcm sc8180x_cnoc_bcms[] = {
++	{ .name = "SN15", .buswidth = 8, .channels = 1 },
++	{ .name = "SN3", .buswidth = 8, .channels = 1 },
++	{ .name = "CN0", .buswidth = 8, .channels = 1 },
+ };
+ 
+-static void build_bw_table_cmd(struct hfi_bwtable_cmd *cmd,
++static int build_bw_table_cmd(struct hfi_bwtable_cmd *cmd,
+ 		struct rpmh_bw_votes *ddr, struct rpmh_bw_votes *cnoc)
+ {
+ 	u32 i, j;
+ 
++	if (!ddr || !ddr->num_levels || !ddr->num_cmds ||
++		ddr->num_levels > ARRAY_SIZE(cmd->ddr_cmd_data) ||
++		ddr->num_cmds > ARRAY_SIZE(cmd->ddr_cmd_addrs) ||
++		(cnoc && (!cnoc->num_levels || !cnoc->num_cmds ||
++		cnoc->num_levels > ARRAY_SIZE(cmd->cnoc_cmd_data) ||
++		cnoc->num_cmds > ARRAY_SIZE(cmd->cnoc_cmd_addrs))))
++		return -EINVAL;
++
++	memset(cmd, 0, sizeof(*cmd));
++	CMD_MSG_HDR((*cmd), H2F_MSG_BW_VOTE_TBL);
+ 	cmd->bw_level_num = ddr->num_levels;
+ 	cmd->ddr_cmds_num = ddr->num_cmds;
+ 	cmd->ddr_wait_bitmask = ddr->wait_bitmask;
+@@ -399,10 +448,10 @@
+ 			cmd->ddr_cmd_data[i][j] = (u32) ddr->cmds[i][j];
+ 
+ 	if (!cnoc)
+-		return;
++		return 0;
+ 
+ 	cmd->cnoc_cmds_num = cnoc->num_cmds;
+-		cmd->cnoc_wait_bitmask = cnoc->wait_bitmask;
++	cmd->cnoc_wait_bitmask = cnoc->wait_bitmask;
+ 
+ 	for (i = 0; i < cnoc->num_cmds; i++)
+ 		cmd->cnoc_cmd_addrs[i] = cnoc->addrs[i];
+@@ -410,6 +459,8 @@
+ 	for (i = 0; i < cnoc->num_levels; i++)
+ 		for (j = 0; j < cnoc->num_cmds; j++)
+ 			cmd->cnoc_cmd_data[i][j] = (u32) cnoc->cmds[i][j];
++
++	return 0;
+ }
+ 
+ static int build_bw_table(struct adreno_device *adreno_dev)
+@@ -417,37 +468,44 @@
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-	struct rpmh_bw_votes *ddr, *cnoc = NULL;
++	struct rpmh_bw_votes *ddr, *cnoc;
++	struct bcm ddr_bcms[ARRAY_SIZE(sc8180x_ddr_bcms)];
++	struct bcm cnoc_bcms[ARRAY_SIZE(sc8180x_cnoc_bcms)];
+ 	u32 *cnoc_table;
+-	u32 count;
+-
+-	ddr = build_rpmh_bw_votes(a660_ddr_bcms, ARRAY_SIZE(a660_ddr_bcms),
++	int count = 0, ret;
++
++	if (!adreno_is_a680(adreno_dev))
++		return -EOPNOTSUPP;
++
++	memcpy(ddr_bcms, sc8180x_ddr_bcms, sizeof(ddr_bcms));
++	memcpy(cnoc_bcms, sc8180x_cnoc_bcms, sizeof(cnoc_bcms));
++	ddr = build_rpmh_bw_votes(ddr_bcms, ARRAY_SIZE(ddr_bcms),
+ 		pwr->ddr_table, pwr->ddr_table_count);
+ 	if (IS_ERR(ddr))
+ 		return PTR_ERR(ddr);
+ 
+-	cnoc_table = kgsl_bus_get_table(device->pdev, "qcom,bus-table-cnoc",
+-		&count);
+-
+-	if (count > 0)
+-		cnoc = build_rpmh_bw_votes(a660_cnoc_bcms,
+-			ARRAY_SIZE(a660_cnoc_bcms), cnoc_table, count);
+-
++	cnoc_table = kgsl_bus_get_table(device->pdev, "qcom,bus-table-cnoc", &count);
++	if (IS_ERR(cnoc_table)) {
++		ret = PTR_ERR(cnoc_table);
++		goto free_ddr;
++	}
++	if (count != MAX_CNOC_LEVELS) {
++		ret = -EINVAL;
++		kfree(cnoc_table);
++		goto free_ddr;
++	}
++	cnoc = build_rpmh_bw_votes(cnoc_bcms, ARRAY_SIZE(cnoc_bcms), cnoc_table, count);
+ 	kfree(cnoc_table);
+-
+ 	if (IS_ERR(cnoc)) {
+-		free_rpmh_bw_votes(ddr);
+-		return PTR_ERR(cnoc);
+-	}
+-
+-	CMD_MSG_HDR(gmu->hfi.bw_table, H2F_MSG_BW_VOTE_TBL);
+-
+-	build_bw_table_cmd(&gmu->hfi.bw_table, ddr, cnoc);
+-
++		ret = PTR_ERR(cnoc);
++		goto free_ddr;
++	}
++
++	ret = build_bw_table_cmd(&gmu->hfi.bw_table, ddr, cnoc);
++	free_rpmh_bw_votes(cnoc);
++free_ddr:
+ 	free_rpmh_bw_votes(ddr);
+-	free_rpmh_bw_votes(cnoc);
+-
+-	return 0;
++	return ret;
+ }
+ 
+ int a6xx_build_rpmh_tables(struct adreno_device *adreno_dev)
+--- a/drivers/gpu/msm/kgsl_bus.c
++++ b/drivers/gpu/msm/kgsl_bus.c
+@@ -159,22 +159,25 @@
+ u32 *kgsl_bus_get_table(struct platform_device *pdev,
+ 		const char *name, int *count)
+ {
++	struct device_node *node = pdev->dev.of_node;
+ 	u32 *levels;
+-	int i, num = of_property_count_elems_of_size(pdev->dev.of_node,
+-		name, sizeof(u32));
+-
+-	/* If the bus wasn't specified, then build a static table */
++	int num, ret;
++
++	*count = 0;
++	if (!of_find_property(node, name, NULL))
++		return ERR_PTR(-ENOENT);
++	num = of_property_count_elems_of_size(node, name, sizeof(u32));
+ 	if (num <= 0)
+-		return ERR_PTR(-EINVAL);
+-
++		return ERR_PTR(num ? num : -EINVAL);
+ 	levels = kcalloc(num, sizeof(*levels), GFP_KERNEL);
+ 	if (!levels)
+ 		return ERR_PTR(-ENOMEM);
+ 
+-	for (i = 0; i < num; i++)
+-		of_property_read_u32_index(pdev->dev.of_node,
+-			name, i, &levels[i]);
+-
++	ret = of_property_read_u32_array(node, name, levels, num);
++	if (ret) {
++		kfree(levels);
++		return ERR_PTR(ret);
++	}
+ 	*count = num;
+ 	return levels;
+ }
+@@ -183,7 +186,7 @@
+ {
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+ 	int count;
+-	int ddr = of_fdt_get_ddrtype();
++	int ddr = kgsl_get_ddrtype();
+ 
+ 	if (ddr >= 0) {
+ 		char str[32];
+@@ -193,6 +196,12 @@
+ 		pwr->ddr_table = kgsl_bus_get_table(pdev, str, &count);
+ 		if (!IS_ERR(pwr->ddr_table))
+ 			goto done;
++		if (PTR_ERR(pwr->ddr_table) != -ENOENT) {
++			int ret = PTR_ERR(pwr->ddr_table);
++
++			pwr->ddr_table = NULL;
++			return ret;
++		}
+ 	}
+ 
+ 	/* Look if a generic table is present */
+--- a/drivers/gpu/msm/kgsl.c
++++ b/drivers/gpu/msm/kgsl.c
+@@ -4447,13 +4447,31 @@
+ 	return ret ? ret : num;
+ }
+ 
++int kgsl_get_ddrtype(void)
++{
++	struct device_node *node;
++	u32 value;
++	int type = -ENOENT;
++
++	for_each_node_by_type(node, "memory") {
++		if (of_property_read_u32(node, "ddr_device_type", &value))
++			continue;
++		if (value > INT_MAX || (type >= 0 && value != type)) {
++			of_node_put(node);
++			return -EINVAL;
++		}
++		type = value;
++	}
++	return type;
++}
++
+ int kgsl_of_property_read_ddrtype(struct device_node *node, const char *base,
+ 		u32 *ptr)
+ {
+ 	char str[32];
+-	int ddr = of_fdt_get_ddrtype();
+-
+-	/* of_fdt_get_ddrtype returns error if the DDR type isn't determined */
++	int ddr = kgsl_get_ddrtype();
++
++	/* kgsl_get_ddrtype returns error if the DDR type isn't determined */
+ 	if (ddr >= 0) {
+ 		int ret;
+ 
+@@ -4461,7 +4479,7 @@
+ 		ret = snprintf(str, sizeof(str), "%s-ddr%d", base, ddr);
+ 
+ 		/* WARN_ON() if the array size was too small for the string */
+-		if (WARN_ON(ret > sizeof(str)))
++		if (WARN_ON(ret >= sizeof(str)))
+ 			return -ENOMEM;
+ 
+ 		/* Read the expanded string */
+--- a/drivers/gpu/msm/kgsl_device.h
++++ b/drivers/gpu/msm/kgsl_device.h
+@@ -969,6 +969,8 @@
+  *
+  * Return: 0 on success or error code on failure.
+  */
++int kgsl_get_ddrtype(void);
++
+ int kgsl_of_property_read_ddrtype(struct device_node *node, const char *base,
+ 		u32 *ptr);
+ 
+--- a/drivers/gpu/msm/adreno_a6xx.c
++++ b/drivers/gpu/msm/adreno_a6xx.c
+@@ -193,7 +193,7 @@
+ 	adreno_dev->highest_bank_bit = a6xx_core->highest_bank_bit;
+ 
+ 	/* If the memory type is DDR 4, override the existing configuration */
+-	if (of_fdt_get_ddrtype() == 0x7) {
++	if (kgsl_get_ddrtype() == 0x7) {
+ 		if (adreno_is_a642(adreno_dev) ||
+ 			adreno_is_a642l(adreno_dev) ||
+ 			adreno_is_a643(adreno_dev))

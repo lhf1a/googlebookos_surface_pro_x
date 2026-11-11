@@ -1,0 +1,230 @@
+--- a/drivers/gpu/msm/kgsl_mmu.c
++++ b/drivers/gpu/msm/kgsl_mmu.c
+@@ -278,9 +278,12 @@
+ struct kgsl_pagetable *
+ kgsl_mmu_createpagetableobject(struct kgsl_mmu *mmu, unsigned int name)
+ {
+-	int status = 0;
++	int status;
+ 	struct kgsl_pagetable *pagetable = NULL;
+ 	unsigned long flags;
++
++	if (!MMU_OP_VALID(mmu, mmu_init_pt))
++		return ERR_PTR(-ENODEV);
+ 
+ 	pagetable = kzalloc(sizeof(struct kgsl_pagetable), GFP_KERNEL);
+ 	if (pagetable == NULL)
+@@ -298,12 +301,10 @@
+ 	atomic_long_set(&pagetable->stats.mapped, 0);
+ 	atomic_long_set(&pagetable->stats.max_mapped, 0);
+ 
+-	if (MMU_OP_VALID(mmu, mmu_init_pt)) {
+-		status = mmu->mmu_ops->mmu_init_pt(mmu, pagetable);
+-		if (status) {
+-			kfree(pagetable);
+-			return ERR_PTR(status);
+-		}
++	status = mmu->mmu_ops->mmu_init_pt(mmu, pagetable);
++	if (status) {
++		kfree(pagetable);
++		return ERR_PTR(status);
+ 	}
+ 
+ 	spin_lock_irqsave(&kgsl_driver.ptlock, flags);
+@@ -539,93 +540,8 @@
+ 	return false;
+ }
+ 
+-/*
+- * NOMMU definitions - NOMMU really just means that the MMU is kept in pass
+- * through and the GPU directly accesses physical memory. Used in debug mode
+- * and when a real MMU isn't up and running yet.
+- */
+-
+-static bool nommu_gpuaddr_in_range(struct kgsl_pagetable *pagetable,
+-		uint64_t gpuaddr, uint64_t size)
+-{
+-	return (gpuaddr != 0) ? true : false;
+-}
+-
+-static int nommu_get_gpuaddr(struct kgsl_pagetable *pagetable,
+-		struct kgsl_memdesc *memdesc)
+-{
+-	if (WARN_ONCE(memdesc->sgt->nents > 1,
+-		"Attempt to map non-contiguous memory with NOMMU\n"))
+-		return -EINVAL;
+-
+-	memdesc->gpuaddr = (uint64_t) sg_phys(memdesc->sgt->sgl);
+-
+-	if (memdesc->gpuaddr) {
+-		memdesc->pagetable = pagetable;
+-		return 0;
+-	}
+-
+-	return -ENOMEM;
+-}
+-
+-static const struct kgsl_mmu_pt_ops nommu_pt_ops = {
+-	.get_gpuaddr = nommu_get_gpuaddr,
+-	.addr_in_range = nommu_gpuaddr_in_range,
+-};
+-
+-static int nommu_init_pt(struct kgsl_mmu *mmu, struct kgsl_pagetable *pt)
+-{
+-	struct kgsl_device *device = KGSL_MMU_DEVICE(mmu);
+-	struct kgsl_global_memdesc *md;
+-
+-	if (pt == NULL)
+-		return -EINVAL;
+-
+-	pt->pt_ops = &nommu_pt_ops;
+-
+-	list_for_each_entry(md, &device->globals, node)
+-		md->memdesc.gpuaddr =
+-			(uint64_t) sg_phys(md->memdesc.sgt->sgl);
+-
+-	return 0;
+-}
+-
+-static struct kgsl_pagetable *nommu_getpagetable(struct kgsl_mmu *mmu,
+-		unsigned long name)
+-{
+-	struct kgsl_pagetable *pagetable;
+-
+-	pagetable = kgsl_get_pagetable(KGSL_MMU_GLOBAL_PT);
+-
+-	if (pagetable == NULL)
+-		pagetable = kgsl_mmu_createpagetableobject(mmu,
+-			KGSL_MMU_GLOBAL_PT);
+-
+-	return pagetable;
+-}
+-
+-static struct kgsl_mmu_ops kgsl_nommu_ops = {
+-	.mmu_init_pt = nommu_init_pt,
+-	.mmu_getpagetable = nommu_getpagetable,
+-};
+-
+ int kgsl_mmu_probe(struct kgsl_device *device)
+ {
+-	struct kgsl_mmu *mmu = &device->mmu;
+-	int ret;
+-
+-	/*
+-	 * Try to probe for the IOMMU and if it doesn't exist for some reason
+-	 * go for the NOMMU option instead
+-	 */
+-	ret = kgsl_iommu_probe(device);
+-	if (!ret || ret == -EPROBE_DEFER)
+-		return ret;
+-
+-	/* set up for NOMMU */
+-	set_bit(KGSL_MMU_GLOBAL_PAGETABLE, &mmu->features);
+-
+-	mmu->mmu_ops = &kgsl_nommu_ops;
+-	mmu->type = KGSL_MMU_TYPE_NONE;
+-	return 0;
+-}
++	/* GPU access requires the IOMMU; never fall back to physical addresses. */
++	return kgsl_iommu_probe(device);
++}
+--- a/drivers/gpu/msm/kgsl_mmu.h
++++ b/drivers/gpu/msm/kgsl_mmu.h
+@@ -5,6 +5,8 @@
+ #ifndef __KGSL_MMU_H
+ #define __KGSL_MMU_H
+ 
++#include <linux/err.h>
++#include <linux/errno.h>
+ #include <linux/platform_device.h>
+ 
+ #include "kgsl_iommu.h"
+@@ -235,7 +237,7 @@
+ 	if (MMU_OP_VALID(mmu, mmu_getpagetable))
+ 		return mmu->mmu_ops->mmu_getpagetable(mmu, name);
+ 
+-	return NULL;
++	return ERR_PTR(-ENODEV);
+ }
+ 
+ static inline int kgsl_mmu_set_pt(struct kgsl_mmu *mmu,
+--- a/drivers/gpu/msm/kgsl_iommu.c
++++ b/drivers/gpu/msm/kgsl_iommu.c
+@@ -1323,14 +1323,9 @@
+ 	ret = iommu_domain_set_attr(iommu_pt->domain,
+ 				DOMAIN_ATTR_DYNAMIC, &dynamic);
+ 
+-	/*
+-	 * If -ENOTSUPP then dynamic pagetables aren't supported. Quietly
+-	 * return the error and the upper levels will handle it
+-	 */
+ 	if (ret) {
+-		if (ret != -ENOTSUPP)
+-			dev_err(device->dev,
+-				"set DOMAIN_ATTR_DYNAMIC failed: %d\n", ret);
++		dev_err(device->dev,
++			"set DOMAIN_ATTR_DYNAMIC failed: %d\n", ret);
+ 		goto done;
+ 	}
+ 
+@@ -1409,33 +1404,15 @@
+ static struct kgsl_pagetable *kgsl_iommu_getpagetable(struct kgsl_mmu *mmu,
+ 		unsigned long name)
+ {
+-	struct kgsl_device *device = KGSL_MMU_DEVICE(mmu);
+ 	struct kgsl_pagetable *pt;
+ 
+-	if (!kgsl_mmu_is_perprocess(mmu) && (name != KGSL_MMU_SECURE_PT) &&
+-		(name != KGSL_MMU_GLOBAL_LPAC_PT)) {
+-		name = KGSL_MMU_GLOBAL_PT;
+-		if (mmu->defaultpagetable != NULL)
+-			return mmu->defaultpagetable;
+-	}
++	/* Global kernel mappings do not replace isolated process pagetables. */
++	if (!kgsl_mmu_is_perprocess(mmu))
++		return ERR_PTR(-EOPNOTSUPP);
+ 
+ 	pt = kgsl_get_pagetable(name);
+-	if (pt == NULL) {
++	if (pt == NULL)
+ 		pt = kgsl_mmu_createpagetableobject(mmu, name);
+-
+-		/*
+-		 * Special fallback case -if we get ENOTSUPP that means that
+-		 * per-process pagetables are not supported by arm-smmu. This
+-		 * should happen on the first try so we safely set the global
+-		 * pagetable bit and avoid going down this path again
+-		 */
+-		if (PTR_ERR_OR_ZERO(pt) == -ENOTSUPP) {
+-			dev_err_once(device->dev,
+-				"Couldn't enable per-process pagetables. Default to global pagetables\n");
+-			set_bit(KGSL_MMU_GLOBAL_PAGETABLE, &mmu->features);
+-			return mmu->defaultpagetable;
+-		}
+-	}
+ 
+ 	return pt;
+ }
+@@ -2445,6 +2422,12 @@
+ 	if (!node)
+ 		return -ENODEV;
+ 
++	/* This port requires independent process address spaces. */
++	if (of_property_read_bool(node, "qcom,global_pt")) {
++		of_node_put(node);
++		return -EOPNOTSUPP;
++	}
++
+ 	/* Create a kmem cache for the pagetable address objects */
+ 	if (!addr_entry_cache) {
+ 		addr_entry_cache = KMEM_CACHE(kgsl_iommu_addr_entry, 0);
+@@ -2513,9 +2496,6 @@
+ 
+ 	mmu->type = KGSL_MMU_TYPE_IOMMU;
+ 	mmu->mmu_ops = &kgsl_iommu_ops;
+-
+-	if (of_property_read_bool(node, "qcom,global_pt"))
+-		set_bit(KGSL_MMU_GLOBAL_PAGETABLE, &mmu->features);
+ 
+ 	/* Fill out the rest of the devices in the node */
+ 	of_platform_populate(node, NULL, NULL, &pdev->dev);

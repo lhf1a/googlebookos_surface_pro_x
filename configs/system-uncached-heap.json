@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "kernel_series": "6.18",
+  "architecture": "arm64",
+  "source": "drivers/dma-buf/heaps/system_heap.c",
+  "source_sha256": "93b596c944f90bfb3341fc54143523b87f6a7af00905fe45d3fe0dbfcb90e589",
+  "patched_sha256": "0089a33632f6471a17e97ba387066489eb59d3c4386b10d3674330c1fe0554ea",
+  "patch_sha256": "9594fb5cc394c6e1c103d5c59300a1d90e3e6f851141b9b54312725597d2caaa",
+  "heap": "system-uncached",
+  "cache_policy": "pgprot_writecombine; initial zeroing cleaned via noncoherent DMA API",
+  "unload_supported": false,
+  "device_validated": false
+}

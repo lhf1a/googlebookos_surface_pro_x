@@ -1,0 +1,241 @@
+--- a/drivers/gpu/msm/kgsl.h
++++ b/drivers/gpu/msm/kgsl.h
+@@ -184,6 +184,8 @@
+ #define KGSL_MEMDESC_RANDOM BIT(8)
+ /* Allocate memory from the system instead of the pools */
+ #define KGSL_MEMDESC_SYSMEM BIT(9)
++/* Mapping rollback is unproven; retain backing and VA until recovery. */
++#define KGSL_MEMDESC_MAP_UNCERTAIN BIT(10)
+ 
+ /**
+  * struct kgsl_memdesc - GPU memory object descriptor
+--- a/drivers/gpu/msm/kgsl_mmu.c
++++ b/drivers/gpu/msm/kgsl_mmu.c
+@@ -376,7 +376,13 @@
+ 				struct kgsl_memdesc *memdesc)
+ {
+ 	int size;
+-	struct kgsl_device *device = KGSL_MMU_DEVICE(pagetable->mmu);
++	struct kgsl_device *device;
++
++	if (memdesc->priv & KGSL_MEMDESC_MAP_UNCERTAIN)
++		return -EUCLEAN;
++	if (!PT_OP_VALID(pagetable, mmu_map))
++		return -ENODEV;
++	device = KGSL_MMU_DEVICE(pagetable->mmu);
+ 
+ 	if (!memdesc->gpuaddr)
+ 		return -EINVAL;
+@@ -419,6 +425,9 @@
+ {
+ 	struct kgsl_pagetable *pagetable = memdesc->pagetable;
+ 	int unmap_fail = 0;
++
++	if (memdesc->priv & KGSL_MEMDESC_MAP_UNCERTAIN)
++		return -EUCLEAN;
+ 
+ 	if (memdesc->size == 0 || memdesc->gpuaddr == 0)
+ 		return 0;
+@@ -473,6 +482,9 @@
+ 	int ret = 0;
+ 	struct kgsl_device *device;
+ 
++	if (memdesc->priv & KGSL_MEMDESC_MAP_UNCERTAIN)
++		return -EUCLEAN;
++
+ 	if (!PT_OP_VALID(pagetable, mmu_unmap))
+ 		return -ENODEV;
+ 
+--- a/drivers/gpu/msm/kgsl_iommu.c
++++ b/drivers/gpu/msm/kgsl_iommu.c
+@@ -330,7 +330,8 @@
+ }
+ 
+ static int _iommu_map_single_page(struct kgsl_pagetable *pt,
+-		uint64_t gpuaddr, phys_addr_t physaddr, int times,
++		struct kgsl_memdesc *memdesc, uint64_t gpuaddr,
++		phys_addr_t physaddr, int times,
+ 		unsigned int flags)
+ {
+ 	struct kgsl_device *device = KGSL_MMU_DEVICE(pt->mmu);
+@@ -345,19 +346,23 @@
+ 
+ 	for (i = 0; i < times; i++) {
+ 		ret = iommu_map(iommu_pt->domain, gpuaddr + mapped,
+-				physaddr, PAGE_SIZE, flags);
+-		if (ret)
++				physaddr, PAGE_SIZE, flags, GFP_KERNEL);
++		if (ret) {
++			/* iommu_map also hides its partial-map rollback result. */
++			memdesc->priv |= KGSL_MEMDESC_MAP_UNCERTAIN;
+ 			break;
++		}
+ 		mapped += PAGE_SIZE;
+ 	}
+ 
+-	if (ret)
+-		iommu_unmap(iommu_pt->domain, gpuaddr, mapped);
++	if (ret && mapped &&
++		iommu_unmap(iommu_pt->domain, gpuaddr, mapped) != mapped)
++		memdesc->priv |= KGSL_MEMDESC_MAP_UNCERTAIN;
+ 
+ 	if (ret) {
+ 		dev_err(device->dev, "map err: 0x%016llX, 0x%lx, 0x%x, %d\n",
+ 			gpuaddr, PAGE_SIZE * times, flags, ret);
+-		return -ENODEV;
++		return ret;
+ 	}
+ 
+ 	return 0;
+@@ -386,7 +391,8 @@
+ }
+ 
+ static int _iommu_map_sg(struct kgsl_pagetable *pt,
+-		uint64_t addr, struct scatterlist *sg, int nents,
++		struct kgsl_memdesc *memdesc, uint64_t addr,
++		struct scatterlist *sg, int nents,
+ 		unsigned int flags)
+ {
+ 	struct kgsl_iommu_pt *iommu_pt = pt->priv;
+@@ -407,14 +413,16 @@
+ 	if (addr & (1ULL << 48))
+ 		addr |= 0xffff000000000000;
+ 
+-	/* The 6.18 core returns a signed errno and rolls back its failed map. */
++	/* The core hides rollback failures; an errno cannot prove teardown. */
+ 	mapped = iommu_map_sg(iommu_pt->domain, addr, sg, nents, flags,
+ 			GFP_KERNEL);
+-	if (mapped < 0)
++	if (mapped < 0) {
++		memdesc->priv |= KGSL_MEMDESC_MAP_UNCERTAIN;
+ 		return mapped;
++	}
+ 	if (mapped != expected) {
+-		if (mapped)
+-			_iommu_unmap(pt, addr, mapped);
++		if (mapped && _iommu_unmap(pt, addr, mapped))
++			memdesc->priv |= KGSL_MEMDESC_MAP_UNCERTAIN;
+ 		return -EIO;
+ 	}
+ 
+@@ -1645,7 +1653,7 @@
+ 
+ 	protflags &= ~IOMMU_WRITE;
+ 
+-	return _iommu_map_single_page(pt, gpuaddr, physaddr,
++	return _iommu_map_single_page(pt, memdesc, gpuaddr, physaddr,
+ 			pad_size >> PAGE_SHIFT, protflags);
+ }
+ 
+@@ -1708,13 +1716,14 @@
+ 		return sgt ? PTR_ERR(sgt) : -EINVAL;
+ 
+ 	/* GPU page tables consume physical SG entries, not DMA-coalesced ones. */
+-	ret = _iommu_map_sg(pt, addr, sgt->sgl, sgt->orig_nents, flags);
++	ret = _iommu_map_sg(pt, memdesc, addr, sgt->sgl,
++			sgt->orig_nents, flags);
+ 	if (ret)
+ 		goto done;
+ 
+ 	ret = _iommu_map_guard_page(pt, memdesc, addr + size, flags);
+-	if (ret)
+-		_iommu_unmap(pt, addr, size);
++	if (ret && _iommu_unmap(pt, addr, size))
++		memdesc->priv |= KGSL_MEMDESC_MAP_UNCERTAIN;
+ 
+ done:
+ 	if (memdesc->pages != NULL)
+--- a/drivers/gpu/msm/kgsl.c
++++ b/drivers/gpu/msm/kgsl.c
+@@ -346,7 +346,8 @@
+ 				struct kgsl_mem_entry, memdesc);
+ 	struct kgsl_dma_buf_meta *meta = entry->priv_data;
+ 
+-	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
++	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
++			KGSL_MEMDESC_MAP_UNCERTAIN))
+ 		return;
+ 
+ 	if (meta != NULL) {
+@@ -377,7 +378,8 @@
+ 	struct scatterlist *sg;
+ 	int i;
+ 
+-	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
++	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
++			KGSL_MEMDESC_MAP_UNCERTAIN))
+ 		return;
+ 	if (!memdesc->sgt)
+ 		return;
+@@ -4085,7 +4087,8 @@
+ 
+ 	ret = kgsl_mmu_map(private->pagetable, &entry->memdesc);
+ 	if (ret) {
+-		kgsl_mmu_put_gpuaddr(&entry->memdesc);
++		if (kgsl_mmu_put_gpuaddr(&entry->memdesc))
++			kgsl_mem_entry_detach_process(entry);
+ 		return (unsigned long) ret;
+ 	}
+ 
+--- a/drivers/gpu/msm/kgsl_sharedmem.c
++++ b/drivers/gpu/msm/kgsl_sharedmem.c
+@@ -740,7 +740,8 @@
+ 	if (!memdesc->ops || !memdesc->ops->free)
+ 		return 0;
+ 
+-	memdesc->ops->free(memdesc);	return 0;
++	memdesc->ops->free(memdesc);
++	return 0;
+ }
+ 
+ #if IS_ENABLED(CONFIG_QCOM_SECURE_BUFFER)
+@@ -955,7 +956,8 @@
+ 	if (!memdesc->hostptr)
+ 		return;
+ 
+-	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
++	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
++			KGSL_MEMDESC_MAP_UNCERTAIN))
+ 		return;
+ 
+ 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.coherent);
+@@ -976,7 +978,8 @@
+ 	int ret;
+ 	int order = get_order(PAGE_SIZE);
+ 
+-	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
++	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
++			KGSL_MEMDESC_MAP_UNCERTAIN))
+ 		return;
+ 
+ 	ret = unlock_sgt(memdesc->sgt);
+@@ -1015,7 +1018,8 @@
+ {
+ 	int ret;
+ 
+-	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
++	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
++			KGSL_MEMDESC_MAP_UNCERTAIN))
+ 		return;
+ 
+ 	ret = unlock_sgt(memdesc->sgt);
+@@ -1048,7 +1052,8 @@
+ 	kgsl_paged_unmap_kernel(memdesc);
+ 	WARN_ON(memdesc->hostptr);
+ 
+-	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
++	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
++			KGSL_MEMDESC_MAP_UNCERTAIN))
+ 		return;
+ 
+ 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.page_alloc);
+@@ -1068,7 +1073,8 @@
+ 	kgsl_paged_unmap_kernel(memdesc);
+ 	WARN_ON(memdesc->hostptr);
+ 
+-	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
++	if (memdesc->priv & (KGSL_MEMDESC_MAPPED |
++			KGSL_MEMDESC_MAP_UNCERTAIN))
+ 		return;
+ 
+ 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.page_alloc);

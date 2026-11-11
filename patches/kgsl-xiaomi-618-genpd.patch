@@ -1,0 +1,364 @@
+--- a/drivers/gpu/msm/Kconfig
++++ b/drivers/gpu/msm/Kconfig
+@@ -2,6 +2,7 @@
+ config QCOM_KGSL
+ 	tristate "Qualcomm Technologies, Inc. 3D Graphics driver"
+ 	depends on ARCH_QCOM
++	depends on PM && PM_GENERIC_DOMAINS
+ 	depends on QCOM_QFPROM
+ 	select QCOM_SCM
+ 	select QCOM_MDT_LOADER
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -4,6 +4,9 @@
+  */
+ 
+ #include <linux/pm_opp.h>
++#include <linux/pm_domain.h>
++#include <linux/pm_runtime.h>
++#include <linux/iopoll.h>
+ #include <linux/vmalloc.h>
+ #include <linux/clk.h>
+ #include <linux/component.h>
+@@ -1668,6 +1671,73 @@
+ 
+ #define A6XX_VBIF_XIN_HALT_CTRL1_ACKS   (BIT(0) | BIT(1) | BIT(2) | BIT(3))
+ 
++/* Callers serialize power transitions with the KGSL device mutex. */
++static int a6xx_gmu_domain_put(struct device *pd, bool *held)
++{
++	bool on;
++	int ret;
++
++	if (IS_ERR_OR_NULL(pd))
++		return pd ? PTR_ERR(pd) : -ENODEV;
++	if (!*held)
++		return 0;
++	/* Votable CX otherwise skips the GPUCC hardware-off poll. */
++	dev_pm_genpd_synced_poweroff(pd);
++	/* put_sync_suspend drops usage even when suspend fails. */
++	ret = pm_runtime_put_sync_suspend(pd);
++	*held = false;
++	if (ret < 0)
++		return ret;
++	/* genpd_runtime_suspend alone does not report provider power-off errors. */
++	return read_poll_timeout(dev_pm_genpd_is_on, on, !on, 100, 5000000,
++		false, pd);
++}
++
++int a6xx_gmu_disable_clks(struct adreno_device *adreno_dev)
++{
++	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
++	int ret;
++
++	if (gmu->native_domains) {
++		ret = a6xx_gmu_domain_put(gmu->gxpd, &gmu->gx_held);
++		if (ret)
++			goto fail;
++		if (gmu->clks_on && a6xx_gmu_gx_is_on(KGSL_DEVICE(adreno_dev))) {
++			ret = -ETIMEDOUT;
++			goto fail;
++		}
++	}
++	if (gmu->clks_on) {
++		clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
++		gmu->clks_on = false;
++	}
++	return 0;
++fail:
++	if (!gmu->power_error)
++		gmu->power_error = ret;
++	return ret;
++}
++
++int a6xx_gmu_disable_cx(struct adreno_device *adreno_dev)
++{
++	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
++	int ret;
++
++	if (gmu->clks_on)
++		ret = -EBUSY;
++	else if (gmu->native_domains) {
++		/* A failed clock enable still owns the GX bookkeeping reference. */
++		ret = a6xx_gmu_domain_put(gmu->gxpd, &gmu->gx_held);
++		if (!ret)
++			ret = a6xx_gmu_domain_put(gmu->cxpd, &gmu->cx_held);
++	} else
++		ret = a6xx_cx_regulator_disable_wait(gmu->cx_gdsc,
++			KGSL_DEVICE(adreno_dev), 5000);
++	if (ret && !gmu->power_error)
++		gmu->power_error = ret;
++	return ret;
++}
++
+ static int a6xx_gmu_pwrctrl_suspend(struct adreno_device *adreno_dev)
+ {
+ 	int ret = 0;
+@@ -1720,6 +1790,12 @@
+ 	/* Allow the software reset to complete */
+ 	udelay(100);
+ 
++	if (gmu->native_domains) {
++		ret = a6xx_gmu_domain_put(gmu->gxpd, &gmu->gx_held);
++		if (ret)
++			return ret;
++		return a6xx_gmu_gx_is_on(device) ? -ETIMEDOUT : 0;
++	}
+ 	if (!a6xx_gmu_gx_is_on(device))
+ 		return 0;
+ 	if (IS_ERR_OR_NULL(gmu->gx_gdsc))
+@@ -1815,9 +1891,11 @@
+ 	if (ret)
+ 		goto fail;
+ 
+-	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
+-
+-	ret = a6xx_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
++	ret = a6xx_gmu_disable_clks(adreno_dev);
++	if (ret)
++		goto fail;
++
++	ret = a6xx_gmu_disable_cx(adreno_dev);
+ 	if (ret)
+ 		goto fail;
+ 
+@@ -2143,17 +2221,31 @@
+ int a6xx_gmu_enable_gdsc(struct adreno_device *adreno_dev)
+ {
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
+-	int ret;
++	int ret, cleanup;
+ 
+ 	if (gmu->power_error)
+ 		return gmu->power_error;
+-
+-	ret = regulator_enable(gmu->cx_gdsc);
+-	if (ret)
+-		dev_err(&gmu->pdev->dev,
+-			"Failed to enable GMU CX gdsc, error %d\n", ret);
+-
+-	return ret;
++	if (gmu->native_domains) {
++		if (gmu->cx_held || gmu->gx_held)
++			return -EBUSY;
++		ret = pm_runtime_resume_and_get(gmu->cxpd);
++		if (ret < 0)
++			return ret;
++		gmu->cx_held = true;
++		/* GPUCC leaves physical GX power-on to the GMU firmware. */
++		ret = pm_runtime_resume_and_get(gmu->gxpd);
++		if (ret < 0) {
++			cleanup = a6xx_gmu_domain_put(gmu->cxpd, &gmu->cx_held);
++			if (cleanup)
++				gmu->power_error = cleanup;
++			return ret;
++		}
++		gmu->gx_held = true;
++		return 0;
++	}
++	if (adreno_is_a680(adreno_dev))
++		return -ENODEV;
++	return regulator_enable(gmu->cx_gdsc);
+ }
+ 
+ 
+@@ -2192,6 +2284,7 @@
+ 	if (ret)
+ 		return ret;
+ 
++	gmu->clks_on = true;
+ 	a6xx_rdpm_cx_freq_update(gmu, GMU_FREQUENCY / 1000);
+ 	device->state = KGSL_STATE_AWARE;
+ 	return 0;
+@@ -2289,11 +2382,13 @@
+ 	goto clear_boot_bw;
+ 
+ clks_gdsc_off:
+-	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
++	cleanup = a6xx_gmu_disable_clks(adreno_dev);
++	if (cleanup)
++		return ret ? ret : cleanup;
+ 
+ gdsc_off:
+ 	/* Poll to make sure that the CX is off */
+-	cleanup = a6xx_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
++	cleanup = a6xx_gmu_disable_cx(adreno_dev);
+ 	if (cleanup) {
+ 		if (!gmu->power_error)
+ 			gmu->power_error = cleanup;
+@@ -2382,11 +2477,13 @@
+ 	a6xx_gmu_irq_disable(adreno_dev);
+ 
+ clks_gdsc_off:
+-	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
++	cleanup = a6xx_gmu_disable_clks(adreno_dev);
++	if (cleanup)
++		return ret ? ret : cleanup;
+ 
+ gdsc_off:
+ 	/* Poll to make sure that the CX is off */
+-	cleanup = a6xx_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
++	cleanup = a6xx_gmu_disable_cx(adreno_dev);
+ 	if (cleanup) {
+ 		if (!gmu->power_error)
+ 			gmu->power_error = cleanup;
+@@ -2615,10 +2712,41 @@
+ 	return 0;
+ }
+ 
++static int a6xx_gmu_power_probe(struct adreno_device *adreno_dev)
++{
++	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
++	struct device *dev = &gmu->pdev->dev;
++	struct device *cx, *gx;
++
++	if (!adreno_is_a680(adreno_dev))
++		return a6xx_gmu_regulators_probe(gmu, gmu->pdev);
++	if (!of_device_is_compatible(dev->of_node, "qcom,adreno-gmu"))
++		return -EOPNOTSUPP;
++	cx = dev_pm_domain_attach_by_name(dev, "cx");
++	if (IS_ERR_OR_NULL(cx))
++		return cx ? PTR_ERR(cx) : -ENODEV;
++	gx = dev_pm_domain_attach_by_name(dev, "gx");
++	if (IS_ERR_OR_NULL(gx)) {
++		dev_pm_domain_detach(cx, false);
++		return gx ? PTR_ERR(gx) : -ENODEV;
++	}
++	gmu->cxpd = cx;
++	gmu->gxpd = gx;
++	gmu->native_domains = true;
++	return 0;
++}
++
++
+ void a6xx_gmu_remove(struct kgsl_device *device)
+ {
+ 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+ 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
++
++	/* Unbind must quiesce the GPU before releasing shared backing or domains. */
++	if (gmu->power_error || gmu->cx_held || gmu->gx_held || gmu->clks_on) {
++		dev_err(device->dev, "GMU resources retained after unsafe remove\n");
++		return;
++	}
+ 
+ 	qmp_put(gmu->qmp);
+ 	gmu->qmp = NULL;
+@@ -2631,6 +2759,13 @@
+ 	a6xx_free_gmu_globals(gmu);
+ 
+ 	vfree(gmu->itcm_shadow);
++	if (gmu->native_domains) {
++		dev_pm_domain_detach(gmu->gxpd, false);
++		dev_pm_domain_detach(gmu->cxpd, false);
++		gmu->gxpd = NULL;
++		gmu->cxpd = NULL;
++		gmu->native_domains = false;
++	}
+ }
+ 
+ static int a6xx_gmu_iommu_fault_handler(struct iommu_domain *domain,
+@@ -2741,13 +2876,13 @@
+ 	a6xx_gmu_rdpm_probe(gmu, device);
+ 
+ 	/* Set up GMU regulators */
+-	ret = a6xx_gmu_regulators_probe(gmu, pdev);
++	ret = a6xx_gmu_power_probe(adreno_dev);
+ 	if (ret)
+ 		return ret;
+ 
+ 	ret = a6xx_gmu_clocks_probe(adreno_dev);
+ 	if (ret)
+-		return ret;
++		goto error;
+ 
+ 	/* Set up GMU IOMMU and shared memory with GMU */
+ 	ret = a6xx_gmu_iommu_init(gmu);
+@@ -2891,10 +3026,12 @@
+ 
+ 	a6xx_hfi_stop(adreno_dev);
+ 
+-	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
++	cleanup = a6xx_gmu_disable_clks(adreno_dev);
++	if (cleanup)
++		return ret ? ret : cleanup;
+ 
+ 	/* Poll to make sure that the CX is off */
+-	cleanup = a6xx_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
++	cleanup = a6xx_gmu_disable_cx(adreno_dev);
+ 	if (cleanup) {
+ 		if (!gmu->power_error)
+ 			gmu->power_error = cleanup;
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.h
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.h
+@@ -171,6 +171,12 @@
+ 	/** @pwrlevels: Array of GMU power levels */
+ 	/* Latched shutdown failure; checked recovery is not implemented yet. */
+ 	int power_error;
++	struct device *cxpd;
++	struct device *gxpd;
++	bool native_domains;
++	bool cx_held;
++	bool gx_held;
++	bool clks_on;
+ 	struct regulator *cx_gdsc;
+ 	struct regulator *gx_gdsc;
+ 	struct clk_bulk_data *clks;
+@@ -418,6 +424,8 @@
+  * to recover from the fault
+  */
+ int a6xx_gmu_suspend(struct adreno_device *adreno_dev);
++int a6xx_gmu_disable_clks(struct adreno_device *adreno_dev);
++int a6xx_gmu_disable_cx(struct adreno_device *adreno_dev);
+ 
+ /**
+  * a6xx_gmu_oob_set - send gmu oob request
+--- a/drivers/gpu/msm/adreno_a6xx_hwsched.c
++++ b/drivers/gpu/msm/adreno_a6xx_hwsched.c
+@@ -215,11 +215,13 @@
+ 	goto clear_boot_bw;
+ 
+ clks_gdsc_off:
+-	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
++	cleanup = a6xx_gmu_disable_clks(adreno_dev);
++	if (cleanup)
++		return ret ? ret : cleanup;
+ 
+ gdsc_off:
+ 	/* Poll to make sure that the CX is off */
+-	cleanup = a6xx_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
++	cleanup = a6xx_gmu_disable_cx(adreno_dev);
+ 	if (cleanup) {
+ 		if (!gmu->power_error)
+ 			gmu->power_error = cleanup;
+@@ -289,11 +291,13 @@
+ 	a6xx_gmu_irq_disable(adreno_dev);
+ 
+ clks_gdsc_off:
+-	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
++	cleanup = a6xx_gmu_disable_clks(adreno_dev);
++	if (cleanup)
++		return ret ? ret : cleanup;
+ 
+ gdsc_off:
+ 	/* Poll to make sure that the CX is off */
+-	cleanup = a6xx_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
++	cleanup = a6xx_gmu_disable_cx(adreno_dev);
+ 	if (cleanup) {
+ 		if (!gmu->power_error)
+ 			gmu->power_error = cleanup;
+@@ -406,10 +410,12 @@
+ 
+ 	a6xx_hwsched_hfi_stop(adreno_dev);
+ 
+-	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
++	cleanup = a6xx_gmu_disable_clks(adreno_dev);
++	if (cleanup)
++		return ret ? ret : cleanup;
+ 
+ 	/* Poll to make sure that the CX is off */
+-	cleanup = a6xx_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
++	cleanup = a6xx_gmu_disable_cx(adreno_dev);
+ 	if (cleanup) {
+ 		if (!gmu->power_error)
+ 			gmu->power_error = cleanup;

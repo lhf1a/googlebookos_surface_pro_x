@@ -1,0 +1,30 @@
+--- a/drivers/gpu/msm/kgsl_iommu.c
++++ b/drivers/gpu/msm/kgsl_iommu.c
+@@ -515,11 +515,14 @@
+ 		size_t mapped = 0;
+ 
+ 		ret = _iommu_map_scatterlist(pt, addr, s, flags, &mapped);
+-		if (ret || mapped == 0)
+-			break;
+-
++		/* Include this entry's partial mapping in failure rollback. */
+ 		total_mapped += mapped;
+ 		addr += mapped;
++		if (ret || mapped != s->length || !mapped) {
++			if (!ret)
++				ret = -EIO;
++			break;
++		}
+ 	}
+ 
+ 	if (ret || total_mapped == 0) {
+@@ -2346,7 +2349,8 @@
+ 	if (IS_ERR_OR_NULL(memdesc->sgt))
+ 		return !memdesc->sgt ? -EINVAL : PTR_ERR(memdesc->sgt);
+ 
+-	ret = _iommu_map_sg(pt, addr, memdesc->sgt->sgl, memdesc->sgt->nents,
++	/* Map physical entries, not the DMA-coalesced attachment count. */
++	ret = _iommu_map_sg(pt, addr, memdesc->sgt->sgl, memdesc->sgt->orig_nents,
+ 			flags);
+ 	if (ret)
+ 		return ret;

@@ -1,0 +1,134 @@
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -894,6 +894,7 @@
+ 	.def_domain_type = qcom_smmu_def_domain_type,
+ 	.write_s2cr = qcom_smmu_write_s2cr,
+ 	.tlb_sync = qcom_smmu_tlb_sync,
++	.tlb_sync_checked = qcom_smmu_tlb_sync_checked,
+ };
+ 
+ static const struct arm_smmu_impl qcom_smmu_500_impl = {
+@@ -903,6 +904,7 @@
+ 	.reset = arm_mmu500_reset,
+ 	.write_s2cr = qcom_smmu_write_s2cr,
+ 	.tlb_sync = qcom_smmu_tlb_sync,
++	.tlb_sync_checked = qcom_smmu_tlb_sync_checked,
+ #ifdef CONFIG_ARM_SMMU_QCOM_DEBUG
+ 	.context_fault = qcom_smmu_context_fault,
+ 	.context_fault_needs_threaded_irq = true,
+@@ -916,6 +918,7 @@
+ 	.reset = qcom_sdm845_smmu500_reset,
+ 	.write_s2cr = qcom_smmu_write_s2cr,
+ 	.tlb_sync = qcom_smmu_tlb_sync,
++	.tlb_sync_checked = qcom_smmu_tlb_sync_checked,
+ #ifdef CONFIG_ARM_SMMU_QCOM_DEBUG
+ 	.context_fault = qcom_smmu_context_fault,
+ 	.context_fault_needs_threaded_irq = true,
+@@ -929,6 +932,7 @@
+ 	.alloc_context_bank = qcom_adreno_smmu_alloc_context_bank,
+ 	.write_sctlr = qcom_adreno_smmu_write_sctlr,
+ 	.tlb_sync = qcom_smmu_tlb_sync,
++	.tlb_sync_checked = qcom_smmu_tlb_sync_checked,
+ 	.context_fault = qcom_adreno_smmu_context_fault,
+ 	.context_fault_needs_threaded_irq = true,
+ };
+@@ -940,6 +944,7 @@
+ 	.alloc_context_bank = qcom_adreno_smmu_alloc_context_bank,
+ 	.write_sctlr = qcom_adreno_smmu_write_sctlr,
+ 	.tlb_sync = qcom_smmu_tlb_sync,
++	.tlb_sync_checked = qcom_smmu_tlb_sync_checked,
+ 	.context_fault = qcom_adreno_smmu_context_fault,
+ 	.context_fault_needs_threaded_irq = true,
+ };
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.c
+@@ -39,6 +39,7 @@
+ #include <linux/fsl/mc.h>
+ 
+ #include "arm-smmu.h"
++#include <linux/arm-smmu-priv.h>
+ #ifdef CONFIG_ARM64
+ #include <asm/virt.h>
+ #include "sq2-el2-context-limit.h"
+@@ -1336,6 +1337,52 @@
+ 	arm_smmu_rpm_put(smmu);
+ }
+ 
++/* The caller keeps the domain attached and excludes mapping/teardown races. */
++int arm_smmu_flush_tlb_checked(struct iommu_domain *domain)
++{
++	struct arm_smmu_domain *smmu_domain;
++	struct arm_smmu_device *smmu;
++	struct arm_smmu_cfg *cfg;
++	unsigned long flags;
++	int ret = -ENODEV;
++
++	if (!domain || domain->owner != &arm_smmu_ops)
++		return -EOPNOTSUPP;
++
++	smmu_domain = to_smmu_domain(domain);
++	mutex_lock(&smmu_domain->init_mutex);
++	smmu = smmu_domain->smmu;
++	cfg = &smmu_domain->cfg;
++	if (!smmu || !smmu_domain->pgtbl_ops)
++		goto unlock;
++
++	ret = -EOPNOTSUPP;
++	if (smmu_domain->stage != ARM_SMMU_DOMAIN_S1 ||
++	    cfg->fmt != ARM_SMMU_CTX_FMT_AARCH64 ||
++	    cfg->cbndx >= smmu->num_context_banks ||
++	    smmu->cbs[cfg->cbndx].cfg != cfg ||
++	    !smmu->impl || !smmu->impl->tlb_sync_checked)
++		goto unlock;
++
++	ret = arm_smmu_rpm_get(smmu);
++	if (ret < 0)
++		goto unlock;
++
++	spin_lock_irqsave(&smmu_domain->cb_lock, flags);
++	wmb();
++	arm_smmu_cb_write(smmu, cfg->cbndx, ARM_SMMU_CB_S1_TLBIASID,
++			  cfg->asid);
++	ret = smmu->impl->tlb_sync_checked(smmu,
++			ARM_SMMU_CB(smmu, cfg->cbndx),
++			ARM_SMMU_CB_TLBSYNC, ARM_SMMU_CB_TLBSTATUS);
++	spin_unlock_irqrestore(&smmu_domain->cb_lock, flags);
++	arm_smmu_rpm_put(smmu);
++unlock:
++	mutex_unlock(&smmu_domain->init_mutex);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(arm_smmu_flush_tlb_checked);
++
+ static phys_addr_t arm_smmu_iova_to_phys_hard(struct iommu_domain *domain,
+ 					      dma_addr_t iova)
+ {
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.h
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.h
+@@ -445,6 +445,8 @@
+ 			struct io_pgtable_cfg *cfg, struct device *dev);
+ 	void (*tlb_sync)(struct arm_smmu_device *smmu, int page, int sync,
+ 			 int status);
++	int (*tlb_sync_checked)(struct arm_smmu_device *smmu, int page,
++				int sync, int status);
+ 	int (*def_domain_type)(struct device *dev);
+ 	irqreturn_t (*global_fault)(int irq, void *dev);
+ 	irqreturn_t (*context_fault)(int irq, void *dev);
+--- /dev/null
++++ b/include/linux/arm-smmu-priv.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _ARM_SMMU_PRIV_H
++#define _ARM_SMMU_PRIV_H
++
++struct iommu_domain;
++
++/*
++ * Invalidate and drain an attached AArch64 stage-1 domain, with real PM and
++ * synchronization errors. Does not stop devices, detach or change roots.
++ * Caller serializes map/unmap/teardown and retains backing on any error.
++ * Unsupported providers return -EOPNOTSUPP, never a successful no-op.
++ */
++int arm_smmu_flush_tlb_checked(struct iommu_domain *domain);
++
++#endif

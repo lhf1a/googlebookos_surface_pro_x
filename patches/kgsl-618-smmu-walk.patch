@@ -1,0 +1,167 @@
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.c
+@@ -346,6 +346,31 @@
+ 	}
+ }
+ 
++static int arm_smmu_tlb_inv_walk_s1_checked(unsigned long iova, size_t size,
++					  size_t granule, void *cookie)
++{
++	struct arm_smmu_domain *domain = cookie;
++	struct arm_smmu_device *smmu = domain->smmu;
++	struct arm_smmu_cfg *cfg = &domain->cfg;
++	unsigned long flags;
++	int ret;
++
++	if (!READ_ONCE(domain->checked_unmap)) {
++		arm_smmu_tlb_inv_walk_s1(iova, size, granule, cookie);
++		return 0;
++	}
++
++	/* map/unmap hold runtime PM; the io-pgtable callback cannot sleep. */
++	spin_lock_irqsave(&domain->cb_lock, flags);
++	wmb();
++	arm_smmu_cb_write(smmu, cfg->cbndx, ARM_SMMU_CB_S1_TLBIASID, cfg->asid);
++	ret = smmu->impl->tlb_sync_checked(smmu,
++			ARM_SMMU_CB(smmu, cfg->cbndx),
++			ARM_SMMU_CB_TLBSYNC, ARM_SMMU_CB_TLBSTATUS);
++	spin_unlock_irqrestore(&domain->cb_lock, flags);
++	return ret;
++}
++
+ static void arm_smmu_tlb_add_page_s1(struct iommu_iotlb_gather *gather,
+ 				     unsigned long iova, size_t granule,
+ 				     void *cookie)
+@@ -398,6 +423,7 @@
+ static const struct iommu_flush_ops arm_smmu_s1_tlb_ops = {
+ 	.tlb_flush_all	= arm_smmu_tlb_inv_context_s1,
+ 	.tlb_flush_walk	= arm_smmu_tlb_inv_walk_s1,
++	.tlb_flush_walk_checked = arm_smmu_tlb_inv_walk_s1_checked,
+ 	.tlb_add_page	= arm_smmu_tlb_add_page_s1,
+ };
+ 
+@@ -1282,7 +1308,9 @@
+ 	if (!ops)
+ 		return -ENODEV;
+ 
+-	arm_smmu_rpm_get(smmu);
++	ret = arm_smmu_rpm_get(smmu);
++	if (ret < 0)
++		return ret;
+ 	ret = ops->map_pages(ops, iova, paddr, pgsize, pgcount, prot, gfp, mapped);
+ 	arm_smmu_rpm_put(smmu);
+ 
+@@ -1300,7 +1328,8 @@
+ 	if (!ops)
+ 		return 0;
+ 
+-	arm_smmu_rpm_get(smmu);
++	if (arm_smmu_rpm_get(smmu) < 0)
++		return 0;
+ 	ret = ops->unmap_pages(ops, iova, pgsize, pgcount, iotlb_gather);
+ 	arm_smmu_rpm_put(smmu);
+ 
+@@ -1382,6 +1411,18 @@
+ 	return ret;
+ }
+ EXPORT_SYMBOL_GPL(arm_smmu_flush_tlb_checked);
++
++/* Caller serializes domain operations and keeps it attached through this call. */
++int arm_smmu_enable_checked_unmap(struct iommu_domain *domain)
++{
++	int ret = arm_smmu_flush_tlb_checked(domain);
++
++	if (ret)
++		return ret;
++	WRITE_ONCE(to_smmu_domain(domain)->checked_unmap, true);
++	return 0;
++}
++EXPORT_SYMBOL_GPL(arm_smmu_enable_checked_unmap);
+ 
+ static phys_addr_t arm_smmu_iova_to_phys_hard(struct iommu_domain *domain,
+ 					      dma_addr_t iova)
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.h
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.h
+@@ -379,6 +379,7 @@
+ 	struct arm_smmu_device		*smmu;
+ 	struct io_pgtable_ops		*pgtbl_ops;
+ 	unsigned long			pgtbl_quirks;
++	bool				checked_unmap;
+ 	const struct iommu_flush_ops	*flush_ops;
+ 	struct arm_smmu_cfg		cfg;
+ 	enum arm_smmu_domain_stage	stage;
+--- a/drivers/iommu/io-pgtable-arm.c
++++ b/drivers/iommu/io-pgtable-arm.c
+@@ -659,8 +659,15 @@
+ 				__arm_lpae_clear_pte(&ptep[i], &iop->cfg, 1);
+ 
+ 				/* Also flush any partial walks */
+-				io_pgtable_tlb_flush_walk(iop, iova + i * size, size,
+-							  ARM_LPAE_GRANULE(data));
++				if (io_pgtable_tlb_flush_walk_checked(iop,
++						iova + i * size, size, ARM_LPAE_GRANULE(data))) {
++					/* Keep the subtree reachable when synchronization fails. */
++					WRITE_ONCE(ptep[i], pte);
++					if (!iop->cfg.coherent_walk)
++						__arm_lpae_sync_pte(&ptep[i], 1, &iop->cfg);
++					wmb();
++					break;
++				}
+ 				__arm_lpae_free_pgtable(data, lvl + 1, iopte_deref(pte, data));
+ 			}
+ 		}
+--- a/include/linux/arm-smmu-priv.h
++++ b/include/linux/arm-smmu-priv.h
+@@ -12,4 +12,11 @@
+  */
+ int arm_smmu_flush_tlb_checked(struct iommu_domain *domain);
+ 
++/* Opt in before publishing mappings, with caller-serialized domain lifetime.
++ * Validates capability/PM with a drain before enabling checked walk callbacks.
++ * Failed subtree invalidation retains the original page table and yields a
++ * short unmap. Callers must retain backing on partial/unmapped errors.
++ */
++int arm_smmu_enable_checked_unmap(struct iommu_domain *domain);
++
+ #endif
+--- a/include/linux/io-pgtable.h
++++ b/include/linux/io-pgtable.h
+@@ -35,6 +35,10 @@
+  *                  others may decide to update the iommu_iotlb_gather structure
+  *                  and defer the invalidation until iommu_iotlb_sync() instead.
+  *
++ * @tlb_flush_walk_checked: Optional checked walk invalidation. ARM LPAE retains
++ *                  the child table and restores its parent entry on error.
++ *                  Other backends keep using tlb_flush_walk.
++ *
+  * Note that these can all be called in atomic context and must therefore
+  * not block.
+  */
+@@ -44,6 +48,8 @@
+ 			       void *cookie);
+ 	void (*tlb_add_page)(struct iommu_iotlb_gather *gather,
+ 			     unsigned long iova, size_t granule, void *cookie);
++	int (*tlb_flush_walk_checked)(unsigned long iova, size_t size,
++				      size_t granule, void *cookie);
+ };
+ 
+ /**
+@@ -285,6 +291,18 @@
+ 		iop->cfg.tlb->tlb_flush_walk(iova, size, granule, iop->cookie);
+ }
+ 
++static inline int
++io_pgtable_tlb_flush_walk_checked(struct io_pgtable *iop, unsigned long iova,
++				 size_t size, size_t granule)
++{
++	if (iop->cfg.tlb && iop->cfg.tlb->tlb_flush_walk_checked)
++		return iop->cfg.tlb->tlb_flush_walk_checked(iova, size, granule,
++							 iop->cookie);
++
++	io_pgtable_tlb_flush_walk(iop, iova, size, granule);
++	return 0;
++}
++
+ static inline void
+ io_pgtable_tlb_add_page(struct io_pgtable *iop,
+ 			struct iommu_iotlb_gather * gather, unsigned long iova,

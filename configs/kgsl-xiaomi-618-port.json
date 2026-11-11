@@ -1,0 +1,1235 @@
+{
+  "schema": 1,
+  "source_manifest": "kgsl-xiaomi-source-inputs.json",
+  "status": "source-linked-not-device-ready",
+  "patches": [
+    {
+      "path": "patches/kgsl-xiaomi-618-icc-errors.patch",
+      "sha256": "2204dc6e9977f2e069d45f6813170568e230c84380e344531a1c7b5b67ff9adb",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "1a6ccb4bbc4d8811ad2f112e2c8170a6eb77eb804db792fe470e5ee776936859",
+          "after": "d9027aacdef096994b2d610cd4f06d69742de350fa3da22cd26ba78109802c37"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "3e9ac55ae73ff3d22f13ec9425ee4138fbae2e33ef5e097d3a8a178ae17fb9c1",
+          "after": "38ecac310539450f6591bec44dd3c6a13b4cc3fe9e7a821fe883df8175b980b0"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched.c": {
+          "before": "4dbc79b06cdfc91d1b2597ba578de437ed70b349250d94196e81939ad984a185",
+          "after": "33d7f1d77b6226f27fb1103c34137794b09414bb08caa6a20dc890c0495865dd"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-dmabuf.patch",
+      "sha256": "e673ddaaa8e61d52fb0f4c043fab531e514db249f8c42f8213558209d2fa590d",
+      "files": {
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "80dc2c8660bb8aecc371b0ceabc1f74e8fbc8f18f74d33765b2be91f08a6d021",
+          "after": "bdf9707cda97624e49e945d1376cfa4ecdd6cea2c7a1d447a46ea4ceb23ac4b7"
+        },
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "2fcfb4c14fd9b59041bc6e0125a58acc4b92a61dcf1cd9826c6e221d73c65572",
+          "after": "4b13fc474a2b647b295ce05dcbb3aabc3e5d8d1bad924946dadea4d8e1cec6f8"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-core-api.patch",
+      "sha256": "5556c114af6371bc614dd7ea076911847723a8d77afeb7d149247b29002bf950",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "d9027aacdef096994b2d610cd4f06d69742de350fa3da22cd26ba78109802c37",
+          "after": "bd6f071cbe26212e7a326774f867eeb7adb9ea6878d78339bb9293347ad5aef7"
+        },
+        "drivers/gpu/msm/adreno_a5xx_preempt.c": {
+          "before": "bf965ca672aa6e0c9c423f63461709c869895dc5ff6fae5563a9bae4fccfd634",
+          "after": "43f6e2781c3c24ca35e0272b561f5a7d450df0f3e7498c670f4050cf34c898fd"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "38ecac310539450f6591bec44dd3c6a13b4cc3fe9e7a821fe883df8175b980b0",
+          "after": "37e887051ac01ef69bf51d158395034ff0311421423fc2e43f4179c279332dd4"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched.c": {
+          "before": "33d7f1d77b6226f27fb1103c34137794b09414bb08caa6a20dc890c0495865dd",
+          "after": "b9e31f8f5b6d0963916e3a82e8d8fcbbac197fd939ad358148ae3910f96db2db"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c": {
+          "before": "c7f1ac637452c914ae00f67da9da6d88f83ae34350e97c769b4b5ca2e4517c65",
+          "after": "8de836f826e0cc732b24a37cebe13eb81136fcef563ea9451d0da4f5ef964922"
+        },
+        "drivers/gpu/msm/adreno_a6xx_preempt.c": {
+          "before": "baa549d24e62a2a8770b21fb9d2a404c83a604066d391c23efa2e6aa05be06f1",
+          "after": "539eaeb0301f93ef15faabd7b46c73711a8fbd3ea304208ba4b7acfdc4fb1908"
+        },
+        "drivers/gpu/msm/adreno_a6xx_rgmu.c": {
+          "before": "42167075e8dc30ecaf4d03257b24bcec01b99027250660a22f71fbc76acedd00",
+          "after": "47a87efa9cbdf20a635be997b4641cc58b6e1f7712f6a6f0eed760a1608037c0"
+        },
+        "drivers/gpu/msm/adreno_cp_parser.c": {
+          "before": "f7ffa5600e550297b7b97e364ad3726bfc7bc4103b62631d36c70df3ec11232a",
+          "after": "ff941244e17bb090093c362628cdcc144e82c4df69f84c6afb31a16c1b47927e"
+        },
+        "drivers/gpu/msm/adreno_dispatch.c": {
+          "before": "69e4e080c16eba48608f7e770d627760e27cb75fac30de31b870c0aa5f54fdb6",
+          "after": "ee792d1816c270a32eefecec419b93936d15dffd85fbb4da01912e6ba08e43ae"
+        },
+        "drivers/gpu/msm/adreno_drawctxt.c": {
+          "before": "adbd69d03f48473f1a16afb2914ec43da02d3fb2a784ca3892f8fc6915f81411",
+          "after": "6ae92c6c083fdf7b8a4a35a8dc14cf68890d002177adba91405d412dfd2d5e59"
+        },
+        "drivers/gpu/msm/adreno_profile.c": {
+          "before": "da9d39d9f0ffda71e1f3fbe6cfa3d9f80fe9f064a378b7634a4f2bbc52d0747b",
+          "after": "ae7e9d54da2464726f3bede5bc582ea0606bd1bd6b8bee899cfe976ac81376ad"
+        },
+        "drivers/gpu/msm/adreno_ringbuffer.c": {
+          "before": "e43e030d4be30128e36df746d013c31e6e7f9641652c813420718823fca71031",
+          "after": "20de55977f94ec5821fa1226577bb6444d95de2f56ab7f083de1a9f37bcb2027"
+        },
+        "drivers/gpu/msm/adreno_ringbuffer.h": {
+          "before": "647e544deb2fc713a336ff3a8fededd7ca3e9826b79b3da8d932536fca7fb581",
+          "after": "6bf21b43f5f70b93cbf204353bf6e07f75d40508656b2213615cd45624508720"
+        },
+        "drivers/gpu/msm/adreno_trace.h": {
+          "before": "5f82f1d4671b9461dc3ad8af198ae363249c3fdbf0ab21c463b3033d21a2de8a",
+          "after": "41de43bad3c6ba176c3d455d97fe223ee7b664a634a26782d62425427f5143c6"
+        },
+        "drivers/gpu/msm/governor_gpubw_mon.c": {
+          "before": "49a8b8a68a0bac7d8308b0b60285a97010ace02bd9b7128f2a6f3ca3e29fee9a",
+          "after": "28a0b81d0d36039a4122a8c12556b941e7d9096320f7064631fd81b68dae1510"
+        },
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "bdf9707cda97624e49e945d1376cfa4ecdd6cea2c7a1d447a46ea4ceb23ac4b7",
+          "after": "942899604aac37de474dc5f4a27076a370b29c0984e660950ea69f7a1a1831b0"
+        },
+        "drivers/gpu/msm/kgsl_drawobj.c": {
+          "before": "931f715e7c8b11190ea2ddc52d4ba9e5f446db12a19c3806f66c0d7c1f48d44e",
+          "after": "f68b620cd36afb3bf9d426f11b49b2e07ab4f7fd7dd6897d4d02d6671d129eaa"
+        },
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "4b13fc474a2b647b295ce05dcbb3aabc3e5d8d1bad924946dadea4d8e1cec6f8",
+          "after": "3a815c99cc88d7e28014757b8b8fe18d3146c4c28897baea4dfb0a832c3bc5d4"
+        },
+        "drivers/gpu/msm/kgsl_pool.c": {
+          "before": "b7e59346bbee8b37498f3121743b823a2f2696abcf71e70071ff45c495d7d403",
+          "after": "bda34c393c3cc32a5e54466ca27f3eb7f5ef157335bd7f5dd205a246c12f42ae"
+        },
+        "drivers/gpu/msm/kgsl_pwrctrl.c": {
+          "before": "5bbe646a4de20b6481489086b743f66b8c78b179d3dd75e5576f80850b4e75ce",
+          "after": "5c2d97c6781794c07993872cfa4669bbeaffc43d2bab9f97cf08006703ceeef8"
+        },
+        "drivers/gpu/msm/kgsl_pwrscale.c": {
+          "before": "3e8a7b93d2d6153e3352afa62b9a6276a552dd7946c0144b4b6b858ef9fc2bb0",
+          "after": "6bb451900d09abc37783d9ce59f39ec7e499b0bb48bda76eeaac73e1c94a7746"
+        },
+        "drivers/gpu/msm/kgsl_pwrscale.h": {
+          "before": "3daa596ac28dd852503db3195a483a1b910280e0a45172cb4b8127b02def4943",
+          "after": "a5181a967b1591030e5616817d3260aee3718d04d558506fc1bb8aa2fdde6ff0"
+        },
+        "drivers/gpu/msm/kgsl_sharedmem.c": {
+          "before": "8fc2e4b1a0fe35fa1c498b6ab84cd642e3c91c9de2ca1f946c1f274f03e3bef0",
+          "after": "7725dc97636b5495865801de5c853e82716f2646742c3be9e369674e05eb4bd8"
+        },
+        "drivers/gpu/msm/kgsl_snapshot.c": {
+          "before": "5c8eb40e457e84c5ea30cd94b9e75da252f71050a7d36e293bbb9b10414b2e0d",
+          "after": "25b25645560fd5fd5f8622349062b5fb40896271a27bb4a9ca81892c7388a453"
+        },
+        "drivers/gpu/msm/kgsl_sync.c": {
+          "before": "aadfbe59fc8ae4463678a9e127eac6b3a04df4f0d144435184f3bcfebb6fb83e",
+          "after": "83ba3f328269092a86cfa43ea2eb077522a22409daead71e050d978fa3f61fa6"
+        },
+        "drivers/gpu/msm/kgsl_timeline.c": {
+          "before": "113d7041e8f8c14c10dcfda31a3aabda56ac12b5165200e030b81b93d5265738",
+          "after": "9bc855df44ee4d40f6f4b373e4dc3d12e5dc499ef30b9beaf8ecacb3b8e93fa9"
+        },
+        "drivers/gpu/msm/kgsl_trace.h": {
+          "before": "534bea13df61102629f928d17441f82d223d274f792cda9afeaa7f077fdad157",
+          "after": "72b367a0c7d7c21df922419dbf08e662f7c3ad9286545d6d675c284dc4ae6e89"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-mm.patch",
+      "sha256": "b2b4736b286bc178cacb83e9da04ec158af3d6f410637b786419081df7326530",
+      "files": {
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "942899604aac37de474dc5f4a27076a370b29c0984e660950ea69f7a1a1831b0",
+          "after": "75a053029e0d80243f7fa7a15f77f6aee0036790697e8af37786aef9fb29dd36"
+        },
+        "drivers/gpu/msm/kgsl_pool.c": {
+          "before": "bda34c393c3cc32a5e54466ca27f3eb7f5ef157335bd7f5dd205a246c12f42ae",
+          "after": "a1c2e454c73b47cf468428aa5ee9d490b2862b5eea087d4aaa70ae502f5e5b38"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-gmu-memory.patch",
+      "sha256": "57351662dd8f93dc2de0a6e2a6e4aaaeea882e9687ec32bf1a2e9cc876344caa",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "37e887051ac01ef69bf51d158395034ff0311421423fc2e43f4179c279332dd4",
+          "after": "5287e880981f26f84e32600785a9293d4c50f81adf07dfe18575dcfa841fe6fa"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.h": {
+          "before": "77b0883bbdfe74d8444c680b12dc967f24eaa514d3fc8f741de8e933e00b81e6",
+          "after": "8ca935818151b3425deb3419e62e43e93d0d95c0b87d0eee414bbfe966351baf"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c": {
+          "before": "8de836f826e0cc732b24a37cebe13eb81136fcef563ea9451d0da4f5ef964922",
+          "after": "f7a5c195154e1b957e59c9391a468262f2270ce8a19892acd99323cb7f5d5da6"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-qmp.patch",
+      "sha256": "5fbd25246292c897ba1b69437dc9d8e2a409e5aa4254edb48da2bb6f17730f75",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "5287e880981f26f84e32600785a9293d4c50f81adf07dfe18575dcfa841fe6fa",
+          "after": "2d2e5a84eb71060bb9eea3a4dff0754d3860fed7fee901cde8b72a09d4239d7e"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.h": {
+          "before": "8ca935818151b3425deb3419e62e43e93d0d95c0b87d0eee414bbfe966351baf",
+          "after": "adbe4c5f2384b4f60429f28fac52d8d66b4052ca753f77abbb8af54b4a08b2c3"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched.c": {
+          "before": "b9e31f8f5b6d0963916e3a82e8d8fcbbac197fd939ad358148ae3910f96db2db",
+          "after": "58a36779c0df204fc2c8eeed1de1361de46ddf096bd7f42ae462f9457c2c8382"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c": {
+          "before": "f7a5c195154e1b957e59c9391a468262f2270ce8a19892acd99323cb7f5d5da6",
+          "after": "823a4954e5939407b03a83a02e47362f55231bc5b141e3f2561650260e29454f"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-rpmh.patch",
+      "sha256": "42c24935393a6ba9b6b8f8620a03d61f92a82bcab3dbaa5e3ac87ca23fbe8eaf",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_rpmh.c": {
+          "before": "ffc7d3cef068bb63ac1b68d629f220304bbd7b6b6cdadae007872a3bd8b392d9",
+          "after": "50dff18c20d245edecdf6cdecde82106e94da47c29f741c5e9bdebd2901a1933"
+        },
+        "drivers/gpu/msm/kgsl_bus.c": {
+          "before": "fc8ba32c06ab549429c26c84bc1569c19bd23e8fec789de7481c6b52741c5826",
+          "after": "c3419dda426ac9ea17107b0449bedf8744c5af59b09b4826d05d21a259d6bd21"
+        },
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "75a053029e0d80243f7fa7a15f77f6aee0036790697e8af37786aef9fb29dd36",
+          "after": "be452973665fcfc77ec25102b477f2201a057b8cf3be05feeb95bb4c111561d7"
+        },
+        "drivers/gpu/msm/kgsl_device.h": {
+          "before": "daee37a3cf76b38034b48b4662ba6819299d835bab690ed8722e0b2aefd5e0d7",
+          "after": "847e1388294a153b085c20645cb9f8d6482e1d46852d6dfe6abf9bb0cdf1f2f2"
+        },
+        "drivers/gpu/msm/adreno_a6xx.c": {
+          "before": "a756d865bd0b4ee5a98e9256d1a9962cc9ce978e56953a6b6f6dc29dc8dc032c",
+          "after": "c921514b99f8579b41b669f387905b51fb614f948bd6c6e3fcfce1d184cf2c68"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-bus.patch",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx.c": {
+          "before": "c921514b99f8579b41b669f387905b51fb614f948bd6c6e3fcfce1d184cf2c68",
+          "after": "da3e64e4d43253362b72d4f868d236c867599f3999f0a13ed50eb985f57d1bca"
+        },
+        "drivers/gpu/msm/kgsl_bus.c": {
+          "before": "c3419dda426ac9ea17107b0449bedf8744c5af59b09b4826d05d21a259d6bd21",
+          "after": "7d21260a0187d263facd1aa75920d39863e4c5dec268598cc540975e4ccf76bc"
+        },
+        "drivers/gpu/msm/kgsl_pwrctrl.c": {
+          "before": "5c2d97c6781794c07993872cfa4669bbeaffc43d2bab9f97cf08006703ceeef8",
+          "after": "876886436b727a6d2ab54c5f01e95475a95c931a7a3412f18965935ab6a9a873"
+        },
+        "drivers/gpu/msm/kgsl_pwrctrl.h": {
+          "before": "c395fbc406dc24dc7adb277c726b0b379fb6593f750e3037802fe9411dc9da62",
+          "after": "bb843e8ae663239f61d44a9b6a61e0c91bc9f52ea33cf737b61ea7c660da81bf"
+        },
+        "drivers/gpu/msm/kgsl_pwrscale.c": {
+          "before": "6bb451900d09abc37783d9ce59f39ec7e499b0bb48bda76eeaac73e1c94a7746",
+          "after": "c3cd6ca5c10734fe6b5f7d27adf5fdbd7835e5122571b04ed2eede222a72e561"
+        }
+      },
+      "sha256": "0be12384f0813c56ab6977bbf1c14c7a87bb6d029ead71b567017e27de33c8fa"
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-bootstrap.patch",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "bd6f071cbe26212e7a326774f867eeb7adb9ea6878d78339bb9293347ad5aef7",
+          "after": "4d1d964be8925e33d963e763808cff98dbdfafb84cf921accd6c23dbdd60d92f"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "2d2e5a84eb71060bb9eea3a4dff0754d3860fed7fee901cde8b72a09d4239d7e",
+          "after": "4383bfe9f319283a7385e5b1328d72ec5e379bcb255b84601875d4b676e72885"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched.c": {
+          "before": "58a36779c0df204fc2c8eeed1de1361de46ddf096bd7f42ae462f9457c2c8382",
+          "after": "aaff4501e09df7b14468500073075f11806f4855f4c3352da4abbcfd0a217898"
+        },
+        "drivers/gpu/msm/kgsl_bus.c": {
+          "before": "7d21260a0187d263facd1aa75920d39863e4c5dec268598cc540975e4ccf76bc",
+          "after": "5bfcaeee47ac08f8f63f1e72c0d49ad4fed933a3c0f5f9bd767e36d2372435d5"
+        },
+        "drivers/gpu/msm/kgsl_bus.h": {
+          "before": "54b2515b76949f891654e0697d4e864eb990a36e9976d13b7bfee1cd0dd73270",
+          "after": "21421f1c77320bd02faa24685d38c1f84306735d7c80b19b37c8200c5d73ad7e"
+        },
+        "drivers/gpu/msm/kgsl_pwrctrl.h": {
+          "before": "bb843e8ae663239f61d44a9b6a61e0c91bc9f52ea33cf737b61ea7c660da81bf",
+          "after": "eb118755da0fe0872f6e92ba9a0e3ebdb8726c228e4938ea8b6c3c36824924d7"
+        }
+      },
+      "sha256": "e61d395c9dd5ae9ce62a6d9ae30c40fb3aa90e4a90fd2d5137af4043ab59f997"
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-pagetable.patch",
+      "sha256": "1505c93eaa460b1e8ecfc79b423512958d2a4ba32bb60765a049fb022d576721",
+      "files": {
+        "drivers/gpu/msm/Makefile": {
+          "before": "f86189aa2eac049032424ed113679dbde3b297cbb8b1fff3ec18d04879ed309a",
+          "after": "95627cce8d29caa975c727e1feeb812969ae6ce5ac27300986a5f328c1620027"
+        },
+        "drivers/gpu/msm/kgsl_iommu_table.c": {
+          "before": null,
+          "after": "c933425fdde670364ff30fc7cc33138d46892814558c86af7dc76dc10599a590"
+        },
+        "drivers/gpu/msm/kgsl_iommu_table.h": {
+          "before": null,
+          "after": "1fc012de502104eb823d6a709e67ff67e80edbf56f873666a805806cc8a36bdc"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-mmu-required.patch",
+      "sha256": "dffdf871ade69d4edd7eede1f72c7df84896097f76708309925adaf83bf07191",
+      "files": {
+        "drivers/gpu/msm/kgsl_mmu.c": {
+          "before": "0d17b9ac20d92b2a6dcc78c67dd99da48fb3f9ca9c1ea9d9d39e76cdc28a51a3",
+          "after": "776ceefaa90ea0eb5249b9fa0231953b274eaa24e0fb5ba4395b8c4fb3dab5b7"
+        },
+        "drivers/gpu/msm/kgsl_mmu.h": {
+          "before": "4e6cdc2ead9ad0ce81c1531c21c1cd806ca93a1ee218cec0a19e77a2658e9774",
+          "after": "aa053d7d4e47c9e5dbef8ebd6ec42cdd7aab44f1d0bd1098df00aa9667e68169"
+        },
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "3a815c99cc88d7e28014757b8b8fe18d3146c4c28897baea4dfb0a832c3bc5d4",
+          "after": "f4c5aaf5d4a3fd40188d08c4cebcb0c1a2e005a61ec04815f3780e81c763f027"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-snapshot.patch",
+      "sha256": "c11dd25d995c721bd85d57048639cb176c77883fcebd4591b09bc4b1887ebfb2",
+      "files": {
+        "drivers/gpu/msm/kgsl_snapshot.c": {
+          "before": "25b25645560fd5fd5f8622349062b5fb40896271a27bb4a9ca81892c7388a453",
+          "after": "34e551c8ad48ea184a2b345ce47d1ece2c4239e98a784f69a68ef2ef83a1ef06"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-smmu-layout.patch",
+      "sha256": "e48059df9aff3311f32bd79af7ee9f5bc1cdb56250469e38da253d771e9632ca",
+      "files": {
+        "drivers/gpu/msm/kgsl_device.h": {
+          "before": "847e1388294a153b085c20645cb9f8d6482e1d46852d6dfe6abf9bb0cdf1f2f2",
+          "after": "2f0f9e592e1ef818db381d4904f483bd3d5015c6e9e1233f69b9988b7e61dff5"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-release-errors.patch",
+      "sha256": "2ff3381f66ddfc3b46b7e15d1b63939b5e461918ebe114450212e537ed28aeb5",
+      "files": {
+        "drivers/gpu/msm/kgsl_mmu.c": {
+          "before": "776ceefaa90ea0eb5249b9fa0231953b274eaa24e0fb5ba4395b8c4fb3dab5b7",
+          "after": "72dd1e46eac5646c80fc2fa0e089a329726b7fcefdd04cf6f73c7ac574a802fe"
+        },
+        "drivers/gpu/msm/kgsl_mmu.h": {
+          "before": "aa053d7d4e47c9e5dbef8ebd6ec42cdd7aab44f1d0bd1098df00aa9667e68169",
+          "after": "c1602656653dc5a605efb6b02cadf09dc99f4814d4277285b412d4b4e184cad4"
+        },
+        "drivers/gpu/msm/kgsl_sharedmem.c": {
+          "before": "7725dc97636b5495865801de5c853e82716f2646742c3be9e369674e05eb4bd8",
+          "after": "4b345c6e28c8a83664c51ccb6f9ff0d5dbc5d0c783a2a9c8a1845bf3d9790023"
+        },
+        "drivers/gpu/msm/kgsl_sharedmem.h": {
+          "before": "031c242fec1528bcce55f32ab23907f038dbf9472683834c8a6dfcf379979aae",
+          "after": "8e428b51c1224757ac6dd98216416ce6350f06e7c8618bd63d3eb4445843a8fb"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-entry-retention.patch",
+      "sha256": "b402e7f4a219ec4cbf0b775f59fe70e6c1d44d38da9f9ae60ed07d567395dbe5",
+      "files": {
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "be452973665fcfc77ec25102b477f2201a057b8cf3be05feeb95bb4c111561d7",
+          "after": "a6524a5049b193af3c7e418e6661ff23111190b1a24d5e5c6001bb9e1b7338da"
+        },
+        "drivers/gpu/msm/kgsl.h": {
+          "before": "6dd95a89eb4eba74ed38d42ade5704d803852fd322954d68ed3057a4341156ce",
+          "after": "eab9f21bd39e3bf8e1dbcef5c6f07de9673538418f7919d7428f202e4253e1b2"
+        },
+        "drivers/gpu/msm/kgsl_debugfs.c": {
+          "before": "5054000d6558034574e34bb25ff31e3c02d5d7a14b8f6adf53f0bfde3883b3c4",
+          "after": "0d8e171789f2d3e65294b73a7bc3e3d792689d66ea0a4018d967149e9114eb94"
+        },
+        "drivers/gpu/msm/kgsl_debugfs.h": {
+          "before": "f0421f2fe445dcec85af6f71fa9caafd625a7a6da9ad3d8530a8baaac2e55498",
+          "after": "f6a04f0c40401088dbe61496489b7d436f71211f05b05b3c925d4c5081a44c0d"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-map-retention.patch",
+      "sha256": "f3524f93f399427555da3e433514469e4a2868b5274695fee1bcb6628a05a76f",
+      "files": {
+        "drivers/gpu/msm/kgsl.h": {
+          "before": "eab9f21bd39e3bf8e1dbcef5c6f07de9673538418f7919d7428f202e4253e1b2",
+          "after": "d917588b98fba753e693d39a550b257f30c05673090d2ae74d1487d239c58e9e"
+        },
+        "drivers/gpu/msm/kgsl_mmu.c": {
+          "before": "72dd1e46eac5646c80fc2fa0e089a329726b7fcefdd04cf6f73c7ac574a802fe",
+          "after": "cad90a15c9b3565f4accfc670f61db8bf1498a67f0647743eecc355c356ce69e"
+        },
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "f4c5aaf5d4a3fd40188d08c4cebcb0c1a2e005a61ec04815f3780e81c763f027",
+          "after": "a751269bee1d90b62c1135cd9a1f019acf7c477882e8d649814c402fc18acbf7"
+        },
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "a6524a5049b193af3c7e418e6661ff23111190b1a24d5e5c6001bb9e1b7338da",
+          "after": "23faafbe32686ef2af4617e9631ec92dfbc08d95659da39c0d795b0b4f0c5f7c"
+        },
+        "drivers/gpu/msm/kgsl_sharedmem.c": {
+          "before": "4b345c6e28c8a83664c51ccb6f9ff0d5dbc5d0c783a2a9c8a1845bf3d9790023",
+          "after": "922daf218b364587a11d2b3d96c928e26c5dc72ca14eb47901d74a643fa23562"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-tz-dcvs.patch",
+      "sha256": "a70a766b318ba292778f7a695750148909baa05e60ac1bfbef952f13458ba5ec",
+      "files": {
+        "drivers/gpu/msm/governor_msm_adreno_tz.c": {
+          "before": "d45355969353ced2c6b459b8ef5a579b98ddfcb17765290c3c8b78878fb26883",
+          "after": "fa80766465df6b851a8059899b0f2e68ef8b43ec976c7afa67b0fee986560037"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-zap-loader.patch",
+      "sha256": "d2574a92d1ddb2751fc1a6c515f17704cb8f6cb993e9b536d89faea250df32e1",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "4d1d964be8925e33d963e763808cff98dbdfafb84cf921accd6c23dbdd60d92f",
+          "after": "0c2352edd28b828c7c972a02313d64a13a5d764b6dd84b62058fc24a284775fe"
+        },
+        "drivers/gpu/msm/adreno.h": {
+          "before": "76c1e2e7ecedf9d9bb803f9095a7eb2d35a135f3472b0606e2f49c69ec3e2a71",
+          "after": "5ffc199588475fe8fb6f58f68599068efcced06ddbab5856d06956c916395a0b"
+        },
+        "drivers/gpu/msm/Kconfig": {
+          "before": "1acbc12af3dc1a5f90921e0f181fab7074238f12a63878e51cd7fcc80eab1cbe",
+          "after": "ae19135682f4b848cbdcbe05971074d7608ba98e604b0d946cceb7255d57aafd"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-gmu-opp.patch",
+      "sha256": "fe7153834a0fb0ce23644d430c764efc220ec34054913425e61ac8f2a8690727",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "4383bfe9f319283a7385e5b1328d72ec5e379bcb255b84601875d4b676e72885",
+          "after": "52a7ed8309890e7cc532974b1b267da217c5da23e24c86035a2e58af0467771b"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.h": {
+          "before": "adbe4c5f2384b4f60429f28fac52d8d66b4052ca753f77abbb8af54b4a08b2c3",
+          "after": "f8158999cfc080fb1d4e68af5b8e4d06ece3c7aeb61ec24fd4068edcaed134bd"
+        },
+        "drivers/gpu/msm/adreno_a6xx_rpmh.c": {
+          "before": "50dff18c20d245edecdf6cdecde82106e94da47c29f741c5e9bdebd2901a1933",
+          "after": "0d9fd374c7b1192dd0235305adef6d58b1f1f196de779e4da229bb7140b0c4d3"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hfi.c": {
+          "before": "2fedab0593272600dd1b94d7f33c8b2534a4562f54cb24ce8d6840222ddb7ba6",
+          "after": "7c557d4af3c992d93d6fae7a26614ec803e48520f12c1bdde3343f4354c93030"
+        },
+        "drivers/gpu/msm/Kconfig": {
+          "before": "ae19135682f4b848cbdcbe05971074d7608ba98e604b0d946cceb7255d57aafd",
+          "after": "35fec663dfd9b60d5961562c9cc8c6b697c6314b46961147b535b4e2dde11e18"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-power-off-errors.patch",
+      "sha256": "cc8ec5edd28700d743b89aaa67556eeeab2b401e1432c37b5bbc364e90e9e6d3",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "52a7ed8309890e7cc532974b1b267da217c5da23e24c86035a2e58af0467771b",
+          "after": "35d20e493c9d49aba36fe403595697e3912df11c52bc7666b6ecdfb0783459a1"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.h": {
+          "before": "f8158999cfc080fb1d4e68af5b8e4d06ece3c7aeb61ec24fd4068edcaed134bd",
+          "after": "ef30c10acef3d572810b990a6463bf649d91881266505a1d8d53fef313e3d179"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched.c": {
+          "before": "aaff4501e09df7b14468500073075f11806f4855f4c3352da4abbcfd0a217898",
+          "after": "de8fd58b72dc3c396087429044fd27278ed913a30d6d7fc165f486051f13df78"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched.h": {
+          "before": "141605c87e5b80703ee94393edb238e6628104ab91f6f5cf83142e126d99b20f",
+          "after": "2d25996747eed81cc6b61d208dd1fa47279ea81626b57b98f5e0a5162c3ec361"
+        },
+        "drivers/gpu/msm/adreno_hwsched.c": {
+          "before": "56e98060b72f2e31ee0e2f142b22642cd127342591338a43cc95dd283cb3964a",
+          "after": "49fed6c9cfbf7f0084a0453e956e97ee3f1d4fd3cfa0841b77e95c9f9cd709a8"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-reset-errors.patch",
+      "sha256": "43cbcd2a6cf3c438345bfc12fe13dd3779dccc7896257f06e7ce5e17a5a7ebf8",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx.c": {
+          "before": "da3e64e4d43253362b72d4f868d236c867599f3999f0a13ed50eb985f57d1bca",
+          "after": "8a91d3477841e9e1aca5494be9a24f4e2d285464b3d439bef3195eced87e6405"
+        },
+        "drivers/gpu/msm/adreno_a6xx.h": {
+          "before": "d9c66ceb8cd3601f8dd6655a37ac641a1e7b910f8dbcdc0c184a76907130d844",
+          "after": "94b43a48f506ead9f0cc91c72bb0a62c394e764a02af8939d0fdeea19a51cef0"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "35d20e493c9d49aba36fe403595697e3912df11c52bc7666b6ecdfb0783459a1",
+          "after": "a88b4abd6c1d1d7ce23e87f2dbea72f34457251abcf384047de05d874dcc147a"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.h": {
+          "before": "ef30c10acef3d572810b990a6463bf649d91881266505a1d8d53fef313e3d179",
+          "after": "819d48dc201bd83c038190d7cea4d3250ffe747f4c4d32db49726fc01f1f41e9"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched.c": {
+          "before": "de8fd58b72dc3c396087429044fd27278ed913a30d6d7fc165f486051f13df78",
+          "after": "924ae1ea79bf2a7ca2be8effabcddae3ba41e7555c5e572fd3c2aac341fc7e58"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-genpd.patch",
+      "sha256": "e56ace4b88b358c4fff555fff89ccb19b551ae43c79d6fdf2b8b712ac22d6fc7",
+      "files": {
+        "drivers/gpu/msm/Kconfig": {
+          "before": "35fec663dfd9b60d5961562c9cc8c6b697c6314b46961147b535b4e2dde11e18",
+          "after": "3b88260eb57f0695e359bd0c0a56e86e4a5e7630b0ad67324272e4789d85459d"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "a88b4abd6c1d1d7ce23e87f2dbea72f34457251abcf384047de05d874dcc147a",
+          "after": "6cd4bf6d9236689b157c9a04075eaaece15b25b93ca16008a2a1e0ebfca867d0"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.h": {
+          "before": "819d48dc201bd83c038190d7cea4d3250ffe747f4c4d32db49726fc01f1f41e9",
+          "after": "8af9c44b5ad3abea0e45af72929d5b6fd597e77e754f0b505a0a4d4d6b438b0e"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched.c": {
+          "before": "924ae1ea79bf2a7ca2be8effabcddae3ba41e7555c5e572fd3c2aac341fc7e58",
+          "after": "73f55b1e01cee45f56826694416e67a03733542b364a8697c41d1fd295cad912"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-gmu-resources.patch",
+      "sha256": "3cf0a30310543b4d2b30d0d86dddaf6296de8d99dc491f18c448f58d19380f34",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "6cd4bf6d9236689b157c9a04075eaaece15b25b93ca16008a2a1e0ebfca867d0",
+          "after": "ffd397a92ee9ae7f9d8f1aeafb4a75a36f5bfe1ff4f038a0214c5f384c6b7252"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.h": {
+          "before": "8af9c44b5ad3abea0e45af72929d5b6fd597e77e754f0b505a0a4d4d6b438b0e",
+          "after": "836f660b65a88a1c133fb3345f2fb13e152088b6ca30674878e5176ad67e855a"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c": {
+          "before": "823a4954e5939407b03a83a02e47362f55231bc5b141e3f2561650260e29454f",
+          "after": "4bda50722ed645a612355af1d8f95fd4677a00f5ec6bbc293cb4dfd002618404"
+        },
+        "drivers/gpu/msm/adreno.c": {
+          "before": "0c2352edd28b828c7c972a02313d64a13a5d764b6dd84b62058fc24a284775fe",
+          "after": "387d414b65b615039b96f5fe9f4a524d65aae3c00dc604b972f23837337b0049"
+        },
+        "drivers/gpu/msm/kgsl_gmu_core.c": {
+          "before": "253a0e520ba04aa06932d6fd997d8bce83456caf718cb7dba1b64724f997ec90",
+          "after": "fce7088d444588ad23848b84bd6318a2b1cc861726f61b378d38a47e3364afbe"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-gpu-probe.patch",
+      "sha256": "bf9318d066f08881c199a9ab2f7b9d51c118c8c817ccd50593181b9aa1ddf378",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "387d414b65b615039b96f5fe9f4a524d65aae3c00dc604b972f23837337b0049",
+          "after": "3e6b7778baca89bdee43ddd918d95176baf77d73266be8c107a36d43d0bca01d"
+        },
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "23faafbe32686ef2af4617e9631ec92dfbc08d95659da39c0d795b0b4f0c5f7c",
+          "after": "62a14d5fd4123807f10ed9b7954469a6e2d6df64b4345c0c125d988cf114577b"
+        },
+        "drivers/gpu/msm/kgsl_gmu_core.c": {
+          "before": "fce7088d444588ad23848b84bd6318a2b1cc861726f61b378d38a47e3364afbe",
+          "after": "bb611ab16258b55439d837a358546b970e0ba6c8dac094c53e12a74f43570a6b"
+        },
+        "drivers/gpu/msm/kgsl_gmu_core.h": {
+          "before": "7c1a72ed7a8668d8d47944633eabc6c613288fb326154bd8a51b24f34df82d9e",
+          "after": "44252f4adc7445e0a3b4ce9c15e8cc7c7f360f7c3f7abb061f9049d9cb83652d"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-dt-ownership.patch",
+      "sha256": "6a1144ca25bc71dd30ee03765bac94429dacd4caa34512db14ba8b95cf2e6681",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "3e6b7778baca89bdee43ddd918d95176baf77d73266be8c107a36d43d0bca01d",
+          "after": "7d7132f58a5283c08d628d477ecb3c2aba3a17b5c67474a534f89d0ea7e4aad8"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-gpu-opp.patch",
+      "sha256": "fa096fcee501a65aae9acdc4f13288950dccdd46dad2d610b2ac964d27113ed6",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "7d7132f58a5283c08d628d477ecb3c2aba3a17b5c67474a534f89d0ea7e4aad8",
+          "after": "7ed46147fe038efff6e9712d47564d9d05647e0ca4090904bd12a57584d096ba"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-clock-owner.patch",
+      "sha256": "6bdd36117d91e736a6290ac39cad83b3d2694bc41882ad69420be52065e86c6e",
+      "files": {
+        "drivers/gpu/msm/kgsl_pwrctrl.c": {
+          "before": "876886436b727a6d2ab54c5f01e95475a95c931a7a3412f18965935ab6a9a873",
+          "after": "ae76880f83cc5c323dd933a597008038a798f93983a3efc775805f592bf01f46"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-power-callbacks.patch",
+      "sha256": "150323604c94f5591736136ba19f019f7566a6cf0f340d54be370ac9c29a11e1",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "7ed46147fe038efff6e9712d47564d9d05647e0ca4090904bd12a57584d096ba",
+          "after": "7eceb19b41532ecf5ba899cf1ab1737970ae3fc498dd0399db231a9db9298160"
+        },
+        "drivers/gpu/msm/adreno.h": {
+          "before": "5ffc199588475fe8fb6f58f68599068efcced06ddbab5856d06956c916395a0b",
+          "after": "799f2d43e6bdec803a68e8cab0e519ea29e5f153007bd4820550bd73d0964e30"
+        },
+        "drivers/gpu/msm/adreno_a3xx.c": {
+          "before": "86da2f490fde99715389262939baa819c26dcfa691579920526ef217f918bd2e",
+          "after": "62057c8ef52324ac4083649fa6dd56e109e681591e93063c09fd5564a78aecff"
+        },
+        "drivers/gpu/msm/adreno_a5xx.c": {
+          "before": "8a12fe2d8c635257a36bc2bad9029727b98e08d83f58e46af3ec0fcd72bf9df3",
+          "after": "ed550374c9b521cee7d3b8623cd20cb2c5266714a4d9c66297df5f5a7c1eec03"
+        },
+        "drivers/gpu/msm/adreno_a6xx.c": {
+          "before": "8a91d3477841e9e1aca5494be9a24f4e2d285464b3d439bef3195eced87e6405",
+          "after": "87d82cdeaf2f29a81ba5c841751346debcd5ce3c96f515a1d63c63bafbec8181"
+        },
+        "drivers/gpu/msm/adreno_a6xx.h": {
+          "before": "94b43a48f506ead9f0cc91c72bb0a62c394e764a02af8939d0fdeea19a51cef0",
+          "after": "ce5c9e6aa01a295ce751109e44c3fac83f05a20acf82a4bed7a89e849ebda382"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "ffd397a92ee9ae7f9d8f1aeafb4a75a36f5bfe1ff4f038a0214c5f384c6b7252",
+          "after": "7c99730279aa47a4c08df8ebf1403790bc730ed44a490971cdff8512f69792ac"
+        },
+        "drivers/gpu/msm/kgsl_device.h": {
+          "before": "2f0f9e592e1ef818db381d4904f483bd3d5015c6e9e1233f69b9988b7e61dff5",
+          "after": "8986f4c329856c472a90f5fef70bf2e660a7e5f9a2629ec44dbea3e91cc1b09f"
+        },
+        "drivers/gpu/msm/kgsl_pwrctrl.c": {
+          "before": "ae76880f83cc5c323dd933a597008038a798f93983a3efc775805f592bf01f46",
+          "after": "139384bd92d3ee446b8f3a9de22c88b0f658aeb7f857fb05a7ea339b932e27e5"
+        },
+        "drivers/gpu/msm/kgsl_pwrctrl.h": {
+          "before": "eb118755da0fe0872f6e92ba9a0e3ebdb8726c228e4938ea8b6c3c36824924d7",
+          "after": "8a7418e6400b2619b532fdca83745d7444cc72da6e201f7121e912f84f87aed5"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-dispatcher-recovery.patch",
+      "sha256": "ae472b9f56fe9d38ff568b9cd17ace31be50e1b8e9daadc103b8efa0e32fae94",
+      "files": {
+        "drivers/gpu/msm/adreno.h": {
+          "before": "799f2d43e6bdec803a68e8cab0e519ea29e5f153007bd4820550bd73d0964e30",
+          "after": "3943756b1473a28f294cd0f9e27121ef63d333fbcf81a402a8c685fd958fc6a5"
+        },
+        "drivers/gpu/msm/adreno_dispatch.h": {
+          "before": "d1505aa2a65ca19258a9d2c1b224b7afe2e5a3a38d64785b5190e0c0e7b728d3",
+          "after": "aca7c788ad4872dc291099f3467f81c2728e76c38750fae5f0e13c5f47816269"
+        },
+        "drivers/gpu/msm/adreno_dispatch.c": {
+          "before": "ee792d1816c270a32eefecec419b93936d15dffd85fbb4da01912e6ba08e43ae",
+          "after": "46efcd424023d49424c3eff7230ddce10558999db07b47779748365f760b6d35"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-scm-api.patch",
+      "sha256": "7e2383058da96f1c8869c9a991d098b1377728b84c52eb361e4056dd7b43b82c",
+      "files": {
+        "drivers/gpu/msm/adreno_a5xx.c": {
+          "before": "ed550374c9b521cee7d3b8623cd20cb2c5266714a4d9c66297df5f5a7c1eec03",
+          "after": "ce7654a93862b2aa421a50925b2bda632b7a307cdb64343a5679ba671693633b"
+        },
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "a751269bee1d90b62c1135cd9a1f019acf7c477882e8d649814c402fc18acbf7",
+          "after": "f88882761068628e2221654455dcef123b80f023721932c5f91ca28c8666bb73"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-smmu-fault.patch",
+      "sha256": "a929ba896883c9235e4c95e12b2fc305d84de064ffa42ac0a329dc356376968d",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "7eceb19b41532ecf5ba899cf1ab1737970ae3fc498dd0399db231a9db9298160",
+          "after": "8b4a72356f4e4d6faa2fb8a1f101150547d68f6d88267b3da392d6755756f1bb"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "7c99730279aa47a4c08df8ebf1403790bc730ed44a490971cdff8512f69792ac",
+          "after": "e7a675b2a4e4bc17463cfcba45b279649027f918be80afa71e27bba60dce3c4f"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched.c": {
+          "before": "73f55b1e01cee45f56826694416e67a03733542b364a8697c41d1fd295cad912",
+          "after": "23211a66bd4482334c534bc2d645fb27a87d77da5a3d5e442ff353d4efe11a49"
+        },
+        "drivers/gpu/msm/adreno_a6xx_rgmu.c": {
+          "before": "47a87efa9cbdf20a635be997b4641cc58b6e1f7712f6a6f0eed760a1608037c0",
+          "after": "b41a3d7629a11a9ae4c7573bb5630797bcc31433d27b63b48da03bff736b2a13"
+        },
+        "drivers/gpu/msm/adreno_dispatch.c": {
+          "before": "46efcd424023d49424c3eff7230ddce10558999db07b47779748365f760b6d35",
+          "after": "85942ebb4ef7883153be5a3587ffc733a874621eb1989a887ab11304d8d3aace"
+        },
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "f88882761068628e2221654455dcef123b80f023721932c5f91ca28c8666bb73",
+          "after": "9bd0cb0bfc4ae55837b7634dd126df53b28a74ccee898244241a0c4acc1a553c"
+        },
+        "drivers/gpu/msm/kgsl_iommu.h": {
+          "before": "8550863cb6dac8aa79aa957109aa599b5e03763e821203708da0f1b97dc36185",
+          "after": "9b7f2cd2c63da1fb12534bcb41e13a1528c1e303e152216b52c694f14c9ff0a9"
+        },
+        "drivers/gpu/msm/kgsl_mmu.h": {
+          "before": "c1602656653dc5a605efb6b02cadf09dc99f4814d4277285b412d4b4e184cad4",
+          "after": "afd22c2b9307daf6fe7ddc2faa72f615e4597e04c014d4b6749bb23057d70491"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-process-table.patch",
+      "sha256": "71fec4e92857d22d9d37cd2dba9bb20512ef302c27609302a7316847a82451b3",
+      "files": {
+        "drivers/gpu/msm/adreno_iommu.c": {
+          "before": "65593bff50ada066e1c9eca1a1fb39e58543c13cea47e5a991850297162e7685",
+          "after": "b35e12d43dd20dbd0b81c1b70b9771c78c57a5812a9ac3c3fef67c347a92e435"
+        },
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "62a14d5fd4123807f10ed9b7954469a6e2d6df64b4345c0c125d988cf114577b",
+          "after": "19bb64154da91219a36b84fd7310d11fcdfdd66b21dcb5a624026dbd8f92ae77"
+        },
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "9bd0cb0bfc4ae55837b7634dd126df53b28a74ccee898244241a0c4acc1a553c",
+          "after": "102aa0bad0b3ff8db0cf2cb0fead4c298a9b7dd1388fccfff38faa420faf6c5a"
+        },
+        "drivers/gpu/msm/kgsl_iommu.h": {
+          "before": "9b7f2cd2c63da1fb12534bcb41e13a1528c1e303e152216b52c694f14c9ff0a9",
+          "after": "750147f857a969450085b17929f5e28553b6e95e251b6f5ec1e5faeabd4b131f"
+        },
+        "drivers/gpu/msm/kgsl_mmu.c": {
+          "before": "cad90a15c9b3565f4accfc670f61db8bf1498a67f0647743eecc355c356ce69e",
+          "after": "359899bf69472a5f954ea821a90e7d191a9687fe81fd7f498f42e2c4e9c23401"
+        },
+        "drivers/gpu/msm/kgsl_mmu.h": {
+          "before": "afd22c2b9307daf6fe7ddc2faa72f615e4597e04c014d4b6749bb23057d70491",
+          "after": "c5986639172906c220d317b2c8ea1ae05d8c885e87ec88f3f442785513087dd3"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-default-root.patch",
+      "sha256": "898f467d4c4fa575f51a5b48be80528d232437fefb03ac69776134b3af6ded8e",
+      "files": {
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "102aa0bad0b3ff8db0cf2cb0fead4c298a9b7dd1388fccfff38faa420faf6c5a",
+          "after": "722e5f1510670aea75ae01453e84e1dfd51887d9d498e1aec78373d5bab940b6"
+        },
+        "drivers/gpu/msm/kgsl_mmu.h": {
+          "before": "c5986639172906c220d317b2c8ea1ae05d8c885e87ec88f3f442785513087dd3",
+          "after": "d3a751c71399f92983c07d064cbc365e6d683fea4847b7667a9485968d35d668"
+        },
+        "drivers/gpu/msm/adreno.c": {
+          "before": "8b4a72356f4e4d6faa2fb8a1f101150547d68f6d88267b3da392d6755756f1bb",
+          "after": "87156971009b9895b80c60d870175090bfa72ddef85429cbd8e3b9cafbb403f5"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-parent-domain.patch",
+      "sha256": "688ddfd78a8543bd8de6a9a6f02270c299bea95c7a6a6886a8c52d480a253af4",
+      "files": {
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "722e5f1510670aea75ae01453e84e1dfd51887d9d498e1aec78373d5bab940b6",
+          "after": "f18ad87c57c41da908708203e3314ef8148c7ff38a3c4b46085d552b91cb13e8"
+        },
+        "drivers/gpu/msm/kgsl_iommu.h": {
+          "before": "750147f857a969450085b17929f5e28553b6e95e251b6f5ec1e5faeabd4b131f",
+          "after": "1ab37d2d3fb8e3d1c4521889239d67db73adff27a2a1e68cd6c2d60ece722846"
+        },
+        "drivers/gpu/msm/kgsl_mmu.c": {
+          "before": "359899bf69472a5f954ea821a90e7d191a9687fe81fd7f498f42e2c4e9c23401",
+          "after": "21c6832783969d82723547430a8eb2e4e2683b7e01171b30089e3bf7b77026b7"
+        },
+        "drivers/gpu/msm/kgsl_mmu.h": {
+          "before": "d3a751c71399f92983c07d064cbc365e6d683fea4847b7667a9485968d35d668",
+          "after": "edecf509621a12cd3797bedaac74e478ba241154dd6804a9a5b51f50b46f8ab9"
+        },
+        "drivers/gpu/msm/kgsl_sharedmem.c": {
+          "before": "922daf218b364587a11d2b3d96c928e26c5dc72ca14eb47901d74a643fa23562",
+          "after": "1c9b931a0cad5881ac4c770c49be58c16430363e329b8b88609dcd75570e59f1"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-module-api.patch",
+      "sha256": "d3c869a3f13d29d783e6f2cd222363611e2bf3c1aeca48368de46e37976486fb",
+      "files": {
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "19bb64154da91219a36b84fd7310d11fcdfdd66b21dcb5a624026dbd8f92ae77",
+          "after": "4625d4ee633b9c4bbd8f49c9c4716e7294aa5c9ddc03da9a2f043a235d578aa4"
+        },
+        "drivers/gpu/msm/adreno.c": {
+          "before": "87156971009b9895b80c60d870175090bfa72ddef85429cbd8e3b9cafbb403f5",
+          "after": "3f054ba1cfbca61c1351837fee3807350b27ef0c6bc520540dd315bd129bb317"
+        },
+        "drivers/gpu/msm/kgsl_debugfs.c": {
+          "before": "0d8e171789f2d3e65294b73a7bc3e3d792689d66ea0a4018d967149e9114eb94",
+          "after": "bef3a157da629e06aebdc934b5cf4272c8de31ed6262d7c30a48874944528d73"
+        },
+        "drivers/gpu/msm/adreno_debugfs.c": {
+          "before": "ed32cc4979ee63efcd7803a7dae0c73da7e76d99de09d35dc781c6466b106411",
+          "after": "658291d7f528c1aa3b04dbdd87e7be6e239574b77f72aacc3af838ac2a2c1124"
+        },
+        "drivers/gpu/msm/governor_gpubw_mon.c": {
+          "before": "28a0b81d0d36039a4122a8c12556b941e7d9096320f7064631fd81b68dae1510",
+          "after": "ffa682f2c52dcdaee501b6f5e2218e486b8b42ff1d1626471d7839c7d1478648"
+        },
+        "drivers/gpu/msm/governor_msm_adreno_tz.c": {
+          "before": "fa80766465df6b851a8059899b0f2e68ef8b43ec976c7afa67b0fee986560037",
+          "after": "a74ce9455966791105aaa07a6578a41b09030e98afb5cee08c41a595e0cfdd69"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-svm-mmap.patch",
+      "sha256": "427558806c3127b253883b482f70bbf6b790fc6babc5e73944fc9120f29e1da9",
+      "files": {
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "4625d4ee633b9c4bbd8f49c9c4716e7294aa5c9ddc03da9a2f043a235d578aa4",
+          "after": "aea38103297c828f0bdf18f8c1772279424e2a7127b4e514918059cbf1d8173c"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-map-publication.patch",
+      "sha256": "a2f29998859ecf56c3fc8a90556369d790e432081a19ce77da2cb75b00913f22",
+      "files": {
+        "drivers/gpu/msm/kgsl.h": {
+          "before": "d917588b98fba753e693d39a550b257f30c05673090d2ae74d1487d239c58e9e",
+          "after": "fd816f3d8466c565a89468b0cedfa3baf1c10d9b5d262a5a278e603e8d173443"
+        },
+        "drivers/gpu/msm/kgsl.c": {
+          "before": "aea38103297c828f0bdf18f8c1772279424e2a7127b4e514918059cbf1d8173c",
+          "after": "f6137398ef28a36915c503080acc119823a3cda22dc5d95e203b35f4d4f21bd1"
+        },
+        "drivers/gpu/msm/kgsl_device.h": {
+          "before": "8986f4c329856c472a90f5fef70bf2e660a7e5f9a2629ec44dbea3e91cc1b09f",
+          "after": "d34d96546e7f9ca6e8add566071425cfb8b30ede8bd385f838a1860190750031"
+        },
+        "drivers/gpu/msm/kgsl_drawobj.h": {
+          "before": "4d62464df7726068a2acd05a68d2f0c9161f76bf9f0d461a4021c6a1ba468118",
+          "after": "0830b24b833390bbbd325b55bc95bfb536ff657cfbf8316db51fdf408803dfd8"
+        },
+        "drivers/gpu/msm/kgsl_drawobj.c": {
+          "before": "f68b620cd36afb3bf9d426f11b49b2e07ab4f7fd7dd6897d4d02d6671d129eaa",
+          "after": "e99d12b652a0658c5e7791defc8dec64f68773ca8fc6b782b7f497802b680a32"
+        },
+        "drivers/gpu/msm/adreno_dispatch.c": {
+          "before": "85942ebb4ef7883153be5a3587ffc733a874621eb1989a887ab11304d8d3aace",
+          "after": "3a812a2a97bc0560ec47c5e653314f19bad393853f8b26e77cc3ba4915768046"
+        },
+        "drivers/gpu/msm/adreno_hwsched.c": {
+          "before": "49fed6c9cfbf7f0084a0453e956e97ee3f1d4fd3cfa0841b77e95c9f9cd709a8",
+          "after": "299f6991a974c50f788e58ae83b91df1896ae943225a1fb4a9daddb32e86aac0"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-fence-result.patch",
+      "sha256": "decfd776259d7eefa2b38d661fe2f8639dbbd201fe5dd9b42968eb23fc6faef2",
+      "files": {
+        "drivers/gpu/msm/adreno_drawctxt.c": {
+          "before": "6ae92c6c083fdf7b8a4a35a8dc14cf68890d002177adba91405d412dfd2d5e59",
+          "after": "6aad89f0f2ab9a63152955d1f00adbc27a951bc4e166bc699c7d5482d6526550"
+        },
+        "drivers/gpu/msm/governor_msm_adreno_tz.c": {
+          "before": "a74ce9455966791105aaa07a6578a41b09030e98afb5cee08c41a595e0cfdd69",
+          "after": "5bc687253ff65be9398bf67ebe6551f1a45fa2b12d98a091889ddaec4ca57c5b"
+        },
+        "drivers/gpu/msm/kgsl_events.c": {
+          "before": "96729f2c5b8560e3fbc436b316464accb83e73037f826f72ead59be369939348",
+          "after": "7bfb86c190124beb06e3d74e05d98d74e9addb8ff02c31acb1b05209b7007e7b"
+        },
+        "drivers/gpu/msm/kgsl_sync.c": {
+          "before": "83ba3f328269092a86cfa43ea2eb077522a22409daead71e050d978fa3f61fa6",
+          "after": "be5b2ea719d6a1e576d3ac10ed1e176cd14d06f8ad1d256d33de2621316fbd7c"
+        },
+        "drivers/gpu/msm/kgsl_sync.h": {
+          "before": "4d2db90fb167f3699a9c935953ddbc3763deddf67926f421a3893182667fce1d",
+          "after": "a28f04bfd76424952866f49af2b8ab2889912f1a30bd77a536151576a02f928b"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-hwsched-recovery.patch",
+      "sha256": "f782826f525e2e4ba15e18e06d343a8e48a9d7cc6b6a61b61f9e30f1a06fc5e0",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_hwsched.c": {
+          "before": "23211a66bd4482334c534bc2d645fb27a87d77da5a3d5e442ff353d4efe11a49",
+          "after": "ce3b23f43dd84adee80ec5b519638c142fafa0dcd65b2b8c07aaec16256d7f98"
+        },
+        "drivers/gpu/msm/adreno_hwsched.c": {
+          "before": "299f6991a974c50f788e58ae83b91df1896ae943225a1fb4a9daddb32e86aac0",
+          "after": "4fcd7bcab6b48ce6885bccccd722c3f84f2415849208d852f0b5fff4cba1135b"
+        },
+        "drivers/gpu/msm/adreno_hwsched.h": {
+          "before": "c1c3bd62b02224db498310bd1dc4ec862d33f28006959c52c7d54467ec2b1473",
+          "after": "c74f15965e1ae6d25c80af9e9e9e615a37e8d7ba521062cf872d10599bfc3240"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-dispatcher-replay.patch",
+      "sha256": "709c750b7c181d3836ce90375212d2c399e3b30229a6f160048d68e95c42d3e8",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "3f054ba1cfbca61c1351837fee3807350b27ef0c6bc520540dd315bd129bb317",
+          "after": "a5487048430e5f9d8a1a28bb0c07423c9a91e64f32df8d709ee8c8bd8e764b35"
+        },
+        "drivers/gpu/msm/adreno_dispatch.c": {
+          "before": "3a812a2a97bc0560ec47c5e653314f19bad393853f8b26e77cc3ba4915768046",
+          "after": "d04c379637ff8e9a35fbbda0b833483a89d4f4645a97e3ccda49e8c933010c6e"
+        },
+        "drivers/gpu/msm/adreno_dispatch.h": {
+          "before": "aca7c788ad4872dc291099f3467f81c2728e76c38750fae5f0e13c5f47816269",
+          "after": "05683c9f1a5e306caa5f4725b3f1807d2b34b4ca2b2be84593fc18d589de5561"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-reset-context.patch",
+      "sha256": "6eff9577c56c565c1cb0aa1d24217d6149744d7f794dca9e37e8258efed9d907",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "a5487048430e5f9d8a1a28bb0c07423c9a91e64f32df8d709ee8c8bd8e764b35",
+          "after": "59284830a6faee8d710b02f36823827049463184d9abc61ce359d0d5c8f58264"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "e7a675b2a4e4bc17463cfcba45b279649027f918be80afa71e27bba60dce3c4f",
+          "after": "75224afa8b7e90c8b120c8220fa3cd3a8b35b3957a8780575927b8fba4d79f4e"
+        },
+        "drivers/gpu/msm/adreno_a6xx_rgmu.c": {
+          "before": "b41a3d7629a11a9ae4c7573bb5630797bcc31433d27b63b48da03bff736b2a13",
+          "after": "e1fbddf8914e051748fadbb8e7856bc803db24bb0db2867b6342da6a8e9b1fc3"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-context-switch.patch",
+      "sha256": "f70029b1000ca70489f29ecc3fb88d7e24aa3400a648306ecbe9c783b94079f4",
+      "files": {
+        "drivers/gpu/msm/adreno_drawctxt.c": {
+          "before": "6aad89f0f2ab9a63152955d1f00adbc27a951bc4e166bc699c7d5482d6526550",
+          "after": "8208a6dd1c6bfd353f5386da88b3defb04a0e07911ce25dd263d089ce4585b36"
+        },
+        "drivers/gpu/msm/adreno_ringbuffer.c": {
+          "before": "20de55977f94ec5821fa1226577bb6444d95de2f56ab7f083de1a9f37bcb2027",
+          "after": "468bc5c107520d60883c02f92e22619a1ca184df0d376606a10c9463a27ac21b"
+        },
+        "drivers/gpu/msm/adreno_ringbuffer.h": {
+          "before": "6bf21b43f5f70b93cbf204353bf6e07f75d40508656b2213615cd45624508720",
+          "after": "2ef614c056afa23269676c4eff9ad3e2f23a63f756ac41e3a32937d04d31a582"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-hard-reset-retire.patch",
+      "sha256": "d96bd109ad7cff4d7cba292f6000ceeec3652170ca7bcd6c548e1209e625633f",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx.h": {
+          "before": "ce5c9e6aa01a295ce751109e44c3fac83f05a20acf82a4bed7a89e849ebda382",
+          "after": "ce9a4c9a37cd1de306ee636510f09338cec1a495f7f9bc0770a6fe8cfbab6ebd"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "75224afa8b7e90c8b120c8220fa3cd3a8b35b3957a8780575927b8fba4d79f4e",
+          "after": "3f1c89c7d210c790ff8a1fd2bc56ac514285d6009984115d79083ad2d3b0c322"
+        },
+        "drivers/gpu/msm/adreno_a6xx_preempt.c": {
+          "before": "539eaeb0301f93ef15faabd7b46c73711a8fbd3ea304208ba4b7acfdc4fb1908",
+          "after": "3b088994e7e8fa31f381a77e25e304b48d07e1950f042dc5ad9074dff4838f20"
+        },
+        "drivers/gpu/msm/adreno_drawctxt.c": {
+          "before": "8208a6dd1c6bfd353f5386da88b3defb04a0e07911ce25dd263d089ce4585b36",
+          "after": "8b5856e50dd7d34bf37b36439df67e9ce1be1dbe62f92ceae681b138e24e6f51"
+        },
+        "drivers/gpu/msm/adreno_drawctxt.h": {
+          "before": "9f1e5ae81b4ed7f49013c2e18763b260cc2593fe61bf3b4df93456b07171ac45",
+          "after": "91bc1fc5d276463d6b773fbaf1748b46828c79319c0d1da2cc02be35d5ca8237"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-slumber-retire.patch",
+      "sha256": "91d14041aeecae035ac45e22397be2693997a984bfb3d85065f9e471b5d1b73d",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "3f1c89c7d210c790ff8a1fd2bc56ac514285d6009984115d79083ad2d3b0c322",
+          "after": "11d9fc44454480aa623e7c18a5fc8f9abfe0b6046dfb5bf9731482830b9b708c"
+        },
+        "drivers/gpu/msm/adreno_a6xx_preempt.c": {
+          "before": "3b088994e7e8fa31f381a77e25e304b48d07e1950f042dc5ad9074dff4838f20",
+          "after": "6dac5516c7b3f424dcb1aa4d63ff412eb11c44fbceb26edf4c505803118a9e04"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-idle-retry.patch",
+      "sha256": "6b7e6f6e30e27d0bada95623034e27ede26571c19f812e155a636588fb807567",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "11d9fc44454480aa623e7c18a5fc8f9abfe0b6046dfb5bf9731482830b9b708c",
+          "after": "8523b9ba82753e1d2465e3ba3b2ec51c4571c0021aca4f88ef884e6439c2fd87"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-native-bandwidth.patch",
+      "sha256": "bcdaceec3854c6ff2995c5e50d07e480666e653bcce4f4ba418d74dd90d68f4f",
+      "files": {
+        "drivers/gpu/msm/kgsl_bus.c": {
+          "before": "5bfcaeee47ac08f8f63f1e72c0d49ad4fed933a3c0f5f9bd767e36d2372435d5",
+          "after": "30106d3ea88a1c35251390f671485c85be86f0e50981e92f65dc1cbea6d55273"
+        },
+        "drivers/gpu/msm/adreno_a6xx_rpmh.c": {
+          "before": "0d9fd374c7b1192dd0235305adef6d58b1f1f196de779e4da229bb7140b0c4d3",
+          "after": "d222c080ea12e0236528fec26210165125a17860d6ae0ab0eaa91cb909644049"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-native-cnoc.patch",
+      "sha256": "6c1ef5210ae5cc0b1c1a9cb772883791fc358462ddd4d8547051bcb740bde82d",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_rpmh.c": {
+          "before": "d222c080ea12e0236528fec26210165125a17860d6ae0ab0eaa91cb909644049",
+          "after": "0d0b4156a131475ce936390c53c5d34f36fcd6d686e784ccd8410ca98aa6ef65"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-native-firmware.patch",
+      "sha256": "213e7041efc26809a626909d0c56cd8567e7e45918689e54440a528c21982f67",
+      "files": {
+        "drivers/gpu/msm/adreno-gpulist.h": {
+          "before": "2028d35c94b1f228ce851a28ec9d5a32d198e3c3f9441419aa01f2413c47e3ec",
+          "after": "508b85e561c1bfde0c366c85d99865de2481bfe24dd1f0a992a87b3b367ae98e"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-firmware-bounds.patch",
+      "sha256": "2e639e0f767aa8c9c886ff5fb10dc4b71141c78afb94a5f59804f9e1565081a8",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "8523b9ba82753e1d2465e3ba3b2ec51c4571c0021aca4f88ef884e6439c2fd87",
+          "after": "7ecc6372216b7cbfbf0051fc54d1793c6383babaf4ae9991d0a592fdabdfd916"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-gmu-vma-owner.patch",
+      "sha256": "25c8b2896399d8f5eef060555b25f534b56f3c954ddfef2dcefff994c7fe89b1",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "7ecc6372216b7cbfbf0051fc54d1793c6383babaf4ae9991d0a592fdabdfd916",
+          "after": "e9c98fa8c7d5814713d5f25e61cf25914f92a70439afac1b8fbf0f7e57c4036b"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.h": {
+          "before": "836f660b65a88a1c133fb3345f2fb13e152088b6ca30674878e5176ad67e855a",
+          "after": "63ac96848375784f2c63e040b82421b68ece88edb79bee3ea8b0eed68306e52b"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-gmu-unmap-errors.patch",
+      "sha256": "94a8fefefcb4a57a3288d6ec5654f9c2777d752347eccaffe68c89bc10372c08",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "e9c98fa8c7d5814713d5f25e61cf25914f92a70439afac1b8fbf0f7e57c4036b",
+          "after": "94a521bd9f09ee93d4be9a685d8f687aa72baaa79126d02ab012e8148a0b8230"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-gmu-map-retain.patch",
+      "sha256": "5ceb7af41b5c5dcc3a519df9569e27703ccea14e062cc2563b1867b1ba8c3da4",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "94a521bd9f09ee93d4be9a685d8f687aa72baaa79126d02ab012e8148a0b8230",
+          "after": "5bf1ec1486c564405d0f4b1e76a9679a608357acb8271bace43ea785f3e625a1"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c": {
+          "before": "4bda50722ed645a612355af1d8f95fd4677a00f5ec6bbc293cb4dfd002618404",
+          "after": "a19c245b970d01c9a1655479b11423bc774f58616ac578ee3a7beb4ca0f96e73"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-gmu-drain.patch",
+      "sha256": "ca1d3b1c4dd752261aabf5f065671ff3110328df58d8a4120d2e3372c075bc9c",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "5bf1ec1486c564405d0f4b1e76a9679a608357acb8271bace43ea785f3e625a1",
+          "after": "773231bc5e241ef1b4c8126b66f343d095efd2cbf65e3bd4c2d9be474fda6ca7"
+        },
+        "drivers/gpu/msm/adreno_a6xx_gmu.h": {
+          "before": "63ac96848375784f2c63e040b82421b68ece88edb79bee3ea8b0eed68306e52b",
+          "after": "f8b81112dac8f699ac3b342df15663b9f52732dc5a235c06750f5611e53ce7d1"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched.c": {
+          "before": "ce3b23f43dd84adee80ec5b519638c142fafa0dcd65b2b8c07aaec16256d7f98",
+          "after": "e4f9fcf24340cf04e6254e77c4c5391fe805e43477660d4612bd3b4f2865bc67"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c": {
+          "before": "a19c245b970d01c9a1655479b11423bc774f58616ac578ee3a7beb4ca0f96e73",
+          "after": "99bb9d41c82afcb7abf25b9cd5dadfae69d1b2ee624fcb92f30c230d10ed96f1"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched_hfi.h": {
+          "before": "bd390716e98392c8ae8b7b02e5d2764ce8f65436337c2a03334af85fa7e5a9fc",
+          "after": "3a8831edbfe88ad777d66b003dbce17627bdbffce2f8af2a68f750648f8b99fa"
+        },
+        "drivers/gpu/msm/kgsl.h": {
+          "before": "fd816f3d8466c565a89468b0cedfa3baf1c10d9b5d262a5a278e603e8d173443",
+          "after": "11ca95d32d654b32da96275f0c667d5a66b09142121620831855a1fa4e6773a0"
+        },
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "f18ad87c57c41da908708203e3314ef8148c7ff38a3c4b46085d552b91cb13e8",
+          "after": "cfdbf12e3dee4b990a32fde698cffd24e1e2a7537ebd29e5f3215704a32bf894"
+        },
+        "drivers/gpu/msm/kgsl_mmu.c": {
+          "before": "21c6832783969d82723547430a8eb2e4e2683b7e01171b30089e3bf7b77026b7",
+          "after": "ed9b3e2266c95eb8afe62585241714e18dd6e38674bd6e760698b28e17f23cc6"
+        },
+        "drivers/gpu/msm/kgsl_sharedmem.c": {
+          "before": "1c9b931a0cad5881ac4c770c49be58c16430363e329b8b88609dcd75570e59f1",
+          "after": "8f81df76e7cb90e75ec619c6ddaa3d3479c330c993000607bba74a76aa894259"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-checked-unmap.patch",
+      "sha256": "092c1f28d779c0cf849e6ff373a522da1cfa882f3fa59dffb85f7de6aa357d32",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_gmu.c": {
+          "before": "773231bc5e241ef1b4c8126b66f343d095efd2cbf65e3bd4c2d9be474fda6ca7",
+          "after": "4d8305c8ecfb54a1bd635e4fae0fad4036722a15c1e991709b41239a24168ba2"
+        },
+        "drivers/gpu/msm/kgsl_iommu.c": {
+          "before": "cfdbf12e3dee4b990a32fde698cffd24e1e2a7537ebd29e5f3215704a32bf894",
+          "after": "5d63a63cf5b4f9ec2cc45f94374fdbb24a51c4367b68f9ece996ec943021bbb2"
+        }
+      }
+    }
+  ],
+  "open": [
+    "DMA-BUF partial-range synchronization and trustworthy general exporter cache metadata; pinned system/WC full-buffer imports host-tested only",
+    "Native parent/process SMMU source wiring requires actual GPU translation/isolation/ASID/CP/preemption retirement and fault/PM validation; replace bound-lifetime SMMU PM pin with checked GPU runtime ownership, implement retained-parent/table recovery and safe component/devres unbind. Native GPU DDR calibration and CNOC hardware voting, later LLCC/firmware/cache/GMU/HWSCHED lifecycle remain open.",
+    "SC8180X/SQ1/SQ2 GPU OPP peak-bandwidth calibration is absent from the captured DT; native loader now exists but rejects ENODATA. Native CNOC OFF/ON input now uses the pinned SDMSHRIKE/A680 family reference, with live target cmd-db conversion; A680.1 hardware voting is not validated. Do not invent bandwidths from CPU/phone tables or synthetic fixtures. Runtime HFI/DCVS/shared-genpd/upper PM and retained-resource recovery remain unvalidated.",
+    "Secure firmware lifecycle, later dispatcher replay failure/concurrent retirement and full power-state error/retained-owner recovery; target QMP phandle/ACD capability and PM recovery. SCM/clock/SMMU providers now link in the isolated matched kernel; runtime validation remains open.",
+    "KGSL and both governors link with the real provider kernel and rebuilt MSM. SVM selects without side effects, binds at final mmap, and publishes a separate address only after complete map; address lookups/info/profiling and both top-level IB validators use readiness. Top-level IB entries are referenced until command-object destruction and released via the deferred path. Nested IB/data-buffer ownership, cancellation/forced queue destruction versus actual GPU quiescence, root retirement, concurrency stress and runtime validation remain incomplete.",
+    "Native UMD runtime semantics and Oculus priority extensions; target GPU/DPU/fence/PM verification",
+    "Per-fence event results and callback references are source-connected in v67, but cancellation delivery is not proof of GPU quiescence. HWSCHED v68 removes pre-restart synthetic completion, checks restart and per-command replay ownership, but actual reset/CP/preemption/SMMU retirement, unregister acknowledgements, independent halt references, fatal-error recovery and outer teardown remain unvalidated. Dispatcher v69 preserves replay owners and propagates replay/transaction-drain failure, but retained recovery, forced close/devres unbind, memory-release callbacks and nested resources still require a checked retirement protocol before deployment.",
+    "GMU v83 enables checked ARM LPAE subtree unmap before GPU-parent/GMU mappings. Failed nonleaf sync restores the original parent entry, retains the subtree and reports only completed prefix; PM failure prevents map/unmap edits. Whole-domain/root free still uses void flush callbacks. Complete HFI/worker/IRQ/GPU/GMU quiescence, failed-owner recovery, concurrency and safe component/devres unbind remain incomplete. Host MMIO/PM/locks/DMA are models; existing remove power/clock checks are not full retirement."
+  ],
+  "host_validated": [
+    "DMA-BUF attachment lifetime, physical SG count, signed map errors and failure rollback",
+    "Pinned system/WC full-buffer exporter cache callbacks (partial range and other exporters rejected)",
+    "Userptr FOLL_LONGTERM pin/unpin, VMA gap/overflow rejection and dirty release",
+    "Shrinker registration/free order; allocation failure keeps optional pools disabled and direct allocations available",
+    "Software timeline 64-bit ordering via matching 6.18 fence init/compare; not GPU completion proof",
+    "GMU physical SG from DMA allocation API, exact signed iommu_map_sg result, address bounds, delayed publication and allocation cleanup",
+    "GMU paging-domain allocation/attach error propagation; QMP send errors preserve ACD state (host tests only)",
+    "SC8180X RPMh voltage/BCM transforms with captured target cmd-db, aux-data validation, allocation unwind and HFI bounds; driver-local DDR metadata/property parsing",
+    "Bus table/level bounds, mandatory gfx-mem ICC acquisition/cleanup, wide bandwidth units, request preservation, AXI partial-success cancellation and devfreq busmon error/retry propagation; no hardware vote proof",
+    "First-boot ICC floor/units, normal AB preservation, HFI-stop/reset call ordering, initial/cleanup errors, persistent floor retry and dirty ICC retry after failed provider rollback; firmware/power/reset mocked, not hardware shutdown proof",
+    "MMU probe/init/acquisition errors propagate without NOMMU or shared-global fallback; missing callbacks and global_pt configurations rejected. Host tests only, native process backend integration remains incomplete.",
+    "Explicit uncertain-map ownership when legacy iommu_map_sg/map hides rollback errors, checked short-map/guard rollback, VA/backing release refusal and SVM ID withdrawal. Host only; conservative retention has no recovery/reclamation, native table integration and global teardown remain incomplete.",
+    "DCVS v2 governor consumer and separate 6.18 SCM provider: coherent TZ pool, exact service/command capability checks, signed level delta separate from transport errno, init/version/CA/start-resource and suspend failure paths; 60 host scenarios, no firmware capability/runtime proof.",
+    "Board-named ZAP MDT/PAS loading with reserved-memory bounds, original errors and failed-shutdown poison; explicit disabled nonsecure target takes actual A6xx register transition, while missing/auth failures cannot fall back. 29 host cases/5 negative controls; no new KGSL or signed-firmware runtime proof.",
+    "Target A680 GMU clocks and 200/500 MHz OPP-to-ARC/HFI path: real ARC conversion and HFI layout/header with captured SQ2 cmd-db, 36 host cases/5 negative controls; clock/OPP/firmware mocked, native genpd lifecycle and startup remain incomplete.",
+    "GMU/HWSCHED reported shutdown errors propagate through power-off and PM suspend; RSCC/GBIF/fault errors latch and reject later active-count/boot/replay, HWSCHED restart failure returns instead of BUG_ON. 48 host cases/5 negative controls; low-level void reset/CX helpers and native genpd/recovery remain incomplete.",
+    "Checked GMU reset: SPTPRAC/RPMh/first GBIF/GX regulator/CX disable failures propagate, failed reset preserves clocks/state and prevents reboot, first-boot cleanup failure keeps bandwidth floor. 33 physical-helper/52 caller/53 bootstrap host cases and 7 runtime negative controls; MMIO/regulator/time mocked, native genpd and recovery incomplete.",
+    "A680 named cx/gx genpd wired into probe/enable/reset/clock/CX shutdown and guarded remove. Synced poweroff requests hardware polling for votable CX, PM usage drops tracked on errors, domain and GX status checked. 34 host cases/8 mutants, related 33/52/53/36 regressions; no target execution or complete outer-unbind/retained-resource recovery proof.",
+    "A680 GMU/PDC MMIO resource names, checked geometry and publication, NO_AUTOEN GMU/HFI IRQ requests, exact GMU compatible and GPU qcom,gmu component reference. 36 host cases/8 runtime negative controls and four strict ARM64 objects; no target probe, IRQ/firmware execution or safe running-device unbind proof.",
+    "Native A680.1 compatible/chip-ID and GPU IRQ index with NO_AUTOEN; successful GMU component state and borrowed-node preservation; actual matching 6.18 platform driver group rollback and KGSL module init/exit error paths. 27 host cases/9 runtime mutants/three strict ARM64 objects; full GPU probe/OPP and unsafe unbind remain incomplete.",
+    "GPU-local OF child lookups, model/core match node ownership, power-bin/L3 success/error reference cleanup, and early speed-bin/power failures through shared probe unwind. 28 host scenarios/6 runtime mutants/adreno.o -Werror; early probe slice only, not whole device initialization or unsafe-unbind proof.",
+    "Native A680.1 OPP-v2 frequency/voltage import with atomic table publication, reference puts, descending order, lossless kHz/u32/u16 bounds and HFI OFF capacity; captured 10 OPPs through actual ARC/GX/HFI-v1 functions. 25 host scenarios, 28 DT regressions, 8 runtime mutants and strict adreno.o; bus indices intentionally unset/rejected, no hardware startup or bandwidth proof.",
+    "Native A680.1 power init requires completed GMU binding, preserves OPP frequencies, avoids duplicate CPU clock/regulator ownership while retaining common constraints/runtime-PM/timer initialization. 27 actual-function host scenarios/5 runtime mutants and kgsl_pwrctrl.o ARM64 -Werror; clock/DT/PM mocked, no full probe or hardware clock/power proof.",
+    "Separate 6.18 clock-provider-v1 implements actual branch2 retention bits with registered-clock type/lifetime lookup, checked runtime-PM and register errors. 27 actual-provider host scenarios/6 runtime mutants, 9 preparer tests and two strict ARM64 provider objects. v46 A3xx strict object passes with new provider header, KGSL sources unchanged; void consumer callbacks and SPTPRAC disable callback types remain incomplete.",
+    "Typed KGSL clock-retention/regulator callbacks preserve lower errors and regulator ownership; generic init/wake/slumber cut off failed steps, latch uncertain transitions, suppress suspend resume and reject later state/first-open/active-count/reset requests. 47 actual callback/state host scenarios, 7 runtime mutants, 27 clock-owner/33 reset/52 power-off regressions, 9 preparer checks and five ARM64 -Werror objects. Generic dispatcher fault retirement/BUG and recovery/teardown remain incomplete; no runtime power proof.",
+    "Dispatcher reset failure preserves pending queue ownership/counts/halt/faults, latches error and blocks known-error send/worker/timer paths; successful reset cancels old ringbuffer events instead of fabricating timestamps. recovery_active preserves IRQ faults across lower boot clear calls. 27 actual dispatcher/wait host scenarios, 9 runtime mutants, 47 power callback regressions and five strict ARM64 objects; reset/replay/events/hardware mocked, later replay failures, concurrent races, teardown and native SMMU integration remain incomplete.",
+    "KGSL aperture uses existing 6.18 SCM API with actual 8-bit context-bank validation, SCM readiness/capability checks and bounded EBUSY retry; A5xx ZAP retains BOOT state=0/PAS=13 and original errors. Actual KGSL plus matching SCM descriptor functions pass 256 valid-bank and 17 error/availability/ZAP checks, five runtime negative controls; A5xx full ARM64 object -Werror passes. Firmware transport mocked; old kgsl_iommu domain/fault APIs still prevent full module build and native SMMU integration.",
+    "Native SMMU fault protocol source-connected: provider opt-in EBUSY hold masks CFIE before callback and pins runtime PM until checked terminate/rearm; KGSL decodes actual FSR through provider and propagates errors through dispatcher and four boot callers. 28 actual-provider/KGSL IRQ/helper host scenarios, 8 compiled runtime mutants, 29 dispatcher cases and 31 provider regressions; five strict KGSL objects and one provider object. MMIO/PM/scheduling mocked; native domain attachment, full kernel link, safe unbind, HWSCHED fault recovery and hardware fault/PM validation remain incomplete.",
+    "Native process pagetables use independent io-pgtable roots and physical SG/guard mappings with uncertain-map ownership propagation; actual CP generation marks exported roots, checked destructors retain outer/parent/device/module ownership on failure, and close rejects live child references. 39 backend plus 23 actual-caller host scenarios, 7 compiled runtime negative controls, 32 MMU regressions and four strict ARM64 objects pass. Parent domain attachment remains legacy, exported roots deliberately lack retirement/reclamation, and void outer unbind remains unsafe; no full module build or hardware isolation proof.",
+    "CPU default-root restoration now calls the checked native SMMU reset_ttbr0 provider even with split tables, rejects nondefault/invalid roots and missing providers, and latches hardware restore errors. Actual soft-reset caller checks AWARE and restore errors before publishing ringbuffer globals or restarting. 18 actual-function host cases/7 compiled runtime mutants, 39 backend plus 23 process-caller and 32 MMU regressions, five strict ARM64 objects. Provider hardware calls modeled; parent/default-root installation and full IOMMU object remain incomplete, no GPU quiescence/retirement proof.",
+    "Native parent/probe now attaches an actual paging domain to GPU pdev (not the KGSL character device), installs a distinct long-lived empty TTBR0 using the matched SMMU private interface, and owns the real supplier PM/device reference through cleanup. Global mapping errors propagate to allocators; uncertain mappings retain backing; init/destruction failures retain outer pagetables with the exact owned device pointer. 41 parent/probe/global cases, 39 backend plus 31 process/parent mapping cases, 28 acquisition checks, 14 compiled runtime mutants and seven strict ARM64 objects pass. Complete source compilation reaches MODPOST with 15 namespace/unresolved-symbol errors and no module. PM is deliberately pinned while bound; boot-exposed roots are not reclaimed; safe unbind, hardware translation/retirement and runtime-PM handoff remain incomplete.",
+    "Module API v61 imports DMA_BUF, uses exported mm_get_unmapped_area for the real memstore file, and preserves FIFO priority 2 via checked sched_setattr_nocheck before waking the worker; creation/scheduler failures propagate and cleanup drains/stops the worker. 25 actual-helper/core-mmap-wrapper host cases and 8 compiled runtime mutants. Six source files changed, 109 reproduce; full KGSL plus two governors build with -Werror, no forced provider headers and real kernel exports. Separate 6.18.60-sq2-kgsl-dev1 kernel builds Image and 486 modules including fallback MSM; 489-module depmod is clean. No hardware, concurrent-producer/unbind, SVM correctness, root-retirement or normal-PM proof.",
+    "SVM mmap v63 moves GPU VA reservation/mapping out of get_unmapped_area to the final fallible step of the real mmap callback, after core admission and checked CPU page insertion. Exact CPU/GPU candidate checks, exclusive VMA/search end, bounded TASK_SIZE search, secure/alignment/release-error relookup checks, and first-map accounting. 39 actual KGSL/core-wrapper host scenarios, 10 compiled runtime mutants, 19 actual outer-release and 25 module-API regressions plus 9 preparer checks; 109 sources reproduce with only kgsl.c changed. Three modules fully build with -Werror and 489-module depmod is clean. MMU/VMA/PTE/LSM leaves are modeled, concurrent publication, root retirement, PM/unbind and hardware remain unvalidated.",
+    "Map-publication v64 adds release/acquire published_gpuaddr separate from reserved internal gpuaddr, publishes after successful attach/SVM mapping and withdraws before entry unmap; info/address lookup/profiling reject unpublished mappings. Dispatcher and HWSCHED validate aligned bounded top-level IBs, pin the entry, and command destruction defers its put. 20 actual-function scenarios include three pthread-blocked mapping interleavings; eight compiled runtime mutants; 20 outer-release and 39 SVM regressions, nine preparer checks, 109-source reproducibility. Full 60-object/three-module -Werror build and 489-module depmod pass. Kernel refs/IDR/backend/worker modeled; no weak-memory litmus, actual GPU retirement, nested IB/data ownership, hardware or safe-unbind proof.",
+    "Fence-result v67: each timestamp event owns its fence reference and signals only that fence, sets cancellation error before signaling, and never advances other timestamps. Invalidation/wait_rb no longer write synthetic SOP/EOP; late terminal-context events cancel under the group lock. 16 actual-function scenarios, eight compiled runtime mutants and 20 publication regressions pass; 38 patches/109 sources reproduce, 60 objects/three modules link with -Werror, and 489-module depmod is clean. Fixed TZ MODULE_DESCRIPTION; historical v64 log had one missed MODPOST metadata warning. Initial v67 full compile had only WSL clock-skew warnings, subsequent incremental recheck clean. Host fence/lock/ref/work models are not GPU retirement or kernel concurrency proof.",
+    "HWSCHED recovery v68 removes forced EOP, uses RESTART/RESETTING/REPLAY checked transitions, retains fault refs on failed restart, invalidates fault-policy contexts only after restart and before replay, and releases cancelled old-queue objects without forging completion. Successful submissions alone publish replay flags and increment inflight; replayed detached/invalid contexts retain commands until actual EOP. Queue-full with published commands waits for completion-driven retry; other errors latch and preserve owners. Duplicate fault notifications no longer leak refs; failed profiling mapping no longer leaks a retired object. 26 actual-function scenarios, 11 compiled runtime mutants, 16 fence and 20 publication regressions, nine preparer checks; 39 patches/109 sources reproduce, 60 objects/three modules strict link without compiler/MODPOST warnings, 489-module depmod clean. Reset/HFI/timestamps/ref/locks/events are modeled; hardware, SMMU fault integration and general safe teardown still unvalidated.",
+    "Dispatcher replay v69 replaces allocation-failure destruction and late replay invalidation with an explicit per-queue retained_replay owner. Checked bounds/count/copy precede ownership transfer; successful sendcmd transfers its entry to the dispatch queue and clears the replay slot; failures retain remaining slots, stop later queues, restore halt refs and latch the original error. Checked stop propagates pending-transaction halt errors before ring/context release. 47 actual dispatcher/send/replay/stop/wait host scenarios, nine compiled runtime mutants, 47 power callbacks and 20 publication regressions, nine preparer checks; 40 patches/109 sources reproduce, 60 objects/three modules strict link without warnings and 489-module depmod clean. Reset/ringbuffer/MMIO/events/fault policy/locks modeled; ordinary replay failure including ENOSPC remains terminal until a future checked recovery/reclamation protocol, and close/devres/hardware retirement remain unvalidated.",
+    "Reset-context v70 preserves active-context ownership until checked default-root restoration in generic/GMU/RGMU boot and soft reset. _soft_reset propagates SP/TP regulator errors to both callers; shared release clears software pointer and metadata before put. 36 actual-function scenarios, nine compiled runtime mutants, 47 dispatcher and 47 power regressions, nine preparer checks; 41 patches/109 sources reproduce, 60 objects/three modules strict link and 489-module depmod clean. MMIO, boot MMU/power rollback and refs modeled; started/submitted roots still retained, context-switch cancellation/registration-failure ownership, preemption retirement, safe unbind and hardware remain incomplete.",
+    "Context-switch v71 reserves a record before CP publication, transfers the old active reference into a per-ringbuffer list before event registration, and publishes the new active reference before an immediate callback can run. Only retired callbacks release records; cancelled/unknown callbacks retain them. Registration failure preserves both owners, latches transition_error and prevents further switches; prepublication failures unwind temporary resources. Nonempty owner lists reject ringbuffer reinitialization. 23 actual switch/set_pt/event/init scenarios, ten compiled runtime mutants, 36 default-root/16 fence/47 dispatcher regressions and nine preparer checks; 42 patches/109 sources reproduce, 60 objects/three modules strict link and 489-module depmod clean. CP/ref/lock/workqueue leaves modeled; cancelled-owner reclamation, GPU/preemption/root retirement, devres unbind and hardware remain incomplete.",
+    "Hard-reset retirement v72 wires ordinary A6xx GMU restart through checked shutdown, checked default-root restore and validated CPU restore-record reset before switch/active-context release and reboot. Nonsecure CP record bodies, user-save scratch, SMMU/default-root and ringbuffer metadata are rewritten; preemption timer drained, stale scheduler pointers cleared. Pending callbacks retain their own records until cancellation/retirement work runs; completed/registration-failed records release outside events.lock. Callback release decision is captured under lock to avoid reset-after-unlock UAF. 21 actual reset/record and 30 actual switch/event scenarios, 12 compiled runtime mutants, 36 default-root/47 dispatcher/47 power regressions and nine preparer checks; 43 patches/109 sources reproduce, 60 objects/three modules strict link and 489-module depmod clean. Hardware/provider/boot/ref/lock leaves modeled. Only ordinary hard-reset path wired; normal PM, soft/HWSCHED, fatal transition_error recovery, retained replay and page-table reclamation, safe unbind and hardware remain incomplete. Updated the older shutdown harness to current v68 HWSCHED return/state/error APIs and the new reset dependencies; 55 actual shutdown/PM/recovery scenarios pass, including root/record failures.",
+    "Slumber retirement v73 shares checked shutdown/default-root/restore-record/switch-and-active release with ordinary hard reset. Normal power-off propagates early context-idle errors before OOB or shutdown, clears GPU_STARTED after hardware shutdown, and latches first power/transition errors if root/record retirement fails; owners survive and wake is refused. 63 shutdown/PM/recovery scenarios, eight compiled runtime mutants, 21 hard-reset/30 switch/36 default-root/47 dispatcher regressions and nine preparer checks pass; 44 patches/109 sources reproduce, 60 objects/three modules strict link and 489-module depmod clean. Hardware/provider/CP/locks/ref leaves modeled; idle-worker retry, soft/HWSCHED/fatal recovery, root/replay reclamation and safe unbind remain incomplete.",
+    "Idle-retry v74 checks ordinary GMU idle-worker power-off results and rearms only a live GPU without latched power/transition errors. After dispatcher idle may release device->mutex, power-off rechecks new errors, GPU_STARTED and active count before any OOB request; already-off exits, new activity returns EBUSY. PM resumes its dispatcher gate only for a still-live healthy early-idle failure; uncertain shutdown/retirement keeps it closed. 84 actual-function scenarios, ten compiled runtime controls, 21 hard-reset regressions and nine preparer checks; 45 patches/109 sources reproduce, 60 objects/three modules strict compile/link and 489-module depmod pass. Initial complete build had two WSL clock-skew warnings, final incremental clean. Added explicit OOB observation after an initial negative control exposed that fixture gap. Controlled unlock interleavings/hardware/timers remain modeled, no kernel concurrency/runtime retirement proof; full recovery/root reclamation/unbind and KGSL/SDE device acceptance incomplete.",
+    "Native-bandwidth v75 reads exact enabled GPU OPP peak kBps for native A680.1 instead of phone DDR tables, reserves OFF, coalesces equal peaks and validates order/range/HFI capacity and the single gfx-mem path. Missing peak returns ENODATA, explicit average floor returns EOPNOTSUPP until governor floor semantics are integrated. Per-frequency indices publish only after ICC acquisition; default/max use the OPP peak and minimum uses the smallest nonzero table entry. Added missing SH2 on the matched SC8180X GPU-to-CNOC route, verified by source graph; addresses/unit/width/VCD remain runtime cmd-db. 99 bus scenarios, 51 RPMh/18 DDR cases, seven compiled runtime controls and nine preparer checks; 46 patches/109 sources reproduce, 60 objects/three modules strict build and 489-module depmod pass. Synthetic bandwidth inputs plus captured metadata are not target calibration or hardware voting. Captured target OPPs have no peak bandwidth and native CNOC input remains absent; expected ENODATA, no device probe/deployment. Full GPU lifecycle/submit and SDE acceptance incomplete.",
+    "SQ1 bandwidth reference v1: pinned original DSDT PMCL evaluated offline by ACPICA, selecting P004/P007 and matching all returned package values to source. Ten parser/bounds/hash tests and two independent semantic runs pass. Nine frequency versus eleven bandwidth states, unresolved raw units and a driver query configuration multiplier prohibit direct per-frequency OPP calibration. Three existing BAUD initialization diagnostics retained; PMCL query succeeds, not whole-ACPI or device validation. No KGSL patch, target DT, kernel or deployment change; v75 remains the candidate.",
+    "Native-CNOC v76 removes the absent legacy qcom,bus-table-cnoc property dependency using pinned SDMSHRIKE/A680 OFF/ON inputs 0/100 kBps, retaining SC8180X SH2/SN15/SN3/CN0 topology and runtime cmd-db addresses/unit/width/VCD. No DDR or per-frequency values imported. 59 RPMh and 18 DDR cases, nine compiled runtime-rejected controls and nine preparer checks pass; 47 patches/109 sources reproduce with only adreno_a6xx_rpmh.c changed, 60 objects/three modules strict build and 489-module depmod pass. A680 revision0 source differs from target revision1; hardware voting, target OPP DDR calibration, probe/submit/lifecycle and SDE acceptance remain incomplete. No deployment.",
+    "Native-firmware v77 changes only the A680 descriptor to request qcom/a680_sqe.fw and qcom/a680_gmu.bin, matching the existing device payload and matched MSM catalog. Captured bytes match remote SHA256; offline inspection covers 20 GMU headers, six page-rounded backing allocations and nine payload ranges; SQE payload stripping matches MSM. This is source/path and binary-layout evidence, not native loader or hardware execution. 48 patches/109 sources reproduce, 60 objects/three modules strict build and 489-module dependencies pass; nine preparer checks. No firmware copied into tracked source and no deployment. Malformed firmware bounds/shared VMA lifetime/partial cleanup, DDR calibration, actual submit/retirement and SDE acceptance remain open.",
+    "Firmware-bounds v78 decodes local little-endian headers with size_t/subtraction bounds, widens VMA/backing end comparisons to u64, and rejects empty ranges. Complete structural/VMA validation precedes metadata allocation; complete backing validation precedes any payload copy. Requires preallocation metadata before payload, preserves unknown version metadata and nonzero data type fields seen in the captured A680 image, checks TCM alignment and rounded backing extents. Actual parse/load functions plus captured A680 bytes pass54 scenarios with ASan/UBSan; allocations, request_firmware and MMIO are models. Six injected allocation failures retain existing owners and retry in the model; not DMA rollback proof. Twelve compiled runtime mutants include validation moved after allocation/copy and unsafe unaligned header access. 49 patches/109 sources reproduce, 60 objects/three modules strict build and489-module depmod pass; nine preparer checks. Partial-allocation cleanup, shared static VMA lifetime, SQE bounds, actual hardware/DDR/submit/retirement and SDE acceptance remain open. No deployment.",
+    "GMU-VMA v79 replaces shared mutable VMA pointers with an embedded per-GMU array; both family templates are const and explicitly sized to GMU_MEM_TYPE_MAX, including zero unsupported slots. Early probe initializes its own cursors before changing pdev or touching providers; live/retained domain, global entries, firmware, preallocation, genpd/power/clock/error or enabled state returns EBUSY without mutation.67 actual-function scenarios (13 new isolation/owner/family cases plus54 firmware regressions),14 compiled runtime assertion controls,9 preparer checks,50 patches/109-source reproduction,60 objects/three modules strict build and489-module depmod pass. An initial short-copy mutant exposed zero-initialized fixture blindness; final fixture uses nonzero storage and all14 controls fail as intended. Probe ordering is source-checked, entire probe/providers/concurrency modeled or unexecuted. Internal KGSL layout changes require the complete rebuilt module; no provider ABI change. Safe unbind, short-unmap retention/cleanup, SQE bounds, target DDR, actual submit/retirement and SDE acceptance remain incomplete; no deployment.",
+    "GMU-unmap v80 checks every global teardown iommu_unmap extent before DMA free. Mismatch latches EUCLEAN and retains the affected/suffix entries, count and domain; preexisting errors or missing domain stop cleanup and later calls do not retry partial holes. Remove propagates the cleanup failure before QMP/firmware/shadow/genpd release; successful release clears firmware/shadow pointers to prevent repeated free.42 actual genpd/global-release/remove scenarios (8 new) and58 GMU regressions pass,10 compiled assertion controls,9 preparer tests,51 patches/109-source reproduction,60 objects/three modules strict build and489-module dependency audit pass. Source audit confirms core iommu_map_sg hides rollback unmap extent; its failure path remains unsafe until both ordinary DMA and HWSCHED imported owners are retained. Byte-count checking is not checked TLB/hardware retirement proof. Outer devres/unbind, SQE bounds, DDR/actual submit and SDE acceptance incomplete; no deployment.",
+    "GMU-map-retain v81 latches errors after failed real IOMMU map attempts (including negative core rollback results), retains ordinary DMA backing/address/count and HWSCHED GPU-global/entry/address association, and reuses MAP_UNCERTAIN to prevent shared release. No HFI success handle on failure; prevalidation errors unwind normally while unused GPU globals remain device-owned.69 joined actual map/import/allocation/publication/shared-release cases,69 firmware cases,17 release and42 genpd/remove regressions,11 compiled runtime controls,9 preparer checks pass.52 patches/109 sources reproduce; two sources changed,60 objects/three modules strict build and489-module dependencies pass. Hardware/DMA/IOMMU/allocator/PM leaves modeled. Recovery, checked drain, successful-import final unmap and outer unbind are incomplete; no deployment.",
+    "GMU-drain v82 adds a checked AArch64 S1 ARM SMMU export with owner/context/PM validation, cb locking and real Qualcomm timeout propagation, connected to GMU exact-unmap/backing release. Successful HWSCHED imports carry GMU_MAPPED through shared/parent/direct cleanup and are explicitly unmapped/drained before clearing ownership. Remove returns errors and stops HWSCHED dispatcher cleanup on failure.22 actual provider,74 GMU,47 genpd/remove,43 parent/global,17 release cases and13 compiled runtime controls pass;18 preparer tests.53 patches/109 sources reproduce,9 changed.Whole isolated native-kernel-v2 Image/486 modules and strict SMMU objects built,KGSL60 objects/3 modules strict MODPOST and489-module dependencies pass. Initial kernel45 warnings plus4 later clock warnings retained; final incremental no warnings. Source audit verifies91,245 original entries,3 changed+1 added. Hardware/complete quiescence/inner page-table freeing/retained recovery/devres and KGSL/SDE acceptance incomplete; no deployment.",
+    "Checked-unmap v83: actual ARM LPAE subtree unmap/recursive free/map replacement18 cases, provider32, GMU76, parent45,15 compiled runtime-negative controls,18 preparer tests pass. GPU/GMU opt in before mappings; failed enable retains attached domain or safely frees detached empty domain.54 patches/109 sources reproduce;2 KGSL sources changed. Full native-kernel-v3 Image/486modules with3 strict IOMMU objects, KGSL60objects/3modules strict MODPOST,489-module dependencies pass. Kernel initial47 warnings retained, final incremental zero.91,246 source entries checked,5 changed; oldv2 preserved. Internal io-pgtable/SMMU layouts require complete paired rebuild. Domain/root free, hardware/concurrent retirement and safe unbind, DDR/SQE and KGSL/SDE hardware acceptance remain open; no deployment."
+  ]
+}

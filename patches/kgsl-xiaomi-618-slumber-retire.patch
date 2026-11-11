@@ -1,0 +1,95 @@
+--- a/drivers/gpu/msm/adreno_a6xx_gmu.c
++++ b/drivers/gpu/msm/adreno_a6xx_gmu.c
+@@ -3315,6 +3315,32 @@
+ 	return ret;
+ }
+ 
++/* GPU IRQs are off and checked shutdown has completed; device->mutex is held. */
++static int a6xx_gmu_retire_contexts(struct adreno_device *adreno_dev)
++{
++	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
++	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
++	int ret;
++
++	ret = kgsl_mmu_set_pt(&device->mmu, device->mmu.defaultpagetable);
++	if (ret)
++		goto fail;
++	ret = a6xx_preemption_reset_records(adreno_dev);
++	if (ret)
++		goto fail;
++
++	adreno_drawctxt_retire_switches(adreno_dev);
++	adreno_set_active_ctxs_null(adreno_dev);
++	return 0;
++fail:
++	/* Hardware is off, but its old owners must survive incomplete retirement. */
++	if (!gmu->power_error)
++		gmu->power_error = ret;
++	if (!READ_ONCE(device->pwrctrl.transition_error))
++		WRITE_ONCE(device->pwrctrl.transition_error, ret);
++	return ret;
++}
++
+ static int a6xx_power_off(struct adreno_device *adreno_dev)
+ {
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+@@ -3328,7 +3354,9 @@
+ 
+ 	trace_kgsl_pwr_request_state(device, KGSL_STATE_SLUMBER);
+ 
+-	adreno_suspend_context(device);
++	ret = adreno_suspend_context(device);
++	if (ret)
++		return ret;
+ 
+ 	ret = a6xx_gmu_oob_set(device, oob_gpu);
+ 	if (ret) {
+@@ -3362,7 +3390,10 @@
+ 	if (shutdown)
+ 		return shutdown;
+ 
+-	adreno_set_active_ctxs_null(adreno_dev);
++	clear_bit(GMU_PRIV_GPU_STARTED, &gmu->flags);
++	shutdown = a6xx_gmu_retire_contexts(adreno_dev);
++	if (shutdown)
++		return shutdown;
+ 
+ 	adreno_dispatcher_stop(adreno_dev);
+ 
+@@ -3373,8 +3404,6 @@
+ 
+ 	if (!IS_ERR_OR_NULL(adreno_dev->gpuhtw_llc_slice))
+ 		llcc_slice_deactivate(adreno_dev->gpuhtw_llc_slice);
+-
+-	clear_bit(GMU_PRIV_GPU_STARTED, &gmu->flags);
+ 
+ 	timer_delete_sync(&device->idle_timer);
+ 
+@@ -3657,15 +3686,9 @@
+ 
+ 	clear_bit(GMU_PRIV_GPU_STARTED, &gmu->flags);
+ 
+-	ret = kgsl_mmu_set_pt(&device->mmu, device->mmu.defaultpagetable);
++	ret = a6xx_gmu_retire_contexts(adreno_dev);
+ 	if (ret)
+ 		return ret;
+-	ret = a6xx_preemption_reset_records(adreno_dev);
+-	if (ret)
+-		return ret;
+-
+-	adreno_drawctxt_retire_switches(adreno_dev);
+-	adreno_set_active_ctxs_null(adreno_dev);
+ 
+ 	/* Attempt to reboot the gmu and gpu */
+ 	return a6xx_boot(adreno_dev);
+--- a/drivers/gpu/msm/adreno_a6xx_preempt.c
++++ b/drivers/gpu/msm/adreno_a6xx_preempt.c
+@@ -595,7 +595,7 @@
+ 		memdesc->size >= size;
+ }
+ 
+-/* Called with device->mutex and GPU IRQs off, after checked hard shutdown. */
++/* Called with device->mutex and GPU IRQs off, after checked full shutdown. */
+ int a6xx_preemption_reset_records(struct adreno_device *adreno_dev)
+ {
+ 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);

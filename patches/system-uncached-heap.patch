@@ -1,0 +1,157 @@
+--- a/system_heap.c
++++ b/system_heap.c
+@@ -10,6 +10,7 @@
+  *	Andrew F. Davis <afd@ti.com>
+  */
+ 
++#include <linux/device.h>
+ #include <linux/dma-buf.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/dma-heap.h>
+@@ -20,6 +21,10 @@
+ #include <linux/scatterlist.h>
+ #include <linux/slab.h>
+ #include <linux/vmalloc.h>
++
++/* Only used to clean initial cached zeroing before exposing WC mappings.
++ * No hardware DMA or device IOVA is shared through this device. */
++static struct device *zero_device;
+ 
+ struct system_heap_buffer {
+ 	struct dma_heap *heap;
+@@ -121,7 +126,7 @@
+ 	struct sg_table *table = &a->table;
+ 	int ret;
+ 
+-	ret = dma_map_sgtable(attachment->dev, table, direction, 0);
++	ret = dma_map_sgtable(attachment->dev, table, direction, DMA_ATTR_SKIP_CPU_SYNC);
+ 	if (ret)
+ 		return ERR_PTR(ret);
+ 
+@@ -136,48 +141,22 @@
+ 	struct dma_heap_attachment *a = attachment->priv;
+ 
+ 	a->mapped = false;
+-	dma_unmap_sgtable(attachment->dev, table, direction, 0);
+-}
+-
++	dma_unmap_sgtable(attachment->dev, table, direction, DMA_ATTR_SKIP_CPU_SYNC);
++}
++
++/* All exported CPU mappings are WC. The DMA-BUF core retains reservation
++ * fence waits; barriers order CPU accesses without touching a cached alias. */
+ static int system_heap_dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
+-						enum dma_data_direction direction)
+-{
+-	struct system_heap_buffer *buffer = dmabuf->priv;
+-	struct dma_heap_attachment *a;
+-
+-	mutex_lock(&buffer->lock);
+-
+-	if (buffer->vmap_cnt)
+-		invalidate_kernel_vmap_range(buffer->vaddr, buffer->len);
+-
+-	list_for_each_entry(a, &buffer->attachments, list) {
+-		if (!a->mapped)
+-			continue;
+-		dma_sync_sgtable_for_cpu(a->dev, &a->table, direction);
+-	}
+-	mutex_unlock(&buffer->lock);
+-
++                                              enum dma_data_direction direction)
++{
++	mb();
+ 	return 0;
+ }
+ 
+ static int system_heap_dma_buf_end_cpu_access(struct dma_buf *dmabuf,
+-					      enum dma_data_direction direction)
+-{
+-	struct system_heap_buffer *buffer = dmabuf->priv;
+-	struct dma_heap_attachment *a;
+-
+-	mutex_lock(&buffer->lock);
+-
+-	if (buffer->vmap_cnt)
+-		flush_kernel_vmap_range(buffer->vaddr, buffer->len);
+-
+-	list_for_each_entry(a, &buffer->attachments, list) {
+-		if (!a->mapped)
+-			continue;
+-		dma_sync_sgtable_for_device(a->dev, &a->table, direction);
+-	}
+-	mutex_unlock(&buffer->lock);
+-
++                                            enum dma_data_direction direction)
++{
++	mb();
+ 	return 0;
+ }
+ 
+@@ -189,6 +168,7 @@
+ 	struct sg_page_iter piter;
+ 	int ret;
+ 
++	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+ 	for_each_sgtable_page(table, &piter, vma->vm_pgoff) {
+ 		struct page *page = sg_page_iter_page(&piter);
+ 
+@@ -220,7 +200,7 @@
+ 		*tmp++ = sg_page_iter_page(&piter);
+ 	}
+ 
+-	vaddr = vmap(pages, npages, VM_MAP, PAGE_KERNEL);
++	vaddr = vmap(pages, npages, VM_MAP, pgprot_writecombine(PAGE_KERNEL));
+ 	vfree(pages);
+ 
+ 	if (!vaddr)
+@@ -378,6 +358,13 @@
+ 		list_del(&page->lru);
+ 	}
+ 
++	/* Flush __GFP_ZERO through the noncoherent DMA API before either a WC
++	 * CPU mapping or an importing device can access the allocation. */
++	ret = dma_map_sgtable(zero_device, table, DMA_BIDIRECTIONAL, 0);
++	if (ret)
++		goto free_pages;
++	dma_unmap_sgtable(zero_device, table, DMA_BIDIRECTIONAL, 0);
++
+ 	/* create the dmabuf */
+ 	exp_info.exp_name = dma_heap_get_name(heap);
+ 	exp_info.ops = &system_heap_buf_ops;
+@@ -415,14 +402,33 @@
+ 	struct dma_heap_export_info exp_info;
+ 	struct dma_heap *sys_heap;
+ 
+-	exp_info.name = "system";
++	/* ARM64 root devices use the direct, noncoherent DMA ops. The 64-bit
++	 * mask prevents bounce buffers when cleaning these allocated pages. */
++	zero_device = root_device_register("system-uncached-zero");
++	if (IS_ERR(zero_device))
++		return PTR_ERR(zero_device);
++	if (dma_coerce_mask_and_coherent(zero_device, DMA_BIT_MASK(64))) {
++		root_device_unregister(zero_device);
++		return -ENODEV;
++	}
++
++	exp_info.name = "system-uncached";
+ 	exp_info.ops = &system_heap_ops;
+ 	exp_info.priv = NULL;
+ 
+ 	sys_heap = dma_heap_add(&exp_info);
+-	if (IS_ERR(sys_heap))
++	if (IS_ERR(sys_heap)) {
++		root_device_unregister(zero_device);
+ 		return PTR_ERR(sys_heap);
++	}
+ 
+ 	return 0;
+ }
+ module_init(system_heap_create);
++
++/* dma_heap has no unregister API: intentionally no module_exit/unload path. */
++MODULE_DESCRIPTION("Independent nonsecure system WC DMA-BUF heap for ARM64");
++MODULE_LICENSE("GPL");
++MODULE_IMPORT_NS("DMA_BUF");
++MODULE_IMPORT_NS("DMA_BUF_HEAP");
++MODULE_INFO(q2_memory_backend, "dma-heap-system-uncached-v1");

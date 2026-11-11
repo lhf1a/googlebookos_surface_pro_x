@@ -1,0 +1,21 @@
+{
+  "repository": "https://android.googlesource.com/kernel/msm-extra/graphics-devicetree",
+  "ref": "refs/heads/android-msm-p11-5.15-tm-wear-kr3-dr-p11-qpr1",
+  "commit": "b8c849e838ca1ce51342ececd79dc8e8dc46611b",
+  "path": "gpu/sdmshrike-gpu.dtsi",
+  "sha256": "3cd4fc5f7efc18eefc07b053e6d96921c25a595b9850fa3c1f34252bb75b9adf",
+  "schema": 1,
+  "status": "a680-downstream-cnoc-reference-not-ddr-calibration",
+  "cnoc_kBps": [
+    0,
+    100
+  ],
+  "source_gpu_chipid": "0x06080000",
+  "target_gpu_chipid": "0x06080001",
+  "scope": "CNOC OFF/ON input only; target BCM layout/address/unit/VCD still derive from SC8180X topology and runtime cmd-db. No DDR or per-frequency values imported.",
+  "limits": [
+    "Source base A680 revision differs from target A680.1; runtime validation still required.",
+    "Source GPU table only covers 315/405/461/500/514 MHz and OFF, not captured target 177..700 MHz.",
+    "DDR macro divides by 1024; do not import it as decimal OPP kBps without auditing source consumer semantics."
+  ]
+}
