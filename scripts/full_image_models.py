@@ -82,10 +82,10 @@ def sq1_dtb(current, reference):
     return bytes(new.as_bytearray()), changes
 
 
-def model_router(pristine, directory):
+def model_router(pristine, directory, graphics_argument='sq2.vulkan=qcom'):
     tool = module('model_router_pe', 'prepare-sq2-618-debug-entry.py')
     if directory != 'SQ2Nat':
-        pristine, _ = tool.rewrite_efi(pristine, 'SQ2Nat', directory, 1, 'sq2.vulkan=qcom')
+        pristine, _ = tool.rewrite_efi(pristine, 'SQ2Nat', directory, 1, graphics_argument)
     tool.unsigned_arm64_pe(pristine)
     before = ('\\EFI\\SQ1Default\\el2launch.efi\0').encode('utf-16le')
     after = ('\\EFI\\' + directory + '\\el1launch.efi\0').encode('utf-16le')
@@ -95,7 +95,7 @@ def model_router(pristine, directory):
     return result
 
 
-def install_profiles(tree, reference, pristine_router):
+def install_profiles(tree, reference, pristine_router, graphics_argument='sq2.vulkan=qcom'):
     tool = module('model_profiles_pe', 'prepare-sq2-618-debug-entry.py')
     report = {}
     for directory in ('SQ2Nat', 'SQ2Res'):
@@ -106,9 +106,9 @@ def install_profiles(tree, reference, pristine_router):
         before = ('\\EFI\\' + directory + '\\android-el2.dtb\0').encode('utf-16le')
         after = ('\\EFI\\' + directory + '\\android-sq1.dtb\0').encode('utf-16le')
         require(len(before) == len(after) and launcher.count(before) == 1, 'Unknown DTB constant')
-        router = model_router(pristine_router, directory)
+        router = model_router(pristine_router, directory, graphics_argument)
         tool.inspect_efi(router, launcher, (bundle / 'kernel-options.txt').read_text(),
-                         directory, 'sq2.vulkan=qcom', router_target_count=1)
+                         directory, graphics_argument, router_target_count=1)
         (bundle / 'android-sq1.dtb').write_bytes(dtb)
         (bundle / 'el1launch.efi').write_bytes(launcher.replace(before, after))
         (bundle / 'start.efi').write_bytes(router)
@@ -118,11 +118,11 @@ def install_profiles(tree, reference, pristine_router):
             'profiles': report, 'hardware_verified': False}
 
 
-def from_template(tree, template, esp_offset, pristine_router, work):
+def from_template(tree, template, esp_offset, pristine_router, work, graphics_argument='sq2.vulkan=qcom'):
     reference = work / 'sq1-template-reference.dtb'
     require(not reference.exists(), 'Use a fresh model-reference output')
     subprocess.run(['mcopy', '-i', str(template) + '@@' + str(esp_offset),
                     '::/EFI/SQ1EL2/android-el2.dtb', str(reference)], check=True)
-    report = install_profiles(tree, reference.read_bytes(), pristine_router)
+    report = install_profiles(tree, reference.read_bytes(), pristine_router, graphics_argument)
     (work / 'MODEL-PROFILES.json').write_text(json.dumps(report, indent=2) + '\n')
     return report

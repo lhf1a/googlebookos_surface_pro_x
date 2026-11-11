@@ -5,6 +5,7 @@ parent-package dependency. Full builds never deploy or open block devices.
 """
 import argparse
 import gzip
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,128 @@ from disk_image import module, regular, require
 from single_user_payload import ANCHOR, HOOK
 
 DEFAULT_PRIVATE = ROOT / 'private/build-inputs'
+DEFAULT_A6XX_PATCHES = ROOT / 'patches/drm-618-a6xx-upstream'
+
+# Full Mesa chain: keep the Mesa/minigbm/drm-HWC vendor overlay, remove the
+# closed Qualcomm graphics payloads and their pre-Android stage helpers.
+CLOSED_GRAPHICS_DIRS = ('etc/sq2-qti-system', 'etc/sq2-graphics-full', 'etc/sq2-vulkan-closed')
+CLOSED_GRAPHICS_HELPERS = ('bin/qti-system-display-stage', 'bin/qualcomm-full-start')
+MESA_REQUIRED_PROPS = ('ro.hardware.egl=freedreno', 'ro.hardware.vulkan=freedreno',
+                       'ro.vendor.hwcomposer.mode=client')
+MESA_STAGE_LINES = (
+    b'qualcomm-full-start > /logs/qualcomm-full.txt 2>&1 || fail qualcomm-full-graphics\n',
+    b'qti-system-display-stage > /logs/qti-system-display.txt 2>&1 || fail qti-system-display\n',
+)
+MESA_STATUS_HOOK = (
+    b'if [ -f /etc/sq2-graphics-mode ]; then\n'
+    b'    echo "SQ2_GRAPHICS_MODE: $(cat /etc/sq2-graphics-mode)" | tee -a /logs/status.txt\n'
+    b'fi\n'
+)
+
+
+def mesa_runtime(records, bodies):
+    """Switch the runtime initramfs from the mixed/QTI stack to a full Mesa chain.
+
+    Host-side transformation only: closed Qualcomm graphics payloads and their
+    pre-Android stage helpers are removed, the Mesa/minigbm/drm-HWC overlay is
+    required to stay intact, and init stops invoking the closed stages.
+    It does not build Mesa, prove rendering or touch a device.
+    """
+    prop_name = 'etc/googlebook-security/build.prop'
+    require(prop_name in bodies, 'Mesa overlay missing: ' + prop_name)
+    props = bodies[prop_name].decode()
+    for item in MESA_REQUIRED_PROPS:
+        require(item in props, 'Mesa overlay property missing: ' + item)
+    require('etc/googlebook-security/lib64/egl/libEGL_freedreno.so' in bodies, 'Mesa EGL payload missing')
+    require('etc/googlebook-security/lib64/hw/vulkan.freedreno.so' in bodies, 'Mesa Vulkan payload missing')
+    require('etc/googlebook-security/lib64/hw/mapper.minigbm.so' in bodies, 'minigbm mapper missing')
+    init = bodies.get('init', b'')
+    for line in MESA_STAGE_LINES:
+        require(init.count(line) == 1,
+                'Unknown closed-graphics stage in init: ' + line.decode().strip())
+    removed = []
+    for directory in CLOSED_GRAPHICS_DIRS:
+        require(directory in bodies, 'Closed graphics payload missing: ' + directory)
+        for name in sorted(n for n in bodies if n == directory or n.startswith(directory + '/')):
+            removed.append(name)
+            bodies.pop(name, None)
+            records.pop(name, None)
+    for name in CLOSED_GRAPHICS_HELPERS:
+        require(name in bodies, 'Closed graphics helper missing: ' + name)
+        removed.append(name)
+        bodies.pop(name, None)
+        records.pop(name, None)
+    for line in MESA_STAGE_LINES:
+        init = init.replace(line, b'')
+    require(MESA_STATUS_HOOK not in init, 'Mesa status hook already present')
+    anchor = b'if [ -d /etc/googlebook-security ]; then\n'
+    require(init.count(anchor) == 1, 'Unknown security-overlay handoff')
+    init = init.replace(anchor, MESA_STATUS_HOOK + anchor, 1)
+    bodies['init'] = init
+    bodies['etc/sq2-graphics-mode'] = b'full-mesa\n'
+    records['etc/sq2-graphics-mode'] = new_record(0o100644)
+    retained = sorted(n for n in bodies
+                      if n.startswith('etc/googlebook-security/') and not n.endswith('/'))
+    require(retained, 'Mesa overlay lost all members')
+    return {'graphics': 'mesa',
+            'removed_members': removed,
+            'removed_count': len(removed),
+            'retained_mesa_members': len(retained),
+            'init_closed_stages_removed': len(MESA_STAGE_LINES),
+            'marker': 'etc/sq2-graphics-mode',
+            'hardware_validated': False}
+
+
+def rewrite_mesa_boot_selection(bundle):
+    """Select Mesa in the EFI boot command line (equal-length token rewrite)."""
+    options_path = bundle / 'kernel-options.txt'
+    text = options_path.read_text()
+    tokens = [t for t in text.split() if t.startswith('sq2.vulkan=')]
+    require(tokens == ['sq2.vulkan=qcom'],
+            'Unexpected baseline graphics option: ' + repr(tokens))
+    launcher_path = bundle / 'el2launch.efi'
+    launcher = launcher_path.read_bytes()
+    old = 'sq2.vulkan=qcom'.encode('utf-16le')
+    new = 'sq2.vulkan=mesa'.encode('utf-16le')
+    require(len(old) == len(new) and launcher.count(old) == 1,
+            'Unexpected EFI graphics constant')
+    require(launcher.count(text.strip().encode('utf-16le') + b'\0\0') == 1,
+            'EFI command line does not match kernel-options.txt')
+    options_path.write_text(text.replace('sq2.vulkan=qcom', 'sq2.vulkan=mesa'))
+    launcher_path.write_bytes(launcher.replace(old, new))
+    updated = options_path.read_text()
+    require(launcher_path.read_bytes().count(updated.strip().encode('utf-16le') + b'\0\0') == 1,
+            'EFI command line was not updated')
+    return 'sq2.vulkan=mesa'
+
+
+def apply_kernel_patches(patch_dir, kernel_source, output, run):
+    """Apply every *.patch in order to the extracted pinned kernel source."""
+    patch_dir = Path(patch_dir)
+    require(patch_dir.is_dir(), 'Kernel patch directory is missing: ' + str(patch_dir))
+    files = sorted(p for p in patch_dir.iterdir() if p.suffix == '.patch')
+    require(files, 'No .patch files in ' + str(patch_dir))
+    applied = []
+    for patch in files:
+        text = patch.read_text()
+        touched = re.findall(r'^diff --git a/(\S+) b/', text, re.M)
+        require(touched, 'Patch has no diff header: ' + patch.name)
+        run(['patch', '-p1', '--batch', '--forward', '--fuzz=0', '-i', str(patch.resolve())],
+            cwd=kernel_source)
+        hashes = {}
+        for name in touched:
+            path = Path(kernel_source) / name
+            require(path.is_file(), 'Patched file missing: ' + name)
+            hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        applied.append({'path': str(patch),
+                        'sha256': hashlib.sha256(patch.read_bytes()).hexdigest(),
+                        'files': hashes})
+    report = {'directory': str(patch_dir), 'patch_count': len(applied), 'patches': applied,
+              'note': 'Applied to the extracted pinned kernel source before compilation; '
+                      'not an upstream rebase and not hardware validated.',
+              'hardware_validated': False}
+    (Path(output) / 'KERNEL-PATCHES.json').write_text(json.dumps(report, indent=2) + '\n')
+    return report
 
 
 def records_from_gzip(path):
@@ -118,7 +241,7 @@ def install_userdata_growth(records, bodies):
     for name in ('resize-userdata-partition','grow-image-userdata','surface-swap-boot'):
         records['bin/'+name]=new_record(0o100755)
 
-def assemble_runtime(private, output, compiled=None):
+def assemble_runtime(private, output, compiled=None, graphics='baseline'):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
     bodies = {name: b'' if rec[1][1] & 0o170000 == 0o040000 else (runtime/'files'/name).read_bytes()
@@ -143,6 +266,11 @@ def assemble_runtime(private, output, compiled=None):
             name = path.relative_to(stage).as_posix()
             bodies[name] = path.read_bytes()
             records[name] = new_record(0o100644)
+    graphics_report = None
+    if graphics == 'mesa':
+        graphics_report = mesa_runtime(records, bodies)
+    elif graphics != 'baseline':
+        raise ValueError('Unknown graphics mode: ' + repr(graphics))
     init = bodies['init']
     require(init.count(ANCHOR) == 1, 'Unknown Android handoff')
     init = re.sub(rb'(?m)^(\s*el2-terminal-autostart)[ \t]+[0-9]+(?=[ \t]*(?:>|&|\n|$))',rb'\1',init)
@@ -179,6 +307,7 @@ def assemble_runtime(private, output, compiled=None):
         return gzip.compress(raw+b'\0'*(-len(raw)%512),mtime=0)
     # Directories before children; separate final credential member is retained.
     output.write_bytes(archive(sorted(bodies,key=lambda n:(n.count('/'),n)))+archive(sorted(identity)))
+    return graphics_report
 
 
 def build(args, compile_kernel):
@@ -189,10 +318,10 @@ def build(args, compile_kernel):
     require(not args.output.exists(),'Full build output must be fresh')
     args.output.mkdir(parents=True)
     records=[]
-    def run(command):
+    def run(command, cwd=None):
         label='step-'+str(len(records))
         with (args.output/(label+'.stdout')).open('w') as out,(args.output/(label+'.stderr')).open('w') as err:
-            result=subprocess.run(list(map(str,command)),stdout=out,stderr=err)
+            result=subprocess.run(list(map(str,command)),stdout=out,stderr=err,cwd=cwd)
         records.append({'command':list(map(str,command)),'exit':result.returncode,
                         'stdout':label+'.stdout','stderr':label+'.stderr'})
         (args.output/'BUILD-COMMANDS.json').write_text(json.dumps(records,indent=2)+'\n')
@@ -227,6 +356,12 @@ def build(args, compile_kernel):
             link=prefixes/name
             if not link.exists() and not link.is_symlink():
                 link.symlink_to(os.path.relpath(target,prefixes),target_is_directory=True)
+        kernel_patches = args.kernel_patches
+        if kernel_patches is None and args.graphics == 'mesa':
+            kernel_patches = DEFAULT_A6XX_PATCHES
+        patch_report = None
+        if kernel_patches:
+            patch_report = apply_kernel_patches(kernel_patches, extracted/'kernel', args.output, run)
         cross=args.cross_compile
         if cross is None:
             toolchain=build_dir.parent/(build_dir.name+'-toolchain')
@@ -244,22 +379,33 @@ def build(args, compile_kernel):
     original=private/'kernel-6.18/EFI/SQ2Nat'
     for name in ('start.efi','el2launch.efi','qebspilaa64.efi','tcblaunch.exe','kernel-options.txt'):
         shutil.copyfile(original/name,bundle/name)
+    graphics_token = [t for t in (bundle/'kernel-options.txt').read_text().split()
+                      if t.startswith('sq2.vulkan=')]
+    require(graphics_token, 'Missing sq2.vulkan= boot option')
+    graphics_token = graphics_token[0]
+    if args.graphics == 'mesa':
+        graphics_token = rewrite_mesa_boot_selection(bundle)
     if compiled:
         shutil.copyfile(compiled/'Image',bundle/'Image')
         run(['dtc','-q','-I','dts','-O','dtb','-o',bundle/'android-el2.dtb',private/'kernel-6.18/board.dts'])
     else:
         for name in ('Image','android-el2.dtb'):
             shutil.copyfile(original/name,bundle/name)
-    assemble_runtime(private,bundle/'initramfs.cpio.gz',compiled)
+    graphics_report = assemble_runtime(private,bundle/'initramfs.cpio.gz',compiled,graphics=args.graphics)
     from disk_image import build as disk_build
     disk_args=argparse.Namespace(output=args.output/'disk',template=template,recovery_zip=None,
         resources=private,private_root=private,prepared_bundle=bundle,
         single_user_initramfs=bundle/'initramfs.cpio.gz',
         expected_single_user_sha256=None,
-        size_gib=None,jobs=args.jobs,build_only=True,resume_build=False,kernel_mode=args.kernel_mode)
+        size_gib=None,jobs=args.jobs,build_only=True,resume_build=False,kernel_mode=args.kernel_mode,
+        graphics_argument=graphics_token)
     report=disk_build(disk_args)
     report.update(source_compiled=bool(compiled),private_root=str(private),
         source_commit=source_commit,
-        build_time_parent_initramfs_used=False,postbuild_tests_performed=False)
+        build_time_parent_initramfs_used=False,postbuild_tests_performed=False,
+        graphics=args.graphics,graphics_boot_option=graphics_token,
+        graphics_report=graphics_report,
+        kernel_patches=patch_report['patch_count'] if patch_report else 0,
+        hardware_validated=False)
     (args.output/'FULL-IMAGE.json').write_text(json.dumps(report,indent=2)+'\n')
     return report

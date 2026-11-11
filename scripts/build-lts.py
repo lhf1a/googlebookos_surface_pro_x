@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Unified Linux 6.18 LTS entry, including original-template full-image builds.
 
+full-image accepts --graphics baseline|mesa. The mesa mode assembles the full
+Mesa userspace chain (Mesa freedreno GLES/Vulkan, minigbm, drm HWC3 client
+composition) instead of the accepted mixed/QTI graphics stack, and applies the
+repo A6xx kernel patch series unless --kernel-patches overrides it. It is a
+build-time selection only; no rendering or hardware validation is implied.
+
 package is an exact private baseline copy, NOT a source compilation or disk
 image. compile produces unvalidated source-build artifacts; it never splices a
 new Image into an existing initramfs. single-user creates a separate fresh-data
@@ -238,6 +244,10 @@ def main(argv=None):
     full.add_argument('--private-root', type=Path, default=DEFAULT_PRIVATE)
     full.add_argument('--template', type=Path, help='default: PRIVATE_ROOT/template.img; size/layout are retained exactly')
     full.add_argument('--kernel-mode', choices=('source','prebuilt'), default='source')
+    full.add_argument('--graphics', choices=('baseline','mesa'), default='baseline',
+                      help='baseline: accepted mixed graphics stack; mesa: full Mesa chain (Mesa GLES/Vulkan, minigbm, drm HWC3)')
+    full.add_argument('--kernel-patches', type=Path,
+                      help='apply every *.patch in this directory to the extracted kernel source before compile; mesa defaults to patches/drm-618-a6xx-upstream')
     full.add_argument('--cross-compile', help='override the compiler; default extracts PRIVATE_ROOT/kernel-6.18/toolchain.tar.gz')
     full.add_argument('--build-dir', type=Path, help='fresh Linux filesystem kernel build directory')
     full.add_argument('--output', type=Path, required=True)

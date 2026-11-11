@@ -224,15 +224,15 @@ def shared_model_router(router, directory):
     return result
 
 
-def rescue_efi(tree, efi):
+def rescue_efi(tree, efi, graphics_argument='sq2.vulkan=qcom'):
     tool = module('disk_efi','prepare-sq2-618-debug-entry.py')
     source = tree/'EFI/SQ2Nat'
     dest = tree/'EFI/SQ2Res'
     dest.mkdir(exist_ok=True)
     for path in source.iterdir():
         if path.name not in ('SHA256SUMS',): shutil.copyfile(path,dest/path.name)
-    router,_ = tool.rewrite_efi((source/'start.efi').read_bytes(),'SQ2Nat','SQ2Res',1,'sq2.vulkan=qcom')
-    launcher,_ = tool.rewrite_efi((source/'el2launch.efi').read_bytes(),'SQ2Nat','SQ2Res',5,'sq2.vulkan=qcom')
+    router,_ = tool.rewrite_efi((source/'start.efi').read_bytes(),'SQ2Nat','SQ2Res',1,graphics_argument)
+    launcher,_ = tool.rewrite_efi((source/'el2launch.efi').read_bytes(),'SQ2Nat','SQ2Res',5,graphics_argument)
     command = (source/'kernel-options.txt').read_text().strip().replace('\\EFI\\SQ2Nat\\','\\EFI\\SQ2Res\\')
     rescue = command.replace('sq2.video.c2=experimental','sq2.rescue=1')
     require(rescue != command and len(rescue) <= len(command), 'Unsupported rescue options')
@@ -244,9 +244,9 @@ def rescue_efi(tree, efi):
     (source/'start.efi').write_bytes(shared_model_router((source/'start.efi').read_bytes(),'SQ2Nat'))
     (dest/'el2launch.efi').write_bytes(launcher)
     (dest/'kernel-options.txt').write_text(rescue+'\n')
-    tool.inspect_efi((dest/'start.efi').read_bytes(),launcher,rescue+'\n','SQ2Res','sq2.vulkan=qcom',router_target_count=2)
+    tool.inspect_efi((dest/'start.efi').read_bytes(),launcher,rescue+'\n','SQ2Res',graphics_argument,router_target_count=2)
     tool.inspect_efi((source/'start.efi').read_bytes(),(source/'el2launch.efi').read_bytes(),
-                     (source/'kernel-options.txt').read_text(),'SQ2Nat','sq2.vulkan=qcom',router_target_count=2)
+                     (source/'kernel-options.txt').read_text(),'SQ2Nat',graphics_argument,router_target_count=2)
     # These are fresh generated bundles, not checksum-pinned release packages.
     for directory in [source,dest]:
         (directory/'SHA256SUMS').unlink(missing_ok=True)
@@ -319,13 +319,15 @@ def build(args):
     (tree/'EFI/SQ2Nat/initramfs.cpio.gz').write_bytes(payload)
     shutil.copyfile(bootloader,tree/'EFI/BOOT/BOOTAA64.EFI')
     shutil.copytree(input_root/'kernel-6.18/firmware',tree/'firmware',dirs_exist_ok=resume)
-    rescue_efi(tree,bundle)
+    graphics_argument = module('disk_graphics','prepare-sq2-618-debug-entry.py').graphics_option(
+        (bundle/'kernel-options.txt').read_text())
+    rescue_efi(tree,bundle,graphics_argument)
     if template:
         # Shared binaries do not mean identical frequency/power policies. Keep
         # the original universal template's SQ1 selection; SQ2 remains intact.
         from full_image_models import from_template
         from_template(tree,source,original_map['SQ2PROBE']['offset'],
-                      (bundle/'start.efi').read_bytes(),work)
+                      (bundle/'start.efi').read_bytes(),work,graphics_argument)
     (tree/'SPX-IMAGE.txt').write_text('SPX_IMAGE_FORMAT=1\nSPX_RELEASE=6.18-'+selected['baseline']+'-single-user\nPRIVATE_IDENTITY_PRESENT=1\n')
     (tree/'EFI/BOOT/grub.cfg').write_text("set timeout=5\nset default=spx-single-user\n\nmenuentry 'Surface Pro X Linux 6.18 - single user 0' --id spx-single-user {\n chainloader /EFI/SQ2Nat/start.efi\n}\nmenuentry 'Surface Pro X Linux 6.18 - rescue (no Android data mount)' --id spx-rescue {\n chainloader /EFI/SQ2Res/start.efi\n}\nmenuentry 'Power off' { halt }\n")
     (output/'LAYOUT.json').write_text(json.dumps({'image_bytes':image_bytes,'partitions':parts,'template':str(template) if template else None,'partition_boundaries_preserved':bool(template)},indent=2)+'\n')
