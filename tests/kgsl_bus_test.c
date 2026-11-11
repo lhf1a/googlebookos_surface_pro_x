@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#define dev_err(dev, ...) ((void)(dev), fprintf(stderr, __VA_ARGS__))
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>

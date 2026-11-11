@@ -1,0 +1,279 @@
+--- a/bin/prepare-native-gpu
++++ b/bin/prepare-native-gpu
+@@ -1,33 +1,202 @@
+ #!/bin/busybox sh
+-# Preserve SQ2 firmware after Android replaces the initramfs root.
+-# Only load drivers and record discovery; do not repeat the GPU test suite.
++# Host-first KGSL/SDE stage. WIP: no production approval is supplied.
++# Host seals and full DT/provider contracts must be resolved before packaging.
+ set -eu
++stage=ENTRY
++stop() { echo "SQ2_KGSL_SDE_STOP stage=$stage reason=$1" >&2; exit "${2:-1}"; }
++R=${SQ2_FIXTURE_ROOT:-}
++if [ -n "$R" ]; then
++    case "$R" in /*) ;; *) stop invalid-fixture-root 2;; esac
++    [ -f "$R/.sq2-offline-fixture" ] || stop fixture-marker 2
++    case "${SQ2_COMMAND:-}" in "$R"/*) ;; *) stop fixture-command 2;; esac
++    [ -x "$SQ2_COMMAND" ] || stop fixture-command 2
++elif [ -n "${SQ2_COMMAND:-}" ]; then
++    stop command-injection-without-fixture 2
++fi
++run() { if [ -n "$R" ]; then "$SQ2_COMMAND" "$@"; else "$@"; fi; }
+ target=${1:-/newroot}
+-case "$target" in /newroot|/android) ;; *) exit 2;; esac
+-test -d "$target/debug_ramdisk"
+-dest=$target/debug_ramdisk/sq2-firmware
+-mkdir -p "$dest"
+-# Firmware requests also occur during Bluetooth setup and remoteproc resume.
+-# Retain the selected ADSP blob (which fits the pinned DT), ath10k board data,
+-# regulatory database, and QCA firmware, not just the three GPU blobs.
+-cp -a /lib/firmware/. "$dest/"
++case "$target" in /newroot|/android) ;; *) stop invalid-target 2;; esac
++approval=$R/etc/sq2-kgsl-sde
++stage=VERIFY_HOST_APPROVAL
++[ -f "$approval/host-approval.sha256" ] || stop approval-missing
++[ -f "$approval/host-approval.conf" ] || stop approval-missing
++# This seal is part of the host-built initramfs trust boundary, not a signature.
++IFS=' ' read -r seal_digest seal_name seal_extra < "$approval/host-approval.sha256" || stop approval-seal-format
++[ "${#seal_digest}" = 64 ] || stop approval-seal-format
++case "$seal_digest" in *[!0-9a-f]*) stop approval-seal-format;; esac
++[ "$seal_name" = host-approval.conf ] && [ -z "$seal_extra" ] || stop approval-seal-format
++[ "$(run wc -l < "$approval/host-approval.sha256")" = 1 ] || stop approval-seal-format
++(cd "$approval" && run sha256sum -c host-approval.sha256) || stop approval-seal
++seen=' '
++while IFS='=' read -r key value || [ -n "$key$value" ]; do
++    case "$key" in ''|'#'*) continue;; esac
++    case "$seen" in *" $key "*) stop approval-duplicate-key;; esac
++    seen="$seen$key "
++    case "$key" in
++        SCHEMA) [ "$value" = 1 ] || stop approval-schema;;
++        STATUS) [ "$value" = APPROVED ] || stop approval-not-approved;;
++        KERNEL_RELEASE) release=$value;;
++        IMAGE_SHA256) image_sha=$value;;
++        KERNEL_NOTES_SHA256) notes_sha=$value;;
++        KGSL_NOTES_SHA256) kgsl_notes_sha=$value;;
++        SDE_NOTES_SHA256) sde_notes_sha=$value;;
++        DTB_SHA256) dtb_sha=$value;;
++        RUNTIME_DT_STATIC_SHA256) static_dt_sha=$value;;
++        FDT_HELPER_SHA256) fdt_helper_sha=$value;;
++        BUSYBOX_SHA256) busybox_sha=$value;;
++        MODULE_MANIFEST_SHA256) module_sha=$value;;
++        FIRMWARE_MANIFEST_SHA256) firmware_sha=$value;;
++        PROVIDERS_SHA256) providers_sha=$value;;
++        STAGE_SHA256) stage_sha=$value;;
++        INIT_SHA256) init_sha=$value;;
++        ALL10_OPP_POLICY|SDE_DT_CONTRACT|EDP_PHY_PANEL_OWNER|CLOCK_ICC_PM|HOST_BOOT_FLOW|NO_EXPECTED_FAILURE_PROBE)
++            [ "$value" = PASS ] || stop "host-contract-$key";;
++        *) stop approval-unknown-key;;
++    esac
++done < "$approval/host-approval.conf"
++for key in SCHEMA STATUS KERNEL_RELEASE IMAGE_SHA256 KERNEL_NOTES_SHA256 KGSL_NOTES_SHA256 SDE_NOTES_SHA256 DTB_SHA256 RUNTIME_DT_STATIC_SHA256 FDT_HELPER_SHA256 BUSYBOX_SHA256 MODULE_MANIFEST_SHA256 FIRMWARE_MANIFEST_SHA256 PROVIDERS_SHA256 STAGE_SHA256 INIT_SHA256 ALL10_OPP_POLICY SDE_DT_CONTRACT EDP_PHY_PANEL_OWNER CLOCK_ICC_PM HOST_BOOT_FLOW NO_EXPECTED_FAILURE_PROBE; do
++    case "$seen" in *" $key "*) ;; *) stop "approval-missing-$key";; esac
++done
++case "$release" in ''|*[!a-zA-Z0-9._+-]*) stop approval-release;; esac
++check_hash() {
++    case "$1" in *[!0-9a-f]*|'') stop approval-hash-format;; esac
++    [ "${#1}" = 64 ] || stop approval-hash-format
++    actual=$(run sha256sum "$2") || stop "unreadable-$3"
++    [ "${actual%% *}" = "$1" ] || stop "hash-$3"
++}
++stage=VERIFY_INPUTS
++[ "$(run uname -r)" = "$release" ] || stop kernel-release
++check_hash "$image_sha" "$R/media/esp/EFI/SQ2Sde/Image" Image
++# Notes bind the running kernel build, not bytewise measured-boot attestation.
++check_hash "$notes_sha" "$R/sys/kernel/notes" running-kernel-notes
++check_hash "$dtb_sha" "$R/media/esp/EFI/SQ2Sde/android-el2.dtb" staged-dtb
++check_hash "$stage_sha" "$0" stage-script
++check_hash "$init_sha" "$R/init" init-script
++check_hash "$busybox_sha" "$R/bin/busybox" busybox
++check_hash "$fdt_helper_sha" "$R/bin/sq2-fdt-contract" fdt-helper
++[ ! -e "$R/run/sq2-kgsl-sde" ] || stop stage-already-attempted
++run mkdir -p "$R/run/sq2-kgsl-sde" || stop static-dt-output
++run "$R/bin/sq2-fdt-contract" "$R/sys/firmware/fdt" > "$R/run/sq2-kgsl-sde/runtime-static-dt" || stop runtime-static-dt
++check_hash "$static_dt_sha" "$R/run/sq2-kgsl-sde/runtime-static-dt" runtime-static-dt
++run "$R/bin/sq2-fdt-contract" "$R/media/esp/EFI/SQ2Sde/android-el2.dtb" > "$R/run/sq2-kgsl-sde/staged-static-dt" || stop staged-static-dt
++check_hash "$static_dt_sha" "$R/run/sq2-kgsl-sde/staged-static-dt" staged-static-dt
++check_hash "$module_sha" "$approval/modules.sha256" module-manifest
++check_hash "$firmware_sha" "$approval/firmware.sha256" firmware-manifest
++check_hash "$providers_sha" "$approval/providers.list" provider-list
++# Accept only relative, whitespace-free inventory paths; never source/eval data.
++check_tree() {
++    manifest=$1 tree=$2
++    inventory=''
++    while read -r digest file extra || [ -n "$digest$file$extra" ]; do
++        case "$digest" in *[!0-9a-f]*|'') stop manifest-format;; esac
++        [ "${#digest}" = 64 ] && [ -z "$extra" ] || stop manifest-format
++        case "$file" in ./*) ;; *) stop manifest-path;; esac
++        case "$file" in *..*|*\\*|*[!a-zA-Z0-9_./+-]*) stop manifest-path;; esac
++        [ "$file" != ./modules.dep.bb ] || stop cache-in-manifest
++        inventory="$inventory$file
++"
++    done < "$manifest"
++    [ -n "$inventory" ] || stop empty-manifest
++    expected=$(printf %s "$inventory" | run sort) || stop manifest-sort
++    links=$(cd "$tree" && run find . -type l) || stop tree-symlink-inventory
++    [ -z "$links" ] || stop tree-symlink
++    actual=$(cd "$tree" && run find . -type f) || stop tree-inventory
++    actual=$(printf '%s\n' "$actual" | run sort) || stop tree-sort
++    [ "$expected" = "$actual" ] || stop tree-inventory
++    (cd "$tree" && run sha256sum -c "$manifest") || stop tree-hash
++}
++module_root=$R/lib/modules/$release
++[ ! -L "$module_root" ] || stop module-tree-symlink
++[ "$(run readlink -f "$module_root")" = "$module_root" ] || stop module-tree-path
++cache=$module_root/modules.dep.bb
++[ ! -L "$cache" ] || stop module-cache-symlink
++if [ -e "$cache" ]; then
++    [ -f "$cache" ] || stop module-cache-not-regular
++    # BusyBox small-modprobe generated cache is not a host input. Remove only
++    # this exact release cache; canonical path and symlink checks precede it.
++    run rm -f -- "$cache" || stop module-cache-remove
++fi
++check_tree "$approval/modules.sha256" "$module_root"
++check_tree "$approval/firmware.sha256" "$R/lib/firmware"
++providers=''
++while IFS= read -r module || [ -n "$module" ]; do
++    case "$module" in ''|*[!a-zA-Z0-9_-]*) stop provider-name;; esac
++    canonical=$(printf %s "$module" | run tr '-' '_') || stop provider-name
++    case "$canonical" in msm|msm_dpu|msm_drm|msm_kgsl|llcc_qcom|governor*) stop reserved-provider;; esac
++    case " $providers " in *" $canonical "*) stop duplicate-provider;; esac
++    providers="$providers $canonical"
++done < "$approval/providers.list"
++# BusyBox has no portable -C override: refuse unapproved install/alias policy.
++[ ! -e "$R/etc/modprobe.conf" ] || stop modprobe-configuration
++for path in "$R/etc/modprobe.d" "$R/lib/modprobe.d" "$R/usr/lib/modprobe.d" "$R/run/modprobe.d"; do
++    [ ! -e "$path" ] || stop modprobe-configuration
++done
++stage=VERIFY_EXCLUSIVE_OWNERSHIP
++for module in msm msm_dpu msm_drm msm_kgsl; do
++    [ ! -d "$R/sys/module/$module" ] || stop "already-loaded-$module"
++done
++gpu=$R/sys/bus/platform/devices/2c00000.gpu
++display=$R/sys/bus/platform/devices/ae00000.display-subsystem
++[ -d "$gpu" ] && [ -d "$display" ] || stop platform-device-missing
++[ ! -L "$gpu/driver" ] && [ ! -L "$display/driver" ] || stop platform-already-bound
++gpu=$(run readlink -f "$gpu") || stop gpu-device-path
++display=$(run readlink -f "$display") || stop display-device-path
++stage=PRESERVE_FIRMWARE
++[ -d "$R$target/debug_ramdisk" ] || stop debug-ramdisk
++dest=$R$target/debug_ramdisk/sq2-firmware
++run mkdir -p "$dest" || stop firmware-destination
++run cp -a "$R/lib/firmware/." "$dest/" || stop firmware-copy
++run mkdir -p "$R/debug_ramdisk" || stop firmware-alias
++run mount --bind "$R$target/debug_ramdisk" "$R/debug_ramdisk" || stop firmware-alias
+ for name in a680_sqe.fw a680_gmu.bin msft/surface/pro-x-sq2/qcdxkmsuc8180.mbn; do
+-    sha256sum "$dest/qcom/$name"
+-done
+-# module_param_string preserves a trailing newline: use printf, not echo.
+-printf %s /debug_ramdisk/sq2-firmware > /sys/module/firmware_class/parameters/path
+-for module in phy-qcom-edp dispcc-sm8250 pwm_bl msm; do
+-    timeout 20 modprobe "$module"
+-done
+-for attempt in $(seq 1 15); do
+-    [ -c /dev/dri/renderD128 ] && break
+-    sleep 1
+-done
+-ls -l /dev/dri
+-for connector in /sys/class/drm/card*-eDP-*; do
++    run cmp "$dest/qcom/$name" "$R/debug_ramdisk/sq2-firmware/qcom/$name" || stop firmware-alias-content
++done
++printf %s /debug_ramdisk/sq2-firmware > "$R/sys/module/firmware_class/parameters/path" || stop firmware-path
++load() {
++    stage="LOAD_$1"
++    if run "$R/bin/busybox" timeout 20 "$R/bin/busybox" modprobe "$1"; then :
++    else rc=$?; stop "modprobe-$1-rc=$rc" "$rc"; fi
++}
++for module in $providers; do load "$module"; done
++load llcc_qcom
++load msm_kgsl
++stage=VERIFY_KGSL_BIND
++check_hash "$kgsl_notes_sha" "$R/sys/module/msm_kgsl/notes/.note.gnu.build-id" loaded-kgsl-notes
++bound() {
++    [ "$(run readlink -f "$1/driver")" = "$R/sys/bus/platform/drivers/$2" ] &&
++    [ "$(run readlink -f "$1/driver/module")" = "$R/sys/module/$3" ]
++}
++bound "$gpu" kgsl-3d msm_kgsl || stop kgsl-driver-not-bound
++run test -c "$R/dev/kgsl-3d0" || stop kgsl-node
++[ "$(run readlink -f "$R/sys/class/kgsl/kgsl-3d0/device")" = "$gpu" ] || stop kgsl-node-owner
++load governor_msm_adreno_tz
++load msm_drm
++stage=VERIFY_SDE_BIND
++check_hash "$sde_notes_sha" "$R/sys/module/msm_drm/notes/.note.gnu.build-id" loaded-sde-notes
++bound "$display" msm_drm msm_drm || stop sde-driver-not-bound
++card=''
++for path in "$R/sys/class/drm"/card*; do
++    name=${path##*/}
++    case "$name" in card[0-9]|card[0-9][0-9]) ;; *) continue;; esac
++    if [ "$(run readlink -f "$path/device")" = "$display" ]; then
++        [ -z "$card" ] || stop multiple-sde-cards
++        run test -c "$R/dev/dri/$name" || stop drm-card-node
++        card=$path
++    fi
++done
++[ -n "$card" ] || stop sde-card-missing
++stage=VERIFY_EDP
++card_real=$(run readlink -f "$card") || stop drm-card-owner
++connected=''
++for connector in "$card"-eDP-*; do
+     [ -f "$connector/status" ] || continue
+-    echo "CONNECTOR=$connector"
+-    cat "$connector/status" "$connector/modes"
+-done
+-test -c /dev/dri/renderD128
+-echo 'SQ2_GPU_DRIVER_READY: rendering and Android graphics compatibility not tested here.'
++    connector_real=$(run readlink -f "$connector") || stop edp-owner
++    case "$connector_real" in "$card_real"/*) ;; *) stop edp-owner;; esac
++    [ "$(run cat "$connector/status")" = connected ] || continue
++    modes=$(run cat "$connector/modes") || stop edp-modes
++    [ -n "$modes" ] || stop edp-no-modes
++    connected=$connector
++done
++[ -n "$connected" ] || stop edp-not-connected
++echo "SQ2_KGSL_SDE_BOUND kgsl=kgsl-3d display=msm_drm card=${card##*/} edp=${connected##*/}"
++echo 'SQ2_KGSL_SDE_GATE_PASSED: binding only; Android/HWC/scanout/fences not accepted here.'
+--- a/init
++++ b/init
+@@ -53,6 +53,7 @@
+ fi
+ # Android BPF stats uses closing a PF_KEY socket as an RCU synchronization.
+ # Load our matching module before Android's donor module loader takes over.
++rm -f /lib/modules/"$(uname -r)"/modules.dep.bb
+ modprobe af_key >> /logs/module-load.txt 2>&1 || fail af-key-module
+ # vold needs FUSE before it creates the emulated storage volumes. Loading it
+ # after boot leaves those volumes UNMOUNTABLE until the framework retries.
+@@ -61,7 +62,7 @@
+ chmod 0666 /dev/fuse || fail fuse-device-permissions
+ if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
+     # SQ2_TSENS_V1: matching module before Android's incompatible donor loader.
+-    if ! insmod /lib/modules/6.3.8-sq2-android1/kernel/drivers/thermal/qcom/qcom_tsens.ko >> /logs/module-load.txt 2>&1; then
++    if ! modprobe qcom_tsens >> /logs/module-load.txt 2>&1; then
+         # The high-frequency experiment must not boot without its sensor driver.
+         if [ -d /sys/firmware/devicetree/base/soc@0/gpu@2c00000/opp-table/opp-661000000 ]; then
+             fail gpu-tsens-module
+@@ -136,12 +137,20 @@
+ echo 'DEVELOPMENT_ONLY: keystore2 failures remain visible but do not request fatal reboot.' | tee -a /logs/status.txt
+ mkdir -p /newroot/debug_ramdisk/logs
+ mount --bind /logs /newroot/debug_ramdisk/logs
+-if [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
+-    if prepare-native-gpu > /logs/gpu-native-startup.txt 2>&1; then
+-        echo 'SQ2 GPU driver discovered; Android graphics userspace remains under development.' | tee -a /logs/status.txt
+-    else
+-        echo 'SQ2 GPU preparation failed; see gpu-native-startup.txt or use the rescue entry.' | tee -a /logs/status.txt
+-    fi
++# Every Android handoff, including smoke paths, must pass the same gate.
++# Rescue mode exits earlier and never hands off to Android.
++if prepare-native-gpu > /logs/gpu-native-startup.txt 2>&1; then
++    echo 'SQ2 KGSL/SDE bind gate passed; Android graphics acceptance remains pending.' | tee -a /logs/status.txt
++else
++    gpu_rc=$?
++    echo "SQ2_KGSL_SDE_HANDOFF_BLOCKED rc=$gpu_rc; see gpu-native-startup.txt" | tee -a /logs/status.txt
++    # Preserve existing SSH; make at most one bounded diagnostic attempt.
++    # Never unload a provider, retry graphics, reboot, or reach handoff here.
++    if timeout 120 network-up >> /logs/network-up-gpu-failure.txt 2>&1; then
++        start-ssh >> /logs/ssh-gpu-failure.txt 2>&1 || true
++    fi
++    sync
++    while true; do sleep 3600; done
+ fi
+ for name in apex bootstrap-apex linkerconfig mnt tmp storage data_mirror; do mount -t tmpfs tmpfs /newroot/$name || fail "$name-tmpfs"; done
+ if [ "$ssd" = 1 ]; then

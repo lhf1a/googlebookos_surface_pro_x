@@ -6,6 +6,7 @@
 #include <string.h>
 #include <errno.h>
 #include <limits.h>
+#define dev_err(dev, ...) ((void)(dev), fprintf(stderr, __VA_ARGS__))
 typedef uint32_t u32;
 typedef uint64_t u64;
 typedef int64_t s64;

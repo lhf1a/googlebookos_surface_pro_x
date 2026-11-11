@@ -1,0 +1,400 @@
+--- /dev/null
++++ b/sde_generic_phy_owner.c
+@@ -0,0 +1,342 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Independent WIP foundation. No vendor parser/catalog/AUX callsite is wired. */
++#include <linux/err.h>
++#include <linux/errno.h>
++#include <linux/string.h>
++#include "sde_generic_phy_owner.h"
++
++static DEFINE_MUTEX(sde_phy_registry_lock);
++static LIST_HEAD(sde_phy_registry);
++
++static int sde_phy_lock(struct sde_phy_owner *owner)
++{
++	if (!owner || !READ_ONCE(owner->phy))
++		return -EINVAL;
++	mutex_lock(&owner->lock);
++	if (!owner->phy) {
++		mutex_unlock(&owner->lock);
++		return -EINVAL;
++	}
++	return 0;
++}
++
++int sde_phy_owner_acquire(struct sde_phy_owner *owner, struct device *consumer)
++{
++	struct sde_phy_owner *other;
++	struct phy *phy;
++	int ret = 0;
++
++	if (!owner || !consumer)
++		return -EINVAL;
++	if (owner->phy)
++		return -EBUSY;
++	phy = phy_get(consumer, "dp");
++	if (IS_ERR(phy))
++		return PTR_ERR(phy);
++	if (!phy)
++		return -ENODEV;
++	if (!phy->ops || !phy->ops->init || !phy->ops->exit ||
++	    !phy->ops->configure || !phy->ops->set_mode ||
++	    !phy->ops->power_on || !phy->ops->power_off) {
++		ret = -EOPNOTSUPP;
++		goto put_phy;
++	}
++	mutex_lock(&sde_phy_registry_lock);
++	list_for_each_entry(other, &sde_phy_registry, node) {
++		if (other == owner || other->phy == phy) {
++			ret = -EBUSY;
++			goto unlock_registry;
++		}
++	}
++	/* This detects existing users, not a framework-wide exclusive lease. */
++	mutex_lock(&phy->mutex);
++	if (phy->init_count || phy->power_count)
++		ret = -EBUSY;
++	mutex_unlock(&phy->mutex);
++	if (ret)
++		goto unlock_registry;
++
++	mutex_init(&owner->lock);
++	INIT_LIST_HEAD(&owner->node);
++	owner->consumer = get_device(consumer);
++	owner->phy = phy;
++	owner->initialized = false;
++	owner->configured = false;
++	owner->powered = false;
++	owner->uncertain = false;
++	memset(&owner->config, 0, sizeof(owner->config));
++	owner->operation_error = 0;
++	owner->cleanup_error = 0;
++	list_add_tail(&owner->node, &sde_phy_registry);
++	mutex_unlock(&sde_phy_registry_lock);
++	return 0;
++
++unlock_registry:
++	mutex_unlock(&sde_phy_registry_lock);
++put_phy:
++	phy_put(consumer, phy);
++	return ret;
++}
++
++static int sde_phy_opts_valid(const struct phy_configure_opts_dp *opts)
++{
++	unsigned int i;
++
++	if (!opts || (opts->lanes != 1 && opts->lanes != 2 && opts->lanes != 4))
++		return -EINVAL;
++	switch (opts->link_rate) {
++	/* Matched SC8180X qcom_edp v4 provider, not all rates in phy-dp.h. */
++	case 1620: case 2700: case 5400: case 8100:
++		break;
++	default:
++		return -EINVAL;
++	}
++	for (i = 0; i < opts->lanes; i++)
++		if (opts->voltage[i] > 3 || opts->pre[i] > 3 ||
++		    opts->voltage[i] + opts->pre[i] > 3)
++			return -EINVAL;
++	return 0;
++}
++
++static int sde_phy_stop_locked(struct sde_phy_owner *owner)
++{
++	int ret;
++
++	/* Failed provider power_on may have programmed hardware although core
++	 * power_count is zero. No balanced generic power_off or proven reset is
++	 * available here: retain the owner rather than invent safe retirement.
++	 */
++	if (owner->uncertain)
++		return -EUCLEAN;
++	if (owner->powered) {
++		ret = phy_power_off(owner->phy);
++		if (ret)
++			return ret;
++		owner->powered = false;
++	}
++	owner->configured = false;
++	if (owner->initialized) {
++		ret = phy_exit(owner->phy);
++		if (ret)
++			return ret;
++		owner->initialized = false;
++	}
++	return 0;
++}
++
++static int sde_phy_rollback(struct sde_phy_owner *owner, int error)
++{
++	int cleanup = sde_phy_stop_locked(owner);
++
++	owner->operation_error = error;
++	owner->cleanup_error = cleanup;
++	return error;
++}
++
++static int sde_phy_prepare_locked(struct sde_phy_owner *owner, bool edp)
++{
++	int ret;
++
++	if (owner->uncertain)
++		return -EUCLEAN;
++	if (owner->cleanup_error)
++		return -EBUSY;
++	if (owner->initialized)
++		return -EALREADY;
++	/* QCOM init uses is_edp to select AUX defaults. Set mode first. */
++	ret = phy_set_mode_ext(owner->phy, PHY_MODE_DP,
++			       edp ? PHY_SUBMODE_EDP : PHY_SUBMODE_DP);
++	if (!ret)
++		ret = phy_init(owner->phy);
++	if (ret) {
++		owner->operation_error = ret;
++		owner->cleanup_error = 0;
++		return ret;
++	}
++	owner->initialized = true;
++	owner->operation_error = owner->cleanup_error = 0;
++	return 0;
++}
++
++static int sde_phy_configure_locked(struct sde_phy_owner *owner,
++				  const struct phy_configure_opts_dp *opts)
++{
++	union phy_configure_opts config = { 0 };
++	int ret;
++
++	if (owner->uncertain)
++		return -EUCLEAN;
++	if (owner->cleanup_error)
++		return -EBUSY;
++	if (!owner->initialized)
++		return -EPIPE;
++	ret = sde_phy_opts_valid(opts);
++	if (ret) {
++		owner->operation_error = ret;
++		return ret; /* Caller error: do not disturb the current configuration. */
++	}
++	/* QCOM configure caches all opts but only programs requested voltage.
++	 * A live link-rate/lane/SSC change needs a separate stop/restart path.
++	 */
++	if (owner->powered &&
++	    (opts->link_rate != owner->config.link_rate ||
++	     opts->lanes != owner->config.lanes || opts->ssc != owner->config.ssc)) {
++		owner->operation_error = -EBUSY;
++		return -EBUSY;
++	}
++	config.dp = *opts;
++	ret = phy_configure(owner->phy, &config);
++	if (ret) {
++		owner->configured = false;
++		return sde_phy_rollback(owner, ret);
++	}
++	owner->config = config.dp;
++	owner->configured = true;
++	owner->operation_error = owner->cleanup_error = 0;
++	return 0;
++}
++
++static int sde_phy_power_on_locked(struct sde_phy_owner *owner)
++{
++	int ret;
++
++	if (owner->uncertain)
++		return -EUCLEAN;
++	if (owner->cleanup_error)
++		return -EBUSY;
++	if (owner->powered)
++		return -EALREADY;
++	if (!owner->initialized || !owner->configured)
++		return -EPIPE;
++	ret = phy_power_on(owner->phy);
++	if (ret) {
++		owner->uncertain = true;
++		owner->configured = false;
++		owner->operation_error = ret;
++		owner->cleanup_error = -EUCLEAN;
++		return ret;
++	}
++	owner->powered = true;
++	owner->operation_error = owner->cleanup_error = 0;
++	return 0;
++}
++
++int sde_phy_owner_prepare(struct sde_phy_owner *owner, bool edp)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	ret = sde_phy_prepare_locked(owner, edp);
++	mutex_unlock(&owner->lock);
++	return ret;
++}
++
++int sde_phy_owner_configure(struct sde_phy_owner *owner,
++			    const struct phy_configure_opts_dp *opts)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	ret = sde_phy_configure_locked(owner, opts);
++	mutex_unlock(&owner->lock);
++	return ret;
++}
++
++int sde_phy_owner_power_on(struct sde_phy_owner *owner)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	ret = sde_phy_power_on_locked(owner);
++	mutex_unlock(&owner->lock);
++	return ret;
++}
++
++int sde_phy_owner_start(struct sde_phy_owner *owner, bool edp,
++			const struct phy_configure_opts_dp *opts)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	if (owner->uncertain) {
++		ret = -EUCLEAN;
++		goto unlock;
++	}
++	if (owner->cleanup_error) {
++		ret = -EBUSY;
++		goto unlock;
++	}
++	ret = sde_phy_opts_valid(opts);
++	if (ret)
++		owner->operation_error = ret;
++	if (!ret)
++		ret = sde_phy_prepare_locked(owner, edp);
++	if (!ret)
++		ret = sde_phy_configure_locked(owner, opts);
++	if (!ret)
++		ret = sde_phy_power_on_locked(owner);
++unlock:
++	mutex_unlock(&owner->lock);
++	return ret;
++}
++
++int sde_phy_owner_stop(struct sde_phy_owner *owner)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	ret = sde_phy_stop_locked(owner);
++	owner->cleanup_error = ret;
++	if (!ret)
++		owner->operation_error = 0;
++	else if (!owner->operation_error)
++		owner->operation_error = ret;
++	mutex_unlock(&owner->lock);
++	return ret;
++}
++
++int sde_phy_owner_release(struct sde_phy_owner *owner)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	ret = sde_phy_stop_locked(owner);
++	if (ret) {
++		owner->cleanup_error = ret;
++		if (!owner->operation_error)
++			owner->operation_error = ret;
++		mutex_unlock(&owner->lock);
++		return ret;
++	}
++	mutex_lock(&sde_phy_registry_lock);
++	list_del_init(&owner->node);
++	mutex_unlock(&sde_phy_registry_lock);
++	phy_put(owner->consumer, owner->phy);
++	put_device(owner->consumer);
++	owner->phy = NULL;
++	owner->consumer = NULL;
++	owner->operation_error = owner->cleanup_error = 0;
++	mutex_unlock(&owner->lock);
++	return 0;
++}
++
++int sde_phy_owner_status(struct sde_phy_owner *owner,
++			 struct sde_phy_owner_status *status)
++{
++	int ret;
++
++	if (!status)
++		return -EINVAL;
++	ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	status->acquired = true;
++	status->initialized = owner->initialized;
++	status->configured = owner->configured;
++	status->powered = owner->powered;
++	status->uncertain = owner->uncertain;
++	status->operation_error = owner->operation_error;
++	status->cleanup_error = owner->cleanup_error;
++	mutex_unlock(&owner->lock);
++	return 0;
++}
+--- /dev/null
++++ b/sde_generic_phy_owner.h
+@@ -0,0 +1,52 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef SDE_GENERIC_PHY_OWNER_H
++#define SDE_GENERIC_PHY_OWNER_H
++
++#include <linux/device.h>
++#include <linux/list.h>
++#include <linux/mutex.h>
++#include <linux/phy/phy.h>
++
++/* Caller-owned, initially zeroed, sleepable context. Do not modify fields.
++ * Acquire/release/storage lifetime require external serialization. Operations
++ * between them are serialized internally. Retain storage if release fails.
++ * Registry exclusivity covers this backend, NOT unrelated generic-PHY users.
++ */
++struct sde_phy_owner {
++	struct device *consumer;
++	struct phy *phy;
++	struct mutex lock;
++	struct list_head node;
++	bool initialized;
++	bool configured;
++	bool powered;
++	bool uncertain;
++	struct phy_configure_opts_dp config;
++	int operation_error;
++	int cleanup_error;
++};
++
++struct sde_phy_owner_status {
++	bool acquired;
++	bool initialized;
++	bool configured;
++	bool powered;
++	bool uncertain;
++	int operation_error;
++	int cleanup_error;
++};
++
++int sde_phy_owner_acquire(struct sde_phy_owner *owner, struct device *consumer);
++int sde_phy_owner_prepare(struct sde_phy_owner *owner, bool edp);
++int sde_phy_owner_configure(struct sde_phy_owner *owner,
++			    const struct phy_configure_opts_dp *opts);
++int sde_phy_owner_power_on(struct sde_phy_owner *owner);
++int sde_phy_owner_start(struct sde_phy_owner *owner, bool edp,
++			const struct phy_configure_opts_dp *opts);
++int sde_phy_owner_stop(struct sde_phy_owner *owner);
++/* On error owner remains acquired; no force-put of live/uncertain resources. */
++int sde_phy_owner_release(struct sde_phy_owner *owner);
++int sde_phy_owner_status(struct sde_phy_owner *owner,
++			 struct sde_phy_owner_status *status);
++
++#endif

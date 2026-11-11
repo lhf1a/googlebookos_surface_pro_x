@@ -1,0 +1,219 @@
+{
+  "schema": 1,
+  "status": "host-construction-blocked-not-device-ready",
+  "entry": "VERIFY_INPUTS",
+  "failure": "STOP_BEFORE_DEVICE_WRITE",
+  "states": [
+    {
+      "id": "VERIFY_INPUTS",
+      "requires": [
+        "kernel_module_match",
+        "payload_exact_hashes",
+        "kernel_cmdline_match"
+      ],
+      "next": "VERIFY_DT"
+    },
+    {
+      "id": "VERIFY_DT",
+      "requires": [
+        "all10_opp_policy",
+        "sde_root_irq_dma",
+        "six_interface_catalog",
+        "edp_phy_panel_owner",
+        "child_component_graph",
+        "clock_icc_pm"
+      ],
+      "next": "BUILD_BOOT_PAYLOAD"
+    },
+    {
+      "id": "BUILD_BOOT_PAYLOAD",
+      "requires": [
+        "complete_modules_modpost_depmod",
+        "initramfs_exact_changes",
+        "no_negative_probe_loop"
+      ],
+      "next": "VERIFY_HOST_BOOT"
+    },
+    {
+      "id": "VERIFY_HOST_BOOT",
+      "requires": [
+        "qemu_boot_path",
+        "recovery_paths"
+      ],
+      "next": "DEVICE_STAGE"
+    },
+    {
+      "id": "DEVICE_STAGE",
+      "requires": [
+        "device_payload_hashes",
+        "rollback_payload_preserved"
+      ],
+      "next": "ARM_ONE_SHOT"
+    },
+    {
+      "id": "ARM_ONE_SHOT",
+      "requires": [
+        "grub_load_consume_clear"
+      ],
+      "next": "BOOT_ONCE"
+    },
+    {
+      "id": "BOOT_ONCE",
+      "requires": [
+        "new_boot_id",
+        "runtime_kernel_match"
+      ],
+      "next": "BIND_PROVIDERS"
+    },
+    {
+      "id": "BIND_PROVIDERS",
+      "requires": [
+        "exclusive_mdss_gpu_ownership",
+        "real_kgsl_bind",
+        "real_sde_bind",
+        "real_edp_connected"
+      ],
+      "next": "ANDROID_HANDOFF"
+    },
+    {
+      "id": "ANDROID_HANDOFF",
+      "requires": [
+        "boot_completed",
+        "surfaceflinger_hwc_running",
+        "physical_display"
+      ],
+      "next": "RECORD_RESULT"
+    },
+    {
+      "id": "RECORD_RESULT",
+      "requires": [
+        "capture_literal_results"
+      ],
+      "next": "DONE"
+    }
+  ],
+  "runtime_failure": [
+    "capture_literal_failure",
+    "keep_consumed_one_shot_empty",
+    "preserve_existing_ssh",
+    "bounded_once_network_ssh_attempt",
+    "stop_no_retry"
+  ],
+  "module_order": [
+    "matched_provider_modules",
+    "llcc_qcom",
+    "msm_kgsl",
+    "governor_msm_adreno_tz",
+    "msm_drm"
+  ],
+  "runtime_binding_checks": {
+    "gpu": {
+      "device": "2c00000.gpu",
+      "driver": "kgsl-3d"
+    },
+    "display": {
+      "device": "ae00000.display-subsystem",
+      "driver": "msm_drm"
+    },
+    "reject_upstream_module": "msm",
+    "modprobe_zero_is_not_binding_success": true
+  },
+  "host_blockers": {
+    "all10_opp_policy": "590/661/700MHz explicit default/min/max policies unresolved; preserve all10 OPPs, no interpolation/max fill/drop.",
+    "sde_root_irq_dma": "Native root guard is an isolated WIP, not an integrated complete SDE consumer.",
+    "six_interface_catalog": "SC8180X INTF0..5 and internal eDP INTF5 must be described from matched sources.",
+    "edp_phy_panel_owner": "Vendor DP consumer does not yet consume current generic PHY and aux-panel contract.",
+    "child_component_graph": "SDE master child population and connectors/bridge lifetimes not closed.",
+    "clock_icc_pm": "Complete native provider voting and failure unwind not validated.",
+    "kernel_cmdline_match": "Whole boot payload must preserve reviewed kernel-options and embedded EFI args; source bundle is not a boot payload.",
+    "qemu_boot_path": "Actual complete composed-v7 smoke init reaches ordinary failure and mounted synthetic EROFS/overlay then real approval gate; SSD selection/native-handoff/real Android path remain unvalidated.",
+    "recovery_paths": "Once/bounded actual helper calls proven on real kernel QEMU failures; SSH reachability, physical failures and pre-PID1 panic recovery not validated."
+  },
+  "rules": [
+    "Build and validate the complete startup flow before real-device activation.",
+    "No expected-failure boot, automatic experiment retry, or skipped mandatory gate.",
+    "A QEMU virt boot-path smoke cannot validate SQ2 MMIO, PHY, DDR policy, KGSL/SDE binding or physical display.",
+    "Do not switch the default entry before the candidate passes the real binding and display gates.",
+    "Device permission does not turn missing hardware inputs into validated values."
+  ],
+  "candidate": {
+    "patch": "patches/wip/kgsl-sde-boot-flow-20261111.patch",
+    "patch_sha256": "0ddd934acda9aba48e27da9568a8a91d4159f505368dd6353f31eb8cdb216fb4",
+    "parent_files": {
+      "probe/test2/init-googlebook-native": "db859e8122ff9ad8cd05490349aa2f3d28d7ebc27a4077e993c71e271e33b51d",
+      "probe/test2/prepare-native-gpu": "b0c1a326eff8c8e57272a9a445967bde60c165698e926ba8ad0d42badeb487d0"
+    },
+    "helper_source": "probe/test2/sq2-fdt-contract.c",
+    "helper_sha256": "0fcb2489ff07986be0e99ff08281141dfbd200f8695c7d33490280a23be4ecc7",
+    "stage_scope": "two-file isolated startup mechanism; no production approval; not whole initramfs/device ready",
+    "patches": [
+      {
+        "path": "patches/wip/kgsl-sde-boot-flow-20261111.patch",
+        "sha256": "0ddd934acda9aba48e27da9568a8a91d4159f505368dd6353f31eb8cdb216fb4"
+      },
+      {
+        "path": "patches/wip/kgsl-sde-boot-stage-argv-20261111.patch",
+        "sha256": "a54c1b614510d179573d31435cce057b2a0ca3c76e2321c7c82e7d1b006e0681"
+      }
+    ],
+    "post_prelude_patches": [
+      {
+        "path": "patches/wip/kgsl-sde-init-early-ssh-20261111.patch",
+        "sha256": "c1e6ad06c1040a54e312bdd67464bb6628761dd3ceee184a3b480c9ec4a42fe6",
+        "before": {
+          "init": "73358bb3dfaca527377051feb00413365c9aa0f34f63095e4a4ec5e7a39e2574"
+        },
+        "after": {
+          "init": "c55c32323b31776d3188759ef964acce95dbab18567e9814b2c20be842753fec"
+        }
+      }
+    ]
+  },
+  "kernel_cmdline_requirements": {
+    "lsm": "selinux",
+    "enforcing": "0",
+    "source": "Matched accepted kernel-options and embedded EFI args; do not drop these from host smoke",
+    "boundary": "Observed QEMU no-LSM KernelSU Oops is retained, not counted as KGSL driver failure"
+  },
+  "generic_phy_foundation": {
+    "status": "independent-unwired-WIP-not-deployment-ready",
+    "patch": "patches/wip/sde-generic-phy-owner-20261111.patch",
+    "sha256": "4aa4b3308b837d7c2d8133f384d237e36fec3d70328540caa3ba8abffdea0d91",
+    "supported_link_rates": [
+      1620,
+      2700,
+      5400,
+      8100
+    ],
+    "powered_geometry_change": "reject rate/lanes/ssc before provider; allow same-geometry voltage updates",
+    "power_on_failure": "UNCERTAIN: retain PHY/device/init references, no fake power_off/force_put",
+    "host_scenarios": 54,
+    "host_assertions": 802,
+    "uncertain_assertions": 23,
+    "hardware_validated": false,
+    "wired_to_legacy": false
+  },
+  "module_prelude": {
+    "status": "host-tested-foundation-not-whole-Android-init",
+    "generator": "scripts/kgsl-sde-module-prelude/generate.py",
+    "generator_sha256": "d1965fdd29fae088c8cc86bcf7b2a1d0707119a26481bd315cfd6b8306aff9ef",
+    "template": "scripts/kgsl-sde-module-prelude/execute.in.sh",
+    "template_sha256": "9e55a82e50a41a77a0273c01003ba4f68f79e8fd497a0393fbdb096a7194620e",
+    "required": "af_key,fuse; tsens retains parent OPP661 condition",
+    "optional_disabled": [
+      "dummy: CONFIG_DUMMY=n"
+    ],
+    "source": "ELF .modinfo depends crossed with modules.dep plus alias/softdep/builtin",
+    "runtime": "single insertion, plan/module/notes identity, cross-process lock, no implicit retry",
+    "real_qemu_scope": "Composed v6/review3 strict argv, clean497 modules+117 firmware: real kernel prelude/packaging only; full init and physical SQ2 remain distinct.",
+    "hardware_validated": false
+  },
+  "completed_host_contracts": {
+    "no_negative_probe_loop": "Composed source has no expected-failure boot/retry loop; full payload assembly still pending.",
+    "runtime_inputs": "Copied modules normalized:497 .ko/510 regular files; copied firmware117 regular files; aliases materialized without changing target bytes.",
+    "module_prelude": "Final review3 identity/lock/strict argv generation; v6b real matched kernel QEMU inserts16 unique modules with no unknown-symbol diagnostics.",
+    "diagnostic_attempt": "Once per PID1 shell, mark before calls, timeout-k5/120 network then independently-k2/10 SSH; helper rc not reachability. Nondebug success ownership unchanged.",
+    "complete_init_smoke": "Original-byte v7 init staysPID1; actual missingFAT rc255 fail and sixsyntheticEROFS/overlay path to actual stageapprovalmissing1. One diagnostic pair, no handoff/provider insertion. Read-only observer instrumentation; no Android claim."
+  },
+  "high_opp_policy_decision": "User: finish startup flow first, no experimental590/661/700MHz policy now; all10 retained."
+}

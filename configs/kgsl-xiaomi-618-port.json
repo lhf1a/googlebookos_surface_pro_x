@@ -1210,6 +1210,16 @@
           "after": "012a4f02a8d956b0d72185cfdd6b71733dc155350a20d59845a545494307741d"
         }
       }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-missing-opp-bandwidth-diagnostic.patch",
+      "sha256": "c9ceb4513f96b3f88eaec757a8caea932332c487112c88adf4c749737625279a",
+      "files": {
+        "drivers/gpu/msm/kgsl_bus.c": {
+          "before": "012a4f02a8d956b0d72185cfdd6b71733dc155350a20d59845a545494307741d",
+          "after": "8f28ecad01071d4d1e17bd90d384235eb3e6cb99e380db5f40368b307fee4e48"
+        }
+      }
     }
   ],
   "open": [
@@ -1306,5 +1316,8 @@
     },
     "fresh58_host_result": "out/kgsl-resume-20261111/ddr-indexed/FRESH58-RESULT.json",
     "fresh58_host_result_sha256": "2ef754b8b690dcd29deef98c99782c32a13e0507ffb82a31c8e1222fede8692e"
-  }
+  },
+  "notes": [
+    "2026-11-11 round6 patch59: missing OPP peak diagnostic only; preserves ENODATA and all OPP/ICC/HFI behavior. Real-device round5 probe failed before GMU bind. Not a DDR policy or hardware fix; all10 GPU OPPs must remain enabled."
+  ]
 }

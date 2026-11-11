@@ -1,0 +1,12 @@
+--- a/bin/prepare-native-gpu
++++ b/bin/prepare-native-gpu
+@@ -14,7 +14,8 @@
+     stop command-injection-without-fixture 2
+ fi
+ run() { if [ -n "$R" ]; then "$SQ2_COMMAND" "$@"; else "$@"; fi; }
+-target=${1:-/newroot}
++[ "$#" -le 1 ] || stop invalid-target-arguments 2
++target=${1-/newroot}
+ case "$target" in /newroot|/android) ;; *) stop invalid-target 2;; esac
+ approval=$R/etc/sq2-kgsl-sde
+ stage=VERIFY_HOST_APPROVAL

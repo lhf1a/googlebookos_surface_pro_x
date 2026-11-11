@@ -1,0 +1,15 @@
+--- a/drivers/gpu/msm/kgsl_bus.c
++++ b/drivers/gpu/msm/kgsl_bus.c
+@@ -227,8 +227,11 @@
+ 		peak = dev_pm_opp_get_bw(opp, true, 0);
+ 		avg = dev_pm_opp_get_bw(opp, false, 0);
+ 		dev_pm_opp_put(opp);
+-		if (!peak)
++		if (!peak) {
++			dev_err(dev, "GPU OPP %lu Hz missing peak bandwidth: %d\n",
++				freq, -ENODATA);
+ 			return ERR_PTR(-ENODATA);
++		}
+ 		if (peak > U32_MAX)
+ 			return ERR_PTR(-ERANGE);
+ 		/* Explicit average floors need integration with the bus governor. */

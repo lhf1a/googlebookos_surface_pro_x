@@ -1,3 +1,59 @@
+## 2026-11-11：用户暂停；本次只提交推送与现有产物打包
+
+此条优先于下方旧active/继续段落。goal已由用户设paused；随后只授权“提交并推送当前修改，构建产物打包”，
+不自动恢复开发、不重建、不连设备、不部署/重启。两子代理已中断，不能因旧next-step文字自行继续。
+当前保存KGSL59诊断、SDE20既有模块、v7启动源/SSH once、规范化工具及generic-PHY独立WIP；均不提升硬件验收。
+已存在HOST-ONLY initramfs 263155021B，SHA a1af0fff688b2730a141a035074c1e86cb6c09ce88e58f86701a06f15f1d9c16，
+1295项独立解包严格相等、24项变化。最终外部权限确认/独立完整audit被暂停打断；packed prepare-native-gpu
+mode0777来自Windows源副本，恢复后需先审查，保存阶段不修功能/权限。此包不是可刷EFI载荷，不生成批准。
+私有固件、继承开发SSH凭据与原始证据只放ignored本地产物包，绝不推Git；包内MANIFEST绑定最终source commit。
+续接公开configs/kgsl-sde-checkpoint-round6-20261111.json、docs/KGSL-SDE-SAVE-20261111.md；
+ignored CURRENT.json与四角色主链保持；原六个rescue-console文件不纳入本次提交。
+
+## 2026-11-11：早期 SSH .122 继续接力，先构建启动流程
+
+用户明确继续开发，不做恢复收尾；目标 active。最近已确认设备 root@192.168.5.122，
+6.18.60-sq2-kgsl-sde-mst-dev1，boot 00ff60cd-658e-4564-976a-73462739207f，
+PID1 为 BusyBox /init（没有 Android handoff）。自动重启 subshell PID528 经身份确认后
+SIGSTOP，已观察 T；不得恢复计时器、杀 PID1 或自动返回 native。one-shot 已消费，默认未改。
+设备操作授权不等于允许已知失败试启：用户要求先构建启动流程再真机；本轮旧链已发出的一次
+诊断启动如实保留，之后不再启动新已知负例。用户选择暂不制定高三档实验带宽政策。
+
+实际 KGSL59 probe 在177MHz peak0处-61；只有模块注册，没有KGSL绑定/节点；SDE同样未匹配
+当前上游DT。实际FDT保留10档，不能删590/661/700或伪造政策。运行内核与KGSL/SDE notes
+已与匹配产物逐字/BuildID核对。KGSL59严格60对象/3模块、96+99 host回归通过，仅加诊断。
+
+两文件host-first启动事务已完成34stage负控、12init块、4TSENS和2实际stage→init联合模型用例，
+Lead独立重跑通过；修改失败停止handoff并保留SSH，原/回滚失败仍handoff。四角色位于
+out/kgsl-resume-2/round6/boot-stage，未替换默认源码/builder、未生成真实approval。
+可复建WIP源构造器scripts/prepare-kgsl-sde-boot-flow.py；机器状态图configs/kgsl-sde-boot-flow.json。
+整个497模块/完整initramfs/真实DT、eDP genericPHY/catalog/AUX、clock/ICC/PM仍未闭合，full_*不提升。
+
+新增进展：review3模块前导的ELF依赖/身份/锁/严格参数门禁已完成，真实匹配内核QEMU v6b插入
+16个唯一模块、零unknown-symbol，510模块文件+117固件文件通过实际BusyBox完整库存检查；
+这仍是自制前导init，不是完整Android。模块/固件在副本上规范化，未改.ko或升级固件。
+generic-PHY backend独立四角色及Lead复跑完成（54场景802断言+UNCERTAIN23、真实ARM64编译），
+未接legacy parser/catalog/AUX；power_on失败保持UNCERTAIN引用，不假称退休。
+
+当前源候选round6-composed-boot-source-v7：45文件，包含严格stage argv与统一diagnostic_attempt；
+普通fail/debug主动诊断/graphics失败共用当前PID1 shell一次尝试，标记先于helper，
+network-up timeout-k5/120后独立start-ssh timeout-k2/10，保留首错与独立rc，不冒称SSH可达。
+nondebug正常路径不新增Wi-Fi owner，原handoff尾段不变。公开builder仅post-prelude应用
+精确父/新hash增量并拒绝额外文件改动；64项相关回归通过。候选仍NOT-ACTIVATABLE/noapproval。
+早SSH局部B/M/R普通失败均停止且无handoff，网络/SSH调用0/1/0；原始总体B/R图形失败仍
+继续handoff，修改总体必须停。历史v4/v6四角色冻结保留，同四角色主链继续扩展v7。
+完整/init真实QEMU回放两例已完成：缺FAT在75行真实mount失败保留rc255；六个synthetic EROFS
+与真实overlay/deviceinfo/policy/keystore bind后，176行真正stage因缺approval拒1，185行停止。
+两例真实helper返回network1/SSH0，各仅一次、unverified，无handoff/native模块；init仍PID1。
+observer只读并exec原字节init，host随后终止guest；不是SSD/native-handoff/Android/物理显示验收。
+主链B/M/R及Lead独立tar→rollback→reapply精确字节/模式通过；Lead发现旧apply helper被上级
+可信Git仓库静默跳过路径，已显式隔离Git discovery/继承环境并完成1/0/1事务；旧反证与角色保留。
+当前继续：从真实历史runtime（非QEMU observer root）构建fresh HOST-ONLY v7完整initramfs，
+逐文件delta与独立解包验证，不放批准、不组EFI/不激活；随后闭合真实SDE所有权，不能只加guard。
+最新一次只读SSH复核.122超时exit255；这不是重启证据，当前boot/timer状态未重新确认。
+本阶段没有设备写入/重启，不恢复计时器，不自动收尾；可以继续主机工作。
+活动入口out/kgsl-resume-20261111/CURRENT.json；详见docs/KGSL-SDE-BOOT-FLOW-20261111.md。
+旧角色不替换；私有载荷、原始日志/照片/凭据不进Git。原六个rescue-console文件仍不纳入。
 ## 2026-11-11：匹配内核首次真机启动成功，Android 桌面正常（KGSL/SDE 未加载）
 
 用户目标"实现KGSL-SDE，并在真机调试运行"；本轮取得**真机里程碑**：SQ2 设备以

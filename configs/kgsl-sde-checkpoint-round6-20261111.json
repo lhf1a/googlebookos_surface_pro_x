@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "status": "paused",
+  "branch": "codex/kgsl-sde-port-v83",
+  "baseline_commit": "4608030",
+  "save_authorization": "Commit/push current source and package existing outputs only; not resume.",
+  "built": {
+    "kernel_release": "6.18.60-sq2-kgsl-sde-mst-dev1",
+    "kgsl_patch_count": 59,
+    "sde_patch_count": 20,
+    "module_count": 497,
+    "source_bundle_revision": "composed-v7",
+    "init_sha256": "c55c32323b31776d3188759ef964acce95dbab18567e9814b2c20be842753fec",
+    "host_initramfs_sha256": "a1af0fff688b2730a141a035074c1e86cb6c09ce88e58f86701a06f15f1d9c16",
+    "host_initramfs_bytes": 263155021,
+    "host_archive_unpacked_identity": "16f68013c7089a65873b8a978826e0ade43f43c9807c9cc087e694941eeed899"
+  },
+  "verified": {
+    "related_host_regressions": 64,
+    "whole_init_qemu_cases": 2,
+    "baseline_modified_rollback": "prepare23: original/rollback HANDOFF0; modified nohandoff, fixture143 after observed fail-stop wait; exact native tar rollback/reapply including modes",
+    "physical_kgsl_sde_validated": false
+  },
+  "source_roles": {
+    "MODIFIED_FILE.tar.gz": {
+      "path": "out/kgsl-resume-2/round6/boot-flow-composed/MODIFIED_FILE.tar.gz",
+      "sha256": "167df19c69515e2ac5dc7a96bec60072fb00a0d97482867267a842f730afe56b",
+      "bytes": 529418
+    },
+    "DIFF_FILE.patch": {
+      "path": "out/kgsl-resume-2/round6/boot-flow-composed/DIFF_FILE.patch",
+      "sha256": "21d0d2e32fbbec90ef6bf960d5f59c358b3ec601448aa29b2d18dd3e485269f1",
+      "bytes": 1435358
+    },
+    "VERIFICATION.txt": {
+      "path": "out/kgsl-resume-2/round6/boot-flow-composed/VERIFICATION.txt",
+      "sha256": "7e20331e9a8f9d2807c148d9e358d90807f96239c328febbe00c0786ec0c1915",
+      "bytes": 1524597
+    },
+    "ROLLBACK.sh": {
+      "path": "out/kgsl-resume-2/round6/boot-flow-composed/ROLLBACK.sh",
+      "sha256": "a7369e77fb4151c4ba2fa44f2c12df8a45c52cdfac07f7c6ae05e22488091b9e",
+      "bytes": 33516
+    }
+  },
+  "package": {
+    "kind": "PRIVATE-LOCAL-HOST-ONLY-NOT-ACTIVATABLE",
+    "location": "out/packages/kgsl-sde-round6-20261111-host-only-<commit>.tar.gz",
+    "final_source_commit": "Bound in package MANIFEST.json after commit",
+    "binary_outputs_pushed_to_git": false,
+    "contains_inherited_private_runtime_credentials": true
+  },
+  "limits": [
+    "All ten GPU OPPs retained; no experimental590/661/700 policy.",
+    "Native SDE root/catalog/eDP/PHY/AUX/clockICC/PM not integrated/validated.",
+    "Whole-init QEMU used synthetic EROFS, no Android/native-handoff/hardware acceptance.",
+    "Latest .122 read timed out; runtime/timer not re-confirmed; no new device operation.",
+    "Final payload audit interrupted; prepare-native-gpu packed mode0777 requires review on resume.",
+    "Existing six rescue-console files are unrelated pre-existing untracked files and remain uncommitted."
+  ],
+  "next": "Only explicit user resume may restart development. Finish interrupted artifact audit before any activation."
+}

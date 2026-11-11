@@ -1,0 +1,67 @@
+--- a/init
++++ b/init
+@@ -11,7 +11,39 @@
+ mount -t devpts devpts /dev/pts -o mode=620,ptmxmode=666
+ echo 0 > /proc/sys/kernel/printk_ratelimit
+ echo 4 > /proc/sys/kernel/printk
+-fail() { echo "SQ2_NATIVE_PREP_FAILED: $*"; sync; while true; do setsid cttyhack /bin/sh; sleep 1; done; }
++# One PID1 diagnostic attempt, shared by proactive debug, fail and graphics.
++# Mark before helpers: reentry/failure cannot retry or recursively call fail().
++# The helper return codes are local observations, not SSH reachability evidence.
++diagnostic_attempted=0
++diagnostic_network_rc=not-attempted
++diagnostic_ssh_rc=not-attempted
++diagnostic_attempt() {
++    [ "$diagnostic_attempted" = 0 ] || return 0
++    diagnostic_attempted=1
++    echo "SQ2_DIAGNOSTIC_ATTEMPTED reason=$1 cause_rc=${2:-none}" >> /logs/early-diagnostic.txt
++    if timeout -k 5 120 network-up >> /logs/network-up.txt 2>&1; then
++        diagnostic_network_rc=0
++    else
++        diagnostic_network_rc=$?
++    fi
++    # A failed network attempt must not prevent an existing/new listener attempt.
++    # start-ssh preserves a live server; timeout bounds only this helper call.
++    if timeout -k 2 10 start-ssh >> /logs/ssh-early-diagnostic.txt 2>&1; then
++        diagnostic_ssh_rc=0
++    else
++        diagnostic_ssh_rc=$?
++    fi
++    echo "SQ2_DIAGNOSTIC_ATTEMPT_RESULT network_rc=$diagnostic_network_rc ssh_rc=$diagnostic_ssh_rc reachability=unverified" >> /logs/early-diagnostic.txt
++    return 0
++}
++fail() {
++    init_failure_rc=$?
++    echo "SQ2_NATIVE_PREP_FAILED: $*"
++    echo "SQ2_NATIVE_PREP_FAILURE_STATUS rc=$init_failure_rc" >> /logs/early-diagnostic.txt
++    diagnostic_attempt "fail:$*" "$init_failure_rc"
++    sync
++    while true; do setsid cttyhack /bin/sh; sleep 1; done
++}
+ smoke=0
+ grep -q 'sq2.native=smoke' /proc/cmdline && smoke=1
+ ssd=0
+@@ -76,8 +108,10 @@
+     timeout 5 hwclock -s -u >> /logs/module-load.txt 2>&1
+     if [ "$debug" = 1 ]; then
+         echo 'Preparing Wi-Fi and diagnostic SSH (maximum 120 seconds)...'
+-        if timeout 120 network-up > /logs/network-up.txt 2>&1; then
+-            start-ssh
++        # Only the existing debug branch proactively takes bootstrap Wi-Fi.
++        # Nondebug success keeps Android's existing ownership policy unchanged.
++        diagnostic_attempt debug-common-drivers
++        if [ "$diagnostic_network_rc" = 0 ]; then
+             keep-debug-route > /logs/debug-route.txt 2>&1 &
+         fi
+         touch-services > /logs/touch-startup.txt 2>&1
+@@ -146,9 +180,7 @@
+     echo "SQ2_KGSL_SDE_HANDOFF_BLOCKED rc=$gpu_rc; see gpu-native-startup.txt" | tee -a /logs/status.txt
+     # Preserve existing SSH; make at most one bounded diagnostic attempt.
+     # Never unload a provider, retry graphics, reboot, or reach handoff here.
+-    if timeout 120 network-up >> /logs/network-up-gpu-failure.txt 2>&1; then
+-        start-ssh >> /logs/ssh-gpu-failure.txt 2>&1 || true
+-    fi
++    diagnostic_attempt graphics-failure "$gpu_rc"
+     sync
+     while true; do sleep 3600; done
+ fi
