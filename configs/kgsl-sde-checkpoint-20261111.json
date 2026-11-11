@@ -225,5 +225,32 @@
       "device fallback requires a power cycle if a future candidate boot hangs (panic=0)"
     ],
     "hardware_validated": false
+  },
+  "resume_round4_real_device_boot": {
+    "status": "matched-kernel-boots-android-on-device",
+    "kernel_release": "6.18.60-sq2-kgsl-sde-mst-dev1",
+    "boot_id": "65a7d969-12a8-4784-b2fb-228717646510",
+    "running_cmdline": "initrd=\\EFI\\SQ2Sde\\initramfs.cpio.gz; one-shot grubenv consumed",
+    "android": {
+      "boot_completed": "1",
+      "surfaceflinger": "running",
+      "vendor_hwcomposer": "running",
+      "launcher": "com.google.android.apps.nexuslauncher running",
+      "display": "card0-eDP-1 status=connected; /dev/dri/card0 + renderD128 present; screenshot shows Android desktop"
+    },
+    "display_driver": "msm (upstream msm_dpu display, accepted combined-v5 build), llcc_qcom, drm_gpuvm/drm_exec/gpu_sched, phy_qcom_edp, pwm_bl; no KGSL/SDE loaded",
+    "fix": {
+      "problem": "first candidate boot (v1/v2): Android booted but vendor.qti.hardware.display.composer-service aborted; SDM logs 'DRMCrtcManager::Init: CRTC capabilities failed: -95' and QtiComposer init failed, so Android stayed without HWC.",
+      "root_cause": "the rebuilt external msm.ko came from full-image-source-20261110-v1/external/edp-618 which lacks the project display patches (dpu caps / release fence / scheduler / exec-module) present in the accepted gpu-submit-efficiency combined-v5 tree (hash 7ee05cae... on the device).",
+      "fix": "rebuilt drivers/gpu/drm/msm from combined-v5/edp-618 against kernel-out-mst1; staged msm.ko sha256 59104470c3fde9305d526ba9aa38c7c0a7668a9a1836efcd5651606d35defbad (running on device), vermagic 6.18.60-sq2-kgsl-sde-mst-dev1, size 1903304 bytes.",
+      "evidence": "logcat.old.log from the failed boot: 'Failed to get hwcomposer instance' repeated; after the fix HWC and SurfaceFlinger run and sys.boot_completed=1."
+    },
+    "sde_kgsl_loaded": false,
+    "next_blocker": "DTB has only upstream qcom,sc8180x-mdss nodes; no downstream qcom,mdss/qcom,sde/qcom,kgsl-3d0 nodes for techpack SDE / native KGSL",
+    "evidence": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-2/round3/DEVICE-BOOT-20261111.json",
+    "hardware_validated": {
+      "matched_kernel_boot_android": true,
+      "sde_kgsl_display": false
+    }
   }
 }

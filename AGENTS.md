@@ -1,3 +1,25 @@
+## 2026-11-11：匹配内核首次真机启动成功，Android 桌面正常（KGSL/SDE 未加载）
+
+用户目标"实现KGSL-SDE，并在真机调试运行"；本轮取得**真机里程碑**：SQ2 设备以
+`EFI/SQ2Sde` 一次性载荷启动 `6.18.60-sq2-kgsl-sde-mst-dev1`，Android `boot_completed=1`、
+SurfaceFlinger/vendor HWC running、eDP connected、桌面截图正常；GRUB one-shot 已消费清空，
+断电重启会回 native。
+
+关键修正（全部保留过程与证据）：grub.cfg 需 `load_env` 才能读 `next_entry`；
+`start.efi`/`el2launch.efi` 内嵌 UTF-16 常量硬编码 `\EFI\SQ2Nat\`（含 cmdline），按
+`prepare-sq2-618-debug-entry.py` 方式同长度改为 `SQ2Sde`；首次候选 boot 的 Android HWC abort
+（`CRTC capabilities failed: -95`）根因是 external `msm.ko` 用了缺项目显示补丁的旧源
+（full-image-source 的 edp-618），改用验收版 `gpu-submit-efficiency/combined-v5/edp-618`
+对新内核重建（sha `59104470…`）后 HWC 正常。候选 initramfs 增加 ESP 诊断日志、早期 SSH、
+420s 无 SurfaceFlinger 自动回退；重启统一用 Android `nsenter -t 1 -m -- /system/bin/reboot`，
+不用 Linux `reboot`。
+
+**边界**：运行中的显示是已验收上游 MSM 栈；native KGSL 与 SDE `msm_drm.ko` 均未加载。当前 DTB
+只有上游 `qcom,sc8180x-mdss` 节点，没有下游 `qcom,mdss`/`qcom,kgsl-3d0`，DT 方案是 SDE/KGSL
+probe 的硬前提。真实提交/fence/PM/性能/SQ1-SQ2 全部未做；`hardware_validated` 仅对"匹配内核
+启动 Android（上游显示）"成立，`full_*` 不提升。证据
+`out/kgsl-resume-2/round3/DEVICE-BOOT-20261111.json`、`docs/KGSL-SDE-DEVICE-BRINGUP-20261111.md`。
+
 ## 2026-11-11：真机 bring-up 准备，SQ2 候选启动载荷 staged（未启动）
 
 目标仍是"实现KGSL-SDE，并在真机调试运行"。本轮只做真机可达性/一致性核查与候选载荷准备，
