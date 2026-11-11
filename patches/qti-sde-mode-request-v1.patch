@@ -1,0 +1,239 @@
+--- a/sde-drm/drm_atomic_req.cpp
++++ b/sde-drm/drm_atomic_req.cpp
+@@ -63,6 +63,12 @@
+   va_list args;
+   va_start(args, obj_id);
+   switch (opcode) {
++    case DRMOps::CRTC_SET_MODE: {
++      int ret = drm_mgr_->GetCrtcMgr()->SetMode(obj_id, drm_atomic_req_,
++                                               va_arg(args, drmModeModeInfo *));
++      if (ret && !mode_request_error_)
++        mode_request_error_ = ret;
++    } break;
+     case DRMOps::PLANE_SET_SRC_RECT:
+     case DRMOps::PLANE_SET_DST_RECT:
+     case DRMOps::PLANE_SET_ZORDER:
+@@ -87,7 +93,6 @@
+       drm_mgr_->GetPlaneMgr()->Perform(opcode, obj_id, drm_atomic_req_, args);
+     } break;
+     case DRMOps::CRTC_SET_POST_PROC:
+-    case DRMOps::CRTC_SET_MODE:
+     case DRMOps::CRTC_SET_ACTIVE:
+     case DRMOps::CRTC_SET_OUTPUT_FENCE_OFFSET:
+     case DRMOps::CRTC_SET_CORE_CLK:
+@@ -147,7 +152,7 @@
+       DRM_LOGE("Invalid opcode %d", opcode);
+   }
+   va_end(args);
+-  return 0;
++  return mode_request_error_;
+ }
+ 
+ int DRMAtomicReq::Validate() {
+@@ -155,8 +160,11 @@
+   // because we just want to validate, not actually mark planes as removed
+   drm_mgr_->GetPlaneMgr()->UnsetUnusedResources(token_.crtc_id, false/*is_commit*/,
+                                                 drm_atomic_req_);
+-  int ret = drmModeAtomicCommit(fd_, drm_atomic_req_,
+-                                DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_TEST_ONLY, nullptr);
++  int ret = mode_request_error_;
++  if (!ret)
++    ret = drmModeAtomicCommit(fd_, drm_atomic_req_,
++                             DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_TEST_ONLY, nullptr);
++  mode_request_error_ = 0;
+   if (ret) {
+     DRM_LOGE("drmModeAtomicCommit failed with error %d (%s).", errno, strerror(errno));
+   }
+@@ -184,7 +192,10 @@
+     flags |= DRM_MODE_ATOMIC_NONBLOCK;
+   }
+ 
+-  int ret = drmModeAtomicCommit(fd_, drm_atomic_req_, flags, nullptr);
++  int ret = mode_request_error_;
++  if (!ret)
++    ret = drmModeAtomicCommit(fd_, drm_atomic_req_, flags, nullptr);
++  mode_request_error_ = 0;
+   if (ret) {
+     DRM_LOGE("drmModeAtomicCommit failed with error %d (%s).", errno, strerror(errno));
+   }
+--- a/sde-drm/drm_atomic_req.h
++++ b/sde-drm/drm_atomic_req.h
+@@ -53,6 +53,7 @@
+   drmModeAtomicReq *drm_atomic_req_ = {};
+   DRMManager *drm_mgr_ = {};
+   int fd_ = -1;
++  int mode_request_error_ = 0;
+   DRMDisplayToken token_ = {};
+ };
+ 
+--- a/sde-drm/drm_crtc.cpp
++++ b/sde-drm/drm_crtc.cpp
+@@ -44,6 +44,7 @@
+ 
+ #include "drm_utils.h"
+ #include "drm_crtc.h"
++#include "sde_mode_request_adapter.h"
+ #include "drm_property.h"
+ 
+ namespace sde_drm {
+@@ -326,6 +327,11 @@
+       continue;
+     }
+ 
++    if (string(info->name) == SDE_MODE_REQUEST_PROPERTY) {
++      mode_request_property_ = info->prop_id;
++      drmModeFreeProperty(info);
++      continue;
++    }
+     string property_name(info->name);
+     DRMProperty prop_enum = prop_mgr_.GetPropertyEnum(property_name);
+     if (prop_enum == DRMProperty::INVALID) {
+@@ -614,25 +620,62 @@
+   pp_mgr_->Init(prop_mgr_, DRM_MODE_OBJECT_CRTC);
+ }
+ 
++int DRMCrtc::SetMode(drmModeAtomicReq *req, const drmModeModeInfo *mode) {
++  uint32_t obj_id = drm_crtc_->crtc_id;
++  uint32_t prop_id = prop_mgr_.GetPropertyId(DRMProperty::MODE_ID);
++  uint32_t blob_id = 0, request = 0;
++  drmModeModeInfo timing = {};
++  const drmModeModeInfo *submitted = mode;
++  if (!prop_id || !req)
++    return -EINVAL;
++  if (mode_request_property_ && mode) {
++    int ret = SDEPrepareModeRequest(mode, &timing, &request);
++    if (ret)
++      return ret;
++    submitted = &timing;
++  }
++  /* Missing property is legacy compatibility, not silently stripped flags. */
++  if (submitted && drmModeCreatePropertyBlob(fd_, submitted,
++                                             sizeof(*submitted), &blob_id))
++    return errno ? -errno : -EIO;
++  int cursor = drmModeAtomicGetCursor(req);
++  int ret = 0;
++  if (mode_request_property_)
++    ret = drmModeAtomicAddProperty(req, obj_id, mode_request_property_,
++                                  (uint64_t(blob_id) << 32) | request);
++  if (ret >= 0)
++    ret = drmModeAtomicAddProperty(req, obj_id, prop_id, blob_id);
++  if (ret < 0) {
++    drmModeAtomicSetCursor(req, cursor);
++    if (blob_id)
++      drmModeDestroyPropertyBlob(fd_, blob_id);
++    return ret;
++  }
++  tmp_prop_val_map_[prop_id] = blob_id;
++  if (mode_request_property_)
++    tmp_prop_val_map_[mode_request_property_] = (uint64_t(blob_id) << 32) | request;
++  SetModeBlobID(blob_id);
++  return 0;
++}
++
++int DRMCrtcManager::SetMode(uint32_t obj_id, drmModeAtomicReq *req,
++                            const drmModeModeInfo *mode) {
++  lock_guard<mutex> lock(lock_);
++  auto it = crtc_pool_.find(obj_id);
++  if (it == crtc_pool_.end())
++    return -EINVAL;
++  return it->second->SetMode(req, mode);
++}
++
+ void DRMCrtc::Perform(DRMOps code, drmModeAtomicReq *req, va_list args) {
+   uint32_t obj_id = drm_crtc_->crtc_id;
+ 
+   switch (code) {
+     case DRMOps::CRTC_SET_MODE: {
+-      drmModeModeInfo *mode = va_arg(args, drmModeModeInfo *);
+-      uint32_t prop_id = prop_mgr_.GetPropertyId(DRMProperty::MODE_ID);
+-      uint32_t blob_id = 0;
+-
+-      if (mode) {
+-        if (drmModeCreatePropertyBlob(fd_, (const void *)mode, sizeof(drmModeModeInfo), &blob_id)) {
+-          DRM_LOGE("drmModeCreatePropertyBlob failed for CRTC_SET_MODE, crtc %d", obj_id);
+-          return;
+-        }
+-      }
+-
+-      AddProperty(req, obj_id, prop_id, blob_id, true /* cache */, tmp_prop_val_map_);
+-      SetModeBlobID(blob_id);
+-      DRM_LOGD("CRTC %d: Set mode %s", obj_id, mode ? mode->name : "null");
++      const drmModeModeInfo *mode = va_arg(args, drmModeModeInfo *);
++      int ret = SetMode(req, mode);
++      if (ret)
++        DRM_LOGE("typed mode request failed, crtc %d error %d", obj_id, ret);
+     } break;
+ 
+     case DRMOps::CRTC_SET_OUTPUT_FENCE_OFFSET: {
+--- a/sde-drm/drm_crtc.h
++++ b/sde-drm/drm_crtc.h
+@@ -53,6 +53,7 @@
+   DRMStatus GetStatus() { return status_; }
+   void GetInfo(DRMCrtcInfo *info);
+   void SetModeBlobID(uint64_t blob_id);
++  int SetMode(drmModeAtomicReq *req, const drmModeModeInfo *mode);
+   bool ConfigureScalerLUT(drmModeAtomicReq *req, uint32_t dir_lut_blob_id,
+                           uint32_t cir_lut_blob_id, uint32_t sep_lut_blob_id);
+   void PostValidate(bool success);
+@@ -84,6 +85,7 @@
+   int fd_ = -1;
+   uint32_t crtc_index_ = {};
+   uint64_t mode_blob_id_ = 0;
++  uint32_t mode_request_property_ = 0;
+   drmModeCrtc *drm_crtc_ = {};
+   DRMStatus status_ = DRMStatus::FREE;
+   DRMCrtcInfo crtc_info_ = {};
+@@ -114,6 +116,7 @@
+   void Free(DRMDisplayToken *token);
+   void Perform(DRMOps code, uint32_t obj_id, drmModeAtomicReq *req, va_list args);
+   int GetCrtcInfo(uint32_t crtc_id, DRMCrtcInfo *info);
++  int SetMode(uint32_t obj_id, drmModeAtomicReq *req, const drmModeModeInfo *mode);
+   void SetScalerLUT(const DRMScalerLUTInfo &lut_info);
+   void UnsetScalerLUT();
+   void GetPPInfo(uint32_t crtc_id, DRMPPFeatureInfo *info);
+--- /dev/null
++++ b/sde-drm/sde_mode_request.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef _UAPI_SDE_MODE_REQUEST_H_
++#define _UAPI_SDE_MODE_REQUEST_H_
++/* SDE_MODE_REQUEST: upper32 MODE_ID blob id, lower32 request bits.
++ * The final atomic state validates the binding, independent of set order.
++ * This staging ABI requires matching userspace and a completed DSI consumer port.
++ */
++#define SDE_MODE_REQUEST_PROPERTY "SDE_MODE_REQUEST"
++#define SDE_MODE_REQ_SEAMLESS (1U << 0)
++#define SDE_MODE_REQ_VIDEO (1U << 1)
++#define SDE_MODE_REQ_COMMAND (1U << 2)
++#define SDE_MODE_REQ_ALL (SDE_MODE_REQ_SEAMLESS | SDE_MODE_REQ_VIDEO | SDE_MODE_REQ_COMMAND)
++#endif
+--- /dev/null
++++ b/sde-drm/sde_mode_request_adapter.h
+@@ -0,0 +1,27 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef _SDE_MODE_REQUEST_ADAPTER_H_
++#define _SDE_MODE_REQUEST_ADAPTER_H_
++#include <errno.h>
++#include <stdint.h>
++#include "sde_mode_request.h"
++static inline int SDEPrepareModeRequest(const drmModeModeInfo *mode,
++ drmModeModeInfo *timing, uint32_t *request)
++{
++ if (!mode || !timing || !request)
++  return -EINVAL;
++ uint32_t flags = mode->flags;
++ /* Exact6.18 public timing bits plus aspect-ratio bits; legacy request bits
++  * are translated below, never re-used as public flags. */
++ if (flags & ~(0x007ff3ffU | (7U << 29)))
++  return -EINVAL;
++ uint32_t panel = flags & ((1U << 29) | (1U << 30));
++ if (panel == ((1U << 29) | (1U << 30)))
++  return -EINVAL;
++ *timing = *mode;
++ *request = ((flags & (1U << 31)) ? SDE_MODE_REQ_SEAMLESS : 0) |
++  ((flags & (1U << 29)) ? SDE_MODE_REQ_VIDEO : 0) |
++  ((flags & (1U << 30)) ? SDE_MODE_REQ_COMMAND : 0);
++ timing->flags &= ~((1U << 29) | (1U << 30) | (1U << 31));
++ return 0;
++}
++#endif

@@ -55,6 +55,8 @@ struct list_head {struct list_head *next,*prev;};
 #define INIT_LIST_HEAD(h) ((h)->next=(h),(h)->prev=(h))
 static void list_add_tail(struct list_head *n,struct list_head *h){n->prev=h->prev;n->next=h;h->prev->next=n;h->prev=n;}
 static void list_del(struct list_head *n){n->prev->next=n->next;n->next->prev=n->prev;INIT_LIST_HEAD(n);}
+#define list_del_init(n) list_del(n)
+static bool list_empty(const struct list_head *h){return h->next==h;}
 static void list_move_tail(struct list_head *n,struct list_head *h){list_del(n);list_add_tail(n,h);}
 #define list_for_each_entry(p,h,m) for(p=container_of((h)->next,__typeof__(*p),m);&(p)->m!=(h);p=container_of((p)->m.next,__typeof__(*p),m))
 #define list_for_each_entry_safe(p,t,h,m) for(p=container_of((h)->next,__typeof__(*p),m),t=container_of((p)->m.next,__typeof__(*p),m);&(p)->m!=(h);p=t,t=container_of((t)->m.next,__typeof__(*t),m))
@@ -105,7 +107,7 @@ struct drm_gem_object {struct drm_device *dev;size_t size;struct dma_buf_attachm
 struct driver {struct drm_gem_object *(*gem_prime_import_sg_table)(struct drm_device *,struct dma_buf_attachment *,struct sg_table *);};
 struct msm_kms;struct kms_funcs {struct device *(*get_address_space_device)(struct msm_kms *,u32);struct msm_gem_address_space *(*get_address_space)(struct msm_kms *,u32);};
 struct msm_kms {const struct kms_funcs *funcs;};
-struct msm_drm_private {struct msm_kms *kms;struct mutex gem_lock;struct list_head inactive_list;};
+struct msm_drm_private {struct msm_kms *kms;struct mutex gem_lock;struct list_head inactive_list;struct drm_device *dev;};
 struct drm_device {struct device *dev;struct driver *driver;void *dev_private;struct mutex struct_mutex,object_name_lock;};
 struct page {int unused;};
 struct msm_mmu;struct mmu_funcs {int (*map_dma_buf)(struct msm_mmu *,struct sg_table *,int,unsigned int);void (*unmap_dma_buf)(struct msm_mmu *,struct sg_table *,int,unsigned int);bool (*is_domain_secure)(struct msm_mmu *);struct device *(*get_dev)(struct msm_mmu *);void (*destroy)(struct msm_mmu *);};
@@ -116,7 +118,7 @@ struct drm_mm {int unused;};
 struct msm_gem_address_space {struct kref kref;struct mutex list_lock,cb_lock;bool domain_attached;struct msm_mmu *mmu;struct aspace_ops *ops;struct drm_mm mm;struct list_head active_list,clients;};
 struct aspace_client {struct list_head list;void (*cb)(void *,bool);void *cb_data;};
 struct msm_gem_vma {struct list_head list;struct msm_gem_address_space *aspace;uint64_t iova;bool mapped;};
-struct msm_gem_object {struct drm_gem_object base;u32 flags;u8 madv,vmap_count;struct mutex lock;struct list_head mm_list,submit_entry,vmas,iova_list;struct msm_gem_address_space *aspace,*import_aspace;bool in_active_list,obj_dirty,aspace_ref;struct dma_resv *resv,_resv;struct sg_table *sgt;struct page **pages;void *vaddr;struct iosys_map import_map;int import_error;};
+struct msm_gem_object {struct drm_gem_object base;u32 flags;u8 madv,vmap_count;struct mutex lock;struct list_head mm_list,submit_entry,vmas,iova_list;struct msm_gem_address_space *aspace,*import_aspace;bool in_active_list,obj_dirty,aspace_ref;struct dma_resv *resv,_resv;struct sg_table *sgt;struct page **pages;void *vaddr;struct iosys_map import_map;int import_error;struct msm_drm_private *owner;};
 #define to_msm_bo(x) container_of(x,struct msm_gem_object,base)
 #include "actual-definitions.h"
 #ifndef LEGACY_MODEL
@@ -168,6 +170,11 @@ static void *legacy_dma_buf_vmap(struct dma_buf *b){struct iosys_map m;return dm
 static void legacy_dma_buf_vunmap(struct dma_buf *b,void *v){struct iosys_map m={v,false};dma_buf_vunmap_unlocked(b,&m);}
 static unsigned long drm_prime_get_contiguous_size(struct sg_table *t){struct scatterlist *s=t->sgl;uint64_t expected=s->dma_address;unsigned long total=0;for(unsigned int i=0;i<t->nents&&s;i++,s=s->next){if(!s->dma_length||s->dma_address!=expected)break;total+=s->dma_length;expected+=s->dma_length;}return total;}
 static void drm_gem_private_object_init(struct drm_device *d,struct drm_gem_object *o,size_t n){o->dev=d;o->size=n;o->refs=1;dma_resv_init(&o->_resv);if(!o->resv)o->resv=&o->_resv;}
+static bool msm_drm_owner_get_live(struct msm_drm_private *priv){(void)priv;return true;}
+static void msm_drm_owner_put_live(struct msm_drm_private *priv){(void)priv;}
+static void drm_dev_get(struct drm_device *dev){(void)dev;}
+static void drm_dev_put(struct drm_device *dev){(void)dev;}
+
 static void drm_gem_object_release(struct drm_gem_object *o){dma_resv_fini(&o->_resv);}
 static void drm_gem_object_get(struct drm_gem_object *o){CHECK(o->refs>0);o->refs++;}
 static void msm_gem_free_object(struct drm_gem_object *o);

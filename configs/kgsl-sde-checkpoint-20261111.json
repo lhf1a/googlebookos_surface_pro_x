@@ -1,14 +1,14 @@
 {
-  "status": "paused",
+  "status": "resumed-round1",
   "date": "2026-11-11",
   "branch": "codex/kgsl-sde-port-v83",
   "parent_commit": "690acd69ea98402aec01f3251d670b28516f0010",
-  "save_only": true,
+  "save_only": false,
   "hardware_validated": false,
   "deployment_ready": false,
   "kgsl_patch_count": 58,
-  "sde_patch_count": 17,
-  "sde_source_count": 315,
+  "sde_patch_count": 18,
+  "sde_source_count": 318,
   "sde_checker_groups": 16,
   "sde_checker_groups_exit0": true,
   "sde_full_build": {
@@ -19,39 +19,79 @@
     },
     "MODIFIED": {
       "exit": 2,
-      "objects": 25,
+      "objects": 54,
       "modules": 0
     },
     "ROLLBACK": {
       "exit": 2,
       "objects": 25,
       "modules": 0
+    },
+    "error_lines": {
+      "BASELINE": 978,
+      "MODIFIED": 254,
+      "ROLLBACK": 978
+    },
+    "target_diagnostics_cleared": {
+      "private_flags": "364 -> 0",
+      "DRM_MODE_FLAG_SEAMLESS": "120 -> 0",
+      "drm_irq_install": "1 -> 0",
+      "DRM_UNLOCKED": "1 -> 0",
+      "dp_mst_drm.c": "113 -> 13",
+      "msm_drv.c": "42 -> 1"
     }
   },
-  "exact_rollback_and_reapply_files": 317,
+  "exact_rollback_and_reapply_files": 320,
+  "resume_round1": {
+    "authorization": "User explicitly requested resuming and advancing the paused work with parallel agents on 2026-11-11. Source/host phase only: no device ops, no deploy/reboot, no push, no default publish-pins change.",
+    "agents": [
+      "irq (task-1): real Linux IRQ line + 6.18 drm_driver callback migration + prepared-vblank gate",
+      "mode-kernel (task-2): driver-owned requested/adjusted/selected state + SDE_MODE_REQUEST_V1/SDE_MODE_CATALOG_V1 uapi + all consumers",
+      "mode-userland (task-3): final-uapi-aligned adapter, 42 TU / 5 library strict link, product proposal",
+      "mst (task-4): opt-in per-connector persistent lifecycle in 6.18 core + fixed-primary driver",
+      "owner (task-5): drmm-managed msm_drm_private, owner/file admission and late retirement"
+    ],
+    "merge_decisions": [
+      "msm_postclose: owner version kept (owner refs, lastctx, enable_refcnt, drm_dev_put), reformatted to tabs",
+      "msm_lastclose: IRQ 6.18 body kept (no 4.19 dev->vblank[] timer walk) + owner live guard",
+      "msm_atomic.c bridge chain (4 conflicts): mode-kernel form kept because drm_bridge_chain_get_first_bridge() increments the ref and requires drm_bridge_put(); MST version leaked it"
+    ],
+    "new_patch": "patches/sde-xiaomi-618-resume-round1.patch",
+    "new_patch_sha256": "c0ed125fa935493e9ad78a301c8842d8922c99e4c1642ad8271766bb324b999f",
+    "evidence": "out/kgsl-resume-20261111/sde-integration-18/",
+    "candidate_evidence": "out/kgsl-resume-2/{irq,mode-kernel,mode-userland,mst,owner}/",
+    "checker_model_updates": "scripts/check-sde-{active-lock,prime}.py and tests/sde_{active_lock,prime}_test.c: model-only additions for the owner-agent real *_active() split and admission helpers (list_empty/list_del_init/drm_dev_get/put/msm_drm_owner_*/msm_gem_publish); assertions and scenario lists unchanged, both checkers pass on integrated-18",
+    "remaining": [
+      "dp_mst_drm.c has 13 diagnostics that are exactly the new MST core symbols; a separately built matched 6.18 kernel + fresh KOUT is required (Lead-only) and must never be mixed with dev2 modules",
+      "Remaining whole-module blockers are pre-existing 6.18 API drift outside round-1 scope: dsi_panel MIPI_DSI_MSG_*/mipi_dsi_msg ctrl+wait_ms/drm_dsc_config.dsc_panel_id/drm_panel_init/devm_of_pwm_get/PTR_RET, sde_crtc evtlog/of_fdt_get_ddrtype/vzalloc/vfree, sde_dsc_helper dsc_panel_id, sde_connector prototypes+drm_framebuffer_get/lookup+drm_connector.panel, sde_plane/encoder drm_encoder::bridge, msm_drv iommu_present",
+      "mode-userland is library-level only: no HWC service, no joint kernel+userspace runtime, no device acceptance",
+      "No device access, deployment, reboot, performance/PM, real submit/fence retirement or SQ1-SQ2 acceptance; full_* unclaimed"
+    ]
+  },
   "integrated_configs": {
     "configs/kgsl-xiaomi-618-port.json": "e8fdfeeb95b656a331e661d5bfc09ee00a2634060603023882b04fe5c045f111",
-    "configs/sde-xiaomi-618-port.json": "c3f26ebaef0bb030cff6ad4481b6aad51112fad5db6612f44e41245ea3199104",
-    "configs/drm-618-plane-fence-ownership.json": "0134d9d52661991c16a9f7e8a6bbd64a46f7d682b468ab0ced6baee9d0e79e62"
+    "configs/sde-xiaomi-618-port.json": "572eb739e8771a9b9af551e8d7c7b96f5b7cd55c6c9576efe900548a3bedee35",
+    "configs/drm-618-plane-fence-ownership.json": "0134d9d52661991c16a9f7e8a6bbd64a46f7d682b468ab0ced6baee9d0e79e62",
+    "configs/sm8350-display-build.json": "9a55b17196b8565e2d8b2945bb7bfb89d1895b02fe65aaf5b7230aff687ea7ce"
   },
   "latest_roles": {
     "MODIFIED_FILE.tar.gz": {
-      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-17/MODIFIED_FILE.tar.gz",
-      "sha256": "3db32e884ecc76242b736375cb87243fdc1f7a6391ccfb0d7dffd47f663afb94",
-      "bytes": 1217744
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-18/MODIFIED_FILE.tar.gz",
+      "sha256": "5cbb54e4f0b92fac08cc151c822646bf9bbc3cb4aad416f5c0d6cfbcd9fe8063",
+      "bytes": 1235584
     },
     "DIFF_FILE.patch": {
-      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-17/DIFF_FILE.patch",
-      "sha256": "07c6995416e21f965e0745412e7d3a1db2c71b43c609728cac20eb653d6c0ff8",
-      "bytes": 11285
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-18/DIFF_FILE.patch",
+      "sha256": "f6e200c354fa95be9131169190c53fce862b8087b8534c141faa54c64c6662cf",
+      "bytes": 203439
     },
     "VERIFICATION.txt": {
-      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-17/VERIFICATION.txt",
-      "sha256": "a7194a570a19f45e753e42d4bc1c1c10a62f3fbb5f3ab4ff7f0f076629e9b95f",
-      "bytes": 87255
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-18/VERIFICATION.txt",
+      "sha256": "db063a5d7d5d0e34abdf6280ccc65d9cbce54ca4f3bde0924d6800ac5b31f4de",
+      "bytes": 76370
     },
     "ROLLBACK.sh": {
-      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-17/ROLLBACK.sh",
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-18/ROLLBACK.sh",
       "sha256": "c1b7f5638fb1ffaf720aee8dddf3f158b92f625e6e051e2d41d10fee2473a845",
       "bytes": 507
     }
@@ -61,17 +101,16 @@
   "unfinished_groups": 7,
   "unfinished_changed_files": 52,
   "remaining": [
-    "Complete mode catalog/bridge/CRTC/encoder consumers and paired userspace",
-    "IRQ/vblank real PM, failure rollback and atomic callback contract",
-    "MST persistent-primary core+driver lifecycle and new paired kernel",
-    "Other DRM/DSI/provider API and platform resources",
-    "Late GEM/file/private-owner lifetime and safe DMA/fence retirement",
-    "KGSL+SDE runtime display/submit/DDR/PM/performance/SQ1-SQ2 acceptance"
+    "Build matched patched 6.18 kernel (MST core API) with fresh KOUT; re-run full B/M/R and the blocked dp_mst_drm TU",
+    "Migrate remaining pre-existing 6.18 API drift (dsi_panel/sde_crtc/sde_dsc_helper/sde_connector/sde_plane/encoder bridge/iommu_present) toward full module + MODPOST",
+    "Complete mode catalog/bridge/CRTC/encoder consumers and paired userspace HWC path; joint runtime still unverified",
+    "Late GEM/file/private-owner retirement beyond host tests and KGSL+SDE joint runtime display/submit/DDR/PM/performance/SQ1-SQ2 acceptance"
   ],
-  "resume_requires_explicit_user_request": true,
+  "resume_requires_explicit_user_request": false,
   "excluded_from_commit": [
     "Private libraries/firmware/credentials/raw logs",
     "Compiled modules/ELFs/kernel Image/archive payloads",
+    "out/ evidence trees (ignored local)",
     "Six pre-existing rescue-console untracked files"
   ]
 }

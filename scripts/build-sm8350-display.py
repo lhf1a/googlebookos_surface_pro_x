@@ -49,6 +49,7 @@ def main():
     p.add_argument("--drm-device-lifecycle", action="store_true")
     p.add_argument("--dpu-display-topology", action="store_true")
     p.add_argument("--dpu-events", action="store_true")
+    p.add_argument("--sde-mode-request", action="store_true")
     a = p.parse_args()
     if a.dpu_display_topology or a.dpu_events:
         a.dpu_sdm_contract = True
@@ -93,6 +94,12 @@ def main():
         adaptations.append(config["dpu_inherited_planes"])
         adaptations.append(config["dpu_sdr_color"])
         adaptations.append(config["dpu_busy_commit"])
+    if a.sde_mode_request:
+        if any((a.dpu_plane_properties, a.dpu_capabilities, a.dpu_output_fence,
+                a.hwc_allocator_mapper5, a.dpu_sdm_contract, a.drm_device_lifecycle,
+                a.dpu_display_topology, a.dpu_events)):
+            raise ValueError("SDE mode request staging is not the mainline DPU backend")
+        adaptations.append(config["sde_mode_request"])
     for adaptation in adaptations:
         for item in adaptation.get("headers", []):
             path = verify(ROOT, item["path"], item["sha256"])

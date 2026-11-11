@@ -4,7 +4,9 @@
   "status": "compile-blocked-not-device-ready",
   "source_prefix": "techpack/display/",
   "additional_sources": {
-    "include/uapi/drm/msm_drm.h": "09ee68d46862dd77835f298705a85d69fb43b68a8c2fe83e4d0abf2d955ccb44"
+    "include/uapi/drm/msm_drm.h": "09ee68d46862dd77835f298705a85d69fb43b68a8c2fe83e4d0abf2d955ccb44",
+    "include/uapi/drm/sde_mode_identity.h": "c1acff837c433e86cd2b6e87a331455ffa1c851743507fed6039ee752fe2d8d2",
+    "include/uapi/drm/sde_mode_request.h": "8e519f9935b9f910bf73aa1fb7bd1f90058bb87f80f490daf77ea59dc4da1a93"
   },
   "patches": [
     {
@@ -536,6 +538,120 @@
           "after": "904e7dbc342a40dc1cb097c7fe490fc484926f9d065431294523e5cf4181b60d"
         }
       }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-resume-round1.patch",
+      "sha256": "c0ed125fa935493e9ad78a301c8842d8922c99e4c1642ad8271766bb324b999f",
+      "files": {
+        "techpack/display/msm/Makefile": {
+          "before": "f9cab4c57f8b6905d6928f110af7a69793cba205ee8c31a2ef87f5a92c3726e0",
+          "after": "2e68014a53074f915191355c4f94b075f1afd2e746f4f1f359b78e540dbf9354"
+        },
+        "techpack/display/msm/dp/dp_display.c": {
+          "before": "ba7566ac376be8fa773a8e09d4941efa18bddfe157dcd5ae00919e8bdb1edf79",
+          "after": "02e63646f2084b7f0523b76cb0513c48cc504c5a739c08df818dcf4f0b3a2a3f"
+        },
+        "techpack/display/msm/dp/dp_display.h": {
+          "before": "33cac1be1898fd5725c0ccddfca577bf363ed106e55cef41d4de52d3c876e9b2",
+          "after": "66037ca37a5580dfc6851e444b4fb31d9219a81b8e87d21b659dc9b94757f791"
+        },
+        "techpack/display/msm/dp/dp_mst_drm.c": {
+          "before": "4209005dd5e0755094ad3ae9a8936bc453c624a25151889f1d6aa0bcfc5a0534",
+          "after": "c20cd2331efcf35230a4d6fbc3ab381b18fa563dfd8f2edd435c41dc5a891e13"
+        },
+        "techpack/display/msm/dsi/dsi_display.c": {
+          "before": "3d1c111a3fabb4ab078f1e2a92f3f048f93e5cb019134bcbdf9010d4716a2b3f",
+          "after": "dca8d489dd9253bc5814574303990c161208c873656a5beefb41b213721c1472"
+        },
+        "techpack/display/msm/dsi/dsi_display.h": {
+          "before": "d0b4d91e0e753208cb42db95ec8d0b8c897e2227b97faf6df29bf5f98759efa7",
+          "after": "c47c100f330de6981969bc64397d74595bb77e16c67350f59cdb78949045dff7"
+        },
+        "techpack/display/msm/dsi/dsi_drm.c": {
+          "before": "8766cea6442f1a373d6cda5d2d22b40ce698b9c2fbd9fbd3bbeb8c0bfb195e3c",
+          "after": "205cd84a23a5dddfde6103b25dba4bd25a3ca7b9abcb88df98834c083507c2da"
+        },
+        "techpack/display/msm/msm_atomic.c": {
+          "before": "ed382a9e2b9f2e48def5d581deb1f3e5f1f50ef81bec852579999fddc4e1b675",
+          "after": "56df1be5670493807f40b0369ea82fbed13c38b1176168acd3157aec0ee0b15b"
+        },
+        "techpack/display/msm/msm_drv.c": {
+          "before": "9b00d11d940928cffbadbec2b49bd1acd1fb6e2f6016e4ebbc0f897ee5048179",
+          "after": "7ab813c4d6d14bf20797bce9f3cc48edd6956d6a41b2762aa3bc552774c17be3"
+        },
+        "techpack/display/msm/msm_drv.h": {
+          "before": "904e7dbc342a40dc1cb097c7fe490fc484926f9d065431294523e5cf4181b60d",
+          "after": "1763818a043ea4b819ff2340d0b48bee4853754cda1d33150845a392783e5a99"
+        },
+        "techpack/display/msm/msm_gem.c": {
+          "before": "d709541d5d5c47f3583b114ff39b215572914a4a42161b9f004c734e294d7c25",
+          "after": "5457c83cbda1809433b56cef04d120adfa7309addeebd2490b405247a72d1e85"
+        },
+        "techpack/display/msm/msm_gem.h": {
+          "before": "5d5b42fc84d2e74d224a683de754a5cb641e747afed2e4d276b9cf2bd4d49c20",
+          "after": "2433d575a2c445afaf31bf0c526200bd74b7bbac1f3ec3e5f84c87767d44b300"
+        },
+        "techpack/display/msm/msm_gem_prime.c": {
+          "before": "5771ccbc4d234f8507a259e9480b2fba82c7c0d5b145eb636ae4b6d89296fad3",
+          "after": "7f6ba76eeca0b85f9ce5bee533ec442d9e41eda9a40ad78a86e186fcb5a7b48c"
+        },
+        "techpack/display/msm/msm_kms.h": {
+          "before": "afabd5e4f3a16996b88fadccf6dedad6bb64f55cad7743a1b512813a44ecbba2",
+          "after": "f766dc38c10373c8ee0d1be7e0bfca69ab92a764239ff98aaf2a30b1a66e44e4"
+        },
+        "techpack/display/msm/sde/sde_connector.c": {
+          "before": "ccbcbcf95506ad4a3d0c7c55f4f1a96ced4b3836876e4201d974af95401ca929",
+          "after": "83747249770b00fac35c709b48cbe4c913f25a0667760d162d9b029b9ab21384"
+        },
+        "techpack/display/msm/sde/sde_connector.h": {
+          "before": "6bc6558406fabf6a1cfdf3ef57f663e73ac8c6774d47f69eb3c7a33b059d2531",
+          "after": "3dc7627f19fe3ee3999b24fe83116db8799d2b9d29f7f3b4c7db4dfa0149f448"
+        },
+        "techpack/display/msm/sde/sde_core_irq.c": {
+          "before": "15cc85ead4a92f7ca146ea11c84a5e9792444049094dd08cf28a1bb7b37c7240",
+          "after": "212b1710bdc2105e4982eadab7c23f1df92d2c9c6b54219b9d1a81f3c0769d0a"
+        },
+        "techpack/display/msm/sde/sde_core_irq.h": {
+          "before": "9ac88fe0aa0300220dec9a162ffdb81b7956983dd40595e08aa6847bd37bfc51",
+          "after": "baa817cf1579d48b47873c2442c76409019869abb8ce8c213292d135fef93d29"
+        },
+        "techpack/display/msm/sde/sde_crtc.c": {
+          "before": "8556fe41e81a11e8a21ad89ff3d4f2b9c07e17e1c48c0cba13ac509847561451",
+          "after": "5505316052c6dee63885b4490e1c4cf350167c10bd88ef2a53367a2258074a1d"
+        },
+        "techpack/display/msm/sde/sde_crtc.h": {
+          "before": "4a4a841498065e5b965ac1147fb5a190ad418e5fbe9bd98cbda0348d619c3624",
+          "after": "12eb1b3feb25e5f6b2a2a831f23944adde117da063f11956c073b1ba96e59cf7"
+        },
+        "techpack/display/msm/sde/sde_encoder.c": {
+          "before": "52a3f322a542ff48683da6fa5866b2283dd343e74b216cecb23c46d41df78c46",
+          "after": "a7a3c4d54df621f64c4ae68a57543caa6297cccfec41f959ea7591ae4ea79e4d"
+        },
+        "techpack/display/msm/sde/sde_encoder_phys_cmd.c": {
+          "before": "f3f7c85b96e296d180a921990af1557d662a8912b6670a6e511eee1812393ed7",
+          "after": "72bae5acd462d421f3c3196d14c8449532f8cc53a1914787a12da19ff34c8208"
+        },
+        "techpack/display/msm/sde/sde_encoder_phys_vid.c": {
+          "before": "764955c477eeaa19ba414f48b409dbbe3f5207d8b7352c138aa52b92c97c5afe",
+          "after": "71f6ccc24e3fd227343aaac7d0b9ad1261faa5293afa0a7827cc72cdabaf4993"
+        },
+        "techpack/display/msm/sde/sde_hw_catalog_format.h": {
+          "before": "5f64f8811ddf55d43048726845aa7a179efab2cd4fd97aaf3ac4308cb2572139",
+          "after": "2ef72fe4aa0a17c4b5350474c2acff4cf07d60a6b8433efaba656b931205ddb1"
+        },
+        "techpack/display/msm/sde/sde_irq.c": {
+          "before": "9c69b2de2c5e972f5d29e299563f2d5c2c1871ecbeaecb6cacc7959476b862bc",
+          "after": "efec05ffe9a97cebace114db18983d2970197ff377ca286174ff10c48850f26e"
+        },
+        "techpack/display/msm/sde/sde_irq.h": {
+          "before": "fc243ad16050302070017883f5e4165b9495becb613d67f99d0dcb7a08bd07a6",
+          "after": "e0d8926005fac61dc4b535f9779dc001793af7ff309ff972a80f38ed8f1b42ec"
+        },
+        "techpack/display/msm/sde/sde_mode_state.h": {
+          "before": null,
+          "after": "5abcdabd1cc468219b0ca8c196fb2c9c49d95f19984a0b2871951398a6846df7"
+        }
+      }
     }
   ],
   "scope": "Pinned full downstream display source plus its MSM UAPI, prepared for explicit Linux 6.18 API diagnostics. This is not a Surface hardware configuration or a loadable port.",
@@ -551,7 +667,11 @@
     "String/free API migrations do not complete mode/private payload/MST/bridge/provider retirement. Full original caller semantics beyond documented copy/release sites, whole module and hardware validation remain separate. Driver-owned mode transport plus all consumers and late GEM/private-owner lifetime are still required.",
     "Mode state, bridge/MST/DSI/driver API adaptation and owner retirement remain incomplete. Debugfs scalar best-effort return is not proof node creation; controller success cleanup is repaired by group15; its historical API-only evidence is retained. Pinctrl/log header probes are not full module or hardware validation.",
     "Controller success cleanup is repaired in group15; historical API-only known defect remains preserved in its evidence. Fence diagnostic API migration does not prove actual fence retirement/ownership/PM; mode/MST/IRQ/GEM owner and whole module/hardware still incomplete.",
-    "Framebuffer17 fixes format-info API and checked linear extents, not complete SDE/native owner/physical buffer retirement. IRQ/vblank, full mode/bridge and MST\u2014including fixed-primary persistent connector identity\u2014remain unfinished. Any new persistent MST core API requires a separately built matched kernel, not the old dev2 binary."
+    "Framebuffer17 fixes format-info API and checked linear extents, not complete SDE/native owner/physical buffer retirement. IRQ/vblank, full mode/bridge and MST\u2014including fixed-primary persistent connector identity\u2014remain unfinished. Any new persistent MST core API requires a separately built matched kernel, not the old dev2 binary.",
+    "integrated-18 remaining 13 dp_mst_drm.c diagnostics are exactly the new MST core symbols (cbs.connector_lifetime/disconnect_connector, DRM_DP_MST_CONNECTOR_*, drm_dp_atomic_release_port_payload) that the existing dev2 KOUT does not provide. A separately built patched 6.18 kernel + fresh KOUT is required (Lead-only) before the MST candidate can compile or link; the new msm_drm.ko must never be mixed with dev2 modules.",
+    "Remaining whole-module errors are pre-existing 6.18 API drift outside round-1 scope: dsi_panel (MIPI_DSI_MSG_*/mipi_dsi_msg ctrl+wait_ms, drm_dsc_config.dsc_panel_id, drm_panel_init, devm_of_pwm_get, PTR_RET), sde_crtc (evtlog format, of_fdt_get_ddrtype, vzalloc/vfree), sde_dsc_helper dsc_panel_id, sde_connector prototypes/drm_framebuffer_get/lookup and drm_connector.panel, sde_plane/encoder drm_encoder::bridge, and msm_drv iommu_present.",
+    "mode-userland product proposal (configs/sm8350-display-build.json, qti-sde-mode-request-v1/v2.patch, probe header, build script) is prepared but there is no HWC service, joint kernel+userspace runtime or device validation; library link is not display acceptance.",
+    "No device access, deployment, reboot, performance/PM measurement, real submit/fence retirement or SQ1/SQ2 acceptance was performed in round 1; full_* remain unclaimed. The run-1 goal continues."
   ],
   "host_validated": [
     "First group: driver-owned legacy DP AUX transactions; 80 actual-function host scenarios and seven compiled runtime negatives, eleven wiring checks. AUX/sleep modeled; no eDP supported-rate-table or hardware validation.",
@@ -572,6 +692,8 @@
     "Group14 public API headers: add linux/pinctrl/consumer.h to five actual consumers; move drm_gem_atomic_helper.h after the original sde_plane pr_fmt definition. This corrects the include-order regression introduced by project PRIME patch4, preserves original log format and does not suppress warnings. Six real ARM64 header/order probes B2/0objects M0/6objects R2/0objects; six negative variants each2/5objects. Six full original TUs all still exit2, targeted diagnostics27/0/27; not complete caller success.",
     "Group15 controller debugfs success now returns0 immediately after publishing debugfs_root, rather than falling through error_remove_dir. Same-input exact source HOST B/M/R compile0 and run1/0/1; modified72 strict scenarios pass. Successful root removal1->0, while each real file failure still returns-13/removes once and directory failure removes zero. Five compile0/run1 mutants. Independent successor; original API-only evidence retained.",
     "Group16 sde_fence diagnostics remove obsolete dma_fence_ops string callbacks and use an identity-checked local formatter for own context, with READ_ONCE done_count. Foreign fences receive unavailable, not a guessed timeline or private cast; target seqno still printed separately. Actual functions/current ops declaration47 HOST checks; B1/M0/R1, three source mutants compile0/run1. Real ARM64 caller/header probe B2/M0/R2; full original consumer TU remains2. Thirteen synchronization/lifecycle functions byte-identical; no signaling/wait/release policy removed or claimed hardware-verified.",
-    "Group17 framebuffer: accept modern core-selected format_info in fb_create and propagate the same pointer to size admission and real fill helper. Internal writeback/stolen API retained through once-only format lookup using actual modern pixel_format/modifier arguments. Preserve vendor modified-format validation and acquired/borrowed GEM reference ownership, including partial lookup failures and repeated handles. Linear extents use real rounded plane dimensions/min_pitch and u64 size to avoid old truncation/wrap.327 extracted-source HOST assertions with actual format/fill helpers pass; five compile0/run1 mutants. Real ARM64 API probe B2/M0/R2; complete msm_fb TU remains2. No scanout or provider-retirement claim."
+    "Group17 framebuffer: accept modern core-selected format_info in fb_create and propagate the same pointer to size admission and real fill helper. Internal writeback/stolen API retained through once-only format lookup using actual modern pixel_format/modifier arguments. Preserve vendor modified-format validation and acquired/borrowed GEM reference ownership, including partial lookup failures and repeated handles. Linear extents use real rounded plane dimensions/min_pitch and u64 size to avoid old truncation/wrap.327 extracted-source HOST assertions with actual format/fill helpers pass; five compile0/run1 mutants. Real ARM64 API probe B2/M0/R2; complete msm_fb TU remains2. No scanout or provider-retirement claim.",
+    "Round1 resume 2026-11-11 (integrated-18): five parallel candidates integrated over integrated-17. irq/vblank: real Linux IRQ line (platform_get_irq -> preinstall -> request_irq -> postinstall, partial rollback, free_irq before provider tables), 6.18 drm_driver irq_*/vblank/lastclose migration to drm_client_funcs, per-crtc prepared-vblank gate; 56 host checks + 5 mutants, narrow ARM64 msm_drv diagnostics 51->9 with all IRQ-family diagnostics 0. mode-kernel: driver-owned requested/adjusted/selected state + SDE_MODE_REQUEST_V1/SDE_MODE_CATALOG_V1 uapi, msm_kms helpers take CRTC state, DSI bridge/catalog publisher, sde_crtc/connector/encoder/atomic consumers, real <drm/drm_fourcc.h>; private_flags/DRM_MODE_FLAG_SEAMLESS eliminated (364+120 -> 0); 112 host checks + 5 mutants. mode-userland: final-uapi-aligned adapter, 42 TU / 5 source-library strict Android aarch64 link, 103 host checks + 5 mutants, 90 checks against actual kernel ingest/derive/commit inline state. MST persistent-primary: explicit per-connector driver-managed lifecycle added to 6.18 core with NULL-default historical behavior unchanged, new drm_dp_atomic_release_port_payload; core and driver patches byte-exact apply/rollback, 59 host checks + 4 mutants, core narrow ARM64 TU 0/0/0. Late GEM/private-owner: drmm-managed msm_drm_private, owner/device refs on GEM and file contexts, admission/retirement wait, reversible PRIME import, late VRAM free; 28 host cases + 5 mutants, 3 real ARM64 probes, adds 0 new diagnostics. Integrated three-state full build: BASELINE exit2/25 objects, MODIFIED exit2/54 objects, ROLLBACK exit2/25 objects; error lines 978->254; 16/16 host checker groups exit0; 317-file exact rollback/reapply; KOUT hashes unchanged. Source/host level only: hardware_validated=false, deployment_ready=false.",
+    "Two host checkers needed model-only updates for the owner-agent's real *_active() split and owner admission helpers (list_empty/list_del_init/drm_dev_get/drm_dev_put/msm_drm_owner_* models and owner/drm_device fields in tests/sde_active_lock_test.c and tests/sde_prime_test.c): all assertions and scenario lists are unchanged, and both checkers pass on integrated-18 (21/21 active-lock cases, 31 PRIME scenarios). This is harness plumbing for new real source, not a weakened gate."
   ]
 }

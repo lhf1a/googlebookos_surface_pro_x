@@ -25,12 +25,13 @@ def main():
     gem_core = a.kernel_source / 'drivers/gpu/drm/drm_gem.c'
     functions = []
     order = [(core, ['drm_gem_is_prime_exported_dma_buf']),
-             (gem, ['msm_gem_new_impl', 'msm_gem_import', 'msm_gem_delayed_import', 'add_vma', 'lookup_vma', 'del_vma']),
+             (gem, ['msm_gem_publish']),
+             (gem, ['msm_gem_new_impl', 'msm_gem_import_active', 'msm_gem_import', 'msm_gem_delayed_import', 'add_vma', 'lookup_vma', 'del_vma']),
              (vma, ['msm_gem_address_space_destroy', 'msm_gem_address_space_put', 'smmu_aspace_map_vma', 'smmu_aspace_unmap_vma']),
-             (gem, ['put_iova', 'msm_gem_get_iova_locked', 'msm_gem_pin_iova', 'msm_gem_get_and_pin_iova', 'msm_gem_vunmap_locked', 'get_vaddr', 'msm_gem_put_vaddr', 'msm_gem_free_object']),
+             (gem, ['put_iova', 'msm_gem_get_iova_locked_active', 'msm_gem_get_iova_locked', 'msm_gem_pin_iova_active', 'msm_gem_pin_iova', 'msm_gem_get_and_pin_iova', 'msm_gem_vunmap_locked', 'get_vaddr', 'msm_gem_put_vaddr', 'msm_gem_free_object']),
              (prime, ['msm_gem_prime_import_sg_table']),
              (core, ['drm_gem_prime_import_dev', 'drm_prime_gem_destroy']),
-             (prime, ['msm_gem_prime_import'])]
+             (prime, ['msm_gem_prime_import_active', 'msm_gem_prime_import'])]
     if not a.legacy_model:
         order += [(prime, ['msm_gem_prime_vmap', 'msm_gem_prime_vunmap']),
                   (gem_core, ['drm_gem_vmap_locked', 'drm_gem_vunmap_locked', 'drm_gem_vmap', 'drm_gem_vunmap']),

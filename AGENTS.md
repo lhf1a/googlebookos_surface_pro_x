@@ -1,3 +1,34 @@
+## 2026-11-11：用户恢复并行开发，SDE第18组整编（IRQ/mode/MST/GEM-owner）
+
+用户明确要求“使用多agent并行可以并行开发的部分，推进恢复工作”，暂停解除。本轮仅源码/主机阶段：
+不连设备、不部署/重启、不推送、不改发布pins。五路子代理并行：IRQ/vblank、mode内核、mode用户态/
+产品、MST持久primary、late GEM/private-owner；各自独占目录，Lead串行语义合并与全部完整构建。
+
+合并要点：msm_drv.c两处冲突——msm_postclose取owner版本（owner引用、lastctx清除、enable_refcnt、
+drm_dev_put）并统一tab缩进；msm_lastclose取IRQ的6.18体（删除4.19 dev->vblank[] disable-timer遍历）
++owner live guard。msm_atomic.c四处bridge链冲突统一取mode-kernel形态：匹配6.18
+include/drm/drm_bridge.h，drm_bridge_chain_get_first_bridge()会递增引用、必须drm_bridge_put，
+MST版本漏put会在每次commit泄漏bridge引用。新增sde_mode_state.h走patch，两个uapi头走
+additional_sources；prepared树318源。
+
+实际整编：BASELINE exit2/25对象/0模块，MODIFIED exit2/54对象/0模块，ROLLBACK exit2/25/0；
+错误行978→254；private_flags 364→0、DRM_MODE_FLAG_SEAMLESS 120→0、drm_irq_install/DRM_UNLOCKED 0；
+dp_mst_drm 113→13（全部是新core符号，须新配对内核）、msm_drv 42→1（iommu_present）。
+320事务文件精确回滚/重应用；16组host checker全部0（active-lock/prime仅为owner真实*_active()拆分
+补充list_empty/list_del_init/drm_dev_get/put/msm_drm_owner_*/msm_gem_publish模型，断言场景未改）；
+KOUT五输出hash不变；config 18补丁/318源且SOURCE.json config_sha一致。
+剩余整模块阻塞为既有6.18 API漂移：dsi_panel(MIPI_DSI_MSG_*/mipi_dsi_msg ctrl+wait_ms/
+drm_dsc_config.dsc_panel_id/drm_panel_init/devm_of_pwm_get/PTR_RET)、sde_crtc(evtlog/
+of_fdt_get_ddrtype/vzalloc/vfree)、sde_dsc_helper dsc_panel_id、sde_connector framebuffer helpers/
+drm_connector.panel、sde_plane/encoder drm_encoder::bridge、msm_drv iommu_present。
+
+MST新core API（cbs.connector_lifetime/disconnect_connector、DRM_DP_MST_CONNECTOR_*、
+drm_dp_atomic_release_port_payload）必须单独构建匹配6.18内核+fresh KOUT后才能编译链接，不得与
+dev2模块混装。mode用户态产品patch已应用仓库（42TU/5库严格链接、103 host检查），仅是库级，不是
+HWC服务或设备验收。证据out/kgsl-resume-20261111/sde-integration-18与out/kgsl-resume-2/*，
+详细见docs/KGSL-SDE-RESUME-20261111.md；四角色路径/SHA见FINAL-ROLE-PATHS.txt。
+hardware_validated=false、deployment_ready=false；目标active，full_*不提升。
+
 ## 2026-11-11：KGSL/SDE 已暂停，保存到当前分支
 
 用户明确暂停后，仅授权保存进展并提交当前 `codex/kgsl-sde-port-v83`。目标保持 paused，

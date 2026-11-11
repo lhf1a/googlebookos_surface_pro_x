@@ -1336,5 +1336,35 @@
     "patched_sources": {
       "sde-drm/drm_atomic_req.cpp": "df3819b869be82a43e462d511a9792145e0140e1a89ce52d14cd006f66f65290"
     }
+  },
+  "sde_mode_request": {
+    "purpose": "Userland half of the driver-owned requested/derived/selected mode state, aligned to the mode-kernel uapi v1 (SDE_MODE_REQUEST_V1 request blob, SDE_MODE_CATALOG_V1 timing-keyed catalog). Legacy QTI request bits are transported as requested state next to the public MODE_ID timing, the kernel wire rules are enforced before submission, one request per atomic transaction is staged, and a stale/partial property set cannot be committed. The kernel catalog/bridge/consumer port is still incomplete and this library set is not deployment-ready.",
+    "patch": "patches/qti-sde-mode-request-v2.patch",
+    "patch_sha256": "a1f4602c560de9f965e4ee25460607053ed18238ab8ed3fec1776f3db65741e7",
+    "base_sources": {
+      "libdrmutils/drm_interface.h": "7eea1d65fdb85213815b681643df30352b8fa9f70e2c33385fb0039501138713",
+      "sde-drm/drm_atomic_req.cpp": "d033d0eadc0276c2ed4a2c80b608151f58f199a42fef9d655b4e14fa4c285881",
+      "sde-drm/drm_atomic_req.h": "ced2573f9ac7b383b150700d45e4894e49124886444f2c4d601e6eaee15bf10b",
+      "sde-drm/drm_connector.cpp": "4e6858d7fcb2cfcafa58acd03bf5d5d6806af3d98fcf9812567265cacf1a5970",
+      "sde-drm/drm_connector.h": "ca20bbc6159bd2d8540519a57aba8212ccc674f1a104eeb45a3e7d7fcb084410",
+      "sde-drm/drm_crtc.cpp": "ae4dd88d2d5c5c4e396b1894e0a55720059bd9d19f5d2f05e18f909c41249652",
+      "sde-drm/drm_crtc.h": "ef3243e6ed4ffee9f8916b73f4f6fffda394e4f4ccb19eb120b4fb58374393fb",
+      "sdm/libs/core/drm/hw_device_drm.cpp": "7aee44a2b9646cff9802cc3154e0789ba814c01aa7c23ded17ca1a8c7eb55bff",
+      "sdm/libs/core/drm/hw_device_drm.h": "f824b1c3c010ae3b13fbddaeeebe99165694697b64a17213e88d86c876599b31"
+    },
+    "patched_sources": {
+      "libdrmutils/drm_interface.h": "cff27b4b38664c5541fe395417b46b881778a0a2293289b9b4f294a9c93b90a2",
+      "libdrmutils/sde_mode_identity.h": "c1acff837c433e86cd2b6e87a331455ffa1c851743507fed6039ee752fe2d8d2",
+      "sde-drm/drm_atomic_req.cpp": "988a1d3af980e5fac875bceffc36ce921364850a184cc145393fa9a18b2e8951",
+      "sde-drm/drm_atomic_req.h": "17f771605a735548f772c4460751d92c86d50b2e54f2064c426d37625663d765",
+      "sde-drm/drm_connector.cpp": "c1471be6a8524fa3ed0b2bfb3936a6bdf99a57351cc81d26e73f8cb3c5c4ffb6",
+      "sde-drm/drm_connector.h": "88376cb902ca8b83bb8e874be45fab7df349c3998c109998471c48cb4f13b9fe",
+      "sde-drm/drm_crtc.cpp": "09813c32d2278ba4ad6ebf781b5757355f7805bbc7317203f96250cb8bde99ac",
+      "sde-drm/drm_crtc.h": "38c5eca015ef7a73e1b4e1005366255beee624f59949f986d7e98011312c83da",
+      "sde-drm/sde_mode_request.h": "471945b52bbc99502dacbc2e786573d271e9097527e74f2d9a0c33a6e4e3b415",
+      "sde-drm/sde_mode_request_adapter.h": "81dc4de6b950c065afc1e2343ca2a86664284f8ddfd14e07e790dde33134db5e",
+      "sdm/libs/core/drm/hw_device_drm.cpp": "af414b3dcd89b39b9499cb5a26943b416e3ed76a4b955bb133b992c2a1f571f1",
+      "sdm/libs/core/drm/hw_device_drm.h": "fa4c189d0347caf1319a5d47369e40fc611af69a681ef907b5bc44f94c4d8938"
+    }
   }
 }

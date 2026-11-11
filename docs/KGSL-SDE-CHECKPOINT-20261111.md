@@ -1,5 +1,10 @@
 # KGSL + DRM/SDE paused checkpoint — 2026-11-11
 
+> **已恢复（2026-11-11）**：用户明确要求并行推进恢复工作后暂停解除，round1 已完成。
+> 最新状态与证据见 `docs/KGSL-SDE-RESUME-20261111.md`、`out/kgsl-resume-20261111/CURRENT.json`
+> 与 `out/kgsl-resume-20261111/sde-integration-18/`。本文保留为暂停时点的历史记录；其中
+> “明确恢复后”步骤已被 round1 部分执行，MST 匹配内核与其余 6.18 API 迁移仍待续。
+
 ## 状态与本次保存边界
 
 - 分支：`codex/kgsl-sde-port-v83`；目标 **paused**，三个子代理均中断。
