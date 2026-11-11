@@ -1,0 +1,39 @@
+From: Roman Demidov <roman.demidov.nn@gmail.com>
+Date: 2026-09-29T14:20:58Z
+Subject: [PATCH 6/11] drm/msm/a6xx: fix use-after-free of OPP in a6xx_pm_resume
+
+The OPP reference obtained via dev_pm_opp_find_freq_ceil() is dropped
+with dev_pm_opp_put() before being passed to dev_pm_opp_set_opp(). If
+the reference count reaches zero, the OPP object may be freed, leading
+to a use-after-free when dev_pm_opp_set_opp() dereferences it.
+
+Fix the order of calls: first use the OPP to set the required
+performance state, then release the reference.
+
+Fixes: 5a903a44a984 ("drm/msm/a6xx: Introduce GMU wrapper support")
+Signed-off-by: Roman Demidov <roman.demidov.nn@gmail.com>
+Reviewed-by: Dmitry Baryshkov <dmitry.baryshkov@oss.qualcomm.com>
+Reviewed-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
+Patchwork: https://patchwork.freedesktop.org/patch/757104/
+Message-ID: <20260929142103.81854-1-roman.demidov.nn@gmail.com>
+Signed-off-by: Rob Clark <robin.clark@oss.qualcomm.com>
+
+---
+6.18.60 adaptation: applies unchanged to a6xx_pm_resume(). The OPP reference obtained from dev_pm_opp_find_freq_ceil() is now kept until after dev_pm_opp_set_opp() so the OPP object cannot be freed before it is dereferenced.
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+index 110184722cf142a7f31eaac8bfcd821e5229080d..dbbc812be54ee3de4efad6591f564fb65f916906 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+@@ -2231,10 +2231,10 @@ static int a6xx_pm_resume(struct msm_gpu *gpu)
+ 		ret = PTR_ERR(opp);
+ 		goto err_set_opp;
+ 	}
+-	dev_pm_opp_put(opp);
+ 
+ 	/* Set the core clock and bus bw, having VDD scaling in mind */
+ 	dev_pm_opp_set_opp(&gpu->pdev->dev, opp);
++	dev_pm_opp_put(opp);
+ 
+ 	pm_runtime_resume_and_get(gmu->dev);
+ 	pm_runtime_resume_and_get(gmu->gxpd);

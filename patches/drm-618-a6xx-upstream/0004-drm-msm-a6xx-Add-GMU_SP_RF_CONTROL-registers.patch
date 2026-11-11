@@ -1,0 +1,27 @@
+From: Val Packett <val@packett.cool>
+Date: Tue, 3 Nov 2026 02:14:00 +0100
+Subject: [PATCH 4/11] drm/msm/a6xx: Add GMU_SP_RF_CONTROL registers
+
+These registers are used in the a680 hwcg init sequence downstream.
+Add them to the XML register list in preparation for importing said
+sequence.
+
+Signed-off-by: Val Packett <val@packett.cool>
+
+---
+Applied unchanged to the 6.18.60 register XML (context identical).
+Upstream posting: https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/
+
+diff --git a/drivers/gpu/drm/msm/registers/adreno/a6xx_gmu.xml b/drivers/gpu/drm/msm/registers/adreno/a6xx_gmu.xml
+index 09b8a0b9c0de7615f7e7e6364c198405a498121a..701343752a7302a8d1d752433b4f3ca7f5aad8b0 100644
+--- a/drivers/gpu/drm/msm/registers/adreno/a6xx_gmu.xml
++++ b/drivers/gpu/drm/msm/registers/adreno/a6xx_gmu.xml
+@@ -42,6 +42,8 @@ xsi:schemaLocation="https://gitlab.freedesktop.org/freedreno/ rules-fd.xsd">
+ 
+ 	<reg32 offset="0x1a880" name="GPU_GMU_GX_SPTPRAC_CLOCK_CONTROL"/>
+ 	<reg32 offset="0x1a881" name="GMU_GX_SPTPRAC_POWER_CONTROL"/>
++	<reg32 offset="0x1a883" name="GMU_GX_GMU_SP_RF_CONTROL_0"/>
++	<reg32 offset="0x1a884" name="GMU_GX_GMU_SP_RF_CONTROL_1"/>
+ 	<reg32 offset="0x1b400" name="GMU_CM3_ITCM_START"/>
+ 	<reg32 offset="0x1c400" name="GMU_CM3_DTCM_START"/>
+ 	<reg32 offset="0x1cbf0" name="GMU_NMI_CONTROL_STATUS"/>

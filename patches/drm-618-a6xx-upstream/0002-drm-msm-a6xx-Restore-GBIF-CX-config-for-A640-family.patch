@@ -1,0 +1,49 @@
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Tue, 3 Nov 2026 02:13:58 +0100
+Subject: [PATCH 2/11] drm/msm/a6xx: Restore GBIF CX config for A640 family
+
+Commit 60a4e18e0e8a ("drm/msm/adreno: Do CX GBIF config before GMU
+start") moved the GBIF_QSB_SIDE{0..3} configuration from hw_init() to
+the per-GPU catalog entries. Previously, it was applied to all GPUs of
+the A610, A640, and A650 families as well as A7xx. However, the A640
+family entries (A640 and A680) were not updated with the new gbif_cx
+list, so the configuration is no longer applied on these GPUs.
+
+On the Surface Pro X (SC8180X, A680), this results in GMU HFI timeouts
+(e.g. for HFI_H2F_MSG_GX_BW_PERF_VOTE) and GPU lockups shortly after
+starting a desktop session.
+
+Add the missing gbif_cx entries to restore the previous behavior.
+
+Fixes: 60a4e18e0e8a ("drm/msm/adreno: Do CX GBIF config before GMU start")
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Signed-off-by: Val Packett <val@packett.cool>
+Reviewed-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
+
+---
+6.18.60 adaptation: the gbif_cx field is introduced by patch 1/5 of this
+series (the 6.19 catalog refactor is absent from 6.18.60); the A640/A680
+entries keep the 6.18.60 field set, so only the two catalog assignments
+are added. Upstream posting:
+https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_catalog.c b/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
+index d33ee50a43443ea9b2b856c107a035d3644e5002..32cce8cf5eca1002e3adc837501dfbdc3c76ff78 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
+@@ -964,6 +964,7 @@ static const struct adreno_info a6xx_gpus[] = {
+ 		.a6xx = &(const struct a6xx_info) {
+ 			.hwcg = a640_hwcg,
+ 			.protect = &a630_protect,
++			.gbif_cx = a640_gbif,
+ 			.gmu_cgc_mode = 0x00020202,
+ 			.prim_fifo_threshold = 0x00180000,
+ 		},
+@@ -1084,6 +1085,7 @@ static const struct adreno_info a6xx_gpus[] = {
+ 		.a6xx = &(const struct a6xx_info) {
+ 			.hwcg = a640_hwcg,
+ 			.protect = &a630_protect,
++			.gbif_cx = a640_gbif,
+ 			.gmu_cgc_mode = 0x00020202,
+ 			.prim_fifo_threshold = 0x00200200,
+ 		},

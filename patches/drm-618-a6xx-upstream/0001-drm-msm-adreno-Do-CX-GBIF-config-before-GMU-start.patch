@@ -1,0 +1,79 @@
+From: Akhil P Oommen <akhilpo@oss.qualcomm.com>
+Date: Tue, 18 Nov 2025 08:50:44 +0000
+Subject: [PATCH 1/11] drm/msm/adreno: Do CX GBIF config before GMU start
+
+GMU lies on the CX domain and accesses CX GBIF. So do CX GBIF
+configurations before GMU wakes up. This was not a problem so far, but
+A840 GPU is very sensitive to this requirement. Also, move these
+registers to the catalog.
+
+Signed-off-by: Akhil P Oommen <akhilpo@oss.qualcomm.com>
+Patchwork: https://patchwork.freedesktop.org/patch/689024/
+Message-ID: <20251118-kaana-gpu-support-v4-17-86eeb8e93fb6@oss.qualcomm.com>
+Signed-off-by: Rob Clark <robin.clark@oss.qualcomm.com>
+
+---
+6.18.60 adaptation of upstream commit 60a4e18e0e8ab27d7dfd1316eab31706176481e9.
+This carries the a6xx/A7xx subset only: A8xx/A840 support and the A8xx
+GMU MRC_GBIF_QOS programming do not exist in 6.18.60 and are omitted.
+The legacy GBIF_QSB_SIDE0..3 writes in a6xx_gpu.c hw_init() are kept
+unchanged so no existing GPU family loses its configuration; the new
+catalog gbif_cx list additionally programs the CX GBIF before the GMU is
+woken up. Local adaptation, not an upstream commit.
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_catalog.c b/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
+index 6db50c780ff118077127319dc326152c9dfa5f92..d33ee50a43443ea9b2b856c107a035d3644e5002 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
+@@ -670,6 +670,14 @@ static const u32 a690_protect_regs[] = {
+ };
+ DECLARE_ADRENO_PROTECT(a690_protect, 48);
+ 
++static const struct adreno_reglist a640_gbif[] = {
++	{ REG_A6XX_GBIF_QSB_SIDE0, 0x00071620 },
++	{ REG_A6XX_GBIF_QSB_SIDE1, 0x00071620 },
++	{ REG_A6XX_GBIF_QSB_SIDE2, 0x00071620 },
++	{ REG_A6XX_GBIF_QSB_SIDE3, 0x00071620 },
++	{ },
++};
++
+ static const struct adreno_info a6xx_gpus[] = {
+ 	{
+ 		.chip_ids = ADRENO_CHIP_IDS(0x06010000),
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+index 3f17cfaca8b47f51c7b53219ac1916eb484636ae..399c2fa5dacad6bb590ce269c27aea71d894f0b2 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+@@ -841,7 +841,9 @@ static int a6xx_gmu_fw_start(struct a6xx_gmu *gmu, unsigned int state)
+ {
+ 	struct a6xx_gpu *a6xx_gpu = container_of(gmu, struct a6xx_gpu, gmu);
+ 	struct adreno_gpu *adreno_gpu = &a6xx_gpu->base;
++	struct msm_gpu *gpu = &adreno_gpu->base;
+ 	const struct a6xx_info *a6xx_info = adreno_gpu->info->a6xx;
++	const struct adreno_reglist *gbif_cx = a6xx_info->gbif_cx;
+ 	u32 fence_range_lower, fence_range_upper;
+ 	u32 chipid = 0;
+ 	int ret;
+@@ -926,6 +928,10 @@ static int a6xx_gmu_fw_start(struct a6xx_gmu *gmu, unsigned int state)
+ 			  gmu->log.iova | (gmu->log.size / SZ_4K - 1));
+ 	}
+ 
++	/* Do the CX GBIF configurations before GMU wake up */
++	for (int i = 0; (gbif_cx && gbif_cx[i].offset); i++)
++		gpu_write(gpu, gbif_cx[i].offset, gbif_cx[i].value);
++
+ 	/* Set up the lowest idle level on the GMU */
+ 	a6xx_gmu_power_config(gmu);
+ 
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gpu.h b/drivers/gpu/drm/msm/adreno/a6xx_gpu.h
+index 0b17d36c36a9567e6afa4269ae7783ed3578e40e..d1fb05ecafbdae4f3d93538dfddd18c23709ca35 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gpu.h
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gpu.h
+@@ -46,6 +46,7 @@ struct a6xx_info {
+ 	const struct adreno_protect *protect;
+ 	const struct adreno_reglist_list *pwrup_reglist;
+ 	const struct adreno_reglist_list *ifpc_reglist;
++	const struct adreno_reglist *gbif_cx;
+ 	u32 gmu_chipid;
+ 	u32 gmu_cgc_mode;
+ 	u32 prim_fifo_threshold;

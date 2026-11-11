@@ -1,0 +1,821 @@
+{
+  "schema": 1,
+  "name": "drm-618-a6xx-upstream",
+  "date": "2026-11-11",
+  "status": "host-compiled-core-not-hardware-validated",
+  "kernel_version": "6.18.60",
+  "hardware_validated": false,
+  "kernel_build_config": {
+    "path": "configs/kernel-6.18-baseline.config",
+    "sha256": "bcd5f6468a4783d6bf5ab1fefbbe17182461d9087e431090ca21ccd0ecc20fea",
+    "localversion": "CONFIG_LOCALVERSION=\"-sq2-android1\"",
+    "note": "Reference config of the matched 6.18.60 kernel build. The prepare script neither builds nor modifies it; a build is owned by the build/env workstream."
+  },
+  "source": {
+    "archive": "private/build-inputs/kernel-6.18/linux-6.18.60-current-sources-20261107.tar.gz",
+    "archive_sha256": "26f3045793cdf6e44379b75cb0adda0b7b32f2914537fcfb02f83c8d752a3b3b",
+    "archive_bytes": 303774784,
+    "archive_entries": 91832,
+    "source_subdir": "kernel",
+    "extract_filter": "data",
+    "note": "Project-pinned source tree, not a pristine LTS tarball: it already carries project deltas (for example the SQ2 a680 firmware names in a6xx_catalog.c and the pre-existing a6xx_gmu.xml.h include). Base hashes below are therefore taken from this archive, never from upstream master."
+  },
+  "upstream": {
+    "primary_series": {
+      "series_subject": "[PATCH 0/4] drm/msm/a6xx: Fixes for a680 (SC8180X)",
+      "submitter": "Val Packett <val@packett.cool>",
+      "series_date": "2026-11-03",
+      "series_message_id": "<20261103011358.65398-1-val@packett.cool>",
+      "url": "https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/",
+      "lore": "https://lore.kernel.org/all/20261103011358.65398-1-val@packett.cool/",
+      "status": "pending-upstream"
+    },
+    "batch_composition": {
+      "prerequisite_subset": [
+        1
+      ],
+      "pending_a680_fixes": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "merged_mainline_backports": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ]
+    },
+    "status_checked": "2026-11-11",
+    "status_note": "Mixed 11-patch batch, not a single upstream series: 0001 is a local 6.18 subset of 60a4e18e0e8a, 0002-0005 are pending upstream a680 fixes with no commit hash, and 0006-0011 backport fixes already merged in mainline (commit hashes per patch).",
+    "source_inputs": {
+      "patch_meta": "out/a6xx-work/patch-meta.json (ignored, Lead-verified input; values copied into this config)",
+      "patch_hashes": "out/a6xx-work/patch-hashes.json (ignored, Lead-verified input; values copied into this config)",
+      "sha256sums": "out/a6xx-work/patches/SHA256SUMS (ignored, Lead-verified input)",
+      "note": "These inputs are not shipped; the config is the authoritative pin after installation."
+    }
+  },
+  "prerequisite_analysis": {
+    "upstream_commit": "60a4e18e0e8ab27d7dfd1316eab31706176481e9",
+    "title": "drm/msm/adreno: Do CX GBIF config before GMU start",
+    "author": "Akhil P Oommen <akhilpo@oss.qualcomm.com>",
+    "date": "2025-11-18",
+    "upstream_release": "6.19",
+    "present_in_6.18.60": false,
+    "evidence": "6.18.60 has no gbif_cx member in struct a6xx_info, no a640_gbif register list, and still programs REG_A6XX_GBIF_QSB_SIDE0..3 in a6xx_gpu.c hw_init(). Patch 0001 supplies the a6xx/A7xx subset of 60a4e18e0e8a; patch 0002 then adds the missing A640/A680 catalog entries.",
+    "risk": "0001 is a local delta that does not exist in any release. If 6.18 LTS later backports 60a4e18e0e8a (or a vendor tree already contains it), drop 0001 and re-adapt 0002 to that shape instead of stacking both.",
+    "kept_behaviour": "The legacy hw_init() GBIF_QSB_SIDE0..3 writes are retained so no existing GPU family loses its configuration; the catalog list additionally programs CX GBIF before the GMU is woken up."
+  },
+  "patches": [
+    {
+      "index": 1,
+      "path": "patches/drm-618-a6xx-upstream/0001-drm-msm-adreno-Do-CX-GBIF-config-before-GMU-start.patch",
+      "sha256": "3654f3311cca90bb75a45b5b556fdefa320562dd540bf40dfba1c2177b0a05fa",
+      "role": "prerequisite",
+      "origin": "backport-subset",
+      "subject": "drm/msm/adreno: Do CX GBIF config before GMU start",
+      "author": "Akhil P Oommen <akhilpo@oss.qualcomm.com>",
+      "date": "2025-11-18",
+      "message_id": "<20251118-kaana-gpu-support-v4-17-86eeb8e93fb6@oss.qualcomm.com>",
+      "url": "https://github.com/torvalds/linux/commit/60a4e18e0e8ab27d7dfd1316eab31706176481e9",
+      "local_adaptation": [
+        "6.18-compatible subset of upstream 60a4e18e0e8a: A8xx/A840 support and the A8xx GMU MRC_GBIF_QOS programming do not exist in 6.18.60 and are omitted.",
+        "Legacy REG_A6XX_GBIF_QSB_SIDE0..3 writes in a6xx_gpu.c hw_init() are kept unchanged; the new catalog list additionally programs the CX GBIF before GMU start.",
+        "Adds the gbif_cx field to struct a6xx_info and the a640_gbif register list that patch 0002 uses."
+      ],
+      "post_contains": [
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c",
+          "contains": "static const struct adreno_reglist a640_gbif[] = {"
+        },
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.h",
+          "contains": "const struct adreno_reglist *gbif_cx;"
+        },
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+          "contains": "gpu_write(gpu, gbif_cx[i].offset, gbif_cx[i].value);"
+        }
+      ],
+      "files": {
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c": {
+          "before": "c5b2a0d8d56a036a055726355bf59efd6d07d348ef74f613bb6ae26fb232917c",
+          "after": "e1b1152323e3fb29c8239a78fe0793e483bfcd8445358f902c110108d65d828f"
+        },
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c": {
+          "before": "dba0140a606adc2e632e09fec5ff473ac325ba175b59b2608dd81ae45ac0c383",
+          "after": "7f4edca7ba84f3c06f415b549acdbfb8e7a39706dcd5f7215270192f1b0e4738"
+        },
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.h": {
+          "before": "c17a28b26df20637d05d44d8ed532022b269e0f9f60dc851dc8798bc57cbfa96",
+          "after": "48a0713189ee48e433e8039f65bae1feac4c2dcbdea90b7cb927cb2feb67d481"
+        }
+      },
+      "upstream_commit": "60a4e18e0e8ab27d7dfd1316eab31706176481e9",
+      "patchwork": "https://patchwork.freedesktop.org/patch/689024/"
+    },
+    {
+      "index": 2,
+      "path": "patches/drm-618-a6xx-upstream/0002-drm-msm-a6xx-Restore-GBIF-CX-config-for-A640-family.patch",
+      "sha256": "02a78a2857ce71992253b68c60e42f6f8026b31a001d38fd6487b5c153549b9b",
+      "role": "fix",
+      "origin": "pending-upstream",
+      "subject": "drm/msm/a6xx: Restore GBIF CX config for A640 family",
+      "author": "Maximilian Luz <luzmaximilian@gmail.com>",
+      "date": "2026-11-03",
+      "message_id": "<20261103011358.65398-2-val@packett.cool>",
+      "url": "https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/",
+      "local_adaptation": [
+        "Depends on patch 0001 for the gbif_cx field and a640_gbif table because the 6.19 catalog refactor is absent from 6.18.60.",
+        "Only the two A640/A680 catalog assignments are added; every other 6.18.60 field of those entries is untouched."
+      ],
+      "post_contains": [
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c",
+          "contains": ".gbif_cx = a640_gbif,",
+          "count": 2
+        }
+      ],
+      "files": {
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c": {
+          "before": "e1b1152323e3fb29c8239a78fe0793e483bfcd8445358f902c110108d65d828f",
+          "after": "b36e5bb0fea370ba5cde5e85274dd2fa04ef65d060f39552e91d9563f44ca0ea"
+        }
+      },
+      "series": "[PATCH 0/4] drm/msm/a6xx: Fixes for a680 (SC8180X)",
+      "series_url": "https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/",
+      "reviews": [
+        "Reviewed-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>"
+      ]
+    },
+    {
+      "index": 3,
+      "path": "patches/drm-618-a6xx-upstream/0003-drm-msm-a6xx-Fix-GMEM-range-on-a680.patch",
+      "sha256": "ae476f341331957dfebda46143ae3bc767f6fdbe9fece1c05c2670e341a15301",
+      "role": "fix",
+      "origin": "pending-upstream",
+      "subject": "drm/msm/a6xx: Fix GMEM range on a680",
+      "author": "Val Packett <val@packett.cool>",
+      "date": "2026-11-03",
+      "message_id": "<20261103011358.65398-3-val@packett.cool>",
+      "url": "https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/",
+      "local_adaptation": [
+        "6.18.60 has no adreno_is_a722()/A722 support, so the SZ_16M case stays a740-family-only; every pre-existing GPU keeps its previous value.",
+        "6.18.60 expresses MSM_PARAM_GMEM_BASE with adreno_is_a650_family()/adreno_is_a740_family() rather than the newer family >= ADRENO_6XX_GEN3 test, so adreno_is_a680() is added to the zero-base condition."
+      ],
+      "post_contains": [
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+          "contains": "else if (adreno_is_a680(adreno_gpu))"
+        },
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+          "contains": "gmem_range_min = 0;"
+        },
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/adreno_gpu.c",
+          "contains": "adreno_is_a680(adreno_gpu))"
+        }
+      ],
+      "files": {
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c": {
+          "before": "19673b639cc2de7013f005a33f8e5861f02d4a1c3bec9ed5951ba636af5ddb6f",
+          "after": "5fa7817ff960d93d43331432c826ab5b2e1c05686921c523fc22afb746b70f6d"
+        },
+        "kernel/drivers/gpu/drm/msm/adreno/adreno_gpu.c": {
+          "before": "620c493cbf9333be07c7875330823f053a004617cb7da74297f98321ffd58bb4",
+          "after": "c4b77c21cb5faf003206b8c78f78a0cc07e5715d512d7d0cc0f440360aa92199"
+        }
+      },
+      "series": "[PATCH 0/4] drm/msm/a6xx: Fixes for a680 (SC8180X)",
+      "series_url": "https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/"
+    },
+    {
+      "index": 4,
+      "path": "patches/drm-618-a6xx-upstream/0004-drm-msm-a6xx-Add-GMU_SP_RF_CONTROL-registers.patch",
+      "sha256": "8f99afcb894dbdc370efcc80701ff1a43ebad1642d8da03aea68d6e180325ec0",
+      "role": "fix",
+      "origin": "pending-upstream",
+      "subject": "drm/msm/a6xx: Add GMU_SP_RF_CONTROL registers",
+      "author": "Val Packett <val@packett.cool>",
+      "date": "2026-11-03",
+      "message_id": "<20261103011358.65398-4-val@packett.cool>",
+      "url": "https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/",
+      "local_adaptation": [
+        "Applied unchanged: the 6.18.60 a6xx_gmu.xml context around GPU_GMU_GX_SPTPRAC_CLOCK_CONTROL/POWER_CONTROL is identical.",
+        "Must be applied before patch 0005, which references the two new GMU_GX_GMU_SP_RF_CONTROL_0/1 macros."
+      ],
+      "post_contains": [
+        {
+          "file": "kernel/drivers/gpu/drm/msm/registers/adreno/a6xx_gmu.xml",
+          "contains": "name=\"GMU_GX_GMU_SP_RF_CONTROL_0\""
+        },
+        {
+          "file": "kernel/drivers/gpu/drm/msm/registers/adreno/a6xx_gmu.xml",
+          "contains": "name=\"GMU_GX_GMU_SP_RF_CONTROL_1\""
+        }
+      ],
+      "files": {
+        "kernel/drivers/gpu/drm/msm/registers/adreno/a6xx_gmu.xml": {
+          "before": "82d7a064efde19ab22cf6661f4405a878775a732de2d69b7280027da383426be",
+          "after": "25c897f340808008fc3889a2d062861c9f1735be64b64e2c47b076593357c28f"
+        }
+      },
+      "series": "[PATCH 0/4] drm/msm/a6xx: Fixes for a680 (SC8180X)",
+      "series_url": "https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/"
+    },
+    {
+      "index": 5,
+      "path": "patches/drm-618-a6xx-upstream/0005-drm-msm-a6xx-Import-a680-hwcg-sequence-from-kgsl.patch",
+      "sha256": "c123e678b3b8762e36cdfc4e1534155db93b6866128cf83672c9563b20ad49c7",
+      "role": "fix",
+      "origin": "pending-upstream",
+      "subject": "drm/msm/a6xx: Import a680 hwcg sequence from kgsl",
+      "author": "Val Packett <val@packett.cool>",
+      "date": "2026-11-03",
+      "message_id": "<20261103011358.65398-5-val@packett.cool>",
+      "url": "https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/",
+      "local_adaptation": [
+        "a6xx_catalog.c already includes a6xx_gmu.xml.h in 6.18.60, so the upstream include addition is dropped.",
+        "The A680 catalog entry context carries .gbif_cx from patch 0002 and the new table uses the registers from patch 0004, so both must already be applied."
+      ],
+      "post_contains": [
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c",
+          "contains": "static const struct adreno_reglist a680_hwcg[] = {"
+        },
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c",
+          "contains": ".hwcg = a680_hwcg,"
+        }
+      ],
+      "files": {
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c": {
+          "before": "b36e5bb0fea370ba5cde5e85274dd2fa04ef65d060f39552e91d9563f44ca0ea",
+          "after": "20217ca36a6480a1cc09df0db08afe06f521e31ac2f2445f794267fb1242a345"
+        }
+      },
+      "series": "[PATCH 0/4] drm/msm/a6xx: Fixes for a680 (SC8180X)",
+      "series_url": "https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/"
+    },
+    {
+      "index": 6,
+      "path": "patches/drm-618-a6xx-upstream/0006-drm-msm-a6xx-fix-use-after-free-of-OPP-in-a6xx_pm_resume.patch",
+      "sha256": "35ff79a57f2f0d56003716804db2dd30706b54de7be75c0df4736cca1526d22b",
+      "role": "fix",
+      "origin": "merged-mainline",
+      "subject": "drm/msm/a6xx: fix use-after-free of OPP in a6xx_pm_resume",
+      "author": "Roman Demidov <roman.demidov.nn@gmail.com>",
+      "date": "2026-09-29",
+      "message_id": "<20260929142103.81854-1-roman.demidov.nn@gmail.com>",
+      "url": "https://github.com/torvalds/linux/commit/8128ae7af6b4dc95e486c5c0a80839a069df578e",
+      "local_adaptation": [
+        "Applies unchanged to the 6.18.60 a6xx_pm_resume(): dev_pm_opp_put(opp) moves after dev_pm_opp_set_opp() so the OPP reference cannot be freed before it is dereferenced."
+      ],
+      "post_contains": [
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+          "regex": "dev_pm_opp_set_opp\\(&gpu->pdev->dev, opp\\);\\s*\\n\\s*dev_pm_opp_put\\(opp\\);"
+        }
+      ],
+      "files": {
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c": {
+          "before": "5fa7817ff960d93d43331432c826ab5b2e1c05686921c523fc22afb746b70f6d",
+          "after": "733d0b66de2ea63a0a48f79201be25de8a613b38aa9432f11b78cdea4067d728"
+        }
+      },
+      "upstream_commit": "8128ae7af6b4dc95e486c5c0a80839a069df578e",
+      "patchwork": "https://patchwork.freedesktop.org/patch/757104/"
+    },
+    {
+      "index": 7,
+      "path": "patches/drm-618-a6xx-upstream/0007-drm-msm-a6xx-check-pm_runtime_resume_and_get-during-resume.patch",
+      "sha256": "113a73c73c72e21467dd00aba676bf24a6c284ac76ad19a6b755d120adcf848d",
+      "role": "fix",
+      "origin": "merged-mainline",
+      "subject": "drm/msm/a6xx: check pm_runtime_resume_and_get during resume",
+      "author": "Roman Demidov <roman.demidov.nn@gmail.com>",
+      "date": "2026-09-29",
+      "message_id": "<20260929142103.81854-2-roman.demidov.nn@gmail.com>",
+      "url": "https://github.com/torvalds/linux/commit/e2f57c576f14f96449cfee840860cb9707501d23",
+      "local_adaptation": [
+        "6.18.60 a6xx_pm_resume() has only the grp_clks block (no later gmu clock enable or a6xx_llc_activate steps), so the unwind ladder is adapted to the 6.18.60 body: both pm_runtime_resume_and_get() results are checked and gxpd/dev/OPP state is unwound in order; the success path keeps msm_devfreq_resume()."
+      ],
+      "post_contains": [
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+          "contains": "ret = pm_runtime_resume_and_get(gmu->dev);"
+        },
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+          "contains": "goto err_opp_clear;"
+        }
+      ],
+      "files": {
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c": {
+          "before": "733d0b66de2ea63a0a48f79201be25de8a613b38aa9432f11b78cdea4067d728",
+          "after": "2fac22638dd163ba7c8bfaf3fb94301c99d635a49049bdd5115909d1cd790a58"
+        }
+      },
+      "upstream_commit": "e2f57c576f14f96449cfee840860cb9707501d23",
+      "patchwork": "https://patchwork.freedesktop.org/patch/757106/"
+    },
+    {
+      "index": 8,
+      "path": "patches/drm-618-a6xx-upstream/0008-drm-msm-a6xx-Increase-GMU-FW-init-timeout.patch",
+      "sha256": "23bf5166c56b1a917c354a97c6ba56cbf3f6735e3174f75ae5c8fbf3cabbb95f",
+      "role": "fix",
+      "origin": "merged-mainline",
+      "subject": "drm/msm/a6xx+: Increase GMU FW init timeout",
+      "author": "Rob Clark <robin.clark@oss.qualcomm.com>",
+      "date": "2026-09-12",
+      "message_id": "<20260912150915.28700-1-robin.clark@oss.qualcomm.com>",
+      "url": "https://github.com/torvalds/linux/commit/ba970587a0e1203b6a0934b5b9174886b4c4d24c",
+      "local_adaptation": [
+        "Same a6xx_gmu_start() poll in 6.18.60; the timeout is raised from 10 ms to 100 ms, matching downstream kgsl."
+      ],
+      "post_contains": [
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+          "contains": "100, 100000);"
+        }
+      ],
+      "files": {
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c": {
+          "before": "7f4edca7ba84f3c06f415b549acdbfb8e7a39706dcd5f7215270192f1b0e4738",
+          "after": "d9e462f19b9915ab13b16183f01c8c8b0a7dc3c9535c4cae0b1e912832f363b4"
+        }
+      },
+      "upstream_commit": "ba970587a0e1203b6a0934b5b9174886b4c4d24c",
+      "patchwork": "https://patchwork.freedesktop.org/patch/753014/"
+    },
+    {
+      "index": 9,
+      "path": "patches/drm-618-a6xx-upstream/0009-drm-msm-a6xx-Fix-secondary-rail-vote-in-ARC-votes.patch",
+      "sha256": "4c34c024c4571b975af2f951cc7d6cd3380e5263876483bd717f2879f8009a8e",
+      "role": "fix",
+      "origin": "merged-mainline",
+      "subject": "drm/msm/a6xx: Fix secondary rail vote in ARC votes",
+      "author": "Akhil P Oommen <akhilpo@oss.qualcomm.com>",
+      "date": "2026-09-23",
+      "message_id": "<20260923-hawi-gpu-v1-2-0c3c79a1a470@oss.qualcomm.com>",
+      "url": "https://github.com/torvalds/linux/commit/128a0edde50780ed9eb93ab5d2e18ca24c1f1c43",
+      "local_adaptation": [
+        "6.18.60 a6xx_gmu_rpmh_arc_votes_init() has the same requested-level secondary match; only the comparison and a comment change."
+      ],
+      "post_contains": [
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+          "contains": "if (sec[j] >= pri[pindex]) {"
+        }
+      ],
+      "files": {
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c": {
+          "before": "d9e462f19b9915ab13b16183f01c8c8b0a7dc3c9535c4cae0b1e912832f363b4",
+          "after": "1e4c17dc129a5b7b171deded62c5a58c165eec3d3b25b76364364258810883be"
+        }
+      },
+      "upstream_commit": "128a0edde50780ed9eb93ab5d2e18ca24c1f1c43",
+      "patchwork": "https://patchwork.freedesktop.org/patch/755592/"
+    },
+    {
+      "index": 10,
+      "path": "patches/drm-618-a6xx-upstream/0010-drm-msm-a6xx-Correct-OOB-usage.patch",
+      "sha256": "48b0b67a1e501b59f412a2569820ceb60af65995856c2375a5b84c713f5e3c43",
+      "role": "fix",
+      "origin": "merged-mainline",
+      "subject": "drm/msm/a6xx: Correct OOB usage",
+      "author": "Akhil P Oommen <akhilpo@oss.qualcomm.com>",
+      "date": "2026-03-27",
+      "message_id": "<20260327-a8xx-gpu-batch2-v2-4-2b53c38d2101@oss.qualcomm.com>",
+      "url": "https://github.com/torvalds/linux/commit/d34b6919798c1a8c93e1d7cca297d0e068146bd5",
+      "local_adaptation": [
+        "a6xx/A7xx parts only: the A8xx hw_init() hunk is omitted because 6.18.60 has no A8xx support.",
+        "The sysprof OOB request moves from a6xx_gmu_resume() to the end of hw_init(), matching upstream."
+      ],
+      "post_contains": [
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+          "contains": "if (!ret && (refcount_read(&gpu->sysprof_active) > 1)) {"
+        }
+      ],
+      "files": {
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c": {
+          "before": "1e4c17dc129a5b7b171deded62c5a58c165eec3d3b25b76364364258810883be",
+          "after": "ae23ea74b4390c34b8d05cfe9e1c052e641b77ff8b0e602ac44759cc5d96fb57"
+        },
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c": {
+          "before": "2fac22638dd163ba7c8bfaf3fb94301c99d635a49049bdd5115909d1cd790a58",
+          "after": "c6c5e20731bcc45cc222f10c1b1d5cd298ae2cf7eb7da90ecc2940bd2137b8bf"
+        }
+      },
+      "upstream_commit": "d34b6919798c1a8c93e1d7cca297d0e068146bd5",
+      "patchwork": "https://patchwork.freedesktop.org/patch/714659/"
+    },
+    {
+      "index": 11,
+      "path": "patches/drm-618-a6xx-upstream/0011-drm-msm-a6xx-Fix-IRQ-storm-during-msm_recovery-test.patch",
+      "sha256": "3cf62aa0fa49a7c1df7eb2053b74f2b6e547361ef5e3e360e0fecb7e4577a9ab",
+      "role": "fix",
+      "origin": "merged-mainline",
+      "subject": "drm/msm/a6xx: Fix IRQ storm during msm_recovery test",
+      "author": "Jie Zhang <jie.zhang@oss.qualcomm.com>",
+      "date": "2026-06-04",
+      "message_id": "<20260605-assorted-fixes-june-v1-5-2caa04f7287c@oss.qualcomm.com>",
+      "url": "https://github.com/torvalds/linux/commit/bc024d325e98b6b2806e00455e030622fb8e1820",
+      "local_adaptation": [
+        "a6xx_irq() and the common msm_gpu.c recover_worker() parts only; the a5xx and a8xx hunks are omitted (A5xx is outside the Adreno A6xx scope; 6.18.60 has no A8xx support)."
+      ],
+      "post_contains": [
+        {
+          "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+          "contains": "gpu_write(gpu, REG_A6XX_RBBM_INT_0_MASK, A6XX_RBBM_INT_0_MASK_CP_CACHE_FLUSH_TS);"
+        },
+        {
+          "file": "kernel/drivers/gpu/drm/msm/msm_gpu.c",
+          "contains": "priv->disable_err_irq = false;"
+        }
+      ],
+      "files": {
+        "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c": {
+          "before": "c6c5e20731bcc45cc222f10c1b1d5cd298ae2cf7eb7da90ecc2940bd2137b8bf",
+          "after": "68fb7e94d29698d647b89b8129b3901461b3aec1ba9fa6fc9667d2bf7cbf7c66"
+        },
+        "kernel/drivers/gpu/drm/msm/msm_gpu.c": {
+          "before": "3752632cf83cc742c8dc7794a08b0a27c81ec9e68dbd986cb69f634eb0949d30",
+          "after": "8d916b8605bad586e3de1262a1e3fbdff5bdb067393a4a414aefc510e91678a1"
+        }
+      },
+      "upstream_commit": "bc024d325e98b6b2806e00455e030622fb8e1820",
+      "patchwork": "https://patchwork.freedesktop.org/patch/730660/"
+    }
+  ],
+  "baseline": [
+    {
+      "id": "a680-fw-names",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c",
+      "contains": "[ADRENO_FW_SQE] = \"a680_sqe.fw\","
+    },
+    {
+      "id": "gmem-1m-default",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "contains": "gmem_range_min = adreno_is_a740_family(adreno_gpu) ? SZ_16M : SZ_1M;"
+    },
+    {
+      "id": "gmu-timeout-10ms",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "regex": "GMU_CM3_FW_INIT_RESULT,[\\s\\S]{0,160}?100, 10000\\);"
+    },
+    {
+      "id": "arc-secondary-requested-level",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "contains": "if (sec[j] >= level) {"
+    },
+    {
+      "id": "irq-status-masked-only",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "regex": "if \\(priv->disable_err_irq\\)\\s*\\n\\s*status &= "
+    },
+    {
+      "id": "opp-put-before-set",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "regex": "dev_pm_opp_put\\(opp\\);\\s*\\n\\s*\\n\\s*/\\* Set the core clock"
+    },
+    {
+      "id": "unchecked-pm-resume",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "regex": "pm_runtime_resume_and_get\\(gmu->dev\\);\\s*\\n\\s*pm_runtime_resume_and_get\\(gmu->gxpd\\);"
+    },
+    {
+      "id": "sysprof-oob-in-resume",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "regex": "a6xx_gmu_set_initial_freq\\(gpu, gmu\\);\\s*\\n\\s*\\n\\s*if \\(refcount_read\\(&gpu->sysprof_active\\) > 1\\)"
+    }
+  ],
+  "preconditions": [
+    {
+      "id": "no-gbif-cx-field",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.h",
+      "absent": "gbif_cx"
+    },
+    {
+      "id": "no-a640-gbif-list",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c",
+      "absent": "a640_gbif"
+    },
+    {
+      "id": "no-gbif-cx-loop",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "absent": "gbif_cx"
+    },
+    {
+      "id": "no-a680-hwcg-table",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c",
+      "absent": "a680_hwcg"
+    },
+    {
+      "id": "no-sp-rf-control-registers",
+      "file": "kernel/drivers/gpu/drm/msm/registers/adreno/a6xx_gmu.xml",
+      "absent": "GMU_GX_GMU_SP_RF_CONTROL"
+    },
+    {
+      "id": "no-a680-gmem-zero",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "absent": "gmem_range_min = 0;"
+    },
+    {
+      "id": "no-a680-gmem-base-param",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/adreno_gpu.c",
+      "absent": "adreno_is_a680(adreno_gpu))"
+    },
+    {
+      "id": "no-opp-put-after-set",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "absent": "dev_pm_opp_set_opp(&gpu->pdev->dev, opp);\n\tdev_pm_opp_put(opp);"
+    },
+    {
+      "id": "no-checked-pm-resume",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "absent": "ret = pm_runtime_resume_and_get(gmu->dev);"
+    },
+    {
+      "id": "no-100ms-timeout",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "absent": "100, 100000);"
+    },
+    {
+      "id": "no-arc-primary-vote",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "absent": "sec[j] >= pri[pindex]"
+    },
+    {
+      "id": "no-oob-in-hw-init",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "absent": "if (!ret && (refcount_read(&gpu->sysprof_active) > 1))"
+    },
+    {
+      "id": "no-irq-storm-mask",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "absent": "gpu_write(gpu, REG_A6XX_RBBM_INT_0_MASK, A6XX_RBBM_INT_0_MASK_CP_CACHE_FLUSH_TS);"
+    },
+    {
+      "id": "no-recover-irq-reenable",
+      "file": "kernel/drivers/gpu/drm/msm/msm_gpu.c",
+      "absent": "priv->disable_err_irq = false;"
+    }
+  ],
+  "markers": [
+    {
+      "id": "gbif-cx-field",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.h",
+      "contains": "const struct adreno_reglist *gbif_cx;",
+      "description": "struct a6xx_info carries the gbif_cx list pointer"
+    },
+    {
+      "id": "gbif-cx-loop",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "contains": "for (int i = 0; (gbif_cx && gbif_cx[i].offset); i++)",
+      "description": "CX GBIF is programmed in a6xx_gmu_fw_start before GMU wake-up"
+    },
+    {
+      "id": "a640-gbif-list",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c",
+      "contains": "static const struct adreno_reglist a640_gbif[] = {",
+      "description": "A640-family CX GBIF register list"
+    },
+    {
+      "id": "gbif-cx-entries",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c",
+      "contains": ".gbif_cx = a640_gbif,",
+      "count": 2,
+      "description": "A640 and A680 catalog entries point at the list"
+    },
+    {
+      "id": "a680-hwcg-table",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c",
+      "contains": "static const struct adreno_reglist a680_hwcg[] = {",
+      "description": "a680-specific hardware clock-gating sequence"
+    },
+    {
+      "id": "a680-hwcg-selected",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_catalog.c",
+      "contains": ".hwcg = a680_hwcg,",
+      "description": "A680 catalog entry uses the new clock-gating table"
+    },
+    {
+      "id": "a680-gmem-zero",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "contains": "gmem_range_min = 0;",
+      "description": "a680 programs UCHE_GMEM_RANGE_MIN with 0"
+    },
+    {
+      "id": "a680-gmem-min-branch",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "contains": "else if (adreno_is_a680(adreno_gpu))",
+      "description": "the zero range is a680-specific"
+    },
+    {
+      "id": "a680-gmem-base-param",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/adreno_gpu.c",
+      "regex": "case MSM_PARAM_GMEM_BASE:[\\s\\S]{0,240}?adreno_is_a680\\(adreno_gpu\\)",
+      "description": "MSM_PARAM_GMEM_BASE reports 0 for a680"
+    },
+    {
+      "id": "gmu-sp-rf-control-0",
+      "file": "kernel/drivers/gpu/drm/msm/registers/adreno/a6xx_gmu.xml",
+      "contains": "name=\"GMU_GX_GMU_SP_RF_CONTROL_0\"",
+      "description": "new register used by the a680 hwcg table"
+    },
+    {
+      "id": "gmu-sp-rf-control-1",
+      "file": "kernel/drivers/gpu/drm/msm/registers/adreno/a6xx_gmu.xml",
+      "contains": "name=\"GMU_GX_GMU_SP_RF_CONTROL_1\"",
+      "description": "new register used by the a680 hwcg table"
+    },
+    {
+      "id": "opp-put-after-set-opp",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "regex": "dev_pm_opp_set_opp\\(&gpu->pdev->dev, opp\\);\\s*\\n\\s*dev_pm_opp_put\\(opp\\);",
+      "description": "OPP reference is released only after the performance state is set"
+    },
+    {
+      "id": "pm-resume-checked",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "regex": "ret = pm_runtime_resume_and_get\\(gmu->dev\\);\\s*\\n\\s*if \\(ret < 0\\)\\s*\\n\\s*goto err_opp_clear;",
+      "description": "a6xx_pm_resume() checks pm_runtime_resume_and_get()"
+    },
+    {
+      "id": "gmu-timeout-100ms",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "contains": "100, 100000);",
+      "description": "GMU FW init timeout raised to 100 ms"
+    },
+    {
+      "id": "arc-secondary-primary-vote",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "contains": "if (sec[j] >= pri[pindex]) {",
+      "description": "secondary rail matches the quantized primary voltage"
+    },
+    {
+      "id": "oob-in-hw-init",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "contains": "if (!ret && (refcount_read(&gpu->sysprof_active) > 1)) {",
+      "description": "sysprof OOB request moved to the end of hw_init()"
+    },
+    {
+      "id": "irq-storm-mask",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "contains": "gpu_write(gpu, REG_A6XX_RBBM_INT_0_MASK, A6XX_RBBM_INT_0_MASK_CP_CACHE_FLUSH_TS);",
+      "description": "a6xx_irq() masks error interrupts while hw error handling is disabled"
+    },
+    {
+      "id": "recover-irq-reenable",
+      "file": "kernel/drivers/gpu/drm/msm/msm_gpu.c",
+      "contains": "priv->disable_err_irq = false;",
+      "description": "recover_worker() re-enables the error IRQs before recovery"
+    }
+  ],
+  "final_absent": [
+    {
+      "id": "oob-removed-from-resume",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "regex": "a6xx_gmu_set_initial_freq\\(gpu, gmu\\);\\s*\\n\\s*\\n\\s*if \\(refcount_read\\(&gpu->sysprof_active\\) > 1\\)"
+    },
+    {
+      "id": "gmem-1m-default-replaced",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "absent": "gmem_range_min = adreno_is_a740_family(adreno_gpu) ? SZ_16M : SZ_1M;"
+    },
+    {
+      "id": "arc-requested-level-replaced",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "absent": "if (sec[j] >= level) {"
+    },
+    {
+      "id": "gmu-10ms-timeout-replaced",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gmu.c",
+      "regex": "GMU_CM3_FW_INIT_RESULT,[\\s\\S]{0,160}?100, 10000\\);",
+      "description": "the GMU FW init poll timeout is no longer 10 ms"
+    },
+    {
+      "id": "unchecked-pm-resume-replaced",
+      "file": "kernel/drivers/gpu/drm/msm/adreno/a6xx_gpu.c",
+      "absent": "pm_runtime_resume_and_get(gmu->dev);\n\tpm_runtime_resume_and_get(gmu->gxpd);"
+    }
+  ],
+  "apply": {
+    "tool": "patch",
+    "fallback": "git",
+    "note": "patch(1) with --batch --fuzz=0 -p1 after a --dry-run is what every other prepare script in this repository uses and is always cwd-relative. git apply is only a fallback and is refused when the extracted tree sits inside a git worktree, because there git resolves patch paths against the repository root and exits 0 while ignoring them."
+  },
+  "verification": {
+    "date": "2026-11-12",
+    "host_only": true,
+    "commands": {
+      "check": "python3 scripts/prepare-drm-618-a6xx-upstream.py --check",
+      "apply": "python3 scripts/prepare-drm-618-a6xx-upstream.py --apply --work-dir work/drm-618-a6xx-upstream-20261111",
+      "tests": "python3 -m unittest tests.test_drm_618_a6xx_upstream",
+      "build": "make -C <source>/kernel O=<build> ARCH=arm64 CROSS_COMPILE=<toolchain>/usr/bin/aarch64-linux-gnu- -j64 Image modules dtbs"
+    },
+    "results": {
+      "config_schema": "pass",
+      "patch_sha256": "pass",
+      "source_archive_sha256": "pass",
+      "baseline_preconditions": "pass",
+      "strict_order_apply": "pass",
+      "post_conditions": "pass",
+      "kernel_compile": "pass-core-only",
+      "module_load": "not-run",
+      "runtime_gpu_behaviour": "not-run",
+      "hardware": "not-run",
+      "full_external_modules": "not-run"
+    },
+    "note": "Textual checks and the full-tree --apply are host-side only. The core kernel (Image/modules/dtbs) was additionally compiled in a separate ignored work tree; module load, runtime GPU behaviour and hardware are not validated. Textual post-conditions prove source shape only.",
+    "host_build": {
+      "scope": "core Image/modules/dtbs only; the official flow's 12 external module groups and board.dts were not built",
+      "toolchain": "pinned aarch64-linux-gnu-gcc 13.3.0 (sha matches private/build-inputs/kernel-6.18/toolchain.tar.gz)",
+      "config": "configs/kernel-6.18-baseline.config (sha256 bcd5f6468a4783d6bf5ab1fefbbe17182461d9087e431090ca21ccd0ecc20fea)",
+      "jobs": 64,
+      "baseline": {
+        "result": "pass",
+        "image_sha256": "071bb1c78e40fc69b12823200cf1efff42a52d7b5383ad2638332c2cb4b4e69e",
+        "image_bytes": 35588608,
+        "system_map_sha256": "0167278eb34a20f9880e00effb677ef89e918c09d29607c880e4c2389d7bad49",
+        "module_symvers_sha256": "41948a03e8e59903506f0ba34feb4eca52e91f4181d66f65c690f4b038f4f17c",
+        "wall_seconds": 98,
+        "modules": 486,
+        "dtbs": 333,
+        "warnings": 37,
+        "errors": 0,
+        "note": "System.map and Module.symvers are byte-identical to the project's accepted reference build"
+      },
+      "patched": {
+        "result": "pass",
+        "patch_count": 11,
+        "apply_order": "0001..0011",
+        "image_sha256": "82cd2d983741365bd38f81109738dfc48b688c88b6f5858a80ba30325df3b3e5",
+        "image_bytes": 35588608,
+        "kernel_release": "6.18.60-sq2-android1",
+        "wall_seconds": 99,
+        "modules": 486,
+        "dtbs": 333,
+        "warnings": 37,
+        "errors": 0,
+        "system_map_unchanged": true,
+        "module_symvers_unchanged": true,
+        "changed_objects": [
+          "drivers/gpu/drm/msm/adreno/a6xx_catalog.o",
+          "drivers/gpu/drm/msm/adreno/a6xx_gpu.o",
+          "drivers/gpu/drm/msm/adreno/a6xx_gmu.o",
+          "drivers/gpu/drm/msm/adreno/a6xx_hfi.o",
+          "drivers/gpu/drm/msm/adreno/adreno_gpu.o",
+          "drivers/gpu/drm/msm/msm_gpu.o",
+          "drivers/gpu/drm/msm/msm.o"
+        ],
+        "msm_ko_sha256_before": "0d0266de98635db75118b29dbe5e4ae989a3cb06d982ad3e388cf9479a546aa8",
+        "msm_ko_sha256_after": "6579d3721139a6dac9e77f4abb8aecc92a535594e4b0685a7d40e524133c62de",
+        "new_rodata_symbols": [
+          "a640_gbif",
+          "a680_hwcg"
+        ],
+        "note": "Image/vmlinux differ from baseline only by UTS build timestamp and resulting build-id (33 bytes); a6xx_hfi.o changes because struct a6xx_info layout grows"
+      },
+      "equivalence": "prepare-drm-618-a6xx-upstream.py --apply produces a tree whose 7 touched files are byte-identical to the patched source tree that was compiled",
+      "archive_symlink_remediation": {
+        "defect": "the pinned source tar omits symlinked directories; scripts/dtc/include-prefixes/* were missing so make dtbs failed",
+        "remediation": "restored 12 stock relative symlinks in the working copy only (not the archive); no regular file content changed",
+        "recorded_in": "out/a6xx-build/source-archive-remediation.txt"
+      },
+      "evidence": [
+        "out/a6xx-build/baseline/build-audit.json",
+        "out/a6xx-build/patched/build-audit.json",
+        "out/a6xx-build/comparison/COMPARISON.json",
+        "out/a6xx-build/comparison/changed-objects.tsv",
+        "out/a6xx-build/source-archive-remediation.txt"
+      ],
+      "not_done": [
+        "12 external module groups and board.dts from the official build flow",
+        "module load, MODPOST of the full package, runtime GMU HFI/Vulkan/PM/IRQ behaviour",
+        "performance, power, long-run, SQ1/SQ2 or any device boot"
+      ]
+    }
+  },
+  "limits": [
+    "Host-side source preparation only: this artifact does not compile Image, modules or dtbs and does not load a module.",
+    "No device access, deployment, reboot or hardware claim. hardware_validated is false.",
+    "Mixed batch: 0002-0005 are pending upstream as of 2026-11-11, 0006-0011 are backports of already-merged mainline fixes, and 0001 is a local 6.18 subset of 60a4e18e0e8a; this is not one upstream series and not an upstream backport.",
+    "The source archive is the project-pinned tree, not pristine LTS; base hashes are archive-specific.",
+    "Textual markers prove the expected source shape, not that the GMU HFI timeout, texture corruption or the backported PM/IRQ fixes behave correctly at runtime."
+  ],
+  "rollback": "Delete the fresh --work-dir (the script refuses to reuse one). The pinned archive, private/build-inputs and tracked files are never modified by prepare or check. For repository changes, git checkout -- <file> or git reset --hard restores the tracked tree; the series is only applied under work/, never in place.",
+  "independent_audit": {
+    "date": "2026-11-12",
+    "evidence": "out/a6xx-upstream/INVENTORY.json, out/a6xx-upstream/REPORT.md",
+    "result": "11/11 included patches independently confirmed applicable and missing from 6.18.60; all exclusion decisions confirmed; no additional applicable A6xx fix found in the 127-commit mainline window",
+    "stable_check": "v6.18.60..v6.18.63 changes exactly one adreno file (a6xx_catalog.c, A704 GPU-id addition, stable b7e3bcd3b2a1) - no A6xx fix",
+    "upstream_status": "a680 series not merged in torvalds v7.4-rc2, msm-next or msm-fixes as of 2026-11-12; per-patch Message-ID provenance and the patch 1/4 Reviewed-by in the openwall reply were re-verified"
+  }
+}

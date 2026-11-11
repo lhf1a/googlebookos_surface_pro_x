@@ -1,0 +1,59 @@
+From: Val Packett <val@packett.cool>
+Date: Tue, 3 Nov 2026 02:13:59 +0100
+Subject: [PATCH 3/11] drm/msm/a6xx: Fix GMEM range on a680
+
+On a680, the GMEM range starts at 0, like on newer generations.
+Trying to use the 1M value results in texture corruption in Vulkan.
+Fix the wrong range by introducing checks specific to this model.
+
+Link: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15349
+Fixes: 4b565ca5a2cb ("drm/msm: Add A6XX device support")
+Signed-off-by: Val Packett <val@packett.cool>
+
+---
+Note from the original posting (below the scissors line there):
+  I have tried adding it to the if (!(..)) condition i.e. not
+  touching the REG_A6XX_UCHE_GMEM_RANGE_* at all -- that just
+  made launching gtk4-demo instantly hang the system.. So the only
+  thing that works and solves the issue is actually writing the zero
+  for the start.
+
+6.18.60 adaptation: 6.18.60 has no adreno_is_a722()/A722 support, so the
+16M case stays a740-family-only (behaviour for every existing GPU is
+unchanged). 6.18.60 expresses MSM_PARAM_GMEM_BASE with
+adreno_is_a650_family()/adreno_is_a740_family() rather than the newer
+family >= ADRENO_6XX_GEN3 test, so adreno_is_a680() is added to the
+zero-base condition. Upstream posting:
+https://patchew.org/linux/20261103011358.65398-1-val@packett.cool/
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+index a4d752de9bbabaf0937f4904041c0f48531fe826..110184722cf142a7f31eaac8bfcd821e5229080d 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+@@ -1267,7 +1267,11 @@ static int hw_init(struct msm_gpu *gpu)
+ 	if (!(adreno_is_a650_family(adreno_gpu) ||
+ 	      adreno_is_a702(adreno_gpu) ||
+ 	      adreno_is_a730(adreno_gpu))) {
+-		gmem_range_min = adreno_is_a740_family(adreno_gpu) ? SZ_16M : SZ_1M;
++		gmem_range_min = SZ_1M;
++		if (adreno_is_a740_family(adreno_gpu))
++			gmem_range_min = SZ_16M;
++		else if (adreno_is_a680(adreno_gpu))
++			gmem_range_min = 0;
+ 
+ 		/* Set the GMEM VA range [0x100000:0x100000 + gpu->gmem - 1] */
+ 		gpu_write64(gpu, REG_A6XX_UCHE_GMEM_RANGE_MIN, gmem_range_min);
+diff --git a/drivers/gpu/drm/msm/adreno/adreno_gpu.c b/drivers/gpu/drm/msm/adreno/adreno_gpu.c
+index ef9798492bceef29ff72a90232c7d33e9bb9ca26..93dfc7f7c02744907262a8d8224092f7b2999e3b 100644
+--- a/drivers/gpu/drm/msm/adreno/adreno_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/adreno_gpu.c
+@@ -369,7 +369,8 @@ int adreno_get_param(struct msm_gpu *gpu, struct msm_context *ctx,
+ 		return 0;
+ 	case MSM_PARAM_GMEM_BASE:
+ 		if (adreno_is_a650_family(adreno_gpu) ||
+-		    adreno_is_a740_family(adreno_gpu))
++		    adreno_is_a740_family(adreno_gpu) ||
++		    adreno_is_a680(adreno_gpu))
+ 			*value = 0;
+ 		else
+ 			*value = 0x100000;

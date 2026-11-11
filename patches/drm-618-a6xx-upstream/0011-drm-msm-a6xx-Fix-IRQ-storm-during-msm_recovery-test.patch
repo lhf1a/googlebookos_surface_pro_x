@@ -1,0 +1,53 @@
+From: Jie Zhang <jie.zhang@oss.qualcomm.com>
+Date: 2026-06-04T20:08:21Z
+Subject: [PATCH 11/11] drm/msm/a6xx: Fix IRQ storm during msm_recovery test
+
+Once a hang is triggered by the msm_recovery test, the gpu error irq
+remains asserted and triggers an interrupt storm. In the worst case,
+this IRQ storm lands on the CPU core where the hangcheck timer is
+scheduled, blocking it from running. This eventually leads to CPU
+watchdog timeouts.
+
+To fix this, mask the gpu error irqs during msm_recovery test and
+enable them back during the recovery.
+
+Fixes: 5edf2750d998 ("drm/msm: Add debugfs to disable hw err handling")
+Signed-off-by: Jie Zhang <jie.zhang@oss.qualcomm.com>
+Signed-off-by: Akhil P Oommen <akhilpo@oss.qualcomm.com>
+Patchwork: https://patchwork.freedesktop.org/patch/730660/
+Message-ID: <20260605-assorted-fixes-june-v1-5-2caa04f7287c@oss.qualcomm.com>
+Signed-off-by: Rob Clark <robin.clark@oss.qualcomm.com>
+
+---
+6.18.60 adaptation: a6xx_irq() and the common msm_gpu.c recover_worker() parts only. The a5xx and a8xx hunks are omitted (A5xx is outside the Adreno A6xx scope; 6.18.60 has no A8xx support).
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+index 7f256fcb225e546a7d79508e8ddd2b1c490516ed..aa8a0ef5109cd22caadf1558147bbba78b7d1d90 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+@@ -1912,8 +1912,11 @@ static irqreturn_t a6xx_irq(struct msm_gpu *gpu)
+ 
+ 	gpu_write(gpu, REG_A6XX_RBBM_INT_CLEAR_CMD, status);
+ 
+-	if (priv->disable_err_irq)
++	if (priv->disable_err_irq) {
++		/* Turn off interrupts to avoid interrupt storm */
++		gpu_write(gpu, REG_A6XX_RBBM_INT_0_MASK, A6XX_RBBM_INT_0_MASK_CP_CACHE_FLUSH_TS);
+ 		status &= A6XX_RBBM_INT_0_MASK_CP_CACHE_FLUSH_TS;
++	}
+ 
+ 	if (status & A6XX_RBBM_INT_0_MASK_RBBM_HANG_DETECT)
+ 		a6xx_fault_detect_irq(gpu);
+diff --git a/drivers/gpu/drm/msm/msm_gpu.c b/drivers/gpu/drm/msm/msm_gpu.c
+index 569a1ba02e6084d67bee36a697021c5939aa6243..cb784bf4759493e74f640b60548507fe214a865a 100644
+--- a/drivers/gpu/drm/msm/msm_gpu.c
++++ b/drivers/gpu/drm/msm/msm_gpu.c
+@@ -550,6 +550,8 @@ static void recover_worker(struct kthread_work *work)
+ 		msm_update_fence(ring->fctx, fence);
+ 	}
+ 
++	priv->disable_err_irq = false;
++
+ 	gpu->funcs->recover(gpu);
+ 
+ 	/* retire completed submits, plus the one that hung: */

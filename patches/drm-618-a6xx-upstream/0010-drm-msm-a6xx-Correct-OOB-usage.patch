@@ -1,0 +1,51 @@
+From: Akhil P Oommen <akhilpo@oss.qualcomm.com>
+Date: 2026-03-27T00:13:53Z
+Subject: [PATCH 10/11] drm/msm/a6xx: Correct OOB usage
+
+During the GMU resume sequence, using another OOB other than OOB_GPU may
+confuse the internal state of GMU firmware. To align more strictly with
+the downstream sequence, move the sysprof related OOB setup after the
+OOB_GPU is cleared.
+
+Fixes: 62cd0fa6990b ("drm/msm/adreno: Disable IFPC when sysprof is active")
+Signed-off-by: Akhil P Oommen <akhilpo@oss.qualcomm.com>
+Patchwork: https://patchwork.freedesktop.org/patch/714659/
+Message-ID: <20260327-a8xx-gpu-batch2-v2-4-2b53c38d2101@oss.qualcomm.com>
+Signed-off-by: Rob Clark <robin.clark@oss.qualcomm.com>
+
+---
+6.18.60 adaptation: a6xx/a7xx parts only. The A8xx hw_init() hunk is omitted because 6.18.60 has no A8xx support. The sysprof OOB request moves from a6xx_gmu_resume() to the end of hw_init(), as upstream.
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+index 6e361a3858854524a3ee92e299a585e2e8cc15e1..1de3b881b7792b8c6bdb31472431653e81aa9cb2 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gmu.c
+@@ -1161,11 +1161,6 @@ int a6xx_gmu_resume(struct a6xx_gpu *a6xx_gpu)
+ 	/* Set the GPU to the current freq */
+ 	a6xx_gmu_set_initial_freq(gpu, gmu);
+ 
+-	if (refcount_read(&gpu->sysprof_active) > 1) {
+-		ret = a6xx_gmu_set_oob(gmu, GMU_OOB_PERFCOUNTER_SET);
+-		if (!ret)
+-			set_bit(GMU_STATUS_OOB_PERF_SET, &gmu->status);
+-	}
+ out:
+ 	/* On failure, shut down the GMU to leave it in a good state */
+ 	if (ret) {
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+index 45d1288f2db1690e567f742b6f9189165184755e..7f256fcb225e546a7d79508e8ddd2b1c490516ed 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+@@ -1526,6 +1526,12 @@ out:
+ 		a6xx_gmu_clear_oob(&a6xx_gpu->gmu, GMU_OOB_BOOT_SLUMBER);
+ 	}
+ 
++	if (!ret && (refcount_read(&gpu->sysprof_active) > 1)) {
++		ret = a6xx_gmu_set_oob(gmu, GMU_OOB_PERFCOUNTER_SET);
++		if (!ret)
++			set_bit(GMU_STATUS_OOB_PERF_SET, &gmu->status);
++	}
++
+ 	return ret;
+ }
+ 
