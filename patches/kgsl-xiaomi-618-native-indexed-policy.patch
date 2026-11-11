@@ -1,0 +1,269 @@
+--- a/drivers/gpu/msm/kgsl_bus.c
++++ b/drivers/gpu/msm/kgsl_bus.c
+@@ -254,18 +254,189 @@
+ 	return table;
+ }
+ 
++/* Native indexed policy: decimal kB/s table, exact OPP Hz and bus indices. */
++static int kgsl_bus_read_policy_u32(struct device_node *node,
++		const char *name, u32 *value)
++{
++	int count = of_property_count_elems_of_size(node, name, sizeof(u32));
++
++	if (count != 1)
++		return count < 0 ? count : -EINVAL;
++	return of_property_read_u32(node, name, value);
++}
++
++static u32 *kgsl_bus_get_indexed_table(struct kgsl_device *device,
++		struct platform_device *pdev, struct kgsl_pwrlevel *levels,
++		int *count)
++{
++	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
++	struct device_node *parent, *child;
++	bool seen[KGSL_MAX_PWRLEVELS] = {}, off = false;
++	u32 *table;
++	unsigned int i;
++	int num, ret;
++
++	*count = 0;
++	if (pwr->num_pwrlevels >= MAX_GX_LEVELS)
++		return ERR_PTR(-E2BIG);
++	if (of_property_count_strings(pdev->dev.of_node, "interconnect-names") != 1 ||
++		of_property_match_string(pdev->dev.of_node, "interconnect-names", "gfx-mem") != 0)
++		return ERR_PTR(-EINVAL);
++	/* Recheck the enabled set rather than trusting a stale partial list. */
++	ret = dev_pm_opp_get_opp_count(&pdev->dev);
++	if (ret < 0)
++		return ERR_PTR(ret);
++	if ((unsigned int)ret != pwr->num_pwrlevels)
++		return ERR_PTR(-EINVAL);
++	for (i = 0; i < pwr->num_pwrlevels; i++) {
++		struct dev_pm_opp *opp;
++		unsigned long avg;
++
++		if (!levels[i].gpu_freq ||
++			(i && levels[i].gpu_freq >= levels[i - 1].gpu_freq))
++			return ERR_PTR(-EINVAL);
++		opp = dev_pm_opp_find_freq_exact(&pdev->dev, levels[i].gpu_freq, true);
++		if (IS_ERR(opp))
++			return ERR_PTR(PTR_ERR(opp));
++		avg = dev_pm_opp_get_bw(opp, false, 0);
++		dev_pm_opp_put(opp);
++		if (avg)
++			return ERR_PTR(-EOPNOTSUPP);
++	}
++	if (!of_find_property(pdev->dev.of_node, "qcom,bus-table-ddr", NULL))
++		return ERR_PTR(-ENOENT);
++	num = of_property_count_elems_of_size(pdev->dev.of_node,
++		"qcom,bus-table-ddr", sizeof(u32));
++	if (num < 0)
++		return ERR_PTR(num);
++	if (num < 2)
++		return ERR_PTR(-EINVAL);
++	if (num > MAX_GX_LEVELS)
++		return ERR_PTR(-E2BIG);
++	table = kgsl_bus_get_table(pdev, "qcom,bus-table-ddr", &num);
++	if (IS_ERR(table))
++		return table;
++	ret = -EINVAL;
++	if (num < 2 || num > MAX_GX_LEVELS)
++		goto free_table;
++	if (table[0])
++		goto free_table;
++	for (i = 1; i < (u32)num; i++)
++		if (table[i] <= table[i - 1])
++			goto free_table;
++
++	parent = of_get_child_by_name(pdev->dev.of_node, "qcom,gpu-pwrlevels");
++	if (!parent || !of_device_is_available(parent)) {
++		of_node_put(parent);
++		ret = -ENOENT;
++		goto free_table;
++	}
++	for_each_available_child_of_node(parent, child) {
++		u32 freq, def, min, max;
++
++		ret = kgsl_bus_read_policy_u32(child, "qcom,gpu-freq", &freq);
++		if (!ret)
++			ret = kgsl_bus_read_policy_u32(child, "qcom,bus-freq", &def);
++		if (!ret)
++			ret = kgsl_bus_read_policy_u32(child, "qcom,bus-min", &min);
++		if (!ret)
++			ret = kgsl_bus_read_policy_u32(child, "qcom,bus-max", &max);
++		if (ret)
++			goto put_child;
++		ret = -EINVAL;
++		if (!freq) {
++			if (off || def || min || max)
++				goto put_child;
++			off = true;
++			continue;
++		}
++		for (i = 0; i < pwr->num_pwrlevels; i++)
++			if (freq == levels[i].gpu_freq)
++				break;
++		if (i == pwr->num_pwrlevels || seen[i] || !min ||
++			min > def || def > max || max >= (u32)num)
++			goto put_child;
++		seen[i] = true;
++		levels[i].bus_freq = def;
++		levels[i].bus_min = min;
++		levels[i].bus_max = max;
++	}
++	of_node_put(parent);
++	ret = -EINVAL;
++	if (!off)
++		goto free_table;
++	for (i = 0; i < pwr->num_pwrlevels; i++)
++		if (!seen[i] || levels[i].bus_max > levels[0].bus_max)
++			goto free_table;
++	*count = num;
++	return table;
++
++put_child:
++	of_node_put(child);
++	of_node_put(parent);
++free_table:
++	kfree(table);
++	return ERR_PTR(ret);
++}
++
++static u32 *kgsl_bus_get_native_table(struct kgsl_device *device,
++		struct platform_device *pdev, struct kgsl_pwrlevel *levels,
++		int *count)
++{
++	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
++	struct device_node *node = pdev->dev.of_node;
++	u32 indices[KGSL_MAX_PWRLEVELS], *table;
++	const char *mode;
++	unsigned int i;
++	int ret;
++
++	*count = 0;
++	if (!pwr->num_pwrlevels || pwr->num_pwrlevels > KGSL_MAX_PWRLEVELS ||
++		pwr->active_pwrlevel >= pwr->num_pwrlevels ||
++		pwr->default_pwrlevel >= pwr->num_pwrlevels)
++		return ERR_PTR(-EINVAL);
++	memcpy(levels, pwr->pwrlevels, sizeof(pwr->pwrlevels));
++	if (of_find_property(node, "qcom,kgsl-bus-policy", NULL)) {
++		ret = of_property_count_strings(node, "qcom,kgsl-bus-policy");
++		if (ret != 1)
++			return ERR_PTR(ret < 0 ? ret : -EINVAL);
++		ret = of_property_read_string(node, "qcom,kgsl-bus-policy", &mode);
++		if (ret)
++			return ERR_PTR(ret);
++		if (strcmp(mode, "indexed"))
++			return ERR_PTR(-EINVAL);
++		return kgsl_bus_get_indexed_table(device, pdev, levels, count);
++	}
++	/* Absence, not a malformed/unknown selector, selects peak-only mode. */
++	table = kgsl_bus_get_opp_table(device, &pdev->dev, indices, count);
++	if (IS_ERR(table))
++		return table;
++	for (i = 0; i < pwr->num_pwrlevels; i++) {
++		levels[i].bus_freq = indices[i];
++		levels[i].bus_min = 1;
++		levels[i].bus_max = indices[i];
++	}
++	return table;
++}
++
+ int kgsl_bus_init(struct kgsl_device *device, struct platform_device *pdev)
+ {
+ 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+-	u32 indices[KGSL_MAX_PWRLEVELS];
++	struct kgsl_pwrlevel levels[KGSL_MAX_PWRLEVELS];
+ 	bool native = of_device_is_compatible(pdev->dev.of_node, "qcom,adreno-680.1");
++	struct icc_path *path;
++	u32 *table;
+ 	int count, ret, ddr;
+-	unsigned int i;
+-
++
++	/* Probe-only transaction; never overwrite an already owned table/path. */
++	if (pwr->ddr_table || pwr->icc_path || pwr->ddr_table_count)
++		return -EBUSY;
++	if (!native && of_find_property(pdev->dev.of_node, "qcom,kgsl-bus-policy", NULL))
++		return -EOPNOTSUPP;
+ 	if (native) {
+-		pwr->ddr_table = kgsl_bus_get_opp_table(device, &pdev->dev, indices, &count);
+-		if (IS_ERR(pwr->ddr_table))
+-			goto table_error;
++		table = kgsl_bus_get_native_table(device, pdev, levels, &count);
++		if (IS_ERR(table))
++			return PTR_ERR(table);
+ 		goto get_path;
+ 	}
+ 	ddr = kgsl_get_ddrtype();
+@@ -273,36 +444,31 @@
+ 		char str[32];
+ 
+ 		snprintf(str, sizeof(str), "qcom,bus-table-ddr%d", ddr);
+-		pwr->ddr_table = kgsl_bus_get_table(pdev, str, &count);
+-		if (!IS_ERR(pwr->ddr_table))
++		table = kgsl_bus_get_table(pdev, str, &count);
++		if (!IS_ERR(table))
+ 			goto done;
+-		if (PTR_ERR(pwr->ddr_table) != -ENOENT)
+-			goto table_error;
+-	}
+-	pwr->ddr_table = kgsl_bus_get_table(pdev, "qcom,bus-table-ddr", &count);
+-	if (IS_ERR(pwr->ddr_table))
+-		goto table_error;
++		if (PTR_ERR(table) != -ENOENT)
++			return PTR_ERR(table);
++	}
++	table = kgsl_bus_get_table(pdev, "qcom,bus-table-ddr", &count);
++	if (IS_ERR(table))
++		return PTR_ERR(table);
+ done:
+-	ret = validate_pwrlevels(device, pwr->ddr_table, count);
++	ret = validate_pwrlevels(device, table, count);
+ 	if (ret)
+ 		goto free_table;
+ 
+ get_path:
+-	/* GMU also needs CPU ICC votes for AB and firmware bootstrap. */
+-	pwr->icc_path = of_icc_get(&pdev->dev, "gfx-mem");
+-	if (IS_ERR_OR_NULL(pwr->icc_path)) {
+-		ret = pwr->icc_path ? PTR_ERR(pwr->icc_path) : -ENODEV;
+-		pwr->icc_path = NULL;
+-		goto free_table;
+-	}
+-	/* Publish per-frequency indices only after all fallible probe steps. */
+-	if (native) {
+-		for (i = 0; i < pwr->num_pwrlevels; i++) {
+-			pwr->pwrlevels[i].bus_freq = indices[i];
+-			pwr->pwrlevels[i].bus_min = 1;
+-			pwr->pwrlevels[i].bus_max = indices[i];
+-		}
+-	}
++	/* Keep both table and triples private until the last fallible step. */
++	path = of_icc_get(&pdev->dev, "gfx-mem");
++	if (IS_ERR_OR_NULL(path)) {
++		ret = path ? PTR_ERR(path) : -ENODEV;
++		goto free_table;
++	}
++	if (native)
++		memcpy(pwr->pwrlevels, levels, sizeof(levels));
++	pwr->ddr_table = table;
++	pwr->icc_path = path;
+ 	pwr->ddr_table_count = count;
+ 	pwr->cur_ab = 0;
+ 	pwr->cur_ib = 0;
+@@ -310,13 +476,8 @@
+ 	pwr->icc_dirty = false;
+ 	return 0;
+ 
+-table_error:
+-	ret = PTR_ERR(pwr->ddr_table);
+-	pwr->ddr_table = NULL;
+ free_table:
+-	kfree(pwr->ddr_table);
+-	pwr->ddr_table = NULL;
+-	pwr->ddr_table_count = 0;
++	kfree(table);
+ 	return ret;
+ }
+ 

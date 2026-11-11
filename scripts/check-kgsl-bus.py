@@ -20,19 +20,24 @@ def check(source, output):
         ("adreno_a6xx_gmu.c", ("a6xx_gmu_bus_set",)),
         ("adreno_a6xx_hwsched.c", ("a6xx_hwsched_bus_set",)),
         ("kgsl_bus.c", ("_ab_buslevel_update", "kgsl_bus_update", "validate_pwrlevels",
-                        "kgsl_bus_get_opp_table", "kgsl_bus_init", "kgsl_bus_close")),
+                        "kgsl_bus_get_opp_table", "kgsl_bus_read_policy_u32", "kgsl_bus_get_indexed_table",
+                        "kgsl_bus_get_native_table", "kgsl_bus_init", "kgsl_bus_close")),
         ("kgsl_pwrctrl.c", ("kgsl_pwrctrl_axi",)),
         ("kgsl_pwrscale.c", ("kgsl_busmon_target",)),
     ):
         path = source / name
-        functions.extend(module.extract(path.read_text(), function) for function in names)
+        for function in names:
+            body = path.read_text()
+            if function in ("kgsl_bus_read_policy_u32", "kgsl_bus_get_indexed_table", "kgsl_bus_get_native_table") and function + "(" not in body:
+                continue
+            functions.append(module.extract(body, function))
         hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
     functions.insert(0, module.extract((source / "kgsl_bus.c").read_text(), "kgsl_bus_set_icc"))
     output.mkdir(parents=True, exist_ok=False)
     (output / "kgsl-bus-functions.h").write_text("\n\n".join(functions) + "\n")
     harness = ROOT / "tests/kgsl_bus_test.c"
     command = ["gcc", "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
-               "-Wno-unused-parameter", "-fsanitize=address,undefined", "-fno-pie", "-no-pie", "-I", str(output),
+               "-Wno-unused-parameter", "-Wno-unused-function", "-fsanitize=address,undefined", "-fno-pie", "-no-pie", "-I", str(output),
                str(harness), "-o", str(output / "check")]
     subprocess.run(command, check=True)
     result = subprocess.run([str(output / "check")], capture_output=True, text=True)

@@ -1,0 +1,10 @@
+--- a/techpack/display/msm/dsi/dsi_ctrl.c
++++ b/techpack/display/msm/dsi/dsi_ctrl.c
+@@ -325,6 +325,7 @@
+ 	}
+ 
+ 	dsi_ctrl->debugfs_root = dir;
++	return 0;
+ 
+ error_remove_dir:
+ 	debugfs_remove(dir);

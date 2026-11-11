@@ -1,0 +1,62 @@
+--- a/techpack/display/msm/sde/sde_crtc.c
++++ b/techpack/display/msm/sde/sde_crtc.c
+@@ -24,6 +24,8 @@
+ #include <drm/sde_drm.h>
+ #include <drm/drm_mode.h>
+ #include <drm/drm_crtc.h>
++#include <drm/drm_framebuffer.h>
++#include <drm/drm_fourcc.h>
+ #include <drm/drm_probe_helper.h>
+ #include <drm/drm_flip_work.h>
+ 
+--- a/techpack/display/msm/sde/sde_plane.c
++++ b/techpack/display/msm/sde/sde_plane.c
+@@ -24,6 +24,8 @@
+ #include <linux/dma-buf.h>
+ #include <drm/sde_drm.h>
+ #include <drm/msm_drm_pp.h>
++#include <drm/drm_framebuffer.h>
++#include <drm/drm_fourcc.h>
+ 
+ #include "msm_prop.h"
+ #include "msm_drv.h"
+--- a/techpack/display/msm/sde/sde_encoder.c
++++ b/techpack/display/msm/sde/sde_encoder.c
+@@ -27,6 +27,7 @@
+ #include "msm_drv.h"
+ #include "sde_kms.h"
+ #include <drm/drm_crtc.h>
++#include <drm/drm_framebuffer.h>
+ #include <drm/drm_probe_helper.h>
+ #include "sde_hwio.h"
+ #include "sde_hw_catalog.h"
+--- a/techpack/display/msm/sde/sde_formats.c
++++ b/techpack/display/msm/sde/sde_formats.c
+@@ -6,6 +6,7 @@
+ #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
+ 
+ #include <drm/drm_fourcc.h>
++#include <drm/drm_framebuffer.h>
+ #include <media/mmm_color_fmt.h>
+ 
+ #include "sde_kms.h"
+--- a/techpack/display/msm/msm_drv.c
++++ b/techpack/display/msm/msm_drv.c
+@@ -42,6 +42,7 @@
+ #include <uapi/linux/sched/types.h>
+ #include <drm/drm_of.h>
+ #include <drm/drm_auth.h>
++#include <drm/drm_framebuffer.h>
+ #include <drm/drm_probe_helper.h>
+ 
+ #include "msm_drv.h"
+--- a/techpack/display/msm/dsi/dsi_display.h
++++ b/techpack/display/msm/dsi/dsi_display.h
+@@ -15,6 +15,7 @@
+ #include <drm/drm_device.h>
+ #include <drm/drm_crtc.h>
+ #include <drm/drm_connector.h>
++#include <drm/drm_bridge.h>
+ #include <drm/drm_crtc.h>
+ 
+ #include "msm_drv.h"

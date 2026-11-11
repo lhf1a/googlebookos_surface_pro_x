@@ -1,0 +1,144 @@
+--- a/techpack/display/msm/msm_fb.c
++++ b/techpack/display/msm/msm_fb.c
+@@ -198,14 +198,22 @@
+ 	return fb ? (to_msm_framebuffer(fb))->format : NULL;
+ }
+ 
++static struct drm_framebuffer *msm_framebuffer_init_with_info(
++		struct drm_device *dev, const struct drm_format_info *info,
++		const struct drm_mode_fb_cmd2 *mode_cmd,
++		struct drm_gem_object **bos);
++
+ struct drm_framebuffer *msm_framebuffer_create(struct drm_device *dev,
+-		struct drm_file *file, const struct drm_mode_fb_cmd2 *mode_cmd)
+-{
+-	const struct drm_format_info *info = drm_get_format_info(dev,
+-								mode_cmd);
++		struct drm_file *file, const struct drm_format_info *info,
++		const struct drm_mode_fb_cmd2 *mode_cmd)
++{
+ 	struct drm_gem_object *bos[4] = {0};
+ 	struct drm_framebuffer *fb;
+-	int ret, i, n = info->num_planes;
++	int ret, i, n;
++
++	if (!info || !info->num_planes || info->num_planes > ARRAY_SIZE(bos))
++		return ERR_PTR(-EINVAL);
++	n = info->num_planes;
+ 
+ 	for (i = 0; i < n; i++) {
+ 		bos[i] = drm_gem_object_lookup(file, mode_cmd->handles[i]);
+@@ -215,7 +223,7 @@
+ 		}
+ 	}
+ 
+-	fb = msm_framebuffer_init(dev, mode_cmd, bos);
++	fb = msm_framebuffer_init_with_info(dev, info, mode_cmd, bos);
+ 	if (IS_ERR(fb)) {
+ 		ret = PTR_ERR(fb);
+ 		goto out_unref;
+@@ -229,12 +237,11 @@
+ 	return ERR_PTR(ret);
+ }
+ 
+-struct drm_framebuffer *msm_framebuffer_init(struct drm_device *dev,
++static struct drm_framebuffer *msm_framebuffer_init_with_info(
++		struct drm_device *dev, const struct drm_format_info *info,
+ 		const struct drm_mode_fb_cmd2 *mode_cmd,
+ 		struct drm_gem_object **bos)
+ {
+-	const struct drm_format_info *info = drm_get_format_info(dev,
+-								mode_cmd);
+ 	struct msm_drm_private *priv = dev->dev_private;
+ 	struct msm_kms *kms = priv->kms;
+ 	struct msm_framebuffer *msm_fb = NULL;
+@@ -247,6 +254,14 @@
+ 			dev, mode_cmd, mode_cmd->width, mode_cmd->height,
+ 			(char *)&mode_cmd->pixel_format);
+ 
++	if (!info || !info->num_planes ||
++			info->num_planes > ARRAY_SIZE(mode_cmd->handles) ||
++			info->format != mode_cmd->pixel_format ||
++			!mode_cmd->width || !mode_cmd->height ||
++			mode_cmd->width > INT_MAX || mode_cmd->height > INT_MAX) {
++		ret = -EINVAL;
++		goto fail;
++	}
+ 	num_planes = info->num_planes;
+ 
+ 	format = kms->funcs->get_format(kms, mode_cmd->pixel_format,
+@@ -294,23 +309,21 @@
+ 				goto fail;
+ 		}
+ 	} else {
+-		const struct drm_format_info *info;
+-
+-		info = drm_format_info(mode_cmd->pixel_format);
+-		if (!info || num_planes > ARRAY_SIZE(info->cpp)) {
++		if (num_planes > ARRAY_SIZE(info->cpp) ||
++				(num_planes > 1 && (!info->hsub || !info->vsub))) {
+ 			ret = -EINVAL;
+ 			goto fail;
+ 		}
+ 
+ 		for (i = 0; i < num_planes; i++) {
+-			unsigned int width = mode_cmd->width / (i ?
+-					info->hsub : 1);
+-			unsigned int height = mode_cmd->height / (i ?
+-					info->vsub : 1);
+-			unsigned int min_size;
+-
+-			min_size = (height - 1) * mode_cmd->pitches[i]
+-				+ width * info->cpp[i]
++			unsigned int width = drm_format_info_plane_width(info,
++					mode_cmd->width, i);
++			unsigned int height = drm_format_info_plane_height(info,
++					mode_cmd->height, i);
++			u64 min_size;
++
++			min_size = (u64)(height - 1) * mode_cmd->pitches[i]
++				+ drm_format_info_min_pitch(info, i, width)
+ 				+ mode_cmd->offsets[i];
+ 
+ 			if (!bos[i] || bos[i]->size < min_size) {
+@@ -323,7 +336,7 @@
+ 	for (i = 0; i < num_planes; i++)
+ 		msm_fb->base.obj[i] = bos[i];
+ 
+-	drm_helper_mode_fill_fb_struct(dev, fb, mode_cmd);
++	drm_helper_mode_fill_fb_struct(dev, fb, info, mode_cmd);
+ 
+ 	ret = drm_framebuffer_init(dev, fb, &msm_framebuffer_funcs);
+ 	if (ret) {
+@@ -339,6 +352,19 @@
+ 	kfree(msm_fb);
+ 
+ 	return ERR_PTR(ret);
++}
++
++/* Internal writeback/stolen callers do not pass through the core fb_create
++ * callback. Resolve their format once, then use the same initializer contract.
++ */
++struct drm_framebuffer *msm_framebuffer_init(struct drm_device *dev,
++		const struct drm_mode_fb_cmd2 *mode_cmd,
++		struct drm_gem_object **bos)
++{
++	const struct drm_format_info *info = drm_get_format_info(dev,
++			mode_cmd->pixel_format, mode_cmd->modifier[0]);
++
++	return msm_framebuffer_init_with_info(dev, info, mode_cmd, bos);
+ }
+ 
+ struct drm_framebuffer *
+--- a/techpack/display/msm/msm_drv.h
++++ b/techpack/display/msm/msm_drv.h
+@@ -1141,7 +1141,8 @@
+ 		const struct drm_mode_fb_cmd2 *mode_cmd,
+ 		struct drm_gem_object **bos);
+ struct drm_framebuffer *msm_framebuffer_create(struct drm_device *dev,
+-		struct drm_file *file, const struct drm_mode_fb_cmd2 *mode_cmd);
++		struct drm_file *file, const struct drm_format_info *info,
++		const struct drm_mode_fb_cmd2 *mode_cmd);
+ struct drm_framebuffer * msm_alloc_stolen_fb(struct drm_device *dev,
+ 		int w, int h, int p, uint32_t format);
+ int msm_fb_obj_get_attrs(struct drm_gem_object *obj, int *fb_ns,

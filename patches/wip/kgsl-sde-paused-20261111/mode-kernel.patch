@@ -1,0 +1,1118 @@
+--- /dev/null
++++ b/include/uapi/drm/sde_mode_identity.h
+@@ -0,0 +1,30 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef _SDE_MODE_IDENTITY_H_
++#define _SDE_MODE_IDENTITY_H_
++#include <linux/types.h>
++#include <drm/drm_mode.h>
++#define SDE_MODE_CATALOG_PROPERTY "SDE_MODE_CATALOG_V1"
++#define SDE_MODE_IDENTITY_PROPERTY "SDE_MODE_REQUEST_V2"
++#define SDE_MODE_WIRE_VERSION 1U
++#define SDE_MODE_PANEL_NONE 0U
++#define SDE_MODE_PANEL_VIDEO 1U
++#define SDE_MODE_PANEL_COMMAND 2U
++struct sde_mode_identity { __u32 connector_id, generation, row_id; };
++struct sde_mode_request_v2 {
++ __u32 version, bytes, mode_blob_id, request;
++ struct sde_mode_identity identity;
++ __u32 reserved;
++};
++struct sde_mode_catalog_header {
++ __u32 version, header_bytes, entry_bytes, count;
++ __u32 generation, connector_id, reserved0, reserved1;
++};
++struct sde_mode_catalog_entry {
++ struct drm_mode_modeinfo mode;
++ __u32 row_id, panel_kind;
++ char topology[32];
++ __u32 num_roi, xstart, ystart, walign, halign, wmin, hmin, roi_merge;
++ __u32 bit_clk_lo, bit_clk_hi, transfer_time_us, allowed_mode_switch;
++ __u32 has_cwb_crop, has_dedicated_cwb, reserved0, reserved1;
++};
++#endif
+--- /dev/null
++++ b/include/uapi/drm/sde_mode_request.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef _UAPI_SDE_MODE_REQUEST_H_
++#define _UAPI_SDE_MODE_REQUEST_H_
++/* SDE_MODE_REQUEST: upper32 MODE_ID blob id, lower32 request bits.
++ * The final atomic state validates the binding, independent of set order.
++ * This staging ABI requires matching userspace and a completed DSI consumer port.
++ */
++#define SDE_MODE_REQUEST_PROPERTY "SDE_MODE_REQUEST"
++#define SDE_MODE_REQ_SEAMLESS (1U << 0)
++#define SDE_MODE_REQ_VIDEO (1U << 1)
++#define SDE_MODE_REQ_COMMAND (1U << 2)
++#define SDE_MODE_REQ_ALL (SDE_MODE_REQ_SEAMLESS | SDE_MODE_REQ_VIDEO | SDE_MODE_REQ_COMMAND)
++#endif
+--- a/techpack/display/msm/dsi/dsi_defs.h
++++ b/techpack/display/msm/dsi/dsi_defs.h
+@@ -7,6 +7,7 @@
+ #ifndef _DSI_DEFS_H_
+ #define _DSI_DEFS_H_
+ 
++#include <linux/kref.h>
+ #include <linux/types.h>
+ #include <drm/drm_mipi_dsi.h>
+ #include "msm_drv.h"
+@@ -618,8 +619,20 @@
+  * @widebus_support       48 bit wide data bus is supported by hw
+  * @allowed_mode_switch: BIT mask to mark allowed mode switches
+  */
++/* Shared nested allocations of one parsed timing node. Variant views can
++ * change scalar clock/timing data without duplicating command/PHY ownership.
++ */
++struct dsi_mode_resources {
++	struct kref refcount;
++	struct dsi_panel_cmd_set cmd_sets[DSI_CMD_SET_MAX];
++	u32 *phy_timing_val;
++};
++
+ struct dsi_display_mode_priv_info {
+-	struct dsi_panel_cmd_set cmd_sets[DSI_CMD_SET_MAX];
++	struct kref refcount;
++	struct dsi_mode_resources *resources;
++	bool static_payload;
++	struct dsi_panel_cmd_set *cmd_sets;
+ 
+ 	u32 *phy_timing_val;
+ 	u32 phy_timing_len;
+@@ -653,6 +666,9 @@
+  * @priv_info:      Mode private info
+  */
+ struct dsi_display_mode {
++	/* Stable only within the owning display cache generation. */
++	u32 mode_id;
++	u32 mode_generation;
+ 	struct dsi_mode_info timing;
+ 	u32 pixel_clk_khz;
+ 	u32 dsi_mode_flags;
+--- a/techpack/display/msm/dsi/dsi_display.c
++++ b/techpack/display/msm/dsi/dsi_display.c
+@@ -4984,7 +4984,7 @@
+ 	}
+ 
+ 	panel_mode = display->panel->cur_mode;
+-	memcpy(panel_mode, dsi_mode, sizeof(*panel_mode));
++	dsi_panel_mode_assign(panel_mode, dsi_mode);
+ 	/*
+ 	 * dsi_mode_flags flags are used to communicate with other drm driver
+ 	 * components, and are transient. They aren't inherently part of the
+@@ -6962,22 +6962,20 @@
+ 	}
+ }
+ 
+-static void _dsi_display_populate_bit_clks(struct dsi_display *display,
++static int _dsi_display_populate_bit_clks(struct dsi_display *display,
+ 					   int start, int end, u32 *mode_idx)
+ {
+ 	struct dsi_dyn_clk_caps *dyn_clk_caps;
+ 	struct dsi_display_mode *src, *dst;
+ 	struct dsi_host_common_cfg *cfg;
+-	struct dsi_display_mode_priv_info *priv_info;
+-	int i, j, total_modes, bpp, lanes = 0;
+-	size_t size = 0;
++	int i, j, total_modes, bpp, ret, lanes = 0;
+ 
+ 	if (!display || !mode_idx)
+-		return;
++		return -EINVAL;
+ 
+ 	dyn_clk_caps = &(display->panel->dyn_clk_caps);
+ 	if (!dyn_clk_caps->dyn_clk_support)
+-		return;
++		return 0;
+ 
+ 	cfg = &(display->panel->host_config);
+ 	bpp = dsi_pixel_format_to_bpp(cfg->dst_format);
+@@ -6996,7 +6994,7 @@
+ 	for (i = start; i < end; i++) {
+ 		src = &display->modes[i];
+ 		if (!src)
+-			return;
++			return -EINVAL;
+ 		/*
+ 		 * TODO: currently setting the first bit rate in
+ 		 * the list as preferred rate. But ideally should
+@@ -7014,22 +7012,20 @@
+ 
+ 	for (i = 1; i < dyn_clk_caps->bit_clk_list_len; i++) {
+ 		if (*mode_idx >= total_modes)
+-			return;
++			return -EOVERFLOW;
+ 		for (j = start; j < end; j++) {
++			if (*mode_idx >= total_modes)
++				return -EOVERFLOW;
+ 			src = &display->modes[j];
+ 			dst = &display->modes[*mode_idx];
+ 
+ 			if (!src || !dst) {
+ 				DSI_ERR("invalid mode index\n");
+-				return;
++				return -EINVAL;
+ 			}
+-			memcpy(dst, src, sizeof(struct dsi_display_mode));
+-
+-			size = sizeof(struct dsi_display_mode_priv_info);
+-			priv_info = kzalloc(size, GFP_KERNEL);
+-			dst->priv_info = priv_info;
+-			if (dst->priv_info)
+-				memcpy(dst->priv_info, src->priv_info, size);
++			ret = dsi_panel_mode_clone(dst, src);
++			if (ret)
++				return ret;
+ 
+ 			dst->timing.clk_rate_hz = dyn_clk_caps->bit_clk_list[i];
+ 
+@@ -7043,31 +7039,68 @@
+ 			(*mode_idx)++;
+ 		}
+ 	}
+-}
+-
++	return 0;
++}
+ void dsi_display_put_mode(struct dsi_display *display,
+ 	struct dsi_display_mode *mode)
+ {
+ 	dsi_panel_put_mode(mode);
+ }
+ 
++void dsi_display_put_modes(struct dsi_display *display)
++{
++	struct dsi_display_mode *modes;
++	u32 count, i;
++
++	mutex_lock(&display->display_lock);
++	modes = display->modes;
++	count = display->mode_count;
++	display->modes = NULL;
++	display->mode_count = 0;
++	mutex_unlock(&display->display_lock);
++	for (i = 0; i < count; i++)
++		dsi_panel_put_mode(&modes[i]);
++	kfree(modes);
++}
++
++int dsi_display_get_mode_by_id(struct dsi_display *display, u32 generation,
++		u32 mode_id, struct dsi_display_mode *out_mode)
++{
++	int ret = 0;
++
++	if (!display || !out_mode || out_mode->priv_info)
++		return -EINVAL;
++	mutex_lock(&display->display_lock);
++	if (!display->modes || !generation ||
++		generation != display->mode_generation || !mode_id ||
++		mode_id > display->mode_count) {
++		ret = -ESTALE;
++		goto out;
++	}
++	dsi_panel_mode_assign(out_mode, &display->modes[mode_id - 1]);
++out:
++	mutex_unlock(&display->display_lock);
++	return ret;
++}
++
+ int dsi_display_get_modes(struct dsi_display *display,
+ 			  struct dsi_display_mode **out_modes)
+ {
+ 	struct dsi_dfps_capabilities dfps_caps;
+ 	struct dsi_display_ctrl *ctrl;
+-	struct dsi_host_common_cfg *host = &display->panel->host_config;
++	struct dsi_host_common_cfg *host;
+ 	bool is_split_link, is_cmd_mode;
+ 	u32 num_dfps_rates, timing_mode_count, display_mode_count;
+ 	u32 sublinks_count, mode_idx, array_idx = 0;
+ 	struct dsi_dyn_clk_caps *dyn_clk_caps;
+ 	int i, start, end, rc = -EINVAL;
+ 
+-	if (!display || !out_modes) {
++	if (!display || !display->panel || !out_modes) {
+ 		DSI_ERR("Invalid params\n");
+ 		return -EINVAL;
+ 	}
+ 
++	host = &display->panel->host_config;
+ 	*out_modes = NULL;
+ 	ctrl = &display->ctrl[0];
+ 
+@@ -7075,6 +7108,10 @@
+ 
+ 	if (display->modes)
+ 		goto exit;
++	if (display->mode_generation == U32_MAX) {
++		rc = -EOVERFLOW;
++		goto error;
++	}
+ 
+ 	display_mode_count = display->panel->num_display_modes;
+ 
+@@ -7192,7 +7229,12 @@
+ 				goto error;
+ 			}
+ 
+-			memcpy(sub_mode, &display_mode, sizeof(display_mode));
++			if (array_idx >= display_mode_count) {
++				dsi_panel_put_mode(&display_mode);
++				rc = -EOVERFLOW;
++				goto error;
++			}
++			dsi_panel_mode_assign(sub_mode, &display_mode);
+ 			array_idx++;
+ 
+ 			if (!dfps_caps.dfps_support || is_cmd_mode)
+@@ -7205,6 +7247,7 @@
+ 					curr_refresh_rate);
+ 		}
+ 		end = array_idx;
++		dsi_panel_put_mode(&display_mode);
+ 		/*
+ 		 * if POMS is enabled and boot up mode is video mode,
+ 		 * skip bit clk rates update for command mode,
+@@ -7216,20 +7259,33 @@
+ 			(display->panel->panel_mode == DSI_OP_VIDEO_MODE))
+ 			continue;
+ 
+-		_dsi_display_populate_bit_clks(display, start, end, &array_idx);
++		rc = _dsi_display_populate_bit_clks(display, start, end, &array_idx);
++		if (rc)
++			goto error;
+ 		if (is_preferred) {
+ 			/* Set first timing sub mode as preferred mode */
+ 			display->modes[start].is_preferred = true;
+ 		}
+ 	}
+ 
++	display->mode_generation++;
++	display->mode_count = array_idx;
++	for (i = 0; i < array_idx; i++) {
++		display->modes[i].mode_id = i + 1;
++		display->modes[i].mode_generation = display->mode_generation;
++	}
+ exit:
+ 	*out_modes = display->modes;
+ 	rc = 0;
+ 
+ error:
+-	if (rc)
++	if (rc) {
++		for (i = 0; i < array_idx; i++)
++			dsi_panel_put_mode(&display->modes[i]);
+ 		kfree(display->modes);
++		display->modes = NULL;
++		display->mode_count = 0;
++	}
+ 
+ 	mutex_unlock(&display->display_lock);
+ 	return rc;
+@@ -7596,7 +7652,7 @@
+ 		sysfs_notify(&display->dev->kobj, NULL, "dynamic_fps");
+ 	}
+ 
+-	memcpy(display->panel->cur_mode, &adj_mode, sizeof(adj_mode));
++	dsi_panel_mode_assign(display->panel->cur_mode, &adj_mode);
+ error:
+ 	mutex_unlock(&display->display_lock);
+ 	return rc;
+--- a/techpack/display/msm/dsi/dsi_display.h
++++ b/techpack/display/msm/dsi/dsi_display.h
+@@ -236,6 +236,10 @@
+ 	u32 ext_bridge_cnt;
+ 
+ 	struct dsi_display_mode *modes;
++	u32 mode_count;
++	u32 mode_generation;
++	struct drm_property *mode_catalog_property;
++	struct drm_property_blob *mode_catalog_blob;
+ 
+ 	enum dsi_display_type type;
+ 	u32 clk_master_idx;
+@@ -404,6 +408,9 @@
+  *
+  * Return: error code.
+  */
++void dsi_display_put_modes(struct dsi_display *display);
++int dsi_display_get_mode_by_id(struct dsi_display *display, u32 generation,
++		u32 mode_id, struct dsi_display_mode *out_mode);
+ int dsi_display_get_modes(struct dsi_display *display,
+ 			  struct dsi_display_mode **modes);
+ 
+--- a/techpack/display/msm/dsi/dsi_drm.c
++++ b/techpack/display/msm/dsi/dsi_drm.c
+@@ -24,7 +24,10 @@
+ #define DEFAULT_PANEL_JITTER_ARRAY_SIZE		2
+ #define DEFAULT_PANEL_PREFILL_LINES	25
+ 
++static struct dsi_panel_cmd_set default_cmd_sets[DSI_CMD_SET_MAX];
+ static struct dsi_display_mode_priv_info default_priv_info = {
++	.static_payload = true,
++	.cmd_sets = default_cmd_sets,
+ 	.panel_jitter_numer = DEFAULT_PANEL_JITTER_NUMERATOR,
+ 	.panel_jitter_denom = DEFAULT_PANEL_JITTER_DENOMINATOR,
+ 	.panel_prefill_lines = DEFAULT_PANEL_PREFILL_LINES,
+@@ -115,40 +118,19 @@
+ 			      dsi_mode->timing.v_sync_width;
+ 	drm_mode->vtotal = drm_mode->vsync_end + dsi_mode->timing.v_back_porch;
+ 
+-	drm_mode->vrefresh = dsi_mode->timing.refresh_rate;
+ 	drm_mode->clock = dsi_mode->pixel_clk_khz;
+ 
+-	drm_mode->private = (int *)dsi_mode->priv_info;
+-
+-	if (dsi_mode->dsi_mode_flags & DSI_MODE_FLAG_SEAMLESS)
+-		drm_mode->flags |= DRM_MODE_FLAG_SEAMLESS;
+-	if (dsi_mode->dsi_mode_flags & DSI_MODE_FLAG_DFPS)
+-		drm_mode->private_flags |= MSM_MODE_FLAG_SEAMLESS_DYNAMIC_FPS;
+-	if (dsi_mode->dsi_mode_flags & DSI_MODE_FLAG_VBLANK_PRE_MODESET)
+-		drm_mode->private_flags |= MSM_MODE_FLAG_VBLANK_PRE_MODESET;
+-	if (dsi_mode->dsi_mode_flags & DSI_MODE_FLAG_DMS)
+-		drm_mode->private_flags |= MSM_MODE_FLAG_SEAMLESS_DMS;
+-	if (dsi_mode->dsi_mode_flags & DSI_MODE_FLAG_VRR)
+-		drm_mode->private_flags |= MSM_MODE_FLAG_SEAMLESS_VRR;
+-	if (dsi_mode->dsi_mode_flags & DSI_MODE_FLAG_POMS)
+-		drm_mode->private_flags |= MSM_MODE_FLAG_SEAMLESS_POMS;
+-	if (dsi_mode->dsi_mode_flags & DSI_MODE_FLAG_DYN_CLK)
+-		drm_mode->private_flags |= MSM_MODE_FLAG_SEAMLESS_DYN_CLK;
+ 
+ 	if (dsi_mode->timing.h_sync_polarity)
+ 		drm_mode->flags |= DRM_MODE_FLAG_PHSYNC;
+ 	if (dsi_mode->timing.v_sync_polarity)
+ 		drm_mode->flags |= DRM_MODE_FLAG_PVSYNC;
+ 
+-	if (dsi_mode->panel_mode == DSI_OP_VIDEO_MODE)
+-		drm_mode->flags |= DRM_MODE_FLAG_VID_MODE_PANEL;
+-	if (dsi_mode->panel_mode == DSI_OP_CMD_MODE)
+-		drm_mode->flags |= DRM_MODE_FLAG_CMD_MODE_PANEL;
+ 
+ 	/* set mode name */
+ 	snprintf(drm_mode->name, DRM_DISPLAY_MODE_LEN, "%dx%dx%dx%d%s",
+ 			drm_mode->hdisplay, drm_mode->vdisplay,
+-			drm_mode->vrefresh, drm_mode->clock,
++			dsi_mode->timing.refresh_rate, drm_mode->clock,
+ 			video_mode ? "vid" : "cmd");
+ }
+ 
+@@ -813,25 +795,10 @@
+ 	return status;
+ }
+ 
+-void dsi_connector_put_modes(struct drm_connector *connector,
+-	void *display)
+-{
+-	struct drm_display_mode *drm_mode;
+-	struct dsi_display_mode dsi_mode;
+-	struct dsi_display *dsi_display;
+-
+-	if (!connector || !display)
+-		return;
+-
+-	list_for_each_entry(drm_mode, &connector->modes, head) {
+-		convert_to_dsi_mode(drm_mode, &dsi_mode);
+-		dsi_display_put_mode(display, &dsi_mode);
+-	}
+-
+-	/* free the display structure modes also */
+-	dsi_display = display;
+-	kfree(dsi_display->modes);
+-	dsi_display->modes = NULL;
++void dsi_connector_put_modes(struct drm_connector *connector, void *display)
++{
++	if (connector && display)
++		dsi_display_put_modes(display);
+ }
+ 
+ 
+--- a/techpack/display/msm/dsi/dsi_panel.c
++++ b/techpack/display/msm/dsi/dsi_panel.c
+@@ -2101,6 +2101,7 @@
+ 	for (i = i - 1; i >= 0; i--) {
+ 		cmd--;
+ 		kfree(cmd->msg.tx_buf);
++		cmd->msg.tx_buf = NULL;
+ 	}
+ 
+ 	return rc;
+@@ -2114,12 +2115,15 @@
+ 	for (i = 0; i < set->count; i++) {
+ 		cmd = &set->cmds[i];
+ 		kfree(cmd->msg.tx_buf);
++		cmd->msg.tx_buf = NULL;
+ 	}
+ }
+ 
+ void dsi_panel_dealloc_cmd_packets(struct dsi_panel_cmd_set *set)
+ {
+ 	kfree(set->cmds);
++	set->cmds = NULL;
++	set->count = 0;
+ }
+ 
+ int dsi_panel_alloc_cmd_packets(struct dsi_panel_cmd_set *cmd,
+@@ -2769,6 +2773,7 @@
+ 			priv_info->phy_timing_val[i] = data[i];
+ 
+ 		priv_info->phy_timing_len = len;
++		priv_info->resources->phy_timing_val = priv_info->phy_timing_val;
+ 	}
+ 
+ 	if (mode->panel_mode == DSI_OP_VIDEO_MODE) {
+@@ -4022,6 +4027,11 @@
+ 
+ 	dsi_panel_sysfs_deinit(panel);
+ 
++	if (panel->cur_mode) {
++		dsi_panel_put_mode(panel->cur_mode);
++		kfree(panel->cur_mode);
++		panel->cur_mode = NULL;
++	}
+ 	kfree(panel);
+ }
+ 
+@@ -4285,19 +4295,80 @@
+ 	return rc;
+ }
+ 
++static void dsi_mode_resources_release(struct kref *ref)
++{
++	struct dsi_mode_resources *resources =
++		container_of(ref, struct dsi_mode_resources, refcount);
++	int i;
++
++	for (i = 0; i < DSI_CMD_SET_MAX; i++) {
++		dsi_panel_destroy_cmd_packets(&resources->cmd_sets[i]);
++		dsi_panel_dealloc_cmd_packets(&resources->cmd_sets[i]);
++	}
++	kfree(resources->phy_timing_val);
++	kfree(resources);
++}
++
++static void dsi_mode_view_release(struct kref *ref)
++{
++	struct dsi_display_mode_priv_info *info =
++		container_of(ref, struct dsi_display_mode_priv_info, refcount);
++
++	kref_put(&info->resources->refcount, dsi_mode_resources_release);
++	kfree(info);
++}
++
++void dsi_panel_mode_get(struct dsi_display_mode *mode)
++{
++	if (mode->priv_info && !mode->priv_info->static_payload)
++		kref_get(&mode->priv_info->refcount);
++}
++
+ void dsi_panel_put_mode(struct dsi_display_mode *mode)
+ {
+-	int i;
+-
+-	if (!mode->priv_info)
++	struct dsi_display_mode_priv_info *info = mode->priv_info;
++
++	mode->priv_info = NULL;
++	mode->timing.dsc = NULL;
++	mode->timing.vdc = NULL;
++	if (info && !info->static_payload)
++		kref_put(&info->refcount, dsi_mode_view_release);
++}
++
++void dsi_panel_mode_assign(struct dsi_display_mode *dst,
++		const struct dsi_display_mode *src)
++{
++	struct dsi_display_mode copy;
++
++	if (dst == src)
+ 		return;
+-
+-	for (i = 0; i < DSI_CMD_SET_MAX; i++) {
+-		dsi_panel_destroy_cmd_packets(&mode->priv_info->cmd_sets[i]);
+-		dsi_panel_dealloc_cmd_packets(&mode->priv_info->cmd_sets[i]);
+-	}
+-
+-	kfree(mode->priv_info);
++	copy = *src;
++	dsi_panel_mode_get(&copy);
++	dsi_panel_put_mode(dst);
++	*dst = copy;
++}
++
++int dsi_panel_mode_clone(struct dsi_display_mode *dst,
++		const struct dsi_display_mode *src)
++{
++	struct dsi_display_mode_priv_info *info;
++
++	if (!src->priv_info || src->priv_info->static_payload || dst == src)
++		return -EINVAL;
++	info = kmemdup(src->priv_info, sizeof(*info), GFP_KERNEL);
++	if (!info)
++		return -ENOMEM;
++	kref_init(&info->refcount);
++	kref_get(&info->resources->refcount);
++	dsi_panel_put_mode(dst);
++	*dst = *src;
++	dst->priv_info = info;
++	/* Embedded compression data belongs to this variant view. */
++	if (dst->timing.dsc)
++		dst->timing.dsc = &info->dsc;
++	if (dst->timing.vdc)
++		dst->timing.vdc = &info->vdc;
++	return 0;
+ }
+ 
+ void dsi_panel_calc_dsi_transfer_time(struct dsi_host_common_cfg *config,
+@@ -4444,6 +4515,17 @@
+ 		goto done;
+ 	}
+ 
++	kref_init(&mode->priv_info->refcount);
++	mode->priv_info->resources = kzalloc(sizeof(*mode->priv_info->resources),
++		GFP_KERNEL);
++	if (!mode->priv_info->resources) {
++		kfree(mode->priv_info);
++		mode->priv_info = NULL;
++		rc = -ENOMEM;
++		goto done;
++	}
++	kref_init(&mode->priv_info->resources->refcount);
++	mode->priv_info->cmd_sets = mode->priv_info->resources->cmd_sets;
+ 	prv_info = mode->priv_info;
+ 
+ 	timings_np = utils->get_child_by_name(utils->data,
+@@ -4535,8 +4617,7 @@
+ 	goto done;
+ 
+ parse_fail:
+-	kfree(mode->priv_info);
+-	mode->priv_info = NULL;
++	dsi_panel_put_mode(mode);
+ done:
+ 	utils->data = utils_data;
+ 	mutex_unlock(&panel->panel_lock);
+--- a/techpack/display/msm/dsi/dsi_panel.h
++++ b/techpack/display/msm/dsi/dsi_panel.h
+@@ -329,6 +329,11 @@
+ 
+ int dsi_panel_get_mode_count(struct dsi_panel *panel);
+ 
++void dsi_panel_mode_get(struct dsi_display_mode *mode);
++void dsi_panel_mode_assign(struct dsi_display_mode *dst,
++		const struct dsi_display_mode *src);
++int dsi_panel_mode_clone(struct dsi_display_mode *dst,
++		const struct dsi_display_mode *src);
+ void dsi_panel_put_mode(struct dsi_display_mode *mode);
+ 
+ int dsi_panel_get_mode(struct dsi_panel *panel,
+--- a/techpack/display/msm/msm_atomic.c
++++ b/techpack/display/msm/msm_atomic.c
+@@ -47,13 +47,13 @@
+ 	int conn_cnt = 0;
+ 	bool splash_en = false;
+ 
+-	if (msm_is_mode_seamless(&crtc_state->mode) ||
+-		msm_is_mode_seamless_vrr(&crtc_state->adjusted_mode) ||
+-		msm_is_mode_seamless_poms(&crtc_state->adjusted_mode) ||
+-		msm_is_mode_seamless_dyn_clk(&crtc_state->adjusted_mode))
++	if (msm_is_mode_seamless_requested(crtc_state) ||
++		msm_is_mode_seamless_vrr(crtc_state) ||
++		msm_is_mode_seamless_poms(crtc_state) ||
++		msm_is_mode_seamless_dyn_clk(crtc_state))
+ 		return true;
+ 
+-	if (msm_is_mode_seamless_dms(&crtc_state->adjusted_mode) && !enable)
++	if (msm_is_mode_seamless_dms(crtc_state) && !enable)
+ 		return true;
+ 
+ 	if (!crtc_state->mode_changed && crtc_state->connectors_changed && crtc_state->active) {
+@@ -76,42 +76,31 @@
+ 	return false;
+ }
+ 
+-static inline bool _msm_seamless_for_conn(struct drm_connector *connector,
++static inline bool _msm_seamless_for_conn(struct drm_atomic_state *atomic,
++		struct drm_connector *connector,
+ 		struct drm_connector_state *old_conn_state, bool enable)
+ {
++	struct drm_connector_state *new_conn_state;
++	struct drm_crtc_state *new_crtc_state;
++
+ 	if (!old_conn_state || !old_conn_state->crtc)
+ 		return false;
+-
+-	if (!old_conn_state->crtc->state->mode_changed &&
+-			!old_conn_state->crtc->state->active_changed &&
+-			old_conn_state->crtc->state->connectors_changed) {
+-		if (old_conn_state->crtc == connector->state->crtc)
+-			return true;
+-	}
+-
++	new_conn_state = drm_atomic_get_new_connector_state(atomic, connector);
++	new_crtc_state = drm_atomic_get_new_crtc_state(atomic, old_conn_state->crtc);
++	if (!new_conn_state || !new_crtc_state)
++		return false;
++	if (!new_crtc_state->mode_changed && !new_crtc_state->active_changed &&
++		new_crtc_state->connectors_changed &&
++		old_conn_state->crtc == new_conn_state->crtc)
++		return true;
+ 	if (enable)
+ 		return false;
+-
+-	if (!connector->state->crtc &&
+-		old_conn_state->crtc->state->connectors_changed)
++	if (!new_conn_state->crtc && new_crtc_state->connectors_changed)
+ 		return false;
+-
+-	if (msm_is_mode_seamless(&old_conn_state->crtc->state->mode))
+-		return true;
+-
+-	if (msm_is_mode_seamless_vrr(
+-			&old_conn_state->crtc->state->adjusted_mode))
+-		return true;
+-
+-	if (msm_is_mode_seamless_dyn_clk(
+-			 &old_conn_state->crtc->state->adjusted_mode))
+-		return true;
+-
+-	if (msm_is_mode_seamless_dms(
+-			&old_conn_state->crtc->state->adjusted_mode))
+-		return true;
+-
+-	return false;
++	return msm_is_mode_seamless_requested(new_crtc_state) ||
++		msm_is_mode_seamless_vrr(new_crtc_state) ||
++		msm_is_mode_seamless_dyn_clk(new_crtc_state) ||
++		msm_is_mode_seamless_dms(new_crtc_state);
+ }
+ 
+ /* clear specified crtcs (no longer pending update) */
+@@ -188,7 +177,7 @@
+ 		if (WARN_ON(!encoder))
+ 			continue;
+ 
+-		if (_msm_seamless_for_conn(connector, old_conn_state, false))
++		if (_msm_seamless_for_conn(old_state, connector, old_conn_state, false))
+ 			continue;
+ 
+ 		funcs = encoder->helper_private;
+@@ -288,7 +277,7 @@
+ 
+ 		if (!new_crtc_state->mode_changed &&
+ 				new_crtc_state->connectors_changed) {
+-			if (_msm_seamless_for_conn(connector,
++			if (_msm_seamless_for_conn(old_state, connector,
+ 					old_conn_state, false))
+ 				continue;
+ 		} else if (!new_crtc_state->mode_changed) {
+@@ -390,7 +379,7 @@
+ 		}
+ 
+ 		if (msm_needs_vblank_pre_modeset(
+-					&new_crtc_state->adjusted_mode))
++					new_crtc_state))
+ 			drm_crtc_wait_one_vblank(crtc);
+ 
+ 	}
+@@ -411,7 +400,7 @@
+ 
+ 		old_conn_state = drm_atomic_get_old_connector_state(
+ 				old_state, connector);
+-		if (_msm_seamless_for_conn(connector, old_conn_state, true))
++		if (_msm_seamless_for_conn(old_state, connector, old_conn_state, true))
+ 			continue;
+ 
+ 		encoder = connector->state->best_encoder;
+@@ -459,7 +448,7 @@
+ 
+ 		old_conn_state = drm_atomic_get_old_connector_state(
+ 				old_state, connector);
+-		if (_msm_seamless_for_conn(connector, old_conn_state, true))
++		if (_msm_seamless_for_conn(old_state, connector, old_conn_state, true))
+ 			continue;
+ 
+ 		encoder = connector->state->best_encoder;
+--- a/techpack/display/msm/msm_kms.h
++++ b/techpack/display/msm/msm_kms.h
+@@ -23,12 +23,13 @@
+ #include <linux/regulator/consumer.h>
+ 
+ #include "msm_drv.h"
++#include "sde/sde_mode_state.h"
+ 
+ #define MAX_PLANE	4
+ 
+ /**
+  * Device Private DRM Mode Flags
+- * drm_mode->private_flags
++ * Driver-owned adjusted transition flags; never public DRM timing flags.
+  */
+ /* Connector has interpreted seamless transition request as dynamic fps */
+ #define MSM_MODE_FLAG_SEAMLESS_DYNAMIC_FPS	(1<<0)
+@@ -209,46 +210,49 @@
+ /**
+  * Mode Set Utility Functions
+  */
+-static inline bool msm_is_mode_seamless(const struct drm_display_mode *mode)
+-{
+-	return (mode->flags & DRM_MODE_FLAG_SEAMLESS);
+-}
+-
+-static inline bool msm_is_mode_seamless_dms(const struct drm_display_mode *mode)
+-{
+-	return mode ? (mode->private_flags & MSM_MODE_FLAG_SEAMLESS_DMS)
+-		: false;
+-}
+-
+-static inline bool msm_is_mode_dynamic_fps(const struct drm_display_mode *mode)
+-{
+-	return ((mode->flags & DRM_MODE_FLAG_SEAMLESS) &&
+-		(mode->private_flags & MSM_MODE_FLAG_SEAMLESS_DYNAMIC_FPS));
+-}
+-
+-static inline bool msm_is_mode_seamless_vrr(const struct drm_display_mode *mode)
+-{
+-	return mode ? (mode->private_flags & MSM_MODE_FLAG_SEAMLESS_VRR)
+-		: false;
+-}
+-
+-static inline bool msm_is_mode_seamless_poms(
+-		const struct drm_display_mode *mode)
+-{
+-	return mode ? (mode->private_flags & MSM_MODE_FLAG_SEAMLESS_POMS)
+-		: false;
+-}
+-
+-static inline bool msm_is_mode_seamless_dyn_clk(
+-					const struct drm_display_mode *mode)
+-{
+-	return mode ? (mode->private_flags & MSM_MODE_FLAG_SEAMLESS_DYN_CLK)
+-		: false;
+-}
+-
+-static inline bool msm_needs_vblank_pre_modeset(
+-		const struct drm_display_mode *mode)
+-{
+-	return (mode->private_flags & MSM_MODE_FLAG_VBLANK_PRE_MODESET);
+-}
++/* Explicit SDE-allocated CRTC state, never an arbitrary/copied DRM mode. */
++const struct sde_mode_state *msm_get_mode_state(const struct drm_crtc_state *state);
++static inline u32 msm_mode_adjusted_flags(const struct drm_crtc_state *state)
++{
++ const struct sde_mode_state *mode = msm_get_mode_state(state);
++ return mode && mode->adjusted_valid ? mode->adjusted : 0;
++}
++static inline u32 msm_mode_private_flags(const struct drm_crtc_state *state)
++{
++ return (msm_mode_adjusted_flags(state) >> 1) & 0x3f;
++}
++static inline bool msm_is_mode_seamless_requested(const struct drm_crtc_state *state)
++{
++ const struct sde_mode_state *mode = msm_get_mode_state(state);
++ return mode && mode->requested_valid && (mode->requested & SDE_MODE_REQ_SEAMLESS);
++}
++static inline bool msm_is_mode_seamless(const struct drm_crtc_state *state)
++{
++ return msm_mode_adjusted_flags(state) & BIT(0);
++}
++static inline bool msm_is_mode_dynamic_fps(const struct drm_crtc_state *state)
++{
++ return (msm_mode_adjusted_flags(state) & (BIT(0) | BIT(1))) == (BIT(0) | BIT(1));
++}
++static inline bool msm_needs_vblank_pre_modeset(const struct drm_crtc_state *state)
++{
++ return msm_mode_adjusted_flags(state) & BIT(2);
++}
++static inline bool msm_is_mode_seamless_dms(const struct drm_crtc_state *state)
++{
++ return msm_mode_adjusted_flags(state) & BIT(3);
++}
++static inline bool msm_is_mode_seamless_vrr(const struct drm_crtc_state *state)
++{
++ return msm_mode_adjusted_flags(state) & BIT(4);
++}
++static inline bool msm_is_mode_seamless_poms(const struct drm_crtc_state *state)
++{
++ return msm_mode_adjusted_flags(state) & BIT(5);
++}
++static inline bool msm_is_mode_seamless_dyn_clk(const struct drm_crtc_state *state)
++{
++ return msm_mode_adjusted_flags(state) & BIT(6);
++}
++
+ #endif /* __MSM_KMS_H__ */
+--- a/techpack/display/msm/sde/sde_connector.c
++++ b/techpack/display/msm/sde/sde_connector.c
+@@ -10,6 +10,7 @@
+ 
+ #include "sde_kms.h"
+ #include "sde_connector.h"
++#include <drm/sde_mode_identity.h>
+ #include "sde_encoder.h"
+ #include "msm_cooling_device.h"
+ #include <linux/backlight.h>
+@@ -438,6 +439,23 @@
+ 		return -EINVAL;
+ 
+ 	return c_conn->ops.get_num_lm_from_mode(c_conn->display, drm_mode);
++}
++
++int sde_connector_catalog_caps(struct drm_connector *conn,
++		const struct msm_mode_info *mode_info,
++		struct sde_mode_catalog_entry *entry)
++{
++	struct sde_kms *kms = _sde_connector_get_kms(conn);
++	enum sde_rm_topology_name topology;
++
++	if (!kms || !mode_info || !entry)
++		return -EINVAL;
++	topology = sde_rm_get_topology_name(&kms->rm, mode_info->topology);
++	if (topology >= SDE_RM_TOPOLOGY_MAX)
++		return -EINVAL;
++	strscpy(entry->topology, e_topology_name[topology].name, sizeof(entry->topology));
++	entry->has_cwb_crop = kms->catalog->has_cwb_crop;
++	return 0;
+ }
+ 
+ int sde_connector_get_mode_info(struct drm_connector *conn,
+--- a/techpack/display/msm/sde/sde_connector.h
++++ b/techpack/display/msm/sde/sde_connector.h
+@@ -1068,6 +1068,9 @@
+ * @mode_info: Out parameter. information of the display mode
+ * Returns: Zero on success
+ */
++struct sde_mode_catalog_entry;
++int sde_connector_catalog_caps(struct drm_connector *, const struct msm_mode_info *,
++ struct sde_mode_catalog_entry *);
+ int sde_connector_get_mode_info(struct drm_connector *conn,
+ 		const struct drm_display_mode *drm_mode,
+ 		struct msm_mode_info *mode_info);
+--- a/techpack/display/msm/sde/sde_crtc.c
++++ b/techpack/display/msm/sde/sde_crtc.c
+@@ -450,6 +450,11 @@
+ 	drm_crtc_cleanup(crtc);
+ 	mutex_destroy(&sde_crtc->crtc_lock);
+ 	kfree(sde_crtc);
++}
++
++const struct sde_mode_state *msm_get_mode_state(const struct drm_crtc_state *state)
++{
++	return state ? &to_sde_crtc_state(state)->mode_state : NULL;
+ }
+ 
+ static bool sde_crtc_mode_fixup(struct drm_crtc *crtc,
+@@ -3495,6 +3500,9 @@
+ 
+ 	sde_crtc = to_sde_crtc(crtc);
+ 	cstate = to_sde_crtc_state(state);
++	drm_property_blob_put(cstate->mode_state.request_blob);
++	cstate->mode_state.request_blob = NULL;
++
+ 	sde_kms = _sde_crtc_get_kms(crtc);
+ 
+ 	if (!sde_kms) {
+@@ -3509,6 +3517,7 @@
+ 	drm_for_each_encoder_mask(enc, crtc->dev, encoder_mask)
+ 		sde_rm_release(&sde_kms->rm, enc, true);
+ 
++	sde_mode_state_reset(&cstate->mode_state);
+ 	__drm_atomic_helper_crtc_destroy_state(state);
+ 
+ 	/* destroy value helper */
+@@ -3925,6 +3934,7 @@
+ 
+ 	/* duplicate base helper */
+ 	__drm_atomic_helper_crtc_duplicate_state(crtc, &cstate->base);
++	sde_mode_state_duplicate(&cstate->mode_state, &old_cstate->mode_state);
+ 
+ 	return &cstate->base;
+ }
+@@ -3971,6 +3981,7 @@
+ 
+ 	_sde_crtc_set_input_fence_timeout(cstate);
+ 
++	sde_mode_state_reset(&cstate->mode_state);
+ 	cstate->base.crtc = crtc;
+ 	crtc->state = &cstate->base;
+ }
+@@ -5020,6 +5031,16 @@
+ 	dev = crtc->dev;
+ 	sde_crtc = to_sde_crtc(crtc);
+ 	cstate = to_sde_crtc_state(state);
++	/* MODE_ID may be set before or after the metadata property. Validate the
++	 * final atomic state; never resolve a payload or modify committed state.
++	 */
++	if (state->mode_changed || cstate->mode_state.requested_valid) {
++		rc = sde_mode_state_check(&cstate->mode_state,
++			state->mode_blob ? state->mode_blob->base.id : 0);
++		if (rc)
++			return rc;
++	}
++
+ 
+ 	if (!state->enable || !state->active) {
+ 		SDE_DEBUG("crtc%d -> enable %d, active %d, skip atomic_check\n",
+@@ -5577,6 +5598,31 @@
+ 
+ 	sde_crtc = to_sde_crtc(crtc);
+ 	cstate = to_sde_crtc_state(state);
++
++	if (property == sde_crtc->mode_request_property) {
++		struct drm_property_blob *blob;
++		struct sde_mode_request_v2 request;
++
++		if (val > U32_MAX)
++			return -EINVAL;
++		blob = drm_property_lookup_blob(crtc->dev, val);
++		if (!blob)
++			return -EINVAL;
++		if (blob->length != sizeof(request)) {
++			drm_property_blob_put(blob);
++			return -EINVAL;
++		}
++		memcpy(&request, blob->data, sizeof(request));
++		ret = sde_mode_state_set_identity(&cstate->mode_state, &request);
++		if (ret) {
++			drm_property_blob_put(blob);
++			return ret;
++		}
++		drm_property_blob_put(cstate->mode_state.request_blob);
++		cstate->mode_state.request_blob = blob; /* transfer lookup reference */
++		state->mode_changed = true;
++		return 0;
++	}
+ 
+ 	SDE_ATRACE_BEGIN("sde_crtc_atomic_set_property");
+ 	/* check with cp property system first */
+@@ -5716,13 +5762,19 @@
+ 	struct sde_crtc_state *cstate;
+ 	int ret = -EINVAL, i;
+ 
+-	if (!crtc || !state) {
++	if (!crtc || !state || !property || !val) {
+ 		SDE_ERROR("invalid argument(s)\n");
+ 		goto end;
+ 	}
+ 
+ 	sde_crtc = to_sde_crtc(crtc);
+ 	cstate = to_sde_crtc_state(state);
++
++	if (property == sde_crtc->mode_request_property) {
++		*val = cstate->mode_state.request_blob ?
++			cstate->mode_state.request_blob->base.id : 0;
++		return 0;
++	}
+ 
+ 	i = msm_property_index(&sde_crtc->property_info, property);
+ 	if (i == CRTC_PROP_OUTPUT_FENCE) {
+@@ -6733,6 +6785,15 @@
+ 	sde_cp_crtc_init(crtc);
+ 	sde_cp_crtc_install_properties(crtc);
+ 
++	sde_crtc->mode_request_property = drm_property_create(dev, DRM_MODE_PROP_BLOB,
++		SDE_MODE_IDENTITY_PROPERTY, 0);
++	if (!sde_crtc->mode_request_property) {
++		sde_crtc_destroy(crtc);
++		return ERR_PTR(-ENOMEM);
++	}
++	drm_object_attach_property(&crtc->base,
++		sde_crtc->mode_request_property, 0);
++
+ 	for (i = 0; i < SDE_SYS_CACHE_MAX; i++) {
+ 		sde_crtc->cur_perf.llcc_active[i] = false;
+ 		sde_crtc->new_perf.llcc_active[i] = false;
+--- a/techpack/display/msm/sde/sde_crtc.h
++++ b/techpack/display/msm/sde/sde_crtc.h
+@@ -20,6 +20,7 @@
+ #ifndef _SDE_CRTC_H_
+ #define _SDE_CRTC_H_
+ 
++#include "sde_mode_state.h"
+ #include <linux/kthread.h>
+ #include <linux/of_fdt.h>
+ #include <drm/drm_crtc.h>
+@@ -302,6 +303,7 @@
+  */
+ struct sde_crtc {
+ 	struct drm_crtc base;
++	struct drm_property *mode_request_property;
+ 	char name[SDE_CRTC_NAME_SIZE];
+ 
+ 	/* HW Resources reserved for the crtc */
+@@ -436,6 +438,7 @@
+  */
+ struct sde_crtc_state {
+ 	struct drm_crtc_state base;
++	struct sde_mode_state mode_state;
+ 
+ 	struct drm_connector *connectors[MAX_CONNECTORS];
+ 	int num_connectors;
+--- /dev/null
++++ b/techpack/display/msm/sde/sde_mode_state.h
+@@ -0,0 +1,67 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _SDE_MODE_STATE_H_
++#define _SDE_MODE_STATE_H_
++#include <linux/errno.h>
++#include <linux/types.h>
++#include <linux/string.h>
++#include <drm/sde_mode_request.h>
++#include <drm/sde_mode_identity.h>
++struct drm_property_blob;
++/* One-shot requests/derived transitions are separate from stable selection.
++ * Payload references live in the matching bridge state, never in DRM modes.
++ */
++struct sde_mode_state {
++ u32 requested, mode_blob_id, adjusted;
++ u32 selected_blob_id, selected_panel;
++ struct sde_mode_identity identity, selected_identity;
++ struct drm_property_blob *request_blob;
++ bool requested_valid, adjusted_valid;
++};
++static inline void sde_mode_state_reset(struct sde_mode_state *state)
++{
++ memset(state, 0, sizeof(*state));
++}
++static inline void sde_mode_state_duplicate(struct sde_mode_state *dst,
++ const struct sde_mode_state *src)
++{
++ /* The raw driver state copier has not acquired a reference to request_blob.
++  * Clear that borrowed copy, do not put it; the old state retains ownership. */
++ sde_mode_state_reset(dst);
++ dst->selected_blob_id = src->selected_blob_id;
++ dst->selected_panel = src->selected_panel;
++ dst->selected_identity = src->selected_identity;
++}
++static inline int sde_mode_state_set_identity(struct sde_mode_state *state,
++ const struct sde_mode_request_v2 *request)
++{
++ u32 panels = request->request & (SDE_MODE_REQ_VIDEO | SDE_MODE_REQ_COMMAND);
++ if (request->version != SDE_MODE_WIRE_VERSION || request->bytes != sizeof(*request) ||
++     request->reserved || (request->request & ~SDE_MODE_REQ_ALL) ||
++     panels == (SDE_MODE_REQ_VIDEO | SDE_MODE_REQ_COMMAND))
++  return -EINVAL;
++ if (!request->mode_blob_id) {
++  if (request->request || request->identity.connector_id || request->identity.generation ||
++      request->identity.row_id) return -EINVAL;
++ } else if (!request->identity.connector_id ||
++            (!!request->identity.generation != !!request->identity.row_id) ||
++            (!request->identity.row_id && request->request)) {
++  return -EINVAL;
++ }
++ state->requested = request->request;
++ state->mode_blob_id = request->mode_blob_id;
++ state->identity = request->identity;
++ state->requested_valid = true;
++ state->adjusted = 0;
++ state->adjusted_valid = false;
++ return 0;
++}
++static inline int sde_mode_state_check(struct sde_mode_state *state, u32 mode_blob_id)
++{
++ if (!state->requested_valid) return -ENODATA;
++ if (state->mode_blob_id != mode_blob_id) return -EINVAL;
++ state->selected_blob_id = mode_blob_id;
++ state->selected_identity = state->identity;
++ if (!state->identity.row_id) state->selected_panel = SDE_MODE_PANEL_NONE;
++ return 0;
++}
++#endif

@@ -1,0 +1,91 @@
+--- a/techpack/display/msm/sde/sde_fence.c
++++ b/techpack/display/msm/sde/sde_fence.c
+@@ -12,6 +12,10 @@
+ 
+ #define TIMELINE_VAL_LENGTH		128
+ 
++static struct dma_fence_ops sde_fence_ops;
++static void sde_fence_timeline_value_str(struct dma_fence *fence, char *str,
++		int size);
++
+ void *sde_sync_get(uint64_t fd)
+ {
+ 	/* force signed compare, fdget accepts an int argument */
+@@ -38,9 +42,8 @@
+ 	rc = dma_fence_wait_timeout(fence, true,
+ 				msecs_to_jiffies(timeout_ms));
+ 	if (!rc || (rc == -EINVAL)) {
+-		if (fence->ops->timeline_value_str)
+-			fence->ops->timeline_value_str(fence,
+-					timeline_str, TIMELINE_VAL_LENGTH);
++		sde_fence_timeline_value_str(fence, timeline_str,
++				TIMELINE_VAL_LENGTH);
+ 
+ 		SDE_ERROR(
+ 			"fence driver name:%s timeline name:%s seqno:0x%llx timeline:%s signaled:0x%x\n",
+@@ -148,23 +151,30 @@
+ 	}
+ }
+ 
+-static void sde_fence_value_str(struct dma_fence *fence, char *str, int size)
+-{
+-	if (!fence || !str)
+-		return;
+-
+-	snprintf(str, size, "%llu", fence->seqno);
+-}
+-
++/* The generic dma_fence API no longer exposes private timeline counters.
++ * Inspect our own context only after checking the actual operations identity.
++ * A foreign fence's seqno is its target, not its current timeline value.
++ */
+ static void sde_fence_timeline_value_str(struct dma_fence *fence, char *str,
+ 		int size)
+ {
+-	struct sde_fence *f = to_sde_fence(fence);
+-
+-	if (!fence || !f->ctx || !str)
+-		return;
+-
+-	snprintf(str, size, "%d", f->ctx->done_count);
++	struct sde_fence *f;
++
++	if (!str || size <= 0)
++		return;
++
++	if (!fence || fence->ops != &sde_fence_ops) {
++		snprintf(str, size, "unavailable");
++		return;
++	}
++
++	f = to_sde_fence(fence);
++	if (!f->ctx) {
++		snprintf(str, size, "unavailable");
++		return;
++	}
++
++	snprintf(str, size, "%u", READ_ONCE(f->ctx->done_count));
+ }
+ 
+ static struct dma_fence_ops sde_fence_ops = {
+@@ -174,8 +184,6 @@
+ 	.signaled = sde_fence_signaled,
+ 	.wait = dma_fence_default_wait,
+ 	.release = sde_fence_release,
+-	.fence_value_str = sde_fence_value_str,
+-	.timeline_value_str = sde_fence_timeline_value_str,
+ };
+ 
+ /**
+@@ -431,9 +439,8 @@
+ {
+ 	char timeline_str[TIMELINE_VAL_LENGTH];
+ 
+-	if (fence->ops->timeline_value_str)
+-		fence->ops->timeline_value_str(fence,
+-		timeline_str, TIMELINE_VAL_LENGTH);
++	sde_fence_timeline_value_str(fence, timeline_str,
++			TIMELINE_VAL_LENGTH);
+ 
+ 	seq_printf(*s, "fence name:%s timeline name:%s seqno:0x%llx timeline:%s signaled:0x%x\n",
+ 		fence->ops->get_driver_name(fence),

@@ -1,0 +1,917 @@
+--- a/configs/sm8350-display-build.json
++++ b/configs/sm8350-display-build.json
+@@ -1336,5 +1336,35 @@
+     "patched_sources": {
+       "sde-drm/drm_atomic_req.cpp": "df3819b869be82a43e462d511a9792145e0140e1a89ce52d14cd006f66f65290"
+     }
++  },
++  "sde_mode_request": {
++    "purpose": "V2 staged typed catalog identity transport; kernel catalog/bridge/consumer port remains incomplete, not deployment-ready",
++    "patch": "patches/qti-sde-mode-request-v2.patch",
++    "patch_sha256": "cdf611026cec73b69f3652a82452d62227ff254bde0526d5b5755d4781724b63",
++    "base_sources": {
++      "libdrmutils/drm_interface.h": "7eea1d65fdb85213815b681643df30352b8fa9f70e2c33385fb0039501138713",
++      "sde-drm/drm_atomic_req.cpp": "d033d0eadc0276c2ed4a2c80b608151f58f199a42fef9d655b4e14fa4c285881",
++      "sde-drm/drm_atomic_req.h": "ced2573f9ac7b383b150700d45e4894e49124886444f2c4d601e6eaee15bf10b",
++      "sde-drm/drm_connector.cpp": "4e6858d7fcb2cfcafa58acd03bf5d5d6806af3d98fcf9812567265cacf1a5970",
++      "sde-drm/drm_connector.h": "ca20bbc6159bd2d8540519a57aba8212ccc674f1a104eeb45a3e7d7fcb084410",
++      "sde-drm/drm_crtc.cpp": "ae4dd88d2d5c5c4e396b1894e0a55720059bd9d19f5d2f05e18f909c41249652",
++      "sde-drm/drm_crtc.h": "ef3243e6ed4ffee9f8916b73f4f6fffda394e4f4ccb19eb120b4fb58374393fb",
++      "sdm/libs/core/drm/hw_device_drm.cpp": "7aee44a2b9646cff9802cc3154e0789ba814c01aa7c23ded17ca1a8c7eb55bff",
++      "sdm/libs/core/drm/hw_device_drm.h": "f824b1c3c010ae3b13fbddaeeebe99165694697b64a17213e88d86c876599b31"
++    },
++    "patched_sources": {
++      "libdrmutils/drm_interface.h": "538e7886f85a33a6576def9b21fdd976665fc703e5905aa75dcc95acfd821a34",
++      "libdrmutils/sde_mode_identity.h": "69a9f6c6f77c1eecf805275fc9f0124035af197b55789048e6a9567f27a5b828",
++      "sde-drm/drm_atomic_req.cpp": "5b825fc7bc069243f1274ed3c5cf4edee8edab9f271494b063b93d974ccd011c",
++      "sde-drm/drm_atomic_req.h": "3c9a103a5cce269b053d45d84053aca3077fc27a4887a46600efdea41e5e48e9",
++      "sde-drm/drm_connector.cpp": "8f059d661f15f8a64723c16b94d850295c448745d2ab811d05b97ff4f9007218",
++      "sde-drm/drm_connector.h": "88376cb902ca8b83bb8e874be45fab7df349c3998c109998471c48cb4f13b9fe",
++      "sde-drm/drm_crtc.cpp": "a127bb4211b6fa6fbd6f10012d6660e9655339443233738713576dbb157c31d7",
++      "sde-drm/drm_crtc.h": "0ccb898b73c3f649289b500d455d6727ed31d83e840e76348f7e3bb9f37d2013",
++      "sde-drm/sde_mode_request.h": "b401eeaac5ec7ecbc4035898c18a6cdec199ecbc8b763e2650a7b0cbc70f0deb",
++      "sde-drm/sde_mode_request_adapter.h": "70125a55d04aa8ffb54d6a989d48ccb975aab965d3a046ae1590a54ab484b74c",
++      "sdm/libs/core/drm/hw_device_drm.cpp": "6e0a6452695bd72b21577f10bbf0050b98e4d8ecb90534d0edcc5e72498b5b1d",
++      "sdm/libs/core/drm/hw_device_drm.h": "fa4c189d0347caf1319a5d47369e40fc611af69a681ef907b5bc44f94c4d8938"
++    }
+   }
+ }
+--- /dev/null
++++ b/patches/qti-sde-mode-request-v1.patch
+@@ -0,0 +1,239 @@
++--- a/sde-drm/drm_atomic_req.cpp
+++++ b/sde-drm/drm_atomic_req.cpp
++@@ -63,6 +63,12 @@
++   va_list args;
++   va_start(args, obj_id);
++   switch (opcode) {
+++    case DRMOps::CRTC_SET_MODE: {
+++      int ret = drm_mgr_->GetCrtcMgr()->SetMode(obj_id, drm_atomic_req_,
+++                                               va_arg(args, drmModeModeInfo *));
+++      if (ret && !mode_request_error_)
+++        mode_request_error_ = ret;
+++    } break;
++     case DRMOps::PLANE_SET_SRC_RECT:
++     case DRMOps::PLANE_SET_DST_RECT:
++     case DRMOps::PLANE_SET_ZORDER:
++@@ -87,7 +93,6 @@
++       drm_mgr_->GetPlaneMgr()->Perform(opcode, obj_id, drm_atomic_req_, args);
++     } break;
++     case DRMOps::CRTC_SET_POST_PROC:
++-    case DRMOps::CRTC_SET_MODE:
++     case DRMOps::CRTC_SET_ACTIVE:
++     case DRMOps::CRTC_SET_OUTPUT_FENCE_OFFSET:
++     case DRMOps::CRTC_SET_CORE_CLK:
++@@ -147,7 +152,7 @@
++       DRM_LOGE("Invalid opcode %d", opcode);
++   }
++   va_end(args);
++-  return 0;
+++  return mode_request_error_;
++ }
++ 
++ int DRMAtomicReq::Validate() {
++@@ -155,8 +160,11 @@
++   // because we just want to validate, not actually mark planes as removed
++   drm_mgr_->GetPlaneMgr()->UnsetUnusedResources(token_.crtc_id, false/*is_commit*/,
++                                                 drm_atomic_req_);
++-  int ret = drmModeAtomicCommit(fd_, drm_atomic_req_,
++-                                DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_TEST_ONLY, nullptr);
+++  int ret = mode_request_error_;
+++  if (!ret)
+++    ret = drmModeAtomicCommit(fd_, drm_atomic_req_,
+++                             DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_TEST_ONLY, nullptr);
+++  mode_request_error_ = 0;
++   if (ret) {
++     DRM_LOGE("drmModeAtomicCommit failed with error %d (%s).", errno, strerror(errno));
++   }
++@@ -184,7 +192,10 @@
++     flags |= DRM_MODE_ATOMIC_NONBLOCK;
++   }
++ 
++-  int ret = drmModeAtomicCommit(fd_, drm_atomic_req_, flags, nullptr);
+++  int ret = mode_request_error_;
+++  if (!ret)
+++    ret = drmModeAtomicCommit(fd_, drm_atomic_req_, flags, nullptr);
+++  mode_request_error_ = 0;
++   if (ret) {
++     DRM_LOGE("drmModeAtomicCommit failed with error %d (%s).", errno, strerror(errno));
++   }
++--- a/sde-drm/drm_atomic_req.h
+++++ b/sde-drm/drm_atomic_req.h
++@@ -53,6 +53,7 @@
++   drmModeAtomicReq *drm_atomic_req_ = {};
++   DRMManager *drm_mgr_ = {};
++   int fd_ = -1;
+++  int mode_request_error_ = 0;
++   DRMDisplayToken token_ = {};
++ };
++ 
++--- a/sde-drm/drm_crtc.cpp
+++++ b/sde-drm/drm_crtc.cpp
++@@ -44,6 +44,7 @@
++ 
++ #include "drm_utils.h"
++ #include "drm_crtc.h"
+++#include "sde_mode_request_adapter.h"
++ #include "drm_property.h"
++ 
++ namespace sde_drm {
++@@ -326,6 +327,11 @@
++       continue;
++     }
++ 
+++    if (string(info->name) == SDE_MODE_REQUEST_PROPERTY) {
+++      mode_request_property_ = info->prop_id;
+++      drmModeFreeProperty(info);
+++      continue;
+++    }
++     string property_name(info->name);
++     DRMProperty prop_enum = prop_mgr_.GetPropertyEnum(property_name);
++     if (prop_enum == DRMProperty::INVALID) {
++@@ -614,25 +620,62 @@
++   pp_mgr_->Init(prop_mgr_, DRM_MODE_OBJECT_CRTC);
++ }
++ 
+++int DRMCrtc::SetMode(drmModeAtomicReq *req, const drmModeModeInfo *mode) {
+++  uint32_t obj_id = drm_crtc_->crtc_id;
+++  uint32_t prop_id = prop_mgr_.GetPropertyId(DRMProperty::MODE_ID);
+++  uint32_t blob_id = 0, request = 0;
+++  drmModeModeInfo timing = {};
+++  const drmModeModeInfo *submitted = mode;
+++  if (!prop_id || !req)
+++    return -EINVAL;
+++  if (mode_request_property_ && mode) {
+++    int ret = SDEPrepareModeRequest(mode, &timing, &request);
+++    if (ret)
+++      return ret;
+++    submitted = &timing;
+++  }
+++  /* Missing property is legacy compatibility, not silently stripped flags. */
+++  if (submitted && drmModeCreatePropertyBlob(fd_, submitted,
+++                                             sizeof(*submitted), &blob_id))
+++    return errno ? -errno : -EIO;
+++  int cursor = drmModeAtomicGetCursor(req);
+++  int ret = 0;
+++  if (mode_request_property_)
+++    ret = drmModeAtomicAddProperty(req, obj_id, mode_request_property_,
+++                                  (uint64_t(blob_id) << 32) | request);
+++  if (ret >= 0)
+++    ret = drmModeAtomicAddProperty(req, obj_id, prop_id, blob_id);
+++  if (ret < 0) {
+++    drmModeAtomicSetCursor(req, cursor);
+++    if (blob_id)
+++      drmModeDestroyPropertyBlob(fd_, blob_id);
+++    return ret;
+++  }
+++  tmp_prop_val_map_[prop_id] = blob_id;
+++  if (mode_request_property_)
+++    tmp_prop_val_map_[mode_request_property_] = (uint64_t(blob_id) << 32) | request;
+++  SetModeBlobID(blob_id);
+++  return 0;
+++}
+++
+++int DRMCrtcManager::SetMode(uint32_t obj_id, drmModeAtomicReq *req,
+++                            const drmModeModeInfo *mode) {
+++  lock_guard<mutex> lock(lock_);
+++  auto it = crtc_pool_.find(obj_id);
+++  if (it == crtc_pool_.end())
+++    return -EINVAL;
+++  return it->second->SetMode(req, mode);
+++}
+++
++ void DRMCrtc::Perform(DRMOps code, drmModeAtomicReq *req, va_list args) {
++   uint32_t obj_id = drm_crtc_->crtc_id;
++ 
++   switch (code) {
++     case DRMOps::CRTC_SET_MODE: {
++-      drmModeModeInfo *mode = va_arg(args, drmModeModeInfo *);
++-      uint32_t prop_id = prop_mgr_.GetPropertyId(DRMProperty::MODE_ID);
++-      uint32_t blob_id = 0;
++-
++-      if (mode) {
++-        if (drmModeCreatePropertyBlob(fd_, (const void *)mode, sizeof(drmModeModeInfo), &blob_id)) {
++-          DRM_LOGE("drmModeCreatePropertyBlob failed for CRTC_SET_MODE, crtc %d", obj_id);
++-          return;
++-        }
++-      }
++-
++-      AddProperty(req, obj_id, prop_id, blob_id, true /* cache */, tmp_prop_val_map_);
++-      SetModeBlobID(blob_id);
++-      DRM_LOGD("CRTC %d: Set mode %s", obj_id, mode ? mode->name : "null");
+++      const drmModeModeInfo *mode = va_arg(args, drmModeModeInfo *);
+++      int ret = SetMode(req, mode);
+++      if (ret)
+++        DRM_LOGE("typed mode request failed, crtc %d error %d", obj_id, ret);
++     } break;
++ 
++     case DRMOps::CRTC_SET_OUTPUT_FENCE_OFFSET: {
++--- a/sde-drm/drm_crtc.h
+++++ b/sde-drm/drm_crtc.h
++@@ -53,6 +53,7 @@
++   DRMStatus GetStatus() { return status_; }
++   void GetInfo(DRMCrtcInfo *info);
++   void SetModeBlobID(uint64_t blob_id);
+++  int SetMode(drmModeAtomicReq *req, const drmModeModeInfo *mode);
++   bool ConfigureScalerLUT(drmModeAtomicReq *req, uint32_t dir_lut_blob_id,
++                           uint32_t cir_lut_blob_id, uint32_t sep_lut_blob_id);
++   void PostValidate(bool success);
++@@ -84,6 +85,7 @@
++   int fd_ = -1;
++   uint32_t crtc_index_ = {};
++   uint64_t mode_blob_id_ = 0;
+++  uint32_t mode_request_property_ = 0;
++   drmModeCrtc *drm_crtc_ = {};
++   DRMStatus status_ = DRMStatus::FREE;
++   DRMCrtcInfo crtc_info_ = {};
++@@ -114,6 +116,7 @@
++   void Free(DRMDisplayToken *token);
++   void Perform(DRMOps code, uint32_t obj_id, drmModeAtomicReq *req, va_list args);
++   int GetCrtcInfo(uint32_t crtc_id, DRMCrtcInfo *info);
+++  int SetMode(uint32_t obj_id, drmModeAtomicReq *req, const drmModeModeInfo *mode);
++   void SetScalerLUT(const DRMScalerLUTInfo &lut_info);
++   void UnsetScalerLUT();
++   void GetPPInfo(uint32_t crtc_id, DRMPPFeatureInfo *info);
++--- /dev/null
+++++ b/sde-drm/sde_mode_request.h
++@@ -0,0 +1,13 @@
+++/* SPDX-License-Identifier: MIT */
+++#ifndef _UAPI_SDE_MODE_REQUEST_H_
+++#define _UAPI_SDE_MODE_REQUEST_H_
+++/* SDE_MODE_REQUEST: upper32 MODE_ID blob id, lower32 request bits.
+++ * The final atomic state validates the binding, independent of set order.
+++ * This staging ABI requires matching userspace and a completed DSI consumer port.
+++ */
+++#define SDE_MODE_REQUEST_PROPERTY "SDE_MODE_REQUEST"
+++#define SDE_MODE_REQ_SEAMLESS (1U << 0)
+++#define SDE_MODE_REQ_VIDEO (1U << 1)
+++#define SDE_MODE_REQ_COMMAND (1U << 2)
+++#define SDE_MODE_REQ_ALL (SDE_MODE_REQ_SEAMLESS | SDE_MODE_REQ_VIDEO | SDE_MODE_REQ_COMMAND)
+++#endif
++--- /dev/null
+++++ b/sde-drm/sde_mode_request_adapter.h
++@@ -0,0 +1,27 @@
+++/* SPDX-License-Identifier: MIT */
+++#ifndef _SDE_MODE_REQUEST_ADAPTER_H_
+++#define _SDE_MODE_REQUEST_ADAPTER_H_
+++#include <errno.h>
+++#include <stdint.h>
+++#include "sde_mode_request.h"
+++static inline int SDEPrepareModeRequest(const drmModeModeInfo *mode,
+++ drmModeModeInfo *timing, uint32_t *request)
+++{
+++ if (!mode || !timing || !request)
+++  return -EINVAL;
+++ uint32_t flags = mode->flags;
+++ /* Exact6.18 public timing bits plus aspect-ratio bits; legacy request bits
+++  * are translated below, never re-used as public flags. */
+++ if (flags & ~(0x007ff3ffU | (7U << 29)))
+++  return -EINVAL;
+++ uint32_t panel = flags & ((1U << 29) | (1U << 30));
+++ if (panel == ((1U << 29) | (1U << 30)))
+++  return -EINVAL;
+++ *timing = *mode;
+++ *request = ((flags & (1U << 31)) ? SDE_MODE_REQ_SEAMLESS : 0) |
+++  ((flags & (1U << 29)) ? SDE_MODE_REQ_VIDEO : 0) |
+++  ((flags & (1U << 30)) ? SDE_MODE_REQ_COMMAND : 0);
+++ timing->flags &= ~((1U << 29) | (1U << 30) | (1U << 31));
+++ return 0;
+++}
+++#endif
+--- /dev/null
++++ b/patches/qti-sde-mode-request-v2.patch
+@@ -0,0 +1,596 @@
++--- a/libdrmutils/drm_interface.h
+++++ b/libdrmutils/drm_interface.h
++@@ -30,6 +30,7 @@
++ #ifndef __DRM_INTERFACE_H__
++ #define __DRM_INTERFACE_H__
++ 
+++#include "sde_mode_identity.h"
++ #include <map>
++ #include <string>
++ #include <utility>
++@@ -435,6 +436,8 @@
++    *      uint32_t - colorspace value bit-mask
++    */
++   CONNECTOR_SET_COLORSPACE,
+++  // Source-only typed extension, appended without renumbering original operations.
+++  CRTC_SET_MODE_WITH_METADATA,
++ };
++ 
++ enum struct DRMRotation {
++@@ -648,6 +651,7 @@
++ /* Per mode info */
++ struct DRMModeInfo {
++   drmModeModeInfo mode;
+++  sde_mode_identity mode_identity {};
++   DRMTopology topology;
++   // Valid only if mode is command
++   int num_roi;
++--- /dev/null
+++++ b/libdrmutils/sde_mode_identity.h
++@@ -0,0 +1,30 @@
+++/* SPDX-License-Identifier: MIT */
+++#ifndef _SDE_MODE_IDENTITY_H_
+++#define _SDE_MODE_IDENTITY_H_
+++#include <linux/types.h>
+++#include <drm/drm_mode.h>
+++#define SDE_MODE_CATALOG_PROPERTY "SDE_MODE_CATALOG_V1"
+++#define SDE_MODE_IDENTITY_PROPERTY "SDE_MODE_REQUEST_V2"
+++#define SDE_MODE_WIRE_VERSION 1U
+++#define SDE_MODE_PANEL_NONE 0U
+++#define SDE_MODE_PANEL_VIDEO 1U
+++#define SDE_MODE_PANEL_COMMAND 2U
+++struct sde_mode_identity { __u32 connector_id, generation, row_id; };
+++struct sde_mode_request_v2 {
+++ __u32 version, bytes, mode_blob_id, request;
+++ struct sde_mode_identity identity;
+++ __u32 reserved;
+++};
+++struct sde_mode_catalog_header {
+++ __u32 version, header_bytes, entry_bytes, count;
+++ __u32 generation, connector_id, reserved0, reserved1;
+++};
+++struct sde_mode_catalog_entry {
+++ struct drm_mode_modeinfo mode;
+++ __u32 row_id, panel_kind;
+++ char topology[32];
+++ __u32 num_roi, xstart, ystart, walign, halign, wmin, hmin, roi_merge;
+++ __u32 bit_clk_lo, bit_clk_hi, transfer_time_us, allowed_mode_switch;
+++ __u32 has_cwb_crop, has_dedicated_cwb, reserved0, reserved1;
+++};
+++#endif
++--- a/sde-drm/drm_atomic_req.cpp
+++++ b/sde-drm/drm_atomic_req.cpp
++@@ -63,6 +63,19 @@
++   va_list args;
++   va_start(args, obj_id);
++   switch (opcode) {
+++    case DRMOps::CRTC_SET_MODE_WITH_METADATA: {
+++      const drmModeModeInfo *mode = va_arg(args, const drmModeModeInfo *);
+++      const sde_mode_identity *identity = va_arg(args, const sde_mode_identity *);
+++      int ret = (mode && !identity) ? -EINVAL :
+++        drm_mgr_->GetCrtcMgr()->SetModeWithMetadata(obj_id, drm_atomic_req_, mode, identity);
+++      if (ret && !mode_request_error_) mode_request_error_ = ret;
+++    } break;
+++    case DRMOps::CRTC_SET_MODE: {
+++      int ret = drm_mgr_->GetCrtcMgr()->SetMode(obj_id, drm_atomic_req_,
+++                                               va_arg(args, drmModeModeInfo *));
+++      if (ret && !mode_request_error_)
+++        mode_request_error_ = ret;
+++    } break;
++     case DRMOps::PLANE_SET_SRC_RECT:
++     case DRMOps::PLANE_SET_DST_RECT:
++     case DRMOps::PLANE_SET_ZORDER:
++@@ -87,7 +100,6 @@
++       drm_mgr_->GetPlaneMgr()->Perform(opcode, obj_id, drm_atomic_req_, args);
++     } break;
++     case DRMOps::CRTC_SET_POST_PROC:
++-    case DRMOps::CRTC_SET_MODE:
++     case DRMOps::CRTC_SET_ACTIVE:
++     case DRMOps::CRTC_SET_OUTPUT_FENCE_OFFSET:
++     case DRMOps::CRTC_SET_CORE_CLK:
++@@ -147,7 +159,7 @@
++       DRM_LOGE("Invalid opcode %d", opcode);
++   }
++   va_end(args);
++-  return 0;
+++  return mode_request_error_;
++ }
++ 
++ int DRMAtomicReq::Validate() {
++@@ -155,8 +167,11 @@
++   // because we just want to validate, not actually mark planes as removed
++   drm_mgr_->GetPlaneMgr()->UnsetUnusedResources(token_.crtc_id, false/*is_commit*/,
++                                                 drm_atomic_req_);
++-  int ret = drmModeAtomicCommit(fd_, drm_atomic_req_,
++-                                DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_TEST_ONLY, nullptr);
+++  int ret = mode_request_error_;
+++  if (!ret)
+++    ret = drmModeAtomicCommit(fd_, drm_atomic_req_,
+++                             DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_TEST_ONLY, nullptr);
+++  mode_request_error_ = 0;
++   if (ret) {
++     DRM_LOGE("drmModeAtomicCommit failed with error %d (%s).", errno, strerror(errno));
++   }
++@@ -184,7 +199,10 @@
++     flags |= DRM_MODE_ATOMIC_NONBLOCK;
++   }
++ 
++-  int ret = drmModeAtomicCommit(fd_, drm_atomic_req_, flags, nullptr);
+++  int ret = mode_request_error_;
+++  if (!ret)
+++    ret = drmModeAtomicCommit(fd_, drm_atomic_req_, flags, nullptr);
+++  mode_request_error_ = 0;
++   if (ret) {
++     DRM_LOGE("drmModeAtomicCommit failed with error %d (%s).", errno, strerror(errno));
++   }
++--- a/sde-drm/drm_atomic_req.h
+++++ b/sde-drm/drm_atomic_req.h
++@@ -53,6 +53,7 @@
++   drmModeAtomicReq *drm_atomic_req_ = {};
++   DRMManager *drm_mgr_ = {};
++   int fd_ = -1;
+++  int mode_request_error_ = 0;
++   DRMDisplayToken token_ = {};
++ };
++ 
++--- a/sde-drm/drm_connector.cpp
+++++ b/sde-drm/drm_connector.cpp
++@@ -457,6 +457,11 @@
++       continue;
++     }
++ 
+++    if (string(info->name) == SDE_MODE_CATALOG_PROPERTY) {
+++      mode_catalog_property_ = info->prop_id;
+++      drmModeFreeProperty(info);
+++      continue;
+++    }
++     string property_name(info->name);
++     DRMProperty prop_enum = prop_mgr_.GetPropertyEnum(property_name);
++ 
++@@ -692,6 +697,57 @@
++   drmModeFreePropertyBlob(blob);
++ }
++ 
+++int DRMConnector::ParseModeCatalog(uint64_t blob_id, DRMConnectorInfo *info) {
+++  drmModePropertyBlobRes *blob = drmModeGetPropertyBlob(fd_, blob_id);
+++  if (!blob || !blob->data) {
+++    if (blob) drmModeFreePropertyBlob(blob);
+++    return -EINVAL;
+++  }
+++  sde_mode_catalog_header header {};
+++  std::vector<DRMModeInfo> parsed;
+++  int ret = -EINVAL;
+++  if (blob->length < sizeof(header)) goto out;
+++  memcpy(&header, blob->data, sizeof(header));
+++  if (header.version != SDE_MODE_WIRE_VERSION || header.header_bytes != sizeof(header) ||
+++      header.entry_bytes != sizeof(sde_mode_catalog_entry) || header.reserved0 || header.reserved1 ||
+++      !header.generation || header.connector_id != drm_connector_->connector_id ||
+++      (blob->length - sizeof(header)) % sizeof(sde_mode_catalog_entry) ||
+++      header.count != (blob->length - sizeof(header)) / sizeof(sde_mode_catalog_entry) ||
+++      blob->length != sizeof(header) + size_t(header.count) * sizeof(sde_mode_catalog_entry)) goto out;
+++  for (uint32_t i = 0; i < header.count; i++) {
+++    sde_mode_catalog_entry entry {};
+++    memcpy(&entry, static_cast<const char *>(blob->data) + sizeof(header) + size_t(i) * sizeof(entry),
+++           sizeof(entry));
+++    if (entry.row_id != i + 1 || entry.panel_kind > SDE_MODE_PANEL_COMMAND ||
+++        entry.reserved0 || entry.reserved1 || (entry.mode.flags & ~0x007ff3ffU) ||
+++        !memchr(entry.topology, 0, sizeof(entry.topology)) || entry.num_roi > INT32_MAX ||
+++        entry.xstart > INT32_MAX || entry.ystart > INT32_MAX || entry.walign > INT32_MAX ||
+++        entry.halign > INT32_MAX || entry.wmin > INT32_MAX || entry.hmin > INT32_MAX ||
+++        entry.roi_merge > 1) goto out;
+++    DRMModeInfo item {};
+++    static_assert(sizeof(item.mode) == sizeof(entry.mode), "modeinfo wire size");
+++    memcpy(&item.mode, &entry.mode, sizeof(item.mode));
+++    // Legacy panel discriminator stays only in driver-owned SDM records.
+++    if (entry.panel_kind == SDE_MODE_PANEL_VIDEO) item.mode.flags |= (1U << 29);
+++    if (entry.panel_kind == SDE_MODE_PANEL_COMMAND) item.mode.flags |= (1U << 30);
+++    item.mode_identity = {header.connector_id, header.generation, entry.row_id};
+++    item.topology = GetTopologyEnum(entry.topology);
+++    item.num_roi = entry.num_roi; item.xstart = entry.xstart; item.ystart = entry.ystart;
+++    item.walign = entry.walign; item.halign = entry.halign; item.wmin = entry.wmin;
+++    item.hmin = entry.hmin; item.roi_merge = entry.roi_merge;
+++    item.bit_clk_rate = (uint64_t(entry.bit_clk_hi) << 32) | entry.bit_clk_lo;
+++    item.transfer_time_us = entry.transfer_time_us;
+++    item.allowed_mode_switch = entry.allowed_mode_switch;
+++    item.has_cwb_crop = entry.has_cwb_crop; item.has_dedicated_cwb = entry.has_dedicated_cwb;
+++    parsed.push_back(item);
+++  }
+++  info->modes.swap(parsed);
+++  ret = 0;
+++out:
+++  drmModeFreePropertyBlob(blob);
+++  return ret;
+++}
+++
++ int DRMConnector::GetInfo(DRMConnectorInfo *info) {
++   uint32_t conn_id = drm_connector_->connector_id;
++   if (!skip_connector_reload_ && (IsTVConnector(drm_connector_->connector_type)
++@@ -759,7 +815,7 @@
++       ParseCapabilities(props->prop_values[index], info);
++   }
++ 
++-  if (prop_mgr_.IsPropertyAvailable(DRMProperty::MODE_PROPERTIES)) {
+++  if (!mode_catalog_property_ && prop_mgr_.IsPropertyAvailable(DRMProperty::MODE_PROPERTIES)) {
++     index = std::distance(props->props,
++                           std::find(props->props, props->props + props->count_props,
++                                     prop_mgr_.GetPropertyId(DRMProperty::MODE_PROPERTIES)));
++@@ -795,6 +851,18 @@
++     info->supported_colorspaces = props->prop_values[index];
++   }
++ 
+++  if (mode_catalog_property_) {
+++    auto catalog = std::find(props->props, props->props + props->count_props, mode_catalog_property_);
+++    if (catalog == props->props + props->count_props) {
+++      drmModeFreeObjectProperties(props);
+++      return -ENODEV;
+++    }
+++    int ret = ParseModeCatalog(props->prop_values[catalog - props->props], info);
+++    if (ret) {
+++      drmModeFreeObjectProperties(props);
+++      return ret;
+++    }
+++  }
++   drmModeFreeObjectProperties(props);
++ 
++   return 0;
++--- a/sde-drm/drm_connector.h
+++++ b/sde-drm/drm_connector.h
++@@ -65,6 +65,7 @@
++ 
++  private:
++   void ParseProperties();
+++  int ParseModeCatalog(uint64_t blob_id, DRMConnectorInfo *info);
++   void ParseCapabilities(uint64_t blob_id, DRMConnectorInfo *info);
++   void ParseCapabilities(uint64_t blob_id, drm_panel_hdr_properties *hdr_info);
++   void ParseModeProperties(uint64_t blob_id, DRMConnectorInfo *info);
++@@ -74,6 +75,7 @@
++               DRMRect *conn_rois);
++ 
++   int fd_ = -1;
+++  uint32_t mode_catalog_property_ = 0;
++   drmModeConnector *drm_connector_ = {};
++   DRMPropertyManager prop_mgr_ {};
++   bool skip_connector_reload_ = false; //  Usually set to true for new TV/pluggable displays.
++--- a/sde-drm/drm_crtc.cpp
+++++ b/sde-drm/drm_crtc.cpp
++@@ -44,6 +44,7 @@
++ 
++ #include "drm_utils.h"
++ #include "drm_crtc.h"
+++#include "sde_mode_request_adapter.h"
++ #include "drm_property.h"
++ 
++ namespace sde_drm {
++@@ -307,6 +308,7 @@
++ #define __CLASS__ "DRMCrtc"
++ 
++ DRMCrtc::~DRMCrtc() {
+++  if (mode_identity_blob_id_) drmModeDestroyPropertyBlob(fd_, mode_identity_blob_id_);
++   if (drm_crtc_) {
++     drmModeFreeCrtc(drm_crtc_);
++   }
++@@ -326,6 +328,16 @@
++       continue;
++     }
++ 
+++    if (string(info->name) == SDE_MODE_IDENTITY_PROPERTY) {
+++      mode_identity_property_ = info->prop_id;
+++      drmModeFreeProperty(info);
+++      continue;
+++    }
+++    if (string(info->name) == SDE_MODE_REQUEST_PROPERTY) {
+++      mode_request_property_ = info->prop_id;
+++      drmModeFreeProperty(info);
+++      continue;
+++    }
++     string property_name(info->name);
++     DRMProperty prop_enum = prop_mgr_.GetPropertyEnum(property_name);
++     if (prop_enum == DRMProperty::INVALID) {
++@@ -614,25 +626,115 @@
++   pp_mgr_->Init(prop_mgr_, DRM_MODE_OBJECT_CRTC);
++ }
++ 
+++int DRMCrtc::SetModeWithMetadata(drmModeAtomicReq *req, const drmModeModeInfo *mode,
+++                                const sde_mode_identity *identity) {
+++  if (!mode_identity_property_) return SetMode(req, mode);
+++  uint32_t prop_id = prop_mgr_.GetPropertyId(DRMProperty::MODE_ID);
+++  if (!req || !prop_id || (mode && !identity)) return -EINVAL;
+++  drmModeModeInfo timing {};
+++  uint32_t request = 0, mode_blob = 0, metadata_blob = 0;
+++  sde_mode_request_v2 metadata {};
+++  metadata.version = SDE_MODE_WIRE_VERSION; metadata.bytes = sizeof(metadata);
+++  if (mode) {
+++    int ret = SDEPrepareModeRequest(mode, &timing, &request);
+++    if (ret) return ret;
+++    metadata.identity = *identity;
+++    if (!identity->connector_id || (!!identity->row_id != !!identity->generation) ||
+++        (!identity->row_id && request)) return -EINVAL;
+++    if (drmModeCreatePropertyBlob(fd_, &timing, sizeof(timing), &mode_blob))
+++      return errno ? -errno : -EIO;
+++  } else if (identity && (identity->connector_id || identity->generation || identity->row_id)) {
+++    return -EINVAL;
+++  }
+++  metadata.mode_blob_id = mode_blob; metadata.request = request;
+++  if (drmModeCreatePropertyBlob(fd_, &metadata, sizeof(metadata), &metadata_blob)) {
+++    int ret = errno ? -errno : -EIO;
+++    if (mode_blob) drmModeDestroyPropertyBlob(fd_, mode_blob);
+++    return ret;
+++  }
+++  int cursor = drmModeAtomicGetCursor(req);
+++  int ret = drmModeAtomicAddProperty(req, drm_crtc_->crtc_id, mode_identity_property_, metadata_blob);
+++  if (ret >= 0) ret = drmModeAtomicAddProperty(req, drm_crtc_->crtc_id, prop_id, mode_blob);
+++  if (ret < 0) {
+++    drmModeAtomicSetCursor(req, cursor);
+++    drmModeDestroyPropertyBlob(fd_, metadata_blob);
+++    if (mode_blob) drmModeDestroyPropertyBlob(fd_, mode_blob);
+++    return ret;
+++  }
+++  tmp_prop_val_map_[mode_identity_property_] = metadata_blob;
+++  tmp_prop_val_map_[prop_id] = mode_blob;
+++  if (mode_identity_blob_id_) drmModeDestroyPropertyBlob(fd_, mode_identity_blob_id_);
+++  mode_identity_blob_id_ = metadata_blob;
+++  SetModeBlobID(mode_blob);
+++  return 0;
+++}
+++
+++int DRMCrtcManager::SetModeWithMetadata(uint32_t obj_id, drmModeAtomicReq *req,
+++                                       const drmModeModeInfo *mode,
+++                                       const sde_mode_identity *identity) {
+++  lock_guard<mutex> lock(lock_);
+++  auto it = crtc_pool_.find(obj_id);
+++  if (it == crtc_pool_.end()) return -EINVAL;
+++  return it->second->SetModeWithMetadata(req, mode, identity);
+++}
+++
+++int DRMCrtc::SetMode(drmModeAtomicReq *req, const drmModeModeInfo *mode) {
+++  if (mode_identity_property_) return -EOPNOTSUPP;
+++  uint32_t obj_id = drm_crtc_->crtc_id;
+++  uint32_t prop_id = prop_mgr_.GetPropertyId(DRMProperty::MODE_ID);
+++  uint32_t blob_id = 0, request = 0;
+++  drmModeModeInfo timing = {};
+++  const drmModeModeInfo *submitted = mode;
+++  if (!prop_id || !req)
+++    return -EINVAL;
+++  if (mode_request_property_ && mode) {
+++    int ret = SDEPrepareModeRequest(mode, &timing, &request);
+++    if (ret)
+++      return ret;
+++    submitted = &timing;
+++  }
+++  /* Missing property is legacy compatibility, not silently stripped flags. */
+++  if (submitted && drmModeCreatePropertyBlob(fd_, submitted,
+++                                             sizeof(*submitted), &blob_id))
+++    return errno ? -errno : -EIO;
+++  int cursor = drmModeAtomicGetCursor(req);
+++  int ret = 0;
+++  if (mode_request_property_)
+++    ret = drmModeAtomicAddProperty(req, obj_id, mode_request_property_,
+++                                  (uint64_t(blob_id) << 32) | request);
+++  if (ret >= 0)
+++    ret = drmModeAtomicAddProperty(req, obj_id, prop_id, blob_id);
+++  if (ret < 0) {
+++    drmModeAtomicSetCursor(req, cursor);
+++    if (blob_id)
+++      drmModeDestroyPropertyBlob(fd_, blob_id);
+++    return ret;
+++  }
+++  tmp_prop_val_map_[prop_id] = blob_id;
+++  if (mode_request_property_)
+++    tmp_prop_val_map_[mode_request_property_] = (uint64_t(blob_id) << 32) | request;
+++  SetModeBlobID(blob_id);
+++  return 0;
+++}
+++
+++int DRMCrtcManager::SetMode(uint32_t obj_id, drmModeAtomicReq *req,
+++                            const drmModeModeInfo *mode) {
+++  lock_guard<mutex> lock(lock_);
+++  auto it = crtc_pool_.find(obj_id);
+++  if (it == crtc_pool_.end())
+++    return -EINVAL;
+++  return it->second->SetMode(req, mode);
+++}
+++
++ void DRMCrtc::Perform(DRMOps code, drmModeAtomicReq *req, va_list args) {
++   uint32_t obj_id = drm_crtc_->crtc_id;
++ 
++   switch (code) {
++     case DRMOps::CRTC_SET_MODE: {
++-      drmModeModeInfo *mode = va_arg(args, drmModeModeInfo *);
++-      uint32_t prop_id = prop_mgr_.GetPropertyId(DRMProperty::MODE_ID);
++-      uint32_t blob_id = 0;
++-
++-      if (mode) {
++-        if (drmModeCreatePropertyBlob(fd_, (const void *)mode, sizeof(drmModeModeInfo), &blob_id)) {
++-          DRM_LOGE("drmModeCreatePropertyBlob failed for CRTC_SET_MODE, crtc %d", obj_id);
++-          return;
++-        }
++-      }
++-
++-      AddProperty(req, obj_id, prop_id, blob_id, true /* cache */, tmp_prop_val_map_);
++-      SetModeBlobID(blob_id);
++-      DRM_LOGD("CRTC %d: Set mode %s", obj_id, mode ? mode->name : "null");
+++      const drmModeModeInfo *mode = va_arg(args, drmModeModeInfo *);
+++      int ret = SetMode(req, mode);
+++      if (ret)
+++        DRM_LOGE("typed mode request failed, crtc %d error %d", obj_id, ret);
++     } break;
++ 
++     case DRMOps::CRTC_SET_OUTPUT_FENCE_OFFSET: {
++--- a/sde-drm/drm_crtc.h
+++++ b/sde-drm/drm_crtc.h
++@@ -53,6 +53,9 @@
++   DRMStatus GetStatus() { return status_; }
++   void GetInfo(DRMCrtcInfo *info);
++   void SetModeBlobID(uint64_t blob_id);
+++  int SetMode(drmModeAtomicReq *req, const drmModeModeInfo *mode);
+++  int SetModeWithMetadata(drmModeAtomicReq *req, const drmModeModeInfo *mode,
+++                          const sde_mode_identity *identity);
++   bool ConfigureScalerLUT(drmModeAtomicReq *req, uint32_t dir_lut_blob_id,
++                           uint32_t cir_lut_blob_id, uint32_t sep_lut_blob_id);
++   void PostValidate(bool success);
++@@ -84,6 +87,9 @@
++   int fd_ = -1;
++   uint32_t crtc_index_ = {};
++   uint64_t mode_blob_id_ = 0;
+++  uint32_t mode_request_property_ = 0;
+++  uint32_t mode_identity_property_ = 0;
+++  uint32_t mode_identity_blob_id_ = 0;
++   drmModeCrtc *drm_crtc_ = {};
++   DRMStatus status_ = DRMStatus::FREE;
++   DRMCrtcInfo crtc_info_ = {};
++@@ -114,6 +120,9 @@
++   void Free(DRMDisplayToken *token);
++   void Perform(DRMOps code, uint32_t obj_id, drmModeAtomicReq *req, va_list args);
++   int GetCrtcInfo(uint32_t crtc_id, DRMCrtcInfo *info);
+++  int SetMode(uint32_t obj_id, drmModeAtomicReq *req, const drmModeModeInfo *mode);
+++  int SetModeWithMetadata(uint32_t obj_id, drmModeAtomicReq *req,
+++                          const drmModeModeInfo *mode, const sde_mode_identity *identity);
++   void SetScalerLUT(const DRMScalerLUTInfo &lut_info);
++   void UnsetScalerLUT();
++   void GetPPInfo(uint32_t crtc_id, DRMPPFeatureInfo *info);
++--- /dev/null
+++++ b/sde-drm/sde_mode_request.h
++@@ -0,0 +1,13 @@
+++/* SPDX-License-Identifier: MIT */
+++#ifndef _UAPI_SDE_MODE_REQUEST_H_
+++#define _UAPI_SDE_MODE_REQUEST_H_
+++/* SDE_MODE_REQUEST: upper32 MODE_ID blob id, lower32 request bits.
+++ * The final atomic state validates the binding, independent of set order.
+++ * This staging ABI requires matching userspace and a completed DSI consumer port.
+++ */
+++#define SDE_MODE_REQUEST_PROPERTY "SDE_MODE_REQUEST"
+++#define SDE_MODE_REQ_SEAMLESS (1U << 0)
+++#define SDE_MODE_REQ_VIDEO (1U << 1)
+++#define SDE_MODE_REQ_COMMAND (1U << 2)
+++#define SDE_MODE_REQ_ALL (SDE_MODE_REQ_SEAMLESS | SDE_MODE_REQ_VIDEO | SDE_MODE_REQ_COMMAND)
+++#endif
++--- /dev/null
+++++ b/sde-drm/sde_mode_request_adapter.h
++@@ -0,0 +1,27 @@
+++/* SPDX-License-Identifier: MIT */
+++#ifndef _SDE_MODE_REQUEST_ADAPTER_H_
+++#define _SDE_MODE_REQUEST_ADAPTER_H_
+++#include <errno.h>
+++#include <stdint.h>
+++#include "sde_mode_request.h"
+++static inline int SDEPrepareModeRequest(const drmModeModeInfo *mode,
+++ drmModeModeInfo *timing, uint32_t *request)
+++{
+++ if (!mode || !timing || !request)
+++  return -EINVAL;
+++ uint32_t flags = mode->flags;
+++ /* Exact6.18 public timing bits plus aspect-ratio bits; legacy request bits
+++  * are translated below, never re-used as public flags. */
+++ if (flags & ~(0x007ff3ffU | (7U << 29)))
+++  return -EINVAL;
+++ uint32_t panel = flags & ((1U << 29) | (1U << 30));
+++ if (panel == ((1U << 29) | (1U << 30)))
+++  return -EINVAL;
+++ *timing = *mode;
+++ *request = ((flags & (1U << 31)) ? SDE_MODE_REQ_SEAMLESS : 0) |
+++  ((flags & (1U << 29)) ? SDE_MODE_REQ_VIDEO : 0) |
+++  ((flags & (1U << 30)) ? SDE_MODE_REQ_COMMAND : 0);
+++ timing->flags &= ~((1U << 29) | (1U << 30) | (1U << 31));
+++ return 0;
+++}
+++#endif
++--- a/sdm/libs/core/drm/hw_device_drm.cpp
+++++ b/sdm/libs/core/drm/hw_device_drm.cpp
++@@ -491,6 +491,18 @@
++   hw_info_intf_ = hw_info_intf;
++ }
++ 
+++int HWDeviceDRM::SetModeWithMetadata(const drmModeModeInfo *mode, uint32_t selected_index) {
+++  sde_mode_identity identity {};
+++  const sde_mode_identity *selection = nullptr;
+++  if (mode && selected_index < connector_info_.modes.size()) {
+++    identity = connector_info_.modes[selected_index].mode_identity;
+++    if (!identity.connector_id) identity.connector_id = token_.conn_id;
+++    selection = &identity;
+++  }
+++  return drm_atomic_intf_->Perform(DRMOps::CRTC_SET_MODE_WITH_METADATA, token_.crtc_id,
+++                                  mode, selection);
+++}
+++
++ DisplayError HWDeviceDRM::Init() {
++   int ret = 0;
++   DRMMaster *drm_master = {};
++@@ -579,7 +591,7 @@
++     ClearSolidfillStages();
++     drm_atomic_intf_->Perform(DRMOps::CONNECTOR_SET_CRTC, token_.conn_id, 0);
++     drm_atomic_intf_->Perform(DRMOps::CONNECTOR_SET_POWER_MODE, token_.conn_id, DRMPowerMode::OFF);
++-    drm_atomic_intf_->Perform(DRMOps::CRTC_SET_MODE, token_.crtc_id, nullptr);
+++    SetModeWithMetadata(nullptr, 0);
++     drm_atomic_intf_->Perform(DRMOps::CRTC_SET_ACTIVE, token_.crtc_id, 0);
++ #ifdef TRUSTED_VM
++     drm_atomic_intf_->Perform(sde_drm::DRMOps::CRTC_SET_VM_REQ_STATE, token_.crtc_id,
++@@ -1083,7 +1095,7 @@
++   int64_t retire_fence_fd = -1;
++   drmModeModeInfo current_mode = connector_info_.modes[current_mode_index_].mode;
++   if (!IsSeamlessTransition()) {
++-    drm_atomic_intf_->Perform(DRMOps::CRTC_SET_MODE, token_.crtc_id, &current_mode);
+++    SetModeWithMetadata(&current_mode, current_mode_index_);
++   }
++   drm_atomic_intf_->Perform(DRMOps::CONNECTOR_SET_POWER_MODE, token_.conn_id, DRMPowerMode::OFF);
++   drm_atomic_intf_->Perform(DRMOps::CRTC_SET_ACTIVE, token_.crtc_id, 0);
++@@ -1122,7 +1134,7 @@
++ 
++   drm_atomic_intf_->Perform(DRMOps::CONNECTOR_SET_CRTC, token_.conn_id, token_.crtc_id);
++   drmModeModeInfo current_mode = connector_info_.modes[current_mode_index_].mode;
++-  drm_atomic_intf_->Perform(DRMOps::CRTC_SET_MODE, token_.crtc_id, &current_mode);
+++  SetModeWithMetadata(&current_mode, current_mode_index_);
++ 
++   drm_atomic_intf_->Perform(DRMOps::CRTC_SET_ACTIVE, token_.crtc_id, 1);
++   drm_atomic_intf_->Perform(DRMOps::CONNECTOR_SET_POWER_MODE, token_.conn_id, DRMPowerMode::DOZE);
++@@ -1168,7 +1180,7 @@
++   if (first_cycle_) {
++     drm_atomic_intf_->Perform(DRMOps::CONNECTOR_SET_CRTC, token_.conn_id, token_.crtc_id);
++     drmModeModeInfo current_mode = connector_info_.modes[current_mode_index_].mode;
++-    drm_atomic_intf_->Perform(DRMOps::CRTC_SET_MODE, token_.crtc_id, &current_mode);
+++    SetModeWithMetadata(&current_mode, current_mode_index_);
++   }
++   drm_atomic_intf_->Perform(DRMOps::CRTC_SET_ACTIVE, token_.crtc_id, 1);
++   drm_atomic_intf_->Perform(DRMOps::CONNECTOR_SET_POWER_MODE, token_.conn_id,
++@@ -1232,6 +1244,7 @@
++   DRMSecurityLevel crtc_security_level = DRMSecurityLevel::SECURE_NON_SECURE;
++   uint32_t index = current_mode_index_;
++   drmModeModeInfo current_mode = connector_info_.modes[index].mode;
+++  uint32_t selected_mode_index = index;
++   uint64_t current_bit_clk = connector_info_.modes[index].bit_clk_rate;
++ 
++   solid_fills_.clear();
++@@ -1447,6 +1460,7 @@
++           (current_mode.flags == connector_info_.modes[mode_index].mode.flags) &&
++           (vrefresh_ == connector_info_.modes[mode_index].mode.vrefresh)) {
++         current_mode = connector_info_.modes[mode_index].mode;
+++        selected_mode_index = mode_index;
++         break;
++       }
++     }
++@@ -1460,6 +1474,7 @@
++           (current_mode.flags == connector_info_.modes[mode_index].mode.flags) &&
++           (bit_clk_rate_ == connector_info_.modes[mode_index].bit_clk_rate)) {
++         current_mode = connector_info_.modes[mode_index].mode;
+++        selected_mode_index = mode_index;
++         break;
++       }
++     }
++@@ -1487,7 +1502,7 @@
++ 
++   // Set CRTC mode, only if display config changes
++   if (first_cycle_ || vrefresh_ || update_mode_ || panel_mode_changed_) {
++-    drm_atomic_intf_->Perform(DRMOps::CRTC_SET_MODE, token_.crtc_id, &current_mode);
+++    SetModeWithMetadata(&current_mode, selected_mode_index);
++   }
++ 
++   if (!validate && (hw_layer_info.set_idle_time_ms >= 0)) {
++--- a/sdm/libs/core/drm/hw_device_drm.h
+++++ b/sdm/libs/core/drm/hw_device_drm.h
++@@ -65,6 +65,7 @@
++   HWDeviceDRM(BufferAllocator *buffer_allocator, HWInfoInterface *hw_info_intf);
++   virtual ~HWDeviceDRM() {}
++   virtual DisplayError Init();
+++  int SetModeWithMetadata(const drmModeModeInfo *mode, uint32_t selected_index);
++   virtual DisplayError Deinit();
++   void GetDRMDisplayToken(sde_drm::DRMDisplayToken *token) const;
++   bool IsPrimaryDisplay() const { return hw_panel_info_.is_primary_panel; }
+--- a/probe/graphics/quest2-platform-cxx.h
++++ b/probe/graphics/quest2-platform-cxx.h
+@@ -3,3 +3,12 @@
+ #include <__config_site>
+ #undef _LIBCPP_ABI_NAMESPACE
+ #define _LIBCPP_ABI_NAMESPACE __1
++
++/* Android VNDK34 platform libc++ does not export the LLVM19 additional
++ * stringstream explicit instantiations. Instantiate their real header bodies
++ * locally instead of asking that older runtime for absent vtables/functions.
++ * This does not change libc++ layout/namespace or substitute implementations.
++ */
++#include <__availability>
++#undef _LIBCPP_AVAILABILITY_HAS_ADDITIONAL_IOSTREAM_EXPLICIT_INSTANTIATIONS_1
++#define _LIBCPP_AVAILABILITY_HAS_ADDITIONAL_IOSTREAM_EXPLICIT_INSTANTIATIONS_1 0
+--- a/scripts/build-sm8350-display.py
++++ b/scripts/build-sm8350-display.py
+@@ -49,6 +49,7 @@
+     p.add_argument("--drm-device-lifecycle", action="store_true")
+     p.add_argument("--dpu-display-topology", action="store_true")
+     p.add_argument("--dpu-events", action="store_true")
++    p.add_argument("--sde-mode-request", action="store_true")
+     a = p.parse_args()
+     if a.dpu_display_topology or a.dpu_events:
+         a.dpu_sdm_contract = True
+@@ -93,6 +94,12 @@
+         adaptations.append(config["dpu_inherited_planes"])
+         adaptations.append(config["dpu_sdr_color"])
+         adaptations.append(config["dpu_busy_commit"])
++    if a.sde_mode_request:
++        if any((a.dpu_plane_properties, a.dpu_capabilities, a.dpu_output_fence,
++                a.hwc_allocator_mapper5, a.dpu_sdm_contract, a.drm_device_lifecycle,
++                a.dpu_display_topology, a.dpu_events)):
++            raise ValueError("SDE mode request staging is not the mainline DPU backend")
++        adaptations.append(config["sde_mode_request"])
+     for adaptation in adaptations:
+         for item in adaptation.get("headers", []):
+             path = verify(ROOT, item["path"], item["sha256"])

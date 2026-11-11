@@ -1,3 +1,276 @@
+## 2026-11-11：KGSL/SDE 已暂停，保存到当前分支
+
+用户明确暂停后，仅授权保存进展并提交当前 `codex/kgsl-sde-port-v83`。目标保持 paused，
+三个子代理已中断；不得因旧段落的“继续/active”自动恢复开发、连接设备或重新构建。
+已集成 KGSL58 / SDE17；SDE 三态整体构建仍 exit2/25对象/0模块，16组专项检查通过。
+本次将7组未完成候选的52个源码改动另存为 `patches/wip/kgsl-sde-paused-20261111`，
+仅做精确patch重建/保存完整性校验，不加入正常配置、不当作功能通过。源/私有产物及原始
+证据保留本地ignored目录，不上传；原六个rescue-console文件保持未提交。
+暂停续接入口：`docs/KGSL-SDE-CHECKPOINT-20261111.md` 与
+`configs/kgsl-sde-checkpoint-20261111.json`。须用户明确恢复后再执行未完操作。
+
+## 2026-11-11：SDE第17组，现代framebuffer格式契约
+
+当前17补丁/315源。msm_framebuffer_create接受6.18 core选定的drm_format_info，同一指针
+传至私有initializer、线性大小检查和真实drm_helper_mode_fill_fb_struct，不再重查而覆盖
+core选择。内部writeback/stolen入口保持原调用方式，按真实pixel_format/modifier参数查询一次。
+保留vendor modified-format校验、失败传播、每plane GEM引用及重复handle引用计数；不是
+简单函数指针强转或跳过UBWC校验。msm_drv.h只更新create原型，未改IRQ/mode字段。
+
+线性plane边界改真实rounded width/height及min_pitch，使用u64 min_size避免原32位回绕；
+拒绝无效格式/plane数量和尺寸。327个HOST断言（非327独立场景）使用实际构造函数、真实
+fourcc/fill helper，KMS/分配/GEM叶子仍模型；涵盖core-info身份、奇数chroma边界、>4GiB
+大小、modifier、部分lookup/alloc/register失败、借用和重复handle。五变异先compile0后run1。
+三态HOST编译1/0/1，新运行0；真实ARM64 callback/lookup/fill接口probe三态2/0/2。
+完整msm_fb.c三态仍2，模式公共头阻塞，不能称完整consumer通过。最初harness把计数变量
+命名puts与libc冲突，真实compile1保留；更名put_count后才统计上述有效验证。
+
+整体BASELINE/MODIFIED/ROLLBACK均exit2/25对象/0模块，framebuffer目标API诊断清零。
+317文件精确回滚/重应用、315父源与KOUT五输出保持。合并16组checker全部0，额外合并
+ARM64 framebuffer probe0。完整模块/MODPOST/实际scanout和provider退休仍未验收。
+
+IRQ/vblank代理仍实现真实PM/IRQ注册失败与原子回调睡眠边界，不接受异步work假成功。
+mode代理已将精准增量rebase至独占integrated16副本，继续catalog/bridge/全消费者。
+MST发现QTI primary缓存固定connector ID且热插拔路径跳过primary，因此不能用简单动态重建
+取消常驻fixed-primary语义。已选择独立真实6.18 core opt-in persistent生命周期扩展，默认
+其他驱动行为不变；atomic基础四角色明确未可集成。未来须新配对内核构建，不借旧dev2运行。
+
+证据out/kgsl-resume-20261111/sde-integration-17与sde-framebuffer-api四角色；旧角色全部
+保留。下一仍接收完整IRQ/vblank，并完成mode、MST persistent core/driver与late GEM owner。
+物理显示、真实提交/fence退休/DDR投票/PM/性能/SQ1-SQ2未完成，无设备操作/发布pins变更/
+提交推送，goal active。既有known controller清理/list锁旧open描述已在新config注明后继修复。
+
+## 2026-11-11：SDE第16组集成，controller成功清理与fence诊断接口
+
+当前16补丁/315源。第15组独立修复dsi_ctrl_debugfs_init：debugfs_root发布后立即return0，
+不再成功落入error_remove_dir。原API-only四角色和已知缺陷反证不改写。实际同输入主机三态
+均compile0，运行1/0/1；成功目录removed从1变0，3个真实file失败仍-13/只清理一次，dir
+失败不清理未创建目录。72严格场景通过，5变异先编译0再运行1；不是实机debugfs并发验收。
+
+第16组移除dma_fence_ops已不存在的字符串回调槽；sde_sync_wait/list_dump调用本地
+sde_fence_timeline_value_str，先确认ops身份才访问本驱动ctx，以READ_ONCE读取done_count；
+外来fence明确unavailable，不把target seqno伪装为当前timeline、不盲转私有结构。seqno仍
+单独输出。13个同步/释放/信号相关函数字节不变；不能把诊断迁移称fence生命周期完成。
+实际函数/真实ops声明47项HOST检查通过，三态compile1/0/1；foreign仅分配base的负控可
+被ASan捕获，另错误计数/吞wait错误变异均先compile0再run1。真实6.18 ARM64窄caller TU
+三态2/0/2，完整sde_fence.c三态仍2。初始提取器误禁函数body分号导致ValueError，错误保留，
+修正抽取式后才产生编译/运行证据；没有将抽取错误算产品红例。
+
+整合后BASELINE/MODIFIED/ROLLBACK均exit2/25对象/0模块；旧fence成员诊断在modified
+消失，317文件精确回滚/重应用，父315源和KOUT五输出保持。合并15组checker全部0（debugfs
+已启用require-controller-root严格门禁），额外合并ARM64 fence probe0。完整模块未通过。
+
+模式v2用户态已另完成42TU/5source库严格链接；root重开6个ARM64 ELF及hash（含1个复制
+libdrm），证据ROOT-USERLAND-v2-REOPEN.json。kernel catalog/bridge/全消费者仍未完成，
+不据此称joint mode通过。MST代理正处理真实atomic payload/固定connector生命周期与
+真实链路参数，不能删MST绕过；IRQ代理处理真实request/free、preinstall失败传播/局部回收、
+vblank锁与睡眠边界，不能用假成功异步工作吞掉错误。三代理均gpt-6.1-sol/high，写集独立。
+
+证据out/kgsl-resume-20261111/sde-integration-16与debugfs-cleanup/fence-diagnostics原
+四角色。下一步验收完整IRQ/vblank、mode及MST候选并语义合并；late GEM/private-owner、
+物理显示、真实提交/fence退休/DDR投票/PM/性能/SQ1-SQ2仍未完成。未操作设备、未改发布pins、
+未提交推送。历史open条目按组记录前态，controller成功清理缺陷现由第15组闭合。
+
+## 2026-11-11：SDE第14组集成与真实接口验证
+
+当前14补丁/315源。第13组四源21位点改用真实6.18 debugfs scalar void/best-effort
+接口，45个原独立调用未改；节点名/权限/value与真实file/dir错误处理保留，不提供假返回值。
+host实际15个initializer函数72场景通过，三态旧/新/回滚编译1/0/1，新运行0；五个源码
+变异先编译0再运行1。实际ARM64窄caller TU三态2/0/2；完整dp_debug.c仍编译2。
+dsi_ctrl_debugfs_init成功落入remove目录是独立已证实遗留缺陷，严格检查运行1；API-only
+补丁未掩盖或修复它，后继补丁单独处理，不能称controller debugfs生命周期已通过。
+
+第14组为五个真实消费者补linux/pinctrl/consumer.h，并把sde_plane的
+drm_gem_atomic_helper.h放回原pr_fmt定义之后。该include顺序问题由本项目第4组PRIME
+插入头文件引入，本轮修正，保留原日志格式、不压制warning。六个ARM64窄probe三态
+2/0/2（对象0/6/0），逐项撤销六个负例均2且仅5对象；原日志格式在实际ARM64对象常量中
+核对，不冒充运行期日志验证。六个完整consumer TU仍均2，目标诊断27/0/27。
+
+合并后实际全量构建BASELINE/MODIFIED/ROLLBACK对象数25/25/25，三者exit2、零模块。
+317文件真实回滚/精确重应用、315父源及五个KOUT输出hash核对；本轮三类目标诊断清零。
+合并源14组checker全部exit0；其中提取函数模型和窄API探针不替代完整模块/MODPOST/真机。
+
+模式v2仍未集成，owner/cache基础已有35+134实际函数主机断言与29分配点失败覆盖；root
+独立复跑冻结候选两组exit0。尚需完整catalog/identity/bridge/CRTC/encoder消费者，不据此
+关闭模式路线。新增用户指定gpt-6.1-sol/high MST代理，负责真实6.18 topology/payload和
+atomic commit生命周期，与mode代理协调msm_atomic.c增量；不是删除MST的简化路线。
+late GEM/private-owner退休仍无完整交付，KGSL58与配套dev2内核复用，不重复构建。
+
+证据out/kgsl-resume-20261111/sde-integration-14与原sde-debugfs-void、sde-api-headers
+四角色，旧角色保留。下一步接收独立controller成功清理修复并继续mode/MST/owner；物理显示、
+真实提交/fence退休/DDR投票/PM/性能/SQ1-SQ2仍未完成。无设备操作、发布pins变更或提交推送。
+
+## 2026-11-11：SDE第12组整编与字符串验证纠错
+
+当前12补丁/315源。第11组逐项审计32处strlcpy：30个固定边界改strscpy，strlen后独立
+分配的完整字符串用memcpy含NUL，evtlog外参容量限到真实filter数组，保留C字符串截断/终止
+及后续分支，不承诺NUL后padding逐字相同。第12组15源/21处kzfree改真实kfree_sensitive，
+保留完整分配大小清零再释放语义、补直接slab头，不退化为普通kfree；不是完整析构/退休证明。
+
+实际整编BASELINE exit2/24对象/0模块，MODIFIED exit2/25对象/0模块，真实ROLLBACK
+exit2/24对象/0模块。精确317文件回滚/重应用、315父源和KOUT五输出hash核对；两种已移除
+API的编译诊断在本轮MODIFIED均消失。模式private_flags/SEAMLESS、MST、bridge/DSI等仍阻塞
+完整模块；25对象与减少的诊断条数都不是完成百分比。合并源码12组checker全部exit0。
+
+重要纠错：子代理最初把字符串checker wrapper exit1说成编译失败，root逐字核对发现旧
+host native-api编译/运行均0，实际链接strlcpy@GLIBC_2.38（宿主glibc2.39）；wrapper1来自
+残留调用扫描。错误说法已撤回，旧记录/工具保存在pre-gate-correction。更正后显式标记为
+HOST compiler-poison模型门禁，三态1/0/1；真实4.19语义scalar/word各234均通过，新版三通道
+各234。root另实际6.18内核头ARM64窄API TU三态2/0/2，不能将其称完整调用者编译通过。
+敏感释放实际21语句与6.18 helper有210模型场景，真实ARM64 API TU三态2/0/2；原扫描器
+漏计删除调用的弱点保留并加缺失/重复site拒绝，3个生成wrapper运行反例与3个源码门禁分列。
+
+模式入口v1仍独立未集成：125断言及精确回滚已由子代理完成；另真实Android42 TU和5个
+source库--no-undefined链接成功，root重开6个ARM64 ELF/hash（其中libdrm是固定复制件）。
+不是HWC服务、全内核模式消费者或真机验收。前三次真实构建失败保留；修正错误架构libc++
+输入及独立C++兼容头后才通过。v2继续处理requested/derived/selected、bridge、cache identity
+及共享payload资源owner，不能把入口测试或库链接当整条模式路线完成。
+
+证据out/kgsl-resume-20261111/sde-integration-12；旧四角色保留并扩展，绝对路径/SHA见
+FINAL-ROLE-PATHS.txt。late GEM owner候选只有部分测试，代理交付阶段工具错误，未闭合/未集成，
+不将该工具错误当编译或产品结论。下一步debugfs真实void API及完整mode消费链；owner寿命、
+硬件退休/显示/提交/PM/长时/SQ1-SQ2仍必须完成。无部署/重启/提交推送，pins不改，goal active。
+
+## 2026-11-11：SDE第10组完成三态整编，模式请求迁移仍在进行
+
+当前10补丁/315源，配对dev2内核沿用已完成构建。新增三组：SDE/DP五处日志判断改为真实
+drm_debug_enabled(category)，保留日志路由/CORE门控；六文件仅加八条实际公开类型头；
+dsi_parser_utils.get_named_gpio及函数声明/定义/禁用stub改为const device_node，与6.18 OF匹配。
+GPIO读取/index/error原语义不改。原checker一度错认OF形参名，保留失败，v2改为提取实际名字，
+不把该工具错误计为产品红例。新GPIO64实际源码模型场景通过，完整真实头两配置ARM64 TU通过。
+
+实际整编三态BASELINE exit2/21对象/0模块，MODIFIED exit2/24对象/0模块，ROLLBACK
+exit2/21对象/0模块。原件、317归档文件恢复/重应用及KOUT五输出hash均核对。目标日志符号、
+framebuffer/bridge_funcs完整类型、GPIO回调签名错误在本轮MODIFIED中消失，但模式状态、
+MST/bridge/DSI/DSC等接口仍阻塞整个模块；不能把24对象或错误条数当完成百分比。
+
+整合树独立运行10组checker全部exit0：此前native50/joint14/active21/PRIME31/fence9保持，
+debug1320/GPIO64和6个真实公开头窄TU通过。debug真实完整consumer仍有其他旧API错误；
+公开头六个完整原TU仍失败，仅目标86条类型诊断消失。以上不证明硬件或完整模块可用。
+原四角色保留并扩展，整合证据out/kgsl-resume-20261111/sde-integration-10；角色路径/SHA统一
+更新到FINAL-ROLE-PATHS.txt。无部署/重启/提交推送，默认发布pins和运行10档OPP未改。
+
+mode审计已保存并恢复实际QTI builder源码请求链：6.18拒绝旧VID/CMD/SEAMLESS高位，
+不能仅补常量。driver-owned requested/adjusted状态、配对用户态atomic请求、mode cache payload
+所有权与完整DSI消费者仍须迁移。审计中的共享payload重复释放调用仅为实际语句/函数模型，
+不是完整cache或硬件UAF证明。下一步并行推进真实mode入口/消费者、字符串API、late GEM
+private-owner寿命；所有候选保持独立验证再合入。整体目标active，全部full_*边界保持。
+
+## 2026-11-11：配对内核完成，SDE 第7组已集成并实际三态整编
+
+本节覆盖下方“新内核仍在构建／PRIME尚未集成”的旧检查点。隔离dev2的Image、486内核模块、
+KGSL58的60对象/3模块及489模块depmod已完成；Image 7e0d1129…，msm_kgsl 5ff1f2e3…。
+这是编译候选，不是部署/真机验收；旧配对内核和默认发布pins未改，不重新启动已完成构建。
+
+SDE目前7补丁/315源。PRIME之后合入真实公共framebuffer/fourcc头、删除无用户的ION头依赖、
+实际MDSS DMA provider及active-list引用快照/回调锁/完整DMA span校验。native DMA与active-lock
+是成对int回调API迁移，不能单独拿第6组当可用候选。local走DMA API，EXTBUF保留attachment映射
+所有权；不借用后释放provider域、不重复map/unmap。secure/NRT及固件identity/splash仍显式不支持。
+
+同一dev2 KOUT、相同完整模块命令实际三态：BASELINE exit2/2对象/0模块，MODIFIED
+exit2/21对象/0模块，真实ROLLBACK exit2/2对象/0模块；317个归档文件逐hash恢复并精确重应用。
+原315源和KOUT关键输出不变。整合树独立复跑native50、provider→VMA14、active21、PRIME31、
+fence9均通过。旧PRIME模型缺三项新增公共primitive，初次编译失败保留；仅补模型overflow/SG
+遍历定义，断言/产品不改，旧/回滚失败，新/重应用31通过。不是硬件DMA、TLB、退休或safe unbind证明。
+
+共享工具scripts/check-sde-native-{dma,kms,secure,joint}.py和check-sde-active-lock.py已归档，
+支持显式源码/内核路径，不依赖私有out目录。原四角色与失败证据保留；整合扩展为
+out/kgsl-resume-20261111/sde-integration-7/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}。
+完整编译仍失败：新暴露的日志category API、mode private_flags/SEAMLESS/vrefresh、MST/bridge/DSI等
+需继续真实移植；错误条目数不是独立缺陷数或完成百分比。mode请求须兼顾原厂用户态，不能把6.18
+已拒绝的旧flags硬塞回核心，或用永false/无人设置的属性冒充兼容。
+
+下一步：独立debug-category候选和mode请求/状态所有权迁移，继续完整模块构建、KGSL真机提交及
+SDE物理显示/联合fence/PM/长时/SQ1-SQ2验收；full_*不提升。目标active。未提交推送、未部署重启。
+
+## 2026-11-11：DDR联合链与SDE PRIME／DRM核心后续状态
+
+第58 KGSL完整构建结果保持。另完成同一loader表的实际源码联合链：32场景、9个编译后运行反例；
+BASELINE/ROLLBACK均0绿32红exit1，MODIFIED32绿exit0。逐项核对39 DDR+8 CNOC HFI words、
+七频default/min/max及280次hint，覆盖RPMh分配失败和ICC重试；不是硬件投票/Surface校准。
+证据 `out/kgsl-resume-20261111/ddr-joint/JOINT-RESULT.json`，不改运行10档OPP。
+
+实际DRM `drm_gem_plane_helper_prepare_fb`发现并修正两条引用泄漏：无FB先get显式fence后直接返回；
+chain分配失败漏put尚未转移的new fence。原件/实际回滚3定点各LSan报1个24B模型fence；
+新副本41场景和4个编译后运行负例通过，主代理独立重跑也通过，KERNEL/WRITE语义不变。
+已归档 `configs/drm-618-plane-fence-ownership.json` 及精确patch，旧paired kernel未改。
+新隔离 `/mnt/spx-workspace/chromebookOS/work/qualcomm-618/kgsl-sde-fence-20261111-build`
+已真正启动Image/modules -j12；仅source helper和CONFIG_LOCALVERSION(-sq2-kgsl-sde-fence-dev2)变化。
+记录时session27827/orchestrator354/make1096运行，已有原ashmem warning；尚未宣称构建完成。
+续接必须复核 `drm-fence-chain/build/STATUS.json` 和真实进程/会话，不因观察超时重新开构建。
+
+SDE PRIME九源候选未集成，独立审阅进行中：31 owner、9 fence/state、11 native fault场景及
+10个编译后运行负例通过；BASELINE/ROLLBACK owner与fence exit1，MODIFIED exit0。
+真实PRIME TU三态均exit2，完整候选v4也exit2/仅2对象/无模块；共享KMS/provider旧API仍须迁移。
+import_aspace从attachment前保留到真实unmap/detach后，核心resv持锁入口不递归加锁；
+不读foreign私有数据，不伪造secure属性，不丢必要fence。真实PFN/SG/resv公开API迁移已纳入。
+core新副本另与实际SDE九场景及chain OOM联合通过，但旧paired kernel仍含旧helper，不能混称已修部署。
+下一步先独立审阅合并此候选，再移植真实MDSS DMA provider；不把DMA映射和手动paging域混搭。
+
+原四角色及所有扩展已重开；绝对路径和SHA统一在ignored `out/kgsl-resume-20261111/FINAL-ROLE-PATHS.txt`，
+执行续接点为 `CURRENT.json`。未提交/推送、未部署/重启、不改发布pins；整体目标active、full_*仍未完成。
+
+## 当前续接构建：58补丁/109源（2026-11-11）
+
+native indexed DDR加载器已独立完整编译：60对象（59个GCC -Werror单元和1链接对象）、3模块，
+MODPOST通过、489模块depmod无输出；不是激活/硬件投票验证。原内核/56/57源和输出保持。
+WSL配对根 `/mnt/spx-workspace/chromebookOS/work/qualcomm-618/kgsl-resume-20261111-build`，
+用 `kernel`、`kernel-out`、`kgsl-58`、`stage-58`；不混用运行系统同名模块。
+真实构建报告 `out/kgsl-resume-20261111/ddr-indexed/build/FINAL-BUILD-58-RESULT.json`，
+SHA18349d7c65109aa9c2272511eae9925f8860174448f8e4352b9189ff27bfae4a；
+msm_kgsl SHA409318f2dbe7bb6774a9159c9228a8f47e72e9d9158c64d8c9db68fd73e517de。
+复制模板的install/depmod日志label仍含57，实际命令均指向新stage-58，旧记录不覆盖；按命令核验。
+
+```sh
+python3 scripts/check-kgsl-indexed-policy.py --source FRESH_KGSL/drivers/gpu/msm/kgsl_bus.c --output FRESH_CHECK --mutations --bus-regression-source FRESH_KGSL/drivers/gpu/msm
+```
+该检查固定保存读取的参考JSON原字节及SHA。默认13档/7行参考不是当前10频运行配置，
+全部enabled OPP必须匹配才准入；当前未改DT、不删除实验高档、不插值、不部署。
+输入契约和三态记录见 `docs/KGSL-PARALLEL-20261111.md`；SDE PRIME尚在独立修订，不能合称整栈通过。
+
+## 当前续接构建：57补丁/109源（2026-11-11）
+
+第57候选已完成新的配对 ARM64 内核/模块构建，不继承下方历史v83的链接证明。
+候选状态 `source-linked-not-device-ready`；完整SDE、设备运行、退休/生命周期仍未完成。
+实际命令、输入和字面日志：`out/kgsl-resume-20261111/build/FINAL-BUILD-RESULT.json`（新内核与55组）、
+`FINAL-BUILD-56-RESULT.json`（56组）；57组独立记录为 `out/kgsl-resume-20261111/ordinary-fix/build/FINAL-BUILD-57-RESULT.json`。
+WSL 构建根为 `/mnt/spx-workspace/chromebookOS/work/qualcomm-618/kgsl-resume-20261111-build`；
+`kernel`、`kernel-out`、`kgsl-57`、`stage-57` 成套使用，不与运行系统/历史同版本模块混装。
+外置 devfreq 私有头必须来自该 `kernel/drivers/devfreq/governor.h`，不能用5.4 donor头。
+
+新增局部测试：
+```sh
+python3 scripts/check-kgsl-hfi-worker.py --source FRESH_CANDIDATE/drivers/gpu/msm --output FRESH_HFI_CHECK
+python3 scripts/prepare-sde-618.py --source PINNED_DISPLAY_DONOR --output FRESH_SDE
+python3 scripts/build-sde-618.py --source FRESH_SDE --kernel-build MATCHING_KERNEL_OUT --output FRESH_SDE_BUILD
+```
+SDE构建记录真实失败退出码，不忽略MODPOST、不混入旧DRM核心头、不使用成功stub。
+详细HFI/SQE旧红新绿/回滚及整编警告边界见 `docs/KGSL-PARALLEL-20261111.md`。
+
+## KGSL 并行续接：SQE 边界候选（2026-11-11）
+
+当前配置55补丁/109源，状态 `source-host-tested-not-device-ready`。新第55补丁仅改变
+`adreno.c` 的共享微码loader；最近完整内核/模块构建仍是下方历史v83，不可继承为新候选通过。
+
+```sh
+python3 scripts/prepare-kgsl-618.py --config configs/kgsl-xiaomi-618-port.json --source PINNED_DONOR --output FRESH_CANDIDATE
+python3 scripts/check-kgsl-sqe.py --source FRESH_CANDIDATE/drivers/gpu/msm/adreno.c --output FRESH_CHECK --firmware PRIVATE_CAPTURED_SQE
+```
+
+`--firmware`可省略，只运行50合成场景；带本轮捕获A680 SQE运行51项。checker执行真实提取函数，
+request/global allocator为模型；普通/扩展头、非对齐数据、错误、已缓存及载荷逐字节对照。
+四角色、旧红新绿回滚及6个运行反例见 `docs/KGSL-PARALLEL-20261111.md`。
+不修改旧54项补丁；本机新建输入目录，不覆盖历史candidate，当前没有新完整ARM64链接/部署证明。
+
+外层解绑契约使用真实callback/core函数重跑：
+
+```sh
+python3 scripts/check-kgsl-component-teardown.py --source FRESH_CANDIDATE/drivers/gpu/msm --kernel-source MATCHING_LINUX_618 --output FRESH_STRICT_CHECK
+```
+
+当前严格模式预期退出1，不能当作通过；另加 `--expect-gap` 只确认两个已知反例时退出0，
+结果仍明确 `lifecycle_accepted=false`、`hardware_validated=false`。测试不会访问设备。
+
 ## 小米 KGSL v83：中间页表 checked walk 同步（2026-11-11）
 
 候选 `kgsl-618-v83`：54补丁/109源，配套 `native-kernel-v3`，source-linked-not-device-ready。`configs/kgsl-618-smmu-walk.json` 固定6输入（5改变、qcom源保持），在 smmu-drain 之后准备；GPU父域和GMU域均在映射前调用新导出 `arm_smmu_enable_checked_unmap`。
@@ -201,7 +474,7 @@ python3 scripts/check-kgsl-module-api.py --source FRESH_KGSL/drivers/gpu/msm --k
 
 独立内核在`out/kgsl-sde-port-20261110/native-kernel-v1`：从匹配6.18.60完整源复制，再按SOURCE.json的before/after/patch SHA无fuzz应用三个提供者补丁。新.config只改LOCALVERSION=-sq2-kgsl-dev1；91,245普通源文件只10提供者文件改变。使用记录的COMPILE-COMMAND.json执行Image和modules，成功得到486模块（含MSM）；最终结果以COMPILE-FINAL-RESULT.json为准。初次完整编译37个既有警告和WSL时间戳问题保留，最终增量复核无警告，未声称全内核-Werror。
 
-KGSL完整构建入口为`xiaomi-sm8350-audit/kgsl-618-v61/COMPILE-COMMAND.json`，用新内核真实头和符号表；不再强制包含临时提供者头。保留donor外部devfreq/governor.h和EXTERNAL-KCONFIG.json；源码以-Werror完整构建，得到msm_kgsl.ko及两个governor，60对象/零错误/警告。489模块含实际builtin/order清单的depmod -e -F System.map检查无输出。
+KGSL完整构建入口为`xiaomi-sm8350-audit/kgsl-618-v61/COMPILE-COMMAND.json`，用新内核真实头和符号表；不再强制包含临时提供者头。保留匹配6.18源的外部devfreq/governor.h和EXTERNAL-KCONFIG.json（历史donor措辞不适用于5.4私有头）；源码以-Werror完整构建，得到msm_kgsl.ko及两个governor，60对象/零错误/警告。489模块含实际builtin/order清单的depmod -e -F System.map检查无输出。
 
 构建命令是JSON argv，重放可用Python `subprocess.run(json.load(open(COMMAND_JSON)), check=True)`，不要把转义的governor字符串再拼接为shell命令。旧v61/SOURCE.json的准备前状态字不代表最终链接结果；当前config/COMPILE-RESULT和审计为准。
 

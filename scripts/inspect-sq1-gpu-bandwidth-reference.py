@@ -2,7 +2,8 @@
 """Inspect pinned SQ1 graphics power tables offline; never emit target DT votes.
 
 ACPICA evaluates the original AML with a read-only query wrapper. The Windows
-instruction checks concern a bandwidth query, not a proven GMU voting path.
+instruction checks concern PSTATE selection and memory-frequency telemetry,
+not a proven bandwidth query or GMU voting path.
 Expanded firmware, logs and driver bytes belong in ignored out/ directories.
 """
 import argparse
@@ -227,6 +228,8 @@ def inspect(dsdt, driver, output):
     require(digest(data) == DSDT_SHA, 'Unrecognized DSDT hash')
     check_acpi(data)
     instructions = driver_evidence(driver.read_bytes())
+    # Keep the original JSON key for consumers; its bandwidth name was not proof.
+    instructions["query_selects_graphics_pstate_set"] = instructions["query_selects_graphics_bw_control"]
     output.mkdir(parents=True, exist_ok=False)
     (output / 'input.dat').write_bytes(data)
     (output / 'query.asl').write_text(QUERY)
@@ -266,14 +269,31 @@ def inspect(dsdt, driver, output):
         'tables': tables,
         'selected_frequencies_hz': [row[2] for row in selected[0][9:]],
         'selected_bandwidth_raw': [row[2] for row in selected[1][9:]],
+        'selected_p007_raw': [row[2] for row in selected[1][9:]],
+        'reference_semantics': {
+            'deprecated_semantic_names': {
+                'selected_bandwidth_raw': 'selected_p007_raw',
+                'driver.query_selects_graphics_bw_control': 'driver.query_selects_graphics_pstate_set',
+            },
+            'telemetry_destination': ['DXGK_ADAPTER_PERFDATA.MemoryFrequency',
+                'DXGK_ADAPTER_PERFDATA.MaxMemoryFrequency',
+                'DXGK_ADAPTER_PERFDATA.MaxMemoryFrequencyOC'],
+            'destination_contract_unit': 'Hz',
+            'raw_p007_unit': 'unproven',
+            'physical_value_validated': False,
+            'vote_path_verified': False,
+            'source': 'Fixed-driver Type25/Type26 static consumer audit; not executed telemetry',
+            'note': 'MemoryBandwidth/PCIEBandwidth are zeroed by this Type25 consumer; '
+                'raw P007 values are not DDR bytes/s. The Hz ABI contract does not validate physical values.',
+        },
         'driver': instructions,
         'acpica_diagnostics': diagnostics,
         'limits': [
             'Original AML PMCL evaluated offline with STA/INI disabled, not on hardware. '
             'Pinned DSDT has unrelated BAUD buffer-field initialization errors, retained above.',
             'SQ1 archive selection only; no claim about current SQ2 or firmware revisions.',
-            'Bandwidth units, runtime factor, GPU-frequency-to-bandwidth policy and CNOC ON/OFF votes remain unproved.',
-            '9 frequency states and 11 bandwidth states must not be zipped into an OPP table.',
+            'Raw P007 units, physical runtime factor and GPU-frequency-to-bandwidth policy remain unproved; telemetry is not a vote.',
+            '9 P004 frequency states and 11 P007 states must not be zipped into an OPP bandwidth table.',
             'No DT, driver source, device, or deployment was changed by this tool.',
         ],
         'artifacts': {f.name: digest(f.read_bytes()) for f in output.iterdir() if f.is_file()},
@@ -291,7 +311,8 @@ def main():
     args = parser.parse_args()
     result = inspect(args.dsdt.resolve(), args.driver.resolve(), args.output.resolve())
     print(json.dumps({k: result[k] for k in ['status', 'selected_packages', 'selected_frequencies_hz',
-                                            'selected_bandwidth_raw']}, indent=2))
+                                            'selected_bandwidth_raw', 'selected_p007_raw',
+                                            'reference_semantics']}, indent=2))
 
 
 if __name__ == '__main__':

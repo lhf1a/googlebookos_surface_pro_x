@@ -1,0 +1,306 @@
+--- a/techpack/display/msm/msm_kms.h
++++ b/techpack/display/msm/msm_kms.h
+@@ -53,9 +53,9 @@
+ 	int (*hw_init)(struct msm_kms *kms);
+ 	int (*postinit)(struct msm_kms *kms);
+ 	/* irq handling: */
+-	void (*irq_preinstall)(struct msm_kms *kms);
++	int (*irq_preinstall)(struct msm_kms *kms);
+ 	int (*irq_postinstall)(struct msm_kms *kms);
+-	void (*irq_uninstall)(struct msm_kms *kms);
++	int (*irq_uninstall)(struct msm_kms *kms);
+ 	irqreturn_t (*irq)(struct msm_kms *kms);
+ 	int (*enable_vblank)(struct msm_kms *kms, struct drm_crtc *crtc);
+ 	void (*disable_vblank)(struct msm_kms *kms, struct drm_crtc *crtc);
+--- a/techpack/display/msm/sde/sde_core_irq.c
++++ b/techpack/display/msm/sde/sde_core_irq.c
+@@ -441,52 +441,49 @@
+ }
+ #endif
+ 
+-void sde_core_irq_preinstall(struct sde_kms *sde_kms)
+-{
+-	int i;
+-	int rc;
+-
+-	if (!sde_kms || !sde_kms->dev) {
+-		SDE_ERROR("invalid sde_kms or dev\n");
+-		return;
+-	}
+-
+-	if (!sde_in_trusted_vm(sde_kms)) {
+-		rc = pm_runtime_get_sync(sde_kms->dev->dev);
+-		if (rc < 0) {
+-			SDE_ERROR("failed to enable power resource %d\n", rc);
+-			SDE_EVT32(rc, SDE_EVTLOG_ERROR);
+-			return;
+-		}
+-
+-		sde_clear_all_irqs(sde_kms);
+-		sde_disable_all_irqs(sde_kms);
+-
+-		pm_runtime_put_sync(sde_kms->dev->dev);
+-	}
+-
+-	spin_lock_init(&sde_kms->irq_obj.cb_lock);
+-
+-	/* Create irq callbacks for all possible irq_idx */
+-	sde_kms->irq_obj.total_irqs = sde_kms->hw_intr->sde_irq_map_size;
+-	sde_kms->irq_obj.irq_cb_tbl = kcalloc(sde_kms->irq_obj.total_irqs,
+-			sizeof(struct list_head), GFP_KERNEL);
+-	sde_kms->irq_obj.enable_counts = kcalloc(sde_kms->irq_obj.total_irqs,
+-			sizeof(atomic_t), GFP_KERNEL);
+-	sde_kms->irq_obj.irq_counts = kcalloc(sde_kms->irq_obj.total_irqs,
+-			sizeof(atomic_t), GFP_KERNEL);
+-	if (!sde_kms->irq_obj.irq_cb_tbl || !sde_kms->irq_obj.enable_counts
+-			|| !sde_kms->irq_obj.irq_counts)
+-		return;
+-
+-	for (i = 0; i < sde_kms->irq_obj.total_irqs; i++) {
+-		if (sde_kms->irq_obj.irq_cb_tbl)
+-			INIT_LIST_HEAD(&sde_kms->irq_obj.irq_cb_tbl[i]);
+-		if (sde_kms->irq_obj.enable_counts)
+-			atomic_set(&sde_kms->irq_obj.enable_counts[i], 0);
+-		if (sde_kms->irq_obj.irq_counts)
+-			atomic_set(&sde_kms->irq_obj.irq_counts[i], 0);
+-	}
++int sde_core_irq_preinstall(struct sde_kms *sde_kms)
++{
++    struct list_head *callbacks;
++    atomic_t *enabled, *counts;
++    int i, ret, total;
++
++    if (!sde_kms || !sde_kms->dev || !sde_kms->hw_intr)
++        return -EINVAL;
++    if (sde_kms->irq_obj.irq_cb_tbl || sde_kms->irq_obj.enable_counts ||
++        sde_kms->irq_obj.irq_counts || sde_kms->irq_obj.total_irqs)
++        return -EBUSY;
++    total = sde_kms->hw_intr->sde_irq_map_size;
++    if (total <= 0)
++        return -EINVAL;
++    if (!sde_in_trusted_vm(sde_kms)) {
++        ret = pm_runtime_resume_and_get(sde_kms->dev->dev);
++        if (ret < 0)
++            return ret;
++        sde_clear_all_irqs(sde_kms);
++        sde_disable_all_irqs(sde_kms);
++        pm_runtime_put_sync(sde_kms->dev->dev);
++    }
++    callbacks = kcalloc(total, sizeof(*callbacks), GFP_KERNEL);
++    enabled = kcalloc(total, sizeof(*enabled), GFP_KERNEL);
++    counts = kcalloc(total, sizeof(*counts), GFP_KERNEL);
++    if (!callbacks || !enabled || !counts) {
++        kfree(callbacks);
++        kfree(enabled);
++        kfree(counts);
++        return -ENOMEM;
++    }
++    for (i = 0; i < total; i++) {
++        INIT_LIST_HEAD(&callbacks[i]);
++        atomic_set(&enabled[i], 0);
++        atomic_set(&counts[i], 0);
++    }
++    spin_lock_init(&sde_kms->irq_obj.cb_lock);
++    /* No Linux handler exists until the complete table is published. */
++    sde_kms->irq_obj.irq_cb_tbl = callbacks;
++    sde_kms->irq_obj.enable_counts = enabled;
++    sde_kms->irq_obj.irq_counts = counts;
++    sde_kms->irq_obj.total_irqs = total;
++    return 0;
+ }
+ 
+ int sde_core_irq_postinstall(struct sde_kms *sde_kms)
+@@ -494,42 +491,42 @@
+ 	return 0;
+ }
+ 
+-void sde_core_irq_uninstall(struct sde_kms *sde_kms)
+-{
+-	int i;
+-	int rc;
+-	unsigned long irq_flags;
+-
+-	if (!sde_kms || !sde_kms->dev) {
+-		SDE_ERROR("invalid sde_kms or dev\n");
+-		return;
+-	}
+-
+-	rc = pm_runtime_get_sync(sde_kms->dev->dev);
+-	if (rc < 0) {
+-		SDE_ERROR("failed to enable power resource %d\n", rc);
+-		SDE_EVT32(rc, SDE_EVTLOG_ERROR);
+-		return;
+-	}
+-
+-	for (i = 0; i < sde_kms->irq_obj.total_irqs; i++)
+-		if (atomic_read(&sde_kms->irq_obj.enable_counts[i]) ||
+-				!list_empty(&sde_kms->irq_obj.irq_cb_tbl[i]))
+-			SDE_ERROR("irq_idx=%d still enabled/registered\n", i);
+-
+-	sde_clear_all_irqs(sde_kms);
+-	sde_disable_all_irqs(sde_kms);
+-	pm_runtime_put_sync(sde_kms->dev->dev);
+-
+-	spin_lock_irqsave(&sde_kms->irq_obj.cb_lock, irq_flags);
+-	kfree(sde_kms->irq_obj.irq_cb_tbl);
+-	kfree(sde_kms->irq_obj.enable_counts);
+-	kfree(sde_kms->irq_obj.irq_counts);
+-	sde_kms->irq_obj.irq_cb_tbl = NULL;
+-	sde_kms->irq_obj.enable_counts = NULL;
+-	sde_kms->irq_obj.irq_counts = NULL;
+-	sde_kms->irq_obj.total_irqs = 0;
+-	spin_unlock_irqrestore(&sde_kms->irq_obj.cb_lock, irq_flags);
++int sde_core_irq_uninstall(struct sde_kms *sde_kms)
++{
++    unsigned long flags;
++    int i, ret;
++
++    if (!sde_kms || !sde_kms->dev)
++        return -EINVAL;
++    if (!sde_kms->irq_obj.total_irqs)
++        return 0;
++    if (!sde_kms->irq_obj.irq_cb_tbl || !sde_kms->irq_obj.enable_counts ||
++        !sde_kms->irq_obj.irq_counts)
++        return -EUCLEAN;
++    /* Caller has disabled/synchronized the Linux IRQ before this hook. */
++    ret = pm_runtime_resume_and_get(sde_kms->dev->dev);
++    if (ret < 0)
++        return ret;
++    for (i = 0; i < sde_kms->irq_obj.total_irqs; i++) {
++        if (atomic_read(&sde_kms->irq_obj.enable_counts[i]) ||
++            !list_empty(&sde_kms->irq_obj.irq_cb_tbl[i])) {
++            pm_runtime_put_sync(sde_kms->dev->dev);
++            return -EBUSY;
++        }
++    }
++    sde_clear_all_irqs(sde_kms);
++    sde_disable_all_irqs(sde_kms);
++    pm_runtime_put_sync(sde_kms->dev->dev);
++    spin_lock_irqsave(&sde_kms->irq_obj.cb_lock, flags);
++    kfree(sde_kms->irq_obj.irq_cb_tbl);
++    kfree(sde_kms->irq_obj.enable_counts);
++    kfree(sde_kms->irq_obj.irq_counts);
++    sde_kms->irq_obj.irq_cb_tbl = NULL;
++    sde_kms->irq_obj.enable_counts = NULL;
++    sde_kms->irq_obj.irq_counts = NULL;
++    sde_kms->irq_obj.total_irqs = 0;
++    spin_unlock_irqrestore(&sde_kms->irq_obj.cb_lock, flags);
++    return 0;
+ }
+ 
+ static void sde_core_irq_mask(struct irq_data *irqd)
+--- a/techpack/display/msm/sde/sde_core_irq.h
++++ b/techpack/display/msm/sde/sde_core_irq.h
+@@ -14,7 +14,7 @@
+  * @sde_kms:		SDE handle
+  * @return:		none
+  */
+-void sde_core_irq_preinstall(struct sde_kms *sde_kms);
++int sde_core_irq_preinstall(struct sde_kms *sde_kms);
+ 
+ /**
+  * sde_core_irq_postinstall - perform post-installation of core IRQ handler
+@@ -28,7 +28,7 @@
+  * @sde_kms:		SDE handle
+  * @return:		none
+  */
+-void sde_core_irq_uninstall(struct sde_kms *sde_kms);
++int sde_core_irq_uninstall(struct sde_kms *sde_kms);
+ 
+ /**
+  * sde_core_irq_domain_add - Add core IRQ domain for SDE
+--- a/techpack/display/msm/sde/sde_irq.c
++++ b/techpack/display/msm/sde/sde_irq.c
+@@ -84,28 +84,21 @@
+ 	return IRQ_NONE;
+ }
+ 
+-void sde_irq_preinstall(struct msm_kms *kms)
++int sde_irq_preinstall(struct msm_kms *kms)
+ {
+-	struct sde_kms *sde_kms = to_sde_kms(kms);
++    struct sde_kms *sde_kms;
++    int ret;
+ 
+-	if (!sde_kms->dev || !sde_kms->dev->dev) {
+-		pr_err("invalid device handles\n");
+-		return;
+-	}
+-
+-	sde_core_irq_preinstall(sde_kms);
+-
+-	sde_kms->irq_num = platform_get_irq(
+-				to_platform_device(sde_kms->dev->dev),
+-				0);
+-	if (sde_kms->irq_num < 0) {
+-		SDE_ERROR("invalid irq number %d\n", sde_kms->irq_num);
+-		return;
+-	}
+-
+-	/* disable irq until power event enables it */
+-	if (!sde_kms->irq_enabled)
+-		irq_set_status_flags(sde_kms->irq_num, IRQ_NOAUTOEN);
++    if (!kms || kms->irq < 0)
++        return -EINVAL;
++    sde_kms = to_sde_kms(kms);
++    if (!sde_kms->dev || !sde_kms->dev->dev)
++        return -EINVAL;
++    ret = sde_core_irq_preinstall(sde_kms);
++    if (ret)
++        return ret;
++    sde_kms->irq_num = kms->irq;
++    return 0;
+ }
+ 
+ int sde_irq_postinstall(struct msm_kms *kms)
+@@ -123,15 +116,21 @@
+ 	return rc;
+ }
+ 
+-void sde_irq_uninstall(struct msm_kms *kms)
++int sde_irq_uninstall(struct msm_kms *kms)
+ {
+-	struct sde_kms *sde_kms = to_sde_kms(kms);
++    struct sde_kms *sde_kms;
++    int ret;
+ 
+-	if (!kms) {
+-		SDE_ERROR("invalid parameters\n");
+-		return;
+-	}
+-
+-	sde_core_irq_uninstall(sde_kms);
+-	sde_core_irq_domain_fini(sde_kms);
++    if (!kms)
++        return -EINVAL;
++    sde_kms = to_sde_kms(kms);
++    ret = sde_core_irq_uninstall(sde_kms);
++    if (ret)
++        return ret;
++    ret = sde_core_irq_domain_fini(sde_kms);
++    if (ret)
++        return ret;
++    sde_kms->irq_num = -1;
++    sde_kms->irq_enabled = false;
++    return 0;
+ }
+--- a/techpack/display/msm/sde/sde_irq.h
++++ b/techpack/display/msm/sde/sde_irq.h
+@@ -26,7 +26,7 @@
+  * @kms:		pointer to kms context
+  * @return:		none
+  */
+-void sde_irq_preinstall(struct msm_kms *kms);
++int sde_irq_preinstall(struct msm_kms *kms);
+ 
+ /**
+  * sde_irq_postinstall - perform post-installation of MDSS IRQ handler
+@@ -40,7 +40,7 @@
+  * @drm_dev:		pointer to kms context
+  * @return:		none
+  */
+-void sde_irq_uninstall(struct msm_kms *kms);
++int sde_irq_uninstall(struct msm_kms *kms);
+ 
+ /**
+  * sde_irq - MDSS level IRQ handler

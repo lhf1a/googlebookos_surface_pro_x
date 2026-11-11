@@ -114,6 +114,16 @@ static void kfree(void *p) { assert(!IS_ERR(p)); if (p) { ++frees; free(p); } }
 static void *of_icc_get(struct device *dev, const char *name)
 { assert(dev && !strcmp(name, "gfx-mem")); ++get_calls; return path_result; }
 static void icc_put(void *p) { assert(!IS_ERR(p)); if (p) { assert(p == path_result); ++put_calls; } }
+/* Indexed helpers need these leaves; this suite selects absent native policy. */
+static void *of_find_property(struct device_node *n,const char *s,int *l){return NULL;}
+static int of_property_count_elems_of_size(struct device_node *n,const char *s,int z){return -EINVAL;}
+static int of_property_read_u32(struct device_node *n,const char *s,u32 *v){return -EINVAL;}
+static int of_property_read_string(struct device_node *n,const char *s,const char **v){return -EINVAL;}
+static struct device_node *of_get_child_by_name(struct device_node *n,const char *s){return NULL;}
+static bool of_device_is_available(struct device_node *n){return n!=NULL;}
+static void of_node_put(struct device_node *n){}
+#define for_each_available_child_of_node(p,c) for((c)=NULL;(c);(c)=NULL)
+static int dev_pm_opp_get_opp_count(struct device *d){return opp_count;}
 #include "kgsl-bus-functions.h"
 static int set_bus(struct kgsl_device *d, int level, u32 ab)
 {

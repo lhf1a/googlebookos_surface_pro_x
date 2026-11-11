@@ -1,0 +1,11 @@
+--- a/include/uapi/drm/msm_drm.h
++++ b/include/uapi/drm/msm_drm.h
+@@ -25,7 +25,7 @@
+ #ifndef __MSM_DRM_H__
+ #define __MSM_DRM_H__
+ 
+-#include "drm.h"
++#include <drm/drm.h>
+ 
+ #if defined(__cplusplus)
+ extern "C" {

@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "status": "kernel-linked-host-tested-not-device-validated",
+  "kernel_series": "6.18",
+  "patch": "patches/drm-618-plane-fence-ownership.patch",
+  "sha256": "77545f2597d32566e8eddc280f2e8b2f432093c9794dbad4508f1545019e6ae8",
+  "files": {
+    "drivers/gpu/drm/drm_gem_atomic_helper.c": {
+      "before": "ae1ef24a7adf7b761bb3cfac20512be584d3bf4657b1db46db7648baae317e02",
+      "after": "7e0c477bbcce8eb3841e82a95b55519ffd817d6b722adcfdb16d39c2e288ccc9"
+    }
+  },
+  "changed_function": "drm_gem_plane_helper_prepare_fb",
+  "host_validation": {
+    "scenarios": 41,
+    "isolated_leak_cases": [
+      "no-fb-explicit",
+      "chain-explicit",
+      "chain-implicit"
+    ],
+    "runtime_negative_controls": 4,
+    "baseline_and_actual_rollback": "Compile success; each isolated case returns 1 with one 24-byte modeled fence leak under LSan.",
+    "modified_and_exact_reapply": "Compile success; all scenarios return 0 with empty sanitizer stderr."
+  },
+  "limits": [
+    "Host tests execute actual helper with fence/reservation/allocation API leaves modeled.",
+    "Full isolated paired kernel and KGSL58 consumers built; original kernel and KOUT preserved.",
+    "SDE whole-driver compilation, real scanout, concurrent retirement and full device validation remain incomplete.",
+    "This candidate-only build record does not change default release pins or deployed packages."
+  ],
+  "build_validation": {
+    "result": "out/kgsl-resume-20261111/drm-fence-chain/build/FINAL-ARTIFACTS.json",
+    "result_sha256": "85bab129741e64cac7833c7fe8cdc6333a48cd3de256e6dfc5e0b25b1c7df482",
+    "kernelrelease": "6.18.60-sq2-kgsl-sde-fence-dev2",
+    "image_sha256": "7e0d1129e64feb0d8b0a6e0830e6d34e4ef04174dc64a943a90038c065d6d967",
+    "kernel_modules": 486,
+    "kgsl_modules": 3,
+    "depmod_modules": 489,
+    "strict_core_objects": 5,
+    "kgsl_objects": 60,
+    "full_kernel_warnings": 37,
+    "strict_core_and_kgsl_warnings": 0,
+    "deployed": false
+  }
+}

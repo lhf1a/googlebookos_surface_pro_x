@@ -1,0 +1,40 @@
+--- a/techpack/display/msm/dsi/dsi_parser.h
++++ b/techpack/display/msm/dsi/dsi_parser.h
+@@ -43,7 +43,7 @@
+ int dsi_parser_read_string_index(const struct device_node *np,
+ 				const char *propname,
+ 				int index, const char **output);
+-int dsi_parser_get_named_gpio(struct device_node *np,
++int dsi_parser_get_named_gpio(const struct device_node *np,
+ 				const char *propname, int index);
+ #else /* CONFIG_DSI_PARSER */
+ static inline void *dsi_parser_get(struct device *dev)
+@@ -147,7 +147,7 @@
+ 	return -ENODEV;
+ }
+ 
+-static inline int dsi_parser_get_named_gpio(struct device_node *np,
++static inline int dsi_parser_get_named_gpio(const struct device_node *np,
+ 				const char *propname, int index)
+ {
+ 	return -ENODEV;
+@@ -186,7 +186,7 @@
+ 		struct device_node *prev);
+ 	int (*count_u32_elems)(const struct device_node *np,
+ 		const char *propname);
+-	int (*get_named_gpio)(struct device_node *np,
++	int (*get_named_gpio)(const struct device_node *np,
+ 				const char *propname, int index);
+ 	int (*get_available_child_count)(const struct device_node *np);
+ };
+--- a/techpack/display/msm/dsi/dsi_parser.c
++++ b/techpack/display/msm/dsi/dsi_parser.c
+@@ -854,7 +854,7 @@
+ 	return -EINVAL;
+ }
+ 
+-int dsi_parser_get_named_gpio(struct device_node *np,
++int dsi_parser_get_named_gpio(const struct device_node *np,
+ 				const char *propname, int index)
+ {
+ 	int gpio = -EINVAL;

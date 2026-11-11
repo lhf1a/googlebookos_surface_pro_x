@@ -1,0 +1,413 @@
+{
+  "schema": 1,
+  "status": "source-family-reference-not-activated-not-surface-calibration",
+  "source": {
+    "repository": "https://android.googlesource.com/kernel/msm",
+    "commit": "04749e7fec2a8a5784a984d09f03fd0f2715fd1b",
+    "path": "arch/arm64/boot/dts/qcom/sdmshrike-gpu.dtsi",
+    "sha256": "25f87fb03f58ae29727a187de1c66b6f2d819ef172ac78a29295f5902ab4b5ec",
+    "git_blob_sha1": "76a1e5379fc6791771a68a70267b9b1cdcff3a0b",
+    "kernel_version": "4.14.105",
+    "corroborating_commit": "5ffa8544edf4f9288f38b56ffab358103d2cebd9",
+    "corroborating_gpu_and_v2_bytes_equal": true
+  },
+  "source_identity": {
+    "root_compatible": "qcom,sdmshrike",
+    "soc_id": 340,
+    "base_soc_version": "0x10000",
+    "v2_soc_version": "0x20000",
+    "base_gpu_chipid": "0x06080000",
+    "v2_gpu_chipid": "0x06080001",
+    "speedbin_selector_in_gpu_or_v2": false,
+    "ddr_type_selector_in_gpu_or_v2": false,
+    "physical_ddr_type": "DDR_TYPE_UNCONFIRMED",
+    "surface_board_policy_identity": "NOT_PROVEN"
+  },
+  "source_units": {
+    "dt_property": "qcom,msm-bus,vectors-KBps",
+    "table_unit": "decimal kB/s",
+    "consumer": "drivers/soc/qcom/msm_bus/msm_bus_of.c:139,166-169; msm_bus_core.h:44",
+    "consumer_to_bytes_per_second_multiplier": 1000,
+    "macro_divide_1024": false,
+    "static_vector_ab": 0,
+    "runtime_ab_policy": "Not inferred from static AB=0; driver/governor may generate AB separately."
+  },
+  "ddr_table_kBps": [
+    0,
+    400000,
+    600000,
+    800000,
+    1200000,
+    1648000,
+    2188000,
+    2724000,
+    3072000,
+    4068000,
+    5184000,
+    6220000,
+    7216000
+  ],
+  "source_vectors": [
+    [
+      26,
+      512,
+      0,
+      0
+    ],
+    [
+      26,
+      512,
+      0,
+      400000
+    ],
+    [
+      26,
+      512,
+      0,
+      600000
+    ],
+    [
+      26,
+      512,
+      0,
+      800000
+    ],
+    [
+      26,
+      512,
+      0,
+      1200000
+    ],
+    [
+      26,
+      512,
+      0,
+      1648000
+    ],
+    [
+      26,
+      512,
+      0,
+      2188000
+    ],
+    [
+      26,
+      512,
+      0,
+      2724000
+    ],
+    [
+      26,
+      512,
+      0,
+      3072000
+    ],
+    [
+      26,
+      512,
+      0,
+      4068000
+    ],
+    [
+      26,
+      512,
+      0,
+      5184000
+    ],
+    [
+      26,
+      512,
+      0,
+      6220000
+    ],
+    [
+      26,
+      512,
+      0,
+      7216000
+    ]
+  ],
+  "frequency_bindings": [
+    {
+      "source_pwrlevel_index": 0,
+      "gpu_hz": 514000000,
+      "default_index": 12,
+      "min_index": 11,
+      "max_index": 12,
+      "default_kBps": 7216000,
+      "min_kBps": 6220000,
+      "max_kBps": 7216000
+    },
+    {
+      "source_pwrlevel_index": 1,
+      "gpu_hz": 500000000,
+      "default_index": 12,
+      "min_index": 10,
+      "max_index": 12,
+      "default_kBps": 7216000,
+      "min_kBps": 5184000,
+      "max_kBps": 7216000
+    },
+    {
+      "source_pwrlevel_index": 2,
+      "gpu_hz": 461000000,
+      "default_index": 10,
+      "min_index": 9,
+      "max_index": 11,
+      "default_kBps": 5184000,
+      "min_kBps": 4068000,
+      "max_kBps": 6220000
+    },
+    {
+      "source_pwrlevel_index": 3,
+      "gpu_hz": 405000000,
+      "default_index": 9,
+      "min_index": 8,
+      "max_index": 10,
+      "default_kBps": 4068000,
+      "min_kBps": 3072000,
+      "max_kBps": 5184000
+    },
+    {
+      "source_pwrlevel_index": 4,
+      "gpu_hz": 315000000,
+      "default_index": 8,
+      "min_index": 7,
+      "max_index": 9,
+      "default_kBps": 3072000,
+      "min_kBps": 2724000,
+      "max_kBps": 4068000
+    },
+    {
+      "source_pwrlevel_index": 5,
+      "gpu_hz": 256000000,
+      "default_index": 5,
+      "min_index": 5,
+      "max_index": 7,
+      "default_kBps": 1648000,
+      "min_kBps": 1648000,
+      "max_kBps": 2724000
+    },
+    {
+      "source_pwrlevel_index": 6,
+      "gpu_hz": 177000000,
+      "default_index": 4,
+      "min_index": 3,
+      "max_index": 5,
+      "default_kBps": 1200000,
+      "min_kBps": 800000,
+      "max_kBps": 1648000
+    },
+    {
+      "source_pwrlevel_index": 7,
+      "gpu_hz": 0,
+      "default_index": 0,
+      "min_index": 0,
+      "max_index": 0,
+      "default_kBps": 0,
+      "min_kBps": 0,
+      "max_kBps": 0
+    }
+  ],
+  "source_opp_hz": [
+    514000000,
+    500000000,
+    461000000,
+    405000000,
+    315000000,
+    256000000,
+    177000000
+  ],
+  "captured_target_frequency_state_from_existing_project_record": {
+    "hz": [
+      177000000,
+      256000000,
+      315000000,
+      405000000,
+      461000000,
+      500000000,
+      514000000,
+      590000000,
+      661000000,
+      700000000
+    ],
+    "effective_dtb_available_in_this_turn": false,
+    "missing_bandwidth_bindings_hz": [
+      590000000,
+      661000000,
+      700000000
+    ],
+    "historical_snapshot_before_live_dtb_capture": true
+  },
+  "topology_comparison": {
+    "sdmshrike": {
+      "gpu_channels": 4,
+      "gpu_width": 32,
+      "llcc_channels": 8,
+      "llcc_width": 16,
+      "ebi_channels": 8,
+      "ebi_width": 4,
+      "ddr_bcms": [
+        "SH0",
+        "MC0",
+        "ACV"
+      ]
+    },
+    "sm8150_same_commit": {
+      "soc_id": 339,
+      "gpu_chipid": "0x06040000",
+      "gpu_channels": 2,
+      "gpu_width": 32,
+      "llcc_channels": 4,
+      "llcc_width": 16,
+      "ebi_channels": 4,
+      "ebi_width": 4
+    },
+    "local_sc8180x": {
+      "gpu_channels": 4,
+      "gpu_width": 32,
+      "llcc_channels": 8,
+      "llcc_width": 16,
+      "ebi_channels": 8,
+      "ebi_width": 4,
+      "ddr_bcms": [
+        "SH0",
+        "MC0",
+        "ACV"
+      ]
+    },
+    "claim": "SDMSHRIKE V2/A680.1 resource-family reference, distinct from SM8150/A640; not Surface OEM calibration."
+  },
+  "current_56_57_bus_source_sha256": {
+    "kgsl_bus.c": "30106d3ea88a1c35251390f671485c85be86f0e50981e92f65dc1cbea6d55273",
+    "adreno_a6xx_rpmh.c": "0d0b4156a131475ce936390c53c5d34f36fcd6d686e784ccd8410ca98aa6ef65"
+  },
+  "native_implementation_gap": {
+    "existing_dt_properties_alone_preserve_triples": false,
+    "reason": [
+      "adreno.c native OPP branch bypasses legacy qcom,gpu-pwrlevels and bins.",
+      "kgsl_bus_init native branch ignores legacy qcom,bus-table-ddr and reads OPP peak bandwidth only.",
+      "Peak values are coalesced; publication forces default=max=peak index and min=1.",
+      "No existing DT-only way to preserve all 13 source indices and independent per-frequency default/min/max."
+    ],
+    "current_behavior_sites": [
+      "adreno.c:1078-1121,1157-1158",
+      "kgsl_bus.c:198-254,265-269,299-304",
+      "kgsl_bus.c:43-59 bootstrap uses default pwrlevel bus_min",
+      "kgsl_pwrscale.c:590-597 clamps bus hints with per-frequency min/max",
+      "adreno_a6xx_rpmh.c:431-434,486-519 builds votes from pwr->ddr_table and runtime cmd-db"
+    ],
+    "historical_patch_count": 57
+  },
+  "suggested_integration_not_implemented": {
+    "preserve": "Native OPP frequencies/voltage authority and target ICC/cmd-db remain unchanged.",
+    "input": "Full indexed decimal DDR table plus exact-frequency default/min/max triples; reject missing enabled OPP rows, do not interpolate or substitute max.",
+    "smallest_code_sites": [
+      "Extend native bandwidth loader in kgsl_bus.c with an explicit validated indexed policy mode (separate from peak-only mode).",
+      "Stage complete source table and per-OPP triples in temporaries; enforce min<=default<=max, OFF=0, increasing nonzero table, HFI bounds, exact one-to-one enabled OPP frequency match; publish only after ICC success.",
+      "Keep adreno native OPP loader authoritative; do not route through legacy voltage parser. Optional reuse of existing qcom,bus-table-ddr and qcom,gpu-pwrlevels property spellings still requires a new documented native binding/loader contract.",
+      "Keep adreno_a6xx_rpmh target BCMS/runtime metadata path; no source cmd-db addresses copied."
+    ],
+    "unresolved_hz": [
+      590000000,
+      661000000,
+      700000000
+    ],
+    "cannot_claim": "A seven-frequency reference is not completion of the ten-frequency target DDR policy and is not hardware acceptance.",
+    "historical_patch_count": 57
+  },
+  "provenance": [
+    {
+      "url": "https://android.googlesource.com/kernel/msm/+/04749e7fec2a8a5784a984d09f03fd0f2715fd1b/arch/arm64/boot/dts/qcom/sdmshrike-bus.dtsi?format=TEXT",
+      "sha256": "b44ffdb6576f2c80c90e63c33e053d7bb24a4558822ad15508046b7b239c6b27",
+      "git_blob_sha1": "23309e0844af219cc8742fddbd03ab288d1c1a10",
+      "expected_git_blob_sha1": "23309e0844af219cc8742fddbd03ab288d1c1a10",
+      "verified": true
+    },
+    {
+      "url": "https://android.googlesource.com/kernel/msm/+/04749e7fec2a8a5784a984d09f03fd0f2715fd1b/arch/arm64/boot/dts/qcom/sdmshrike-gpu.dtsi?format=TEXT",
+      "sha256": "25f87fb03f58ae29727a187de1c66b6f2d819ef172ac78a29295f5902ab4b5ec",
+      "git_blob_sha1": "76a1e5379fc6791771a68a70267b9b1cdcff3a0b",
+      "expected_git_blob_sha1": "76a1e5379fc6791771a68a70267b9b1cdcff3a0b",
+      "verified": true
+    },
+    {
+      "url": "https://android.googlesource.com/kernel/msm/+/04749e7fec2a8a5784a984d09f03fd0f2715fd1b/arch/arm64/boot/dts/qcom/sdmshrike-v2.dtsi?format=TEXT",
+      "sha256": "6eda840fbc3915567a687c8846d3ce07c128a7610272c48890fb7779ffe5307a",
+      "git_blob_sha1": "b32e6449c89243a7eaf5f2b76ab09ac249d371e7",
+      "expected_git_blob_sha1": "b32e6449c89243a7eaf5f2b76ab09ac249d371e7",
+      "verified": true
+    },
+    {
+      "url": "https://android.googlesource.com/kernel/msm/+/04749e7fec2a8a5784a984d09f03fd0f2715fd1b/arch/arm64/boot/dts/qcom/sdmshrike.dtsi?format=TEXT",
+      "sha256": "04e139475067d70b87239eec8926bd71326836f95ed261e293d224a98afd605e",
+      "git_blob_sha1": "c80aea67df73773891fcbd0c7b2cccd3b56ec0ba",
+      "expected_git_blob_sha1": "c80aea67df73773891fcbd0c7b2cccd3b56ec0ba",
+      "verified": true
+    },
+    {
+      "url": "https://android.googlesource.com/kernel/msm/+/04749e7fec2a8a5784a984d09f03fd0f2715fd1b/drivers/soc/qcom/msm_bus/msm_bus_of.c?format=TEXT",
+      "sha256": "648867071c0e980f3aaa97efe15474babf0ec83a03c72ab175c45fd0ecf65b9c",
+      "git_blob_sha1": "f24bc92f16bf5b00ecf7d8246ed380f4a738a500",
+      "expected_git_blob_sha1": "f24bc92f16bf5b00ecf7d8246ed380f4a738a500",
+      "verified": true
+    },
+    {
+      "url": "https://android.googlesource.com/kernel/msm/+/04749e7fec2a8a5784a984d09f03fd0f2715fd1b/drivers/soc/qcom/msm_bus/msm_bus_core.h?format=TEXT",
+      "sha256": "fd4b4d2309d20dca7186eed60477444c6f41135a9afcd8a3949c39e1eaa302dd",
+      "git_blob_sha1": "1abfa96483e0898a1a5a08b27a0b76ea5dad0cf4",
+      "expected_git_blob_sha1": "1abfa96483e0898a1a5a08b27a0b76ea5dad0cf4",
+      "verified": true
+    }
+  ],
+  "current_evidence_20261111": {
+    "status": "reference-not-activated-no-runtime-policy-change",
+    "runtime_dtb_sha256": "91625e298f90fb40bf5d45e1df3d3e742eba8dfdf1870e0de1532de525e4873f",
+    "runtime_gpu_node": "/soc@0/gpu@2c00000",
+    "runtime_opp_hz": [
+      177000000,
+      256000000,
+      315000000,
+      405000000,
+      461000000,
+      500000000,
+      514000000,
+      590000000,
+      661000000,
+      700000000
+    ],
+    "runtime_opp_peak_or_average_bandwidth_present": false,
+    "source_family_seven_frequency_policy_complete": true,
+    "surface_oem_calibration_proven": false,
+    "project_experimental_hz": [
+      590000000,
+      661000000,
+      700000000
+    ],
+    "project_experimental_origin": {
+      "590_661": "build-sq2-gpu-opp.py explicitly adds these at corner416; baseline native table is177..514; project commit277c0d08ab96b7217b564d266b147ddefb68e4ef (2026-10-28).",
+      "700": "sq2-gpu-boot-payload.py build_700 copies661node, sets700Hz and661/700 corner432; introduced by6337faea7e63b49a55dd1595d7460ea0ed834109 (2026-10-30).",
+      "current_profile": "prepare-sq2-lts-thermal-dtb.py explicitly preserves all three in baseline-700 by user-selected project policy, not extracted OEM bandwidth."
+    },
+    "experimental_bandwidth_policy_validated": false,
+    "cmd_db_sha256": "52bb7e8700eacf3c190987d332318316e72c6dec7124d680642d2ca88dc73df3",
+    "cmd_db_capture": "Static metadata read in a private mount namespace; parent mountinfo unchanged, private debugfs unmounted. Not hardware DDR vote validation.",
+    "indexed_loader_candidate": {
+      "path": "patches/kgsl-xiaomi-618-native-indexed-policy.patch",
+      "sha256": "dccb1e060871117ddab7287f80c41b2a8ecb4c863260159cf8a3273c79bcfdf0",
+      "selector": "qcom,kgsl-bus-policy = \"indexed\"",
+      "stage": "host-validated-loader-not-activated; native build evidence maintained separately",
+      "enabled_opp_coverage": "exact; ten enabled OPPs plus seven policy rows rejected",
+      "opp_authority": "frequency and voltage unchanged; indexed table explicitly replaces peak bandwidth policy; nonzero average rejected"
+    },
+    "not_evidence": [
+      "Existing upstream MSM single-OFF HFI DDR placeholder is not fixed-max or calibrated dynamic KGSL DDR voting.",
+      "Windows P007 selected raw telemetry is not DDR bandwidth calibration; raw units and physical validation remain unproven."
+    ],
+    "sources": [
+      "out/kgsl-resume-20261111/ddr-high/INPUT-CLASSIFICATION.json",
+      "out/kgsl-resume-20261111/ddr-high/VERIFICATION.json",
+      "out/kgsl-resume-20261111/ddr-indexed/NATIVE-CONTRACT.txt"
+    ]
+  }
+}

@@ -1,3 +1,321 @@
+## 2026-11-11：KGSL/SDE 已暂停，保存到当前分支
+
+用户明确暂停后，仅授权保存进展并提交当前 `codex/kgsl-sde-port-v83`。目标保持 paused，
+三个子代理已中断；不得因旧段落的“继续/active”自动恢复开发、连接设备或重新构建。
+已集成 KGSL58 / SDE17；SDE 三态整体构建仍 exit2/25对象/0模块，16组专项检查通过。
+本次将7组未完成候选的52个源码改动另存为 `patches/wip/kgsl-sde-paused-20261111`，
+仅做精确patch重建/保存完整性校验，不加入正常配置、不当作功能通过。源/私有产物及原始
+证据保留本地ignored目录，不上传；原六个rescue-console文件保持未提交。
+暂停续接入口：`docs/KGSL-SDE-CHECKPOINT-20261111.md` 与
+`configs/kgsl-sde-checkpoint-20261111.json`。须用户明确恢复后再执行未完操作。
+
+## 2026-11-11：SDE第17组，现代framebuffer格式契约
+
+当前17补丁/315源。msm_framebuffer_create接受6.18 core选定的drm_format_info，同一指针
+传至私有initializer、线性大小检查和真实drm_helper_mode_fill_fb_struct，不再重查而覆盖
+core选择。内部writeback/stolen入口保持原调用方式，按真实pixel_format/modifier参数查询一次。
+保留vendor modified-format校验、失败传播、每plane GEM引用及重复handle引用计数；不是
+简单函数指针强转或跳过UBWC校验。msm_drv.h只更新create原型，未改IRQ/mode字段。
+
+线性plane边界改真实rounded width/height及min_pitch，使用u64 min_size避免原32位回绕；
+拒绝无效格式/plane数量和尺寸。327个HOST断言（非327独立场景）使用实际构造函数、真实
+fourcc/fill helper，KMS/分配/GEM叶子仍模型；涵盖core-info身份、奇数chroma边界、>4GiB
+大小、modifier、部分lookup/alloc/register失败、借用和重复handle。五变异先compile0后run1。
+三态HOST编译1/0/1，新运行0；真实ARM64 callback/lookup/fill接口probe三态2/0/2。
+完整msm_fb.c三态仍2，模式公共头阻塞，不能称完整consumer通过。最初harness把计数变量
+命名puts与libc冲突，真实compile1保留；更名put_count后才统计上述有效验证。
+
+整体BASELINE/MODIFIED/ROLLBACK均exit2/25对象/0模块，framebuffer目标API诊断清零。
+317文件精确回滚/重应用、315父源与KOUT五输出保持。合并16组checker全部0，额外合并
+ARM64 framebuffer probe0。完整模块/MODPOST/实际scanout和provider退休仍未验收。
+
+IRQ/vblank代理仍实现真实PM/IRQ注册失败与原子回调睡眠边界，不接受异步work假成功。
+mode代理已将精准增量rebase至独占integrated16副本，继续catalog/bridge/全消费者。
+MST发现QTI primary缓存固定connector ID且热插拔路径跳过primary，因此不能用简单动态重建
+取消常驻fixed-primary语义。已选择独立真实6.18 core opt-in persistent生命周期扩展，默认
+其他驱动行为不变；atomic基础四角色明确未可集成。未来须新配对内核构建，不借旧dev2运行。
+
+证据out/kgsl-resume-20261111/sde-integration-17与sde-framebuffer-api四角色；旧角色全部
+保留。下一仍接收完整IRQ/vblank，并完成mode、MST persistent core/driver与late GEM owner。
+物理显示、真实提交/fence退休/DDR投票/PM/性能/SQ1-SQ2未完成，无设备操作/发布pins变更/
+提交推送，goal active。既有known controller清理/list锁旧open描述已在新config注明后继修复。
+
+## 2026-11-11：SDE第16组集成，controller成功清理与fence诊断接口
+
+当前16补丁/315源。第15组独立修复dsi_ctrl_debugfs_init：debugfs_root发布后立即return0，
+不再成功落入error_remove_dir。原API-only四角色和已知缺陷反证不改写。实际同输入主机三态
+均compile0，运行1/0/1；成功目录removed从1变0，3个真实file失败仍-13/只清理一次，dir
+失败不清理未创建目录。72严格场景通过，5变异先编译0再运行1；不是实机debugfs并发验收。
+
+第16组移除dma_fence_ops已不存在的字符串回调槽；sde_sync_wait/list_dump调用本地
+sde_fence_timeline_value_str，先确认ops身份才访问本驱动ctx，以READ_ONCE读取done_count；
+外来fence明确unavailable，不把target seqno伪装为当前timeline、不盲转私有结构。seqno仍
+单独输出。13个同步/释放/信号相关函数字节不变；不能把诊断迁移称fence生命周期完成。
+实际函数/真实ops声明47项HOST检查通过，三态compile1/0/1；foreign仅分配base的负控可
+被ASan捕获，另错误计数/吞wait错误变异均先compile0再run1。真实6.18 ARM64窄caller TU
+三态2/0/2，完整sde_fence.c三态仍2。初始提取器误禁函数body分号导致ValueError，错误保留，
+修正抽取式后才产生编译/运行证据；没有将抽取错误算产品红例。
+
+整合后BASELINE/MODIFIED/ROLLBACK均exit2/25对象/0模块；旧fence成员诊断在modified
+消失，317文件精确回滚/重应用，父315源和KOUT五输出保持。合并15组checker全部0（debugfs
+已启用require-controller-root严格门禁），额外合并ARM64 fence probe0。完整模块未通过。
+
+模式v2用户态已另完成42TU/5source库严格链接；root重开6个ARM64 ELF及hash（含1个复制
+libdrm），证据ROOT-USERLAND-v2-REOPEN.json。kernel catalog/bridge/全消费者仍未完成，
+不据此称joint mode通过。MST代理正处理真实atomic payload/固定connector生命周期与
+真实链路参数，不能删MST绕过；IRQ代理处理真实request/free、preinstall失败传播/局部回收、
+vblank锁与睡眠边界，不能用假成功异步工作吞掉错误。三代理均gpt-6.1-sol/high，写集独立。
+
+证据out/kgsl-resume-20261111/sde-integration-16与debugfs-cleanup/fence-diagnostics原
+四角色。下一步验收完整IRQ/vblank、mode及MST候选并语义合并；late GEM/private-owner、
+物理显示、真实提交/fence退休/DDR投票/PM/性能/SQ1-SQ2仍未完成。未操作设备、未改发布pins、
+未提交推送。历史open条目按组记录前态，controller成功清理缺陷现由第15组闭合。
+
+## 2026-11-11：SDE第14组集成与真实接口验证
+
+当前14补丁/315源。第13组四源21位点改用真实6.18 debugfs scalar void/best-effort
+接口，45个原独立调用未改；节点名/权限/value与真实file/dir错误处理保留，不提供假返回值。
+host实际15个initializer函数72场景通过，三态旧/新/回滚编译1/0/1，新运行0；五个源码
+变异先编译0再运行1。实际ARM64窄caller TU三态2/0/2；完整dp_debug.c仍编译2。
+dsi_ctrl_debugfs_init成功落入remove目录是独立已证实遗留缺陷，严格检查运行1；API-only
+补丁未掩盖或修复它，后继补丁单独处理，不能称controller debugfs生命周期已通过。
+
+第14组为五个真实消费者补linux/pinctrl/consumer.h，并把sde_plane的
+drm_gem_atomic_helper.h放回原pr_fmt定义之后。该include顺序问题由本项目第4组PRIME
+插入头文件引入，本轮修正，保留原日志格式、不压制warning。六个ARM64窄probe三态
+2/0/2（对象0/6/0），逐项撤销六个负例均2且仅5对象；原日志格式在实际ARM64对象常量中
+核对，不冒充运行期日志验证。六个完整consumer TU仍均2，目标诊断27/0/27。
+
+合并后实际全量构建BASELINE/MODIFIED/ROLLBACK对象数25/25/25，三者exit2、零模块。
+317文件真实回滚/精确重应用、315父源及五个KOUT输出hash核对；本轮三类目标诊断清零。
+合并源14组checker全部exit0；其中提取函数模型和窄API探针不替代完整模块/MODPOST/真机。
+
+模式v2仍未集成，owner/cache基础已有35+134实际函数主机断言与29分配点失败覆盖；root
+独立复跑冻结候选两组exit0。尚需完整catalog/identity/bridge/CRTC/encoder消费者，不据此
+关闭模式路线。新增用户指定gpt-6.1-sol/high MST代理，负责真实6.18 topology/payload和
+atomic commit生命周期，与mode代理协调msm_atomic.c增量；不是删除MST的简化路线。
+late GEM/private-owner退休仍无完整交付，KGSL58与配套dev2内核复用，不重复构建。
+
+证据out/kgsl-resume-20261111/sde-integration-14与原sde-debugfs-void、sde-api-headers
+四角色，旧角色保留。下一步接收独立controller成功清理修复并继续mode/MST/owner；物理显示、
+真实提交/fence退休/DDR投票/PM/性能/SQ1-SQ2仍未完成。无设备操作、发布pins变更或提交推送。
+
+## 2026-11-11：SDE第12组整编与字符串验证纠错
+
+当前12补丁/315源。第11组逐项审计32处strlcpy：30个固定边界改strscpy，strlen后独立
+分配的完整字符串用memcpy含NUL，evtlog外参容量限到真实filter数组，保留C字符串截断/终止
+及后续分支，不承诺NUL后padding逐字相同。第12组15源/21处kzfree改真实kfree_sensitive，
+保留完整分配大小清零再释放语义、补直接slab头，不退化为普通kfree；不是完整析构/退休证明。
+
+实际整编BASELINE exit2/24对象/0模块，MODIFIED exit2/25对象/0模块，真实ROLLBACK
+exit2/24对象/0模块。精确317文件回滚/重应用、315父源和KOUT五输出hash核对；两种已移除
+API的编译诊断在本轮MODIFIED均消失。模式private_flags/SEAMLESS、MST、bridge/DSI等仍阻塞
+完整模块；25对象与减少的诊断条数都不是完成百分比。合并源码12组checker全部exit0。
+
+重要纠错：子代理最初把字符串checker wrapper exit1说成编译失败，root逐字核对发现旧
+host native-api编译/运行均0，实际链接strlcpy@GLIBC_2.38（宿主glibc2.39）；wrapper1来自
+残留调用扫描。错误说法已撤回，旧记录/工具保存在pre-gate-correction。更正后显式标记为
+HOST compiler-poison模型门禁，三态1/0/1；真实4.19语义scalar/word各234均通过，新版三通道
+各234。root另实际6.18内核头ARM64窄API TU三态2/0/2，不能将其称完整调用者编译通过。
+敏感释放实际21语句与6.18 helper有210模型场景，真实ARM64 API TU三态2/0/2；原扫描器
+漏计删除调用的弱点保留并加缺失/重复site拒绝，3个生成wrapper运行反例与3个源码门禁分列。
+
+模式入口v1仍独立未集成：125断言及精确回滚已由子代理完成；另真实Android42 TU和5个
+source库--no-undefined链接成功，root重开6个ARM64 ELF/hash（其中libdrm是固定复制件）。
+不是HWC服务、全内核模式消费者或真机验收。前三次真实构建失败保留；修正错误架构libc++
+输入及独立C++兼容头后才通过。v2继续处理requested/derived/selected、bridge、cache identity
+及共享payload资源owner，不能把入口测试或库链接当整条模式路线完成。
+
+证据out/kgsl-resume-20261111/sde-integration-12；旧四角色保留并扩展，绝对路径/SHA见
+FINAL-ROLE-PATHS.txt。late GEM owner候选只有部分测试，代理交付阶段工具错误，未闭合/未集成，
+不将该工具错误当编译或产品结论。下一步debugfs真实void API及完整mode消费链；owner寿命、
+硬件退休/显示/提交/PM/长时/SQ1-SQ2仍必须完成。无部署/重启/提交推送，pins不改，goal active。
+
+## 2026-11-11：SDE第10组完成三态整编，模式请求迁移仍在进行
+
+当前10补丁/315源，配对dev2内核沿用已完成构建。新增三组：SDE/DP五处日志判断改为真实
+drm_debug_enabled(category)，保留日志路由/CORE门控；六文件仅加八条实际公开类型头；
+dsi_parser_utils.get_named_gpio及函数声明/定义/禁用stub改为const device_node，与6.18 OF匹配。
+GPIO读取/index/error原语义不改。原checker一度错认OF形参名，保留失败，v2改为提取实际名字，
+不把该工具错误计为产品红例。新GPIO64实际源码模型场景通过，完整真实头两配置ARM64 TU通过。
+
+实际整编三态BASELINE exit2/21对象/0模块，MODIFIED exit2/24对象/0模块，ROLLBACK
+exit2/21对象/0模块。原件、317归档文件恢复/重应用及KOUT五输出hash均核对。目标日志符号、
+framebuffer/bridge_funcs完整类型、GPIO回调签名错误在本轮MODIFIED中消失，但模式状态、
+MST/bridge/DSI/DSC等接口仍阻塞整个模块；不能把24对象或错误条数当完成百分比。
+
+整合树独立运行10组checker全部exit0：此前native50/joint14/active21/PRIME31/fence9保持，
+debug1320/GPIO64和6个真实公开头窄TU通过。debug真实完整consumer仍有其他旧API错误；
+公开头六个完整原TU仍失败，仅目标86条类型诊断消失。以上不证明硬件或完整模块可用。
+原四角色保留并扩展，整合证据out/kgsl-resume-20261111/sde-integration-10；角色路径/SHA统一
+更新到FINAL-ROLE-PATHS.txt。无部署/重启/提交推送，默认发布pins和运行10档OPP未改。
+
+mode审计已保存并恢复实际QTI builder源码请求链：6.18拒绝旧VID/CMD/SEAMLESS高位，
+不能仅补常量。driver-owned requested/adjusted状态、配对用户态atomic请求、mode cache payload
+所有权与完整DSI消费者仍须迁移。审计中的共享payload重复释放调用仅为实际语句/函数模型，
+不是完整cache或硬件UAF证明。下一步并行推进真实mode入口/消费者、字符串API、late GEM
+private-owner寿命；所有候选保持独立验证再合入。整体目标active，全部full_*边界保持。
+
+## 2026-11-11：配对内核完成，SDE 第7组已集成并实际三态整编
+
+本节覆盖下方“新内核仍在构建／PRIME尚未集成”的旧检查点。隔离dev2的Image、486内核模块、
+KGSL58的60对象/3模块及489模块depmod已完成；Image 7e0d1129…，msm_kgsl 5ff1f2e3…。
+这是编译候选，不是部署/真机验收；旧配对内核和默认发布pins未改，不重新启动已完成构建。
+
+SDE目前7补丁/315源。PRIME之后合入真实公共framebuffer/fourcc头、删除无用户的ION头依赖、
+实际MDSS DMA provider及active-list引用快照/回调锁/完整DMA span校验。native DMA与active-lock
+是成对int回调API迁移，不能单独拿第6组当可用候选。local走DMA API，EXTBUF保留attachment映射
+所有权；不借用后释放provider域、不重复map/unmap。secure/NRT及固件identity/splash仍显式不支持。
+
+同一dev2 KOUT、相同完整模块命令实际三态：BASELINE exit2/2对象/0模块，MODIFIED
+exit2/21对象/0模块，真实ROLLBACK exit2/2对象/0模块；317个归档文件逐hash恢复并精确重应用。
+原315源和KOUT关键输出不变。整合树独立复跑native50、provider→VMA14、active21、PRIME31、
+fence9均通过。旧PRIME模型缺三项新增公共primitive，初次编译失败保留；仅补模型overflow/SG
+遍历定义，断言/产品不改，旧/回滚失败，新/重应用31通过。不是硬件DMA、TLB、退休或safe unbind证明。
+
+共享工具scripts/check-sde-native-{dma,kms,secure,joint}.py和check-sde-active-lock.py已归档，
+支持显式源码/内核路径，不依赖私有out目录。原四角色与失败证据保留；整合扩展为
+out/kgsl-resume-20261111/sde-integration-7/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}。
+完整编译仍失败：新暴露的日志category API、mode private_flags/SEAMLESS/vrefresh、MST/bridge/DSI等
+需继续真实移植；错误条目数不是独立缺陷数或完成百分比。mode请求须兼顾原厂用户态，不能把6.18
+已拒绝的旧flags硬塞回核心，或用永false/无人设置的属性冒充兼容。
+
+下一步：独立debug-category候选和mode请求/状态所有权迁移，继续完整模块构建、KGSL真机提交及
+SDE物理显示/联合fence/PM/长时/SQ1-SQ2验收；full_*不提升。目标active。未提交推送、未部署重启。
+
+## 2026-11-11：DDR联合链与SDE PRIME／DRM核心后续状态
+
+第58 KGSL完整构建结果保持。另完成同一loader表的实际源码联合链：32场景、9个编译后运行反例；
+BASELINE/ROLLBACK均0绿32红exit1，MODIFIED32绿exit0。逐项核对39 DDR+8 CNOC HFI words、
+七频default/min/max及280次hint，覆盖RPMh分配失败和ICC重试；不是硬件投票/Surface校准。
+证据 `out/kgsl-resume-20261111/ddr-joint/JOINT-RESULT.json`，不改运行10档OPP。
+
+实际DRM `drm_gem_plane_helper_prepare_fb`发现并修正两条引用泄漏：无FB先get显式fence后直接返回；
+chain分配失败漏put尚未转移的new fence。原件/实际回滚3定点各LSan报1个24B模型fence；
+新副本41场景和4个编译后运行负例通过，主代理独立重跑也通过，KERNEL/WRITE语义不变。
+已归档 `configs/drm-618-plane-fence-ownership.json` 及精确patch，旧paired kernel未改。
+新隔离 `/mnt/spx-workspace/chromebookOS/work/qualcomm-618/kgsl-sde-fence-20261111-build`
+已真正启动Image/modules -j12；仅source helper和CONFIG_LOCALVERSION(-sq2-kgsl-sde-fence-dev2)变化。
+记录时session27827/orchestrator354/make1096运行，已有原ashmem warning；尚未宣称构建完成。
+续接必须复核 `drm-fence-chain/build/STATUS.json` 和真实进程/会话，不因观察超时重新开构建。
+
+SDE PRIME九源候选未集成，独立审阅进行中：31 owner、9 fence/state、11 native fault场景及
+10个编译后运行负例通过；BASELINE/ROLLBACK owner与fence exit1，MODIFIED exit0。
+真实PRIME TU三态均exit2，完整候选v4也exit2/仅2对象/无模块；共享KMS/provider旧API仍须迁移。
+import_aspace从attachment前保留到真实unmap/detach后，核心resv持锁入口不递归加锁；
+不读foreign私有数据，不伪造secure属性，不丢必要fence。真实PFN/SG/resv公开API迁移已纳入。
+core新副本另与实际SDE九场景及chain OOM联合通过，但旧paired kernel仍含旧helper，不能混称已修部署。
+下一步先独立审阅合并此候选，再移植真实MDSS DMA provider；不把DMA映射和手动paging域混搭。
+
+原四角色及所有扩展已重开；绝对路径和SHA统一在ignored `out/kgsl-resume-20261111/FINAL-ROLE-PATHS.txt`，
+执行续接点为 `CURRENT.json`。未提交/推送、未部署/重启、不改发布pins；整体目标active、full_*仍未完成。
+
+## 2026-11-11：原生 indexed DDR 加载器与高频来源修正
+
+第58补丁 `kgsl-xiaomi-618-native-indexed-policy.patch` 已加入完整准备链；只改 `kgsl_bus.c`。
+显式 `qcom,kgsl-bus-policy = "indexed"` 保留完整十进制表及每频率 default/min/max，
+原生OPP仍决定频率/电压；非零average拒绝，缺selector保留原peak-only模式，坏selector不回退。
+完整表/三值与ICC成功后才发布；启用10频率但只有7行政策明确失败，不插值、不填max、不删OPP。
+同输入BASELINE/ROLLBACK均23绿73红exit1，MODIFIED96绿exit0；原99 bus场景三态全绿，
+12个变异均编译成功后运行断言失败。新鲜58准备副本再次通过96+99；58组现已独立完成
+60对象（59个-Werror编译单元+1链接对象）/3模块/MODPOST和489模块depmod，编译stderr空。
+msm_kgsl SHA409318f2…；原内核91,246源、配对输出和56/57源/对象/模块保持。
+主代理新58回归bus99、含实取固件SQE51通过；component/devres严格反例仍exit1，不宣称safe unbind。
+测试含真实提取函数，但OF/OPP/ICC仍为模型，不证明硬件动态投票。
+
+纠正下方历史“高三档缺失OEM表”的解释：590/661由项目提交277c0d08…添加，700由6337faea…
+复制661并调角添加，均是项目实验档；原177..514七档的SDMSHRIKE V2来源完整，仍非Surface校准。
+当前10个运行OPP保持。实际DTB SHA91625e29…，GPU `/soc@0/gpu@2c00000`，所有OPP无peak/avg带宽。
+同boot只读取得cmd-db静态元数据（独立mount namespace，父mountinfo未变），没有部署、重启或采样。
+已用实际输入重跑：RPMh59+DDR18、GMU OPP36、GPU OPP25通过；最后一项原checker本来可用，
+fdtget支持省略unit-address，未把错误的路径失败假设写成产品缺陷，也未为此修改checker。
+这些验证不证明真实投票/PLL/功耗。MSM的单OFF HFI占位表不构成已验证动态DDR路径。
+Windows P007输出为原始性能状态遥测，不再称带宽；兼容旧JSON字段且数值/指令不变。
+
+四角色扩展 `ddr-indexed/`、`reference-semantics/`、`reference-classification/` 均位于
+ignored `out/kgsl-resume-20261111/`；原SQE角色保留。分类元数据三态1/0/1，仅验证证据分类，
+不冒充驱动回归。SDE PRIME仍是独立未集成候选，完整SDE尚未编译通过。safe unbind、
+动态OPP并发、完整fence/退休、设备显示/提交/PM及SQ1/SQ2验收未完成；整体目标active，full_*不提升。
+子代理按用户指定 gpt-6.1-sol/high；共享KOUT单一持有者。默认发布pins、EFI、运行OPP不变。
+
+## 2026-11-11：第57组配对编译及SDMSHRIKE V2带宽来源
+
+当前57补丁/109源已完成新鲜配对编译：60对象（59个GCC命令均-Werror、1个链接对象）、3模块，
+MODPOST无错误警告，489模块depmod无输出；`msm_kgsl.ko` SHA `a63381e52d818bfb43cd1e01097eed1d7fa13930a038f23b67a9f5ae3afb5583`。
+只修 `adreno_unbind` 输入producer/work的停止顺序：同输入BASELINE/ROLLBACK4绿22红exit1，
+MODIFIED26绿exit0。原内核源/配套输出/56源与模块未改变；初次59/60计数断言失败保留。
+这不是完整safe unbind/硬件退休验收，外层component/devres严格反例仍失败。
+
+DDR找到比旧graphics参考更完整的官方4.14.105 SDMSHRIKE V2/A680.1来源，固定commit
+`04749e7fec2a8a5784a984d09f03fd0f2715fd1b`：13档十进制kB/s，7个177..514MHz档位明确
+对应default/min/max，且GPU/LLCC/EBI通道宽度与SC8180X拓扑相符。仅落非激活参考
+`configs/kgsl-sc8180x-downstream-policy-reference.json`；590/661/700MHz仍无来源，
+不能降为7频点冒充完整目标，不能从Windows MemoryFrequency换算出缺失带宽。
+当前native peak-only加载会覆盖原三值，后续需显式indexed-policy模式并精确匹配全部enabled OPP；
+不复制源cmd-db地址、不插值、不把max当default。本轮未改变任何运行DT/OPP或发布pins。
+
+SDE三组已独立prepare315源，第三组将DP PHY旧常量迁到现代定义和独立CP2/CP3名称；
+2308实际函数场景及9个运行反例通过，保持原支持集合与MMIO顺序。完整header/getter TU
+基线/回滚exit2、改件exit0，不等于dp_link.c完整TU。全模块仍未通过，
+不是Surface eDP或联合显示验收；设备未部署/重启，目标active。
+详细命令、回滚和未完成边界见 `docs/KGSL-PARALLEL-20261111.md`。
+
+## 2026-11-11：第56组 HFI worker 修复及新配对内核已编译
+
+本节覆盖下方第55组“未新编译”的阶段记录；整体 KGSL＋DRM/SDE 目标仍 active。
+子 agent 按用户指定统一使用 `gpt-6.1-sol` / `high`，保留独占写入与主代理串行集成边界。
+
+第56项 `hfi-worker-lifecycle` 将 F2H cache 改为每实例，初始化两个链表并检查 task/cache/IRQ
+创建结果；IRQ 申请最后进行，probe 失败先 join worker 再释放 cache。等待条件改为 stop 或有包，
+修复 stop 唤醒后仍睡眠的问题。19 个实际函数/pthread 场景及7个编译后运行反例通过；
+旧版及回滚均退出1（worker stop 超时），新版退出0。仅为 probe/worker 局部修复，未接入 live unbind，
+IRQ/slab/内核调度仍为模型。component/master devres 错误释放的严格反例仍 exit1，不能称生命周期闭合。
+
+独立复制本机 full-image 内核源和运行配置，应用全套提供者补丁，完整 Image＋486模块完成；
+6个提供者对象 `-Werror` 重编。第55/56组各新鲜目录完成60对象/3模块严格编译与 MODPOST，
+两套489模块 depmod 均无输出。新 release `6.18.60-sq2-kgsl-sqe-dev1`，未复用历史符号表；
+第56组 `msm_kgsl.ko` SHA256 `a98eceec3635d4bc114885d59dcc04fe7b7ed58a8e741dcb8c3f5f908f435ad1`。
+73个软链均留在复制树内；原源码保持。完整首编37条既有编译警告、2条KSU元数据提示及中间
+5条.cmd NUL警告均保留；最终增量只有2条KSU提示，不能称全内核首编零警告。
+外置 KGSL 必须使用本次真实 **6.18** 的 `drivers/devfreq/governor.h`；首次误用5.4头失败已保留。
+
+原 Quest 2 4.19 的 DDR 输入来自 DT 政策表，经 MSM bus 拓扑/cmd-db 转成 RPMh TCS，
+再由 HFI 发送整表、运行时选索引；Windows 并非必需。Kona/A650 表不能直接当作 SQ2/A680 校准，
+cmd-db 也不替代频点对应的政策。DTS `/1024`、MSM bus `×1000` 换算差异已核对。
+Windows Type25 仅写 MemoryFrequency 等频率字段，MemoryBandwidth 字段清零，不得把该频率当带宽。
+
+SDE 已恢复固定313源并启动真实6.18 API移植；完整构建仍 exit2，未生成可用模块。
+DP helper 第一组和UAPI include修复的单TU/主机通过不等于完整SDE或Surface eDP验收。
+普通A680输入worker/独立owner、目标DDR、SDE其余API及provider、实际提交/显示/双机验证继续。
+本轮没有部署、重启、修改默认pins/EFI、提交或推送；full_*仍未提升。
+证据：`out/kgsl-resume-20261111/build/FINAL-BUILD-56-RESULT.json`、`teardown-owner/`、
+`quest2-ddr/FINDINGS.md`；详情和沿用四角色见 `docs/KGSL-PARALLEL-20261111.md`。
+
+## 2026-11-11：并行续接，SQE 边界候选与解绑反例
+
+已切换并同步 `codex/kgsl-sde-port-v83` 到 `690acd6`，用户授权 sub agent 并行。
+固定 donor 426 文件逐 SHA 核对，重建 v83 的54补丁/109源；当前新候选追加第55项
+`sqe-bounds`，只改变 `adreno.c` 的 `get_ucode_version` / `adreno_get_firmware`。
+分配前验证普通版本头至少8字节、扩展头至少16字节及整dword，使用非对齐小端读取；
+合法载荷仍跳过首4字节原样复制，错误不发布size/version。A5xx PM4/PFP共用该loader，
+本轮仅含捕获的A680 SQE，不能外推A5xx硬件验收。
+
+最终精确长度夹具51场景：旧版11绿/40红、新版51绿/0红、实际回滚11绿/40红，
+回滚SHA等于原件；6个反例均编译后运行失败。另独立42项对照旧6绿/36红（14个实际ASan越界）、
+新42绿；独立完整51项也通过。初版较大底层缓冲的记录保留，不称40个失败全是ASan越界。
+重跑v83父域45、GMU76、固件55（未带捕获GMU文件）、LPAE18、provider32及准备器18通过。
+
+实际callback/core六函数复现普通/HWSCHED两种错误路径：即使GMU remove保留资源或callback
+提前return，component与master仍各释放一次devres并清bound。严格保留契约测试exit1，
+这是未修问题，不是生命周期绿例；remove errno/devres/锁仍为模型，未证明实机UAF。
+下一步须处理独立owner及两阶段停机/释放，包括bind失败回收，不能靠void callback返回值阻止core清理。
+
+当前新候选为 `source-host-tested-not-device-ready`，**未新做完整内核/模块编译、未部署/重启**；
+最近完整配套构建仍是历史v83/native-kernel-v3，不得把旧Module.symvers混入新候选。
+本次SSH只读核对SF/audioserver running、Android boot_completed=1，运行的仍是MSM而非原生KGSL。
+默认发布pins、EFI及原未跟踪救援文件保持；整体KGSL＋DRM/SDE目标active，full_*不提升。
+完整命令/证据、四角色与并行边界见 `docs/KGSL-PARALLEL-20261111.md`。
+
 ## 2026-11-11：小米 KGSL v83 保留同步失败的中间页表
 
 新增 smmu-walk-v1 提供者补丁。ARM LPAE 撤销非叶项时使用可返回错误的 walk 同步；失败恢复完整父项及非一致性 DMA 可见性，保留子树，只返回此前成功撤销的前缀长度。原有映射替换调用收到短撤销后拒绝覆盖。未启用的其他调用者保留原有回调行为；整个 domain/root 销毁仍未改为可检查同步。

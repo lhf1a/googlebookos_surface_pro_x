@@ -1,0 +1,322 @@
+--- a/techpack/display/msm/dsi/dsi_panel.c
++++ b/techpack/display/msm/dsi/dsi_panel.c
+@@ -2462,7 +2462,7 @@
+ parse_fail:
+ 	list_for_each_entry_safe(pos, tmp, &temp_head, list) {
+ 		list_del(&pos->list);
+-		kzfree(pos);
++		kfree_sensitive(pos);
+ 	}
+ end:
+ 	return rc;
+--- a/techpack/display/msm/sde/sde_hw_cdm.c
++++ b/techpack/display/msm/sde/sde_hw_cdm.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/slab.h>
+ #include "sde_hw_mdss.h"
+ #include "sde_hwio.h"
+ #include "sde_hw_catalog.h"
+@@ -347,7 +348,7 @@
+ 	return c;
+ 
+ blk_init_error:
+-	kzfree(c);
++	kfree_sensitive(c);
+ 
+ 	return ERR_PTR(rc);
+ }
+--- a/techpack/display/msm/sde/sde_hw_ctl.c
++++ b/techpack/display/msm/sde/sde_hw_ctl.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/slab.h>
+ #include <linux/delay.h>
+ #include "sde_hwio.h"
+ #include "sde_hw_ctl.h"
+@@ -1439,7 +1440,7 @@
+ 	return c;
+ 
+ blk_init_error:
+-	kzfree(c);
++	kfree_sensitive(c);
+ 
+ 	return ERR_PTR(rc);
+ }
+--- a/techpack/display/msm/sde/sde_hw_ds.c
++++ b/techpack/display/msm/sde/sde_hw_ds.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/slab.h>
+ #include "sde_hw_ds.h"
+ #include "sde_formats.h"
+ #include "sde_dbg.h"
+@@ -131,7 +132,7 @@
+ 	return hw_ds;
+ 
+ blk_init_error:
+-	kzfree(hw_ds);
++	kfree_sensitive(hw_ds);
+ 
+ 	return ERR_PTR(rc);
+ 
+--- a/techpack/display/msm/sde/sde_hw_dsc.c
++++ b/techpack/display/msm/sde/sde_hw_dsc.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/slab.h>
+ #include "sde_hw_mdss.h"
+ #include "sde_hwio.h"
+ #include "sde_hw_catalog.h"
+@@ -300,7 +301,7 @@
+ 	return c;
+ 
+ blk_init_error:
+-	kzfree(c);
++	kfree_sensitive(c);
+ 
+ 	return ERR_PTR(rc);
+ }
+--- a/techpack/display/msm/sde/sde_hw_dspp.c
++++ b/techpack/display/msm/sde/sde_hw_dspp.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/slab.h>
+ #include <drm/msm_drm_pp.h>
+ #include "sde_hw_mdss.h"
+ #include "sde_hwio.h"
+@@ -455,7 +456,7 @@
+ 	return c;
+ 
+ blk_init_error:
+-	kzfree(c);
++	kfree_sensitive(c);
+ 
+ 	return ERR_PTR(rc);
+ }
+--- a/techpack/display/msm/sde/sde_hw_intf.c
++++ b/techpack/display/msm/sde/sde_hw_intf.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+  * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
+  */
++#include <linux/slab.h>
+ #include <linux/iopoll.h>
+ 
+ #include "sde_hwio.h"
+@@ -879,7 +880,7 @@
+ 	return c;
+ 
+ blk_init_error:
+-	kzfree(c);
++	kfree_sensitive(c);
+ 
+ 	return ERR_PTR(rc);
+ }
+--- a/techpack/display/msm/sde/sde_hw_lm.c
++++ b/techpack/display/msm/sde/sde_hw_lm.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/slab.h>
+ #include <linux/iopoll.h>
+ 
+ #include "sde_kms.h"
+@@ -341,7 +342,7 @@
+ 	return c;
+ 
+ blk_init_error:
+-	kzfree(c);
++	kfree_sensitive(c);
+ 
+ 	return ERR_PTR(rc);
+ }
+--- a/techpack/display/msm/sde/sde_hw_pingpong.c
++++ b/techpack/display/msm/sde/sde_hw_pingpong.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/slab.h>
+ #include <linux/iopoll.h>
+ 
+ #include "sde_hw_mdss.h"
+@@ -570,7 +571,7 @@
+ 	return c;
+ 
+ blk_init_error:
+-	kzfree(c);
++	kfree_sensitive(c);
+ 
+ 	return ERR_PTR(rc);
+ }
+--- a/techpack/display/msm/sde/sde_hw_qdss.c
++++ b/techpack/display/msm/sde/sde_hw_qdss.c
+@@ -5,6 +5,7 @@
+ 
+ #define pr_fmt(fmt)     "[drm:%s:%d] " fmt, __func__, __LINE__
+ 
++#include <linux/slab.h>
+ #include <linux/mutex.h>
+ #include <linux/platform_device.h>
+ 
+@@ -82,7 +83,7 @@
+ 	rc = sde_hw_blk_init(&c->base, SDE_HW_BLK_QDSS, idx, &sde_hw_ops);
+ 	if (rc) {
+ 		SDE_ERROR("failed to init hw blk %d\n", rc);
+-		kzfree(c);
++		kfree_sensitive(c);
+ 		return ERR_PTR(rc);
+ 	}
+ 
+--- a/techpack/display/msm/sde/sde_hw_sspp.c
++++ b/techpack/display/msm/sde/sde_hw_sspp.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/slab.h>
+ #include "sde_hwio.h"
+ #include "sde_hw_catalog.h"
+ #include "sde_hw_lm.h"
+@@ -1368,7 +1369,7 @@
+ 	return hw_pipe;
+ 
+ blk_init_error:
+-	kzfree(hw_pipe);
++	kfree_sensitive(hw_pipe);
+ 
+ 	return ERR_PTR(rc);
+ }
+--- a/techpack/display/msm/sde/sde_hw_top.c
++++ b/techpack/display/msm/sde/sde_hw_top.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/slab.h>
+ #include "sde_hwio.h"
+ #include "sde_hw_catalog.h"
+ #include "sde_hw_top.h"
+@@ -716,7 +717,7 @@
+ 	return mdp;
+ 
+ blk_init_error:
+-	kzfree(mdp);
++	kfree_sensitive(mdp);
+ 
+ 	return ERR_PTR(rc);
+ }
+--- a/techpack/display/msm/sde/sde_hw_wb.c
++++ b/techpack/display/msm/sde/sde_hw_wb.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/slab.h>
+ #include "sde_hw_mdss.h"
+ #include "sde_hwio.h"
+ #include "sde_hw_catalog.h"
+@@ -384,7 +385,7 @@
+ 	return c;
+ 
+ blk_init_error:
+-	kzfree(c);
++	kfree_sensitive(c);
+ 
+ 	return ERR_PTR(rc);
+ }
+--- a/techpack/display/msm/sde_hdcp_2x.c
++++ b/techpack/display/msm/sde_hdcp_2x.c
+@@ -367,7 +367,7 @@
+ 			list);
+ 		hdcp2_close_stream(hdcp->hdcp2_ctx,
+ 			stream_entry->stream_handle);
+-		kzfree(stream_entry);
++		kfree_sensitive(stream_entry);
+ 		hdcp->stream_count--;
+ 	}
+ 
+@@ -750,7 +750,7 @@
+ 				stream_entry->stream_handle);
+ 			hdcp->stream_count--;
+ 			list_del(element);
+-			kzfree(stream_entry);
++			kfree_sensitive(stream_entry);
+ 			query_streams = true;
+ 		} else if (!stream_entry->stream_handle) {
+ 			if (hdcp2_open_stream(hdcp->hdcp2_ctx,
+@@ -801,7 +801,7 @@
+ 			/* Stream wasn't fully initialized so remove it */
+ 			hdcp->stream_count--;
+ 			list_del(entry);
+-			kzfree(stream_entry);
++			kfree_sensitive(stream_entry);
+ 		} else {
+ 			stream_entry->active = false;
+ 		}
+@@ -1099,7 +1099,7 @@
+ 
+ 	return 0;
+ error:
+-	kzfree(hdcp);
++	kfree_sensitive(hdcp);
+ 	hdcp = NULL;
+ unlock:
+ 	return rc;
+@@ -1114,5 +1114,5 @@
+ 
+ 	kthread_stop(hdcp->thread);
+ 	sde_hdcp_2x_disable(data);
+-	kzfree(hdcp);
+-}
++	kfree_sensitive(hdcp);
++}
+--- a/techpack/display/msm/sde_io_util.c
++++ b/techpack/display/msm/sde_io_util.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2012-2015, 2017-2021 The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/slab.h>
+ #include <linux/clk.h>
+ #include <linux/err.h>
+ #include <linux/io.h>
+@@ -179,7 +180,7 @@
+ parse_fail:
+ 	msm_dss_clean_io_mem(&temp_head);
+ end:
+-	kzfree(res);
++	kfree_sensitive(res);
+ 	return rc;
+ }
+ EXPORT_SYMBOL(msm_dss_get_pmic_io_mem);
+@@ -264,7 +265,7 @@
+ 
+ 	list_for_each_entry_safe(pos, tmp, mem_list, list) {
+ 		list_del(&pos->list);
+-		kzfree(pos);
++		kfree_sensitive(pos);
+ 	}
+ }
+ EXPORT_SYMBOL(msm_dss_clean_io_mem);
+@@ -300,7 +301,7 @@
+ 
+ 	list_for_each_entry_safe(pos, tmp, irq_list, list) {
+ 		list_del(&pos->list);
+-		kzfree(pos);
++		kfree_sensitive(pos);
+ 	}
+ }
+ EXPORT_SYMBOL(msm_dss_clean_io_irq);

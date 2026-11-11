@@ -1,0 +1,29 @@
+--- a/drivers/gpu/msm/adreno.c
++++ b/drivers/gpu/msm/adreno.c
+@@ -1841,16 +1841,22 @@
+ 	adreno_dev = ADRENO_DEVICE(device);
+ 	gpudev = ADRENO_GPU_DEVICE(adreno_dev);
+ 
++#ifdef CONFIG_INPUT
++	/* Stop the producer before draining work that can wake the GPU. */
++	if (adreno_input_handler.private == device) {
++		input_unregister_handler(&adreno_input_handler);
++		adreno_input_handler.private = NULL;
++	}
++#endif
++	/* input_work takes device->mutex, so drain it without that mutex held. */
++	cancel_work_sync(&adreno_dev->input_work);
++
+ 	if (gpudev->remove != NULL)
+ 		gpudev->remove(adreno_dev);
+ 
+ 	/* The memory is fading */
+ 	_adreno_free_memories(adreno_dev);
+ 
+-#ifdef CONFIG_INPUT
+-	if (adreno_input_handler.private)
+-		input_unregister_handler(&adreno_input_handler);
+-#endif
+ 	adreno_sysfs_close(adreno_dev);
+ 
+ 	adreno_coresight_remove(adreno_dev);

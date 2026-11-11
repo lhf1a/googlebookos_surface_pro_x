@@ -1,0 +1,270 @@
+{
+  "status": "paused-work-in-progress-NOT-integrated-NOT-device-ready",
+  "groups": {
+    "irq": {
+      "parent": "integrated14 provider/IRQ partial",
+      "patch": "patches/wip/kgsl-sde-paused-20261111/irq.patch",
+      "sha256": "e0b0654878004599a920772926914fc02a9f53991f3668c03733ce269cd2452d",
+      "bytes": 9314,
+      "changed_files": {
+        "techpack/display/msm/msm_kms.h": {
+          "before": "afabd5e4f3a16996b88fadccf6dedad6bb64f55cad7743a1b512813a44ecbba2",
+          "after": "67d48845bee2a7fd5767460620003bc1c63b05de88b7f12132d6d1444ea98440"
+        },
+        "techpack/display/msm/sde/sde_core_irq.c": {
+          "before": "15cc85ead4a92f7ca146ea11c84a5e9792444049094dd08cf28a1bb7b37c7240",
+          "after": "f1f91015eb454f0cf81c09136d174ea1f68490388b0bda4c50824221479f95b5"
+        },
+        "techpack/display/msm/sde/sde_core_irq.h": {
+          "before": "9ac88fe0aa0300220dec9a162ffdb81b7956983dd40595e08aa6847bd37bfc51",
+          "after": "baa817cf1579d48b47873c2442c76409019869abb8ce8c213292d135fef93d29"
+        },
+        "techpack/display/msm/sde/sde_irq.c": {
+          "before": "9c69b2de2c5e972f5d29e299563f2d5c2c1871ecbeaecb6cacc7959476b862bc",
+          "after": "34209b81eff298a7d119f2d45cc3164922180495819252edce4d8953ee4f64b2"
+        },
+        "techpack/display/msm/sde/sde_irq.h": {
+          "before": "fc243ad16050302070017883f5e4165b9495becb613d67f99d0dcb7a08bd07a6",
+          "after": "e0d8926005fac61dc4b535f9779dc001793af7ff309ff972a80f38ed8f1b42ec"
+        }
+      }
+    },
+    "mode-kernel": {
+      "parent": "integrated16 plus incomplete mode v2",
+      "patch": "patches/wip/kgsl-sde-paused-20261111/mode-kernel.patch",
+      "sha256": "788c247164072a30942b2a5d3cfcb9549a80b9161853cc8e56e3ede60a9ac08e",
+      "bytes": 33916,
+      "changed_files": {
+        "include/uapi/drm/sde_mode_identity.h": {
+          "before": null,
+          "after": "69a9f6c6f77c1eecf805275fc9f0124035af197b55789048e6a9567f27a5b828"
+        },
+        "include/uapi/drm/sde_mode_request.h": {
+          "before": null,
+          "after": "b401eeaac5ec7ecbc4035898c18a6cdec199ecbc8b763e2650a7b0cbc70f0deb"
+        },
+        "techpack/display/msm/dsi/dsi_defs.h": {
+          "before": "411e45c0e125c1e96fe2e221e0ef67a81e26b832d39dc91abd84bb380f11b520",
+          "after": "1375d36c3b891f1bb8bae6f3f9b4b88c69926d8aa151f6315964d961bb053271"
+        },
+        "techpack/display/msm/dsi/dsi_display.c": {
+          "before": "3d1c111a3fabb4ab078f1e2a92f3f048f93e5cb019134bcbdf9010d4716a2b3f",
+          "after": "ec593e16fb35fa48a6cba3747ece408aa77a9425933137f101930b1eab41412e"
+        },
+        "techpack/display/msm/dsi/dsi_display.h": {
+          "before": "d0b4d91e0e753208cb42db95ec8d0b8c897e2227b97faf6df29bf5f98759efa7",
+          "after": "f89a994fc67f6f292314277a1fceaed0423f756237881e1d8dbd255c3f81f3a7"
+        },
+        "techpack/display/msm/dsi/dsi_drm.c": {
+          "before": "8766cea6442f1a373d6cda5d2d22b40ce698b9c2fbd9fbd3bbeb8c0bfb195e3c",
+          "after": "640dd278b458043957c5b3867f269c770b435b15fa63237f8a61f790d8d4d0b6"
+        },
+        "techpack/display/msm/dsi/dsi_panel.c": {
+          "before": "c1c72ee964ce3be91c5b6c031840ad6e2d81eb791edc04047251752e7555f615",
+          "after": "dc8bcc32a3394173bb84a880ea20e6e94952212ba70fe6d211343a2fad7704d6"
+        },
+        "techpack/display/msm/dsi/dsi_panel.h": {
+          "before": "899451a904cc3644e13f00fecb52af1c08fedb1092c5097dce65e2d5b8d08e8f",
+          "after": "f670fc2c4e8045ac298921c4791406262b96c13a4876765aa9d2b1eab164648b"
+        },
+        "techpack/display/msm/msm_atomic.c": {
+          "before": "ed382a9e2b9f2e48def5d581deb1f3e5f1f50ef81bec852579999fddc4e1b675",
+          "after": "a82ad69732e8ed3cd329f885d00d3612dfb04f3b8c79fb301e7851e5f4e76819"
+        },
+        "techpack/display/msm/msm_kms.h": {
+          "before": "afabd5e4f3a16996b88fadccf6dedad6bb64f55cad7743a1b512813a44ecbba2",
+          "after": "31f3f0fc3a2c687f1f9cb7f2ca83c97365d7f80cb8cba175b3b68cea15f3ad7c"
+        },
+        "techpack/display/msm/sde/sde_connector.c": {
+          "before": "ccbcbcf95506ad4a3d0c7c55f4f1a96ced4b3836876e4201d974af95401ca929",
+          "after": "c55b19cfd02540bbd698bc624430ab746beb06787533778a850dc6b5b1a6b6c1"
+        },
+        "techpack/display/msm/sde/sde_connector.h": {
+          "before": "6bc6558406fabf6a1cfdf3ef57f663e73ac8c6774d47f69eb3c7a33b059d2531",
+          "after": "45f7bd8499e2c037c81276680aa8c3a71ec34ab1a42eb919c7765add74b579f3"
+        },
+        "techpack/display/msm/sde/sde_crtc.c": {
+          "before": "8556fe41e81a11e8a21ad89ff3d4f2b9c07e17e1c48c0cba13ac509847561451",
+          "after": "6485a421d12a64d4d434e1037bcfd353d503abc75789cce4cb679b5ef784f11d"
+        },
+        "techpack/display/msm/sde/sde_crtc.h": {
+          "before": "4a4a841498065e5b965ac1147fb5a190ad418e5fbe9bd98cbda0348d619c3624",
+          "after": "070a72439cf391a5f160b7679f9c5d86acf953e534b87caf1f566853427a3a8f"
+        },
+        "techpack/display/msm/sde/sde_mode_state.h": {
+          "before": null,
+          "after": "670fbb52bdce1b66f6b833c1067885a23bba3a03d9b86e85c595a4e83297fd91"
+        }
+      }
+    },
+    "mode-userland": {
+      "parent": "official QTI e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "patch": "patches/wip/kgsl-sde-paused-20261111/mode-userland.patch",
+      "sha256": "11d4f0fbf71e17ce98bd7081152ef97284ca490bae47d4eb15d3099d93ca87ce",
+      "bytes": 24361,
+      "changed_files": {
+        "libdrmutils/drm_interface.h": {
+          "before": "7eea1d65fdb85213815b681643df30352b8fa9f70e2c33385fb0039501138713",
+          "after": "538e7886f85a33a6576def9b21fdd976665fc703e5905aa75dcc95acfd821a34"
+        },
+        "libdrmutils/sde_mode_identity.h": {
+          "before": null,
+          "after": "69a9f6c6f77c1eecf805275fc9f0124035af197b55789048e6a9567f27a5b828"
+        },
+        "sde-drm/drm_atomic_req.cpp": {
+          "before": "d033d0eadc0276c2ed4a2c80b608151f58f199a42fef9d655b4e14fa4c285881",
+          "after": "5b825fc7bc069243f1274ed3c5cf4edee8edab9f271494b063b93d974ccd011c"
+        },
+        "sde-drm/drm_atomic_req.h": {
+          "before": "ced2573f9ac7b383b150700d45e4894e49124886444f2c4d601e6eaee15bf10b",
+          "after": "3c9a103a5cce269b053d45d84053aca3077fc27a4887a46600efdea41e5e48e9"
+        },
+        "sde-drm/drm_connector.cpp": {
+          "before": "4e6858d7fcb2cfcafa58acd03bf5d5d6806af3d98fcf9812567265cacf1a5970",
+          "after": "957a6417c5dce16e028b57399090f3ec341f0b41263b939ef3f85ac7f780aabb"
+        },
+        "sde-drm/drm_connector.h": {
+          "before": "ca20bbc6159bd2d8540519a57aba8212ccc674f1a104eeb45a3e7d7fcb084410",
+          "after": "88376cb902ca8b83bb8e874be45fab7df349c3998c109998471c48cb4f13b9fe"
+        },
+        "sde-drm/drm_crtc.cpp": {
+          "before": "ae4dd88d2d5c5c4e396b1894e0a55720059bd9d19f5d2f05e18f909c41249652",
+          "after": "a127bb4211b6fa6fbd6f10012d6660e9655339443233738713576dbb157c31d7"
+        },
+        "sde-drm/drm_crtc.h": {
+          "before": "ef3243e6ed4ffee9f8916b73f4f6fffda394e4f4ccb19eb120b4fb58374393fb",
+          "after": "0ccb898b73c3f649289b500d455d6727ed31d83e840e76348f7e3bb9f37d2013"
+        },
+        "sde-drm/sde_mode_request.h": {
+          "before": null,
+          "after": "b401eeaac5ec7ecbc4035898c18a6cdec199ecbc8b763e2650a7b0cbc70f0deb"
+        },
+        "sde-drm/sde_mode_request_adapter.h": {
+          "before": null,
+          "after": "70125a55d04aa8ffb54d6a989d48ccb975aab965d3a046ae1590a54ab484b74c"
+        },
+        "sdm/libs/core/drm/hw_device_drm.cpp": {
+          "before": "7aee44a2b9646cff9802cc3154e0789ba814c01aa7c23ded17ca1a8c7eb55bff",
+          "after": "6e0a6452695bd72b21577f10bbf0050b98e4d8ecb90534d0edcc5e72498b5b1d"
+        },
+        "sdm/libs/core/drm/hw_device_drm.h": {
+          "before": "f824b1c3c010ae3b13fbddaeeebe99165694697b64a17213e88d86c876599b31",
+          "after": "fa4c189d0347caf1319a5d47369e40fc611af69a681ef907b5bc44f94c4d8938"
+        }
+      }
+    },
+    "mode-product": {
+      "parent": "repository product baseline at save time",
+      "patch": "patches/wip/kgsl-sde-paused-20261111/mode-product.patch",
+      "sha256": "1c99abd658b9ded87445b4ff45d355a63cfb178b55f6884c1960abdc1cb743c6",
+      "bytes": 38706,
+      "changed_files": {
+        "configs/sm8350-display-build.json": {
+          "before": "7f4485e7572f497ca7f932c83309d14f1c1995319c7d8c1e189ca48d0234088b",
+          "after": "962b9629f960c320b9733b6d48b90a2550519e5050d2119a6f3654e21c66ab6c"
+        },
+        "patches/qti-sde-mode-request-v1.patch": {
+          "before": null,
+          "after": "fa87c080d1efbd8ef088f218fdc5a3fbe00c1b500e3a8428561c16a21ff61feb"
+        },
+        "patches/qti-sde-mode-request-v2.patch": {
+          "before": null,
+          "after": "cdf611026cec73b69f3652a82452d62227ff254bde0526d5b5755d4781724b63"
+        },
+        "probe/graphics/quest2-platform-cxx.h": {
+          "before": "ac837814fb84c9b767b5bf81452580261017cd7b875bac6205f039d710cbf4c8",
+          "after": "428636d4fb0126a2d315ab0306cb71e6b2d08dcd07a1c19a54d368e86c583a45"
+        },
+        "scripts/build-sm8350-display.py": {
+          "before": "8597e6a61a47d16eceda3ac07a408a5d7069fe12d76dbb9b3da0668323b95430",
+          "after": "fbd212d901d473107f60b900da26de030904b23b45c1952a0dc1c3290a6c31c7"
+        }
+      }
+    },
+    "mst-driver": {
+      "parent": "integrated12 plus incomplete persistent MST driver",
+      "patch": "patches/wip/kgsl-sde-paused-20261111/mst-driver.patch",
+      "sha256": "e018f3a4efe466b4efd6658cd2b30b29654a0a3c34bf1903bcdf5ca8f0b6aaf4",
+      "bytes": 54920,
+      "changed_files": {
+        "techpack/display/msm/Makefile": {
+          "before": "f9cab4c57f8b6905d6928f110af7a69793cba205ee8c31a2ef87f5a92c3726e0",
+          "after": "2e68014a53074f915191355c4f94b075f1afd2e746f4f1f359b78e540dbf9354"
+        },
+        "techpack/display/msm/dp/dp_display.c": {
+          "before": "ba7566ac376be8fa773a8e09d4941efa18bddfe157dcd5ae00919e8bdb1edf79",
+          "after": "02e63646f2084b7f0523b76cb0513c48cc504c5a739c08df818dcf4f0b3a2a3f"
+        },
+        "techpack/display/msm/dp/dp_display.h": {
+          "before": "33cac1be1898fd5725c0ccddfca577bf363ed106e55cef41d4de52d3c876e9b2",
+          "after": "66037ca37a5580dfc6851e444b4fb31d9219a81b8e87d21b659dc9b94757f791"
+        },
+        "techpack/display/msm/dp/dp_mst_drm.c": {
+          "before": "4209005dd5e0755094ad3ae9a8936bc453c624a25151889f1d6aa0bcfc5a0534",
+          "after": "c20cd2331efcf35230a4d6fbc3ab381b18fa563dfd8f2edd435c41dc5a891e13"
+        },
+        "techpack/display/msm/msm_atomic.c": {
+          "before": "ed382a9e2b9f2e48def5d581deb1f3e5f1f50ef81bec852579999fddc4e1b675",
+          "after": "6c9038349db673c4406034712520e890515492554885055c68e52b213ae164d6"
+        },
+        "techpack/display/msm/msm_drv.c": {
+          "before": "9b00d11d940928cffbadbec2b49bd1acd1fb6e2f6016e4ebbc0f897ee5048179",
+          "after": "13064eb7529954d45e67858c6040537284377ccb855c47f9d98e19f7d66c1781"
+        },
+        "techpack/display/msm/sde/sde_connector.c": {
+          "before": "ccbcbcf95506ad4a3d0c7c55f4f1a96ced4b3836876e4201d974af95401ca929",
+          "after": "83747249770b00fac35c709b48cbe4c913f25a0667760d162d9b029b9ab21384"
+        },
+        "techpack/display/msm/sde/sde_connector.h": {
+          "before": "6bc6558406fabf6a1cfdf3ef57f663e73ac8c6774d47f69eb3c7a33b059d2531",
+          "after": "3dc7627f19fe3ee3999b24fe83116db8799d2b9d29f7f3b4c7db4dfa0149f448"
+        }
+      }
+    },
+    "mst-core": {
+      "parent": "paired dev2 Linux6.18.60 core, not changed in place",
+      "patch": "patches/wip/kgsl-sde-paused-20261111/mst-core.patch",
+      "sha256": "2c41cb4573b6f1a0dd79867bb805300da02787057e37bb2603e41be6fb0caed5",
+      "bytes": 5561,
+      "changed_files": {
+        "drivers/gpu/drm/display/drm_dp_mst_topology.c": {
+          "before": "eaf06ec833a9c95cd84b731cfc620396505486b5c3984a8c39d59cb53f7df73c",
+          "after": "b02cf259b064e58ae5dd25e8393e88dbe890ba35bed695917b1653a9b0baab4d"
+        },
+        "include/drm/display/drm_dp_mst_helper.h": {
+          "before": "9e05d5c0af9e815d02693eae57f34488894485ec35b6d29e10306310cb2b0bf9",
+          "after": "5253a64d90da58207c37e0b6b3af7cd7623ff12d7045eaeb2f1d4a19d33a529e"
+        }
+      }
+    },
+    "gem-owner": {
+      "parent": "unfinished native owner candidate; not integrated",
+      "patch": "patches/wip/kgsl-sde-paused-20261111/gem-owner.patch",
+      "sha256": "f9efa5537ee6340674f77afeac251b7024884028dcca87ac627d7f4dacfb9696",
+      "bytes": 19792,
+      "changed_files": {
+        "techpack/display/msm/msm_drv.c": {
+          "before": "80d07de160d1968f16ebd74930f0df9349d2cee9f499aac8963c1734df0d1d33",
+          "after": "429993a5f0e861a10a271d784ac86cbd08f1963cfe9d03fa202bc2037d447b6d"
+        },
+        "techpack/display/msm/msm_drv.h": {
+          "before": "e25b51ce2bf225a57d3ac866a5679a3a932785c58faf65ac8ca8f665a055062f",
+          "after": "2e4f8702a946b1a45c1b0d5ef39b5903fd6645be919366d9b51bfe3285b06f9a"
+        },
+        "techpack/display/msm/msm_gem.c": {
+          "before": "d709541d5d5c47f3583b114ff39b215572914a4a42161b9f004c734e294d7c25",
+          "after": "5457c83cbda1809433b56cef04d120adfa7309addeebd2490b405247a72d1e85"
+        },
+        "techpack/display/msm/msm_gem.h": {
+          "before": "5d5b42fc84d2e74d224a683de754a5cb641e747afed2e4d276b9cf2bd4d49c20",
+          "after": "2433d575a2c445afaf31bf0c526200bd74b7bbac1f3ec3e5f84c87767d44b300"
+        },
+        "techpack/display/msm/msm_gem_prime.c": {
+          "before": "5771ccbc4d234f8507a259e9480b2fba82c7c0d5b145eb636ae4b6d89296fad3",
+          "after": "7f6ba76eeca0b85f9ce5bee533ec442d9e41eda9a40ad78a86e186fcb5a7b48c"
+        }
+      }
+    }
+  },
+  "excluded": "Binaries, raw logs, credentials, SOURCE/Kbuild generated records; all original trees retained locally. Patches are independent alternatives and must not be blindly stacked."
+}

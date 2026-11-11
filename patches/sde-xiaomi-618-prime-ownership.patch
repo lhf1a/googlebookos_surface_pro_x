@@ -1,0 +1,1471 @@
+--- a/techpack/display/msm/msm_atomic.c
++++ b/techpack/display/msm/msm_atomic.c
+@@ -1,3 +1,4 @@
++#include <drm/drm_gem_atomic_helper.h>
+ /*
+  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+  * Copyright (C) 2014 Red Hat
+@@ -471,25 +472,15 @@
+ 	SDE_ATRACE_END("msm_enable");
+ }
+ 
+-int msm_atomic_prepare_fb(struct drm_plane *plane,
+-			  struct drm_plane_state *new_state)
+-{
+-	struct msm_drm_private *priv = plane->dev->dev_private;
+-	struct msm_kms *kms = priv->kms;
+-	struct drm_gem_object *obj;
+-	struct msm_gem_object *msm_obj;
+-	struct dma_fence *fence;
+-
+-	if (!new_state->fb)
+-		return 0;
+-
+-	obj = msm_framebuffer_bo(new_state->fb, 0);
+-	msm_obj = to_msm_bo(obj);
+-	fence = dma_resv_get_excl_rcu(msm_obj->resv);
+-
+-	drm_atomic_set_fence_for_plane(new_state, fence);
+-
+-	return msm_framebuffer_prepare(new_state->fb, kms->aspace);
++int msm_atomic_prepare_fb(struct drm_plane *plane, struct drm_plane_state *new_state)
++{
++    struct msm_drm_private *priv = plane->dev->dev_private;
++    int ret;
++
++    ret = drm_gem_plane_helper_prepare_fb(plane, new_state);
++    if (ret || !new_state->fb)
++        return ret;
++    return msm_framebuffer_prepare(new_state->fb, priv->kms->aspace);
+ }
+ 
+ /* The (potentially) asynchronous part of the commit.  At this point
+@@ -687,16 +678,8 @@
+ 	 */
+ 	for_each_oldnew_plane_in_state(state, plane, old_plane_state,
+ 			new_plane_state, i) {
+-		if ((new_plane_state->fb != old_plane_state->fb)
+-				&& new_plane_state->fb) {
+-			struct drm_gem_object *obj =
+-				msm_framebuffer_bo(new_plane_state->fb, 0);
+-			struct msm_gem_object *msm_obj = to_msm_bo(obj);
+-			struct dma_fence *fence =
+-				dma_resv_get_excl_rcu(msm_obj->resv);
+-
+-			drm_atomic_set_fence_for_plane(new_plane_state, fence);
+-		}
++		/* prepare_fb already installed the complete fence dependency. */
++
+ 		c->plane_mask |= (1 << drm_plane_index(plane));
+ 	}
+ 
+--- a/techpack/display/msm/msm_drv.c
++++ b/techpack/display/msm/msm_drv.c
+@@ -838,6 +838,7 @@
+ 
+ 	INIT_LIST_HEAD(&priv->client_event_list);
+ 	INIT_LIST_HEAD(&priv->inactive_list);
++	mutex_init(&priv->gem_lock);
+ 	INIT_LIST_HEAD(&priv->vm_client_list);
+ 
+ 	mutex_init(&priv->vm_client_lock);
+@@ -1216,7 +1217,7 @@
+ 
+ 	ret = msm_gem_cpu_prep(obj, args->op, &timeout);
+ 
+-	drm_gem_object_put_unlocked(obj);
++	drm_gem_object_put(obj);
+ 
+ 	return ret;
+ }
+@@ -1234,7 +1235,7 @@
+ 
+ 	ret = msm_gem_cpu_fini(obj);
+ 
+-	drm_gem_object_put_unlocked(obj);
++	drm_gem_object_put(obj);
+ 
+ 	return ret;
+ }
+@@ -1767,7 +1768,7 @@
+ 			DRM_UNLOCKED),
+ };
+ 
+-static const struct vm_operations_struct vm_ops = {
++const struct vm_operations_struct msm_gem_vm_ops = {
+ 	.fault = msm_gem_fault,
+ 	.open = drm_gem_vm_open,
+ 	.close = drm_gem_vm_close,
+@@ -1799,21 +1800,12 @@
+ 	.irq_uninstall      = msm_irq_uninstall,
+ 	.enable_vblank      = msm_enable_vblank,
+ 	.disable_vblank     = msm_disable_vblank,
+-	.gem_free_object    = msm_gem_free_object,
+-	.gem_vm_ops         = &vm_ops,
+ 	.dumb_create        = msm_gem_dumb_create,
+ 	.dumb_map_offset    = msm_gem_dumb_map_offset,
+ 	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
+ 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
+-	.gem_prime_export   = drm_gem_prime_export,
+ 	.gem_prime_import   = msm_gem_prime_import,
+-	.gem_prime_pin      = msm_gem_prime_pin,
+-	.gem_prime_unpin    = msm_gem_prime_unpin,
+-	.gem_prime_get_sg_table = msm_gem_prime_get_sg_table,
+ 	.gem_prime_import_sg_table = msm_gem_prime_import_sg_table,
+-	.gem_prime_vmap     = msm_gem_prime_vmap,
+-	.gem_prime_vunmap   = msm_gem_prime_vunmap,
+-	.gem_prime_mmap     = msm_gem_prime_mmap,
+ 	.ioctls             = msm_ioctls,
+ 	.num_ioctls         = ARRAY_SIZE(msm_ioctls),
+ 	.fops               = &fops,
+--- a/techpack/display/msm/msm_drv.h
++++ b/techpack/display/msm/msm_drv.h
+@@ -873,6 +873,7 @@
+ 
+ 	/* list of GEM objects: */
+ 	struct list_head inactive_list;
++	struct mutex gem_lock; /* protects the GEM object list */
+ 
+ 	struct workqueue_struct *wq;
+ 
+@@ -1084,9 +1085,12 @@
+ 		struct drm_mode_create_dumb *args);
+ int msm_gem_dumb_map_offset(struct drm_file *file, struct drm_device *dev,
+ 		uint32_t handle, uint64_t *offset);
++struct dma_resv *msm_gem_prime_res_obj(struct drm_gem_object *obj);
++extern const struct vm_operations_struct msm_gem_vm_ops;
++struct iosys_map;
+ struct sg_table *msm_gem_prime_get_sg_table(struct drm_gem_object *obj);
+-void *msm_gem_prime_vmap(struct drm_gem_object *obj);
+-void msm_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr);
++int msm_gem_prime_vmap(struct drm_gem_object *obj, struct iosys_map *map);
++void msm_gem_prime_vunmap(struct drm_gem_object *obj, struct iosys_map *map);
+ int msm_gem_prime_mmap(struct drm_gem_object *obj, struct vm_area_struct *vma);
+ struct drm_gem_object *msm_gem_prime_import_sg_table(struct drm_device *dev,
+ 		struct dma_buf_attachment *attach, struct sg_table *sg);
+@@ -1113,6 +1117,8 @@
+ void *msm_gem_kernel_new_locked(struct drm_device *dev, uint32_t size,
+ 		uint32_t flags, struct msm_gem_address_space *aspace,
+ 		struct drm_gem_object **bo, uint64_t *iova);
++void msm_gem_kernel_put(struct drm_gem_object *bo,
++        struct msm_gem_address_space *aspace, bool locked);
+ struct drm_gem_object *msm_gem_import(struct drm_device *dev,
+ 		struct dma_buf *dmabuf, struct sg_table *sgt);
+ 
+--- a/techpack/display/msm/msm_fb.c
++++ b/techpack/display/msm/msm_fb.c
+@@ -18,7 +18,6 @@
+  */
+ 
+ #include <linux/dma-buf.h>
+-#include <linux/msm_ion.h>
+ #include <drm/drm_crtc.h>
+ #include <drm/drm_damage_helper.h>
+ #include <drm/drm_gem_framebuffer_helper.h>
+@@ -224,7 +223,7 @@
+ 
+ out_unref:
+ 	for (i = 0; i < n; i++)
+-		drm_gem_object_put_unlocked(bos[i]);
++		drm_gem_object_put(bos[i]);
+ 	return ERR_PTR(ret);
+ }
+ 
+@@ -375,7 +374,7 @@
+ 		/* note: if fb creation failed, we can't rely on fb destroy
+ 		 * to unref the bo:
+ 		 */
+-		drm_gem_object_put_unlocked(bo);
++		drm_gem_object_put(bo);
+ 		return ERR_CAST(fb);
+ 	}
+ 
+@@ -383,30 +382,10 @@
+ }
+ 
+ int msm_fb_obj_get_attrs(struct drm_gem_object *obj, int *fb_ns,
+-	 int *fb_sec, int *fb_sec_dir, unsigned long *flags)
+-{
+-
+-	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+-	int ret = 0;
+-
+-	if (!obj->import_attach) {
+-		DRM_DEBUG("NULL attachment in drm gem object flags:0x%x\n", msm_obj->flags);
+-		return -EINVAL;
+-	}
+-
+-	ret = dma_buf_get_flags(obj->import_attach->dmabuf, flags);
+-	if (ret) {
+-		DRM_ERROR("dma_buf_get_flags failure, err=%d\n", ret);
+-		return ret;
+-	}
+-
+-	if (!(*flags & ION_FLAG_SECURE))
+-		*fb_ns = 1;
+-	else if (*flags & ION_FLAG_CP_PIXEL)
+-		*fb_sec = 1;
+-	else if (*flags & (ION_FLAG_CP_SEC_DISPLAY |
+-			ION_FLAG_CP_CAMERA_PREVIEW))
+-		*fb_sec_dir = 1;
+-
+-	return ret;
+-}
++        int *fb_sec, int *fb_sec_dir, unsigned long *flags)
++{
++    /* No public DMA-BUF private-security metadata/provider exists. Do not
++     * fabricate ION attributes. Plane admission uses the actual state mode.
++     */
++    return -EOPNOTSUPP;
++}
+--- a/techpack/display/msm/msm_gem.c
++++ b/techpack/display/msm/msm_gem.c
+@@ -19,8 +19,10 @@
+ #include <linux/spinlock.h>
+ #include <linux/shmem_fs.h>
+ #include <linux/dma-buf.h>
+-#include <linux/pfn_t.h>
+-#include <linux/ion.h>
++#include <linux/vmalloc.h>
++#include <linux/overflow.h>
++#include <linux/limits.h>
++#include <drm/drm_prime.h>
+ 
+ #include "msm_drv.h"
+ #include "msm_gem.h"
+@@ -28,6 +30,18 @@
+ #include "sde_dbg.h"
+ 
+ static void msm_gem_vunmap_locked(struct drm_gem_object *obj);
++
++static const struct drm_gem_object_funcs msm_gem_object_funcs = {
++    .free = msm_gem_free_object,
++    .export = drm_gem_prime_export,
++    .pin = msm_gem_prime_pin,
++    .unpin = msm_gem_prime_unpin,
++    .get_sg_table = msm_gem_prime_get_sg_table,
++    .vmap = msm_gem_prime_vmap,
++    .vunmap = msm_gem_prime_vunmap,
++    .mmap = msm_gem_mmap_obj,
++    .vm_ops = &msm_gem_vm_ops,
++};
+ 
+ 
+ static dma_addr_t physaddr(struct drm_gem_object *obj)
+@@ -100,7 +114,7 @@
+ 
+ 		msm_obj->pages = p;
+ 
+-		msm_obj->sgt = drm_prime_pages_to_sg(p, npages);
++		msm_obj->sgt = drm_prime_pages_to_sg(dev, p, npages);
+ 		if (IS_ERR(msm_obj->sgt)) {
+ 			void *ptr = ERR_CAST(msm_obj->sgt);
+ 
+@@ -192,7 +206,8 @@
+ 
+ 	msm_obj = to_msm_bo(obj);
+ 
+-	if (msm_obj->vram_node)
++	/* Imported cache maintenance belongs to exporter begin/end_cpu_access. */
++	if (obj->import_attach || msm_obj->vram_node)
+ 		return;
+ 	/*
+ 	 * dma_sync_sg_for_device synchronises a single contiguous or
+@@ -212,8 +227,12 @@
+ {
+ 	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+ 
+-	vma->vm_flags &= ~VM_PFNMAP;
+-	vma->vm_flags |= VM_MIXEDMAP;
++	/* Imported buffers are mapped through their DMA-BUF fd/exporter. */
++	if (obj->import_attach)
++		return -EOPNOTSUPP;
++	vm_flags_clear(vma, VM_PFNMAP);
++	vm_flags_set(vma, VM_MIXEDMAP | VM_DONTEXPAND | VM_DONTDUMP);
++	vma->vm_ops = &msm_gem_vm_ops;
+ 
+ 	if (msm_obj->flags & MSM_BO_WC) {
+ 		vma->vm_page_prot = pgprot_writecombine(vm_get_page_prot(vma->vm_flags));
+@@ -238,15 +257,7 @@
+ 
+ int msm_gem_mmap(struct file *filp, struct vm_area_struct *vma)
+ {
+-	int ret;
+-
+-	ret = drm_gem_mmap(filp, vma);
+-	if (ret) {
+-		DBG("mmap failed: %d", ret);
+-		return ret;
+-	}
+-
+-	return msm_gem_mmap_obj(vma->vm_private_data, vma);
++    return drm_gem_mmap(filp, vma);
+ }
+ 
+ vm_fault_t msm_gem_fault(struct vm_fault *vmf)
+@@ -292,7 +303,7 @@
+ 	VERB("Inserting %pK pfn %lx, pa %lx", (void *)vmf->address,
+ 			pfn, pfn << PAGE_SHIFT);
+ 
+-	ret = vmf_insert_mixed(vma, vmf->address, __pfn_to_pfn_t(pfn, PFN_DEV));
++	ret = vmf_insert_mixed(vma, vmf->address, pfn);
+ out_unlock:
+ 	mutex_unlock(&msm_obj->lock);
+ out:
+@@ -411,7 +422,6 @@
+ 		 * the aspace inaccessible. Store the aspace, as it is used to
+ 		 * update the active_list during gem_free_obj and gem_purge.
+ 		 */
+-		msm_obj->aspace = vma->aspace;
+ 		del_vma(vma);
+ 	}
+ }
+@@ -426,60 +436,28 @@
+ 
+ 	WARN_ON(!mutex_is_locked(&msm_obj->lock));
+ 
++        if (obj->import_attach) {
++            struct device *dev = msm_gem_get_aspace_device(aspace);
++
++            if (!aspace || !aspace->domain_attached ||
++                !aspace->mmu || !aspace->mmu->funcs->is_domain_secure ||
++                aspace->mmu->funcs->is_domain_secure(aspace->mmu) ||
++                !dev || dev != obj->import_attach->dev || msm_obj->obj_dirty)
++                return -EOPNOTSUPP;
++            if (msm_obj->import_aspace != aspace)
++                return -EBUSY;
++            ret = msm_gem_delayed_import(obj);
++            if (ret)
++                return ret;
++            if (msm_obj->vmap_count)
++                return -EBUSY;
++        }
++
+ 	vma = lookup_vma(obj, aspace);
+ 
+ 	if (!vma) {
+ 		struct page **pages;
+-		struct device *dev;
+-		struct dma_buf *dmabuf;
+-		bool reattach = false;
+-		unsigned long dma_map_attrs;
+-
+-		dev = msm_gem_get_aspace_device(aspace);
+-		if ((dev && obj->import_attach) &&
+-				((dev != obj->import_attach->dev) ||
+-				msm_obj->obj_dirty)) {
+-			dmabuf = obj->import_attach->dmabuf;
+-			dma_map_attrs = obj->import_attach->dma_map_attrs;
+-
+-			DRM_DEBUG("detach nsec-dev:%pK attach sec-dev:%pK\n",
+-					obj->import_attach->dev, dev);
+-			SDE_EVT32(obj->import_attach->dev, dev, msm_obj->sgt,
+-					 msm_obj->obj_dirty);
+-
+-			if (msm_obj->sgt)
+-				dma_buf_unmap_attachment(obj->import_attach,
+-					msm_obj->sgt, DMA_BIDIRECTIONAL);
+-			dma_buf_detach(dmabuf, obj->import_attach);
+-
+-			obj->import_attach = dma_buf_attach(dmabuf, dev);
+-			if (IS_ERR(obj->import_attach)) {
+-				DRM_ERROR("dma_buf_attach failure, err=%ld\n",
+-						PTR_ERR(obj->import_attach));
+-				ret = PTR_ERR(obj->import_attach);
+-				return ret;
+-			}
+-			/*
+-			 * obj->import_attach is created as part of dma_buf_attach.
+-			 * Re-apply the dma_map_attr in this case to be in sync
+-			 * with iommu_map attrs during map_attachment callback.
+-			 */
+-			obj->import_attach->dma_map_attrs |= dma_map_attrs;
+-			msm_obj->obj_dirty = false;
+-			reattach = true;
+-		}
+-
+-		/* perform delayed import for buffers without existing sgt */
+-		if (((msm_obj->flags & MSM_BO_EXTBUF) && !(msm_obj->sgt))
+-				|| reattach) {
+-			ret = msm_gem_delayed_import(obj);
+-			if (ret) {
+-				DRM_ERROR("delayed dma-buf import failed %d\n",
+-						ret);
+-				msm_obj->obj_dirty = true;
+-				return ret;
+-			}
+-		}
++
+ 
+ 		vma = add_vma(obj, aspace);
+ 		if (IS_ERR(vma)) {
+@@ -502,7 +480,9 @@
+ 
+ 	*iova = vma->iova;
+ 
+-	if (aspace &&  !msm_obj->in_active_list) {
++	if (aspace && aspace->ops && aspace->ops->add_to_active &&
++	    !msm_obj->in_active_list) {
++		msm_obj->aspace = aspace;
+ 		mutex_lock(&aspace->list_lock);
+ 		msm_gem_add_obj_to_aspace_active_list(aspace, obj);
+ 		mutex_unlock(&aspace->list_lock);
+@@ -704,7 +684,7 @@
+ 
+ 	*offset = msm_gem_mmap_offset(obj);
+ 
+-	drm_gem_object_put_unlocked(obj);
++	drm_gem_object_put(obj);
+ 
+ fail:
+ 	return ret;
+@@ -712,59 +692,63 @@
+ 
+ static void *get_vaddr(struct drm_gem_object *obj, unsigned madv)
+ {
+-	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+-	int ret = 0;
+-
+-	mutex_lock(&msm_obj->lock);
+-
+-	if (WARN_ON(msm_obj->madv > madv)) {
+-		dev_err(obj->dev->dev, "Invalid madv state: %u vs %u\n",
+-			msm_obj->madv, madv);
+-		mutex_unlock(&msm_obj->lock);
+-		return ERR_PTR(-EBUSY);
+-	}
+-
+-	/* increment vmap_count *before* vmap() call, so shrinker can
+-	 * check vmap_count (is_vunmapable()) outside of msm_obj->lock.
+-	 * This guarantees that we won't try to msm_gem_vunmap() this
+-	 * same object from within the vmap() call (while we already
+-	 * hold msm_obj->lock)
+-	 */
+-	msm_obj->vmap_count++;
+-
+-	if (!msm_obj->vaddr) {
+-		struct page **pages = get_pages(obj);
+-		if (IS_ERR(pages)) {
+-			ret = PTR_ERR(pages);
+-			goto fail;
+-		}
+-
+-		if (obj->import_attach) {
+-			ret = dma_buf_begin_cpu_access(
+-				obj->import_attach->dmabuf, DMA_BIDIRECTIONAL);
+-			if (ret)
+-				goto fail;
+-
+-			msm_obj->vaddr =
+-				dma_buf_vmap(obj->import_attach->dmabuf);
+-		} else {
+-			msm_obj->vaddr = vmap(pages, obj->size >> PAGE_SHIFT,
+-				VM_MAP, pgprot_writecombine(PAGE_KERNEL));
+-		}
+-
+-		if (msm_obj->vaddr == NULL) {
+-			ret = -ENOMEM;
+-			goto fail;
+-		}
+-	}
+-
+-	mutex_unlock(&msm_obj->lock);
+-	return msm_obj->vaddr;
+-
+-fail:
+-	msm_obj->vmap_count--;
+-	mutex_unlock(&msm_obj->lock);
+-	return ERR_PTR(ret);
++    struct msm_gem_object *msm_obj = to_msm_bo(obj);
++    int ret = 0, end_ret;
++
++    mutex_lock(&msm_obj->lock);
++    if (msm_obj->madv > madv || msm_obj->vmap_count == U8_MAX) {
++        ret = -EBUSY;
++        goto fail_unlock;
++    }
++    if (obj->import_attach && msm_obj->import_error) {
++        ret = msm_obj->import_error;
++        goto fail_unlock;
++    }
++    msm_obj->vmap_count++;
++    if (!msm_obj->vaddr) {
++        if (obj->import_attach) {
++            struct dma_buf *buf = obj->import_attach->dmabuf;
++
++            ret = dma_buf_begin_cpu_access(buf, DMA_BIDIRECTIONAL);
++            if (ret)
++                goto fail_count;
++            ret = dma_buf_vmap_unlocked(buf, &msm_obj->import_map);
++            if (!ret && msm_obj->import_map.is_iomem) {
++                dma_buf_vunmap_unlocked(buf, &msm_obj->import_map);
++                iosys_map_clear(&msm_obj->import_map);
++                ret = -EOPNOTSUPP;
++            }
++            if (!ret && iosys_map_is_null(&msm_obj->import_map))
++                ret = -EIO;
++            if (ret) {
++                end_ret = dma_buf_end_cpu_access(buf, DMA_BIDIRECTIONAL);
++                if (end_ret)
++                    msm_obj->import_error = end_ret;
++                goto fail_count;
++            }
++            msm_obj->vaddr = msm_obj->import_map.vaddr;
++        } else {
++            struct page **pages = get_pages(obj);
++
++            if (IS_ERR(pages)) {
++                ret = PTR_ERR(pages);
++                goto fail_count;
++            }
++            msm_obj->vaddr = vmap(pages, obj->size >> PAGE_SHIFT,
++                                  VM_MAP, pgprot_writecombine(PAGE_KERNEL));
++            if (!msm_obj->vaddr) {
++                ret = -ENOMEM;
++                goto fail_count;
++            }
++        }
++    }
++    mutex_unlock(&msm_obj->lock);
++    return msm_obj->vaddr;
++fail_count:
++    msm_obj->vmap_count--;
++fail_unlock:
++    mutex_unlock(&msm_obj->lock);
++    return ERR_PTR(ret);
+ }
+ 
+ void *msm_gem_get_vaddr(struct drm_gem_object *obj)
+@@ -785,12 +769,15 @@
+ 
+ void msm_gem_put_vaddr(struct drm_gem_object *obj)
+ {
+-	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+-
+-	mutex_lock(&msm_obj->lock);
+-	WARN_ON(msm_obj->vmap_count < 1);
+-	msm_obj->vmap_count--;
+-	mutex_unlock(&msm_obj->lock);
++    struct msm_gem_object *msm_obj = to_msm_bo(obj);
++
++    mutex_lock(&msm_obj->lock);
++    if (!WARN_ON(!msm_obj->vmap_count)) {
++        msm_obj->vmap_count--;
++        if (obj->import_attach && !msm_obj->vmap_count)
++            msm_gem_vunmap_locked(obj);
++    }
++    mutex_unlock(&msm_obj->lock);
+ }
+ 
+ /* Update madvise status, returns true if not purged, else
+@@ -802,7 +789,7 @@
+ 
+ 	mutex_lock(&msm_obj->lock);
+ 
+-	WARN_ON(!mutex_is_locked(&obj->dev->struct_mutex));
++	WARN_ON(!mutex_is_locked(&msm_obj->lock));
+ 
+ 	if (msm_obj->madv != __MSM_MADV_PURGED)
+ 		msm_obj->madv = madv;
+@@ -819,19 +806,20 @@
+ 	struct drm_device *dev = obj->dev;
+ 	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+ 
+-	WARN_ON(!mutex_is_locked(&dev->struct_mutex));
++	if (WARN_ON(obj->import_attach))
++		return;
++
++	mutex_lock_nested(&msm_obj->lock, subclass);
+ 	WARN_ON(!is_purgeable(msm_obj));
+-	WARN_ON(obj->import_attach);
+-
+-	mutex_lock_nested(&msm_obj->lock, subclass);
+-
+-	put_iova(obj);
++
+ 	if (msm_obj->aspace) {
+ 		mutex_lock(&msm_obj->aspace->list_lock);
+ 		msm_gem_remove_obj_from_aspace_active_list(msm_obj->aspace,
+ 				obj);
+ 		mutex_unlock(&msm_obj->aspace->list_lock);
+ 	}
++	put_iova(obj);
++	msm_obj->aspace = NULL;
+ 
+ 	msm_gem_vunmap_locked(obj);
+ 
+@@ -857,22 +845,24 @@
+ 
+ static void msm_gem_vunmap_locked(struct drm_gem_object *obj)
+ {
+-	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+-
+-	WARN_ON(!mutex_is_locked(&msm_obj->lock));
+-
+-	if (!msm_obj->vaddr || WARN_ON(!is_vunmapable(msm_obj)))
+-		return;
+-
+-	if (obj->import_attach) {
+-		dma_buf_vunmap(obj->import_attach->dmabuf, msm_obj->vaddr);
+-		dma_buf_end_cpu_access(obj->import_attach->dmabuf,
+-						DMA_BIDIRECTIONAL);
+-	} else {
+-		vunmap(msm_obj->vaddr);
+-	}
+-
+-	msm_obj->vaddr = NULL;
++    struct msm_gem_object *msm_obj = to_msm_bo(obj);
++    int ret;
++
++    WARN_ON(!mutex_is_locked(&msm_obj->lock));
++    if (!msm_obj->vaddr || WARN_ON(msm_obj->vmap_count))
++        return;
++    if (obj->import_attach) {
++        struct dma_buf *buf = obj->import_attach->dmabuf;
++
++        dma_buf_vunmap_unlocked(buf, &msm_obj->import_map);
++        iosys_map_clear(&msm_obj->import_map);
++        ret = dma_buf_end_cpu_access(buf, DMA_BIDIRECTIONAL);
++        if (ret)
++            msm_obj->import_error = ret;
++    } else {
++        vunmap(msm_obj->vaddr);
++    }
++    msm_obj->vaddr = NULL;
+ }
+ 
+ void msm_gem_vunmap(struct drm_gem_object *obj, enum msm_gem_lock subclass)
+@@ -886,13 +876,14 @@
+ 
+ int msm_gem_cpu_prep(struct drm_gem_object *obj, uint32_t op, ktime_t *timeout)
+ {
+-	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+ 	bool write = !!(op & MSM_PREP_WRITE);
+ 	unsigned long remain =
+ 		op & MSM_PREP_NOSYNC ? 0 : timeout_to_jiffies(timeout);
+ 	long ret;
+ 
+-	ret = dma_resv_wait_timeout_rcu(msm_obj->resv, write,
++	if (obj->import_attach)
++		return -EOPNOTSUPP;
++	ret = dma_resv_wait_timeout(obj->resv, dma_resv_usage_rw(write),
+ 						  true,  remain);
+ 	if (ret == 0)
+ 		return remain == 0 ? -EBUSY : -ETIMEDOUT;
+@@ -906,27 +897,18 @@
+ 
+ int msm_gem_cpu_fini(struct drm_gem_object *obj)
+ {
+-	/* TODO cache maintenance */
++	if (obj->import_attach)
++		return -EOPNOTSUPP;
++	/* TODO native cache maintenance */
+ 	return 0;
+ }
+ 
+ #ifdef CONFIG_DEBUG_FS
+-static void describe_fence(struct dma_fence *fence, const char *type,
+-		struct seq_file *m)
+-{
+-	if (!dma_fence_is_signaled(fence))
+-		seq_printf(m, "\t%9s: %s %s seq %llu\n", type,
+-				fence->ops->get_driver_name(fence),
+-				fence->ops->get_timeline_name(fence),
+-				fence->seqno);
+-}
+ 
+ void msm_gem_describe(struct drm_gem_object *obj, struct seq_file *m)
+ {
+ 	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+-	struct dma_resv *robj = msm_obj->resv;
+-	struct dma_resv_list *fobj;
+-	struct dma_fence *fence;
++	struct dma_resv *robj = obj->resv;
+ 	struct msm_gem_vma *vma;
+ 	uint64_t off = drm_vma_node_start(&obj->vma_node);
+ 	const char *madv;
+@@ -965,21 +947,8 @@
+ 		seq_puts(m, "\n");
+ 	}
+ 
+-	rcu_read_lock();
+-	fobj = rcu_dereference(robj->fence);
+-	if (fobj) {
+-		unsigned int i, shared_count = fobj->shared_count;
+-
+-		for (i = 0; i < shared_count; i++) {
+-			fence = rcu_dereference(fobj->shared[i]);
+-			describe_fence(fence, "Shared", m);
+-		}
+-	}
+-
+-	fence = rcu_dereference(robj->fence_excl);
+-	if (fence)
+-		describe_fence(fence, "Exclusive", m);
+-	rcu_read_unlock();
++	/* Describe all current reservation usages through the public API. */
++	dma_resv_describe(robj, m);
+ 
+ 	mutex_unlock(&msm_obj->lock);
+ }
+@@ -1006,49 +975,42 @@
+ /* don't call directly!  Use drm_gem_object_put() and friends */
+ void msm_gem_free_object(struct drm_gem_object *obj)
+ {
+-	struct drm_device *dev = obj->dev;
+-	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+-
+-	WARN_ON(!mutex_is_locked(&dev->struct_mutex));
+-
+-	/* object should not be on active list: */
+-	WARN_ON(is_active(msm_obj));
+-
+-	list_del(&msm_obj->mm_list);
+-
+-	mutex_lock(&msm_obj->lock);
+-
+-	put_iova(obj);
+-	if (msm_obj->aspace) {
+-		mutex_lock(&msm_obj->aspace->list_lock);
+-		msm_gem_remove_obj_from_aspace_active_list(msm_obj->aspace,
+-				obj);
+-		mutex_unlock(&msm_obj->aspace->list_lock);
+-	}
+-
+-	if (obj->import_attach) {
+-		if (msm_obj->vaddr)
+-			dma_buf_vunmap(obj->import_attach->dmabuf, msm_obj->vaddr);
+-
+-		/* Don't drop the pages for imported dmabuf, as they are not
+-		 * ours, just free the array we allocated:
+-		 */
+-		if (msm_obj->pages)
+-			kvfree(msm_obj->pages);
+-
+-		drm_prime_gem_destroy(obj, msm_obj->sgt);
+-	} else {
+-		msm_gem_vunmap_locked(obj);
+-		put_pages(obj);
+-	}
+-
+-	if (msm_obj->resv == &msm_obj->_resv)
+-		dma_resv_fini(msm_obj->resv);
+-
+-	drm_gem_object_release(obj);
+-
+-	mutex_unlock(&msm_obj->lock);
+-	kfree(msm_obj);
++    struct msm_drm_private *priv = obj->dev->dev_private;
++    struct msm_gem_object *msm_obj = to_msm_bo(obj);
++    struct msm_gem_address_space *aspace;
++
++    WARN_ON(is_active(msm_obj));
++    mutex_lock(&priv->gem_lock);
++    list_del(&msm_obj->mm_list);
++    mutex_unlock(&priv->gem_lock);
++    mutex_lock(&msm_obj->lock);
++    aspace = msm_obj->import_aspace;
++    if (msm_obj->in_active_list) {
++        mutex_lock(&msm_obj->aspace->list_lock);
++        msm_gem_remove_obj_from_aspace_active_list(msm_obj->aspace, obj);
++        mutex_unlock(&msm_obj->aspace->list_lock);
++    }
++    put_iova(obj);
++    msm_obj->aspace = NULL;
++
++    /* At final object release no legitimate CPU user may remain. */
++    WARN_ON(msm_obj->vmap_count);
++    msm_obj->vmap_count = 0;
++    msm_gem_vunmap_locked(obj);
++    if (obj->import_attach) {
++        drm_prime_gem_destroy(obj, msm_obj->sgt);
++        obj->import_attach = NULL;
++        msm_obj->sgt = NULL;
++        kvfree(msm_obj->pages);
++    } else {
++        put_pages(obj);
++    }
++    /* Never destroy the DMA domain before attachment cleanup above. */
++    msm_obj->import_aspace = NULL;
++    msm_gem_address_space_put(aspace);
++    drm_gem_object_release(obj);
++    mutex_unlock(&msm_obj->lock);
++    kfree(msm_obj);
+ }
+ 
+ /* convenience method to construct a GEM buffer object, and userspace handle */
+@@ -1070,7 +1032,7 @@
+ 	ret = drm_gem_handle_create(file, obj, handle);
+ 
+ 	/* drop reference from allocate - handle holds it now */
+-	drm_gem_object_put_unlocked(obj);
++	drm_gem_object_put(obj);
+ 
+ 	return ret;
+ }
+@@ -1104,12 +1066,8 @@
+ 	msm_obj->flags = flags;
+ 	msm_obj->madv = MSM_MADV_WILLNEED;
+ 
+-	if (resv) {
+-		msm_obj->resv = resv;
+-	} else {
+-		msm_obj->resv = &msm_obj->_resv;
+-		dma_resv_init(msm_obj->resv);
+-	}
++	msm_obj->base.resv = resv;
++	msm_obj->base.funcs = &msm_gem_object_funcs;
+ 
+ 	INIT_LIST_HEAD(&msm_obj->submit_entry);
+ 	INIT_LIST_HEAD(&msm_obj->vmas);
+@@ -1118,14 +1076,10 @@
+ 	msm_obj->in_active_list = false;
+ 	msm_obj->obj_dirty = false;
+ 
+-	if (struct_mutex_locked) {
+-		WARN_ON(!mutex_is_locked(&dev->struct_mutex));
+-		list_add_tail(&msm_obj->mm_list, &priv->inactive_list);
+-	} else {
+-		mutex_lock(&dev->struct_mutex);
+-		list_add_tail(&msm_obj->mm_list, &priv->inactive_list);
+-		mutex_unlock(&dev->struct_mutex);
+-	}
++	/* No removed DRM struct_mutex contract in object lifetime callbacks. */
++	mutex_lock(&priv->gem_lock);
++	list_add_tail(&msm_obj->mm_list, &priv->inactive_list);
++	mutex_unlock(&priv->gem_lock);
+ 
+ 	*obj = &msm_obj->base;
+ 
+@@ -1194,7 +1148,7 @@
+ 	return obj;
+ 
+ fail:
+-	drm_gem_object_put_unlocked(obj);
++	drm_gem_object_put(obj);
+ 	return ERR_PTR(ret);
+ }
+ 
+@@ -1212,108 +1166,51 @@
+ 
+ int msm_gem_delayed_import(struct drm_gem_object *obj)
+ {
+-	struct dma_buf_attachment *attach;
+-	struct sg_table *sgt;
+-	struct msm_gem_object *msm_obj;
+-	int ret = 0;
+-
+-	if (!obj) {
+-		DRM_ERROR("NULL drm gem object\n");
+-		return -EINVAL;
+-	}
+-
+-	msm_obj = to_msm_bo(obj);
+-
+-	if (!obj->import_attach) {
+-		DRM_ERROR("NULL dma_buf_attachment in drm gem object\n");
+-		return -EINVAL;
+-	}
+-
+-	attach = obj->import_attach;
+-	attach->dma_map_attrs |= DMA_ATTR_DELAYED_UNMAP;
+-
+-	if (msm_obj->flags & MSM_BO_SKIPSYNC)
+-		attach->dma_map_attrs |= DMA_ATTR_SKIP_CPU_SYNC;
+-
+-	/*
+-	 * All SMMU mapping are generated with cache hint.
+-	 * SSPP cache hint will control the LLCC access.
+-	 */
+-	if (msm_obj->flags & MSM_BO_KEEPATTRS)
+-		attach->dma_map_attrs |=
+-				(DMA_ATTR_IOMMU_USE_UPSTREAM_HINT |
+-				DMA_ATTR_IOMMU_USE_LLC_NWA);
+-
+-	/*
+-	 * dma_buf_map_attachment will call dma_map_sg for ion buffer
+-	 * mapping, and iova will get mapped when the function returns.
+-	 */
+-	sgt = dma_buf_map_attachment(attach, DMA_BIDIRECTIONAL);
+-	if (IS_ERR(sgt)) {
+-		ret = PTR_ERR(sgt);
+-		DRM_ERROR("dma_buf_map_attachment failure, err=%d\n",
+-				ret);
+-		goto fail_import;
+-	}
+-	msm_obj->sgt = sgt;
+-	msm_obj->pages = NULL;
+-
+-fail_import:
+-	return ret;
++    struct msm_gem_object *msm_obj;
++
++    if (!obj || !obj->import_attach)
++        return -EINVAL;
++    msm_obj = to_msm_bo(obj);
++    /* Eager imports own exactly one mapped attachment. A lost SG owner is
++     * corruption, not permission to remap/rebind an uncertain attachment.
++     */
++    if (!msm_obj->sgt || !msm_obj->sgt->sgl || !msm_obj->sgt->nents)
++        return -EUCLEAN;
++    return msm_obj->import_error;
+ }
+ 
+ struct drm_gem_object *msm_gem_import(struct drm_device *dev,
+-		struct dma_buf *dmabuf, struct sg_table *sgt)
+-{
+-	struct msm_gem_object *msm_obj;
+-	struct drm_gem_object *obj = NULL;
+-	uint32_t size;
+-	int ret;
+-	unsigned long flags = 0;
+-
+-	size = PAGE_ALIGN(dmabuf->size);
+-
+-	ret = msm_gem_new_impl(dev, size, MSM_BO_WC, dmabuf->resv, &obj,
+-			false);
+-	if (ret)
+-		goto fail;
+-
+-	drm_gem_private_object_init(dev, obj, size);
+-
+-	msm_obj = to_msm_bo(obj);
+-	mutex_lock(&msm_obj->lock);
+-	msm_obj->sgt = sgt;
+-	msm_obj->pages = NULL;
+-	/*
+-	 * 1) If sg table is NULL, user should call msm_gem_delayed_import
+-	 * to add back the sg table to the drm gem object.
+-	 *
+-	 * 2) Add buffer flag unconditionally for all import cases.
+-	 *    # Cached buffer will be attached immediately hence sgt will
+-	 *      be available upon gem obj creation.
+-	 *    # Un-cached buffer will follow delayed attach hence sgt
+-	 *      will be NULL upon gem obj creation.
+-	 */
+-	msm_obj->flags |= MSM_BO_EXTBUF;
+-
+-	/*
+-	 * For all uncached buffers, there is no need to perform cache
+-	 * maintenance on dma map/unmap time.
+-	 */
+-	ret = dma_buf_get_flags(dmabuf, &flags);
+-	if (ret) {
+-		DRM_ERROR("dma_buf_get_flags failure, err=%d\n", ret);
+-	} else if ((flags & ION_FLAG_CACHED) == 0) {
+-		DRM_DEBUG("Buffer is uncached type\n");
+-		msm_obj->flags |= MSM_BO_SKIPSYNC;
+-	}
+-
+-	mutex_unlock(&msm_obj->lock);
+-	return obj;
+-
+-fail:
+-	drm_gem_object_put_unlocked(obj);
+-	return ERR_PTR(ret);
++                                  struct dma_buf *dmabuf, struct sg_table *sgt)
++{
++    struct drm_gem_object *obj;
++    struct msm_gem_object *msm_obj;
++    size_t size;
++    u64 end;
++    int ret;
++
++    if (!dmabuf || !dmabuf->resv || !dmabuf->size ||
++        dmabuf->size > SIZE_MAX - (PAGE_SIZE - 1) ||
++        !sgt || !sgt->sgl || !sgt->nents)
++        return ERR_PTR(-EINVAL);
++    size = PAGE_ALIGN(dmabuf->size);
++    if ((size >> PAGE_SHIFT) > INT_MAX)
++        return ERR_PTR(-E2BIG);
++    /* SDE consumes one base DMA address, not an arbitrary DMA SG list. */
++    if (drm_prime_get_contiguous_size(sgt) < size ||
++        check_add_overflow((u64)sg_dma_address(sgt->sgl), (u64)size - 1, &end))
++        return ERR_PTR(-EINVAL);
++
++    ret = msm_gem_new_impl(dev, 0, MSM_BO_WC | MSM_BO_EXTBUF,
++                           dmabuf->resv, &obj, false);
++    if (ret)
++        return ERR_PTR(ret);
++    drm_gem_private_object_init(dev, obj, size);
++    msm_obj = to_msm_bo(obj);
++    msm_obj->sgt = sgt;
++    /* The core installs import_attach after this callback succeeds. It
++     * retains the same resv and owns all attachment unwind on failure.
++     */
++    return obj;
+ }
+ 
+ static void *_msm_gem_kernel_new(struct drm_device *dev, uint32_t size,
+@@ -1348,7 +1245,7 @@
+ 	if (locked)
+ 		drm_gem_object_put(obj);
+ 	else
+-		drm_gem_object_put_unlocked(obj);
++		drm_gem_object_put(obj);
+ 
+ 	return ERR_PTR(ret);
+ 
+@@ -1380,7 +1277,7 @@
+ 	if (locked)
+ 		drm_gem_object_put(bo);
+ 	else
+-		drm_gem_object_put_unlocked(bo);
++		drm_gem_object_put(bo);
+ }
+ 
+ void msm_gem_object_set_name(struct drm_gem_object *bo, const char *fmt, ...)
+--- a/techpack/display/msm/msm_gem.h
++++ b/techpack/display/msm/msm_gem.h
+@@ -20,6 +20,7 @@
+ 
+ #include <linux/kref.h>
+ #include <linux/dma-resv.h>
++#include <linux/iosys-map.h>
+ #include "msm_drv.h"
+ 
+ /* Additional internal-use only BO flags: */
+@@ -122,12 +123,13 @@
+ 	struct page **pages;
+ 	struct sg_table *sgt;
+ 	void *vaddr;
++	struct iosys_map import_map;
++	int import_error;
++	/* Held from before attachment through its final unmap/detach. */
++	struct msm_gem_address_space *import_aspace;
+ 
+ 	struct list_head vmas;    /* list of msm_gem_vma */
+ 
+-	/* normally (resv == &_resv) except for imported bo's */
+-	struct dma_resv *resv;
+-	struct dma_resv _resv;
+ 
+ 	/* For physically contiguous buffers.  Used when we don't have
+ 	 * an IOMMU.  Also used for stolen/splashscreen buffer.
+@@ -154,7 +156,7 @@
+ 
+ static inline bool is_purgeable(struct msm_gem_object *msm_obj)
+ {
+-	WARN_ON(!mutex_is_locked(&msm_obj->base.dev->struct_mutex));
++	WARN_ON(!mutex_is_locked(&msm_obj->lock));
+ 	return (msm_obj->madv == MSM_MADV_DONTNEED) && msm_obj->sgt &&
+ 			!msm_obj->base.dma_buf && !msm_obj->base.import_attach;
+ }
+--- a/techpack/display/msm/msm_gem_prime.c
++++ b/techpack/display/msm/msm_gem_prime.c
+@@ -22,28 +22,40 @@
+ #include "msm_kms.h"
+ 
+ #include <linux/dma-buf.h>
+-#include <linux/ion.h>
+-#include <linux/msm_ion.h>
++#include <linux/iosys-map.h>
+ 
+ struct sg_table *msm_gem_prime_get_sg_table(struct drm_gem_object *obj)
+ {
+-	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+-	int npages = obj->size >> PAGE_SHIFT;
++    struct msm_gem_object *msm_obj = to_msm_bo(obj);
++    size_t npages = obj->size >> PAGE_SHIFT;
+ 
+-	if (WARN_ON(!msm_obj->pages))  /* should have already pinned! */
+-		return NULL;
+-
+-	return drm_prime_pages_to_sg(msm_obj->pages, npages);
++    if (WARN_ON(!msm_obj->pages))
++        return ERR_PTR(-ENOMEM);
++    return drm_prime_pages_to_sg(obj->dev, msm_obj->pages, npages);
+ }
+ 
+-void *msm_gem_prime_vmap(struct drm_gem_object *obj)
++int msm_gem_prime_vmap(struct drm_gem_object *obj, struct iosys_map *map)
+ {
+-	return msm_gem_get_vaddr(obj);
++    void *vaddr;
++
++    /* PRIME mapping callbacks run with obj->resv held; CPU access is a
++     * separate DMA-BUF begin/end contract, not an implicit vmap side effect.
++     */
++    if (obj->import_attach)
++        return dma_buf_vmap(obj->import_attach->dmabuf, map);
++    vaddr = msm_gem_get_vaddr(obj);
++    if (IS_ERR(vaddr))
++        return PTR_ERR(vaddr);
++    iosys_map_set_vaddr(map, vaddr);
++    return 0;
+ }
+ 
+-void msm_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr)
++void msm_gem_prime_vunmap(struct drm_gem_object *obj, struct iosys_map *map)
+ {
+-	msm_gem_put_vaddr(obj);
++    if (obj->import_attach)
++        dma_buf_vunmap(obj->import_attach->dmabuf, map);
++    else
++        msm_gem_put_vaddr(obj);
+ }
+ 
+ int msm_gem_prime_mmap(struct drm_gem_object *obj, struct vm_area_struct *vma)
+@@ -65,9 +77,12 @@
+ 
+ int msm_gem_prime_pin(struct drm_gem_object *obj)
+ {
+-	if (!obj->import_attach)
+-		msm_gem_get_pages(obj);
+-	return 0;
++    struct page **pages;
++
++    if (obj->import_attach)
++        return 0;
++    pages = msm_gem_get_pages(obj);
++    return IS_ERR(pages) ? PTR_ERR(pages) : 0;
+ }
+ 
+ void msm_gem_prime_unpin(struct drm_gem_object *obj)
+@@ -78,138 +93,63 @@
+ 
+ struct dma_resv *msm_gem_prime_res_obj(struct drm_gem_object *obj)
+ {
+-	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+-
+-	return msm_obj->resv;
++    return obj->resv;
+ }
+ 
+ 
+ struct drm_gem_object *msm_gem_prime_import(struct drm_device *dev,
+-					    struct dma_buf *dma_buf)
++                                        struct dma_buf *buf)
+ {
+-	struct dma_buf_attachment *attach;
+-	struct sg_table *sgt = NULL;
+-	struct drm_gem_object *obj;
+-	struct device *attach_dev = NULL;
+-	unsigned long flags = 0;
+-	struct msm_drm_private *priv;
+-	struct msm_kms *kms;
+-	int ret;
+-	bool lazy_unmap = true;
+-	u32 domain;
++    struct msm_drm_private *priv;
++    struct msm_kms *kms;
++    struct device *attach_dev;
++    struct msm_gem_address_space *aspace;
++    struct drm_gem_object *obj;
+ 
+-	if (!dma_buf || !dev->dev_private)
+-		return ERR_PTR(-EINVAL);
++    if (!dev || !buf || !dev->dev_private)
++        return ERR_PTR(-EINVAL);
+ 
+-	priv = dev->dev_private;
+-	kms = priv->kms;
++    /* The core checks the exporter ops identity before interpreting priv. */
++    if (drm_gem_is_prime_exported_dma_buf(dev, buf))
++        return drm_gem_prime_import_dev(dev, buf, dev->dev);
+ 
+-	if (dma_buf->priv && !dma_buf->ops->begin_cpu_access) {
+-		obj = dma_buf->priv;
+-		if (obj->dev == dev) {
+-			/*
+-			 * Importing dmabuf exported from out own gem increases
+-			 * refcount on gem itself instead of f_count of dmabuf.
+-			 */
+-			drm_gem_object_get(obj);
+-			return obj;
+-		}
+-	}
++    priv = dev->dev_private;
++    kms = priv->kms;
++    if (!kms || !kms->funcs || !kms->funcs->get_address_space_device ||
++        !kms->funcs->get_address_space)
++        return ERR_PTR(-EOPNOTSUPP);
++    attach_dev = kms->funcs->get_address_space_device(kms,
++                                                   MSM_SMMU_DOMAIN_UNSECURE);
++    if (IS_ERR(attach_dev))
++        return ERR_CAST(attach_dev);
++    if (!attach_dev)
++        return ERR_PTR(-ENODEV);
+ 
+-	if (!dev->driver->gem_prime_import_sg_table) {
+-		DRM_ERROR("NULL gem_prime_import_sg_table\n");
+-		return ERR_PTR(-EINVAL);
+-	}
+-
+-	get_dma_buf(dma_buf);
+-
+-	ret = dma_buf_get_flags(dma_buf, &flags);
+-	if (ret) {
+-		DRM_ERROR("dma_buf_get_flags failure, err=%d\n", ret);
+-		goto fail_put;
+-	}
+-
+-	if (!kms || !kms->funcs->get_address_space_device) {
+-		DRM_ERROR("invalid kms ops\n");
+-		goto fail_put;
+-	}
+-
+-	/*
+-	 * - attach default drm device for all S2 only buffers or
+-	 *   when IOMMU is not available
+-	 * - avoid using lazying unmap feature as it doesn't add
+-	 * any value without nested translations
+-	 */
+-	if ((!iommu_present(&platform_bus_type))
+-			|| (flags & ION_FLAG_CP_SEC_DISPLAY)
+-			|| (flags & ION_FLAG_CP_CAMERA_PREVIEW)) {
+-		attach_dev = dev->dev;
+-		lazy_unmap = false;
+-	} else {
+-		domain = (flags & ION_FLAG_CP_PIXEL) ?
+-			    MSM_SMMU_DOMAIN_SECURE : MSM_SMMU_DOMAIN_UNSECURE;
+-		attach_dev = kms->funcs->get_address_space_device(kms, domain);
+-	}
+-
+-	/*
+-	 * While transitioning from secure use-cases, the secure/non-secure
+-	 * context bank might still not be attached back, while the
+-	 * prime_fd_to_handle call is made for the next frame. Attach those
+-	 * buffers to default drm device and reattaching with the correct
+-	 * context-bank will be handled in msm_gem_delayed_import.
+-	 */
+-	if (!attach_dev) {
+-		DRM_DEBUG("attaching dma buf with default drm device\n");
+-		attach_dev = dev->dev;
+-	}
+-
+-	attach = dma_buf_attach(dma_buf, attach_dev);
+-	if (IS_ERR(attach)) {
+-		DRM_ERROR("dma_buf_attach failure, err=%ld\n", PTR_ERR(attach));
+-		return ERR_CAST(attach);
+-	}
+-
+-	attach->dma_map_attrs |= DMA_ATTR_IOMMU_USE_LLC_NWA;
+-
+-	/*
+-	 * For cached buffers where CPU access is required, dma_map_attachment
+-	 * must be called now to allow user-space to perform cpu sync begin/end
+-	 * otherwise do delayed mapping during the commit.
+-	 */
+-	if (flags & ION_FLAG_CACHED) {
+-		if (lazy_unmap)
+-			attach->dma_map_attrs |= DMA_ATTR_DELAYED_UNMAP;
+-		sgt = dma_buf_map_attachment(attach, DMA_BIDIRECTIONAL);
+-		if (IS_ERR(sgt)) {
+-			ret = PTR_ERR(sgt);
+-			DRM_ERROR(
+-			"dma_buf_map_attachment failure, err=%d\n", ret);
+-			goto fail_detach;
+-		}
+-	}
+-
+-	/*
+-	 * If importing a NULL sg table (i.e. for uncached buffers),
+-	 * create a drm gem object with only the dma buf attachment.
+-	 */
+-	obj = dev->driver->gem_prime_import_sg_table(dev, attach, sgt);
+-	if (IS_ERR(obj)) {
+-		ret = PTR_ERR(obj);
+-		DRM_ERROR("gem_prime_import_sg_table failure, err=%d\n", ret);
+-		goto fail_unmap;
+-	}
+-
+-	obj->import_attach = attach;
+-
+-	return obj;
+-
+-fail_unmap:
+-	if (sgt)
+-		dma_buf_unmap_attachment(attach, sgt, DMA_BIDIRECTIONAL);
+-fail_detach:
+-	dma_buf_detach(dma_buf, attach);
+-fail_put:
+-	dma_buf_put(dma_buf);
+-
+-	return ERR_PTR(ret);
++    /*
++     * Exporter permission to attach to this explicit ordinary device is
++     * NOT a protected-plane certificate. No private exporter flags exist
++     * in the public API; secure/direct translation is rejected by SDE's
++     * actual plane-state admission path until a provider is implemented.
++     * Keep the mapped attachment for the entire imported object's life.
++     */
++    aspace = kms->funcs->get_address_space(kms, MSM_SMMU_DOMAIN_UNSECURE);
++    if (IS_ERR(aspace))
++        return ERR_CAST(aspace);
++    if (!aspace || !kref_get_unless_zero(&aspace->kref))
++        return ERR_PTR(-ENODEV);
++    if (!aspace->domain_attached || !aspace->mmu ||
++        !aspace->mmu->funcs->is_domain_secure ||
++        aspace->mmu->funcs->is_domain_secure(aspace->mmu) ||
++        msm_gem_get_aspace_device(aspace) != attach_dev) {
++        msm_gem_address_space_put(aspace);
++        return ERR_PTR(-EOPNOTSUPP);
++    }
++    obj = drm_gem_prime_import_dev(dev, buf, attach_dev);
++    if (IS_ERR(obj)) {
++        /* The core has already unmapped/detached before the owner put. */
++        msm_gem_address_space_put(aspace);
++        return obj;
++    }
++    to_msm_bo(obj)->import_aspace = aspace;
++    return obj;
+ }
+--- a/techpack/display/msm/msm_gem_vma.c
++++ b/techpack/display/msm/msm_gem_vma.c
+@@ -22,39 +22,36 @@
+ 
+ /* SDE address space operations */
+ static void smmu_aspace_unmap_vma(struct msm_gem_address_space *aspace,
+-		struct msm_gem_vma *vma, struct sg_table *sgt,
+-		unsigned int flags)
+-{
+-	if (!vma->iova)
+-		return;
+-
+-	if (aspace) {
+-		aspace->mmu->funcs->unmap_dma_buf(aspace->mmu, sgt,
+-				DMA_BIDIRECTIONAL, flags);
+-	}
+-
+-	vma->iova = 0;
+-	msm_gem_address_space_put(aspace);
++        struct msm_gem_vma *vma, struct sg_table *sgt, unsigned int flags)
++{
++    if (!aspace || !vma || !vma->mapped)
++        return;
++    aspace->mmu->funcs->unmap_dma_buf(aspace->mmu, sgt,
++                                   DMA_BIDIRECTIONAL, flags);
++    vma->mapped = false;
++    vma->iova = 0;
++    msm_gem_address_space_put(aspace);
+ }
+ 
+ static int smmu_aspace_map_vma(struct msm_gem_address_space *aspace,
+-		struct msm_gem_vma *vma, struct sg_table *sgt,
+-		int npages, unsigned int flags)
+-{
+-	int ret = -EINVAL;
+-
+-	if (!aspace || !aspace->domain_attached)
+-		return ret;
+-
+-	ret = aspace->mmu->funcs->map_dma_buf(aspace->mmu, sgt,
+-			DMA_BIDIRECTIONAL, flags);
+-	if (!ret)
+-		vma->iova = sg_dma_address(sgt->sgl);
+-
+-	/* Get a reference to the aspace to keep it around */
+-	kref_get(&aspace->kref);
+-
+-	return ret;
++        struct msm_gem_vma *vma, struct sg_table *sgt,
++        int npages, unsigned int flags)
++{
++    int ret;
++
++    if (!aspace || !aspace->domain_attached || !vma || !sgt ||
++        !sgt->sgl || !sgt->nents || npages <= 0)
++        return -EINVAL;
++    if (vma->mapped)
++        return 0;
++    ret = aspace->mmu->funcs->map_dma_buf(aspace->mmu, sgt,
++                                       DMA_BIDIRECTIONAL, flags);
++    if (ret)
++        return ret;
++    vma->iova = sg_dma_address(sgt->sgl);
++    vma->mapped = true;
++    kref_get(&aspace->kref);
++    return 0;
+ }
+ 
+ static void smmu_aspace_destroy(struct msm_gem_address_space *aspace)
+--- a/techpack/display/msm/sde/sde_plane.c
++++ b/techpack/display/msm/sde/sde_plane.c
+@@ -1,3 +1,4 @@
++#include <drm/drm_gem_atomic_helper.h>
+ /*
+  * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+  * Copyright (C) 2014-2021 The Linux Foundation. All rights reserved.
+@@ -693,14 +694,10 @@
+ 			return -EINVAL;
+ 		break;
+ 	case SDE_DRM_FB_SEC:
+-		*aspace = kms->aspace[MSM_SMMU_DOMAIN_SECURE];
+-		if (!aspace)
+-			return -EINVAL;
+-		break;
++		return -EOPNOTSUPP;
+ 	case SDE_DRM_FB_NON_SEC_DIR_TRANS:
+ 	case SDE_DRM_FB_SEC_DIR_TRANS:
+-		*aspace = NULL;
+-		break;
++		return -EOPNOTSUPP;
+ 	default:
+ 		SDE_ERROR("invalid fb_translation mode:%d\n", mode);
+ 		return -EFAULT;
+@@ -1907,6 +1904,10 @@
+ 		return ret;
+ 	}
+ 
++	ret = drm_gem_plane_helper_prepare_fb(plane, new_state);
++	if (ret)
++		return ret;
++
+ 	/* cache aspace */
+ 	pstate->aspace = aspace;
+ 
+@@ -1964,36 +1965,23 @@
+ }
+ 
+ static int _sde_plane_validate_fb(struct sde_plane *psde,
+-				struct drm_plane_state *state)
+-{
+-	struct sde_plane_state *pstate;
+-	struct drm_framebuffer *fb;
+-	uint32_t fb_ns = 0, fb_sec = 0, fb_sec_dir = 0;
+-	unsigned long flags = 0;
+-	int mode, ret = 0, n, i;
+-
+-	pstate = to_sde_plane_state(state);
+-	mode = sde_plane_get_property(pstate,
+-				PLANE_PROP_FB_TRANSLATION_MODE);
+-
+-	fb = state->fb;
+-	n = fb->format->num_planes;
+-	for (i = 0; i < n; i++) {
+-		ret = msm_fb_obj_get_attrs(fb->obj[i], &fb_ns, &fb_sec,
+-			&fb_sec_dir, &flags);
+-
+-		if (!ret && ((fb_ns && (mode != SDE_DRM_FB_NON_SEC)) ||
+-			(fb_sec && (mode != SDE_DRM_FB_SEC)) ||
+-			(fb_sec_dir && (mode != SDE_DRM_FB_SEC_DIR_TRANS)))) {
+-			SDE_ERROR_PLANE(psde, "mode:%d fb:%d dma_buf flags:0x%x rc:%d\n",
+-			mode, fb->base.id, flags, ret);
+-			SDE_EVT32(psde->base.base.id, fb->base.id, flags,
+-			fb_ns, fb_sec, fb_sec_dir, ret, SDE_EVTLOG_ERROR);
+-			return -EINVAL;
+-		}
+-	}
+-
+-	return 0;
++                                struct drm_plane_state *state)
++{
++    struct sde_plane_state *pstate = to_sde_plane_state(state);
++    int mode = sde_plane_get_property(pstate, PLANE_PROP_FB_TRANSLATION_MODE);
++    int i;
++
++    /* Attachment permission for the ordinary device does not establish a
++     * protected-plane/secure-session certificate. No such provider is ported.
++     */
++    if (mode != SDE_DRM_FB_NON_SEC)
++        return -EOPNOTSUPP;
++    if (!state->fb)
++        return -EINVAL;
++    for (i = 0; i < state->fb->format->num_planes; i++)
++        if (!state->fb->obj[i])
++            return -EINVAL;
++    return 0;
+ }
+ 
+ static void _sde_plane_sspp_atomic_check_mode_changed(struct sde_plane *psde,

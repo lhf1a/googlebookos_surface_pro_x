@@ -1,0 +1,143 @@
+--- a/drivers/gpu/drm/display/drm_dp_mst_topology.c
++++ b/drivers/gpu/drm/display/drm_dp_mst_topology.c
+@@ -2292,7 +2292,18 @@
+ 		port->cached_edid = drm_edid_read_ddc(port->connector,
+ 						      &port->aux.ddc);
+ 
+-	drm_connector_dynamic_register(port->connector);
++ if (mgr->cbs->connector_lifetime &&
++     mgr->cbs->connector_lifetime(mgr, port->connector) ==
++     DRM_DP_MST_CONNECTOR_DRIVER_MANAGED) {
++  ret = drm_connector_register(port->connector);
++  if (ret) {
++   mgr->cbs->disconnect_connector(mgr, port, port->connector);
++   drm_connector_put(port->connector);
++   port->connector = NULL;
++   goto error;
++  }
++ } else
++  drm_connector_dynamic_register(port->connector);
+ 	return;
+ 
+ error:
+@@ -4583,6 +4594,33 @@
+ 	return 0;
+ }
+ EXPORT_SYMBOL(drm_dp_atomic_release_time_slots);
++int drm_dp_atomic_release_port_payload(struct drm_atomic_state *state,
++ struct drm_dp_mst_topology_mgr *mgr, struct drm_dp_mst_port *port)
++{
++ struct drm_dp_mst_topology_state *topology;
++ struct drm_dp_mst_atomic_payload *payload;
++ struct drm_connector_state *old_conn;
++ topology = drm_atomic_get_mst_topology_state(state, mgr);
++ if (IS_ERR(topology))
++  return PTR_ERR(topology);
++ old_conn = drm_atomic_get_old_connector_state(state, port->connector);
++ if (!old_conn)
++  return -EINVAL;
++ if (old_conn->crtc)
++  topology->pending_crtc_mask |= drm_crtc_mask(old_conn->crtc);
++ payload = drm_atomic_get_mst_payload_state(topology, port);
++ if (!payload)
++  return 0;
++ if (!payload->delete) {
++  payload->pbn = 0;
++  payload->delete = true;
++  if (payload->vcpi)
++   topology->payload_mask &= ~BIT(payload->vcpi - 1);
++ }
++ return 0;
++}
++EXPORT_SYMBOL(drm_dp_atomic_release_port_payload);
++
+ 
+ /**
+  * drm_dp_mst_atomic_setup_commit() - setup_commit hook for MST helpers
+@@ -5025,10 +5063,16 @@
+ {
+ 	drm_dp_port_set_pdt(port, DP_PEER_DEVICE_NONE, port->mcs);
+ 
+-	if (port->connector) {
+-		drm_connector_unregister(port->connector);
+-		drm_connector_put(port->connector);
+-	}
++ if (port->connector) {
++  struct drm_dp_mst_topology_mgr *mgr = port->mgr;
++  if (mgr->cbs->connector_lifetime &&
++      mgr->cbs->connector_lifetime(mgr, port->connector) ==
++      DRM_DP_MST_CONNECTOR_DRIVER_MANAGED)
++   mgr->cbs->disconnect_connector(mgr, port, port->connector);
++  else
++   drm_connector_unregister(port->connector);
++  drm_connector_put(port->connector);
++ }
+ 
+ 	drm_dp_mst_put_port_malloc(port);
+ }
+@@ -5712,7 +5756,10 @@
+ 				 int max_dpcd_transaction_bytes, int max_payloads,
+ 				 int conn_base_id)
+ {
+-	struct drm_dp_mst_topology_state *mst_state;
++ struct drm_dp_mst_topology_state *mst_state;
++
++ if (!!mgr->cbs->connector_lifetime != !!mgr->cbs->disconnect_connector)
++  return -EINVAL;
+ 
+ 	mutex_init(&mgr->lock);
+ 	mutex_init(&mgr->qlock);
+--- a/include/drm/display/drm_dp_mst_helper.h
++++ b/include/drm/display/drm_dp_mst_helper.h
+@@ -510,7 +510,38 @@
+ 
+ /* sideband msg handler */
+ struct drm_dp_mst_topology_mgr;
++/**
++ * enum drm_dp_mst_connector_lifetime - registration lifetime owner
++ * @DRM_DP_MST_CONNECTOR_CORE_MANAGED: dynamic connector per topology port
++ * @DRM_DP_MST_CONNECTOR_DRIVER_MANAGED: persistent static connector, driver-owned
++ *
++ * add_connector always transfers one connector reference to MST core.
++ * A driver-managed connector must additionally have an independent owner ref,
++ * retained until topology work stops and the driver unregisters it at teardown.
++ * Core still drops its transferred reference when each port is destroyed.
++ */
++enum drm_dp_mst_connector_lifetime {
++ DRM_DP_MST_CONNECTOR_CORE_MANAGED,
++ DRM_DP_MST_CONNECTOR_DRIVER_MANAGED,
++};
+ struct drm_dp_mst_topology_cbs {
++ /**
++  * @connector_lifetime: optional persistent-connector opt-in; must be paired
++  * with disconnect_connector and remain stable for a connector's lifetime.
++  * NULL preserves the core-owned dynamic connector behavior.
++  */
++ enum drm_dp_mst_connector_lifetime (*connector_lifetime)(
++  struct drm_dp_mst_topology_mgr *mgr, struct drm_connector *connector);
++ /**
++  * @disconnect_connector: detach a driver-managed connector from this port.
++  * Called without topology/modeset locks from delayed destruction, before
++  * core drops its reference. A later port may already have rebound it:
++  * detach only if the current binding still equals this port. In-flight
++  * atomic states must independently retain port and connector references.
++  * Final unregister belongs to the owner after manager destruction.
++  */
++ void (*disconnect_connector)(struct drm_dp_mst_topology_mgr *mgr,
++  struct drm_dp_mst_port *port, struct drm_connector *connector);
+ 	/* create a connector for a port */
+ 	struct drm_connector *(*add_connector)(struct drm_dp_mst_topology_mgr *mgr, struct drm_dp_mst_port *port, const char *path);
+ 	/*
+@@ -944,6 +975,12 @@
+ drm_dp_atomic_release_time_slots(struct drm_atomic_state *state,
+ 				 struct drm_dp_mst_topology_mgr *mgr,
+ 				 struct drm_dp_mst_port *port);
++/* Retire an obsolete physical binding even if its persistent connector remains
++ * active on another port. Never find_time_slots for this old port in the same
++ * transaction. Normal atomic payload reference-transfer rules still apply.
++ */
++int __must_check drm_dp_atomic_release_port_payload(struct drm_atomic_state *state,
++ struct drm_dp_mst_topology_mgr *mgr, struct drm_dp_mst_port *port);
+ void drm_dp_mst_atomic_wait_for_dependencies(struct drm_atomic_state *state);
+ int __must_check drm_dp_mst_atomic_setup_commit(struct drm_atomic_state *state);
+ int drm_dp_send_power_updown_phy(struct drm_dp_mst_topology_mgr *mgr,

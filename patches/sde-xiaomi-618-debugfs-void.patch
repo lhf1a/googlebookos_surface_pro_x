@@ -1,0 +1,297 @@
+--- a/techpack/display/msm/dp/dp_debug.c
++++ b/techpack/display/msm/dp/dp_debug.c
+@@ -1977,32 +1977,14 @@
+ 		return rc;
+ 	}
+ 
+-	file = debugfs_create_u32("max_lclk_khz", 0644, dir,
++	debugfs_create_u32("max_lclk_khz", 0644, dir,
+ 			&debug->parser->max_lclk_khz);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs max_lclk_khz failed, rc=%d\n",
+-		       DEBUG_NAME, rc);
+-		return rc;
+-	}
+-
+-	file = debugfs_create_u32("lane_count", 0644, dir,
++
++	debugfs_create_u32("lane_count", 0644, dir,
+ 			&debug->panel->lane_count);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs lane_count failed, rc=%d\n",
+-		       DEBUG_NAME, rc);
+-		return rc;
+-	}
+-
+-	file = debugfs_create_u32("link_bw_code", 0644, dir,
++
++	debugfs_create_u32("link_bw_code", 0644, dir,
+ 			&debug->panel->link_bw_code);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs link_bw_code failed, rc=%d\n",
+-			debug->name, rc);
+-		return rc;
+-	}
+ 
+ 	return rc;
+ }
+@@ -2011,25 +1993,12 @@
+ 		struct dentry *dir)
+ {
+ 	int rc = 0;
+-	struct dentry *file;
+-
+-	file = debugfs_create_bool("hdcp_wait_sink_sync", 0644, dir,
++
++	debugfs_create_bool("hdcp_wait_sink_sync", 0644, dir,
+ 			&debug->dp_debug.hdcp_wait_sink_sync);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs hdcp_wait_sink_sync failed, rc=%d\n",
+-		       debug->name, rc);
+-		return rc;
+-	}
+-
+-	file = debugfs_create_bool("force_encryption", 0644, dir,
++
++	debugfs_create_bool("force_encryption", 0644, dir,
+ 			&debug->dp_debug.force_encryption);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs force_encryption failed, rc=%d\n",
+-		       debug->name, rc);
+-		return rc;
+-	}
+ 
+ 	return rc;
+ }
+@@ -2160,23 +2129,11 @@
+ 		return rc;
+ 	}
+ 
+-	file = debugfs_create_bool("skip_uevent", 0644, dir,
++	debugfs_create_bool("skip_uevent", 0644, dir,
+ 			&debug->dp_debug.skip_uevent);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs skip_uevent failed, rc=%d\n",
+-		       debug->name, rc);
+-		return rc;
+-	}
+-
+-	file = debugfs_create_bool("force_multi_func", 0644, dir,
++
++	debugfs_create_bool("force_multi_func", 0644, dir,
+ 			&debug->hpd->force_multi_func);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs force_multi_func failed, rc=%d\n",
+-		       debug->name, rc);
+-		return rc;
+-	}
+ 
+ 	return rc;
+ }
+@@ -2185,25 +2142,12 @@
+ 		struct dentry *dir)
+ {
+ 	int rc = 0;
+-	struct dentry *file;
+-
+-	file = debugfs_create_bool("dsc_feature_enable", 0644, dir,
++
++	debugfs_create_bool("dsc_feature_enable", 0644, dir,
+ 			&debug->parser->dsc_feature_enable);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs dsc_feature failed, rc=%d\n",
+-		       debug->name, rc);
+-		return rc;
+-	}
+-
+-	file = debugfs_create_bool("fec_feature_enable", 0644, dir,
++
++	debugfs_create_bool("fec_feature_enable", 0644, dir,
+ 			&debug->parser->fec_feature_enable);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs fec_feature_enable failed, rc=%d\n",
+-		       debug->name, rc);
+-		return rc;
+-	}
+ 
+ 	return rc;
+ }
+@@ -2256,25 +2200,12 @@
+ 		struct dentry *dir)
+ {
+ 	int rc = 0;
+-	struct dentry *file;
+-
+-	file = debugfs_create_bool("ssc_enable", 0644, dir,
++
++	debugfs_create_bool("ssc_enable", 0644, dir,
+ 			&debug->pll->ssc_en);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs ssc_enable failed, rc=%d\n",
+-		       debug->name, rc);
+-		return rc;
+-	}
+-
+-	file = debugfs_create_bool("widebus_mode", 0644, dir,
++
++	debugfs_create_bool("widebus_mode", 0644, dir,
+ 			&debug->parser->has_widebus);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs widebus_mode failed, rc=%d\n",
+-		       debug->name, rc);
+-		return rc;
+-	}
+ 
+ 	return rc;
+ }
+@@ -2283,27 +2214,14 @@
+ 		struct dentry *dir)
+ {
+ 	int rc = 0;
+-	struct dentry *file;
+-
+-	file = debugfs_create_ulong("connect_notification_delay_ms", 0644, dir,
++
++	debugfs_create_ulong("connect_notification_delay_ms", 0644, dir,
+ 		&debug->dp_debug.connect_notification_delay_ms);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs connect_notification_delay_ms failed, rc=%d\n",
+-		       debug->name, rc);
+-		return rc;
+-	}
+ 	debug->dp_debug.connect_notification_delay_ms =
+ 		DEFAULT_CONNECT_NOTIFICATION_DELAY_MS;
+ 
+-	file = debugfs_create_u32("disconnect_delay_ms", 0644, dir,
++	debugfs_create_u32("disconnect_delay_ms", 0644, dir,
+ 		&debug->dp_debug.disconnect_delay_ms);
+-	if (IS_ERR_OR_NULL(file)) {
+-		rc = PTR_ERR(file);
+-		DP_ERR("[%s] debugfs disconnect_delay_ms failed, rc=%d\n",
+-		       DEBUG_NAME, rc);
+-		return rc;
+-	}
+ 	debug->dp_debug.disconnect_delay_ms = DEFAULT_DISCONNECT_DELAY_MS;
+ 
+ 	return rc;
+--- a/techpack/display/msm/dsi/dsi_ctrl.c
++++ b/techpack/display/msm/dsi/dsi_ctrl.c
+@@ -307,17 +307,10 @@
+ 		goto error_remove_dir;
+ 	}
+ 
+-	cmd_dma_logs = debugfs_create_bool("enable_cmd_dma_stats",
++	debugfs_create_bool("enable_cmd_dma_stats",
+ 				       0600,
+ 				       dir,
+ 				       &dsi_ctrl->enable_cmd_dma_stats);
+-	if (IS_ERR_OR_NULL(cmd_dma_logs)) {
+-		rc = PTR_ERR(cmd_dma_logs);
+-		DSI_CTRL_ERR(dsi_ctrl,
+-				"enable cmd dma stats failed, rc=%d\n",
+-				rc);
+-		goto error_remove_dir;
+-	}
+ 
+ 	cmd_dma_logs = debugfs_create_file("cmd_dma_stats",
+ 				       0444,
+--- a/techpack/display/msm/dsi/dsi_display.c
++++ b/techpack/display/msm/dsi/dsi_display.c
+@@ -1978,54 +1978,26 @@
+ 
+ 		snprintf(name, ARRAY_SIZE(name),
+ 				"%s_allow_phy_power_off", phy->name);
+-		dump_file = debugfs_create_bool(name, 0600, dir,
++		debugfs_create_bool(name, 0600, dir,
+ 				&phy->allow_phy_power_off);
+-		if (IS_ERR_OR_NULL(dump_file)) {
+-			rc = PTR_ERR(dump_file);
+-			DSI_ERR("[%s] debugfs create %s failed, rc=%d\n",
+-			       display->name, name, rc);
+-			goto error_remove_dir;
+-		}
+ 
+ 		snprintf(name, ARRAY_SIZE(name),
+ 				"%s_regulator_min_datarate_bps", phy->name);
+-		dump_file = debugfs_create_u32(name, 0600, dir,
++		debugfs_create_u32(name, 0600, dir,
+ 				&phy->regulator_min_datarate_bps);
+-		if (IS_ERR_OR_NULL(dump_file)) {
+-			rc = PTR_ERR(dump_file);
+-			DSI_ERR("[%s] debugfs create %s failed, rc=%d\n",
+-			       display->name, name, rc);
+-			goto error_remove_dir;
+-		}
+-	}
+-
+-	if (!debugfs_create_bool("ulps_feature_enable", 0600, dir,
+-			&display->panel->ulps_feature_enabled)) {
+-		DSI_ERR("[%s] debugfs create ulps feature enable file failed\n",
+-		       display->name);
+-		goto error_remove_dir;
+-	}
+-
+-	if (!debugfs_create_bool("ulps_suspend_feature_enable", 0600, dir,
+-			&display->panel->ulps_suspend_enabled)) {
+-		DSI_ERR("[%s] debugfs create ulps-suspend feature enable file failed\n",
+-		       display->name);
+-		goto error_remove_dir;
+-	}
+-
+-	if (!debugfs_create_bool("ulps_status", 0400, dir,
+-			&display->ulps_enabled)) {
+-		DSI_ERR("[%s] debugfs create ulps status file failed\n",
+-		       display->name);
+-		goto error_remove_dir;
+-	}
+-
+-	if (!debugfs_create_u32("clk_gating_config", 0600, dir,
+-			&display->clk_gating_config)) {
+-		DSI_ERR("[%s] debugfs create clk gating config failed\n",
+-		       display->name);
+-		goto error_remove_dir;
+-	}
++	}
++
++	debugfs_create_bool("ulps_feature_enable", 0600, dir,
++			&display->panel->ulps_feature_enabled);
++
++	debugfs_create_bool("ulps_suspend_feature_enable", 0600, dir,
++			&display->panel->ulps_suspend_enabled);
++
++	debugfs_create_bool("ulps_status", 0400, dir,
++			&display->ulps_enabled);
++
++	debugfs_create_u32("clk_gating_config", 0600, dir,
++			&display->clk_gating_config);
+ 
+ 	display->root = dir;
+ 	dsi_parser_dbg_init(display->parser, dir);
+--- a/techpack/display/msm/sde/sde_encoder_phys_wb.c
++++ b/techpack/display/msm/sde/sde_encoder_phys_wb.c
+@@ -1826,11 +1826,8 @@
+ 	if (!phys_enc || !wb_enc->hw_wb || !debugfs_root)
+ 		return -EINVAL;
+ 
+-	if (!debugfs_create_u32("wbdone_timeout", 0600,
+-			debugfs_root, &wb_enc->wbdone_timeout)) {
+-		SDE_ERROR("failed to create debugfs/wbdone_timeout\n");
+-		return -ENOMEM;
+-	}
++	debugfs_create_u32("wbdone_timeout", 0600,
++			debugfs_root, &wb_enc->wbdone_timeout);
+ 
+ 	return 0;
+ }

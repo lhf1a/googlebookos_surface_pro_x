@@ -1,0 +1,77 @@
+{
+  "status": "paused",
+  "date": "2026-11-11",
+  "branch": "codex/kgsl-sde-port-v83",
+  "parent_commit": "690acd69ea98402aec01f3251d670b28516f0010",
+  "save_only": true,
+  "hardware_validated": false,
+  "deployment_ready": false,
+  "kgsl_patch_count": 58,
+  "sde_patch_count": 17,
+  "sde_source_count": 315,
+  "sde_checker_groups": 16,
+  "sde_checker_groups_exit0": true,
+  "sde_full_build": {
+    "BASELINE": {
+      "exit": 2,
+      "objects": 25,
+      "modules": 0
+    },
+    "MODIFIED": {
+      "exit": 2,
+      "objects": 25,
+      "modules": 0
+    },
+    "ROLLBACK": {
+      "exit": 2,
+      "objects": 25,
+      "modules": 0
+    }
+  },
+  "exact_rollback_and_reapply_files": 317,
+  "integrated_configs": {
+    "configs/kgsl-xiaomi-618-port.json": "e8fdfeeb95b656a331e661d5bfc09ee00a2634060603023882b04fe5c045f111",
+    "configs/sde-xiaomi-618-port.json": "c3f26ebaef0bb030cff6ad4481b6aad51112fad5db6612f44e41245ea3199104",
+    "configs/drm-618-plane-fence-ownership.json": "0134d9d52661991c16a9f7e8a6bbd64a46f7d682b468ab0ced6baee9d0e79e62"
+  },
+  "latest_roles": {
+    "MODIFIED_FILE.tar.gz": {
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-17/MODIFIED_FILE.tar.gz",
+      "sha256": "3db32e884ecc76242b736375cb87243fdc1f7a6391ccfb0d7dffd47f663afb94",
+      "bytes": 1217744
+    },
+    "DIFF_FILE.patch": {
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-17/DIFF_FILE.patch",
+      "sha256": "07c6995416e21f965e0745412e7d3a1db2c71b43c609728cac20eb653d6c0ff8",
+      "bytes": 11285
+    },
+    "VERIFICATION.txt": {
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-17/VERIFICATION.txt",
+      "sha256": "a7194a570a19f45e753e42d4bc1c1c10a62f3fbb5f3ab4ff7f0f076629e9b95f",
+      "bytes": 87255
+    },
+    "ROLLBACK.sh": {
+      "path": "/mnt/c/Users/Administrator/Documents/ChatGPT/chromebookOS/out/kgsl-resume-20261111/sde-integration-17/ROLLBACK.sh",
+      "sha256": "c1b7f5638fb1ffaf720aee8dddf3f158b92f625e6e051e2d41d10fee2473a845",
+      "bytes": 507
+    }
+  },
+  "unfinished_manifest": "patches/wip/kgsl-sde-paused-20261111/MANIFEST.json",
+  "unfinished_manifest_sha256": "42b7f2ccd1bac84953e4740c393663a2f9c262632cdde569696d6b7aefcc1b61",
+  "unfinished_groups": 7,
+  "unfinished_changed_files": 52,
+  "remaining": [
+    "Complete mode catalog/bridge/CRTC/encoder consumers and paired userspace",
+    "IRQ/vblank real PM, failure rollback and atomic callback contract",
+    "MST persistent-primary core+driver lifecycle and new paired kernel",
+    "Other DRM/DSI/provider API and platform resources",
+    "Late GEM/file/private-owner lifetime and safe DMA/fence retirement",
+    "KGSL+SDE runtime display/submit/DDR/PM/performance/SQ1-SQ2 acceptance"
+  ],
+  "resume_requires_explicit_user_request": true,
+  "excluded_from_commit": [
+    "Private libraries/firmware/credentials/raw logs",
+    "Compiled modules/ELFs/kernel Image/archive payloads",
+    "Six pre-existing rescue-console untracked files"
+  ]
+}

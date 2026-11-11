@@ -1,0 +1,313 @@
+--- a/techpack/display/msm/dp/dp_catalog.c
++++ b/techpack/display/msm/dp/dp_catalog.c
+@@ -2759,7 +2759,7 @@
+ 	catalog = container_of(dp_catalog, struct dp_catalog_private,
+ 		dp_catalog);
+ 
+-	strlcpy(catalog->exe_mode, mode, sizeof(catalog->exe_mode));
++	strscpy(catalog->exe_mode, mode, sizeof(catalog->exe_mode));
+ 
+ 	if (!strcmp(catalog->exe_mode, "hw"))
+ 		catalog->parser->clear_io_buf(catalog->parser);
+@@ -2931,7 +2931,7 @@
+ 
+ 	dp_catalog_get_io(catalog);
+ 
+-	strlcpy(catalog->exe_mode, "hw", sizeof(catalog->exe_mode));
++	strscpy(catalog->exe_mode, "hw", sizeof(catalog->exe_mode));
+ 
+ 	dp_catalog = &catalog->dp_catalog;
+ 	dp_catalog->parser = parser;
+--- a/techpack/display/msm/dp/dp_ctrl.c
++++ b/techpack/display/msm/dp/dp_ctrl.c
+@@ -820,10 +820,10 @@
+ 
+ 	if (dp_panel->stream_id == DP_STREAM_0) {
+ 		clk_type = DP_STREAM0_PM;
+-		strlcpy(clk_name, "strm0_pixel_clk", 32);
++		strscpy(clk_name, "strm0_pixel_clk", 32);
+ 	} else if (dp_panel->stream_id == DP_STREAM_1) {
+ 		clk_type = DP_STREAM1_PM;
+-		strlcpy(clk_name, "strm1_pixel_clk", 32);
++		strscpy(clk_name, "strm1_pixel_clk", 32);
+ 	} else {
+ 		DP_ERR("Invalid stream:%d for clk enable\n",
+ 				dp_panel->stream_id);
+--- a/techpack/display/msm/dp/dp_debug.c
++++ b/techpack/display/msm/dp/dp_debug.c
+@@ -1726,7 +1726,7 @@
+ 
+ 	/* qfprom register dump not supported */
+ 	if (!strcmp(debug->reg_dump, "qfprom_physical"))
+-		strlcpy(debug->reg_dump, "clear", sizeof(debug->reg_dump));
++		strscpy(debug->reg_dump, "clear", sizeof(debug->reg_dump));
+ end:
+ 	return len;
+ }
+--- a/techpack/display/msm/dp/dp_display.c
++++ b/techpack/display/msm/dp/dp_display.c
+@@ -360,7 +360,7 @@
+ 	int i, j;
+ 
+ 	for (i = 0; i < MAX_DP_ACTIVE_BOOT_DISPLAY; i++) {
+-		strlcpy(disp_buf, boot_displays[i].boot_param,
++		strscpy(disp_buf, boot_displays[i].boot_param,
+ 			MAX_CMDLINE_PARAM_LEN);
+ 
+ 		pos = strnstr(disp_buf, ":", strlen(disp_buf));
+--- a/techpack/display/msm/dp/dp_gpio_hpd.c
++++ b/techpack/display/msm/dp/dp_gpio_hpd.c
+@@ -253,7 +253,7 @@
+ 		goto gpio_error;
+ 	}
+ 
+-	strlcpy(gpio_hpd->gpio_cfg.gpio_name, hpd_gpio_name,
++	strscpy(gpio_hpd->gpio_cfg.gpio_name, hpd_gpio_name,
+ 		sizeof(gpio_hpd->gpio_cfg.gpio_name));
+ 	gpio_hpd->gpio_cfg.value = 0;
+ 
+--- a/techpack/display/msm/dp/dp_lphw_hpd.c
++++ b/techpack/display/msm/dp/dp_lphw_hpd.c
+@@ -365,7 +365,7 @@
+ 		goto gpio_error;
+ 	}
+ 
+-	strlcpy(lphw_hpd->gpio_cfg.gpio_name, hpd_gpio_name,
++	strscpy(lphw_hpd->gpio_cfg.gpio_name, hpd_gpio_name,
+ 		sizeof(lphw_hpd->gpio_cfg.gpio_name));
+ 	lphw_hpd->gpio_cfg.value = 0;
+ 
+--- a/techpack/display/msm/dp/dp_parser.c
++++ b/techpack/display/msm/dp/dp_parser.c
+@@ -305,7 +305,7 @@
+ 			continue;
+ 		}
+ 
+-		strlcpy(mp->gpio_config[i].gpio_name, dp_gpios[i],
++		strscpy(mp->gpio_config[i].gpio_name, dp_gpios[i],
+ 			sizeof(mp->gpio_config[i].gpio_name));
+ 
+ 		mp->gpio_config[i].value = 0;
+@@ -670,14 +670,14 @@
+ 				core_clk_index < core_clk_count) {
+ 			struct dss_clk *clk =
+ 				&core_power->clk_config[core_clk_index];
+-			strlcpy(clk->clk_name, clk_name, sizeof(clk->clk_name));
++			strscpy(clk->clk_name, clk_name, sizeof(clk->clk_name));
+ 			clk->type = DSS_CLK_AHB;
+ 			core_clk_index++;
+ 		} else if (dp_parser_check_prefix(link_clk, clk_name) &&
+ 			   link_clk_index < link_clk_count) {
+ 			struct dss_clk *clk =
+ 				&link_power->clk_config[link_clk_index];
+-			strlcpy(clk->clk_name, clk_name, sizeof(clk->clk_name));
++			strscpy(clk->clk_name, clk_name, sizeof(clk->clk_name));
+ 			link_clk_index++;
+ 
+ 			if (!strcmp(clk_name, "link_clk"))
+@@ -688,7 +688,7 @@
+ 			   strm0_clk_index < strm0_clk_count) {
+ 			struct dss_clk *clk =
+ 				&strm0_power->clk_config[strm0_clk_index];
+-			strlcpy(clk->clk_name, clk_name, sizeof(clk->clk_name));
++			strscpy(clk->clk_name, clk_name, sizeof(clk->clk_name));
+ 			strm0_clk_index++;
+ 
+ 			clk->type = DSS_CLK_PCLK;
+@@ -696,7 +696,7 @@
+ 			   strm1_clk_index < strm1_clk_count) {
+ 			struct dss_clk *clk =
+ 				&strm1_power->clk_config[strm1_clk_index];
+-			strlcpy(clk->clk_name, clk_name, sizeof(clk->clk_name));
++			strscpy(clk->clk_name, clk_name, sizeof(clk->clk_name));
+ 			strm1_clk_index++;
+ 
+ 			clk->type = DSS_CLK_PCLK;
+--- a/techpack/display/msm/dsi/dsi_clk_manager.c
++++ b/techpack/display/msm/dsi/dsi_clk_manager.c
+@@ -1321,7 +1321,7 @@
+ 		goto error;
+ 	}
+ 
+-	strlcpy(c->name, client, MAX_STRING_LEN);
++	strscpy(c->name, client, MAX_STRING_LEN);
+ 	c->mngr = mngr;
+ 
+ 	list_add(&c->list, &mngr->client_list);
+--- a/techpack/display/msm/dsi/dsi_display.c
++++ b/techpack/display/msm/dsi/dsi_display.c
+@@ -1898,7 +1898,7 @@
+ 	char secondary_panel_str[] = "_secondary";
+ 	int i;
+ 
+-	strlcpy(panel_name, display->name, SEC_PANEL_NAME_MAX_LEN);
++	strscpy(panel_name, display->name, SEC_PANEL_NAME_MAX_LEN);
+ 	if (strcmp(display->display_type, "secondary") == 0)
+ 		strlcat(panel_name, secondary_panel_str, SEC_PANEL_NAME_MAX_LEN);
+ 
+@@ -2657,7 +2657,7 @@
+ 	int i, j;
+ 
+ 	for (i = 0; i < MAX_DSI_ACTIVE_DISPLAY; i++) {
+-		strlcpy(disp_buf, boot_displays[i].boot_param,
++		strscpy(disp_buf, boot_displays[i].boot_param,
+ 			MAX_CMDLINE_PARAM_LEN);
+ 
+ 		pos = strnstr(disp_buf, ":", strlen(disp_buf));
+--- a/techpack/display/msm/dsi/dsi_parser.c
++++ b/techpack/display/msm/dsi/dsi_parser.c
+@@ -206,7 +206,7 @@
+ 		char *to_int, *tmp;
+ 		char item[SZ_128];
+ 
+-		strlcpy(item, prop->items[i], SZ_128);
++		strscpy(item, prop->items[i], SZ_128);
+ 
+ 		tmp = item;
+ 
+@@ -250,7 +250,7 @@
+ 	if (!prop->raw)
+ 		goto end;
+ 
+-	strlcpy(prop->raw, buf, buf_len + 1);
++	memcpy(prop->raw, buf, buf_len + 1);
+ 
+ 	found = true;
+ 
+@@ -573,7 +573,7 @@
+ 	if (!prop->value)
+ 		goto end;
+ 
+-	strlcpy(item, prop->value, SZ_128);
++	strscpy(item, prop->value, SZ_128);
+ 	property = item;
+ 	to_int = strsep(&property, "x");
+ 
+@@ -616,7 +616,7 @@
+ 		char item[SZ_128];
+ 		char *to_int, *tmp;
+ 
+-		strlcpy(item, prop->items[i], SZ_128);
++		strscpy(item, prop->items[i], SZ_128);
+ 
+ 		tmp = item;
+ 
+@@ -1228,7 +1228,7 @@
+ 
+ 	parser->dev = dev;
+ 
+-	strlcpy(parser->file_name, "dsi_prop", sizeof(parser->file_name));
++	strscpy(parser->file_name, "dsi_prop", sizeof(parser->file_name));
+ 
+ 	return parser;
+ end:
+--- a/techpack/display/msm/sde/sde_fence.c
++++ b/techpack/display/msm/sde/sde_fence.c
+@@ -254,7 +254,7 @@
+ 		return ERR_PTR(-ENOMEM);
+ 	}
+ 
+-	strlcpy(ctx->name, name, ARRAY_SIZE(ctx->name));
++	strscpy(ctx->name, name, ARRAY_SIZE(ctx->name));
+ 	ctx->drm_id = drm_id;
+ 	kref_init(&ctx->kref);
+ 	ctx->context = dma_fence_context_alloc(1);
+--- a/techpack/display/msm/sde_dbg.c
++++ b/techpack/display/msm/sde_dbg.c
+@@ -296,7 +296,7 @@
+ {
+ 	struct md_region md_entry;
+ 
+-	strlcpy(md_entry.name, name, sizeof(md_entry.name));
++	strscpy(md_entry.name, name, sizeof(md_entry.name));
+ 	md_entry.virt_addr = (uintptr_t)virt_addr;
+ 	md_entry.phys_addr = virt_to_phys(virt_addr);
+ 	md_entry.size = size;
+@@ -2491,7 +2491,7 @@
+ 	if (!reg_base)
+ 		return -ENOMEM;
+ 
+-	strlcpy(reg_base->name, name, sizeof(reg_base->name));
++	strscpy(reg_base->name, name, sizeof(reg_base->name));
+ 	reg_base->base = base;
+ 	reg_base->max_offset = max_offset;
+ 	reg_base->off = 0;
+@@ -2523,7 +2523,7 @@
+ 	if (!reg_base)
+ 		return -ENOMEM;
+ 
+-	strlcpy(reg_base->name, name, sizeof(reg_base->name));
++	strscpy(reg_base->name, name, sizeof(reg_base->name));
+ 	reg_base->base = NULL;
+ 	reg_base->max_offset = 0;
+ 	reg_base->off = 0;
+@@ -2596,7 +2596,7 @@
+ 	if (!range)
+ 		return;
+ 
+-	strlcpy(range->range_name, range_name, sizeof(range->range_name));
++	strscpy(range->range_name, range_name, sizeof(range->range_name));
+ 	range->offset.start = offset_start;
+ 	range->offset.end = offset_end;
+ 	range->xin_id = xin_id;
+--- a/techpack/display/msm/sde_dbg_evtlog.c
++++ b/techpack/display/msm/sde_dbg_evtlog.c
+@@ -268,7 +268,8 @@
+ 			continue;
+ 
+ 		/* don't care about return value */
+-		(void)strlcpy(buf, filter_node->filter, bufsz);
++		(void)strscpy(buf, filter_node->filter,
++			min_t(size_t, bufsz, sizeof(filter_node->filter)));
+ 		rc = 0;
+ 		break;
+ 	}
+@@ -323,7 +324,7 @@
+ 		}
+ 
+ 		/* don't care if copy truncated */
+-		(void)strlcpy(filter_node->filter, flt,
++		(void)strscpy(filter_node->filter, flt,
+ 				SDE_EVTLOG_FILTER_STRSIZE);
+ 
+ 		spin_lock_irqsave(&evtlog->spin_lock, flags);
+--- a/techpack/display/msm/sde_power_handle.c
++++ b/techpack/display/msm/sde_power_handle.c
+@@ -130,7 +130,7 @@
+ 			goto error;
+ 		}
+ 
+-		strlcpy(mp->vreg_config[i].vreg_name, st,
++		strscpy(mp->vreg_config[i].vreg_name, st,
+ 					sizeof(mp->vreg_config[i].vreg_name));
+ 
+ 		rc = of_property_read_u32(supply_node,
+@@ -258,7 +258,7 @@
+ 	for (i = 0; i < num_clk; i++) {
+ 		of_property_read_string_index(pdev->dev.of_node, "clock-names",
+ 							i, &clock_name);
+-		strlcpy(mp->clk_config[i].clk_name, clock_name,
++		strscpy(mp->clk_config[i].clk_name, clock_name,
+ 				sizeof(mp->clk_config[i].clk_name));
+ 
+ 		of_property_read_u32_index(pdev->dev.of_node, "clock-rate",
+@@ -972,7 +972,7 @@
+ 	event->event_type = event_type;
+ 	event->cb_fnc = cb_fnc;
+ 	event->usr = usr;
+-	strlcpy(event->client_name, client_name, MAX_CLIENT_NAME_LEN);
++	strscpy(event->client_name, client_name, MAX_CLIENT_NAME_LEN);
+ 	event->active = true;
+ 
+ 	mutex_lock(&phandle->phandle_lock);
+--- a/techpack/display/msm/sde_rsc.c
++++ b/techpack/display/msm/sde_rsc.c
+@@ -106,7 +106,7 @@
+ 		return ERR_PTR(-ENOMEM);
+ 
+ 	mutex_lock(&rsc->client_lock);
+-	strlcpy(client->name, client_name, MAX_RSC_CLIENT_NAME_LEN);
++	strscpy(client->name, client_name, MAX_RSC_CLIENT_NAME_LEN);
+ 	client->current_state = SDE_RSC_IDLE_STATE;
+ 	client->rsc_index = rsc_index;
+ 	client->id = id;

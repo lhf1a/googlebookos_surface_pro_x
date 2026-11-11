@@ -1,0 +1,282 @@
+--- a/techpack/display/msm/msm_gem.c
++++ b/techpack/display/msm/msm_gem.c
+@@ -602,62 +602,88 @@
+ 	// things that are no longer needed..
+ }
+ 
+-void msm_gem_aspace_domain_attach_detach_update(
+-		struct msm_gem_address_space *aspace,
+-		bool is_detach)
+-{
+-	struct msm_gem_object *msm_obj;
+-	struct drm_gem_object *obj;
+-	struct aspace_client *aclient;
+-	int ret;
+-	uint64_t iova;
+-
+-	if (!aspace)
+-		return;
+-
+-	mutex_lock(&aspace->list_lock);
+-	if (is_detach) {
+-		/* Indicate to clients domain is getting detached */
+-		list_for_each_entry(aclient, &aspace->clients, list) {
+-			if (aclient->cb)
+-				aclient->cb(aclient->cb_data,
+-						is_detach);
+-		}
+-
+-		/**
+-		 * Unmap active buffers,
+-		 * typically clients should do this when the callback is called,
+-		 * but this needs to be done for the buffers which are not
+-		 * attached to any planes.
+-		 */
+-		list_for_each_entry(msm_obj, &aspace->active_list, iova_list) {
+-			obj = &msm_obj->base;
+-			if (obj->import_attach) {
+-				mutex_lock(&msm_obj->lock);
+-				put_iova(obj);
+-				msm_obj->obj_dirty = true;
+-				mutex_unlock(&msm_obj->lock);
+-			}
+-		}
+-	} else {
+-		/* map active buffers */
+-		list_for_each_entry(msm_obj, &aspace->active_list, iova_list) {
+-			obj = &msm_obj->base;
+-			ret = msm_gem_get_iova(obj, aspace, &iova);
+-			if (ret) {
+-				mutex_unlock(&aspace->list_lock);
+-				return;
+-			}
+-		}
+-
+-		/* Indicate to clients domain is attached */
+-		list_for_each_entry(aclient, &aspace->clients, list) {
+-			if (aclient->cb)
+-				aclient->cb(aclient->cb_data,
+-						is_detach);
+-		}
+-	}
+-	mutex_unlock(&aspace->list_lock);
++/*
++ * Never acquire an object lock while holding list_lock.  The active list
++ * does not itself own GEM references: final release may already be waiting
++ * for list_lock with a zero reference count and its object lock held.
++ * Pin the complete snapshot before callbacks or mapping changes.  Refuse a
++ * zero-ref entry, rather than resurrect it or skip a required update.
++ * cb_lock serializes transitions and callback registration/unregistration;
++ * callbacks may take object/list locks but must not unregister themselves.
++ */
++int msm_gem_aspace_domain_attach_detach_update(
++        struct msm_gem_address_space *aspace, bool is_detach)
++{
++    struct msm_gem_object *msm_obj;
++    struct drm_gem_object **objects = NULL;
++    struct aspace_client *aclient;
++    size_t count = 0, pinned = 0, i;
++    int ret = 0;
++    uint64_t iova;
++
++    if (!aspace)
++        return -EINVAL;
++
++    mutex_lock(&aspace->cb_lock);
++    mutex_lock(&aspace->list_lock);
++    list_for_each_entry(msm_obj, &aspace->active_list, iova_list)
++        count++;
++    if (count) {
++        objects = kcalloc(count, sizeof(*objects), GFP_KERNEL);
++        if (!objects) {
++            ret = -ENOMEM;
++            goto unlock_list;
++        }
++    }
++    list_for_each_entry(msm_obj, &aspace->active_list, iova_list) {
++        if (!kref_get_unless_zero(&msm_obj->base.refcount)) {
++            ret = -EBUSY;
++            goto unlock_list;
++        }
++        objects[pinned++] = &msm_obj->base;
++    }
++unlock_list:
++    mutex_unlock(&aspace->list_lock);
++    if (ret)
++        goto unlock_callbacks;
++
++    if (is_detach) {
++        list_for_each_entry(aclient, &aspace->clients, list)
++            if (aclient->cb)
++                aclient->cb(aclient->cb_data, true);
++    }
++    for (i = 0; i < pinned; i++) {
++        struct drm_gem_object *obj = objects[i];
++
++        msm_obj = to_msm_bo(obj);
++        mutex_lock(&msm_obj->lock);
++        /* A concurrent purge may already have removed this pinned object. */
++        if (msm_obj->aspace == aspace && msm_obj->in_active_list) {
++            if (is_detach) {
++                if (obj->import_attach) {
++                    put_iova(obj);
++                    msm_obj->obj_dirty = true;
++                }
++            } else {
++                ret = msm_gem_get_iova_locked(obj, aspace, &iova);
++            }
++        }
++        mutex_unlock(&msm_obj->lock);
++        if (ret)
++            break;
++    }
++    if (!ret && !is_detach) {
++        list_for_each_entry(aclient, &aspace->clients, list)
++            if (aclient->cb)
++                aclient->cb(aclient->cb_data, false);
++    }
++unlock_callbacks:
++    mutex_unlock(&aspace->cb_lock);
++    /* The last put may run free_object and acquire list_lock. */
++    for (i = 0; i < pinned; i++)
++        drm_gem_object_put(objects[i]);
++    kfree(objects);
++    return ret;
+ }
+ 
+ int msm_gem_dumb_create(struct drm_file *file, struct drm_device *dev,
+--- a/techpack/display/msm/msm_gem.h
++++ b/techpack/display/msm/msm_gem.h
+@@ -75,7 +75,8 @@
+ 	struct list_head active_list;
+ 	/* list of clients */
+ 	struct list_head clients;
+-	struct mutex list_lock; /* Protects active_list & clients */
++	struct mutex list_lock; /* Protects active_list, never nests object locks */
++	struct mutex cb_lock; /* Serializes client lifetime and domain callbacks */
+ };
+ 
+ struct msm_gem_vma {
+--- a/techpack/display/msm/msm_gem_vma.c
++++ b/techpack/display/msm/msm_gem_vma.c
+@@ -16,6 +16,8 @@
+  * this program.  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
++#include <linux/overflow.h>
++
+ #include "msm_drv.h"
+ #include "msm_gem.h"
+ #include "msm_mmu.h"
+@@ -37,6 +39,9 @@
+         struct msm_gem_vma *vma, struct sg_table *sgt,
+         int npages, unsigned int flags)
+ {
++    struct scatterlist *sg;
++    u64 required, total = 0, expected = 0, end;
++    unsigned int i;
+     int ret;
+ 
+     if (!aspace || !aspace->domain_attached || !vma || !sgt ||
+@@ -48,10 +53,33 @@
+                                        DMA_BIDIRECTIONAL, flags);
+     if (ret)
+         return ret;
++
++    /* The DMA provider owns mapping; publish only a complete linear span. */
++    if (check_mul_overflow((u64)npages, (u64)PAGE_SIZE, &required))
++        goto invalid_span;
++    for_each_sg(sgt->sgl, sg, sgt->nents, i) {
++        u64 address = sg_dma_address(sg);
++        u64 length = sg_dma_len(sg);
++
++        if (!length || (i && address != expected) ||
++            check_add_overflow(address, length, &end) ||
++            check_add_overflow(total, length, &total))
++            goto invalid_span;
++        expected = end;
++    }
++    if (total < required)
++        goto invalid_span;
++
+     vma->iova = sg_dma_address(sgt->sgl);
+     vma->mapped = true;
+     kref_get(&aspace->kref);
+     return 0;
++
++invalid_span:
++    /* EXTBUF is attachment-owned: its provider deliberately does no DMA unmap. */
++    aspace->mmu->funcs->unmap_dma_buf(aspace->mmu, sgt,
++                                   DMA_BIDIRECTIONAL, flags);
++    return -ERANGE;
+ }
+ 
+ static void smmu_aspace_destroy(struct msm_gem_address_space *aspace)
+@@ -110,18 +138,18 @@
+ 	INIT_LIST_HEAD(&aclient->list);
+ 
+ 	/* check if callback is already registered */
+-	mutex_lock(&aspace->list_lock);
++	mutex_lock(&aspace->cb_lock);
+ 	list_for_each_entry(temp, &aspace->clients, list) {
+ 		if ((temp->cb == aclient->cb) &&
+ 			(temp->cb_data == aclient->cb_data)) {
+ 			kfree(aclient);
+-			mutex_unlock(&aspace->list_lock);
++			mutex_unlock(&aspace->cb_lock);
+ 			return -EEXIST;
+ 		}
+ 	}
+ 
+ 	list_move_tail(&aclient->list, &aspace->clients);
+-	mutex_unlock(&aspace->list_lock);
++	mutex_unlock(&aspace->cb_lock);
+ 
+ 	return 0;
+ }
+@@ -137,7 +165,7 @@
+ 	if (!aspace || !cb)
+ 		return -EINVAL;
+ 
+-	mutex_lock(&aspace->list_lock);
++	mutex_lock(&aspace->cb_lock);
+ 	list_for_each_entry(aclient, &aspace->clients, list) {
+ 		if ((aclient->cb == cb) &&
+ 			(aclient->cb_data == cb_data)) {
+@@ -147,7 +175,7 @@
+ 			break;
+ 		}
+ 	}
+-	mutex_unlock(&aspace->list_lock);
++	mutex_unlock(&aspace->cb_lock);
+ 
+ 	return rc;
+ }
+@@ -184,6 +212,7 @@
+ 	INIT_LIST_HEAD(&aspace->clients);
+ 	kref_init(&aspace->kref);
+ 	mutex_init(&aspace->list_lock);
++	mutex_init(&aspace->cb_lock);
+ 
+ 	return aspace;
+ }
+--- a/techpack/display/msm/msm_drv.h
++++ b/techpack/display/msm/msm_drv.h
+@@ -262,7 +262,7 @@
+ 	MSM_DISPLAY_SPR_TYPE_MAX
+ };
+ 
+-static const char * __maybe_unused msm_spr_pack_type_str[MSM_DISPLAY_SPR_TYPE_MAX] = {
++static const char *msm_spr_pack_type_str[MSM_DISPLAY_SPR_TYPE_MAX] __maybe_unused = {
+ 	[MSM_DISPLAY_SPR_TYPE_NONE] = "",
+ 	[MSM_DISPLAY_SPR_TYPE_PENTILE] = "pentile",
+ 	[MSM_DISPLAY_SPR_TYPE_RGBW] = "rgbw",
+@@ -1034,7 +1034,7 @@
+  * msm_gem_aspace_domain_attach_detach: function to inform the attach/detach
+  * of the domain for this aspace
+  */
+-void msm_gem_aspace_domain_attach_detach_update(
++int msm_gem_aspace_domain_attach_detach_update(
+ 		struct msm_gem_address_space *aspace,
+ 		bool is_detach);
+ 

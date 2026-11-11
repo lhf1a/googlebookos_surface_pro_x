@@ -1,0 +1,577 @@
+{
+  "schema": 1,
+  "source_manifest": "kgsl-xiaomi-source-inputs.json",
+  "status": "compile-blocked-not-device-ready",
+  "source_prefix": "techpack/display/",
+  "additional_sources": {
+    "include/uapi/drm/msm_drm.h": "09ee68d46862dd77835f298705a85d69fb43b68a8c2fe83e4d0abf2d955ccb44"
+  },
+  "patches": [
+    {
+      "path": "patches/sde-xiaomi-618-public-dp-link.patch",
+      "sha256": "580ba1ba2df5f4de2ea8eb5a2d91230e3268f87fb9a1b5fe1e251f3ec8604ef1",
+      "files": {
+        "techpack/display/msm/dp/dp_panel.c": {
+          "before": "c60a5245e07bd915086c0fcec26f8a609a9e0a1240f26c65525e067e591cf632",
+          "after": "8f8b79b7ea2848c1082e8905973686c6794ac335ecd71479a3e87d7784caaed3"
+        },
+        "techpack/display/msm/sde_hdcp_1x.c": {
+          "before": "f403b1ec490eccf4388f6d6d6fb084fbc5940ed1a1998ff41acf32f912b6913e",
+          "after": "f3712c57f8dc78aad3456a9454fddf8a71b909cf1b801a9f0afcadb240636b43"
+        },
+        "techpack/display/msm/dsi/dsi_drm.h": {
+          "before": "0db0488c69cafe34dc4d7f966d2baf21c8b097b364d1057ece5c51da387c867b",
+          "after": "b94590afc3482a9030777d0230449d8c76370e9240817ff6e7878081995d444b"
+        },
+        "techpack/display/msm/sde/sde_connector.h": {
+          "before": "fe2c8b020804db77bdd019a0ae25d9ac49bd6b773e146745092b9654c3af4329",
+          "after": "6bc6558406fabf6a1cfdf3ef57f663e73ac8c6774d47f69eb3c7a33b059d2531"
+        },
+        "techpack/display/msm/dp/dp_audio.c": {
+          "before": "9497698a498f37b56498c1936c0705ca48d6298e60bd1457c6c6b8e23c471ef7",
+          "after": "0beea036d25061681d1375f165d098790becf08f0cee9cb3779363a85d8e5d0f"
+        },
+        "techpack/display/msm/dp/dp_mst_drm.h": {
+          "before": "14c90ecdbc8affd0fe3550375250c386be2e51a1d1c495740efa13a2515cc865",
+          "after": "35abc2ac897a8613e72801ea849b0ee971a7294b6dc3bb5f3e1f137adfd5f44f"
+        },
+        "techpack/display/msm/sde_dbg.h": {
+          "before": "5c2f02ed75ffa405753fc290bbbb7deefbe22e9a876a027198f84fbea9bda528",
+          "after": "e89535dc1a9482199faa32920a58e244b0b5e9f9e856a49448e1870678224b72"
+        },
+        "techpack/display/msm/dp/dp_catalog.h": {
+          "before": "870216f87ab7eea455829447b6b906d731d139cebfa66010819c2686fc107875",
+          "after": "672a63e70df58ed750704f70ba47b0f2bd7830966359c0726502fb9091deda39"
+        },
+        "techpack/display/msm/sde_dbg.c": {
+          "before": "92250fd87bde0fad6dda906fd7528ced2913f6209f74affaf8dfc997a4ec1393",
+          "after": "6e93f5e7d6cf1836e57b9d56950a28cd93bfb547b2ecca9cbd158dccad98b279"
+        },
+        "techpack/display/msm/dp/dp_mst_drm.c": {
+          "before": "10a1703f72e3b2e625d9e881cda17503d8eb0703d40a4ab5f7039c88ce373799",
+          "after": "4209005dd5e0755094ad3ae9a8936bc453c624a25151889f1d6aa0bcfc5a0534"
+        },
+        "techpack/display/msm/sde/sde_hw_catalog.h": {
+          "before": "1704f6519250aa2185798fd53b86bbee27d6160e5deaf5ebf9dad0311655c381",
+          "after": "4c89ec45b02a2f495d000c86d9993c2378210eccbf4008057688d94e6f5ae7bd"
+        },
+        "techpack/display/msm/dsi/dsi_display.h": {
+          "before": "b15fab6c06fa0cc64d694b0f81c46b7ee9a2bd5915ae9e584ec303f5cde2779d",
+          "after": "f3dcf5b9d94e7d75934c5e28a3740623448ff35ac11b657787233240f87c1dde"
+        },
+        "techpack/display/msm/sde_hdcp.h": {
+          "before": "9d7d45af18d64dedbd578a7ba64564e991e67b7f233a5e85236baf37bd77e396",
+          "after": "7eefe09cf68698ec554f76f1a034655a7263d1025caafff33908fa9bee89d78e"
+        },
+        "techpack/display/msm/dp/dp_link_helpers.c": {
+          "before": null,
+          "after": "c4c61722223b76a20c4dac29dc58e0213ae12325ea29137c4f2e2d7859313ad2"
+        },
+        "techpack/display/msm/dsi/dsi_clk.h": {
+          "before": "c73ab8c98bb43d944487108bbb2f4f045bf8e8ce882d8d2ef58a3bb2f5be49eb",
+          "after": "7b904ce51fa31c58cc4442b1301bab33d794ff8fff78ec6e3994a8fb8bfa1e9c"
+        },
+        "techpack/display/msm/dp/dp_link.h": {
+          "before": "8ccf27160eae159d988005f1ddf3f1da4f25009758c3be038bec8a1b2b8eeb43",
+          "after": "8752932756daa3fe195fd432187142d6160530f37d2ed6939a01815e852e7bd9"
+        },
+        "techpack/display/msm/sde_edid_parser.h": {
+          "before": "d682472e63a4bd3ed8a38268e881ea4e008b51142b9dee4213f24ab4c3e6127a",
+          "after": "c196a776ff6ac3a8f1b0c6a42eac58cd895205476e8e4ab582657a580cff402d"
+        },
+        "techpack/display/msm/dp/dp_panel.h": {
+          "before": "08cf33aa86116bf887d41456173ac1db6979073371a55fc40c80d8282bfae096",
+          "after": "f447fc3fa3440c0b8701c626d4c4021cbfa7038cb3f352ad83a08ceda17a5c79"
+        },
+        "techpack/display/msm/dp/dp_link.c": {
+          "before": "cd80aecb521c47e470d60722de4abb3908ef289e9aa994d3912bb4adc9242f39",
+          "after": "39e7168d44796a9580362edd95be69ac43acd8b0f033b3943e8520d67d2affb4"
+        },
+        "techpack/display/msm/dp/dp_power.c": {
+          "before": "fa15deade1ac55e415b6f07dc86adade4c0eefe59311ba81144c96b720c674b7",
+          "after": "e9a83b1863a70618f30fba93c5b89eb54cae9a63ed01f5ff9db8ed24592dc915"
+        },
+        "techpack/display/msm/dp/dp_link_helpers.h": {
+          "before": null,
+          "after": "d09c6657caf67495c55bbbbe3bc78688eba4dd48ecd49c42d9f9ee525d57ecbc"
+        },
+        "techpack/display/msm/dp/dp_drm.h": {
+          "before": "f760dce249b4ceb714481d4a970a385ba4d40710d026d57e41cfde0a12c3f71b",
+          "after": "1b964ea7811b918ae7491f6f940ab8c167e75f9eb301bfcf2a7ccbfca3b63c39"
+        },
+        "techpack/display/msm/dp/dp_hdcp2p2.c": {
+          "before": "54109569974cc3351ddfec5535f9522ba44ae977c98ef00d65d4ee648ae828d1",
+          "after": "1522e8b77048f80fb8bd71e82b97fd32657da146f281312791fc80aaccdaea3e"
+        },
+        "techpack/display/msm/Makefile": {
+          "before": "e66f2116970b08d2106079e62d63f10a5522bf50596c992fbea29a283ca3ac31",
+          "after": "f9cab4c57f8b6905d6928f110af7a69793cba205ee8c31a2ef87f5a92c3726e0"
+        },
+        "techpack/display/msm/dp/dp_aux.h": {
+          "before": "ae2cffdf4a15c56909a5571057b59dd35e8d434062298edb01ae942310d65068",
+          "after": "2936a3440bec32ae003b401b294499b9283a5eed1c3b9088e99d2b1058c7800f"
+        },
+        "techpack/display/msm/msm_drv.h": {
+          "before": "000d07409eb4a7a36d35f36e7810bb5a9a66857ccecc0d01903c7f468893131c",
+          "after": "78046ce21653749470b709841ce439e4a06891a5b4cfc96f1296aa4b9e900d76"
+        },
+        "techpack/display/msm/dp/dp_display.h": {
+          "before": "43dc91ac79331a6aa96eb1f3039a68692170097768b16f3709832f150106d85f",
+          "after": "33cac1be1898fd5725c0ccddfca577bf363ed106e55cef41d4de52d3c876e9b2"
+        },
+        "techpack/display/msm/sde_rsc.c": {
+          "before": "69c5f6ed3072543574e2d6227fdb8d643abde598862500d4fab9d3eb0e398518",
+          "after": "3bf7c338e509452b52016f187ccda2383136e5107feafbfa42574b6ea1ccac63"
+        },
+        "techpack/display/msm/dp/dp_ctrl.c": {
+          "before": "8c4548506cf7050ccbbfc592afd12e39be80fea2e38631812ab81437a46fb3a8",
+          "after": "125fddfebcf11da43e735b30002ac9cbb4ffc6caa2548fdafa9f6018bf4d2c24"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-uapi-core-include.patch",
+      "sha256": "66edd02c897162635449daceddab8ae6e9452d639a1bf5e3363080411efdfada",
+      "files": {
+        "include/uapi/drm/msm_drm.h": {
+          "before": "09ee68d46862dd77835f298705a85d69fb43b68a8c2fe83e4d0abf2d955ccb44",
+          "after": "64cf717e791e88a90137416c78b1c0b09b66da9147dbdd267eca6277ea8bff1d"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-dp-phy-pattern.patch",
+      "sha256": "626a5abbc18032d19ac066b74ff09b6885915343da7cffacb45da5d63d1e53c8",
+      "files": {
+        "techpack/display/msm/dp/dp_link.h": {
+          "before": "8752932756daa3fe195fd432187142d6160530f37d2ed6939a01815e852e7bd9",
+          "after": "d257dc3e1984df97cc9d6f50dfd73bdf625c87f55117d0e96b79e692d4f4f34b"
+        },
+        "techpack/display/msm/dp/dp_link.c": {
+          "before": "39e7168d44796a9580362edd95be69ac43acd8b0f033b3943e8520d67d2affb4",
+          "after": "1bcb42d06de790b296772435e5339a3f1bd60d67d25f43fea4dd42fc4ea1255c"
+        },
+        "techpack/display/msm/dp/dp_catalog.c": {
+          "before": "c8e566a5fd13cc71eb240d7eb5ee73072a1a51d7e600374e879582a999484bc9",
+          "after": "b9a7f6b590816cef37ea3e01f57ebb8a5e6a79ad7b1a21e8b5ad0dc71de9a88a"
+        },
+        "techpack/display/msm/dp/dp_ctrl.c": {
+          "before": "125fddfebcf11da43e735b30002ac9cbb4ffc6caa2548fdafa9f6018bf4d2c24",
+          "after": "5fdfd6cb8c069f03e6c433137cbe974a709d88bc9b32ca0c35d55f73989a7839"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-prime-ownership.patch",
+      "sha256": "ecc9574ae200fcdbe566da2cbd994fa9cab91df0851aebac680bae171e701fe0",
+      "files": {
+        "techpack/display/msm/msm_atomic.c": {
+          "before": "23180378dce01a5d7ad3d8685ebfe0fe869d9a50fdca990d2a1428cb24170258",
+          "after": "ed382a9e2b9f2e48def5d581deb1f3e5f1f50ef81bec852579999fddc4e1b675"
+        },
+        "techpack/display/msm/msm_drv.c": {
+          "before": "08c46c3e0d0fe8d89c31b99bcc9b043a5298a17305a71a0ba584f3e1e4d6dcaa",
+          "after": "80d07de160d1968f16ebd74930f0df9349d2cee9f499aac8963c1734df0d1d33"
+        },
+        "techpack/display/msm/msm_drv.h": {
+          "before": "78046ce21653749470b709841ce439e4a06891a5b4cfc96f1296aa4b9e900d76",
+          "after": "63fe9c55a2d5335b6d2bd3a6eb9e92465991eca9fa4742d7e7e5fd7e71d6a87a"
+        },
+        "techpack/display/msm/msm_fb.c": {
+          "before": "4741b2fb2c304e91a97622da419fee606ce247951a2da71c2e9f331de8a7c64e",
+          "after": "7246eaff7f4bbb7187eeea38a78546febd9deaeebc1303ccd3ac09d507daccbc"
+        },
+        "techpack/display/msm/msm_gem.c": {
+          "before": "9eb09210f5afef3943d9154b3c926c60f550eb8f9341299ff23d8bffe9353c2b",
+          "after": "ac34eb2224b216ff506938f73585413aac8659b2d581b19f6f8b7e779020a005"
+        },
+        "techpack/display/msm/msm_gem.h": {
+          "before": "943bc3c322e55f4a4134fd26b309ea13e33c75eb66a71a2995380860414d0f0b",
+          "after": "64e96f25d1d2b9d23cd2da0f783cd8cada536e30864e92e21172600006a589c5"
+        },
+        "techpack/display/msm/msm_gem_prime.c": {
+          "before": "17b4a85daf52bf855c87234175ba55077ad3c454eb38b9c0ba7ea852b0cf63e5",
+          "after": "5771ccbc4d234f8507a259e9480b2fba82c7c0d5b145eb636ae4b6d89296fad3"
+        },
+        "techpack/display/msm/msm_gem_vma.c": {
+          "before": "10217a19e3168b461c7b74f1045c736ec93893df9e53e0d5c05ac27c951b07ea",
+          "after": "8e80412fbdaec057fce60c9376922dea88c0adfcfd1958cbb1ee5d74e7b5851e"
+        },
+        "techpack/display/msm/sde/sde_plane.c": {
+          "before": "e783fcd7c67f079703db6b5bb4ec8c0c508cc838c28bf541b173c79813035516",
+          "after": "748b203484e94206411bdaee1571481bb3d3eb1cd0a8c71f74eb8c539bde88b3"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-public-memory-headers.patch",
+      "sha256": "c857bf4ca8e031f0b257a978f1be9411b3616bdc80cec0331ca8eb6c4bce9a5d",
+      "files": {
+        "techpack/display/msm/msm_fb.c": {
+          "before": "7246eaff7f4bbb7187eeea38a78546febd9deaeebc1303ccd3ac09d507daccbc",
+          "after": "1b2c2ff32317d5f8688eae98478d65d1e73463d3ca843738c4d269c89521deb2"
+        },
+        "techpack/display/msm/sde/sde_kms.h": {
+          "before": "676623f57575d94a09d229510210d73d514c6f51baaa464027a0048e39824984",
+          "after": "e6946ad59ca8355e8d2188e1f3689c17e027e6190e3c38b9fa50b2e6986a9b16"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-native-dma.patch",
+      "sha256": "2da0d645728f337dfa77442a1f93a5a5f8b888e052531200d5b2207028b1b824",
+      "files": {
+        "techpack/display/msm/msm_smmu.c": {
+          "before": "953027400ed58aa069fee6a9417ff8ffd2f1d4c089c0e94a71bfdfd1f5fdda6c",
+          "after": "1e845eac9edcd998764e77c4e042e44acbb6ba8acbe489b546d3f5b983eb92b9"
+        },
+        "techpack/display/msm/msm_mmu.h": {
+          "before": "fc19e26a1820f74904c973eba2c4f54c795c8d6c7b21422b6454be8620b2f59f",
+          "after": "3919997fac725ad9442c2ab1afade15b112e4b830ab8ea6c35257712403c28d2"
+        },
+        "techpack/display/msm/msm_iommu.c": {
+          "before": "712e99c4c004f40f0d1b58a44221e79030c64574d3f4e45f3792827f3eb927f1",
+          "after": "cc6eb30e3db8a9a71b50460120e24a30bd003cb82ee444608c236dc3f8458100"
+        },
+        "techpack/display/msm/sde/sde_kms.c": {
+          "before": "9c57e532f34bccc83d3c588afdca5bbd1615d143df22ca445202b030cc25f891",
+          "after": "43e30e187f4b01fbf1f8b86c4526ad8eca5afb087b71ef88152b29a471225e90"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-active-lock.patch",
+      "sha256": "70fff53db30b3674265f1094e54057dd9f76b351322af338af7b7ff58e2a62ca",
+      "files": {
+        "techpack/display/msm/msm_gem.c": {
+          "before": "ac34eb2224b216ff506938f73585413aac8659b2d581b19f6f8b7e779020a005",
+          "after": "d709541d5d5c47f3583b114ff39b215572914a4a42161b9f004c734e294d7c25"
+        },
+        "techpack/display/msm/msm_gem.h": {
+          "before": "64e96f25d1d2b9d23cd2da0f783cd8cada536e30864e92e21172600006a589c5",
+          "after": "5d5b42fc84d2e74d224a683de754a5cb641e747afed2e4d276b9cf2bd4d49c20"
+        },
+        "techpack/display/msm/msm_gem_vma.c": {
+          "before": "8e80412fbdaec057fce60c9376922dea88c0adfcfd1958cbb1ee5d74e7b5851e",
+          "after": "de1a67a51dafdf80e9bcacdbda623482f222cd01ef9b91f11d933aa9765ae2ad"
+        },
+        "techpack/display/msm/msm_drv.h": {
+          "before": "63fe9c55a2d5335b6d2bd3a6eb9e92465991eca9fa4742d7e7e5fd7e71d6a87a",
+          "after": "e25b51ce2bf225a57d3ac866a5679a3a932785c58faf65ac8ca8f665a055062f"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-debug-category.patch",
+      "sha256": "274435ad3417ff42fc04bf9c520af1b9c48af0a7cbbbbedd737736a1c7592fff",
+      "files": {
+        "techpack/display/msm/sde/sde_kms.h": {
+          "before": "e6946ad59ca8355e8d2188e1f3689c17e027e6190e3c38b9fa50b2e6986a9b16",
+          "after": "5bf24d3356e5466d91269edde951fa8c7dc33ea1e28480eb6a465cc8fc7be37c"
+        },
+        "techpack/display/msm/dp/dp_debug.h": {
+          "before": "2ebbccee140ce0df52b2df6bc108203b0c4e1c0211ee44bc8035fff4aea8c52f",
+          "after": "6256852c0bba74df423325e1e379015ed751fe2f9d8f6399b677b778c4ec83ca"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-public-type-headers.patch",
+      "sha256": "fa2971aad8a751640d001b3f561bda1f85948d6bdb15fa0c076f1c23e6bfc528",
+      "files": {
+        "techpack/display/msm/sde/sde_crtc.c": {
+          "before": "faf7d0ad1a45ad49d2cdd433dd62320b83e7cc3296f5a87dbc4301eb6d0d5929",
+          "after": "8556fe41e81a11e8a21ad89ff3d4f2b9c07e17e1c48c0cba13ac509847561451"
+        },
+        "techpack/display/msm/sde/sde_plane.c": {
+          "before": "748b203484e94206411bdaee1571481bb3d3eb1cd0a8c71f74eb8c539bde88b3",
+          "after": "1862baaa0de359491e38de531aa02f7e0ba9bc441194e68af4d9dc6b6a0debdb"
+        },
+        "techpack/display/msm/sde/sde_encoder.c": {
+          "before": "7081e3637984d2f5b93bf7f69cbdaae4746562932ed9c8464ce898a93934cc12",
+          "after": "52a3f322a542ff48683da6fa5866b2283dd343e74b216cecb23c46d41df78c46"
+        },
+        "techpack/display/msm/sde/sde_formats.c": {
+          "before": "834b73f7fd81ed1aa9a463b254002f1a91912197d5e8948dbd9993ce6eb93aef",
+          "after": "b0365c39c375a532e24a19fd491bc5d08415883b2593143d50985e264a670ce1"
+        },
+        "techpack/display/msm/msm_drv.c": {
+          "before": "80d07de160d1968f16ebd74930f0df9349d2cee9f499aac8963c1734df0d1d33",
+          "after": "9b00d11d940928cffbadbec2b49bd1acd1fb6e2f6016e4ebbc0f897ee5048179"
+        },
+        "techpack/display/msm/dsi/dsi_display.h": {
+          "before": "f3dcf5b9d94e7d75934c5e28a3740623448ff35ac11b657787233240f87c1dde",
+          "after": "d0b4d91e0e753208cb42db95ec8d0b8c897e2227b97faf6df29bf5f98759efa7"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-gpio-const.patch",
+      "sha256": "ac1b9015e58d03d8b8737d6c62b1fcd17ed0809bface258cb6f84e0d2d8bbbb7",
+      "files": {
+        "techpack/display/msm/dsi/dsi_parser.h": {
+          "before": "93d17504e0f87f36ab9ad23b2dc295a4c61e78ca9b04ae522cdb4391d77bebe1",
+          "after": "6064cf5df4b283eb30fa1f0cfd88c943bedafbc7747ba0e57c32cbf285d9da58"
+        },
+        "techpack/display/msm/dsi/dsi_parser.c": {
+          "before": "cb972230f0c6c007972558b6a5308b427195198a9362a49e58d8ed83b31ae62b",
+          "after": "f480307c2cdc919575cc57e8ddbdb70ac77adb20f0a49801f6b538246483ddbb"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-string-api.patch",
+      "sha256": "7f5b0205db7310ad72e22ccf682a919ac5e0a7522a8eb4442a990e78d658593a",
+      "files": {
+        "techpack/display/msm/dp/dp_catalog.c": {
+          "before": "b9a7f6b590816cef37ea3e01f57ebb8a5e6a79ad7b1a21e8b5ad0dc71de9a88a",
+          "after": "48cb50d6b74df2570ce9a1a0196d4e88a1ada5c5be40c88fd1295a11120b549f"
+        },
+        "techpack/display/msm/dp/dp_ctrl.c": {
+          "before": "5fdfd6cb8c069f03e6c433137cbe974a709d88bc9b32ca0c35d55f73989a7839",
+          "after": "f2a1b9cc192c6393dbe9fa2ad249b80b70fc0bd60e065fcff84526f720e2e59d"
+        },
+        "techpack/display/msm/dp/dp_debug.c": {
+          "before": "afc558d5737285933591c89026a8ffa458ab85caeb4f102b2ebfc28fba10c343",
+          "after": "77d3bfd7a559b57ef3e18360b46152856eda7c16d1cbb64c8202e60f341e0aeb"
+        },
+        "techpack/display/msm/dp/dp_display.c": {
+          "before": "2880201d8ea65c9b25c6fd3f7a8bbb701bea84fe052038f28fb016f91e354608",
+          "after": "ba7566ac376be8fa773a8e09d4941efa18bddfe157dcd5ae00919e8bdb1edf79"
+        },
+        "techpack/display/msm/dp/dp_gpio_hpd.c": {
+          "before": "98d595c7262dc71071f1fcb3cdaf2bb32fd5124300f8f7cb55e210047ab1f0b6",
+          "after": "e4b005d626e6f6d8f270f686bd464dd5943854a2411ad7a70c9bbafeaa85f7b1"
+        },
+        "techpack/display/msm/dp/dp_lphw_hpd.c": {
+          "before": "edfe6f68a70260874163f8da1d89e74f76f4df7c08c96867ecf7b3eda03fcb1f",
+          "after": "8f87f8d3624bafce15ba60aae8854cefba6caf4c95d09159a9a311fc2b8dd335"
+        },
+        "techpack/display/msm/dp/dp_parser.c": {
+          "before": "6a4f2b30fa5338aa44c34bd26e79efe41e718b77612e50e3179a5e9c5c8ed296",
+          "after": "7004ed3e3ae01b3cb83d2b744d6ae5396fb8ad7d7633bf3edd67eeee66b4ffe0"
+        },
+        "techpack/display/msm/dsi/dsi_clk_manager.c": {
+          "before": "bea4ac5006826a99629c62da04f6c9e67f52d7d085e3f9fe355825827612e349",
+          "after": "8d882bac679b28464e0b9913fa32bdcb1db4aa1ad910f46c46afa6247ce58a12"
+        },
+        "techpack/display/msm/dsi/dsi_display.c": {
+          "before": "95d10c836d6a963f61a93077b5b7c75402b67fa0281ea081d33a7f1290a0d753",
+          "after": "d902cfe0fedcdc46da31622c197879c6c64f62fd255e7da06c3b66631cc97e8b"
+        },
+        "techpack/display/msm/dsi/dsi_parser.c": {
+          "before": "f480307c2cdc919575cc57e8ddbdb70ac77adb20f0a49801f6b538246483ddbb",
+          "after": "2aeaa6a3e885c969bc9b3530a7ecfb0b09df1fe611297f7aa7750f27914eae30"
+        },
+        "techpack/display/msm/sde/sde_fence.c": {
+          "before": "55ded9b98b0854635626fe9cb4177c4960bc720d13f17eefe42777cf16c55f82",
+          "after": "aa0ef9adb53d64bffdaa473a62b0ac6763aa72baad4fbf498298a4c7bd0b0717"
+        },
+        "techpack/display/msm/sde_dbg.c": {
+          "before": "6e93f5e7d6cf1836e57b9d56950a28cd93bfb547b2ecca9cbd158dccad98b279",
+          "after": "462bc8cc73802c9902f6e1ec38ea1423c0edf9f2b7644a0e1178bcd5598b7945"
+        },
+        "techpack/display/msm/sde_dbg_evtlog.c": {
+          "before": "5c1985ae491ffa9e60c95039078b4a25644429c5636fc55066243d383bc83cff",
+          "after": "32038561cdde81fcbdc97bec7fba3da0b5f13896325de8f61bc155e8101ca7a4"
+        },
+        "techpack/display/msm/sde_power_handle.c": {
+          "before": "402cd8f5ed292448dc8edf19563303052d48aced43800e0eaaeda30ae231ef00",
+          "after": "3bffacca89d757f4bda4328ccefc653e9a24f7ab3695517b11e79cd717c161d5"
+        },
+        "techpack/display/msm/sde_rsc.c": {
+          "before": "3bf7c338e509452b52016f187ccda2383136e5107feafbfa42574b6ea1ccac63",
+          "after": "efbda407cab779a52e45bbcdbd5f159ec438ac25c07bafec8632d5f93eb6f71c"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-sensitive-free.patch",
+      "sha256": "b8d65f512f231e9e215cfbfc7434db570561b863aae8b6cc6bd31b97549249e6",
+      "files": {
+        "techpack/display/msm/dsi/dsi_panel.c": {
+          "before": "93f99fbbc82866b6f73db542379f8169947f345c4fbecdadc2c341a592e21813",
+          "after": "6bc7f0f7c3ed0c21285bada12f76d89173793c59f1c2fa98ac42039add4336f7"
+        },
+        "techpack/display/msm/sde/sde_hw_cdm.c": {
+          "before": "b0d4938b1a85880e503a6532672d45330b0e42685f0c38f19193b2414b7f5886",
+          "after": "b6b9a7999bd75c9e04d9f72571b990d30291be4fd4cd17716f124f18039120df"
+        },
+        "techpack/display/msm/sde/sde_hw_ctl.c": {
+          "before": "6b33d8e0c70fd5ac411662b1815cfa62f85d9928e89bfc7062600723e46dffb5",
+          "after": "ba61fd5bd96795af620e8f7dd0132923b0b94ca7b2596d50131b334a9d3ba814"
+        },
+        "techpack/display/msm/sde/sde_hw_ds.c": {
+          "before": "5dabc6ffffb67c647f427ea0ae453458e3b4aabe6d6c23ecaac5d70a7f316eaf",
+          "after": "e5c8f414aa4f844ef2685ae4cdf504fef25ab41658d12d683e21bc370827eb54"
+        },
+        "techpack/display/msm/sde/sde_hw_dsc.c": {
+          "before": "61a6de43216ed364cc4db4c8897756cc8eb40d1ec43eaf1d1627cfc229da8fdc",
+          "after": "7b14f08ddf26572e34150ffb8a26fb351fdf06ddb005006c4c3a0122c7ffd79b"
+        },
+        "techpack/display/msm/sde/sde_hw_dspp.c": {
+          "before": "c4d0453c49185e2845d5bd8b271407c3ae022caf6d340077da5fd947a20b982c",
+          "after": "69f52971c1cbe02574fb498ec9a43ee0609128e95d473d6033408f10f28eb72b"
+        },
+        "techpack/display/msm/sde/sde_hw_intf.c": {
+          "before": "8559cdc2c631cf26a31a3b7989fdf5375c05dfba3beffa4c1760430dbc13602f",
+          "after": "c6715e828e4b9090a541dc767e5da2f52ae41cda5e84db420e0e7895b668ef7d"
+        },
+        "techpack/display/msm/sde/sde_hw_lm.c": {
+          "before": "54a891bb6dcb6303a808726833acb7d02bd850618406458be0e2afefe1300a6f",
+          "after": "f581822988c50a4fb2aac9e7ab7d2af06d8801ef6010a0c3431a6a4d82f08a42"
+        },
+        "techpack/display/msm/sde/sde_hw_pingpong.c": {
+          "before": "dd267fe538b53917f70df8166199041dd55290f5d9724ac41383fec790987e6f",
+          "after": "b4d17165fdbed7b49d7b1fc8c62a91c19f498d63a856f622b17c7a57cf6d01ee"
+        },
+        "techpack/display/msm/sde/sde_hw_qdss.c": {
+          "before": "b026420258b27b49a0abf28c61e9e91eeb3e80c8a5b256f4dc4397ddcae9bef0",
+          "after": "03a98a70dec9bd4a78b8b066aec3872f86f815d81a7c542be9b1c5008fdc7008"
+        },
+        "techpack/display/msm/sde/sde_hw_sspp.c": {
+          "before": "1992068752554aa242a3a470d03d48ec0cc292e98ef9d7b0cc15778abce40e01",
+          "after": "fabefb1f7cdda17e2488b37634815e9ae395be34eefd91e73cd568be4b0ded39"
+        },
+        "techpack/display/msm/sde/sde_hw_top.c": {
+          "before": "995dff7cc3a6bbd66c0d72bdb8431a46f91d35d905fce0c0589c6392e096f9b8",
+          "after": "fe8ce8a15d99e04bc8eaf7eb09b5fa4e2325d4e5bbddaacb36539581c3caef69"
+        },
+        "techpack/display/msm/sde/sde_hw_wb.c": {
+          "before": "1af6024aae0219a722f5d9b75edf058f40577e1f64e07efd5b8464f48cbbf849",
+          "after": "535b7caf7ef0633d36711c0f39955e0866ad319b87b34c69f6c8d44a0a2e3cd1"
+        },
+        "techpack/display/msm/sde_hdcp_2x.c": {
+          "before": "e420fc61af596bf9e44e5bfafa82dd11b1912674089c2c612c799cb049ab1eea",
+          "after": "47d2e8198bf0e2b6ad7e8f2f168e5ace8e352788b3425e193297a8299b0af559"
+        },
+        "techpack/display/msm/sde_io_util.c": {
+          "before": "37cb371b2dbd31d3039c18cb24b4f515c5c623195be570a386d71fab7efcebbb",
+          "after": "1a3e515f9e9c3260ced92cfd14553c1a06c9c6a3ad68aab035e3767692ed8a56"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-debugfs-void.patch",
+      "sha256": "9c01693ea2eedf2c05c627be293601993dfbfdff0aaf0bdf72f4d57f1a1cf239",
+      "files": {
+        "techpack/display/msm/dp/dp_debug.c": {
+          "before": "77d3bfd7a559b57ef3e18360b46152856eda7c16d1cbb64c8202e60f341e0aeb",
+          "after": "4178d6394b767547e6bfb7873107143cc04d0f14d5bad199ad087ae0fafad390"
+        },
+        "techpack/display/msm/dsi/dsi_ctrl.c": {
+          "before": "6d44afb6da13227633bcc2d425a339d88503d3706ff4a68419408746771ad69b",
+          "after": "c94a92d83bd70ea3e4ae8663482d017b7c34f089cfedf3a0f59a8350f67c05b9"
+        },
+        "techpack/display/msm/dsi/dsi_display.c": {
+          "before": "d902cfe0fedcdc46da31622c197879c6c64f62fd255e7da06c3b66631cc97e8b",
+          "after": "3d1c111a3fabb4ab078f1e2a92f3f048f93e5cb019134bcbdf9010d4716a2b3f"
+        },
+        "techpack/display/msm/sde/sde_encoder_phys_wb.c": {
+          "before": "3318cec7dacad93eb1a12f2eb0eb78932911902395e9ae15abbe946a4b608b57",
+          "after": "7c54f4a6cac9016c6d49249dd87d2157eee329a0020ba686da2ae96f0e6bda8c"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-api-headers.patch",
+      "sha256": "f0fa682e303ff49806c1e7dd67eb939ed97f30580f05256a211ae8a1b910036e",
+      "files": {
+        "techpack/display/msm/dp/dp_parser.c": {
+          "before": "7004ed3e3ae01b3cb83d2b744d6ae5396fb8ad7d7633bf3edd67eeee66b4ffe0",
+          "after": "feb17a5212860530c560164736ca3cc531d1b89a2805d78d4bfa973f2d82ee0e"
+        },
+        "techpack/display/msm/dp/dp_power.c": {
+          "before": "e9a83b1863a70618f30fba93c5b89eb54cae9a63ed01f5ff9db8ed24592dc915",
+          "after": "0ec3cf1c64483c5e45aedd2e48a4bf70c9b9c91cdff43c2a81e5d7d7680879f4"
+        },
+        "techpack/display/msm/dp/dp_gpio_hpd.c": {
+          "before": "e4b005d626e6f6d8f270f686bd464dd5943854a2411ad7a70c9bbafeaa85f7b1",
+          "after": "36f78df1b942c1e63ab54e087bbfed6691044609e66d56cfa2abaa1091e9c803"
+        },
+        "techpack/display/msm/dp/dp_lphw_hpd.c": {
+          "before": "8f87f8d3624bafce15ba60aae8854cefba6caf4c95d09159a9a311fc2b8dd335",
+          "after": "9f36032ff471d23de5a115cf3a127f4e068e71d4983c9fec07a493fcacf8f239"
+        },
+        "techpack/display/msm/dsi/dsi_panel.c": {
+          "before": "6bc7f0f7c3ed0c21285bada12f76d89173793c59f1c2fa98ac42039add4336f7",
+          "after": "c1c72ee964ce3be91c5b6c031840ad6e2d81eb791edc04047251752e7555f615"
+        },
+        "techpack/display/msm/sde/sde_plane.c": {
+          "before": "1862baaa0de359491e38de531aa02f7e0ba9bc441194e68af4d9dc6b6a0debdb",
+          "after": "6ab0247039d5da3c1832472b8e49d54550c5bb07e906599abe3f46e9fdd0debc"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-debugfs-cleanup.patch",
+      "sha256": "58a3e6934266c629b6da473a636fe3e0bc492ea020556f3a3fc8391e6ef066da",
+      "files": {
+        "techpack/display/msm/dsi/dsi_ctrl.c": {
+          "before": "c94a92d83bd70ea3e4ae8663482d017b7c34f089cfedf3a0f59a8350f67c05b9",
+          "after": "113dcb67c8679aad0812822d7b1f08713ee9033f18e0ddda95909e29c5c138cf"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-fence-diagnostics.patch",
+      "sha256": "7e5622a0f7735c2a4c16efd6abaa3ba2c33360c72b17009dd5c29007de3c3830",
+      "files": {
+        "techpack/display/msm/sde/sde_fence.c": {
+          "before": "aa0ef9adb53d64bffdaa473a62b0ac6763aa72baad4fbf498298a4c7bd0b0717",
+          "after": "be3dd2ee8cef6787135121b0d08bc905c2f367a2044343a1166523e24ff4c97f"
+        }
+      }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-framebuffer-api.patch",
+      "sha256": "83e0ebae8ac769f1b6ed1c33ee4b8b069a9914a456a2962735dc2a065906637d",
+      "files": {
+        "techpack/display/msm/msm_fb.c": {
+          "before": "1b2c2ff32317d5f8688eae98478d65d1e73463d3ca843738c4d269c89521deb2",
+          "after": "458c0b15f3aad57d63b65b9937c139ae8ecef49b7ba8a744d4d2bb3a06860bf2"
+        },
+        "techpack/display/msm/msm_drv.h": {
+          "before": "e25b51ce2bf225a57d3ac866a5679a3a932785c58faf65ac8ca8f665a055062f",
+          "after": "904e7dbc342a40dc1cb097c7fe490fc484926f9d065431294523e5cf4181b60d"
+        }
+      }
+    }
+  ],
+  "scope": "Pinned full downstream display source plus its MSM UAPI, prepared for explicit Linux 6.18 API diagnostics. This is not a Surface hardware configuration or a loadable port.",
+  "open": [
+    "Modern DRM/DP/atomic/GEM/PRIME/fence APIs; no old DRM core headers or success stubs may replace these interfaces.",
+    "Surface SC8180X 5.1 catalog resources and eDP/PHY ownership, target ICC/clock/PM binding.",
+    "Phone-only Type-C/audio/secure-display and debug dependencies require real provider adaptation or explicit unsupported-feature handling, not fake implementations.",
+    "SDE must exclusively own display resources; no simultaneous binding with the existing DPU/DP driver.",
+    "Complete module build, physical scanout, buffer retirement and KGSL/SDE joint validation remain unimplemented.",
+    "PRIME4 is not a complete allocator/SMMU/lifetime port: the inherited active-list lock inversion was subsequently repaired by group7; complete retirement remains open. Native provider/private KMS/DRM APIs, complete module build and actual scanout/retirement remain required. Core prepare_fb reference fixes require the new paired dev2 kernel; never silently use old helper behavior.",
+    "Groups6+7 repair the observed inherited list/object lock inversion and native nonsecure DMA mapping model, but complete map admission, provider retirement, late GEM close/private-owner lifetime and safe hardware unbind are still open. Secure/NRT and firmware identity/splash mappings are explicitly unsupported by this backend, not implemented success paths. Mode-state/bridge/DSI and other modern DRM interfaces still require real adaptation; full module and hardware validation pending.",
+    "Groups8-10 do not port removed mode private_flags/SEAMLESS/vrefresh/payload, MST topology, bridge ownership or full DSI/DRM API. Old mode high bits are rejected by real6.18 mode validation; a coherent driver-owned state and paired user-space request path is required. Existing DSI parser ignores GPIO index/read status as before; this const-only patch does not redefine that behavior.",
+    "String/free API migrations do not complete mode/private payload/MST/bridge/provider retirement. Full original caller semantics beyond documented copy/release sites, whole module and hardware validation remain separate. Driver-owned mode transport plus all consumers and late GEM/private-owner lifetime are still required.",
+    "Mode state, bridge/MST/DSI/driver API adaptation and owner retirement remain incomplete. Debugfs scalar best-effort return is not proof node creation; controller success cleanup is repaired by group15; its historical API-only evidence is retained. Pinctrl/log header probes are not full module or hardware validation.",
+    "Controller success cleanup is repaired in group15; historical API-only known defect remains preserved in its evidence. Fence diagnostic API migration does not prove actual fence retirement/ownership/PM; mode/MST/IRQ/GEM owner and whole module/hardware still incomplete.",
+    "Framebuffer17 fixes format-info API and checked linear extents, not complete SDE/native owner/physical buffer retirement. IRQ/vblank, full mode/bridge and MST\u2014including fixed-primary persistent connector identity\u2014remain unfinished. Any new persistent MST core API requires a separately built matched kernel, not the old dev2 binary."
+  ],
+  "host_validated": [
+    "First group: driver-owned legacy DP AUX transactions; 80 actual-function host scenarios and seven compiled runtime negatives, eleven wiring checks. AUX/sleep modeled; no eDP supported-rate-table or hardware validation.",
+    "Second group: downstream MSM UAPI includes modern core via <drm/drm.h>; ARM64 TU baseline/rollback fail, modified compiles. Fourteen sizeof and eleven ioctl values match pristine header resolved against same modern core. No ABI structure/ioctl changes.",
+    "Full paired SDE module still compile-blocked; isolated TU success is not full link or device readiness.",
+    "Third group: modern DP PHY test encodings and explicit driver-owned CP2/CP3 selectors; preserve supported subset (CP2 rejected) and all MMIO sequence semantics. Actual-function2308 host cases, nine compiled runtime negatives; pinned donor semantic trace equal. Real header/getter ARM64 TU passes but full dp_link.c and full module remain unported. No hardware/AUX test.",
+    "2026-11-11 PRIME4: modern core import identity and eager mapped attachment; import_aspace kept from before attachment through final unmap/detach; shared base.resv, locked/unlocked CPU vmap distinction, complete multi-plane core fence dependency, explicit unsupported secure/direct translation. Actual31 owner+9 fence/state+11 native PFN cases and10 compiled runtime negative controls. Baseline/rollback owner+fence exit1; modified/reapply exit0. Real PRIME TU baseline/modified/rollback exit2 and candidate whole build exit2/2objects/no module. Independent review reran actual UAPI flags31+9+11; no newly introduced regression confirmed. Inherited active-list lock inversion independently reproduced and assigned a separate repair, not passed by these tests. Core41 reference fix now has a separate dev2 paired kernel; full SDE and device acceptance incomplete.",
+    "Groups5-7: real public framebuffer/fourcc headers and removal of unused ION include; native MDSS DMA provider; pinned active-list snapshots, callback registry serialization and complete DMA span validation. Native DMA and active-lock patches are companion int-callback/API changes; prepare the complete seven-patch set, not an intermediate six-patch candidate.",
+    "Native provider actual-function50, provider/VMA joint14, two full native6.18 TUs strict compile and9 runtime-negative controls passed in frozen candidates. Active-list baseline/rollback7pass14fail, modified/reapply21pass and5 runtime-negative controls; two old-source handshake timeouts are not both classified as demonstrated deadlocks. No hardware proof.",
+    "Header-only full builds baseline/rollback2objects/0modules/exit2, modified2objects/0modules/exit2; absent ION errors and msm_fb incomplete-type errors eliminated, other newly exposed incomplete-type errors remain.",
+    "Groups8-10: SDE/DP five debug predicates use public drm_debug_enabled(category) with real6.18 category indices, preserving original DRM/pr routes and inner CORE filtering; framebuffer/format/bridge types include actual public headers at six use sites; DSI get_named_gpio callback/declaration/definition/disabled stub match const device_node of the actual OF API.",
+    "Public type headers change eight includes only: six actual-use public-header probes modified compile0, baseline/rollback compile2; six full original TUs still exit2 but targeted86 incomplete-type diagnostics become0, rollback restores86. No complete-TU or hardware success claimed.",
+    "GPIO const unchanged dispatch: actual-source host enabled32+disabled32 scenarios pass; baseline/rollback fail callback type compilation. Complete actual dsi_parser.h with real6.18 OF headers yields two strict ARM64 TU objects for enabled/disabled paths, baseline/rollback exit2, modified0. Earlier checker parameter-name error retained separately, not counted as a product failure.",
+    "Group11 strings: all32 original strlcpy results unused. Thirty bounded C-string sites use real strscpy; strlen-sized separately allocated parser buffer copies its known bytes including NUL with memcpy; filter getter limits external capacity to actual source array width. Preserve C-string truncation/terminator and following branches, not unspecified bytes after NUL. No strlcpy compatibility shim.",
+    "Group12: all21 kzfree call statements across15 files use actual exported6.18 kfree_sensitive; explicit slab headers added where missing. Source otherwise byte-identical. Actual erase/free helper bodies and21 statements pass210 allocator/KASAN-leaf modeled scenarios; baseline/rollback fail removed kzfree compilation, modified/reapply pass. Actual21-statement strict ARM64 TU B2/M0/R2 resolves to paired exported kfree_sensitive. Not complete caller/lifetime or hardware verification.",
+    "Sensitive-free checker initial source mutation scan could omit removed calls; retained original evidence and added pinned-site-count guard. Three removed/duplicated source variants now reject at preflight; three exact generated-wrapper controls compile then fail at runtime. Candidate archive SOURCE manifest corrected to actual source hashes; product-only delta separate from artifact metadata diff.",
+    "Group13 debugfs: 21 former scalar-return uses in four files now call the real6.18 void/best-effort API. Preserve names/modes/parents/value pointers and real file/dir error paths. No fake dentry-return shim. The inherited dsi_ctrl_debugfs_init successful-directory removal remains explicitly open for a separate successor; this patch does not claim healthy controller debugfs lifetime.",
+    "Group14 public API headers: add linux/pinctrl/consumer.h to five actual consumers; move drm_gem_atomic_helper.h after the original sde_plane pr_fmt definition. This corrects the include-order regression introduced by project PRIME patch4, preserves original log format and does not suppress warnings. Six real ARM64 header/order probes B2/0objects M0/6objects R2/0objects; six negative variants each2/5objects. Six full original TUs all still exit2, targeted diagnostics27/0/27; not complete caller success.",
+    "Group15 controller debugfs success now returns0 immediately after publishing debugfs_root, rather than falling through error_remove_dir. Same-input exact source HOST B/M/R compile0 and run1/0/1; modified72 strict scenarios pass. Successful root removal1->0, while each real file failure still returns-13/removes once and directory failure removes zero. Five compile0/run1 mutants. Independent successor; original API-only evidence retained.",
+    "Group16 sde_fence diagnostics remove obsolete dma_fence_ops string callbacks and use an identity-checked local formatter for own context, with READ_ONCE done_count. Foreign fences receive unavailable, not a guessed timeline or private cast; target seqno still printed separately. Actual functions/current ops declaration47 HOST checks; B1/M0/R1, three source mutants compile0/run1. Real ARM64 caller/header probe B2/M0/R2; full original consumer TU remains2. Thirteen synchronization/lifecycle functions byte-identical; no signaling/wait/release policy removed or claimed hardware-verified.",
+    "Group17 framebuffer: accept modern core-selected format_info in fb_create and propagate the same pointer to size admission and real fill helper. Internal writeback/stolen API retained through once-only format lookup using actual modern pixel_format/modifier arguments. Preserve vendor modified-format validation and acquired/borrowed GEM reference ownership, including partial lookup failures and repeated handles. Linear extents use real rounded plane dimensions/min_pitch and u64 size to avoid old truncation/wrap.327 extracted-source HOST assertions with actual format/fill helpers pass; five compile0/run1 mutants. Real ARM64 API probe B2/M0/R2; complete msm_fb TU remains2. No scanout or provider-retirement claim."
+  ]
+}

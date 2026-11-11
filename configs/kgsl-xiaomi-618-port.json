@@ -1166,6 +1166,50 @@
           "after": "5d63a63cf5b4f9ec2cc45f94374fdbb24a51c4367b68f9ece996ec943021bbb2"
         }
       }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-sqe-bounds.patch",
+      "sha256": "aec5bd48471dfd0b10ed1600ebe9a754593b1e18750910afc268d019a620ff03",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "59284830a6faee8d710b02f36823827049463184d9abc61ce359d0d5c8f58264",
+          "after": "281dff7ccb065bc99a330b4f0149554e10c238073c7ce9e68e0f8900eca3ba16"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-hfi-worker-lifecycle.patch",
+      "sha256": "d74292ad34139d0c4f7b0ea45c76c40b2b4c3094ee4f711377dac37e8bcc34b7",
+      "files": {
+        "drivers/gpu/msm/adreno_a6xx_hwsched_hfi.c": {
+          "before": "99bb9d41c82afcb7abf25b9cd5dadfae69d1b2ee624fcb92f30c230d10ed96f1",
+          "after": "7e0366d1ce177b8cf4f392b290128a0d34f3f3698dc3690c91526111ad394326"
+        },
+        "drivers/gpu/msm/adreno_a6xx_hwsched_hfi.h": {
+          "before": "3a8831edbfe88ad777d66b003dbce17627bdbffce2f8af2a68f750648f8b99fa",
+          "after": "613c62aee0bc503c388d578722c29a4eb878a0bd343edf34fb73b740f693d508"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-input-worker-stop.patch",
+      "sha256": "5372bf6b187c68ef68f64b3165cffb76fd3440685457926a6bbddbe9e5331457",
+      "files": {
+        "drivers/gpu/msm/adreno.c": {
+          "before": "281dff7ccb065bc99a330b4f0149554e10c238073c7ce9e68e0f8900eca3ba16",
+          "after": "0587f68a0b32b7a43a904a154fe78d227faecd99bcb880f4957d62802c46f618"
+        }
+      }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-native-indexed-policy.patch",
+      "sha256": "dccb1e060871117ddab7287f80c41b2a8ecb4c863260159cf8a3273c79bcfdf0",
+      "files": {
+        "drivers/gpu/msm/kgsl_bus.c": {
+          "before": "30106d3ea88a1c35251390f671485c85be86f0e50981e92f65dc1cbea6d55273",
+          "after": "012a4f02a8d956b0d72185cfdd6b71733dc155350a20d59845a545494307741d"
+        }
+      }
     }
   ],
   "open": [
@@ -1176,7 +1220,9 @@
     "KGSL and both governors link with the real provider kernel and rebuilt MSM. SVM selects without side effects, binds at final mmap, and publishes a separate address only after complete map; address lookups/info/profiling and both top-level IB validators use readiness. Top-level IB entries are referenced until command-object destruction and released via the deferred path. Nested IB/data-buffer ownership, cancellation/forced queue destruction versus actual GPU quiescence, root retirement, concurrency stress and runtime validation remain incomplete.",
     "Native UMD runtime semantics and Oculus priority extensions; target GPU/DPU/fence/PM verification",
     "Per-fence event results and callback references are source-connected in v67, but cancellation delivery is not proof of GPU quiescence. HWSCHED v68 removes pre-restart synthetic completion, checks restart and per-command replay ownership, but actual reset/CP/preemption/SMMU retirement, unregister acknowledgements, independent halt references, fatal-error recovery and outer teardown remain unvalidated. Dispatcher v69 preserves replay owners and propagates replay/transaction-drain failure, but retained recovery, forced close/devres unbind, memory-release callbacks and nested resources still require a checked retirement protocol before deployment.",
-    "GMU v83 enables checked ARM LPAE subtree unmap before GPU-parent/GMU mappings. Failed nonleaf sync restores the original parent entry, retains the subtree and reports only completed prefix; PM failure prevents map/unmap edits. Whole-domain/root free still uses void flush callbacks. Complete HFI/worker/IRQ/GPU/GMU quiescence, failed-owner recovery, concurrency and safe component/devres unbind remain incomplete. Host MMIO/PM/locks/DMA are models; existing remove power/clock checks are not full retirement."
+    "GMU v83 enables checked ARM LPAE subtree unmap before GPU-parent/GMU mappings. Failed nonleaf sync restores the original parent entry, retains the subtree and reports only completed prefix; PM failure prevents map/unmap edits. Whole-domain/root free still uses void flush callbacks. Complete HFI/worker/IRQ/GPU/GMU quiescence, failed-owner recovery, concurrency and safe component/devres unbind remain incomplete. Host MMIO/PM/locks/DMA are models; existing remove power/clock checks are not full retirement.",
+    "The post-v83 SQE boundary candidate has host tests only; complete paired module compilation remains required. Shared A5xx PM4/PFP loader changes lack actual A5xx firmware/hardware acceptance.",
+    "Native indexed DDR loading capability is not activated or calibrated. Seven native-family reference frequency policies do not cover the current ten enabled project OPPs (590/661/700MHz are experimental additions); strict loader rejects incomplete matching. No dynamic OPP/DT concurrency or hardware vote proof. Fresh58 strict module build and489-module dependency check are complete; deployment, calibration and hardware acceptance remain unperformed."
   ],
   "host_validated": [
     "DMA-BUF attachment lifetime, physical SG count, signed map errors and failure rollback",
@@ -1230,6 +1276,35 @@
     "GMU-unmap v80 checks every global teardown iommu_unmap extent before DMA free. Mismatch latches EUCLEAN and retains the affected/suffix entries, count and domain; preexisting errors or missing domain stop cleanup and later calls do not retry partial holes. Remove propagates the cleanup failure before QMP/firmware/shadow/genpd release; successful release clears firmware/shadow pointers to prevent repeated free.42 actual genpd/global-release/remove scenarios (8 new) and58 GMU regressions pass,10 compiled assertion controls,9 preparer tests,51 patches/109-source reproduction,60 objects/three modules strict build and489-module dependency audit pass. Source audit confirms core iommu_map_sg hides rollback unmap extent; its failure path remains unsafe until both ordinary DMA and HWSCHED imported owners are retained. Byte-count checking is not checked TLB/hardware retirement proof. Outer devres/unbind, SQE bounds, DDR/actual submit and SDE acceptance incomplete; no deployment.",
     "GMU-map-retain v81 latches errors after failed real IOMMU map attempts (including negative core rollback results), retains ordinary DMA backing/address/count and HWSCHED GPU-global/entry/address association, and reuses MAP_UNCERTAIN to prevent shared release. No HFI success handle on failure; prevalidation errors unwind normally while unused GPU globals remain device-owned.69 joined actual map/import/allocation/publication/shared-release cases,69 firmware cases,17 release and42 genpd/remove regressions,11 compiled runtime controls,9 preparer checks pass.52 patches/109 sources reproduce; two sources changed,60 objects/three modules strict build and489-module dependencies pass. Hardware/DMA/IOMMU/allocator/PM leaves modeled. Recovery, checked drain, successful-import final unmap and outer unbind are incomplete; no deployment.",
     "GMU-drain v82 adds a checked AArch64 S1 ARM SMMU export with owner/context/PM validation, cb locking and real Qualcomm timeout propagation, connected to GMU exact-unmap/backing release. Successful HWSCHED imports carry GMU_MAPPED through shared/parent/direct cleanup and are explicitly unmapped/drained before clearing ownership. Remove returns errors and stops HWSCHED dispatcher cleanup on failure.22 actual provider,74 GMU,47 genpd/remove,43 parent/global,17 release cases and13 compiled runtime controls pass;18 preparer tests.53 patches/109 sources reproduce,9 changed.Whole isolated native-kernel-v2 Image/486 modules and strict SMMU objects built,KGSL60 objects/3 modules strict MODPOST and489-module dependencies pass. Initial kernel45 warnings plus4 later clock warnings retained; final incremental no warnings. Source audit verifies91,245 original entries,3 changed+1 added. Hardware/complete quiescence/inner page-table freeing/retained recovery/devres and KGSL/SDE acceptance incomplete; no deployment.",
-    "Checked-unmap v83: actual ARM LPAE subtree unmap/recursive free/map replacement18 cases, provider32, GMU76, parent45,15 compiled runtime-negative controls,18 preparer tests pass. GPU/GMU opt in before mappings; failed enable retains attached domain or safely frees detached empty domain.54 patches/109 sources reproduce;2 KGSL sources changed. Full native-kernel-v3 Image/486modules with3 strict IOMMU objects, KGSL60objects/3modules strict MODPOST,489-module dependencies pass. Kernel initial47 warnings retained, final incremental zero.91,246 source entries checked,5 changed; oldv2 preserved. Internal io-pgtable/SMMU layouts require complete paired rebuild. Domain/root free, hardware/concurrent retirement and safe unbind, DDR/SQE and KGSL/SDE hardware acceptance remain open; no deployment."
-  ]
+    "Checked-unmap v83: actual ARM LPAE subtree unmap/recursive free/map replacement18 cases, provider32, GMU76, parent45,15 compiled runtime-negative controls,18 preparer tests pass. GPU/GMU opt in before mappings; failed enable retains attached domain or safely frees detached empty domain.54 patches/109 sources reproduce;2 KGSL sources changed. Full native-kernel-v3 Image/486modules with3 strict IOMMU objects, KGSL60objects/3modules strict MODPOST,489-module dependencies pass. Kernel initial47 warnings retained, final incremental zero.91,246 source entries checked,5 changed; oldv2 preserved. Internal io-pgtable/SMMU layouts require complete paired rebuild. Domain/root free, hardware/concurrent retirement and safe unbind, DDR/SQE and KGSL/SDE hardware acceptance remain open; no deployment.",
+    "SQE-bounds continuation after v83: shared adreno_get_firmware/get_ucode_version validates version-header extent and dword payload alignment before allocation, reads little-endian unaligned fields, preserves exact payload/error publication. Affects A6xx SQE and A5xx PM4/PFP; only captured A680 SQE tested. 51 host scenarios, six compiled runtime negative controls, baseline/modified/rollback verified. New candidate NOT complete-module/kernel built or deployed; last complete paired build remains historical v83/native-kernel-v3. Component/devres containment, root lifetime, DDR and actual KGSL/SDE acceptance remain incomplete.",
+    "HFI-worker foundation after SQE: f2h_cache belongs to its HWSCHED instance, both queues initialize before the consumer starts, probe checks name/cache/task/NO_AUTOEN IRQ failures, and IRQ-request failure joins the consumer before releasing cache. Worker wait uses stop OR queued-data. Actual five functions with pthread wait/join:19 scenarios,7 compiled runtime-negative controls; original/rollback fail to join, modified passes. Probe-only unwind is wired; successful runtime quiesce/teardown, outer retained owners and hardware stop remain incomplete. Internal HWSCHED layout changed: rebuild whole KGSL.",
+    "2026-11-11: fresh paired Linux 6.18.60-sq2-kgsl-sqe-dev1 Image/486 modules and patch56 KGSL60 objects/3 modules strictly compiled/MODPOST; 489-module depmod clean. Original warnings retained. See out/kgsl-resume-20261111/build/FINAL-BUILD-56-RESULT.json; no device validation or lifecycle acceptance.",
+    "2026-11-11: patch57 stops this device input producer and drains input_work before adreno_unbind provider/free; 26 host actual-function scenarios and six compiled runtime negatives. Baseline/rollback4pass22fail, modified26pass. Kernel input/PM/provider mocked; full component/devres ownership unresolved. Fresh patch57 native build required separately.",
+    "2026-11-11 patch57 fresh paired strict build complete: 60 objects (59 GCC -Werror commands plus linked msm_kgsl.o), 3 modules, MODPOST clean; 489 module depmod no output. msm_kgsl SHA256 a63381e52d818bfb43cd1e01097eed1d7fa13930a038f23b67a9f5ae3afb5583. Source/kernel/patch56 outputs unchanged; report ordinary-fix/build/FINAL-BUILD-57-RESULT.json. Initial validator 59-vs-60 assertion failure retained; no runtime/device acceptance.",
+    "2026-11-11 patch58 native indexed DDR loader: explicit single-string indexed mode, complete decimal kB/s table and exact enabled OPP frequency triples/OFF, OPP frequency/voltage authority preserved and explicit indexed BW replaces OPP peak; nonzero avg rejected. Probe-fixed-set only. 96 real bus-source host contracts pass,12 compiled runtime negatives, baseline/actual rollback23pass73fail, original99 bus regressions pass. Table/triples stage until ICC success; repeated init EBUSY preserves owner. Not activated, higher3 experimental GPU OPP policies unvalidated, no DDR/hardware acceptance; fresh58 module build pending.",
+    "2026-11-11 patch58 fresh integration: two independent58-patch preparations reproduce109 sources from426 hash-pinned donor inputs, only kgsl_bus.c differs from57; fresh96 indexed/peak/legacy scenarios and12 compiled runtime negatives, independent99 bus regressions and18 preparer tests pass. Fresh kgsl-58 full60 objects (59 strict GCC commands plus composite LD),3 modules and clean MODPOST;489 module depmod no output. msm_kgsl SHA409318f2dbe7bb6774a9159c9228a8f47e72e9d9158c64d8c9db68fd73e517de. Kernel91,246 sources/output hashes and old56/57 sources/objects/modules unchanged. Initial copied install/depmod log-label57 typo is documented with original commands proving stage-58, not reused57 results. Native indexed policy remains unactivated, DDR/experimental high frequencies uncalibrated; no deployment or hardware acceptance."
+  ],
+  "native_indexed_policy": {
+    "status": "source-linked-loader-not-activated-not-ddr-calibrated",
+    "activated": false,
+    "host_result": "out/kgsl-resume-20261111/ddr-indexed/HOST-RESULT.json",
+    "host_result_sha256": "3f146ed315691d4de5fa6fb9514388ac71b20ac421bd683537151fbc14322d66",
+    "contract": "out/kgsl-resume-20261111/ddr-indexed/NATIVE-CONTRACT.txt",
+    "reference": "configs/kgsl-sc8180x-downstream-policy-reference.json",
+    "enabled_target_policy_complete": false,
+    "module_build": {
+      "status": "fresh58-strict-complete-not-device-validated",
+      "result": "out/kgsl-resume-20261111/ddr-indexed/build/FINAL-BUILD-58-RESULT.json",
+      "result_sha256": "18349d7c65109aa9c2272511eae9925f8860174448f8e4352b9189ff27bfae4a",
+      "objects": 60,
+      "strict_compiler_commands": 59,
+      "composite_link_objects": 1,
+      "modules": 3,
+      "dependency_modules": 489,
+      "depmod_clean": true
+    },
+    "fresh58_host_result": "out/kgsl-resume-20261111/ddr-indexed/FRESH58-RESULT.json",
+    "fresh58_host_result_sha256": "2ef754b8b690dcd29deef98c99782c32a13e0507ffb82a31c8e1222fede8692e"
+  }
 }
