@@ -95,6 +95,23 @@ python3 scripts/build.py full-image --graphics mesa \
 `hardware_validated=false`）、`KERNEL-PATCHES.json`、`MESA-VERIFY-BUNDLE.json`、
 `disk/{LAYOUT.json,IMAGE-MANIFEST.json}`、`BUILD-COMMANDS.json`。
 
+## 5. ESP 部署：必须使用 disk image 的 initramfs 变体（2026-11-12 事故）
+
+设备 ESP 上的 `EFI/SQ2Nat/initramfs.cpio.gz` 不是 paired/EFI 目录里的那个文件。
+`disk_image.build()` 会调用 `storage_payload()`，在 paired initramfs 后追加 storage
+delta：`etc/sq2-ssd-partitions`、`etc/sq2-ssd-layout`、`bin/prepare-native-ssd`，并把
+`init` 的 `sq2-loop-slice "${ssd_part}3"` 改为 `sq2-loop-slice /dev/block/by-name/super`。
+缺少 delta 时 init 无法发现内置 NVMe，表现为 SSD-not-found 且 SSH 不可达。
+
+2026-11-12 曾把 paired 变体（`39a3993c…`，203,609,782 B）直接写入设备 ESP，重启后
+SSD-not-found。正确文件应取自 `out/<build>/disk/…img` 的 SQ2PROBE/FAT32 分区
+（本次 r2 为 `5fb5622c…`，203,615,765 B；r1 为 `34132fa9…`），或者完整刷新该
+`disk/…img`。paired 目录只用于外部配对/交付，不是内置 SSD 的 ESP 载荷。
+
+部署时只替换两个 `initramfs.cpio.gz`，保留 `SPX-IMAGE.txt`、
+`SPX-USERDATA-GROWN.txt`、`GPT-BACKUP-*.bin`、`Image`、dtb、launchers 与 firmware。
+仅主机准备、尚未写回设备；恢复后仍需实机验证启动、扩容 marker 与 swap。
+
 ## 5. 明确未做（不得提升的边界）
 
 - **未写盘、未启动、未接任何设备**；未验证 eDP/DPU 点亮、SurfaceFlinger/HWC3-drm
