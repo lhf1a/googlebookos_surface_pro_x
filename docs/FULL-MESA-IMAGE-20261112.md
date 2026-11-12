@@ -153,6 +153,15 @@ SSD-not-found。正确文件应取自 `out/<build>/disk/…img` 的 SQ2PROBE/FAT
 - `192.168.5.110` 实机部署 `EFI/SQ2Msa/initramfs.cpio.gz`（`9329ff7a1de0d363e5391d96e5aadebc34686212aeda2e44602d2bcb903cee6d`，配套从 `r4` 构建树重编的 `venus-core.ko` `3ec4cc33…` / `venus-dec.ko` `52382a57…`）并正常重启（`boot_id` `d44cff09…` / `6d4e7b28…`）：
   - `init.svc.sq2-omx=running`，`sq2_pm_status` 为 `sys_error=0 core_state=1 insts=0 vb2_bytes=0`，`media_codecs_quest2_omx.xml` 自动生成 `avc/hevc/mpeg2/vp8/vp9` 五项硬解能力，`mediacodeclist_generator` 正常完成退出，FUSE `/storage/emulated` 正常挂载，用户确认恢复可用；
   - 按 `probe/graphics/chrome-graphics-cache.sh` 规范对动态发现的已解锁 `user 0` 下 `com.android.chrome` 执行先停进程、直接删除 6 处确认图形/着色器缓存（`GPUPersistentCache`、`Default/{DawnGraphiteCache,DawnWebGPUCache,GPUCache}`、`user_de` 下 `opengl.shaders_cache.multifile` 与 `skia.shaders_cache`，`cache-backup=none`）并重启 Chrome，账号、普通缓存与其他应用未改动。
+- 完整 20 GiB 全 Mesa 通用整盘镜像重构建（`out/full-mesa-image-20261112-r5`，基于 `abb9cd5`）：
+  - 命令：`python3 scripts/build.py full-image --graphics mesa --output out/full-mesa-image-20261112-r5 --jobs 64`
+  - 整盘 raw（`21,474,836,480` B）：`225c3b2374c96efe59df5906606df2ef0ce0b97f714c12fddda2a111b2235faa`
+  - 整盘 gzip（`8,150,719,947` B）：`96230621db5aa41f30c1ee61ed344c0b6ade0c75bc52d16243e7c895195ba782`（`pigz -dc | sha256sum` 全流解压校验与 raw 一致，`sgdisk -v` 主/备 GPT `No problems found`）
+  - 盘内 ESP `EFI/SQ2Nat/Image`（及 `SQ2Res`）：`3e424f7b9d18c9f83687606501b8b6fa395eeac8b8dab1642e2717d2000031a2`
+  - 盘内 ESP `EFI/SQ2Nat/initramfs.cpio.gz`（含 `storage_payload` delta，`203,647,800` B）：`38eea26a96e085d5372f3d51cb9bf136079ab5c4ee69ba25623c728ba154e93e`
+  - 盘内 `msm.ko`：`789d56ab8e9f7ea32c4b4af73823aef602396ad745e0b112ff35e4e980152aea`（含 `a640_gbif`、`a680_hwcg`、GMU MMIO 偏移路由与 `dpu_caps_blob_release`）
+  - 盘内 `venus-core.ko`：`008e42eee03fab285c41a0e4a663e83a2430f5fea32e511ef11a6243b0fc1e65`（导出 `sq2_{avc,hevc,vp8,vp9,mpeg2,mpeg1}_caps` 与 `venus_sq2_pm_publish`）
+  - 盘内 `quest2-omx-service`：`abbd1b666d97201847f1f9d5a5e74f63a8783ada494e187a2cd633ba1a72a1b4`（`RequiresSwRenderer=1`，配套私有 `etc/sq2-hidl/lib64/libgrallocutils.so` `0fb5d79e…`；`verify_mesa_image.py bundle --graphics mesa` 校验 `ok=true`）。
 
 ## 8. 明确未做（不得提升的边界）
 
