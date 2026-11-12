@@ -108,6 +108,11 @@ SSD-not-found。正确文件应取自 `out/<build>/disk/…img` 的 SQ2PROBE/FAT
 （本次 r2 为 `5fb5622c…`，203,615,765 B；r1 为 `34132fa9…`），或者完整刷新该
 `disk/…img`。paired 目录只用于外部配对/交付，不是内置 SSD 的 ESP 载荷。
 
+恢复用最小载荷：以 r1 ESP initramfs 为基础，仅替换 `bin/grow-image-userdata` 为长选项
+修复版，再用 `storage_payload()` 保留完整 delta；结果 `c1bece1e…`（203,612,637 B），
+除 grow helper 外与原 r1 ESP initramfs 逐成员一致，模块与设备未改动的 r1 Image 配对。
+主机侧准备 `out/esp-recovery-20261112/`，Windows 侧用 `run-recovery.cmd` 提权写入。
+
 部署时只替换两个 `initramfs.cpio.gz`，保留 `SPX-IMAGE.txt`、
 `SPX-USERDATA-GROWN.txt`、`GPT-BACKUP-*.bin`、`Image`、dtb、launchers 与 firmware。
 仅主机准备、尚未写回设备；恢复后仍需实机验证启动、扩容 marker 与 swap。
