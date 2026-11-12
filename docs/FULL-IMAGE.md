@@ -4,6 +4,26 @@
 > 构建命令、产物哈希与未验证边界见 [FULL-MESA-IMAGE](FULL-MESA-IMAGE-20261112.md)。
 > 默认 `baseline` 行为不变，已验收发布包与设备回退未被修改。
 
+## 2026-11-12：首启 userdata 扩容 / 自动 swap 在设备上未生效的修复
+
+设备（SQ2 8 GiB 机型，`192.168.5.123`，运行 6.18.60 全 Mesa 镜像）上
+`/logs/surface-swap-boot.txt` 为 `SWAP_ERROR_USERDATA_GROW_FAILED`，
+`/logs/userdata-grow.txt` 显示 `sgdisk: invalid option -- i`，userdata 仍为模板的 4.15 GiB，
+swap 未创建（脚本把扩容作为 swap 的前置条件）。
+
+根因：mica Android 自带的是 popt 版 gptfdisk，**只接受长选项**
+（`--info/--print/--move-second-header/--delete/--new/--partition-guid/--typecode/
+--change-name/--attributes`），而 `probe/test2/grow-image-userdata` 使用了短选项
+（`-i/-e/-p/-d/-n/-u/-t/-c`），因此扩容在第一次查询就中止。这不是 swap 逻辑问题：
+8 GiB 机型本应启用 6 GiB swapfile，但扩容失败导致整个后台脚本退出。
+
+修复（`probe/test2/grow-image-userdata`）：全部改为 Android gptfdisk 支持的长选项；
+`--move-second-header` 在备份 GPT 已在盘尾时是成功 no-op，新盘则先移动备份头；重写
+userdata 分区后重新读取并逐项校验 GUID/type/attribute/start/last，再用现有
+`resize-userdata-partition` 更新内核分区长度、`resize2fs` 在线扩容，最后写扩容标记；
+`tests/test_grow_userdata.py` 用只接受长选项的假 sgdisk 固件回归该行为（含重叠拒绝、
+marker 幂等、info/resize2fs 失败路径）。仅主机测试，不代表设备验收。
+
 ## 临时启动期 SSH 调试入口（不改变正常构建默认）
 
 取消哈希门槛的包已写盘，后续照片进入 Android 服务反复退出阶段：GMU GPU_SET 超时、

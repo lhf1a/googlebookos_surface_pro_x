@@ -4,7 +4,7 @@
 Subcommands: verify / package / compile / import-private / full-image /
 single-user / disk-image. The full-image flow builds the universal whole disk;
 --graphics mesa selects the full Mesa userspace chain and is documented in
-docs/FULL-MESA-IMAGE-20261112.md. Historical 6.3.8 disk/model/kernel options
+docs/FULL-MESA-IMAGE-20261112.md. Historical obsolete disk/model/kernel options
 remain rejected; they must not rebuild an obsolete kernel runtime.
 """
 from pathlib import Path

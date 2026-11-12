@@ -28,21 +28,37 @@ fi
 a() { nsenter -t 1 -m -r -- /system/bin/"$@"; }
 dev=$(cat /sys/class/block/$node/dev)
 a cat /proc/self/mountinfo | awk -v dev="$dev" '$3==dev && $5=="/data" && / - ext4 / {ok=1} END {exit ok?0:1}'
-info=$(a sgdisk -i "$number" "$disk")
+# Android ships gptfdisk built with popt: long options only, no short aliases
+# (short forms fail with "invalid option"). Keep every sgdisk call long-form.
+info=$(a sgdisk --info "$number" "$disk")
 guid=$(printf '%s\n' "$info" | awk '/Partition unique GUID:/ {print $4}')
 type=$(printf '%s\n' "$info" | awk '/Partition GUID code:/ {print $4}')
 attrs=$(printf '%s\n' "$info" | awk '/Attribute flags:/ {print $3}')
 first=$(printf '%s\n' "$info" | awk '/First sector:/ {print $3}')
 [ -n "$guid" ] && [ -n "$type" ] && [ -n "$attrs" ] && [ "$first" = "$start" ]
 # Relocate only GPT backup metadata; preserve userdata start/GUID/type/flags.
-a sgdisk -e "$disk"
-last=$(a sgdisk -p "$disk" | awk '/last usable sector is/ {print $NF}')
+# Already-at-end is a successful no-op; a fresh image keeps its backup at the
+# old image end and must be moved before the entry can be extended.
+a sgdisk --move-second-header "$disk"
+last=$(a sgdisk --print "$disk" | awk '/last usable sector is/ {print $NF}')
 case "$last" in ''|*[!0-9]*) exit 1;; esac
 [ "$last" -ge $((start+size-1)) ]
 newsize=$((last-start+1))
 if [ "$newsize" -gt "$size" ]; then
-    a sgdisk -d "$number" -n "$number:$start:$last" -u "$number:$guid" -t "$number:$type" -c "$number:userdata" --attributes="$number:=:0x$attrs" "$disk"
+    a sgdisk --delete "$number" \
+        --new "$number:$start:$last" \
+        --partition-guid "$number:$guid" \
+        --typecode "$number:$type" \
+        --change-name "$number:userdata" \
+        --attributes "$number:=:0x$attrs" "$disk"
     sync
+    # Re-read and require the rewritten entry to retain identity and length.
+    post=$(a sgdisk --info "$number" "$disk")
+    [ "$(printf '%s\n' "$post" | awk '/Partition unique GUID:/ {print $4}')" = "$guid" ]
+    [ "$(printf '%s\n' "$post" | awk '/Partition GUID code:/ {print $4}')" = "$type" ]
+    [ "$(printf '%s\n' "$post" | awk '/Attribute flags:/ {print $3}')" = "$attrs" ]
+    [ "$(printf '%s\n' "$post" | awk '/First sector:/ {print $3}')" = "$start" ]
+    [ "$(printf '%s\n' "$post" | awk '/Last sector:/ {print $3}')" = "$last" ]
     # Update only this partition's length, retaining its start and live ext4;
     # rereading the whole table would fail with mounted ESP/super/userdata.
     resize-userdata-partition "$disk" "$number" "$((start*512))" "$((newsize*512))"
