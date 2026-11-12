@@ -1,0 +1,25 @@
+--- a/init
++++ b/init
+@@ -54,7 +54,7 @@
+ grep -q 'sq2.native=ssd-smoke' /proc/cmdline && ssd_smoke=1
+ grep -q 'sq2.rescue=1' /proc/cmdline && rescue=1
+ grep -q 'sq2.debug=1' /proc/cmdline && debug=1
+-if [ "$rescue" = 1 ] || [ "$smoke" = 1 ] || [ "$ssd_smoke" = 1 ]; then debug=1; fi
++if [ "$rescue" = 1 ] || [ "$smoke" = 1 ] || [ "$ssd_smoke" = 1 ] || [ -d /etc/sq2-kgsl-sde ]; then debug=1; fi
+ if ! grep -q 'sq2.storage=nvme' /proc/cmdline; then
+     ls /sys/class/block/nvme* >/dev/null 2>&1 && fail 'Internal NVMe was enumerated without authorization'
+ fi
+@@ -173,6 +173,13 @@
+ mount --bind /logs /newroot/debug_ramdisk/logs
+ # Every Android handoff, including smoke paths, must pass the same gate.
+ # Rescue mode exits earlier and never hands off to Android.
++if [ "$debug" = 1 ] && [ "$smoke" = 0 ] && [ "$ssd_smoke" = 0 ]; then
++    echo "SQ2_SDE_EARLY_SSH_HOLD: waiting up to 180s for /run/sq2-proceed-gpu" | tee -a /logs/status.txt
++    for _hold in $(seq 1 180); do
++        [ -e /run/sq2-proceed-gpu ] && break
++        sleep 1
++    done
++fi
+ if prepare-native-gpu > /logs/gpu-native-startup.txt 2>&1; then
+     echo 'SQ2 KGSL/SDE bind gate passed; Android graphics acceptance remains pending.' | tee -a /logs/status.txt
+ else

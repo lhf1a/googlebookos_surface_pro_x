@@ -1,0 +1,1251 @@
+--- a/techpack/display/msm/Makefile
++++ b/techpack/display/msm/Makefile
+@@ -21,6 +21,7 @@
+ 	dp/dp_audio.o \
+ 	dp/dp_debug.o \
+ 	dp/dp_hpd.o \
++	dp/sde_generic_phy_owner.o \
+ 	dp/dp_gpio_hpd.o \
+ 	dp/dp_lphw_hpd.o \
+ 	dp/dp_display.o \
+--- a/techpack/display/msm/dp/dp_catalog.c
++++ b/techpack/display/msm/dp/dp_catalog.c
+@@ -6,6 +6,7 @@
+ 
+ 
+ #include <linux/delay.h>
++#include <linux/rational.h>
+ #include <linux/iopoll.h>
+ 
+ #include "dp_catalog.h"
+@@ -132,7 +133,7 @@
+ {
+ 	u32 data = 0;
+ 
+-	if (io_data->buf)
++	if (io_data && io_data->buf)
+ 		memcpy(&data, io_data->buf + offset, sizeof(offset));
+ 
+ 	return data;
+@@ -141,7 +142,7 @@
+ static void dp_write_sw(struct dp_catalog_private *catalog,
+ 	struct dp_io_data *io_data, u32 offset, u32 data)
+ {
+-	if (io_data->buf)
++	if (io_data && io_data->buf)
+ 		memcpy(io_data->buf + offset, &data, sizeof(data));
+ }
+ 
+@@ -150,6 +151,9 @@
+ {
+ 	u32 data = 0;
+ 
++	if (!io_data || !io_data->io.base)
++		return 0;
++
+ 	data = readl_relaxed(io_data->io.base + offset);
+ 
+ 	return data;
+@@ -158,6 +162,9 @@
+ static void dp_write_hw(struct dp_catalog_private *catalog,
+ 	struct dp_io_data *io_data, u32 offset, u32 data)
+ {
++	if (!io_data || !io_data->io.base)
++		return;
++
+ 	writel_relaxed(data, io_data->io.base + offset);
+ }
+ 
+@@ -454,7 +461,11 @@
+ 		struct dp_catalog_private *catalog)
+ {
+ 	u32 reg = DP_PHY_STATUS, state;
+-	void __iomem *base = catalog->io.dp_phy->io.base;
++	void __iomem *base;
++
++	if (!catalog->io.dp_phy || !catalog->io.dp_phy->io.base)
++		return true;
++	base = catalog->io.dp_phy->io.base;
+ 	bool success = true;
+ 	u32 const poll_sleep_us = 500;
+ 	u32 const pll_timeout_us = 10000;
+@@ -1279,11 +1290,32 @@
+ 	catalog = dp_catalog_get_priv(panel);
+ 	io_data = catalog->io.dp_mmss_cc;
+ 
+-	if (panel->stream_id == DP_STREAM_1)
+-		strm_reg_off = MMSS_DP_PIXEL1_M - MMSS_DP_PIXEL_M;
++	if (!io_data || !io_data->io.base) {
++		unsigned long num = 0, den = 1;
++		u32 pixel_div = 2;
++		u32 pclk_khz = panel->widebus_en ?
++				(stream_rate_khz >> 1) : stream_rate_khz;
++
++		if (rate == link_rate_hbr3)
++			pixel_div = 6;
++		else if (rate == link_rate_hbr2)
++			pixel_div = 4;
++		if (rate && pclk_khz) {
++			rational_best_approximation((rate * 10) / pixel_div,
++					pclk_khz, 0xffff, 0xffff, &den, &num);
++			pixel_m = num & 0xffff;
++			pixel_n = (~(den - num)) & 0xffff;
++		} else {
++			pixel_m = 1;
++			pixel_n = 0xffff;
++		}
++	} else {
++		if (panel->stream_id == DP_STREAM_1)
++			strm_reg_off = MMSS_DP_PIXEL1_M - MMSS_DP_PIXEL_M;
+ 
+-	pixel_m = dp_read(MMSS_DP_PIXEL_M + strm_reg_off);
+-	pixel_n = dp_read(MMSS_DP_PIXEL_N + strm_reg_off);
++		pixel_m = dp_read(MMSS_DP_PIXEL_M + strm_reg_off);
++		pixel_n = dp_read(MMSS_DP_PIXEL_N + strm_reg_off);
++	}
+ 	DP_DEBUG("pixel_m=0x%x, pixel_n=0x%x\n", pixel_m, pixel_n);
+ 
+ 	mvid = (pixel_m & 0xFFFF) * 5;
+--- a/techpack/display/msm/dp/dp_catalog_v420.c
++++ b/techpack/display/msm/dp/dp_catalog_v420.c
+@@ -4,6 +4,7 @@
+  */
+ 
+ 
++#include <linux/rational.h>
+ #include "dp_catalog.h"
+ #include "dp_reg.h"
+ #include "dp_debug.h"
+@@ -162,11 +163,32 @@
+ 	catalog = dp_catalog_get_priv_v420(panel);
+ 	io_data = catalog->io->dp_mmss_cc;
+ 
+-	if (panel->stream_id == DP_STREAM_1)
+-		reg_off = MMSS_DP_PIXEL1_M_V420 - MMSS_DP_PIXEL_M_V420;
++	if (!io_data || !io_data->io.base) {
++		unsigned long num = 0, den = 1;
++		u32 pixel_div = 2;
++		u32 pclk_khz = panel->widebus_en ?
++				(stream_rate_khz >> 1) : stream_rate_khz;
++
++		if (rate == link_rate_hbr3)
++			pixel_div = 6;
++		else if (rate == link_rate_hbr2)
++			pixel_div = 4;
++		if (pclk_khz) {
++			rational_best_approximation((rate * 10) / pixel_div,
++					pclk_khz, 0xffff, 0xffff, &den, &num);
++			pixel_m = num & 0xffff;
++			pixel_n = (~(den - num)) & 0xffff;
++		} else {
++			pixel_m = 1;
++			pixel_n = 0xffff;
++		}
++	} else {
++		if (panel->stream_id == DP_STREAM_1)
++			reg_off = MMSS_DP_PIXEL1_M_V420 - MMSS_DP_PIXEL_M_V420;
+ 
+-	pixel_m = dp_read(MMSS_DP_PIXEL_M_V420 + reg_off);
+-	pixel_n = dp_read(MMSS_DP_PIXEL_N_V420 + reg_off);
++		pixel_m = dp_read(MMSS_DP_PIXEL_M_V420 + reg_off);
++		pixel_n = dp_read(MMSS_DP_PIXEL_N_V420 + reg_off);
++	}
+ 	DP_DEBUG("pixel_m=0x%x, pixel_n=0x%x\n", pixel_m, pixel_n);
+ 
+ 	mvid = (pixel_m & 0xFFFF) * 5;
+--- a/techpack/display/msm/dp/dp_ctrl.c
++++ b/techpack/display/msm/dp/dp_ctrl.c
+@@ -234,6 +234,12 @@
+ 	struct dp_link *link = ctrl->link;
+ 	bool high = false;
+ 
++	if (ctrl->pll && ctrl->pll->phy_update_vx_px) {
++		ctrl->pll->phy_update_vx_px(ctrl->pll,
++			link->phy_params.v_level, link->phy_params.p_level);
++		return;
++	}
++
+ 	if (ctrl->link->link_params.bw_code == DP_LINK_BW_5_4 ||
+ 	    ctrl->link->link_params.bw_code == DP_LINK_BW_8_1)
+ 		high = true;
+@@ -665,6 +671,9 @@
+ 
+ 	dp_ctrl_set_clock_rate(ctrl, "link_clk", type, rate);
+ 
++	if (ctrl->pll)
++		ctrl->pll->pll_db.lane_cnt = ctrl->link->link_params.lane_count;
++
+ 	if (ctrl->pll->pll_cfg) {
+ 		ret = ctrl->pll->pll_cfg(ctrl->pll, rate);
+ 		if (ret < 0) {
+@@ -990,6 +999,11 @@
+ 	ctrl->dp_ctrl.stream_off(&ctrl->dp_ctrl, ctrl->panel);
+ 	ctrl->dp_ctrl.off(&ctrl->dp_ctrl);
+ 
++	if (ctrl->pll && ctrl->pll->phy_aux_prepare) {
++		struct dp_catalog *cat = container_of(ctrl->catalog,
++				struct dp_catalog, ctrl);
++		ctrl->pll->phy_aux_prepare(ctrl->pll, cat->hpd.is_edp);
++	}
+ 	ctrl->aux->init(ctrl->aux, ctrl->parser->aux_cfg, skip_op);
+ 
+ 	ret = ctrl->dp_ctrl.on(&ctrl->dp_ctrl, ctrl->mst_mode,
+--- a/techpack/display/msm/dp/dp_display.c
++++ b/techpack/display/msm/dp/dp_display.c
+@@ -8,6 +8,7 @@
+ #include <linux/slab.h>
+ #include <linux/uaccess.h>
+ #include <linux/debugfs.h>
++#include <linux/backlight.h>
+ #include <linux/component.h>
+ #include <linux/of_irq.h>
+ #include <linux/soc/qcom/fsa4480-i2c.h>
+@@ -173,6 +174,7 @@
+ 	enum dp_display_states state;
+ 
+ 	struct platform_device *pdev;
++	struct backlight_device *backlight;
+ 	struct device_node *aux_switch_node;
+ 	bool aux_switch_ready;
+ 	struct dentry *root;
+@@ -1255,6 +1257,14 @@
+ 	dp->aux->abort(dp->aux, false);
+ 	dp->ctrl->abort(dp->ctrl, false);
+ 
++	if (!skip_op && dp->pll && dp->pll->phy_aux_prepare) {
++		rc = dp->pll->phy_aux_prepare(dp->pll, dp->dp_display.is_edp);
++		if (rc) {
++			DP_ERR("failed to prepare generic phy for aux, rc=%d\n", rc);
++			return rc;
++		}
++	}
++
+ 	dp->aux->init(dp->aux, dp->parser->aux_cfg, skip_op);
+ 	dp_display_state_add(DP_STATE_READY);
+ 	/* log this as it results from user action of cable connection */
+@@ -1276,6 +1286,8 @@
+ 
+ 	dp_display_state_remove(DP_STATE_READY);
+ 	dp->aux->deinit(dp->aux);
++	if (dp->pll && dp->pll->phy_aux_unprepare)
++		dp->pll->phy_aux_unprepare(dp->pll);
+ 	/* log this as it results from user action of cable disconnection */
+ 	DP_INFO("[OK]\n");
+ }
+@@ -1294,6 +1306,8 @@
+ 	}
+ 
+ 	dp_display_abort_hdcp(dp, true);
++	if (dp->pll && dp->pll->phy_aux_unprepare)
++		dp->pll->phy_aux_unprepare(dp->pll);
+ 	dp->ctrl->deinit(dp->ctrl);
+ 	dp->hpd->host_deinit(dp->hpd, &dp->catalog->hpd);
+ 	dp->power->deinit(dp->power);
+@@ -2394,7 +2408,7 @@
+ 	struct dp_display_private *dp;
+ 	struct dp_panel *dp_panel;
+ 	int rc = 0;
+-	bool shallow_mode = true;
++	bool shallow_mode = !dp_display->is_edp;
+ 	bool skip_op = is_skip_required(dp_display);
+ 
+ 	if (!dp_display || !panel) {
+@@ -2666,9 +2680,11 @@
+ 			if (!IS_ERR_OR_NULL(pinctrl->pin)) {
+ 				pinctrl->state_bl_pwm = pinctrl_lookup_state(pinctrl->pin,
+ 					"mdss_edp_bl_pwm");
+-				rc = dp_display_set_pinctrl_state(pinctrl, pinctrl->state_bl_pwm);
+-				if (rc)
+-					DP_DEBUG("failed to set pinctrl, rc=%d\n", rc);
++				if (!IS_ERR_OR_NULL(pinctrl->state_bl_pwm)) {
++					if (dp_display_set_pinctrl_state(pinctrl,
++							pinctrl->state_bl_pwm))
++						DP_DEBUG("failed to set bl_pwm pinctrl\n");
++				}
+ 			} else {
+ 				DP_DEBUG("failed to get pinctrl");
+ 			}
+@@ -2744,6 +2760,8 @@
+ 			DP_ERR("Cannot turn edp backlight power on");
+ 			goto end;
+ 		}
++		if (dp->backlight)
++			backlight_enable(dp->backlight);
+ 	}
+ 
+ 	cancel_delayed_work_sync(&dp->hdcp_cb_work);
+@@ -2800,6 +2818,8 @@
+ 	}
+ 
+ 	if (dp_display->is_edp) {
++		if (dp->backlight)
++			backlight_disable(dp->backlight);
+ 		rc = dp->power->edp_panel_set_gpio(dp->power, DP_GPIO_EDP_BACKLIGHT_EN, false);
+ 		if (rc) {
+ 			DP_ERR("Cannot turn edp backlight power off");
+@@ -4037,6 +4057,13 @@
+ 
+ 	memset(&dp->mst, 0, sizeof(dp->mst));
+ 
++	dp->backlight = devm_of_find_backlight(&pdev->dev);
++	if (IS_ERR(dp->backlight)) {
++		rc = PTR_ERR(dp->backlight);
++		dp->backlight = NULL;
++		goto error;
++	}
++
+ 	rc = dp_display_get_cell_info(dp);
+ 	if (rc)
+ 		goto error;
+--- a/techpack/display/msm/dp/dp_hpd.c
++++ b/techpack/display/msm/dp/dp_hpd.c
+@@ -44,7 +44,14 @@
+ {
+ 	struct dp_hpd *dp_hpd;
+ 
+-	if (parser->no_aux_switch && parser->lphw_hpd) {
++	if (catalog && catalog->is_edp && !parser->lphw_hpd &&
++	    !of_find_property(dev->of_node, "qcom,dp-hpd-gpio", NULL)) {
++		dp_hpd = devm_kzalloc(dev, sizeof(*dp_hpd), GFP_KERNEL);
++		if (!dp_hpd)
++			return ERR_PTR(-ENOMEM);
++		dp_hpd->type = DP_HPD_BUILTIN;
++		goto config;
++	} else if (parser->no_aux_switch && parser->lphw_hpd) {
+ 		dp_hpd = dp_lphw_hpd_get(dev, parser, catalog, cb);
+ 		if (IS_ERR_OR_NULL(dp_hpd)) {
+ 			DP_ERR("failed to get lphw hpd\n");
+@@ -104,6 +111,8 @@
+ 	case DP_HPD_LPHW:
+ 		dp_lphw_hpd_put(dp_hpd);
+ 		break;
++	case DP_HPD_BUILTIN:
++		break;
+ 	default:
+ 		DP_ERR("unknown hpd type %d\n", dp_hpd->type);
+ 		break;
+--- a/techpack/display/msm/dp/dp_parser.c
++++ b/techpack/display/msm/dp/dp_parser.c
+@@ -101,6 +101,12 @@
+ 	const char *data;
+ 	int const minimum_config_count = 1;
+ 
++	if (parser->has_generic_phy &&
++	    !of_find_property(of_node, "qcom,aux-cfg0-settings", NULL)) {
++		dp_parser_phy_aux_cfg_reset(parser);
++		return 0;
++	}
++
+ 	for (i = 0; i < PHY_AUX_CFG_MAX; i++) {
+ 		const char *property = dp_get_phy_aux_config_property(i);
+ 
+@@ -243,9 +249,17 @@
+ 		}
+ 	}
+ 
++	if (!of_find_property(parser->pdev->dev.of_node, "pinctrl-0", NULL))
++		return 0;
++
+ 	pinctrl->state_active = pinctrl_lookup_state(pinctrl->pin,
+ 					"mdss_dp_active");
+ 	if (IS_ERR_OR_NULL(pinctrl->state_active)) {
++		if (parser->has_generic_phy) {
++			pinctrl->state_active = NULL;
++			pinctrl->state_suspend = NULL;
++			return 0;
++		}
+ 		rc = PTR_ERR(pinctrl->state_active);
+ 		DP_ERR("failed to get pinctrl active state, rc=%d\n", rc);
+ 		goto error;
+@@ -254,6 +268,10 @@
+ 	pinctrl->state_suspend = pinctrl_lookup_state(pinctrl->pin,
+ 					"mdss_dp_sleep");
+ 	if (IS_ERR_OR_NULL(pinctrl->state_suspend)) {
++		if (parser->has_generic_phy) {
++			pinctrl->state_suspend = pinctrl->state_active;
++			return 0;
++		}
+ 		rc = PTR_ERR(pinctrl->state_suspend);
+ 		DP_ERR("failed to get pinctrl suspend state, rc=%d\n", rc);
+ 		goto error;
+@@ -282,6 +300,8 @@
+ 		parser->no_aux_switch = true;
+ 		parser->lphw_hpd = of_find_property(of_node,
+ 				"qcom,dp-low-power-hw-hpd", NULL);
++	} else if (of_device_is_compatible(of_node, "qcom,edp-display")) {
++		parser->no_aux_switch = true;
+ 	}
+ 
+ 	if (of_find_property(of_node, "qcom,dp-gpio-aux-switch", NULL))
+@@ -820,6 +840,9 @@
+ 		goto err;
+ 	}
+ 
++	parser->has_generic_phy = (of_property_match_string(
++			parser->pdev->dev.of_node, "phy-names", "dp") >= 0);
++
+ 	rc = dp_parser_reg(parser);
+ 	if (rc)
+ 		goto err;
+--- a/techpack/display/msm/dp/dp_parser.h
++++ b/techpack/display/msm/dp/dp_parser.h
+@@ -268,6 +268,7 @@
+ 	bool has_widebus;
+ 	bool gpio_aux_switch;
+ 	bool lphw_hpd;
++	bool has_generic_phy;
+ 	bool panel_notifier_support;
+ 	u32 mst_fixed_port[MAX_DP_MST_STREAMS];
+ 	u32 pixel_base_off[MAX_DP_MST_STREAMS];
+--- a/techpack/display/msm/dp/dp_pll.c
++++ b/techpack/display/msm/dp/dp_pll.c
+@@ -8,6 +8,149 @@
+ #include <linux/of_device.h>
+ #include "dp_debug.h"
+ #include "dp_pll.h"
++#include "sde_generic_phy_owner.h"
++
++struct dp_pll_generic_phy {
++	struct sde_phy_owner owner;
++	struct phy_configure_opts_dp last_opts;
++	bool is_edp;
++	bool aux_active;
++};
++
++static int dp_pll_generic_aux_prepare(struct dp_pll *pll, bool is_edp)
++{
++	struct dp_pll_generic_phy *priv;
++	struct sde_phy_owner_status st = { 0 };
++	int rc;
++
++	if (!pll || !pll->priv)
++		return -EINVAL;
++	priv = pll->priv;
++	priv->is_edp = is_edp;
++	priv->aux_active = true;
++	rc = sde_phy_owner_status(&priv->owner, &st);
++	if (rc)
++		return rc;
++	if (st.initialized)
++		return 0;
++	return sde_phy_owner_prepare(&priv->owner, is_edp);
++}
++
++static void dp_pll_generic_aux_unprepare(struct dp_pll *pll)
++{
++	struct dp_pll_generic_phy *priv;
++
++	if (!pll || !pll->priv)
++		return;
++	priv = pll->priv;
++	priv->aux_active = false;
++	sde_phy_owner_stop(&priv->owner);
++}
++
++static int dp_pll_generic_cfg(struct dp_pll *pll, unsigned long rate)
++{
++	struct dp_pll_generic_phy *priv;
++	struct sde_phy_owner_status st = { 0 };
++	struct phy_configure_opts_dp opts = { 0 };
++	u8 lanes;
++	int rc;
++
++	if (!pll || !pll->priv)
++		return -EINVAL;
++	priv = pll->priv;
++	rc = sde_phy_owner_status(&priv->owner, &st);
++	if (rc)
++		return rc;
++	if (!st.initialized) {
++		rc = sde_phy_owner_prepare(&priv->owner, priv->is_edp);
++		if (rc)
++			return rc;
++	} else if (st.powered) {
++		rc = sde_phy_owner_stop(&priv->owner);
++		if (rc)
++			return rc;
++		rc = sde_phy_owner_prepare(&priv->owner, priv->is_edp);
++		if (rc)
++			return rc;
++	}
++
++	lanes = pll->pll_db.lane_cnt ? pll->pll_db.lane_cnt : 4;
++	opts.lanes = lanes;
++	opts.link_rate = rate / 100;
++	opts.ssc = pll->ssc_en ? 1 : 0;
++	opts.set_rate = 1;
++	opts.set_lanes = 1;
++	priv->last_opts = opts;
++	return sde_phy_owner_configure(&priv->owner, &opts);
++}
++
++static int dp_pll_generic_prepare(struct dp_pll *pll)
++{
++	struct dp_pll_generic_phy *priv;
++	struct sde_phy_owner_status st = { 0 };
++	int rc;
++
++	if (!pll || !pll->priv)
++		return -EINVAL;
++	priv = pll->priv;
++	rc = sde_phy_owner_status(&priv->owner, &st);
++	if (rc)
++		return rc;
++	if (st.powered)
++		return 0;
++	return sde_phy_owner_power_on(&priv->owner);
++}
++
++static int dp_pll_generic_unprepare(struct dp_pll *pll)
++{
++	struct dp_pll_generic_phy *priv;
++	struct sde_phy_owner_status st = { 0 };
++	int rc;
++
++	if (!pll || !pll->priv)
++		return -EINVAL;
++	priv = pll->priv;
++	rc = sde_phy_owner_status(&priv->owner, &st);
++	if (rc)
++		return rc;
++	if (!st.powered)
++		return 0;
++	rc = sde_phy_owner_stop(&priv->owner);
++	if (rc)
++		return rc;
++	if (priv->aux_active)
++		rc = sde_phy_owner_prepare(&priv->owner, priv->is_edp);
++	return rc;
++}
++
++static int dp_pll_generic_update_vx_px(struct dp_pll *pll,
++		u8 v_level, u8 p_level)
++{
++	struct dp_pll_generic_phy *priv;
++	struct phy_configure_opts_dp opts;
++	unsigned int i;
++
++	if (!pll || !pll->priv)
++		return -EINVAL;
++	priv = pll->priv;
++	if (v_level > 3)
++		v_level = 3;
++	if (p_level > 3)
++		p_level = 3;
++	if (v_level + p_level > 3)
++		p_level = 3 - v_level;
++
++	opts = priv->last_opts;
++	opts.set_rate = 0;
++	opts.set_lanes = 0;
++	opts.set_voltages = 1;
++	for (i = 0; i < opts.lanes && i < 4; i++) {
++		opts.voltage[i] = v_level;
++		opts.pre[i] = p_level;
++	}
++	priv->last_opts = opts;
++	return sde_phy_owner_configure(&priv->owner, &opts);
++}
+ 
+ static int dp_pll_fill_io(struct dp_pll *pll)
+ {
+@@ -103,27 +246,6 @@
+ 	parser = pll->parser;
+ 	pdev = pll->pdev;
+ 
+-	label = of_get_property(pdev->dev.of_node, "qcom,pll-revision", NULL);
+-	if (label) {
+-		if (!strcmp(label, "5nm-v1")) {
+-			pll->revision = DP_PLL_5NM_V1;
+-		} else if (!strcmp(label, "5nm-v2")) {
+-			pll->revision = DP_PLL_5NM_V2;
+-		} else if (!strcmp(label, "7nm")) {
+-			pll->revision = DP_PLL_7NM;
+-		} else if (!strcmp(label, "edp-7nm")) {
+-			pll->revision = EDP_PLL_7NM;
+-		} else {
+-			DP_ERR("Unsupported pll revision\n");
+-			rc = -ENOTSUPP;
+-			goto error;
+-		}
+-	} else {
+-		DP_ERR("pll revision not specified\n");
+-		rc = -EINVAL;
+-		goto error;
+-	}
+-
+ 	pll->name = of_get_property(pdev->dev.of_node, "label", NULL);
+ 	if (!pll->name)
+ 		pll->name = "dp0";
+@@ -133,13 +255,60 @@
+ 	pll->bonding_en = of_property_read_bool(pdev->dev.of_node,
+ 						"qcom,bonding-feature-enable");
+ 
+-	rc = dp_pll_fill_io(pll);
+-	if (rc)
+-		goto error;
++	if (parser->has_generic_phy) {
++		struct dp_pll_generic_phy *priv;
+ 
+-	rc = dp_pll_clock_register(pll);
+-	if (rc)
+-		goto error;
++		pll->revision = DP_PLL_GENERIC_PHY;
++		priv = kzalloc(sizeof(*priv), GFP_KERNEL);
++		if (!priv) {
++			rc = -ENOMEM;
++			goto error;
++		}
++		priv->is_edp = of_device_is_compatible(pdev->dev.of_node,
++						"qcom,edp-display");
++		rc = sde_phy_owner_acquire(&priv->owner, &pdev->dev);
++		if (rc) {
++			DP_ERR("failed to acquire generic dp phy, rc=%d\n", rc);
++			kfree(priv);
++			goto error;
++		}
++		pll->priv = priv;
++		pll->pll_cfg = dp_pll_generic_cfg;
++		pll->pll_prepare = dp_pll_generic_prepare;
++		pll->pll_unprepare = dp_pll_generic_unprepare;
++		pll->phy_aux_prepare = dp_pll_generic_aux_prepare;
++		pll->phy_aux_unprepare = dp_pll_generic_aux_unprepare;
++		pll->phy_update_vx_px = dp_pll_generic_update_vx_px;
++	} else {
++		label = of_get_property(pdev->dev.of_node, "qcom,pll-revision", NULL);
++		if (label) {
++			if (!strcmp(label, "5nm-v1")) {
++				pll->revision = DP_PLL_5NM_V1;
++			} else if (!strcmp(label, "5nm-v2")) {
++				pll->revision = DP_PLL_5NM_V2;
++			} else if (!strcmp(label, "7nm")) {
++				pll->revision = DP_PLL_7NM;
++			} else if (!strcmp(label, "edp-7nm")) {
++				pll->revision = EDP_PLL_7NM;
++			} else {
++				DP_ERR("Unsupported pll revision\n");
++				rc = -ENOTSUPP;
++				goto error;
++			}
++		} else {
++			DP_ERR("pll revision not specified\n");
++			rc = -EINVAL;
++			goto error;
++		}
++
++		rc = dp_pll_fill_io(pll);
++		if (rc)
++			goto error;
++
++		rc = dp_pll_clock_register(pll);
++		if (rc)
++			goto error;
++	}
+ 
+ 	DP_INFO("revision=%s, ssc_en=%d, bonding_en=%d\n",
+ 			dp_pll_get_revision(pll->revision), pll->ssc_en,
+@@ -153,6 +322,16 @@
+ 
+ void dp_pll_put(struct dp_pll *pll)
+ {
+-	dp_pll_clock_unregister(pll);
++	if (!pll)
++		return;
++	if (pll->revision == DP_PLL_GENERIC_PHY) {
++		struct dp_pll_generic_phy *priv = pll->priv;
++
++		if (priv && !sde_phy_owner_release(&priv->owner))
++			kfree(priv);
++		pll->priv = NULL;
++	} else {
++		dp_pll_clock_unregister(pll);
++	}
+ 	kfree(pll);
+ }
+--- a/techpack/display/msm/dp/dp_pll.h
++++ b/techpack/display/msm/dp/dp_pll.h
+@@ -46,6 +46,7 @@
+ 	DP_PLL_5NM_V2,
+ 	DP_PLL_7NM,
+ 	EDP_PLL_7NM,
++	DP_PLL_GENERIC_PHY,
+ };
+ 
+ static inline const char *dp_pll_get_revision(enum dp_pll_revision rev)
+@@ -56,6 +57,7 @@
+ 	case DP_PLL_5NM_V2:	return "DP_PLL_5NM_V2";
+ 	case DP_PLL_7NM:	return "DP_PLL_7NM";
+ 	case EDP_PLL_7NM:	return "EDP_PLL_7NM";
++	case DP_PLL_GENERIC_PHY:	return "DP_PLL_GENERIC_PHY";
+ 	default:		return "???";
+ 	}
+ }
+@@ -142,6 +144,9 @@
+ 	int (*pll_cfg)(struct dp_pll *pll, unsigned long rate);
+ 	int (*pll_prepare)(struct dp_pll *pll);
+ 	int (*pll_unprepare)(struct dp_pll *pll);
++	int (*phy_aux_prepare)(struct dp_pll *pll, bool is_edp);
++	void (*phy_aux_unprepare)(struct dp_pll *pll);
++	int (*phy_update_vx_px)(struct dp_pll *pll, u8 v_level, u8 p_level);
+ };
+ 
+ static inline struct dp_pll_vco_clk *to_dp_vco_hw(struct clk_hw *hw)
+--- a/techpack/display/msm/dp/dp_power.c
++++ b/techpack/display/msm/dp/dp_power.c
+@@ -6,6 +6,8 @@
+ 
+ #include <linux/pinctrl/consumer.h>
+ #include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/pm_opp.h>
+ #include <linux/pm_runtime.h>
+ #include <drm/drm_print.h>
+ #include "dp_power.h"
+@@ -31,6 +33,7 @@
+ 	bool link_clks_on;
+ 	bool strm0_clks_on;
+ 	bool strm1_clks_on;
++	bool has_opp_table;
+ };
+ 
+ static int dp_power_regulator_init(struct dp_power_private *power)
+@@ -436,6 +439,9 @@
+ 	for (i = 0; i < ARRAY_SIZE(gpio_names); i++) {
+ 		unsigned int gpio = mp->gpio_config[i].gpio;
+ 
++		if (power->parser->no_aux_switch && i <= DP_GPIO_CMN_MAX)
++			continue;
++
+ 		if (gpio_is_valid(gpio)) {
+ 			rc = gpio_request(gpio, gpio_names[i]);
+ 			if (rc) {
+@@ -451,6 +457,9 @@
+ 	for (i = 0; i < ARRAY_SIZE(gpio_names); i++) {
+ 		unsigned int gpio = mp->gpio_config[i].gpio;
+ 
++		if (power->parser->no_aux_switch && i <= DP_GPIO_CMN_MAX)
++			continue;
++
+ 		if (gpio_is_valid(gpio))
+ 			gpio_free(gpio);
+ 	}
+@@ -495,11 +504,10 @@
+ 	struct dss_module_power *mp;
+ 	struct dss_gpio *config;
+ 
+-	if (power->parser->no_aux_switch)
+-		return 0;
+-
+ 	mp = &power->parser->mp[DP_CORE_PM];
+ 	config = mp->gpio_config;
++	if (!config)
++		return 0;
+ 
+ 	if (enable) {
+ 		rc = dp_power_request_gpios(power);
+@@ -508,9 +516,12 @@
+ 			return rc;
+ 		}
+ 
+-		dp_power_set_gpio(power, flip);
++		if (!power->parser->no_aux_switch)
++			dp_power_set_gpio(power, flip);
+ 	} else {
+ 		for (i = 0; i < mp->num_gpio; i++) {
++			if (power->parser->no_aux_switch && i <= DP_GPIO_CMN_MAX)
++				continue;
+ 			if (gpio_is_valid(config[i].gpio)) {
+ 				gpio_set_value(config[i].gpio, 0);
+ 				gpio_free(config[i].gpio);
+@@ -548,6 +559,15 @@
+ 	dp_power->phandle = phandle;
+ 	dp_power->drm_dev = drm_dev;
+ 
++	if (power->pdev && of_find_property(power->pdev->dev.of_node,
++			"operating-points-v2", NULL)) {
++		if (!devm_pm_opp_set_clkname(&power->pdev->dev, "link_clk") &&
++		    !devm_pm_opp_of_add_table(&power->pdev->dev)) {
++			power->has_opp_table = true;
++			pm_runtime_enable(&power->pdev->dev);
++		}
++	}
++
+ 	return 0;
+ 
+ error_clk:
+@@ -567,6 +587,11 @@
+ 
+ 	power = container_of(dp_power, struct dp_power_private, dp_power);
+ 
++	if (power->has_opp_table) {
++		pm_runtime_disable(&power->pdev->dev);
++		power->has_opp_table = false;
++	}
++
+ 	dp_power_clk_init(power, false);
+ 	dp_power_regulator_deinit(power);
+ }
+@@ -675,10 +700,28 @@
+ 
+ 	rc = pm_runtime_get_sync(dp_power->drm_dev->dev);
+ 	if (rc < 0) {
++		pm_runtime_put_noidle(dp_power->drm_dev->dev);
+ 		DP_ERR("Power resource enable failed\n");
+ 		goto err_sde_power;
+ 	}
+ 
++	if (power->has_opp_table) {
++		unsigned long max_freq = ULONG_MAX;
++		struct dev_pm_opp *opp;
++
++		rc = pm_runtime_get_sync(&power->pdev->dev);
++		if (rc < 0) {
++			pm_runtime_put_noidle(&power->pdev->dev);
++			DP_ERR("DP device pm_runtime enable failed, rc=%d\n", rc);
++			goto err_dp_pm;
++		}
++		opp = dev_pm_opp_find_freq_floor(&power->pdev->dev, &max_freq);
++		if (!IS_ERR(opp)) {
++			dev_pm_opp_set_opp(&power->pdev->dev, opp);
++			dev_pm_opp_put(opp);
++		}
++	}
++
+ 	rc = dp_power_clk_enable(dp_power, DP_CORE_PM, true);
+ 	if (rc) {
+ 		DP_ERR("failed to enable DP core clocks\n");
+@@ -688,6 +731,11 @@
+ 	return 0;
+ 
+ err_clk:
++	if (power->has_opp_table) {
++		dev_pm_opp_set_opp(&power->pdev->dev, NULL);
++		pm_runtime_put_sync(&power->pdev->dev);
++	}
++err_dp_pm:
+ 	pm_runtime_put_sync(dp_power->drm_dev->dev);
+ err_sde_power:
+ 	dp_power_config_gpios(power, flip, false);
+@@ -716,6 +764,10 @@
+ 		dp_power_clk_enable(dp_power, DP_LINK_PM, false);
+ 
+ 	dp_power_clk_enable(dp_power, DP_CORE_PM, false);
++	if (power->has_opp_table) {
++		dev_pm_opp_set_opp(&power->pdev->dev, NULL);
++		pm_runtime_put_sync(&power->pdev->dev);
++	}
+ 	pm_runtime_put_sync(dp_power->drm_dev->dev);
+ 
+ 	dp_power_config_gpios(power, false, false);
+@@ -747,7 +799,11 @@
+ 		return -EINVAL;
+ 
+ 	if ((pin_state >= DP_GPIO_EDP_MIN) && (pin_state < DP_GPIO_EDP_MAX)) {
++		if (!gpio_is_valid(config[pin_state].gpio))
++			return 0;
+ 		gpio_direction_output(config[pin_state].gpio, enable);
++		if (pin_state == DP_GPIO_EDP_VCC_EN && enable)
++			msleep(20);
+ 	} else {
+ 		pr_err(" Invalid GPIO call\n");
+ 		return -EINVAL;
+--- a/techpack/display/msm/dp/sde_generic_phy_owner.c
++++ b/techpack/display/msm/dp/sde_generic_phy_owner.c
+@@ -0,0 +1,342 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Generic Linux PHY ownership backend for SC8180X eDP/DP controllers. */
++#include <linux/err.h>
++#include <linux/errno.h>
++#include <linux/string.h>
++#include "sde_generic_phy_owner.h"
++
++static DEFINE_MUTEX(sde_phy_registry_lock);
++static LIST_HEAD(sde_phy_registry);
++
++static int sde_phy_lock(struct sde_phy_owner *owner)
++{
++	if (!owner || !READ_ONCE(owner->phy))
++		return -EINVAL;
++	mutex_lock(&owner->lock);
++	if (!owner->phy) {
++		mutex_unlock(&owner->lock);
++		return -EINVAL;
++	}
++	return 0;
++}
++
++int sde_phy_owner_acquire(struct sde_phy_owner *owner, struct device *consumer)
++{
++	struct sde_phy_owner *other;
++	struct phy *phy;
++	int ret = 0;
++
++	if (!owner || !consumer)
++		return -EINVAL;
++	if (owner->phy)
++		return -EBUSY;
++	phy = phy_get(consumer, "dp");
++	if (IS_ERR(phy))
++		return PTR_ERR(phy);
++	if (!phy)
++		return -ENODEV;
++	if (!phy->ops || !phy->ops->init || !phy->ops->exit ||
++	    !phy->ops->configure || !phy->ops->set_mode ||
++	    !phy->ops->power_on || !phy->ops->power_off) {
++		ret = -EOPNOTSUPP;
++		goto put_phy;
++	}
++	mutex_lock(&sde_phy_registry_lock);
++	list_for_each_entry(other, &sde_phy_registry, node) {
++		if (other == owner || other->phy == phy) {
++			ret = -EBUSY;
++			goto unlock_registry;
++		}
++	}
++	/* This detects existing users, not a framework-wide exclusive lease. */
++	mutex_lock(&phy->mutex);
++	if (phy->init_count || phy->power_count)
++		ret = -EBUSY;
++	mutex_unlock(&phy->mutex);
++	if (ret)
++		goto unlock_registry;
++
++	mutex_init(&owner->lock);
++	INIT_LIST_HEAD(&owner->node);
++	owner->consumer = get_device(consumer);
++	owner->phy = phy;
++	owner->initialized = false;
++	owner->configured = false;
++	owner->powered = false;
++	owner->uncertain = false;
++	memset(&owner->config, 0, sizeof(owner->config));
++	owner->operation_error = 0;
++	owner->cleanup_error = 0;
++	list_add_tail(&owner->node, &sde_phy_registry);
++	mutex_unlock(&sde_phy_registry_lock);
++	return 0;
++
++unlock_registry:
++	mutex_unlock(&sde_phy_registry_lock);
++put_phy:
++	phy_put(consumer, phy);
++	return ret;
++}
++
++static int sde_phy_opts_valid(const struct phy_configure_opts_dp *opts)
++{
++	unsigned int i;
++
++	if (!opts || (opts->lanes != 1 && opts->lanes != 2 && opts->lanes != 4))
++		return -EINVAL;
++	switch (opts->link_rate) {
++	/* Matched SC8180X qcom_edp v4 provider, not all rates in phy-dp.h. */
++	case 1620: case 2700: case 5400: case 8100:
++		break;
++	default:
++		return -EINVAL;
++	}
++	for (i = 0; i < opts->lanes; i++)
++		if (opts->voltage[i] > 3 || opts->pre[i] > 3 ||
++		    opts->voltage[i] + opts->pre[i] > 3)
++			return -EINVAL;
++	return 0;
++}
++
++static int sde_phy_stop_locked(struct sde_phy_owner *owner)
++{
++	int ret;
++
++	/* Failed provider power_on may have programmed hardware although core
++	 * power_count is zero. No balanced generic power_off or proven reset is
++	 * available here: retain the owner rather than invent safe retirement.
++	 */
++	if (owner->uncertain)
++		return -EUCLEAN;
++	if (owner->powered) {
++		ret = phy_power_off(owner->phy);
++		if (ret)
++			return ret;
++		owner->powered = false;
++	}
++	owner->configured = false;
++	if (owner->initialized) {
++		ret = phy_exit(owner->phy);
++		if (ret)
++			return ret;
++		owner->initialized = false;
++	}
++	return 0;
++}
++
++static int sde_phy_rollback(struct sde_phy_owner *owner, int error)
++{
++	int cleanup = sde_phy_stop_locked(owner);
++
++	owner->operation_error = error;
++	owner->cleanup_error = cleanup;
++	return error;
++}
++
++static int sde_phy_prepare_locked(struct sde_phy_owner *owner, bool edp)
++{
++	int ret;
++
++	if (owner->uncertain)
++		return -EUCLEAN;
++	if (owner->cleanup_error)
++		return -EBUSY;
++	if (owner->initialized)
++		return -EALREADY;
++	/* QCOM init uses is_edp to select AUX defaults. Set mode first. */
++	ret = phy_set_mode_ext(owner->phy, PHY_MODE_DP,
++			       edp ? PHY_SUBMODE_EDP : PHY_SUBMODE_DP);
++	if (!ret)
++		ret = phy_init(owner->phy);
++	if (ret) {
++		owner->operation_error = ret;
++		owner->cleanup_error = 0;
++		return ret;
++	}
++	owner->initialized = true;
++	owner->operation_error = owner->cleanup_error = 0;
++	return 0;
++}
++
++static int sde_phy_configure_locked(struct sde_phy_owner *owner,
++				  const struct phy_configure_opts_dp *opts)
++{
++	union phy_configure_opts config = { 0 };
++	int ret;
++
++	if (owner->uncertain)
++		return -EUCLEAN;
++	if (owner->cleanup_error)
++		return -EBUSY;
++	if (!owner->initialized)
++		return -EPIPE;
++	ret = sde_phy_opts_valid(opts);
++	if (ret) {
++		owner->operation_error = ret;
++		return ret; /* Caller error: do not disturb the current configuration. */
++	}
++	/* QCOM configure caches all opts but only programs requested voltage.
++	 * A live link-rate/lane/SSC change needs a separate stop/restart path.
++	 */
++	if (owner->powered &&
++	    (opts->link_rate != owner->config.link_rate ||
++	     opts->lanes != owner->config.lanes || opts->ssc != owner->config.ssc)) {
++		owner->operation_error = -EBUSY;
++		return -EBUSY;
++	}
++	config.dp = *opts;
++	ret = phy_configure(owner->phy, &config);
++	if (ret) {
++		owner->configured = false;
++		return sde_phy_rollback(owner, ret);
++	}
++	owner->config = config.dp;
++	owner->configured = true;
++	owner->operation_error = owner->cleanup_error = 0;
++	return 0;
++}
++
++static int sde_phy_power_on_locked(struct sde_phy_owner *owner)
++{
++	int ret;
++
++	if (owner->uncertain)
++		return -EUCLEAN;
++	if (owner->cleanup_error)
++		return -EBUSY;
++	if (owner->powered)
++		return -EALREADY;
++	if (!owner->initialized || !owner->configured)
++		return -EPIPE;
++	ret = phy_power_on(owner->phy);
++	if (ret) {
++		owner->uncertain = true;
++		owner->configured = false;
++		owner->operation_error = ret;
++		owner->cleanup_error = -EUCLEAN;
++		return ret;
++	}
++	owner->powered = true;
++	owner->operation_error = owner->cleanup_error = 0;
++	return 0;
++}
++
++int sde_phy_owner_prepare(struct sde_phy_owner *owner, bool edp)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	ret = sde_phy_prepare_locked(owner, edp);
++	mutex_unlock(&owner->lock);
++	return ret;
++}
++
++int sde_phy_owner_configure(struct sde_phy_owner *owner,
++			    const struct phy_configure_opts_dp *opts)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	ret = sde_phy_configure_locked(owner, opts);
++	mutex_unlock(&owner->lock);
++	return ret;
++}
++
++int sde_phy_owner_power_on(struct sde_phy_owner *owner)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	ret = sde_phy_power_on_locked(owner);
++	mutex_unlock(&owner->lock);
++	return ret;
++}
++
++int sde_phy_owner_start(struct sde_phy_owner *owner, bool edp,
++			const struct phy_configure_opts_dp *opts)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	if (owner->uncertain) {
++		ret = -EUCLEAN;
++		goto unlock;
++	}
++	if (owner->cleanup_error) {
++		ret = -EBUSY;
++		goto unlock;
++	}
++	ret = sde_phy_opts_valid(opts);
++	if (ret)
++		owner->operation_error = ret;
++	if (!ret)
++		ret = sde_phy_prepare_locked(owner, edp);
++	if (!ret)
++		ret = sde_phy_configure_locked(owner, opts);
++	if (!ret)
++		ret = sde_phy_power_on_locked(owner);
++unlock:
++	mutex_unlock(&owner->lock);
++	return ret;
++}
++
++int sde_phy_owner_stop(struct sde_phy_owner *owner)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	ret = sde_phy_stop_locked(owner);
++	owner->cleanup_error = ret;
++	if (!ret)
++		owner->operation_error = 0;
++	else if (!owner->operation_error)
++		owner->operation_error = ret;
++	mutex_unlock(&owner->lock);
++	return ret;
++}
++
++int sde_phy_owner_release(struct sde_phy_owner *owner)
++{
++	int ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	ret = sde_phy_stop_locked(owner);
++	if (ret) {
++		owner->cleanup_error = ret;
++		if (!owner->operation_error)
++			owner->operation_error = ret;
++		mutex_unlock(&owner->lock);
++		return ret;
++	}
++	mutex_lock(&sde_phy_registry_lock);
++	list_del_init(&owner->node);
++	mutex_unlock(&sde_phy_registry_lock);
++	phy_put(owner->consumer, owner->phy);
++	put_device(owner->consumer);
++	owner->phy = NULL;
++	owner->consumer = NULL;
++	owner->operation_error = owner->cleanup_error = 0;
++	mutex_unlock(&owner->lock);
++	return 0;
++}
++
++int sde_phy_owner_status(struct sde_phy_owner *owner,
++			 struct sde_phy_owner_status *status)
++{
++	int ret;
++
++	if (!status)
++		return -EINVAL;
++	ret = sde_phy_lock(owner);
++	if (ret)
++		return ret;
++	status->acquired = true;
++	status->initialized = owner->initialized;
++	status->configured = owner->configured;
++	status->powered = owner->powered;
++	status->uncertain = owner->uncertain;
++	status->operation_error = owner->operation_error;
++	status->cleanup_error = owner->cleanup_error;
++	mutex_unlock(&owner->lock);
++	return 0;
++}
+--- a/techpack/display/msm/dp/sde_generic_phy_owner.h
++++ b/techpack/display/msm/dp/sde_generic_phy_owner.h
+@@ -0,0 +1,52 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef SDE_GENERIC_PHY_OWNER_H
++#define SDE_GENERIC_PHY_OWNER_H
++
++#include <linux/device.h>
++#include <linux/list.h>
++#include <linux/mutex.h>
++#include <linux/phy/phy.h>
++
++/* Caller-owned, initially zeroed, sleepable context. Do not modify fields.
++ * Acquire/release/storage lifetime require external serialization. Operations
++ * between them are serialized internally. Retain storage if release fails.
++ * Registry exclusivity covers this backend, NOT unrelated generic-PHY users.
++ */
++struct sde_phy_owner {
++	struct device *consumer;
++	struct phy *phy;
++	struct mutex lock;
++	struct list_head node;
++	bool initialized;
++	bool configured;
++	bool powered;
++	bool uncertain;
++	struct phy_configure_opts_dp config;
++	int operation_error;
++	int cleanup_error;
++};
++
++struct sde_phy_owner_status {
++	bool acquired;
++	bool initialized;
++	bool configured;
++	bool powered;
++	bool uncertain;
++	int operation_error;
++	int cleanup_error;
++};
++
++int sde_phy_owner_acquire(struct sde_phy_owner *owner, struct device *consumer);
++int sde_phy_owner_prepare(struct sde_phy_owner *owner, bool edp);
++int sde_phy_owner_configure(struct sde_phy_owner *owner,
++			    const struct phy_configure_opts_dp *opts);
++int sde_phy_owner_power_on(struct sde_phy_owner *owner);
++int sde_phy_owner_start(struct sde_phy_owner *owner, bool edp,
++			const struct phy_configure_opts_dp *opts);
++int sde_phy_owner_stop(struct sde_phy_owner *owner);
++/* On error owner remains acquired; no force-put of live/uncertain resources. */
++int sde_phy_owner_release(struct sde_phy_owner *owner);
++int sde_phy_owner_status(struct sde_phy_owner *owner,
++			 struct sde_phy_owner_status *status);
++
++#endif

@@ -154,6 +154,10 @@
       {
         "path": "patches/wip/kgsl-sde-boot-stage-argv-20261111.patch",
         "sha256": "a54c1b614510d179573d31435cce057b2a0ca3c76e2321c7c82e7d1b006e0681"
+      },
+      {
+        "path": "patches/wip/kgsl-sde-boot-gpubw-7opp-20261112.patch",
+        "sha256": "57dab05027d41a750080b0f21be93a3ccc78044aa2798b136c3aab39865a51ec"
       }
     ],
     "post_prelude_patches": [
@@ -165,6 +169,16 @@
         },
         "after": {
           "init": "c55c32323b31776d3188759ef964acce95dbab18567e9814b2c20be842753fec"
+        }
+      },
+      {
+        "path": "patches/wip/kgsl-sde-init-debug-hold-20261112.patch",
+        "sha256": "468a93daa8e677e9023785a6e322bfbd3168428286e9439def13db6d10ac1faa",
+        "before": {
+          "init": "c55c32323b31776d3188759ef964acce95dbab18567e9814b2c20be842753fec"
+        },
+        "after": {
+          "init": "040a708efa1f51047f14a6537947183d66a3bd7113d8b1f29a0d54b7db0e6765"
         }
       }
     ]

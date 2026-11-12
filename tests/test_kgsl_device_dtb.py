@@ -150,5 +150,41 @@ class DeviceDTTests(unittest.TestCase):
             self.result()
 
 
+    def test_opt_in_disabled_high_opps_accepted(self):
+        real_hz = [f * 1000000 for f in self.hz]
+        policy = dict(ddr_table_kBps=[0, 1, 2], frequency_bindings=[
+            dict(gpu_hz=f, min_index=1, default_index=1, max_index=2)
+            for f in real_hz[:7]])
+        base, new = copy.deepcopy(self.base), copy.deepcopy(self.base)
+        for f_short, f_real in zip(self.hz, real_hz):
+            base[GPU + "/opp-table/opp-" + str(f_short)]["opp-hz"] = u32(0, f_real)
+            new[GPU + "/opp-table/opp-" + str(f_short)]["opp-hz"] = u32(0, f_real)
+        for f_short in [590, 661, 700]:
+            new[GPU + "/opp-table/opp-" + str(f_short)]["status"] = b"disabled\0"
+        new[GPU].update({"qcom,kgsl-bus-policy": b"indexed\0", "qcom,bus-table-ddr": u32(0, 1, 2)})
+        parent = GPU + "/qcom,gpu-pwrlevels"
+        new[parent] = {}
+        for freq in [0] + real_hz[:7]:
+            new[parent + "/row-" + str(freq)] = {
+                "qcom,gpu-freq": u32(freq), "qcom,bus-min": u32(1 if freq else 0),
+                "qcom,bus-freq": u32(1 if freq else 0), "qcom,bus-max": u32(2 if freq else 0)}
+        self.assertFalse(GATE.check(fdt(base), fdt(new), policy)["passed"])
+        res = GATE.check(fdt(base), fdt(new), policy, allow_disabled_high_opps=True)
+        self.assertTrue(res["passed"], res)
+        self.assertEqual(len(res["candidate_enabled_hz"]), 7)
+        new[GPU + "/opp-table/opp-514"]["status"] = b"disabled\0"
+        self.assertFalse(GATE.check(fdt(base), fdt(new), policy, allow_disabled_high_opps=True)["passed"])
+
+    def test_opt_in_sde_display_contract(self):
+        self.base[GATE.MDSS] = {"compatible": b"qcom,sc8180x-mdss\0"}
+        self.new[GATE.MDSS] = {"compatible": b"qcom,sde-kms\0qcom,sc8180x-mdss\0"}
+        self.new[GATE.DP_EDP] = {"compatible": b"qcom,edp-display\0"}
+        self.assertFalse(self.result()["passed"])
+        res = GATE.check(fdt(self.base), fdt(self.new), self.policy, allow_sde_display=True)
+        self.assertTrue(res["passed"], res)
+        self.new[GATE.MDSS]["compatible"] = b"qcom,sc8180x-mdss\0"
+        self.assertFalse(GATE.check(fdt(self.base), fdt(self.new), self.policy, allow_sde_display=True)["passed"])
+
+
 if __name__ == "__main__":
     unittest.main()

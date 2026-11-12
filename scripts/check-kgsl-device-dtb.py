@@ -2,7 +2,8 @@
 """Read-only, fail-closed KGSL DT preflight. Passing is not hardware acceptance.
 
 Compare raw FDT properties, not a dtc text round trip (which can change escaped
-byte strings). The explicit indexed policy must cover every original enabled OPP.
+byte strings). By default the explicit indexed policy must cover every original
+enabled OPP; opt-in candidate flags exist only for isolated SQ2Sde bring-up.
 This tool never writes a DTB, disables an OPP, or infers a missing policy row.
 """
 import argparse
@@ -13,6 +14,9 @@ import struct
 import sys
 
 GPU = "/soc@0/gpu@2c00000"
+MDSS = "/soc@0/display-subsystem@ae00000"
+DP_EDP = "/soc@0/qcom,dp_display@ae9a000"
+EXPERIMENTAL_HIGH_HZ = {590000000, 661000000, 700000000}
 
 
 def read_fdt(data):
@@ -130,22 +134,40 @@ def opps(nodes):
     return result
 
 
-def check(baseline, candidate, policy):
+def check(baseline, candidate, policy, allow_disabled_high_opps=False,
+          allow_sde_display=False):
     before, br = read_fdt(baseline)
     after, ar = read_fdt(candidate)
     original, enabled = opps(before), opps(after)
     errors, changes = [], []
-    if set(original) != set(enabled):
-        errors.append("enabled OPP set changed: removed=%s added=%s" % (
-            sorted(set(original) - set(enabled)), sorted(set(enabled) - set(original))))
+    removed = set(original) - set(enabled)
+    added = set(enabled) - set(original)
+    if allow_disabled_high_opps:
+        target_opps = enabled
+        if added or not removed.issubset(EXPERIMENTAL_HIGH_HZ):
+            errors.append("enabled OPP set changed outside experimental high OPPs: removed=%s added=%s" % (
+                sorted(removed), sorted(added)))
+    else:
+        target_opps = original
+        if removed or added:
+            errors.append("enabled OPP set changed: removed=%s added=%s" % (
+                sorted(removed), sorted(added)))
     if br != ar:
         errors.append("reservation map or boot CPU changed")
     policy_path = GPU + "/qcom,gpu-pwrlevels"
-    # Only the exact policy subtree and two GPU policy properties may differ.
+    disabled_opp_paths = {original[hz] for hz in (removed & EXPERIMENTAL_HIGH_HZ)
+                          } if allow_disabled_high_opps else set()
+
+    def allowed_sde(path):
+        if not allow_sde_display:
+            return False
+        return (path == MDSS or path.startswith(MDSS + "/")
+                or path == DP_EDP or path.startswith(DP_EDP + "/"))
+
     for path in sorted(set(before) | set(after)):
         is_policy = path == policy_path or path.startswith(policy_path + "/")
         if path not in before or path not in after:
-            if not is_policy:
+            if not is_policy and not allowed_sde(path):
                 changes.append(path + ":node")
             continue
         for name in sorted(set(before[path]) | set(after[path])):
@@ -153,6 +175,10 @@ def check(baseline, candidate, policy):
                 continue
             if is_policy or (path == GPU and name in (
                     "qcom,kgsl-bus-policy", "qcom,bus-table-ddr")):
+                continue
+            if path in disabled_opp_paths and name == "status" and after[path].get(name) == b"disabled\0":
+                continue
+            if allowed_sde(path):
                 continue
             changes.append(path + ":" + name)
     if changes:
@@ -180,10 +206,10 @@ def check(baseline, candidate, policy):
                 or not 0 < indices[0] <= indices[1] <= indices[2] < len(table)):
             raise ValueError("invalid/duplicate explicit policy row")
         expected[hz] = indices
-    missing = sorted(set(original) - set(expected))
-    if missing or set(expected) - set(original):
+    missing = sorted(set(target_opps) - set(expected))
+    if missing or set(expected) - set(target_opps):
         errors.append("policy coverage incomplete: missing=%s extra=%s" % (
-            missing, sorted(set(expected) - set(original))))
+            missing, sorted(set(expected) - set(target_opps))))
     actual = {}
     for path, props in after.items():
         if path.rsplit("/", 1)[0] != policy_path or not available(after, path):
@@ -202,10 +228,19 @@ def check(baseline, candidate, policy):
     for path in enabled.values():
         if any(cells(after[path].get("opp-avg-kBps", b""))):
             errors.append(path + ": nonzero average unsupported")
-    if actual and max(original) in actual:
-        if any(v[2] > actual[max(original)][2] for v in actual.values()):
+    if actual and max(target_opps) in actual:
+        if any(v[2] > actual[max(target_opps)][2] for v in actual.values()):
             errors.append("policy exceeds highest GPU OPP bus maximum")
+    if allow_sde_display:
+        if after.get(MDSS, {}).get("compatible") != b"qcom,sde-kms\0qcom,sc8180x-mdss\0":
+            errors.append("MDSS requires dual compatible qcom,sde-kms + qcom,sc8180x-mdss")
+        if DP_EDP not in after or not available(after, DP_EDP):
+            errors.append("SDE internal eDP node missing or unavailable")
+        elif after[DP_EDP].get("compatible") != b"qcom,edp-display\0":
+            errors.append("SDE internal eDP node requires qcom,edp-display compatible")
     return dict(offline_contract_only=True, hardware_validated=False,
+                allow_disabled_high_opps=allow_disabled_high_opps,
+                allow_sde_display=allow_sde_display,
                 baseline_sha256=hashlib.sha256(baseline).hexdigest(),
                 candidate_sha256=hashlib.sha256(candidate).hexdigest(),
                 baseline_enabled_hz=sorted(original), candidate_enabled_hz=sorted(enabled),
@@ -218,10 +253,14 @@ def main():
     parser.add_argument("--baseline", required=True, type=Path)
     parser.add_argument("--candidate", required=True, type=Path)
     parser.add_argument("--policy", required=True, type=Path)
+    parser.add_argument("--allow-disabled-high-opps", action="store_true")
+    parser.add_argument("--allow-sde-display", action="store_true")
     args = parser.parse_args()
     try:
         result = check(args.baseline.read_bytes(), args.candidate.read_bytes(),
-                       json.loads(args.policy.read_text(encoding="utf-8")))
+                       json.loads(args.policy.read_text(encoding="utf-8")),
+                       allow_disabled_high_opps=args.allow_disabled_high_opps,
+                       allow_sde_display=args.allow_sde_display)
     except (ValueError, KeyError, TypeError, OSError, struct.error) as error:
         print(json.dumps(dict(passed=False, errors=[str(error)])))
         return 2

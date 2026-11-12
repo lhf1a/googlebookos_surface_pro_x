@@ -1,0 +1,44 @@
+--- a/drivers/gpu/msm/governor_msm_adreno_tz.c
++++ b/drivers/gpu/msm/governor_msm_adreno_tz.c
+@@ -447,7 +447,8 @@
+ 	struct msm_adreno_extended_profile *gpu_profile;
+ 	struct device_node *node = devfreq->dev.parent->of_node;
+ 
+-	if (!of_device_is_compatible(node, "qcom,kgsl-3d0"))
++	if (!of_device_is_compatible(node, "qcom,kgsl-3d0") &&
++	    !of_device_is_compatible(node, "qcom,adreno-680.1"))
+ 		return -EINVAL;
+ 
+ 	gpu_profile = container_of((devfreq->profile),
+--- a/drivers/gpu/msm/kgsl_pwrscale.c
++++ b/drivers/gpu/msm/kgsl_pwrscale.c
+@@ -878,7 +878,29 @@
+ 
+ 	devfreq = devfreq_add_device(&pdev->dev, &gpu_profile->profile,
+ 			governor, &adreno_tz_data);
++	if (IS_ERR(devfreq) && strcmp(governor, "simple_ondemand")) {
++		long gov_err = PTR_ERR(devfreq);
++
++		if (gov_err == -ENODEV || gov_err == -EOPNOTSUPP ||
++		    gov_err == -EINVAL) {
++			dev_warn(device->dev,
++				"devfreq governor '%s' unavailable (%ld); falling back to simple_ondemand\n",
++				governor, gov_err);
++			devfreq = devfreq_add_device(&pdev->dev,
++					&gpu_profile->profile,
++					"simple_ondemand", NULL);
++		}
++	}
+ 	if (IS_ERR(devfreq)) {
++		destroy_workqueue(pwrscale->devfreq_wq);
++		pwrscale->devfreq_wq = NULL;
++		if (kgsl_midframe) {
++			hrtimer_cancel(&kgsl_midframe->timer);
++			kfree(kgsl_midframe);
++			kgsl_midframe = NULL;
++		}
++		srcu_cleanup_notifier_head(&pwrscale->nh);
++		dev_pm_opp_unregister_notifier(&pdev->dev, &pwr->nb);
+ 		device->pwrscale.enabled = false;
+ 		return PTR_ERR(devfreq);
+ 	}

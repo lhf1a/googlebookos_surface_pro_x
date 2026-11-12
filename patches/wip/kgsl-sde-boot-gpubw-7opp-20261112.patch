@@ -1,0 +1,68 @@
+--- a/bin/prepare-native-gpu
++++ b/bin/prepare-native-gpu
+@@ -50,12 +50,12 @@
+         PROVIDERS_SHA256) providers_sha=$value;;
+         STAGE_SHA256) stage_sha=$value;;
+         INIT_SHA256) init_sha=$value;;
+-        ALL10_OPP_POLICY|SDE_DT_CONTRACT|EDP_PHY_PANEL_OWNER|CLOCK_ICC_PM|HOST_BOOT_FLOW|NO_EXPECTED_FAILURE_PROBE)
++        SDMSHRIKE_V2_7OPP_POLICY|SDE_DT_CONTRACT|EDP_PHY_PANEL_OWNER|CLOCK_ICC_PM|HOST_BOOT_FLOW|NO_EXPECTED_FAILURE_PROBE)
+             [ "$value" = PASS ] || stop "host-contract-$key";;
+         *) stop approval-unknown-key;;
+     esac
+ done < "$approval/host-approval.conf"
+-for key in SCHEMA STATUS KERNEL_RELEASE IMAGE_SHA256 KERNEL_NOTES_SHA256 KGSL_NOTES_SHA256 SDE_NOTES_SHA256 DTB_SHA256 RUNTIME_DT_STATIC_SHA256 FDT_HELPER_SHA256 BUSYBOX_SHA256 MODULE_MANIFEST_SHA256 FIRMWARE_MANIFEST_SHA256 PROVIDERS_SHA256 STAGE_SHA256 INIT_SHA256 ALL10_OPP_POLICY SDE_DT_CONTRACT EDP_PHY_PANEL_OWNER CLOCK_ICC_PM HOST_BOOT_FLOW NO_EXPECTED_FAILURE_PROBE; do
++for key in SCHEMA STATUS KERNEL_RELEASE IMAGE_SHA256 KERNEL_NOTES_SHA256 KGSL_NOTES_SHA256 SDE_NOTES_SHA256 DTB_SHA256 RUNTIME_DT_STATIC_SHA256 FDT_HELPER_SHA256 BUSYBOX_SHA256 MODULE_MANIFEST_SHA256 FIRMWARE_MANIFEST_SHA256 PROVIDERS_SHA256 STAGE_SHA256 INIT_SHA256 SDMSHRIKE_V2_7OPP_POLICY SDE_DT_CONTRACT EDP_PHY_PANEL_OWNER CLOCK_ICC_PM HOST_BOOT_FLOW NO_EXPECTED_FAILURE_PROBE; do
+     case "$seen" in *" $key "*) ;; *) stop "approval-missing-$key";; esac
+ done
+ case "$release" in ''|*[!a-zA-Z0-9._+-]*) stop approval-release;; esac
+@@ -153,15 +153,24 @@
+     run cmp "$dest/qcom/$name" "$R/debug_ramdisk/sq2-firmware/qcom/$name" || stop firmware-alias-content
+ done
+ printf %s /debug_ramdisk/sq2-firmware > "$R/sys/module/firmware_class/parameters/path" || stop firmware-path
++mark_stage() {
++    stage=$1
++    echo "SQ2_KGSL_SDE_STAGE=$stage"
++    if [ -z "$R" ] && [ -d /media/esp ]; then
++        printf "%s\n" "$stage" > /media/esp/SQ2-SDE-LAST-STAGE.txt 2>/dev/null || true
++        sync || true
++    fi
++}
+ load() {
+-    stage="LOAD_$1"
++    mark_stage "LOAD_$1"
+     if run "$R/bin/busybox" timeout 20 "$R/bin/busybox" modprobe "$1"; then :
+     else rc=$?; stop "modprobe-$1-rc=$rc" "$rc"; fi
+ }
+ for module in $providers; do load "$module"; done
+ load llcc_qcom
++load governor_gpubw_mon
+ load msm_kgsl
+-stage=VERIFY_KGSL_BIND
++mark_stage VERIFY_KGSL_BIND
+ check_hash "$kgsl_notes_sha" "$R/sys/module/msm_kgsl/notes/.note.gnu.build-id" loaded-kgsl-notes
+ bound() {
+     [ "$(run readlink -f "$1/driver")" = "$R/sys/bus/platform/drivers/$2" ] &&
+@@ -172,7 +181,7 @@
+ [ "$(run readlink -f "$R/sys/class/kgsl/kgsl-3d0/device")" = "$gpu" ] || stop kgsl-node-owner
+ load governor_msm_adreno_tz
+ load msm_drm
+-stage=VERIFY_SDE_BIND
++mark_stage VERIFY_SDE_BIND
+ check_hash "$sde_notes_sha" "$R/sys/module/msm_drm/notes/.note.gnu.build-id" loaded-sde-notes
+ bound "$display" msm_drm msm_drm || stop sde-driver-not-bound
+ card=''
+@@ -186,7 +195,7 @@
+     fi
+ done
+ [ -n "$card" ] || stop sde-card-missing
+-stage=VERIFY_EDP
++mark_stage VERIFY_EDP
+ card_real=$(run readlink -f "$card") || stop drm-card-owner
+ connected=''
+ for connector in "$card"-eDP-*; do
+@@ -200,4 +209,5 @@
+ done
+ [ -n "$connected" ] || stop edp-not-connected
+ echo "SQ2_KGSL_SDE_BOUND kgsl=kgsl-3d display=msm_drm card=${card##*/} edp=${connected##*/}"
++mark_stage GATE_PASSED
+ echo 'SQ2_KGSL_SDE_GATE_PASSED: binding only; Android/HWC/scanout/fences not accepted here.'

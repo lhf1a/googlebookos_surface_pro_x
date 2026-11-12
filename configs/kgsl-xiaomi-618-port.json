@@ -1220,6 +1220,20 @@
           "after": "8f28ecad01071d4d1e17bd90d384235eb3e6cb99e380db5f40368b307fee4e48"
         }
       }
+    },
+    {
+      "path": "patches/kgsl-xiaomi-618-sq2-devfreq-fallback.patch",
+      "sha256": "2bfbb66e75fb8fccc1f24f9f4662da7d0cc34e5e9108d5093cb6820c221ef820",
+      "files": {
+        "drivers/gpu/msm/governor_msm_adreno_tz.c": {
+          "before": "5bc687253ff65be9398bf67ebe6551f1a45fa2b12d98a091889ddaec4ca57c5b",
+          "after": "d013324c64196207ad1df07911bbdd94962186f838b798507a96075cf7666cdb"
+        },
+        "drivers/gpu/msm/kgsl_pwrscale.c": {
+          "before": "c3cd6ca5c10734fe6b5f7d27adf5fdbd7835e5122571b04ed2eede222a72e561",
+          "after": "7b7485a7dc04c42d6a740839dc3dc311e43b65720d2dd0961cc00769af86807f"
+        }
+      }
     }
   ],
   "open": [

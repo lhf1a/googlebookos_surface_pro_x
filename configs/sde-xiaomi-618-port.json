@@ -1012,6 +1012,64 @@
           "after": "0f0c0d6865325cd4d0cb2d3eb41d160fc4ecca4e4aaeee323123a30144b88644"
         }
       }
+    },
+    {
+      "path": "patches/sde-xiaomi-618-sc8180x-edp-phy-backlight.patch",
+      "sha256": "ae6f965ad1f900e0b76dddee18bdb8786e40c8666bbbd06f0a65c3187ffd6533",
+      "files": {
+        "techpack/display/msm/Makefile": {
+          "before": "325b3bcfd9689342a9df14017b9c978b23bf810d5b180960ca99682300fe0e00",
+          "after": "5b98dfd524fc9a5a6e9e91d77de2c11df1d9d495e03dd15665c67478b93d853b"
+        },
+        "techpack/display/msm/dp/dp_catalog.c": {
+          "before": "48cb50d6b74df2570ce9a1a0196d4e88a1ada5c5be40c88fd1295a11120b549f",
+          "after": "ec667aa1487f1f14c6b6db3615b03f43d2df9c7d7b0d84f678a821dce7a37a80"
+        },
+        "techpack/display/msm/dp/dp_catalog_v420.c": {
+          "before": "1bba00731d2377a43d6afc0fb3e78bc6109d89f33d1c3ed1dbd5dae005a2bcf9",
+          "after": "138394ed6dd3dffb3660d93632efd7036ad50cb1f81b1fd446a864f6ed3c39be"
+        },
+        "techpack/display/msm/dp/dp_ctrl.c": {
+          "before": "b3c47efae71fd76d05a76640d367e2096d4e36f21fe8914850365aaad14aa8ff",
+          "after": "40fa596544daf1e9e8e99d591d2f05eca50f3431281b170d28d8b9d17164dde2"
+        },
+        "techpack/display/msm/dp/dp_display.c": {
+          "before": "f8a76769f52199bfe5fe3f13ab4114a69b8d3c846d25362163ba0d4d39e60425",
+          "after": "2320e3846f741a9b0887343e299c723f5546ef1ec4a1b5855c9cf6547dcff39f"
+        },
+        "techpack/display/msm/dp/dp_hpd.c": {
+          "before": "fe86130e73430c17baacea2e36cac32861c600adb77498424682a0c637ef7b91",
+          "after": "efd486fc66c95bbf2477dfdd3a6ae37ad343675830c24e22c03e8a3ac2a3a411"
+        },
+        "techpack/display/msm/dp/dp_parser.c": {
+          "before": "feb17a5212860530c560164736ca3cc531d1b89a2805d78d4bfa973f2d82ee0e",
+          "after": "99e3fed9e35da88e3c07a165e1678a6a6ecd1e3bf8bba34983aeae1ec811f30c"
+        },
+        "techpack/display/msm/dp/dp_parser.h": {
+          "before": "c3b73392799b2dfa3c1ac938dee381c324e0f5a769be9756e80e5781472f2a1b",
+          "after": "5f5acb3979c32a866e5b49ce732728f5e60f89b0557bc2e51d76e62b67bc4d56"
+        },
+        "techpack/display/msm/dp/dp_pll.c": {
+          "before": "9e1b27fdf7f4b35e68eefa9e0866184b6619c04384462365891474ba87b5abb5",
+          "after": "d34293cdea6e1effffb5448a364a55b2aa2fcd4ff1463e6e14209cbd3973d051"
+        },
+        "techpack/display/msm/dp/dp_pll.h": {
+          "before": "e3cbf38b0803610432d1df5908e510a50193c2abb8265e30c9982ba810dfe884",
+          "after": "299e0081abb8c862d536c7173278e159053a294ad57f22e870a4e65ab2fb9503"
+        },
+        "techpack/display/msm/dp/dp_power.c": {
+          "before": "0132b104222d2192e28b292b4e7ead8bc668b9f024c25d8834f5ba06e708320f",
+          "after": "a5103357fef10d614ffef6ba564ab848ee9d5a27dc1ae649066dcab28719d6f0"
+        },
+        "techpack/display/msm/dp/sde_generic_phy_owner.c": {
+          "before": null,
+          "after": "537cc4e15461675d0492cc1f6cfd16a1c57bdcccee7dda5bbbd6055570366819"
+        },
+        "techpack/display/msm/dp/sde_generic_phy_owner.h": {
+          "before": null,
+          "after": "6ab2127d58ff7dc7eeff607e28ce1b863dc26bb456016f5ea4cf528337d6a506"
+        }
+      }
     }
   ],
   "scope": "Pinned full downstream display source plus its MSM UAPI, prepared for explicit Linux 6.18 API diagnostics. This is not a Surface hardware configuration or a loadable port.",
