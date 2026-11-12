@@ -330,8 +330,27 @@ def build(args):
                       (bundle/'start.efi').read_bytes(),work,graphics_argument)
     (tree/'SPX-IMAGE.txt').write_text('SPX_IMAGE_FORMAT=1\nSPX_RELEASE=6.18-'+selected['baseline']+'-single-user\nPRIVATE_IDENTITY_PRESENT=1\n')
     (tree/'EFI/BOOT/grub.cfg').write_text("set timeout=5\nset default=spx-single-user\n\nmenuentry 'Surface Pro X Linux 6.18 - single user 0' --id spx-single-user {\n chainloader /EFI/SQ2Nat/start.efi\n}\nmenuentry 'Surface Pro X Linux 6.18 - rescue (no Android data mount)' --id spx-rescue {\n chainloader /EFI/SQ2Res/start.efi\n}\nmenuentry 'Power off' { halt }\n")
+    esp_only = bool(getattr(args, 'esp_only', False))
     (output/'LAYOUT.json').write_text(json.dumps({'image_bytes':image_bytes,'partitions':parts,'template':str(template) if template else None,'partition_boundaries_preserved':bool(template)},indent=2)+'\n')
     files={p.relative_to(tree).as_posix():{'bytes':p.stat().st_size} for p in tree.rglob('*') if p.is_file()}
+    if esp_only:
+        esp_export = output/'esp'
+        shutil.copytree(tree, esp_export, dirs_exist_ok=resume)
+        report={'operation':'private-esp-payload-only','image':None,'image_bytes':None,
+                'image_sha256':None,'compressed_image':None,'compressed_bytes':None,
+                'compressed_sha256':None,'gzip_full_stream_verified':False,'gpt_primary_backup_verified':False,
+                'esp_only':True,'esp_tree':str(esp_export),
+                'source_private_baseline':selected['baseline'],'single_user_parent_sha256':None,
+                'template':str(template) if template else None,'template_layout_preserved':bool(template),
+                'kernel_mode':getattr(args,'kernel_mode','prebuilt'),
+                'final_initramfs_sha256':None,'storage_payload':audit,
+                'efi_files':files,'content_hash_validation':False,'build_only_requested':build_only,
+                'new_rollback_performed':False,'device_written':False,'hardware_boot_tested':False,
+                'private_identity_present':True,'anonymous_public_image':False,'userdata_migrated':False,
+                'hardware_scope':'ESP-only candidate with native-SSD storage delta; boot/SQ1/SQ2 untested'}
+        (output/'IMAGE-MANIFEST.json').write_text(json.dumps(report,indent=2)+'\n')
+        print(json.dumps({k:report[k] for k in ['esp_only','esp_tree','hardware_boot_tested']},indent=2),flush=True)
+        return report
     fat=work/'esp.fat'
     if fat.exists(): regular(fat)
     with fat.open('wb' if resume else 'xb') as stream:stream.truncate(mapping['SQ2PROBE']['bytes'])

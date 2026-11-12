@@ -59,6 +59,7 @@ def main():
     for path in (ROOT/'probe/video').iterdir():
         if path.suffix=='.h' and (venus/path.name).is_file():
             shutil.copyfile(path,venus/path.name)
+    invoke('full_image_video','ensure_venus_source_hooks',venus)
     # Remove the remaining opt-in boot/stage diagnostics from this source form.
     # The current shared PM header is already release-clean.
     patch=(ROOT/'patches/venus-release-diagnostics.patch').read_text()

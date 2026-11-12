@@ -21,6 +21,7 @@ from single_user_payload import ANCHOR, HOOK
 
 DEFAULT_PRIVATE = ROOT / 'private/build-inputs'
 DEFAULT_A6XX_PATCHES = ROOT / 'patches/drm-618-a6xx-upstream'
+DEFAULT_A6XX_MMIO_FIX_PATCHES = ROOT / 'patches/drm-618-a6xx-mmio-fix'
 
 # Full Mesa chain: keep the Mesa/minigbm/drm-HWC vendor overlay, remove the
 # closed Qualcomm graphics payloads and their pre-Android stage helpers.
@@ -60,6 +61,9 @@ def mesa_runtime(records, bodies):
     for line in MESA_STAGE_LINES:
         require(init.count(line) == 1,
                 'Unknown closed-graphics stage in init: ' + line.decode().strip())
+    # Keep Venus hardware decode usable without the QTI display/gralloc layer.
+    from full_image_video import mesa_omx
+    omx_report = mesa_omx(records, bodies, new_record)
     removed = []
     for directory in CLOSED_GRAPHICS_DIRS:
         require(directory in bodies, 'Closed graphics payload missing: ' + directory)
@@ -90,6 +94,7 @@ def mesa_runtime(records, bodies):
             'retained_mesa_members': len(retained),
             'init_closed_stages_removed': len(MESA_STAGE_LINES),
             'marker': 'etc/sq2-graphics-mode',
+            'video': omx_report,
             'hardware_validated': False}
 
 
@@ -116,32 +121,101 @@ def rewrite_mesa_boot_selection(bundle):
     return 'sq2.vulkan=mesa'
 
 
-def apply_kernel_patches(patch_dir, kernel_source, output, run):
-    """Apply every *.patch in order to the extracted pinned kernel source."""
+EXTERNAL_UNSYNCED_PREFIXES = (
+    'drivers/thermal/qcom/',
+    'drivers/clk/qcom/videocc-sm8150',
+    'drivers/media/platform/qcom/venus/',
+    'drivers/hid/spi-hid/',
+    'drivers/platform/surface/aggregator/',
+)
+
+
+def split_git_diffs(text):
+    """Split a git patch into (header, [(path, diff_block), ...])."""
+    starts = [(m.start(), m.group(1)) for m in re.finditer(r'^diff --git a/(\S+) b/\S+', text, re.M)]
+    if not starts:
+        return text, []
+    header = text[:starts[0][0]]
+    blocks = []
+    for index, (pos, path) in enumerate(starts):
+        end = starts[index + 1][0] if index + 1 < len(starts) else len(text)
+        blocks.append((path, text[pos:end]))
+    return header, blocks
+
+
+def apply_kernel_patches(patch_dir, kernel_source, output, run, external_source=None,
+                         extra_patch_dirs=()):
+    """Apply every *.patch in order to pinned kernel source and synced external overrides."""
     patch_dir = Path(patch_dir)
-    require(patch_dir.is_dir(), 'Kernel patch directory is missing: ' + str(patch_dir))
-    files = sorted(p for p in patch_dir.iterdir() if p.suffix == '.patch')
-    require(files, 'No .patch files in ' + str(patch_dir))
+    extra_dirs = [Path(d) for d in extra_patch_dirs]
+    kernel_source = Path(kernel_source)
+    output = Path(output)
+    files = []
+    for directory in (patch_dir, *extra_dirs):
+        require(directory.is_dir(), 'Kernel patch directory is missing: ' + str(directory))
+        dir_files = sorted(p for p in directory.iterdir() if p.suffix == '.patch')
+        require(dir_files, 'No .patch files in ' + str(directory))
+        files.extend(dir_files)
+    edp_tree = Path(external_source) / 'edp-618' if external_source is not None else None
+    if edp_tree is not None:
+        require((edp_tree / 'drivers/gpu/drm/msm').is_dir(),
+                'External MSM override directory is missing: ' + str(edp_tree))
     applied = []
     for patch in files:
         text = patch.read_text()
-        touched = re.findall(r'^diff --git a/(\S+) b/', text, re.M)
+        header, blocks = split_git_diffs(text)
+        touched = list(dict.fromkeys(name for name, _ in blocks))
         require(touched, 'Patch has no diff header: ' + patch.name)
+        if edp_tree is not None:
+            unsynced = [n for n in touched if n.startswith(EXTERNAL_UNSYNCED_PREFIXES)]
+            require(not unsynced,
+                    'Patch touches unsynced external module override(s): ' + ', '.join(unsynced))
+        msm_blocks = [(name, block) for name, block in blocks
+                      if name.startswith('drivers/gpu/drm/msm/')]
+        msm_touched = list(dict.fromkeys(name for name, _ in msm_blocks))
+        pre_matched_msm = set()
+        if edp_tree is not None:
+            for name in msm_touched:
+                k_file, e_file = kernel_source / name, edp_tree / name
+                if k_file.is_file() and e_file.is_file() and k_file.read_bytes() == e_file.read_bytes():
+                    pre_matched_msm.add(name)
         run(['patch', '-p1', '--batch', '--forward', '--fuzz=0', '-i', str(patch.resolve())],
             cwd=kernel_source)
         hashes = {}
         for name in touched:
-            path = Path(kernel_source) / name
+            path = kernel_source / name
             require(path.is_file(), 'Patched file missing: ' + name)
             hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
-        applied.append({'path': str(patch),
-                        'sha256': hashlib.sha256(patch.read_bytes()).hexdigest(),
-                        'files': hashes})
+        entry = {'path': str(patch),
+                 'sha256': hashlib.sha256(patch.read_bytes()).hexdigest(),
+                 'files': hashes}
+        if edp_tree is not None and msm_blocks:
+            if len(msm_blocks) == len(blocks):
+                ext_patch = patch.resolve()
+            else:
+                ext_patch = (output / ('edp-618-' + patch.name)).resolve()
+                ext_patch.write_text(header + ''.join(block for _, block in msm_blocks))
+            run(['patch', '-p1', '--batch', '--forward', '--fuzz=0', '-i', str(ext_patch)],
+                cwd=edp_tree)
+            ext_hashes = {}
+            for name in msm_touched:
+                ext_path = edp_tree / name
+                require(ext_path.is_file(), 'Patched external MSM file missing: ' + name)
+                ext_hashes[name] = hashlib.sha256(ext_path.read_bytes()).hexdigest()
+                if name in pre_matched_msm:
+                    require(ext_hashes[name] == hashes[name],
+                            'External MSM patch result diverged from kernel: ' + name)
+            entry['external_files'] = ext_hashes
+        applied.append(entry)
     report = {'directory': str(patch_dir), 'patch_count': len(applied), 'patches': applied,
-              'note': 'Applied to the extracted pinned kernel source before compilation; '
+              'external_msm_synced': edp_tree is not None,
+              'note': 'Applied to the extracted pinned kernel source (and external/edp-618 '
+                      'when present) before compilation; '
                       'not an upstream rebase and not hardware validated.',
               'hardware_validated': False}
-    (Path(output) / 'KERNEL-PATCHES.json').write_text(json.dumps(report, indent=2) + '\n')
+    if extra_dirs:
+        report['extra_directories'] = [str(d) for d in extra_dirs]
+    (output / 'KERNEL-PATCHES.json').write_text(json.dumps(report, indent=2) + '\n')
     return report
 
 
@@ -257,6 +331,9 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline'):
             by_name[path.name] = path
         # Replace ALL effective module copies, including private overlay copies,
         # never silently retain parent modules with the same version string.
+        from full_image_video import validate_venus_core_module
+        require('venus-core.ko' in by_name, 'Required Venus core module not built')
+        validate_venus_core_module(by_name['venus-core.ko'].read_bytes())
         for name in list(bodies):
             if name.endswith('.ko'):
                 require(Path(name).name in by_name, 'Required runtime module not built: '+name)
@@ -283,6 +360,7 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline'):
     # Take the current committed helper, while the accepted cumulative IPTSd
     # binary remains the fixed private runtime input (not the old touch cache).
     bodies['bin/touch-calibration-boot'] = (ROOT/'probe/test2/touch-calibration-boot').read_bytes().replace(b'\r\n',b'\n')
+    records.setdefault('bin/touch-calibration-boot', new_record(0o100755))
     # Universal builds do not rewrite reference hashes or gate boot on content
     # hashes. Preserve imported manifests as metadata; no startup consumer uses
     # them for validation after this policy is applied.
@@ -371,7 +449,12 @@ def build(args, compile_kernel):
             kernel_patches = DEFAULT_A6XX_PATCHES
         patch_report = None
         if kernel_patches:
-            patch_report = apply_kernel_patches(kernel_patches, extracted/'kernel', args.output, run)
+            extra_patches = ()
+            if Path(kernel_patches).resolve() == DEFAULT_A6XX_PATCHES.resolve():
+                extra_patches = (DEFAULT_A6XX_MMIO_FIX_PATCHES,)
+            patch_report = apply_kernel_patches(kernel_patches, extracted/'kernel', args.output, run,
+                                                external_source=extracted/'external',
+                                                extra_patch_dirs=extra_patches)
         cross=args.cross_compile
         if cross is None:
             toolchain=build_dir.parent/(build_dir.name+'-toolchain')
@@ -402,20 +485,23 @@ def build(args, compile_kernel):
         for name in ('Image','android-el2.dtb'):
             shutil.copyfile(original/name,bundle/name)
     graphics_report = assemble_runtime(private,bundle/'initramfs.cpio.gz',compiled,graphics=args.graphics)
+    esp_only = bool(getattr(args, 'esp_only', False))
     from disk_image import build as disk_build
     disk_args=argparse.Namespace(output=args.output/'disk',template=template,recovery_zip=None,
         resources=private,private_root=private,prepared_bundle=bundle,
         single_user_initramfs=bundle/'initramfs.cpio.gz',
         expected_single_user_sha256=None,
         size_gib=None,jobs=args.jobs,build_only=True,resume_build=False,kernel_mode=args.kernel_mode,
-        graphics_argument=graphics_token)
+        graphics_argument=graphics_token,esp_only=esp_only)
     report=disk_build(disk_args)
     report.update(source_compiled=bool(compiled),private_root=str(private),
         source_commit=source_commit,
         build_time_parent_initramfs_used=False,postbuild_tests_performed=False,
         graphics=args.graphics,graphics_boot_option=graphics_token,
         graphics_report=graphics_report,
+        esp_only=esp_only,
         kernel_patches=patch_report['patch_count'] if patch_report else 0,
+        kernel_patches_external_msm_synced=(patch_report['external_msm_synced'] if patch_report else None),
         kernel_patches_note=('prebuilt accepted Image: no patches applied' if args.kernel_mode=='prebuilt'
                              else None),
         hardware_validated=False)

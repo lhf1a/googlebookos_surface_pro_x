@@ -26,6 +26,35 @@ from kernel_baseline import ROOT, digest, policy, validate_build_tree, validate_
 DEFAULT_BUNDLE = ROOT / 'private/build-inputs/kernel-6.18' / policy()['bundle_directory']
 REQUIRED = {'Image', 'android-el2.dtb', 'el2launch.efi', 'initramfs.cpio.gz',
             'kernel-options.txt', 'qebspilaa64.efi', 'start.efi', 'tcblaunch.exe'}
+MSM_DISPLAY_PREFIXES = ('disp/', 'dp/', 'dsi/', 'hdmi/', 'registers/display/', 'generated/')
+MSM_DISPLAY_FILES = {'Makefile', 'msm_kms.c', 'msm_kms.h', 'msm_atomic.c',
+                     'msm_atomic_trace.h', 'msm_atomic_tracepoints.c',
+                     'msm_fb.c', 'msm_fbdev.c'}
+
+
+def validate_msm_gpu_sync(kernel_msm, external_msm):
+    """Reject external msm.ko overrides whose non-display GPU/core files lag kernel source."""
+    kernel_msm, external_msm = Path(kernel_msm), Path(external_msm)
+    if not (kernel_msm / 'adreno').is_dir():
+        return
+    def gpu_files(root):
+        result = {}
+        for path in sorted(root.rglob('*')):
+            if not path.is_file() or path.is_symlink():
+                continue
+            rel = path.relative_to(root).as_posix()
+            if rel in MSM_DISPLAY_FILES or rel.startswith(MSM_DISPLAY_PREFIXES):
+                continue
+            result[rel] = path
+        return result
+    kern = gpu_files(kernel_msm)
+    ext = gpu_files(external_msm)
+    diverged = sorted((set(kern) ^ set(ext)) |
+                      {rel for rel in (set(kern) & set(ext))
+                       if kern[rel].read_bytes() != ext[rel].read_bytes()})
+    if diverged:
+        raise ValueError('External msm.ko GPU sources diverge from kernel source: '
+                         + ', '.join(diverged[:8]))
 
 
 def external_manifest(directory, selected):
@@ -129,6 +158,9 @@ def compile_kernel(args, selected=None):
         external_root = args.external_sources.resolve()
         if external_root == output or external_root in output.parents or external_root == build or external_root in build.parents:
             raise ValueError('Build/export directories must be outside preserved external sources')
+        for group in external['groups']:
+            if 'msm.ko' in group['modules']:
+                validate_msm_gpu_sync(source / 'drivers/gpu/drm/msm', external_root / group['source'])
     if not args.config.is_file():
         raise ValueError('An explicit accepted full .config is required')
     if source == build or source in build.parents:
@@ -179,6 +211,12 @@ def compile_kernel(args, selected=None):
                 # recovery. Reapply idempotently to the copy, never the input.
                 run(label + '-resume-recovery', [str(module_dir)],
                     [sys.executable, str(ROOT / 'scripts/patch-sq2-spi-pm.py')])
+            if 'venus-core.ko' in group['modules'] and (module_dir / 'venus-sq2-avc-export.h').is_file():
+                # The preserved source archive copied raw probe/video/*.h over
+                # venus-sq2-core.h and venus-sq2-system-pm.h, dropping the PM
+                # core publish call and sq2_*_caps #include. Restore on copy.
+                run(label + '-venus-hooks', ['--ensure-venus-hooks', str(module_dir)],
+                    [sys.executable, str(ROOT / 'scripts/full_image_video.py')])
             options = ['M=' + str(module_dir)] + group.get('make_options', [])
             run(label + '-clean', options + ['clean'], prefix)
             run(label, options + ['-j' + str(args.jobs), 'modules'], prefix)
@@ -247,7 +285,9 @@ def main(argv=None):
     full.add_argument('--graphics', choices=('baseline','mesa'), default='baseline',
                       help='baseline: accepted mixed graphics stack; mesa: full Mesa chain (Mesa GLES/Vulkan, minigbm, drm HWC3)')
     full.add_argument('--kernel-patches', type=Path,
-                      help='apply every *.patch in this directory to the extracted kernel source before compile; mesa defaults to patches/drm-618-a6xx-upstream')
+                      help='apply every *.patch in this directory to the extracted kernel source (and external/edp-618) before compile; mesa defaults to patches/drm-618-a6xx-upstream')
+    full.add_argument('--esp-only', action='store_true',
+                      help='build paired kernel/modules and native-SSD ESP payload only; skip the 20 GiB disk image')
     full.add_argument('--cross-compile', help='override the compiler; default extracts PRIVATE_ROOT/kernel-6.18/toolchain.tar.gz')
     full.add_argument('--build-dir', type=Path, help='fresh Linux filesystem kernel build directory')
     full.add_argument('--output', type=Path, required=True)

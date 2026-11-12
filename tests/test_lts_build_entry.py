@@ -231,6 +231,43 @@ class LtsEntry(unittest.TestCase):
         self.assertFalse((args.output / 'external-build/spi/spi-hid.ko').exists())
         self.assertEqual((module / 'spi-hid-core.c').read_text(), 'preserved V1 source\n')
 
+    def test_msm_external_override_rejects_stale_gpu_and_accepts_synced_gpu(self):
+        args = self.compile_fixture(core_only=False)
+        args.external_sources = self.root / 'external'
+        kern_msm = args.source / 'drivers/gpu/drm/msm'
+        ext_msm = args.external_sources / 'edp-618/drivers/gpu/drm/msm'
+        for tree in (kern_msm, ext_msm):
+            (tree / 'adreno').mkdir(parents=True)
+            (tree / 'disp/dpu1').mkdir(parents=True)
+            (tree / 'dp').mkdir(parents=True)
+            (tree / 'Makefile').write_text('obj-m += msm.o\n')
+            (tree / 'msm_gpu.c').write_text('patched msm_gpu\n')
+        (kern_msm / 'adreno/a6xx_catalog.c').write_text('patched a680_hwcg + a640_gbif\n')
+        (ext_msm / 'adreno/a6xx_catalog.c').write_text('stale unpatched catalog\n')
+        (kern_msm / 'disp/dpu1/dpu_plane.c').write_text('stock dpu_plane\n')
+        (ext_msm / 'disp/dpu1/dpu_plane.c').write_text('sq2 ubwc + sdr dpu_plane\n')
+        (ext_msm / 'dp/sq2_edp_rates.h').write_text('/* sq2 edp */\n')
+        (ext_msm / 'generated').mkdir()
+        (ext_msm / 'generated/a6xx_gmu.xml.h').write_text('/* pregenerated */\n')
+        groups = {'groups': [{'source': 'edp-618/drivers/gpu/drm/msm',
+                              'modules': {'msm.ko': 'kernel/drivers/gpu/drm/msm/msm.ko'}}]}
+        with patch.object(build, 'external_manifest', return_value=groups):
+            with self.assertRaisesRegex(ValueError, 'GPU sources diverge.*adreno/a6xx_catalog.c'):
+                build.compile_kernel(args, self.selected)
+        self.assertFalse(args.output.exists())
+        self.assertFalse(args.build_dir.exists())
+
+        (ext_msm / 'adreno/a6xx_catalog.c').write_text('patched a680_hwcg + a640_gbif\n')
+        fake = self.fake_make(args)
+        def run(command, stdout, stderr):
+            if 'modules' in command and any(s.startswith('M=') for s in command):
+                copied = Path(next(s[2:] for s in command if s.startswith('M=')))
+                (copied / 'msm.ko').write_bytes(b'\x7fELF\x00vermagic=' + self.selected['kernel_release'].encode() + b' SMP\x00')
+            return fake(command, stdout, stderr)
+        with patch.object(build, 'external_manifest', return_value=groups), patch.object(build.subprocess, 'run', side_effect=run):
+            result = build.compile_kernel(args, self.selected)
+        self.assertTrue(result['external_runtime_overrides_integrated'])
+
 
 if __name__ == '__main__':
     unittest.main()

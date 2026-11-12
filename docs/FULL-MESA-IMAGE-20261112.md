@@ -117,20 +117,52 @@ SSD-not-found。正确文件应取自 `out/<build>/disk/…img` 的 SQ2PROBE/FAT
 `SPX-USERDATA-GROWN.txt`、`GPT-BACKUP-*.bin`、`Image`、dtb、launchers 与 firmware。
 仅主机准备、尚未写回设备；恢复后仍需实机验证启动、扩容 marker 与 swap。
 
-## 5. 明确未做（不得提升的边界）
+## 6. `external/edp-618` 覆盖带补丁 `msm.ko` 根因修复与 r3/r4 ESP 载荷（2026-11-12）
 
-- **未写盘、未启动、未接任何设备**；未验证 eDP/DPU 点亮、SurfaceFlinger/HWC3-drm
-  client 合成、minigbm 分配、freedreno GLES/Turnip Vulkan 实际渲染、A6xx GMEM/hwcg/
-  GMU timeout 修复的运行期效果、性能、功耗、PM、长时稳定性。
-- 只读的 stock mica vendor/super 分区中仍可能有非本链路使用的闭源文件；本镜像只是
-  不再**加载** QTI display/闭源 GLES/Vulkan 层。
-- Mesa 成员与 20 GiB 模板来自私有输入（`private/build-inputs/`，ignored）；全新 clone
-  无这些输入时不可复现；本镜像仍含私有 SSH 身份，属私有实验室产物，不得当匿名公共镜像分发。
+实机验证 r1/r2 后发现 3DMark 分数不变（5123）且仍有花屏；根因复核确认：
+
+1. `scripts/full_image.py` 原本仅对 `extracted/kernel` 应用了 11 个 `drm-618-a6xx-upstream` 补丁，生成含 `a640_gbif`/`a680_hwcg` 的 `kernel-build/.../msm.ko`（`6579d372…`）。
+2. 随后 `scripts/build-lts.py` 编译外部覆盖树 `external/edp-618/drivers/gpu/drm/msm`（同时含 SQ2 eDP/DPU 适配与一份未打补丁的 Adreno GPU 源码），并用产物 `04f37c99…` 覆盖了 `modules-stage/.../msm.ko`，导致最终进盘的 `msm.ko` 缺失全部 11 个 A6xx/A680 修复（§4 此前仅核对了 `kernel-build` 的 `a6xx_catalog.o`，未对最终进盘 `msm.ko` 复核符号）。
+3. 进一步在 `5.110` 上实机启动 r3 时发现并定位出第 5 号补丁 `0005-drm-msm-a6xx-Import-a680-hwcg-sequence-from-kgsl.patch` 的主线 MMIO 空间越界缺陷：该补丁把 `REG_A6XX_GMU_GX_GMU_SP_RF_CONTROL_0/1`（`0x1a883`/`0x1a884`，字节偏移 `0x6a20c`/`0x6a210`）放入 `a680_hwcg[]`，但主线 `drm/msm` 中 `gpu@2c00000` 仅映射 `0x40000` B，GMU 单独映射于 `gmu@2c6a000`（`gmu->mmio_offset = 0x6a000`）；`a6xx_set_hwcg()` 无条件调用 `gpu_write()` 会越界写入 `gpu->mmio + 0x6a20c`（在 `5.110` 上命中未映射 `vmalloc` 页引发 Oops 并死锁 `msm_open` 导致黑屏，在未触发故障的机器上也未真正写到 GMU `0x02c6a20c`）。
+
+已完成的修复与 r4 ESP 载荷构建：
+
+- `scripts/full_image.py`：`apply_kernel_patches(..., external_source=extracted/'external', extra_patch_dirs=...)` 将 `drivers/gpu/drm/msm/**` 补丁同步应用到 `kernel` 与 `external/edp-618`，并在使用默认 `patches/drm-618-a6xx-upstream` 时自动追加 `patches/drm-618-a6xx-mmio-fix/0001-drm-msm-a6xx-Route-GMU-offset-hwcg-entries-via-gmu_write.patch`（使 `>= gmu->mmio_offset` 的 `hwcg` 项改走 `gmu_write()`）；校验 GPU 文件在两棵树产出的 SHA256 完全一致，同时拒绝任何触及未同步外部覆盖树的补丁。
+- `scripts/build-lts.py`：新增 `validate_msm_gpu_sync()`，在任何 `compile` 路径下校验 `external/edp-618` 非显示 GPU/核心源码与 `kernel` 逐字节一致，失配即拒绝编译；`full-image` 新增 `--esp-only`（配对 `disk_image.py`），跳过 20 GiB 整盘与 gzip 打包，直接导出含完整 `storage_payload` delta 的内置 SSD ESP 树 `disk/esp/`。
+- `out/full-mesa-esp-20261112-r4` 与替换包 `out/esp-update-a6xx-20261112/`：
+  - `EFI/SQ2Nat/Image`（及 `SQ2Res`）：`418ebc422317e78e86b62e0ff7ad54bf184714e160509d54b85283a16e335313`（35,588,608 B）
+  - `EFI/SQ2Nat/initramfs.cpio.gz`（及 `SQ2Res`，含 `storage_payload` delta）：`dd8d797994479f43a47d47899ec44cb52f16c38292555eaeedadb26593257730`（203,616,044 B）
+  - 解包与反汇编核实其唯一 `msm.ko`（`8d822403a98f86acd1c9f3844ff9527a910c003381992c7a711135935c69e33e`）同时包含 `a640_gbif`、`a680_hwcg`、`a6xx_set_hwcg` 的 `gmu_write` 偏移路由分支以及 SQ2 DPU/eDP 适配（`dpu_caps_blob_release` 等）。
+
+## 7. 全 Mesa 硬件视频解码与 `/storage/emulated`（`/data` 存储）恢复（2026-11-12）
+
+在 `192.168.5.110` 实机启动全 Mesa 载荷（`EFI/SQ2Msa`）后，定位并修复两项独立回归：
+
+1. **OMX 服务 QTI gralloc 依赖与原生缓冲契约失配**：
+   - `--graphics mesa` 移除 `etc/sq2-qti-system` 后，启用了 `QUEST2_NATIVE_SURFACE_TEST` 的 `quest2-omx-service`（`7a6aa750…`）因动态依赖 `_ZN7gralloc15GetBufferLayoutEP16private_handle_tPjS2_S2_` 回落到原厂 vendor 的同名 `libgrallocutils.so`，触发 `CANNOT LINK EXECUTABLE`；
+   - VINTF 仍声明 `IOmx/default` 与 `IOmxStore/default`，使 `mediaserver` 与 `mediacodeclist_generator` 持续每秒阻塞重试 `getService`，进而阻塞 `MediaProvider` 挂载 FUSE `/storage/emulated`（表现为应用侧 `/data` 存储无法加载）；
+   - 同时该构建对 `OMX_IndexParamVideoAndroidRequiresSwRenderer` 返回 `0`，会令 `ACodec` 在全 Mesa 下分配 `minigbm`（`cros_gralloc_handle`）原生缓冲并交由 QTI `private_handle_t` 校验而失败。
+2. **源码构建 `venus-core.ko` 头文件挂钩被覆盖**：
+   - `scripts/prepare-full-image-sources.py` 在应用 `patch-sq2-venus-system-pm.py` 与 `patch-sq2-venus-avc-caps.py` 之后复制 `probe/video/*.h` 覆盖了 `external/venus/`，丢失 `venus-sq2-core.h` 的 `venus_sq2_pm_publish(core);` 与 `venus-sq2-system-pm.h` 的 `#include "venus-sq2-avc-export.h"`，导致源码编译出的 `venus-core.ko` 缺少 `sq2_{avc,hevc,vp8,vp9,mpeg2,mpeg1}_caps` 且 `sq2_pm_status` 恒为 `unpublished`。
+
+修复与实机验证：
+
+- 新增 `scripts/full_image_video.py`（配套更新 `scripts/build-lts.py`、`scripts/prepare-full-image-sources.py`、`scripts/full_image.py` 与增量修复脚本 `scripts/patch-mesa-video-initramfs.py`）：
+  - 在 `build-lts.py` 编译外部 `venus` 模块前幂等恢复 `venus_sq2_pm_publish(core)` 与 `venus-sq2-avc-export.h` 包含挂钩，并在 `full_image.assemble_runtime` 校验源码编译产出的 `venus-core.ko` 实际导出五类解码能力参数；
+  - 在 `mesa_runtime` 移除闭源图形目录前，将 QTI `libgrallocutils.so`（`0fb5d79e…`）仅拷入 `sq2-omx` 私有目录 `etc/sq2-hidl/lib64/`（不写入 `/vendor/lib64/`），并将 `quest2-omx-service` 的 `RequiresSwRenderer` 常量补丁为 `1`（`abbd1b66…`），采用 **Venus 硬解 → ByteBuffer + `SoftwareRenderer`（含 `sq2-p010-renderer`）→ `minigbm` / Mesa `SurfaceFlinger`** 路线。
+- `192.168.5.110` 实机部署 `EFI/SQ2Msa/initramfs.cpio.gz`（`9329ff7a1de0d363e5391d96e5aadebc34686212aeda2e44602d2bcb903cee6d`，配套从 `r4` 构建树重编的 `venus-core.ko` `3ec4cc33…` / `venus-dec.ko` `52382a57…`）并正常重启（`boot_id` `d44cff09…` / `6d4e7b28…`）：
+  - `init.svc.sq2-omx=running`，`sq2_pm_status` 为 `sys_error=0 core_state=1 insts=0 vb2_bytes=0`，`media_codecs_quest2_omx.xml` 自动生成 `avc/hevc/mpeg2/vp8/vp9` 五项硬解能力，`mediacodeclist_generator` 正常完成退出，FUSE `/storage/emulated` 正常挂载，用户确认恢复可用；
+  - 按 `probe/graphics/chrome-graphics-cache.sh` 规范对动态发现的已解锁 `user 0` 下 `com.android.chrome` 执行先停进程、直接删除 6 处确认图形/着色器缓存（`GPUPersistentCache`、`Default/{DawnGraphiteCache,DawnWebGPUCache,GPUCache}`、`user_de` 下 `opengl.shaders_cache.multifile` 与 `skia.shaders_cache`，`cache-backup=none`）并重启 Chrome，账号、普通缓存与其他应用未改动。
+
+## 8. 明确未做（不得提升的边界）
+
+- 仅在 `192.168.5.110` 单机验证了 `EFI/SQ2Msa` 启动、OMX 服务注册、存储挂载与按需 Chrome 图形缓存清理；未据此宣称跨 SQ1/SQ2 整盘重刷、4K60 吞吐/功耗基准、PM 休眠唤醒、长时稳定性或 `full_*` 整栈目标完成。
+- 只读的 stock mica vendor/super 分区中仍可能有非本链路使用的闭源文件；本镜像只是不再向系统图形路径加载闭源 EGL/GLES/Vulkan/HWC 层（`sq2-omx` 仅在自身私有库目录携带闭源 OMX 组件所需依赖）。
+- Mesa 成员与 20 GiB 模板来自私有输入（`private/build-inputs/`，ignored）；全新 clone 无这些输入时不可复现；本镜像仍含私有 SSH 身份，属私有实验室产物，不得当匿名公共镜像分发。
 - 为保持通用镜像策略，`disk_image` 以 `--build-only` 运行，其 `IMAGE-MANIFEST.json` 中
   postbuild 读回/全流校验字段为 False/None；§4 的 gzip 全流与 GPT 校验是本轮另外独立执行的。
 - 历史 6.3.8 图形入口、已验收发布包与设备现有回退均未改动。
 
-## 6. 回滚
+## 9. 回滚
 
-输出全部在 ignored `out/full-mesa-image-20261112/`，删除该目录即可；仓库侧
-`git revert` 本功能提交即可恢复构建脚本。私有输入、设备、EFI/GRUB、发布 pins 均未被写入。
+输出全部在 ignored `out/`，删除对应目录即可；`192.168.5.110` 更新前原 `SQ2Msa/initramfs.cpio.gz`（`90473e9b…`）保存在本地 `out/omx-mesa-fix-20261112/device/` 可随时原子恢复；仓库侧恢复对应脚本修改即可，私有输入与发布 pins 未被写入。

@@ -18,6 +18,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import full_image as fi  # noqa: E402  (scripts/ on sys.path)
+import full_image_video as fiv  # noqa: E402
 
 PRIVATE = ROOT / 'private/build-inputs'
 RUNTIME = PRIVATE / 'full-image-runtime'
@@ -42,6 +43,23 @@ INIT = (b'#!/bin/busybox sh\n'
         b'fi\n' + STAGE_LINES + b'quest2-hidl-stage > /logs/hidl-stage.txt 2>&1 || fail hidl-stage\n')
 
 
+def _synthetic_aarch64_elf(extra=b''):
+    head = bytearray(64)
+    head[:6] = b'\x7fELF\x02\x01'
+    head[18:20] = (183).to_bytes(2, 'little')
+    return bytes(head) + extra
+
+
+def _synthetic_omx_service():
+    buf = bytearray(_synthetic_aarch64_elf())
+    end = fiv.OMX_SWRENDER_OFFSET + len(fiv.OMX_SWRENDER_BEFORE)
+    buf.extend(b'\0' * (end - len(buf)))
+    buf[fiv.OMX_INDEX_CHECK_OFFSET:fiv.OMX_INDEX_CHECK_OFFSET + len(fiv.OMX_INDEX_CHECK_BYTES)] = (
+        fiv.OMX_INDEX_CHECK_BYTES)
+    buf[fiv.OMX_SWRENDER_OFFSET:end] = fiv.OMX_SWRENDER_BEFORE
+    return bytes(buf)
+
+
 def fixture_runtime():
     records, bodies = {}, {}
     def put(name, body, mode=0o100644):
@@ -53,9 +71,13 @@ def fixture_runtime():
                  'etc/googlebook-security/lib64/hw/vulkan.freedreno.so',
                  'etc/googlebook-security/lib64/hw/mapper.minigbm.so'):
         put(name, b'fixture')
+    omx_service = _synthetic_omx_service()
+    put(fiv.OMX_SERVICE, omx_service, 0o100755)
+    put(fiv.OMX_SUMS, (fiv.sha(omx_service) + '  quest2-omx-service\n').encode())
     for directory in fi.CLOSED_GRAPHICS_DIRS:
         put(directory, b'', 0o040755)
         put(directory + '/payload.so', b'closed-fixture')
+    put(fiv.OMX_GRALLOC_UTILS_SOURCE, _synthetic_aarch64_elf(fiv.GRALLOC_LAYOUT_SYMBOL))
     for name in fi.CLOSED_GRAPHICS_HELPERS:
         put(name, b'#!/bin/sh\n', 0o100755)
     return records, bodies
@@ -66,7 +88,10 @@ class MesaRuntimeFixture(unittest.TestCase):
         records, bodies = fixture_runtime()
         report = fi.mesa_runtime(records, bodies)
         self.assertEqual(report['graphics'], 'mesa')
-        self.assertEqual(report['removed_count'], 6 + len(fi.CLOSED_GRAPHICS_HELPERS))
+        self.assertEqual(report['removed_count'], 7 + len(fi.CLOSED_GRAPHICS_HELPERS))
+        self.assertEqual(report['video']['omx_output'], 'bytebuffer-software-renderer')
+        self.assertIn(fiv.OMX_GRALLOC_UTILS, bodies)
+        self.assertIn(fiv.OMX_GRALLOC_UTILS, records)
         self.assertFalse(report['hardware_validated'])
         for directory in fi.CLOSED_GRAPHICS_DIRS:
             self.assertNotIn(directory, bodies)
@@ -168,11 +193,143 @@ class KernelPatchApplication(unittest.TestCase):
             report = fi.apply_kernel_patches(PATCH_DIR, kernel, root, run)
             self.assertEqual(report['patch_count'], len(config['patches']))
             self.assertEqual(report['hardware_validated'], False)
+            self.assertEqual(report['external_msm_synced'], False)
             for name, want in expected.items():
                 got = __import__('hashlib').sha256((kernel / name).read_bytes()).hexdigest()
                 self.assertEqual(got, want, name)
             manifest = json.loads((root / 'KERNEL-PATCHES.json').read_text())
             self.assertEqual(len(manifest['patches']), len(config['patches']))
+
+    @unittest.skipUnless(SOURCE_ARCHIVE.is_file() and PATCH_DIR.is_dir(),
+                         'private pinned source archive or patch series not staged')
+    def test_series_syncs_external_edp618_msm_tree(self):
+        config = json.loads(PATCH_CONFIG.read_text(encoding='utf-8'))
+        expected = {}
+        for entry in config['patches']:
+            for name, hashes in entry['files'].items():
+                expected[name.removeprefix('kernel/')] = hashes['after']
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            kernel = root / 'kernel'
+            external = root / 'external'
+            edp = external / 'edp-618'
+            names = {name.removeprefix('kernel/') for entry in config['patches']
+                     for name in entry['files']}
+            with tarfile.open(SOURCE_ARCHIVE) as archive:
+                members = {m.name: m for m in archive.getmembers() if m.isfile()}
+                for name in names:
+                    for prefix, tree in (('kernel/', kernel), ('external/edp-618/', edp)):
+                        body = archive.extractfile(members[prefix + name]).read()
+                        path = tree / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(body)
+
+            def run(command, cwd=None):
+                result = subprocess.run(list(map(str, command)), cwd=cwd,
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result
+            report = fi.apply_kernel_patches(PATCH_DIR, kernel, root, run, external_source=external)
+            self.assertTrue(report['external_msm_synced'])
+            for name, want in expected.items():
+                got_kern = __import__('hashlib').sha256((kernel / name).read_bytes()).hexdigest()
+                got_ext = __import__('hashlib').sha256((edp / name).read_bytes()).hexdigest()
+                self.assertEqual(got_kern, want, name)
+                self.assertEqual(got_ext, want, 'external/edp-618/' + name)
+            manifest = json.loads((root / 'KERNEL-PATCHES.json').read_text())
+            self.assertTrue(all('external_files' in p for p in manifest['patches']))
+
+    @unittest.skipUnless(SOURCE_ARCHIVE.is_file() and PATCH_DIR.is_dir()
+                         and fi.DEFAULT_A6XX_MMIO_FIX_PATCHES.is_dir(),
+                         'private pinned source archive or patch series not staged')
+    def test_series_plus_gmu_mmio_fix_applies_to_kernel_and_edp618(self):
+        config = json.loads(PATCH_CONFIG.read_text(encoding='utf-8'))
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            kernel = root / 'kernel'
+            external = root / 'external'
+            edp = external / 'edp-618'
+            names = {name.removeprefix('kernel/') for entry in config['patches']
+                     for name in entry['files']}
+            with tarfile.open(SOURCE_ARCHIVE) as archive:
+                members = {m.name: m for m in archive.getmembers() if m.isfile()}
+                for name in names:
+                    for prefix, tree in (('kernel/', kernel), ('external/edp-618/', edp)):
+                        body = archive.extractfile(members[prefix + name]).read()
+                        path = tree / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(body)
+
+            def run(command, cwd=None):
+                result = subprocess.run(list(map(str, command)), cwd=cwd,
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result
+            report = fi.apply_kernel_patches(
+                PATCH_DIR, kernel, root, run, external_source=external,
+                extra_patch_dirs=(fi.DEFAULT_A6XX_MMIO_FIX_PATCHES,))
+            self.assertEqual(report['patch_count'], len(config['patches']) + 1)
+            self.assertEqual(report['extra_directories'], [str(fi.DEFAULT_A6XX_MMIO_FIX_PATCHES)])
+            gpu_c_kern = (kernel / 'drivers/gpu/drm/msm/adreno/a6xx_gpu.c').read_text()
+            gpu_c_ext = (edp / 'drivers/gpu/drm/msm/adreno/a6xx_gpu.c').read_text()
+            self.assertEqual(gpu_c_kern, gpu_c_ext)
+            self.assertIn('if (gmu->mmio && (reg->offset << 2) >= gmu->mmio_offset)', gpu_c_kern)
+            self.assertIn('gmu_write(gmu, reg->offset, state ? reg->value : 0);', gpu_c_kern)
+
+    def test_mixed_patch_and_unsynced_override_guard(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            kernel = root / 'kernel'
+            external = root / 'external'
+            edp = external / 'edp-618'
+            (kernel / 'include/uapi/drm').mkdir(parents=True)
+            (kernel / 'drivers/gpu/drm/msm/adreno').mkdir(parents=True)
+            (edp / 'drivers/gpu/drm/msm/adreno').mkdir(parents=True)
+            (kernel / 'include/uapi/drm/msm_drm.h').write_text('int header = 1;\n')
+            for tree in (kernel, edp):
+                (tree / 'drivers/gpu/drm/msm/adreno/a6xx_gpu.c').write_text('int gpu = 1;\n')
+            patches = root / 'patches'
+            patches.mkdir()
+            (patches / '0001-mixed.patch').write_text(
+                'From: test\nSubject: mixed\n\n'
+                'diff --git a/include/uapi/drm/msm_drm.h b/include/uapi/drm/msm_drm.h\n'
+                '--- a/include/uapi/drm/msm_drm.h\n'
+                '+++ b/include/uapi/drm/msm_drm.h\n'
+                '@@ -1 +1 @@\n'
+                '-int header = 1;\n'
+                '+int header = 2;\n'
+                'diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c\n'
+                '--- a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c\n'
+                '+++ b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c\n'
+                '@@ -1 +1 @@\n'
+                '-int gpu = 1;\n'
+                '+int gpu = 2;\n'
+            )
+
+            def run(command, cwd=None):
+                result = subprocess.run(list(map(str, command)), cwd=cwd,
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result
+            out = root / 'out'
+            out.mkdir()
+            report = fi.apply_kernel_patches(patches, kernel, out, run, external_source=external)
+            self.assertEqual((kernel / 'include/uapi/drm/msm_drm.h').read_text(), 'int header = 2;\n')
+            self.assertEqual((kernel / 'drivers/gpu/drm/msm/adreno/a6xx_gpu.c').read_text(), 'int gpu = 2;\n')
+            self.assertEqual((edp / 'drivers/gpu/drm/msm/adreno/a6xx_gpu.c').read_text(), 'int gpu = 2;\n')
+            self.assertEqual(set(report['patches'][0]['external_files']),
+                             {'drivers/gpu/drm/msm/adreno/a6xx_gpu.c'})
+
+            bad_patches = root / 'bad-patches'
+            bad_patches.mkdir()
+            (bad_patches / '0001-venus.patch').write_text(
+                'diff --git a/drivers/media/platform/qcom/venus/core.c b/drivers/media/platform/qcom/venus/core.c\n'
+                '--- a/drivers/media/platform/qcom/venus/core.c\n'
+                '+++ b/drivers/media/platform/qcom/venus/core.c\n'
+                '@@ -1 +1 @@\n-old\n+new\n'
+            )
+            with self.assertRaisesRegex(ValueError, 'unsynced external module override'):
+                fi.apply_kernel_patches(bad_patches, kernel, out, run, external_source=external)
 
 
 @unittest.skipUnless(RUNTIME.is_dir(), 'private full-image runtime not staged')
@@ -185,6 +342,8 @@ class RealRuntimeMesaTransform(unittest.TestCase):
         self.assertGreater(report['removed_count'], 100)
         self.assertGreater(report['retained_mesa_members'], 50)
         self.assertIn('etc/sq2-hidl', bodies)
+        self.assertIn('etc/sq2-hidl/lib64/libgrallocutils.so', bodies)
+        self.assertEqual(report['video']['omx_output'], 'bytebuffer-software-renderer')
         self.assertIn('bin/quest2-hidl-stage', bodies)
         self.assertNotIn('bin/qti-system-display-stage', bodies)
         self.assertNotIn('etc/sq2-qti-system', bodies)
@@ -233,6 +392,7 @@ class FullImageCli(unittest.TestCase):
         self.assertIn('--graphics', help_text.stdout)
         self.assertIn('mesa', help_text.stdout)
         self.assertIn('--kernel-patches', help_text.stdout)
+        self.assertIn('--esp-only', help_text.stdout)
         bad = subprocess.run(
             [sys.executable, str(ROOT / 'scripts/build.py'), 'full-image',
              '--output', str(ROOT / 'out/should-not-exist'), '--graphics', 'unknown'],
