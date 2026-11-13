@@ -30,6 +30,7 @@ static int sq2_omx_flush(struct venus_inst *inst, u32 flags)
 {
  struct vb2_v4l2_buffer *buffer;
  u32 type;
+ bool output_flushed;
  int ret;
  if (!flags || (flags & ~3U)) return -EINVAL;
  if (!IS_SQ2_HFI(inst->core)) return -EOPNOTSUPP;
@@ -55,6 +56,7 @@ static int sq2_omx_flush(struct venus_inst *inst, u32 flags)
   ret = hfi_session_flush(inst, HFI_FLUSH_OUTPUT, true);
   mutex_lock(&inst->lock);
  }
+ output_flushed = (inst->sq2_omx_flush_flags & 2) != 0;
  inst->sq2_omx_flush_flags = 0;
  inst->sq2_omx_flush_output_pending = false;
  if (ret) goto out;
@@ -79,6 +81,19 @@ static int sq2_omx_flush(struct venus_inst *inst, u32 flags)
    v4l2_m2m_buf_done(buffer, VB2_BUF_STATE_DONE);
   }
  }
+ if ((flags & 1) && (flags & 2))
+  memset(inst->tss, 0, sizeof(inst->tss));
+ if ((flags & 1) && inst->streamon_cap &&
+     (inst->codec_state == VENUS_DEC_STATE_DRAIN ||
+      inst->codec_state == VENUS_DEC_STATE_STOPPED)) {
+  inst->drain_active = false;
+  inst->codec_state = VENUS_DEC_STATE_DECODING;
+ }
+ /* Flushing output/all returns internal DPB buffers from firmware too. Re-queue
+  * them when capture remains active (not before start or mid-DRC teardown). */
+ if (output_flushed && inst->streamon_cap &&
+     inst->codec_state != VENUS_DEC_STATE_DRC)
+  ret = venus_helper_queue_dpb_bufs(inst);
 out:
  mutex_unlock(&inst->lock);
  mutex_unlock(&inst->ctx_q_lock);

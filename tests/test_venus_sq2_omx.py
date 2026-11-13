@@ -12,6 +12,8 @@ HARNESS = r"""
 #include <string.h>
 #include <errno.h>
 typedef uint32_t u32;
+typedef uint64_t u64;
+#include <stdbool.h>
 #define V4L2_EVENT_SRC_CH_RESOLUTION 1
 #define INST_START 5
 #define HFI_BUFFERFLAG_CODECCONFIG 0x80U
@@ -25,14 +27,22 @@ struct hfi_event_data {u32 sq2_sequence_fields,height,width,bit_depth,pic_struct
 struct vb2_buffer {int bytes;};
 struct vb2_v4l2_buffer {struct vb2_buffer vb2_buf;u32 flags;};
 struct core {int sq2;unsigned long sys_error;};
-struct venus_inst {struct core *core;int lock,ctx_q_lock,state,session_error;u32 sq2_omx_flush_flags;int sq2_omx_flush_output_pending;void *m2m_ctx;};
-static int inject_sequence,inject_session_error,inject_core_error,fail_call;
+enum venus_dec_state {
+ VENUS_DEC_STATE_STOPPED = 3,
+ VENUS_DEC_STATE_DRAIN = 5,
+ VENUS_DEC_STATE_DECODING = 6,
+ VENUS_DEC_STATE_DRC = 7,
+};
+struct venus_ts_metadata {int used; u64 ts_ns;};
+struct venus_inst {struct core *core;int lock,ctx_q_lock,state,session_error;u32 sq2_omx_flush_flags;int sq2_omx_flush_output_pending;void *m2m_ctx;unsigned int streamon_cap;enum venus_dec_state codec_state;int drain_active;struct venus_ts_metadata tss[4];};
+static int inject_sequence,inject_session_error,inject_core_error,fail_call,inject_drc;
 static int sq2_omx_flush_output(struct venus_inst *);
-static int error,acknowledged,calls,returned,last_type,in_count,out_count,cleared;
+static int error,acknowledged,calls,returned,last_type,in_count,out_count,cleared,dpb_queued,dpb_error;
 static struct vb2_v4l2_buffer in_buf,out_buf;
 static void mutex_lock(int *p){assert(!*p);*p=1;}
 static void mutex_unlock(int *p){assert(*p);*p=0;}
 static int test_bit(int n,unsigned long *p){return (*p>>n)&1;}
+static int venus_helper_queue_dpb_bufs(struct venus_inst *i){assert(i->lock);if(dpb_error)return dpb_error;dpb_queued++;return 0;}
 static int hfi_session_flush(struct venus_inst *i,u32 type,int block){
  calls++;last_type=type;
  if(!block){assert(i->lock);return error;}
@@ -40,6 +50,7 @@ static int hfi_session_flush(struct venus_inst *i,u32 type,int block){
  if(inject_sequence){
   inject_sequence=0;
   mutex_lock(&i->lock);
+  if(inject_drc){inject_drc=0;i->codec_state=VENUS_DEC_STATE_DRC;}
   assert(!sq2_omx_flush_output(i));
   mutex_unlock(&i->lock);
  }
@@ -60,8 +71,6 @@ static void v4l2_m2m_buf_done(struct vb2_v4l2_buffer *b,int state){
 }
 static void *v4l2_m2m_get_dst_vq(void *p){return p;}
 static void vb2_clear_last_buffer_dequeued(void *p){(void)p;assert(acknowledged);cleared++;}
-#define true 1
-#define false 0
 #include "HEADER"
 #include "FLAGS_HEADER"
 int main(void){
@@ -98,13 +107,30 @@ int main(void){
  mutex_lock(&i.lock);count=calls;
  assert(!sq2_omx_flush_output(&i) && calls==count+1 && last_type==HFI_FLUSH_OUTPUT);
  mutex_unlock(&i.lock);
- // Errors arriving while unlocked must not return software-owned buffers.
- in_count=out_count=1;int old_returned=returned;inject_session_error=1;
- assert(sq2_omx_flush(&i,3)==-EIO && returned==old_returned);
+ // Errors arriving while unlocked must not return software-owned buffers or re-queue DPBs.
+ in_count=out_count=1;int old_returned=returned;int old_dpb=dpb_queued;inject_session_error=1;
+ assert(sq2_omx_flush(&i,3)==-EIO && returned==old_returned && dpb_queued==old_dpb);
  inject_session_error=0;i.session_error=0;inject_core_error=1;
- assert(sq2_omx_flush(&i,3)==-EIO && returned==old_returned);
+ assert(sq2_omx_flush(&i,3)==-EIO && returned==old_returned && dpb_queued==old_dpb);
  inject_core_error=0;core.sys_error=0;inject_sequence=1;error=-ETIMEDOUT;count=calls;
- assert(sq2_omx_flush(&i,1)==-ETIMEDOUT && calls==count+1 && returned==old_returned);
+ assert(sq2_omx_flush(&i,1)==-ETIMEDOUT && calls==count+1 && returned==old_returned && dpb_queued==old_dpb);
+ error=0;
+ // Active capture decoding re-queues flushed DPBs, clears tss, and resets DRAIN/STOPPED.
+ i.streamon_cap=1;i.codec_state=VENUS_DEC_STATE_DRAIN;i.drain_active=1;i.tss[0].used=1;
+ old_dpb=dpb_queued;
+ assert(!sq2_omx_flush(&i,3) && dpb_queued==old_dpb+1 && i.codec_state==VENUS_DEC_STATE_DECODING && !i.drain_active && !i.tss[0].used);
+ i.codec_state=VENUS_DEC_STATE_STOPPED;
+ assert(!sq2_omx_flush(&i,3) && dpb_queued==old_dpb+2 && i.codec_state==VENUS_DEC_STATE_DECODING);
+ // Input-only flush without DRC does not re-queue DPBs or clear tss.
+ i.tss[0].used=1;
+ assert(!sq2_omx_flush(&i,1) && dpb_queued==old_dpb+2 && i.tss[0].used);
+ // Mid-DRC teardown must not re-queue old DPBs.
+ inject_sequence=1;inject_drc=1;
+ assert(!sq2_omx_flush(&i,1) && dpb_queued==old_dpb+2 && i.codec_state==VENUS_DEC_STATE_DRC);
+ // Propagate DPB queue error while still releasing software-queued buffers.
+ i.codec_state=VENUS_DEC_STATE_DECODING;in_count=out_count=1;old_returned=returned;dpb_error=-ENOMEM;
+ assert(sq2_omx_flush(&i,3)==-ENOMEM && returned==old_returned+2);
+ dpb_error=0;
  assert(!i.lock && !i.ctx_q_lock && !i.sq2_omx_flush_flags);
  return 0;
 }
