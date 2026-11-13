@@ -77,14 +77,21 @@ def _sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def hybrid_runtime(records, bodies, gralloc_adapter_bytes=None, layout_payload=None):
+def hybrid_runtime(
+    records,
+    bodies,
+    gralloc_adapter_bytes=None,
+    layout_payload=None,
+    backlight_payload=None,
+):
     """Combine Mesa Freedreno/Turnip 3D with QTI gralloc/mapper5/HWC/SDM + native OMX.
 
     Host-side transformation only: retains Mesa GLES/Turnip in etc/googlebook-security,
     strips closed Adreno GLES/Vulkan from etc/sq2-qti-system, installs the
     u_gralloc_cros_api -> gralloc.kona adapter (gralloc.sq2_mesa.so) as
     gralloc.default.so, aligns sq2-qti-display/libdrm.so with Mesa's libdrm,
-    and preserves RequiresSwRenderer=0 native ANW surface OMX decoding.
+    redirects missing QTI panelN-backlight sysfs nodes to pwm-backlight, and
+    preserves RequiresSwRenderer=0 native ANW surface OMX decoding.
     """
     prop_name = 'etc/googlebook-security/build.prop'
     require(prop_name in bodies, 'Mesa overlay missing: ' + prop_name)
@@ -112,6 +119,7 @@ def hybrid_runtime(records, bodies, gralloc_adapter_bytes=None, layout_payload=N
                     qti_prefix + '/root/lib64/libgrallocutils.so',
                     qti_prefix + '/root/lib64/libqdMetaData.so',
                     qti_prefix + '/root/lib64/sq2-qti-display/libdrm.so',
+                    qti_prefix + '/root/lib64/sq2-qti-display/libsdmcore.so',
                     'bin/qti-system-display-stage'):
         require(req_qti in bodies, 'QTI display/gralloc payload missing: ' + req_qti)
 
@@ -163,14 +171,37 @@ def hybrid_runtime(records, bodies, gralloc_adapter_bytes=None, layout_payload=N
     if layout_payload is None:
         from build_mesa_qti_layout import build_payload
         layout_payload = build_payload(bodies[qti_prefix + '/root/lib64/libgrallocutils.so'])
-    expected_layout = {'lib64/libgrallocutils.so',
-                       'lib64/sq2-qti-display/libgrallocutils.so',
-                       'lib64/libsq2_grallocutils_vendor.so'}
-    require(set(layout_payload) == expected_layout, 'Incomplete Hybrid layout payload')
-    for rel, payload in layout_payload.items():
-        path = f'{qti_prefix}/root/{rel}'
-        bodies[path] = payload
-        records[path] = new_record(0o100644)
+    if backlight_payload is None:
+        from build_sdm_backlight_shim import build_payload as build_backlight_payload
+        backlight_payload = build_backlight_payload(
+            bodies[qti_prefix + '/root/lib64/sq2-qti-display/libsdmcore.so']
+        )
+
+    overlay_specs = (
+        (
+            'Hybrid layout payload',
+            layout_payload,
+            {
+                'lib64/libgrallocutils.so',
+                'lib64/sq2-qti-display/libgrallocutils.so',
+                'lib64/libsq2_grallocutils_vendor.so',
+            },
+        ),
+        (
+            'Hybrid backlight payload',
+            backlight_payload,
+            {
+                'lib64/sq2-qti-display/libsdmcore.so',
+                'lib64/sq2-qti-display/libsq2_sdm_backlight.so',
+            },
+        ),
+    )
+    for label, payload_map, expected_keys in overlay_specs:
+        require(set(payload_map) == expected_keys, f'Incomplete {label}')
+        for rel, payload in payload_map.items():
+            path = f'{qti_prefix}/root/{rel}'
+            bodies[path] = payload
+            records[path] = new_record(0o100644)
 
     # Rewrite INSTALL_FILES, SYMLINKS, INSTALLED_SHA256SUMS, and SHA256SUMS deterministically.
     root_prefix = qti_prefix + '/root/'

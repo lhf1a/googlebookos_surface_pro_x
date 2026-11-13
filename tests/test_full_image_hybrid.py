@@ -103,6 +103,7 @@ def build_hybrid_fixture_tree():
     add_file(f'{qti_prefix}/root/lib64/libgrallocutils.so', b'grallocutils')
     add_file(f'{qti_prefix}/root/lib64/libqdMetaData.so', b'qdmeta')
     add_file(f'{qti_prefix}/root/lib64/sq2-qti-display/libdrm.so', b'OLD_QTI_LIBDRM')
+    add_file(f'{qti_prefix}/root/lib64/sq2-qti-display/libsdmcore.so', b'OLD_SDMCORE')
     for closed_rel in full_image.HYBRID_CLOSED_QTI_ROOT_FILES:
         add_file(f'{qti_prefix}/root/{closed_rel}', b'closed-' + closed_rel.encode())
 
@@ -507,10 +508,20 @@ class HybridGraphicsTest(unittest.TestCase):
     def test_hybrid_runtime_fixture_and_omx_gate(self):
         records, bodies = build_hybrid_fixture_tree()
         fake_adapter = make_aarch64_elf(b'ADAPTER')
-        report = full_image.hybrid_runtime(records, bodies, gralloc_adapter_bytes=fake_adapter, layout_payload={
+        report = full_image.hybrid_runtime(
+            records,
+            bodies,
+            gralloc_adapter_bytes=fake_adapter,
+            layout_payload={
                 'lib64/libgrallocutils.so': b'fixture-layout',
                 'lib64/sq2-qti-display/libgrallocutils.so': b'fixture-layout',
-                'lib64/libsq2_grallocutils_vendor.so': b'fixture-vendor'})
+                'lib64/libsq2_grallocutils_vendor.so': b'fixture-vendor',
+            },
+            backlight_payload={
+                'lib64/sq2-qti-display/libsdmcore.so': b'fixture-sdmcore',
+                'lib64/sq2-qti-display/libsq2_sdm_backlight.so': b'fixture-backlight',
+            },
+        )
 
         self.assertEqual(report['graphics'], 'hybrid')
         self.assertEqual(bodies['etc/sq2-graphics-mode'], b'hybrid-mesa-qti\n')
@@ -543,6 +554,7 @@ class HybridGraphicsTest(unittest.TestCase):
         install_files = bodies['etc/sq2-qti-system/INSTALL_FILES'].decode().splitlines()
         self.assertIn('lib64/hw/gralloc.sq2_mesa.so', install_files)
         self.assertIn('lib64/hw/mapper.quest2.so', install_files)
+        self.assertIn('lib64/sq2-qti-display/libsq2_sdm_backlight.so', install_files)
         self.assertEqual(
             len(install_files),
             len(bodies['etc/sq2-qti-system/INSTALLED_SHA256SUMS'].decode().splitlines()),
@@ -555,10 +567,20 @@ class HybridGraphicsTest(unittest.TestCase):
         omx[off:off + len(full_image_video.OMX_SWRENDER_AFTER)] = full_image_video.OMX_SWRENDER_AFTER
         bad_bodies[full_image_video.OMX_SERVICE] = bytes(omx)
         with self.assertRaises(ValueError):
-            full_image.hybrid_runtime(bad_records, bad_bodies, gralloc_adapter_bytes=fake_adapter, layout_payload={
-                'lib64/libgrallocutils.so': b'fixture-layout',
-                'lib64/sq2-qti-display/libgrallocutils.so': b'fixture-layout',
-                'lib64/libsq2_grallocutils_vendor.so': b'fixture-vendor'})
+            full_image.hybrid_runtime(
+                bad_records,
+                bad_bodies,
+                gralloc_adapter_bytes=fake_adapter,
+                layout_payload={
+                    'lib64/libgrallocutils.so': b'fixture-layout',
+                    'lib64/sq2-qti-display/libgrallocutils.so': b'fixture-layout',
+                    'lib64/libsq2_grallocutils_vendor.so': b'fixture-vendor',
+                },
+                backlight_payload={
+                    'lib64/sq2-qti-display/libsdmcore.so': b'fixture-sdmcore',
+                    'lib64/sq2-qti-display/libsq2_sdm_backlight.so': b'fixture-backlight',
+                },
+            )
 
     def test_hybrid_runtime_real_private_overlay_if_present(self):
         runtime_dir = ROOT / 'private/build-inputs/full-image-runtime'
@@ -574,6 +596,12 @@ class HybridGraphicsTest(unittest.TestCase):
         self.assertEqual(report['graphics'], 'hybrid')
         self.assertEqual(report['video']['omx_output'], 'native-anw-surface')
         qti = 'etc/sq2-qti-system'
+        self.assertIn(f'{qti}/root/lib64/sq2-qti-display/libsq2_sdm_backlight.so', bodies)
+        with tempfile.TemporaryDirectory() as tmp:
+            patched_sdmcore = Path(tmp) / 'libsdmcore.so'
+            patched_sdmcore.write_bytes(bodies[f'{qti}/root/lib64/sq2-qti-display/libsdmcore.so'])
+            needed = subprocess.check_output(['patchelf', '--print-needed', str(patched_sdmcore)], text=True)
+            self.assertIn('libsq2_sdm_backlight.so', needed.splitlines())
         for line in bodies[f'{qti}/INSTALLED_SHA256SUMS'].decode().splitlines():
             digest, rel = line.split(None, 1)
             self.assertEqual(hashlib.sha256(bodies[f'{qti}/root/{rel}']).hexdigest(), digest)
