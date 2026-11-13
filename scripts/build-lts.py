@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Unified Linux 6.18 LTS entry, including original-template full-image builds.
 
-full-image accepts --graphics baseline|mesa. The mesa mode assembles the full
-Mesa userspace chain (Mesa freedreno GLES/Vulkan, minigbm, drm HWC3 client
-composition) instead of the accepted mixed/QTI graphics stack, and applies the
-repo A6xx kernel patch series unless --kernel-patches overrides it. It is a
-build-time selection only; no rendering or hardware validation is implied.
+full-image accepts --graphics baseline|mesa|hybrid. The mesa mode assembles the
+full Mesa userspace chain (Mesa freedreno GLES/Vulkan, minigbm, drm HWC3 client
+composition), while hybrid combines Mesa Freedreno GLES + Turnip Vulkan with QTI
+gralloc + mapper5 + source QTI HWC/SDM + native-surface OMX, applying the repo
+A6xx kernel patch series unless --kernel-patches overrides it. Both are
+build-time selections only; no rendering or hardware validation is implied.
 
 package is an exact private baseline copy, NOT a source compilation or disk
 image. compile produces unvalidated source-build artifacts; it never splices a
@@ -282,10 +283,10 @@ def main(argv=None):
     full.add_argument('--private-root', type=Path, default=DEFAULT_PRIVATE)
     full.add_argument('--template', type=Path, help='default: PRIVATE_ROOT/template.img; size/layout are retained exactly')
     full.add_argument('--kernel-mode', choices=('source','prebuilt'), default='source')
-    full.add_argument('--graphics', choices=('baseline','mesa'), default='baseline',
-                      help='baseline: accepted mixed graphics stack; mesa: full Mesa chain (Mesa GLES/Vulkan, minigbm, drm HWC3)')
+    full.add_argument('--graphics', choices=('baseline', 'mesa', 'hybrid'), default='baseline',
+                      help='baseline: accepted mixed graphics stack; mesa: full Mesa/minigbm/drm-HWC3; hybrid: Mesa GLES/Turnip + QTI gralloc/mapper5/HWC')
     full.add_argument('--kernel-patches', type=Path,
-                      help='apply every *.patch in this directory to the extracted kernel source (and external/edp-618) before compile; mesa defaults to patches/drm-618-a6xx-upstream')
+                      help='apply every *.patch in this directory to the extracted kernel source (and external/edp-618) before compile; mesa and hybrid default to patches/drm-618-a6xx-upstream')
     full.add_argument('--esp-only', action='store_true',
                       help='build paired kernel/modules and native-SSD ESP payload only; skip the 20 GiB disk image')
     full.add_argument('--cross-compile', help='override the compiler; default extracts PRIVATE_ROOT/kernel-6.18/toolchain.tar.gz')
