@@ -38,3 +38,8 @@ sysmem 指 Vulkan 仍由 GPU 渲染、绕过片上 GMEM 的分块渲染路径，
 - 上游 [A680 UBWC/macrotile 修正](https://www.mail-archive.com/dri-devel@lists.freedesktop.org/msg504111.html) 要求配套内核 UBWC 查询接口，不能单独写 macrotile 寄存器。当前未回移该系列；禁用 UBWC 未消除本次异常。
 - 对比更多 Vulkan 应用及 Wild Life Extreme；当前应用级 workaround 不代表这些路径已通过。
 - 用户目视固定配置和重启回归已通过；长期温度/功耗与更多应用验证仍待进行，不自动扩大适用范围。
+
+## 2026-11-14 更新：移除默认 3DMark sysmem 绕过并接入双 Vulkan 分流
+
+- 6.18 内核合入 `0003 Fix GMEM range on a680`（见 `patches/drm-618-a6xx-upstream/`）后，`scripts/patch-sq2-turnip-gmem.py`（默认 `--revert` / `--verify-clean`）与 `scripts/build-sq2-turnip.sh` 默认恢复未打 3DMark sysmem 补丁的纯硬件 GMEM Mesa Turnip 26.2.4；`--apply-legacy-3dmark-sysmem` 与 `SQ2_TURNIP_LEGACY_3DMARK_SYSMEM=1` 仅保留为显式回退开关。
+- `--graphics hybrid`（`SQ2Hyb`）在默认保留硬件 GMEM Turnip 1.3 的同时引入高通 Quest 2 v77 原生 Vulkan 分流路由器，已在 `192.168.8.124` 完成实机部署与双后端计算/应用分流验证（完整交互跑分对比留待用户侧实测），详见 [SQ2HYB-DUAL-VULKAN-20261114.md](SQ2HYB-DUAL-VULKAN-20261114.md)。

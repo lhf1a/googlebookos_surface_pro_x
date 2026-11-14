@@ -106,10 +106,16 @@ def build_hybrid_fixture_tree():
     add_file(f'{qti_prefix}/root/lib64/sq2-qti-display/libsdmcore.so', b'OLD_SDMCORE')
     for closed_rel in full_image.HYBRID_CLOSED_QTI_ROOT_FILES:
         add_file(f'{qti_prefix}/root/{closed_rel}', b'closed-' + closed_rel.encode())
+    for qti_vk_rel in full_image.HYBRID_REQUIRED_QTI_VULKAN_FILES:
+        add_file(f'{qti_prefix}/root/{qti_vk_rel}', b'qti-vk-' + qti_vk_rel.encode())
+    add_file(f'{qti_prefix}/root/lib64/hw/vulkan.freedreno.so', b'qti-vulkan-policy')
+    add_file(f'{qti_prefix}/root/etc/selinux/vendor_file_contexts', b'# base contexts\n')
 
     symlinks = [
         'lib64/hw/gralloc.default.so gralloc.kona.so',
         'lib64/hw/mapper.qti.so mapper.quest2.so',
+        'lib64/egl/libq2v77glnext.so ../libq2v77glnext.so',
+        'lib64/egl/libq2v77qgl.so ../libq2v77qgl.so',
     ]
     for closed_link in sorted(full_image.HYBRID_CLOSED_QTI_SYMLINKS):
         symlinks.append(f'{closed_link} libEGL_adreno.so')
@@ -508,10 +514,12 @@ class HybridGraphicsTest(unittest.TestCase):
     def test_hybrid_runtime_fixture_and_omx_gate(self):
         records, bodies = build_hybrid_fixture_tree()
         fake_adapter = make_aarch64_elf(b'ADAPTER')
+        fake_router = make_aarch64_elf(b'ROUTER')
         report = full_image.hybrid_runtime(
             records,
             bodies,
             gralloc_adapter_bytes=fake_adapter,
+            vulkan_router_bytes=fake_router,
             layout_payload={
                 'lib64/libgrallocutils.so': b'fixture-layout',
                 'lib64/sq2-qti-display/libgrallocutils.so': b'fixture-layout',
@@ -524,11 +532,23 @@ class HybridGraphicsTest(unittest.TestCase):
         )
 
         self.assertEqual(report['graphics'], 'hybrid')
+        self.assertEqual(report['vulkan_mode'], 'dual-turnip-qti')
         self.assertEqual(bodies['etc/sq2-graphics-mode'], b'hybrid-mesa-qti\n')
         self.assertEqual(bodies['etc/sq2-qti-system/root/lib64/hw/gralloc.sq2_mesa.so'], fake_adapter)
         self.assertEqual(
             bodies['etc/sq2-qti-system/root/lib64/sq2-qti-display/libdrm.so'],
             bodies['etc/googlebook-security/lib64/libdrm.so'],
+        )
+        self.assertEqual(bodies['etc/googlebook-security/lib64/hw/vulkan.turnip.so'], b'turnip')
+        self.assertEqual(bodies['etc/googlebook-security/lib64/hw/vulkan.freedreno.so'], fake_router)
+        self.assertIn(
+            b'app com.kurogame.* = qcom',
+            bodies['etc/googlebook-security/etc/sq2-vulkan-policy.conf'],
+        )
+        self.assertNotIn('etc/sq2-qti-system/root/lib64/hw/vulkan.freedreno.so', bodies)
+        self.assertEqual(
+            bodies['etc/sq2-qti-system/root/lib64/hw/vulkan.qti.so'],
+            b'qti-vulkan-policy',
         )
         self.assertNotIn('etc/sq2-graphics-full', bodies)
         self.assertNotIn('etc/sq2-vulkan-closed', bodies)
@@ -539,11 +559,20 @@ class HybridGraphicsTest(unittest.TestCase):
 
         for rel in full_image.HYBRID_CLOSED_QTI_ROOT_FILES:
             self.assertNotIn(f'etc/sq2-qti-system/root/{rel}', bodies)
+        for qti_vk_rel in full_image.HYBRID_REQUIRED_QTI_VULKAN_FILES:
+            self.assertIn(f'etc/sq2-qti-system/root/{qti_vk_rel}', bodies)
 
         symlinks = bodies['etc/sq2-qti-system/SYMLINKS'].decode().splitlines()
         self.assertIn('lib64/hw/gralloc.default.so gralloc.sq2_mesa.so', symlinks)
+        self.assertIn('lib64/egl/libq2v77glnext.so ../libq2v77glnext.so', symlinks)
+        self.assertIn('lib64/egl/libq2v77qgl.so ../libq2v77qgl.so', symlinks)
         for closed_link in full_image.HYBRID_CLOSED_QTI_SYMLINKS:
             self.assertFalse(any(line.startswith(closed_link + ' ') for line in symlinks))
+
+        vfc = bodies['etc/sq2-qti-system/root/etc/selinux/vendor_file_contexts'].decode()
+        self.assertIn(r'vulkan\.turnip\.so', vfc)
+        self.assertIn(r'vulkan\.qti\.so', vfc)
+        self.assertIn(r'sq2-vulkan-policy\.conf', vfc)
 
         props = bodies['etc/googlebook-security/build.prop'].decode()
         self.assertNotIn('ro.vendor.hwcomposer.mode=client', props)
@@ -554,11 +583,45 @@ class HybridGraphicsTest(unittest.TestCase):
         install_files = bodies['etc/sq2-qti-system/INSTALL_FILES'].decode().splitlines()
         self.assertIn('lib64/hw/gralloc.sq2_mesa.so', install_files)
         self.assertIn('lib64/hw/mapper.quest2.so', install_files)
+        self.assertIn('lib64/hw/vulkan.qti.so', install_files)
+        self.assertIn('lib64/vulkan.qti-native.so', install_files)
         self.assertIn('lib64/sq2-qti-display/libsq2_sdm_backlight.so', install_files)
         self.assertEqual(
             len(install_files),
             len(bodies['etc/sq2-qti-system/INSTALLED_SHA256SUMS'].decode().splitlines()),
         )
+        for line in bodies['etc/sq2-qti-system/INSTALLED_SHA256SUMS'].decode().splitlines():
+            digest, rel = line.split(None, 1)
+            self.assertEqual(
+                hashlib.sha256(bodies[f'etc/sq2-qti-system/root/{rel}']).hexdigest(),
+                digest,
+            )
+        for line in bodies['etc/sq2-qti-system/SHA256SUMS'].decode().splitlines():
+            digest, rel = line.split(None, 1)
+            self.assertEqual(
+                hashlib.sha256(bodies[f'etc/sq2-qti-system/{rel}']).hexdigest(),
+                digest,
+            )
+
+        # Reject legacy 3DMark sysmem Turnip payload.
+        bad_vk_records, bad_vk_bodies = build_hybrid_fixture_tree()
+        with self.assertRaisesRegex(ValueError, 'Legacy 3DMark sysmem'):
+            full_image.hybrid_runtime(
+                bad_vk_records,
+                bad_vk_bodies,
+                gralloc_adapter_bytes=fake_adapter,
+                vulkan_router_bytes=fake_router,
+                turnip_bytes=b'bad com.futuremark.dmandroid.application payload',
+                layout_payload={
+                    'lib64/libgrallocutils.so': b'fixture-layout',
+                    'lib64/sq2-qti-display/libgrallocutils.so': b'fixture-layout',
+                    'lib64/libsq2_grallocutils_vendor.so': b'fixture-vendor',
+                },
+                backlight_payload={
+                    'lib64/sq2-qti-display/libsdmcore.so': b'fixture-sdmcore',
+                    'lib64/sq2-qti-display/libsq2_sdm_backlight.so': b'fixture-backlight',
+                },
+            )
 
         # Verify tampering RequiresSwRenderer=0 -> 1 is rejected.
         bad_records, bad_bodies = build_hybrid_fixture_tree()
@@ -571,6 +634,7 @@ class HybridGraphicsTest(unittest.TestCase):
                 bad_records,
                 bad_bodies,
                 gralloc_adapter_bytes=fake_adapter,
+                vulkan_router_bytes=fake_router,
                 layout_payload={
                     'lib64/libgrallocutils.so': b'fixture-layout',
                     'lib64/sq2-qti-display/libgrallocutils.so': b'fixture-layout',
