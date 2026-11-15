@@ -284,7 +284,13 @@ def main(argv=None):
     full.add_argument('--template', type=Path, help='default: PRIVATE_ROOT/template.img; size/layout are retained exactly')
     full.add_argument('--kernel-mode', choices=('source','prebuilt'), default='source')
     full.add_argument('--graphics', choices=('baseline', 'mesa', 'hybrid'), default='baseline',
-                      help='baseline: accepted mixed graphics stack; mesa: full Mesa/minigbm/drm-HWC3; hybrid: Mesa GLES/Turnip + QTI gralloc/mapper5/HWC')
+                      help='baseline: accepted mixed graphics stack (bundles forked device_faker); mesa: full Mesa/minigbm/drm-HWC3; hybrid: Mesa GLES/Turnip + QTI gralloc/mapper5/HWC')
+    full.add_argument('--device-faker-zip', type=Path,
+                      help='override prebuilt device_faker_gfx KernelSU module zip for baseline builds')
+    full.add_argument('--device-faker-src', type=Path,
+                      help='override local checkout of https://github.com/lhf1a/device_faker_gfx for baseline builds')
+    full.add_argument('--skip-device-faker', action='store_true',
+                      help='explicitly omit forked device_faker_gfx KernelSU module from baseline runtime')
     full.add_argument('--kernel-patches', type=Path,
                       help='apply every *.patch in this directory to the extracted kernel source (and external/edp-618) before compile; mesa and hybrid default to patches/drm-618-a6xx-upstream')
     full.add_argument('--esp-only', action='store_true',

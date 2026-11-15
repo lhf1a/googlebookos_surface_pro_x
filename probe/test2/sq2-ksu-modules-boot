@@ -1,0 +1,39 @@
+#!/bin/busybox sh
+# Provision bundled KernelSU modules once after Android boots and /data/adb/ksud exists.
+set -eu
+export PATH="${SQ2_TEST_PATH:-/bin:/sbin}"
+grep -qE 'sq2.rescue=1|sq2.ksu=0' "${SQ2_CMDLINE:-/proc/cmdline}" && exit 0
+lock_dir="${SQ2_KSU_MODULES_LOCK:-/run/sq2-ksu-modules-lock}"
+mkdir "$lock_dir" 2>/dev/null || exit 0
+trap 'rmdir "$lock_dir"' EXIT
+mod_dir="${SQ2_KSU_MODULES_DIR:-/etc/sq2-ksu-modules}"
+[ -d "$mod_dir" ] || exit 0
+android() { timeout 120 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+for n in $(seq 1 "${SQ2_BOOT_POLL_RETRIES:-300}"); do
+    [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = 1 ] && break
+    sleep "${SQ2_BOOT_POLL_SLEEP:-1}"
+done
+[ "$(android getprop sys.boot_completed)" = 1 ] || exit 1
+data="${SQ2_DATA_DIR:-/proc/1/root/data}"
+ksud_bin=
+if [ -x "$data/adb/ksud" ]; then
+    ksud_bin=/data/adb/ksud
+elif [ -x "$data/adb/ksu/bin/ksud" ]; then
+    ksud_bin=/data/adb/ksu/bin/ksud
+else
+    exit 0
+fi
+test ! -L "$data/local/tmp"
+mkdir -p "$data/local/tmp"
+for zip in "$mod_dir"/*.zip; do
+    [ -f "$zip" ] || continue
+    mod_id=$(unzip -p "$zip" module.prop 2>/dev/null | sed -n 's/^id=//p' | tr -d '\r' | head -n 1)
+    case "$mod_id" in ''|*/*) continue;; esac
+    if [ -d "$data/adb/modules/$mod_id" ] || [ -d "$data/adb/modules_update/$mod_id" ]; then
+        continue
+    fi
+    cp "$zip" "$data/local/tmp/sq2-ksu-module.zip"
+    timeout 120 nsenter -t 1 -m -r -- "$ksud_bin" module install /data/local/tmp/sq2-ksu-module.zip
+    rm -f "$data/local/tmp/sq2-ksu-module.zip"
+    echo "KSU_MODULE_INSTALLED:$mod_id"
+done

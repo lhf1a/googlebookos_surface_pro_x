@@ -645,6 +645,34 @@ def install_default_wallpaper(private, records, bodies):
             bodies['init'] = bodies['init'].replace(ANCHOR, hook + ANCHOR)
 
 
+KSU_MODULES_HOOK = b'    sq2-ksu-modules-boot > /logs/sq2-ksu-modules-boot.txt 2>&1 &\n'
+
+
+def install_ksu_modules(records, bodies, ksu_modules):
+    """Bundle validated KernelSU module zips into initramfs and wire one-time installer hook."""
+    if not ksu_modules:
+        return []
+    init = bodies['init']
+    require(init.count(ANCHOR) == 1 and init.count(KSU_MODULES_HOOK) <= 1,
+            'Unknown KSU modules boot handoff')
+    if KSU_MODULES_HOOK not in init:
+        init = init.replace(ANCHOR, KSU_MODULES_HOOK + ANCHOR)
+    bodies['init'] = init
+    helper = (ROOT / 'probe/test2/sq2-ksu-modules-boot').read_bytes().replace(b'\r\n', b'\n')
+    subprocess.run(['sh', '-n'], input=helper, check=True, capture_output=True)
+    bodies['bin/sq2-ksu-modules-boot'] = helper
+    records['bin/sq2-ksu-modules-boot'] = new_record(0o100755)
+    installed = []
+    for name, body in sorted(ksu_modules.items()):
+        require(body and name.endswith('.zip') and '/' not in name,
+                'Invalid KSU module archive name: ' + name)
+        rel = 'etc/sq2-ksu-modules/' + name
+        bodies[rel] = body
+        records[rel] = new_record(0o100644)
+        installed.append(rel)
+    return installed
+
+
 def install_userdata_growth(records, bodies):
     import tempfile
     with tempfile.TemporaryDirectory(prefix='spx-grow-build-') as tmp:
@@ -657,7 +685,7 @@ def install_userdata_growth(records, bodies):
     for name in ('resize-userdata-partition','grow-image-userdata','surface-swap-boot'):
         records['bin/'+name]=new_record(0o100755)
 
-def assemble_runtime(private, output, compiled=None, graphics='baseline'):
+def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_modules=None):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
     bodies = {name: b'' if rec[1][1] & 0o170000 == 0o040000 else (runtime/'files'/name).read_bytes()
@@ -719,6 +747,15 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline'):
     from full_image_home import apply as apply_home
     apply_home(records, bodies, new_record)
     install_default_wallpaper(private, records, bodies)
+    if ksu_modules is None and graphics == 'baseline':
+        priv_df = private / 'ksu-modules' / 'device_faker.zip'
+        if priv_df.is_file():
+            from build_device_faker_fork import validate_device_faker_zip
+            df_bytes = priv_df.read_bytes()
+            validate_device_faker_zip(df_bytes)
+            ksu_modules = {'device_faker.zip': df_bytes}
+    if ksu_modules:
+        install_ksu_modules(records, bodies, ksu_modules)
     install_userdata_growth(records, bodies)
     # Add parent directory records for every newly installed module/index.
     for name in list(bodies):
@@ -765,6 +802,7 @@ def build(args, compile_kernel):
         (args.output/'BUILD-COMMANDS.json').write_text(json.dumps(records,indent=2)+'\n')
         require(result.returncode==0,'Build failed: '+str(args.output/(label+'.stderr')))
     compiled=None
+    patch_report = None
     if args.kernel_mode=='source':
         source=private/'kernel-6.18/source'
         recipe=json.loads((source/'SOURCE.json').read_text())
@@ -834,7 +872,23 @@ def build(args, compile_kernel):
     else:
         for name in ('Image','android-el2.dtb'):
             shutil.copyfile(original/name,bundle/name)
-    graphics_report = assemble_runtime(private,bundle/'initramfs.cpio.gz',compiled,graphics=args.graphics)
+    ksu_modules = {}
+    device_faker_meta = None
+    if args.graphics == 'baseline' and not getattr(args, 'skip_device_faker', False):
+        from build_device_faker_fork import resolve_or_build_device_faker_zip
+        df_bytes, device_faker_meta = resolve_or_build_device_faker_zip(
+            private=private,
+            explicit_zip=getattr(args, 'device_faker_zip', None),
+            explicit_src=getattr(args, 'device_faker_src', None),
+        )
+        ksu_modules['device_faker.zip'] = df_bytes
+    graphics_report = assemble_runtime(
+        private,
+        bundle/'initramfs.cpio.gz',
+        compiled,
+        graphics=args.graphics,
+        ksu_modules=ksu_modules,
+    )
     esp_only = bool(getattr(args, 'esp_only', False))
     from disk_image import build as disk_build
     disk_args=argparse.Namespace(output=args.output/'disk',template=template,recovery_zip=None,
@@ -849,6 +903,7 @@ def build(args, compile_kernel):
         build_time_parent_initramfs_used=False,postbuild_tests_performed=False,
         graphics=args.graphics,graphics_boot_option=graphics_token,
         graphics_report=graphics_report,
+        device_faker_fork=device_faker_meta,
         esp_only=esp_only,
         kernel_patches=patch_report['patch_count'] if patch_report else 0,
         kernel_patches_external_msm_synced=(patch_report['external_msm_synced'] if patch_report else None),
