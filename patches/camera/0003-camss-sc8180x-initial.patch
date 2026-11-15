@@ -1,0 +1,181 @@
+--- a/camss-csiphy-3ph-1-0.c
++++ b/camss-csiphy-3ph-1-0.c
+@@ -883,6 +883,10 @@
+ 			val = r->reg_data;
+ 			break;
+ 		}
++		/* SC8180X native D-PHY uses a one-cycle data-lane receive delay. */
++		if (csiphy->camss->res->version == CAMSS_8180X &&
++		    r->reg_addr <= 0x600 && !(r->reg_addr & 0x1ff))
++			val |= 1;
+ 		writel_relaxed(val, csiphy->base + r->reg_addr);
+ 		if (r->delay_us)
+ 			udelay(r->delay_us);
+@@ -908,6 +912,7 @@
+ 
+ 	switch (version) {
+ 	case CAMSS_2290:
++	case CAMSS_8180X:
+ 	case CAMSS_7280:
+ 	case CAMSS_8250:
+ 	case CAMSS_8280XP:
+@@ -1004,6 +1009,7 @@
+ 		regs->lane_regs = &lane_regs_sm8250[0];
+ 		regs->lane_array_size = ARRAY_SIZE(lane_regs_sm8250);
+ 		break;
++	case CAMSS_8180X:
+ 	case CAMSS_8280XP:
+ 		regs->lane_regs = &lane_regs_sc8280xp[0];
+ 		regs->lane_array_size = ARRAY_SIZE(lane_regs_sc8280xp);
+--- a/camss-vfe.c
++++ b/camss-vfe.c
+@@ -343,6 +343,7 @@
+ 	case CAMSS_2290:
+ 	case CAMSS_7280:
+ 	case CAMSS_8x96:
++	case CAMSS_8180X:
+ 	case CAMSS_8250:
+ 	case CAMSS_8280XP:
+ 	case CAMSS_8300:
+@@ -1990,6 +1991,7 @@
+ 
+ 	switch (vfe->camss->res->version) {
+ 	case CAMSS_7280:
++	case CAMSS_8180X:
+ 	case CAMSS_8250:
+ 	case CAMSS_8280XP:
+ 	case CAMSS_8300:
+--- a/camss.c
++++ b/camss.c
+@@ -4464,7 +4464,121 @@
+ 	.vfe_num = ARRAY_SIZE(vfe_res_x1e80100),
+ };
+ 
++/*
++ * Initial SC8180X RAW path: all four PHY inputs routed through IFE0.
++ * Rates come from SC8180X CAMCC/native ACPI, not SM8150's higher OPPs.
++ * The native MPCS power description uses clocks/TITAN_TOP without switched
++ * PHY regulators. Other IFE instances are not exposed by this first port.
++ * Gen2 setup follows Andrew Gigena/Gaurav Suman's SM8150 CAMSS work.
++ */
++static const struct camss_subdev_resources csiphy_res_sc8180x[] = {
++	{
++		.clock = { "camnoc_axi", "slow_ahb_src", "cpas_ahb",
++			   "csiphy0", "csiphy0_timer" },
++		.clock_rate = { { 0 }, { 80000000 }, { 0 },
++				{ 400000000 }, { 300000000 } },
++		.reg = { "csiphy0" },
++		.interrupt = { "csiphy0" },
++		.csiphy = {
++			.id = 0,
++			.hw_ops = &csiphy_ops_3ph_1_0,
++			.formats = &csiphy_formats_sdm845,
++		},
++	},
++	{
++		.clock = { "camnoc_axi", "slow_ahb_src", "cpas_ahb",
++			   "csiphy1", "csiphy1_timer" },
++		.clock_rate = { { 0 }, { 80000000 }, { 0 },
++				{ 400000000 }, { 300000000 } },
++		.reg = { "csiphy1" },
++		.interrupt = { "csiphy1" },
++		.csiphy = {
++			.id = 1,
++			.hw_ops = &csiphy_ops_3ph_1_0,
++			.formats = &csiphy_formats_sdm845,
++		},
++	},
++	{
++		.clock = { "camnoc_axi", "slow_ahb_src", "cpas_ahb",
++			   "csiphy2", "csiphy2_timer" },
++		.clock_rate = { { 0 }, { 80000000 }, { 0 },
++				{ 400000000 }, { 300000000 } },
++		.reg = { "csiphy2" },
++		.interrupt = { "csiphy2" },
++		.csiphy = {
++			.id = 2,
++			.hw_ops = &csiphy_ops_3ph_1_0,
++			.formats = &csiphy_formats_sdm845,
++		},
++	},
++	{
++		.clock = { "camnoc_axi", "slow_ahb_src", "cpas_ahb",
++			   "csiphy3", "csiphy3_timer" },
++		.clock_rate = { { 0 }, { 80000000 }, { 0 },
++				{ 400000000 }, { 300000000 } },
++		.reg = { "csiphy3" },
++		.interrupt = { "csiphy3" },
++		.csiphy = {
++			.id = 3,
++			.hw_ops = &csiphy_ops_3ph_1_0,
++			.formats = &csiphy_formats_sdm845,
++		},
++	},
++};
++
++static const struct camss_subdev_resources csid_res_sc8180x[] = {
++	{
++		.clock = { "vfe0_cphy_rx", "vfe0_csid" },
++		.clock_rate = { { 400000000 }, { 400000000, 480000000, 600000000 } },
++		.reg = { "csid0" },
++		.interrupt = { "csid0" },
++		.csid = {
++			.hw_ops = &csid_ops_gen2,
++			.parent_dev_ops = &vfe_parent_dev_ops,
++			.formats = &csid_formats_gen2,
++		},
++	},
++};
++
++static const struct camss_subdev_resources vfe_res_sc8180x[] = {
++	{
++		.clock = { "gcc_axi_hf", "camnoc_axi", "cpas_ahb", "slow_ahb_src",
++			   "vfe0", "vfe0_axi" },
++		.clock_rate = { { 0 }, { 400000000 }, { 0 }, { 80000000 },
++				{ 400000000, 558000000, 637000000, 760000000 }, { 0 } },
++		.reg = { "vfe0" },
++		.interrupt = { "vfe0" },
++		.vfe = {
++			.line_num = 3,
++			.has_pd = true,
++			.pd_name = "ife0",
++			.hw_ops = &vfe_ops_170,
++			.formats_rdi = &vfe_formats_rdi_845,
++			.formats_pix = &vfe_formats_pix_845,
++		},
++	},
++};
++
++static const struct resources_icc icc_res_sc8180x[] = {
++	{ .name = "ahb", .icc_bw_tbl = { .avg = 38400, .peak = 76800 } },
++	{ .name = "hf_0", .icc_bw_tbl = { .avg = 2097152, .peak = 2097152 } },
++};
++
++static const struct camss_resources sc8180x_resources = {
++	.version = CAMSS_8180X,
++	.pd_name = "top",
++	.csiphy_res = csiphy_res_sc8180x,
++	.csid_res = csid_res_sc8180x,
++	.vfe_res = vfe_res_sc8180x,
++	.icc_res = icc_res_sc8180x,
++	.icc_path_num = ARRAY_SIZE(icc_res_sc8180x),
++	.csiphy_num = ARRAY_SIZE(csiphy_res_sc8180x),
++	.csid_num = ARRAY_SIZE(csid_res_sc8180x),
++	.vfe_num = ARRAY_SIZE(vfe_res_sc8180x),
++};
++
+ static const struct of_device_id camss_dt_match[] = {
++	{ .compatible = "qcom,sc8180x-camss", .data = &sc8180x_resources },
+ 	{ .compatible = "qcom,msm8916-camss", .data = &msm8916_resources },
+ 	{ .compatible = "qcom,msm8953-camss", .data = &msm8953_resources },
+ 	{ .compatible = "qcom,msm8996-camss", .data = &msm8996_resources },
+--- a/camss.h
++++ b/camss.h
+@@ -83,6 +83,7 @@
+ 	CAMSS_8x16,
+ 	CAMSS_8x53,
+ 	CAMSS_8x96,
++	CAMSS_8180X,
+ 	CAMSS_8250,
+ 	CAMSS_8280XP,
+ 	CAMSS_8300,

@@ -685,7 +685,7 @@ def install_userdata_growth(records, bodies):
     for name in ('resize-userdata-partition','grow-image-userdata','surface-swap-boot'):
         records['bin/'+name]=new_record(0o100755)
 
-def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_modules=None):
+def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_modules=None, camera=None):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
     bodies = {name: b'' if rec[1][1] & 0o170000 == 0o040000 else (runtime/'files'/name).read_bytes()
@@ -707,6 +707,8 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
         validate_venus_dec_module(by_name['venus-dec.ko'].read_bytes())
         for name in list(bodies):
             if name.endswith('.ko'):
+                if camera and name.startswith('etc/spx-camera/modules/'):
+                    continue  # Replaced below by modules built against this kernel.
                 require(Path(name).name in by_name, 'Required runtime module not built: '+name)
                 bodies[name] = by_name[Path(name).name].read_bytes()
         for path in modules.rglob('*'):
@@ -757,6 +759,9 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
     if ksu_modules:
         install_ksu_modules(records, bodies, ksu_modules)
     install_userdata_growth(records, bodies)
+    if camera is not None:
+        from full_image_camera import install
+        install(records, bodies, camera, new_record)
     # Add parent directory records for every newly installed module/index.
     for name in list(bodies):
         for parent in Path(name).parents:
@@ -801,6 +806,10 @@ def build(args, compile_kernel):
                         'stdout':label+'.stdout','stderr':label+'.stderr'})
         (args.output/'BUILD-COMMANDS.json').write_text(json.dumps(records,indent=2)+'\n')
         require(result.returncode==0,'Build failed: '+str(args.output/(label+'.stderr')))
+    camera = None
+    if args.graphics in ('baseline', 'hybrid') and not getattr(args, 'without_camera', False):
+        from full_image_camera import load
+        camera = load(getattr(args, 'camera_inputs', None) or private/'camera')
     compiled=None
     patch_report = None
     if args.kernel_mode=='source':
@@ -855,6 +864,9 @@ def build(args, compile_kernel):
              '--external-sources',extracted/'external','--config',ROOT/'configs/kernel-6.18-baseline.config',
              '--build-dir',build_dir,'--output',compiled,'--cross-compile',cross,
              '--jobs',str(args.jobs),'--build-only'])
+    if camera is not None and compiled:
+        from full_image_camera import rebuild_modules
+        rebuild_modules(camera, extracted/'kernel', build_dir, args.output, cross, run)
     bundle=args.output/'paired/EFI/SQ2Nat'
     bundle.mkdir(parents=True)
     original=private/'kernel-6.18/EFI/SQ2Nat'
@@ -872,6 +884,10 @@ def build(args, compile_kernel):
     else:
         for name in ('Image','android-el2.dtb'):
             shutil.copyfile(original/name,bundle/name)
+    if camera is not None:
+        from full_image_camera import prepare_dtb
+        camera_dt = bundle/'android-el2.dtb'
+        camera_dt.write_bytes(prepare_dtb(camera_dt.read_bytes()))
     ksu_modules = {}
     device_faker_meta = None
     if args.graphics == 'baseline' and not getattr(args, 'skip_device_faker', False):
@@ -888,6 +904,7 @@ def build(args, compile_kernel):
         compiled,
         graphics=args.graphics,
         ksu_modules=ksu_modules,
+        camera=camera,
     )
     esp_only = bool(getattr(args, 'esp_only', False))
     from disk_image import build as disk_build
@@ -904,6 +921,9 @@ def build(args, compile_kernel):
         graphics=args.graphics,graphics_boot_option=graphics_token,
         graphics_report=graphics_report,
         device_faker_fork=device_faker_meta,
+        camera_enabled=camera is not None,
+        camera_provider_sha256=_sha256(camera['provider']) if camera else None,
+        camera_modules_rebuilt=bool(camera is not None and compiled),
         esp_only=esp_only,
         kernel_patches=patch_report['patch_count'] if patch_report else 0,
         kernel_patches_external_msm_synced=(patch_report['external_msm_synced'] if patch_report else None),

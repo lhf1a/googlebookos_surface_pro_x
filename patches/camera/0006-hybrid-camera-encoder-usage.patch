@@ -1,0 +1,18 @@
+--- a/quest2-allocator5-service.cpp
++++ b/quest2-allocator5-service.cpp
+@@ -23,12 +23,14 @@
+         constexpr uint64_t qti_alloc_ubwc=1ULL<<28,qti_uncached=1ULL<<29;
+         // SoftwareRenderer keeps the legacy external-display routing hint on CPU YV12 output.
+         constexpr uint64_t external_display=0x2000;
++        constexpr uint64_t video_encoder=0x10000;
+         return d.width>0 && d.height>0 && d.layerCount==1 && d.reservedSize==0 && d.additionalOptions.empty() &&
+             (int(d.format)==35 || QuestGralloc::supportedFormat(int(d.format))) &&
+             (int(d.format)!=35 || (!(d.width&1) && !(d.height&1) && !(usage&~0xffULL))) &&
+             (int(d.format)!=33 || (d.height==1 && !(usage&~0xffULL))) &&
+             (!QuestGralloc::yuvFormat(int(d.format)) || (!(d.width&1) && !(d.height&1))) &&
+-            !(usage&~(0x1b33ULL|external_display|uint64_t(aidl::android::hardware::graphics::common::BufferUsage::VIDEO_DECODER)|qti_alloc_ubwc|qti_uncached)) && (!read || read==2 || read==3) && (!write || write==0x20 || write==0x30) &&
++            !(usage&~(0x1b33ULL|external_display|video_encoder|uint64_t(aidl::android::hardware::graphics::common::BufferUsage::VIDEO_DECODER)|qti_alloc_ubwc|qti_uncached)) && (!read || read==2 || read==3) && (!write || write==0x20 || write==0x30) &&
++            (!(usage&video_encoder) || (int(d.format)==1 && usage==0x10033)) &&
+             (!gralloc::IsUBwcEnabled(int(d.format),usage) ||
+              (!QuestGralloc::yuvFormat(int(d.format)) && !(usage&0xff)));
+     }

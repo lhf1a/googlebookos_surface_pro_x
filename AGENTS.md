@@ -1,3 +1,13 @@
+## 2026-11-15：前后摄默认构建baseline
+
+用户要求拉取最新main、提交当前摄像头并推送。baseline/Hybrid full-image默认加入
+已验收v10共用camera依赖；source内核必须重新构建camera模块，保留其他子系统与回退。
+不热换活跃mapper/allocator；图形改动完整启动。保留原生JPEG、三档H.264/AAC及
+当前QTI gralloc1→allocator5/mapper缓冲约定，不能当minigbm布局处理。
+用户明确要求CCI偶发只登记，不继续追因；软件ISP高清帧率、AF/IR后续处理。
+Windows参考/实际媒体/含身份启动包留private/out，勿提交。
+详见docs/FRONT-CAMERA.md、docs/BUILD.md及configs/camera-baseline.json。
+
 ## 2026-11-15：精简触摸向导作为默认版本
 
 用户完成SQ2静置、滑动和15点实测后，明确要求本版作为默认并提交远端。

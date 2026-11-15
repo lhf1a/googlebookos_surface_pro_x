@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "kernel_release": "6.18.60-sq2-android1",
+  "files": {
+    "qcom_spmi-regulator.ko": "3f43fce8495d463601022dc0f5260b2f5c66408a9078015c91471dbdba2904d8",
+    "camcc-sc8180x.ko": "1458147a07959f7d5dcff600fc6f978494820b68a0ec5a662432b87fc4e7fad4",
+    "i2c-qcom-cci.ko": "c47d9ef13f4ab7efd70ed7ae24902d847d014a088e3d518cb9c4a6e7888dd97a",
+    "v4l2-async.ko": "006715413b9bfdbffa69bdb6038f6121b1f1214c0f90a6efb2c79572864a1fbc",
+    "v4l2-fwnode.ko": "c4613a1f6c587f8521128173edd2da6299409e61829589feb2f06c1ec1bc7875",
+    "v4l2-cci.ko": "9c04d11f54bda0edf3e796774e7466b28734f85ac88f5434d0dc0805af68ddae",
+    "ov5693.ko": "619180b51597b935d176580993794d7d1cda8c33f94a8809fd2777c55521c448",
+    "ov13858.ko": "24f2f0d6f0b29caadfde4f8dfb73fe2d3030b5db0332ec159c7ced35fc4381e0",
+    "videobuf2-dma-sg.ko": "2970eeea9e492b4acfda6b383ab68debd76599da52377650b3cb96922fcc8a6d",
+    "qcom-camss.ko": "67cf1ea17adfae1155be0ba250a21de4a1b4b2b197796ab0fac2a9abf59090c8",
+    "provider": "2091ff3db5bb44ff99dcb7ffeadec63a6e061bda5cbc0c3787205c30f3694491",
+    "mapper.quest2.so": "8675c6b3ee0b4e65412cb267091e0816f0c145916ad5b209d1e1a83201abc890",
+    "quest2-allocator5-service": "d928df4220475573a2dabcc7cfd811676fd6441245eb3eda3dd799298ff36acd"
+  }
+}

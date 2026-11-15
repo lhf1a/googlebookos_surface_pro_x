@@ -1,0 +1,57 @@
+--- a/quest2-gralloc-backend.h
++++ b/quest2-gralloc-backend.h
+@@ -74,7 +74,7 @@
+         return format==0x32315659 || format==0x36 || format==0x7fa30c04 || format==0x7fa30c0a;
+     }
+     static bool supportedFormat(int32_t format) {
+-        return format==1 || format==2 || format==5 || format==43 || format==22 || yuvFormat(format);
++        return format==33 || format==1 || format==2 || format==5 || format==43 || format==22 || yuvFormat(format);
+     }
+     bool geometry(buffer_handle_t b,QuestGeometry &g) {
+         if(!device || GET_DIMENSIONS(device,b,&g.width,&g.height) || GET_STRIDE(device,b,&g.stride) ||
+@@ -91,6 +91,12 @@
+         struct stat backing{};
+         if(fstat(b->data[0],&backing) || backing.st_size<0 || uint64_t(backing.st_size)<g.size)return false;
+         int count=0;
++        if(g.format==33) {
++            // JPEG BLOB is a one-row byte allocation; never treat it as RGB pixels.
++            if(g.height!=1 || g.scan!=1 || g.stride!=g.width || g.size<g.width || g.ubwc)return false;
++            g.plane={0,0,0,0,1,int32_t(g.stride),int32_t(g.stride),1,g.size};
++            g.sample_bytes=1;return true;
++        }
+         g.yuv=yuvFormat(g.format);g.planar_yv12=g.format==0x32315659;
+         if(g.yuv) {
+             if((g.width&1) || (g.height&1) || (g.scan&1))return false;
+--- a/quest2-allocator5-service.cpp
++++ b/quest2-allocator5-service.cpp
+@@ -25,6 +25,7 @@
+         constexpr uint64_t external_display=0x2000;
+         return d.width>0 && d.height>0 && d.layerCount==1 && d.reservedSize==0 && d.additionalOptions.empty() &&
+             QuestGralloc::supportedFormat(int(d.format)) &&
++            (int(d.format)!=33 || (d.height==1 && !(usage&~0xffULL))) &&
+             (!QuestGralloc::yuvFormat(int(d.format)) || (!(d.width&1) && !(d.height&1))) &&
+             !(usage&~(0x1b33ULL|external_display|uint64_t(aidl::android::hardware::graphics::common::BufferUsage::VIDEO_DECODER)|qti_alloc_ubwc|qti_uncached)) && (!read || read==2 || read==3) && (!write || write==0x20 || write==0x30) &&
+             (!gralloc::IsUBwcEnabled(int(d.format),usage) ||
+--- a/quest2-native-mapper5.cpp
++++ b/quest2-native-mapper5.cpp
+@@ -34,7 +34,7 @@
+         return AIMAPPER_ERROR_NO_RESOURCES;
+     }
+     static uint32_t fourcc(int32_t f) {
+-        const char *s=f==0x32315659?"YV12":f==0x7fa30c04?"NV12":(f==0x36 || f==0x7fa30c0a)?"P010":f==22?"AB4H":f==43?"AB30":f==2?"XB24":f==5?"AR24":"AB24";
++        const char *s=f==33?"R8  ":f==0x32315659?"YV12":f==0x7fa30c04?"NV12":(f==0x36 || f==0x7fa30c0a)?"P010":f==22?"AB4H":f==43?"AB30":f==2?"XB24":f==5?"AR24":"AB24";
+         return uint32_t(s[0])|(uint32_t(s[1])<<8)|(uint32_t(s[2])<<16)|(uint32_t(s[3])<<24);
+     }
+ public:
+@@ -206,9 +206,9 @@
+                 gc::PlaneLayout plane;int offset=0;
+                 const gc::PlaneLayoutComponentType types[]={gc::PlaneLayoutComponentType::R,gc::PlaneLayoutComponentType::G,
+                     gc::PlaneLayoutComponentType::B,gc::PlaneLayoutComponentType::A};
+-                for(unsigned i=0;i<(g.format==2?3u:4u);i++) {
++                for(unsigned i=0;i<(g.format==33?1u:g.format==2?3u:4u);i++) {
+                     gc::PlaneLayoutComponent c;c.type.name="android.hardware.graphics.common.PlaneLayoutComponentType";
+-                    c.type.value=static_cast<int64_t>(types[g.format==5 && i<3?2-i:i]);c.offsetInBits=offset;
++                    c.type.value=static_cast<int64_t>(g.format==33?gc::PlaneLayoutComponentType::RAW:types[g.format==5 && i<3?2-i:i]);c.offsetInBits=offset;
+                     c.sizeInBits=g.format==22?16:g.format==43?(i==3?2:10):8;
+                     offset+=c.sizeInBits;
+                     if(g.ubwc)c.offsetInBits=c.sizeInBits=-1;

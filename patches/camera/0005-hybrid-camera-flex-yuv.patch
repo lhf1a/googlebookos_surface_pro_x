@@ -1,0 +1,125 @@
+--- a/quest2-gralloc-metadata.h
++++ b/quest2-gralloc-metadata.h
+@@ -11,6 +11,8 @@
+ #include <vector>
+ #include <cstring>
+ #include <cstddef>
++#include <unistd.h>
++#include <fcntl.h>
+ struct private_handle_t;
+ extern "C" unsigned long getMetaDataSize();
+ extern "C" int copyMetaDataHandleToVa(private_handle_t *,MetaData_t *);
+@@ -23,6 +25,21 @@
+ class QuestMetadata {
+     void *mapping=MAP_FAILED;
+     size_t size=0;
++    int metadataFd=-1;
++    struct RequestedFormat {
++        uint64_t magic;
++        uint32_t version;
++        int32_t requested;
++        int32_t physical;
++        uint32_t reserved;
++        uint64_t donorSize;
++    };
++    static_assert(sizeof(RequestedFormat)==32);
++    static constexpr uint64_t formatMagic=0x31544d4658505351ULL;
++    size_t extensionOffset() const {
++        long page=sysconf(_SC_PAGESIZE);
++        return page>0 ? (size+size_t(page)-1)/size_t(page)*size_t(page) : 0;
++    }
+ public:
+     QuestMetadata(const QuestMetadata &)=delete;
+     QuestMetadata &operator=(const QuestMetadata &)=delete;
+@@ -35,6 +52,7 @@
+         if(size<prefix || fstat(b->data[1],&st) || !S_ISREG(st.st_mode) ||
+            fstatfs(b->data[1],&fs) || fs.f_type!=TMPFS_MAGIC ||
+            st.st_size<0 || uint64_t(st.st_size)<size)return;
++        metadataFd=b->data[1];
+         mapping=mmap(nullptr,size,PROT_READ|PROT_WRITE,MAP_SHARED,b->data[1],0);
+         if(mapping==MAP_FAILED)return;
+         std::vector<uint64_t> snapshot((size+7)/8);
+@@ -47,6 +65,41 @@
+     }
+     ~QuestMetadata(){if(mapping!=MAP_FAILED)munmap(mapping,size);}
+     MetaData_t *get() const {return mapping==MAP_FAILED?nullptr:static_cast<MetaData_t *>(mapping);}
++    // Keep the QTI metadata ABI intact. Only flexible YUV gets an immutable
++    // descriptor after the donor's page-aligned region; fd[1] transports it.
++    int createFlexibleYuvMetadataFd() const {
++        if(!get())return -1;
++        size_t offset=extensionOffset();
++        struct stat st{};
++        if(!offset || fstat(metadataFd,&st) || st.st_size<0 ||
++           uint64_t(st.st_size)!=offset)return -1;
++        // QTI seals its metadata against resizing. Export a separate coherent
++        // memfd with an identical donor region and our immutable descriptor.
++        int fd=memfd_create("spx-flex-yuv",MFD_CLOEXEC|MFD_ALLOW_SEALING);
++        if(fd<0)return -1;
++        std::vector<uint8_t> donor(offset);
++        RequestedFormat data{formatMagic,1,35,0x32315659,0,size};
++        if(pread(metadataFd,donor.data(),donor.size(),0)!=ssize_t(donor.size()) ||
++           ftruncate(fd,offset+sizeof(data)) ||
++           pwrite(fd,donor.data(),donor.size(),0)!=ssize_t(donor.size()) ||
++           pwrite(fd,&data,sizeof(data),offset)!=sizeof(data) ||
++           fcntl(fd,F_ADD_SEALS,F_SEAL_GROW|F_SEAL_SHRINK)) {
++            close(fd);return -1;
++        }
++        return fd;
++    }
++    int32_t requestedFormat(int32_t physical) const {
++        if(!get() || physical!=0x32315659)return physical;
++        size_t offset=extensionOffset();
++        struct stat st{};
++        RequestedFormat data{};
++        if(!offset || fstat(metadataFd,&st) || st.st_size<0 ||
++           uint64_t(st.st_size)!=offset+sizeof(data) ||
++           pread(metadataFd,&data,sizeof(data),offset)!=sizeof(data))return physical;
++        return data.magic==formatMagic && data.version==1 && data.requested==35 &&
++               data.physical==physical && data.reserved==0 && data.donorSize==size
++               ? data.requested : physical;
++    }
+     bool initializeName(const std::string &name) {
+         if(!get() || name.size()>=MAX_NAME_LEN || name.find('\0')!=std::string::npos)return false;
+         memset(get()->name,0,sizeof(get()->name));memcpy(get()->name,name.data(),name.size());
+--- a/quest2-allocator5-service.cpp
++++ b/quest2-allocator5-service.cpp
+@@ -24,7 +24,8 @@
+         // SoftwareRenderer keeps the legacy external-display routing hint on CPU YV12 output.
+         constexpr uint64_t external_display=0x2000;
+         return d.width>0 && d.height>0 && d.layerCount==1 && d.reservedSize==0 && d.additionalOptions.empty() &&
+-            QuestGralloc::supportedFormat(int(d.format)) &&
++            (int(d.format)==35 || QuestGralloc::supportedFormat(int(d.format))) &&
++            (int(d.format)!=35 || (!(d.width&1) && !(d.height&1) && !(usage&~0xffULL))) &&
+             (int(d.format)!=33 || (d.height==1 && !(usage&~0xffULL))) &&
+             (!QuestGralloc::yuvFormat(int(d.format)) || (!(d.width&1) && !(d.height&1))) &&
+             !(usage&~(0x1b33ULL|external_display|uint64_t(aidl::android::hardware::graphics::common::BufferUsage::VIDEO_DECODER)|qti_alloc_ubwc|qti_uncached)) && (!read || read==2 || read==3) && (!write || write==0x20 || write==0x30) &&
+@@ -51,7 +52,7 @@
+         aa::AllocationResult result;
+         for(int32_t i=0;i<count;i++) {
+             buffer_handle_t handle=nullptr;
+-            int e=backend.allocate(d.width,d.height,int(d.format),uint64_t(d.usage),&handle);
++            int e=backend.allocate(d.width,d.height,int(d.format)==35?0x32315659:int(d.format),uint64_t(d.usage),&handle);
+             if(e || !handle)return failure(aa::AllocationError::NO_RESOURCES);
+             QuestGeometry g;
+             if(!backend.geometry(handle,g) || g.stride>INT32_MAX || (i && result.stride!=int32_t(g.stride))) {
+@@ -75,7 +76,8 @@
+             aidl::android::hardware::common::NativeHandle native;
+             bool copied=true;
+             for(int n=0;n<handle->numFds;n++) {
+-                int fd=fcntl(handle->data[n],F_DUPFD_CLOEXEC,0);
++                int fd=(n==1 && int(d.format)==35)?metadata.createFlexibleYuvMetadataFd():
++                    fcntl(handle->data[n],F_DUPFD_CLOEXEC,0);
+                 if(fd<0){copied=false;break;}
+                 native.fds.emplace_back(fd);
+             }
+--- a/quest2-native-mapper5.cpp
++++ b/quest2-native-mapper5.cpp
+@@ -162,7 +162,7 @@
+                 return mt::StandardMetadata<Type::CROP>::value::encode(crops,dest,size);
+             }
+             ENCODE(WIDTH,g.width);ENCODE(HEIGHT,g.height);ENCODE(LAYER_COUNT,g.layers);
+-            ENCODE(PIXEL_FORMAT_REQUESTED,static_cast<gc::PixelFormat>(g.format));
++            ENCODE(PIXEL_FORMAT_REQUESTED,static_cast<gc::PixelFormat>(it->second.metadata->requestedFormat(g.format)));
+             ENCODE(PIXEL_FORMAT_FOURCC,fourcc(g.format));
+             ENCODE(PIXEL_FORMAT_MODIFIER,g.ubwc?0x0500000000000001ULL:0ULL); // DRM_FORMAT_MOD_QCOM_COMPRESSED
+             ENCODE(USAGE,static_cast<gc::BufferUsage>(g.usage));ENCODE(ALLOCATION_SIZE,g.size);

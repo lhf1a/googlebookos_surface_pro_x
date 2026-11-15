@@ -1,3 +1,61 @@
+## 2026-11-15：摄像头纳入最新main构建baseline
+
+在远端b65c700基础上整合已实机验证的v10，不覆盖新触摸/Hybrid/游戏优化改动。
+标准full-image的baseline/hybrid默认加载PRIVATE_ROOT/camera（或--camera-inputs），
+包括十个运行模块、HAL、双摄三档profiles、两份mapper及allocator；--without-camera
+仅跳过新增摄像头载荷。full Mesa缓冲未验证，本次保持其现有路径。
+源码内核构建重编camera模块；prebuilt模式使用导入并校验的匹配6.18.60模块。
+设备树从构建自己的DT派生，保留其他属性/保留内存，不覆盖成样机整份DT。
+
+full_image_camera.py一次性从已验收包仅提取共用camera ELF，排除身份、照片和Windows原件；
+CAMERA.json记录输入完整性，configs/camera-baseline.json记录本次验收指纹。
+历史verify/package的严格v21包pins未伪装成新整机验收；新功能在full-image路径生效。
+provider重新构建与真机2091ff3d逐字一致；十个模块匹配内核重编通过，
+完整DT属性与真机工作DT相同，实际runtime集成保持SSH身份。
+主机full_image测试31项（23通过，8项既有可选输入跳过）、camera DT四项和ISP通过。
+本次未重新制作20GiB整盘或部署重启；此前v10真机证据如下。
+
+## 2026-11-15：前后摄照片/视频格式接入完成（SQ2 Hybrid v10）
+
+已按用户最新范围完成格式与系统相机对接，偶发问题仅登记。
+完整启动 boot 27706771-47d1-4b43-866c-26d1bc275698，默认 initramfs
+9245c960b207b6eeba6722814c6c170696a77eb4b02a399e58237f8953495fa3，
+实际 provider 2091ff3db5bb44ff99dcb7ffeadec63a6e061bda5cbc0c3787205c30f3694491。
+mapper8675c6b3…、allocator d928df42…与已通过的Hybrid缓冲实现一致，未热换图形。
+
+Camera2的JPEG/BLOB、PRIVATE、YUV420_888共用五档尺寸：
+320×240、640×480、1280×720、1920×1080及本sensor原生尺寸。
+系统相机识别FHD/HD/SD，默认1080p。最终启动的六段MediaRecorder录像全部通过，
+H.264视频+AAC音轨，全部解码通过；实测帧率如下（不是profile标称30fps的保证）：
+
+| 模式 | 前摄 | 后摄 |
+| --- | ---: | ---: |
+| 480p | 28.6 fps | 30.0 fps |
+| 720p | 18.3 fps | 10.0 fps |
+| 1080p | 6.3 fps | 7.7 fps |
+
+系统相机实际DCIM保存并完整解码：
+- 后摄JPEG：20261115_225912911.jpg，4224×3136，4596481字节。
+- 前摄JPEG：20261115_225951008.jpg，2592×1944，1396130字节。
+- 前摄1080p：20261115_230054279.mp4，31.729秒/181帧，约5.7fps，H.264/AAC。
+- 后摄1080p：20261115_230200033.mp4，35.505秒/252帧，约7.1fps，H.264/AAC。
+
+测试结束已停止诊断及系统相机，两sensor runtime_status均suspended。
+证据位于ignored out/camera-android-20261115：video-v10-matrix.txt、
+video-v10/verified.json、stock-v10/verified.json、stock-v10-end.txt。
+原生尺寸三流和720p/1080p+原生JPEG的v9验收适用于未变更的格式/ISP路径；
+v10只追加HAL的30fps传感器时序上限，并已完成最终实际录像回归。
+
+已知/后续：CCI首次打开或切换偶发超时，本轮不再定位；
+软件ISP高清帧率低、画质/曝光待调、后摄AF未接入；
+IR仍仅芯片ID通过，图像与认证未完成；声音内容未主观听验。
+这些不作为本轮前后摄格式接入的新阻塞，不宣称CTS、长期稳定性或SQ1实测通过。
+
+保留Mesa回退及ESP中的72d87b16…上一录像工作包、c9a81413…拍照工作包、
+7c27053b…原图形工作包。已移除的过时YUV-only/no-HAL备份9d369e03…
+删除前与本地initramfs.camera-yuv-cold.cpio.gz完整SHA一致；v9包仍在本地保留。
+本机完整包含原有私有状态，仅限此实验设备，不作公共镜像分发。
+
 ## 2026-11-15：精简触摸向导作为默认版本
 
 用户完成SQ2静置、滑动和15点实测后，明确要求本版作为默认并提交远端。

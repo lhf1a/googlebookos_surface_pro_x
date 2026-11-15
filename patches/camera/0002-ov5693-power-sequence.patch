@@ -1,0 +1,57 @@
+--- a/ov5693.c
++++ b/ov5693.c
+@@ -658,10 +658,8 @@
+ {
+ 	gpiod_set_value_cansleep(ov5693->reset, 1);
+ 	gpiod_set_value_cansleep(ov5693->powerdown, 1);
+-
++	clk_disable_unprepare(ov5693->xvclk);
+ 	regulator_bulk_disable(OV5693_NUM_SUPPLIES, ov5693->supplies);
+-
+-	clk_disable_unprepare(ov5693->xvclk);
+ }
+ 
+ static int ov5693_sensor_powerup(struct ov5693_device *ov5693)
+@@ -671,28 +669,24 @@
+ 	gpiod_set_value_cansleep(ov5693->reset, 1);
+ 	gpiod_set_value_cansleep(ov5693->powerdown, 1);
+ 
++	/* Match the SPX module's native power-before-clock sequence. */
++	ret = regulator_bulk_enable(OV5693_NUM_SUPPLIES, ov5693->supplies);
++	if (ret)
++		return ret;
++
++	usleep_range(1000, 1500);
+ 	ret = clk_prepare_enable(ov5693->xvclk);
+ 	if (ret) {
+-		dev_err(ov5693->dev, "Failed to enable clk\n");
+-		goto fail_power;
+-	}
+-
+-	ret = regulator_bulk_enable(OV5693_NUM_SUPPLIES, ov5693->supplies);
+-	if (ret) {
+-		dev_err(ov5693->dev, "Failed to enable regulators\n");
+-		goto fail_power;
+-	}
+-
++		regulator_bulk_disable(OV5693_NUM_SUPPLIES, ov5693->supplies);
++		return ret;
++	}
++
++	usleep_range(1000, 1500);
+ 	gpiod_set_value_cansleep(ov5693->powerdown, 0);
+ 	gpiod_set_value_cansleep(ov5693->reset, 0);
+-
+-	usleep_range(5000, 7500);
+-
+-	return 0;
+-
+-fail_power:
+-	ov5693_sensor_powerdown(ov5693);
+-	return ret;
++	msleep(10);
++
++	return 0;
+ }
+ 
+ static int __maybe_unused ov5693_sensor_suspend(struct device *dev)

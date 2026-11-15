@@ -1,0 +1,41 @@
+#!/bin/busybox sh
+# Install the built-in camera provider before Android creates any clients.
+set -eu
+case " $(cat /proc/cmdline) " in *' sq2.camera=0 '*|*' sq2.rescue=1 '*) exit 0;; esac
+for sensor in ov5693 ov13858; do
+    set -- /sys/bus/i2c/drivers/"$sensor"/*-*
+    [ -e "$1/name" ] || exit 0
+done
+source=/etc/spx-camera/userspace
+vendor=/newroot/vendor
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+target="$vendor/bin/hw/android.hardware.camera.provider-usb-service.android-desktop"
+test -f "$target"
+test -f "$vendor/bin/get_variant_camera"
+cp "$source/provider" "$target"
+chmod 755 "$target"
+# Preserve the donor codec capabilities; replace only the camera-ID profiles.
+for profile in "$vendor/etc"/media_profiles_camera_*.xml "$vendor/etc/media_profiles.xml" "$vendor/etc/media_profiles_V1_0.xml" "$vendor/etc/media_profiles_vendor.xml"; do
+    [ -f "$profile" ] || continue
+    [ "$(grep -c '</MediaSettings>' "$profile")" = 1 ]
+    sed '/^[[:space:]]*<CamcorderProfiles[ >]/,/^[[:space:]]*<\/CamcorderProfiles>/d; /<\/MediaSettings>/d' "$profile" > /newroot/debug_ramdisk/spx-media-profile.tmp
+    sed -n '/^[[:space:]]*<CamcorderProfiles[ >]/,/^[[:space:]]*<\/CamcorderProfiles>/p' "$source/media_profiles_spx.xml" >> /newroot/debug_ramdisk/spx-media-profile.tmp
+    echo '</MediaSettings>' >> /newroot/debug_ramdisk/spx-media-profile.tmp
+    cat /newroot/debug_ramdisk/spx-media-profile.tmp > "$profile"
+done
+rm /newroot/debug_ramdisk/spx-media-profile.tmp
+mkdir -p "$vendor/etc/permissions"
+cat > "$vendor/etc/permissions/spx-camera.xml" <<'XML'
+<permissions>
+  <feature name="android.hardware.camera" />
+  <feature name="android.hardware.camera.front" />
+  <feature name="android.hardware.camera.any" />
+</permissions>
+XML
+# Android init requires the original executable type even in permissive mode.
+cat > "$vendor/etc/init/spx-camera-labels.rc" <<'RC'
+on post-fs
+    restorecon /vendor/bin/hw/android.hardware.camera.provider-usb-service.android-desktop
+    restorecon /vendor/etc/permissions/spx-camera.xml
+RC
+echo SPX_CAMERA_PROVIDER_STAGED

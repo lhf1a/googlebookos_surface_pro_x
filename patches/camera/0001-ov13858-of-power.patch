@@ -1,0 +1,198 @@
+--- a/ov13858.c
++++ b/ov13858.c
+@@ -2,6 +2,10 @@
+ // Copyright (c) 2017 Intel Corporation.
+ 
+ #include <linux/acpi.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/of.h>
++#include <linux/regulator/consumer.h>
+ #include <linux/clk.h>
+ #include <linux/i2c.h>
+ #include <linux/module.h>
+@@ -1031,6 +1035,9 @@
+ struct ov13858 {
+ 	struct device *dev;
+ 	struct clk *clk;
++	struct gpio_desc *reset;
++	struct regulator_bulk_data supplies[3];
++	bool managed_power;
+ 
+ 	struct v4l2_subdev sd;
+ 	struct media_pad pad;
+@@ -1655,6 +1662,74 @@
+ 	mutex_destroy(&ov13858->mutex);
+ }
+ 
++/* ACPI systems retain their firmware-managed power domain. */
++static int ov13858_power_on(struct device *dev)
++{
++ struct ov13858 *sensor = to_ov13858(dev_get_drvdata(dev));
++ int i, ret;
++ if (!sensor->managed_power)
++  return 0;
++ gpiod_set_value_cansleep(sensor->reset, 1);
++ for (i = 0; i < ARRAY_SIZE(sensor->supplies); i++) {
++  ret = regulator_enable(sensor->supplies[i].consumer);
++  if (ret)
++   goto disable_supplies;
++ }
++ usleep_range(1000, 1500);
++ ret = clk_prepare_enable(sensor->clk);
++ if (ret)
++  goto disable_supplies;
++ usleep_range(1000, 1500);
++ gpiod_set_value_cansleep(sensor->reset, 0);
++ usleep_range(5000, 7500);
++ return 0;
++
++disable_supplies:
++ while (i--)
++  regulator_disable(sensor->supplies[i].consumer);
++ return ret;
++}
++
++static int ov13858_power_off(struct device *dev)
++{
++ struct ov13858 *sensor = to_ov13858(dev_get_drvdata(dev));
++ int i, ret, first = 0;
++ if (!sensor->managed_power)
++  return 0;
++ gpiod_set_value_cansleep(sensor->reset, 1);
++ usleep_range(1000, 1500);
++ clk_disable_unprepare(sensor->clk);
++ for (i = ARRAY_SIZE(sensor->supplies) - 1; i >= 0; i--) {
++  ret = regulator_disable(sensor->supplies[i].consumer);
++  if (ret && !first)
++   first = ret;
++ }
++ return first;
++}
++
++static int ov13858_get_power(struct ov13858 *sensor)
++{
++ int ret;
++ if (!sensor->dev->of_node)
++  return 0;
++ sensor->reset = devm_gpiod_get(sensor->dev, "reset", GPIOD_OUT_HIGH);
++ if (IS_ERR(sensor->reset))
++  return dev_err_probe(sensor->dev, PTR_ERR(sensor->reset), "reset GPIO unavailable\n");
++ sensor->supplies[0].supply = "iovdd";
++ sensor->supplies[1].supply = "avdd";
++ sensor->supplies[2].supply = "dvdd";
++ ret = devm_regulator_bulk_get(sensor->dev, ARRAY_SIZE(sensor->supplies),
++                               sensor->supplies);
++ if (ret)
++  return dev_err_probe(sensor->dev, ret, "sensor supplies unavailable\n");
++ sensor->managed_power = true;
++ return 0;
++}
++
++static const struct dev_pm_ops ov13858_pm_ops = {
++ SET_RUNTIME_PM_OPS(ov13858_power_off, ov13858_power_on, NULL)
++};
++
+ static int ov13858_probe(struct i2c_client *client)
+ {
+ 	struct ov13858 *ov13858;
+@@ -1681,11 +1756,18 @@
+ 	/* Initialize subdev */
+ 	v4l2_i2c_subdev_init(&ov13858->sd, client, &ov13858_subdev_ops);
+ 
+-	/* Check module identity */
++	ret = ov13858_get_power(ov13858);
++ if (ret)
++  return ret;
++ ret = ov13858_power_on(ov13858->dev);
++ if (ret)
++  return ret;
++
++ /* Check module identity */
+ 	ret = ov13858_identify_module(ov13858);
+ 	if (ret) {
+ 		dev_err(ov13858->dev, "failed to find sensor: %d\n", ret);
+-		return ret;
++		goto error_power;
+ 	}
+ 
+ 	/* Set default mode to max resolution */
+@@ -1693,7 +1775,7 @@
+ 
+ 	ret = ov13858_init_controls(ov13858);
+ 	if (ret)
+-		return ret;
++		goto error_power;
+ 
+ 	/* Initialize subdev */
+ 	ov13858->sd.internal_ops = &ov13858_internal_ops;
+@@ -1710,25 +1792,28 @@
+ 		goto error_handler_free;
+ 	}
+ 
+-	ret = v4l2_async_register_subdev_sensor(&ov13858->sd);
+-	if (ret < 0)
+-		goto error_media_entity;
+-
+-	/*
+-	 * Device is already turned on by i2c-core with ACPI domain PM.
+-	 * Enable runtime PM and turn off the device.
+-	 */
+-	pm_runtime_set_active(ov13858->dev);
+-	pm_runtime_enable(ov13858->dev);
+-	pm_runtime_idle(ov13858->dev);
+-
+-	return 0;
++ /* Keep the sensor powered while the async bridge can bind it. */
++ pm_runtime_set_active(ov13858->dev);
++ pm_runtime_get_noresume(ov13858->dev);
++ pm_runtime_enable(ov13858->dev);
++ ret = v4l2_async_register_subdev_sensor(&ov13858->sd);
++ if (ret < 0) {
++  pm_runtime_disable(ov13858->dev);
++  pm_runtime_put_noidle(ov13858->dev);
++  goto error_media_entity;
++ }
++ pm_runtime_set_autosuspend_delay(ov13858->dev, 1000);
++ pm_runtime_use_autosuspend(ov13858->dev);
++ pm_runtime_put_autosuspend(ov13858->dev);
++ return 0;
+ 
+ error_media_entity:
+ 	media_entity_cleanup(&ov13858->sd.entity);
+ 
+ error_handler_free:
+ 	ov13858_free_controls(ov13858);
++error_power:
++ ov13858_power_off(ov13858->dev);
+ 	dev_err(ov13858->dev, "%s failed:%d\n", __func__, ret);
+ 
+ 	return ret;
+@@ -1744,6 +1829,9 @@
+ 	ov13858_free_controls(ov13858);
+ 
+ 	pm_runtime_disable(ov13858->dev);
++ if (!pm_runtime_status_suspended(ov13858->dev))
++  ov13858_power_off(ov13858->dev);
++ pm_runtime_set_suspended(ov13858->dev);
+ }
+ 
+ static const struct i2c_device_id ov13858_id_table[] = {
+@@ -1762,9 +1850,17 @@
+ MODULE_DEVICE_TABLE(acpi, ov13858_acpi_ids);
+ #endif
+ 
++static const struct of_device_id ov13858_of_match[] = {
++ { .compatible = "ovti,ov13858" },
++ {}
++};
++MODULE_DEVICE_TABLE(of, ov13858_of_match);
++
+ static struct i2c_driver ov13858_i2c_driver = {
+ 	.driver = {
+ 		.name = "ov13858",
++  .pm = &ov13858_pm_ops,
++  .of_match_table = ov13858_of_match,
+ 		.acpi_match_table = ACPI_PTR(ov13858_acpi_ids),
+ 	},
+ 	.probe = ov13858_probe,

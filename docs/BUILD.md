@@ -1,3 +1,34 @@
+## 2026-11-15：摄像头默认构建baseline
+
+baseline/Hybrid full-image现在默认集成前后摄；完整构建仍使用既有私有平台依赖。
+一次性导入已验证的共用camera二进制（不会提取SSH身份或拍摄内容）：
+
+    python3 scripts/full_image_camera.py --import-initramfs /path/to/verified-camera-initramfs.cpio.gz --output private/build-inputs/camera
+    python3 scripts/build.py full-image --graphics hybrid --private-root /path/to/private-inputs --camera-inputs /path/to/camera --output out/new-camera-image --esp-only
+
+--camera-inputs省略时使用PRIVATE_ROOT/camera；缺少输入时明确报错，不静默丢失摄像头。
+--without-camera跳过新增载荷；Mesa模式不自动安装尚未验证的相机缓冲实现。
+source内核模式从本轮source/build重新编译camera模块；prebuilt使用CAMERA.json所列匹配模块。
+HAL和图形库作为已验收的用户空间依赖导入，与其他私有runtime依赖一致；
+修改这些源码后须重编并更新camera输入，不能沿用旧二进制声称源码已经生效。
+
+HAL构建（不再隐式引用实验工作树）：
+
+    python3 scripts/build-spx-camera-provider.py DEPS AIDL LIBS TOOLCHAINS PROVIDER --platform-headers PLATFORM_HEADERS --binder-library LIBBINDER_NDK_SO
+
+DEPS含AOSP system-media、libjpeg-turbo与nativewindow headers；AIDL由
+build-spx-camera-aidl.py从冻结camera V3/common/FMQ/graphics接口生成；
+LIBS含匹配Android的libcamera_metadata、libnativewindow、libjpeg、libcutils。
+图形使用build-spx-camera-graphics.py ORIGINAL_BUILD_JSON GRAPHICS_SOURCE NEW_OUTPUT，
+按匹配平台ABI构建并应用0004/0005/0006。pack-spx-camera[-graphics|-userspace].py
+保留作为离线实验组包入口，标准full-image直接安装有效条目，不依赖母包追加链。
+profiles、boot/stage helper始终从当前源码读取；不打包诊断APK/ACPI/ID探针或开机采集。
+
+验收：原生JPEG前2592×1944/后4224×3136，双路480p/720p/1080p H.264/AAC。
+高清实际帧率低、CCI偶发、AF/IR未接入均保持记录，详见FRONT-CAMERA和HANDOFF。
+configs/camera-baseline.json为本次共用ELF指纹；不替换历史kernel-baseline.json
+中verify/package的完整已验收包，避免冒称新的整盘/双机测试。
+
 ## 2026-11-15：精简触摸向导作为默认版本
 
 用户完成SQ2静置、滑动和15点实测后，明确要求本版作为默认并提交远端。
