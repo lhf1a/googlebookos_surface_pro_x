@@ -1,0 +1,6 @@
+id=sq2-game-opt
+name=SQ2 UE/Unity Game Optimizer
+version=v1.0.0
+versionCode=100
+author=chromebookOS
+description=General UE/Unity game optimization for SQ2: dynamic CPU big-cluster (policy4) and GPU devfreq boost with foreground/screen-off restore, key thread CPU 4-7 pinning, Zygisk Vulkan VK_PRESENT_MODE_MAILBOX_KHR & eglSwapInterval=0 hook, and QCOM Vulkan routing policy for UE/Unity engines.
