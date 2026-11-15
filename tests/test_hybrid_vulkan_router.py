@@ -332,6 +332,31 @@ int main(int argc, char **argv) {
     assert(dec.backend == SQ2_VK_BACKEND_TURNIP);
     assert(strcmp(dec.reason, "conf:type") == 0);
 
+    /* Generic Unreal and Unity games default to qcom via conf:type */
+    struct sq2_vk_eval_input ue_generic = {
+        .uid = 10185,
+        .cmdline_arg0 = "com.example.uegame",
+        .loaded_sonames = ue_libs,
+        .soname_count = 1,
+        .policy_conf_text = policy_text,
+    };
+    assert(sq2_vk_evaluate_policy(&ue_generic, &dec) == 0);
+    assert(dec.app_type == SQ2_VK_TYPE_UNREAL);
+    assert(dec.backend == SQ2_VK_BACKEND_QCOM);
+    assert(strcmp(dec.reason, "conf:type") == 0);
+
+    struct sq2_vk_eval_input unity_generic = {
+        .uid = 10190,
+        .cmdline_arg0 = "com.miHoYo.Yuanshen",
+        .loaded_sonames = unity_libs,
+        .soname_count = 1,
+        .policy_conf_text = policy_text,
+    };
+    assert(sq2_vk_evaluate_policy(&unity_generic, &dec) == 0);
+    assert(dec.app_type == SQ2_VK_TYPE_UNITY);
+    assert(dec.backend == SQ2_VK_BACKEND_QCOM);
+    assert(strcmp(dec.reason, "conf:type") == 0);
+
     /* debug.turnip_apps overrides conf:app qcom and ties over debug.qcom_apps */
     struct sq2_vk_eval_input dbg_over = base;
     dbg_over.prop_debug_turnip_apps = "com.foo.*,com.kurogame.*";
