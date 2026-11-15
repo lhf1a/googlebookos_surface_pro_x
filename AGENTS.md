@@ -1,3 +1,10 @@
+## 2026-11-16：传感器默认构建
+
+用户要求提交并推送，作为默认构建。baseline/Hybrid full-image默认接入已验收
+TCS3430光线与LSM6DSO加速度SubHal、SLPI EFI/固件和旋转策略；source模式重编匹配模块。
+保留摄像头、触摸、图形和用户设置，Mesa路径不扩展。固件/模型校准/私有包不进Git。
+SQ2已完整重启和用户明暗/旋转验收；SQ1及长期休眠未验收。详见docs/SENSORS.md。
+
 ## 2026-11-15：前后摄默认构建baseline
 
 用户要求拉取最新main、提交当前摄像头并推送。baseline/Hybrid full-image默认加入

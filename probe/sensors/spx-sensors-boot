@@ -1,0 +1,16 @@
+#!/bin/busybox sh
+# Optional sensor providers. Android owns the user-facing brightness/rotation policy.
+set -eu
+export PATH=/bin:/sbin
+case " $(cat /proc/cmdline) " in *' spx.sensors=0 '*|*' sq2.rescue=1 '*) exit 0;; esac
+root=/sys/firmware/devicetree/base
+grep -q 'microsoft,surface-pro-x' "$root/compatible" || exit 0
+modprobe i2c-qcom-geni
+modprobe industrialio
+[ -d /sys/module/spx_tcs3430 ] || insmod /etc/spx-sensors/modules/spx-tcs3430.ko
+slpi="$root/soc@0/remoteproc@2400000"
+if [ -r "$slpi/compatible" ] && grep -q 'qcom,sc8180x-slpi-pas' "$slpi/compatible"; then
+    for m in qcom_common qcom_q6v5 mdt_loader qcom_pil_info; do modprobe "$m"; done
+    [ -d /sys/module/fastrpc ] || insmod /etc/spx-sensors/modules/fastrpc.ko
+    [ -d /sys/module/spx_slpi_pas ] || insmod /etc/spx-sensors/modules/spx-slpi-pas.ko
+fi

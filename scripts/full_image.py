@@ -685,7 +685,7 @@ def install_userdata_growth(records, bodies):
     for name in ('resize-userdata-partition','grow-image-userdata','surface-swap-boot'):
         records['bin/'+name]=new_record(0o100755)
 
-def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_modules=None, camera=None):
+def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_modules=None, camera=None, sensors=None):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
     bodies = {name: b'' if rec[1][1] & 0o170000 == 0o040000 else (runtime/'files'/name).read_bytes()
@@ -707,6 +707,8 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
         validate_venus_dec_module(by_name['venus-dec.ko'].read_bytes())
         for name in list(bodies):
             if name.endswith('.ko'):
+                if sensors and name.startswith('etc/spx-sensors/modules/'):
+                    continue  # Replaced by freshly built sensor modules below.
                 if camera and name.startswith('etc/spx-camera/modules/'):
                     continue  # Replaced below by modules built against this kernel.
                 require(Path(name).name in by_name, 'Required runtime module not built: '+name)
@@ -762,6 +764,9 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
     if camera is not None:
         from full_image_camera import install
         install(records, bodies, camera, new_record)
+    if sensors is not None:
+        from full_image_sensors import install
+        install(records, bodies, sensors, new_record)
     # Add parent directory records for every newly installed module/index.
     for name in list(bodies):
         for parent in Path(name).parents:
@@ -810,6 +815,10 @@ def build(args, compile_kernel):
     if args.graphics in ('baseline', 'hybrid') and not getattr(args, 'without_camera', False):
         from full_image_camera import load
         camera = load(getattr(args, 'camera_inputs', None) or private/'camera')
+    sensors = None
+    if args.graphics in ('baseline', 'hybrid') and not getattr(args, 'without_sensors', False):
+        from full_image_sensors import load
+        sensors = load(getattr(args, 'sensor_inputs', None) or private/'sensors')
     compiled=None
     patch_report = None
     if args.kernel_mode=='source':
@@ -867,6 +876,9 @@ def build(args, compile_kernel):
     if camera is not None and compiled:
         from full_image_camera import rebuild_modules
         rebuild_modules(camera, extracted/'kernel', build_dir, args.output, cross, run)
+    if sensors is not None and compiled:
+        from full_image_sensors import rebuild_modules
+        rebuild_modules(sensors, extracted/'kernel', build_dir, args.output, cross, run)
     bundle=args.output/'paired/EFI/SQ2Nat'
     bundle.mkdir(parents=True)
     original=private/'kernel-6.18/EFI/SQ2Nat'
@@ -888,6 +900,11 @@ def build(args, compile_kernel):
         from full_image_camera import prepare_dtb
         camera_dt = bundle/'android-el2.dtb'
         camera_dt.write_bytes(prepare_dtb(camera_dt.read_bytes()))
+    if sensors is not None:
+        from full_image_sensors import prepare_dtb
+        sensor_dt = bundle/'android-el2.dtb'
+        sensor_dt.write_bytes(prepare_dtb(sensor_dt.read_bytes(), sensors))
+        (bundle/'qebspilaa64.efi').write_bytes(sensors['qebspilaa64.efi'])
     ksu_modules = {}
     device_faker_meta = None
     if args.graphics == 'baseline' and not getattr(args, 'skip_device_faker', False):
@@ -905,6 +922,7 @@ def build(args, compile_kernel):
         graphics=args.graphics,
         ksu_modules=ksu_modules,
         camera=camera,
+        sensors=sensors,
     )
     esp_only = bool(getattr(args, 'esp_only', False))
     from disk_image import build as disk_build
@@ -914,6 +932,9 @@ def build(args, compile_kernel):
         expected_single_user_sha256=None,
         size_gib=None,jobs=args.jobs,build_only=True,resume_build=False,kernel_mode=args.kernel_mode,
         graphics_argument=graphics_token,esp_only=esp_only)
+    if sensors is not None:
+        from full_image_sensors import FIRMWARE
+        disk_args.additional_firmware={FIRMWARE.removeprefix('firmware/'): sensors[FIRMWARE]}
     report=disk_build(disk_args)
     report.update(source_compiled=bool(compiled),private_root=str(private),
         source_commit=source_commit,
@@ -921,6 +942,9 @@ def build(args, compile_kernel):
         graphics=args.graphics,graphics_boot_option=graphics_token,
         graphics_report=graphics_report,
         device_faker_fork=device_faker_meta,
+        sensors_enabled=sensors is not None,
+        sensor_modules_rebuilt=bool(sensors is not None and compiled),
+        sensor_hal_sha256=_sha256(sensors["sensors.spx.so"]) if sensors else None,
         camera_enabled=camera is not None,
         camera_provider_sha256=_sha256(camera['provider']) if camera else None,
         camera_modules_rebuilt=bool(camera is not None and compiled),

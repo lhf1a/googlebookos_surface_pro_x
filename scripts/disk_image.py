@@ -319,6 +319,12 @@ def build(args):
     (tree/'EFI/SQ2Nat/initramfs.cpio.gz').write_bytes(payload)
     shutil.copyfile(bootloader,tree/'EFI/BOOT/BOOTAA64.EFI')
     shutil.copytree(input_root/'kernel-6.18/firmware',tree/'firmware',dirs_exist_ok=resume)
+    for name,data in getattr(args, 'additional_firmware', {}).items():
+        relative=Path(name)
+        require(not relative.is_absolute() and '..' not in relative.parts, 'Invalid firmware path')
+        target=tree/'firmware'/relative
+        target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_bytes(data)
     graphics_argument = module('disk_graphics','prepare-sq2-618-debug-entry.py').graphics_option(
         (bundle/'kernel-options.txt').read_text())
     rescue_efi(tree,bundle,graphics_argument)

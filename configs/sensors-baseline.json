@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "kernel_release": "6.18.60-sq2-android1",
+  "hardware_tested": [
+    "SQ2"
+  ],
+  "features": [
+    "automatic_brightness",
+    "automatic_rotation"
+  ],
+  "accepted_initramfs_sha256": "e4f6cb1491a35c2c632a7747cd5c9c171e2ee099d5ce316459d56c036ff2525d",
+  "files": {
+    "config/8180_cls_adux1080_display.json": "ab96d0e695de8ee655bf79fad0d6b042720fd4b0388c30a818e301d97b32e1a6",
+    "config/8180_cls_ak991x_display.json": "3baf246e773a99b67c656088de6398d3d1a8617aa3976c74e48479f52d564c31",
+    "config/8180_cls_lsm6dso_display.json": "74ed63957ee54b3866c830f4c29275f9df1c2825caa6b4d9eb72b6dfe4bec87c",
+    "config/adux1080_polling_0.json": "aee9e9a7e7065bdb03d10b18fe3e2e35ce028609e02b4c7de481298e30bec3f0",
+    "config/ak991x_dri_0.json": "32d8509b5980282cde664e896b3441271622b76c5660948827ca7f0899cff3d6",
+    "config/config_list.txt": "f99506fbff5101c2052c7e37a57db6667c6eb2937a79334ecfe036a444662ae5",
+    "config/default_sensors.json": "628a8d5c489bc563468aa3a0fdfc3b7348836374c91187ec4b6dc3f4bd2dc60b",
+    "config/lsm6dso_0.json": "70fcf19823cb67272e80841c27cbe9e56f6f33baee453ab6bd95a40ebe5dd465",
+    "config/lsm6dso_0_16g.json": "81609d75ed517c694151d159c460eeeaa58672adbc979f46236cfd53be122667",
+    "config/sns_amd.json": "87c13ce2533a230335701eadcf4318fe2ab795002cd019490be97e55eeb6748e",
+    "config/sns_amd_sw_disabled.json": "366bcb3b0dec0194f1218341611cab2593301380d62175013f4801f229036a3d",
+    "config/sns_amd_sw_enabled.json": "01189e716d60fb45e78d2af029ba2fde8df4dc05fa544258330c87cef5927c3a",
+    "config/sns_aont.json": "e635f641b0ef34e7f232e21518df475907e9820d8f95394c17811d280c1d47fd",
+    "config/sns_ccd.json": "1e73fd21b3ea8f1b8e44e4847d85560b27beb4db1373873102f9a656e3c684c3",
+    "config/sns_cm.json": "c8e76b88a649605cdde4238fc2e03c29393b843b329c096e22df411e45f9523a",
+    "config/sns_dae.json": "14948ff31c6d1ac2d5af3021a7a2d1d98e6240e3ce6011a349d9b1a410dc9870",
+    "config/sns_device_orient.json": "e7b1d063ad1a8b80519c272d5b638be985e7fa115ccaaac0dea5afd2882933b1",
+    "config/sns_diag_filter.json": "743ac18e3a66cb3c936c4c6e7fd11191226379fc43aa6c434b211a2bce0cee8e",
+    "config/sns_gyro_cal.json": "fd0525bf00b50435443b79cd7720f898ac4c5acb5f2834318c7b1ad0d856a8aa",
+    "config/sns_mag_cal.json": "cc556f4d027bd3cfc153fb287b0041d5953644609d1d60e37678f06b6deb6df4",
+    "config/sns_rmd.json": "50b578cc9937232446add00912b0b6296689fec975a292f4b1ac581ecd034aab",
+    "config/sns_rotv.json": "ed25419ffdab6e907a3f16efa8d4bcc52bdf68865aad5738fa2aff3f1777fa8b",
+    "config/sns_tilt_sw_disabled.json": "09521495854c5920b0d1b5b10ce6939f5f2b35bf3fb007f160808dbcc60d4199",
+    "firmware/qcom/msft/surface/pro-x/qcslpi8180.mbn": "7964ffba743cc6c1042faa21ae016c492a733f4de031a087ba2796b1ed354d50",
+    "hexagonrpcd": "70519f4ddef797083ed35f7bac168468bd8a96399c79e7bdc1418d82b04f95a1",
+    "modules/fastrpc.ko": "648baf714bf9cf9668743c545d5aebc5028c6079835df18792f059bbe22a5a2d",
+    "modules/spx-slpi-pas.ko": "60d094cf6799b7d576dc655adf9b20a18d94ea1a6b9de6e6e9a83d7666b58f03",
+    "modules/spx-tcs3430.ko": "8656ed8a0ec3a12a56bd469028a0d503965af3caaa6bb2acd070f930d922104a",
+    "qebspilaa64.efi": "2b3a941bdcabadf72cacddfd2739a859739cd2890b9b8f8f7ebe9771e86006fd",
+    "sensors.spx.so": "21aa69dbb878a7cab858120a26321d446f5b1261287d07403604bb8a6e3c0310",
+    "spx-sensors-overlay.apk": "38727901069bbad1404c98ec928a4de57fcde41de58e500cdea58371c06733e3",
+    "spx-tcs3430-golden.bin": "015c8ae261fc35924e9e2aa321a00eaf7e742d185dcd3a90aaffc5f6c9484a13"
+  },
+  "limits": [
+    "SQ1 hardware not tested",
+    "long-term suspend and power not tested",
+    "model default calibration, not per-unit photometric calibration"
+  ]
+}

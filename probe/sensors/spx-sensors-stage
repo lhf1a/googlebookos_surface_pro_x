@@ -1,0 +1,35 @@
+#!/bin/busybox sh
+# Install only the Surface providers; Android retains brightness/rotation policy.
+set -eu
+case " $(cat /proc/cmdline) " in *' spx.sensors=0 '*|*' sq2.rescue=1 '*) exit 0;; esac
+grep -q 'microsoft,surface-pro-x' /sys/firmware/devicetree/base/compatible || exit 0
+source=/etc/spx-sensors
+vendor=/newroot/vendor
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+test -f "$vendor/etc/sensors/hals.conf"
+cp "$source/userspace/sensors.spx.so" "$vendor/lib64/sensors.spx.so"
+cp "$source/userspace/spx-tcs3430-golden.bin" "$vendor/etc/sensors/spx-tcs3430-golden.bin"
+chmod 644 "$vendor/lib64/sensors.spx.so" "$vendor/etc/sensors/spx-tcs3430-golden.bin"
+grep -qx 'sensors.spx.so' "$vendor/etc/sensors/hals.conf" ||
+    printf '\nsensors.spx.so\n' >> "$vendor/etc/sensors/hals.conf"
+mkdir -p "$vendor/overlay"
+cp "$source/userspace/spx-sensors-overlay.apk" "$vendor/overlay/spx-sensors-overlay.apk"
+chmod 644 "$vendor/overlay/spx-sensors-overlay.apk"
+# Permit rotation on this portable desktop; retain the user's rotation lock.
+properties=/newroot/debug_ramdisk/spx-sensors.build.prop
+sed '/^config\.override_forced_orient=/d' /newroot/system/build.prop > "$properties"
+printf '\nconfig.override_forced_orient=true\n' >> "$properties"
+chmod 644 "$properties"
+mount --bind "$properties" /newroot/system/build.prop
+mkdir -p "$vendor/etc/permissions"
+cat > "$vendor/etc/permissions/spx-sensors.xml" <<'XML'
+<permissions>
+  <feature name="android.hardware.sensor.accelerometer" />
+  <feature name="android.hardware.sensor.light" />
+</permissions>
+XML
+if [ -c /dev/fastrpc-sdsp ]; then
+    ln -s /sys/devices/soc0 "$source/rpc-root/socinfo"
+    /bin/spx-sensor-rpcd -s -f /dev/fastrpc-sdsp -R "$source/rpc-root"         </dev/null >/logs/sensors-rpc.txt 2>&1 &
+fi
+echo SPX_SENSORS_STAGED
