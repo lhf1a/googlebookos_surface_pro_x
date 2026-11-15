@@ -10,3 +10,9 @@
 /vendor/lib64/vulkan\.qti-native\.so u:object_r:same_process_hal_file:s0
 /vendor/lib64/libquest2-native-vulkan-memory\.so u:object_r:same_process_hal_file:s0
 /vendor/lib64/mapper\.qti\.so u:object_r:same_process_hal_file:s0
+/vendor/lib64/hw/vulkan\.freedreno\.so u:object_r:same_process_hal_file:s0
+/vendor/lib64/hw/vulkan\.turnip\.so u:object_r:same_process_hal_file:s0
+/vendor/lib64/hw/vulkan\.qti\.so u:object_r:same_process_hal_file:s0
+/vendor/lib64/hw/gralloc\.sq2_mesa\.so u:object_r:same_process_hal_file:s0
+/vendor/lib64/libsq2_grallocutils_vendor\.so u:object_r:same_process_hal_file:s0
+/vendor/etc/sq2-vulkan-policy\.conf u:object_r:vendor_configs_file:s0

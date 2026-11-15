@@ -28,12 +28,65 @@ DEFAULT_A6XX_MMIO_FIX_PATCHES = ROOT / 'patches/drm-618-a6xx-mmio-fix'
 CLOSED_GRAPHICS_DIRS = ('etc/sq2-qti-system', 'etc/sq2-graphics-full', 'etc/sq2-vulkan-closed')
 CLOSED_GRAPHICS_HELPERS = ('bin/qti-system-display-stage', 'bin/qualcomm-full-start',
                            'bin/closed-vulkan-start')
+HYBRID_CLOSED_DIRS = ('etc/sq2-graphics-full', 'etc/sq2-vulkan-closed')
+HYBRID_CLOSED_HELPERS = ('bin/qualcomm-full-start', 'bin/closed-vulkan-start')
+HYBRID_CLOSED_QTI_ROOT_FILES = (
+    'lib64/egl/eglSubDriverAndroid.so',
+    'lib64/egl/libEGL_adreno.so',
+    'lib64/egl/libGLESv1_CM_adreno.so',
+    'lib64/egl/libGLESv2_adreno.so',
+    'lib64/egl/qgl_config.txt',
+    'lib64/sq2-qti-display/eglSubDriverAndroid.so',
+    'lib64/sq2-qti-display/libEGL_adreno.so',
+    'lib64/sq2-qti-display/libGLESv2_adreno.so',
+    'lib64/sq2-qti-display/libq2v77glnext.so',
+    'lib64/sq2-qti-display/libq2v77qgl.so',
+)
+HYBRID_CLOSED_QTI_SYMLINKS = {
+    'lib64/egl/libEGL_freedreno.so',
+    'lib64/egl/libGLESv1_CM_freedreno.so',
+    'lib64/egl/libGLESv2_freedreno.so',
+}
+HYBRID_REQUIRED_QTI_VULKAN_FILES = (
+    'lib64/vulkan.qti-native.so',
+    'lib64/libquest2-native-vulkan-memory.so',
+    'lib64/libq2v77glnext.so',
+    'lib64/libq2v77qgl.so',
+    'lib64/qgl_config.txt',
+    'lib64/libgsl.so',
+    'lib64/libadreno_utils.so',
+    'lib64/libquest2-system-ion.so',
+)
+HYBRID_REQUIRED_QTI_VULKAN_SYMLINKS = {
+    'lib64/egl/libq2v77glnext.so',
+    'lib64/egl/libq2v77qgl.so',
+}
+HYBRID_SELINUX_CONTEXT_LINES = (
+    r'/vendor/lib64/hw/vulkan\.freedreno\.so u:object_r:same_process_hal_file:s0',
+    r'/vendor/lib64/hw/vulkan\.turnip\.so u:object_r:same_process_hal_file:s0',
+    r'/vendor/lib64/hw/vulkan\.qti\.so u:object_r:same_process_hal_file:s0',
+    r'/vendor/lib64/hw/gralloc\.sq2_mesa\.so u:object_r:same_process_hal_file:s0',
+    r'/vendor/lib64/libsq2_grallocutils_vendor\.so u:object_r:same_process_hal_file:s0',
+    r'/vendor/etc/sq2-vulkan-policy\.conf u:object_r:vendor_configs_file:s0',
+)
+LEGACY_TURNIP_SYSMEM_MARKERS = (
+    b'com.futuremark.dmandroid.application',
+    b'SQ2 A680.1: forcing sysmem rendering',
+)
+DEFAULT_CLEAN_TURNIP_PATH = ROOT / 'out/sq2-turnip/runtime/vulkan.freedreno.so'
+DEFAULT_CLEAN_TURNIP_LIBDRM_PATH = ROOT / 'out/sq2-turnip/runtime/libdrm.so'
+DEFAULT_VULKAN_POLICY_PATH = ROOT / 'configs/sq2-vulkan-policy.conf'
+HYBRID_REQUIRED_PROPS = ('ro.hardware.egl=freedreno', 'ro.hardware.vulkan=freedreno',
+                         'vendor.gralloc.disable_ubwc=0', 'ro.surface_flinger.force_hole_punch=true')
+HYBRID_REMOVE_PROPS = {'ro.vendor.hwcomposer.mode=client', 'vendor.minigbm.debug=nocompression'}
 MESA_REQUIRED_PROPS = ('ro.hardware.egl=freedreno', 'ro.hardware.vulkan=freedreno',
                        'ro.vendor.hwcomposer.mode=client')
 MESA_STAGE_LINES = (
     b'qualcomm-full-start > /logs/qualcomm-full.txt 2>&1 || fail qualcomm-full-graphics\n',
     b'qti-system-display-stage > /logs/qti-system-display.txt 2>&1 || fail qti-system-display\n',
 )
+HYBRID_STAGE_LINE = b'qualcomm-full-start > /logs/qualcomm-full.txt 2>&1 || fail qualcomm-full-graphics\n'
+HYBRID_KEEP_STAGE_LINE = b'qti-system-display-stage > /logs/qti-system-display.txt 2>&1 || fail qti-system-display\n'
 MESA_STATUS_HOOK = (
     b'if [ -f /etc/sq2-graphics-mode ]; then\n'
     b'    echo "SQ2_GRAPHICS_MODE: $(cat /etc/sq2-graphics-mode)" | tee -a /logs/status.txt\n'
@@ -41,7 +94,292 @@ MESA_STATUS_HOOK = (
 )
 
 
-def mesa_runtime(records, bodies):
+def _sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def append_selinux_context_lines(contexts_bytes, lines=HYBRID_SELINUX_CONTEXT_LINES):
+    """Append missing SELinux file_contexts lines idempotently."""
+    text = contexts_bytes.decode('utf-8')
+    existing = {line.strip() for line in text.splitlines() if line.strip()}
+    out = list(text.splitlines())
+    for line in lines:
+        if line not in existing:
+            out.append(line)
+            existing.add(line)
+    return ('\n'.join(out) + '\n').encode('utf-8')
+
+
+def resolve_clean_turnip_bytes(bodies, turnip_bytes=None):
+    """Return unpatched hardware-GMEM Turnip bytes and reject 3DMark sysmem markers."""
+    vk_key = 'etc/googlebook-security/lib64/hw/vulkan.freedreno.so'
+    require(vk_key in bodies, 'Mesa Vulkan payload missing')
+    if turnip_bytes is None:
+        existing = bodies[vk_key]
+        if any(m in existing for m in LEGACY_TURNIP_SYSMEM_MARKERS) and DEFAULT_CLEAN_TURNIP_PATH.is_file():
+            turnip_bytes = DEFAULT_CLEAN_TURNIP_PATH.read_bytes()
+            libdrm_key = 'etc/googlebook-security/lib64/libdrm.so'
+            if libdrm_key in bodies and DEFAULT_CLEAN_TURNIP_LIBDRM_PATH.is_file():
+                bodies[libdrm_key] = DEFAULT_CLEAN_TURNIP_LIBDRM_PATH.read_bytes()
+        else:
+            turnip_bytes = existing
+    for marker in LEGACY_TURNIP_SYSMEM_MARKERS:
+        require(marker not in turnip_bytes, 'Legacy 3DMark sysmem workaround marker found in Turnip binary')
+    return turnip_bytes
+
+
+def hybrid_runtime(
+    records,
+    bodies,
+    gralloc_adapter_bytes=None,
+    layout_payload=None,
+    backlight_payload=None,
+    vulkan_router_bytes=None,
+    turnip_bytes=None,
+    vulkan_policy_bytes=None,
+):
+    """Combine Mesa Freedreno/Dual-Vulkan (Turnip + QTI) with QTI gralloc/mapper5/HWC/SDM + OMX.
+
+    Host-side transformation only: retains Mesa GLES in etc/googlebook-security,
+    installs unpatched hardware-GMEM Turnip at vulkan.turnip.so, installs the
+    per-app Dual-Vulkan router at vulkan.freedreno.so + sq2-vulkan-policy.conf,
+    retains QTI native Vulkan closure while relocating QTI's HAL wrapper to
+    vulkan.qti.so, strips closed Adreno GLES, installs gralloc.sq2_mesa.so as
+    gralloc.default.so, aligns sq2-qti-display/libdrm.so with Mesa's libdrm,
+    redirects missing QTI panelN-backlight sysfs nodes to pwm-backlight, and
+    preserves RequiresSwRenderer=0 native ANW surface OMX decoding.
+    """
+    prop_name = 'etc/googlebook-security/build.prop'
+    require(prop_name in bodies, 'Mesa overlay missing: ' + prop_name)
+    props_text = bodies[prop_name].decode()
+    for item in HYBRID_REQUIRED_PROPS:
+        require(item in props_text, 'Hybrid overlay property missing: ' + item)
+    for req_mesa in ('etc/googlebook-security/lib64/egl/libEGL_freedreno.so',
+                     'etc/googlebook-security/lib64/egl/libGLESv1_CM_freedreno.so',
+                     'etc/googlebook-security/lib64/egl/libGLESv2_freedreno.so',
+                     'etc/googlebook-security/lib64/libgallium_dri.so',
+                     'etc/googlebook-security/lib64/libdrm.so',
+                     'etc/googlebook-security/lib64/hw/vulkan.freedreno.so'):
+        require(req_mesa in bodies, 'Mesa/Turnip payload missing: ' + req_mesa)
+
+    qti_prefix = 'etc/sq2-qti-system'
+    for req_qti in (qti_prefix,
+                    qti_prefix + '/INSTALL_FILES',
+                    qti_prefix + '/SYMLINKS',
+                    qti_prefix + '/SHA256SUMS',
+                    qti_prefix + '/INSTALLED_SHA256SUMS',
+                    qti_prefix + '/root/bin/hw/vendor.qti.hardware.display.composer-service',
+                    qti_prefix + '/root/bin/hw/vendor.qti.hardware.display.allocator-service',
+                    qti_prefix + '/root/lib64/hw/mapper.quest2.so',
+                    qti_prefix + '/root/lib64/hw/gralloc.kona.so',
+                    qti_prefix + '/root/lib64/libgrallocutils.so',
+                    qti_prefix + '/root/lib64/libqdMetaData.so',
+                    qti_prefix + '/root/lib64/sq2-qti-display/libdrm.so',
+                    qti_prefix + '/root/lib64/sq2-qti-display/libsdmcore.so',
+                    'bin/qti-system-display-stage'):
+        require(req_qti in bodies, 'QTI display/gralloc payload missing: ' + req_qti)
+    for req_vk_rel in HYBRID_REQUIRED_QTI_VULKAN_FILES:
+        req_vk_path = f'{qti_prefix}/root/{req_vk_rel}'
+        require(req_vk_path in bodies, 'QTI native Vulkan dependency missing: ' + req_vk_path)
+
+    qti_vk_hal_src = f'{qti_prefix}/root/lib64/hw/vulkan.freedreno.so'
+    qti_vk_hal_dst = f'{qti_prefix}/root/lib64/hw/vulkan.qti.so'
+    require(
+        qti_vk_hal_src in bodies or qti_vk_hal_dst in bodies,
+        'QTI Vulkan policy HAL missing: ' + qti_vk_hal_src,
+    )
+
+    init = bodies.get('init', b'')
+    require(init.count(HYBRID_STAGE_LINE) == 1,
+            'Unknown closed-graphics stage in init: ' + HYBRID_STAGE_LINE.decode().strip())
+    require(init.count(HYBRID_KEEP_STAGE_LINE) == 1,
+            'Missing qti-system-display-stage in init')
+
+    from full_image_video import verify_native_omx
+    omx_report = verify_native_omx(bodies)
+
+    if gralloc_adapter_bytes is None:
+        from build_mesa_qti_gralloc import build_bytes
+        gralloc_adapter_bytes = build_bytes()
+
+    clean_turnip = resolve_clean_turnip_bytes(bodies, turnip_bytes=turnip_bytes)
+    if vulkan_router_bytes is None:
+        from build_hybrid_vulkan_router import build_bytes as build_router_bytes
+        vulkan_router_bytes = build_router_bytes()
+    if vulkan_policy_bytes is None:
+        vulkan_policy_bytes = DEFAULT_VULKAN_POLICY_PATH.read_bytes().replace(b'\r\n', b'\n')
+
+    removed = []
+    for directory in HYBRID_CLOSED_DIRS:
+        require(directory in bodies, 'Closed graphics payload missing: ' + directory)
+        for name in sorted(n for n in bodies if n == directory or n.startswith(directory + '/')):
+            removed.append(name)
+            bodies.pop(name, None)
+            records.pop(name, None)
+    for name in HYBRID_CLOSED_HELPERS:
+        require(name in bodies, 'Closed graphics helper missing: ' + name)
+        removed.append(name)
+        bodies.pop(name, None)
+        records.pop(name, None)
+
+    for rel in HYBRID_CLOSED_QTI_ROOT_FILES:
+        full_name = f'{qti_prefix}/root/{rel}'
+        if full_name in bodies:
+            removed.append(full_name)
+            bodies.pop(full_name, None)
+            records.pop(full_name, None)
+
+    # Relocate QTI's Vulkan policy HAL out of vulkan.freedreno.so so it does not overwrite our router.
+    if qti_vk_hal_src in bodies:
+        qti_vk_bytes = bodies.pop(qti_vk_hal_src)
+        records.pop(qti_vk_hal_src, None)
+        bodies[qti_vk_hal_dst] = qti_vk_bytes
+        records[qti_vk_hal_dst] = new_record(0o100644)
+    require(qti_vk_hal_src not in bodies, 'QTI Vulkan HAL must not remain at vulkan.freedreno.so')
+
+    # Install Dual-Vulkan files in etc/googlebook-security (router + Turnip + policy conf).
+    records.setdefault('etc/googlebook-security/etc', new_record(0o040755))
+    bodies.setdefault('etc/googlebook-security/etc', b'')
+    bodies['etc/googlebook-security/lib64/hw/vulkan.turnip.so'] = clean_turnip
+    records['etc/googlebook-security/lib64/hw/vulkan.turnip.so'] = new_record(0o100644)
+    bodies['etc/googlebook-security/lib64/hw/vulkan.freedreno.so'] = vulkan_router_bytes
+    records['etc/googlebook-security/lib64/hw/vulkan.freedreno.so'] = new_record(0o100644)
+    bodies['etc/googlebook-security/etc/sq2-vulkan-policy.conf'] = vulkan_policy_bytes
+    records['etc/googlebook-security/etc/sq2-vulkan-policy.conf'] = new_record(0o100644)
+
+    # Align composer's LD_LIBRARY_PATH libdrm.so with Mesa/Turnip's libdrm 2.4.133.
+    bodies[qti_prefix + '/root/lib64/sq2-qti-display/libdrm.so'] = (
+        bodies['etc/googlebook-security/lib64/libdrm.so']
+    )
+
+    # Install u_gralloc_cros_api -> gralloc.kona adapter as gralloc.sq2_mesa.so.
+    adapter_rel = 'lib64/hw/gralloc.sq2_mesa.so'
+    adapter_path = f'{qti_prefix}/root/{adapter_rel}'
+    bodies[adapter_path] = gralloc_adapter_bytes
+    records[adapter_path] = new_record(0o100644)
+
+    # Pad real linear RGB allocations for Freedreno; never inflate imported sizes.
+    if layout_payload is None:
+        from build_mesa_qti_layout import build_payload
+        layout_payload = build_payload(bodies[qti_prefix + '/root/lib64/libgrallocutils.so'])
+    if backlight_payload is None:
+        from build_sdm_backlight_shim import build_payload as build_backlight_payload
+        backlight_payload = build_backlight_payload(
+            bodies[qti_prefix + '/root/lib64/sq2-qti-display/libsdmcore.so']
+        )
+
+    overlay_specs = (
+        (
+            'Hybrid layout payload',
+            layout_payload,
+            {
+                'lib64/libgrallocutils.so',
+                'lib64/sq2-qti-display/libgrallocutils.so',
+                'lib64/libsq2_grallocutils_vendor.so',
+            },
+        ),
+        (
+            'Hybrid backlight payload',
+            backlight_payload,
+            {
+                'lib64/sq2-qti-display/libsdmcore.so',
+                'lib64/sq2-qti-display/libsq2_sdm_backlight.so',
+            },
+        ),
+    )
+    for label, payload_map, expected_keys in overlay_specs:
+        require(set(payload_map) == expected_keys, f'Incomplete {label}')
+        for rel, payload in payload_map.items():
+            path = f'{qti_prefix}/root/{rel}'
+            bodies[path] = payload
+            records[path] = new_record(0o100644)
+
+    vfc_path = f'{qti_prefix}/root/etc/selinux/vendor_file_contexts'
+    if vfc_path in bodies:
+        bodies[vfc_path] = append_selinux_context_lines(bodies[vfc_path])
+
+    # Rewrite INSTALL_FILES, SYMLINKS, INSTALLED_SHA256SUMS, and SHA256SUMS deterministically.
+    root_prefix = qti_prefix + '/root/'
+    install_rel_paths = sorted(
+        n.removeprefix(root_prefix)
+        for n in bodies
+        if n.startswith(root_prefix) and not (records[n][1][1] & 0o170000 == 0o040000)
+    )
+    bodies[qti_prefix + '/INSTALL_FILES'] = ('\n'.join(install_rel_paths) + '\n').encode()
+
+    new_symlinks = []
+    saw_default_gralloc = False
+    seen_vk_symlinks = set()
+    for raw_line in bodies[qti_prefix + '/SYMLINKS'].decode().splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        src, dst = line.split(None, 1)
+        if src in HYBRID_CLOSED_QTI_SYMLINKS:
+            continue
+        if src == 'lib64/hw/gralloc.default.so':
+            dst = 'gralloc.sq2_mesa.so'
+            saw_default_gralloc = True
+        if src in HYBRID_REQUIRED_QTI_VULKAN_SYMLINKS:
+            seen_vk_symlinks.add(src)
+        new_symlinks.append(f'{src} {dst}')
+    require(saw_default_gralloc, 'Expected lib64/hw/gralloc.default.so in sq2-qti-system SYMLINKS')
+    require(
+        seen_vk_symlinks == HYBRID_REQUIRED_QTI_VULKAN_SYMLINKS,
+        'Missing required QTI Vulkan symlinks in sq2-qti-system SYMLINKS',
+    )
+    bodies[qti_prefix + '/SYMLINKS'] = ('\n'.join(new_symlinks) + '\n').encode()
+
+    installed_sums = [f'{_sha256(bodies[root_prefix + rel])}  {rel}' for rel in install_rel_paths]
+    bodies[qti_prefix + '/INSTALLED_SHA256SUMS'] = ('\n'.join(installed_sums) + '\n').encode()
+
+    non_root_sums = []
+    for raw_line in bodies[qti_prefix + '/SHA256SUMS'].decode().splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        _, rel = line.split(None, 1)
+        rel = rel.lstrip('*')
+        if not rel.startswith('root/'):
+            target = f'{qti_prefix}/{rel}'
+            require(target in bodies, 'Missing non-root file in sq2-qti-system: ' + target)
+            non_root_sums.append(f'{_sha256(bodies[target])}  {rel}')
+    all_sums = [f'{_sha256(bodies[root_prefix + rel])}  root/{rel}' for rel in install_rel_paths] + sorted(non_root_sums)
+    bodies[qti_prefix + '/SHA256SUMS'] = ('\n'.join(all_sums) + '\n').encode()
+
+    # Remove minigbm/client-only overrides while retaining freedreno EGL/Vulkan and hole punch.
+    filtered_props = [
+        line for line in props_text.splitlines(keepends=True)
+        if line.strip() not in HYBRID_REMOVE_PROPS
+    ]
+    bodies[prop_name] = ''.join(filtered_props).encode()
+
+    init = init.replace(HYBRID_STAGE_LINE, b'')
+    require(MESA_STATUS_HOOK not in init, 'Hybrid status hook already present')
+    anchor = b'if [ -d /etc/googlebook-security ]; then\n'
+    require(init.count(anchor) == 1, 'Unknown security-overlay handoff')
+    init = init.replace(anchor, MESA_STATUS_HOOK + anchor, 1)
+    bodies['init'] = init
+    bodies['etc/sq2-graphics-mode'] = b'hybrid-mesa-qti\n'
+    records['etc/sq2-graphics-mode'] = new_record(0o100644)
+
+    retained_mesa = sorted(n for n in bodies
+                           if n.startswith('etc/googlebook-security/') and not n.endswith('/'))
+    return {'graphics': 'hybrid',
+            'vulkan_mode': 'dual-turnip-qti',
+            'removed_members': removed,
+            'removed_count': len(removed),
+            'retained_mesa_members': len(retained_mesa),
+            'qti_installed_count': len(install_rel_paths),
+            'gralloc_adapter_sha256': _sha256(gralloc_adapter_bytes),
+            'vulkan_router_sha256': _sha256(vulkan_router_bytes),
+            'turnip_sha256': _sha256(clean_turnip),
+            'marker': 'etc/sq2-graphics-mode',
+            'video': omx_report,
+            'hardware_validated': False}
+
+
+def mesa_runtime(records, bodies, turnip_bytes=None):
     """Switch the runtime initramfs from the mixed/QTI stack to a full Mesa chain.
 
     Host-side transformation only: closed Qualcomm graphics payloads and their
@@ -57,6 +395,9 @@ def mesa_runtime(records, bodies):
     require('etc/googlebook-security/lib64/egl/libEGL_freedreno.so' in bodies, 'Mesa EGL payload missing')
     require('etc/googlebook-security/lib64/hw/vulkan.freedreno.so' in bodies, 'Mesa Vulkan payload missing')
     require('etc/googlebook-security/lib64/hw/mapper.minigbm.so' in bodies, 'minigbm mapper missing')
+    bodies['etc/googlebook-security/lib64/hw/vulkan.freedreno.so'] = resolve_clean_turnip_bytes(
+        bodies, turnip_bytes=turnip_bytes
+    )
     init = bodies.get('init', b'')
     for line in MESA_STAGE_LINES:
         require(init.count(line) == 1,
@@ -331,9 +672,11 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline'):
             by_name[path.name] = path
         # Replace ALL effective module copies, including private overlay copies,
         # never silently retain parent modules with the same version string.
-        from full_image_video import validate_venus_core_module
+        from full_image_video import validate_venus_core_module, validate_venus_dec_module
         require('venus-core.ko' in by_name, 'Required Venus core module not built')
         validate_venus_core_module(by_name['venus-core.ko'].read_bytes())
+        require('venus-dec.ko' in by_name, 'Required Venus decoder module not built')
+        validate_venus_dec_module(by_name['venus-dec.ko'].read_bytes())
         for name in list(bodies):
             if name.endswith('.ko'):
                 require(Path(name).name in by_name, 'Required runtime module not built: '+name)
@@ -347,6 +690,8 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline'):
     graphics_report = None
     if graphics == 'mesa':
         graphics_report = mesa_runtime(records, bodies)
+    elif graphics == 'hybrid':
+        graphics_report = hybrid_runtime(records, bodies)
     elif graphics != 'baseline':
         raise ValueError('Unknown graphics mode: ' + repr(graphics))
     init = bodies['init']
@@ -450,7 +795,7 @@ def build(args, compile_kernel):
             if not link.exists() and not link.is_symlink():
                 link.symlink_to(os.path.relpath(target,prefixes),target_is_directory=True)
         kernel_patches = args.kernel_patches
-        if kernel_patches is None and args.graphics == 'mesa':
+        if kernel_patches is None and args.graphics in ('mesa', 'hybrid'):
             kernel_patches = DEFAULT_A6XX_PATCHES
         patch_report = None
         if kernel_patches:
@@ -481,7 +826,7 @@ def build(args, compile_kernel):
                       if t.startswith('sq2.vulkan=')]
     require(graphics_token, 'Missing sq2.vulkan= boot option')
     graphics_token = graphics_token[0]
-    if args.graphics == 'mesa':
+    if args.graphics in ('mesa', 'hybrid'):
         graphics_token = rewrite_mesa_boot_selection(bundle)
     if compiled:
         shutil.copyfile(compiled/'Image',bundle/'Image')

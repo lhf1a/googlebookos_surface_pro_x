@@ -156,7 +156,32 @@ def ensure_venus_source_hooks(directory):
                 'Unexpected sq2_pm_stage anchor in venus-sq2-system-pm.h')
         pm_h.write_text(pm_text.replace(stage_anchor, include_line + '\n' + stage_anchor, 1))
         changed.append('venus-sq2-system-pm.h')
+    omx_h = directory / 'venus-sq2-omx.h'
+    repo_omx_h = Path(__file__).resolve().parents[1] / 'probe/video/venus-sq2-omx.h'
+    if omx_h.is_file():
+        require(repo_omx_h.is_file(), 'Missing repo probe/video/venus-sq2-omx.h')
+        want_omx = repo_omx_h.read_bytes()
+        if omx_h.read_bytes() != want_omx:
+            omx_h.write_bytes(want_omx)
+            changed.append('venus-sq2-omx.h')
     return {'directory': str(directory), 'updated_headers': changed}
+
+
+def verify_native_omx(bodies):
+    """Verify quest2-omx-service retains RequiresSwRenderer=0 native ANW surface mode."""
+    require(OMX_SERVICE in bodies, 'OMX HIDL payload missing: ' + OMX_SERVICE)
+    service = bodies[OMX_SERVICE]
+    aarch64_elf(service, OMX_SERVICE)
+    idx_end = OMX_INDEX_CHECK_OFFSET + len(OMX_INDEX_CHECK_BYTES)
+    end = OMX_SWRENDER_OFFSET + len(OMX_SWRENDER_BEFORE)
+    require(len(service) >= end and
+            service[OMX_INDEX_CHECK_OFFSET:idx_end] == OMX_INDEX_CHECK_BYTES,
+            'OMX RequiresSwRenderer index anchor mismatch')
+    require(service[OMX_SWRENDER_OFFSET:end] == OMX_SWRENDER_BEFORE,
+            'OMX service is not in RequiresSwRenderer=0 native ANW mode')
+    return {'omx_output': 'native-anw-surface',
+            'omx_service_sha256': sha(service),
+            'requires_sw_renderer': 0}
 
 
 def validate_venus_core_module(body):
@@ -165,6 +190,13 @@ def validate_venus_core_module(body):
     missing = [s.decode().rstrip('\0') for s in VENUS_CORE_REQUIRED_STRINGS if s not in body]
     require(not missing,
             'Compiled venus-core.ko lacks SQ2 capability exports: ' + ', '.join(missing))
+
+
+def validate_venus_dec_module(body):
+    """Verify built venus-dec.ko is valid AArch64 ELF and references DPB queueing."""
+    aarch64_elf(body, 'venus-dec.ko')
+    require(b'venus_helper_queue_dpb_bufs' in body,
+            'Compiled venus-dec.ko lacks venus_helper_queue_dpb_bufs reference')
 
 
 def main():
