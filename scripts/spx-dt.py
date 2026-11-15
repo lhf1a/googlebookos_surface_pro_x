@@ -16,4 +16,3 @@ def properties(fdt):
             result[path, value.name] = bytes(value)
             prop = fdt.next_property_offset(prop, quiet=(libfdt.NOTFOUND,))
     return result
-
