@@ -35,7 +35,7 @@ int main(){
    subprocess.run([str(d/'test')],check=True)
  def test_ui_and_original_rollback_are_preserved(self):
   s=(R/'probe/touch-calibration/MainActivity.java').read_text()
-  for text in ['NOISE_MS=45000','+60000','已检测到','已应用修复，重新检查','继续优化','我确认当前效果可以','noisePassed=f[1].equals("quiet")&&noiseContacts==0','handler.removeCallbacks(noiseStep)']:
+  for text in ['NOISE_MS=45000','+60000','已检测到','已应用修复，重新检查','应用下一版修复并复测','静置期间未触屏','noisePassed=WizardFlow.idleOutputClean','handler.removeCallbacks(noiseStep)']:
    self.assertIn(text,s)
   h=(R/'probe/test2/touch-calibration-boot').read_text()
   self.assertIn('if [ "$noise_preview" != 1 ]; then\n                        rm -f "$noise/previous"',h)

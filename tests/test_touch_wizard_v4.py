@@ -72,7 +72,7 @@ public class Check {
                 self.assertTrue((noise/'command').read_text().startswith('slide-test '))
                 self.assertEqual(request('noise-save'),'OK');self.assertEqual((store/(device+'.noise')).read_bytes(),active)
                 self.assertEqual(request('noise-slide','current'),'OK')
-                self.assertTrue((noise/'command').read_text().startswith('slide '))
+                self.assertTrue((noise/'command').read_text().startswith('slide-test '))
                 self.assertEqual(request('noise-resume'),'OK')
                 self.assertEqual((noise/'active').read_bytes(),active)
                 # Real coordinate preview dispatch must replace stale learn with

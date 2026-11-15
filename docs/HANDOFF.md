@@ -1,3 +1,54 @@
+## 2026-11-15：精简触摸向导作为默认版本
+
+用户完成SQ2静置、滑动和15点实测后，明确要求本版作为默认并提交远端。
+保留已有累加修复IPTSd和设备私有规则；默认向导不再自动循环优化，
+零意外触点与残余信号分开报告，无参数改动不强制复测，坐标/拇指为按需专项。
+当前设备默认Hybrid入口已持久更新APK/helper，其他入口及内核不变；
+静置41→0触点、滑动单指无伴随、15点各1次，详见TOUCH-NOISE-AND-CALIBRATION。
+full-image构建从当前源码重建向导，避免复用私有runtime中的旧APK。
+本机规则、APK、含凭据镜像及原始日志不提交；本次未做重启或SQ1验收。
+
+## 2026-11-15：新版校准实机观测
+
+用户现场测试，同boot只读观察，未注入触摸或替用户确认：
+- 静置 run 4bce326e…：47.671秒，41新触点，4505帧/4503异常帧，4格稀疏候选。
+- 应用后 run 0fcc5946…：48.367秒，0新触点，4505帧/3385异常帧；
+  保留残余信号提示，未自动循环优化，正常进入slide-test。
+- 滑动 run 25e35ec1…：quiet，enough=true，peak=1，multi_frames=0，
+  moves=1120，span=0.864545，cancels=0；对应用户单指确认文件已写入。
+- 15点 run 6f05189c…完整、未截断，每点 starts/groups/peak 全为1，cancels全0；
+  对应SINGLE_FINGER_ONE_TAP_PER_TARGET确认文件匹配。
+  随后tap-cancel返回OK并reload，按无异常分支保留原tap，不强制复测。
+- 静置 .noise 已保存，active与持久文件SHA256相同：35e11f4f…；
+  坐标profile/tap仍为原保存文件。前台随后为哔哩哔哩。
+- 这轮证明静置输出、单指滑动、15点及简化流程有效；未观察到新的坐标/拇指专项，
+  最终手势按钮无独立日志，不能据切回其他应用断言已确认全部手势。
+  长期使用/重启加载效果仍待后续。监看已停止，原始快照在ignored out/touch-live-20261115。
+
+## 2026-11-15：精简校准流程已部署到用户指定 SQ2
+
+用户明确要求部署。已更新运行 APK 与 /bin/touch-calibration-boot，helper 重启成功，
+IPTSd 二进制保持 e531874e…；安装 APK 与构建 SHA256 均为 71c1b0c9…，
+helper 为 5a4f0276…。原坐标/profile、tap、prompted 校验一致，未替用户保存新规则。
+同 boot 9bab5119…，未重启，人工触摸流程与下次启动验收待用户执行。
+
+已动态核对当前 NVMe/ESP、marker、Android system_a 根源与启动参数，
+只持久更新当前默认 EFI/SQ2Hyb/initramfs.cpio.gz：
+f79f97da… → 3d7ecee4…。last-entry-wins 审计仅 APK/helper 两项差异，
+IPTSd/内核/凭据及其他内容一致，原凭据 member 保持最后。gzip/hash/sync及同ESP
+原子替换通过；SQ2Msa另一入口、菜单未改。
+ESP原镜像备份：EFI/SQ2Hyb/initramfs.before-touch-flow-20261115.cpio.gz；
+运行备份与校准数据在 Android /data/local/tmp/touch-flow-backup-20261115。
+主机证据与原镜像在 ignored out/touch-deploy-20261115；含私有数据，不分发。
+需要回退时，在确认ESP仍为本次目标后，用备份原子恢复该默认入口镜像并正常重启；
+当前RAM立即回退另需恢复备份 helper/APK，不清除应用或校准数据。
+
+## 2026-11-15：触摸校准流程精简
+
+已按用户要求修改向导：消除自动循环优化，无改动不重复复测，合并滑动/拇指确认页，
+坐标和拇指改为按需专项；检查现有规则时保留其作用。APK/helper 已离线构建，未部署。
+完整流程与验证边界见 docs/TOUCH-NOISE-AND-CALIBRATION.md 最新节。
+
 ## 2026-11-10：首启跳过向导 HOME 修正与扩容/swap 提交
 
 用户将v6部署到192.168.5.116，boot81aa2a4a…；配置完成两个settings均1，但HOME和前台

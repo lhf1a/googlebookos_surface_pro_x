@@ -361,6 +361,11 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline'):
     # binary remains the fixed private runtime input (not the old touch cache).
     bodies['bin/touch-calibration-boot'] = (ROOT/'probe/test2/touch-calibration-boot').read_bytes().replace(b'\r\n',b'\n')
     records.setdefault('bin/touch-calibration-boot', new_record(0o100755))
+    # Rebuild the default wizard instead of retaining a stale private-runtime APK.
+    touch_files, _ = module('full_image_touch', 'build-touch-calibration.py').build(ROOT)
+    wizard = 'etc/sq2-touch-calibration/wizard.apk'
+    mode, bodies[wizard] = touch_files[wizard]
+    records[wizard] = new_record(mode)
     # Universal builds do not rewrite reference hashes or gate boot on content
     # hashes. Preserve imported manifests as metadata; no startup consumer uses
     # them for validation after this policy is applied.

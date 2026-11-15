@@ -218,8 +218,7 @@ while true; do
                     power=$(cat /sys/class/power_supply/ADP1/online 2>/dev/null || printf unknown)
                     case "$power" in 0|1) ;; *) power=unknown;; esac
                     printf 'power_online=%s\n' "$power" > "$noise/power"
-                    op=learn; [ "$command" != noise-slide ] || op=slide
-                    [ "$requested" != preview ] || op=$op-test
+                    op=learn-test; [ "$command" != noise-slide ] || op=slide-test
                     if noise_begin "$op" "$nonce"; then reply OK;else noise_reload "$nonce-cancel";reply ERROR;fi
                     ;;
                 noise-apply)

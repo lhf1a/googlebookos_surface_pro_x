@@ -30,6 +30,11 @@ public final class SingleTapCapture {
     active=action==1||action==3?0:Math.max(0,pointerCount-(action==6?1:0));
     if(action==1&&began){if(capturedAt[i]<0)capturedAt[i]=now;began=false;}
   }
+  public boolean clean(){
+    if(!complete)return false;
+    for(int i=0;i<N;i++)if(starts[i]!=1||groups[i]!=1||peak[i]!=1||cancels[i]!=0)return false;
+    return true;
+  }
   public int total(){int n=0;for(int v:starts)n+=v;return n;}
   public int multiTrials(){int n=0;for(int v:peak)if(v>1)n++;return n;}
   public int fragmentedTrials(){int n=0;for(int v:groups)if(v>1)n++;return n;}

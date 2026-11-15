@@ -5,6 +5,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 import ast
 import subprocess
 
@@ -44,8 +46,16 @@ class AssemblyChecksums(unittest.TestCase):
                 path.write_bytes(data)
             (runtime / 'records.json').write_text(json.dumps({n: m.new_record(0o100644) for n in bodies}))
             output = root / 'assembled.gz'
-            m.assemble_runtime(root, output)
+            load_module=m.module
+            wizard='etc/sq2-touch-calibration/wizard.apk'
+            def load(name, filename):
+                if filename=='build-touch-calibration.py':
+                    return SimpleNamespace(build=lambda source: ({wizard:(0o100644,b'current source wizard')},{}))
+                return load_module(name, filename)
+            with patch.object(m,'module',side_effect=load):
+                m.assemble_runtime(root, output)
             _, actual = m.records_from_gzip(output)
+            self.assertEqual(actual[wizard],b'current source wizard')
             self.assertEqual(actual['etc/renderer/BASELINE.sha256'], baseline)
             self.assertEqual(actual['etc/renderer/SHA256SUMS'], bodies['etc/renderer/SHA256SUMS'])
 

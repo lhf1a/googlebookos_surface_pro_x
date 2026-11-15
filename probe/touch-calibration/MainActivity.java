@@ -18,6 +18,7 @@ public class MainActivity extends Activity {
   boolean idleArmed=false,retesting=false,noiseBand=false,patchAvailable=false,exporting=false,thumbAfter=false;
   boolean noiseDetected=false,noisePassed=false,noiseAuto=false;
   static final long NOISE_MS=45000;
+  boolean thumbRequested=false;
   boolean slideMode=false,slideAfter=false,slideEnough=false;SlideCapture slideCapture;
   String slideState="",slideRun="";
   void slideIntro(){
@@ -30,25 +31,20 @@ public class MainActivity extends Activity {
     slideEnough=slideCapture!=null&&slideCapture.enough()&&!slideState.equals("no_data")&&!slideState.equals("inconclusive")&&!slideState.equals("error")&&!slideState.equals("expired");
     record("slide-"+slideRun+".txt",slideState+"\n"+(slideCapture==null?"missing":slideCapture.summary())+"\nafter="+slideAfter+" operator_confirmed=false\n");
     if(!slideEnough){message(slideState.equals("no_data")?"已记录触点，但原始数据不足，请重新检测。":slideCapture!=null&&slideCapture.cancels>0?"滑动被中断，请重新检测。":"尚未采到有效滑动，请单指来回滑动。","重新检测",this::slideIntro);return;}
-    LinearLayout l=layout("请抬手。确认刚才全程单指，且未触碰顶部。");
-    holdButton(l,"长按：确认，查看结果",()->{
-      record("slide-"+slideRun+"-confirmed.txt","single_finger=true no_top_contact=true\n");
-      flow.slideRetested=slideAfter;slideReview();
-    });
-    button(l,"操作不符，重新检测",this::slideIntro);
+    slideReview();
   }
   void slideReview(){
     noisePassed=slideEnough&&slideCapture.clean()&&slideState.equals("quiet");
-    if(!noisePassed&&patchAvailable){
-      LinearLayout l=layout("已检测到伴随触点，正在生成修复。");
+    if(!noisePassed&&patchAvailable&&!slideAfter){
+      LinearLayout l=layout("检测到滑动异常。确认刚才全程单指，且未触碰顶部后再应用修复。");
       button(l,"退出并撤销未保存修复",()->finish());
-      noiseAuto=true;send("noise-export","");return;
+      holdButton(l,"长按：确认单指，应用并复测",()->{record("slide-"+slideRun+"-confirmed.txt","single_finger=true no_top_contact=true\n");noiseAuto=true;send("noise-export","");});return;
     }
-    LinearLayout l=layout(noisePassed?"滑动检测通过。\n请测试顶部轻点、跨区拖动和双指缩放。":"仍有异常，未通过。\n请重测，或确认当前效果可以接受。");
+    LinearLayout l=layout(noisePassed?"滑动检测通过。\n请确认刚才全程单指，且未触碰顶部。":"仍有异常，未通过。\n请重测，或确认当前效果可以接受。");
     button(l,"重新滑动检测",this::slideIntro);
     if(!patch.isEmpty())button(l,"保存当前修复文件…",this::exportPatch);
     holdButton(l,noisePassed?"长按：操作正常，下一步":"长按：我接受当前效果，下一步",()->{
-      flow.slideRetested=true;flow.confirmSlide();
+      record("slide-"+slideRun+"-confirmed.txt","single_finger=true no_top_contact=true\n");flow.slideRetested=true;flow.confirmSlide();
       if(noisePreview)send("noise-save","");else send("noise-resume","");
     });
     button(l,"效果不接受，恢复原规则",()->send("noise-cancel",""));
@@ -111,7 +107,7 @@ public class MainActivity extends Activity {
         if(done.equals("noise-resume")){noiseNonce="";if(slideMode){flow.confirmSlide();pointIntro();}else{flow.confirmNoise();slideIntro();}return;}
         if(done.equals("noise-save")){noisePreview=false;noiseNonce="";if(slideMode){flow.confirmSlide();pointIntro();}else{flow.confirmNoise();slideIntro();}return;}
         if(done.equals("noise-cancel")){noiseAuto=false;noisePreview=false;flow.changedNoise();noiseIntro();return;}
-        if(done.equals("preview")){preview=true;deadline=SystemClock.elapsedRealtime()+150000;if(thumbAfter)thumbIntro(true);else thumbIntro(false);return;}
+        if(done.equals("preview")){preview=true;deadline=SystemClock.elapsedRealtime()+150000;if(thumbAfter)thumbIntro(true);else if(thumbRequested){thumbRequested=false;thumbIntro(false);}else review();return;}
         if(done.equals("save")){preview=false;message("已保存。","完成",()->finish());return;}
         if(done.equals("cancel")||done.equals("skip")){preview=false;finish();return;}
       }
@@ -188,7 +184,7 @@ public class MainActivity extends Activity {
         boolean abnormal=!info.getOrDefault("abnormal_frames","0").equals("0")||noiseContacts>0;
         noiseDetected=abnormal||Arrays.asList("ready","line_noise","broad_signal","transient","unresolved").contains(f[1]);
         if(!f[1].equals("learning")){noiseCapturing=false;String summary=noiseSummary(f[1],f[2],info);
-          noisePassed=f[1].equals("quiet")&&noiseContacts==0;
+          noisePassed=WizardFlow.idleOutputClean(f[1],Integer.parseInt(f[2]),noiseContacts);
           noiseBand=info.getOrDefault("candidate_kind","none").equals("band");
           patchAvailable=f[1].equals("ready")||f[1].equals("line_noise")&&noiseBand;
           if(retesting){afterContacts=noiseContacts;afterNoise=summary;flow.finishRetest();record("idle-after.txt",summary);noiseReview();}
@@ -201,6 +197,7 @@ public class MainActivity extends Activity {
     }catch(Exception ignored){}handler.postDelayed(this,300);
   }};
   void detectionResult(){
+    if(noisePassed){flow.finishRetest();noiseReview();return;}
     if(patchAvailable){
       noiseAuto=false;message("正在准备修复方案…");send("noise-export","");return;
     }
@@ -233,18 +230,13 @@ public class MainActivity extends Activity {
     if(noiseAuto)laterNoise(()->{if(noiseAuto&&!leaving&&!waiting){noiseAuto=false;send("noise-retest","preview");}});
   }
   void noiseReview(){
-    if(!noisePassed&&patchAvailable){
-      noiseAuto=true;LinearLayout l=layout("已检测到残余异常，尚未通过。\n5秒后继续优化并复测，请保持静置。");
-      button(l,"现在继续优化",()->{noiseAuto=true;send("noise-export","");});
-      holdButton(l,"长按：我确认当前效果可以，下一步",()->{noiseAuto=false;if(noisePreview)send("noise-save","");else{flow.confirmNoise();send("noise-resume","");}});
-      button(l,"停止并恢复原规则",()->{noiseAuto=false;send("noise-cancel","");});
-      laterNoise(()->{if(noiseAuto&&!leaving&&!waiting){send("noise-export","");}});return;
-    }
     noiseAuto=false;
-    LinearLayout l=layout(noisePassed?"45秒复测通过。\n请轻点、拖动和双指缩放，确认操作正常。":noiseDetected?"仍检测到异常，尚未通过。\n可继续检测优化，或确认当前效果可以接受。":"检测数据不足，尚未通过。\n请继续检测，或确认当前效果可以接受。");
-    holdButton(l,noisePassed?"长按：操作正常，下一步":"长按：我确认当前效果可以，下一步",()->{if(!flow.retested)return;if(noisePreview)send("noise-save","");else{flow.confirmNoise();send("noise-resume","");}});
-    if(!patch.isEmpty())button(l,"保存当前修复文件…",this::exportPatch);
-    button(l,"继续检测优化",this::prepareRetest);button(l,"效果不接受，恢复原规则",()->send("noise-cancel",""));
+    LinearLayout l=layout(noisePassed?"本轮未记录到意外触点。"+(noiseDetected?"仍有信号异常，接着检查正常触摸。":"接着检查单指滑动。"):noiseDetected?"本轮仍有异常。可手动再修复一次，或恢复原规则。":"数据不足，请重新检测。");
+    if(noisePassed)holdButton(l,"长按：静置期间未触屏，继续滑动检查",()->{if(!flow.retested)return;if(noisePreview){flow.confirmNoise();slideIntro();}else send("noise-resume","");});
+    if(!noisePassed&&patchAvailable)button(l,"应用下一版修复并复测",()->{noiseAuto=true;send("noise-export","");});
+    if(!patch.isEmpty())button(l,"导出修复文件…",this::exportPatch);
+    button(l,"重新静置检测",this::prepareRetest);
+    button(l,"恢复原规则并重新开始",()->send("noise-cancel",""));
   }
   void pointIntro(){
     LinearLayout l=layout((tapAfter?"再测一次":"单指点击检测")+"\n用一根手指轻点黄色十字，然后抬手。共15次。\n采到后等1秒，再点下一个。");
@@ -290,7 +282,7 @@ public class MainActivity extends Activity {
   void pointResult(SingleTapCapture t,String run){
     if(!tapAfter){
       tapBefore=t;LinearLayout l=layout("点击完成\n刚才是否每个十字都只点了一次？");
-      holdButton(l,"长按：是，调整并复测",()->{record("point15-operator-confirmed.txt",run+"\nSINGLE_FINGER_ONE_TAP_PER_TARGET\n");message("正在分析，请稍候…");send("tap-finish","");});
+      holdButton(l,t.clean()?"长按：是，保留参数并继续":"长按：是，调整并复测",()->{record("point15-operator-confirmed.txt",run+"\nSINGLE_FINGER_ONE_TAP_PER_TARGET\n");if(t.clean()){tapContinue=true;send("tap-cancel","");}else{message("正在分析，请稍候…");send("tap-finish","");}});
       button(l,"重新采集",this::pointIntro);return;
     }
     flow.tapRetested=true;
@@ -309,8 +301,11 @@ public class MainActivity extends Activity {
   }
   void coordinateIntro(){
     if(!flow.noiseConfirmed){prepareRetest();return;}if(!flow.slideConfirmed){slideIntro();return;}if(!flow.tapConfirmed){pointIntro();return;}
-    LinearLayout l=layout("点击黄色十字，变绿后抬手。\n点不到按音量减跳过；音量加返回上一点。" );
-    button(l,"开始42次采样",()->{skippedRegions=0;collecting=true;setContentView(new Targets());});
+    LinearLayout l=layout("请轻点、快速双击、拖动和双指缩放。\n位置准确即可完成；有偏移再校准，拇指异常可单独检测。" );
+    addGesturePad(l);
+    holdButton(l,"长按：位置、轻点、拖动及双指正常，完成",()->finish());
+    button(l,"仅检查拇指，保留坐标",()->{candidate=original;thumbAfter=false;thumbRequested=true;send("preview",candidate.encode(device));});
+    button(l,"位置有偏移，开始42次采样",()->{skippedRegions=0;collecting=true;setContentView(new Targets());});
   }
   boolean trialAlive(){if(preview&&SystemClock.elapsedRealtime()<deadline)return true;collecting=false;send("cancel","");message("预览已超时，正在恢复上次保存的坐标结果。");return false;}
   void thumbIntro(boolean after){
@@ -325,31 +320,25 @@ public class MainActivity extends Activity {
     button(l,"我已按提示点击，生成修复方案",()->{
       if(!trialAlive())return;flow.changedThumb();
       if(thumbBefore.proposeSizeCandidate()&&!candidate.thumbOptimized){candidate=candidate.withThumbOptimization(true);plan="本轮有重复／缺报／短触点证据：候选将接触面积上限从2.0cm放宽到2.4cm；保持触点阈值、起落时序与坐标曲线不变。不是根因结论，需同条件复测。";}
-      else if(candidate.thumbOptimized)plan="当前已采用2.4cm上限，不继续盲目放宽。保留现有参数进行同条件复测；若仍有问题，不把它声明为已修复。";
-      else plan="本轮未达到生成面积候选的证据门限，保留2.0cm与当前曲线，不无故修改正常触摸；仍进行同条件复测。";
-      record("thumb-plan.txt",thumbBefore.encode()+plan);thumbCandidateReview();
+      else if(candidate.thumbOptimized)plan="当前已采用2.4cm上限，不继续盲目放宽。保留现有参数；若仍有问题，不把它声明为已修复。";
+      else plan="本轮未达到生成面积候选的证据门限，保留2.0cm与当前曲线，不无故修改正常触摸；无需重复采集，继续手势确认。";
+      record("thumb-plan.txt",thumbBefore.encode()+plan);if(candidate.thumbOptimized==thumbBase.thumbOptimized){review();}else{thumbAfter=true;send("preview",candidate.encode(device));}
     });
     button(l,"刚才操作不一致，重新采集",()->thumbIntro(false));
-  }
-  void thumbCandidateReview(){LinearLayout l=layout("准备好后，再用拇指点击10次。" );
-    button(l,"临时应用方案，再测试10次",()->{thumbAfter=true;send("preview",candidate.encode(device));});
-    button(l,"放弃候选，重新采集",()->{candidate=thumbBase;thumbIntro(false);});
   }
   void thumbReview(){
     collecting=false;flow.thumbRetested=true;
     LinearLayout l=layout("复测完成，请确认点击正常。" );
-    holdButton(l,"长按：效果确认，进入最后手势确认",()->{if(flow.confirmThumb())review();});
+    addGesturePad(l);
+    holdButton(l,"长按：点击、位置及手势正常，保存",()->{if(trialAlive()&&flow.confirmThumb())send("save","");});
     button(l,"再做同条件复测",()->thumbIntro(true));
     button(l,"修复无效，恢复原拇指参数保留坐标",()->{candidate=thumbBase;thumbAfter=true;plan="已恢复本轮拇指测试前参数；重新复测后由你确认，未标记修复成功。";flow.changedThumb();send("preview",candidate.encode(device));});
     button(l,"放弃全部坐标改动",()->send("cancel",""));
   }
   void review(){
-    if(!flow.thumbConfirmed)return;
-    LinearLayout l=layout("请在下方轻点、拖动和双指缩放。\n确认操作正常后保存。" );
-    View pad=new View(this){final Paint p=new Paint(3);float[] points=new float[0];
-      protected void onDraw(Canvas c){c.drawColor(Color.DKGRAY);p.setColor(Color.YELLOW);for(int i=0;i<points.length;i+=2)c.drawCircle(points[i],points[i+1],15,p);}
-      public boolean onTouchEvent(MotionEvent e){getParent().requestDisallowInterceptTouchEvent(true);int a=e.getActionMasked(),skip=a==MotionEvent.ACTION_POINTER_UP?e.getActionIndex():-1,n=a==MotionEvent.ACTION_UP||a==MotionEvent.ACTION_CANCEL?0:e.getPointerCount()-(skip>=0?1:0);points=new float[n*2];for(int i=0,j=0;j<n;i++){if(i==skip)continue;points[j*2]=e.getX(i);points[j*2+1]=e.getY(i);j++;}invalidate();return true;}};
-    l.addView(pad,new LinearLayout.LayoutParams(1000,230));
+    LinearLayout l=layout("请在下方轻点、快速双击、拖动和双指缩放。\n确认位置及操作正常后保存。");
+    addGesturePad(l);
+    button(l,"拇指点击有问题，做专项检测",()->thumbIntro(false));
     holdButton(l,"长按：位置及手势可接受，保存本机结果",()->{if(trialAlive())send("save","");});
     button(l,"恢复上次坐标结果",()->send("cancel",""));
   }

@@ -31,5 +31,5 @@ public static void main(String[]args){
   n=(R/'probe/touch-calibration/noise-runtime.hpp').read_text()
   for t in ['if(!noiseBypass)AdaptiveNoise::apply','AdaptiveNoise::refine(active,learner.result)','baselineProbe=noiseBypass=tapBypass=false','time+600000','tapreload'] : self.assertIn(t,n)
   t=(R/'probe/touch-calibration/tap-runtime.hpp').read_text();self.assertIn('bool enabled=!bypass',t);self.assertIn('candidate=active',t);self.assertIn('if(learning)tracker.step',t)
-  h=(R/'probe/test2/touch-calibration-boot').read_text();self.assertIn('noise-resume)',h);self.assertIn('op=$op-test',h)
+  h=(R/'probe/test2/touch-calibration-boot').read_text();self.assertIn('noise-resume)',h);self.assertIn('op=learn-test',h)
 if __name__=='__main__':unittest.main()

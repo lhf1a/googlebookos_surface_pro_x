@@ -39,8 +39,8 @@ elif a[:2]==['am','start']:pathlib.Path({str(w/'launched')!r}).touch()
             profile=f'Version=1\nDevice={device}\nCalibrationX=0:0 .02:.03 .12:.12 1:1\nCalibrationY=\nCalibrationXTop=\nCalibrationTopStart=0.1\nCalibrationTopEnd=0.3\n'
             processes=[]
             def wait_for(fn):
-                end=time.time()+8
-                while time.time()<end:
+                end=time.monotonic()+8
+                while time.monotonic()<end:
                     if fn():return
                     time.sleep(.025)
                 self.fail('Timed out; '+(w/'session.log').read_text())
