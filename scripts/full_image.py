@@ -685,7 +685,7 @@ def install_userdata_growth(records, bodies):
     for name in ('resize-userdata-partition','grow-image-userdata','surface-swap-boot'):
         records['bin/'+name]=new_record(0o100755)
 
-def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_modules=None, camera=None, sensors=None):
+def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_modules=None, camera=None, sensors=None, suspend=None):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
     bodies = {name: b'' if rec[1][1] & 0o170000 == 0o040000 else (runtime/'files'/name).read_bytes()
@@ -767,6 +767,9 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
     if sensors is not None:
         from full_image_sensors import install
         install(records, bodies, sensors, new_record)
+    if suspend is not None:
+        from full_image_suspend import install
+        install(records, bodies, suspend, new_record)
     # Add parent directory records for every newly installed module/index.
     for name in list(bodies):
         for parent in Path(name).parents:
@@ -797,6 +800,9 @@ def build(args, compile_kernel):
     if args.build_dir is not None:
         args.build_dir = args.build_dir.resolve()
     private=args.private_root.resolve()
+    # Fail before the expensive kernel build if the reusable Android input is
+    # missing; the image never silently falls back to the long donor wakelock.
+    regular(private/'suspend/desktop-services.jar')
     source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     template=regular(args.template or private/'template.img')
     require(args.jobs>0,'--jobs must be positive')
@@ -915,6 +921,10 @@ def build(args, compile_kernel):
             explicit_src=getattr(args, 'device_faker_src', None),
         )
         ksu_modules['device_faker.zip'] = df_bytes
+    # Both prebuilt and source default builds must contain the accepted sleep
+    # fix. Source mode selects this build's module, never a same-release donor.
+    from full_image_suspend import load as load_suspend
+    suspend = load_suspend(private/'suspend', bundle/'Image', compiled)
     graphics_report = assemble_runtime(
         private,
         bundle/'initramfs.cpio.gz',
@@ -923,6 +933,7 @@ def build(args, compile_kernel):
         ksu_modules=ksu_modules,
         camera=camera,
         sensors=sensors,
+        suspend=suspend,
     )
     esp_only = bool(getattr(args, 'esp_only', False))
     from disk_image import build as disk_build
@@ -941,6 +952,8 @@ def build(args, compile_kernel):
         build_time_parent_initramfs_used=False,postbuild_tests_performed=False,
         graphics=args.graphics,graphics_boot_option=graphics_token,
         graphics_report=graphics_report,
+        suspend_enabled=True,
+        suspend_module_source='fresh-compiled' if compiled else 'image-paired-prebuilt',
         device_faker_fork=device_faker_meta,
         sensors_enabled=sensors is not None,
         sensor_modules_rebuilt=bool(sensors is not None and compiled),

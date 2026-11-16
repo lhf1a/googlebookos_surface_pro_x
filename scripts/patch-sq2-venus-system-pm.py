@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Add explicit idle-only no-TZ system PM to a freshly prepared module copy."""
 from pathlib import Path
-import argparse,shutil
+import argparse,shutil,importlib.util
 def replace(s,a,b):
  if s.count(a)!=1:raise ValueError('Unknown Venus PM source anchor: '+repr(a))
  return s.replace(a,b,1)
@@ -32,5 +32,10 @@ def apply(directory,root):
  p=directory/'Makefile';s=p.read_text()
  if 'SQ2_VENUS_SYSTEM_PM' in s:raise ValueError('System PM already applied')
  p.write_text(s+'\nccflags-y += -DSQ2_VENUS_SYSTEM_PM\n')
+ # The shared PM header now calls the firmware quiesce helper. Keep standalone
+ # --system-sleep preparation complete, not only the full-image build path.
+ spec=importlib.util.spec_from_file_location('sq2_sleep_fix',root/'scripts/patch-sq2-venus-sleep-fix.py')
+ fix=importlib.util.module_from_spec(spec);spec.loader.exec_module(fix)
+ fix.apply(directory,root)
 if __name__=='__main__':
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('directory',type=Path);p.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[1]);a=p.parse_args();apply(a.directory,a.root)

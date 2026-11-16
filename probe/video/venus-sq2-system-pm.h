@@ -5,10 +5,12 @@
  * restart on resume. A failed stop/start remains quarantined until reboot. */
 #ifndef VENUS_SQ2_SYSTEM_PM_INTEGRATION_H
 #define VENUS_SQ2_SYSTEM_PM_INTEGRATION_H
+#include "hfi_venus.h"
 
 /* Published SQ2 cores and this module remain pinned until reboot. Read-only
  * observations do not clear errors or request firmware/PM transitions. */
 static struct venus_core *sq2_pm_status_core;
+#include "venus-sq2-avc-export.h"
 static const char *sq2_pm_stage = "probe";
 static void venus_sq2_pm_publish(struct venus_core *core)
 {
@@ -76,6 +78,12 @@ static int venus_sq2_pm_stop(void *data)
 {
  struct venus_core *core = data;
  int ret;
+ /* STOPPING already excludes new sessions; do not reset a live firmware
+  * before the existing HFI idle/PC_READY handshake has completed. */
+ cancel_delayed_work_sync(&core->work);
+ ret = venus_sq2_pm_result(core, "stop:prepare-pc",
+  venus_hfi_prepare_system_stop(core));
+ if (ret) return ret;
  ret = venus_sq2_pm_result(core, "stop:irq-disable",
   sq2_venus_platform_irq(core->sq2_platform, false));
  if (ret) return ret;

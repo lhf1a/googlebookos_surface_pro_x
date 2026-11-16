@@ -164,6 +164,13 @@ def ensure_venus_source_hooks(directory):
         if omx_h.read_bytes() != want_omx:
             omx_h.write_bytes(want_omx)
             changed.append('venus-sq2-omx.h')
+    if (directory / 'hfi_venus.c').is_file():
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'venus_sleep_fix', Path(__file__).with_name('patch-sq2-venus-sleep-fix.py'))
+        sleep_fix = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sleep_fix)
+        changed.extend(sleep_fix.apply(directory))
     return {'directory': str(directory), 'updated_headers': changed}
 
 

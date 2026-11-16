@@ -231,3 +231,10 @@ SQ1/SQ2分型和user0已在本次构建路径合入。未运行整盘校验、�
 本次修复包 `D:/spx_img/touch-home-normal-start-20261110/initramfs.cpio.gz` 为 249578106 字节。
 原 v5 完整磁盘镜像不因此自动更新；需要新整盘时必须重新运行完整构建。
 
+# 默认休眠修复依赖
+
+默认 full/source 构建已接入 Venus PC_PREP/PC_READY 恢复修复和 Android 1000ms AC
+息屏 grace。请准备 `private/build-inputs/suspend/desktop-services.jar`；源码模式
+实际重编 Venus，prebuilt 模式另需准确 Image 配对模块。详见
+[默认休眠修复](SUSPEND-DEFAULT-20261116.md)。私有 JAR/模块不进 Git。
+

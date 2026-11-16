@@ -1,0 +1,24 @@
+#!/bin/busybox sh
+# One-time migration of the donor's never-sleep policy; preserve user choices.
+set -eu
+export PATH=/bin:/sbin
+android() { nsenter -t 1 -m -- /system/bin/"$@"; }
+ready=0
+for n in $(seq 1 180); do
+ if [ "$(android getprop sys.boot_completed 2>/dev/null)" = 1 ]; then ready=1; break; fi
+ sleep 1
+done
+[ "$ready" = 1 ] || exit 1
+stamp=/proc/1/root/data/system/surface-sleep-defaults-v1
+[ ! -e "$stamp" ] || exit 0
+screen=$(android settings --user 0 get system screen_off_timeout)
+stay=$(android settings get global stay_on_while_plugged_in)
+if [ "$screen" = 2147483647 ]; then
+ android settings --user 0 put system screen_off_timeout 60000
+fi
+if [ "$stay" = 15 ]; then
+ android settings put global stay_on_while_plugged_in 0
+fi
+printf 'v1\n' > "$stamp"
+chmod 600 "$stamp"
+echo SURFACE_SLEEP_DEFAULTS_APPLIED

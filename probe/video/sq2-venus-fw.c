@@ -49,6 +49,17 @@ static DEFINE_MUTEX(sq2_fw_lock);
 static struct sq2_venus_fw *sq2_fw_owner;
 static const char image_name[] = "qcom/venus-5.2/venus.mbn";
 
+/* System PM must not unregister/recreate devices while their parent and
+ * suppliers are suspended. Retain the no-TZ transport for this already-pinned
+ * core's lifetime. Firmware contents and IOVA mappings still stop/unmap on
+ * every cycle; this is not firmware retention or a failed-start retry.
+ * All accesses are serialized by sq2_fw_lock. */
+static struct platform_device *sq2_pm_memory_device;
+static struct platform_device *sq2_pm_stream_device;
+static struct iommu_domain *sq2_pm_stream_domain;
+static unsigned long sq2_pm_stream_reuses;
+module_param_named(sq2_pm_stream_reuses, sq2_pm_stream_reuses, ulong, 0400);
+
 static int sq2_fw_count_peer(struct device *dev, void *data)
 {
  unsigned int *count = data;
@@ -58,6 +69,14 @@ static int sq2_fw_count_peer(struct device *dev, void *data)
 
 static void sq2_fw_drop_stream(struct sq2_venus_fw *fw)
 {
+ if (fw->stream && fw->stream == sq2_pm_stream_device) {
+  /* The stopped transaction has unmapped its firmware. Keep the domain
+   * attached so the ordinary SMMU PM callbacks restore the same context. */
+  fw->attached = false;
+  fw->domain = NULL;
+  fw->stream = NULL;
+  return;
+ }
  if (fw->attached) iommu_detach_device(fw->domain, &fw->stream->dev);
  if (fw->domain) iommu_domain_free(fw->domain);
  if (fw->stream) platform_device_unregister(fw->stream);
@@ -76,6 +95,16 @@ static int sq2_fw_create_stream(struct sq2_venus_fw *fw)
  unsigned int peers = 0;
  int ret;
 
+ if (sq2_pm_stream_device) {
+  if (sq2_pm_stream_device->dev.parent != fw->parent ||
+      !sq2_pm_stream_domain) return -EINVAL;
+  fw->stream = sq2_pm_stream_device;
+  fw->domain = sq2_pm_stream_domain;
+  fw->attached = true;
+  sq2_pm_stream_reuses++;
+  pr_info("SQ2_PM_TRANSPORT reuse=%lu sid=2342\n", sq2_pm_stream_reuses);
+  return 0;
+ }
  np = of_get_child_by_name(fw->parent->of_node, "video-firmware");
  if (!np) return -ENODEV;
  ret = of_parse_phandle_with_args(np, "iommus", "#iommu-cells", 0, &args);
@@ -108,12 +137,16 @@ static int sq2_fw_create_stream(struct sq2_venus_fw *fw)
  ret = iommu_group_for_each_dev(group, &peers, sq2_fw_count_peer);
  iommu_group_put(group);
  if (ret || peers != 1) { ret = ret ? ret : -EBUSY; goto fail; }
- fw->domain = iommu_domain_alloc(&platform_bus_type);
- if (!fw->domain) { ret = -ENOMEM; goto fail; }
+ fw->domain = iommu_paging_domain_alloc(&fw->stream->dev);
+ if (IS_ERR(fw->domain)) { ret = PTR_ERR(fw->domain); fw->domain = NULL; goto fail; }
  ret = iommu_attach_device(fw->domain, &fw->stream->dev);
  if (ret) goto fail;
  fw->attached = true;
- pr_info("SQ2_NO_TZ stream_attached sid=2342 singleton=1\n");
+ sq2_pm_stream_device = fw->stream;
+ sq2_pm_stream_domain = fw->domain;
+ /* One bounded lifetime pin, independent of each firmware transaction. */
+ __module_get(THIS_MODULE);
+ pr_info("SQ2_NO_TZ stream_attached sid=2342 singleton=1 retained_for_pm=1\n");
  goto put;
 fail:
  sq2_fw_drop_stream(fw);
@@ -252,7 +285,8 @@ static int sq2_fw_alloc(void *ctx)
  struct device *dev;
  int ret;
 
- fw->pdev = platform_device_register_simple("sq2-venus-fw-memory", -1, NULL, 0);
+ fw->pdev = fw->no_tz_base && sq2_pm_memory_device ? sq2_pm_memory_device :
+  platform_device_register_simple("sq2-venus-fw-memory", -1, NULL, 0);
  if (IS_ERR(fw->pdev))
   return PTR_ERR(fw->pdev);
  dev = &fw->pdev->dev;
@@ -285,6 +319,10 @@ pin:
   ret = -ENODEV;
   goto free;
  }
+ if (fw->no_tz_base && !sq2_pm_memory_device) {
+  sq2_pm_memory_device = fw->pdev;
+  __module_get(THIS_MODULE);
+ }
  memset(fw->cpu, 0, SQ2_FW_LIMIT);
  pr_info("SQ2_VENUS_FW phase=allocated phys=%pa bytes=%u\n", &fw->phys, SQ2_FW_LIMIT);
  return 0;
@@ -293,7 +331,8 @@ free:
  else dma_free_coherent(dev, SQ2_FW_LIMIT, fw->cpu, fw->dma);
  fw->cpu = NULL;
 unregister:
- platform_device_unregister(fw->pdev);
+ if (fw->pdev != sq2_pm_memory_device)
+  platform_device_unregister(fw->pdev);
  fw->pdev = NULL;
  return ret;
 }
@@ -302,7 +341,7 @@ static int sq2_fw_no_tz_load(struct sq2_venus_fw *fw)
  u32 off;
  int ret = sq2_fw_create_stream(fw);
  if (ret) return ret;
- ret = qcom_mdt_load_no_init(&fw->pdev->dev, fw->image, image_name, 9,
+ ret = qcom_mdt_load_no_init(&fw->pdev->dev, fw->image, image_name,
                            fw->cpu, fw->phys, SQ2_FW_LIMIT, NULL);
  if (ret) return ret;
  wmb();
@@ -334,7 +373,7 @@ static int sq2_fw_load(void *ctx)
       qcom_mdt_get_size(fw->image) != 0x500000)
    return -EINVAL;
   pr_info("SQ2_VENUS_FW phase=efi_prepared_no_init\n");
-  ret = qcom_mdt_load_no_init(&fw->pdev->dev, fw->image, image_name, 9,
+  ret = qcom_mdt_load_no_init(&fw->pdev->dev, fw->image, image_name,
                     fw->cpu, fw->phys, SQ2_FW_LIMIT, NULL);
  } else {
   ret = qcom_mdt_load(&fw->pdev->dev, fw->image, image_name, 9,
@@ -379,7 +418,8 @@ static void sq2_fw_release(void *ctx)
  wmb();
  if (fw->pil_gap) sq2_fw_unmap_gap(fw);
  else dma_free_coherent(&fw->pdev->dev, SQ2_FW_LIMIT, fw->cpu, fw->dma);
- platform_device_unregister(fw->pdev);
+ if (fw->pdev != sq2_pm_memory_device)
+  platform_device_unregister(fw->pdev);
  fw->cpu = NULL;
  fw->pdev = NULL;
  module_put(THIS_MODULE);

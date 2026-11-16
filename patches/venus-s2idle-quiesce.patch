@@ -1,0 +1,75 @@
+--- a/hfi_venus.c
++++ b/hfi_venus.c
+@@ -1645,7 +1645,7 @@
+ 	return false;
+ }
+ 
+-static int venus_suspend_3xx(struct venus_core *core)
++static int venus_suspend_3xx(struct venus_core *core, bool prepare_only)
+ {
+ 	struct venus_hfi_device *hdev = to_hfi_priv(core);
+ 	struct device *dev = core->dev;
+@@ -1697,6 +1697,10 @@
+ 		return ret;
+ 
+ power_off:
++	/* SQ2 owns reset/unmap separately. Its system stop must first let the
++	 * firmware finish the normal PC_PREP protocol while IRQs remain enabled. */
++	if (prepare_only)
++		return 0;
+ 	mutex_lock(&hdev->lock);
+ 
+ 	ret = venus_power_off(hdev);
+@@ -1713,10 +1717,18 @@
+ 	return 0;
+ }
+ 
++int venus_hfi_prepare_system_stop(struct venus_core *core)
++{
++	if (!IS_SQ2_HFI(core) || !IS_V4(core) || !core->priv ||
++	    !core->sq2_no_tz_active || test_bit(0, &core->sys_error))
++		return -EINVAL;
++	return venus_suspend_3xx(core, true);
++}
++
+ static int venus_suspend(struct venus_core *core)
+ {
+ 	if (IS_V3(core) || IS_V4(core) || IS_V6(core))
+-		return venus_suspend_3xx(core);
++		return venus_suspend_3xx(core, false);
+ 
+ 	return venus_suspend_1xx(core);
+ }
+--- a/hfi_venus.h
++++ b/hfi_venus.h
+@@ -8,6 +8,7 @@
+ 
+ struct venus_core;
+ 
++int venus_hfi_prepare_system_stop(struct venus_core *core);
+ void venus_hfi_destroy(struct venus_core *core);
+ int venus_hfi_create(struct venus_core *core);
+ void venus_hfi_queues_reinit(struct venus_core *core);
+--- a/venus-sq2-system-pm.h
++++ b/venus-sq2-system-pm.h
+@@ -5,6 +5,7 @@
+  * restart on resume. A failed stop/start remains quarantined until reboot. */
+ #ifndef VENUS_SQ2_SYSTEM_PM_INTEGRATION_H
+ #define VENUS_SQ2_SYSTEM_PM_INTEGRATION_H
++#include "hfi_venus.h"
+ 
+ /* Published SQ2 cores and this module remain pinned until reboot. Read-only
+  * observations do not clear errors or request firmware/PM transitions. */
+@@ -77,6 +78,12 @@
+ {
+  struct venus_core *core = data;
+  int ret;
++ /* STOPPING already excludes new sessions; do not reset a live firmware
++  * before the existing HFI idle/PC_READY handshake has completed. */
++ cancel_delayed_work_sync(&core->work);
++ ret = venus_sq2_pm_result(core, "stop:prepare-pc",
++  venus_hfi_prepare_system_stop(core));
++ if (ret) return ret;
+  ret = venus_sq2_pm_result(core, "stop:irq-disable",
+   sq2_venus_platform_irq(core->sq2_platform, false));
+  if (ret) return ret;

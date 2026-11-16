@@ -1,3 +1,13 @@
+## 2026-11-16：休眠修复默认构建与默认入口
+
+用户授权将实机通过的 s2idle 修复持久化并推 main。Venus 停机前必须执行
+PC_PREP/PC_READY；no-TZ 传输设备跨 PM 保留，错误不吞掉。默认 full/source 构建
+在副本应用补丁并重新编译；框架 AC 息屏 grace=1000ms，正常应用锁不绕过。
+JAR/预编译模块依赖在 private/build-inputs/suspend，不进 Git。预编译模块须匹配
+准确 Image；不可只凭相同 release 混装。现机 GRUB 默认 sq2-sensors，保留 Hybrid 回退。
+已实测最长59.199252秒 s2idle、Venus5/5恢复及用户显示/触摸/视频/声音；
+仍有定时器短醒，不扩展到 SQ1 或长时功耗验收。详见 docs/SUSPEND-DEFAULT-20261116.md。
+
 ## 2026-11-16：摄像头源码构建优先
 
 用户要求摄像头支持可从零构建而无需Surface提取启动包。使用
