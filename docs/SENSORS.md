@@ -3,7 +3,20 @@
 2026-11-16：SQ2 已完成独立 HAL、Android SensorService、用户照光/遮挡与横竖屏测试，
 完整重启后再次确认正常。已验收 initramfs 为 `e4f6cb1491a35c2c632a7747cd5c9c171e2ee099d5ce316459d56c036ff2525d`。
 共同组件指纹见 `configs/sensors-baseline.json`；原始资料、固件和含身份镜像不进 Git。
-SQ1 同包实测、长期休眠/功耗及本机出厂照度标定尚未验收。
+SQ1 同包实测、长期休眠/功耗尚未验收。
+
+## 从零构建与共用依赖
+
+无需先启动 Surface，也无需从每台设备提取驱动或启动包。用户已确认当前 SLPI
+闭源固件、型号配置和默认光学校准可在 SQ1/SQ2 设备间通用；准备一次共用输入后，
+后续构建直接复用，不要求逐机提取或重新校准。
+
+Linux TCS3430 驱动、SSC 客户端、Android SubHal、启动集成及旋转覆盖源码在
+`probe/sensors/`，构建脚本在 `scripts/`，具体命令如下。内核源码、Android 平台
+接口/匹配库、工具链和 EFI 工程均可在构建主机离线准备，无需连接运行中的 Surface。
+SLPI 固件仍作为共用二进制依赖提供；现有资料已足够准备传感器构建输入。
+`extract-spx-light-calibration.py` 仅在需要从已有 `SurfaceLightSensor.sys` 重新生成
+默认校准文件时使用；已有共用 golden 文件可直接复用，无需再次提取 Windows 驱动。
 
 ## 默认构建
 
@@ -23,7 +36,7 @@ source 内核模式重新构建 TCS3430、SLPI PAS 与 FastRPC 模块，使用�
 SLPI 固件进入 ESP firmware 树，带 PAS12 的 qebspil 与对应 DT 成对安装。
 不把样机整份运行时 DT 覆盖到新构建，不改变无关设备或保留内存。
 
-构建输入由源码产物与 OEM **型号级**资料组成：
+构建输入由源码产物与 SQ1/SQ2 共用 OEM 资料组成：
 
 ```sh
 bash scripts/build-spx-sensors.sh KERNEL_SOURCE MATCHING_BUILD NEW_ALS_OUTPUT

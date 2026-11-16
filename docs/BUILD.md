@@ -3,7 +3,9 @@
 baseline/Hybrid full-image默认读取PRIVATE_ROOT/sensors；--sensor-inputs可指定输入，
 --without-sensors仅跳过新增传感器，Mesa保持原路径。source内核重编三个传感器模块；
 prebuilt核验匹配模块。HAL、SLPI固件/EFI、默认光学校准为私有共用依赖，
-不导入单机registry或身份。构建配方、测试及边界见[SENSORS.md](SENSORS.md)。
+不导入单机registry或身份。用户已确认SLPI固件、型号配置和默认光学校准为SQ1/SQ2
+共用资料，准备一次即可复用；无需先启动Surface或逐台提取。驱动/HAL源码与构建脚本
+已入库，构建配方见[SENSORS.md](SENSORS.md)。
 
 ## 2026-11-15：摄像头默认构建baseline
 

@@ -3,6 +3,8 @@
 用户要求提交并推送，作为默认构建。baseline/Hybrid full-image默认接入已验收
 TCS3430光线与LSM6DSO加速度SubHal、SLPI EFI/固件和旋转策略；source模式重编匹配模块。
 保留摄像头、触摸、图形和用户设置，Mesa路径不扩展。固件/模型校准/私有包不进Git。
+用户已确认SLPI固件、型号配置及默认光学校准在SQ1/SQ2间通用；
+共用依赖准备一次即可，后续构建无需启动Surface、逐台提取或重新校准。
 SQ2已完整重启和用户明暗/旋转验收；SQ1及长期休眠未验收。详见docs/SENSORS.md。
 
 ## 2026-11-15：前后摄默认构建baseline
