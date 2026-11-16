@@ -170,7 +170,7 @@ python3 scripts/import-hybrid-dependencies.py --private-root private/build-input
 ```
 
 presence preflight 通过不等于编译成功；完整构建还会校验 runtime、模板、工具链及 ABI。
-最终产物和匿名化规则见 [STANDARD-BUILD](STANDARD-BUILD.md)：新 userdata/metadata、首次设置保留、移除个人 SSH/Wi-Fi/账户材料。
+最终产物和匿名化规则见 [STANDARD-BUILD](STANDARD-BUILD.md)：新 userdata/metadata、默认跳过初始设置、移除个人 SSH/Wi-Fi/账户材料。
 只有 `FULL-IMAGE.json`、实际 IMG/IMG.GZ 及读回验证完成后，才是完整交付。当前文档不把脚本测试或原始依赖打包称作该事件。
 
 
@@ -280,7 +280,7 @@ python3 scripts/build.py --reuse-components reuse.json --private-root PREPARED_I
 ```
 
 或统一阶段入口 `python3 scripts/hybrid_bootstrap.py --stage assemble --reuse-components reuse.json --private-root PREPARED_INPUTS --work BUILD_WORK`。
-两者均构建完整 `.img` / `.img.gz`，不是组件编译。镜像接入 HWC/OMX、摄像头、传感器 RPC/EFI、自动亮度/旋转和触控，保留首次设置。
+两者均构建完整 `.img` / `.img.gz`，不是组件编译。镜像接入 HWC/OMX、摄像头、传感器 RPC/EFI、自动亮度/旋转和触控，默认跳过初始设置。
 复用清单逐项检查内容，完整 camera bundle 和 sensor modules 必须匹配 6.18.60-sq2-android1；不能叠加新的内核 patch。
 触控向导仍从当前源码生成，需设置 `SQ2_ANDROID_SDK`；NDK 编译器和 Linux 镜像工具同下文要求。
 

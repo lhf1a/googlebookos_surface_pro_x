@@ -15,6 +15,26 @@ class ReuseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'runtime or source changed'):
                 reuse.prepared_runtime({'path':str(path),'sha256':'0'*64,'source_sha256':{}})
 
+    def test_touch_source_change_invalidates_only_wizard(self):
+        from unittest.mock import patch
+        import full_image
+        sources={'probe/touch-calibration/MainActivity.java':'new','probe/storage/resize-userdata-partition.c':'same'}
+        prefix='etc/sq2-qti-system/root/'
+        names=['lib64/libgrallocutils.so','lib64/sq2-qti-display/libgrallocutils.so','lib64/libsq2_grallocutils_vendor.so',
+               'lib64/sq2-qti-display/libsdmcore.so','lib64/sq2-qti-display/libsq2_sdm_backlight.so']
+        bodies={prefix+n:b'graphics' for n in names}
+        bodies.update({'etc/sq2-touch-calibration/wizard.apk':b'old-apk','bin/resize-userdata-partition':b'resize'})
+        receipt={'path':'/fixture','sha256':'same','source_sha256':dict(sources)}
+        with patch.object(reuse,'helper_sources',return_value=sources),patch.object(reuse,'digest',return_value='same'),patch.object(full_image,'records_from_gzip',return_value=({},bodies)):
+            graphics,helpers=reuse.prepared_runtime(receipt)
+            self.assertEqual(helpers['etc/sq2-touch-calibration/wizard.apk'],b'old-apk')
+            receipt['source_sha256']['probe/touch-calibration/MainActivity.java']='old'
+            changed_graphics,helpers=reuse.prepared_runtime(receipt)
+            self.assertEqual(changed_graphics,graphics)
+            self.assertEqual(helpers,{'bin/resize-userdata-partition':b'resize'})
+            receipt['source_sha256']['probe/storage/resize-userdata-partition.c']='old'
+            with self.assertRaisesRegex(ValueError,'runtime or source changed'):reuse.prepared_runtime(receipt)
+
     def test_reuse_growth_helper_does_not_compile(self):
         from unittest.mock import patch
         import full_image

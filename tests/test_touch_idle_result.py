@@ -9,7 +9,7 @@ class IdleResult(unittest.TestCase):
    p=subprocess.run([sys.executable,str(f),str(R/'probe/touch-calibration/MainActivity.java')],capture_output=True,text=True)
    self.assertEqual(p.returncode,0,p.stderr);print(p.stdout)
    self.assertIn('result=已生成修复方案。',p.stdout)
-   self.assertIn('button=应用修复并复测',p.stdout)
+   self.assertIn('button=应用复测 / Apply & test',p.stdout)
    self.assertIn('command=noise-apply auto_retest=true',p.stdout)
    self.assertIn('no_safe_candidate=已检测到异常，暂未生成可安全应用的方案。',p.stdout)
 if __name__=='__main__':unittest.main()

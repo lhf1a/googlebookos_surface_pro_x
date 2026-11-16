@@ -1,5 +1,9 @@
-"""Remove inherited operator identity after all feature payloads are installed."""
+"""Remove inherited identity and install generic first-boot setup skipping."""
 import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SETUP_HOOK = b'timeout 600 surface-first-boot > /logs/first-boot.txt 2>&1 &\n'
 
 
 def apply(records, bodies, new_record):
@@ -45,5 +49,19 @@ def apply(records, bodies, new_record):
     for name, body in bodies.items():
         if any(s and s in body for s in secrets):
             raise ValueError('Inherited credential remains in ' + name)
+    install_first_boot(records, bodies, new_record)
     return dict(removed=sorted(removed), ssh_enabled=False, root_password_locked=True,
-                first_setup_preserved=True, credential_patterns_checked=len(secrets))
+                first_setup_preserved=False, first_setup_skipped=True,
+                credential_patterns_checked=len(secrets))
+
+
+def install_first_boot(records, bodies, new_record):
+    # Never restore the old LAN-specific helpers: they also changed network
+    # probing policy. This generic helper only skips OOBE for the fresh user 0.
+    anchor = b'exec native-handoff /newroot\n'
+    if bodies['init'].count(anchor) != 1 or bodies['init'].count(SETUP_HOOK) > 1:
+        raise ValueError('Unknown Android handoff for first-boot setup policy')
+    if SETUP_HOOK not in bodies['init']:
+        bodies['init'] = bodies['init'].replace(anchor, SETUP_HOOK+anchor)
+    bodies['bin/surface-first-boot'] = (ROOT/'probe/test2/surface-first-boot').read_bytes().replace(b'\r\n',b'\n')
+    records['bin/surface-first-boot'] = new_record(0o100755)

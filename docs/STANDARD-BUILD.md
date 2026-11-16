@@ -83,7 +83,7 @@ python3 scripts/build.py --reuse-components FRESH_VENUS_OUTPUT/REUSE.json --priv
 | `kernel-build/`、`kernel-export/` | 内核构建树、Image、模块stage、DTB与命令记录 |
 | `camera-sensors/`、`camera-camss/`、传感器模块目录 | 本轮匹配内核的组件输出 |
 | `paired/EFI/SQ2Nat/` | 首轮配对启动包；不是最终整盘交付目录 |
-| `paired/EFI/SQ2Nat/PRIVACY.json` | 去除身份与保留首次设置的处理记录 |
+| `paired/EFI/SQ2Nat/PRIVACY.json` | 去除身份与默认跳过初始设置的处理记录 |
 | `disk/work/esp-tree/` | 存储适配、正常/救援入口和SQ1/SQ2路由后的ESP树；具体工作目录以构建清单为准 |
 | `disk/surface-pro-x-6.18-hybrid-generic.img` | 完整稀疏磁盘镜像 |
 | `disk/surface-pro-x-6.18-hybrid-generic.img.gz` | 压缩整盘镜像 |
@@ -91,11 +91,15 @@ python3 scripts/build.py --reuse-components FRESH_VENUS_OUTPUT/REUSE.json --priv
 | `FULL-IMAGE.json`、`BUILD-COMMANDS.json` | 全流程结果、命令及日志位置 |
 
 个人SSH/Wi-Fi/密码与旧setup跳过脚本在最终组件安装后清除；不复制旧userdata/metadata、persist、FRP及原始转储。
-首次配置交给Android，用户设置保持；闭源平台库/固件仍须按其许可分发。
+默认通过 `surface-first-boot` 设置用户 0 的 `device_provisioned=1` / `user_setup_complete=1`，停用已安装的初始设置向导并进入桌面；不修改联网探测策略，不预置账户/Wi-Fi/SSH 凭据。成功后写入 userdata 标记，后续启动不重复执行。闭源平台库/固件仍须按其许可分发。
 
 ## 6. 当前真实产物
 
-`out/hybrid-runtime-20261116/common/`只有前轮的Image（35,588,608B）和initramfs（255,409,661B）。
-它们基于较早运行包，不含本次最新摄像头/传感器完整集成，**不是当前通用镜像交付件**。
-`/mnt/spx-workspace/chromebookOS/out/hybrid-generic-20261116`是上次失败尝试留下的空目录。
-上述均为历史产物。最新含主线休眠修复的完整镜像在 `/mnt/spx-workspace/chromebookOS/out/hybrid-sleep-20261116/image/disk/`，原始 20 GiB，压缩 8,199,955,842 字节；全流/分区/ESP 回读校验通过，未真机启动。完整哈希、增量构建与边界见 [休眠整包记录](HYBRID-SLEEP-20261116.md)。前一份不含新休眠补丁的 `hybrid-assembly-20261116` 镜像保留，不覆盖。
+当前完整成品在 `/mnt/spx-workspace/chromebookOS/out/hybrid-current-20261116/image/disk/`：
+原始 20 GiB，压缩 8,199,981,130 字节。包含默认跳过初始设置、最新双语触摸校准和匹配的休眠修复；
+GPT/ESP/完整 gzip/匿名身份检查通过，未真机启动。文件哈希、复用方式和验证范围见
+[新镜像说明](HYBRID-SETUP-TOUCH-20261116.md)。旧 `hybrid-assembly`、`hybrid-sleep` 整盘及旧 release 压缩成品已按要求清理，模板和组件保留。
+
+初始设置默认策略更新只对使用当前源码重新装配的产物生效；此前已经生成的镜像不会自动改变。`PRIVACY.json` 应记录 `first_setup_preserved=false`、`first_setup_skipped=true`。
+
+触摸校准向导使用当前 `probe/touch-calibration/` 源码构建（含最新中英双语界面）。使用组件复用清单时，若仅向导 Java/Manifest 变化，旧 APK 自动失效并重编，图形适配库与 userdata 扩容工具继续复用；不将旧 APK 当作最新产物。

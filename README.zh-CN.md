@@ -2,9 +2,9 @@
 
 唯一默认整盘构建为 **hybrid**，SQ1/SQ2 共用 **Linux 6.18.60-sq2-android1**：Mesa GLES/Turnip + QTI gralloc/mapper5/HWC + 原生 OMX。
 
-[标准构建](docs/STANDARD-BUILD.md) · [Windows 依赖准备](docs/DEPENDENCIES.md) · [休眠增量与镜像哈希](docs/HYBRID-SLEEP-20261116.md)
+[标准构建](docs/STANDARD-BUILD.md) · [Windows 依赖准备](docs/DEPENDENCIES.md) · [新镜像、首启策略与触摸校准](docs/HYBRID-SETUP-TOUCH-20261116.md)
 
-默认保留摄像头、触控、自动亮度/旋转，接入 Venus s2idle 修复。通用镜像清除继承的账户/Wi-Fi/SSH 凭据，新建 userdata/metadata，并保留首次设置。
+默认保留摄像头、触控、自动亮度/旋转，接入 Venus s2idle 修复。通用镜像清除继承的账户/Wi-Fi/SSH 凭据，新建 userdata/metadata，并默认跳过初始设置（用户 0）；SSH 仍默认关闭，不预置账户或网络凭据。
 
 ```sh
 python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUTPUT

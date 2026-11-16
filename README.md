@@ -2,9 +2,9 @@
 
 The only default full-image build is **hybrid**, shared by **SQ1/SQ2**, using Linux **6.18.60-sq2-android1**: Mesa GLES/Turnip with QTI gralloc/mapper5/HWC and native OMX.
 
-[简体中文](README.zh-CN.md) · [Standard build](docs/STANDARD-BUILD.md) · [Windows dependencies](docs/DEPENDENCIES.md) · [Sleep integration and image hashes](docs/HYBRID-SLEEP-20261116.md)
+[简体中文](README.zh-CN.md) · [Standard build](docs/STANDARD-BUILD.md) · [Windows dependencies](docs/DEPENDENCIES.md) · [Current image, setup policy and touch calibration](docs/HYBRID-SETUP-TOUCH-20261116.md)
 
-Camera, touch, automatic brightness/rotation and the Venus s2idle fix are included. The generic image removes inherited accounts/Wi-Fi/SSH credentials, creates fresh userdata/metadata and preserves first-run setup.
+Camera, touch, automatic brightness/rotation and the Venus s2idle fix are included. The generic image removes inherited accounts/Wi-Fi/SSH credentials, creates fresh userdata/metadata and skips first-run setup by default (user 0). SSH remains disabled; no account or network credentials are provisioned.
 
 ```sh
 python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUTPUT

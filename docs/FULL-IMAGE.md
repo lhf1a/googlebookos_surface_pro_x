@@ -1,8 +1,10 @@
 # 当前标准：Hybrid 通用镜像
 
+当前默认行为和已完成成品见 [新镜像说明](HYBRID-SETUP-TOUCH-20261116.md)；下方带日期的旧实验记录保留其当时状态。
+
 无子命令默认执行 full-image，--graphics 仅接受 hybrid。SQ1/SQ2共用6.18内核与initramfs，沿用既有SMBIOS路由与SQ1 DT频率配置。
 摄像头、自动亮度、自动旋转和最新版触控向导为必需能力，不能通过省略参数跳过。
-组件全部安装后重建无个人凭据的cpio；锁定root密码、默认关闭SSH、清除旧Wi-Fi配置，移除自动跳过首次设置。
+组件全部安装后重建无个人凭据的cpio；锁定root密码、默认关闭SSH、清除旧Wi-Fi配置，默认跳过初始设置。新 helper `surface-first-boot` 等待 Android 启动完成，仅配置用户 0 的设置完成标记、停用已有设置向导并启动 HOME；不恢复旧的 LAN 专用跳过脚本。
 userdata/metadata新建；不复制persist、FRP、原始转储及desktop security个人状态。输出执行文件系统与分区读回检查。
 
 ```sh

@@ -4,7 +4,7 @@
 full-image is the default operation and hybrid is its only graphics selection.
 It combines Mesa GLES/Turnip with QTI gralloc/mapper5/HWC, camera, sensors and
 current touch support. The shared SQ1/SQ2 6.18 image removes inherited personal
-credentials and retains Android first setup.
+credentials and skips Android first setup by default.
 
 package is an exact private baseline copy, NOT a source compilation or disk
 image. compile produces unvalidated source-build artifacts; it never splices a

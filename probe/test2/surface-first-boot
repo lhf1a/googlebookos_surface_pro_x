@@ -1,0 +1,42 @@
+#!/bin/busybox sh
+# Generic user-0 image: skip initial setup, without accounts or network presets.
+set -eu
+export PATH=/bin:/sbin
+android() { timeout 15 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+ready=0
+for n in $(seq 1 180); do
+    if [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = 1 ]; then
+        ready=1
+        break
+    fi
+    sleep 2
+done
+[ "$ready" = 1 ] || { echo 'FIRST_BOOT_DEFERRED: Android not ready' >&2; exit 1; }
+stamp=/proc/1/root/data/system/surface-first-boot-v1
+[ ! -e "$stamp" ] || exit 0
+[ "$(android am get-current-user)" = 0 ] || {
+    echo 'FIRST_BOOT_DEFERRED: expected full user 0' >&2
+    exit 1
+}
+android settings put global device_provisioned 1
+android settings --user 0 put secure user_setup_complete 1
+# Disable only setup packages that actually exist; retain account/settings apps.
+packages=$(android pm list packages --user 0)
+for package in com.google.android.setupwizard com.google.android.desktop.setupwizard; do
+    case "
+$packages
+" in
+        *"
+package:$package
+"*)
+            android pm disable-user --user 0 "$package"
+            android am force-stop --user 0 "$package"
+            ;;
+    esac
+done
+# Existing user0-home-boot handles the donor LoginLauncher, but preserves a
+# user's chosen launcher. Do not hard-code a replacement HOME here.
+android am start --user 0 -a android.intent.action.MAIN -c android.intent.category.HOME
+printf 'v1\n' > "$stamp"
+chmod 600 "$stamp"
+echo 'SURFACE_FIRST_BOOT: initial setup skipped for user 0'

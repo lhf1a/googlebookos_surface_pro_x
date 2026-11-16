@@ -986,7 +986,7 @@ def build(args, compile_kernel):
     report.update(source_compiled=bool(compiled),private_root=str(private),
         source_commit=source_commit,
         build_time_parent_initramfs_used=False,postbuild_tests_performed=not esp_only,
-        private_identity_present=False, first_setup_preserved=True, target_models=["sq1", "sq2"],
+        private_identity_present=False, first_setup_preserved=False, first_setup_skipped=True, target_models=["sq1", "sq2"],
         graphics=args.graphics,graphics_boot_option=graphics_token,
         graphics_report=graphics_report,
         suspend_enabled=True,

@@ -2,9 +2,9 @@
 """Compatibility filename for the single Linux 6.18 LTS build entry.
 
 Subcommands: verify / package / compile / import-private / full-image /
-single-user / disk-image. The full-image flow builds the universal whole disk;
---graphics mesa selects the full Mesa userspace chain and is documented in
-docs/FULL-MESA-IMAGE-20261112.md. Historical obsolete disk/model/kernel options
+single-user / disk-image. The full-image flow builds the universal hybrid whole disk with initial setup skipped and the current
+touch calibration wizard. Hybrid is the only graphics selection. See
+docs/STANDARD-BUILD.md. Historical obsolete disk/model/kernel options
 remain rejected; they must not rebuild an obsolete kernel runtime.
 """
 from pathlib import Path

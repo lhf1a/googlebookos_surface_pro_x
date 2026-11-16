@@ -23,7 +23,7 @@ class Anonymous(unittest.TestCase):
                 'etc/spx-sensors/userspace/sensors.spx.so':b'sensors',
                 'bin/iptsd':b'touch','bin/user0-home-boot':b'wait-for-setup'}
         return {n:f.new_record(0o100644) for n in bodies}, bodies
-    def test_clear_identity_keep_all_features_and_setup(self):
+    def test_clear_identity_keep_features_and_skip_setup(self):
         records,bodies=self.fixture();original=dict(bodies)
         result=a.apply(records,bodies,f.new_record)
         for name in ['etc/spx-camera/userspace/provider','etc/spx-sensors/userspace/sensors.spx.so','bin/iptsd','bin/user0-home-boot']:
@@ -32,7 +32,23 @@ class Anonymous(unittest.TestCase):
         for secret in [b'old-private-key',b'old-public-key',b'old-wifi-secret',b'old-password-hash',b'lab-local-setup']:
             self.assertNotIn(secret,raw)
         self.assertEqual(bodies['etc/shadow'],b'root:!:0:0:99999:7:::\n')
-        self.assertTrue(result['first_setup_preserved'])
+        self.assertFalse(result['first_setup_preserved'])
+        self.assertTrue(result['first_setup_skipped'])
+        self.assertEqual(bodies['init'].count(a.SETUP_HOOK),1)
+        self.assertIn('bin/surface-first-boot',bodies)
+        a.apply(records,bodies,f.new_record)
+        self.assertEqual(bodies['init'].count(a.SETUP_HOOK),1)
+    def test_setup_handoff_must_be_unique(self):
+        for init in [b'#!/bin/sh\n',d.ANCHOR+d.ANCHOR]:
+            records,bodies=self.fixture();bodies['init']=init
+            with self.assertRaisesRegex(ValueError,'handoff'):
+                a.apply(records,bodies,f.new_record)
+    def test_setup_helper_mode_and_syntax(self):
+        import subprocess
+        records,bodies=self.fixture();a.apply(records,bodies,f.new_record)
+        self.assertEqual(records['bin/surface-first-boot'][1][1],0o100755)
+        result=subprocess.run(['sh','-n'],input=bodies['bin/surface-first-boot'],capture_output=True)
+        self.assertEqual(result.returncode,0,result.stderr)
     def test_secret_copy_rejected(self):
         records,bodies=self.fixture();bodies['etc/copy']=b'old-private-key'
         with self.assertRaisesRegex(ValueError,'credential'):a.apply(records,bodies,f.new_record)

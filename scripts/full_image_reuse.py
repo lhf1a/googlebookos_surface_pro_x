@@ -33,7 +33,16 @@ def prepared_runtime(receipt):
     """Reuse only named compiled helpers, not the old init or personal state."""
     if not receipt: return {}, {}
     path = Path(receipt['path'])
-    if digest(path) != receipt['sha256'] or helper_sources() != receipt['source_sha256']:
+    current_sources = helper_sources()
+    previous_sources = receipt['source_sha256']
+    changed = {n for n in current_sources.keys() | previous_sources.keys()
+               if current_sources.get(n) != previous_sources.get(n)}
+    # A wizard source update invalidates its APK, not the unchanged graphics
+    # shims or userdata resize helper. assemble_runtime rebuilds missing helpers.
+    touch_only = all(n.startswith('probe/touch-calibration/') and
+                     (n.endswith('.java') or n.endswith('/AndroidManifest.xml'))
+                     for n in changed)
+    if digest(path) != receipt['sha256'] or (changed and not touch_only):
         raise ValueError('Prepared helper runtime or source changed')
     from full_image import records_from_gzip
     _, bodies = records_from_gzip(path)
@@ -45,6 +54,8 @@ def prepared_runtime(receipt):
             'lib64/sq2-qti-display/libsdmcore.so','lib64/sq2-qti-display/libsq2_sdm_backlight.so')},
     }
     helpers = {n:bodies[n] for n in ('etc/sq2-touch-calibration/wizard.apk','bin/resize-userdata-partition')}
+    if changed:
+        helpers.pop('etc/sq2-touch-calibration/wizard.apk')
     return graphics, helpers
 
 
