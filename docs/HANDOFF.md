@@ -1,3 +1,23 @@
+## 2026-11-16：摄像头源码构建入口已跑通
+
+基于最新main be8ef2c，保留传感器默认构建及两个新子模块。
+新增统一构建入口，完全不读旧camera镜像/二进制：从源码编译十个运行模块、
+冻结AIDL、HAL/ISP和两类图形wrapper，产物camera目录直接供--camera-inputs使用。
+本地结果out/camera-source-build-20261116-v2/camera，构建日志与命令在同级build目录；
+HAL 1b5414e845008b4d680f55e0a22690bebe675dc407cf7e177c8fd18e909011aa。
+未替换实机或已验收fingerprint；新构建产物尚未做真机启动。
+
+首次选到kgsl-dev1构建树，最终ABI校验正确拒绝；已改为匹配android1的构建树，
+并复用kernel_baseline校验将错误发现提前到编译前。full-image模块重编也补上同一检查。
+图形builder现在按源文件名重定向所有源/私有头文件到本次patch副本，
+避免历史BUILD.json引用旧输出目录时绕过本次源码补丁。
+
+完整源码编译、13个ELF的ABI/完整性检查和真实full-image安装器集成通过，身份保持不变。
+full_image 36项（28通过、8项既有可选输入跳过），camera DT四项通过。
+构建所需共用Android/QTI库/生成头文件仍需准备；Windows驱动和Surface提取包不是构建输入。
+本轮只解决可重建入口；不追究CCI偶发、不做AF/IR或高清性能扩展。
+使用方法和每项依赖见docs/CAMERA-BUILD.md。
+
 ## 2026-11-16：自动亮度/自动旋转纳入最新main默认构建
 
 用户补充确认：SLPI闭源固件、型号配置和默认光学校准可在SQ1/SQ2设备间通用。

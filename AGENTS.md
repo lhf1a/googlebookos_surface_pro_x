@@ -1,3 +1,11 @@
+## 2026-11-16：摄像头源码构建优先
+
+用户要求摄像头支持可从零构建而无需Surface提取启动包。使用
+build-spx-camera-bundle.py生成baseline输入；旧initramfs导入仅作迁移。
+源内核必须通过kernel_baseline的source/build ABI校验；不得改版本号冒充匹配。
+Android/QTI共用平台依赖明确列在CAMERA-BUILD，不称整个图形栈已开源。
+保持现机与已验收pins，源码重编不自动部署或替换其验收结论。
+
 ## 2026-11-16：传感器默认构建
 
 用户要求提交并推送，作为默认构建。baseline/Hybrid full-image默认接入已验收

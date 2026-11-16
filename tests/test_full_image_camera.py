@@ -61,6 +61,35 @@ class CameraAssembly(unittest.TestCase):
             self.assertEqual(result, before)
             self.assertFalse(any("camera-id.ko" in n or "observe.ko" in n for n in result))
 
+    def test_source_build_rejects_wrong_kernel_before_creating_output(self):
+        builder = image.module("camera_bundle_test", "build-spx-camera-bundle.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root/"source"
+            source.mkdir()
+            (source/"Makefile").write_text("VERSION = 6\nPATCHLEVEL = 18\nSUBLEVEL = 60\n")
+            build = root/"kernel-build"
+            (build/"include/config").mkdir(parents=True)
+            (build/"include/config/kernel.release").write_text("6.18.60-sq2-kgsl-dev1\n")
+            with self.assertRaisesRegex(ValueError, "Unsupported module ABI"):
+                builder.build({"kernel_source": source, "kernel_build": build}, root/"output")
+            self.assertFalse((root/"output").exists())
+
+    def test_source_bundle_roundtrip_excludes_unrelated_payloads(self):
+        elf = bytearray(64)
+        elf[:6] = b"\x7fELF\x02\x01"
+        elf[18:20] = (183).to_bytes(2, "little")
+        files = {name: bytes(elf)+name.encode() for name in camera.payload_paths()}
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            magic = camera.policy()["kernel_release"]+" SMP preempt mod_unload aarch64"
+            with patch.object(camera.subprocess, "check_output", return_value=magic):
+                camera.write_inputs(files, root/"camera")
+                self.assertEqual(camera.load(root/"camera"), files)
+            with self.assertRaisesRegex(ValueError, "Incomplete camera input inventory"):
+                camera.write_inputs(files | {"etc/shadow": b"identity fixture"}, root/"bad")
+            self.assertFalse((root/"bad").exists())
+
     def test_rejects_corrupt_private_input_before_use(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

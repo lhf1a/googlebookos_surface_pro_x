@@ -39,7 +39,9 @@ commands = []
 for original in baseline['commands']:
     if not any(v.endswith('/'+name) for v in original for name in targets):
         continue
-    cmd = [str(staged/Path(v).name) if '/probe/graphics/' in v else v for v in original]
+    # Always compile the staged source closure, including commands from a
+    # prior build directory. Reusing that old .cpp would bypass new patches.
+    cmd = [str(staged/Path(v).name) if Path(v).name in used else v for v in original]
     index = cmd.index('-o')+1
     cmd[index] = str(out/Path(cmd[index]).name)
     subprocess.run(cmd, check=True)

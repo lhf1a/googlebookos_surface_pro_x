@@ -1,0 +1,19 @@
+{
+  "kernel_source": "../upstream/linux-6.18.60",
+  "kernel_build": "../out/kernel-build",
+  "cross_compile": "aarch64-linux-gnu-",
+  "toolchains": "../toolchains",
+  "interfaces": "../upstream/camera/hardware-interfaces",
+  "aidl_compiler": "../toolchains/sq2-graphics/sdk/android-15/aidl",
+  "dependencies": "../upstream/camera",
+  "libraries": "../private/android-platform-libs/camera",
+  "platform_headers": "../out/android-platform/mapper5/include",
+  "binder_library": "../private/android-platform-libs/libbinder_ndk.so",
+  "layout_headers": "../out/android-platform/renderer/generated",
+  "hidl_headers": "../out/android-platform/hidl/include",
+  "allocator_headers": "../out/android-platform/allocator-generated",
+  "graphics_library_dirs": [
+    "../private/android-platform-libs/gralloc",
+    "../private/android-platform-libs/platform"
+  ]
+}

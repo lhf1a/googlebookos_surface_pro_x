@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 
 from disk_image import module, require
-from kernel_baseline import ROOT, policy
+from kernel_baseline import ROOT, policy, validate_kernel_source, validate_build_tree
 
 SENSORS = "qcom_spmi-regulator camcc-sc8180x i2c-qcom-cci v4l2-async v4l2-fwnode v4l2-cci ov5693 ov13858".split()
 CAMSS = "videobuf2-dma-sg qcom-camss".split()
@@ -48,6 +48,11 @@ def import_inputs(initramfs, output):
     files = {name: bodies[path] for name, path in payload_paths().items()}
     require(bodies[PREFIX+"root/lib64/hw/mapper.quest2.so"] ==
             bodies[PREFIX+"root/lib64/sq2-qti-display/mapper.quest2.so"], "Mapper copies differ")
+    return write_inputs(files, output)
+
+
+def write_inputs(files, output):
+    require(set(files) == set(payload_paths()), "Incomplete camera input inventory")
     for name, data in files.items():
         arm64(data, name)
     output.mkdir(parents=True, exist_ok=False)
@@ -56,6 +61,7 @@ def import_inputs(initramfs, output):
     manifest = {"schema": 1, "kernel_release": policy()["kernel_release"],
                 "files": {n: sha(d) for n, d in files.items()}}
     (output/"CAMERA.json").write_text(json.dumps(manifest, indent=2)+"\n")
+    load(output)
     return manifest
 
 
@@ -78,6 +84,8 @@ def load(inputs):
 
 def rebuild_modules(files, source, build, output, cross, run):
     """Source-kernel builds must not reuse same-release modules from an older build."""
+    validate_kernel_source(source)
+    validate_build_tree(build)
     sensors, camss = output/"camera-sensors", output/"camera-camss"
     for script, dest in (("build-spx-camera-probe.sh", sensors), ("build-spx-camss.sh", camss)):
         run(["env", "CROSS_COMPILE="+cross, "sh", ROOT/"scripts"/script, source, build, dest])

@@ -1,3 +1,16 @@
+## 2026-11-16：摄像头可直接从源码生成baseline输入
+
+新增build-spx-camera-bundle.py及configs/camera-build.example.json，
+从匹配内核源码/build、冻结AIDL、当前HAL/ISP和图形wrapper源码直接生成camera/CAMERA.json。
+不读取旧initramfs或Surface提取文件，不需要设备在线；不打包Windows驱动。
+匹配Android/QTI头文件和平台链接库仍是明确依赖，详见[摄像头构建](CAMERA-BUILD.md)。
+
+    python3 scripts/build-spx-camera-bundle.py --inputs private/camera-build.json --output out/camera-from-source
+    python3 scripts/build.py full-image --graphics hybrid --private-root /path/to/platform-inputs --camera-inputs out/camera-from-source/camera --output out/full-camera-image --esp-only
+
+旧--import-initramfs仅作迁移入口，源码构建不再需要它。
+以下2026-11-15记录描述此前的导入方式。
+
 ## 2026-11-16：自动亮度/旋转默认构建
 
 baseline/Hybrid full-image默认读取PRIVATE_ROOT/sensors；--sensor-inputs可指定输入，
