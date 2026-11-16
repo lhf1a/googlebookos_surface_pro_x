@@ -16,12 +16,12 @@
 用户确认“已恢复声音”。故缺失补丁只是差异，不能作为已经证明的完整根因；
 单独恢复补丁的候选失败，不进入默认构建。默认构建固定能出声的模块hash，
 停播爆音仍开放；下次先核对原驱动全套启动/解除静音行为。增益、HAL、DMIC、
-端口配对及transport保持。后续实际状态以HANDOFF为准。
+端口配对及transport保持。后续状态见 [BUILD](BUILD.md) 与 [IMAGE](IMAGE.md)。
 
 2026-11-02 EL2无声为启动前置判断遗漏：音频DSP已被接管，state为attached，旧
 audio-drivers-start只接受running，尚未加载声卡即退出。允许这两种活动状态后
 原声卡/HAL恢复，AAudio528000帧、active xruns0，用户确认声音正常。没有修改
-下述增益、SoundWire端口或音频transport；启动包持久修正见HANDOFF最新条目。
+下述增益、SoundWire端口或音频transport；启动包持久修正已并入默认构建。
 
 用户确认 +12 dB 听感很好，选择该档位作为默认，并在重启验证后确认声音问题已解决。
 先前 clean 音乐正常、左右顺序正确，短间隔和 10 秒间隔启停均无用户可闻爆音。

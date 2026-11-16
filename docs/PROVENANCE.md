@@ -11,7 +11,7 @@
 | 本仓源码 | probe/ + scripts/ | Vulkan 路由、gralloc/layout/backlight 与 dma_heap/ION 内存适配 |
 
 Quest 归档可按站点公布 SHA 校验；历史 vendor hash 验证不代表完整 ZIP 已验证，更不代表 Meta 签名链认证。Surface 音频/SLPI 等 OEM 固件是共用硬件输入，与上述 Android 运行库来源分开。
-已完成组件编译、整盘装配和匹配 Venus 增量构建；具体产物与验证范围见 [HYBRID-SLEEP-20261116](HYBRID-SLEEP-20261116.md)。原配置中的历史 candidate 状态保留，主机装配不提升真机验收。
+已完成组件编译、整盘装配和匹配 Venus 增量构建；具体产物与验证范围见 [IMAGE](IMAGE.md)。原配置中的历史 candidate 状态保留，主机装配不提升真机验收。
 
 公开的内核重建输入见 `configs/hybrid-kernel-source.json`。外部归档包含源码及三个与相邻 DTS 对应的 DT overlay，不含 OEM 固件、ELF、驱动二进制或凭据；内容范围见 [归档说明](../source-dependencies/kernel-6.18/README.md)。这份明确审核的源码/DT 归档是下方历史“不发布第三方源码归档”规则的限定例外；原版权和许可保留，KernelSU LICENSE 位于内核补丁中。
 

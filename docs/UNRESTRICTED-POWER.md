@@ -1,4 +1,4 @@
-> 2026-11-04更新：下文lte-fs12-seed、lte-fsg-seed及el2-preboot-init相关旧诊断工具已退役；引用仅为历史记录，当前实现见docs/HANDOFF.md顶部。
+> 2026-11-04更新：下文lte-fs12-seed、lte-fsg-seed及el2-preboot-init相关旧诊断工具已退役；引用仅为历史记录，当前实现见 [SUSPEND](SUSPEND.md)。
 
 # screen_only 依赖整理与无限制环境
 
@@ -6,7 +6,7 @@
 
 已实机启动并成为新默认，原Mesa回退/原正常包/共享固件保留。实际N/autoN、owner0、
 test/trial=N、pm_test none和22条有效hash通过，用户确认视频正常。完整经过和失败/回滚
-见HANDOFF最新节。旧段落的15条目/未部署属于早期构建，不是当前状态。
+见 [SUSPEND](SUSPEND.md)。旧段落的15条目/未部署属于早期构建，不是当前状态。
 
 必须审计嵌套tar及清单依赖。旧runtime.tar/start.sh仍拒绝N，现移到独立v2u，
 保留/校验旧v1。新launcher仍采用原private mount namespace、mapper和MAP_CACHE契约，

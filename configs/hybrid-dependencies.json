@@ -892,12 +892,12 @@
     {
       "id": "android-qti-platform",
       "reason": "Source and donor channels are pinned above; the remaining work is preparing matching platform headers/libraries, applying local source fixes, and composing runtime. Do not classify source-built OMX/HWC as opaque missing proprietary inputs.",
-      "channel": "configs/sm8250-omx-source.json; sm8350-display-build.json; quest2-mapper5-reference.json; quest2-hidl-build.json; stagefright-p010-renderer.json; docs/QUEST2-VENDOR-REFERENCE.md"
+      "channel": "configs/sm8250-omx-source.json; sm8350-display-build.json; quest2-mapper5-reference.json; quest2-hidl-build.json; stagefright-p010-renderer.json; docs/PROVENANCE.md"
     },
     {
       "id": "boot-runtime-template",
       "reason": "Prepared board.dts/EFI/template layout/full-image-runtime required; public recovery ZIP is not template.img.",
-      "channel": "docs/FULL-IMAGE.md and scripts/full_image.py import_private; generic sanitized inputs only"
+      "channel": "docs/BUILD.md and scripts/full_image.py import_private; generic sanitized inputs only"
     },
     {
       "id": "camera-sensor-built-inputs",

@@ -16,7 +16,7 @@
         "DawnWebGPUCache",
         "com.android.opengl.shaders_cache.multifile"
       ],
-      "evidence": "docs/HANDOFF.md 2026-11-05; original private chrome-cache/VERIFICATION.txt records five moved locations, ROLLBACK_HASH_MATCH and Chrome stopped; this is Chrome-only historical validation"
+      "evidence": "git history 2026-11-05; original private chrome-cache/VERIFICATION.txt records five moved locations, ROLLBACK_HASH_MATCH and Chrome stopped; this is Chrome-only historical validation"
     },
     {
       "names": [

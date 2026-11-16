@@ -59,4 +59,4 @@ camera模块，用户空间使用刚生成的包。boot/stage helper和profiles�
 
 构建日志位于build/*.log，命令记录为build/commands.json；产物和本地依赖不提交。
 2026-11-16已用新入口完整重编并通过full-image安装器校验，未部署新产物。
-真机v10格式/录像证据见FRONT-CAMERA.md；构建成功不扩展为新二进制或SQ1的真机验收。
+真机v10格式/录像证据留在本地 out/；构建成功不扩展为新二进制或SQ1的真机验收。

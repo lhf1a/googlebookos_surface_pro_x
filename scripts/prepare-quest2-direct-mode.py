@@ -3,7 +3,7 @@
 
 This does not contact a device or install a system driver. It copies the pinned
 private runtime and changes only one proven qgl_config directory string slot.
-See docs/QUEST2-VULKAN-DIRECT.md for the parser and render-mode evidence.
+See the git history for the parser and render-mode evidence.
 """
 import argparse
 import hashlib

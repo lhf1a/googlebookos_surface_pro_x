@@ -1,6 +1,6 @@
 # Hybrid 标准构建流程与产物
 
-更新：2026-11-16。基于主线 `619af8b`（含 `940a769` 休眠修复），统一为 Hybrid 默认构建、Windows 依赖准备和无个人凭据整盘装配。
+更新：2026-11-16。唯一默认 Hybrid 构建、Windows 依赖准备和无个人凭据整盘装配。
 
 ## 1. 唯一产品线
 
@@ -10,6 +10,7 @@
 - 摄像头、自动亮度、自动旋转和当前触控向导为整包必需能力。
 - `compile`是内核组件构建；`verify/package`是历史固定包核验/复制，不是另一条整机产品线。
 - `--esp-only`仅输出启动分区内容，不能当完整磁盘镜像。
+- 通用交付规则（任意 SQ1/SQ2、禁止单机准入、镜像与本机状态分离）见 [DEVELOPMENT](DEVELOPMENT.md)。
 
 ## 2. 构建顺序
 
@@ -98,7 +99,7 @@ python3 scripts/build.py --reuse-components FRESH_VENUS_OUTPUT/REUSE.json --priv
 当前完整成品在 `/mnt/spx-workspace/chromebookOS/out/hybrid-current-20261116/image/disk/`：
 原始 20 GiB，压缩 8,199,981,130 字节。包含默认跳过初始设置、最新双语触摸校准和匹配的休眠修复；
 GPT/ESP/完整 gzip/匿名身份检查通过，未真机启动。文件哈希、复用方式和验证范围见
-[新镜像说明](HYBRID-SETUP-TOUCH-20261116.md)。旧 `hybrid-assembly`、`hybrid-sleep` 整盘及旧 release 压缩成品已按要求清理，模板和组件保留。
+[IMAGE](IMAGE.md)。旧 `hybrid-assembly`、`hybrid-sleep` 整盘及旧 release 压缩成品已按要求清理，模板和组件保留。
 
 初始设置默认策略更新只对使用当前源码重新装配的产物生效；此前已经生成的镜像不会自动改变。`PRIVACY.json` 应记录 `first_setup_preserved=false`、`first_setup_skipped=true`。
 

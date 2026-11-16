@@ -2,7 +2,7 @@
 """Prepare an offline, same-firmware Quest 2 v77 Vulkan candidate.
 
 Never contacts a device, runs donor code, or replaces a system driver. Requires
-Linux/WSL patchelf and readelf. See docs/QUEST2-V77-VULKAN.md for the ABI limits.
+Linux/WSL patchelf and readelf. See the git history for the ABI limits.
 """
 import argparse
 import hashlib

@@ -418,7 +418,7 @@
     "execution_plan": {
       "date": "2026-11-08",
       "status": "user-confirmed; implementation-goal-active",
-      "document": "docs/QUALCOMM-FULL-STACK-PORT.md",
+      "document": "docs/BUILD.md",
       "section": "\u5f53\u524d\u6267\u884c\u65b9\u6848\uff082026-11-08 \u7528\u6237\u786e\u8ba4\uff09",
       "framework_mapper": "mapper5",
       "display_backend": "source QTI HWC/SDM adapted to Linux 6.18 and actual Surface hardware",
@@ -7972,7 +7972,7 @@
       "objective_complete": false
     },
     "full_stack_plan": {
-      "document": "docs/QUALCOMM-FULL-STACK-PORT.md",
+      "document": "docs/BUILD.md",
       "direction": "Matched Qualcomm KGSL, QTI allocator/mapper/gralloc, msm_vidc, OEM OMX/HIDL and HWC/display kernel on Linux6.18",
       "status": "design-recorded-not-implemented",
       "checkpoint_scope": "Save mixed-stack source and verified progress; no new deployment",

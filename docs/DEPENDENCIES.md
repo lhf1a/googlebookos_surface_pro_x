@@ -45,7 +45,7 @@ ALS 默认光学校准仅从 `SurfaceLightSensor.sys` 中提取带 CRC 的 1480 
 固定下载地址已纳入清单。默认仅下载已固定 SHA256 的 96,436 字节 prefix 与 84,162,032 字节 vendor 区段；两者已实际完成 131 操作及最终 vendor hash 核对。加 `-FullDonorArchive` 才额外下载并核验完整 1,172,543,128 字节归档。
 历史配置 `archive_hash_verified=false` 不改成 true：历史证据是 vendor 操作、分区与文件 hash，本次添加来源不等于重新下载验证整个 ZIP。
 
-Linux 侧继续使用已有 `rebuild-quest2-v77-vendor.py` 和 `extract-quest2-v77-reference.py`，详见 [QUEST2-VENDOR-REFERENCE](QUEST2-VENDOR-REFERENCE.md)。前者接收固定 prefix/vendor range，并核验 131 个 REPLACE_XZ 操作及完整 vendor 分区 SHA；后者只读 debugfs 提取。
+Linux 侧继续使用已有 `rebuild-quest2-v77-vendor.py` 和 `extract-quest2-v77-reference.py`，donor 来源见 [PROVENANCE](PROVENANCE.md)。前者接收固定 prefix/vendor range，并核验 131 个 REPLACE_XZ 操作及完整 vendor 分区 SHA；后者只读 debugfs 提取。
 `hybrid_bootstrap.py --stage quest` 已将区段校验（或完整 ZIP 校验及区段切分）、vendor 重建和只读文件提取串联；区段偏移来自上述锁。两个区段不是两个独立 donor。
 不刷写 Quest OTA/分区到 Surface，不把 A650 firmware 当作 Surface A680 firmware。
 
@@ -209,7 +209,7 @@ python3 scripts/hybrid_bootstrap.py --imported private/dependency-import \
 隔离验证 glue 的调用为 `--stage glue --ndk NDK_DIRECTORY --work FRESH_OUTPUT`。
 `BOOTSTRAP.json` 保存完成阶段、命令、退出码、日志 hash、产物 hash和失败点；`image_built` 仍为 false。
 这些新增阶段没有跳过 full-image 必需的 camera/sensors，也没有用旧 initramfs 冒充从零生成的 runtime。
-后续已接通传感器 RPC/EFI/固件打包和显式复用 runtime 的整盘装配；这不等于下载包可从零生成 HWC/OMX/runtime，见文末及 HYBRID-ASSEMBLY-20261116.md。
+后续已接通传感器 RPC/EFI/固件打包和显式复用 runtime 的整盘装配；这不等于下载包可从零生成 HWC/OMX/runtime，见文末与 [BUILD](BUILD.md)。
 
 本轮实跑：Windows 将实际 Quest 两个区段和固定 hexagonrpc Git bundle 打包，Linux importer 随后调用 quest 阶段完成重建/提取（906 个普通文件）；独立离线恢复 hexagonrpc commit 成功。两个 Hybrid 粘合库已用明确指定的本机 NDK r28c 实编译为 ARM64 ELF，输出映射与 full_image.py 对齐。此实跑包未包含全部 Android/SDK/Surface 依赖，NDK也不是由该包解出，因此不是完整 clean-room 构建验收。
 
@@ -265,7 +265,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Export-SurfaceHybr
 
 ## 复用已完成组件，继续到完整磁盘镜像
 
-最新休眠增量使用 `rebuild-hybrid-venus.py` 在匹配 KOUT 上重编 Venus，再将其生成的 REUSE.json 交给默认 hybrid 构建；不重编未变化组件。输入配对、命令和新镜像哈希见 [HYBRID-SLEEP-20261116](HYBRID-SLEEP-20261116.md)。
+最新休眠增量使用 `rebuild-hybrid-venus.py` 在匹配 KOUT 上重编 Venus，再将其生成的 REUSE.json 交给默认 hybrid 构建；不重编未变化组件。输入配对、命令和新镜像哈希见 [SUSPEND](SUSPEND.md)。
 
 `scripts/build-spx-sensor-runtime.py` 接收上述 `--surface-assets`、已编译的 `--kernel-components`、
 `--platform-components`、固定 Git `--sources-root` 和 `--venus-firmware`，编译静态 RPC/PAS12 EFI 后生成完整 sensors bundle。
