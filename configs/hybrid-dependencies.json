@@ -1,0 +1,959 @@
+{
+  "schema": 1,
+  "product": "hybrid-sq1-sq2-6.18",
+  "downloads": [
+    {
+      "id": "googlebook",
+      "url": "https://dl.google.com/device/recovery/mica-user/16471258/recovery.zip",
+      "algorithm": "SHA256",
+      "hash": "cb68dd6dbd73e568cfeecca0cbd4ceb23338640814dc3ee52aba5507e5a645d7",
+      "file": "mica-recovery.zip"
+    },
+    {
+      "id": "cuttlefish",
+      "url": "https://ci.android.com/builds/submitted/16373615/aosp_cf_arm64_only_phone-userdebug/latest/aosp_cf_arm64_only_phone-img-16373615.zip",
+      "algorithm": "SHA256",
+      "hash": "051caf8072ba9fb417e05999de2984752e44e13ce70b6c49c669f0a73db85c18",
+      "file": "cuttlefish-16373615.zip",
+      "resolver": "android-ci-artifact"
+    },
+    {
+      "id": "libsepol",
+      "url": "https://github.com/SELinuxProject/selinux/releases/download/3.11/libsepol-3.11.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "79f3d2c88f44b7eb5cf54d9792e03232297e17f97a179163f2750099a00f164d",
+      "file": "libsepol-3.11.tar.gz"
+    },
+    {
+      "id": "mesa",
+      "url": "https://archive.mesa3d.org/mesa-26.2.4.tar.xz",
+      "algorithm": "SHA256",
+      "hash": "bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9",
+      "file": "mesa-26.2.4.tar.xz"
+    },
+    {
+      "id": "libdrm",
+      "url": "https://dri.freedesktop.org/libdrm/libdrm-2.4.133.tar.xz",
+      "algorithm": "SHA256",
+      "hash": "fc68f9d0ba2ea63c9432a299e14fea09fad7a8a66e8039fcd7802ca59f77b4f5",
+      "file": "libdrm-2.4.133.tar.xz"
+    },
+    {
+      "id": "ndk",
+      "url": "https://dl.google.com/android/repository/android-ndk-r28c-linux.zip",
+      "algorithm": "SHA1",
+      "hash": "a7b54a5de87fecd125a17d54f73c446199e72a64",
+      "file": "android-ndk-r28c-linux.zip"
+    },
+    {
+      "id": "sdk-platform",
+      "url": "https://dl.google.com/android/repository/platform-35_r02.zip",
+      "algorithm": "SHA1",
+      "hash": "0bb560a90a7a2cbd0dd8348224d518b638fe7949",
+      "file": "platform-35_r02.zip"
+    },
+    {
+      "id": "sdk-build-tools",
+      "url": "https://dl.google.com/android/repository/build-tools_r35_linux.zip",
+      "algorithm": "SHA1",
+      "hash": "2cfaa0bbb2336e9ec18ed3ecea84fa2e2af607bc",
+      "file": "build-tools_r35_linux.zip"
+    },
+    {
+      "id": "quest2-v77-donor",
+      "url": "https://files.cocaine.trade/firmware/meta/Quest%202/q2_51584880050400150.zip",
+      "algorithm": "SHA256",
+      "hash": "f09e3a0de4d5c345975b0869d0049a339fba820cb178039287120e7247775e1b",
+      "file": "q2_51584880050400150.zip",
+      "bytes": 1172543128,
+      "third_party": true,
+      "provenance": "configs/quest2-full-donor-candidate.json",
+      "hash_provenance": "Published archive hash; full file checked on each acquisition. Historical record verified vendor partition, not full archive.",
+      "oem_signature_verified": false,
+      "full_archive_only": true
+    },
+    {
+      "id": "aosp-hwservicemanager",
+      "url": "https://android.googlesource.com/platform/system/hwservicemanager/+archive/refs/tags/android-16.0.0_r1.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "98b9e13005527fb17a529be8b7da4842e8c6d207608f225f50a5ad2e76616eb8",
+      "file": "hwservicemanager-android-16.0.0_r1.tar.gz",
+      "provenance": "configs/quest2-hidl-build.json"
+    },
+    {
+      "id": "quest2-v77-prefix",
+      "file": "q2-v77-prefix.bin",
+      "url": "https://files.cocaine.trade/firmware/meta/Quest%202/q2_51584880050400150.zip",
+      "range": "0-96435",
+      "algorithm": "SHA256",
+      "hash": "cf79a48d176f6caac37ff49b572aec1e6d5c27987e8a22294328afc118294468",
+      "bytes": 96436,
+      "third_party": true,
+      "provenance": "Pinned archive ranges; locally reconstructed all131 operations and vendor SHA256 44f90742c03c04037e378860ad493098a369d2bc752aa0d56d14f63ae91b6722; not OEM signature verification."
+    },
+    {
+      "id": "quest2-v77-vendor-range",
+      "file": "q2-v77-vendor-range.bin",
+      "url": "https://files.cocaine.trade/firmware/meta/Quest%202/q2_51584880050400150.zip",
+      "range": "1085676686-1169838717",
+      "algorithm": "SHA256",
+      "hash": "dba5bcd18c67fc1bc04e1b6245094c7a1ab4492575735418325fd2bebd36769e",
+      "bytes": 84162032,
+      "third_party": true,
+      "provenance": "Pinned archive ranges; locally reconstructed all131 operations and vendor SHA256 44f90742c03c04037e378860ad493098a369d2bc752aa0d56d14f63ae91b6722; not OEM signature verification."
+    },
+    {
+      "id": "linux-6.18.60",
+      "url": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.60.tar.xz",
+      "algorithm": "SHA256",
+      "hash": "3c2f44ef6acc021a7ad444d9a2e6ec1ef488ff09368793d0004a6080f69d621e",
+      "file": "linux-6.18.60.tar.xz"
+    },
+    {
+      "id": "camera-system-media",
+      "url": "https://android.googlesource.com/platform/system/media/+archive/f01e84b958fb6a887dc0e74e4b5ebd159f03860a.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "bdecf979fd59db67f0b98c0a67e33eb88a8db3ce7fc5edad906e7d5fbc689617",
+      "file": "system-media.tar.gz",
+      "git_commit": "f01e84b958fb6a887dc0e74e4b5ebd159f03860a"
+    },
+    {
+      "id": "camera-jpeg",
+      "url": "https://android.googlesource.com/platform/external/libjpeg-turbo/+archive/6cedbd6ff13946bef76a015693d02723b0d3226e.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "5fdd7d5dddf121c690dd69dc6815ad310d9d55e3ee095974e11e803dc86a706a",
+      "file": "jpeg.tar.gz",
+      "git_commit": "6cedbd6ff13946bef76a015693d02723b0d3226e"
+    },
+    {
+      "id": "camera-core",
+      "url": "https://android.googlesource.com/platform/system/core/+archive/68be0c2c0006a0740d0b1809abe4717308f90d15/libcutils/include.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "8bac2d09d3b42e0600b2f2ea2c444359ea24e4f93a552c655f250e71b2151ca5",
+      "file": "cutils-headers.tar.gz",
+      "git_commit": "68be0c2c0006a0740d0b1809abe4717308f90d15"
+    },
+    {
+      "id": "hidl-input-00",
+      "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/base/include.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "d3793075f4fe54e0a02178c5590fb7a5f16a495e0fd4db061d26a76bdb76745c",
+      "file": "hidl-input-00.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "include",
+        "archive": true
+      },
+      "git_tree": "3ef79fdaa9663d8a3e3056b0a06b9f8a926db42b"
+    },
+    {
+      "id": "hidl-input-01",
+      "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/include.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "6b13285a27bac9bca2ee39bdb3dacb51fd3c83595f3cc774ba9e101e776abdaf",
+      "file": "hidl-input-01.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "include",
+        "archive": true
+      },
+      "git_tree": "751631d3eb14779156c4b606f83ee2d7c39edccf"
+    },
+    {
+      "id": "hidl-input-02",
+      "url": "https://android.googlesource.com/platform/system/libhwbinder/+archive/android-12.0.0_r1/include.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "1bfee9de86e0e43216c8b364b36d09d43374c11f1f611d76c751586b30eb84f0",
+      "file": "hidl-input-02.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "include",
+        "archive": true
+      },
+      "git_tree": "843046245597697eb8b73720b585c2c1991bd74d"
+    },
+    {
+      "id": "hidl-input-03",
+      "url": "https://android.googlesource.com/platform/system/core/+archive/android-12.0.0_r1/libutils/include.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "ceebb6508b37b274c68a02c5d83b3f3739f05ee039fe01decfc8a361d406284d",
+      "file": "hidl-input-03.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "include",
+        "archive": true
+      },
+      "git_tree": "f8ce53187f75981743cd21b983fd55d4ba0379c5"
+    },
+    {
+      "id": "hidl-input-04",
+      "url": "https://android.googlesource.com/platform/system/core/+archive/android-12.0.0_r1/libcutils/include.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "6967f2c40b7ed41967633783eab3c42a1f3a6af864e6ca354ae77dc0c12a3ff4",
+      "file": "hidl-input-04.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "include",
+        "archive": true
+      },
+      "git_tree": "12669a3c022be0797d83325e6ad1a579ed23dd11"
+    },
+    {
+      "id": "hidl-input-05",
+      "url": "https://android.googlesource.com/platform/system/libbase/+archive/android-12.0.0_r1/include.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "cb6316fcc2b1c03f8c5036fb0c2909447674a4b501e10ef6eeabcebaa1d4d107",
+      "file": "hidl-input-05.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "include",
+        "archive": true
+      },
+      "git_tree": "29818900b938ed0ff1b48efcf94d90164cfa7b69"
+    },
+    {
+      "id": "hidl-input-06",
+      "url": "https://android.googlesource.com/platform/system/logging/+archive/android-12.0.0_r1/liblog/include.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "ce45c2ccc532a5a21a2196cb26849828e20f0dc07220032b7ee91b6a98c98347",
+      "file": "hidl-input-06.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "include",
+        "archive": true
+      },
+      "git_tree": "14ef98be992102b412564eb4dce00a3c7e02a58f"
+    },
+    {
+      "id": "hidl-input-07",
+      "url": "https://android.googlesource.com/platform/system/core/+archive/android-12.0.0_r1/libsystem/include.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "e9d8505e50e95a8da139c7e52e9ed824b1b8409da7089313b21aca31d8bcc411",
+      "file": "hidl-input-07.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "include",
+        "archive": true
+      },
+      "git_tree": "2942cc219520e870b6724f8bce5591e184572418"
+    },
+    {
+      "id": "hidl-input-08",
+      "url": "https://android.googlesource.com/platform/system/libfmq/+archive/android-12.0.0_r1/include.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "cf5781837f7e8b3d97feab2ac7e4d8ae9dd96a02995a55ffbe1d81b672a28315",
+      "file": "hidl-input-08.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "include",
+        "archive": true
+      },
+      "git_tree": "d5a6e76c151cea0b3a4bf0951836fa3493a0cfe9"
+    },
+    {
+      "id": "hidl-input-09",
+      "url": "https://android.googlesource.com/platform/system/libfmq/+archive/android-12.0.0_r1/base.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "9ccbe7aef16efbd9e03aa14813d965e29352aa8f6a23da4a6084588eb31d4d2a",
+      "file": "hidl-input-09.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "include",
+        "archive": true
+      },
+      "git_tree": "cac238d9c1ef9b8584df12dd496f4043a675889f"
+    },
+    {
+      "id": "hidl-input-10",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/common/1.0.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "bdbf45a4b8ee8257c62cf6b191ac45c8d32366b3d64d9c3019677565fec038a5",
+      "file": "hidl-input-10.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hardware/graphics/common/1.0",
+        "archive": true
+      },
+      "git_tree": "a6181161d15cf81682e5fb5591313fe38fd289a2"
+    },
+    {
+      "id": "hidl-input-11",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/common/1.1.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "f90a69ce40c4db0fe5915627889dbfb71c2acd65ffd9d071c252eb27478c190d",
+      "file": "hidl-input-11.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hardware/graphics/common/1.1",
+        "archive": true
+      },
+      "git_tree": "b2e033ffa04e52c07affa35c5dca9e203696b3e9"
+    },
+    {
+      "id": "hidl-input-12",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/common/1.2.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "0a850e08bc232d073642fc4c41092a87ffeb05285b857160ecb975add74ffe22",
+      "file": "hidl-input-12.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hardware/graphics/common/1.2",
+        "archive": true
+      },
+      "git_tree": "c88088ebf42652634576d1218f812ee006be26f0"
+    },
+    {
+      "id": "hidl-input-13",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/allocator/3.0.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "acb1a9485fef73e459a115541a9e6c26bb6dbb6b0baf5d2442bf4760e6fc876e",
+      "file": "hidl-input-13.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hardware/graphics/allocator/3.0",
+        "archive": true
+      },
+      "git_tree": "1f6d3ec25fae535787bd63be1b85fd05339d6be2"
+    },
+    {
+      "id": "hidl-input-14",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/2.0.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "ec8bc1cdbfa77e8c248e09846b3ccec10de7c800becc16622b53e954d327690d",
+      "file": "hidl-input-14.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hardware/graphics/mapper/2.0",
+        "archive": true
+      },
+      "git_tree": "8c790ca98bd06a47ed9d1e415d525a2fd1f45fbd"
+    },
+    {
+      "id": "hidl-input-15",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/2.1.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "a57262b33f4e1fa65ac171628f485ccb73957b376fae81d9b5150c18a1ae25f7",
+      "file": "hidl-input-15.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hardware/graphics/mapper/2.1",
+        "archive": true
+      },
+      "git_tree": "37f82aab097a0ce98e8d35782e64e38ce3858d8a"
+    },
+    {
+      "id": "hidl-input-16",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/3.0.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "a448d3cab1f77d33c8eb12183f354b57d270e160e2b789385493f9b92cbc1e6d",
+      "file": "hidl-input-16.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hardware/graphics/mapper/3.0",
+        "archive": true
+      },
+      "git_tree": "47b582a4a333db03ba7b6bf63553ca4cda447c54"
+    },
+    {
+      "id": "hidl-input-17",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+archive/android-12.0.0_r1/graphics/mapper/4.0.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "dca35239d29a01d7233fbe4e6537bcd5e02fafe158e5100c4e4d532362a5b22b",
+      "file": "hidl-input-17.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hardware/graphics/mapper/4.0",
+        "archive": true
+      },
+      "git_tree": "87609375888ac1154b3d12f093ab42073d8e1f0c"
+    },
+    {
+      "id": "hidl-input-18",
+      "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/base/1.0.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "fc6092cf7fe376ecb6c09031de445b7634212fa652cdbb5e054789becfeacf49",
+      "file": "hidl-input-18.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hidl/base/1.0",
+        "archive": true
+      },
+      "git_tree": "bae10c89d0a0324a8856cb105c4366c282cd7159"
+    },
+    {
+      "id": "hidl-input-19",
+      "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/manager/1.0.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "1eb7d409f50ff06a2a0d1d0cf92955126f50003965b806a96f7cbe407cd52f32",
+      "file": "hidl-input-19.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hidl/manager/1.0",
+        "archive": true
+      },
+      "git_tree": "6be0a716a50b18780bd019cd52255e44f2ca4a0b"
+    },
+    {
+      "id": "hidl-input-20",
+      "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/manager/1.1.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "803c16dbc109f7967f7ffc0a6b3b08173f4c5f9d2ab302a92cd6bd0a4b277ba3",
+      "file": "hidl-input-20.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hidl/manager/1.1",
+        "archive": true
+      },
+      "git_tree": "3c0d0ebe272e7865ab66ba0eebd17f823cb449db"
+    },
+    {
+      "id": "hidl-input-21",
+      "url": "https://android.googlesource.com/platform/system/libhidl/+archive/android-12.0.0_r1/transport/manager/1.2.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "1b2bac22599ce866b2ab85eaf9e5e465278690aa5c6f677eea48eba904c5ddca",
+      "file": "hidl-input-21.tar.gz",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/android/hidl/manager/1.2",
+        "archive": true
+      },
+      "git_tree": "bdbbe6d80b72d5ebcbc8baef23e602ec37690533"
+    },
+    {
+      "id": "hidl-input-22",
+      "url": "https://android.googlesource.com/platform/prebuilts/build-tools/+/94dfb8dcf347e4fa1d8fda6b0a9b745a4c1ae0a3/linux-x86/bin/hidl-gen?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "963d5265315fec5a43b434ec0aed933dbbb2ac698d9f97be9da19f963c97ee75",
+      "file": "hidl-input-22.bin",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hidl-gen",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "hidl-input-23",
+      "url": "https://android.googlesource.com/platform/prebuilts/build-tools/+/94dfb8dcf347e4fa1d8fda6b0a9b745a4c1ae0a3/linux-x86/lib64/libc++.so?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "b4bf6891d676b4679512db9b2a09a57b4a1579cf99e8c5f8edcf90e9e14b3489",
+      "file": "hidl-input-23.bin",
+      "materialize": {
+        "group": "hidl",
+        "destination": "libc++.so",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "hidl-input-24",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapper/3.0/IQtiMapper.hal",
+      "algorithm": "SHA256",
+      "hash": "72889f3c7812efb6e00cd59d17dca3ee392b029eef83622758d206e1e835722c",
+      "file": "hidl-input-24.bin",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/vendor/qti/hardware/display/mapper/3.0/IQtiMapper.hal",
+        "archive": false
+      }
+    },
+    {
+      "id": "hidl-input-25",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapper/4.0/IQtiMapper.hal",
+      "algorithm": "SHA256",
+      "hash": "f49205d41f011a96c6d238ea69f7b6c9d159809f4ecabef04ca4ccdb195d57b5",
+      "file": "hidl-input-25.bin",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/vendor/qti/hardware/display/mapper/4.0/IQtiMapper.hal",
+        "archive": false
+      }
+    },
+    {
+      "id": "hidl-input-26",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapperextensions/1.0/IQtiMapperExtensions.hal",
+      "algorithm": "SHA256",
+      "hash": "13eca267916c940ad44e08ee5e43e22bb24fa6afe7f2b824ea9d6c753d17e1d9",
+      "file": "hidl-input-26.bin",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/vendor/qti/hardware/display/mapperextensions/1.0/IQtiMapperExtensions.hal",
+        "archive": false
+      }
+    },
+    {
+      "id": "hidl-input-27",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapperextensions/1.0/types.hal",
+      "algorithm": "SHA256",
+      "hash": "b750c6dd2233e7d102f0a4f3d5124e358d134b80dfc86066d84e6f0722615881",
+      "file": "hidl-input-27.bin",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/vendor/qti/hardware/display/mapperextensions/1.0/types.hal",
+        "archive": false
+      }
+    },
+    {
+      "id": "hidl-input-28",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_interfaces/dd3c9a9a2a136f649fa8ece063aea2ac0e581ec0/display/mapperextensions/1.1/IQtiMapperExtensions.hal",
+      "algorithm": "SHA256",
+      "hash": "9e960ad971bfeb1ccc3102caf0a2d94e95457a1ff9ff0c72156faa94f2500c5d",
+      "file": "hidl-input-28.bin",
+      "materialize": {
+        "group": "hidl",
+        "destination": "hal/vendor/qti/hardware/display/mapperextensions/1.1/IQtiMapperExtensions.hal",
+        "archive": false
+      }
+    },
+    {
+      "id": "expat",
+      "file": "expat-2.5.0.tar.bz2",
+      "url": "https://github.com/mesonbuild/wrapdb/releases/download/expat_2.5.0-3/expat-2.5.0.tar.bz2",
+      "algorithm": "SHA256",
+      "hash": "ef2420f0232c087801abf705e89ae65f6257df6b7931d37846a193ef2e8cdcbe"
+    },
+    {
+      "id": "expat-meson",
+      "file": "expat_2.5.0-3_patch.zip",
+      "url": "https://wrapdb.mesonbuild.com/v2/expat_2.5.0-3/get_patch",
+      "algorithm": "SHA256",
+      "hash": "e30c8c32f79fd4563a86a5c9cfe419568c35b775077c2d1428170081129406b4"
+    },
+    {
+      "id": "mesa-mapper5",
+      "file": "mesa-android-mapper5.patch",
+      "url": "https://raw.githubusercontent.com/skylartaylor/gbos-vm/3b08ed29a73858644c65f24e06ee2a7cfb7e3774/patches/mesa-android-mapper5.patch",
+      "algorithm": "SHA256",
+      "hash": "d9dcfd32debe9ca5c06cdfa8fe51233eb17cb5f04702e2e498831cbbca6b18f4"
+    },
+    {
+      "id": "host-python-meson",
+      "file": "meson-1.8.5-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/22/a3/9b9ca250146b2eace017d7931cabb44a65c04b79f6f046d74e9c94bd5da3/meson-1.8.5-py3-none-any.whl",
+      "algorithm": "SHA256",
+      "hash": "15ab2cca08271bc055bc33a4929b7c58f15ad67df4c1fa65dc223e822b882bef",
+      "host": "Linux x86_64 Python3.12"
+    },
+    {
+      "id": "host-python-mako",
+      "file": "mako-1.3.10-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/87/fb/99f81ac72ae23375f22b7afdb7642aba97c00a713c217124420147681a2f/mako-1.3.10-py3-none-any.whl",
+      "algorithm": "SHA256",
+      "hash": "baef24a52fc4fc514a0887ac600f9f1cff3d82c61d4d700a1fa84d597b88db59",
+      "host": "Linux x86_64 Python3.12"
+    },
+    {
+      "id": "host-python-markupsafe",
+      "file": "MarkupSafe-3.0.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/f3/f0/89e7aadfb3749d0f52234a0c8c7867877876e0a20b60e2188e9850794c17/MarkupSafe-3.0.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "algorithm": "SHA256",
+      "hash": "e17c96c14e19278594aa4841ec148115f9c7615a47382ecb6b82bd8fea3ab0c8",
+      "host": "Linux x86_64 Python3.12"
+    },
+    {
+      "id": "host-python-pyyaml",
+      "file": "PyYAML-6.0.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/b9/2b/614b4752f2e127db5cc206abc23a8c19678e92b23c3db30fc86ab731d3bd/PyYAML-6.0.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "algorithm": "SHA256",
+      "hash": "80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476",
+      "host": "Linux x86_64 Python3.12"
+    },
+    {
+      "id": "host-python-packaging",
+      "file": "packaging-25.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/20/12/38679034af332785aac8774540895e234f4d07f7545804097de4b666afd8/packaging-25.0-py3-none-any.whl",
+      "algorithm": "SHA256",
+      "hash": "29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484",
+      "host": "Linux x86_64 Python3.12"
+    },
+    {
+      "id": "host-python-pycparser",
+      "file": "pycparser-2.22-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/13/a3/a812df4e2dd5696d1f351d58b8fe16a405b234ad2886a0dab9183fb78109/pycparser-2.22-py3-none-any.whl",
+      "algorithm": "SHA256",
+      "hash": "c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc",
+      "host": "Linux x86_64 Python3.12"
+    },
+    {
+      "id": "mapper-input-00",
+      "file": "mapper-input-00.bin",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/mapper/stable-c/include/android/hardware/graphics/mapper/IMapper.h?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "6ceeb9954652cc7fd3988a1e0ecb474f9be75fb59699a12e5c5b839cdf210442",
+      "materialize": {
+        "group": "mapper",
+        "destination": "include/android/hardware/graphics/mapper/IMapper.h",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "mapper-input-01",
+      "file": "mapper-input-01.bin",
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display/+/484ca55710cb0bc6e5222922ced149b9068cbf5b/gralloc/gr_utils.h?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "ac96578db111a47771d958f1743c16e88e6dbe47bc90817a403be51c3d8b7d11",
+      "materialize": {
+        "group": "mapper",
+        "destination": "gr_utils.h",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "mapper-input-02",
+      "file": "mapper-input-02.bin",
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display/+/484ca55710cb0bc6e5222922ced149b9068cbf5b/gralloc/gr_device_impl.h?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "fc41fd5fcdf2802ea1dad93ec82b0664a129f9083c7c4ff2e89e5db2c2fcf09d",
+      "materialize": {
+        "group": "mapper",
+        "destination": "gr_device_impl.h",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "mapper-input-03",
+      "file": "mapper-input-03.bin",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/mapper/stable-c/implutils/include/android/hardware/graphics/mapper/utils/IMapperMetadataTypes.h?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "49dda8f1de00578e577e4f538f72c35aca00a1ac44f426c66283a3bc147ad370",
+      "materialize": {
+        "group": "mapper",
+        "destination": "include/android/hardware/graphics/mapper/utils/IMapperMetadataTypes.h",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "mapper-input-04",
+      "file": "mapper-input-04.bin",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/mapper/stable-c/implutils/include/android/hardware/graphics/mapper/utils/IMapperProvider.h?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "c15da6b3d95f69adc023b929724a4f1bc78f2e4bdd04a8995537892060bf98f9",
+      "materialize": {
+        "group": "mapper",
+        "destination": "include/android/hardware/graphics/mapper/utils/IMapperProvider.h",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "mapper-input-05",
+      "file": "mapper-input-05.bin",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/allocator/aidl/aidl_api/android.hardware.graphics.allocator/2/android/hardware/graphics/allocator/AllocationError.aidl?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "50f4f06f5b7b4cf7ec1f63a3fd559325a1fd7e0adbbc0325b1ce22759155d416",
+      "materialize": {
+        "group": "mapper",
+        "destination": "allocator-aidl/android/hardware/graphics/allocator/AllocationError.aidl",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "mapper-input-06",
+      "file": "mapper-input-06.bin",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/allocator/aidl/aidl_api/android.hardware.graphics.allocator/2/android/hardware/graphics/allocator/AllocationResult.aidl?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "8cb5f19a606dbfa0a3f222086b3432ae64c0dc671fcd550b52fb32ff3f3f0523",
+      "materialize": {
+        "group": "mapper",
+        "destination": "allocator-aidl/android/hardware/graphics/allocator/AllocationResult.aidl",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "mapper-input-07",
+      "file": "mapper-input-07.bin",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/allocator/aidl/aidl_api/android.hardware.graphics.allocator/2/android/hardware/graphics/allocator/BufferDescriptorInfo.aidl?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "ffe29e599d317f119573fc19587131c3bb0eb7cdd690a722b73f1f8fbf0e482e",
+      "materialize": {
+        "group": "mapper",
+        "destination": "allocator-aidl/android/hardware/graphics/allocator/BufferDescriptorInfo.aidl",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "mapper-input-08",
+      "file": "mapper-input-08.bin",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/allocator/aidl/aidl_api/android.hardware.graphics.allocator/2/android/hardware/graphics/allocator/IAllocator.aidl?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "e25054d807f63cd5f69060d986bf7ec2e01809ad008592b33ac166fbc8b3601a",
+      "materialize": {
+        "group": "mapper",
+        "destination": "allocator-aidl/android/hardware/graphics/allocator/IAllocator.aidl",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "mapper-input-09",
+      "file": "mapper-input-09.bin",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces/+/488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6/graphics/allocator/aidl/aidl_api/android.hardware.graphics.allocator/2/.hash?format=TEXT",
+      "algorithm": "SHA256",
+      "hash": "fcdd8c9f27c105b25b291834937fd6cd2031563e4c753379717890addd578b3d",
+      "materialize": {
+        "group": "mapper",
+        "destination": "allocator-v2.hash",
+        "archive": false
+      },
+      "encoding": "base64"
+    },
+    {
+      "id": "mapper-input-10",
+      "file": "mapper-input-10.bin",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/include/color_metadata.h",
+      "algorithm": "SHA256",
+      "hash": "4084a27a0fe358ab3068d2c498e6165c2979aa62781d6b4524d0caa26d677372",
+      "materialize": {
+        "group": "mapper",
+        "destination": "include/color_metadata.h",
+        "archive": false
+      }
+    },
+    {
+      "id": "mapper-input-11",
+      "file": "mapper-input-11.bin",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/libqdmetadata/qdMetaData.h",
+      "algorithm": "SHA256",
+      "hash": "70cbefa25b56af82b6d37e220412c4d00f767b18f66befa7fe16d62f83f6a726",
+      "materialize": {
+        "group": "mapper",
+        "destination": "qdMetaData.h",
+        "archive": false
+      }
+    },
+    {
+      "id": "mapper-input-12",
+      "file": "mapper-input-12.bin",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/gralloc/QtiGrallocMetadata.h",
+      "algorithm": "SHA256",
+      "hash": "e8fa89d057f4b690b8c22103f6f595b120489f9e06688546d1a28e229f0ae1e7",
+      "materialize": {
+        "group": "mapper",
+        "destination": "include/QtiGrallocMetadata.h",
+        "archive": false
+      }
+    },
+    {
+      "id": "mapper-input-13",
+      "file": "mapper-input-13.bin",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/gralloc/QtiGrallocPriv.h",
+      "algorithm": "SHA256",
+      "hash": "a5415a09949b797ba469bfb91495ee284f252d132e23728d7f279f818bbf7144",
+      "materialize": {
+        "group": "mapper",
+        "destination": "include/QtiGrallocPriv.h",
+        "archive": false
+      }
+    },
+    {
+      "id": "mapper-input-14",
+      "file": "mapper-input-14.bin",
+      "url": "https://raw.githubusercontent.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf/17ef14f5da298e137bba894525fbe181efdefa96/gralloc/QtiGralloc.h",
+      "algorithm": "SHA256",
+      "hash": "837745e1455fad24a7e65312b810a11cf19c47741ba59aa1c0a129fbec673459",
+      "materialize": {
+        "group": "mapper",
+        "destination": "QtiGralloc-contract.h",
+        "archive": false
+      }
+    },
+    {
+      "id": "camera-libhardware",
+      "file": "libhardware-include-all.tar.gz",
+      "url": "https://android.googlesource.com/platform/hardware/libhardware/+archive/cd2b68d71a1dd9a45668ddd9a507000ccd7ff114/include_all.tar.gz",
+      "algorithm": "SHA256",
+      "hash": "7ceeccdabe8c98afe61ab935578aa3d55e269cdb9cd6538da3e87d98bf538742"
+    }
+  ],
+  "repositories": [
+    {
+      "id": "surface_firmware_tools",
+      "url": "https://github.com/linux-surface/aarch64-firmware",
+      "commit": "9f07579ee64aba56419cfd0fbbca9f26741edc90"
+    },
+    {
+      "id": "gbos_vm_reference",
+      "url": "https://github.com/skylartaylor/gbos-vm",
+      "commit": "3b08ed29a73858644c65f24e06ee2a7cfb7e3774"
+    },
+    {
+      "id": "minigbm",
+      "url": "https://android.googlesource.com/platform/external/minigbm",
+      "commit": "455b7456397dff01443584b09e2fd594079e905c"
+    },
+    {
+      "id": "cutils_headers",
+      "url": "https://android.googlesource.com/platform/system/core",
+      "commit": "a3b721a32242006b59cb12bd62c9133632af3a2d"
+    },
+    {
+      "id": "log_headers",
+      "url": "https://android.googlesource.com/platform/system/logging",
+      "commit": "bcac7c30d88a3773a7c0bc9f5617a23a886331fd"
+    },
+    {
+      "id": "hexagonrpc",
+      "url": "https://github.com/linux-msm/hexagonrpc",
+      "commit": "da7a3742ab8d5273a281b70ee11f16fb2cb6a690"
+    },
+    {
+      "id": "device_faker_gfx",
+      "url": "https://github.com/lhf1a/device_faker_gfx.git",
+      "commit": "4fca03096456a8ef05cf6faf5b412132c6439771"
+    },
+    {
+      "id": "wechat-density-lsplant",
+      "url": "https://github.com/lhf1a/wechat-density-lsplant.git",
+      "commit": "d0a8d73f7ca73967e1016d0406ada34834de3373"
+    },
+    {
+      "id": "device_faker_config",
+      "url": "https://github.com/Seyud/device_faker_config.git",
+      "commit": "4831cca635e376f66453d8b3854c73a56a56ef45"
+    },
+    {
+      "id": "qti-display-sm8350",
+      "url": "https://github.com/LineageOS/android_hardware_qcom_display",
+      "commit": "e9bbe9a980d408af36b52f2abaae7c35647b7425",
+      "provenance": "configs/sm8350-display-build.json"
+    },
+    {
+      "id": "qti-omx-sm8250",
+      "url": "https://github.com/LineageOS/android_hardware_qcom_media",
+      "commit": "05f3cd8dbfa66f2e79ffda3cb294697374510160",
+      "provenance": "configs/sm8250-omx-source.json"
+    },
+    {
+      "id": "oculus-kernel-headers",
+      "url": "https://github.com/facebookincubator/oculus-linux-kernel",
+      "commit": "6f22d8e7cb7b48f3026f72bc3dbefef787a62ecc",
+      "provenance": "configs/sm8250-omx-source.json"
+    },
+    {
+      "id": "aosp-frameworks-av",
+      "url": "https://android.googlesource.com/platform/frameworks/av",
+      "commit": "e2f098935447ca4945946de5cb69db843fe3f003",
+      "provenance": "configs/stagefright-p010-renderer.json"
+    },
+    {
+      "id": "aosp-frameworks-native",
+      "url": "https://android.googlesource.com/platform/frameworks/native",
+      "commit": "4f463a6b1de9198963dc6aff74154a504ba3f8f6",
+      "provenance": "configs/stagefright-p010-renderer.json"
+    },
+    {
+      "id": "aosp-graphics-interfaces",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces",
+      "commit": "488942f82bd1bc9ad1cb65a02c71421dc3a6a3d6",
+      "provenance": "configs/quest2-mapper5-reference.json"
+    },
+    {
+      "id": "aosp-gralloc-sm8150",
+      "url": "https://android.googlesource.com/platform/hardware/qcom/sm8150/display",
+      "commit": "484ca55710cb0bc6e5222922ced149b9068cbf5b",
+      "provenance": "configs/quest2-mapper5-reference.json"
+    },
+    {
+      "id": "qti-display-commonsys-intf",
+      "url": "https://github.com/LineageOS/android_vendor_qcom_opensource_display-commonsys-intf",
+      "commit": "17ef14f5da298e137bba894525fbe181efdefa96",
+      "provenance": "configs/quest2-mapper5-reference.json"
+    },
+    {
+      "id": "aosp-camera-sensor-interfaces",
+      "url": "https://android.googlesource.com/platform/hardware/interfaces",
+      "commit": "1a56e38edc2f2f6189ef405ee1edce554e15cbc0",
+      "provenance": "Frozen camera V3, graphics common V5, sensors HIDL 2.1; actual 179 AIDL objects and provider/sub-HAL compiled."
+    },
+    {
+      "id": "qebspil",
+      "url": "https://github.com/stephan-gh/qebspil",
+      "commit": "8e4d9e676a3b3afe136cda9b953a2139ff1a32d0"
+    },
+    {
+      "id": "qebspil-gnu-efi",
+      "url": "https://github.com/ncroxon/gnu-efi.git",
+      "commit": "1fee8ab566ce91b9cbab9f2c85db96566d79063b"
+    },
+    {
+      "id": "qebspil-dtc",
+      "url": "https://git.kernel.org/pub/scm/utils/dtc/dtc.git",
+      "commit": "2d10aa2afe35527728db30b35ec491ecb6959e5c"
+    }
+  ],
+  "manual_required": [
+    {
+      "id": "android-qti-platform",
+      "reason": "Source and donor channels are pinned above; the remaining work is preparing matching platform headers/libraries, applying local source fixes, and composing runtime. Do not classify source-built OMX/HWC as opaque missing proprietary inputs.",
+      "channel": "configs/sm8250-omx-source.json; sm8350-display-build.json; quest2-mapper5-reference.json; quest2-hidl-build.json; stagefright-p010-renderer.json; docs/QUEST2-VENDOR-REFERENCE.md"
+    },
+    {
+      "id": "boot-runtime-template",
+      "reason": "Prepared board.dts/EFI/template layout/full-image-runtime required; public recovery ZIP is not template.img.",
+      "channel": "docs/FULL-IMAGE.md and scripts/full_image.py import_private; generic sanitized inputs only"
+    },
+    {
+      "id": "camera-sensor-built-inputs",
+      "reason": "Camera provider/mapper/allocator, sensor HAL/overlay and kernel modules have explicit source builders. Use build-spx-sensor-runtime.py with Windows-exported OEM model assets to build/reuse RPC and PAS12 EFI, then full_image_reuse.py to assemble existing completed components.",
+      "channel": "docs/CAMERA-BUILD.md; docs/SENSORS.md"
+    }
+  ],
+  "runtime_groups": [
+    {
+      "id": "android-base",
+      "source_type": "official-image-and-aosp-source",
+      "inputs": [
+        "googlebook",
+        "cuttlefish",
+        "aosp-hwservicemanager",
+        "aosp-frameworks-av"
+      ],
+      "notes": "mica recovery build16471258; Cuttlefish16373615; AOSP HIDL and patched Stagefright. Platform ABI/header closure still required."
+    },
+    {
+      "id": "quest2-qti-binaries",
+      "source_type": "third-party-archived-vendor-binaries",
+      "inputs": [
+        "quest2-v77-donor"
+      ],
+      "notes": "gralloc.kona/core/metadata/qcodec2_utils/gsl/adreno_utils; native QTI Vulkan/QGL. Hybrid removes donor EGL/GLES. SHA checks do not authenticate Meta signature."
+    },
+    {
+      "id": "qti-source-built-hal",
+      "source_type": "public-source-plus-local-patches",
+      "inputs": [
+        "qti-display-sm8350",
+        "qti-omx-sm8250",
+        "oculus-kernel-headers",
+        "aosp-graphics-interfaces",
+        "aosp-gralloc-sm8150",
+        "qti-display-commonsys-intf"
+      ],
+      "notes": "Display/HWC/SDM, mapper5/allocator and OMX rebuilt against platform ABI; not wholesale donor service binaries."
+    },
+    {
+      "id": "mesa-libdrm",
+      "source_type": "public-source",
+      "inputs": [
+        "mesa",
+        "libdrm",
+        "ndk",
+        "gbos_vm_reference"
+      ],
+      "notes": "Freedreno/Turnip; Android mapper5 patch."
+    },
+    {
+      "id": "project-glue",
+      "source_type": "project-source",
+      "inputs": [],
+      "notes": "Vulkan router, Mesa gralloc bridge/layout facade, backlight shim, dma_heap/ION/Vulkan memory adaptation in probe/ and scripts/."
+    }
+  ]
+}

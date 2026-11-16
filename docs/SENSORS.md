@@ -20,9 +20,9 @@ SLPI 固件仍作为共用二进制依赖提供；现有资料已足够准备传
 
 ## 默认构建
 
-`build.py full-image` 的 baseline/Hybrid 默认安装传感器。输入目录默认为
-`PRIVATE_ROOT/sensors`，可用 `--sensor-inputs` 指定；`--without-sensors` 跳过新增载荷。
-缺少必需输入会报错，不静默生成缺功能的镜像。Mesa 模式保持原路径。
+本工作区 `build.py full-image` 的唯一Hybrid构建必须安装传感器。输入目录默认为
+`PRIVATE_ROOT/sensors`，可用 `--sensor-inputs` 指定；标准入口不提供跳过传感器选项。
+缺少必需输入会报错。先按下文准备共用包，再运行整包；总流程见 [STANDARD-BUILD](STANDARD-BUILD.md)。
 
 ```sh
 python3 scripts/build.py full-image --graphics hybrid \

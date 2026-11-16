@@ -1,3 +1,18 @@
+# 当前构建入口（2026-11-16）
+
+标准整盘仅支持并默认使用 **hybrid**，面向 SQ1/SQ2 共用 Linux 6.18.60。
+完整命令、输入和产物见 [STANDARD-BUILD](STANDARD-BUILD.md)；Windows 下载/提取/打包见 [DEPENDENCIES](DEPENDENCIES.md)；最新休眠接入和增量复用见 [HYBRID-SLEEP-20261116](HYBRID-SLEEP-20261116.md)。
+
+```sh
+python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUTPUT
+```
+
+摄像头、自动亮度/旋转、触控和休眠修复为默认整包能力；历史 `--graphics baseline/mesa`、`--without-camera`、`--without-sensors` 不再是标准 CLI 选项。
+`--esp-only` 不是整盘交付，`verify/package` 不是重新构建。原始依赖采集完成不代表完整 clean-room runtime 已可从零生成。
+
+---
+## 以下为历史构建记录（旧命令不覆盖上述当前入口）
+
 ## 2026-11-16：摄像头可直接从源码生成baseline输入
 
 新增build-spx-camera-bundle.py及configs/camera-build.example.json，

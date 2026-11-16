@@ -30,3 +30,6 @@ known_hosts
 *.tar.gz
 *.tar.xz
 *.tar.bz2
+
+# Reviewed module sources and three accompanying DT overlays; no OEM firmware.
+!/source-dependencies/kernel-6.18/external-sources.tar.gz

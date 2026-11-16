@@ -26,11 +26,12 @@ def main():
     parser.add_argument('prefix', type=Path)
     parser.add_argument('vendor_range', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--work-root', type=Path, default=ROOT/'out', help='explicit fresh build workspace boundary')
     args = parser.parse_args()
     cfg = json.loads((ROOT / 'configs/quest2-full-donor-candidate.json').read_text(encoding='utf-8-sig'))
     vendor = cfg['vendor']
     output = args.output.resolve()
-    require(output.is_relative_to((ROOT / 'out').resolve()) and output.suffix == '.img',
+    require(output.is_relative_to(args.work_root.resolve()) and output.suffix == '.img',
             'Output must be a new .img inside the workspace out directory')
     require(not output.exists(), 'Refusing to overwrite an existing image')
     with args.prefix.open('rb') as source:

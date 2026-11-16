@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "upstream": {
+    "url": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.60.tar.xz",
+    "sha256": "3c2f44ef6acc021a7ad444d9a2e6ec1ef488ff09368793d0004a6080f69d621e"
+  },
+  "patch": "patches/kernel-6.18-surface-baseline.patch",
+  "patch_sha256": "32d2dc55dcd64c8b89114be1b2dcb2dd67340f5c27f02406aae060fb811f7125",
+  "external": "source-dependencies/kernel-6.18/external-sources.tar.gz",
+  "external_sha256": "b080faec4c0229eebbeb0d53c4f1946f6df3c2fbb593b3909015d9caea14fa58",
+  "parent_kernel_files_verified": 91244,
+  "provenance": "Official 6.18.60 plus byte-exact project delta; external module sources from preserved prepared source, copyright headers retained. KernelSU includes its LICENSE. Old local source archive is not required to reconstruct."
+}

@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Unified Linux 6.18 LTS entry, including original-template full-image builds.
 
-full-image accepts --graphics baseline|mesa|hybrid. The mesa mode assembles the
-full Mesa userspace chain (Mesa freedreno GLES/Vulkan, minigbm, drm HWC3 client
-composition), while hybrid combines Mesa Freedreno GLES + Turnip Vulkan with QTI
-gralloc + mapper5 + source QTI HWC/SDM + native-surface OMX, applying the repo
-A6xx kernel patch series unless --kernel-patches overrides it. Both are
-build-time selections only; no rendering or hardware validation is implied.
+full-image is the default operation and hybrid is its only graphics selection.
+It combines Mesa GLES/Turnip with QTI gralloc/mapper5/HWC, camera, sensors and
+current touch support. The shared SQ1/SQ2 6.18 image removes inherited personal
+credentials and retains Android first setup.
 
 package is an exact private baseline copy, NOT a source compilation or disk
 image. compile produces unvalidated source-build artifacts; it never splices a
@@ -273,6 +271,9 @@ def compile_kernel(args, selected=None):
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or (argv[0].startswith('--') and argv[0] != '--help'):
+        argv.insert(0, 'full-image')
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='operation', required=True)
     from full_image import DEFAULT_PRIVATE
@@ -283,8 +284,10 @@ def main(argv=None):
     full.add_argument('--private-root', type=Path, default=DEFAULT_PRIVATE)
     full.add_argument('--template', type=Path, help='default: PRIVATE_ROOT/template.img; size/layout are retained exactly')
     full.add_argument('--kernel-mode', choices=('source','prebuilt'), default='source')
-    full.add_argument('--graphics', choices=('baseline', 'mesa', 'hybrid'), default='baseline',
-                      help='baseline: accepted mixed graphics stack (bundles forked device_faker); mesa: full Mesa/minigbm/drm-HWC3; hybrid: Mesa GLES/Turnip + QTI gralloc/mapper5/HWC')
+    full.add_argument('--reuse-components', type=Path,
+                      help='explicit hash-checked completed kernel/camera/sensors/Mesa/glue manifest; assemble without recompiling them')
+    full.add_argument('--graphics', choices=('hybrid',), default='hybrid',
+                      help='only build line: Mesa GLES/Turnip + QTI gralloc/mapper5/HWC')
     full.add_argument('--device-faker-zip', type=Path,
                       help='override prebuilt device_faker_gfx KernelSU module zip for baseline builds')
     full.add_argument('--device-faker-src', type=Path,
@@ -293,12 +296,10 @@ def main(argv=None):
                       help='explicitly omit forked device_faker_gfx KernelSU module from baseline runtime')
     full.add_argument('--camera-inputs', type=Path,
                       help='shared camera binaries and CAMERA.json; default PRIVATE_ROOT/camera for baseline/hybrid')
-    full.add_argument('--without-camera', action='store_true',
-                      help='skip adding the camera payload; full Mesa is unchanged')
+    full.set_defaults(without_camera=False)
     full.add_argument('--sensor-inputs', type=Path,
                       help='sensor modules/HAL/SLPI EFI and model firmware; default PRIVATE_ROOT/sensors')
-    full.add_argument('--without-sensors', action='store_true',
-                      help='skip adding automatic brightness/rotation; full Mesa is unchanged')
+    full.set_defaults(without_sensors=False)
     full.add_argument('--kernel-patches', type=Path,
                       help='apply every *.patch in this directory to the extracted kernel source (and external/edp-618) before compile; mesa and hybrid default to patches/drm-618-a6xx-upstream')
     full.add_argument('--esp-only', action='store_true',

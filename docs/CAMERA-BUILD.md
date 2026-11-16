@@ -53,7 +53,7 @@ camera.metadata/device/provider V3。每份冻结源目录必须含其.hash。
 
     python3 scripts/build.py full-image --graphics hybrid --private-root /path/to/platform-inputs --camera-inputs out/camera-from-source/camera --output out/full-camera-image --esp-only
 
-baseline同样支持；Mesa路径保持原有行为。source内核模式仍会针对本轮内核重编
+本工作区标准入口仅提供Hybrid；总流程见 [STANDARD-BUILD](STANDARD-BUILD.md)。source内核模式仍会针对本轮内核重编
 camera模块，用户空间使用刚生成的包。boot/stage helper和profiles直接读取当前源码。
 无需先运行full_image_camera.py --import-initramfs；该旧入口仅保留作已验收包的迁移工具。
 

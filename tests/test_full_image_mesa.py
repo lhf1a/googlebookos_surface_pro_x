@@ -338,7 +338,14 @@ class RealRuntimeMesaTransform(unittest.TestCase):
         records = json.loads((RUNTIME / 'records.json').read_text())
         bodies = {name: b'' if rec[1][1] & 0o170000 == 0o040000 else (RUNTIME / 'files' / name).read_bytes()
                   for name, rec in records.items()}
-        report = fi.mesa_runtime(records, bodies)
+        import os
+        turnip = None
+        if os.environ.get('SQ2_REUSE_COMPONENTS'):
+            from full_image_reuse import load
+            _, replacements, graphics, _ = load(pathlib.Path(os.environ['SQ2_REUSE_COMPONENTS']))
+            bodies.update(replacements)
+            turnip = graphics['turnip_bytes']
+        report = fi.mesa_runtime(records, bodies, turnip_bytes=turnip)
         self.assertGreater(report['removed_count'], 100)
         self.assertGreater(report['retained_mesa_members'], 50)
         self.assertIn('etc/sq2-hidl', bodies)

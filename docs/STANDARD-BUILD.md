@@ -1,66 +1,101 @@
-# 唯一标准编译基线：Linux 6.18 LTS
+# Hybrid 标准构建流程与产物
 
-更新：2026-11-07。当前版本 **6.18.60-sq2-android1**。6.3.8专用编译链已退休；历史记录不是可执行入口。
+更新：2026-11-16。基于主线 `619af8b`（含 `940a769` 休眠修复），统一为 Hybrid 默认构建、Windows 依赖准备和无个人凭据整盘装配。
 
-2026-11-12：统一入口 `scripts/build.py full-image` 新增 `--graphics mesa` 全 Mesa 通用镜像
-选项与 `--kernel-patches`；默认 baseline 不变，实际构建与边界见
-[FULL-MESA-IMAGE](FULL-MESA-IMAGE-20261112.md)。
+## 1. 唯一产品线
 
-## 保持当前验收内容
+- 标准入口：`python3 scripts/build.py`，无子命令默认 `full-image`。
+- 图形仅允许 `hybrid`：Mesa GLES/Turnip + QTI gralloc/mapper5/HWC；保留现有双 Vulkan 选择策略。
+- SQ1/SQ2共用 Linux 6.18.60 Image、配套模块和initramfs；SMBIOS路由选择机型DT频率配置。
+- 摄像头、自动亮度、自动旋转和当前触控向导为整包必需能力。
+- `compile`是内核组件构建；`verify/package`是历史固定包核验/复制，不是另一条整机产品线。
+- `--esp-only`仅输出启动分区内容，不能当完整磁盘镜像。
 
-以 `configs/kernel-baseline.json` 的文件清单为准，不重新混装旧模块。当前原件：
-- Image：`db374853bb5df0cdaa5215b1226256adedda3292a93084e874438a4ba706c982`
-- initramfs：`5b3a70c349735e58b404b0d3825dc0dde12ae991706cbbab7e15ed65c9911185`
-- DTB：`c137b9604b908e39aba4be6ecd98e55cd9986fe3fd7522c93069bef7489c956b`
+## 2. 构建顺序
 
-有效启动参数为 **Mesa、原生60Hz、EL2、unrestricted suspend、nohibernate**；GPU为当前700/RPMh432档。
-保留音频、SSAM电池、SPI触摸response、Venus队列锁、IPA预留与RMNET、Android拥有网络及启动后SSH等当前修正。
-不因为旧文档默认高通/661而改变当前验收内容。单机用户确认与六帧视频证明不等于跨设备或长期认证。
-Scene跨用户链接属于已授权设备数据状态，不复制到其他设备；Scene GPU读数缺失仍是已知问题。
+依赖来源、原 Windows 只读提取、统一下载打包与 Linux 导入见 [DEPENDENCIES](DEPENDENCIES.md)。
+`Prepare-HybridDependencies.ps1` 生成原始依赖包；尚未闭合的 prepared source/Android-QTI 转换步骤明确记为 unresolved，不能把采集完成当作完整镜像构建完成。
 
-## 一个入口，明确区分核验、组包与编译
-
-在具备Python3的主机运行；源码编译需要Linux/WSL与匹配ARM64工具链：
-
-```sh
-python3 scripts/build.py verify
-python3 scripts/build.py package --output out/6.18-release-FRESH
-python3 scripts/build.py compile --help
+```text
+共用平台依赖 + 匹配6.18内核构建树
+ ├─ 摄像头源码 → 驱动/AIDL/Camera HAL/ISP/mapper/allocator → camera/CAMERA.json
+ └─ 传感器源码 + 共用OEM资料 → 模块/SubHal/overlay/RPC/SLPI EFI → sensors/sensors-bundle.json
+                                   ↓
+full-image：准备内核源码 → 显示/A6xx补丁 → Image/modules/DTB → 外部模块/depmod
+                                   ↓
+匹配内核重编模块（或显式复用已完成组件）→ Hybrid图形集成 → 构建/校验复用触控向导 → 安装camera/sensors
+                                   ↓
+Venus休眠握手模块 + desktop-services.jar补丁 + 一次性休眠设置迁移
+                                   ↓
+清理个人凭据/自动跳过首次设置 → 重建initramfs → 配对EFI/SLPI固件/机型DT
+                                   ↓
+模板系统分区 + 新userdata/metadata → GPT/ESP/文件系统读回 → IMG/IMG.GZ/清单
 ```
 
-默认输入为 `private/build-inputs/kernel-6.18/EFI/SQ2L618C`。`package`逐字节复制当前EFI包并核对清单，
-**不是源码编译，也不是生成新的完整磁盘镜像**。旧磁盘重组入口已撤销，避免悄悄装回6.3.8。
-`build-surface-pro-x.py`、`build-source-boot.py`、`build-source-disk.py`、`build-sq2-default.py`兼容文件名均转到同一CLI，旧参数明确拒绝。
+摄像头和传感器包目前在完整内核构建**之前**加载：需要先准备它们，不能假定full-image会自动从零引导这些依赖。
+摄像头新源码入口不依赖Surface在线、旧camera运行包或Windows摄像头驱动。
+传感器的SLPI固件、型号配置、默认光学校准由SQ1/SQ2共用，准备一次即可；不要求逐机采集。
 
-`compile`使用显式source/config/build-dir/output/cross-compile；实际执行Image、modules、dtbs与模块导出。
-默认配置为 `configs/kernel-6.18-baseline.config`。完整基线还需要匹配的外挂源目录与模块清单，具体参数以`compile --help`为准。
-新编译输出与验收发布包分离，未经配套打包/验收不得覆盖发布pins。不能以仅核心编译通过代替全部外挂模块与initramfs功能对齐。
+## 3. 输入及当前状态
 
-## 本地输入与恢复
+| 输入 | 作用 | 本机状态 |
+| --- | --- | --- |
+| `private/build-inputs/template.img` | 原20 GiB布局和Android系统分区 | 已有 |
+| `kernel-6.18/source/SOURCE.json`、`source.tar.gz` | 内核/外部模块源码 | 已有 |
+| `kernel-6.18/toolchain.tar.gz`、`board.dts` | ARM64工具链、DT源码 | 已有 |
+| `full-image-runtime/records.json`、`files/` | Mesa/QTI/音视频等共用输入 | 已有；实际镜像通过复用清单换入新编译干净 Mesa/Turnip |
+| `camera/CAMERA.json`及13个ELF | 前后摄模块、provider、mapper/allocator | 已从源码生成并装入完整镜像 |
+| `sensors/sensors-bundle.json`及对应文件 | ALS/加速度/SLPI/RPC/配置 | 模块/HAL/overlay/RPC/EFI 与型号资料已装配 |
+| `suspend/desktop-services.jar` | 构建时修改 AC 息屏等待至 1000ms | 默认必需；取同一 Android system 的原 JAR，不从 Git 获取 |
+| Android平台接口、生成头、链接库、NDK/SDK | camera/sensor/触控用户态构建 | 按本机路径配置并逐项检查，不能用示例路径代替 |
 
-- `private/build-inputs/kernel-6.18/`：当前私有EFI包、源码归档与构建清单；不纳入Git。
-- `out/mainline-618-20261107/`：改动前Git bundle、未提交diff、未跟踪文件归档和本轮输出。
-- `out/kernel-baseline-20261107/retired-638/`：退休工具逐字节备份。
-- `configs/retired-kernel-tools.json`：退休清单与原hash。仅退休旧工具，不删除真机回退入口。
-- 既有四角色与验证记录继续保存在 `out/kernel-6.18-migration-20261105/`；新记录只追加。
+摄像头配置模板：`configs/camera-build.example.json`；完整字段与ABI要求见 [CAMERA-BUILD](CAMERA-BUILD.md)。
+传感器命令与共用输入见 [SENSORS](SENSORS.md)。两个Git子模块按主线固定提交拉取；它们不代替上述平台依赖。
 
-## 隐私与验收边界
+## 4. 执行入口
 
-当前私有包保留原SSH身份，不能当成匿名公共镜像发布。Git仅保存源码、配置、清单、测试与文档。
-不把IP、序列号、用户编号或原盘UUID作为编译/运行准入。SQ1/SQ2通用交付目标保持，但本轮基线是当前SQ2已观察产物，不能假称6.18双机新镜像全验收。
-本轮主线整理不写设备、不重启，不清除userdata或已有恢复能力。
-通用开发与身份分离规则见 [DEVELOPMENT.md](DEVELOPMENT.md)。
-
-## 已执行的完整源码编译形式
-
-解开私有源码归档得到`kernel/`和`external/`后：
+先创建填写真实路径的 `private/camera-build.json`，准备与6.18匹配的kernel_source/kernel_build及平台依赖：
 
 ```sh
-python3 scripts/build.py compile --source SOURCE_ROOT/kernel \
-  --config configs/kernel-6.18-baseline.config --build-dir FRESH_BUILD \
-  --output FRESH_EXPORT --cross-compile TOOLCHAIN/bin/aarch64-linux-gnu- \
-  --external-sources SOURCE_ROOT/external --jobs 8
+python3 scripts/build-spx-camera-bundle.py --inputs private/camera-build.json --output out/camera-from-source
+python3 scripts/build.py --camera-inputs out/camera-from-source/camera --sensor-inputs private/build-inputs/sensors --output FRESH_LINUX_OUTPUT --jobs 8
 ```
 
-显式`--resume-build`只复用config与ABI匹配的构建目录。缺少外挂源时默认拒绝；`--core-only`必须明确指定且产物标记不完整。
-本次完整入口28步exit0、15个外挂模块覆盖成功；发布包另经verify保持原hash。源码导出不等于新boot包已验收。
+第二条默认source内核与hybrid；output必须是全新目录，源码构建输出使用Linux文件系统。
+传感器包先用 `build-spx-sensor-bundle.py` 生成；参数见SENSORS。缺输入时修复输入，不跳过组件。
+
+已完成组件使用 `full_image_reuse.py` 生成显式哈希清单，再执行 `python3 scripts/build.py --reuse-components REUSE.json --private-root PREPARED_INPUTS --output FRESH_LINUX_OUTPUT`。
+此路径复用 Image/全部模块、camera、sensors、Mesa 和 glue，不再重编它们；详见 [DEPENDENCIES](DEPENDENCIES.md)。
+
+若原复用包尚未包含最新 Venus 休眠修复，先执行 `rebuild-hybrid-venus.py`，不能直接沿用旧模块：
+
+```sh
+python3 scripts/rebuild-hybrid-venus.py --reuse-components PREVIOUS_REUSE.json --kernel-build MATCHED_KOUT --source PREVIOUS_VENUS_SOURCE --output FRESH_VENUS_OUTPUT
+python3 scripts/build.py --reuse-components FRESH_VENUS_OUTPUT/REUSE.json --private-root PREPARED_INPUTS --output FRESH_IMAGE_OUTPUT
+```
+
+脚本核对 Image、配置及符号表后只重编 Venus；保留完整模块 stage。无受影响源码变化时，可用 `full_image_reuse.py --assembled-runtime PREVIOUS_INITRAMFS` 显式复用已编译小型 helper，不复制旧 init 或个人状态。
+
+## 5. 产物层级
+
+| 路径（相对OUTPUT） | 含义 |
+| --- | --- |
+| `kernel-build/`、`kernel-export/` | 内核构建树、Image、模块stage、DTB与命令记录 |
+| `camera-sensors/`、`camera-camss/`、传感器模块目录 | 本轮匹配内核的组件输出 |
+| `paired/EFI/SQ2Nat/` | 首轮配对启动包；不是最终整盘交付目录 |
+| `paired/EFI/SQ2Nat/PRIVACY.json` | 去除身份与保留首次设置的处理记录 |
+| `disk/work/esp-tree/` | 存储适配、正常/救援入口和SQ1/SQ2路由后的ESP树；具体工作目录以构建清单为准 |
+| `disk/surface-pro-x-6.18-hybrid-generic.img` | 完整稀疏磁盘镜像 |
+| `disk/surface-pro-x-6.18-hybrid-generic.img.gz` | 压缩整盘镜像 |
+| `disk/IMAGE-MANIFEST.json`、`disk/LAYOUT.json` | 镜像结果与分区布局 |
+| `FULL-IMAGE.json`、`BUILD-COMMANDS.json` | 全流程结果、命令及日志位置 |
+
+个人SSH/Wi-Fi/密码与旧setup跳过脚本在最终组件安装后清除；不复制旧userdata/metadata、persist、FRP及原始转储。
+首次配置交给Android，用户设置保持；闭源平台库/固件仍须按其许可分发。
+
+## 6. 当前真实产物
+
+`out/hybrid-runtime-20261116/common/`只有前轮的Image（35,588,608B）和initramfs（255,409,661B）。
+它们基于较早运行包，不含本次最新摄像头/传感器完整集成，**不是当前通用镜像交付件**。
+`/mnt/spx-workspace/chromebookOS/out/hybrid-generic-20261116`是上次失败尝试留下的空目录。
+上述均为历史产物。最新含主线休眠修复的完整镜像在 `/mnt/spx-workspace/chromebookOS/out/hybrid-sleep-20261116/image/disk/`，原始 20 GiB，压缩 8,199,955,842 字节；全流/分区/ESP 回读校验通过，未真机启动。完整哈希、增量构建与边界见 [休眠整包记录](HYBRID-SLEEP-20261116.md)。前一份不含新休眠补丁的 `hybrid-assembly-20261116` 镜像保留，不覆盖。

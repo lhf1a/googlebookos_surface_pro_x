@@ -51,25 +51,33 @@ def import_inputs(initramfs, output):
     return write_inputs(files, output)
 
 
-def write_inputs(files, output):
-    require(set(files) == set(payload_paths()), "Incomplete camera input inventory")
+def write_inputs(files, output, source_only=False):
+    expected = set(payload_paths())
+    if source_only: expected = {n for n in expected if not n.endswith('.ko')}
+    require(set(files) == expected, "Incomplete camera input inventory")
     for name, data in files.items():
         arm64(data, name)
     output.mkdir(parents=True, exist_ok=False)
     for name, data in files.items():
         (output/name).write_bytes(data)
-    manifest = {"schema": 1, "kernel_release": policy()["kernel_release"],
+    manifest = {"schema": 2 if source_only else 1, "kernel_release": policy()["kernel_release"],
+                "modules_require_source_build": source_only,
                 "files": {n: sha(d) for n, d in files.items()}}
     (output/"CAMERA.json").write_text(json.dumps(manifest, indent=2)+"\n")
-    load(output)
+    load(output, source_build=source_only)
     return manifest
 
 
-def load(inputs):
+def load(inputs, source_build=False):
     manifest = json.loads((inputs/"CAMERA.json").read_text())
-    require(manifest["schema"] == 1, "Unknown camera input schema")
+    require(manifest["schema"] in (1,2), "Unknown camera input schema")
+    source_only = manifest['schema'] == 2
+    require(not source_only or (source_build and manifest.get('modules_require_source_build') is True),
+            "Source-only camera inputs require source kernel/module compilation")
     require(manifest["kernel_release"] == policy()["kernel_release"], "Camera kernel ABI mismatch")
-    require(set(manifest["files"]) == set(payload_paths()), "Incomplete camera input inventory")
+    expected = set(payload_paths())
+    if source_only: expected = {n for n in expected if not n.endswith('.ko')}
+    require(set(manifest["files"]) == expected, "Incomplete camera input inventory")
     files = {}
     for name, expected in manifest["files"].items():
         data = (inputs/name).read_bytes()

@@ -97,14 +97,19 @@ class AssemblyChecksums(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Unrecognized hash command'):
             boot.without_hash_checks('bin/unknown',b'#!/bin/sh\nif sha256sum -c file; then echo yes; fi\n')
 
-    def test_universal_build_has_no_hash_calls_or_gates(self):
+    def test_generated_output_hashes_do_not_become_boot_baseline_gates(self):
         tree=ast.parse((ROOT/'scripts/disk_image.py').read_text())
         build=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='build')
         for call in (n for n in ast.walk(build) if isinstance(n,ast.Call)):
-            if isinstance(call.func,ast.Name):
-                self.assertNotIn(call.func.id,('sha','region'))
-            if isinstance(call.func,ast.Attribute):
-                self.assertNotEqual(call.func.attr,'sha256')
+            # Whole-image/ESP/gzip readback now verifies generated outputs.
+            # It must not require the old donor template's release hash.
+            if isinstance(call.func,ast.Name) and call.func.id=='sha':
+                self.assertIsInstance(call.args[0],ast.Name)
+                self.assertIn(call.args[0].id,('p','image','compressed','fat'))
+            if isinstance(call.func,ast.Name) and call.func.id=='region':
+                self.assertEqual(call.args[0].id,'image')
+            if isinstance(call.func,ast.Attribute) and call.func.attr=='sha256' and call.args:
+                self.assertEqual(call.args[0].id,'payload')
         helper=(ROOT/'probe/test2/prepare-image-ssd').read_text()
         self.assertNotIn('sha256sum',helper)
         self.assertIn('ambiguous-image-disk',helper)

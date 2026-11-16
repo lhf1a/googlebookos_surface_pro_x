@@ -153,7 +153,7 @@ def write_gpt(source, image, parts):
             stream.write(body)
 
 
-def storage_payload(base, parts, super_header_sha256=None):
+def storage_payload(base, parts, super_header_sha256=None, anonymous=False):
     cpio = cpio_module()
     before = cpio.entries(gzip.decompress(base))
     mode, init = before['init']
@@ -186,7 +186,7 @@ def storage_payload(base, parts, super_header_sha256=None):
         payload = decoder.decompress(rest)
         require(decoder.eof, 'Truncated gzip parent')
         size = len(rest)-len(decoder.unused_data)
-        if not decoder.unused_data:
+        if not decoder.unused_data and not anonymous:
             last = cpio.entries(payload)
             identity = {'etc/shadow','bin/dropbear'} <= last.keys()
             require(not (last.keys() & delta.keys()), 'Final identity overrides storage policy')
@@ -311,7 +311,7 @@ def build(args):
         with source.open('rb') as f:
             f.seek(original_map['super']['offset']+offset+1024)
             require(f.read(4)==b'\xe2\xe1\xf5\xe0','Expected EROFS logical partition: '+name)
-    payload,audit,member=storage_payload(base,parts)
+    payload,audit,member=storage_payload(base,parts,anonymous=getattr(args, "anonymous", False))
     (output/'storage-layout-delta.cpio.gz').write_bytes(member)
     tree=work/'esp-tree';(tree/'EFI/BOOT').mkdir(parents=True,exist_ok=resume);(tree/'EFI/SQ2Nat').mkdir(exist_ok=resume)
     for name in selected['files']:
@@ -334,7 +334,7 @@ def build(args):
         from full_image_models import from_template
         from_template(tree,source,original_map['SQ2PROBE']['offset'],
                       (bundle/'start.efi').read_bytes(),work,graphics_argument)
-    (tree/'SPX-IMAGE.txt').write_text('SPX_IMAGE_FORMAT=1\nSPX_RELEASE=6.18-'+selected['baseline']+'-single-user\nPRIVATE_IDENTITY_PRESENT=1\n')
+    (tree/'SPX-IMAGE.txt').write_text('SPX_IMAGE_FORMAT=1\nSPX_RELEASE=6.18-'+selected['baseline']+'-single-user\nPRIVATE_IDENTITY_PRESENT='+('0' if getattr(args, 'anonymous', False) else '1')+'\n')
     (tree/'EFI/BOOT/grub.cfg').write_text("set timeout=5\nset default=spx-single-user\n\nmenuentry 'Surface Pro X Linux 6.18 - single user 0' --id spx-single-user {\n chainloader /EFI/SQ2Nat/start.efi\n}\nmenuentry 'Surface Pro X Linux 6.18 - rescue (no Android data mount)' --id spx-rescue {\n chainloader /EFI/SQ2Res/start.efi\n}\nmenuentry 'Power off' { halt }\n")
     esp_only = bool(getattr(args, 'esp_only', False))
     (output/'LAYOUT.json').write_text(json.dumps({'image_bytes':image_bytes,'partitions':parts,'template':str(template) if template else None,'partition_boundaries_preserved':bool(template)},indent=2)+'\n')
@@ -352,7 +352,7 @@ def build(args):
                 'final_initramfs_sha256':None,'storage_payload':audit,
                 'efi_files':files,'content_hash_validation':False,'build_only_requested':build_only,
                 'new_rollback_performed':False,'device_written':False,'hardware_boot_tested':False,
-                'private_identity_present':True,'anonymous_public_image':False,'userdata_migrated':False,
+                'private_identity_present':not getattr(args, 'anonymous', False),'anonymous_public_image':False,'userdata_migrated':False,
                 'hardware_scope':'ESP-only candidate with native-SSD storage delta; boot/SQ1/SQ2 untested'}
         (output/'IMAGE-MANIFEST.json').write_text(json.dumps(report,indent=2)+'\n')
         print(json.dumps({k:report[k] for k in ['esp_only','esp_tree','hardware_boot_tested']},indent=2),flush=True)
@@ -366,12 +366,18 @@ def build(args):
         run(['/usr/sbin/fsck.fat','-n',fat])
         readback=work/'esp-readback';readback.mkdir(exist_ok=resume)
         run(['mcopy','-i',fat,'-s','::/*',readback])
-    image=output/'surface-pro-x-6.18-single-user-private.img'
+        expected = {p.relative_to(tree).as_posix(): sha(p) for p in tree.rglob('*') if p.is_file()}
+        actual = {p.relative_to(readback).as_posix(): sha(p) for p in readback.rglob('*') if p.is_file()}
+        require(actual == expected, 'ESP readback differs from assembled payload')
+        for name, value in expected.items(): files[name]['sha256'] = value
+    image=output/('surface-pro-x-6.18-hybrid-generic.img' if getattr(args, 'anonymous', False) else 'surface-pro-x-6.18-single-user-private.img')
     if image.exists(): regular(image)
     with image.open('wb' if resume else 'xb') as stream:stream.truncate(image_bytes)
     partition_hashes={}
     for p in parts:
         if p['name'] in ('userdata','metadata','misc','SQ2PROBE'):continue
+        if getattr(args, 'anonymous', False) and p['name'] in ('persist', 'frp_persist', 'rawdump', 'desktop_security_persist', 'desktop_security_storage'):
+            continue
         src=original_map[p['name']]
         print('COPY_PRISTINE_PARTITION',p['name'],flush=True)
         copy_region(source,image,src['offset'],src['bytes'],p['offset'])
@@ -397,8 +403,8 @@ def build(args):
     if template:
         # Preserve the template's protective MBR, both GPTs, attributes and GUIDs.
         # No guessed capacity, reordered partitions or new layout is introduced.
-        first = min(p['offset'] for p in parts)
-        last = max(p['offset'] + p['bytes'] for p in parts)
+        first = 34*512 if getattr(args, 'anonymous', False) else min(p['offset'] for p in parts)
+        last = image_bytes-33*512 if getattr(args, 'anonymous', False) else max(p['offset'] + p['bytes'] for p in parts)
         copy_region(source,image,0,first,0)
         copy_region(source,image,last,image_bytes-last,last)
     else:
@@ -416,18 +422,38 @@ def build(args):
             process.stdin.write(body)
         process.stdin.close();error=process.stderr.read().decode();status=process.wait()
         require(status==0,'pigz failed: '+error)
-    raw_sha=None
+    raw_sha = compressed_sha = None
+    zeroed = []
+    if not build_only:
+        raw_sha, compressed_sha = sha(image), sha(compressed)
+        h = hashlib.sha256(); count = 0
+        with gzip.open(compressed, 'rb') as stream:
+            while block := stream.read(8*M):
+                h.update(block); count += len(block)
+        require(count == image_bytes and h.hexdigest() == raw_sha, 'Full gzip stream differs from image')
+        require(region(image, mapping['SQ2PROBE']['offset'], mapping['SQ2PROBE']['bytes']) == sha(fat),
+                'Final image ESP differs from verified FAT')
+        if getattr(args, 'anonymous', False):
+            with image.open('rb') as stream:
+                for name in ('misc','persist','frp_persist','rawdump','desktop_security_persist','desktop_security_storage'):
+                    if name not in mapping: continue
+                    part = mapping[name]; stream.seek(part['offset']); left = part['bytes']
+                    while left:
+                        block = stream.read(min(left, 8*M))
+                        require(block and not any(block), 'Nonzero private-state partition: '+name)
+                        left -= len(block)
+                    zeroed.append(name)
     report={'operation':'private-full-gpt-disk-image','image':str(image),'image_bytes':image.stat().st_size,
             'image_sha256':raw_sha,'compressed_image':str(compressed),'compressed_bytes':compressed.stat().st_size,
-            'compressed_sha256':None,'gzip_full_stream_verified':False,'gpt_primary_backup_verified':not build_only,
+            'compressed_sha256':compressed_sha,'gzip_full_stream_verified':not build_only,'gpt_primary_backup_verified':not build_only,
             'source_recovery_zip_sha256':None, 'source_recovery_raw_sha256':None,
             'source_private_baseline':selected['baseline'],'single_user_parent_sha256':None,
             'template':str(template) if template else None,'template_layout_preserved':bool(template),
             'kernel_mode':getattr(args,'kernel_mode','prebuilt'),
-            'final_initramfs_sha256':None,'storage_payload':audit,
+            'final_initramfs_sha256':hashlib.sha256(payload).hexdigest(),'storage_payload':audit,
             'pristine_partition_sha256':partition_hashes,'fresh_filesystems':fresh,'efi_files':files,
-            'all_efi_files_readback_verified':False,'content_hash_validation':False,'build_only_requested':build_only,'new_rollback_performed':False,'device_written':False,'hardware_boot_tested':False,
-            'private_identity_present':True,'anonymous_public_image':False,'userdata_migrated':False,
+            'all_efi_files_readback_verified':not build_only,'content_hash_validation':not build_only,'zeroed_identity_partitions':zeroed,'build_only_requested':build_only,'new_rollback_performed':False,'device_written':False,'hardware_boot_tested':False,
+            'private_identity_present':not getattr(args, 'anonymous', False),'anonymous_public_image':False,'userdata_migrated':False,
             'hardware_scope':('New source-compiled kernel candidate with accepted SQ2 userspace inputs; boot/user0/SQ1 untested'
                               if getattr(args,'kernel_mode','prebuilt')=='source' else
                               'SQ2 accepted runtime inputs; new disk boot, user-0 applications and SQ1 remain untested')}

@@ -20,6 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PIN = '8e4d9e676a3b3afe136cda9b953a2139ff1a32d0'
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--output', type=Path, required=True)
+p.add_argument('--source', type=Path, default=ROOT/'upstream/qebspil')
+p.add_argument('--dtc-source', type=Path, help='explicit pinned dtc checkout instead of nested submodule')
+p.add_argument('--gnu-efi-source', type=Path, help='explicit pinned gnu-efi checkout instead of nested submodule')
 p.add_argument('--venus-firmware', type=Path,
                help='enable the deployed PAS9 metadata handoff using the pinned private Venus image')
 a = p.parse_args()
@@ -41,7 +44,7 @@ if a.venus_firmware:
             metadata.extend(image[offset:offset + size])
     assert 0 < len(metadata) <= 16384
     venus_metadata = bytes(metadata)
-src = ROOT / 'upstream/qebspil'
+src = a.source.resolve()
 # Use the fixed source tree, including exact submodule revisions, without
 # carrying Windows-only .git paths into the Linux build.
 git = ['git', '-c', f'safe.directory={src}', '-c', 'core.filemode=false',
@@ -61,8 +64,9 @@ for module, revision in {
     'dtc': '2d10aa2afe35527728db30b35ec491ecb6959e5c',
     'gnu-efi': '1fee8ab566ce91b9cbab9f2c85db96566d79063b',
 }.items():
-    archive(['git', f'--git-dir={src / ".git/modules/external" / module}'],
-            revision, a.output / 'external' / module)
+    explicit = a.dtc_source if module == 'dtc' else a.gnu_efi_source
+    command = ['git','-C',str(explicit.resolve())] if explicit else ['git', f'--git-dir={src / ".git/modules/external" / module}']
+    archive(command, revision, a.output / 'external' / module)
 
 def edit(name, old, new):
     path = a.output / name

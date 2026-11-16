@@ -655,8 +655,15 @@ class HybridGraphicsTest(unittest.TestCase):
             name: b'' if rec[1][1] & 0o170000 == 0o040000 else (runtime_dir / 'files' / name).read_bytes()
             for name, rec in records.items()
         }
-        adapter_bytes = build_mesa_qti_gralloc.build_bytes()
-        report = full_image.hybrid_runtime(records, bodies, gralloc_adapter_bytes=adapter_bytes)
+        reuse_manifest = os.environ.get('SQ2_REUSE_COMPONENTS')
+        if reuse_manifest:
+            from full_image_reuse import load
+            _, replacements, graphics, _ = load(Path(reuse_manifest))
+            bodies.update(replacements)
+            report = full_image.hybrid_runtime(records, bodies, **graphics)
+        else:
+            adapter_bytes = build_mesa_qti_gralloc.build_bytes()
+            report = full_image.hybrid_runtime(records, bodies, gralloc_adapter_bytes=adapter_bytes)
         self.assertEqual(report['graphics'], 'hybrid')
         self.assertEqual(report['video']['omx_output'], 'native-anw-surface')
         qti = 'etc/sq2-qti-system'

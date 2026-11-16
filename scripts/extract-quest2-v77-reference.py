@@ -30,12 +30,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('image', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--work-root', type=Path, default=ROOT/'out', help='explicit fresh build workspace boundary')
     args = parser.parse_args()
     cfg = json.loads((ROOT / 'configs/quest2-full-donor-candidate.json').read_text(encoding='utf-8-sig'))
     image, output = args.image.resolve(), args.output.resolve()
     require(image.is_file() and image.stat().st_size == cfg['vendor']['bytes'], 'Wrong vendor image size/type')
     require(digest(image) == cfg['vendor']['manifest_sha256'], 'Wrong vendor image hash')
-    require(output.is_relative_to((ROOT / 'out').resolve()), 'Output must be inside workspace out/')
+    require(output.is_relative_to(args.work_root.resolve()), 'Output must be inside the explicit workspace')
     require(not output.exists(), 'Refusing to overwrite an existing directory')
     # debugfs has its own command parser. Restrict quoted paths, and do not use
     # a shell; image entries are separately restricted to safe single names.

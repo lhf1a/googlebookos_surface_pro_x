@@ -15,6 +15,21 @@ import full_image_camera as camera
 
 
 class CameraAssembly(unittest.TestCase):
+    def test_source_only_bundle_requires_real_module_rebuild(self):
+        elf = bytearray(64); elf[:6] = b'\x7fELF\x02\x01'; elf[18:20] = (183).to_bytes(2,'little')
+        files = {n:bytes(elf)+n.encode() for n in camera.payload_paths() if not n.endswith('.ko')}
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)/'camera'
+            camera.write_inputs(files,target,source_only=True)
+            with self.assertRaisesRegex(ValueError,'require source kernel'):
+                camera.load(target)
+            self.assertEqual(camera.load(target,source_build=True),files)
+            manifest=json.loads((target/'CAMERA.json').read_text())
+            manifest['modules_require_source_build']=False
+            (target/'CAMERA.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError,'require source kernel'):
+                camera.load(target,source_build=True)
+
     def test_real_archive_has_hooks_profiles_and_preserves_identity(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

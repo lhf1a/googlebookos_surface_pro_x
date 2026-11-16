@@ -673,9 +673,12 @@ def install_ksu_modules(records, bodies, ksu_modules):
     return installed
 
 
-def install_userdata_growth(records, bodies):
+def install_userdata_growth(records, bodies, compiled_resize=None):
     import tempfile
-    with tempfile.TemporaryDirectory(prefix='spx-grow-build-') as tmp:
+    if compiled_resize is not None:
+        bodies['bin/resize-userdata-partition'] = compiled_resize
+    else:
+      with tempfile.TemporaryDirectory(prefix='spx-grow-build-') as tmp:
         binary=Path(tmp)/'resize-userdata-partition'
         subprocess.run(['aarch64-linux-gnu-gcc','-static','-Os','-Wall','-Wextra',
                         str(ROOT/'probe/storage/resize-userdata-partition.c'),'-o',str(binary)],check=True)
@@ -685,7 +688,8 @@ def install_userdata_growth(records, bodies):
     for name in ('resize-userdata-partition','grow-image-userdata','surface-swap-boot'):
         records['bin/'+name]=new_record(0o100755)
 
-def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_modules=None, camera=None, sensors=None, suspend=None):
+def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_modules=None, camera=None, sensors=None, anonymous=False,
+                     runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
     bodies = {name: b'' if rec[1][1] & 0o170000 == 0o040000 else (runtime/'files'/name).read_bytes()
@@ -719,11 +723,14 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
             name = path.relative_to(stage).as_posix()
             bodies[name] = path.read_bytes()
             records[name] = new_record(0o100644)
+    for name, body in (runtime_replacements or {}).items():
+        require(name in bodies, 'Unknown runtime replacement: '+name)
+        bodies[name] = body
     graphics_report = None
     if graphics == 'mesa':
         graphics_report = mesa_runtime(records, bodies)
     elif graphics == 'hybrid':
-        graphics_report = hybrid_runtime(records, bodies)
+        graphics_report = hybrid_runtime(records, bodies, **(graphics_inputs or {}))
     elif graphics != 'baseline':
         raise ValueError('Unknown graphics mode: ' + repr(graphics))
     init = bodies['init']
@@ -739,9 +746,13 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
     bodies['bin/touch-calibration-boot'] = (ROOT/'probe/test2/touch-calibration-boot').read_bytes().replace(b'\r\n',b'\n')
     records.setdefault('bin/touch-calibration-boot', new_record(0o100755))
     # Rebuild the default wizard instead of retaining a stale private-runtime APK.
-    touch_files, _ = module('full_image_touch', 'build-touch-calibration.py').build(ROOT)
     wizard = 'etc/sq2-touch-calibration/wizard.apk'
-    mode, bodies[wizard] = touch_files[wizard]
+    compiled_helpers = compiled_helpers or {}
+    if wizard in compiled_helpers:
+        mode, bodies[wizard] = 0o100644, compiled_helpers[wizard]
+    else:
+        touch_files, _ = module('full_image_touch', 'build-touch-calibration.py').build(ROOT)
+        mode, bodies[wizard] = touch_files[wizard]
     records[wizard] = new_record(mode)
     # Universal builds do not rewrite reference hashes or gate boot on content
     # hashes. Preserve imported manifests as metadata; no startup consumer uses
@@ -760,7 +771,7 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
             ksu_modules = {'device_faker.zip': df_bytes}
     if ksu_modules:
         install_ksu_modules(records, bodies, ksu_modules)
-    install_userdata_growth(records, bodies)
+    install_userdata_growth(records, bodies, compiled_helpers.get('bin/resize-userdata-partition'))
     if camera is not None:
         from full_image_camera import install
         install(records, bodies, camera, new_record)
@@ -770,6 +781,10 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
     if suspend is not None:
         from full_image_suspend import install
         install(records, bodies, suspend, new_record)
+    if anonymous:
+        from full_image_anonymous import apply as anonymize
+        privacy = anonymize(records, bodies, new_record)
+        (output.parent/'PRIVACY.json').write_text(json.dumps(privacy, indent=2)+'\n')
     # Add parent directory records for every newly installed module/index.
     for name in list(bodies):
         for parent in Path(name).parents:
@@ -785,11 +800,25 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
         raw+=encode('TRAILER!!!',b'',trailer)
         return gzip.compress(raw+b'\0'*(-len(raw)%512),mtime=0)
     # Directories before children; separate final credential member is retained.
-    output.write_bytes(archive(sorted(bodies,key=lambda n:(n.count('/'),n)))+archive(sorted(identity)))
+    output.write_bytes(archive(sorted(bodies,key=lambda n:(n.count('/'),n)))+(b'' if anonymous else archive(sorted(identity))))
     return graphics_report
 
 
 def build(args, compile_kernel):
+    reuse = None
+    replacements, graphics_inputs, compiled_helpers = {}, {}, {}
+    if getattr(args, 'reuse_components', None):
+        require(args.kernel_mode == 'source' and not args.kernel_patches,
+                'Component reuse requires source mode and no new --kernel-patches')
+        from full_image_reuse import load as load_reuse
+        reuse, replacements, graphics_inputs, reuse_receipt = load_reuse(args.reuse_components)
+        from full_image_reuse import prepared_runtime
+        graphics_extra, compiled_helpers = prepared_runtime(reuse_receipt.get('prepared_runtime'))
+        graphics_inputs.update(graphics_extra)
+        for attr, role in (('camera_inputs','camera'),('sensor_inputs','sensors')):
+            existing = getattr(args, attr, None)
+            require(existing is None or existing.resolve() == reuse[role], 'Conflicting reused '+role+' inputs')
+            setattr(args, attr, reuse[role])
     # A prebuilt Image cannot carry new patches; never silently ignore them.
     if args.kernel_mode == 'prebuilt' and args.kernel_patches:
         raise ValueError('--kernel-patches requires --kernel-mode source')
@@ -808,6 +837,8 @@ def build(args, compile_kernel):
     require(args.jobs>0,'--jobs must be positive')
     require(not args.output.exists(),'Full build output must be fresh')
     args.output.mkdir(parents=True)
+    if reuse:
+        (args.output/'REUSED-COMPONENTS.json').write_text(json.dumps(reuse_receipt,indent=2)+'\n')
     records=[]
     def run(command, cwd=None):
         label='step-'+str(len(records))
@@ -820,14 +851,15 @@ def build(args, compile_kernel):
     camera = None
     if args.graphics in ('baseline', 'hybrid') and not getattr(args, 'without_camera', False):
         from full_image_camera import load
-        camera = load(getattr(args, 'camera_inputs', None) or private/'camera')
+        camera = load(getattr(args, 'camera_inputs', None) or private/'camera',
+                      source_build=args.kernel_mode == 'source')
     sensors = None
     if args.graphics in ('baseline', 'hybrid') and not getattr(args, 'without_sensors', False):
         from full_image_sensors import load
         sensors = load(getattr(args, 'sensor_inputs', None) or private/'sensors')
-    compiled=None
+    compiled=reuse['kernel'] if reuse else None
     patch_report = None
-    if args.kernel_mode=='source':
+    if args.kernel_mode=='source' and not reuse:
         source=private/'kernel-6.18/source'
         recipe=json.loads((source/'SOURCE.json').read_text())
         require(recipe.get('current_release_patches') is True,'Source inputs are not prepared for current release')
@@ -879,10 +911,10 @@ def build(args, compile_kernel):
              '--external-sources',extracted/'external','--config',ROOT/'configs/kernel-6.18-baseline.config',
              '--build-dir',build_dir,'--output',compiled,'--cross-compile',cross,
              '--jobs',str(args.jobs),'--build-only'])
-    if camera is not None and compiled:
+    if camera is not None and compiled and not reuse:
         from full_image_camera import rebuild_modules
         rebuild_modules(camera, extracted/'kernel', build_dir, args.output, cross, run)
-    if sensors is not None and compiled:
+    if sensors is not None and compiled and not reuse:
         from full_image_sensors import rebuild_modules
         rebuild_modules(sensors, extracted/'kernel', build_dir, args.output, cross, run)
     bundle=args.output/'paired/EFI/SQ2Nat'
@@ -934,6 +966,10 @@ def build(args, compile_kernel):
         camera=camera,
         sensors=sensors,
         suspend=suspend,
+        anonymous=True,
+        runtime_replacements=replacements,
+        graphics_inputs=graphics_inputs,
+        compiled_helpers=compiled_helpers,
     )
     esp_only = bool(getattr(args, 'esp_only', False))
     from disk_image import build as disk_build
@@ -941,26 +977,29 @@ def build(args, compile_kernel):
         resources=private,private_root=private,prepared_bundle=bundle,
         single_user_initramfs=bundle/'initramfs.cpio.gz',
         expected_single_user_sha256=None,
-        size_gib=None,jobs=args.jobs,build_only=True,resume_build=False,kernel_mode=args.kernel_mode,
-        graphics_argument=graphics_token,esp_only=esp_only)
+        size_gib=None,jobs=args.jobs,build_only=False,resume_build=False,kernel_mode=args.kernel_mode,
+        graphics_argument=graphics_token,esp_only=esp_only,anonymous=True)
     if sensors is not None:
         from full_image_sensors import FIRMWARE
         disk_args.additional_firmware={FIRMWARE.removeprefix('firmware/'): sensors[FIRMWARE]}
     report=disk_build(disk_args)
     report.update(source_compiled=bool(compiled),private_root=str(private),
         source_commit=source_commit,
-        build_time_parent_initramfs_used=False,postbuild_tests_performed=False,
+        build_time_parent_initramfs_used=False,postbuild_tests_performed=not esp_only,
+        private_identity_present=False, first_setup_preserved=True, target_models=["sq1", "sq2"],
         graphics=args.graphics,graphics_boot_option=graphics_token,
         graphics_report=graphics_report,
         suspend_enabled=True,
-        suspend_module_source='fresh-compiled' if compiled else 'image-paired-prebuilt',
+        suspend_module_source=('matched-incremental-rebuild' if reuse else 'fresh-compiled') if compiled else 'image-paired-prebuilt',
         device_faker_fork=device_faker_meta,
         sensors_enabled=sensors is not None,
-        sensor_modules_rebuilt=bool(sensors is not None and compiled),
+        sensor_modules_rebuilt=bool(sensors is not None and compiled and not reuse),
         sensor_hal_sha256=_sha256(sensors["sensors.spx.so"]) if sensors else None,
         camera_enabled=camera is not None,
         camera_provider_sha256=_sha256(camera['provider']) if camera else None,
-        camera_modules_rebuilt=bool(camera is not None and compiled),
+        camera_modules_rebuilt=bool(camera is not None and compiled and not reuse),
+        components_reused=bool(reuse),
+        kernel_compiled_this_run=bool(compiled and not reuse),
         esp_only=esp_only,
         kernel_patches=patch_report['patch_count'] if patch_report else 0,
         kernel_patches_external_msm_synced=(patch_report['external_msm_synced'] if patch_report else None),

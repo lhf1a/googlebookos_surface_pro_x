@@ -1,3 +1,21 @@
+# 当前标准：Hybrid 通用镜像
+
+无子命令默认执行 full-image，--graphics 仅接受 hybrid。SQ1/SQ2共用6.18内核与initramfs，沿用既有SMBIOS路由与SQ1 DT频率配置。
+摄像头、自动亮度、自动旋转和最新版触控向导为必需能力，不能通过省略参数跳过。
+组件全部安装后重建无个人凭据的cpio；锁定root密码、默认关闭SSH、清除旧Wi-Fi配置，移除自动跳过首次设置。
+userdata/metadata新建；不复制persist、FRP、原始转储及desktop security个人状态。输出执行文件系统与分区读回检查。
+
+```sh
+python3 scripts/build.py --private-root PRIVATE_ROOT --output FRESH_LINUX_OUTPUT --jobs 8
+```
+
+PRIVATE_ROOT需包含当前camera/CAMERA.json、sensors/sensors-bundle.json及其文件、suspend/desktop-services.jar、Hybrid Mesa/QTI运行依赖和配套内核源码/工具链。私有依赖不由git fetch下载。
+
+默认安装 Venus s2idle 握手修复、1000ms AC 息屏等待和一次性设置迁移；旧 Venus 模块会被拒绝。
+完整步骤见 [STANDARD-BUILD](STANDARD-BUILD.md)，Windows 采集见 [DEPENDENCIES](DEPENDENCIES.md)，匹配 KOUT 增量复用和最新镜像哈希见 [HYBRID-SLEEP-20261116](HYBRID-SLEEP-20261116.md)。
+
+以下为历史记录，以本节默认策略为准。
+
 # 原模板整包构建（2026-11-10）
 
 > 2026-11-12：`full-image` 新增 `--graphics mesa` 全 Mesa 通用镜像选项与 `--kernel-patches`；

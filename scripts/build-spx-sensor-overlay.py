@@ -5,10 +5,11 @@ import argparse,subprocess
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('toolchains',type=Path)
 p.add_argument('output',type=Path)
+p.add_argument('--keystore',type=Path,help='explicit local build signing key; never packaged')
 a=p.parse_args();root=Path(__file__).resolve().parents[1]
 sdk=a.toolchains.resolve()/'sq2-graphics/sdk';tools=sdk/'android-15'
 out=a.output.resolve();out.mkdir(parents=True,exist_ok=False)
-src=root/'probe/sensors/overlay';key=root/'private/spx-sensors/overlay.keystore'
+src=root/'probe/sensors/overlay';key=(a.keystore or root/'private/spx-sensors/overlay.keystore').resolve()
 def run(*args):subprocess.run(list(map(str,args)),check=True)
 key.parent.mkdir(parents=True,exist_ok=True)
 if not key.exists():
