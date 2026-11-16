@@ -33,7 +33,7 @@
 
 The project maintains a single unified **Hybrid** product line shared across SQ1 and SQ2:
 
-- **Unified Boot & SoC Routing**: Both models share the same Linux `Image`, kernel modules, and `initramfs.cpio.gz`. Surface ARM64 UEFI loads custom GRUB (`BOOTAA64.EFI`), which launches `start.efi` to inspect SMBIOS and dispatch `el1launch.efi` + `android-sq1.dtb` (SQ1, GPU/GMU OPPs capped at 661 MHz / CPU big cores at 2995.2 MHz) or `el2launch.efi` + `android-el2.dtb` (SQ2, CPU big cores up to 3148.8 MHz), alongside `qebspilaa64.efi` (SLPI PAS12) and `tcblaunch.exe`.
+- **Unified Boot & SoC Routing (EL2)**: Both models share the same Linux `Image`, kernel modules, `initramfs.cpio.gz`, and **EL2 (`sq2.el2=1`)** boot path. Surface ARM64 UEFI loads custom GRUB (`BOOTAA64.EFI`), which launches `start.efi` to inspect SMBIOS and dispatch `el2launch.efi` + `android-el2.dtb` on SQ2, or `el1launch.efi` (a cloned copy of `el2launch.efi` keeping `sq2.el2=1`) + `android-sq1.dtb` (retaining SQ1 GPU/GMU OPPs from `SQ1EL2/android-el2.dtb`) on SQ1, alongside `qebspilaa64.efi` (SLPI PAS12) and `tcblaunch.exe`.
 - **Hybrid Graphics & Display Stack**:
   - **EGL / GLES**: **Mesa Freedreno `26.2.4`** + `libdrm 2.4.133` (donor EGL/GLES stripped).
   - **Dual-Vulkan Router (`vulkan.freedreno.so`)**: Routes per-process via `/vendor/etc/sq2-vulkan-policy.conf` between hardware-GMEM **Mesa Turnip** (`vulkan.turnip.so`, default for system UI, browsers, emulators, benchmarks, and general apps) and **Qualcomm Quest 2 v77 native Vulkan** (`vulkan.qti.so` + `libgsl`/`libadreno_utils`, default for Unity/Unreal and select titles).
@@ -58,8 +58,8 @@ flowchart LR
 
 | Device | SoC | Boot Mode & DTB | Build Profile | Current Scope |
 | :--- | :--- | :--- | :---: | :--- |
-| **Surface Pro X (Gen 1)** | Microsoft SQ1 (8cx Gen 1) | `el1launch.efi` + `android-sq1.dtb` | `hybrid` (shared) | Shared image target; LTE & Touch enumeration verified on earlier builds, full `6.18` parity pending |
-| **Surface Pro X (Gen 2)** | Microsoft SQ2 (8cx Gen 2) | `el2launch.efi` + `android-el2.dtb` | `hybrid` (shared) | Primary verification platform across `6.3.8` and `6.18.60` builds |
+| **Surface Pro X (Gen 1)** | Microsoft SQ1 (8cx Gen 1) | **EL2** (`el1launch.efi` [`el2launch` clone] + `android-sq1.dtb`) | `hybrid` (shared) | Shared EL2 image target; LTE & Touch enumeration verified on earlier builds, full `6.18` parity pending |
+| **Surface Pro X (Gen 2)** | Microsoft SQ2 (8cx Gen 2) | **EL2** (`el2launch.efi` + `android-el2.dtb`) | `hybrid` (shared) | Primary verification platform across `6.3.8` and `6.18.60` builds |
 
 ### Feature Support Matrix
 
@@ -67,7 +67,7 @@ Legend: `✅ Available` · `🟡 Partially Available` · `❌ Unavailable`
 
 | Subsystem | Status | Verified Behavior, Hardware Scope & Caveats |
 | :--- | :---: | :--- |
-| **UEFI / NVMe / USB Boot & Storage** | ✅ Available | ARM64 UEFI → custom GRUB (`BOOTAA64.EFI`) → SMBIOS router (`start.efi`) → EL1 (SQ1) / EL2 (SQ2). 20 GiB GPT image auto-expands `userdata` online on first normal boot (`grow-image-userdata` + `resize2fs`). *Note: the `2026-11-16` universal image has passed host verification; real-device boot on it is pending.* |
+| **UEFI / NVMe / USB Boot & Storage** | ✅ Available | ARM64 UEFI → custom GRUB (`BOOTAA64.EFI`) → SMBIOS router (`start.efi`) → **EL2** (`sq2.el2=1`; SQ1 uses `el1launch.efi` clone + `android-sq1.dtb`, SQ2 uses `el2launch.efi` + `android-el2.dtb`). 20 GiB GPT image auto-expands `userdata` online on first normal boot (`grow-image-userdata` + `resize2fs`). *Note: the `2026-11-16` universal image has passed host verification; real-device boot on it is pending.* |
 | **Audio (Speakers / Mic / USB-C)** | ✅ Available | Verified on SQ2: SoundWire WCD9340 speakers (`+12 dB` RX7/RX8 `raw=84`, FIFO fix), DMIC (`CARD_0_DEV_1`, `raw=96`), and USB-C audio (`05ac:110b`, 48 kHz play/record). *Caveats: built-in speakers lack bass and have a slight right-skewed stereo image; SQ1 audio and BT A2DP/HFP are untested.* |
 | **Root / KernelSU** | ✅ Available | KernelSU Next (`v3.2.0-legacy`) + Zygisk Next (`1.5.2`) + `sq2-ksu-modules-boot`, plus optional lab `device_faker_gfx`. Generic images strip personal credentials, lock `root`, and disable SSH by default. |
 | **Android Desktop & Graphics (GLES / Vulkan)** | 🟡 Partially Available | `2880×1920@60` desktop, Mesa 26.2.4 Freedreno/Turnip, Dual-Vulkan router, and QTI HWC/SDM are usable on SQ2. *Caveats: graphics compatibility remains limited; A680.1 Wild Life GMEM root cause is open and `6.18` GMEM Wild Life re-testing is pending.* |

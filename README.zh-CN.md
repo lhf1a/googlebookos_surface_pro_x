@@ -33,7 +33,7 @@
 
 本项目维护单一且统一的 **hybrid（混合模式）** 产品线，由 SQ1 与 SQ2 共用同一套镜像：
 
-- **统一引导与 SoC 路由**：SQ1 与 SQ2 共用同一份 Linux `Image`、内核模块与 `initramfs.cpio.gz`。Surface ARM64 UEFI 加载定制 GRUB（`BOOTAA64.EFI`），再由 `start.efi` 检测 SMBIOS 机型并动态分发：SQ1 加载 `el1launch.efi` + `android-sq1.dtb`（GPU/GMU OPP 限制在 661 MHz，CPU 大核上限 2995.2 MHz），SQ2 加载 `el2launch.efi` + `android-el2.dtb`（CPU 大核最高 3148.8 MHz），并协同加载 `qebspilaa64.efi`（SLPI PAS12）与 `tcblaunch.exe`。
+- **统一引导与 SoC 路由（EL2）**：SQ1 与 SQ2 共用同一份 Linux `Image`、内核模块、`initramfs.cpio.gz` 以及 **EL2（`sq2.el2=1`）** 引导路径。Surface ARM64 UEFI 加载定制 GRUB（`BOOTAA64.EFI`），再由 `start.efi` 检测 SMBIOS 机型并动态分发：SQ2 加载 `el2launch.efi` + `android-el2.dtb`，SQ1 加载 `el1launch.efi`（`el2launch.efi` 的克隆副本，仍保留 `sq2.el2=1`）+ `android-sq1.dtb`（基于 `android-el2.dtb` 保留 `SQ1EL2/android-el2.dtb` 中的 GPU/GMU OPP 配置），并协同加载 `qebspilaa64.efi`（SLPI PAS12）与 `tcblaunch.exe`。
 - **混合图形与显示栈**：
   - **EGL / GLES**：采用 **Mesa Freedreno `26.2.4`** + `libdrm 2.4.133`（已剔除参考镜像中的 EGL/GLES 库）。
   - **双 Vulkan 路由器（`vulkan.freedreno.so`）**：通过 `/vendor/etc/sq2-vulkan-policy.conf` 按进程路由——系统 UI、浏览器、模拟器、基准测试及常规应用默认使用硬件 GMEM 模式下的 **Turnip / Mesa**（`vulkan.turnip.so`）；Unity / Unreal 引擎及部分特定游戏默认使用 **Qualcomm Quest 2 v77 原生 Vulkan**（`vulkan.qti.so` + `libgsl` / `libadreno_utils`）。
@@ -58,8 +58,8 @@ flowchart LR
 
 | 设备型号 | SoC | 引导模式与设备树（DTB） | 构建配置 | 当前支持范围 |
 | :--- | :--- | :--- | :---: | :--- |
-| **Surface Pro X（一代）** | Microsoft SQ1（8cx Gen 1） | `el1launch.efi` + `android-sq1.dtb` | `hybrid`（共用） | 共用镜像目标平台；早期构建已验证 LTE 与触控枚举，完整 `6.18` 对等验收待完成 |
-| **Surface Pro X（二代）** | Microsoft SQ2（8cx Gen 2） | `el2launch.efi` + `android-el2.dtb` | `hybrid`（共用） | `6.3.8` 与 `6.18.60` 阶段的主力验证平台 |
+| **Surface Pro X（一代）** | Microsoft SQ1（8cx Gen 1） | **EL2**（`el1launch.efi` [`el2launch` 副本] + `android-sq1.dtb`） | `hybrid`（共用） | 共用 EL2 镜像目标平台；早期构建已验证 LTE 与触控枚举，完整 `6.18` 对等验收待完成 |
+| **Surface Pro X（二代）** | Microsoft SQ2（8cx Gen 2） | **EL2**（`el2launch.efi` + `android-el2.dtb`） | `hybrid`（共用） | `6.3.8` 与 `6.18.60` 阶段的主力验证平台 |
 
 ### 功能支持矩阵
 
@@ -67,7 +67,7 @@ flowchart LR
 
 | 子系统 | 状态 | 已验证行为、硬件范围与限制 |
 | :--- | :---: | :--- |
-| **UEFI / NVMe / USB 启动与存储** | ✅ 可用 | ARM64 UEFI → 定制 GRUB（`BOOTAA64.EFI`）→ SMBIOS 路由（`start.efi`）→ EL1（SQ1）/ EL2（SQ2）。20 GiB GPT 镜像在首次正常启动时自动在线扩容 `userdata`（`grow-image-userdata` + `resize2fs`）。*注：`2026-11-16` 通用镜像已通过构建主机校验，真机启动验收待完成。* |
+| **UEFI / NVMe / USB 启动与存储** | ✅ 可用 | ARM64 UEFI → 定制 GRUB（`BOOTAA64.EFI`）→ SMBIOS 路由（`start.efi`）→ **EL2**（`sq2.el2=1`；SQ1 使用 `el1launch.efi` 副本 + `android-sq1.dtb`，SQ2 使用 `el2launch.efi` + `android-el2.dtb`）。20 GiB GPT 镜像在首次正常启动时自动在线扩容 `userdata`（`grow-image-userdata` + `resize2fs`）。*注：`2026-11-16` 通用镜像已通过构建主机校验，真机启动验收待完成。* |
 | **音频（扬声器 / 麦克风 / USB-C）** | ✅ 可用 | SQ2 已验证：SoundWire WCD9340 扬声器（`+12 dB` RX7/RX8 `raw=84`，含 FIFO 修复）、DMIC 麦克风（`CARD_0_DEV_1`，`raw=96`）及 USB-C 音频（`05ac:110b`，48 kHz 放音/录音）。*限制：内置扬声器低频不足且声场略偏右；SQ1 音频与蓝牙 A2DP/HFP 尚未测试。* |
 | **Root / KernelSU** | ✅ 可用 | 集成 KernelSU Next（`v3.2.0-legacy`）+ Zygisk Next（`1.5.2`）+ `sq2-ksu-modules-boot`，并提供实验性 `device_faker_gfx` 模块。通用镜像默认清除个人凭据、锁定 `root` 密码并禁用 SSH。 |
 | **Android 桌面与图形（GLES / Vulkan）** | 🟡 部分可用 | SQ2 上 `2880×1920@60` 桌面、Mesa 26.2.4 Freedreno/Turnip、双 Vulkan 路由器及 QTI HWC/SDM 均可正常使用。*限制：图形兼容性仍有限；A680.1 Wild Life GMEM 根因尚未定位，`6.18` 下开启硬件 GMEM 的 Wild Life 复测待完成。* |
