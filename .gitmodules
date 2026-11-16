@@ -1,0 +1,6 @@
+[submodule "upstream/device_faker_gfx"]
+	path = upstream/device_faker_gfx
+	url = https://github.com/lhf1a/device_faker_gfx.git
+[submodule "upstream/wechat-density-lsplant"]
+	path = upstream/wechat-density-lsplant
+	url = https://github.com/lhf1a/wechat-density-lsplant.git

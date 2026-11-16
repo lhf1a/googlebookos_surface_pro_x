@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FORK_URL = 'https://github.com/lhf1a/device_faker_gfx.git'
 FORK_BRANCH = 'main'
 FORK_COMMIT = '4fca03096456a8ef05cf6faf5b412132c6439771'
+SUBMODULE_SRC_DIR = ROOT / 'upstream' / 'device_faker_gfx'
 DEFAULT_SRC_DIR = ROOT / 'out' / 'src' / 'device_faker_gfx'
 DEFAULT_OUT_ZIP = ROOT / 'out' / 'device-faker' / 'device_faker-gfx.zip'
 REQUIRED_ZIP_ENTRIES = {'module.prop', 'customize.sh', 'uninstall.sh', 'zygisk/arm64-v8a.so'}
@@ -101,14 +102,27 @@ def build_from_source(source_dir, out_zip=DEFAULT_OUT_ZIP):
     return data
 
 
+def _read_git_head(source_dir):
+    """Return HEAD commit SHA for a git checkout or submodule, or FORK_COMMIT if unavailable."""
+    res = subprocess.run(
+        ['git', '-C', str(source_dir), 'rev-parse', 'HEAD'],
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode == 0 and res.stdout.strip():
+        return res.stdout.strip()
+    return FORK_COMMIT
+
+
 def resolve_or_build_device_faker_zip(
     private=None,
     explicit_zip=None,
     explicit_src=None,
     out_zip=DEFAULT_OUT_ZIP,
     allow_fetch=True,
+    submodule_dir=SUBMODULE_SRC_DIR,
 ):
-    """Resolve forked device_faker KSU zip bytes from override, private input, cache, or fork source."""
+    """Resolve forked device_faker KSU zip bytes from override, private input, cache, submodule, or fork source."""
     zip_path = explicit_zip or os.environ.get('SQ2_DEVICE_FAKER_ZIP')
     if zip_path:
         p = Path(zip_path)
@@ -145,6 +159,18 @@ def resolve_or_build_device_faker_zip(
             'sha256': sha,
             'fork_url': FORK_URL,
             'fork_commit': FORK_COMMIT,
+        }
+
+    submod = Path(submodule_dir) if submodule_dir is not None else None
+    if submod is not None and (submod / 'Cargo.toml').is_file():
+        data = build_from_source(submod, out_zip=out_zip)
+        sha = validate_device_faker_zip(data)
+        return data, {
+            'source': 'fork-submodule-build',
+            'path': str(out_zip),
+            'sha256': sha,
+            'fork_url': FORK_URL,
+            'fork_commit': _read_git_head(submod),
         }
 
     if not allow_fetch:

@@ -1,4 +1,6 @@
-/upstream/
+/upstream/*
+!/upstream/device_faker_gfx
+!/upstream/wechat-density-lsplant
 /work/
 /downloads/
 /out/

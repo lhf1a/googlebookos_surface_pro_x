@@ -206,8 +206,30 @@ class DeviceFakerBaselineTests(unittest.TestCase):
 
             with self.assertRaisesRegex(FileNotFoundError, 'Forked device_faker zip not staged'):
                 df_mod.resolve_or_build_device_faker_zip(
-                    private=None, out_zip=root / 'missing.zip', allow_fetch=False
+                    private=None,
+                    out_zip=root / 'missing.zip',
+                    allow_fetch=False,
+                    submodule_dir=root / 'missing-submodule',
                 )
+
+            submod = root / 'upstream' / 'device_faker_gfx'
+            submod.mkdir(parents=True)
+            (submod / 'Cargo.toml').write_text('[package]\nname = "device_faker"\n')
+            with (
+                mock.patch.object(df_mod, 'build_from_source', return_value=zip_b) as build_mock,
+                mock.patch.object(df_mod, 'clone_or_update_fork') as clone_mock,
+            ):
+                data, meta = df_mod.resolve_or_build_device_faker_zip(
+                    private=None,
+                    out_zip=root / 'missing-submod.zip',
+                    allow_fetch=False,
+                    submodule_dir=submod,
+                )
+            self.assertEqual(data, zip_b)
+            self.assertEqual(meta['source'], 'fork-submodule-build')
+            build_mock.assert_called_once_with(submod, out_zip=root / 'missing-submod.zip')
+            clone_mock.assert_not_called()
+            self.assertEqual(df_mod.SUBMODULE_SRC_DIR, ROOT / 'upstream' / 'device_faker_gfx')
 
     def test_sq2_ksu_modules_boot_script_behavior(self):
         script = ROOT / 'probe' / 'test2' / 'sq2-ksu-modules-boot'
@@ -340,6 +362,8 @@ exit 1
                     device_faker_zip=None,
                     device_faker_src=None,
                     skip_device_faker=False,
+                    without_camera=True,
+                    without_sensors=True,
                     esp_only=True,
                 )
                 report = full_image.build(args, lambda _: {})
