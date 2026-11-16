@@ -2,8 +2,8 @@
 
 ## 已验证状态（2026-10-30）
 
-当前 SQ2 默认入口为 `sq2-usb-test`（菜单标题 **SQ2 USB storage and audio**）。
-原有四个入口和载荷全部保留；USB 更新没有替换 Image、DTB 或音频 HAL。
+本节为 USB 存储/音频的既有验收范围；当前 Type-C、默认入口及下口 ADB 策略见 [TYPEC](TYPEC.md)。
+以下 USB 存储/音频结果不代表所有端口模式或全部外设已经验收。
 
 - FAT32 USB 盘能够生成 Android PUBLIC 卷；用户确认 Files 打开、创建与读写正常。
 - USB-C EarPods `05ac:110b` 的播放和录音均可用。用户确认左/右声道、人声与回放速度正确。
@@ -17,7 +17,7 @@
 最后一次自动路由录音约 5202 ms，两端实际 routed type 均为 USB_HEADSET（22）。
 这是当前 U 盘、EarPods 和测试范围的通过，不证明所有 USB 外设/文件系统或长期稳定性。
 exFAT 仅在早期原盘上做过内核只读挂载，不等同于本轮 Android 自动挂载验证。
-Type-C DP/AltMode 不在此次完成范围。
+Type-C DP/AltMode、原生多屏和下口 ADB 已接入当前默认构建；旧 USB 音频记录不覆盖新状态，见 [TYPEC](TYPEC.md)。
 
 ## 修复机制与保护
 

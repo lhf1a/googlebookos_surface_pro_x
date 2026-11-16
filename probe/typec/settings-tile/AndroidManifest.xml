@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.surface.displaysettings">
+ <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>
+ <application android:label="屏幕排列与镜像" android:allowBackup="false" android:icon="@android:drawable/ic_menu_manage" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+  <activity android:name=".NativeDisplayTile" android:exported="true">
+   <intent-filter><action android:name="com.android.settings.action.IA_SETTINGS"/></intent-filter>
+   <meta-data android:name="com.android.settings.category" android:value="com.android.settings.category.ia.display"/>
+   <meta-data android:name="com.android.settings.FRAGMENT_CLASS" android:value="com.android.settings.connecteddevice.display.TabbedDisplayPreferenceFragment"/>
+   <meta-data android:name="com.android.settings.title" android:value="屏幕排列与镜像"/>
+   <meta-data android:name="com.android.settings.summary" android:value="使用系统原生多屏排列、镜像/扩展和分辨率设置"/>
+   <meta-data android:name="com.android.settings.order" android:value="-10"/>
+  </activity>
+ </application>
+</manifest>

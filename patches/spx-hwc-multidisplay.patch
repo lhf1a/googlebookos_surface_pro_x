@@ -1,0 +1,36 @@
+--- a/composer/hwc_display.cpp
++++ b/composer/hwc_display.cpp
+@@ -1104,7 +1104,8 @@
+       *out_value = INT32(variable_config.y_dpi * 1000.0f);
+       break;
+     case HwcAttribute::CONFIG_GROUP:
+-      *out_value = GetDisplayConfigGroup(variable_config);
++      // SQ2 DRM modes require a real modeset; do not advertise seamless groups.
++      *out_value = INT32(config);
+       break;
+     default:
+       DLOGW("Spurious attribute type = %s", composer_V2_4::toString(attribute).c_str());
+@@ -2814,10 +2815,8 @@
+     return false;
+   }
+ 
+-  const DisplayConfigGroupInfo &config_group1 = variable_config1->second;
+-  const DisplayConfigGroupInfo &config_group2 = variable_config2->second;
+-
+-  return (config_group1 == config_group2);
++  // Config lookup failures above remain failures.
++  return config_id1 == config_id2;
+ }
+ 
+ bool HWCDisplay::AllowSeamless(hwc2_config_t config) {
+--- a/composer/hwc_session.cpp
++++ b/composer/hwc_session.cpp
+@@ -50,7 +50,7 @@
+ #define __CLASS__ "HWCSession"
+ 
+ #define HWC_UEVENT_SWITCH_HDMI "change@/devices/virtual/switch/hdmi"
+-#define HWC_UEVENT_DRM_EXT_HOTPLUG "mdss_mdp/drm/card"
++#define HWC_UEVENT_DRM_EXT_HOTPLUG "/drm/card"
+ 
+ using HwcAttribute = composer_V2_4::IComposerClient::Attribute;
+ 

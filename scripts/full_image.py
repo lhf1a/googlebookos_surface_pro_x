@@ -689,7 +689,7 @@ def install_userdata_growth(records, bodies, compiled_resize=None):
         records['bin/'+name]=new_record(0o100755)
 
 def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_modules=None, camera=None, sensors=None, anonymous=False,
-                     runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None):
+                     runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None, typec=None):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
     bodies = {name: b'' if rec[1][1] & 0o170000 == 0o040000 else (runtime/'files'/name).read_bytes()
@@ -711,6 +711,8 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
         validate_venus_dec_module(by_name['venus-dec.ko'].read_bytes())
         for name in list(bodies):
             if name.endswith('.ko'):
+                if typec and name.startswith('etc/spx-typec/'):
+                    continue  # Replaced by modules rebuilt against this Image below.
                 if sensors and name.startswith('etc/spx-sensors/modules/'):
                     continue  # Replaced by freshly built sensor modules below.
                 if camera and name.startswith('etc/spx-camera/modules/'):
@@ -781,6 +783,9 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
     if suspend is not None:
         from full_image_suspend import install
         install(records, bodies, suspend, new_record)
+    if typec is not None:
+        from full_image_typec import install
+        install(records, bodies, typec, new_record)
     if anonymous:
         from full_image_anonymous import apply as anonymize
         privacy = anonymize(records, bodies, new_record)
@@ -832,6 +837,7 @@ def build(args, compile_kernel):
     # Fail before the expensive kernel build if the reusable Android input is
     # missing; the image never silently falls back to the long donor wakelock.
     regular(private/'suspend/desktop-services.jar')
+    regular(private/'typec/services.jar')
     source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     template=regular(args.template or private/'template.img')
     require(args.jobs>0,'--jobs must be positive')
@@ -957,6 +963,10 @@ def build(args, compile_kernel):
     # fix. Source mode selects this build's module, never a same-release donor.
     from full_image_suspend import load as load_suspend
     suspend = load_suspend(private/'suspend', bundle/'Image', compiled)
+    from full_image_typec import load as load_typec, prepare_dtb as typec_dtb
+    typec = load_typec(private/'typec', bundle/'Image', args.output/'typec', compiled)
+    dt=bundle/'android-el2.dtb'
+    dt.write_bytes(typec_dtb(dt.read_bytes()))
     graphics_report = assemble_runtime(
         private,
         bundle/'initramfs.cpio.gz',
@@ -966,6 +976,7 @@ def build(args, compile_kernel):
         camera=camera,
         sensors=sensors,
         suspend=suspend,
+        typec=typec,
         anonymous=True,
         runtime_replacements=replacements,
         graphics_inputs=graphics_inputs,
@@ -990,6 +1001,7 @@ def build(args, compile_kernel):
         graphics=args.graphics,graphics_boot_option=graphics_token,
         graphics_report=graphics_report,
         suspend_enabled=True,
+        typec_enabled=True, lower_usb_default='adb',
         suspend_module_source=('matched-incremental-rebuild' if reuse else 'fresh-compiled') if compiled else 'image-paired-prebuilt',
         device_faker_fork=device_faker_meta,
         sensors_enabled=sensors is not None,

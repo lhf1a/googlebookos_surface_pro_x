@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+for i in $(seq 1 180); do
+ if [ -x /proc/1/root/system/bin/getprop ] &&
+    [ "$(nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed)" = 1 ] &&
+    [ -d /proc/1/root/config/usb_gadget/g1/functions/ffs.adb ]; then
+  echo 'Android gadget ready; restoring saved lower USB mode'
+  exec /bin/spx-lower-usb boot
+ fi
+ sleep 2
+done
+echo 'Lower USB mode restore failed: Android did not become ready' >&2
+exit 1

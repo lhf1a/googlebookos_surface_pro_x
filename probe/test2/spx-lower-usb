@@ -1,0 +1,91 @@
+#!/bin/sh
+# Lower connector only. Standard Android init/adbd owns ADB descriptors and auth.
+set -eu
+export PATH=/bin:/sbin
+android() { nsenter -t 1 -m -r -- "$@"; }
+get() { android /system/bin/getprop "$1"; }
+setprop() { android /system/bin/setprop "$1" "$2"; }
+role=/sys/bus/platform/devices/surface-typec/lower_data_role
+state=/proc/1/root/data/vendor/surface-usb
+g=/proc/1/root/config/usb_gadget/g1
+mode=${1:-status}
+case "$mode" in
+ status)
+  printf 'role='; cat "$role"
+  printf 'config='; get sys.usb.config
+  printf 'usb_state='; get sys.usb.state
+  printf 'adb_secure='; get ro.adb.secure
+  printf 'saved_mode='; if [ -f "$state/lower-mode" ]; then cat "$state/lower-mode"; else echo adb; fi
+  for p in /sys/class/udc/*/state; do [ ! -f "$p" ] || cat "$p"; done
+  exit 0;;
+ boot)
+  mode=adb
+  if [ -f "$state/lower-mode" ]; then mode=$(cat "$state/lower-mode"); fi
+  case "$mode" in adb|host) ;; *) echo 'Invalid saved lower USB mode' >&2; exit 2;; esac
+  [ "$mode" != host ] || exit 0;;
+ adb|host) ;;
+ *) echo 'usage: spx-lower-usb adb|host|status|boot [--save]' >&2; exit 2;;
+esac
+test -e "$role"
+# Do not steal an active DP connection or mounted USB storage. Caller disconnects first.
+if [ "$(cat "$role")" != device ]; then
+ for p in /sys/firmware/devicetree/base/soc@0/usb@a6f8800/usb@a600000; do
+  test -d "$p"
+ done
+ for p in /sys/devices/platform/soc@0/a6f8800.usb/a600000.usb/xhci-hcd.*/usb*/*/idVendor; do
+  [ ! -f "$p" ] || { echo 'Disconnect lower-port USB peripherals before changing role' >&2; exit 1; }
+ done
+fi
+if [ "$mode" = adb ]; then
+ # Native role setter rejects device role while lower DP is active.
+ echo device > "$role"
+ # DWC3 role work is asynchronous; wait for the real lower UDC to register.
+ for i in $(seq 1 50); do
+  [ -d /sys/class/udc/a600000.usb ] && break
+  sleep 0.1
+ done
+ test -d /sys/class/udc/a600000.usb
+ # Requested ADB mode also enables Android's authorization UI; never disables auth.
+ android /system/bin/settings put global adb_enabled 1
+ setprop ctl.stop vendor.usb-hal
+ for i in $(seq 1 30); do [ "$(get init.svc.vendor.usb-hal)" != running ] && break; sleep 0.1; done
+ test "$(get init.svc.vendor.usb-hal)" != running
+ test -d "$g/functions/ffs.adb"
+ if [ -n "$(cat "$g/UDC")" ]; then echo '' > "$g/UDC"; fi
+ # Remove configuration links, never function instances owned by Android init.
+ for p in "$g/configs/b.1/"*; do [ ! -L "$p" ] || rm "$p"; done
+ setprop sys.usb.config none
+ setprop sys.usb.configfs 1
+ for p in /sys/class/udc/*; do
+  [ -e "$p" ] || continue
+  controller=${p##*/}
+  case "$(readlink -f "$p")" in */a6f8800.usb/a600000.usb/udc/*) setprop sys.usb.controller "$controller";; esac
+ done
+ test "$(get sys.usb.controller)" = a600000.usb
+ setprop sys.usb.config adb
+ # Standard init binds after adbd/bridge has supplied FunctionFS descriptors.
+ for i in $(seq 1 60); do
+  [ "$(get sys.usb.state)" = adb ] && [ -n "$(cat "$g/UDC")" ] && break
+  sleep 0.2
+ done
+ test "$(get sys.usb.state)" = adb
+ test "$(cat "$g/UDC")" = a600000.usb
+else
+ if [ -n "$(cat "$g/UDC")" ]; then echo '' > "$g/UDC"; fi
+ setprop sys.usb.config none
+ for i in $(seq 1 30); do [ "$(get sys.usb.state)" = none ] && break; sleep 0.1; done
+ for p in "$g/configs/b.1/"*; do [ ! -L "$p" ] || rm "$p"; done
+ echo host > "$role"
+ setprop sys.usb.configfs 2
+ setprop ctl.start vendor.usb-hal
+ # Restore the original local authenticated ADB/bridge service; do not enable TCP externally.
+ setprop ctl.start adbd
+fi
+if [ "${2:-}" = --save ]; then
+ mkdir -p "$state"; chmod 700 "$state"
+ printf '%s\n' "$mode" > "$state/lower-mode.new"
+ chmod 600 "$state/lower-mode.new"
+ mv "$state/lower-mode.new" "$state/lower-mode"
+fi
+echo "LOWER_USB_MODE=$mode"
+exec "$0" status

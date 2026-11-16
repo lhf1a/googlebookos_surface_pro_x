@@ -79,7 +79,9 @@ flowchart LR
 | **LTE 移动数据** | 🟡 部分可用 | 动态 EFI SCM/GPT FSG 缓存（`EFI/SPX/LTE/<uuid>.bin`，上限 2 MiB）+ IPA4.1 / QMI / RMNET IPv4 数据连接已在 SQ1 与 SQ2 跑通。*限制：双机全新通用镜像验收、IPv6 与漫游尚未完成验证。* |
 | **Wi-Fi / 蓝牙 / SSH** | 🟡 部分可用 | SQ2 上 Android 托管的 Wi-Fi（`ath10k_snoc`，WCN3990）与 QCA UART 蓝牙（`sq2-hci-bridge`）可用。*限制：BLE HID 配对及 `uhid` 节点注册已确认，但真实光标/滚轮输入事件尚未确认；通用构建默认关闭 SSH（开启时仅允许密钥登录）。* |
 | **USB 存储 / Type Cover / 物理按键** | 🟡 部分可用 | SQ2 已验证 FAT32 USB 存储（`PUBLIC` SAF 卷）、USB-C 音频（`05ac:110b`）、Surface Type Cover 键盘保护盖（`045E:09AE/09AF/09B0`，含热插拔恢复）及音量/电源按键。*限制：exFAT 仅支持只读，其他各类 USB 外设未测。* |
-| **红外 / Windows Hello、通话/短信/5G/eSIM、休眠到磁盘、合盖休眠、USB-C DP Alt Mode** | ❌ 不可用 | 红外摄像头/人脸认证未实现（仅识别芯片 ID）；无蜂窝语音通话、短信、IMS、eSIM 或 5G；禁用休眠到磁盘（`nohibernate`）与合盖休眠（`lid_behavior=0`，无 `SW_LID`）；USB-C DisplayPort Alt Mode（`CONFIG_TYPEC_DP_ALTMODE=y`）未实现/未测试。 |
+| **USB-C DP / 原生多屏设置** | ✅ SQ2 可用 | 两口 DP 出图、拔插/换口和内屏保持已验收；原生屏幕排列、镜像/扩展可用。默认构建接入 SAM/QMP、HWC 热插拔/非无缝模式分组及未知合盖状态修复。SQ1、DP 音频与外屏长时休眠未验收。 |
+| **下口 USB ADB** | ✅ SQ2 可用 | 默认下口为需授权的 USB ADB（`ro.adb.secure=1`）；Windows 枚举、shell、重启恢复及 host 回切实测通过。使用下口 DP/USB 外设前，通过 root SSH 执行 `spx-lower-usb host --save`。设备选择及授权不嵌入通用包，见 [Type-C](docs/TYPEC.md)。 |
+| **红外 / Windows Hello、通话/短信/5G/eSIM、休眠到磁盘、合盖休眠** | ❌ 不可用 | 红外摄像头/人脸认证未实现（仅识别芯片 ID）；无蜂窝语音通话、短信、IMS、eSIM 或 5G；禁用休眠到磁盘（`nohibernate`）与合盖休眠（`lid_behavior=0`，无 `SW_LID`） |
 
 ---
 
@@ -112,7 +114,7 @@ flowchart LR
 - **尚未测试与待解决缺口**：
   - **SQ1 硬件对等验证**：SQ1 的传感器、`s2idle`、摄像头、持续 CPU/GPU 负载（限制在 `2995.2 / 661 MHz`）以及 `2026-11-16` 通用镜像启动尚待实测。
   - **标准 3D 与 Web 基准**：缺少 `glmark2`、`vkmark`、WebGL 以及 `6.18` 硬件 GMEM 模式下的 Wild Life / 游戏帧率功耗比数据。
-  - **音频 / 输入 / 显示缺口**：内置扬声器低频与左右声道平衡；Bilibili 拖放/切换清晰度时的音频跳帧或 XRUN（实测出现过 `1×4096` 帧 HAL 跳帧）；蓝牙 A2DP/HFP 音频；BLE HID 实际光标/滚轮事件；Surface 触控笔绘图/压感/倾角；端到端触控延迟；USB-C DP Alt Mode 视频输出。
+  - **音频 / 输入 / 显示缺口**：内置扬声器低频与左右声道平衡；Bilibili 拖放/切换清晰度时的音频跳帧或 XRUN（实测出现过 `1×4096` 帧 HAL 跳帧）；蓝牙 A2DP/HFP 音频；BLE HID 实际光标/滚轮事件；Surface 触控笔绘图/压感/倾角；端到端触控延迟。
   - **功耗与长时稳定性**：多轮连续 `s2idle` 可靠性（仍存在 `timerfd` 唤醒与冻结中止）、电池放电曲线、实时整机瓦数遥测以及 `sq2-game-opt` 开启前后的帧率/功耗对比。
 - **构建主机测试 vs 真机测试**：`tests/` 目录包含 `336` 个构建主机端打包、策略、校准及 ASan/UBSan 测试用例（`232` 个 Python、`92` 个 C/C++、`5` 个 PowerShell、`7` 个测试夹具）；`scripts/` 目录提供真机诊断脚本（`test-sq2-cpu-frequency.sh`、`test-sq2-gpu-opp.sh`、`test-sq2-audio-reopen.sh`、`verify-sq2-mediacodec-frames.py`）。主机侧校验通过并不代表真机启动已获认证。
 

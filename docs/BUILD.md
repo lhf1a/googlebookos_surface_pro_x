@@ -29,6 +29,7 @@ full-image-runtime/
 camera/CAMERA.json + ELF
 sensors/sensors-bundle.json + 文件
 suspend/desktop-services.jar       # 构建时 patch AC 息屏等待
+typec/services.jar                # 共用 Android JAR，修正未知合盖状态
 ```
 
 组件输入来源：
@@ -37,6 +38,7 @@ suspend/desktop-services.jar       # 构建时 patch AC 息屏等待
 | --- | --- | --- |
 | 摄像头 | `scripts/build-spx-camera-bundle.py --inputs private/camera-build.json` | 源码生成；需要匹配的 AIDL/平台头/链接库，见 [CAMERA-BUILD](CAMERA-BUILD.md) |
 | 传感器 | `scripts/build-spx-sensor-bundle.py` | ALS/加速度/SLPI/RPC/overlay，见 [SENSORS](SENSORS.md) |
+| Type-C / 多屏 / ADB | 默认 `full_image_typec.py`，源码重编匹配模块 + 原生 Settings 入口 | 共用 services.jar 与 Java/smali/SDK 工具，见 [TYPEC](TYPEC.md) |
 | 休眠 | `scripts/full_image_suspend.py --desktop-services ... --output private/build-inputs/suspend` | 同一 Android system 的原 JAR，见 [SUSPEND](SUSPEND.md) |
 
 缺输入时明确报错，不静默丢组件；不通过改版本号或复用旧模块绕过 ABI/配对检查。

@@ -79,7 +79,9 @@ Legend: `✅ Available` · `🟡 Partially Available` · `❌ Unavailable`
 | **LTE Mobile Data** | 🟡 Partially Available | Dynamic EFI SCM/GPT FSG cache (`EFI/SPX/LTE/<uuid>.bin`, max 2 MiB) + IPA4.1/QMI/RMNET IPv4 data demonstrated on SQ1 and SQ2. *Caveats: fresh dual-device universal image acceptance, IPv6, and roaming are pending.* |
 | **Wi-Fi / Bluetooth / SSH** | 🟡 Partially Available | Android-managed Wi-Fi (`ath10k_snoc`, WCN3990) and QCA UART BT (`sq2-hci-bridge`) work on SQ2. *Caveats: BLE HID pairing/`uhid` publication verified, but live cursor/scroll events remain unconfirmed; SSH is disabled by default in generic builds (key-only when enabled).* |
 | **USB Storage / Type Cover / Buttons** | 🟡 Partially Available | FAT32 USB storage (`PUBLIC` SAF volume), USB-C audio (`05ac:110b`), Surface Type Cover (`045E:09AE/09AF/09B0`, hotplug recovery), and Volume/Power buttons work on SQ2. *Caveats: exFAT is read-only; arbitrary USB peripherals are untested.* |
-| **IR / Windows Hello, Voice/SMS/5G/eSIM, Hibernate, Lid Sleep, USB-C DP Alt Mode** | ❌ Unavailable | IR camera/Hello auth unimplemented (chip ID only); no cellular voice, SMS, IMS, eSIM, or 5G; `nohibernate` and `lid_behavior=0` (`SW_LID` unavailable); USB-C DisplayPort Alt Mode (`CONFIG_TYPEC_DP_ALTMODE=y`) unimplemented/untested. |
+| **USB-C DP / Native Multi-Display Settings** | ✅ Available on SQ2 | Both ports: DP output, unplug/replug and internal-screen preservation accepted. Native arrangement and mirror/extend controls work. Default builds include SAM/QMP, HWC hotplug/non-seamless mode grouping and unknown-lid fixes. SQ1, DP audio and long-run external-display sleep remain unverified. |
+| **Lower-Port USB ADB** | ✅ Available on SQ2 | Default lower-port mode is authenticated USB ADB (`ro.adb.secure=1`); Windows enumeration, shell, reboot restore and host rollback verified. Switch to `spx-lower-usb host --save` over root SSH before using the lower port for DP/USB peripherals. Device-local choices/authorizations are not embedded. See [Type-C](docs/TYPEC.md). |
+| **IR / Windows Hello, Voice/SMS/5G/eSIM, Hibernate, Lid Sleep** | ❌ Unavailable | IR camera/Hello auth unimplemented (chip ID only); no cellular voice, SMS, IMS, eSIM, or 5G; `nohibernate` and `lid_behavior=0` (`SW_LID` unavailable). |
 
 ---
 
@@ -112,7 +114,7 @@ Legend: `✅ Available` · `🟡 Partially Available` · `❌ Unavailable`
 - **Not yet benchmarked / open gaps**:
   - **SQ1 hardware parity**: SQ1 sensors, `s2idle`, camera, sustained CPU/GPU (capped at `2995.2 / 661 MHz`), and `2026-11-16` universal image boot.
   - **Standard 3D & Web benchmarks**: No `glmark2`, `vkmark`, WebGL, or `6.18` GMEM Wild Life / game FPS-per-watt numbers.
-  - **Audio / Input / Display gaps**: Speaker bass and stereo balance; Bilibili seek/switch audio skip/XRUN (`1×4096` HAL skip observed); BT A2DP/HFP audio; live BLE HID cursor/scroll events; Surface Pen drawing/pressure/tilt; end-to-end touch latency; USB-C DP Alt Mode.
+  - **Audio / Input / Display gaps**: Speaker bass and stereo balance; Bilibili seek/switch audio skip/XRUN (`1×4096` HAL skip observed); BT A2DP/HFP audio; live BLE HID cursor/scroll events; Surface Pen drawing/pressure/tilt; end-to-end touch latency.
   - **Power & Long-Run**: Multi-cycle `s2idle` reliability (`timerfd` wakeups & freezer aborts remain), battery discharge curves, wattage telemetry, and `sq2-game-opt` FPS/power deltas.
 - **Host vs Device Tests**: `tests/` contains `336` host-side packaging, policy, calibration, and ASan/UBSan suites (`232` Python, `92` C/C++, `5` PowerShell, `7` fixtures); `scripts/` provides on-device diagnostics (`test-sq2-cpu-frequency.sh`, `test-sq2-gpu-opp.sh`, `test-sq2-audio-reopen.sh`, `verify-sq2-mediacodec-frames.py`). Host checks do not certify device boot.
 
