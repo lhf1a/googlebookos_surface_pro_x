@@ -304,6 +304,15 @@ def main(argv=None):
                       help='apply every *.patch in this directory to the extracted kernel source (and external/edp-618) before compile; mesa and hybrid default to patches/drm-618-a6xx-upstream')
     full.add_argument('--esp-only', action='store_true',
                       help='build paired kernel/modules and native-SSD ESP payload only; skip the 20 GiB disk image')
+    full.set_defaults(minimal_partitions=True)
+    full.add_argument('--minimal-partitions', dest='minimal_partitions', action='store_true',
+                      help='default: slim output GPT to 5 actually used partitions (super, metadata, misc, SQ2PROBE, userdata) and compact active _a super slices')
+    full.add_argument('--preserve-template-layout', dest='minimal_partitions', action='store_false',
+                      help='retain the legacy 39-partition 20 GiB template GPT layout')
+    full.add_argument('--size-gib', type=int,
+                      help='explicit image size in GiB when --minimal-partitions is enabled (default: 8)')
+    full.add_argument('--esp-mib', type=int,
+                      help='explicit ESP size in MiB when --minimal-partitions is enabled (default: 1024)')
     full.add_argument('--boot-gnu-efi', type=Path,
                       help='GNU-EFI source for the boot-volume handoff; default PRIVATE_ROOT/kernel-6.18/gnu-efi')
     full.add_argument('--cross-compile', help='override the compiler; default extracts PRIVATE_ROOT/kernel-6.18/toolchain.tar.gz')
@@ -327,6 +336,9 @@ def main(argv=None):
     disk.add_argument('--output', type=Path, required=True)
     disk.add_argument('--size-gib', type=int, help='explicit custom recovery-layout capacity; no implicit 64 GiB default')
     disk.add_argument('--template', type=Path, help='preserve the original template layout and capacity')
+    disk.add_argument('--minimal-partitions', action='store_true',
+                      help='slim output GPT to 5 actually used partitions and compact active _a super slices')
+    disk.add_argument('--esp-mib', type=int, help='explicit ESP size in MiB when --minimal-partitions is enabled (default: 1024)')
     disk.add_argument('--jobs', type=int, default=8)
     disk.add_argument('--boot-gnu-efi', type=Path)
     disk.add_argument('--build-only', action='store_true', help='construct only; omit postbuild filesystem/partition/gzip readback checks and whole-image checksums')
@@ -363,8 +375,8 @@ def main(argv=None):
             from disk_image import build as disk_image_build
             if args.jobs < 1 or (not args.template and (args.size_gib is None or args.size_gib < 1)):
                 parser.error('select --template or an explicit positive --size-gib; --jobs must be positive')
-            if args.template and args.size_gib is not None:
-                parser.error('--template preserves size; do not also set --size-gib')
+            if args.template and args.size_gib is not None and not args.minimal_partitions:
+                parser.error('--template preserves size; do not also set --size-gib without --minimal-partitions')
             if not args.template and args.recovery_zip is None:
                 parser.error('--recovery-zip is required without --template')
             report = disk_image_build(args)

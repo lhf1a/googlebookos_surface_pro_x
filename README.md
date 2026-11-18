@@ -124,15 +124,15 @@ Legend: `✅ Available` · `🟡 Partially Available` · `❌ Unavailable`
 
 ## Real-Device Deployment Guide
 
-Prebuilt disk images, proprietary firmware, and donor binaries are **not** distributed in this Git repository; build your own image first (see [Building from Source](#building-from-source)). A standard build produces a 20 GiB (`21,474,836,480` bytes) sparse raw GPT disk image and its gzip archive:
+Prebuilt disk images, proprietary firmware, and donor binaries are **not** distributed in this Git repository; build your own image first (see [Building from Source](#building-from-source)). By default, `build.py` produces a slim **8 GiB** (`8,589,934,592` bytes) 5-partition (`super`, `metadata`, `misc`, `SQ2PROBE`, `userdata`, compacting only active `_a` `super` slices) sparse raw GPT disk image and its gzip archive (pass `--preserve-template-layout` to keep the legacy 39-partition 20 GiB template layout):
 
-- `disk/surface-pro-x-6.18-hybrid-generic.img` (20 GiB raw MBR+GPT full-disk image)
-- `disk/surface-pro-x-6.18-hybrid-generic.img.gz` (~7.64 GiB / `8,199,981,130` bytes compressed)
+- `disk/surface-pro-x-6.18-hybrid-generic.img` (8 GiB raw MBR+GPT full-disk image)
+- `disk/surface-pro-x-6.18-hybrid-generic.img.gz` (~3.43 GiB / `3,685,632,793` bytes compressed)
 
 > [!CAUTION]
 > **Back up Windows & BitLocker keys before starting.**
-> - Flashing the **internal NVMe SSD** overwrites your Windows installation and all local data. For safe testing, flash to an **external USB drive** or a spare NVMe SSD inside a **USB-NVMe enclosure** (`>= 20 GiB` capacity, 512-byte logical sectors).
-> - **Single-Image-Disk Rule**: At boot, `prepare-image-ssd` scans all attached block devices for `PARTNAME=SQ2PROBE` + `SPX-IMAGE.txt`. If **more than one** attached disk contains this image, boot aborts with `ambiguous-image-disk`. **Never leave two flashed disks connected at the same time.**
+> - To keep Windows, use **Option D** below for same-disk dual-boot, or flash to an **external USB drive** / **USB-NVMe enclosure** (`>= 8 GiB`, or `>= 16 GiB` recommended on 8 GB RAM units for the 6 GiB swapfile; 512-byte logical sectors). Full-disk flashing onto the internal NVMe SSD overwrites Windows and all local data.
+> - **Single-Image-Disk Rule**: At boot, `prepare-image-ssd` identifies the disk carrying `PARTNAME=SQ2PROBE` + matching `SPX-BOOT-SOURCE.txt`. Avoid keeping two flashed disks attached simultaneously when testing.
 
 ### 1. Prerequisites on Surface Pro X
 
@@ -179,6 +179,26 @@ python3 scripts/deploy-experimental-usb.py \
 # Add --execute --device /dev/sdX and type the exact printed ERASE confirmation string
 # ERASE ["/dev/sdX","<serial>",<size_bytes>] (or pass --confirm-erase)
 ```
+
+#### Option D: Windows + Googlebook OS Dual-Boot Script (Run Directly on Windows)
+
+To set up **Windows + Googlebook OS dual-boot directly from Windows 10/11** (either same-disk dual boot on the internal NVMe SSD using unallocated space / shrinking `C:`, or flashing an external USB drive with a dual-boot GRUB menu containing **Windows**), double-click `scripts/Install-GooglebookDualBoot.cmd` as Administrator, or run in an elevated PowerShell prompt:
+
+```powershell
+# Interactive dual-boot menu (status, same-disk install, external USB flash, switch default OS, uninstall)
+.\scripts\Install-GooglebookDualBoot.cmd
+
+# Read-only status check (disks, free gaps, UEFI/Secure Boot state)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action Status
+
+# Same-disk dual-boot install (uses unallocated space or shrinks Windows C:)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action Install -ImagePath D:\surface-pro-x-6.18-hybrid-generic.img.gz -TargetDiskNumber 0 -ShrinkOSVolumeGB 32
+
+# Switch default OS / repair UEFI boot order (GooglebookOS or Windows)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action SwitchDefault -DefaultOS Windows
+```
+
+- **How it works**: Existing Windows ESP, MSR, `C:`, and WinRE partitions are preserved untouched. The script creates the Googlebook OS GPT partitions via Win32 `IOCTL_DISK_SET_DRIVE_LAYOUT_EX`, streams `.img`/`.img.gz` directly into those partitions, installs a small GRUB dual-boot shim at `\EFI\GooglebookOS\` on the Windows ESP (leaving `\EFI\Microsoft\Boot\bootmgfw.efi` untouched), and registers `"Googlebook OS"` in `{fwbootmgr}` via `bcdedit`. On Surface Pro X, you can select **Googlebook OS** or **Windows** using a keyboard or **Volume +/- and Power** buttons. *Note: only statically verified on the build host so far; back up your BitLocker recovery key and data before modifying partitions on live Windows hardware.*
 
 ### 3. Booting & First-Boot Setup
 

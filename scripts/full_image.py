@@ -1005,7 +1005,10 @@ def build(args, compile_kernel):
         resources=private,private_root=private,prepared_bundle=bundle,
         single_user_initramfs=bundle/'initramfs.cpio.gz',
         expected_single_user_sha256=None,
-        size_gib=None,jobs=args.jobs,build_only=False,resume_build=False,kernel_mode=args.kernel_mode,
+        size_gib=getattr(args, 'size_gib', None),
+        esp_mib=getattr(args, 'esp_mib', None),
+        minimal_partitions=bool(getattr(args, 'minimal_partitions', True)),
+        jobs=args.jobs,build_only=False,resume_build=False,kernel_mode=args.kernel_mode,
         graphics_argument=graphics_token,esp_only=esp_only,anonymous=True,
         boot_gnu_efi=boot_gnu_efi)
     if sensors is not None:

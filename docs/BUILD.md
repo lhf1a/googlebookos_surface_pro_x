@@ -11,6 +11,7 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ```
 
 - 无子命令等同 `full-image`；`--graphics` 只接受 `hybrid`。
+- 默认启用精简 5 分区输出（`super` 仅打包有效 `_a` EROFS 切片、`metadata`、`misc`、`SQ2PROBE` 1 GiB、`userdata`，默认整盘 `8 GiB`，可用 `--size-gib` / `--esp-mib` 调整）；传入 `--preserve-template-layout` 可回退至原 39 分区 `20 GiB` 模板布局。
 - `compile` 只构建内核组件；`verify`/`package` 只核验/复制历史固定 v21 包；`--esp-only` 只输出启动分区。三者都不是整机产品线。
 - 输出目录必须是全新目录，并位于 Linux 文件系统；不要在 NTFS/9p 上直接跑源码构建。
 - 依赖准备在 SQ1/SQ2 原 Windows 安装上执行，见 [DEPENDENCIES](DEPENDENCIES.md)。

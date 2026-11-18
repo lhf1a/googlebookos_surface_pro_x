@@ -14,10 +14,22 @@ start=$(cat /sys/class/block/$node/start)
 size=$(cat /sys/class/block/$node/size)
 sectors=$(cat /sys/class/block/$parent/size)
 # Never grow across another partition, even with an unfamiliar image layout.
+# Dual-boot disks may place Windows partitions (e.g. WinRE) strictly after
+# userdata; reject any overlap and cap growth just before the next partition.
+next_start=
 for p in /sys/class/block/$parent/*; do
     [ -f "$p/partition" ] || continue
     [ "$(basename "$p")" = "$node" ] && continue
-    [ $(( $(cat "$p/start") + $(cat "$p/size") )) -le "$start" ]
+    p_start=$(cat "$p/start")
+    p_size=$(cat "$p/size")
+    p_end=$((p_start + p_size))
+    if [ "$p_end" -le "$start" ]; then
+        continue
+    fi
+    [ "$p_start" -ge $((start + size)) ]
+    if [ -z "$next_start" ] || [ "$p_start" -lt "$next_start" ]; then
+        next_start=$p_start
+    fi
 done
 marker=/media/esp/SPX-USERDATA-GROWN.txt
 identity="$sectors:$number:$start:$size"
@@ -42,6 +54,9 @@ first=$(printf '%s\n' "$info" | awk '/First sector:/ {print $3}')
 a sgdisk --move-second-header "$disk"
 last=$(a sgdisk --print "$disk" | awk '/last usable sector is/ {print $NF}')
 case "$last" in ''|*[!0-9]*) exit 1;; esac
+if [ -n "$next_start" ] && [ $((next_start - 1)) -lt "$last" ]; then
+    last=$((next_start - 1))
+fi
 [ "$last" -ge $((start+size-1)) ]
 newsize=$((last-start+1))
 if [ "$newsize" -gt "$size" ]; then

@@ -124,15 +124,15 @@ flowchart LR
 
 ## 真机部署指南
 
-本 Git 仓库**不**分发预构建磁盘镜像、专有固件或参考二进制文件；请先自行构建镜像（参见[从源码构建](#从源码构建)）。标准构建会生成一份 20 GiB（`21,474,836,480` 字节）的稀疏原始 GPT 磁盘镜像及其 gzip 压缩包：
+本 Git 仓库**不**分发预构建磁盘镜像、专有固件或参考二进制文件；请先自行构建镜像（参见[从源码构建](#从源码构建)）。默认构建会生成一份 **8 GiB**（`8,589,934,592` 字节）精简 5 分区（`super`、`metadata`、`misc`、`SQ2PROBE`、`userdata`，仅打包有效 `_a` 逻辑切片）稀疏原始 GPT 磁盘镜像及其 gzip 压缩包（如需保留旧版 39 分区 20 GiB 模板布局，可传入 `--preserve-template-layout`）：
 
-- `disk/surface-pro-x-6.18-hybrid-generic.img`（20 GiB 原始 MBR+GPT 整盘镜像）
-- `disk/surface-pro-x-6.18-hybrid-generic.img.gz`（约 7.64 GiB / `8,199,981,130` 字节压缩包）
+- `disk/surface-pro-x-6.18-hybrid-generic.img`（8 GiB 原始 MBR+GPT 整盘镜像）
+- `disk/surface-pro-x-6.18-hybrid-generic.img.gz`（约 3.43 GiB / `3,685,632,793` 字节压缩包）
 
 > [!CAUTION]
 > **操作前请务必备份 Windows 系统与 BitLocker 恢复密钥。**
-> - 直接刷写**内置 NVMe 固态硬盘**会彻底覆盖原有 Windows 系统及全部本地数据。如需安全试用，建议刷入**外接高速 USB 移动硬盘**或装在 **USB-NVMe 硬盘盒**中的备用固态硬盘（容量 `>= 20 GiB`，512 字节逻辑扇区）。
-> - **单镜像磁盘规则**：启动阶段 `prepare-image-ssd` 会扫描所有已连接的块设备以查找 `PARTNAME=SQ2PROBE` + `SPX-IMAGE.txt`。若同时连接了**两块及以上**刷有该镜像的磁盘，启动会以 `ambiguous-image-disk` 报错中止。**切勿同时接入两块包含本镜像的磁盘。**
+> - 如需保留 Windows，请使用下文**方案 D**进行无损压缩同盘双启动，或刷入**外接高速 USB 移动硬盘** / **USB-NVMe 硬盘盒**（容量 `>= 8 GiB`，如为 8 GB 内存机型建议 `>= 16 GiB` 以便容纳 6 GiB swapfile，512 字节逻辑扇区）。直接整盘覆写内置 NVMe 会清除原有 Windows 数据。
+> - **单镜像磁盘规则**：启动阶段 `prepare-image-ssd` 会扫描块设备中 `PARTNAME=SQ2PROBE` + 匹配本次 `SPX-BOOT-SOURCE.txt` 的盘。同盘双启动与外置盘同时存在时，仍建议只接入当前待启动的一块系统盘。
 
 ### 1. Surface Pro X 前置准备
 
@@ -179,6 +179,26 @@ python3 scripts/deploy-experimental-usb.py \
 # 添加 --execute --device /dev/sdX 后，需完整输入屏幕打印的 ERASE 确认串：
 # ERASE ["/dev/sdX","<serial>",<size_bytes>]（或通过 --confirm-erase 传入）
 ```
+
+#### 方案 D：Windows 与 Googlebook OS 双启动安装脚本（直接在 Windows 上运行）
+
+如果需要在 **Windows 10/11 上直接部署 Windows + Googlebook OS 双启动**（支持本机内置 NVMe 固态硬盘空闲空间/压缩 `C:` 分区同盘双系统，或刷入外置 USB 磁盘并向 GRUB 菜单加入 Windows 引导项），可直接以管理员身份双击运行 `scripts/Install-GooglebookDualBoot.cmd`，或在管理员 PowerShell 中运行：
+
+```powershell
+# 交互式双启动菜单（查看磁盘状态、同盘双系统、外置 USB 刷盘、切换默认系统、卸载）
+.\scripts\Install-GooglebookDualBoot.cmd
+
+# 仅查看当前磁盘、空闲空间与双启动状态
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action Status
+
+# 本机同盘安装双系统（自动压缩 Windows C: 或使用未分配空间，默认安装后首启 Googlebook OS）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action Install -ImagePath D:\surface-pro-x-6.18-hybrid-generic.img.gz -TargetDiskNumber 0 -ShrinkOSVolumeGB 32
+
+# 切换默认启动系统或修复 UEFI 引导顺序（GooglebookOS / Windows）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action SwitchDefault -DefaultOS Windows
+```
+
+- **同盘双启动与救援说明**：脚本会保留原有 Windows ESP、MSR、`C:` 与 WinRE 分区不动，通过 Windows GPT API 创建精确命名的新分区并流式写入 `.img`/`.img.gz`，在 Windows ESP 的 `\EFI\GooglebookOS\` 部署 GRUB 双系统菜单（保留 `\EFI\Microsoft\Boot\bootmgfw.efi` 原样不动），并在 `{fwbootmgr}` 注册 UEFI 启动项。重启进入 GRUB 菜单后可用键盘或 Surface 物理**音量加/减 + 电源键**选择 **Googlebook OS** 或 **Windows**。*注：当前脚本仅完成代码与宿主侧静态测试，真机 Windows 实测待验证；操作前请务必备份 BitLocker 恢复密钥与重要数据。*
 
 ### 3. 启动与首次开机设置
 

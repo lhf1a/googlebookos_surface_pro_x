@@ -211,6 +211,25 @@ class GrowFixture(unittest.TestCase):
         self.assertFalse((self.p/'esp/SPX-USERDATA-GROWN.txt').exists())
         self.assertEqual(self.state()['partitions']['1']['size'], PART_SIZE)
 
+    def test_dualboot_partition_strictly_after_userdata_caps_growth_and_resizes_fs(self):
+        winre_start = PART_START + PART_SIZE + 8192
+        other = self.p/'sys/devices/platform/nvme0n1/nvme0n1p2'
+        other.mkdir()
+        (other/'partition').write_text('2\n')
+        (other/'start').write_text(str(winre_start) + '\n')
+        (other/'size').write_text('1024000\n')
+        (self.p/'sys/class/block/nvme0n1/nvme0n1p2').symlink_to(
+            '../../../devices/platform/nvme0n1/nvme0n1p2')
+        r = self.run_helper()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        expected_size = winre_start - PART_START
+        part = self.state()['partitions']['1']
+        self.assertEqual(part['size'], expected_size)
+        self.assertEqual((self.p/'esp/SPX-USERDATA-GROWN.txt').read_text().strip(),
+                         '%d:1:%d:%d' % (DISK_SECTORS, PART_START, expected_size))
+        self.assertTrue((self.p/'run/spx-userdata-ready').exists())
+        self.assertTrue(any(c[0] == 'resize2fs' for c in self.calls()))
+
     def test_info_failure_aborts_before_any_write(self):
         r = self.run_helper(FAKE_FAIL='info')
         self.assertNotEqual(r.returncode, 0)

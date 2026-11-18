@@ -28,28 +28,26 @@ userdata/metadata；不关闭 captive portal 探测、不预置网络。
 
 ## 当前本机构建成品
 
-目录：`/mnt/spx-workspace/chromebookOS/out/hybrid-current-20261116/image/`（本地成品，不是公开下载地址；
+目录：`/mnt/spx-workspace/chromebookOS/out/hybrid-main-minimal-5part-20261118/disk/`（本地成品，不是公开下载地址；
 镜像、固件与私有运行库不随 Git 发布）。
 
 | 产物 | 字节数 | SHA256 |
 | --- | --- | --- |
-| `disk/surface-pro-x-6.18-hybrid-generic.img` | 21474836480 | `d2fcdd9704b3d039de2654cd814a0e75d1a937de640c053cfff0a6d9aed0c37e` |
-| `disk/surface-pro-x-6.18-hybrid-generic.img.gz` | 8199981130 | `1ffa84b553b5c504a3cbac42c3aa1d5f2cc48a8c9de4b96add09efa1f72e17a5` |
-| 最终 initramfs | - | `f60315c86fb9b6305b5077c08c6857e2f40290ba7645a31bae93664eb9bc8bfa` |
+| `surface-pro-x-6.18-hybrid-generic.img` | 8589934592 | `e781f3c5a2459a798c6c47f81b82de6bbc41b3f6fd23fb685793610dd50c70fa` |
+| `surface-pro-x-6.18-hybrid-generic.img.gz` | 3685632793 | `9f51c5986aa02e705b2bbfc7aebe11d3411f25c6893bad71b28b8d4449c6de09` |
+| 最终 initramfs | - | `f80a63b53e145e60759e60fc7dd931d9cbadf3de965c505278a4f7f02f9205ba` |
 
-20 GiB 原始容量，压缩约 7.64 GiB；解压后是整盘镜像，不是单独 ESP/EFI 载荷。
+默认精简 5 分区布局（`super` 3.40 GiB 仅含 6 个 `_a` EROFS 切片、`metadata` 64 MiB、`misc` 4 MiB、`SQ2PROBE` 1 GiB、`userdata` 3.53 GiB）：8 GiB 原始容量，压缩约 3.43 GiB。
 
 ```sh
-cd IMAGE_OUTPUT
-sha256sum -c SHA256SUMS
-gzip -t disk/surface-pro-x-6.18-hybrid-generic.img.gz
+gzip -t surface-pro-x-6.18-hybrid-generic.img.gz
 ```
 
 ## 验证范围
 
 主机侧已通过：完整构建 exit 0、GPT 主/备、FAT/ESP 全文件回读、最终 ESP、完整 gzip
-解压大小与 SHA256、userdata/metadata 仅含 lost+found、六个继承身份分区清零、
-39 项首启/复用/HOME/触控测试。
+解压大小与 SHA256、6 个压缩后 EROFS 切片魔数校验、userdata/metadata 仅含 lost+found、misc 清零。
+另在远程 Surface Pro X Windows 11 ARM64（`192.168.5.76`）通过 PowerShell 双启动脚本完成 `C:` 压缩、5 分区创建与流式写入、`WindowsESP\EFI\GooglebookOS\` GRUB 双菜单写入及 `{fwbootmgr}` UEFI 注册检查。
 
-未做：设备写入、重启、SQ1/SQ2 真机启动、长期休眠与功耗验收。
-构建成功和主机校验不能替代硬件验收。
+未做：重启进入 GRUB 菜单后的双系统真机冷启动、长期休眠与功耗验收。
+构建成功、主机校验及 Windows 写盘准备不能替代硬件启动验收。

@@ -132,5 +132,52 @@ sleep() { return 0; }
                     self.assertEqual((root/'run/sq2-ssd-device').read_text().strip(),str(root/'dev/nvme7n2'))
                 else:self.assertIn('FAIL:',p.stderr)
 
+    def test_minimal_layout_compacts_super_and_writes_5_partitions(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / 'source.img'
+            image = root / 'minimal.img'
+            src_super_off = 2 * d.M
+            src_super_len = 16 * d.M
+            with source.open('wb') as f:
+                f.truncate(20 * d.M)
+                # Place system_a at 1 MiB and vendor_a after a 6 MiB system_b gap.
+                f.seek(src_super_off + 1 * d.M + 1024)
+                f.write(b'\xe2\xe1\xf5\xe0')
+                f.seek(src_super_off + 9 * d.M + 1024)
+                f.write(b'\xe2\xe1\xf5\xe0')
+            slices = f'system_a {1*d.M} {2*d.M}\nvendor_a {9*d.M} {1*d.M}\n'.encode()
+            compacted_super, slice_plan, new_slices = d.compact_super_slices(
+                slices, source, src_super_off, src_super_len)
+            self.assertEqual(compacted_super, 4 * d.M)
+            self.assertEqual(slice_plan, [
+                ('system_a', 1*d.M, 1*d.M, 2*d.M),
+                ('vendor_a', 9*d.M, 3*d.M, 1*d.M),
+            ])
+            self.assertEqual(new_slices.decode(), f'system_a {1*d.M} {2*d.M}\nvendor_a {3*d.M} {1*d.M}\n')
+
+            parts = d.plan_minimal_layout(compacted_super, image_bytes=3*d.G, esp_bytes=768*d.M)
+            self.assertEqual([p['name'] for p in parts], ['super', 'metadata', 'misc', 'SQ2PROBE', 'userdata'])
+            with image.open('wb') as f:
+                f.truncate(3 * d.G)
+            d.write_minimal_gpt(image, parts)
+            observed = d.module('test_min_gpt', 'inspect-recovery.py').inspect(image)
+            self.assertTrue(observed['gpt_verified'])
+            self.assertEqual([(p['index'], p['name'], p['offset'], p['bytes']) for p in observed['partitions']],
+                             [(p['index'], p['name'], p['offset'], p['bytes']) for p in parts])
+
+    def test_build_lts_full_image_defaults_to_minimal_partitions(self):
+        from unittest import mock
+        entry = d.module('test_build_lts_defaults', 'build-lts.py')
+        captured = {}
+        def fake_full(args, _compile):
+            captured['minimal'] = args.minimal_partitions
+            return {'ok': True}
+        with mock.patch('full_image.build', side_effect=fake_full):
+            entry.main(['--output', '/tmp/unused-default-check'])
+            self.assertTrue(captured['minimal'])
+            entry.main(['--output', '/tmp/unused-legacy-check', '--preserve-template-layout'])
+            self.assertFalse(captured['minimal'])
+
 
 if __name__=='__main__':unittest.main()

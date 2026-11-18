@@ -95,6 +95,95 @@ def allocated(path):
             offset = end
 
 
+def align_up(value, alignment):
+    return ((value + alignment - 1) // alignment) * alignment
+
+
+def compact_super_slices(slices_bytes, source, source_super_offset, source_super_bytes):
+    """Repack only active _a EROFS slices tightly from offset 1 MiB inside super."""
+    cursor = M
+    plan = []
+    seen = set()
+    with Path(source).open('rb') as f:
+        for line in slices_bytes.decode().splitlines():
+            if not line.strip():
+                continue
+            name, old_off_s, size_s = line.split()
+            old_off, size = int(old_off_s), int(size_s)
+            require(name not in seen, 'Duplicate super slice: ' + name)
+            seen.add(name)
+            require(0 <= old_off < old_off + size <= source_super_bytes, 'Logical partition outside source super: ' + name)
+            f.seek(source_super_offset + old_off + 1024)
+            require(f.read(4) == b'\xe2\xe1\xf5\xe0', 'Expected EROFS logical partition: ' + name)
+            new_off = align_up(cursor, M)
+            plan.append((name, old_off, new_off, size))
+            cursor = new_off + size
+    require(plan, 'No active super slices found')
+    total_super = align_up(cursor, M)
+    text = ''.join(f'{name} {new_off} {size}\n' for name, _, new_off, size in plan).encode()
+    return total_super, plan, text
+
+
+def plan_minimal_layout(super_bytes, image_bytes=8*G, esp_bytes=1*G):
+    """5-partition universal layout: super, metadata, misc, SQ2PROBE, userdata."""
+    require(image_bytes % 512 == 0, 'Image size must be sector-aligned')
+    require(super_bytes % M == 0 and super_bytes > 0, 'Unaligned compacted super')
+    require(esp_bytes % M == 0 and esp_bytes >= 768*M, 'Minimal ESP must be 1 MiB aligned and >= 768 MiB')
+    cursor = M
+    parts = []
+    for index, name, size in (
+        (1, 'super', super_bytes),
+        (2, 'metadata', 64*M),
+        (3, 'misc', 4*M),
+        (4, 'SQ2PROBE', esp_bytes),
+    ):
+        parts.append(dict(index=index, name=name, offset=cursor, bytes=size))
+        cursor = align_up(cursor + size, M)
+    data_offset = cursor
+    data_bytes = ((image_bytes // 512 - 33) * 512 - data_offset) // 4096 * 4096
+    require(data_bytes >= 1*G, 'Image is too small for minimal partitions, ESP and fresh userdata')
+    parts.append(dict(index=5, name='userdata', offset=data_offset, bytes=data_bytes))
+    return parts
+
+
+def write_minimal_gpt(image, parts):
+    """Write a fresh protective MBR and primary/backup GPT containing only parts."""
+    count, size = 128, 128
+    table = bytearray(count * size)
+    esp_guid = uuid.UUID('c12a7328-f81f-11d2-ba4b-00a0c93ec93b').bytes_le
+    linux_guid = uuid.UUID('0fc63daf-8483-4772-8e79-3d69d8477de4').bytes_le
+    for p in parts:
+        require(1 <= p['index'] <= count, 'GPT partition index out of range')
+        pos = (p['index'] - 1) * size
+        table[pos:pos+16] = esp_guid if p['name'] == 'SQ2PROBE' else linux_guid
+        table[pos+16:pos+32] = uuid.uuid4().bytes_le
+        struct.pack_into('<QQ', table, pos+32, p['offset']//512, (p['offset']+p['bytes'])//512-1)
+        table[pos+56:pos+128] = p['name'].encode('utf-16le').ljust(72, b'\0')
+    total = Path(image).stat().st_size // 512
+    guid = uuid.uuid4().bytes_le
+    def make_header(here, other, table_lba):
+        h = bytearray(512)
+        struct.pack_into('<8sIIIIQQQQ16sQIII', h, 0, b'EFI PART', 0x10000, 92, 0, 0,
+                         here, other, 34, total-34, guid, table_lba, count, size, zlib.crc32(table))
+        struct.pack_into('<I', h, 16, zlib.crc32(h[:92]))
+        return h
+    mbr = bytearray(512)
+    mbr[446:462] = struct.pack('<B3sB3sII', 0, b'\0\2\0', 0xee, b'\xff'*3, 1, min(total-1, 0xffffffff))
+    mbr[510:] = b'\x55\xaa'
+    with Path(image).open('r+b') as stream:
+        for offset, body in [(0, mbr), (512, make_header(1, total-1, 2)), (1024, table),
+                             ((total-33)*512, table), ((total-1)*512, make_header(total-1, 1, total-33))]:
+            stream.seek(offset)
+            stream.write(body)
+
+
+def verify_super_erofs_slices(image, super_offset, slice_plan):
+    with Path(image).open('rb') as f:
+        for name, _, new_off, _ in slice_plan:
+            f.seek(super_offset + new_off + 1024)
+            require(f.read(4) == b'\xe2\xe1\xf5\xe0', 'Compacted EROFS verification failed: ' + name)
+
+
 def plan_layout(original, image_bytes, esp_bytes=2*G):
     require(image_bytes % 512 == 0, 'Image size must be sector-aligned')
     parts = {p['name']: dict(p) for p in original['partitions']}
@@ -158,7 +247,7 @@ def boot_helper(name):
     return (ROOT/'probe/test2'/name).read_bytes().replace(b'\r\n', b'\n')
 
 
-def storage_payload(base, parts, super_header_sha256=None, anonymous=False):
+def storage_payload(base, parts, super_header_sha256=None, anonymous=False, super_slices=None):
     cpio = cpio_module()
     before = cpio.entries(gzip.decompress(base))
     mode, init = before['init']
@@ -236,6 +325,8 @@ fi
     partition_table = ''.join(f"{p['name']} {p['index']} {p['bytes']//512}\n" for p in parts).encode()
     delta = {'init':(mode,init), 'bin/prepare-native-ssd':(0o100755,helper),
              'etc/sq2-ssd-layout':(0o100644,layout), 'etc/sq2-ssd-partitions':(0o100644,partition_table)}
+    if super_slices is not None:
+        delta['etc/sq2-ssd-super-slices'] = (0o100644, super_slices)
     delta.update(early_storage)
     # Optional storage preparation: notify before zygote; never gate it.
     if 'bin/surface-swap-boot' in before:
@@ -519,19 +610,30 @@ def build(args):
                 shutil.copyfileobj(src,dst,8*M)
     gpt=module('disk_gpt','inspect-recovery.py')
     original=gpt.inspect(source)
-    image_bytes = original['image_bytes'] if template else args.size_gib*G
-    parts = original['partitions'] if template else plan_layout(original,image_bytes)
-    mapping={p['name']:p for p in parts}
     original_map={p['name']:p for p in original['partitions']}
     base=candidate.read_bytes()
     c=cpio_module();before=c.entries(gzip.decompress(base))
-    for line in before['etc/sq2-ssd-super-slices'][1].decode().splitlines():
-        name,offset,size=line.split();offset,size=int(offset),int(size)
-        require(0<=offset<offset+size<=mapping['super']['bytes'],'Logical partition outside super')
-        with source.open('rb') as f:
-            f.seek(original_map['super']['offset']+offset+1024)
-            require(f.read(4)==b'\xe2\xe1\xf5\xe0','Expected EROFS logical partition: '+name)
-    payload,audit,member=storage_payload(base,parts,anonymous=getattr(args, "anonymous", False))
+    minimal_partitions=bool(getattr(args,'minimal_partitions',False))
+    slice_plan=None
+    super_slices_override=None
+    if minimal_partitions:
+        compacted_super,slice_plan,super_slices_override=compact_super_slices(
+            before['etc/sq2-ssd-super-slices'][1],source,original_map['super']['offset'],original_map['super']['bytes'])
+        image_bytes=(args.size_gib*G) if getattr(args,'size_gib',None) else 8*G
+        esp_bytes=(args.esp_mib*M) if getattr(args,'esp_mib',None) else 1*G
+        parts=plan_minimal_layout(compacted_super,image_bytes=image_bytes,esp_bytes=esp_bytes)
+        mapping={p['name']:p for p in parts}
+    else:
+        image_bytes = original['image_bytes'] if template else args.size_gib*G
+        parts = original['partitions'] if template else plan_layout(original,image_bytes)
+        mapping={p['name']:p for p in parts}
+        for line in before['etc/sq2-ssd-super-slices'][1].decode().splitlines():
+            name,offset,size=line.split();offset,size=int(offset),int(size)
+            require(0<=offset<offset+size<=mapping['super']['bytes'],'Logical partition outside super')
+            with source.open('rb') as f:
+                f.seek(original_map['super']['offset']+offset+1024)
+                require(f.read(4)==b'\xe2\xe1\xf5\xe0','Expected EROFS logical partition: '+name)
+    payload,audit,member=storage_payload(base,parts,anonymous=getattr(args, "anonymous", False),super_slices=super_slices_override)
     (output/'storage-layout-delta.cpio.gz').write_bytes(member)
     tree=work/'esp-tree';(tree/'EFI/BOOT').mkdir(parents=True,exist_ok=resume);(tree/'EFI/SQ2Nat').mkdir(exist_ok=resume)
     for name in selected['files']:
@@ -566,7 +668,7 @@ def build(args):
     (tree/'SPX-IMAGE.txt').write_text('SPX_IMAGE_FORMAT=1\nSPX_RELEASE=6.18-'+selected['baseline']+'-single-user\nPRIVATE_IDENTITY_PRESENT='+('0' if getattr(args, 'anonymous', False) else '1')+'\n')
     (tree/'EFI/BOOT/grub.cfg').write_text("set timeout=5\nset default=spx-single-user\n\nmenuentry 'Surface Pro X Linux 6.18 - single user 0' --id spx-single-user {\n chainloader /EFI/SQ2Nat/start.efi\n}\nmenuentry 'Surface Pro X Linux 6.18 - rescue (no Android data mount)' --id spx-rescue {\n chainloader /EFI/SQ2Res/start.efi\n}\nmenuentry 'Power off' { halt }\n")
     esp_only = bool(getattr(args, 'esp_only', False))
-    (output/'LAYOUT.json').write_text(json.dumps({'image_bytes':image_bytes,'partitions':parts,'template':str(template) if template else None,'partition_boundaries_preserved':bool(template)},indent=2)+'\n')
+    (output/'LAYOUT.json').write_text(json.dumps({'image_bytes':image_bytes,'partitions':parts,'template':str(template) if template else None,'partition_boundaries_preserved':bool(template) and not minimal_partitions,'minimal_partitions':minimal_partitions},indent=2)+'\n')
     files={p.relative_to(tree).as_posix():{'bytes':p.stat().st_size} for p in tree.rglob('*') if p.is_file()}
     if esp_only:
         esp_export = output/'esp'
@@ -576,7 +678,8 @@ def build(args):
                 'compressed_sha256':None,'gzip_full_stream_verified':False,'gpt_primary_backup_verified':False,
                 'esp_only':True,'esp_tree':str(esp_export),
                 'source_private_baseline':selected['baseline'],'single_user_parent_sha256':None,
-                'template':str(template) if template else None,'template_layout_preserved':bool(template),
+                'template':str(template) if template else None,'template_layout_preserved':bool(template) and not minimal_partitions,
+                'minimal_partitions':minimal_partitions,
                 'kernel_mode':getattr(args,'kernel_mode','prebuilt'),
                 'final_initramfs_sha256':None,'storage_payload':audit,
                 'efi_files':files,'content_hash_validation':False,'build_only_requested':build_only,
@@ -603,13 +706,20 @@ def build(args):
     if image.exists(): regular(image)
     with image.open('wb' if resume else 'xb') as stream:stream.truncate(image_bytes)
     partition_hashes={}
-    for p in parts:
-        if p['name'] in ('userdata','metadata','misc','SQ2PROBE'):continue
-        if getattr(args, 'anonymous', False) and p['name'] in ('persist', 'frp_persist', 'rawdump', 'desktop_security_persist', 'desktop_security_storage'):
-            continue
-        src=original_map[p['name']]
-        print('COPY_PRISTINE_PARTITION',p['name'],flush=True)
-        copy_region(source,image,src['offset'],src['bytes'],p['offset'])
+    if minimal_partitions:
+        src_super = original_map['super']['offset']
+        dst_super = mapping['super']['offset']
+        for name, old_off, new_off, sz in slice_plan:
+            print('COPY_COMPACT_SUPER_SLICE', name, flush=True)
+            copy_region(source, image, src_super + old_off, sz, dst_super + new_off)
+    else:
+        for p in parts:
+            if p['name'] in ('userdata','metadata','misc','SQ2PROBE'):continue
+            if getattr(args, 'anonymous', False) and p['name'] in ('persist', 'frp_persist', 'rawdump', 'desktop_security_persist', 'desktop_security_storage'):
+                continue
+            src=original_map[p['name']]
+            print('COPY_PRISTINE_PARTITION',p['name'],flush=True)
+            copy_region(source,image,src['offset'],src['bytes'],p['offset'])
     fresh={}
     for name in ('userdata','metadata'):
         if build_only:
@@ -629,7 +739,9 @@ def build(args):
         for offset,size in allocated(fs):copy_region(fs,image,offset,size,mapping[name]['offset']+offset)
         fresh[name]={'bytes':mapping[name]['bytes'],'root_listing':listing,'empty_except_lost_found':True}
     for offset,size in allocated(fat):copy_region(fat,image,offset,size,mapping['SQ2PROBE']['offset']+offset)
-    if template:
+    if minimal_partitions:
+        write_minimal_gpt(image, parts)
+    elif template:
         # Preserve the template's protective MBR, both GPTs, attributes and GUIDs.
         # No guessed capacity, reordered partitions or new layout is introduced.
         first = 34*512 if getattr(args, 'anonymous', False) else min(p['offset'] for p in parts)
@@ -642,6 +754,8 @@ def build(args):
         run(['/usr/sbin/sgdisk','-v',image])
         inspected=gpt.inspect(image)
         require([(p['index'],p['name'],p['offset'],p['bytes']) for p in inspected['partitions']]==[(p['index'],p['name'],p['offset'],p['bytes']) for p in parts],'Final GPT differs from plan')
+        if minimal_partitions:
+            verify_super_erofs_slices(image, mapping['super']['offset'], slice_plan)
     compressed=image.with_suffix('.img.gz')
     print('COMPRESS_FULL_IMAGE',flush=True)
     if compressed.exists(): regular(compressed)
@@ -677,7 +791,8 @@ def build(args):
             'compressed_sha256':compressed_sha,'gzip_full_stream_verified':not build_only,'gpt_primary_backup_verified':not build_only,
             'source_recovery_zip_sha256':None, 'source_recovery_raw_sha256':None,
             'source_private_baseline':selected['baseline'],'single_user_parent_sha256':None,
-            'template':str(template) if template else None,'template_layout_preserved':bool(template),
+            'template':str(template) if template else None,'template_layout_preserved':bool(template) and not minimal_partitions,
+            'minimal_partitions':minimal_partitions,
             'kernel_mode':getattr(args,'kernel_mode','prebuilt'),
             'final_initramfs_sha256':hashlib.sha256(payload).hexdigest(),'storage_payload':audit,
             'pristine_partition_sha256':partition_hashes,'fresh_filesystems':fresh,'efi_files':files,
