@@ -1,0 +1,37 @@
+#!/bin/busybox sh
+# Keep the original daemon, user/group and security policy. No fake TPM.
+set -eu
+source=/newroot/system/etc/init/gscd.rc
+target=/newroot/debug_ramdisk/gscd-availability.rc
+service='service android.system.desktop.security.gscd /system/bin/gscd'
+[ "$(grep -Fxc "$service" "$source")" = 1 ]
+[ "$(grep -c '^service ' "$source")" = 1 ]
+skip=1
+version=
+if [ -c /dev/tpm0 ] && [ -r /sys/class/tpm/tpm0/tpm_version_major ]; then
+    if read -r version < /sys/class/tpm/tpm0/tpm_version_major && [ "$version" = 2 ]; then skip=0; fi
+fi
+oneshot=$(grep -c '^[[:space:]]*oneshot[[:space:]]*$' "$source" || true)
+disabled=$(grep -c '^[[:space:]]*disabled[[:space:]]*$' "$source" || true)
+awk -v service="$service" -v skip="$skip" -v oneshot="$oneshot" -v disabled="$disabled" '
+{ print }
+$0==service {
+    if (oneshot==0) print "    oneshot"
+    if (skip==1 && disabled==0) print "    disabled"
+}' "$source" > "$target"
+chmod 644 "$target"
+mount --bind "$target" "$source"
+if [ "$skip" = 1 ]; then
+    # Do not leave an unconditional TPM wait/firmware operation in post-fs.
+    if [ -f /newroot/system/etc/init/gscutil.rc ]; then
+        printf '# No TPM2/GSC backend: startup firmware operation unavailable.\non post-fs\n    write /dev/kmsg SPX_GSCUTIL_SKIPPED_NO_BACKEND\n' > /newroot/debug_ramdisk/gscutil-unavailable.rc
+        mount --bind /newroot/debug_ramdisk/gscutil-unavailable.rc /newroot/system/etc/init/gscutil.rc
+    fi
+    if [ -f /newroot/system/etc/init/check_tpm_clear.rc ]; then
+        awk '{ if ($0 ~ /^[ \t]*exec_background -- \/system\/bin\/check_tpm_clear[ \t]*$/) print "    write /dev/kmsg SPX_TPM_CLEAR_UNAVAILABLE_NO_BACKEND"; else print }' /newroot/system/etc/init/check_tpm_clear.rc > /newroot/debug_ramdisk/check-tpm-unavailable.rc
+        mount --bind /newroot/debug_ramdisk/check-tpm-unavailable.rc /newroot/system/etc/init/check_tpm_clear.rc
+    fi
+    echo GSC_BACKEND_UNAVAILABLE_SKIP: no_TPM2_device_no_autostart_no_restart
+else
+    echo GSC_TPM2_PRESENT_TRY_ONCE: original_daemon_checks_protocol_compatibility
+fi

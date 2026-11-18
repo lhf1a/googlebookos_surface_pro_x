@@ -1,0 +1,22 @@
+#!/bin/busybox sh
+# One startup snapshot of hardware descriptors; never input events.
+echo DT_MODEL
+tr -d '\000' < /sys/firmware/devicetree/base/model;echo
+echo BOOT_PROFILE
+if [ -r /sys/firmware/devicetree/base/chosen/microsoft,boot-profile ]; then
+    tr -d '\000' < /sys/firmware/devicetree/base/chosen/microsoft,boot-profile;echo
+fi
+for connector in /sys/class/drm/card*-eDP-*; do
+    [ -f "$connector/status" ] || continue
+    echo "INTERNAL_CONNECTOR=$connector"
+    cat "$connector/status" "$connector/modes"
+    echo EDID_HEX
+    od -An -tx1 "$connector/edid"
+done
+if [ -r /run/iptsd-hidraw ]; then
+    read -r node < /run/iptsd-hidraw
+    echo "TOUCH_HIDRAW=$node"
+    cat /sys/class/hidraw/${node##*/}/device/uevent
+    echo HID_REPORT_DESCRIPTOR_HEX
+    od -An -tx1 /sys/class/hidraw/${node##*/}/device/report_descriptor
+fi

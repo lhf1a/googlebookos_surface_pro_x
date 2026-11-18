@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+# No image disk/partition is mounted or retained across firmware handoff.
+for module in surface_aggregator surface_aggregator_registry surface_aggregator_hub surface_hid_core; do
+    modprobe "$module"
+done
+insmod /etc/spx-typec/spx-typec.ko
+echo 1 > /sys/bus/platform/devices/surface-typec/events_enabled
+insmod /etc/spx-typec/ucsi_surface_hid.ko
+insmod /etc/spx-typec/spx-ucsi-transport.ko
+echo SPX_TYPEC_FIRMWARE_EVENTS_STARTED_BEFORE_STORAGE

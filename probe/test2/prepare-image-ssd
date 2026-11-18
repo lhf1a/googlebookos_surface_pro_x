@@ -1,6 +1,19 @@
 #!/bin/busybox sh
-# Sourced before Android init. Discover this image's disk, not a lab machine.
-# No disk writes/formatting, no original UUID/serial/capacity admission check.
+# Discover one image disk after early firmware handoff. No identity whitelist.
+# UEFI supplies a fresh boot-instance token from its own loaded ESP.
+# Cloned GPT/FAT UUIDs and identical image contents are not source identities.
+boot_token=
+boot_tokens=0
+read -r boot_source_cmdline < /proc/cmdline
+for option in $boot_source_cmdline; do
+    case "$option" in spx.boot_token=*)
+        boot_token=${option#spx.boot_token=}
+        boot_tokens=$((boot_tokens+1));;
+    esac
+done
+[ "$boot_tokens" = 1 ] || fail boot-source-parameter
+[ "${#boot_token}" = 64 ] || fail boot-source-token-format
+case "$boot_token" in *[!0-9a-f]*) fail boot-source-token-format;; esac
 ssd_disk=
 probe=/run/spx-image-probe
 mkdir -p "$probe" /media/esp /dev/block/by-name /dev/mapper
@@ -8,20 +21,26 @@ for attempt in $(seq 1 45); do
     matches=
     for p in /sys/class/block/*; do
         [ -f "$p/partition" ] || continue
-        grep -qx 'PARTNAME=SQ2PROBE' "$p/uevent" || continue
-        dev=/dev/$(basename "$p")
-        blkid "$dev" | grep -q 'TYPE="vfat"' || continue
+        partname=
+        while IFS= read -r line; do
+            case "$line" in PARTNAME=*) partname=${line#PARTNAME=};; esac
+        done < "$p/uevent"
+        [ "$partname" = SQ2PROBE ] || continue
+        dev=/dev/${p##*/}
+        # The read-only vfat mount itself validates the filesystem type.
         mount -t vfat -o ro "$dev" "$probe" || continue
         valid=0
         if grep -qx 'SPX_IMAGE_FORMAT=1' "$probe/SPX-IMAGE.txt" 2>/dev/null &&
-           [ -f "$probe/EFI/SQ2Nat/start.efi" ]; then valid=1; fi
+           [ -f "$probe/EFI/SQ2Nat/start.efi" ] &&
+           grep -qx "$boot_token" "$probe/SPX-BOOT-SOURCE.txt" 2>/dev/null; then valid=1; fi
         umount "$probe" || fail image-probe-unmount
         [ "$valid" = 1 ] || continue
-        parent=$(basename "$(dirname "$(readlink -f "$p")")")
-        matches="$matches $parent:$(basename "$p")"
+        resolved=$(readlink -f "$p")
+        parent=${resolved%/*}; parent=${parent##*/}
+        matches="$matches $parent:${p##*/}"
     done
     set -- $matches
-    [ "$#" -le 1 ] || fail ambiguous-image-disk
+    [ "$#" -le 1 ] || fail ambiguous-boot-source
     if [ "$#" = 1 ]; then
         parent=${1%%:*}
         espdev=/dev/${1#*:}
@@ -30,32 +49,59 @@ for attempt in $(seq 1 45); do
     fi
     sleep 1
 done
-[ -n "$ssd_disk" ] || fail image-disk-not-found
+[ -n "$ssd_disk" ] || fail boot-source-disk-not-found
 ssd_part=$ssd_disk
 case "$ssd_disk" in *[0-9]) ssd_part=${ssd_disk}p;; esac
-# Expected names/sizes describe the image format, not device identity or node
-# enumeration. An expanded userdata is allowed; never resize it during boot.
-while read name ignored_number expected_sectors; do
-    found=
-    for p in /sys/class/block/*; do
-        [ -f "$p/partition" ] || continue
-        resolved=$(readlink -f "$p")
-        [ "$(basename "$(dirname "$resolved")")" = "$parent" ] || continue
-        grep -qx "PARTNAME=$name" "$p/uevent" || continue
-        [ -z "$found" ] || fail "duplicate-partition-$name"
-        found=/dev/$(basename "$p")
-        actual=$(cat "$p/size")
-        if [ "$name" = userdata ]; then
-            [ "$actual" -ge "$expected_sectors" ] || fail userdata-shrunk
-        else
-            [ "$actual" = "$expected_sectors" ] || fail "partition-size-$name"
-        fi
-    done
-    [ -n "$found" ] || fail "missing-partition-$name"
+
+# Snapshot each partition once, rather than rescanning sysfs for every name.
+# This index is local to this acquisition; never reuse it after a disconnect.
+partition_index=
+for p in /sys/class/block/*; do
+    [ -f "$p/partition" ] || continue
+    resolved=$(readlink -f "$p")
+    owner=${resolved%/*}; owner=${owner##*/}
+    [ "$owner" = "$parent" ] || continue
+    partname=
+    while IFS= read -r line; do
+        case "$line" in PARTNAME=*) partname=${line#PARTNAME=};; esac
+    done < "$p/uevent"
+    read -r actual < "$p/size" || fail partition-size-read
+    partition_index="$partition_index$partname	/dev/${p##*/}	$actual
+"
+done
+validated=$(awk '
+FILENAME != "-" {
+    order[++n]=$1; expected[$1]=$3; next
+}
+{
+    split($0, field, "\t"); name=field[1]
+    if (!(name in expected)) next
+    count[name]++; device[name]=field[2]; sectors[name]=field[3]
+}
+END {
+    for (i=1;i<=n;i++) {
+        name=order[i]
+        if (count[name]>1) { print "duplicate-partition-" name; exit 1 }
+        if (count[name]!=1) { print "missing-partition-" name; exit 1 }
+        if (sectors[name] !~ /^[0-9]+$/) { print "partition-size-" name; exit 1 }
+        if (name=="userdata") {
+            if (sectors[name]+0<expected[name]+0) { print "userdata-shrunk"; exit 1 }
+        } else if (sectors[name]+0!=expected[name]+0) { print "partition-size-" name; exit 1 }
+    }
+    for (i=1;i<=n;i++) print order[i], device[order[i]]
+}' /etc/sq2-ssd-partitions - <<EOF
+$partition_index
+EOF
+) || fail "$validated"
+while read -r name found; do
     alias=/dev/block/by-name/$name
     if [ -e "$alias" ] || [ -L "$alias" ]; then
         [ "$(readlink -f "$alias")" = "$(readlink -f "$found")" ] || fail "partition-alias-$name"
     else ln -s "$found" "$alias" || fail "partition-alias-$name"; fi
-done < /etc/sq2-ssd-partitions
+done <<EOF
+$validated
+EOF
 mount -t vfat -o sync "$espdev" /media/esp || fail image-ESP-mount
 echo "$ssd_disk" > /run/sq2-ssd-device
+printf "%s\n" "$boot_token" > /run/spx-boot-source-token
+echo "SPX_BOOT_SOURCE_SELECTED disk=$ssd_disk esp=$espdev"

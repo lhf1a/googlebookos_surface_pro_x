@@ -9,13 +9,15 @@ class Boot(unittest.TestCase):
             def put(path,body,mode=0o644):
                 p=w/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(body);p.chmod(mode);return p
             put('sys/class/dmi/id/product_uuid','test-board\n')
-            put('sys/class/drm/card0-eDP-1/edid','x'*128)
-            put('sys/class/hidraw/hidraw0/device/uevent','HID_ID=001C:0000045E:00000C21\n')
-            put('sys/class/hidraw/hidraw0/device/report_descriptor','test-hid')
+            put('sys/class/drm/card7-eDP-1/edid','x'*128)
+            put('sys/class/drm/card7-eDP-1/status','connected\n')
+            put('sys/class/hidraw/hidraw19/device/uevent','HID_ID=001C:0000045E:00000996\n')
+            put('sys/class/hidraw/hidraw19/device/report_descriptor','test-hid')
             put('logs/power-input-boot.txt','SQ2_COVER_AND_POWER_INPUT_READY\n')
             put('etc/iptsd.conf','[Contacts]\nAspectMax = 2.0\n')
             put('etc/sq2-touch-calibration/wizard.apk','apk')
-            (w/'run').mkdir();(w/'android/data/local/tmp').mkdir(parents=True)
+            put('run/iptsd-hidraw','/dev/hidraw19\n')
+            (w/'android/data/local/tmp').mkdir(parents=True)
             files=w/'android/data/user_de/10/org.surface.touchcalibration.unified/files'
             files.mkdir(parents=True)
             put('bin/android',f'''#!/usr/bin/python3
@@ -34,7 +36,7 @@ elif a[:2]==['am','start']:pathlib.Path({str(w/'launched')!r}).touch()
                 script=script.replace(prefix,str(w/('android' if prefix=='/proc/1/root' else prefix[1:])))
             script=script.replace('/bin/touch-',str(w/'bin/touch-')).replace('sleep 2','sleep 0.02').replace('+ 180','+ 2')
             runner=put('runner',script,0o755)
-            device=hashlib.sha256(b'test-board\n'+b'x'*128+b'test-hid').hexdigest()
+            device=hashlib.sha256(b'test-board\n'+b'x'*128+b'HID_ID=001C:0000045E:00000996\n'+b'test-hid').hexdigest()
             store=w/'android/data/vendor/sq2-touch-calibration';saved=store/(device+'.profile')
             profile=f'Version=1\nDevice={device}\nCalibrationX=0:0 .02:.03 .12:.12 1:1\nCalibrationY=\nCalibrationXTop=\nCalibrationTopStart=0.1\nCalibrationTopEnd=0.3\n'
             processes=[]

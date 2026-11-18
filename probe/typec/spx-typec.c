@@ -17,6 +17,13 @@
 #include <linux/usb/typec_mux.h>
 #include <linux/usb/role.h>
 #include <drm/bridge/aux-bridge.h>
+/* Runtime connector mask supplied by initramfs from the selected boot disk.
+ * Read-only for this boot: a mounted system/swap device must not be reset by
+ * USC replay or a later role request. Other connectors remain unrestricted.
+ */
+static unsigned int boot_storage_ports;
+module_param(boot_storage_ports, uint, 0444);
+MODULE_PARM_DESC(boot_storage_ports, "Connectors carrying the mounted boot disk");
 struct spx_port {
  struct typec_switch *sw;
  struct typec_mux *mux;
@@ -26,6 +33,8 @@ struct spx_port {
  struct usb_role_switch *role_sw;
  enum usb_role requested_role;
  bool dp_active;
+ bool state_valid;
+ u8 state[11];
 };
 struct spx_typec {
  struct device *dev;
@@ -34,6 +43,8 @@ struct spx_typec {
  struct workqueue_struct *queue;
  struct mutex event_lock;
  bool events_enabled;
+ bool storage_ports_set;
+ bool routing_ready;
  struct spx_port ports[2];
 };
 struct spx_event {struct work_struct work;struct spx_typec *ctx;u8 bytes[11];};
@@ -49,6 +60,8 @@ static int spx_apply(struct spx_typec *ctx,const u8 *b)
  int pin,ret;
  if(!p->present)return -ENODEV;
  if(b[5]>2 || b[6]>3 || b[9]>1 || b[10]>1)return -EPROTO;
+ /* Intentionally retain the boot connector: no mux/role/HPD writes. */
+ if(boot_storage_ports & BIT(b[4]))return 0;
  orientation=b[5]==0?TYPEC_ORIENTATION_NORMAL:b[5]==1?TYPEC_ORIENTATION_REVERSE:TYPEC_ORIENTATION_NONE;
  if(b[6]==2 || b[6]==3) {
   if(p->role_sw && p->requested_role!=USB_ROLE_HOST)return -EBUSY;
@@ -73,6 +86,43 @@ static int spx_apply(struct spx_typec *ctx,const u8 *b)
   drm_aux_hpd_bridge_notify(&p->bridge->dev,b[9]?connector_status_connected:connector_status_disconnected);
  return 0;
 }
+/* SAM event registration is a firmware operation, not a passive listener.
+ * Initramfs enables it before discovering/mounting storage. Cache/ACK state
+ * until the boot connector mask and DRM consumers are ready. Never re-enable
+ * the firmware event source merely to replay a state for a late consumer.
+ */
+static int spx_handle_state(struct spx_typec *ctx,const u8 *b)
+{
+ struct spx_port *p;
+ if(b[4]>=ARRAY_SIZE(ctx->ports))return -EPROTO;
+ p=&ctx->ports[b[4]];
+ if(!p->present)return -ENODEV;
+ if(b[5]>2 || b[6]>3 || b[9]>1 || b[10]>1)return -EPROTO;
+ memcpy(p->state,b,sizeof(p->state));p->state_valid=true;
+ if(!ctx->routing_ready)return 0;
+ return spx_apply(ctx,b);
+}
+static int spx_set_storage_ports(struct spx_typec *ctx,unsigned int mask)
+{
+ if(mask & ~GENMASK(1,0))return -EINVAL;
+ if(ctx->storage_ports_set)return mask==boot_storage_ports?0:-EBUSY;
+ if(ctx->routing_ready)return -EBUSY;
+ boot_storage_ports=mask;ctx->storage_ports_set=true;
+ return 0;
+}
+static int spx_activate_routing(struct spx_typec *ctx)
+{
+ int i,ret;
+ if(!ctx->events_enabled || !ctx->storage_ports_set)return -EAGAIN;
+ if(ctx->routing_ready)return 0;
+ for(i=0;i<ARRAY_SIZE(ctx->ports);i++) {
+  if(!ctx->ports[i].state_valid)continue;
+  ret=spx_apply(ctx,ctx->ports[i].state);
+  if(ret)return ret;
+ }
+ ctx->routing_ready=true;
+ return 0;
+}
 static void spx_process(struct work_struct *work)
 {
  struct spx_event *e=container_of(work,struct spx_event,work);
@@ -80,7 +130,7 @@ static void spx_process(struct work_struct *work)
  __le32 ack[3]={cpu_to_le32(get_unaligned_le32(e->bytes)),cpu_to_le32(e->bytes[4]),0};
  struct ssam_request req={.target_category=0x1b,.target_id=1,.instance_id=1,.command_id=3,.flags=0,.length=sizeof(ack),.payload=(u8*)ack};
  int result,ret;
- mutex_lock(&ctx->event_lock);result=spx_apply(ctx,e->bytes);mutex_unlock(&ctx->event_lock);
+ mutex_lock(&ctx->event_lock);result=spx_handle_state(ctx,e->bytes);mutex_unlock(&ctx->event_lock);
  ack[2]=cpu_to_le32(result==0);
  ret=ssam_request_do_sync(ctx->ctrl,&req,NULL);
  /* Candidate-only state evidence, not a per-frame graphics logger. */
@@ -102,8 +152,8 @@ static u32 spx_notify(struct ssam_event_notifier *nf,const struct ssam_event *ev
  e->ctx=ctx;memcpy(e->bytes,ev->data,11);INIT_WORK(&e->work,spx_process);queue_work(ctx->queue,&e->work);
  return SSAM_NOTIF_HANDLED;
 }
-/* Candidate boot stages bridge providers before MSM, then enables SAM events
- * after MSM attaches its HPD callback. This prevents losing the initial state. */
+/* Firmware notifications start before storage discovery. Routing starts
+ * separately after the boot connector is pinned and MSM attaches HPD. */
 static ssize_t events_enabled_show(struct device *dev,struct device_attribute *attr,char *buf)
 {
  struct spx_typec *ctx=dev_get_drvdata(dev);return sysfs_emit(buf,"%u\n",ctx->events_enabled);
@@ -113,6 +163,9 @@ static ssize_t events_enabled_store(struct device *dev,struct device_attribute *
  struct spx_typec *ctx=dev_get_drvdata(dev);bool enable;int ret=kstrtobool(buf,&enable);
  if(ret)return ret;
  mutex_lock(&ctx->event_lock);
+ if(!enable && ctx->storage_ports_set) {
+  mutex_unlock(&ctx->event_lock);return -EBUSY;
+ }
  if(enable!=ctx->events_enabled) {
   if(enable)ret=ssam_notifier_register(ctx->ctrl,&ctx->notifier);
   else ret=ssam_notifier_unregister(ctx->ctrl,&ctx->notifier);
@@ -122,6 +175,33 @@ static ssize_t events_enabled_store(struct device *dev,struct device_attribute *
  return ret?ret:count;
 }
 static DEVICE_ATTR_RW(events_enabled);
+
+static ssize_t storage_ports_show(struct device *dev,struct device_attribute *attr,char *buf)
+{
+ return sysfs_emit(buf,"%u\n",boot_storage_ports);
+}
+static ssize_t storage_ports_store(struct device *dev,struct device_attribute *attr,const char *buf,size_t count)
+{
+ struct spx_typec *ctx=dev_get_drvdata(dev);unsigned int mask;int ret=kstrtouint(buf,0,&mask);
+ if(ret)return ret;
+ mutex_lock(&ctx->event_lock);ret=spx_set_storage_ports(ctx,mask);mutex_unlock(&ctx->event_lock);
+ return ret?ret:count;
+}
+static DEVICE_ATTR_RW(storage_ports);
+static ssize_t routing_ready_show(struct device *dev,struct device_attribute *attr,char *buf)
+{
+ struct spx_typec *ctx=dev_get_drvdata(dev);return sysfs_emit(buf,"%u\n",ctx->routing_ready);
+}
+static ssize_t routing_ready_store(struct device *dev,struct device_attribute *attr,const char *buf,size_t count)
+{
+ struct spx_typec *ctx=dev_get_drvdata(dev);bool enable;int ret=kstrtobool(buf,&enable);
+ if(ret)return ret;
+ if(!enable)return -EINVAL;
+ mutex_lock(&ctx->event_lock);ret=spx_activate_routing(ctx);mutex_unlock(&ctx->event_lock);
+ return ret?ret:count;
+}
+static DEVICE_ATTR_RW(routing_ready);
+
 static ssize_t lower_data_role_show(struct device *dev,struct device_attribute *attr,char *buf)
 {
  struct spx_typec *ctx=dev_get_drvdata(dev);struct spx_port *p=&ctx->ports[0];
@@ -136,12 +216,14 @@ static ssize_t lower_data_role_store(struct device *dev,struct device_attribute 
  else return -EINVAL;
  if(!p->role_sw)return -ENODEV;
  mutex_lock(&ctx->event_lock);
- if(p->dp_active && role!=USB_ROLE_HOST)ret=-EBUSY;
+ if(boot_storage_ports & BIT(0))
+  ret=usb_role_switch_get_role(p->role_sw)==role?0:-EBUSY;
+ else if(p->dp_active && role!=USB_ROLE_HOST)ret=-EBUSY;
  else {ret=usb_role_switch_set_role(p->role_sw,role);if(!ret)p->requested_role=role;}
  mutex_unlock(&ctx->event_lock);return ret?ret:count;
 }
 static DEVICE_ATTR_RW(lower_data_role);
-static struct attribute *spx_attrs[]={&dev_attr_events_enabled.attr,&dev_attr_lower_data_role.attr,NULL};
+static struct attribute *spx_attrs[]={&dev_attr_events_enabled.attr,&dev_attr_storage_ports.attr,&dev_attr_routing_ready.attr,&dev_attr_lower_data_role.attr,NULL};
 static const struct attribute_group spx_group={.attrs=spx_attrs};
 static int spx_probe(struct platform_device *pdev)
 {
@@ -193,3 +275,5 @@ MODULE_DEVICE_TABLE(of,spx_match);
 static struct platform_driver spx_driver={.probe=spx_probe,.remove=spx_remove,.driver={.name="spx-typec",.of_match_table=spx_match}};
 module_platform_driver(spx_driver);
 MODULE_LICENSE("GPL");MODULE_DESCRIPTION("Surface Pro X SAM USC to native QMP mux and DisplayPort HPD");
+
+MODULE_INFO(spx_boot_handoff,"1");

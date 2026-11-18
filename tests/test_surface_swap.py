@@ -132,12 +132,18 @@ class BootGate(unittest.TestCase):
     def run_gate(self,mem=7592612,cmdline='sq2.native=ssd sq2.el2=1',guard='Y'):
         with tempfile.TemporaryDirectory() as td:
             p=Path(td);(p/'bin').mkdir();(p/'run').mkdir()
-            for name,text in [('cmdline',cmdline),('meminfo',f'MemTotal: {mem} kB\n'),('guard',guard)]:
+            for name,text in [('cmdline',cmdline+'\n'),('meminfo',f'MemTotal: {mem} kB\n'),('guard',guard)]:
                 (p/name).write_text(text)
+            if 'sq2.native=usb' not in cmdline:
+                (p/'run/sq2-ssd-device').write_text('/dev/sdz\n')
+            (p/'data-ready').write_text('1\n')
             ns=p/'bin/nsenter';ns.write_text('#!/bin/sh\ncase "$*" in *getprop*) echo 1;; *) echo INNER_STAGE_REACHED;; esac\n');ns.chmod(0o755)
             text=SOURCE.read_text().replace('export PATH=/bin:/sbin',f'export PATH={p}/bin:/usr/bin:/bin')
             for old,new in [('/proc/cmdline',p/'cmdline'),('/proc/meminfo',p/'meminfo'),
-                            ('/sys/module/suspend/parameters/screen_only',p/'guard'),('/run/surface-swap-lock',p/'run/lock')]:
+                            ('/sys/module/suspend/parameters/screen_only',p/'guard'),('/run/surface-swap-lock',p/'run/lock'),
+                            ('/run/sq2-ssd-device',p/'run/sq2-ssd-device'),
+                            ('/logs/storage-data-ready',p/'data-ready'),
+                            ('/etc/sq2-ssd-partitions',p/'not-present')]:
                 text=text.replace(old,str(new))
             script=p/'helper';script.write_text(text)
             return subprocess.run(['sh',str(script)],capture_output=True,text=True)

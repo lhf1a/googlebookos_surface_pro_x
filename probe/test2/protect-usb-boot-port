@@ -1,0 +1,27 @@
+disk=$(cat /run/sq2-ssd-device)
+node=$(readlink -f "/sys/class/block/${disk##*/}")
+boot_storage_ports=0
+boot_usb=0
+while [ -n "$node" ] && [ "$node" != / ]; do
+    [ ! -f "$node/idVendor" ] || boot_usb=1
+    endpoint=$node/of_node/ports/port@0/endpoint/remote-endpoint
+    if [ -f "$endpoint" ]; then
+        for connector in /sys/firmware/devicetree/base/surface-typec/connector@*; do
+            peer=$connector/ports/port@0/endpoint/phandle
+            [ -f "$peer" ] || continue
+            cmp -s "$endpoint" "$peer" || continue
+            set -- $(od -An -tu1 "$connector/reg")
+            [ "$#" = 4 ] || exit 1
+            port=$(( ($1 << 24) | ($2 << 16) | ($3 << 8) | $4 ))
+            [ "$port" -le 1 ] || exit 1
+            boot_storage_ports=$((boot_storage_ports | (1 << port)))
+        done
+    fi
+    node=${node%/*}
+done
+if [ "$boot_usb" = 1 ] && [ "$boot_storage_ports" = 0 ]; then
+    echo BOOT_STORAGE_CONNECTOR_NOT_FOUND >&2
+    exit 1
+fi
+echo "BOOT_STORAGE_PORTS=$boot_storage_ports"
+echo "$boot_storage_ports" > /sys/bus/platform/devices/surface-typec/storage_ports

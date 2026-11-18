@@ -1,25 +1,30 @@
 #!/bin/busybox sh
-# A transport reset loses the raw-touch mode set by IPTSd. Reapply it once.
+# Follow the selected transport; USB/I2C/other HID devices without this SPI
+# driver's resume counter are not subjected to SPI-specific restarts.
 set -u
 export PATH=/bin:/sbin
-counter=/sys/bus/spi/devices/spi0.0/resume_count
-previous=$(cat "$counter" 2>/dev/null || echo 0)
-while true; do
-    current=$(cat "$counter" 2>/dev/null || echo "$previous")
+previous=
+watched=
+while :; do
+    if [ ! -r /run/iptsd-hidraw ]; then sleep 0.5;continue;fi
+    [ -r /run/iptsd-ready ] || exit 0
+    read -r ready_path < /run/iptsd-ready
+    counter=${ready_path%/*}/resume_count
+    [ -r "$counter" ] || exit 0
+    current=$(cat "$counter" 2>/dev/null) || { sleep 0.5;continue; }
+    if [ "$watched" != "$counter" ]; then previous=$current;watched=$counter;fi
     if [ "$current" != "$previous" ]; then
         previous=$current
         ready=0
         for n in $(seq 1 60); do
-            if [ "$(cat /sys/bus/spi/devices/spi0.0/ready 2>/dev/null)" = ready ]; then ready=1; break; fi
+            if [ "$(cat "$ready_path" 2>/dev/null)" = ready ]; then ready=1;break;fi
             sleep 0.1
         done
-        if [ "$ready" = 0 ]; then echo "TOUCH_RESUME_NOT_READY count=$current"; continue; fi
+        if [ "$ready" = 0 ]; then echo "TOUCH_RESUME_NOT_READY count=$current";continue;fi
         if [ -r /run/iptsd.pid ]; then
             pid=$(cat /run/iptsd.pid)
-            if [ "$(cat /proc/$pid/comm 2>/dev/null)" = iptsd ]; then
-                kill "$pid" 2>/dev/null || true
-                sleep 1
-            fi
+            case "$pid" in ''|*[!0-9]*) exit 1;; esac
+            if [ "$(cat /proc/$pid/comm 2>/dev/null)" = iptsd ]; then kill "$pid" 2>/dev/null || true;sleep 1;fi
             rm -f /run/iptsd.pid
         fi
         echo "TOUCH_RESUME_REINITIALIZE count=$current"

@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -153,7 +154,11 @@ def write_gpt(source, image, parts):
             stream.write(body)
 
 
-def storage_payload(base, parts, super_header_sha256=None, anonymous=False):
+def boot_helper(name):
+    return (ROOT/'probe/test2'/name).read_bytes().replace(b'\r\n', b'\n')
+
+
+def storage_payload(base, parts, super_header_sha256=None, anonymous=False, diagnostics=False):
     cpio = cpio_module()
     before = cpio.entries(gzip.decompress(base))
     mode, init = before['init']
@@ -168,17 +173,104 @@ def storage_payload(base, parts, super_header_sha256=None, anonymous=False):
     # This is an old fixture serial, not target hardware identity. Do not
     # replicate it as a prerequisite or pretend every target is that machine.
     init = init.replace(b' androidboot.serialno=SQ2TEST', b'')
-    helper = (ROOT / 'probe/test2/prepare-image-ssd').read_bytes().replace(b'\r\n',b'\n')
+    # Retired USB fixture and NVMe opt-in checks must not survive in the
+    # universal initramfs. Keep the explicit virtio smoke path; all physical
+    # boots use the image helper's unique-disk/format/partition checks.
+    legacy_storage = re.compile(
+        rb"(?m)^if ! grep -q 'sq2\.storage=nvme' /proc/cmdline; then\n"
+        rb"[^\n]+\nfi\nif \[ \"\$ssd\" = 1 \]; then\n"
+        rb"    \. /bin/prepare-native-ssd\n"
+        rb"elif \[ \"\$smoke\" = 0 \]; then\n"
+        rb"(?:    [^\n]*\n)+else\n"
+        rb"    mkdir -p /media/esp\n"
+        rb"    mount -t vfat -o sync /dev/vdg /media/esp \|\| fail smoke-log-disk\nfi\n")
+    portable_storage = b'''# All physical image boots use runtime layout discovery, not lab media identity.
+if [ "$smoke" = 1 ]; then
+    mkdir -p /media/esp
+    mount -t vfat -o sync /dev/vdg /media/esp || fail smoke-log-disk
+else
+    ssd=1
+    . /bin/prepare-native-ssd
+fi
+'''
+    legacy = legacy_storage.findall(init)
+    if legacy:
+        require(len(legacy) == 1, 'Ambiguous legacy storage selection')
+        init = legacy_storage.sub(portable_storage, init, count=1)
+    else:
+        require(not any(token in init for token in
+                        (b'USB-size', b'USB-serial', b'ESP-UUID', b'DATA-UUID',
+                         b'Internal NVMe was enumerated without authorization')),
+                'Unrecognized legacy storage admission; refusing partial removal')
+    # A Type-C-enabled DT binds USB to this bundled PHY, not the built-in
+    # qcom provider. Load it before searching USB disks; the display-stage
+    # hook runs only after the system partition has already been mounted.
+    early_storage = {}
+    if 'etc/spx-typec/phy-spx-qmp-combo.ko' in before:
+        require('bin/spx-typec-stage' in before, 'Missing Type-C stage')
+        stage_mode, stage = before['bin/spx-typec-stage']
+        stage = stage.replace(b'\r\n', b'\n')
+        phy_load = b'insmod /etc/spx-typec/phy-spx-qmp-combo.ko\n'
+        discovery = b'    . /bin/prepare-native-ssd\n'
+        require(stage.count(phy_load) == 1 and init.count(discovery) == 1,
+                'Unknown early USB PHY load anchors')
+        early_load = (b'    insmod /etc/spx-typec/phy-spx-qmp-combo.ko '
+                      b'>> /logs/spx-typec.txt 2>&1 || fail image-usb-phy\n')
+        init = init.replace(discovery, early_load + discovery, 1)
+        typec_load = b'insmod /etc/spx-typec/spx-typec.ko\n'
+        require(stage.count(typec_load) == 1 and
+                b'parmtype=boot_storage_ports:uint' in before['etc/spx-typec/spx-typec.ko'][1],
+                'Rebuild Type-C with boot-storage connector protection')
+        protected_stage = boot_helper('protect-usb-boot-port')
+        stage = stage.replace(typec_load, protected_stage, 1)
+        # Keep the remaining SAM/UCSI/gadget setup and delayed HPD replay.
+        # Do not reload or hot-swap an active PHY in the late stage.
+        early_storage['bin/spx-typec-stage'] = (stage_mode, stage.replace(phy_load, b'', 1))
+    if early_storage:
+        init = typec_early_handoff(init, early_storage, before)
+        init = optimize_boot_init(init)
+        init = optional_boot_failures(init)
+        if diagnostics:
+            require(init.count(b'    . /bin/prepare-native-ssd\n') == 1, 'Unknown boot-log start anchor')
+            init = init.replace(b'    . /bin/prepare-native-ssd\n', b'    . /bin/prepare-native-ssd\n'+b'    timeout 1800 /bin/persist-boot-logs > /logs/persistence.txt 2>&1 &\n', 1)
+        init = init.replace(b'System images read-only; provisioned system disk selected; original Android init will become PID 1.', b'System images will be read-only; boot-source disk discovery pending; original Android init will become PID 1.')
+    helper = boot_helper('prepare-image-ssd')
     layout = b'# Universal image; no boot-time content hash gate.\nSPX_IMAGE_FORMAT=1\n'
     partition_table = ''.join(f"{p['name']} {p['index']} {p['bytes']//512}\n" for p in parts).encode()
     delta = {'init':(mode,init), 'bin/prepare-native-ssd':(0o100755,helper),
              'etc/sq2-ssd-layout':(0o100644,layout), 'etc/sq2-ssd-partitions':(0o100644,partition_table)}
+    delta.update(early_storage)
+    if diagnostics:
+        delta['bin/persist-boot-logs'] = (0o100755, boot_helper('persist-boot-logs'))
+    # Optional storage preparation: notify before zygote; never gate it.
+    if 'bin/surface-swap-boot' in before:
+        storage_hook = b'if [ "$ssd" = 1 ]; then\n    /bin/storage-ready-stage > /logs/storage-ready-stage.txt 2>&1 || echo STORAGE_READY_STAGE_FAILED_NONFATAL\nfi\n'
+        require(init.count(b'exec native-handoff /newroot\n') == 1, 'Unknown storage scheduling anchor')
+        init = init.replace(b'exec native-handoff /newroot\n', storage_hook+b'exec native-handoff /newroot\n', 1)
+        delta['init'] = (mode, init)
+        delta['bin/surface-swap-boot'] = (0o100755, boot_helper('surface-swap-boot'))
+        delta['bin/grow-image-userdata'] = (0o100755, boot_helper('grow-image-userdata'))
+        delta['bin/storage-ready-stage'] = (0o100755, boot_helper('storage-ready-stage'))
+    require(init.count(b'exec native-handoff /newroot\n') == 1, 'Unknown GSC stage anchor')
+    init = init.replace(b'exec native-handoff /newroot\n', b'/bin/gscd-availability-stage > /logs/gscd-availability.txt 2>&1 || echo GSC_AVAILABILITY_STAGE_FAILED_NONFATAL\n'+b'exec native-handoff /newroot\n', 1)
+    delta['init'] = (mode, init)
+    delta['bin/gscd-availability-stage'] = (0o100755, boot_helper('gscd-availability-stage'))
+    delta['bin/touch-services'] = (0o100755, boot_helper('touch-services'))
+    delta['bin/touch-resume-watch'] = (0o100755, boot_helper('touch-resume-watch'))
+    delta['bin/touch-calibration-boot'] = (0o100755, boot_helper('touch-calibration-boot'))
+    delta['bin/refresh-iptsd-input-nodes'] = (0o100755, boot_helper('refresh-iptsd-input-nodes'))
+    if diagnostics and early_storage:
+        delta['bin/log-hardware-discovery'] = (0o100755, boot_helper('log-hardware-discovery'))
+        require(init.count(b'for name in apex bootstrap-apex linkerconfig mnt tmp storage data_mirror; do')==1, 'Unknown hardware snapshot anchor')
+        init=init.replace(b'for name in apex bootstrap-apex linkerconfig mnt tmp storage data_mirror; do', b'/bin/log-hardware-discovery > /logs/hardware-discovery.txt 2>&1 || echo HARDWARE_SNAPSHOT_FAILED_NONFATAL\nfor name in apex bootstrap-apex linkerconfig mnt tmp storage data_mirror; do', 1)
+        delta['init']=(mode,init)
+    delta.update(early_hidl_bootstrap(before))
     from runtime_boot_policy import apply
     runtime_bodies = {name: body for name, (_,body) in before.items()}
     for name in apply(runtime_bodies):
         if name not in delta:
             delta[name] = (before[name][0],runtime_bodies[name])
-    for name in ['init','bin/prepare-native-ssd']:
+    for name in ['init','bin/prepare-native-ssd', *early_storage]:
         subprocess.run(['sh','-n'],input=delta[name][1],check=True)
     rest, offset, insert, identity = base, 0, len(base), False
     while rest:
@@ -204,6 +296,144 @@ def storage_payload(base, parts, super_header_sha256=None, anonymous=False):
                     'delta_sha256':None, 'content_hash_validation':False,
                     'unit_uuid_and_capacity_gate_removed':True}, member
 
+
+
+def typec_early_handoff(init, early_storage, before):
+    require(b'spx_boot_handoff=1' in before['etc/spx-typec/spx-typec.ko'][1],
+            'Rebuild Type-C with early event / late routing handoff')
+    stage_mode, stage = early_storage['bin/spx-typec-stage']
+    for module in ('ucsi_surface_hid', 'spx-ucsi-transport'):
+        line = ('insmod /etc/spx-typec/'+module+'.ko\n').encode()
+        require(stage.count(line) == 1, 'Missing early Type-C module '+module)
+        stage = stage.replace(line, b'')
+    early_storage['bin/spx-typec-stage'] = (stage_mode, stage)
+    early = boot_helper('spx-typec-early')
+    early_storage['bin/spx-typec-early'] = (0o100755, early)
+    discovery = b'    . /bin/prepare-native-ssd\n'
+    require(init.count(discovery) == 1, 'Ambiguous storage preparation')
+    init = init.replace(discovery, b'    /bin/spx-typec-early >> /logs/spx-typec.txt 2>&1 || fail typec-early\n', 1)
+    rescue = b'if [ "$rescue" = 1 ]; then\n    echo '
+    require(init.count(rescue) == 1, 'Unknown pre-mount/rescue boundary')
+    acquire = b'if [ "$ssd" = 1 ]; then\n    . /bin/prepare-native-ssd\nfi\n'
+    init = init.replace(rescue, acquire+rescue, 1)
+    late = b'echo 1 > /sys/bus/platform/devices/surface-typec/events_enabled 2>> /logs/spx-typec.txt || echo SPX_TYPEC_EVENTS_FAILED\n'
+    require(init.count(late) == 1, 'Unknown late firmware enable')
+    init = init.replace(late, b'echo 1 > /sys/bus/platform/devices/surface-typec/routing_ready 2>> /logs/spx-typec.txt || fail typec-routing\n', 1)
+    # Preserve early handoff evidence rather than truncating it at the late stage.
+    init = init.replace(b'/bin/spx-typec-stage > /logs/spx-typec.txt 2>&1 || echo SPX_TYPEC_STAGE_FAILED',
+                        b'/bin/spx-typec-stage >> /logs/spx-typec.txt 2>&1 || fail typec-storage-protection')
+    return init
+
+
+def optimize_boot_init(init):
+    # Called only after Type-C early handoff has been rendered.
+    duplicate = b'hid_multitouch surface_aggregator surface_aggregator_registry surface_aggregator_hub surface_hid_core surface_hid'
+    require(init.count(duplicate) == 1, 'Unknown common-module load group')
+    init = init.replace(duplicate, b'hid_multitouch surface_hid', 1)
+    cache = b'rm -f /lib/modules/"$(uname -r)"/modules.dep.bb\n'
+    require(init.count(cache) == 1, 'Unknown module-cache initialization')
+    init = init.replace(cache, b'', 1)
+    early = b'# All physical image boots use runtime layout discovery, not lab media identity.\n'
+    require(init.count(early) == 1, 'Unknown earliest module load boundary')
+    init = init.replace(early, b'# Invalidate the inherited cache before the first modprobe, not after it.\n'+cache+early, 1)
+    no_op = b'if grep -qw "sq2.el2=1" /proc/cmdline; then\n el2-terminal-autostart > /logs/el2-terminal-autostart.txt 2>&1 &\nfi\n'
+    require(init.count(no_op) == 1, 'Unknown EL2 autostart caller')
+    init = init.replace(no_op, b'# Default EL2 has no Terminal UI task; explicit lab mode retains it.\ncase " $boot_cmdline " in *" sq2.el2=experimental "*)\n el2-terminal-autostart > /logs/el2-terminal-autostart.txt 2>&1 &\n;; esac\n', 1)
+    flag_lines = [(b"grep -q 'sq2.native=smoke' /proc/cmdline && smoke=1", b'case " $boot_cmdline " in *" sq2.native=smoke "*) smoke=1;; esac'),
+                  (b"grep -q 'sq2.native=ssd' /proc/cmdline && ssd=1", b'case " $boot_cmdline " in *" sq2.native=ssd "*|*" sq2.native=ssd-smoke "*) ssd=1;; esac'),
+                  (b"grep -q 'sq2.native=ssd-smoke' /proc/cmdline && ssd_smoke=1", b'case " $boot_cmdline " in *" sq2.native=ssd-smoke "*) ssd_smoke=1;; esac'),
+                  (b"grep -q 'sq2.rescue=1' /proc/cmdline && rescue=1", b'case " $boot_cmdline " in *" sq2.rescue=1 "*) rescue=1;; esac'),
+                  (b"grep -q 'sq2.debug=1' /proc/cmdline && debug=1", b'case " $boot_cmdline " in *" sq2.debug=1 "*) debug=1;; esac')]
+    require(init.count(b'smoke=0\n') == 2, 'Unknown boot flag declarations')
+    init = init.replace(b'smoke=0\n', b'read -r boot_cmdline < /proc/cmdline\nsmoke=0\n', 1)
+    for old,new in flag_lines:
+        require(init.count(old) == 1, 'Unknown boot flag parser')
+        init = init.replace(old,new,1)
+    return init
+
+
+def optional_boot_failures(init):
+    old=b'/bin/spx-typec-stage >> /logs/spx-typec.txt 2>&1 || fail typec-storage-protection\n'
+    new=b'typec_routing_allowed=0\nif /bin/spx-typec-stage >> /logs/spx-typec.txt 2>&1; then\n    typec_routing_allowed=1\nelse\n    echo TYPEC_OPTIONAL_ROUTING_SKIPPED_STORAGE_MASK_NOT_READY\nfi\n'
+    require(init.count(old)==1,'Unknown Type-C protection stage')
+    init=init.replace(old,new,1)
+    old=b'echo 1 > /sys/bus/platform/devices/surface-typec/routing_ready 2>> /logs/spx-typec.txt || fail typec-routing\n'
+    new=b'if [ "$typec_routing_allowed" = 1 ]; then\n    echo 1 > /sys/bus/platform/devices/surface-typec/routing_ready 2>> /logs/spx-typec.txt || echo TYPEC_OPTIONAL_ROUTING_FAILED_NONFATAL\nfi\n'
+    require(init.count(old)==1,'Unknown late optional routing stage')
+    init=init.replace(old,new,1)
+    for name,marker in [('el2-terminal-stage','EL2_TERMINAL_STAGE_FAILED_NONFATAL'),('radio-stage','RADIO_STAGE_FAILED_NONFATAL')]:
+        old=('|| fail '+name+'\n').encode()
+        require(init.count(old)==1,'Unknown optional stage '+name)
+        init=init.replace(old,('|| echo '+marker+'\n').encode(),1)
+    return init
+
+
+def install_boot_source(tree, shim):
+    """Wrap the Linux EFI stub on the already selected volume; keep EL1/EL2."""
+    tool = module('boot_source_pe', 'prepare-sq2-618-debug-entry.py')
+    data = regular(shim).read_bytes()
+    # New objcopy-generated PE files have a valid nonzero checksum; the
+    # legacy constant-patch validator requires zero only for old launchers.
+    require(data[:2] == b'MZ', 'Boot-source EFI DOS header missing')
+    pe = struct.unpack_from('<I', data, 60)[0]
+    require(data[pe:pe+4] == b'PE\0\0' and struct.unpack_from('<H', data, pe+4)[0] == 0xaa64,
+            'Boot-source EFI must be AArch64 PE')
+    require(struct.unpack_from('<H', data, pe+24)[0] == 0x20b and
+            struct.unpack_from('<II', data, pe+24+112+32) == (0,0), 'Unsigned PE32+ shim required')
+    for directory in ('SQ2Nat', 'SQ2Res'):
+        root = tree/'EFI'/directory
+        for launcher in ('el1launch.efi', 'el2launch.efi'):
+            path = root/launcher
+            if launcher == 'el1launch.efi' and not path.exists():
+                continue
+            source = path.read_bytes();tool.unsigned_arm64_pe(source)
+            old = ('\\EFI\\'+directory+'\\Image').encode('utf-16le')+b'\0\0'
+            new = ('\\EFI\\'+directory+'\\Boot').encode('utf-16le')+b'\0\0'
+            require(source.count(old)==1, 'Unknown kernel entry '+str(path))
+            changed = source.replace(old,new+b'\0'*(len(old)-len(new)),1)
+            require(len(source)==len(changed), 'EFI layout changed')
+            path.write_bytes(changed)
+        (root/'Boot').write_bytes(data)
+
+
+
+def early_hidl_bootstrap(before):
+    """The real HIDL manager starts before default-namespace APEX activation."""
+    import tempfile
+    names = ('etc/sq2-hidl/hwservicemanager',
+             'etc/sq2-qti-system/hidl-support/hwservicemanager')
+    available = [n for n in names if n in before]
+    if not available:
+        return {}
+    bodies = {before[n][1] for n in available}
+    require(len(bodies)==1, 'Conflicting early HIDL managers')
+    payload = bodies.pop()
+    expected = '/system/bin/bootstrap/linker64'
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td)/'hwservicemanager'
+        path.write_bytes(payload)
+        interp = subprocess.check_output(['patchelf','--print-interpreter',path], text=True).strip()
+        require(interp in (expected, '/system/bin/linker64'), 'Unexpected HIDL interpreter')
+        if interp != expected:
+            subprocess.run(['patchelf','--page-size','16384','--set-interpreter',expected,path],check=True)
+        require(subprocess.check_output(['patchelf','--print-interpreter',path],text=True).strip()==expected,
+                'Bootstrap HIDL interpreter not installed')
+        result = path.read_bytes()
+    return {n: (before[n][0], result) for n in available}
+
+def hardware_panel_profiles(tree):
+    import libfdt
+    for directory in ('SQ2Nat','SQ2Res'):
+        for name,model in [('android-sq1.dtb','SQ1'),('android-el2.dtb','SQ2')]:
+            path=tree/'EFI'/directory/name
+            if name == 'android-sq1.dtb' and not path.exists():
+                continue
+            f=libfdt.Fdt(path.read_bytes());f.resize(len(f.as_bytearray())+2048)
+            f.setprop(f.path_offset('/'),'model',('Microsoft Surface Pro X ('+model+')\0').encode())
+            f.setprop(f.path_offset('/chosen'),'microsoft,boot-profile',(model+'\0').encode())
+            panel=f.path_offset('/soc@0/display-subsystem@ae00000/displayport-controller@ae9a000/aux-bus/panel')
+            f.setprop(panel,'microsoft,preserve-boot-panel-power',b'')
+            f.pack();path.write_bytes(bytes(f.as_bytearray()))
 
 def shared_model_router(router, directory):
     """Retain SMBIOS detection; point both supported models at this shared payload.
@@ -311,11 +541,14 @@ def build(args):
         with source.open('rb') as f:
             f.seek(original_map['super']['offset']+offset+1024)
             require(f.read(4)==b'\xe2\xe1\xf5\xe0','Expected EROFS logical partition: '+name)
-    payload,audit,member=storage_payload(base,parts,anonymous=getattr(args, "anonymous", False))
+    payload,audit,member=storage_payload(base,parts,anonymous=getattr(args, "anonymous", False),
+                                         diagnostics=getattr(args, "boot_diagnostics", False))
     (output/'storage-layout-delta.cpio.gz').write_bytes(member)
     tree=work/'esp-tree';(tree/'EFI/BOOT').mkdir(parents=True,exist_ok=resume);(tree/'EFI/SQ2Nat').mkdir(exist_ok=resume)
     for name in selected['files']:
         shutil.copyfile(bundle/name,tree/'EFI/SQ2Nat'/name)
+    require(b'microsoft,preserve-boot-panel-power\0' in (tree/'EFI/SQ2Nat/Image').read_bytes(),
+            'Portable boot requires a kernel built with the panel power handoff patch')
     (tree/'EFI/SQ2Nat/initramfs.cpio.gz').write_bytes(payload)
     shutil.copyfile(bootloader,tree/'EFI/BOOT/BOOTAA64.EFI')
     shutil.copytree(input_root/'kernel-6.18/firmware',tree/'firmware',dirs_exist_ok=resume)
@@ -328,12 +561,19 @@ def build(args):
     graphics_argument = module('disk_graphics','prepare-sq2-618-debug-entry.py').graphics_option(
         (bundle/'kernel-options.txt').read_text())
     rescue_efi(tree,bundle,graphics_argument)
+    from full_image_boot_source import build as build_boot_source
+    shim = build_boot_source(work/'boot-source', getattr(args, 'boot_gnu_efi', None) or
+                             input_root/'kernel-6.18/gnu-efi', run)
     if template:
         # Shared binaries do not mean identical frequency/power policies. Keep
         # the original universal template's SQ1 selection; SQ2 remains intact.
         from full_image_models import from_template
         from_template(tree,source,original_map['SQ2PROBE']['offset'],
                       (bundle/'start.efi').read_bytes(),work,graphics_argument)
+    # Model-profile installation creates el1launch.efi from el2launch.efi.
+    # Wrap only after both model-specific launchers have been finalized.
+    install_boot_source(tree, Path(shim))
+    hardware_panel_profiles(tree)
     (tree/'SPX-IMAGE.txt').write_text('SPX_IMAGE_FORMAT=1\nSPX_RELEASE=6.18-'+selected['baseline']+'-single-user\nPRIVATE_IDENTITY_PRESENT='+('0' if getattr(args, 'anonymous', False) else '1')+'\n')
     (tree/'EFI/BOOT/grub.cfg').write_text("set timeout=5\nset default=spx-single-user\n\nmenuentry 'Surface Pro X Linux 6.18 - single user 0' --id spx-single-user {\n chainloader /EFI/SQ2Nat/start.efi\n}\nmenuentry 'Surface Pro X Linux 6.18 - rescue (no Android data mount)' --id spx-rescue {\n chainloader /EFI/SQ2Res/start.efi\n}\nmenuentry 'Power off' { halt }\n")
     esp_only = bool(getattr(args, 'esp_only', False))

@@ -224,6 +224,8 @@ python3 scripts/hybrid_bootstrap.py --imported private/dependency-import \
 
 Linux 主机要求 Ubuntu 24.04 x86_64 / Python 3.12、python3-venv、Git、patch、GCC/G++/make、aarch64-linux-gnu 工具链、ninja、pkg-config、flex/bison、glslang-tools、JDK、设备树/ELF/EROFS 工具；Python 构建依赖 wheels 由 Windows 包提供，Mesa 阶段不联网安装。
 
+通用启动载荷另外使用 `patchelf`。Windows 准备脚本会收集 `spx-boot-gnu-efi.bundle`；Linux checkout 后将 `sources/spx-boot-gnu-efi` 作为 `build.py`（或 `hybrid_bootstrap.py --stage assemble`）的 `--boot-gnu-efi` 参数，或置于私有输入的 `kernel-6.18/gnu-efi`。它与 SLPI 固件加载器使用的 `qebspil-gnu-efi` 是不同修订，不要替换后者。
+
 独立 Mesa 验证：
 
 ```sh

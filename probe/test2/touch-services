@@ -1,56 +1,67 @@
 #!/bin/busybox sh
-# Keep the supported Surface Pro X SPI device open during input enumeration.
+# Discover the actual IPTS protocol/type, not a CPU name or VID:PID allowlist.
 if [ -r /run/iptsd.pid ] && kill -0 "$(cat /run/iptsd.pid)" 2>/dev/null; then exit 0; fi
 mkdir -p /logs
-[ -c /dev/uinput ] || { echo 'UINPUT_MISSING: kernel must enable INPUT_MISC and INPUT_UINPUT' > /logs/touch-service.txt; exit 1; }
+[ -c /dev/uinput ] || { echo UINPUT_MISSING > /logs/touch-service.txt; exit 1; }
+rm -f /run/iptsd-hidraw /run/iptsd-hid-id /run/iptsd-ready
+: > /logs/touch-service.txt
+selected=
+selected_sys=
+selected_ready=
 for d in /sys/class/hidraw/hidraw*; do
-    [ -r "$d/device/uevent" ] || continue
-    grep -qEi '^HID_ID=001C:0000045E:0000(0C21|0996)$' "$d/device/uevent" || continue
-    node=/dev/$(basename "$d")
-    echo "Checking SQ2 touchscreen $node" > /logs/touch-service.txt
-    cp "$d/device/report_descriptor" /logs/touch-report-descriptor.bin 2>/dev/null
-    # This SPI-HID driver returns from open before its asynchronous reset has
-    # set ready. Keep an independent descriptor open so check-device's close
-    # cannot power the device down again before the daemon starts.
-    exec 3<> "$node" || exit 1
-    ready=/sys/bus/spi/devices/spi0.0/ready
-    for i in $(seq 1 12); do
-        [ "$(cat "$ready" 2>/dev/null)" = ready ] && break
-        echo "Waiting for SPI ready ($i/12)" >> /logs/touch-service.txt
-        sleep 1
+    [ -r "$d/device/report_descriptor" ] || continue
+    node=/dev/${d##*/}
+    exec 3<> "$node" || continue
+    # SPI controller numbering is not stable. Use this HID device's ancestry.
+    ancestor=$(readlink -f "$d/device")
+    ready=
+    while [ -n "$ancestor" ] && [ "$ancestor" != / ]; do
+        if [ -r "$ancestor/ready" ]; then ready=$ancestor/ready;break;fi
+        ancestor=${ancestor%/*}
     done
-    if [ "$(cat "$ready" 2>/dev/null)" != ready ]; then
-        echo 'SPI_READY_TIMEOUT: IPTSd not started; inspect transport-state.txt' >> /logs/touch-service.txt
-        exit 3
-    fi
-    echo 'SPI_READY before feature query' >> /logs/touch-service.txt
-    timeout 15 iptsd-check-device "$node" >> /logs/touch-service.txt 2>&1
-    checked=$?; echo "check-device exit=$checked" >> /logs/touch-service.txt
-    if [ "$checked" -ne 0 ]; then
-        # A mode transition can leave a stale SPI feature response. Let it
-        # settle and retry once while the independent HID descriptor is open.
-        sleep 2
-        timeout 15 iptsd-check-device "$node" >> /logs/touch-service.txt 2>&1
-        checked=$?; echo "check-device retry exit=$checked" >> /logs/touch-service.txt
-    fi
-    [ "$checked" -eq 0 ] || exit 1
-    # Parent retains FD 3 during startup; the daemon owns its own HID handle.
-    if [ -f /run/iptsd-calibrated.conf ]; then
-        export IPTSD_CONFIG_FILE=/run/iptsd-calibrated.conf
-    fi
-    iptsd "$node" 3>&- > /logs/iptsd.txt 2>&1 &
-    echo "$!" > /run/iptsd.pid
-    sleep 4
-    if kill -0 "$(cat /run/iptsd.pid)" 2>/dev/null; then
-        echo "IPTSD_RUNNING device=$node" >> /logs/touch-service.txt
-        if [ -x /proc/1/root/system/bin/getprop ] && command -v refresh-iptsd-input-nodes >/dev/null 2>&1; then
-            refresh-iptsd-input-nodes >> /logs/touch-service.txt 2>&1 || return_code=$?
-            [ "${return_code:-0}" -eq 0 ] || exit "$return_code"
+    if [ -n "$ready" ]; then
+        for i in $(seq 1 12); do
+            [ "$(cat "$ready" 2>/dev/null)" = ready ] && break
+            sleep 1
+        done
+        if [ "$(cat "$ready" 2>/dev/null)" != ready ]; then
+            echo "TRANSPORT_NOT_READY=$node" >> /logs/touch-service.txt
+            exec 3>&-;continue
         fi
-        exit 0
     fi
-    echo 'IPTSD_EXITED: inspect iptsd.txt' >> /logs/touch-service.txt
-    exit 1
+    timeout 15 iptsd-check-device -t touchscreen "$node" >> /logs/touch-service.txt 2>&1
+    checked=$?
+    if [ "$checked" -ne 0 ] && [ -n "$ready" ]; then
+        sleep 2
+        timeout 15 iptsd-check-device -t touchscreen "$node" >> /logs/touch-service.txt 2>&1
+        checked=$?
+    fi
+    if [ "$checked" -ne 0 ]; then exec 3>&-;continue;fi
+    if [ -n "$selected" ]; then
+        echo "MULTIPLE_IPTS_TOUCHSCREENS: $selected $node; no arbitrary selection" >> /logs/touch-service.txt
+        exit 2
+    fi
+    selected=$node;selected_sys=$d;selected_ready=$ready
+    # Keep the accepted transport powered until the daemon owns its handle.
+    exec 4<&3
+    exec 3>&-
 done
-echo 'SQ2 SPI HID device not found' > /logs/touch-service.txt
-exit 2
+[ -n "$selected" ] || { echo NO_SUPPORTED_IPTS_TOUCHSCREEN >> /logs/touch-service.txt; exit 2; }
+hid=$(sed -n 's/^HID_ID=//p' "$selected_sys/device/uevent")
+rest=${hid#*:};vendor=${rest%%:*};product=${rest#*:}
+case "$vendor$product" in ''|*[!0-9a-fA-F]*) exit 1;; esac
+printf '%04X:%04X\n' "$((0x$vendor))" "$((0x$product))" > /run/iptsd-hid-id
+[ -z "$selected_ready" ] || printf '%s\n' "$selected_ready" > /run/iptsd-ready
+printf '%s\n' "$selected" > /run/iptsd-hidraw
+cp "$selected_sys/device/report_descriptor" /logs/touch-report-descriptor.bin
+echo "SELECTED=$selected HID_ID=$hid" >> /logs/touch-service.txt
+if [ -f /run/iptsd-calibrated.conf ]; then export IPTSD_CONFIG_FILE=/run/iptsd-calibrated.conf;fi
+iptsd "$selected" 4>&- > /logs/iptsd.txt 2>&1 &
+echo "$!" > /run/iptsd.pid
+sleep 4
+if ! kill -0 "$(cat /run/iptsd.pid)" 2>/dev/null; then echo IPTSD_EXITED >> /logs/touch-service.txt;exit 1;fi
+echo "IPTSD_RUNNING device=$selected" >> /logs/touch-service.txt
+if [ -x /proc/1/root/system/bin/getprop ] && command -v refresh-iptsd-input-nodes >/dev/null 2>&1; then
+    refresh-iptsd-input-nodes >> /logs/touch-service.txt 2>&1 || exit $?
+fi
+exit 0

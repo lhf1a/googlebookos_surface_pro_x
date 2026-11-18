@@ -834,6 +834,8 @@ def build(args, compile_kernel):
     if args.build_dir is not None:
         args.build_dir = args.build_dir.resolve()
     private=args.private_root.resolve()
+    from full_image_boot_source import check_inputs
+    boot_gnu_efi = check_inputs(getattr(args, 'boot_gnu_efi', None) or private/'kernel-6.18/gnu-efi')
     # Fail before the expensive kernel build if the reusable Android input is
     # missing; the image never silently falls back to the long donor wakelock.
     regular(private/'suspend/desktop-services.jar')
@@ -876,6 +878,9 @@ def build(args, compile_kernel):
         extracted.mkdir(parents=True)
         with tarfile.open(source/recipe['archive']) as archive:
             archive.extractall(extracted,filter='data')
+        for patch in sorted((ROOT/'patches/spx-portable-boot').glob('*.patch')):
+            run(['patch','--batch','--forward','--fuzz=0','-p1','-i',patch],
+                cwd=extracted/'kernel')
         # The preserved archive predates the accepted QTI HWC kernel contract.
         # A source build must carry those adaptations, not replace the runtime
         # with an older MSM merely because its release string matches.
@@ -989,7 +994,8 @@ def build(args, compile_kernel):
         single_user_initramfs=bundle/'initramfs.cpio.gz',
         expected_single_user_sha256=None,
         size_gib=None,jobs=args.jobs,build_only=False,resume_build=False,kernel_mode=args.kernel_mode,
-        graphics_argument=graphics_token,esp_only=esp_only,anonymous=True)
+        graphics_argument=graphics_token,esp_only=esp_only,anonymous=True,
+        boot_gnu_efi=boot_gnu_efi,boot_diagnostics=getattr(args,'boot_diagnostics',False))
     if sensors is not None:
         from full_image_sensors import FIRMWARE
         disk_args.additional_firmware={FIRMWARE.removeprefix('firmware/'): sensors[FIRMWARE]}

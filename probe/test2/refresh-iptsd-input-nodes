@@ -4,11 +4,13 @@
 # Only supported IPTSd virtual touch/stylus nodes; no physical input is removed.
 set -eu
 export PATH=/bin:/sbin
+[ -s /run/iptsd-hid-id ] || exit 0
+read -r hid_id < /run/iptsd-hid-id
 stage=$(mktemp -d /dev/sq2-input-refresh.XXXXXX)
 trap 'rmdir "$stage" 2>/dev/null || true' EXIT
 for d in /sys/class/input/event*; do
     name=$(cat "$d/device/name")
-    case "$name" in 'IPTSD Virtual Touchscreen 045E:0C21'|'IPTSD Virtual Stylus 045E:0C21'|'IPTSD Virtual Touchscreen 045E:0996'|'IPTSD Virtual Stylus 045E:0996') ;; *) continue;; esac
+    case "$name" in "IPTSD Virtual Touchscreen $hid_id"|"IPTSD Virtual Stylus $hid_id") ;; *) continue;; esac
     event=$(basename "$d")
     numbers=$(cat "$d/dev")
     major=${numbers%:*}

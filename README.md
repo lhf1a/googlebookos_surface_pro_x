@@ -58,7 +58,7 @@ flowchart LR
 
 | Device | SoC | Boot Mode & DTB | Build Profile | Current Scope |
 | :--- | :--- | :--- | :---: | :--- |
-| **Surface Pro X (Gen 1)** | Microsoft SQ1 (8cx Gen 1) | **EL2** (`el1launch.efi` [`el2launch` clone] + `android-sq1.dtb`) | `hybrid` (shared) | Shared EL2 image target; LTE & Touch enumeration verified on earlier builds, full `6.18` parity pending |
+| **Surface Pro X (Gen 1)** | Microsoft SQ1 (8cx Gen 1) | **EL2** (`el1launch.efi` [`el2launch` clone] + `android-sq1.dtb`) | `hybrid` (shared) | One USB SSD cold boot reached the Android desktop with the updated boot payload; full `6.18` parity pending |
 | **Surface Pro X (Gen 2)** | Microsoft SQ2 (8cx Gen 2) | **EL2** (`el2launch.efi` + `android-el2.dtb`) | `hybrid` (shared) | Primary verification platform across `6.3.8` and `6.18.60` builds |
 
 ### Feature Support Matrix
@@ -73,7 +73,7 @@ Legend: `✅ Available` · `🟡 Partially Available` · `❌ Unavailable`
 | **Android Desktop & Graphics (GLES / Vulkan)** | 🟡 Partially Available | `2880×1920@60` desktop, Mesa 26.2.4 Freedreno/Turnip, Dual-Vulkan router, and QTI HWC/SDM are usable on SQ2. *Caveats: graphics compatibility remains limited; A680.1 Wild Life GMEM root cause is open and `6.18` GMEM Wild Life re-testing is pending.* |
 | **Video Decode (Venus / OMX)** | 🟡 Partially Available | Hardware H.264, HEVC (Main8), VP8, and VP9 (profile 0) via QTI OMX + Venus (`c2.sq2.*.experimental` for C2 trials). *Caveats: internal display is SDR-only (HDR disabled, Main10 filtered in default OMX), AV1 is unsupported by firmware, MPEG-1/2 are incomplete.* |
 | **Camera (Front / Rear)** | 🟡 Partially Available | OV5693 (front) and OV13858 (rear) via V4L2/CAMSS + software ISP + Camera2 HAL; native JPEG and 480p/720p/1080p H.264/AAC verified on SQ2. *Caveats: low software-ISP fps at 720p/1080p, rear AF/exposure tuning pending, occasional CCI open/switch timeout, SQ1 untested.* |
-| **Touchscreen & Stylus** | 🟡 Partially Available | IPTSd `3.1.1` supports both SQ2 (`045E:0C21`) and SQ1 (`045E:0996`). Bilingual calibration wizard (`probe/touch-calibration/`) included; learned noise profiles stay device-bound. *Caveats: end-to-end touch latency, post-sleep `0996` recovery, and Surface Pen pressure/tilt drawing are untested.* |
+| **Touchscreen & Stylus** | 🟡 Partially Available | IPTSd `3.1.1` selects supported touchscreens by HID/IPTS capabilities, not by SQ1/SQ2 model. The bilingual wizard keeps calibration profiles local to the board, panel and touch controller. *Caveats: end-to-end touch latency, post-sleep `0996` recovery, and Surface Pen pressure/tilt drawing are untested.* |
 | **Sensors (Auto-Brightness / Rotation)** | 🟡 Partially Available | TCS3430 ALS + SLPI PAS12 (`qcslpi8180.mbn`, `qebspilaa64.efi`, `hexagonrpcd`) + `sensors.spx.so` SubHal + rotation overlay. Verified on SQ2 (across reboot); *SQ1 verification and post-long-sleep recovery are pending.* |
 | **Suspend (`s2idle`) & Power** | 🟡 Partially Available | SQ2 `6.18.60` Venus `s2idle` handshake + `desktop-services.jar` AC wakelock patch (`1000 ms`) verified once (`59.2s` sleep). *Caveats: `timerfd` early wakeups and freezer aborts remain, long-run battery/wattage curves and SQ1 suspend are untested.* |
 | **LTE Mobile Data** | 🟡 Partially Available | Dynamic EFI SCM/GPT FSG cache (`EFI/SPX/LTE/<uuid>.bin`, max 2 MiB) + IPA4.1/QMI/RMNET IPv4 data demonstrated on SQ1 and SQ2. *Caveats: fresh dual-device universal image acceptance, IPv6, and roaming are pending.* |
@@ -88,7 +88,9 @@ Legend: `✅ Available` · `🟡 Partially Available` · `❌ Unavailable`
 ## Capability Support and Performance Benchmarks
 
 > [!NOTE]
-> **Baseline Metadata**: All hardware metrics below were measured on **Surface Pro X SQ2** across pre-collapse `6.18.60-sq2-android1` (Hybrid, sensors, camera, OMX, `s2idle`) and `6.3.8-sq2-android1` (Wild Life, CPU/GPU OPP) test builds unless noted otherwise. The **`2026-11-16` universal hybrid disk image** (`surface-pro-x-6.18-hybrid-generic.img`) has passed host packaging and integrity verification only; real-device boot and **SQ1** parity benchmarks are still pending.
+> **Baseline Metadata**: All hardware metrics below were measured on **Surface Pro X SQ2** across pre-collapse `6.18.60-sq2-android1` (Hybrid, sensors, camera, OMX, `s2idle`) and `6.3.8-sq2-android1` (Wild Life, CPU/GPU OPP) test builds unless noted otherwise. The unmodified **`2026-11-16` universal hybrid disk image** (`surface-pro-x-6.18-hybrid-generic.img`) has passed host checks only. The SQ1 observation below used an updated boot payload, not that unmodified artifact.
+
+**SQ1 USB first boot — updated boot payload.** One cold boot from an external USB SSD reached the Android desktop after the `hwservicemanager` bootstrap linker fix. Logs confirm 2880×1920 eDP mode detection, first-run setup completion, and successful `userdata` expansion. The tester observed more than six minutes from power-on to desktop; this is a single observation, not a required wait or a boot-time benchmark. The saved snapshots do not identify the main delay; repeat-boot timing and broader hardware coverage remain unverified.
 
 ### Verified Quantitative Metrics
 
@@ -112,7 +114,7 @@ Legend: `✅ Available` · `🟡 Partially Available` · `❌ Unavailable`
 
 - **Verified qualitatively**: On SQ2, Android desktop (`2880×1920@60`), Bilibili `720p/1080p/4K` switching, Dual-Vulkan (`SQ2VkRouter` Turnip/QTI paths), Type Cover hotplug recovery, FAT32 USB drives, Wi-Fi (`ath10k_snoc`), Bluetooth ON/OFF state, and KernelSU Next + Zygisk Next work in testing. Native LTE IPv4 data has been demonstrated on both SQ1 and SQ2.
 - **Not yet benchmarked / open gaps**:
-  - **SQ1 hardware parity**: SQ1 sensors, `s2idle`, camera, sustained CPU/GPU (capped at `2995.2 / 661 MHz`), and `2026-11-16` universal image boot.
+  - **SQ1 hardware parity**: SQ1 sensors, `s2idle`, camera, sustained CPU/GPU (capped at `2995.2 / 661 MHz`), and boot of the unmodified `2026-11-16` universal image.
   - **Standard 3D & Web benchmarks**: No `glmark2`, `vkmark`, WebGL, or `6.18` GMEM Wild Life / game FPS-per-watt numbers.
   - **Audio / Input / Display gaps**: Speaker bass and stereo balance; Bilibili seek/switch audio skip/XRUN (`1×4096` HAL skip observed); BT A2DP/HFP audio; live BLE HID cursor/scroll events; Surface Pen drawing/pressure/tilt; end-to-end touch latency.
   - **Power & Long-Run**: Multi-cycle `s2idle` reliability (`timerfd` wakeups & freezer aborts remain), battery discharge curves, wattage telemetry, and `sq2-game-opt` FPS/power deltas.
@@ -187,6 +189,8 @@ python3 scripts/deploy-experimental-usb.py \
    - **`Surface Pro X Linux 6.18 - rescue (no Android data mount)`** (`spx-rescue`): Diagnostic fallback (`sq2.rescue=1`) via `/EFI/SQ2Res/start.efi` without mounting Android `userdata` or expanding partitions.
    - **`Power off`**: Powers down the device.
 4. **First Boot**: `surface-first-boot` automatically skips the Android OOBE wizard (`device_provisioned=1`, `user_setup_complete=1`) and launches HOME. The standalone bilingual **Touch Calibration Wizard** remains active on first boot to calibrate touchscreen noise thresholds for your panel and digitizer.
+
+   **Note:** On the first boot after flashing, it may take **up to 15 minutes** for the Android desktop to appear. Keep the device powered on and avoid forcing a restart during this time.
 
 ---
 

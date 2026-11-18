@@ -1,0 +1,14 @@
+#!/bin/busybox sh
+# Nonfatal scheduling only: no wait_for_prop, exec_start or framework gate.
+set -eu
+source=/newroot/system/etc/init/hw/init.rc
+target=/newroot/debug_ramdisk/storage-ready-init.rc
+[ "$(grep -c '^on zygote-start$' "$source")" = 1 ]
+awk '
+{ print }
+$0=="on zygote-start" {
+    print "    # Notify the asynchronous storage worker; never wait for it."
+    print "    write /debug_ramdisk/logs/storage-data-ready 1"
+}' "$source" > "$target"
+chmod 644 "$target"
+mount --bind "$target" "$source"

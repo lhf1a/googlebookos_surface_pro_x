@@ -14,6 +14,9 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 - `compile` 只构建内核组件；`verify`/`package` 只核验/复制历史固定 v21 包；`--esp-only` 只输出启动分区。三者都不是整机产品线。
 - 输出目录必须是全新目录，并位于 Linux 文件系统；不要在 NTFS/9p 上直接跑源码构建。
 - 依赖准备在 SQ1/SQ2 原 Windows 安装上执行，见 [DEPENDENCIES](DEPENDENCIES.md)。
+- 启动来源 EFI 从 GNU-EFI 源码构建。准备 [对应修订](https://github.com/ncroxon/gnu-efi/tree/aeee48d838d40e8ef787748d5dc066ea2fb99dbe) 到 `PRIVATE_ROOT/kernel-6.18/gnu-efi`，或传 `--boot-gnu-efi DIR`。Linux 主机需 `patchelf`、`make`、AArch64 GCC/binutils（支持 `efi-app-aarch64`）。
+- 如复用或指定预构建的内核，必须已包含 `patches/spx-portable-boot/` 的修复，并提供配套模块；旧内核不能仅靠同名版本号通过。启动 ESP 必须可写以记录本次启动来源。
+- 开启 `--boot-diagnostics` 才会将有界启动快照保留到启动盘 ESP；默认关闭，不持续采集日志。
 
 ## 2. 私有输入
 

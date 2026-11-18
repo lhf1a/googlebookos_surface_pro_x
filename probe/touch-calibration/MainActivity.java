@@ -280,7 +280,7 @@ public class MainActivity extends Activity {
       paint.setColor(Color.WHITE);paint.setTextSize(34);paint.setTextAlign(Paint.Align.CENTER);
       drawCue(c,"轻点黄色十字，然后抬手 | Tap yellow cross, then lift",w/2,h*.34f,paint);
       if(i<0){drawCue(c,"准备  | Ready in "+((test.start-now+999)/1000)+" 秒 |  s",w/2,h*.43f,paint);return;}if(i>=15)return;
-      boolean tap=!test.captured();String hint=tap?"请轻点十字 | Tap the cross":test.remaining(now)>0?String.format(Locale.ROOT,"已采集，%.1f秒后进入下一点\nCaptured; next in %.1f s",test.remaining(now)/1000.):"已满1秒，请完全抬手后进入下一点\n1 s elapsed. Lift fully to continue";
+      boolean tap=!test.captured();String hint=tap?"请轻点十字 | Tap the cross":test.remaining(now)>0?String.format(Locale.ROOT,"已采集，%1$.1f秒后进入下一点\nCaptured; next in %1$.1f s",test.remaining(now)/1000.):"已满1秒，请完全抬手后进入下一点\n1 s elapsed. Lift fully to continue";
       drawCue(c,(i+1)+" / 15  —  "+hint,w/2,h*.43f,paint);
       double[] t=test.targets[i];float x=(float)t[0]*(w-1),y=(float)t[1]*(h-1);paint.setColor(tap?Color.YELLOW:Color.GREEN);paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(4);c.drawCircle(x,y,32,paint);c.drawLine(x-44,y,x+44,y,paint);c.drawLine(x,y-44,x,y+44,paint);paint.setStyle(Paint.Style.FILL);
     }

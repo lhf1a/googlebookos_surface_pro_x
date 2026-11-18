@@ -71,4 +71,4 @@ sync
 mv "$marker.pending" "$marker"
 sync
 touch /run/spx-userdata-ready
-echo "USERDATA_GROWN device=$data sectors=$newsize; swap permitted after Android boot"
+echo "USERDATA_GROWN device=$data sectors=$newsize; swap permitted; desktop readiness not required"

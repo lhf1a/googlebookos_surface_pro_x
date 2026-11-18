@@ -58,7 +58,7 @@ flowchart LR
 
 | 设备型号 | SoC | 引导模式与设备树（DTB） | 构建配置 | 当前支持范围 |
 | :--- | :--- | :--- | :---: | :--- |
-| **Surface Pro X（一代）** | Microsoft SQ1（8cx Gen 1） | **EL2**（`el1launch.efi` [`el2launch` 副本] + `android-sq1.dtb`） | `hybrid`（共用） | 共用 EL2 镜像目标平台；早期构建已验证 LTE 与触控枚举，完整 `6.18` 对等验收待完成 |
+| **Surface Pro X（一代）** | Microsoft SQ1（8cx Gen 1） | **EL2**（`el1launch.efi` [`el2launch` 副本] + `android-sq1.dtb`） | `hybrid`（共用） | 更新后的载荷已完成一次外置 USB SSD 冷启动并进入桌面；完整 `6.18` 对等验收待完成 |
 | **Surface Pro X（二代）** | Microsoft SQ2（8cx Gen 2） | **EL2**（`el2launch.efi` + `android-el2.dtb`） | `hybrid`（共用） | `6.3.8` 与 `6.18.60` 阶段的主力验证平台 |
 
 ### 功能支持矩阵
@@ -73,7 +73,7 @@ flowchart LR
 | **Android 桌面与图形（GLES / Vulkan）** | 🟡 部分可用 | SQ2 上 `2880×1920@60` 桌面、Mesa 26.2.4 Freedreno/Turnip、双 Vulkan 路由器及 QTI HWC/SDM 均可正常使用。*限制：图形兼容性仍有限；A680.1 Wild Life GMEM 根因尚未定位，`6.18` 下开启硬件 GMEM 的 Wild Life 复测待完成。* |
 | **视频硬解（Venus / OMX）** | 🟡 部分可用 | 通过 QTI OMX + Venus 硬解支持 H.264、HEVC（Main8）、VP8 与 VP9（Profile 0），另有实验性 `c2.sq2.*.experimental` 供 C2 调试。*限制：内置屏幕仅支持 SDR（默认 OMX 已禁用 HDR 并过滤 Main10），固件不支持 AV1，MPEG-1/2 未完整集成。* |
 | **摄像头（前置 / 后置）** | 🟡 部分可用 | 通过 V4L2/CAMSS + 软件 ISP + Camera2 HAL 驱动 OV5693（前置）与 OV13858（后置）；SQ2 已验证原生 JPEG 拍照与 480p/720p/1080p H.264/AAC 录像。*限制：720p/1080p 下软件 ISP 帧率偏低，后置自动对焦与曝光待调优，偶发 CCI 打开/切换超时，SQ1 未测。* |
-| **触控屏与手写笔** | 🟡 部分可用 | IPTSd `3.1.1` 同时适配 SQ2（`045E:0C21`）与 SQ1（`045E:0996`）。内置双语触控校准向导（`probe/touch-calibration/`），学习得到的噪声基线按设备绑定。*限制：端到端触控延迟、`0996` 休眠唤醒恢复以及 Surface 触控笔压感/倾角绘图尚未测试。* |
+| **触控屏与手写笔** | 🟡 部分可用 | IPTSd `3.1.1` 按 HID/IPTS 能力识别兼容触控屏，不按 SQ1/SQ2 型号判定。双语向导按本机主板、实装面板和实际触控控制器保存校准。*限制：端到端触控延迟、`0996` 休眠唤醒恢复以及 Surface 触控笔压感/倾角绘图尚未测试。* |
 | **传感器（自动亮度 / 自动旋转）** | 🟡 部分可用 | TCS3430 环境光传感器 + SLPI PAS12（`qcslpi8180.mbn`、`qebspilaa64.efi`、`hexagonrpcd`）+ `sensors.spx.so` SubHal + 旋转配置覆盖层。已在 SQ2 验证（含重启保持）；*SQ1 验证及长时休眠后恢复待测。* |
 | **休眠（`s2idle`）与电源管理** | 🟡 部分可用 | SQ2 `6.18.60` 已完成单次实机验证（Venus `s2idle` 握手 + `desktop-services.jar` 交流电持锁补丁 `1000 ms`，最长单次休眠 `59.2s`）。*限制：仍存在 `timerfd` 提前唤醒与进程冻结中止问题，长时续航/功耗曲线及 SQ1 休眠未测。* |
 | **LTE 移动数据** | 🟡 部分可用 | 动态 EFI SCM/GPT FSG 缓存（`EFI/SPX/LTE/<uuid>.bin`，上限 2 MiB）+ IPA4.1 / QMI / RMNET IPv4 数据连接已在 SQ1 与 SQ2 跑通。*限制：双机全新通用镜像验收、IPv6 与漫游尚未完成验证。* |
@@ -88,7 +88,9 @@ flowchart LR
 ## 功能能力与性能基准
 
 > [!NOTE]
-> **基线元数据**：除非另有说明，以下实测数据均采集自 **Surface Pro X SQ2** 在整合前里程碑构建上的表现，分别对应 `6.18.60-sq2-android1`（Hybrid 图形、传感器、摄像头、OMX、`s2idle`）与 `6.3.8-sq2-android1`（Wild Life、CPU/GPU OPP）测试版本。**`2026-11-16` 通用混合模式整盘镜像**（`surface-pro-x-6.18-hybrid-generic.img`）目前仅通过构建主机打包与完整性校验，实机启动与 **SQ1** 对等基准测试尚待开展。
+> **基线元数据**：除非另有说明，以下实测数据均采集自 **Surface Pro X SQ2** 在整合前里程碑构建上的表现，分别对应 `6.18.60-sq2-android1`（Hybrid 图形、传感器、摄像头、OMX、`s2idle`）与 `6.3.8-sq2-android1`（Wild Life、CPU/GPU OPP）测试版本。未经更新的 **`2026-11-16` 通用混合模式整盘镜像**（`surface-pro-x-6.18-hybrid-generic.img`）仍只有主机侧验证；下述 SQ1 实测使用的是更新后的启动载荷。
+
+**SQ1 USB 首次冷启动（更新后的启动载荷）。** 修复 `hwservicemanager` 的早期链接器后，单台 SQ1 从外置 USB SSD 成功进入 Android 桌面。日志确认内屏识别到 2880×1920、首次设置流程完成、`userdata` 扩容成功。本次从开机到桌面由测试者观察超过 6 分钟；这是单次结果，不是必需等待时长，也不是启动性能基准。现存快照不足以定位主要耗时，后续启动耗时与更广泛的硬件兼容性仍待验证。
 
 ### 已验证量化指标
 
@@ -112,7 +114,7 @@ flowchart LR
 
 - **定性已验证行为**：在 SQ2 上，Android 桌面（`2880×1920@60`）、Bilibili `720p/1080p/4K` 清晰度切换、双 Vulkan（`SQ2VkRouter` Turnip/QTI 双路径）、Type Cover 热插拔恢复、FAT32 U 盘挂载、Wi-Fi（`ath10k_snoc`）、蓝牙开关状态以及 KernelSU Next + Zygisk Next 均可在测试中正常运行。原生 LTE IPv4 数据连接已在 SQ1 与 SQ2 上实测跑通。
 - **尚未测试与待解决缺口**：
-  - **SQ1 硬件对等验证**：SQ1 的传感器、`s2idle`、摄像头、持续 CPU/GPU 负载（限制在 `2995.2 / 661 MHz`）以及 `2026-11-16` 通用镜像启动尚待实测。
+  - **SQ1 硬件对等验证**：SQ1 的传感器、`s2idle`、摄像头、持续 CPU/GPU 负载（限制在 `2995.2 / 661 MHz`）以及未经更新的 `2026-11-16` 通用镜像启动尚待实测。
   - **标准 3D 与 Web 基准**：缺少 `glmark2`、`vkmark`、WebGL 以及 `6.18` 硬件 GMEM 模式下的 Wild Life / 游戏帧率功耗比数据。
   - **音频 / 输入 / 显示缺口**：内置扬声器低频与左右声道平衡；Bilibili 拖放/切换清晰度时的音频跳帧或 XRUN（实测出现过 `1×4096` 帧 HAL 跳帧）；蓝牙 A2DP/HFP 音频；BLE HID 实际光标/滚轮事件；Surface 触控笔绘图/压感/倾角；端到端触控延迟。
   - **功耗与长时稳定性**：多轮连续 `s2idle` 可靠性（仍存在 `timerfd` 唤醒与冻结中止）、电池放电曲线、实时整机瓦数遥测以及 `sq2-game-opt` 开启前后的帧率/功耗对比。
@@ -187,6 +189,8 @@ python3 scripts/deploy-experimental-usb.py \
    - **`Surface Pro X Linux 6.18 - rescue (no Android data mount)`**（`spx-rescue`）：诊断救援模式（`sq2.rescue=1`），经由 `/EFI/SQ2Res/start.efi` 启动，不挂载 Android `userdata` 且不触发分区扩容。
    - **`Power off`**：关闭设备电源。
 4. **首次开机**：`surface-first-boot` 会自动跳过 Android 初始设置向导（`device_provisioned=1`、`user_setup_complete=1`）并直接进入桌面。独立的双语**触控校准向导（Touch Calibration Wizard）**会在首次启动时自动运行，为当前屏幕模组校准触控噪声阈值。
+
+   **注意：**刷写后首次启动到显示 Android 桌面最长可能需要 **15 分钟**。请保持设备供电，等待期间不要强制关机或重启。
 
 ---
 

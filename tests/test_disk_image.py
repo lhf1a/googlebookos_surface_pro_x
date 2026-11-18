@@ -60,7 +60,7 @@ class DiskImage(unittest.TestCase):
         self.assertEqual(after['lib/firmware/keep'],before['lib/firmware/keep'])
         self.assertNotIn(b'SQ2TEST',after['init'][1])
         self.assertIn(b'/dev/block/by-name/super',after['init'][1])
-        self.assertIn(d.HOOK+d.ANCHOR,after['init'][1])
+        self.assertLess(after['init'][1].index(d.HOOK),after['init'][1].index(d.ANCHOR))
         self.assertEqual(set(c.entries(gzip.decompress(delta))),set(audit['changed']))
 
     def test_rescue_efi_patches_only_unsigned_path_and_options(self):
@@ -84,36 +84,50 @@ class DiskImage(unittest.TestCase):
 
     def test_runtime_discovery_accepts_other_indices_identities_expansion_and_rejects_ambiguity(self):
         source=(ROOT/'probe/test2/prepare-image-ssd').read_text()
-        for mode in ['normal','expanded','ambiguous','bad_super','small_super']:
+        for mode in ['normal','expanded','stale_clone','ambiguous','missing_token','bad_super','small_super']:
             with self.subTest(mode=mode),tempfile.TemporaryDirectory() as td:
                 root=Path(td)
                 (root/'etc').mkdir();(root/'dev').mkdir();(root/'sys/class/block').mkdir(parents=True)
                 (root/'esp-tree/EFI/SQ2Nat').mkdir(parents=True)
                 (root/'esp-tree/EFI/SQ2Nat/start.efi').touch()
                 (root/'esp-tree/SPX-IMAGE.txt').write_text('SPX_IMAGE_FORMAT=1\n')
+                (root/'esp-tree/SPX-BOOT-SOURCE.txt').write_text('a'*64+'\n')
+                (root/'cmdline').write_text(('console=tty0' if mode=='missing_token' else 'spx.boot_token='+'a'*64)+'\n')
+                (root/'clone-esp').mkdir()
+                (root/'clone-esp/SPX-IMAGE.txt').write_text('SPX_IMAGE_FORMAT=1\n')
+                (root/'clone-esp/SPX-BOOT-SOURCE.txt').write_text('b'*64+'\n')
+                (root/'clone-esp/EFI/SQ2Nat').mkdir(parents=True)
+                (root/'clone-esp/EFI/SQ2Nat/start.efi').touch()
                 expected=hashlib.sha256(bytes(d.M)).hexdigest()
                 (root/'etc/sq2-ssd-layout').write_text('SSD_SUPER_HEADER_SHA256='+('0'*64 if mode=='bad_super' else expected)+'\n')
                 (root/'etc/sq2-ssd-partitions').write_text('userdata 1 32\nsuper 3 2048\nSQ2PROBE 6 1024\n')
                 def partition(parent,name,number,sectors):
                     k=parent+'p'+str(number);p=root/'devices'/parent/k;p.mkdir(parents=True)
-                    (p/'partition').write_text(str(number));(p/'size').write_text(str(sectors));(p/'uevent').write_text('PARTNAME='+name+'\n')
+                    (p/'partition').write_text(str(number)+'\n');(p/'size').write_text(str(sectors)+'\n');(p/'uevent').write_text('PARTNAME='+name+'\n')
                     (root/'sys/class/block'/k).symlink_to(p)
                     (root/'dev'/k).write_bytes(bytes(d.M) if name=='super' else b'fixture')
                 partition('nvme7n2','userdata',11,64 if mode=='expanded' else 32)
                 partition('nvme7n2','super',8,1024 if mode=='small_super' else 2048)
                 partition('nvme7n2','SQ2PROBE',5,1024)
-                if mode=='ambiguous':partition('nvme8n3','SQ2PROBE',17,1024)
-                code=source
+                if mode in ('ambiguous','stale_clone'):partition('nvme8n3','SQ2PROBE',17,1024)
+                code=source.replace('/proc/cmdline',str(root/'cmdline'))
                 for old in ['/etc/sq2-ssd','/sys/class/block','/dev/','/run/','/media/']:
                     code=code.replace(old,str(root)+old)
                 stub='''fail() { echo "FAIL:$1" >&2; exit 1; }
 blkid() { echo 'TYPE="vfat" UUID="unrelated-random-UUID"'; }
-mount() { for last; do :; done; mkdir -p "$last"; cp -a "$FIXTURE/esp-tree/." "$last/"; }
+mount() {
+    case "$5:$TEST_MODE" in
+        *nvme8n3*:stale_clone) src=clone-esp ;;
+        *) src=esp-tree ;;
+    esac
+    for last; do :; done
+    mkdir -p "$last"; cp -a "$FIXTURE/$src/." "$last/"
+}
 umount() { return 0; }
 sleep() { return 0; }
 '''
-                p=subprocess.run(['sh','-c',stub+code],env=dict(os.environ,FIXTURE=td),text=True,capture_output=True)
-                self.assertEqual(p.returncode==0,mode in ['normal','expanded','bad_super'],p.stderr)
+                p=subprocess.run(['sh','-c',stub+code],env=dict(os.environ,FIXTURE=td,TEST_MODE=mode),text=True,capture_output=True)
+                self.assertEqual(p.returncode==0,mode in ['normal','expanded','stale_clone','bad_super'],p.stderr)
                 if p.returncode==0:
                     self.assertEqual((root/'run/sq2-ssd-device').read_text().strip(),str(root/'dev/nvme7n2'))
                 else:self.assertIn('FAIL:',p.stderr)

@@ -17,15 +17,24 @@ for n in $(seq 1 60); do
     grep -q SQ2_COVER_AND_POWER_INPUT_READY /logs/power-input-boot.txt 2>/dev/null && break
     sleep 1
 done
-sensor=
-for d in /sys/class/hidraw/hidraw*; do
-    if grep -qE '^HID_ID=001C:0000045E:0000(0C21|0996)$' "$d/device/uevent"; then sensor=$d; break; fi
+# Use the daemon's protocol-validated device, not a model/VID:PID list.
+[ -r /run/iptsd-hidraw ] || { echo CALIBRATION_NO_ACTIVE_IPTS; exit 0; }
+read -r touch_node < /run/iptsd-hidraw
+sensor=/sys/class/hidraw/${touch_node##*/}
+[ -r "$sensor/device/report_descriptor" ] || exit 0
+display=
+for connector in /sys/class/drm/card*-eDP-*; do
+    [ -r "$connector/status" ] || continue
+    [ "$(cat "$connector/status")" = connected ] || continue
+    [ "$(wc -c < "$connector/edid")" -ge 128 ] || continue
+    [ -z "$display" ] || { echo CALIBRATION_AMBIGUOUS_INTERNAL_DISPLAY; exit 0; }
+    display=$connector
 done
-[ -n "$sensor" ] || { echo CALIBRATION_UNSUPPORTED_SENSOR; exit 0; }
-# Keep this result tied to this board, display EDID and HID descriptor; not Android's fixed lab serial.
+[ -n "$display" ] || { echo CALIBRATION_NO_VALID_PANEL_EDID; exit 0; }
 [ -s /sys/class/dmi/id/product_uuid ] || exit 1
-[ "$(wc -c < /sys/class/drm/card0-eDP-1/edid)" -ge 128 ] || exit 1
-device=$({ cat /sys/class/dmi/id/product_uuid; cat /sys/class/drm/card0-eDP-1/edid; cat "$sensor/device/report_descriptor"; } | sha256sum | cut -d ' ' -f1)
+# Stronger local key: changed controller/panel does not reuse previous tuning.
+# Old profile files are retained, never deleted or copied to another machine.
+device=$({ cat /sys/class/dmi/id/product_uuid; cat "$display/edid"; grep '^HID_ID=' "$sensor/device/uevent"; cat "$sensor/device/report_descriptor"; } | sha256sum | cut -d ' ' -f1)
 store=/proc/1/root/data/vendor/sq2-touch-calibration
 mkdir -p "$store"; chmod 700 "$store"
 saved=$store/$device.profile
@@ -105,14 +114,14 @@ case "$user" in ''|*[!0-9]*) exit 1;; esac
 pkg=org.surface.touchcalibration.unified
 apk=/etc/sq2-touch-calibration/wizard.apk
 installed=$(android pm path "$pkg" 2>/dev/null | sed -n 's/^package://p' | head -n 1)
-if [ -n "$installed" ] && [ -f "/proc/1/root$installed" ] &&
-   [ "$(sha256sum "/proc/1/root$installed" | cut -d ' ' -f1)" = "$(sha256sum "$apk" | cut -d ' ' -f1)" ]; then
-    # A helper restart must not close an identical APK mid-calibration.
-    echo 'Success (identical installed APK retained)' > /logs/touch-calibration-install.txt
+if [ -e /run/sq2-calibration-apk-installed ] && [ -n "$installed" ] && [ -f "/proc/1/root$installed" ]; then
+    # Install once each boot; helper restarts must not close calibration.
+    echo 'Success (installed this boot)' > /logs/touch-calibration-install.txt
 else
     cp "$apk" /proc/1/root/data/local/tmp/sq2-touch-calibration.apk
     ANDROID_COMMAND_TIMEOUT=120 android pm install -r --user "$user" /data/local/tmp/sq2-touch-calibration.apk > /logs/touch-calibration-install.txt
     rm -f /proc/1/root/data/local/tmp/sq2-touch-calibration.apk
+    touch /run/sq2-calibration-apk-installed
 fi
 # Preserve the old signed package/data for rollback; expose only the merged UI.
 android pm disable-user --user "$user" org.surface.touchcalibration > /logs/touch-calibration-legacy-hidden.txt 2>&1 || true

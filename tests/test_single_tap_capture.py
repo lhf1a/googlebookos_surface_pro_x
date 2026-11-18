@@ -1,8 +1,41 @@
 """The 15-point sampler must advance from actual capture, never idle time."""
 from pathlib import Path
-import subprocess,tempfile,unittest
+import re,subprocess,tempfile,unittest
 R=Path(__file__).resolve().parents[1]
 class TapPacing(unittest.TestCase):
+ def test_bilingual_countdown_for_all_15_captures(self):
+  source=(R/'probe/touch-calibration/MainActivity.java').read_text(encoding='utf-8')
+  statement=re.search(r'boolean tap=!test\.captured\(\);String hint=[^\r\n]+',source)
+  self.assertIsNotNone(statement)
+  code=r"""
+import java.util.Locale;
+import org.surface.touchcalibration.SingleTapCapture;
+public class Countdown {
+ static void ok(boolean b){if(!b)throw new AssertionError();}
+ static String hint(SingleTapCapture test,long now){__HINT__ return hint;}
+ public static void main(String[] args){
+  SingleTapCapture test=new SingleTapCapture(3000,42);long now=3000;
+  for(int i=0;i<15;i++){
+   ok(test.trial(now)==i&&hint(test,now).equals("请轻点十字 | Tap the cross"));
+   test.event(0,1,now);test.event(1,1,now+10);
+   for(long elapsed:new long[]{0,500,999}){
+    String seconds=String.format(Locale.ROOT,"%.1f",(1000-elapsed)/1000.);
+    ok(hint(test,now+10+elapsed).equals("已采集，"+seconds+"秒后进入下一点\nCaptured; next in "+seconds+" s"));
+   }
+   ok(hint(test,now+1010).contains("Lift fully"));
+   test.tick(now+1009);ok(test.completed()==i);
+   now+=1010;test.tick(now);ok(test.completed()==i+1);
+  }
+  ok(test.finished(now)&&test.clean()&&test.total()==15);
+  System.out.println("15/15 captures; 45 bilingual countdown samples passed");
+ }
+}
+""".replace('__HINT__',statement.group())
+  with tempfile.TemporaryDirectory() as td:
+   d=Path(td);(d/'Countdown.java').write_text(code,encoding='utf-8')
+   subprocess.run(['javac','-encoding','UTF-8','-d',str(d),str(R/'probe/touch-calibration/SingleTapCapture.java'),str(d/'Countdown.java')],check=True)
+   subprocess.run(['java','-cp',str(d),'Countdown'],check=True)
+
  def test_wait_capture_one_second_release_and_duplicates(self):
   code=r"""
 import org.surface.touchcalibration.SingleTapCapture;

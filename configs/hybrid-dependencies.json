@@ -883,6 +883,11 @@
       "commit": "1fee8ab566ce91b9cbab9f2c85db96566d79063b"
     },
     {
+      "id": "spx-boot-gnu-efi",
+      "url": "https://github.com/ncroxon/gnu-efi.git",
+      "commit": "aeee48d838d40e8ef787748d5dc066ea2fb99dbe"
+    },
+    {
       "id": "qebspil-dtc",
       "url": "https://git.kernel.org/pub/scm/utils/dtc/dtc.git",
       "commit": "2d10aa2afe35527728db30b35ec491ecb6959e5c"

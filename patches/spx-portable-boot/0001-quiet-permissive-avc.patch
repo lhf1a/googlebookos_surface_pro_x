@@ -1,0 +1,36 @@
+--- a/security/selinux/avc.c
++++ b/security/selinux/avc.c
+@@ -25,6 +25,7 @@
+ #include <net/af_unix.h>
+ #include <linux/ip.h>
+ #include <linux/audit.h>
++#include <linux/moduleparam.h>
+ #include <linux/ipv6.h>
+ #include <net/ipv6.h>
+ #include "avc.h"
+@@ -33,6 +34,14 @@
+ 
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/avc.h>
++
++/* Only suppress records that would be printed as permissive=1. Access
++ * decisions, enforcing denials, auditallow and other audit classes are intact.
++ * Root can re-enable policy debugging without replacing the image.
++ */
++static bool permissive_audit;
++module_param_named(permissive_audit, permissive_audit, bool, 0600);
++MODULE_PARM_DESC(permissive_audit, "Log permissive SELinux AVC denials (default off)");
+ 
+ #define AVC_CACHE_SLOTS			512
+ #define AVC_DEF_CACHE_THRESHOLD		512
+@@ -759,6 +768,10 @@
+ 
+ 	if (WARN_ON(!tclass || tclass >= ARRAY_SIZE(secclass_map)))
+ 		return -EINVAL;
++
++	/* Matches avc_audit_post_callback(): denied && result == 0. */
++	if (denied && !result && !READ_ONCE(permissive_audit))
++		return 0;
+ 
+ 	if (!a) {
+ 		a = &stack_data;

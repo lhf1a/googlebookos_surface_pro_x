@@ -314,6 +314,7 @@ def main():
     p.add_argument('--reuse-components', type=Path, help='completed components manifest for assemble stage')
     p.add_argument('--private-root', type=Path, help='explicit prepared runtime/EFI/firmware inputs for assemble stage')
     p.add_argument('--template', type=Path, help='optional explicit disk template for assemble stage')
+    p.add_argument('--boot-gnu-efi', type=Path, help='boot handoff GNU-EFI source (from the spx-boot-gnu-efi checkout)')
     p.add_argument('--ndk', type=Path, help='explicit NDK for isolated glue-stage testing')
     p.add_argument('--sources-root', type=Path, help='explicit source checkout root for isolated platform test')
     p.add_argument('--toolchains-root', type=Path, help='explicit toolchains root for isolated platform test')
@@ -331,6 +332,7 @@ def main():
             command = [sys.executable,ROOT/'scripts/build.py','--reuse-components',a.reuse_components,
                        '--private-root',a.private_root,'--output',b.work/'image','--jobs',a.jobs]
             if a.template: command += ['--template',a.template]
+            if a.boot_gnu_efi: command += ['--boot-gnu-efi',a.boot_gnu_efi]
             b.run('assemble',command)
             b.report['image_built'] = True
             b.report['image_manifest'] = str(b.work/'image/FULL-IMAGE.json')
