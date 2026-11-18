@@ -16,6 +16,8 @@ typedef uint64_t u64;
 #include <stdbool.h>
 #define V4L2_EVENT_SRC_CH_RESOLUTION 1
 #define INST_START 5
+#define INST_UNINIT 2
+#define INST_INIT 3
 #define HFI_BUFFERFLAG_CODECCONFIG 0x80U
 #define HFI_FLUSH_ALL 4
 #define HFI_FLUSH_INPUT 1
@@ -28,13 +30,15 @@ struct vb2_buffer {int bytes;};
 struct vb2_v4l2_buffer {struct vb2_buffer vb2_buf;u32 flags;};
 struct core {int sq2;unsigned long sys_error;};
 enum venus_dec_state {
+ VENUS_DEC_STATE_DEINIT = 0,
  VENUS_DEC_STATE_STOPPED = 3,
  VENUS_DEC_STATE_DRAIN = 5,
  VENUS_DEC_STATE_DECODING = 6,
  VENUS_DEC_STATE_DRC = 7,
 };
 struct venus_ts_metadata {int used; u64 ts_ns;};
-struct venus_inst {struct core *core;int lock,ctx_q_lock,state,session_error;u32 sq2_omx_flush_flags;int sq2_omx_flush_output_pending;void *m2m_ctx;unsigned int streamon_cap;enum venus_dec_state codec_state;int drain_active;struct venus_ts_metadata tss[4];};
+struct venus_inst {struct core *core;int lock,ctx_q_lock,state,session_error;u32 sq2_omx_flush_flags;int sq2_omx_flush_output_pending;void *m2m_ctx;unsigned int streamon_cap,streamon_out;enum venus_dec_state codec_state;int drain_active;struct venus_ts_metadata tss[4];};
+static int software_owned;
 static int inject_sequence,inject_session_error,inject_core_error,fail_call,inject_drc;
 static int sq2_omx_flush_output(struct venus_inst *);
 static int error,acknowledged,calls,returned,last_type,in_count,out_count,cleared,dpb_queued,dpb_error;
@@ -60,17 +64,17 @@ static int hfi_session_flush(struct venus_inst *i,u32 type,int block){
  acknowledged=1;return 0;
 }
 static struct vb2_v4l2_buffer *v4l2_m2m_src_buf_remove(void *p){
- (void)p;assert(acknowledged);if(in_count){in_count--;return &in_buf;}return 0;
+ (void)p;assert(acknowledged || software_owned);if(in_count){in_count--;return &in_buf;}return 0;
 }
 static struct vb2_v4l2_buffer *v4l2_m2m_dst_buf_remove(void *p){
- (void)p;assert(acknowledged);if(out_count){out_count--;return &out_buf;}return 0;
+ (void)p;assert(acknowledged || software_owned);if(out_count){out_count--;return &out_buf;}return 0;
 }
 static void vb2_set_plane_payload(struct vb2_buffer *b,int plane,int bytes){assert(!plane);b->bytes=bytes;}
 static void v4l2_m2m_buf_done(struct vb2_v4l2_buffer *b,int state){
- assert(acknowledged && !b->vb2_buf.bytes && !b->flags && state==VB2_BUF_STATE_DONE);returned++;
+ assert((acknowledged || software_owned) && !b->vb2_buf.bytes && !b->flags && state==VB2_BUF_STATE_DONE);returned++;
 }
 static void *v4l2_m2m_get_dst_vq(void *p){return p;}
-static void vb2_clear_last_buffer_dequeued(void *p){(void)p;assert(acknowledged);cleared++;}
+static void vb2_clear_last_buffer_dequeued(void *p){(void)p;assert(acknowledged || software_owned);cleared++;}
 #include "HEADER"
 #include "FLAGS_HEADER"
 int main(void){
@@ -83,12 +87,27 @@ int main(void){
  assert(p[0]==1 && p[1]==0x51324d31 && p[2]==15 && p[3]==240 && p[4]==320 && p[5]==0x20002 && p[6]==1 && p[7]==9);
  h.sq2_sequence_fields=1;sq2_omx_sequence(&event,&h);memcpy(p,event.u.data,sizeof(p));assert(p[2]==1);
  struct core core={1,0};struct venus_inst i={.core=&core,.state=INST_START};
+ // Prewarm: no HFI START or input submission; only software-owned VB2 buffers.
+ software_owned=1;
+ for(int state=INST_UNINIT;state<=INST_INIT;state++) {
+  i.state=state;in_count=out_count=1;int count=calls,done=returned;
+  assert(!sq2_omx_flush(&i,3) && calls==count && returned==done+2 && !in_count && !out_count);
+ }
+ i.state=INST_INIT;in_count=out_count=1;int pre_calls=calls,pre_done=returned;
+ i.session_error=1;assert(sq2_omx_flush(&i,3)==-EIO && returned==pre_done);
+ i.session_error=0;core.sys_error=1;assert(sq2_omx_flush(&i,3)==-EIO && returned==pre_done);core.sys_error=0;
+ i.streamon_out=1;assert(sq2_omx_flush(&i,3)==-EIO && returned==pre_done);i.streamon_out=0;
+ i.streamon_cap=1;assert(sq2_omx_flush(&i,3)==-EIO && returned==pre_done);i.streamon_cap=0;
+ i.codec_state=VENUS_DEC_STATE_STOPPED;assert(sq2_omx_flush(&i,3)==-EIO && returned==pre_done);
+ assert(calls==pre_calls && !i.lock && !i.ctx_q_lock);
+ i.codec_state=VENUS_DEC_STATE_DEINIT;i.state=INST_START;software_owned=0;
+ returned=cleared=0;
  in_count=out_count=1;error=-ETIMEDOUT;
  assert(sq2_omx_flush(&i,3)==-ETIMEDOUT && !acknowledged && !returned && !cleared && !i.lock);
  error=0;assert(!sq2_omx_flush(&i,3) && returned==2 && last_type==HFI_FLUSH_ALL);
  int before=calls;assert(sq2_omx_flush(&i,0)==-EINVAL && calls==before);
  core.sys_error=1;assert(sq2_omx_flush(&i,1)==-EIO && calls==before);
- core.sys_error=0;i.state=2;assert(sq2_omx_flush(&i,1)==-EIO && calls==before);
+ core.sys_error=0;i.state=4;assert(sq2_omx_flush(&i,1)==-EIO && calls==before);
  i.state=INST_START;in_count=1;out_count=1;
  assert(!sq2_omx_flush(&i,1) && last_type==HFI_FLUSH_INPUT && !in_count && out_count==1);
  assert(!sq2_omx_flush(&i,2) && last_type==HFI_FLUSH_OUTPUT && !out_count);

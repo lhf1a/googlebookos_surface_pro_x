@@ -37,8 +37,23 @@ static int sq2_omx_flush(struct venus_inst *inst, u32 flags)
  /* Queue ioctls stay serialized while the IRQ callback takes the state lock. */
  mutex_lock(&inst->ctx_q_lock);
  mutex_lock(&inst->lock);
- if (inst->state != INST_START || inst->session_error ||
+ if (inst->session_error ||
      test_bit(0, &inst->core->sys_error)) {
+  ret = -EIO;
+  goto out;
+ }
+ /* Before OUTPUT's first queued buffer starts HFI, CAPTURE buffers can
+  * already be queued by OMX prewarming. They are exclusively software-owned;
+  * return them through VB2 without sending FLUSH to a non-started firmware
+  * session. Never use this path after a stream has actually started. */
+ if ((inst->state == INST_UNINIT || inst->state == INST_INIT) &&
+     inst->codec_state == VENUS_DEC_STATE_DEINIT &&
+     !inst->streamon_out && !inst->streamon_cap) {
+  output_flushed = false;
+  ret = 0;
+  goto release_software;
+ }
+ if (inst->state != INST_START) {
   ret = -EIO;
   goto out;
  }
@@ -64,6 +79,8 @@ static int sq2_omx_flush(struct venus_inst *inst, u32 flags)
   ret = -EIO;
   goto out;
  }
+release_software:
+ /* Before start no buffer was submitted; otherwise HFI acknowledged FLUSH. */
  /* The real firmware has returned ownership. Only buffers still on the
   * software queue remain here; completed buffers were removed by callbacks. */
  if (flags & 1)

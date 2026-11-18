@@ -37,6 +37,14 @@ static int kernel(int fd, unsigned long request, void *arg) {
         frame_rate=p->parm.capture.timeperframe.denominator;
         return fail_control?q2_error(fail_control):0;
     }
+    if(request==VIDIOC_S_EXT_CTRLS) {
+        struct v4l2_ext_controls *c=arg;
+        assert(c->ctrl_class==V4L2_CTRL_CLASS_MPEG && c->count==2);
+        assert(c->controls[0].id==V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY && c->controls[0].value==0);
+        assert(c->controls[1].id==V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY_ENABLE);
+        last_value=c->controls[1].value;
+        return fail_control?q2_error(fail_control):0;
+    }
     if(request==VIDIOC_S_CTRL) { last_value=((struct v4l2_control *)arg)->value;return 0; }
     if(request==VIDIOC_QUERYCTRL) {
         struct v4l2_queryctrl *q=arg;q->minimum=0;q->maximum=19;q->default_value=18;return 0;
@@ -73,6 +81,22 @@ int main(void) {
     rate.value=1964116;assert(!q2_dispatch(&s,VIDIOC_S_CTRL,&rate)&&frame_rate==1964116);
     rate.value=0;assert(q2_dispatch(&s,VIDIOC_S_CTRL,&rate)==-1&&errno==EINVAL);
     rate.value=30*65536;fail_control=EIO;assert(q2_dispatch(&s,VIDIOC_S_CTRL,&rate)==-1&&errno==EIO);fail_control=0;
+    struct v4l2_control latency={.id=Q2_CTRL_BASE+56,.value=1};
+    int control_calls=calls;
+    assert(!q2_dispatch(&s,VIDIOC_S_CTRL,&latency) && calls==control_calls+1 && last_request==VIDIOC_S_EXT_CTRLS && last_value==1);
+    assert(latency.id==Q2_CTRL_BASE+56 && latency.value==1);
+    latency.value=0;assert(!q2_dispatch(&s,VIDIOC_S_CTRL,&latency) && last_value==0);
+    control_calls=calls;
+    latency.value=-1;assert(q2_dispatch(&s,VIDIOC_S_CTRL,&latency)==-1 && errno==EINVAL && calls==control_calls);
+    latency.value=2;assert(q2_dispatch(&s,VIDIOC_S_CTRL,&latency)==-1 && errno==EINVAL && calls==control_calls);
+    latency.value=1;s.streaming=1;
+    assert(q2_dispatch(&s,VIDIOC_S_CTRL,&latency)==-1 && errno==EBUSY && calls==control_calls);
+    s.streaming=0;s.queued=1;
+    assert(q2_dispatch(&s,VIDIOC_S_CTRL,&latency)==-1 && errno==EBUSY && calls==control_calls);
+    s.queued=0;fail_control=EIO;
+    assert(q2_dispatch(&s,VIDIOC_S_CTRL,&latency)==-1 && errno==EIO && calls==control_calls+1);
+    fail_control=0;
+    puts("LOW_LATENCY: real zero-delay controls, enable/disable, invalid values, active session and backend failures verified");
     struct v4l2_queryctrl profile={.id=V4L2_CID_MPEG_VIDEO_H264_PROFILE};
     assert(!q2_dispatch(&s,VIDIOC_QUERYCTRL,&profile)&&profile.flags==2);
     profile_menu_error=EIO;assert(q2_dispatch(&s,VIDIOC_QUERYCTRL,&profile)==-1&&errno==EIO);profile_menu_error=0;

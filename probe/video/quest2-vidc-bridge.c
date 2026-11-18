@@ -176,6 +176,23 @@ static int q2_level(int value, int to_native) {
 }
 static int q2_private_control(uint32_t id) { return id >= Q2_CTRL_BASE && id < Q2_CTRL_BASE + 0x1000; }
 static int q2_ctrl(struct q2_session *s, unsigned long request, struct v4l2_control *ctrl) {
+    if (ctrl->id == Q2_CTRL_BASE + 56 && request == VIDIOC_S_CTRL) {
+        /* Downstream LOWLATENCY_MODE: use Venus' real no-reorder path.
+         * Its zero display delay selects HFI_OUTPUT_ORDER_DECODE at start;
+         * disabling it preserves the normal firmware display-order default.
+         * Do not pretend a running session accepted a deferred property. */
+        if (ctrl->value != 0 && ctrl->value != 1) return q2_error(EINVAL);
+        if (s->streaming || s->queued) return q2_error(EBUSY);
+        struct v4l2_ext_control controls[] = {
+            { .id = V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY, .value = 0 },
+            { .id = V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY_ENABLE, .value = ctrl->value },
+        };
+        struct v4l2_ext_controls native = {
+            .ctrl_class = V4L2_CTRL_CLASS_MPEG,
+            .count = sizeof(controls) / sizeof(controls[0]), .controls = controls,
+        };
+        return s->backend(s->fd, VIDIOC_S_EXT_CTRLS, &native);
+    }
     if (ctrl->id == 0x00992077U && request == VIDIOC_S_CTRL) {
         /* Downstream FRAME_RATE is Q16 fps; upstream Venus takes time/frame. */
         if (ctrl->value <= 0) return q2_error(EINVAL);
