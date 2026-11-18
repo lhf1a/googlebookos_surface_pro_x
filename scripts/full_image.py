@@ -734,6 +734,9 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
     for name, body in (runtime_replacements or {}).items():
         require(name in bodies, 'Unknown runtime replacement: '+name)
         bodies[name] = body
+    # Apply after component reuse too; keep input metadata and credentials
+    # separate, and never inherit the old 4096-frame playback cadence.
+    module('primary_audio', 'prepare-sq2-primary-audio.py').install(bodies)
     graphics_report = None
     if graphics == 'mesa':
         graphics_report = mesa_runtime(records, bodies)

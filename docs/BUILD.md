@@ -6,6 +6,15 @@ Mesa GLES/Turnip + QTI gralloc/mapper5/HWC + 原生 OMX。历史 6.3.8 模板、
 
 ## 1. 入口
 
+内置音频默认在运行库替换（含组件复用）之后应用
+`prepare-sq2-primary-audio.py`：48 kHz PRIMARY 使用 10 ms 框架写入，
+物理播放代理保留至少 5760 帧缓冲请求。输入为准备好的麦克风修正版
+donor HAL，重复复用已修复版本不重复打补丁；未知输入在构建时明确报错。
+这是构建适配，不增加启动时身份或内容哈希准入。
+SQ2 的 NTE、鸣潮和视频已经完整重启与用户实听确认；
+不代表 SQ1、所有 USB 设备或长期休眠功耗均已复测。
+完整边界见 [内置扬声器](SPEAKER-LOUDNESS.md)。
+
 ```sh
 python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUTPUT
 ```
