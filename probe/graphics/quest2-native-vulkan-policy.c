@@ -45,6 +45,13 @@ struct Device {
     PFN_vkGetDeviceProcAddr gdpa;
     PFN_vkDestroyDevice destroy;
     PFN_vkAllocateMemory allocate;
+    PFN_vkCreateImage orig_CreateImage;
+    PFN_vkBindImageMemory orig_BindImageMemory;
+    PFN_vkBindImageMemory2 orig_BindImageMemory2;
+    PFN_vkBindImageMemory2KHR orig_BindImageMemory2KHR;
+    PFN_vkGetMemoryAndroidHardwareBufferANDROID orig_GetMemoryAndroidHardwareBufferANDROID;
+    PFN_vkGetAndroidHardwareBufferPropertiesANDROID orig_GetAndroidHardwareBufferPropertiesANDROID;
+    PFN_vkGetMemoryFdKHR orig_GetMemoryFdKHR;
     uint32_t cached_types, memory_flags[VK_MAX_MEMORY_TYPES];
 };
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -255,6 +262,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL wrapped_create_device(VkPhysicalDevice phy
 #define DP(field, type, name) saved.field = (type)saved.gdpa(value, name)
         DP(destroy, PFN_vkDestroyDevice, "vkDestroyDevice");
         DP(allocate, PFN_vkAllocateMemory, "vkAllocateMemory");
+        DP(orig_CreateImage, PFN_vkCreateImage, "vkCreateImage");
+        DP(orig_BindImageMemory, PFN_vkBindImageMemory, "vkBindImageMemory");
+        DP(orig_BindImageMemory2, PFN_vkBindImageMemory2, "vkBindImageMemory2");
+        DP(orig_BindImageMemory2KHR, PFN_vkBindImageMemory2KHR, "vkBindImageMemory2KHR");
+        DP(orig_GetMemoryAndroidHardwareBufferANDROID, PFN_vkGetMemoryAndroidHardwareBufferANDROID, "vkGetMemoryAndroidHardwareBufferANDROID");
+        DP(orig_GetAndroidHardwareBufferPropertiesANDROID, PFN_vkGetAndroidHardwareBufferPropertiesANDROID, "vkGetAndroidHardwareBufferPropertiesANDROID");
+        DP(orig_GetMemoryFdKHR, PFN_vkGetMemoryFdKHR, "vkGetMemoryFdKHR");
 #undef DP
 #ifdef SQ2_VK_CACHED_MEMORY
         PFN_vkGetPhysicalDeviceMemoryProperties query=
@@ -311,13 +325,88 @@ static VKAPI_ATTR VkResult VKAPI_CALL wrapped_allocate(VkDevice device,
         .memory_flags=info->memoryTypeIndex<32?saved.memory_flags[info->memoryTypeIndex]:0,
         .serial=atomic_fetch_add(&serial,1)};
     struct Sq2VulkanMemoryScope previous=sq2_native_vulkan_memory_scope(scope);
+    /* Only the dedicated, device-local buffer path has a specific owner.
+     * Unknown chains, ordinary pooled allocations, images (including WSI),
+     * external handles and host-visible memory stay under the donor policy. */
+    const VkBaseInStructure *chain=info->pNext;
+    int dedicated_local=0;
+    if(!allocator && !external && chain && !chain->pNext &&
+       chain->sType==VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO &&
+       scope.memory_flags==VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT){
+        const VkMemoryDedicatedAllocateInfo *d=(const void *)chain;
+        dedicated_local=d->buffer!=VK_NULL_HANDLE && d->image==VK_NULL_HANDLE;
+    }
+    uint64_t saved_private=sq2_native_vulkan_dedicated_scope(dedicated_local?info->allocationSize:0);
+    /* External allocation, host access, unknown chains and dedicated images
+     * keep the original backing even in exclude mode; no flag retry on export. */
+    int preserve=allocator || external || scope.memory_flags!=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT ||
+                 (chain && !dedicated_local);
+    if(preserve)sq2_native_vulkan_share_guard(1);
     VkResult result=saved.allocate(device,info,allocator,out);
+    if(preserve)sq2_native_vulkan_share_guard(0);
+    sq2_native_vulkan_dedicated_scope(saved_private);
     sq2_native_vulkan_memory_scope(previous);
     if(getenv("SQ2_VULKAN_MEMORY_TRACE"))
         fprintf(stderr,"QTI_VULKAN_ALLOC serial=%llu type=%u properties=%x cached_scope=%u external=%u bytes=%llu result=%d\n",
                 (unsigned long long)scope.serial,scope.memory_type,scope.memory_flags,scope.enabled,external,
                 (unsigned long long)info->allocationSize,result);
     return result;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL shared_CreateImage(VkDevice device,const VkImageCreateInfo *info, const VkAllocationCallbacks *alloc, VkImage *out) {
+    struct Device saved;
+    if(!device_copy(device,&saved)||!saved.orig_CreateImage)return VK_ERROR_INITIALIZATION_FAILED;
+    sq2_native_vulkan_share_guard(1);
+    VkResult rc=saved.orig_CreateImage(device,info,alloc,out);
+    sq2_native_vulkan_share_guard(0);
+    return rc;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL shared_BindImageMemory(VkDevice device,VkImage image, VkDeviceMemory memory, VkDeviceSize offset) {
+    struct Device saved;
+    if(!device_copy(device,&saved)||!saved.orig_BindImageMemory)return VK_ERROR_INITIALIZATION_FAILED;
+    sq2_native_vulkan_share_guard(1);
+    VkResult rc=saved.orig_BindImageMemory(device,image,memory,offset);
+    sq2_native_vulkan_share_guard(0);
+    return rc;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL shared_BindImageMemory2(VkDevice device,uint32_t count, const VkBindImageMemoryInfo *info) {
+    struct Device saved;
+    if(!device_copy(device,&saved)||!saved.orig_BindImageMemory2)return VK_ERROR_INITIALIZATION_FAILED;
+    sq2_native_vulkan_share_guard(1);
+    VkResult rc=saved.orig_BindImageMemory2(device,count,info);
+    sq2_native_vulkan_share_guard(0);
+    return rc;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL shared_BindImageMemory2KHR(VkDevice device,uint32_t count, const VkBindImageMemoryInfo *info) {
+    struct Device saved;
+    if(!device_copy(device,&saved)||!saved.orig_BindImageMemory2KHR)return VK_ERROR_INITIALIZATION_FAILED;
+    sq2_native_vulkan_share_guard(1);
+    VkResult rc=saved.orig_BindImageMemory2KHR(device,count,info);
+    sq2_native_vulkan_share_guard(0);
+    return rc;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL shared_GetMemoryAndroidHardwareBufferANDROID(VkDevice device,const VkMemoryGetAndroidHardwareBufferInfoANDROID *info, struct AHardwareBuffer **out) {
+    struct Device saved;
+    if(!device_copy(device,&saved)||!saved.orig_GetMemoryAndroidHardwareBufferANDROID)return VK_ERROR_INITIALIZATION_FAILED;
+    sq2_native_vulkan_share_guard(1);
+    VkResult rc=saved.orig_GetMemoryAndroidHardwareBufferANDROID(device,info,out);
+    sq2_native_vulkan_share_guard(0);
+    return rc;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL shared_GetAndroidHardwareBufferPropertiesANDROID(VkDevice device,const struct AHardwareBuffer *buffer, VkAndroidHardwareBufferPropertiesANDROID *out) {
+    struct Device saved;
+    if(!device_copy(device,&saved)||!saved.orig_GetAndroidHardwareBufferPropertiesANDROID)return VK_ERROR_INITIALIZATION_FAILED;
+    sq2_native_vulkan_share_guard(1);
+    VkResult rc=saved.orig_GetAndroidHardwareBufferPropertiesANDROID(device,buffer,out);
+    sq2_native_vulkan_share_guard(0);
+    return rc;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL shared_GetMemoryFdKHR(VkDevice device,const VkMemoryGetFdInfoKHR *info, int *out) {
+    struct Device saved;
+    if(!device_copy(device,&saved)||!saved.orig_GetMemoryFdKHR)return VK_ERROR_INITIALIZATION_FAILED;
+    sq2_native_vulkan_share_guard(1);
+    VkResult rc=saved.orig_GetMemoryFdKHR(device,info,out);
+    sq2_native_vulkan_share_guard(0);
+    return rc;
 }
 /* Internal callback addresses must not be ELF-preempted by libvulkan's public
  * entrypoints. Exported functions below only forward to these static targets. */
@@ -342,6 +431,13 @@ static PFN_vkVoidFunction intercept(const char *name) {
 #endif
     MATCH("vkDestroyDevice", wrapped_destroy_device);
     MATCH("vkAllocateMemory", wrapped_allocate);
+    MATCH("vkCreateImage", shared_CreateImage);
+    MATCH("vkBindImageMemory", shared_BindImageMemory);
+    MATCH("vkBindImageMemory2", shared_BindImageMemory2);
+    MATCH("vkBindImageMemory2KHR", shared_BindImageMemory2KHR);
+    MATCH("vkGetMemoryAndroidHardwareBufferANDROID", shared_GetMemoryAndroidHardwareBufferANDROID);
+    MATCH("vkGetAndroidHardwareBufferPropertiesANDROID", shared_GetAndroidHardwareBufferPropertiesANDROID);
+    MATCH("vkGetMemoryFdKHR", shared_GetMemoryFdKHR);
 #undef MATCH
     return NULL;
 }

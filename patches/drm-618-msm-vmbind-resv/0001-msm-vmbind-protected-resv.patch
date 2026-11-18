@@ -1,0 +1,109 @@
+From: ChromebookOS port maintainers
+Subject: [EXPERIMENTAL] drm/msm: protect VM_BIND GPUVM lists with VM reservation
+
+Only user-managed VM_BIND VMs use protected iteration. Keep every object
+lock and fence reservation. Final submit references use allocation-free,
+uninterruptible wound/wait locking; keep the VM reservation object alive
+through final put and unlock. Managed/legacy behavior remains unchanged.
+Not enabled in the default product patch sequence.
+
+diff --git a/drivers/gpu/drm/msm/msm_gem_vma.c b/drivers/gpu/drm/msm/msm_gem_vma.c
+--- a/drivers/gpu/drm/msm/msm_gem_vma.c
++++ b/drivers/gpu/drm/msm/msm_gem_vma.c
+@@ -793,11 +793,12 @@
+ 		  u64 va_start, u64 va_size, bool managed)
+ {
+ 	/*
+-	 * We mostly want to use DRM_GPUVM_RESV_PROTECTED, except that
+-	 * makes drm_gpuvm_bo_evict() a no-op for extobjs (ie. we loose
+-	 * tracking that an extobj is evicted) :facepalm:
+-	 */
+-	enum drm_gpuvm_flags flags = 0;
++	 * VM_BIND list mutations and final VMA teardown hold the VM resv.
++	 * GPUVM preserves external eviction flags until prepare/validate.
++	 * Protected-list submit retirement also holds this resv (including
++	 * non-empty BO tables); keep managed/legacy VM behaviour unchanged.
++	 */
++	enum drm_gpuvm_flags flags = managed ? 0 : DRM_GPUVM_RESV_PROTECTED;
+ 	struct msm_gem_vm *vm;
+ 	struct drm_gem_object *dummy_gem;
+ 	int ret = 0;
+diff --git a/drivers/gpu/drm/msm/msm_gem_submit.c b/drivers/gpu/drm/msm/msm_gem_submit.c
+--- a/drivers/gpu/drm/msm/msm_gem_submit.c
++++ b/drivers/gpu/drm/msm/msm_gem_submit.c
+@@ -531,6 +531,58 @@
+ 		msm_submit_retire(submit);
+ }
+ 
++/* Retirement cannot fail, and allocating a drm_exec tracking array here
++ * can fail under memory pressure.  Lock the unique pair without allocation,
++ * using the same wound/wait backoff as drm_gem_lock_reservations(), but with
++ * non-interruptible locks (like the pre-existing single-object retirement).
++ */
++static void submit_put_protected_vm_bo(struct drm_gem_object *obj,
++				       struct drm_gpuvm_bo *vm_bo)
++{
++	struct drm_gem_object *vm_obj =
++		drm_gpuvm_resv_obj(vm_bo->vm);
++	struct dma_resv *resv[2] = { vm_obj->resv, obj->resv };
++	struct ww_acquire_ctx ticket;
++	int count = resv[0] == resv[1] ? 1 : 2;
++	int contended = -1;
++	int i;
++
++	drm_gem_object_get(vm_obj);
++	ww_acquire_init(&ticket, &reservation_ww_class);
++retry:
++	if (contended != -1)
++		dma_resv_lock_slow(resv[contended], &ticket);
++
++	for (i = 0; i < count; i++) {
++		int j;
++
++		if (i == contended)
++			continue;
++		/* With unique reservations and non-interruptible locking,
++		 * the only failure is -EDEADLK.  Drop every acquired lock
++		 * before acquiring the contended reservation via slowpath.
++		 */
++		if (!dma_resv_lock(resv[i], &ticket))
++			continue;
++		for (j = 0; j < i; j++)
++			dma_resv_unlock(resv[j]);
++		if (contended != -1 && contended >= i)
++			dma_resv_unlock(resv[contended]);
++		contended = i;
++		goto retry;
++	}
++	ww_acquire_done(&ticket);
++
++	drm_gpuvm_bo_put(vm_bo);
++	for (i = 0; i < count; i++)
++		dma_resv_unlock(resv[i]);
++	ww_acquire_fini(&ticket);
++	/* Final vm_bo put may have released the VM.  Pin its reservation
++	 * object independently until all locks above have been released.
++	 */
++	drm_gem_object_put(vm_obj);
++}
++
+ void msm_submit_retire(struct msm_gem_submit *submit)
+ {
+ 	int i;
+@@ -539,9 +591,13 @@
+ 		struct drm_gem_object *obj = submit->bos[i].obj;
+ 		struct drm_gpuvm_bo *vm_bo = submit->bos[i].vm_bo;
+ 
+-		msm_gem_lock(obj);
+-		drm_gpuvm_bo_put(vm_bo);
+-		msm_gem_unlock(obj);
++		if (vm_bo && drm_gpuvm_resv_protected(vm_bo->vm)) {
++			submit_put_protected_vm_bo(obj, vm_bo);
++		} else {
++			msm_gem_lock(obj);
++			drm_gpuvm_bo_put(vm_bo);
++			msm_gem_unlock(obj);
++		}
+ 		drm_gem_object_put(obj);
+ 	}
+ }

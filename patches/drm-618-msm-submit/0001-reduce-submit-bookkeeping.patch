@@ -1,0 +1,131 @@
+From: SPX maintainers
+Subject: [PATCH] drm/msm: reduce legacy submit bookkeeping without eliding synchronization
+
+Keep all BOs, reservation locks, references, fences and mapping validation.
+No app or device identity policy. Hardware performance validation pending.
+
+diff --git a/drivers/gpu/drm/msm/msm_gem.c b/drivers/gpu/drm/msm/msm_gem.c
+--- a/drivers/gpu/drm/msm/msm_gem.c
++++ b/drivers/gpu/drm/msm/msm_gem.c
+@@ -410,18 +410,16 @@
+ 	msm_gem_assert_locked(obj);
+ 
+ 	drm_gem_for_each_gpuvm_bo (vm_bo, obj) {
+-		struct drm_gpuva *vma;
+-
+-		drm_gpuvm_bo_for_each_va (vma, vm_bo) {
+-			if (vma->vm == vm) {
+-				/* lookup_vma() should only be used in paths
+-				 * with at most one vma per vm
+-				 */
+-				GEM_WARN_ON(!list_is_singular(&vm_bo->list.gpuva));
+-
+-				return vma;
+-			}
+-		}
++		/* GPUVM already groups this object's mappings by VM.  Avoid
++		 * walking unrelated VAs; no pointer is cached across unlocks.
++		 */
++		if (vm_bo->vm != vm || list_empty(&vm_bo->list.gpuva))
++			continue;
++
++		/* This legacy lookup permits at most one VMA per VM. */
++		GEM_WARN_ON(!list_is_singular(&vm_bo->list.gpuva));
++		return list_first_entry(&vm_bo->list.gpuva,
++					struct drm_gpuva, gem.entry);
+ 	}
+ 
+ 	return NULL;
+@@ -500,15 +498,24 @@
+ {
+ 	struct msm_gem_object *msm_obj = to_msm_bo(obj);
+ 	struct page **pages;
+-	int prot = msm_gem_prot(obj);
+-
+-	msm_gem_assert_locked(obj);
++	msm_gem_assert_locked(obj);
++
++	/* The existing mapped-VA fast path needs neither page preparation
++	 * nor protection recomputation.  Keep invalid backing/madv states
++	 * on the original validation path and retain the IOVA guard.
++	 */
++	if (msm_obj->pages && msm_obj->madv == MSM_MADV_WILLNEED &&
++	    to_msm_vma(vma)->mapped) {
++		if (GEM_WARN_ON(!vma->va.addr))
++			return -EINVAL;
++		return 0;
++	}
+ 
+ 	pages = msm_gem_get_pages_locked(obj, MSM_MADV_WILLNEED);
+ 	if (IS_ERR(pages))
+ 		return PTR_ERR(pages);
+ 
+-	return msm_gem_vma_map(vma, prot, msm_obj->sgt);
++	return msm_gem_vma_map(vma, msm_gem_prot(obj), msm_obj->sgt);
+ }
+ 
+ void msm_gem_unpin_locked(struct drm_gem_object *obj)
+diff --git a/drivers/gpu/drm/msm/msm_gem_submit.c b/drivers/gpu/drm/msm/msm_gem_submit.c
+--- a/drivers/gpu/drm/msm/msm_gem_submit.c
++++ b/drivers/gpu/drm/msm/msm_gem_submit.c
+@@ -6,6 +6,7 @@
+ 
+ #include <linux/dma-fence-unwrap.h>
+ #include <linux/file.h>
++#include <linux/limits.h>
+ #include <linux/sync_file.h>
+ #include <linux/uaccess.h>
+ 
+@@ -130,6 +131,8 @@
+ static int submit_lookup_objects(struct msm_gem_submit *submit,
+ 		struct drm_msm_gem_submit *args, struct drm_file *file)
+ {
++	struct drm_msm_gem_submit_bo batch[32];
++	bool batch_valid = false;
+ 	unsigned i;
+ 	int ret = 0;
+ 
+@@ -143,7 +146,20 @@
+ 		 */
+ 		submit->bos[i].flags = 0;
+ 
+-		if (copy_from_user(&submit_bo, userptr, sizeof(submit_bo))) {
++		/* Amortize uaccess setup with a bounded 512-byte stack buffer.
++		 * A failed batch falls back to the original scalar reads, so an
++		 * earlier invalid descriptor still wins over a later fault.
++		 */
++		if (!(i % ARRAY_SIZE(batch))) {
++			unsigned count = min_t(unsigned, args->nr_bos - i,
++					       ARRAY_SIZE(batch));
++
++			batch_valid = !copy_from_user(batch, userptr,
++						     count * sizeof(batch[0]));
++		}
++		if (batch_valid) {
++			submit_bo = batch[i % ARRAY_SIZE(batch)];
++		} else if (copy_from_user(&submit_bo, userptr, sizeof(submit_bo))) {
+ 			ret = -EFAULT;
+ 			i = 0;
+ 			goto out;
+@@ -298,12 +314,20 @@
+ static int submit_lock_objects(struct msm_gem_submit *submit)
+ {
+ 	unsigned flags = DRM_EXEC_INTERRUPTIBLE_WAIT;
++	unsigned nr_objects = submit->nr_bos;
+ 	int ret = 0;
+ 
+ 	if (msm_context_is_vmbind(submit->queue->ctx))
+ 		return submit_lock_objects_vmbind(submit);
+ 
+-	drm_exec_init(&submit->exec, flags, submit->nr_bos);
++	/* The VM reservation object is locked in addition to every BO.
++	 * Include it in the initial table rather than growing/copying the
++	 * table on the last BO.  Retain the zero-size default and avoid
++	 * unsigned overflow.  Lock/refcount/retry semantics are unchanged.
++	 */
++	if (nr_objects && nr_objects < UINT_MAX)
++		nr_objects++;
++	drm_exec_init(&submit->exec, flags, nr_objects);
+ 
+ 	drm_exec_until_all_locked (&submit->exec) {
+ 		ret = drm_exec_lock_obj(&submit->exec,

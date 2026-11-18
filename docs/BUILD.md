@@ -106,6 +106,20 @@ python3 scripts/build.py --reuse-components FRESH_VENUS_OUTPUT/REUSE.json \
 不关闭 captive portal 探测、不预置网络。跳过 Android 初始设置不等于跳过独立的触摸校准向导。
 详细策略与当前成品校验值见 [IMAGE](IMAGE.md)。
 
+### Hybrid 源码构建：QCOM 提交优化
+
+默认源码构建把 MSM 共用提交补丁和 GPUVM reservation v2 补丁追加到原有 Adreno 补丁序列。
+QCOM 用户态由仓库源码和私有输入中的 GSL donor 生成：需要 Android NDK AArch64 API 35 clang
+（可用 `SQ2_ANDROID_CC` 指定）、readelf 和支持 `--rename-dynamic-symbols` 的 patchelf。
+不在仓库分发高通运行库。显式选择旧 prebuilt 或复用已有内核时，不会凭空补入新的内核代码。
+
+Hybrid 继续使用 Mesa GLES/Turnip、QTI gralloc/mapper5/HWC 和原生 OMX。
+默认对 NTE 选择 QCOM 并启用 VM_BIND 的 `exclude` 分配策略：这是已测试的应用选择，
+不是按包名判断 BO 是否能共享。桥接复用已验证的 BO 查找结果，移交同步访问表；
+handle、访问标志、队列和共享状态匹配时复用同步准备模板。每次提交仍重新收集 fence，
+导入、导出和 handle 复用继续走登记和失效路径。未采用全量 NO_SHARE 或多核拆表。
+SQ2 游戏测试不代替 SQ1 实机验收。
+
 ## 7. 边界
 
 - 默认只构建产物：不运行测试套件、整盘解压校验或 SHA 清单；编译错误、必要格式/ABI/配对约束仍会中止。

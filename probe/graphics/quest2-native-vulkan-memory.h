@@ -7,5 +7,7 @@ struct Sq2VulkanMemoryScope {
     uint64_t serial;
 };
 struct Sq2VulkanMemoryScope sq2_native_vulkan_memory_scope(struct Sq2VulkanMemoryScope value);
+void sq2_native_vulkan_share_guard(int enter);
+uint64_t sq2_native_vulkan_dedicated_scope(uint64_t bytes);
 int sq2_memory_alloc_pure_64(uint64_t size, uint64_t flags, void *out);
 #endif

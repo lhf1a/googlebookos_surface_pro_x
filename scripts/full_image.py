@@ -137,6 +137,7 @@ def hybrid_runtime(
     vulkan_router_bytes=None,
     turnip_bytes=None,
     vulkan_policy_bytes=None,
+    qti_submit_payload=None,
 ):
     """Combine Mesa Freedreno/Dual-Vulkan (Turnip + QTI) with QTI gralloc/mapper5/HWC/SDM + OMX.
 
@@ -293,6 +294,11 @@ def hybrid_runtime(
             path = f'{qti_prefix}/root/{rel}'
             bodies[path] = payload
             records[path] = new_record(0o100644)
+
+    for rel, data in (qti_submit_payload or {}).items():
+        path = f'{qti_prefix}/root/{rel}'
+        bodies[path] = data
+        records.setdefault(path, new_record(0o100644))
 
     vfc_path = f'{qti_prefix}/root/etc/selinux/vendor_file_contexts'
     if vfc_path in bodies:
@@ -906,7 +912,8 @@ def build(args, compile_kernel):
         if kernel_patches:
             extra_patches = ()
             if Path(kernel_patches).resolve() == DEFAULT_A6XX_PATCHES.resolve():
-                extra_patches = (DEFAULT_A6XX_MMIO_FIX_PATCHES,)
+                extra_patches = (DEFAULT_A6XX_MMIO_FIX_PATCHES, ROOT / "patches/drm-618-msm-submit",
+                                 ROOT / "patches/drm-618-msm-vmbind-resv")
             patch_report = apply_kernel_patches(kernel_patches, extracted/'kernel', args.output, run,
                                                 external_source=extracted/'external',
                                                 extra_patch_dirs=extra_patches)
@@ -972,6 +979,11 @@ def build(args, compile_kernel):
     typec = load_typec(private/'typec', bundle/'Image', args.output/'typec', compiled)
     dt=bundle/'android-el2.dtb'
     dt.write_bytes(typec_dtb(dt.read_bytes()))
+    if args.graphics == 'hybrid' and args.kernel_mode == 'source':
+        from full_image_qti_submit import build_payload
+        graphics_inputs['qti_submit_payload'] = build_payload(
+            private, args.output/'qti-submit-runtime',
+            None if reuse else extracted/'kernel/include/uapi')
     graphics_report = assemble_runtime(
         private,
         bundle/'initramfs.cpio.gz',
