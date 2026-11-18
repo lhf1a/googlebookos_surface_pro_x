@@ -995,7 +995,7 @@ def build(args, compile_kernel):
         expected_single_user_sha256=None,
         size_gib=None,jobs=args.jobs,build_only=False,resume_build=False,kernel_mode=args.kernel_mode,
         graphics_argument=graphics_token,esp_only=esp_only,anonymous=True,
-        boot_gnu_efi=boot_gnu_efi,boot_diagnostics=getattr(args,'boot_diagnostics',False))
+        boot_gnu_efi=boot_gnu_efi)
     if sensors is not None:
         from full_image_sensors import FIRMWARE
         disk_args.additional_firmware={FIRMWARE.removeprefix('firmware/'): sensors[FIRMWARE]}

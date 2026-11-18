@@ -306,8 +306,6 @@ def main(argv=None):
                       help='build paired kernel/modules and native-SSD ESP payload only; skip the 20 GiB disk image')
     full.add_argument('--boot-gnu-efi', type=Path,
                       help='GNU-EFI source for the boot-volume handoff; default PRIVATE_ROOT/kernel-6.18/gnu-efi')
-    full.add_argument('--boot-diagnostics', action='store_true',
-                      help='persist bounded startup snapshots to the selected boot ESP (off by default)')
     full.add_argument('--cross-compile', help='override the compiler; default extracts PRIVATE_ROOT/kernel-6.18/toolchain.tar.gz')
     full.add_argument('--build-dir', type=Path, help='fresh Linux filesystem kernel build directory')
     full.add_argument('--output', type=Path, required=True)
@@ -331,7 +329,6 @@ def main(argv=None):
     disk.add_argument('--template', type=Path, help='preserve the original template layout and capacity')
     disk.add_argument('--jobs', type=int, default=8)
     disk.add_argument('--boot-gnu-efi', type=Path)
-    disk.add_argument('--boot-diagnostics', action='store_true')
     disk.add_argument('--build-only', action='store_true', help='construct only; omit postbuild filesystem/partition/gzip readback checks and whole-image checksums')
     disk.add_argument('--resume-build', action='store_true', help='reuse this explicitly selected build directory and its completed pristine recovery extraction')
     build = commands.add_parser('compile', help='compile Image/modules/dtbs and export unvalidated outputs')

@@ -16,7 +16,6 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 - 依赖准备在 SQ1/SQ2 原 Windows 安装上执行，见 [DEPENDENCIES](DEPENDENCIES.md)。
 - 启动来源 EFI 从 GNU-EFI 源码构建。准备 [对应修订](https://github.com/ncroxon/gnu-efi/tree/aeee48d838d40e8ef787748d5dc066ea2fb99dbe) 到 `PRIVATE_ROOT/kernel-6.18/gnu-efi`，或传 `--boot-gnu-efi DIR`。Linux 主机需 `patchelf`、`make`、AArch64 GCC/binutils（支持 `efi-app-aarch64`）。
 - 如复用或指定预构建的内核，必须已包含 `patches/spx-portable-boot/` 的修复，并提供配套模块；旧内核不能仅靠同名版本号通过。启动 ESP 必须可写以记录本次启动来源。
-- 开启 `--boot-diagnostics` 才会将有界启动快照保留到启动盘 ESP；默认关闭，不持续采集日志。
 
 ## 2. 私有输入
 

@@ -53,7 +53,6 @@ case "$vendor$product" in ''|*[!0-9a-fA-F]*) exit 1;; esac
 printf '%04X:%04X\n' "$((0x$vendor))" "$((0x$product))" > /run/iptsd-hid-id
 [ -z "$selected_ready" ] || printf '%s\n' "$selected_ready" > /run/iptsd-ready
 printf '%s\n' "$selected" > /run/iptsd-hidraw
-cp "$selected_sys/device/report_descriptor" /logs/touch-report-descriptor.bin
 echo "SELECTED=$selected HID_ID=$hid" >> /logs/touch-service.txt
 if [ -f /run/iptsd-calibrated.conf ]; then export IPTSD_CONFIG_FILE=/run/iptsd-calibrated.conf;fi
 iptsd "$selected" 4>&- > /logs/iptsd.txt 2>&1 &

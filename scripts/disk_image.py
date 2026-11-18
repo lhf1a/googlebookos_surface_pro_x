@@ -158,7 +158,7 @@ def boot_helper(name):
     return (ROOT/'probe/test2'/name).read_bytes().replace(b'\r\n', b'\n')
 
 
-def storage_payload(base, parts, super_header_sha256=None, anonymous=False, diagnostics=False):
+def storage_payload(base, parts, super_header_sha256=None, anonymous=False):
     cpio = cpio_module()
     before = cpio.entries(gzip.decompress(base))
     mode, init = before['init']
@@ -230,9 +230,6 @@ fi
         init = typec_early_handoff(init, early_storage, before)
         init = optimize_boot_init(init)
         init = optional_boot_failures(init)
-        if diagnostics:
-            require(init.count(b'    . /bin/prepare-native-ssd\n') == 1, 'Unknown boot-log start anchor')
-            init = init.replace(b'    . /bin/prepare-native-ssd\n', b'    . /bin/prepare-native-ssd\n'+b'    timeout 1800 /bin/persist-boot-logs > /logs/persistence.txt 2>&1 &\n', 1)
         init = init.replace(b'System images read-only; provisioned system disk selected; original Android init will become PID 1.', b'System images will be read-only; boot-source disk discovery pending; original Android init will become PID 1.')
     helper = boot_helper('prepare-image-ssd')
     layout = b'# Universal image; no boot-time content hash gate.\nSPX_IMAGE_FORMAT=1\n'
@@ -240,8 +237,6 @@ fi
     delta = {'init':(mode,init), 'bin/prepare-native-ssd':(0o100755,helper),
              'etc/sq2-ssd-layout':(0o100644,layout), 'etc/sq2-ssd-partitions':(0o100644,partition_table)}
     delta.update(early_storage)
-    if diagnostics:
-        delta['bin/persist-boot-logs'] = (0o100755, boot_helper('persist-boot-logs'))
     # Optional storage preparation: notify before zygote; never gate it.
     if 'bin/surface-swap-boot' in before:
         storage_hook = b'if [ "$ssd" = 1 ]; then\n    /bin/storage-ready-stage > /logs/storage-ready-stage.txt 2>&1 || echo STORAGE_READY_STAGE_FAILED_NONFATAL\nfi\n'
@@ -259,11 +254,6 @@ fi
     delta['bin/touch-resume-watch'] = (0o100755, boot_helper('touch-resume-watch'))
     delta['bin/touch-calibration-boot'] = (0o100755, boot_helper('touch-calibration-boot'))
     delta['bin/refresh-iptsd-input-nodes'] = (0o100755, boot_helper('refresh-iptsd-input-nodes'))
-    if diagnostics and early_storage:
-        delta['bin/log-hardware-discovery'] = (0o100755, boot_helper('log-hardware-discovery'))
-        require(init.count(b'for name in apex bootstrap-apex linkerconfig mnt tmp storage data_mirror; do')==1, 'Unknown hardware snapshot anchor')
-        init=init.replace(b'for name in apex bootstrap-apex linkerconfig mnt tmp storage data_mirror; do', b'/bin/log-hardware-discovery > /logs/hardware-discovery.txt 2>&1 || echo HARDWARE_SNAPSHOT_FAILED_NONFATAL\nfor name in apex bootstrap-apex linkerconfig mnt tmp storage data_mirror; do', 1)
-        delta['init']=(mode,init)
     delta.update(early_hidl_bootstrap(before))
     from runtime_boot_policy import apply
     runtime_bodies = {name: body for name, (_,body) in before.items()}
@@ -541,8 +531,7 @@ def build(args):
         with source.open('rb') as f:
             f.seek(original_map['super']['offset']+offset+1024)
             require(f.read(4)==b'\xe2\xe1\xf5\xe0','Expected EROFS logical partition: '+name)
-    payload,audit,member=storage_payload(base,parts,anonymous=getattr(args, "anonymous", False),
-                                         diagnostics=getattr(args, "boot_diagnostics", False))
+    payload,audit,member=storage_payload(base,parts,anonymous=getattr(args, "anonymous", False))
     (output/'storage-layout-delta.cpio.gz').write_bytes(member)
     tree=work/'esp-tree';(tree/'EFI/BOOT').mkdir(parents=True,exist_ok=resume);(tree/'EFI/SQ2Nat').mkdir(exist_ok=resume)
     for name in selected['files']:
