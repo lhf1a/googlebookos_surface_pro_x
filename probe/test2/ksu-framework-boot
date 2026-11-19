@@ -1,5 +1,5 @@
 #!/bin/busybox sh
-# Provision KSU userspace once after Android mounts data. No module injection here.
+# Provision or upgrade KSU userspace once after Android mounts data. No module injection here.
 set -eu
 export PATH=/bin:/sbin
 grep -qE 'sq2.rescue=1|sq2.ksu=0' /proc/cmdline && exit 0
@@ -18,21 +18,49 @@ data=/proc/1/root/data
 test ! -L "$data/local/tmp"
 mkdir -p "$data/local/tmp"
 test ! -L "$data/adb"
+expected_ver=
+if [ -s expected-version ]; then
+    expected_ver=$(tr -d '\r\n' < expected-version)
+fi
+installed_ver=
+if [ -s "$data/adb/.sq2-ksu-version" ]; then
+    installed_ver=$(tr -d '\r\n' < "$data/adb/.sq2-ksu-version")
+fi
+need_ksud=0
+need_manager_upgrade=0
 if [ ! -e "$data/adb/ksud" ]; then
+    need_ksud=1
+elif [ -n "$expected_ver" ] && [ "$installed_ver" != "$expected_ver" ]; then
+    need_ksud=1
+    need_manager_upgrade=1
+fi
+if [ "$need_ksud" = 1 ]; then
     cp ksud "$data/local/tmp/sq2-ksud.new"
     chmod 755 "$data/local/tmp/sq2-ksud.new"
-    timeout 120 nsenter -t 1 -m -r -- /data/local/tmp/sq2-ksud.new debug version | grep -q 'Kernel Version: 33129'
+    kver_out=$(timeout 120 nsenter -t 1 -m -r -- /data/local/tmp/sq2-ksud.new debug version)
+    if [ -n "$expected_ver" ]; then
+        printf '%s\n' "$kver_out" | grep -q "Kernel Version: $expected_ver"
+    else
+        printf '%s\n' "$kver_out" | grep -qE 'Kernel Version: [0-9]+'
+    fi
     timeout 120 nsenter -t 1 -m -r -- /data/local/tmp/sq2-ksud.new install
     rm -f "$data/local/tmp/sq2-ksud.new"
+    if [ -n "$expected_ver" ]; then
+        printf '%s\n' "$expected_ver" > "$data/adb/.sq2-ksu-version"
+    fi
     echo 'KSU userspace installed; module boot lifecycle available on next boot.'
 fi
 user=$(android cmd activity get-current-user)
 case "$user" in ''|*[!0-9]*) exit 1;; esac
-# Reuse an existing (possibly newer) package; never downgrade it. Include user 0
-# and existing secondary users so a concurrent passwordless-user switch is safe.
+# Reuse an existing (possibly newer) package unless a newer paired KSU kernel/userspace
+# version was installed; never downgrade manually updated packages outside paired upgrades.
 if ! android pm list packages -u com.rifsxd.ksunext | grep -qx 'package:com.rifsxd.ksunext'; then
     cp manager-verified.apk "$data/local/tmp/sq2-ksu-manager.apk"
     android pm install --user "$user" "$data/local/tmp/sq2-ksu-manager.apk"
+    rm -f "$data/local/tmp/sq2-ksu-manager.apk"
+elif [ "$need_manager_upgrade" = 1 ]; then
+    cp manager-verified.apk "$data/local/tmp/sq2-ksu-manager.apk"
+    android pm install -r --user "$user" "$data/local/tmp/sq2-ksu-manager.apk" || true
     rm -f "$data/local/tmp/sq2-ksu-manager.apk"
 fi
 users=$(android pm list users | sed -n 's/.*UserInfo{\([0-9][0-9]*\):.*/\1/p')

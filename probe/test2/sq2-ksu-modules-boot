@@ -1,5 +1,8 @@
 #!/bin/busybox sh
-# Provision bundled KernelSU modules once after Android boots and /data/adb/ksud exists.
+# Provision bundled KernelSU modules once after Android boots and ksud is ready.
+# Modules under /etc/sq2-ksu-modules/*.zip are installed in sorted order
+# (e.g. 10-zygisk-next.zip -> 20-sq2-game-opt.zip -> 30-device_faker.zip)
+# and enabled by default in KernelSU.
 set -eu
 export PATH="${SQ2_TEST_PATH:-/bin:/sbin}"
 grep -qE 'sq2.rescue=1|sq2.ksu=0' "${SQ2_CMDLINE:-/proc/cmdline}" && exit 0
@@ -15,25 +18,75 @@ for n in $(seq 1 "${SQ2_BOOT_POLL_RETRIES:-300}"); do
 done
 [ "$(android getprop sys.boot_completed)" = 1 ] || exit 1
 data="${SQ2_DATA_DIR:-/proc/1/root/data}"
-ksud_bin=
-if [ -x "$data/adb/ksud" ]; then
-    ksud_bin=/data/adb/ksud
-elif [ -x "$data/adb/ksu/bin/ksud" ]; then
-    ksud_bin=/data/adb/ksu/bin/ksud
-else
-    exit 0
+expected_ver_file="${SQ2_KSU_EXPECTED_VERSION_FILE:-/etc/sq2-ksu/expected-version}"
+expected_ksu_ver=
+if [ -s "$expected_ver_file" ]; then
+    expected_ksu_ver=$(tr -d '\r\n' < "$expected_ver_file")
 fi
+ksud_bin=
+for n in $(seq 1 "${SQ2_KSUD_POLL_RETRIES:-60}"); do
+    cand=
+    if [ -x "$data/adb/ksud" ]; then
+        cand=/data/adb/ksud
+    elif [ -x "$data/adb/ksu/bin/ksud" ]; then
+        cand=/data/adb/ksu/bin/ksud
+    fi
+    if [ -n "$cand" ]; then
+        if [ -z "$expected_ksu_ver" ]; then
+            ksud_bin="$cand"
+            break
+        fi
+        cur_ksu_ver=$(tr -d '\r\n' < "$data/adb/.sq2-ksu-version" 2>/dev/null || true)
+        if [ "$cur_ksu_ver" = "$expected_ksu_ver" ]; then
+            ksud_bin="$cand"
+            break
+        fi
+        ksud_bin="$cand"
+    fi
+    sleep "${SQ2_KSUD_POLL_SLEEP:-1}"
+done
+[ -n "$ksud_bin" ] || exit 0
+read_vc() {
+    sed -n 's/^versionCode=//p' "$1" 2>/dev/null | tr -d '\r' | head -n 1
+}
+is_uint() {
+    case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac
+}
 test ! -L "$data/local/tmp"
 mkdir -p "$data/local/tmp"
 for zip in "$mod_dir"/*.zip; do
     [ -f "$zip" ] || continue
-    mod_id=$(unzip -p "$zip" module.prop 2>/dev/null | sed -n 's/^id=//p' | tr -d '\r' | head -n 1)
+    mod_prop=$(unzip -p "$zip" module.prop 2>/dev/null || true)
+    mod_id=$(printf '%s\n' "$mod_prop" | sed -n 's/^id=//p' | tr -d '\r' | head -n 1)
+    bundled_vc=$(printf '%s\n' "$mod_prop" | sed -n 's/^versionCode=//p' | tr -d '\r' | head -n 1)
     case "$mod_id" in ''|*/*) continue;; esac
-    if [ -d "$data/adb/modules/$mod_id" ] || [ -d "$data/adb/modules_update/$mod_id" ]; then
+    need_install=1
+    action=INSTALLED
+    if [ -d "$data/adb/modules_update/$mod_id" ]; then
+        staged_vc=$(read_vc "$data/adb/modules_update/$mod_id/module.prop")
+        if ! is_uint "$bundled_vc" || ! is_uint "$staged_vc" || [ "$bundled_vc" -le "$staged_vc" ]; then
+            need_install=0
+        else
+            action=UPGRADED
+        fi
+    elif [ -d "$data/adb/modules/$mod_id" ]; then
+        installed_vc=$(read_vc "$data/adb/modules/$mod_id/module.prop")
+        if ! is_uint "$bundled_vc" || ! is_uint "$installed_vc" || [ "$bundled_vc" -le "$installed_vc" ]; then
+            need_install=0
+        else
+            action=UPGRADED
+        fi
+    fi
+    if [ "$need_install" = 0 ]; then
+        rm -f "$data/adb/modules/$mod_id/disable" "$data/adb/modules_update/$mod_id/disable" 2>/dev/null || true
         continue
     fi
     cp "$zip" "$data/local/tmp/sq2-ksu-module.zip"
-    timeout 120 nsenter -t 1 -m -r -- "$ksud_bin" module install /data/local/tmp/sq2-ksu-module.zip
+    if timeout 120 nsenter -t 1 -m -r -- "$ksud_bin" module install /data/local/tmp/sq2-ksu-module.zip; then
+        rm -f "$data/adb/modules/$mod_id/disable" "$data/adb/modules_update/$mod_id/disable" 2>/dev/null || true
+        echo "KSU_MODULE_${action}:$mod_id"
+    else
+        echo "KSU_MODULE_FAILED:$mod_id" >&2
+    fi
     rm -f "$data/local/tmp/sq2-ksu-module.zip"
-    echo "KSU_MODULE_INSTALLED:$mod_id"
 done

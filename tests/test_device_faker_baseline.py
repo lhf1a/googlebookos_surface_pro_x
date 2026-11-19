@@ -352,9 +352,20 @@ exit 1
             with (
                 mock.patch('disk_image.build', side_effect=fake_disk_build),
                 mock.patch.object(full_image, 'module', side_effect=mock_touch_module(full_image.module)),
+                mock.patch.object(full_image, 'hybrid_runtime', return_value={'graphics': 'hybrid'}),
+                mock.patch.object(full_image, 'rewrite_mesa_boot_selection', return_value='sq2.vulkan=mesa'),
+                mock.patch('full_image_advanced_control.install'),
+                mock.patch('full_image_suspend.load', return_value=None),
+                mock.patch('full_image_typec.load', return_value=None),
+                mock.patch('full_image_typec.prepare_dtb', side_effect=lambda b: b),
+                mock.patch('build_ksu_modules.resolve_default_ksu_modules',
+                           side_effect=lambda **kw: ({}, {'device_faker_fork': None}) if kw.get('skip_device_faker') else (
+                               {'device_faker.zip': fake_zip},
+                               {'device_faker_fork': {'source': 'private-ksu-modules', 'fork_url': df_mod.FORK_URL, 'sha256': hashlib.sha256(fake_zip).hexdigest()}},
+                           )),
             ):
                 args = argparse.Namespace(
-                    output=root / 'out-baseline',
+                    output=root / 'out-hybrid',
                     private_root=private,
                     template=None,
                     build_dir=None,
@@ -386,7 +397,7 @@ exit 1
                 skip_members = parse_cpio_gz((skip_args.output / 'paired/EFI/SQ2Nat/initramfs.cpio.gz').read_bytes())
                 self.assertNotIn('etc/sq2-ksu-modules/device_faker.zip', skip_members[0])
 
-    def test_build_lts_full_image_cli_defaults_to_baseline_with_device_faker_flags(self):
+    def test_build_lts_full_image_cli_defaults_to_hybrid_with_device_faker_flags(self):
         res = subprocess.run(
             [sys.executable, str(ROOT / 'scripts/build-lts.py'), 'full-image', '--help'],
             capture_output=True,

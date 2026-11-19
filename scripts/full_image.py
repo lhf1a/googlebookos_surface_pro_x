@@ -655,6 +655,22 @@ def install_default_wallpaper(private, records, bodies):
 KSU_MODULES_HOOK = b'    sq2-ksu-modules-boot > /logs/sq2-ksu-modules-boot.txt 2>&1 &\n'
 
 
+def install_ksu_userspace(records, bodies, ksu_userspace):
+    """Replace bundled etc/sq2-ksu/{ksud,manager-verified.apk} and ksu-framework-boot for upgraded KSU kernels."""
+    if not ksu_userspace:
+        return
+    helper = (ROOT / 'probe/test2/ksu-framework-boot').read_bytes().replace(b'\r\n', b'\n')
+    subprocess.run(['sh', '-n'], input=helper, check=True, capture_output=True)
+    bodies['bin/ksu-framework-boot'] = helper
+    records['bin/ksu-framework-boot'] = new_record(0o100755)
+    bodies['etc/sq2-ksu/ksud'] = ksu_userspace['ksud_bytes']
+    records['etc/sq2-ksu/ksud'] = new_record(0o100755)
+    bodies['etc/sq2-ksu/manager-verified.apk'] = ksu_userspace['apk_bytes']
+    records['etc/sq2-ksu/manager-verified.apk'] = new_record(0o100644)
+    bodies['etc/sq2-ksu/expected-version'] = f"{int(ksu_userspace['version_code'])}\n".encode('ascii')
+    records['etc/sq2-ksu/expected-version'] = new_record(0o100644)
+
+
 def install_ksu_modules(records, bodies, ksu_modules):
     """Bundle validated KernelSU module zips into initramfs and wire one-time installer hook."""
     if not ksu_modules:
@@ -696,7 +712,7 @@ def install_userdata_growth(records, bodies, compiled_resize=None):
         records['bin/'+name]=new_record(0o100755)
 
 def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modules=None, camera=None, sensors=None, anonymous=False,
-                     runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None, typec=None):
+                     runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None, typec=None, ksu_userspace=None):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
     bodies = {name: b'' if rec[1][1] & 0o170000 == 0o040000 else (runtime/'files'/name).read_bytes()
@@ -785,6 +801,8 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
             df_bytes = priv_df.read_bytes()
             validate_device_faker_zip(df_bytes)
             ksu_modules = {'device_faker.zip': df_bytes}
+    if ksu_userspace:
+        install_ksu_userspace(records, bodies, ksu_userspace)
     if ksu_modules:
         install_ksu_modules(records, bodies, ksu_modules)
     install_userdata_growth(records, bodies, compiled_helpers.get('bin/resize-userdata-partition'))
@@ -883,6 +901,9 @@ def build(args, compile_kernel):
         from full_image_sensors import load
         sensors = load(getattr(args, 'sensor_inputs', None) or private/'sensors')
     compiled=reuse['kernel'] if reuse else None
+    kernel_build_dir = None
+    kernel_cross = None
+    ksu_next_info = None
     patch_report = None
     if args.kernel_mode=='source' and not reuse:
         source=private/'kernel-6.18/source'
@@ -890,11 +911,23 @@ def build(args, compile_kernel):
         require(recipe.get('current_release_patches') is True,'Source inputs are not prepared for current release')
         compiled=args.output/'kernel-export'
         build_dir=args.build_dir or args.output/'kernel-build'
+        kernel_build_dir = build_dir
         extracted=build_dir.parent/(build_dir.name+'-sources')
         require(not extracted.exists(),'Source extraction directory must be fresh: '+str(extracted))
         extracted.mkdir(parents=True)
         with tarfile.open(source/recipe['archive']) as archive:
             archive.extractall(extracted,filter='data')
+        if not getattr(args, 'skip_ksu_upgrade', False):
+            from build_ksu_next import apply_to_kernel_source, resolve_latest_ksu_next
+            ksu_next_info = resolve_latest_ksu_next(
+                explicit_src=getattr(args, 'ksu_next_src', None),
+            )
+            apply_to_kernel_source(
+                extracted / 'kernel',
+                ksu_next_info['src_dir'],
+                tag=ksu_next_info['tag'],
+                version_code=ksu_next_info['version_code'],
+            )
         for patch in sorted((ROOT/'patches/spx-portable-boot').glob('*.patch')):
             run(['patch','--batch','--forward','--fuzz=0','-p1','-i',patch],
                 cwd=extracted/'kernel')
@@ -936,6 +969,7 @@ def build(args, compile_kernel):
             with tarfile.open(private/'kernel-6.18/toolchain.tar.gz') as archive:
                 archive.extractall(toolchain,filter='data')
             cross=str(toolchain/'usr/bin/aarch64-linux-gnu-')
+        kernel_cross = cross
         run([sys.executable,ROOT/'scripts/build.py','compile','--source',extracted/'kernel',
              '--external-sources',extracted/'external','--config',DEFAULT_KERNEL_CONFIG,
              '--build-dir',build_dir,'--output',compiled,'--cross-compile',cross,
@@ -973,15 +1007,23 @@ def build(args, compile_kernel):
         sensor_dt.write_bytes(prepare_dtb(sensor_dt.read_bytes(), sensors))
         (bundle/'qebspilaa64.efi').write_bytes(sensors['qebspilaa64.efi'])
     ksu_modules = {}
+    ksu_modules_meta = None
     device_faker_meta = None
-    if args.graphics == 'hybrid' and not getattr(args, 'skip_device_faker', False):
-        from build_device_faker_fork import resolve_or_build_device_faker_zip
-        df_bytes, device_faker_meta = resolve_or_build_device_faker_zip(
+    if args.graphics == 'hybrid':
+        from build_ksu_modules import resolve_default_ksu_modules
+        ksu_modules, ksu_modules_meta = resolve_default_ksu_modules(
             private=private,
-            explicit_zip=getattr(args, 'device_faker_zip', None),
-            explicit_src=getattr(args, 'device_faker_src', None),
+            skip_zygisk_next=bool(getattr(args, 'skip_zygisk_next', False)),
+            zygisk_next_zip=getattr(args, 'zygisk_next_zip', None),
+            skip_game_opt=bool(getattr(args, 'skip_game_opt', False)),
+            game_opt_zip=getattr(args, 'game_opt_zip', None),
+            skip_device_faker=bool(getattr(args, 'skip_device_faker', False)),
+            device_faker_zip=getattr(args, 'device_faker_zip', None),
+            device_faker_src=getattr(args, 'device_faker_src', None),
+            kernel_dir=kernel_build_dir,
+            cross_compile=kernel_cross,
         )
-        ksu_modules['device_faker.zip'] = df_bytes
+        device_faker_meta = ksu_modules_meta.get('device_faker_fork')
     # Both prebuilt and source default builds must contain the accepted sleep
     # fix. Source mode selects this build's module, never a same-release donor.
     from full_image_suspend import load as load_suspend
@@ -1001,6 +1043,7 @@ def build(args, compile_kernel):
         compiled,
         graphics=args.graphics,
         ksu_modules=ksu_modules,
+        ksu_userspace=ksu_next_info,
         camera=camera,
         sensors=sensors,
         suspend=suspend,
@@ -1035,6 +1078,8 @@ def build(args, compile_kernel):
         suspend_enabled=True,
         typec_enabled=True, lower_usb_default='adb',
         suspend_module_source=('matched-incremental-rebuild' if reuse else 'fresh-compiled') if compiled else 'image-paired-prebuilt',
+        ksu_next=({k: str(v) if isinstance(v, Path) else v for k, v in ksu_next_info.items() if not k.endswith('_bytes')} if ksu_next_info else None),
+        ksu_modules=ksu_modules_meta,
         device_faker_fork=device_faker_meta,
         sensors_enabled=sensors is not None,
         sensor_modules_rebuilt=bool(sensors is not None and compiled and not reuse),
