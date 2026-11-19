@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import struct
 import subprocess
 import sys
@@ -59,7 +60,11 @@ def make_esp_tree(root, kernel=b'KERNEL-V1', initramfs=b'INITRAMFS-V1', fw_extra
         (root / sub).mkdir(parents=True, exist_ok=True)
     (root / 'SPX-IMAGE.txt').write_text(f'SPX_IMAGE_FORMAT=1\nSPX_RELEASE={release}\n')
     (root / 'EFI/BOOT/BOOTAA64.EFI').write_bytes(b'GRUB-BIN')
-    (root / 'EFI/BOOT/grub.cfg').write_text('set default=custom-dualboot\n')
+    (root / 'EFI/BOOT/grub.cfg').write_text(
+        "set timeout=5\nset default=spx-single-user\n"
+        "menuentry 'Googlebook OS' --id spx-single-user { chainloader /EFI/SQ2Nat/start.efi }\n"
+        "menuentry 'Windows' --id windows { chainloader /EFI/Microsoft/Boot/bootmgfw.efi }\n"
+    )
     for dname in ('EFI/SQ2Nat', 'EFI/SQ2Res'):
         (root / dname / 'Image').write_bytes(kernel)
         (root / dname / 'initramfs.cpio.gz').write_bytes(initramfs)
@@ -573,6 +578,13 @@ case "${{1:-}}" in
             *"probe"*)
                 printf 'SUPER_BYTES=12884901888\\nESP_BYTES=2147483648\\nDATA_FREE_BYTES=64424509440\\nHAS_OTA_INFO=%s\\nCURRENT_SUPER_SHA256=%s\\nKERNEL=6.18.60-sq2-android1\\n' "${{MOCK_HAS_OTA:-0}}" "${{MOCK_SUPER_SHA:-}}"
                 ;;
+            *"check-staged-pkg"*)
+                if [ -n "${{MOCK_STAGED_HIT:-}}" ]; then
+                    echo "HIT=${{MOCK_STAGED_HIT}}"
+                else
+                    echo "MISS"
+                fi
+                ;;
             *"stage-pkg"*)
                 echo "OK_STAGED=verified"
                 ;;
@@ -635,6 +647,113 @@ esac
             )
             self.assertEqual(p_delta.returncode, 0, p_delta.stderr + p_delta.stdout)
             self.assertIn(f'apply-manifest {delta_ota["archive_sha256"]} 0 0 v0.8.0', log_file.read_text())
+
+            # 5) Already-staged matching package skips redundant adb push
+            log_file.write_text('')
+            img_gz_sha = hashlib.sha256(img_gz.read_bytes()).hexdigest()
+            p_hit = subprocess.run(
+                ['sh', str(script), '--adb', str(mock_adb), '-p', str(img_gz), '--no-reboot', '--yes'],
+                env=dict(os.environ, MOCK_HAS_OTA='0', MOCK_STAGED_HIT=img_gz_sha),
+                text=True, capture_output=True,
+            )
+            self.assertEqual(p_hit.returncode, 0, p_hit.stderr + p_hit.stdout)
+            calls_hit = log_file.read_text()
+            self.assertNotIn('/data/local/tmp/spx-ota-upload.pkg', calls_hit)
+            self.assertIn('apply-full-esp-and-pending', calls_hit)
+
+    def test_grub_cfg_repair_and_dualboot_preservation(self):
+        """Ensure legacy/trial grub.cfg (e.g. SQ2N19 + grubenv) is repaired to SQ2Nat while Windows dual-boot is preserved."""
+        ps1_text = (ROOT / 'scripts/Upgrade-GooglebookViaAdb.ps1').read_text(encoding='utf-8')
+        m = re.search(r"(?s)\$deviceHelper = @'\r?\n(.*?)\r?\n'@", ps1_text)
+        self.assertIsNotNone(m, 'Missing embedded $deviceHelper in Upgrade-GooglebookViaAdb.ps1')
+        helper_src = m.group(1)
+        # Extract helper functions up to `case "$CMD" in`
+        fn_block = helper_src.split('case "$CMD" in', 1)[0]
+
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            src_cfg = td / 'src-grub.cfg'
+            src_cfg.write_text(
+                "set timeout=5\nset default=spx-single-user\n"
+                "menuentry 'Surface Pro X Linux 6.18' --id spx-single-user {\n"
+                " chainloader /EFI/SQ2Nat/start.efi\n}\n"
+                "menuentry 'Rescue' --id spx-rescue {\n"
+                " chainloader /EFI/SQ2Res/start.efi\n}\n"
+            )
+
+            def run_ensure(esp_dir):
+                p = subprocess.run(
+                    ['sh', '-c', f'{fn_block}\nensure_grub_boots_sq2nat "$1" "$2"', '--', 'dummy-cmd', str(esp_dir), str(src_cfg)],
+                    text=True, capture_output=True,
+                )
+                self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
+                return p.stdout.strip()
+
+            # Case 1: Legacy/trial grub.cfg (SQ2N19 default) + stale grubenv (SQ2KSU next_entry)
+            esp1 = td / 'esp1'
+            (esp1 / 'EFI/BOOT').mkdir(parents=True)
+            legacy_cfg = (
+                "set timeout=3\nset default=spx-hybrid-5194544\n"
+                "menuentry 'Surface Pro X Hybrid 5194544' --id spx-hybrid-5194544 {\n"
+                " chainloader /EFI/SQ2N19/start.efi\n}\n"
+            )
+            (esp1 / 'EFI/BOOT/grub.cfg').write_text(legacy_cfg)
+            (esp1 / 'EFI/BOOT/grubenv').write_text('# GRUB Environment Block\nnext_entry=spx-ksu342-trial\n')
+            out1 = run_ensure(esp1)
+            self.assertIn('GRUB_ACTION=replaced_legacy_grub', out1)
+            self.assertIn('/EFI/SQ2Nat/start.efi', (esp1 / 'EFI/BOOT/grub.cfg').read_text())
+            self.assertEqual((esp1 / 'EFI/BOOT/grub.cfg.ota-bak').read_text(), legacy_cfg)
+            self.assertFalse((esp1 / 'EFI/BOOT/grubenv').exists())
+            self.assertTrue((esp1 / 'EFI/BOOT/grubenv.ota-bak').is_file())
+
+            # Case 2: Windows dual-boot grub.cfg already pointing to SQ2Nat -> preserved untouched
+            esp2 = td / 'esp2'
+            (esp2 / 'EFI/BOOT').mkdir(parents=True)
+            dual_cfg = (
+                "set timeout=7\nset default=windows\n"
+                "menuentry 'Googlebook OS' --id spx-single-user {\n"
+                " chainloader /EFI/SQ2Nat/start.efi\n}\n"
+                "menuentry 'Windows' --id windows {\n"
+                " chainloader /EFI/Microsoft/Boot/bootmgfw.efi\n}\n"
+            )
+            (esp2 / 'EFI/BOOT/grub.cfg').write_text(dual_cfg)
+            out2 = run_ensure(esp2)
+            self.assertIn('GRUB_ACTION=preserved_dualboot', out2)
+            self.assertEqual((esp2 / 'EFI/BOOT/grub.cfg').read_text(), dual_cfg)
+
+            # Case 3: Windows dual-boot grub.cfg with legacy SQ2N19 + SQ2Res -> rewrites only SQ2N19
+            esp3 = td / 'esp3'
+            (esp3 / 'EFI/BOOT').mkdir(parents=True)
+            dual_legacy = (
+                "set timeout=5\nset default=spx-single-user\n"
+                "menuentry 'Googlebook OS' --id spx-single-user {\n"
+                " chainloader /EFI/SQ2N19/start.efi\n}\n"
+                "menuentry 'Rescue' --id spx-rescue {\n"
+                " chainloader /EFI/SQ2Res/start.efi\n}\n"
+                "menuentry 'Windows' --id windows {\n"
+                " chainloader /EFI/Microsoft/Boot/bootmgfw.efi\n}\n"
+            )
+            (esp3 / 'EFI/BOOT/grub.cfg').write_text(dual_legacy)
+            out3 = run_ensure(esp3)
+            self.assertIn('GRUB_ACTION=repaired_dualboot', out3)
+            repaired3 = (esp3 / 'EFI/BOOT/grub.cfg').read_text()
+            self.assertIn('/EFI/SQ2Nat/start.efi', repaired3)
+            self.assertIn('/EFI/SQ2Res/start.efi', repaired3)
+            self.assertIn('/EFI/Microsoft/Boot/bootmgfw.efi', repaired3)
+            self.assertNotIn('SQ2N19', repaired3)
+
+            # Case 4: Custom single-OS grub.cfg already defaulting to spx-single-user -> preserved
+            esp4 = td / 'esp4'
+            (esp4 / 'EFI/BOOT').mkdir(parents=True)
+            custom_sq2nat = (
+                "set timeout=1\nset default=spx-single-user\n"
+                "menuentry 'My Custom Googlebook' --id spx-single-user {\n"
+                " chainloader /EFI/SQ2Nat/start.efi\n}\n"
+            )
+            (esp4 / 'EFI/BOOT/grub.cfg').write_text(custom_sq2nat)
+            out4 = run_ensure(esp4)
+            self.assertIn('GRUB_ACTION=preserved_sq2nat', out4)
+            self.assertEqual((esp4 / 'EFI/BOOT/grub.cfg').read_text(), custom_sq2nat)
 
     def test_windows_powershell_adb_upgrade_script(self):
         ps1 = ROOT / 'scripts/Upgrade-GooglebookViaAdb.ps1'

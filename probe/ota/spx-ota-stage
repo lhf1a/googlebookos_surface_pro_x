@@ -61,6 +61,73 @@ is_preserved_esp_path() {
     esac
 }
 
+write_standard_grub_cfg() {
+    _wg_dst="$1"
+    _wg_src="${2:-}"
+    if [ -n "$_wg_src" ] && [ -f "$_wg_src" ]; then
+        cp "$_wg_src" "$_wg_dst.spxtmp" && mv -f "$_wg_dst.spxtmp" "$_wg_dst"
+    else
+        cat > "$_wg_dst.spxtmp" <<'GRUBEOF'
+set timeout=5
+set default=spx-single-user
+
+menuentry 'Surface Pro X Linux 6.18 - single user 0' --id spx-single-user {
+ chainloader /EFI/SQ2Nat/start.efi
+}
+menuentry 'Surface Pro X Linux 6.18 - rescue (SSH / Wi-Fi / USB)' --id spx-rescue {
+ chainloader /EFI/SQ2Res/start.efi
+}
+menuentry 'Power off' { halt }
+GRUBEOF
+        mv -f "$_wg_dst.spxtmp" "$_wg_dst"
+    fi
+    sync 2>/dev/null || true
+}
+
+ensure_grub_boots_sq2nat() {
+    _eg_esp="$1"
+    _eg_src_cfg="${2:-}"
+    _eg_cfg="$_eg_esp/EFI/BOOT/grub.cfg"
+    _eg_env="$_eg_esp/EFI/BOOT/grubenv"
+
+    if [ -f "$_eg_env" ]; then
+        cp "$_eg_env" "$_eg_env.ota-bak" 2>/dev/null || true
+        rm -f "$_eg_env" 2>/dev/null || true
+    fi
+
+    mkdir -p "$_eg_esp/EFI/BOOT" 2>/dev/null || true
+
+    if [ ! -f "$_eg_cfg" ]; then
+        write_standard_grub_cfg "$_eg_cfg" "$_eg_src_cfg"
+        log "Installed missing EFI/BOOT/grub.cfg for /EFI/SQ2Nat/start.efi"
+        return 0
+    fi
+
+    if grep -qi 'bootmgfw\.efi' "$_eg_cfg" 2>/dev/null; then
+        if ! grep -q '/EFI/SQ2Nat/start\.efi' "$_eg_cfg" 2>/dev/null; then
+            cp "$_eg_cfg" "$_eg_cfg.ota-bak" 2>/dev/null || true
+            awk '{
+                if ($0 ~ /\/EFI\/SQ2/ && $0 !~ /\/EFI\/SQ2Res\//) {
+                    sub(/\/EFI\/SQ2[^\/ \t]*\/[^ \t]+\.efi/, "/EFI/SQ2Nat/start.efi")
+                }
+                print
+            }' "$_eg_cfg" > "$_eg_cfg.spxtmp" && mv -f "$_eg_cfg.spxtmp" "$_eg_cfg"
+            sync 2>/dev/null || true
+            log "Updated legacy chainloader inside Windows dual-boot grub.cfg -> /EFI/SQ2Nat/start.efi"
+        fi
+        return 0
+    fi
+
+    if grep -q '/EFI/SQ2Nat/start\.efi' "$_eg_cfg" 2>/dev/null && \
+       tr -d '\r' < "$_eg_cfg" | grep -qE '^[[:space:]]*set[[:space:]]+default=(spx-single-user|"spx-single-user"|'\''spx-single-user'\''|0)[[:space:]]*$'; then
+        return 0
+    fi
+
+    cp "$_eg_cfg" "$_eg_cfg.ota-bak" 2>/dev/null || true
+    write_standard_grub_cfg "$_eg_cfg" "$_eg_src_cfg"
+    log "Replaced legacy/trial EFI/BOOT/grub.cfg (backup at grub.cfg.ota-bak) -> /EFI/SQ2Nat/start.efi"
+}
+
 block_size_bytes() {
     _dev="$1"
     if [ -b "$_dev" ]; then
@@ -278,6 +345,7 @@ apply_manifest_package() {
                 ;;
         esac
     done < "$RUN_DIR/work/meta/ota-files.tsv"
+    ensure_grub_boots_sq2nat "$ESP_DIR" "$RUN_DIR/esp-stage/payload/esp/EFI/BOOT/grub.cfg"
     sync 2>/dev/null || true
     log "Manifest OTA files applied cleanly."
 }
@@ -303,6 +371,7 @@ sync_esp_tree_from_dir() {
         fi
         copy_esp_file_atomic "$_src_root/$_rel" "$_rel" ""
     done < "$RUN_DIR/esp-filelist.txt"
+    ensure_grub_boots_sq2nat "$ESP_DIR" "$_src_root/EFI/BOOT/grub.cfg"
     sync 2>/dev/null || true
     log "Full ESP tree synced cleanly."
 }

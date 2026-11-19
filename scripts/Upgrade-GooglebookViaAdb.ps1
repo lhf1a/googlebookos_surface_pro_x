@@ -607,6 +607,80 @@ copy_esp_atomic() {
     sync 2>/dev/null || true
 }
 
+write_standard_grub_cfg() {
+    _wg_dst="$1"
+    _wg_src="${2:-}"
+    if [ -n "$_wg_src" ] && [ -f "$_wg_src" ]; then
+        cp "$_wg_src" "$_wg_dst.spxtmp" && mv -f "$_wg_dst.spxtmp" "$_wg_dst"
+    else
+        cat > "$_wg_dst.spxtmp" <<'GRUBEOF'
+set timeout=5
+set default=spx-single-user
+
+menuentry 'Surface Pro X Linux 6.18 - single user 0' --id spx-single-user {
+ chainloader /EFI/SQ2Nat/start.efi
+}
+menuentry 'Surface Pro X Linux 6.18 - rescue (SSH / Wi-Fi / USB)' --id spx-rescue {
+ chainloader /EFI/SQ2Res/start.efi
+}
+menuentry 'Power off' { halt }
+GRUBEOF
+        mv -f "$_wg_dst.spxtmp" "$_wg_dst"
+    fi
+    sync 2>/dev/null || true
+}
+
+ensure_grub_boots_sq2nat() {
+    _eg_esp="$1"
+    _eg_src_cfg="${2:-}"
+    _eg_cfg="$_eg_esp/EFI/BOOT/grub.cfg"
+    _eg_env="$_eg_esp/EFI/BOOT/grubenv"
+
+    # Clear stale one-shot grubenv (e.g. trial next_entry) so reboot enters SQ2Nat.
+    if [ -f "$_eg_env" ]; then
+        cp "$_eg_env" "$_eg_env.ota-bak" 2>/dev/null || true
+        rm -f "$_eg_env" 2>/dev/null || true
+    fi
+
+    mkdir -p "$_eg_esp/EFI/BOOT" 2>/dev/null || true
+
+    if [ ! -f "$_eg_cfg" ]; then
+        write_standard_grub_cfg "$_eg_cfg" "$_eg_src_cfg"
+        echo "GRUB_ACTION=installed_missing"
+        return 0
+    fi
+
+    # Preserve Windows dual-boot menus (bootmgfw.efi); only rewrite legacy non-SQ2Nat chainloader if needed.
+    if grep -qi 'bootmgfw\.efi' "$_eg_cfg" 2>/dev/null; then
+        if ! grep -q '/EFI/SQ2Nat/start\.efi' "$_eg_cfg" 2>/dev/null; then
+            cp "$_eg_cfg" "$_eg_cfg.ota-bak" 2>/dev/null || true
+            awk '{
+                if ($0 ~ /\/EFI\/SQ2/ && $0 !~ /\/EFI\/SQ2Res\//) {
+                    sub(/\/EFI\/SQ2[^\/ \t]*\/[^ \t]+\.efi/, "/EFI/SQ2Nat/start.efi")
+                }
+                print
+            }' "$_eg_cfg" > "$_eg_cfg.spxtmp" && mv -f "$_eg_cfg.spxtmp" "$_eg_cfg"
+            sync 2>/dev/null || true
+            echo "GRUB_ACTION=repaired_dualboot"
+        else
+            echo "GRUB_ACTION=preserved_dualboot"
+        fi
+        return 0
+    fi
+
+    # Single-OS grub.cfg: preserve only if it already defaults to SQ2Nat (spx-single-user or 0).
+    if grep -q '/EFI/SQ2Nat/start\.efi' "$_eg_cfg" 2>/dev/null && \
+       tr -d '\r' < "$_eg_cfg" | grep -qE '^[[:space:]]*set[[:space:]]+default=(spx-single-user|"spx-single-user"|'\''spx-single-user'\''|0)[[:space:]]*$'; then
+        echo "GRUB_ACTION=preserved_sq2nat"
+        return 0
+    fi
+
+    # Legacy/trial grub.cfg (e.g. SQ2N19 / SQ2KSU / SQ2AU10): back up and install standard SQ2Nat menu.
+    cp "$_eg_cfg" "$_eg_cfg.ota-bak" 2>/dev/null || true
+    write_standard_grub_cfg "$_eg_cfg" "$_eg_src_cfg"
+    echo "GRUB_ACTION=replaced_legacy_grub"
+}
+
 case "$CMD" in
     probe)
         [ -b /dev/block/by-name/super ] || { echo "ERR:missing_super_block" >&2; exit 1; }
@@ -627,6 +701,22 @@ case "$CMD" in
         printf 'HAS_OTA_INFO=%s\n' "$_has_ota_info"
         printf 'CURRENT_SUPER_SHA256=%s\n' "$_cur_super_sha"
         printf 'KERNEL=%s\n' "$_krel"
+        ;;
+
+    check-staged-pkg)
+        _exp_sha="$1"
+        _exp_sz="$2"
+        if [ -f /data/ota/pending.pkg ]; then
+            _cur_sz="$(stat -c '%s' /data/ota/pending.pkg 2>/dev/null || echo 0)"
+            if [ "$_cur_sz" = "$_exp_sz" ]; then
+                _got="$(sha256_dev /data/ota/pending.pkg)"
+                if [ "$_got" = "$_exp_sha" ]; then
+                    echo "HIT=$_got"
+                    exit 0
+                fi
+            fi
+        fi
+        echo "MISS"
         ;;
 
     stage-pkg)
@@ -682,6 +772,8 @@ case "$CMD" in
                     ;;
             esac
         done < "$_stage/meta/ota-files.tsv"
+
+        ensure_grub_boots_sq2nat "$_esp" "$_stage/esp/payload/esp/EFI/BOOT/grub.cfg"
 
         if [ "$_apply_super" = "1" ] || [ "$_wipe_data" = "1" ]; then
             _ptmp="$_esp/SPX-OTA-PENDING.tmp"
@@ -770,6 +862,8 @@ case "$CMD" in
         _i_src="$(sha256_dev "$_src_mp/EFI/SQ2Nat/initramfs.cpio.gz")"
         _i_dst="$(sha256_dev "$_esp/EFI/SQ2Nat/initramfs.cpio.gz")"
         [ "$_i_src" = "$_i_dst" ] || { echo "ERR:initramfs_verify_failed" >&2; exit 1; }
+
+        ensure_grub_boots_sq2nat "$_esp" "$_src_mp/EFI/BOOT/grub.cfg"
 
         _ptmp="$_esp/SPX-OTA-PENDING.tmp"
         {
@@ -865,11 +959,16 @@ try {
     }
 
     # ---- 6. Push & Verify Package ----
-    Write-Log 'Pushing package to device (/data/local/tmp/spx-ota-upload.pkg)...'
-    $null = Invoke-Adb -Arguments @('push', $PackagePath, '/data/local/tmp/spx-ota-upload.pkg') -StreamOutput
-    Write-Log 'Verifying package SHA-256 on device...'
-    $stageOut = (Invoke-DeviceRoot "sh /data/local/tmp/spx-adb-helper.sh stage-pkg $($pkg.Sha256)").Text.Trim()
-    Write-Log $stageOut
+    $stagedHit = (Invoke-DeviceRoot "sh /data/local/tmp/spx-adb-helper.sh check-staged-pkg $($pkg.Sha256) $($pkg.PackageBytes)" -IgnoreExitCode).Text.Trim()
+    if ($stagedHit -eq ("HIT=" + $pkg.Sha256)) {
+        Write-Log "Reusing already-staged verified package on device (/data/ota/pending.pkg)."
+    } else {
+        Write-Log 'Pushing package to device (/data/local/tmp/spx-ota-upload.pkg)...'
+        $null = Invoke-Adb -Arguments @('push', $PackagePath, '/data/local/tmp/spx-ota-upload.pkg') -StreamOutput
+        Write-Log 'Verifying package SHA-256 on device...'
+        $stageOut = (Invoke-DeviceRoot "sh /data/local/tmp/spx-adb-helper.sh stage-pkg $($pkg.Sha256)").Text.Trim()
+        Write-Log $stageOut
+    }
 
     # ---- 7. Apply ESP Bootstrap & Arm Offline OTA ----
     if ($pkg.Kind -eq 'manifest') {
