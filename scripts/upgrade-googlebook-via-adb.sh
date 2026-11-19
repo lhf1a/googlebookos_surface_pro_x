@@ -303,17 +303,17 @@ is_preserved_esp() {
 }
 
 get_blk_bytes() {
-    _d="$1"
-    if [ -b "$_d" ]; then
+    _gb_d="$1"
+    if [ -b "$_gb_d" ]; then
         if command -v blockdev >/dev/null 2>&1; then
-            _b="$(blockdev --getsize64 "$_d" 2>/dev/null || true)"
-            case "$_b" in ''|*[!0-9]*) ;; *) [ "$_b" != "0" ] && { printf '%s\n' "$_b"; return 0; } ;; esac
+            _gb_b="$(blockdev --getsize64 "$_gb_d" 2>/dev/null || true)"
+            case "$_gb_b" in ''|*[!0-9]*) ;; *) [ "$_gb_b" != "0" ] && { printf '%s\n' "$_gb_b"; return 0; } ;; esac
         fi
-        _r="$(readlink -f "$_d" 2>/dev/null || printf '%s' "$_d")"
-        _n="${_r##*/}"
-        if [ -r "/sys/class/block/$_n/size" ]; then
-            _s="$(cat "/sys/class/block/$_n/size")"
-            awk -v s="$_s" 'BEGIN { printf "%.0f\n", s * 512 }'
+        _gb_r="$(readlink -f "$_gb_d" 2>/dev/null || printf '%s' "$_gb_d")"
+        _gb_n="${_gb_r##*/}"
+        if [ -r "/sys/class/block/$_gb_n/size" ]; then
+            _gb_s="$(cat "/sys/class/block/$_gb_n/size")"
+            awk -v s="$_gb_s" 'BEGIN { printf "%.0f\n", s * 512 }'
             return 0
         fi
     fi
@@ -325,40 +325,40 @@ sha256_dev() {
 }
 
 mount_esp() {
-    _mp="/data/local/tmp/spx-adb-esp"
-    mkdir -p "$_mp"
-    umount "$_mp" 2>/dev/null || true
-    mount -t vfat -o sync /dev/block/by-name/SQ2PROBE "$_mp"
-    printf '%s\n' "$_mp"
+    _me_mp="/data/local/tmp/spx-adb-esp"
+    mkdir -p "$_me_mp"
+    umount "$_me_mp" 2>/dev/null || true
+    mount -t vfat -o sync /dev/block/by-name/SQ2PROBE "$_me_mp"
+    printf '%s\n' "$_me_mp"
 }
 
 umount_esp() {
-    _mp="/data/local/tmp/spx-adb-esp"
+    _ue_mp="/data/local/tmp/spx-adb-esp"
     sync 2>/dev/null || true
-    umount "$_mp" 2>/dev/null || true
-    rmdir "$_mp" 2>/dev/null || true
+    umount "$_ue_mp" 2>/dev/null || true
+    rmdir "$_ue_mp" 2>/dev/null || true
 }
 
 backup_sq2nat_if_space() {
-    _esp="$1"
-    [ -d "$_esp/EFI/SQ2Nat" ] || return 0
-    _free_kb="$(df -k "$_esp" | awk 'NR==2{print $4+0}')"
+    _bk_esp="$1"
+    [ -d "$_bk_esp/EFI/SQ2Nat" ] || return 0
+    _bk_free_kb="$(df -k "$_bk_esp" | awk 'NR==2{print $4+0}')"
     # Require >= 350 MiB free on ESP before creating backup copy (v0.7.0 2 GiB ESP has > 1.3 GiB free)
-    if [ "$_free_kb" -ge 358400 ]; then
-        rm -rf "$_esp/EFI/SQ2Bak" 2>/dev/null || true
-        cp -r "$_esp/EFI/SQ2Nat" "$_esp/EFI/SQ2Bak" 2>/dev/null || rm -rf "$_esp/EFI/SQ2Bak" 2>/dev/null || true
+    if [ "$_bk_free_kb" -ge 358400 ]; then
+        rm -rf "$_bk_esp/EFI/SQ2Bak" 2>/dev/null || true
+        cp -r "$_bk_esp/EFI/SQ2Nat" "$_bk_esp/EFI/SQ2Bak" 2>/dev/null || rm -rf "$_bk_esp/EFI/SQ2Bak" 2>/dev/null || true
         sync 2>/dev/null || true
     fi
 }
 
 verify_initramfs_has_ota() {
-    _initrd="$1"
-    [ -f "$_initrd" ] || { echo "ERR:missing_new_initramfs" >&2; return 1; }
-    if ! gzip -dc "$_initrd" 2>/dev/null | tr '\0' '\n' | grep -Fq 'bin/spx-ota-stage'; then
+    _vi_initrd="$1"
+    [ -f "$_vi_initrd" ] || { echo "ERR:missing_new_initramfs" >&2; return 1; }
+    if ! gzip -dc "$_vi_initrd" 2>/dev/null | tr '\0' '\n' | grep -Fq 'bin/spx-ota-stage'; then
         echo "ERR:new_initramfs_missing_spx_ota_stage" >&2
         return 1
     fi
-    if ! gzip -dc "$_initrd" 2>/dev/null | tr '\0' '\n' | grep -Fq 'bin/spx-ota-tool'; then
+    if ! gzip -dc "$_vi_initrd" 2>/dev/null | tr '\0' '\n' | grep -Fq 'bin/spx-ota-tool'; then
         echo "ERR:new_initramfs_missing_spx_ota_tool" >&2
         return 1
     fi
@@ -366,24 +366,24 @@ verify_initramfs_has_ota() {
 }
 
 copy_esp_atomic() {
-    _src="$1"
-    _esp="$2"
-    _rel="$3"
-    _exp_sha="${4:-}"
-    if is_preserved_esp "$_rel"; then
+    _ca_src="$1"
+    _ca_esp="$2"
+    _ca_rel="$3"
+    _ca_exp_sha="${4:-}"
+    if is_preserved_esp "$_ca_rel"; then
         return 0
     fi
-    _dst="$_esp/$_rel"
-    mkdir -p "${_dst%/*}"
-    _tmp="$_dst.spxtmp"
-    rm -f "$_tmp" 2>/dev/null || true
-    cp "$_src" "$_tmp"
+    _ca_dst="$_ca_esp/$_ca_rel"
+    mkdir -p "${_ca_dst%/*}"
+    _ca_tmp="$_ca_dst.spxtmp"
+    rm -f "$_ca_tmp" 2>/dev/null || true
+    cp "$_ca_src" "$_ca_tmp"
     sync 2>/dev/null || true
-    if [ -n "$_exp_sha" ]; then
-        _got="$(sha256_dev "$_tmp")"
-        [ "$_got" = "$_exp_sha" ] || { rm -f "$_tmp"; echo "ERR:esp_verify_mismatch:$_rel" >&2; return 1; }
+    if [ -n "$_ca_exp_sha" ]; then
+        _ca_got="$(sha256_dev "$_ca_tmp")"
+        [ "$_ca_got" = "$_ca_exp_sha" ] || { rm -f "$_ca_tmp"; echo "ERR:esp_verify_mismatch:$_ca_rel" >&2; return 1; }
     fi
-    mv -f "$_tmp" "$_dst"
+    mv -f "$_ca_tmp" "$_ca_dst"
     sync 2>/dev/null || true
 }
 

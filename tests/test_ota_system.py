@@ -755,6 +755,18 @@ esac
             self.assertIn('GRUB_ACTION=preserved_sq2nat', out4)
             self.assertEqual((esp4 / 'EFI/BOOT/grub.cfg').read_text(), custom_sq2nat)
 
+            # Case 5: copy_esp_atomic must NEVER clobber caller's _exp_sha (POSIX sh shares globals!)
+            src_f = td / 'dummy-kernel'
+            src_f.write_bytes(b'KERNEL-BYTES')
+            esp5 = td / 'esp5'
+            esp5.mkdir()
+            p5 = subprocess.run(
+                ['sh', '-c', f'{fn_block}\n_exp_sha="abcdef0123456789"\ncopy_esp_atomic "$1" "$2" "EFI/SQ2Nat/Image" ""\necho "AFTER=$_exp_sha"', '--', 'dummy-cmd', str(src_f), str(esp5)],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(p5.returncode, 0, p5.stderr + p5.stdout)
+            self.assertIn('AFTER=abcdef0123456789', p5.stdout)
+
     def test_windows_powershell_adb_upgrade_script(self):
         ps1 = ROOT / 'scripts/Upgrade-GooglebookViaAdb.ps1'
         cmd = ROOT / 'scripts/Upgrade-GooglebookViaAdb.cmd'
