@@ -15,6 +15,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -340,6 +341,9 @@ static size_t decode_wpa_ssid(const char *src, unsigned char *raw, size_t raw_ca
             } else if (next == 'r') {
                 ch = '\r';
                 i++;
+            } else if (next == 'e') {
+                ch = 0x1b;
+                i++;
             }
         }
         raw[rlen++] = ch;
@@ -369,7 +373,7 @@ static void encode_hex(const unsigned char *raw, size_t len, char *hex_out, size
 
 static sec_mode_t parse_security(const char *flags) {
     bool has_sae = strstr(flags, "SAE") != NULL;
-    bool has_wpa2 = strstr(flags, "WPA2-PSK") != NULL;
+    bool has_wpa2 = strstr(flags, "WPA2-PSK") != NULL || strstr(flags, "RSN-PSK") != NULL;
     bool has_wpa = strstr(flags, "WPA-PSK") != NULL;
     bool has_eap = strstr(flags, "-EAP") != NULL;
     bool has_wep = strstr(flags, "[WEP]") != NULL;
@@ -601,6 +605,181 @@ static bool is_hex64(const char *s) {
     return true;
 }
 
+typedef struct {
+    uint32_t state[5];
+    uint64_t bitlen;
+    unsigned char buf[64];
+    size_t buflen;
+} sha1_ctx_t;
+
+static uint32_t sha1_rol32(uint32_t v, unsigned int n) {
+    return (v << n) | (v >> (32U - n));
+}
+
+static void sha1_transform(uint32_t state[5], const unsigned char block[64]) {
+    uint32_t w[80];
+    for (int i = 0; i < 16; i++) {
+        w[i] = ((uint32_t)block[i * 4] << 24) |
+               ((uint32_t)block[i * 4 + 1] << 16) |
+               ((uint32_t)block[i * 4 + 2] << 8) |
+               ((uint32_t)block[i * 4 + 3]);
+    }
+    for (int i = 16; i < 80; i++) {
+        w[i] = sha1_rol32(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+    }
+    uint32_t a = state[0], b = state[1], c = state[2], d = state[3], e = state[4];
+    for (int i = 0; i < 80; i++) {
+        uint32_t f, k;
+        if (i < 20) {
+            f = (b & c) | ((~b) & d);
+            k = 0x5A827999U;
+        } else if (i < 40) {
+            f = b ^ c ^ d;
+            k = 0x6ED9EBA1U;
+        } else if (i < 60) {
+            f = (b & c) | (b & d) | (c & d);
+            k = 0x8F1BBCDCU;
+        } else {
+            f = b ^ c ^ d;
+            k = 0xCA62C1D6U;
+        }
+        uint32_t temp = sha1_rol32(a, 5) + f + e + k + w[i];
+        e = d;
+        d = c;
+        c = sha1_rol32(b, 30);
+        b = a;
+        a = temp;
+    }
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+}
+
+static void sha1_init(sha1_ctx_t *ctx) {
+    ctx->state[0] = 0x67452301U;
+    ctx->state[1] = 0xEFCDAB89U;
+    ctx->state[2] = 0x98BADCFEU;
+    ctx->state[3] = 0x10325476U;
+    ctx->state[4] = 0xC3D2E1F0U;
+    ctx->bitlen = 0;
+    ctx->buflen = 0;
+}
+
+static void sha1_update(sha1_ctx_t *ctx, const unsigned char *data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        ctx->buf[ctx->buflen++] = data[i];
+        if (ctx->buflen == 64) {
+            sha1_transform(ctx->state, ctx->buf);
+            ctx->bitlen += 512;
+            ctx->buflen = 0;
+        }
+    }
+}
+
+static void sha1_final(sha1_ctx_t *ctx, unsigned char out[20]) {
+    ctx->bitlen += (uint64_t)ctx->buflen * 8U;
+    ctx->buf[ctx->buflen++] = 0x80;
+    if (ctx->buflen > 56) {
+        while (ctx->buflen < 64) ctx->buf[ctx->buflen++] = 0;
+        sha1_transform(ctx->state, ctx->buf);
+        ctx->buflen = 0;
+    }
+    while (ctx->buflen < 56) ctx->buf[ctx->buflen++] = 0;
+    for (int i = 7; i >= 0; i--) {
+        ctx->buf[ctx->buflen++] = (unsigned char)((ctx->bitlen >> (i * 8)) & 0xffU);
+    }
+    sha1_transform(ctx->state, ctx->buf);
+    for (int i = 0; i < 5; i++) {
+        out[i * 4]     = (unsigned char)((ctx->state[i] >> 24) & 0xffU);
+        out[i * 4 + 1] = (unsigned char)((ctx->state[i] >> 16) & 0xffU);
+        out[i * 4 + 2] = (unsigned char)((ctx->state[i] >> 8) & 0xffU);
+        out[i * 4 + 3] = (unsigned char)(ctx->state[i] & 0xffU);
+    }
+}
+
+static void hmac_sha1(const unsigned char *key, size_t key_len,
+                      const unsigned char *msg1, size_t msg1_len,
+                      const unsigned char *msg2, size_t msg2_len,
+                      unsigned char out[20]) {
+    unsigned char kblock[64];
+    memset(kblock, 0, sizeof(kblock));
+    if (key_len > 64) {
+        sha1_ctx_t kh;
+        sha1_init(&kh);
+        sha1_update(&kh, key, key_len);
+        sha1_final(&kh, kblock);
+    } else if (key_len > 0) {
+        memcpy(kblock, key, key_len);
+    }
+
+    unsigned char ipad[64], opad[64];
+    for (size_t i = 0; i < 64; i++) {
+        ipad[i] = (unsigned char)(kblock[i] ^ 0x36U);
+        opad[i] = (unsigned char)(kblock[i] ^ 0x5CU);
+    }
+
+    unsigned char inner[20];
+    sha1_ctx_t ictx;
+    sha1_init(&ictx);
+    sha1_update(&ictx, ipad, 64);
+    if (msg1 && msg1_len > 0) sha1_update(&ictx, msg1, msg1_len);
+    if (msg2 && msg2_len > 0) sha1_update(&ictx, msg2, msg2_len);
+    sha1_final(&ictx, inner);
+
+    sha1_ctx_t octx;
+    sha1_init(&octx);
+    sha1_update(&octx, opad, 64);
+    sha1_update(&octx, inner, 20);
+    sha1_final(&octx, out);
+
+    memset(kblock, 0, sizeof(kblock));
+    memset(ipad, 0, sizeof(ipad));
+    memset(opad, 0, sizeof(opad));
+    memset(inner, 0, sizeof(inner));
+}
+
+/* IEEE 802.11i PBKDF2-HMAC-SHA1(passphrase, ssid_raw, 4096, 32) -> 64 lowercase hex. */
+static bool derive_wpa_psk_hex(const char *passphrase, const unsigned char *ssid_raw,
+                               size_t ssid_len, char *hex_out, size_t hex_cap) {
+    if (!passphrase || !ssid_raw || ssid_len == 0 || hex_cap < 65) return false;
+    size_t pass_len = strlen(passphrase);
+    if (pass_len < 8 || pass_len > 63) return false;
+
+    unsigned char pmk[32];
+    for (uint32_t block = 1; block <= 2; block++) {
+        unsigned char ctr[4] = {
+            (unsigned char)((block >> 24) & 0xffU),
+            (unsigned char)((block >> 16) & 0xffU),
+            (unsigned char)((block >> 8) & 0xffU),
+            (unsigned char)(block & 0xffU)
+        };
+        unsigned char u[20], t[20];
+        hmac_sha1((const unsigned char *)passphrase, pass_len, ssid_raw, ssid_len, ctr, 4, u);
+        memcpy(t, u, 20);
+        for (int iter = 1; iter < 4096; iter++) {
+            hmac_sha1((const unsigned char *)passphrase, pass_len, u, 20, NULL, 0, u);
+            for (int j = 0; j < 20; j++) t[j] ^= u[j];
+        }
+        if (block == 1) {
+            memcpy(pmk, t, 20);
+        } else {
+            memcpy(pmk + 20, t, 12);
+        }
+        memset(u, 0, sizeof(u));
+        memset(t, 0, sizeof(t));
+    }
+    encode_hex(pmk, 32, hex_out, hex_cap);
+    memset(pmk, 0, sizeof(pmk));
+    return strlen(hex_out) == 64;
+}
+
+static bool wpa_ok(const cfg_t *cfg, char *out, size_t out_cap,
+                   const char *a1, const char *a2, const char *a3, const char *a4) {
+    return run_wpa(cfg, out, out_cap, a1, a2, a3, a4) == 0 && strstr(out, "OK") != NULL;
+}
+
 typedef void (*status_cb_t)(const char *msg, void *ctx);
 
 static bool connect_wifi(const cfg_t *cfg, const unsigned char *ssid_raw, size_t ssid_len,
@@ -670,30 +849,81 @@ static bool connect_wifi(const cfg_t *cfg, const unsigned char *ssid_raw, size_t
         }
         run_wpa(cfg, out, sizeof(out), "set_network", net_id, "wep_tx_keyidx", "0");
     } else {
-        if (!is_hex64(password) && (strlen(password) < 8 || strlen(password) > 63)) {
+        bool hex_psk = is_hex64(password);
+        size_t plen = strlen(password);
+        if (sec == SEC_WPA3) {
+            if (plen == 0 || plen > 63) {
+                snprintf(err_out, err_cap, "WPA3 passphrase must be 1-63 characters");
+                return false;
+            }
+        } else if (!hex_psk && (plen < 8 || plen > 63)) {
             snprintf(err_out, err_cap, "WPA passphrase must be 8-63 characters (or 64 hex)");
             return false;
         }
+
         char qpass[MAX_PASS_LEN * 2 + 4];
-        const char *psk_arg = password;
-        if (!is_hex64(password)) {
-            if (!quote_wpa_string(password, qpass, sizeof(qpass))) {
-                snprintf(err_out, err_cap, "Passphrase too long");
+        char psk_hex[65] = "";
+        bool have_qpass = !hex_psk && quote_wpa_string(password, qpass, sizeof(qpass));
+        if (hex_psk) {
+            for (size_t i = 0; i < 64; i++) {
+                psk_hex[i] = (char)tolower((unsigned char)password[i]);
+            }
+            psk_hex[64] = '\0';
+        } else if (sec != SEC_WPA3) {
+            if (!derive_wpa_psk_hex(password, ssid_raw, ssid_len, psk_hex, sizeof(psk_hex))) {
+                snprintf(err_out, err_cap, "Failed to derive WPA PSK");
+                memset(qpass, 0, sizeof(qpass));
                 return false;
             }
-            psk_arg = qpass;
         }
+
+        bool creds_ok = false;
         if (sec == SEC_WPA3) {
-            run_wpa(cfg, out, sizeof(out), "set_network", net_id, "key_mgmt", "SAE");
+            if (!wpa_ok(cfg, out, sizeof(out), "set_network", net_id, "key_mgmt", "SAE")) {
+                memset(qpass, 0, sizeof(qpass));
+                snprintf(err_out, err_cap, "WPA3-SAE is not supported by rescue wpa_supplicant");
+                return false;
+            }
             run_wpa(cfg, out, sizeof(out), "set_network", net_id, "ieee80211w", "2");
+            if (have_qpass && (wpa_ok(cfg, out, sizeof(out), "set_network", net_id, "sae_password", qpass) ||
+                               wpa_ok(cfg, out, sizeof(out), "set_network", net_id, "psk", qpass))) {
+                creds_ok = true;
+            }
         } else if (sec == SEC_WPA2_WPA3) {
-            run_wpa(cfg, out, sizeof(out), "set_network", net_id, "key_mgmt", "WPA-PSK SAE");
-            run_wpa(cfg, out, sizeof(out), "set_network", net_id, "ieee80211w", "1");
+            bool sae_ok = wpa_ok(cfg, out, sizeof(out), "set_network", net_id, "key_mgmt", "WPA-PSK SAE");
+            if (sae_ok) {
+                run_wpa(cfg, out, sizeof(out), "set_network", net_id, "ieee80211w", "1");
+                if (have_qpass && wpa_ok(cfg, out, sizeof(out), "set_network", net_id, "psk", qpass)) {
+                    creds_ok = true;
+                }
+            }
+            if (!creds_ok) {
+                /* Fallback for minimal rescue wpa_supplicant without CONFIG_SAE / PBKDF2. */
+                if (wpa_ok(cfg, out, sizeof(out), "set_network", net_id, "key_mgmt", "WPA-PSK WPA-PSK-SHA256")) {
+                    run_wpa(cfg, out, sizeof(out), "set_network", net_id, "ieee80211w", "1");
+                } else {
+                    run_wpa(cfg, out, sizeof(out), "set_network", net_id, "key_mgmt", "WPA-PSK");
+                    run_wpa(cfg, out, sizeof(out), "set_network", net_id, "ieee80211w", "0");
+                }
+                if (wpa_ok(cfg, out, sizeof(out), "set_network", net_id, "psk", psk_hex)) {
+                    creds_ok = true;
+                }
+            }
         } else {
-            run_wpa(cfg, out, sizeof(out), "set_network", net_id, "key_mgmt", "WPA-PSK");
+            /* Always pass precomputed 64-hex PSK so CONFIG_NO_PBKDF2 wpa_supplicant succeeds. */
+            if (sec == SEC_WPA2 &&
+                wpa_ok(cfg, out, sizeof(out), "set_network", net_id, "key_mgmt", "WPA-PSK WPA-PSK-SHA256")) {
+                run_wpa(cfg, out, sizeof(out), "set_network", net_id, "ieee80211w", "1");
+            } else {
+                run_wpa(cfg, out, sizeof(out), "set_network", net_id, "key_mgmt", "WPA-PSK");
+            }
+            if (wpa_ok(cfg, out, sizeof(out), "set_network", net_id, "psk", psk_hex)) {
+                creds_ok = true;
+            }
         }
-        if (run_wpa(cfg, out, sizeof(out), "set_network", net_id, "psk", psk_arg) != 0 ||
-            strstr(out, "OK") == NULL) {
+        memset(qpass, 0, sizeof(qpass));
+        memset(psk_hex, 0, sizeof(psk_hex));
+        if (!creds_ok) {
             snprintf(err_out, err_cap, "Failed to set Wi-Fi passphrase");
             return false;
         }
@@ -701,6 +931,7 @@ static bool connect_wifi(const cfg_t *cfg, const unsigned char *ssid_raw, size_t
 
     run_wpa(cfg, out, sizeof(out), "enable_network", net_id, NULL, NULL);
     run_wpa(cfg, out, sizeof(out), "select_network", net_id, NULL, NULL);
+    run_wpa(cfg, out, sizeof(out), "reconnect", NULL, NULL, NULL);
 
     if (cb) cb("Associating with Wi-Fi access point...", cb_ctx);
     bool associated = false;

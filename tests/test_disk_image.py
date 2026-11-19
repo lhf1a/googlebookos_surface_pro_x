@@ -180,4 +180,62 @@ sleep() { return 0; }
             self.assertFalse(captured['minimal'])
 
 
+    def test_storage_ready_stage_preserves_init_rc_basename_for_kernelsu(self):
+        """KernelSU is_init_rc() checks dentry->d_name == 'init.rc'; bind-mounted file must keep basename init.rc."""
+        script = (d.ROOT / 'probe/test2/storage-ready-stage').read_text(encoding='utf-8')
+        subprocess.run(['sh', '-n'], input=script, text=True, check=True)
+        self.assertNotIn('storage-ready-init.rc', script)
+        self.assertIn('/init.rc"', script)
+        self.assertIn('mount --bind "$target" "$source"', script)
+
+    def test_compute_super_sha256_and_ota_info_embedding(self):
+        """compute_super_sha256 must match written compacted super bytes and embed into etc/spx-ota-info."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / 'source.img'
+            src_super_off = 2 * d.M
+            with source.open('wb') as f:
+                f.truncate(12 * d.M)
+                f.seek(src_super_off + 1 * d.M)
+                f.write(b'A' * 1024 + b'\xe2\xe1\xf5\xe0' + b'B' * (d.M - 1028))
+                f.seek(src_super_off + 5 * d.M)
+                f.write(b'C' * 1024 + b'\xe2\xe1\xf5\xe0' + b'D' * (d.M - 1028))
+            slices = f'system_a {1*d.M} {1*d.M}\nvendor_a {5*d.M} {1*d.M}\n'.encode()
+            compacted_super, slice_plan, _ = d.compact_super_slices(slices, source, src_super_off, 10 * d.M)
+            computed = d.compute_super_sha256(source, src_super_off, compacted_super, slice_plan=slice_plan)
+
+            # Materialize compacted super and verify exact SHA-256 equality.
+            out = root / 'super.raw'
+            with out.open('wb') as f:
+                f.truncate(compacted_super)
+            for _, old_off, new_off, sz in slice_plan:
+                d.copy_region(source, out, src_super_off + old_off, sz, new_off)
+            self.assertEqual(computed, d.sha(out))
+
+            # Verify storage_payload updates etc/spx-ota-info with SPX_OTA_SUPER_SHA256.
+            cpio = d.cpio_module()
+            init = (b'#!/bin/sh\nsq2-loop-slice "${ssd_part}3" "$offset" "$bytes"\n' + d.HOOK + d.ANCHOR)
+            entries = {
+                'init': (0o100755, init),
+                'bin/apply-single-user': (0o100755, b'user0'),
+                'bin/prepare-native-ssd': (0o100755, b'old'),
+                'etc/sq2-ssd-layout': (0o100644, b'old'),
+                'etc/sq2-ssd-partitions': (0o100644, b'old'),
+                'etc/spx-ota-info': (0o100644, b'SPX_OTA_VERSION=v0.7.6\nSPX_OTA_SUPER_SHA256=\n'),
+            }
+            base_with_ota = gzip.compress(
+                b''.join(cpio.entry(n, b, m) for n, (m, b) in entries.items()) + cpio.entry('TRAILER!!!', b'', 0),
+                mtime=0,
+            )
+            parts = [{'index': i, 'name': n, 'bytes': 64 * d.M}
+                     for i, n in enumerate(['super', 'userdata', 'metadata', 'misc', 'SQ2PROBE'], 1)]
+            payload, _, _ = d.storage_payload(base_with_ota, parts, anonymous=True, super_sha256=computed)
+            after = cpio.entries(gzip.decompress(payload))
+            from datetime import datetime, timezone
+            yymmdd = datetime.now(timezone.utc).strftime('%y%m%d')
+            ota_info_after = after['etc/spx-ota-info'][1].decode()
+            self.assertIn(f'SPX_OTA_SUPER_SHA256={computed}\n', ota_info_after)
+            self.assertIn(f'SPX_OTA_BUILD_DISPLAY=v0.7.6.{yymmdd}\n', ota_info_after)
+
+
 if __name__=='__main__':unittest.main()

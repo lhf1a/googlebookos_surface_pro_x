@@ -182,13 +182,25 @@ block_size_bytes() {
 dir_free_mb() {
     _d="$1"
     [ -d "$_d" ] || { echo 0; return 0; }
-    df -k "$_d" 2>/dev/null | awk 'NR==2 { printf "%d", int($4 / 1024) }'
+    _mb="$(stat -f -c '%a %S' "$_d" 2>/dev/null | awk 'NF==2 && $2>0 { printf "%d", int(($1 * $2) / 1048576) }')"
+    if [ -n "$_mb" ]; then
+        printf '%s
+' "$_mb"
+        return 0
+    fi
+    df -Pk "$_d" 2>/dev/null | awk 'NR==2 { printf "%d", int($4 / 1024) }'
 }
 
 dir_total_mb() {
     _d="$1"
     [ -d "$_d" ] || { echo 0; return 0; }
-    df -k "$_d" 2>/dev/null | awk 'NR==2 { printf "%d", int($2 / 1024) }'
+    _mb="$(stat -f -c '%b %S' "$_d" 2>/dev/null | awk 'NF==2 && $2>0 { printf "%d", int(($1 * $2) / 1048576) }')"
+    if [ -n "$_mb" ]; then
+        printf '%s
+' "$_mb"
+        return 0
+    fi
+    df -Pk "$_d" 2>/dev/null | awk 'NR==2 { printf "%d", int($2 / 1024) }'
 }
 
 read_kv_file() {
@@ -237,13 +249,18 @@ claim_system_update_intent() {
     _u="$1"
     android pm enable --user "$_u" "$UPDATE_COMPONENT" >/dev/null 2>&1 || true
     _handlers="$(android cmd package query-activities --brief -a android.settings.SYSTEM_UPDATE_SETTINGS 2>/dev/null || true)"
+    # Only disable competing stock/GMS handlers when our SystemUpdateActivity is actually active.
+    case "$_handlers" in
+        *"$PKG/"*) ;;
+        *) return 0 ;;
+    esac
     printf '%s\n' "$_handlers" | while IFS= read -r _line; do
         _comp="$(printf '%s' "$_line" | tr -d '\r' | awk '{print $1}')"
         case "$_comp" in
             */*)
                 _pkg="${_comp%%/*}"
                 if [ "$_pkg" != "$PKG" ]; then
-                    android pm disable-user --user "$_u" "$_comp" >/dev/null 2>&1 || true
+                    android pm disable --user "$_u" "$_comp" >/dev/null 2>&1 || true
                 fi
                 ;;
         esac
@@ -260,6 +277,10 @@ publish_state() {
     _commit="$(read_kv_file "$ETC_DIR/spx-ota-info" "SPX_OTA_COMMIT")"
     _krel="$(uname -r 2>/dev/null || true)"
     _cur_super_sha="$(read_kv_file "$ETC_DIR/spx-ota-info" "SPX_OTA_SUPER_SHA256")"
+    _build_display="$(android getprop ro.build.display.id 2>/dev/null | tr -d '\r' || true)"
+    if [ -z "$_build_display" ]; then
+        _build_display="$(read_kv_file "$ETC_DIR/spx-ota-info" "SPX_OTA_BUILD_DISPLAY")"
+    fi
     _super_bytes="$(block_size_bytes "$SUPER_DEV")"
     _esp_free="$(dir_free_mb "$ESP_DIR")"
     _esp_total="$(dir_total_mb "$ESP_DIR")"
@@ -296,6 +317,7 @@ ota_bridge_version=1
 current_version=$_ver
 current_commit=$_commit
 current_kernel=$_krel
+current_build_display=$_build_display
 current_super_sha256=$_cur_super_sha
 super_bytes=$_super_bytes
 esp_free_mb=$_esp_free
@@ -760,8 +782,9 @@ while true; do
         if [ "$_next" != "$CURRENT_USER" ]; then
             CURRENT_USER="$_next"
             LAST_PUBLISHED=0
-            claim_system_update_intent "$CURRENT_USER" || true
         fi
+        # Re-assert System Update intent in case GMS re-enables its update activity after boot.
+        claim_system_update_intent "$CURRENT_USER" || true
     fi
     sleep "${SPX_OTA_POLL_SLEEP:-1}"
 done

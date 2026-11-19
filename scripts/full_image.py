@@ -770,6 +770,8 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
     bodies['init'] = init
     bodies['bin/apply-single-user'] = (ROOT/'probe/test2/apply-single-user').read_bytes().replace(b'\r\n',b'\n')
     records['bin/apply-single-user'] = new_record(0o100755)
+    bodies['bin/apply-device-info'] = (ROOT/'probe/test2/apply-device-info').read_bytes().replace(b'\r\n', b'\n')
+    records['bin/apply-device-info'] = new_record(0o100755)
     # Take the current committed helper, while the accepted cumulative IPTSd
     # binary remains the fixed private runtime input (not the old touch cache).
     bodies['bin/touch-calibration-boot'] = (ROOT/'probe/test2/touch-calibration-boot').read_bytes().replace(b'\r\n',b'\n')

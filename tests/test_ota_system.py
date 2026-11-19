@@ -228,7 +228,7 @@ class OtaSystemTests(unittest.TestCase):
             super_dev.write_bytes(super_v1)
             super_v1_sha = hashlib.sha256(super_v1).hexdigest()
             (etc_dir / 'spx-ota-info').write_text(
-                f'SPX_OTA_VERSION=v1.0\nSPX_OTA_COMMIT=abc123\nSPX_OTA_KERNEL=6.18.60-sq2-android1\nSPX_OTA_SUPER_SHA256={super_v1_sha}\n'
+                f'SPX_OTA_VERSION=v1.0\nSPX_OTA_COMMIT=abc123\nSPX_OTA_KERNEL=6.18.60-sq2-android1\nSPX_OTA_BUILD_DISPLAY=v1.0.261119\nSPX_OTA_SUPER_SHA256={super_v1_sha}\n'
             )
 
             # Build a delta OTA package (super unchanged)
@@ -287,8 +287,11 @@ class OtaSystemTests(unittest.TestCase):
             self.assertTrue(reply.startswith('nonce-1\nOK\n'), reply)
             calls = android_log.read_text()
             self.assertIn('pm enable --user 0 org.surface.advancedcontrol/.SystemUpdateActivity', calls)
-            self.assertIn('pm disable-user --user 0 com.google.android.gms/.update.SystemUpdateActivity', calls)
-            self.assertNotIn('pm disable-user --user 0 org.surface.advancedcontrol', calls)
+            self.assertIn('pm disable --user 0 com.google.android.gms/.update.SystemUpdateActivity', calls)
+            self.assertNotIn('pm disable --user 0 org.surface.advancedcontrol', calls)
+            state_kv = dict(line.split('=', 1) for line in (app_files / 'ota-state').read_text().splitlines() if '=' in line)
+            self.assertTrue(state_kv.get('data_free_mb', '').isdigit() and int(state_kv['data_free_mb']) > 0, state_kv)
+            self.assertEqual(state_kv.get('current_build_display'), 'v1.0.261119', state_kv)
 
             # 2) Inspect delta OTA package
             (app_files / 'ota-upload.pkg').write_bytes(Path(delta_ota['archive']).read_bytes())
@@ -449,9 +452,20 @@ class OtaSystemTests(unittest.TestCase):
         self.assertIn('bin/spx-ota-boot', bodies)
         self.assertIn('etc/spx-ota-info', bodies)
         self.assertIn(b'/bin/spx-ota-stage', bodies['init'])
+        self.assertIn(b'SPX-OTA-RESULT.txt', bodies['init'])
+        legacy_init = init_src.replace(fi_ota.EARLY_ANCHOR, fi_ota.LEGACY_EARLY_HOOK + fi_ota.EARLY_ANCHOR, 1)
+        upgraded_init = fi_ota.patch_init_for_ota(legacy_init)
+        self.assertIn(b'SPX-OTA-RESULT.txt', upgraded_init)
+        self.assertNotIn(fi_ota.LEGACY_EARLY_HOOK, upgraded_init)
         self.assertIn(b'/bin/spx-ota-boot', bodies['init'])
         self.assertLess(bodies['init'].index(b'/bin/spx-ota-stage'), bodies['init'].index(b'base=/media/data/googlebook-stage'))
         self.assertLess(bodies['init'].index(b'/bin/spx-ota-boot'), bodies['init'].index(b'exec native-handoff /newroot'))
+        self.assertEqual(fi_ota.format_ota_build_suffix('v0.7.6', '20261119.1515', source_commit='abcdef123456', super_sha256='012345' + '0' * 58),
+                         'v0.7.6.261119')
+        self.assertEqual(fi_ota.format_ota_build_suffix('v0.7.5-8-gabcdef1', '261119', source_commit='abcdef123456'),
+                         'v0.7.5-8-gabcdef1.261119')
+        self.assertEqual(fi_ota.format_ota_build_suffix('dev', '261119', source_commit='abcdef123456'),
+                         'dev.261119.abcdef1')
 
     def test_prepare_image_ssd_allows_larger_super_and_esp_for_ota(self):
         source = (ROOT / 'probe/test2/prepare-image-ssd').read_text()
@@ -534,6 +548,7 @@ public class OtaJavaTest {
             dump = subprocess.check_output([str(aapt2), 'dump', 'xmltree', str(apk_path), '--file', 'AndroidManifest.xml'], text=True)
             self.assertIn('android.settings.SYSTEM_UPDATE_SETTINGS', dump)
             self.assertIn('.SystemUpdateActivity', dump)
+            self.assertIn('versionCode(0x0101021b)=3', dump)
 
     def test_linux_adb_upgrade_script_end_to_end(self):
         script = ROOT / 'scripts/upgrade-googlebook-via-adb.sh'
@@ -830,6 +845,45 @@ esac
             self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
             self.assertIn('POWERSHELL_OTA_TEST_OK', p.stdout)
             self.assertEqual(out_esp.read_bytes(), esp_data)
+
+
+    def test_ota_stage_promotes_applied_pending_reboot_to_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            esp_dir = Path(td)
+            res_file = esp_dir / 'SPX-OTA-RESULT.txt'
+            res_file.write_text(
+                'STATUS=APPLIED_PENDING_REBOOT\n'
+                'VERSION=v0.7.6-test\n'
+                'PACKAGE_KIND=manifest\n'
+                'APPLY_SUPER=0\n'
+                'WIPE_DATA=0\n'
+                'ERROR=\n',
+                encoding='utf-8',
+            )
+            p = subprocess.run(
+                ['sh', str(ROOT / 'probe/ota/spx-ota-stage')],
+                env=dict(os.environ, SPX_OTA_ESP=str(esp_dir), SPX_OTA_RUN=str(esp_dir / 'run')),
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
+            updated = res_file.read_text(encoding='utf-8')
+            self.assertIn('STATUS=OK\n', updated)
+            self.assertNotIn('APPLIED_PENDING_REBOOT', updated)
+            self.assertIn('VERSION=v0.7.6-test\n', updated)
+
+    def test_adb_helper_probe_ota_info_fallbacks_and_syntax(self):
+        ps1_text = (ROOT / 'scripts/Upgrade-GooglebookViaAdb.ps1').read_text(encoding='utf-8')
+        m_ps1 = re.search(r"(?s)\$deviceHelper = @'\r?\n(.*?)\r?\n'@", ps1_text)
+        self.assertIsNotNone(m_ps1)
+        sh_text = (ROOT / 'scripts/upgrade-googlebook-via-adb.sh').read_text(encoding='utf-8')
+        m_sh = re.search(r"(?s)<<'DEVICE_EOF'\n(.*?)\nDEVICE_EOF", sh_text)
+        self.assertIsNotNone(m_sh)
+        for label, helper_src in (('ps1', m_ps1.group(1).replace('\r\n', '\n')), ('sh', m_sh.group(1))):
+            p = subprocess.run(['sh', '-n'], input=helper_src, text=True, capture_output=True)
+            self.assertEqual(p.returncode, 0, f'{label} sh -n failed: {p.stderr}')
+            self.assertIn('/data/user_de/0/org.surface.advancedcontrol/files/ota-state', helper_src)
+            self.assertIn('/proc/[0-9]*/root/etc/spx-ota-info', helper_src)
 
 
 if __name__ == '__main__':

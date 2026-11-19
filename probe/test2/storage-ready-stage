@@ -1,9 +1,13 @@
 #!/bin/busybox sh
 # Nonfatal scheduling only: no wait_for_prop, exec_start or framework gate.
+# Keep basename "init.rc" so KernelSU's is_init_rc() dentry->d_name check matches
+# the bind-mounted /system/etc/init/hw/init.rc.
 set -eu
 source=/newroot/system/etc/init/hw/init.rc
-target=/newroot/debug_ramdisk/storage-ready-init.rc
+target_dir=/newroot/debug_ramdisk/storage-ready
+target="$target_dir/init.rc"
 [ "$(grep -c '^on zygote-start$' "$source")" = 1 ]
+mkdir -p "$target_dir"
 awk '
 { print }
 $0=="on zygote-start" {

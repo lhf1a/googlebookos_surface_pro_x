@@ -6,7 +6,9 @@ Installs:
 - /bin/spx-ota-boot   (Android root OTA bridge daemon + Settings update handler claim)
 - /etc/spx-ota-info   (build version, commit, kernel release, baseline super hash)
 """
+from datetime import datetime, timezone
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -20,8 +22,13 @@ OTA_STAGE_SRC = OTA_DIR / 'spx-ota-stage'
 OTA_BOOT_SRC = OTA_DIR / 'spx-ota-boot'
 
 EARLY_ANCHOR = b'base=/media/data/googlebook-stage\n'
-EARLY_HOOK = (
+LEGACY_EARLY_HOOK = (
     b'if [ "$ssd" = 1 ] && [ "$rescue" = 0 ] && [ "$smoke" = 0 ] && [ -f /media/esp/SPX-OTA-PENDING ]; then\n'
+    b'    /bin/spx-ota-stage > /logs/spx-ota-stage.txt 2>&1 || echo SPX_OTA_STAGE_FAILED_NONFATAL\n'
+    b'fi\n'
+)
+EARLY_HOOK = (
+    b'if [ "$ssd" = 1 ] && [ "$rescue" = 0 ] && [ "$smoke" = 0 ] && { [ -f /media/esp/SPX-OTA-PENDING ] || [ -f /media/esp/SPX-OTA-RESULT.txt ]; }; then\n'
     b'    /bin/spx-ota-stage > /logs/spx-ota-stage.txt 2>&1 || echo SPX_OTA_STAGE_FAILED_NONFATAL\n'
     b'fi\n'
 )
@@ -54,6 +61,8 @@ def build_ota_tool_bytes(cross_compile='aarch64-linux-gnu-'):
 def patch_init_for_ota(init_bytes):
     """Wire early-boot offline OTA hook and post-boot OTA daemon into /init."""
     init = init_bytes
+    if LEGACY_EARLY_HOOK in init:
+        init = init.replace(LEGACY_EARLY_HOOK, EARLY_HOOK, 1)
     if EARLY_ANCHOR in init and EARLY_HOOK not in init:
         require(init.count(EARLY_ANCHOR) == 1, 'Ambiguous pre-mount anchor in init')
         init = init.replace(EARLY_ANCHOR, EARLY_HOOK + EARLY_ANCHOR, 1)
@@ -80,6 +89,89 @@ def detect_version(source_commit=None):
     return '6.18-' + policy()['baseline'] + '-hybrid'
 
 
+def _sanitize_build_token(value):
+    text = re.sub(r'[^A-Za-z0-9._+-]+', '-', str(value or '').strip())
+    text = re.sub(r'-{2,}', '-', text)
+    return text.strip('.-')
+
+
+def _normalize_yymmdd(build_date):
+    raw = str(build_date or '').strip()
+    digits = re.sub(r'[^0-9]+', '', raw)
+    if len(digits) >= 8 and digits.startswith('20'):
+        return digits[2:8]
+    if len(digits) == 6:
+        return digits
+    sanitized = _sanitize_build_token(raw)
+    return sanitized or datetime.now(timezone.utc).strftime('%y%m%d')
+
+
+def format_ota_build_suffix(version, build_date, source_commit='', super_sha256='', codename='poipu'):
+    """Build a concise, space-free OTA suffix (<version>.<YYMMDD>[.<commit7>]) for ro.build.display.id."""
+    _ = (codename, super_sha256)
+    ver = _sanitize_build_token(version) or '6.18-hybrid'
+    bdate = _normalize_yymmdd(build_date)
+    parts = [ver]
+    if bdate and bdate not in ver:
+        parts.append(bdate)
+
+    commit_clean = re.sub(r'[^0-9a-fA-F]+', '', str(source_commit or '').strip()).lower()
+    commit7 = commit_clean[:7]
+    if commit7 and commit7 not in ver.lower() and not re.fullmatch(r'v[0-9]+(?:\.[0-9]+)+', ver):
+        parts.append(commit7)
+
+    return '.'.join(parts)
+
+
+def format_ota_info(version, source_commit, kernel_release, super_sha256='', build_date=None):
+    """Render etc/spx-ota-info contents with canonical OTA build display metadata."""
+    ver = (version or '').strip() or detect_version(source_commit)
+    commit = (source_commit or '').strip()
+    krel = (kernel_release or '').strip()
+    bdate = _normalize_yymmdd(build_date)
+    super_val = (super_sha256 or '').strip().lower()
+    display = format_ota_build_suffix(ver, bdate, source_commit=commit, super_sha256=super_val)
+    return (
+        f'SPX_OTA_VERSION={ver}\n'
+        f'SPX_OTA_COMMIT={commit}\n'
+        f'SPX_OTA_KERNEL={krel}\n'
+        f'SPX_OTA_BUILD_DATE={bdate}\n'
+        f'SPX_OTA_SUPER_SHA256={super_val}\n'
+        f'SPX_OTA_BUILD_DISPLAY={display}\n'
+    ).encode('utf-8')
+
+
+def update_ota_info_super_sha256(info_bytes, super_sha256):
+    """Update SPX_OTA_SUPER_SHA256 and recompute SPX_OTA_BUILD_DISPLAY on existing spx-ota-info."""
+    text = info_bytes.decode('utf-8', errors='replace').replace('\r\n', '\n')
+    kv = {}
+    order = []
+    for line in text.splitlines():
+        if '=' not in line:
+            continue
+        k, v = line.split('=', 1)
+        k = k.strip()
+        if not k:
+            continue
+        if k not in kv:
+            order.append(k)
+        kv[k] = v.strip()
+
+    ver = kv.get('SPX_OTA_VERSION') or '6.18-hybrid'
+    commit = kv.get('SPX_OTA_COMMIT', '')
+    bdate = _normalize_yymmdd(kv.get('SPX_OTA_BUILD_DATE', ''))
+    super_val = (super_sha256 or '').strip().lower()
+    display = format_ota_build_suffix(ver, bdate, source_commit=commit, super_sha256=super_val)
+
+    kv['SPX_OTA_BUILD_DATE'] = bdate
+    kv['SPX_OTA_SUPER_SHA256'] = super_val
+    kv['SPX_OTA_BUILD_DISPLAY'] = display
+    for req_key in ('SPX_OTA_VERSION', 'SPX_OTA_COMMIT', 'SPX_OTA_KERNEL', 'SPX_OTA_BUILD_DATE', 'SPX_OTA_SUPER_SHA256', 'SPX_OTA_BUILD_DISPLAY'):
+        if req_key not in order:
+            order.append(req_key)
+    return ''.join(f'{k}={kv.get(k, "")}\n' for k in order).encode('utf-8')
+
+
 def install(
     records,
     bodies,
@@ -88,6 +180,7 @@ def install(
     version=None,
     source_commit=None,
     super_sha256='',
+    build_date=None,
 ):
     """Install OTA tool, early-boot applier, Android root daemon, and metadata."""
     if compiled_ota_tool is None:
@@ -107,12 +200,13 @@ def install(
     ver = version or detect_version(source_commit)
     commit = (source_commit or '').strip()
     krel = policy()['kernel_release']
-    info_text = (
-        f'SPX_OTA_VERSION={ver}\n'
-        f'SPX_OTA_COMMIT={commit}\n'
-        f'SPX_OTA_KERNEL={krel}\n'
-        f'SPX_OTA_SUPER_SHA256={super_sha256 or ""}\n'
-    ).encode('utf-8')
+    info_text = format_ota_info(
+        ver,
+        commit,
+        krel,
+        super_sha256=super_sha256,
+        build_date=build_date,
+    )
 
     bodies['bin/spx-ota-tool'] = compiled_ota_tool
     records['bin/spx-ota-tool'] = new_record(0o100755)

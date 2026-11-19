@@ -1,19 +1,95 @@
 #!/bin/busybox sh
-# Before Android init loads read-only properties. Keep mica/desktop dispatch IDs.
+# Before Android init loads read-only properties. Set codename poipu and OTA
+# build display ID while keeping desktop/android-desktop dispatch IDs.
 set -eu
 root=${1:-/newroot}
 density=${2:-300}
 case "$density" in ''|*[!0-9]*) exit 2;; esac
 [ "$density" -ge 72 ] && [ "$density" -le 1000 ] || exit 2
+
+ota_info=${SPX_OTA_INFO_FILE:-/etc/spx-ota-info}
+read_kv() {
+    [ -r "$1" ] || return 0
+    awk -F '=' -v k="$2" '$1 == k { sub(/^[^=]*=/, ""); gsub(/\r/, ""); print; exit }' "$1" 2>/dev/null || true
+}
+
+ota_suffix=""
+if [ -r "$ota_info" ]; then
+    ota_suffix=$(read_kv "$ota_info" SPX_OTA_BUILD_DISPLAY)
+    if [ -z "$ota_suffix" ]; then
+        ota_ver=$(read_kv "$ota_info" SPX_OTA_VERSION)
+        ota_date=$(read_kv "$ota_info" SPX_OTA_BUILD_DATE)
+        ota_commit=$(read_kv "$ota_info" SPX_OTA_COMMIT)
+        if [ -n "$ota_ver" ] || [ -n "$ota_date" ] || [ -n "$ota_commit" ]; then
+            ota_ver=$(printf '%s' "${ota_ver:-6.18-hybrid}" | sed 's/[^A-Za-z0-9._+-]/-/g; s/--*/-/g; s/^[.-]*//; s/[.-]*$//')
+            [ -n "$ota_ver" ] || ota_ver="6.18-hybrid"
+            ota_suffix="$ota_ver"
+            if [ -n "$ota_date" ]; then
+                ota_digits=$(printf '%s' "$ota_date" | tr -cd '0-9')
+                case "$ota_digits" in
+                    20[0-9][0-9][0-9][0-9][0-9][0-9]*)
+                        ota_date=$(printf '%s' "$ota_digits" | cut -c3-8)
+                        ;;
+                    [0-9][0-9][0-9][0-9][0-9][0-9])
+                        ota_date="$ota_digits"
+                        ;;
+                    *)
+                        ota_date=$(printf '%s' "$ota_date" | sed 's/[^A-Za-z0-9._+-]/-/g; s/--*/-/g; s/^[.-]*//; s/[.-]*$//')
+                        ;;
+                esac
+                if [ -n "$ota_date" ]; then
+                    case "$ota_ver" in
+                        *"$ota_date"*) ;;
+                        *) ota_suffix="$ota_suffix.$ota_date" ;;
+                    esac
+                fi
+            fi
+            ota_c7=$(printf '%s' "$ota_commit" | tr -cd '0-9a-fA-F' | tr 'A-F' 'a-f' | cut -c1-7)
+            if [ -n "$ota_c7" ] && ! printf '%s\n' "$ota_ver" | grep -qE '^v[0-9]+(\.[0-9]+)+$'; then
+                case "$(printf '%s' "$ota_ver" | tr 'A-F' 'a-f')" in
+                    *"$ota_c7"*) ;;
+                    *) ota_suffix="$ota_suffix.$ota_c7" ;;
+                esac
+            fi
+        fi
+    fi
+fi
+
+base_build_id=""
+for bp in "$root/system/build.prop" "$root/product/etc/build.prop"; do
+    [ -r "$bp" ] || continue
+    base_build_id=$(read_kv "$bp" ro.build.id)
+    [ -n "$base_build_id" ] && break
+done
+
+build_display_id=""
+if [ -n "$ota_suffix" ]; then
+    if [ -n "$base_build_id" ]; then
+        build_display_id="$base_build_id.$ota_suffix"
+    else
+        build_display_id="$ota_suffix"
+    fi
+fi
+
 mkdir -p "$root/debug_ramdisk/device-info"
-for rel in system/build.prop system/etc/build.prop vendor/build.prop vendor/etc/build.prop product/etc/build.prop odm/etc/build.prop system_ext/etc/build.prop system_dlkm/etc/build.prop vendor_dlkm/etc/build.prop; do
+for rel in system/build.prop system/etc/build.prop vendor/build.prop vendor/etc/build.prop product/etc/build.prop odm/etc/build.prop vendor/odm/etc/build.prop system_ext/etc/build.prop system_dlkm/etc/build.prop vendor_dlkm/etc/build.prop; do
     source="$root/$rel"
     [ -f "$source" ] || continue
     target="$root/debug_ramdisk/device-info/$(echo "$rel" | tr / _)"
-    awk '
+    awk -v display_id="$build_display_id" '
         /^ro\.product\.(.*\.)?model=/ {sub(/=.*/, "=Surface Pro X"); print; next}
         /^ro\.product\.(.*\.)?manufacturer=/ {sub(/=.*/, "=Microsoft"); print; next}
         /^ro\.product\.(.*\.)?brand=/ {sub(/=.*/, "=Microsoft"); print; next}
+        /^ro\.product\.(.*\.)?device=mica$/ {sub(/=mica$/, "=poipu"); print; next}
+        /^ro\.product\.(.*\.)?name=mica$/ {sub(/=mica$/, "=poipu"); print; next}
+        /^ro\.build\.product=mica$/ {sub(/=mica$/, "=poipu"); print; next}
+        /^ro\.build\.flavor=mica-/ {sub(/=mica-/, "=poipu-"); print; next}
+        /^ro\.build\.description=mica-/ {sub(/=mica-/, "=poipu-"); print; next}
+        /^ro\.([a-z_]+\.)?build\.fingerprint=(Dell|Microsoft)\/mica\/mica:/ {
+            sub(/=(Dell|Microsoft)\/mica\/mica:/, "=Microsoft/poipu/poipu:")
+            print; next
+        }
+        display_id != "" && /^ro\.build\.display\.id=/ {print "ro.build.display.id=" display_id; next}
         /^ro\.soc\.model=/ {next}
         /^ro\.sf\.lcd_density=/ {next}
         /^ro\.product\.build\.16k_page\.enabled=/ {next}
@@ -35,4 +111,10 @@ grep -qx 'ro.soc.model=Microsoft SQ2' "$root/vendor/build.prop"
 grep -qx "ro.sf.lcd_density=$density" "$root/vendor/build.prop"
 grep -qx 'ro.product.product.model=Surface Pro X' "$root/product/etc/build.prop"
 grep -qx 'ro.product.build.16k_page.enabled=false' "$root/product/etc/build.prop"
-echo 'SQ2_DEVICE_INFO: Microsoft Surface Pro X / Microsoft SQ2'
+if grep -q '^ro\.product\.product\.device=' "$root/product/etc/build.prop"; then
+    grep -qx 'ro.product.product.device=poipu' "$root/product/etc/build.prop"
+fi
+if [ -n "$build_display_id" ] && [ -f "$root/system/build.prop" ] && grep -q '^ro\.build\.display\.id=' "$root/system/build.prop"; then
+    grep -qx "ro.build.display.id=$build_display_id" "$root/system/build.prop"
+fi
+echo 'SQ2_DEVICE_INFO: Microsoft Surface Pro X (poipu) / Microsoft SQ2'

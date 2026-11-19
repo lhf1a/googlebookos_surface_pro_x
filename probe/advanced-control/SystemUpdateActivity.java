@@ -503,6 +503,10 @@ public final class SystemUpdateActivity extends Activity {
         if (!otaState.currentCommit.isEmpty()) {
             kLine += " · " + otaState.currentCommit;
         }
+        String buildDisp = (Build.DISPLAY != null && !Build.DISPLAY.isEmpty()) ? Build.DISPLAY : otaState.currentBuildDisplay;
+        if (buildDisp != null && !buildDisp.isEmpty()) {
+            kLine += "\nBuild: " + buildDisp;
+        }
         if (otaState.espTotalMb > 0) {
             kLine += "\n" + str.otaStorageLabel(otaState.espFreeMb, otaState.espTotalMb, otaState.dataFreeMb);
         }

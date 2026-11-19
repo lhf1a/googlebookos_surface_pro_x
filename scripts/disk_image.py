@@ -124,6 +124,37 @@ def compact_super_slices(slices_bytes, source, source_super_offset, source_super
     return total_super, plan, text
 
 
+def compute_super_sha256(source, source_super_offset, super_bytes, slice_plan=None):
+    """Compute the exact SHA-256 of the output super partition (compacted or verbatim)."""
+    if slice_plan is None:
+        return region(source, source_super_offset, super_bytes)
+    h = hashlib.sha256()
+    zeros = b'\0' * M
+    cursor = 0
+    with Path(source).open('rb') as f:
+        for _, old_off, new_off, sz in sorted(slice_plan, key=lambda item: item[2]):
+            require(new_off >= cursor and new_off + sz <= super_bytes, 'Invalid super slice plan bounds')
+            gap = new_off - cursor
+            while gap > 0:
+                chunk = min(gap, len(zeros))
+                h.update(zeros[:chunk])
+                gap -= chunk
+            f.seek(source_super_offset + old_off)
+            left = sz
+            while left > 0:
+                data = f.read(min(left, 8 * M))
+                require(bool(data), 'Short read while hashing super slice')
+                h.update(data)
+                left -= len(data)
+            cursor = new_off + sz
+    tail = super_bytes - cursor
+    while tail > 0:
+        chunk = min(tail, len(zeros))
+        h.update(zeros[:chunk])
+        tail -= chunk
+    return h.hexdigest()
+
+
 def plan_minimal_layout(super_bytes, image_bytes=8*G, esp_bytes=1*G):
     """5-partition universal layout: super, metadata, misc, SQ2PROBE, userdata."""
     require(image_bytes % 512 == 0, 'Image size must be sector-aligned')
@@ -247,7 +278,7 @@ def boot_helper(name):
     return (ROOT/'probe/test2'/name).read_bytes().replace(b'\r\n', b'\n')
 
 
-def storage_payload(base, parts, super_header_sha256=None, anonymous=False, super_slices=None):
+def storage_payload(base, parts, super_header_sha256=None, anonymous=False, super_slices=None, super_sha256=None):
     cpio = cpio_module()
     before = cpio.entries(gzip.decompress(base))
     mode, init = before['init']
@@ -327,6 +358,10 @@ fi
              'etc/sq2-ssd-layout':(0o100644,layout), 'etc/sq2-ssd-partitions':(0o100644,partition_table)}
     if super_slices is not None:
         delta['etc/sq2-ssd-super-slices'] = (0o100644, super_slices)
+    if super_sha256 and 'etc/spx-ota-info' in before:
+        from full_image_ota import update_ota_info_super_sha256
+        info_mode, info_body = before['etc/spx-ota-info']
+        delta['etc/spx-ota-info'] = (info_mode, update_ota_info_super_sha256(info_body, super_sha256))
     delta.update(early_storage)
     # Optional storage preparation: notify before zygote; never gate it.
     if 'bin/surface-swap-boot' in before:
@@ -345,6 +380,8 @@ fi
     delta['bin/touch-resume-watch'] = (0o100755, boot_helper('touch-resume-watch'))
     delta['bin/touch-calibration-boot'] = (0o100755, boot_helper('touch-calibration-boot'))
     delta['bin/refresh-iptsd-input-nodes'] = (0o100755, boot_helper('refresh-iptsd-input-nodes'))
+    if 'bin/apply-device-info' in before:
+        delta['bin/apply-device-info'] = (0o100755, boot_helper('apply-device-info'))
     delta.update(early_hidl_bootstrap(before))
     from runtime_boot_policy import apply
     runtime_bodies = {name: body for name, (_,body) in before.items()}
@@ -633,7 +670,8 @@ def build(args):
             with source.open('rb') as f:
                 f.seek(original_map['super']['offset']+offset+1024)
                 require(f.read(4)==b'\xe2\xe1\xf5\xe0','Expected EROFS logical partition: '+name)
-    payload,audit,member=storage_payload(base,parts,anonymous=getattr(args, "anonymous", False),super_slices=super_slices_override)
+    super_sha256 = compute_super_sha256(source, original_map['super']['offset'], mapping['super']['bytes'], slice_plan=slice_plan)
+    payload,audit,member=storage_payload(base,parts,anonymous=getattr(args, "anonymous", False),super_slices=super_slices_override,super_sha256=super_sha256)
     (output/'storage-layout-delta.cpio.gz').write_bytes(member)
     tree=work/'esp-tree';(tree/'EFI/BOOT').mkdir(parents=True,exist_ok=resume);(tree/'EFI/SQ2Nat').mkdir(exist_ok=resume)
     for name in selected['files']:
@@ -681,7 +719,7 @@ def build(args):
                 'template':str(template) if template else None,'template_layout_preserved':bool(template) and not minimal_partitions,
                 'minimal_partitions':minimal_partitions,
                 'kernel_mode':getattr(args,'kernel_mode','prebuilt'),
-                'final_initramfs_sha256':None,'storage_payload':audit,
+                'final_initramfs_sha256':None,'super_sha256':super_sha256,'storage_payload':audit,
                 'efi_files':files,'content_hash_validation':False,'build_only_requested':build_only,
                 'new_rollback_performed':False,'device_written':False,'hardware_boot_tested':False,
                 'private_identity_present':not getattr(args, 'anonymous', False),'anonymous_public_image':False,'userdata_migrated':False,
@@ -794,7 +832,7 @@ def build(args):
             'template':str(template) if template else None,'template_layout_preserved':bool(template) and not minimal_partitions,
             'minimal_partitions':minimal_partitions,
             'kernel_mode':getattr(args,'kernel_mode','prebuilt'),
-            'final_initramfs_sha256':hashlib.sha256(payload).hexdigest(),'storage_payload':audit,
+            'final_initramfs_sha256':hashlib.sha256(payload).hexdigest(),'super_sha256':super_sha256,'storage_payload':audit,
             'pristine_partition_sha256':partition_hashes,'fresh_filesystems':fresh,'efi_files':files,
             'all_efi_files_readback_verified':not build_only,'content_hash_validation':not build_only,'zeroed_identity_partitions':zeroed,'build_only_requested':build_only,'new_rollback_performed':False,'device_written':False,'hardware_boot_tested':False,
             'private_identity_present':not getattr(args, 'anonymous', False),'anonymous_public_image':False,'userdata_migrated':False,

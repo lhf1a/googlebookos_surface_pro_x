@@ -22,7 +22,19 @@ DATA_DIR_OVERRIDE="${SPX_OTA_DATA_DIR:-}"
 META_DIR_OVERRIDE="${SPX_OTA_META_DIR:-}"
 ESP_SRC_OVERRIDE="${SPX_OTA_ESP_SRC_DIR:-}"
 
-[ -f "$PENDING_FILE" ] || exit 0
+if [ ! -f "$PENDING_FILE" ]; then
+    # Online ESP-only OTA writes STATUS=APPLIED_PENDING_REBOOT before rebooting.
+    # Reaching early boot in the new initramfs means the reboot has completed.
+    if [ -f "$RESULT_FILE" ] && [ ! -L "$RESULT_FILE" ] && grep -qx 'STATUS=APPLIED_PENDING_REBOOT' "$RESULT_FILE" 2>/dev/null; then
+        _tmp_res="$RESULT_FILE.tmp"
+        if sed 's/^STATUS=APPLIED_PENDING_REBOOT$/STATUS=OK/' "$RESULT_FILE" > "$_tmp_res" 2>/dev/null; then
+            sync 2>/dev/null || true
+            mv -f "$_tmp_res" "$RESULT_FILE" 2>/dev/null || rm -f "$_tmp_res" 2>/dev/null || true
+            sync 2>/dev/null || true
+        fi
+    fi
+    exit 0
+fi
 [ ! -L "$PENDING_FILE" ] || exit 0
 
 mkdir -p "$RUN_DIR"

@@ -460,6 +460,105 @@ touch "$TEST_CONNECTED"
             self.assertIn('wifi_iface=wlan0 state=COMPLETED ssid=Office WiFi ip=192.168.10.42', r_st.stdout)
             self.assertIn('usb_iface=eth0 ip=192.168.50.9', r_st.stdout)
 
+    def test_compiled_arm64_wifi_tui_no_pbkdf2_and_no_sae_fallback(self):
+        """Verify PBKDF2-HMAC-SHA1 64-hex PSK derivation & fallback when wpa_supplicant lacks PBKDF2/SAE."""
+        import hashlib
+        if not shutil.which('aarch64-linux-gnu-gcc') or not shutil.which('qemu-aarch64'):
+            self.skipTest('aarch64-linux-gnu-gcc or qemu-aarch64 unavailable')
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tui = root / 'spx-wifi-tui'
+            tui.write_bytes(full_image_rescue.build_wifi_tui_bytes())
+            tui.chmod(0o755)
+
+            bin_dir = root / 'bin'
+            run_dir = root / 'run'
+            sys_net = root / 'sys/class/net'
+            bin_dir.mkdir(parents=True)
+            run_dir.mkdir(parents=True)
+            (sys_net / 'wlan0/phy80211').mkdir(parents=True)
+            (run_dir / 'sq2-rescue-wifi.iface').write_text('wlan0\n')
+            calls = root / 'calls.log'
+
+            # Mock wpa_cli behaving like initramfs wpa_supplicant (CONFIG_NO_PBKDF2, no CONFIG_SAE).
+            (bin_dir / 'wpa_cli').write_text(
+                '#!/bin/sh\n'
+                'echo "$*" >> "$TEST_CALLS"\n'
+                'shift 4\n'
+                'case "$1" in\n'
+                '    ping) echo PONG ;;\n'
+                '    scan) echo OK ;;\n'
+                '    scan_results)\n'
+                '        printf "bssid / frequency / signal level / flags / ssid\\n"\n'
+                '        printf "50:92:6a:20:3d:46\\t5180\\t-21\\t[WPA2-PSK-CCMP-128][RSN-PSK-CCMP-128][ESS]\\t\\xe5\\xa4\\xa7\\xe6\\xad\\xa3\\xe7\\x9a\\x84\\xe5\\xb0\\x8f\\xe7\\xa0\\xb4\\xe7\\xbd\\x91_5G\\n"\n'
+                '        printf "aa:bb:cc:dd:ee:03\\t5220\\t-55\\t[WPA2-PSK+SAE-CCMP][ESS]\\t\\xe6\\xb5\\x8b\\xe8\\xaf\\x95WiFi\\n"\n'
+                '        ;;\n'
+                '    list_networks) printf "network id / ssid / bssid / flags\\n" ;;\n'
+                '    add_network) echo 0 ;;\n'
+                '    set_network)\n'
+                '        if [ "$3" = "key_mgmt" ]; then\n'
+                '            case "$4" in *SAE*) echo FAIL; exit 0 ;; esac\n'
+                '        fi\n'
+                '        if [ "$3" = "psk" ]; then\n'
+                '            case "$4" in \\"* ) echo FAIL; exit 0 ;; esac\n'
+                '        fi\n'
+                '        echo OK ;;\n'
+                '    enable_network|select_network|reconnect|disconnect|remove_network) echo OK ;;\n'
+                '    status) printf "wpa_state=COMPLETED\\nssid=Test\\n" ;;\n'
+                'esac\n'
+            )
+            (bin_dir / 'wpa_cli').chmod(0o755)
+            (bin_dir / 'udhcpc').write_text('#!/bin/sh\necho "udhcpc:$*" >> "$TEST_CALLS"\n')
+            (bin_dir / 'udhcpc').chmod(0o755)
+            (bin_dir / 'ip').write_text(
+                '#!/bin/sh\n'
+                'if [ "$1" = "-4" ]; then echo "2: wlan0    inet 192.168.8.124/24 brd 192.168.8.255 scope global wlan0"; fi\n'
+            )
+            (bin_dir / 'ip').chmod(0o755)
+
+            env = dict(
+                os.environ,
+                SPX_WPA_CLI=str(bin_dir / 'wpa_cli'),
+                SPX_WPA_CTRL=str(run_dir / 'wpa_supplicant'),
+                SPX_UDHCPC=str(bin_dir / 'udhcpc'),
+                SPX_IP_BIN=str(bin_dir / 'ip'),
+                SPX_RUN_DIR=str(run_dir),
+                SPX_SYS_NET=str(sys_net),
+                TEST_CALLS=str(calls),
+            )
+
+            # 1. UTF-8 Chinese SSID with WPA2-PSK: derives exact 64-hex PBKDF2-HMAC-SHA1 PSK.
+            ssid_cn = '大正的小破网_5G'
+            pass_cn = 'MyTestPass!2026'
+            expected_psk_cn = hashlib.pbkdf2_hmac('sha1', pass_cn.encode('utf-8'), ssid_cn.encode('utf-8'), 4096, 32).hex()
+            r1 = subprocess.run(['qemu-aarch64', str(tui), '--connect', ssid_cn, pass_cn],
+                                env=env, capture_output=True, text=True)
+            self.assertEqual(r1.returncode, 0, r1.stderr + r1.stdout)
+            log1 = calls.read_text()
+            self.assertIn(f'set_network 0 ssid {ssid_cn.encode("utf-8").hex()}', log1)
+            self.assertIn(f'set_network 0 psk {expected_psk_cn}', log1)
+            self.assertNotIn(f'psk "{pass_cn}"', log1)
+
+            # 2. WPA2/WPA3 transition AP: SAE rejected -> falls back to WPA-PSK + 64-hex PBKDF2 PSK.
+            calls.write_text('')
+            ssid_tr = '测试WiFi'
+            pass_tr = 'SecretPass123'
+            expected_psk_tr = hashlib.pbkdf2_hmac('sha1', pass_tr.encode('utf-8'), ssid_tr.encode('utf-8'), 4096, 32).hex()
+            r2 = subprocess.run(['qemu-aarch64', str(tui), '--connect', ssid_tr, pass_tr],
+                                env=env, capture_output=True, text=True)
+            self.assertEqual(r2.returncode, 0, r2.stderr + r2.stdout)
+            log2 = calls.read_text()
+            self.assertIn('set_network 0 key_mgmt WPA-PSK SAE', log2)
+            self.assertIn('set_network 0 key_mgmt WPA-PSK', log2)
+            self.assertIn(f'set_network 0 psk {expected_psk_tr}', log2)
+
+            # 3. Pure WPA3-SAE fails with clear diagnostic message when wpa_supplicant lacks SAE.
+            r3 = subprocess.run(['qemu-aarch64', str(tui), '--connect', 'OnlyWPA3', 'SecretPass123', '--wpa3'],
+                                env=env, capture_output=True, text=True)
+            self.assertNotEqual(r3.returncode, 0)
+            self.assertIn('WPA3-SAE is not supported', r3.stderr + r3.stdout)
+
 
 class RescueInitPipelineIntegrationTests(unittest.TestCase):
     def test_full_init_pipeline_preserves_all_anchors_and_syntax(self):

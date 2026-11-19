@@ -119,7 +119,14 @@ if [ -e /run/sq2-calibration-apk-installed ] && [ -n "$installed" ] && [ -f "/pr
     echo 'Success (installed this boot)' > /logs/touch-calibration-install.txt
 else
     cp "$apk" /proc/1/root/data/local/tmp/sq2-touch-calibration.apk
-    ANDROID_COMMAND_TIMEOUT=120 android pm install -r --user "$user" /data/local/tmp/sq2-touch-calibration.apk > /logs/touch-calibration-install.txt
+    if ! ANDROID_COMMAND_TIMEOUT=120 android pm install -r --user "$user" /data/local/tmp/sq2-touch-calibration.apk > /logs/touch-calibration-install.txt 2>&1; then
+        if grep -q 'INSTALL_FAILED_UPDATE_INCOMPATIBLE' /logs/touch-calibration-install.txt 2>/dev/null; then
+            # Calibration profiles live under /data/vendor/sq2-touch-calibration; replacing
+            # a differently-signed wizard APK preserves all saved calibration data.
+            android pm uninstall "$pkg" >> /logs/touch-calibration-install.txt 2>&1 || true
+            ANDROID_COMMAND_TIMEOUT=120 android pm install --user "$user" /data/local/tmp/sq2-touch-calibration.apk >> /logs/touch-calibration-install.txt 2>&1 || true
+        fi
+    fi
     rm -f /proc/1/root/data/local/tmp/sq2-touch-calibration.apk
     touch /run/sq2-calibration-apk-installed
 fi

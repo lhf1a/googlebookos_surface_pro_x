@@ -473,6 +473,17 @@ case "$CMD" in
         if [ -r /etc/spx-ota-info ]; then
             _has_ota_info=1
             _cur_super_sha="$(awk -F= '$1=="SPX_OTA_SUPER_SHA256"{print $2; exit}' /etc/spx-ota-info 2>/dev/null || true)"
+        elif [ -r /data/user_de/0/org.surface.advancedcontrol/files/ota-state ]; then
+            _has_ota_info=1
+            _cur_super_sha="$(awk -F= '$1=="current_super_sha256"{print $2; exit}' /data/user_de/0/org.surface.advancedcontrol/files/ota-state 2>/dev/null || true)"
+        else
+            for _p in /proc/[0-9]*/root/etc/spx-ota-info; do
+                if [ -r "$_p" ]; then
+                    _has_ota_info=1
+                    _cur_super_sha="$(awk -F= '$1=="SPX_OTA_SUPER_SHA256"{print $2; exit}' "$_p" 2>/dev/null || true)"
+                    break
+                fi
+            done
         fi
         _krel="$(uname -r 2>/dev/null || true)"
         printf 'SUPER_BYTES=%s\n' "$_super_sz"

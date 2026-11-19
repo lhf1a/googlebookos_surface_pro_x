@@ -1,4 +1,5 @@
 import gzip
+import os
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -100,6 +101,123 @@ class Defaults(unittest.TestCase):
             self.assertIn("build-lts.py", text)
             self.assertNotIn("6.3.8", text)
 
+
+    def test_apply_device_info_sets_poipu_and_ota_build_display_id(self):
+        source = (ROOT/'probe/test2/apply-device-info').read_text()
+        shell = source.replace('mount --bind "$target" "$source"', 'cp "$target" "$source"')
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            props = {
+                'system/build.prop': (
+                    'ro.product.system.brand=Microsoft\n'
+                    'ro.product.system.device=desktop\n'
+                    'ro.product.system.manufacturer=Microsoft\n'
+                    'ro.product.system.model=Surface Pro X\n'
+                    'ro.product.system.name=desktop_system\n'
+                    'ro.system.build.fingerprint=Android/desktop_system/desktop:17/CL3B.260622.273.R1/16471258:user/release-keys\n'
+                    'ro.build.id=CL3B.260622.273.R1\n'
+                    'ro.build.display.id=CL3B.260622.273.R1\n'
+                    'ro.build.flavor=desktop_system-user\n'
+                    'ro.build.description=desktop_system-user 17 CL3B.260622.273.R1 16471258 release-keys\n'
+                ),
+                'vendor/build.prop': (
+                    'ro.product.vendor.brand=Microsoft\n'
+                    'ro.product.vendor.device=mica\n'
+                    'ro.product.vendor.manufacturer=Microsoft\n'
+                    'ro.product.vendor.model=Surface Pro X\n'
+                    'ro.product.vendor.name=mica\n'
+                    'ro.vendor.build.fingerprint=Dell/mica/mica:17/CL3B.260622.273.R1/16471258:user/release-keys\n'
+                ),
+                'product/etc/build.prop': (
+                    'ro.product.product.brand=Microsoft\n'
+                    'ro.product.product.device=mica\n'
+                    'ro.product.product.manufacturer=Microsoft\n'
+                    'ro.product.product.model=Surface Pro X\n'
+                    'ro.product.product.name=mica\n'
+                    'ro.product.build.fingerprint=Dell/mica/mica:17/CL3B.260622.273.R1/16471258:user/release-keys\n'
+                    'ro.build.id=CL3B.260622.273.R1\n'
+                    'ro.build.display.id=CL3B.260622.273.R1\n'
+                    'ro.build.product=mica\n'
+                    'ro.build.flavor=mica-user\n'
+                    'ro.build.description=mica-user 17 CL3B.260622.273.R1 16471258 release-keys\n'
+                ),
+                'vendor/odm/etc/build.prop': (
+                    'ro.product.odm.brand=Dell\n'
+                    'ro.product.odm.device=mica\n'
+                    'ro.product.odm.manufacturer=Dell\n'
+                    'ro.product.odm.model=XPS Googlebook\n'
+                    'ro.product.odm.name=mica\n'
+                    'ro.odm.build.fingerprint=Dell/mica/mica:17/CL3B.260622.273.R1/16471258:user/release-keys\n'
+                ),
+                'system_ext/etc/build.prop': (
+                    'ro.product.system_ext.device=mica\n'
+                    'ro.product.system_ext.name=mica\n'
+                    'ro.system_ext.build.fingerprint=Dell/mica/mica:17/CL3B.260622.273.R1/16471258:user/release-keys\n'
+                ),
+                'system_dlkm/etc/build.prop': (
+                    'ro.product.system_dlkm.device=mica\n'
+                    'ro.product.system_dlkm.name=mica\n'
+                    'ro.system_dlkm.build.fingerprint=Dell/mica/mica:17/CL3B.260622.273.R1/16471258:user/release-keys\n'
+                ),
+                'vendor_dlkm/etc/build.prop': (
+                    'ro.product.vendor_dlkm.device=mica\n'
+                    'ro.product.vendor_dlkm.name=mica\n'
+                    'ro.vendor_dlkm.build.fingerprint=Dell/mica/mica:17/CL3B.260622.273.R1/16471258:user/release-keys\n'
+                ),
+            }
+
+            def reset_props():
+                for rel, body in props.items():
+                    fp = root / rel
+                    fp.parent.mkdir(parents=True, exist_ok=True)
+                    fp.write_text(body)
+
+            # 1) Without SPX_OTA_INFO_FILE: codename -> poipu, ro.build.display.id preserved.
+            reset_props()
+            env_no_ota = dict(os.environ, SPX_OTA_INFO_FILE=str(root / 'missing-ota-info'))
+            r1 = subprocess.run(['sh', '-c', shell, 'device-info', str(root)], env=env_no_ota, capture_output=True, text=True)
+            self.assertEqual(r1.returncode, 0, r1.stderr)
+            self.assertIn('ro.build.display.id=CL3B.260622.273.R1', (root / 'system/build.prop').read_text())
+            self.assertIn('ro.build.display.id=CL3B.260622.273.R1', (root / 'product/etc/build.prop').read_text())
+
+            # 2) With SPX_OTA_INFO_FILE: codename -> poipu, desktop preserved, display.id updated.
+            reset_props()
+            ota_info = root / 'spx-ota-info'
+            ota_info.write_text('SPX_OTA_VERSION=v0.7.6\nSPX_OTA_BUILD_DISPLAY=v0.7.6.261119\n')
+            env_ota = dict(os.environ, SPX_OTA_INFO_FILE=str(ota_info))
+            r2 = subprocess.run(['sh', '-c', shell, 'device-info', str(root)], env=env_ota, capture_output=True, text=True)
+            self.assertEqual(r2.returncode, 0, r2.stderr)
+
+            sys_txt = (root / 'system/build.prop').read_text()
+            self.assertIn('ro.product.system.device=desktop\n', sys_txt)
+            self.assertIn('ro.product.system.name=desktop_system\n', sys_txt)
+            self.assertIn('ro.system.build.fingerprint=Android/desktop_system/desktop:', sys_txt)
+            self.assertIn('ro.build.flavor=desktop_system-user\n', sys_txt)
+            expected_disp = 'CL3B.260622.273.R1.v0.7.6.261119'
+            self.assertIn(f'ro.build.display.id={expected_disp}\n', sys_txt)
+
+            prod_txt = (root / 'product/etc/build.prop').read_text()
+            self.assertIn('ro.product.product.device=poipu\n', prod_txt)
+            self.assertIn('ro.product.product.name=poipu\n', prod_txt)
+            self.assertIn('ro.build.product=poipu\n', prod_txt)
+            self.assertIn('ro.build.flavor=poipu-user\n', prod_txt)
+            self.assertIn('ro.build.description=poipu-user 17 CL3B.260622.273.R1 16471258 release-keys\n', prod_txt)
+            self.assertIn('ro.product.build.fingerprint=Microsoft/poipu/poipu:', prod_txt)
+            self.assertIn(f'ro.build.display.id={expected_disp}\n', prod_txt)
+
+            odm_txt = (root / 'vendor/odm/etc/build.prop').read_text()
+            self.assertIn('ro.product.odm.brand=Microsoft\n', odm_txt)
+            self.assertIn('ro.product.odm.manufacturer=Microsoft\n', odm_txt)
+            self.assertIn('ro.product.odm.model=Surface Pro X\n', odm_txt)
+            self.assertIn('ro.product.odm.device=poipu\n', odm_txt)
+            self.assertIn('ro.product.odm.name=poipu\n', odm_txt)
+            self.assertIn('ro.odm.build.fingerprint=Microsoft/poipu/poipu:', odm_txt)
+
+            for rel in ('vendor/build.prop', 'system_ext/etc/build.prop', 'system_dlkm/etc/build.prop', 'vendor_dlkm/etc/build.prop'):
+                txt = (root / rel).read_text()
+                self.assertNotIn('mica', txt, rel)
+                self.assertIn('=poipu\n', txt, rel)
+                self.assertIn('Microsoft/poipu/poipu:', txt, rel)
 
 if __name__ == '__main__':
     unittest.main()

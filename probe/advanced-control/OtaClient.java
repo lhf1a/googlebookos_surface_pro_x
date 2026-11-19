@@ -23,6 +23,7 @@ final class OtaClient {
         String currentVersion = "";
         String currentCommit = "";
         String currentKernel = "";
+        public String currentBuildDisplay = "";
         String currentSuperSha256 = "";
         long superBytes;
         long espFreeMb;
@@ -268,6 +269,7 @@ final class OtaClient {
         state.currentVersion = map.getOrDefault("current_version", "");
         state.currentCommit = map.getOrDefault("current_commit", "");
         state.currentKernel = map.getOrDefault("current_kernel", "");
+        state.currentBuildDisplay = map.getOrDefault("current_build_display", "");
         state.currentSuperSha256 = map.getOrDefault("current_super_sha256", "");
         state.superBytes = OtaPolicy.parseLongOrZero(map.get("super_bytes"));
         state.espFreeMb = OtaPolicy.parseLongOrZero(map.get("esp_free_mb"));
