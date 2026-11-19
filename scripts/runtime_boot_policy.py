@@ -21,6 +21,10 @@ def without_hash_checks(name, body):
             'sha256sum' not in line or line.startswith('device=$({ cat /sys/class/dmi/id/product_uuid;')
             for line in text.splitlines()):
         return body
+    if name == 'bin/spx-advanced-control-boot' and all(
+            'sha256sum' not in line or line.strip() == '} | sha256sum | cut -d \' \' -f1)"'
+            for line in text.splitlines()):
+        return body
     if name == 'bin/qti-system-display-stage':
         text = replace_once(text,
             '# A second invocation is accepted only if the entire installed payload still matches.\n'
