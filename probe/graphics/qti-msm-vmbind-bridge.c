@@ -105,28 +105,17 @@ static bool is_msm(int fd)
     char name[32]={0};struct drm_version v={.name=name,.name_len=31};
     return !ioctl(fd,DRM_IOCTL_VERSION,&v)&&!strcmp(name,"msm");
 }
-EXPORT bool qti_vm_app_selected(unsigned uid,const char *process,const char *package)
+EXPORT bool qti_vm_app_uid(unsigned uid)
 {
-    /* Android application class, not a fixed device/user/app identity. */
     unsigned appid=uid%100000;
-    if(appid<10000||appid>=20000||!process||!package||!*package)return false;
-    size_t n=strlen(package);
-    for(size_t i=0;i<n;i++){
-        unsigned char c=(unsigned char)package[i];
-        if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='.'))return false;
-    }
-    return !strncmp(process,package,n)&&(process[n]=='\0'||process[n]==':');
+    return appid>=10000 && appid<20000;
 }
 static bool enabled(void)
 {
     const char *a=getenv("QTI_VM_BIND_TEST"),*b=getenv("QTI_VM_BIND_EXCLUSIVE_TEST");
     if(a&&b&&!strcmp(a,"1")&&!strcmp(b,"1"))return true;
 #ifdef __ANDROID__
-    char package[PROP_VALUE_MAX]={0},process[256]={0};
-    if(__system_property_get("debug.sq2.vmbind.app",package)<=0)return false;
-    int fd=open("/proc/self/cmdline",O_RDONLY|O_CLOEXEC);if(fd<0)return false;
-    ssize_t n=read(fd,process,sizeof(process)-1);close(fd);
-    return n>0&&qti_vm_app_selected((unsigned)getuid(),process,package);
+    return qti_vm_app_uid((unsigned)getuid());
 #else
     return false;
 #endif

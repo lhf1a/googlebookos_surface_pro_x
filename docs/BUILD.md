@@ -124,8 +124,8 @@ QCOM 用户态由仓库源码和私有输入中的 GSL donor 生成：需要 And
 不在仓库分发高通运行库。显式选择旧 prebuilt 或复用已有内核时，不会凭空补入新的内核代码。
 
 Hybrid 继续使用 Mesa GLES/Turnip、QTI gralloc/mapper5/HWC 和原生 OMX。
-默认对 NTE 选择 QCOM 并启用 VM_BIND 的 `exclude` 分配策略：这是已测试的应用选择，
-不是按包名判断 BO 是否能共享。桥接复用已验证的 BO 查找结果，移交同步访问表；
+路由器仍决定应用使用 QCOM 还是 Turnip。普通应用经 QCOM/GSL 打开 MSM 时默认启用 VM_BIND，
+不读取包名白名单；系统、隔离和 SDK 沙箱 UID 不在默认范围。BO 共享策略保持 `exclude`。桥接复用已验证的 BO 查找结果，移交同步访问表；
 handle、访问标志、队列和共享状态匹配时复用同步准备模板。每次提交仍重新收集 fence，
 导入、导出和 handle 复用继续走登记和失效路径。未采用全量 NO_SHARE 或多核拆表。
 SQ2 游戏测试不代替 SQ1 实机验收。

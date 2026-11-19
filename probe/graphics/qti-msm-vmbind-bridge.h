@@ -2,8 +2,8 @@
 #ifndef QTI_MSM_VMBIND_BRIDGE_H
 #define QTI_MSM_VMBIND_BRIDGE_H
 #include <stdbool.h>
-/* Explicit experimental opt-in only; no change to the Vulkan router choice. */
-bool qti_vm_app_selected(unsigned uid,const char *process,const char *package);
+/* Normal Android app UID only; Vulkan router selection is unchanged. */
+bool qti_vm_app_uid(unsigned uid);
 int qti_vm_gsl_open(const char *path,int flags,...);
 int qti_vm_gsl_open2(const char *path,int flags);
 int qti_vm_gsl_close(int fd);

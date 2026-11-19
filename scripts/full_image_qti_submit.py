@@ -63,5 +63,4 @@ def build_payload(private, out, uapi=None):
     return {'lib64/'+bridge: (out/bridge).read_bytes(), 'lib64/libgsl.so': (patched/'libgsl.so').read_bytes(),
             'lib64/'+helper: (out/helper).read_bytes(), 'lib64/hw/vulkan.qti.so': (out/policy).read_bytes(),
             'etc/init/sq2-qti-vmbind.rc': b'on post-fs-data\n'
-                b'    setprop debug.sq2.vmbind.app com.hottagames.yh.laohu\n'
                 b'    setprop debug.sq2.vmbind.noshare_mode exclude\n'}
