@@ -64,15 +64,16 @@ is_preserved_esp_path() {
 block_size_bytes() {
     _dev="$1"
     if [ -b "$_dev" ]; then
+        if command -v blockdev >/dev/null 2>&1; then
+            _b="$(blockdev --getsize64 "$_dev" 2>/dev/null || true)"
+            case "$_b" in ''|*[!0-9]*) ;; *) [ "$_b" != "0" ] && { printf '%s\n' "$_b"; return 0; } ;; esac
+        fi
         _real="$(readlink -f "$_dev" 2>/dev/null || printf '%s' "$_dev")"
         _node="${_real##*/}"
         if [ -r "/sys/class/block/$_node/size" ]; then
             _sec="$(cat "/sys/class/block/$_node/size")"
-            echo $(( _sec * 512 ))
+            awk -v s="$_sec" 'BEGIN { printf "%.0f\n", s * 512 }'
             return 0
-        fi
-        if command -v blockdev >/dev/null 2>&1; then
-            blockdev --getsize64 "$_dev" 2>/dev/null && return 0
         fi
     elif [ -f "$_dev" ]; then
         stat -c '%s' "$_dev" 2>/dev/null && return 0

@@ -305,14 +305,17 @@ is_preserved_esp() {
 get_blk_bytes() {
     _d="$1"
     if [ -b "$_d" ]; then
+        if command -v blockdev >/dev/null 2>&1; then
+            _b="$(blockdev --getsize64 "$_d" 2>/dev/null || true)"
+            case "$_b" in ''|*[!0-9]*) ;; *) [ "$_b" != "0" ] && { printf '%s\n' "$_b"; return 0; } ;; esac
+        fi
         _r="$(readlink -f "$_d" 2>/dev/null || printf '%s' "$_d")"
         _n="${_r##*/}"
         if [ -r "/sys/class/block/$_n/size" ]; then
             _s="$(cat "/sys/class/block/$_n/size")"
-            echo $(( _s * 512 ))
+            awk -v s="$_s" 'BEGIN { printf "%.0f\n", s * 512 }'
             return 0
         fi
-        blockdev --getsize64 "$_d" 2>/dev/null && return 0
     fi
     echo 0
 }
@@ -343,7 +346,7 @@ backup_sq2nat_if_space() {
     # Require >= 350 MiB free on ESP before creating backup copy (v0.7.0 2 GiB ESP has > 1.3 GiB free)
     if [ "$_free_kb" -ge 358400 ]; then
         rm -rf "$_esp/EFI/SQ2Bak" 2>/dev/null || true
-        cp -a "$_esp/EFI/SQ2Nat" "$_esp/EFI/SQ2Bak" 2>/dev/null || rm -rf "$_esp/EFI/SQ2Bak" 2>/dev/null || true
+        cp -r "$_esp/EFI/SQ2Nat" "$_esp/EFI/SQ2Bak" 2>/dev/null || rm -rf "$_esp/EFI/SQ2Bak" 2>/dev/null || true
         sync 2>/dev/null || true
     fi
 }
@@ -351,11 +354,11 @@ backup_sq2nat_if_space() {
 verify_initramfs_has_ota() {
     _initrd="$1"
     [ -f "$_initrd" ] || { echo "ERR:missing_new_initramfs" >&2; return 1; }
-    if ! gzip -dc "$_initrd" 2>/dev/null | grep -qa 'bin/spx-ota-stage'; then
+    if ! gzip -dc "$_initrd" 2>/dev/null | tr '\0' '\n' | grep -Fq 'bin/spx-ota-stage'; then
         echo "ERR:new_initramfs_missing_spx_ota_stage" >&2
         return 1
     fi
-    if ! gzip -dc "$_initrd" 2>/dev/null | grep -qa 'bin/spx-ota-tool'; then
+    if ! gzip -dc "$_initrd" 2>/dev/null | tr '\0' '\n' | grep -Fq 'bin/spx-ota-tool'; then
         echo "ERR:new_initramfs_missing_spx_ota_tool" >&2
         return 1
     fi
@@ -390,7 +393,7 @@ case "$CMD" in
         [ -b /dev/block/by-name/SQ2PROBE ] || { echo "ERR:missing_sq2probe_block" >&2; exit 1; }
         _super_sz="$(get_blk_bytes /dev/block/by-name/super)"
         _esp_sz="$(get_blk_bytes /dev/block/by-name/SQ2PROBE)"
-        _data_free_kb="$(df -k /data | awk 'NR==2{print $4+0}')"
+        _data_free_bytes="$(df -k /data | awk 'NR==2{printf "%.0f\n", $4 * 1024}')"
         _has_ota_info=0
         _cur_super_sha=""
         if [ -r /etc/spx-ota-info ]; then
@@ -400,7 +403,7 @@ case "$CMD" in
         _krel="$(uname -r 2>/dev/null || true)"
         printf 'SUPER_BYTES=%s\n' "$_super_sz"
         printf 'ESP_BYTES=%s\n' "$_esp_sz"
-        printf 'DATA_FREE_BYTES=%s\n' "$(( _data_free_kb * 1024 ))"
+        printf 'DATA_FREE_BYTES=%s\n' "$_data_free_bytes"
         printf 'HAS_OTA_INFO=%s\n' "$_has_ota_info"
         printf 'CURRENT_SUPER_SHA256=%s\n' "$_cur_super_sha"
         printf 'KERNEL=%s\n' "$_krel"
@@ -496,11 +499,12 @@ case "$CMD" in
         _kind="$1"
         _esp_off="$2"
         _esp_len="$3"
+        _esp_start="$(awk -v o="$_esp_off" 'BEGIN { printf "%.0f", o + 1 }')"
         rm -f /data/ota/esp-src.fat 2>/dev/null || true
         if [ "$_kind" = "full-img-gz" ]; then
-            gzip -dc /data/ota/pending.pkg | tail -c +"$(( _esp_off + 1 ))" | head -c "$_esp_len" > /data/ota/esp-src.fat
+            gzip -dc /data/ota/pending.pkg | tail -c +"$_esp_start" | head -c "$_esp_len" > /data/ota/esp-src.fat
         else
-            tail -c +"$(( _esp_off + 1 ))" /data/ota/pending.pkg | head -c "$_esp_len" > /data/ota/esp-src.fat
+            tail -c +"$_esp_start" /data/ota/pending.pkg | head -c "$_esp_len" > /data/ota/esp-src.fat
         fi
         _got_sz="$(stat -c '%s' /data/ota/esp-src.fat 2>/dev/null || echo 0)"
         [ "$_got_sz" = "$_esp_len" ] || { rm -f /data/ota/esp-src.fat; echo "ERR:esp_extract_size:$_got_sz" >&2; exit 1; }
