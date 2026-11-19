@@ -361,21 +361,35 @@ function Resolve-AdbExecutable([string]$Requested) {
 }
 
 function Invoke-Adb {
-    param([string[]]$Arguments, [switch]$IgnoreExitCode)
+    param([string[]]$Arguments, [switch]$IgnoreExitCode, [switch]$StreamOutput)
     $fullArgs = @()
     if ($script:TargetSerial) {
         $fullArgs += @('-s', $script:TargetSerial)
     }
     $fullArgs += $Arguments
-    $output = & $script:AdbExe @fullArgs 2>&1
-    $code = $LASTEXITCODE
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($StreamOutput) {
+            & $script:AdbExe @fullArgs
+            $code = $LASTEXITCODE
+            $text = ''
+        } else {
+            $output = & $script:AdbExe @fullArgs 2>&1
+            $code = $LASTEXITCODE
+            $text = (($output | ForEach-Object {
+                if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { $_.ToString() }
+            }) -join "`n")
+        }
+    } finally {
+        $ErrorActionPreference = $prevPref
+    }
     if (-not $IgnoreExitCode -and $code -ne 0) {
-        $joined = ($output | ForEach-Object { $_.ToString() }) -join "`n"
-        throw "adb $($Arguments -join ' ') failed (exit $code): $joined"
+        throw "adb $($Arguments -join ' ') failed (exit $code): $text"
     }
     return [pscustomobject]@{
         ExitCode = $code
-        Text     = (($output | ForEach-Object { $_.ToString() }) -join "`n")
+        Text     = $text
     }
 }
 
@@ -848,7 +862,7 @@ try {
 
     # ---- 6. Push & Verify Package ----
     Write-Log 'Pushing package to device (/data/local/tmp/spx-ota-upload.pkg)...'
-    $null = Invoke-Adb -Arguments @('push', $PackagePath, '/data/local/tmp/spx-ota-upload.pkg')
+    $null = Invoke-Adb -Arguments @('push', $PackagePath, '/data/local/tmp/spx-ota-upload.pkg') -StreamOutput
     Write-Log 'Verifying package SHA-256 on device...'
     $stageOut = (Invoke-DeviceRoot "sh /data/local/tmp/spx-adb-helper.sh stage-pkg $($pkg.Sha256)").Text.Trim()
     Write-Log $stageOut
@@ -865,7 +879,7 @@ try {
         if ($extRes.ExitCode -ne 0) {
             Write-Log "Device-side stream extract unavailable ($($extRes.Text.Trim())); falling back to host extraction..."
             [SpxAdbOtaNative]::ExtractRegion($PackagePath, ($pkg.Kind -eq 'full-img-gz'), $pkg.EspOffset, $pkg.EspBytes, $tmpHostEsp)
-            $null = Invoke-Adb -Arguments @('push', $tmpHostEsp, '/data/local/tmp/spx-esp-src.fat')
+            $null = Invoke-Adb -Arguments @('push', $tmpHostEsp, '/data/local/tmp/spx-esp-src.fat') -StreamOutput
             $espSrcPath = '/data/local/tmp/spx-esp-src.fat'
         } else {
             Write-Log $extRes.Text.Trim()
