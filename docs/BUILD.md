@@ -159,6 +159,16 @@ Hybrid 整包默认从 `probe/advanced-control/` 编译并安装“高级设置 
 复用构建会重编 Vulkan 路由器、高级设置 APK 并刷新桥接脚本。
 当前为源码集成候选；尚未完成新整盘启动及 SQ1/SQ2 真机端到端验收。
 
+### 救援模式（`spx-rescue` / `sq2.rescue=1`）
+
+Hybrid 整包默认使用 `configs/kernel-6.18-hybrid.config`（内置 `r8152` 并以模块形式启用 `usbnet` / `ax88179_178a` / `cdc_ether` / `cdc_ncm` / `rndis_host` 等常见 USB 网卡驱动），并在 initramfs 中集成救援模式组件（`scripts/full_image_rescue.py`、`probe/rescue/`）：
+
+- **在 Android 启动前停止**：发现启动盘与 `/media/esp` 后，在挂载 Android 分区与启动 `/system/bin/init` 之前停留在救援控制台，不自动挂载 `system`/`vendor`/`metadata`/`userdata`。
+- **SSH（仅救援模式）**：自动启动 Dropbear（端口 22），同时允许公钥登录（`/root/.ssh/authorized_keys`，并自动导入 `/media/esp/rescue/authorized_keys` 或 `/media/esp/authorized_keys`）与默认密码 `000000`（仅在救援启动时在内存中为锁定的 `root` 设置，正常启动镜像仍保持 `root` 锁定且关闭 SSH）。
+- **USB 网卡与 Wi-Fi TUI**：自动加载已接入的 USB 网卡驱动并运行 DHCP，同时拉起 `wifi-services`、`ath10k_snoc` 与 `wpa_supplicant`；提供静态编译的 ARM64 TUI 工具 `wifi-tui`（`/bin/spx-wifi-tui`）用于扫描、选择和登录 Open/WPA/WPA2/WPA3/隐藏 Wi-Fi，并实时显示 Wi-Fi/USB 网卡 IP 与 SSH 信息；另提供可选的 `spx-rescue-usb-gadget start|stop` 下口 USB NCM 网卡模式。
+- **继续启动 Android 与控制权交接**：运行 `start-android`（别名 `continue-android`，或 `wifi-tui` 内按 `b`；支持 `--safe` / `--stop-ssh` / `--umount`）可通知 PID 1 退出救援循环；交接脚本 `spx-rescue-handoff` 会先停止救援 USB 监听、`wpa_supplicant`、所有救援 `udhcpc`、清空并关闭救援网卡接口、卸载可选下口 USB gadget 并恢复 host 角色，再恢复正常启动参数与跳过的早期驱动钩子并继续 `exec native-handoff /newroot`。
+- 当前已在主机完成编译、ARM64 `qemu-aarch64` 运行测试与整条 initramfs 装配流水线单元测试；尚未在 SQ1/SQ2 实机完成端到端救援启动与继续进入 Android 验收。
+
 ### 整盘验收边界
 
 - 默认只构建产物：不运行测试套件、整盘解压校验或 SHA 清单；编译错误、必要格式/ABI/配对约束仍会中止。

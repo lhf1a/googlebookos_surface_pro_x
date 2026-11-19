@@ -295,7 +295,7 @@ def main(argv=None):
     full.add_argument('--skip-device-faker', action='store_true',
                       help='explicitly omit forked device_faker_gfx KernelSU module from baseline runtime')
     full.add_argument('--camera-inputs', type=Path,
-                      help='shared camera binaries and CAMERA.json; default PRIVATE_ROOT/camera for baseline/hybrid')
+                      help='shared camera binaries and CAMERA.json; default PRIVATE_ROOT/camera for hybrid')
     full.set_defaults(without_camera=False)
     full.add_argument('--sensor-inputs', type=Path,
                       help='sensor modules/HAL/SLPI EFI and model firmware; default PRIVATE_ROOT/sensors')
@@ -345,7 +345,7 @@ def main(argv=None):
     disk.add_argument('--resume-build', action='store_true', help='reuse this explicitly selected build directory and its completed pristine recovery extraction')
     build = commands.add_parser('compile', help='compile Image/modules/dtbs and export unvalidated outputs')
     build.add_argument('--source', type=Path, required=True)
-    build.add_argument('--config', type=Path, default=ROOT / 'configs/kernel-6.18-baseline.config')
+    build.add_argument('--config', type=Path, default=ROOT / 'configs/kernel-6.18-hybrid.config')
     build.add_argument('--build-dir', type=Path, required=True)
     build.add_argument('--output', type=Path, required=True)
     build.add_argument('--cross-compile', required=True, help='explicit compiler prefix, e.g. /tools/bin/aarch64-linux-gnu-')

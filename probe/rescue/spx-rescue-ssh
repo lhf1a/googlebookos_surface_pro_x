@@ -1,0 +1,193 @@
+#!/bin/sh
+# Rescue-only SSH setup: enables public-key auth and default root password 000000.
+# Normal boot remains locked; this script refuses to unlock root without sq2.rescue=1.
+set -eu
+export PATH="${SPX_RESCUE_PATH:-/bin:/sbin:/usr/bin:/usr/sbin}"
+
+CMDLINE_FILE="${SPX_RESCUE_CMDLINE:-/proc/cmdline}"
+ROOT_PREFIX="${SPX_RESCUE_ROOT:-}"
+ETC_DIR="${ROOT_PREFIX}/etc"
+RUN_DIR="${ROOT_PREFIX}/run"
+LOGS_DIR="${ROOT_PREFIX}/logs"
+HOME_ROOT="${ROOT_PREFIX}/root"
+ESP_DIR="${ROOT_PREFIX}/media/esp"
+DROPBEAR_BIN="${SPX_DROPBEAR_BIN:-dropbear}"
+DROPBEARKEY_BIN="${SPX_DROPBEARKEY_BIN:-dropbearkey}"
+MKPASSWD_BIN="${SPX_MKPASSWD_BIN:-mkpasswd}"
+DEFAULT_PASS="000000"
+
+is_rescue_boot() {
+    [ -r "$CMDLINE_FILE" ] || return 1
+    case " $(cat "$CMDLINE_FILE") " in
+        *' sq2.rescue=1 '*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_running_dropbear() {
+    pidfile="$RUN_DIR/dropbear.pid"
+    [ -r "$pidfile" ] || return 1
+    pid=$(cat "$pidfile" 2>/dev/null || true)
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$pid" -gt 1 ] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    if [ -r "/proc/$pid/cmdline" ]; then
+        cmd=$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+        case "$cmd" in *dropbear*) return 0 ;; *) return 1 ;; esac
+    fi
+    return 0
+}
+
+ensure_default_root_password() {
+    shadow="$ETC_DIR/shadow"
+    mkdir -p "$ETC_DIR"
+    current_hash=""
+    if [ -r "$shadow" ]; then
+        current_hash=$(awk -F: '$1 == "root" { print $2; exit }' "$shadow")
+    fi
+    case "$current_hash" in
+        ''|'!'|'!!'|'*'|'!'*)
+            if command -v "$MKPASSWD_BIN" >/dev/null 2>&1; then
+                newhash=$("$MKPASSWD_BIN" -m sha512 "$DEFAULT_PASS")
+            elif command -v busybox >/dev/null 2>&1; then
+                newhash=$(busybox mkpasswd -m sha512 "$DEFAULT_PASS")
+            else
+                echo "SPX_RESCUE_SSH_ERROR: mkpasswd unavailable" >&2
+                return 1
+            fi
+            [ -n "$newhash" ] || { echo "SPX_RESCUE_SSH_ERROR: empty password hash" >&2; return 1; }
+            tmp="$shadow.rescue.$$"
+            if [ -r "$shadow" ]; then
+                awk -F: -v h="$newhash" 'BEGIN{OFS=":"} $1=="root"{$2=h; found=1} {print} END{if(!found) print "root:" h ":0:0:99999:7:::"}' "$shadow" > "$tmp"
+            else
+                printf 'root:%s:0:0:99999:7:::\n' "$newhash" > "$tmp"
+            fi
+            chmod 600 "$tmp"
+            mv "$tmp" "$shadow"
+            echo "SPX_RESCUE_SSH_PASSWORD=default_000000"
+            ;;
+        *)
+            echo "SPX_RESCUE_SSH_PASSWORD=preserved_custom"
+            ;;
+    esac
+}
+
+ensure_authorized_keys() {
+    ssh_dir="$HOME_ROOT/.ssh"
+    auth_keys="$ssh_dir/authorized_keys"
+    mkdir -p "$HOME_ROOT" "$ssh_dir"
+    chmod 700 "$HOME_ROOT" "$ssh_dir"
+    [ -f "$auth_keys" ] || : > "$auth_keys"
+    chmod 600 "$auth_keys"
+    imported=0
+    for src in "$ESP_DIR/rescue/authorized_keys" "$ESP_DIR/authorized_keys"; do
+        [ -r "$src" ] || continue
+        while IFS= read -r raw || [ -n "$raw" ]; do
+            line=$(printf '%s' "$raw" | tr -d '\r')
+            case "$line" in
+                ''|'#'*) continue ;;
+                ssh-ed25519\ *|ssh-rsa\ *|ecdsa-sha2-*\ *|sk-ssh-*\ *|sk-ecdsa-*\ *) ;;
+                *) continue ;;
+            esac
+            if ! grep -Fqx "$line" "$auth_keys" 2>/dev/null; then
+                printf '%s\n' "$line" >> "$auth_keys"
+                imported=$((imported + 1))
+            fi
+        done < "$src"
+    done
+    if [ "$(id -u)" = 0 ]; then
+        chown 0:0 "$HOME_ROOT" "$ssh_dir" "$auth_keys" 2>/dev/null || true
+    fi
+    key_count=$(grep -Ec '^(ssh-|ecdsa-|sk-)' "$auth_keys" 2>/dev/null || true)
+    echo "SPX_RESCUE_SSH_KEYS count=${key_count:-0} imported=$imported"
+}
+
+ensure_host_key() {
+    db_dir="$ETC_DIR/dropbear"
+    host_key="$db_dir/dropbear_ed25519_host_key"
+    esp_key="$ESP_DIR/rescue/dropbear_ed25519_host_key"
+    mkdir -p "$db_dir"
+    chmod 700 "$db_dir"
+    if [ ! -s "$host_key" ]; then
+        if [ -s "$esp_key" ]; then
+            cp "$esp_key" "$host_key"
+            chmod 600 "$host_key"
+            echo "SPX_RESCUE_SSH_HOSTKEY=loaded_from_esp"
+        else
+            "$DROPBEARKEY_BIN" -t ed25519 -f "$host_key" > "$LOGS_DIR/rescue-dropbearkey.txt" 2>&1
+            chmod 600 "$host_key"
+            echo "SPX_RESCUE_SSH_HOSTKEY=generated_ed25519"
+            if [ -d "$ESP_DIR" ] && [ -w "$ESP_DIR" ]; then
+                mkdir -p "$ESP_DIR/rescue" 2>/dev/null || true
+                cp "$host_key" "$esp_key" 2>/dev/null || true
+            fi
+        fi
+    fi
+}
+
+cmd_start() {
+    if ! is_rescue_boot; then
+        echo "SPX_RESCUE_SSH_REFUSED: sq2.rescue=1 not active" >&2
+        return 1
+    fi
+    mkdir -p "$RUN_DIR" "$LOGS_DIR"
+    if [ -z "$ROOT_PREFIX" ]; then
+        mkdir -p /dev/pts
+        grep -q ' /dev/pts ' /proc/mounts 2>/dev/null || mount -t devpts devpts /dev/pts -o mode=620,ptmxmode=666 || true
+    fi
+    ensure_default_root_password
+    ensure_authorized_keys
+    ensure_host_key
+    if ! is_running_dropbear; then
+        # No -s or -g: both public-key authentication and root password login are enabled.
+        "$DROPBEAR_BIN" -E -p 22 -P "$RUN_DIR/dropbear.pid" -r "$ETC_DIR/dropbear/dropbear_ed25519_host_key" 2>> "$LOGS_DIR/rescue-ssh.txt"
+        sleep 1
+    fi
+    if is_running_dropbear; then
+        echo "SPX_RESCUE_SSH_READY pid=$(cat "$RUN_DIR/dropbear.pid") port=22 auth=pubkey+password"
+        return 0
+    fi
+    echo "SPX_RESCUE_SSH_FAILED: dropbear did not stay running" >&2
+    return 1
+}
+
+cmd_stop() {
+    pidfile="$RUN_DIR/dropbear.pid"
+    if is_running_dropbear; then
+        pid=$(cat "$pidfile")
+        kill "$pid" 2>/dev/null || true
+        for _ in 1 2 3 4 5; do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+        done
+        kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pidfile"
+    # Re-lock root shadow when explicitly stopping rescue SSH.
+    shadow="$ETC_DIR/shadow"
+    if [ -r "$shadow" ]; then
+        tmp="$shadow.lock.$$"
+        awk -F: 'BEGIN{OFS=":"} $1=="root"{$2="!"} {print}' "$shadow" > "$tmp"
+        chmod 600 "$tmp"
+        mv "$tmp" "$shadow"
+    fi
+    echo "SPX_RESCUE_SSH_STOPPED"
+}
+
+cmd_status() {
+    if is_running_dropbear; then
+        echo "ssh=running pid=$(cat "$RUN_DIR/dropbear.pid") port=22 auth=pubkey+password(default:000000)"
+    else
+        echo "ssh=stopped"
+    fi
+    auth_keys="$HOME_ROOT/.ssh/authorized_keys"
+    key_count=$(grep -Ec '^(ssh-|ecdsa-|sk-)' "$auth_keys" 2>/dev/null || true)
+    echo "authorized_keys=${key_count:-0}"
+}
+
+case "${1:-start}" in
+    start) cmd_start ;;
+    stop) cmd_stop ;;
+    status) cmd_status ;;
+    *) echo "Usage: spx-rescue-ssh start|stop|status" >&2; exit 64 ;;
+esac

@@ -59,7 +59,7 @@ class CameraAssembly(unittest.TestCase):
                 return loader(name, filename)
             output = root/"runtime.gz"
             with patch.object(image, "module", side_effect=load):
-                image.assemble_runtime(root, output, camera=files)
+                image.assemble_runtime(root, output, graphics=None, camera=files)
             records, result = image.records_from_gzip(output)
             self.assertEqual(result["etc/shadow"], bodies["etc/shadow"])
             self.assertEqual(result["bin/dropbear"], bodies["bin/dropbear"])

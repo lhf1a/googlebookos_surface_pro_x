@@ -1,0 +1,15 @@
+#!/bin/sh
+# Rescue-mode interactive console shell wrapper.
+# Records the session-leader PID so start-android (local or via SSH) can cleanly
+# close this shell and hand control back to PID 1.
+export PATH="${SPX_RESCUE_PATH:-/bin:/sbin:/usr/bin:/usr/sbin}"
+export HOME=/root
+export TERM="${TERM:-linux}"
+export PS1='spx-rescue:\w# '
+
+RUN_DIR="${SPX_RESCUE_ROOT:-}/run"
+mkdir -p "$RUN_DIR"
+echo $$ > "$RUN_DIR/sq2-rescue-console.pid"
+
+cd /root 2>/dev/null || cd /
+exec /bin/sh -i

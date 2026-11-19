@@ -666,7 +666,7 @@ def build(args):
     install_boot_source(tree, Path(shim))
     hardware_panel_profiles(tree)
     (tree/'SPX-IMAGE.txt').write_text('SPX_IMAGE_FORMAT=1\nSPX_RELEASE=6.18-'+selected['baseline']+'-single-user\nPRIVATE_IDENTITY_PRESENT='+('0' if getattr(args, 'anonymous', False) else '1')+'\n')
-    (tree/'EFI/BOOT/grub.cfg').write_text("set timeout=5\nset default=spx-single-user\n\nmenuentry 'Surface Pro X Linux 6.18 - single user 0' --id spx-single-user {\n chainloader /EFI/SQ2Nat/start.efi\n}\nmenuentry 'Surface Pro X Linux 6.18 - rescue (no Android data mount)' --id spx-rescue {\n chainloader /EFI/SQ2Res/start.efi\n}\nmenuentry 'Power off' { halt }\n")
+    (tree/'EFI/BOOT/grub.cfg').write_text("set timeout=5\nset default=spx-single-user\n\nmenuentry 'Surface Pro X Linux 6.18 - single user 0' --id spx-single-user {\n chainloader /EFI/SQ2Nat/start.efi\n}\nmenuentry 'Surface Pro X Linux 6.18 - rescue (SSH / Wi-Fi / USB)' --id spx-rescue {\n chainloader /EFI/SQ2Res/start.efi\n}\nmenuentry 'Power off' { halt }\n")
     esp_only = bool(getattr(args, 'esp_only', False))
     (output/'LAYOUT.json').write_text(json.dumps({'image_bytes':image_bytes,'partitions':parts,'template':str(template) if template else None,'partition_boundaries_preserved':bool(template) and not minimal_partitions,'minimal_partitions':minimal_partitions},indent=2)+'\n')
     files={p.relative_to(tree).as_posix():{'bytes':p.stat().st_size} for p in tree.rglob('*') if p.is_file()}

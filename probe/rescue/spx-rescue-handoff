@@ -1,0 +1,77 @@
+#!/bin/sh
+# Sourced by PID 1 (init) when transitioning from rescue mode into Android boot.
+# Relinquishes all rescue Wi-Fi & USB ownership and restores normal Android boot state.
+
+_spx_root="${SPX_RESCUE_ROOT:-}"
+_spx_run="${_spx_root}/run"
+_spx_logs="${_spx_root}/logs"
+_spx_cmdline_file="${SPX_RESCUE_CMDLINE:-/proc/cmdline}"
+_spx_continue_file="$_spx_run/sq2-rescue-continue"
+_spx_net_bin="${SPX_RESCUE_NET_BIN:-/bin/spx-rescue-net}"
+_spx_ssh_bin="${SPX_RESCUE_SSH_BIN:-/bin/spx-rescue-ssh}"
+_spx_mount_bin="${SPX_MOUNT_BIN:-mount}"
+
+_spx_mode="normal"
+_spx_stop_ssh="0"
+if [ -r "$_spx_continue_file" ]; then
+    while IFS='=' read -r _k _v; do
+        case "$_k" in
+            mode) _spx_mode="$_v" ;;
+            stop_ssh) _spx_stop_ssh="$_v" ;;
+        esac
+    done < "$_spx_continue_file"
+fi
+
+echo "SQ2_RESCUE_HANDOFF_BEGIN mode=$_spx_mode stop_ssh=$_spx_stop_ssh" | tee -a "$_spx_logs/status.txt"
+
+# 1. Relinquish ALL rescue Wi-Fi, USB Ethernet and USB gadget ownership to Android.
+if [ -x "$_spx_net_bin" ]; then
+    "$_spx_net_bin" stop >> "$_spx_logs/rescue-handoff.txt" 2>&1 || echo "SQ2_RESCUE_NET_HANDOFF_WARN" | tee -a "$_spx_logs/status.txt"
+fi
+
+# 2. Optionally stop Dropbear SSH and re-lock root shadow.
+if [ "$_spx_stop_ssh" = 1 ] && [ -x "$_spx_ssh_bin" ]; then
+    "$_spx_ssh_bin" stop >> "$_spx_logs/rescue-handoff.txt" 2>&1 || true
+fi
+
+rm -f "$_spx_run/sq2-rescue-active" "$_spx_continue_file" "$_spx_run/sq2-rescue-console.pid"
+
+# 3. Restore normal Android boot cmdline & deferred pre-Android hooks unless --safe was requested.
+if [ "$_spx_mode" = "normal" ]; then
+    if [ -r "$_spx_cmdline_file" ]; then
+        _raw_cmdline=$(cat "$_spx_cmdline_file")
+        _new_cmdline=""
+        _has_c2=0
+        for _tok in $_raw_cmdline; do
+            case "$_tok" in
+                sq2.rescue=1) continue ;;
+                sq2.video.c2=*) _has_c2=1 ;;
+            esac
+            _new_cmdline="${_new_cmdline:+$_new_cmdline }$_tok"
+        done
+        if [ "$_has_c2" = 0 ]; then
+            _new_cmdline="${_new_cmdline:+$_new_cmdline }sq2.video.c2=experimental"
+        fi
+        printf '%s\n' "$_new_cmdline" > "$_spx_run/spx-resume-cmdline"
+        "$_spx_mount_bin" --bind "$_spx_run/spx-resume-cmdline" "$_spx_cmdline_file" || echo "SQ2_RESCUE_CMDLINE_BIND_WARN" | tee -a "$_spx_logs/status.txt"
+    fi
+    rescue=0
+    debug=0
+    if [ "${smoke:-0}" = 0 ] && [ "${ssd_smoke:-0}" = 0 ]; then
+        if command -v cpu-frequency-start >/dev/null 2>&1; then
+            cpu-frequency-start > "$_spx_logs/cpu-frequency.txt" 2>&1 || echo 'SQ2_CPUFREQ_NOT_READY: see RAM log'
+        fi
+        if [ -x "${SPX_CAMERA_BOOT_BIN:-/bin/spx-camera-boot}" ]; then
+            "${SPX_CAMERA_BOOT_BIN:-/bin/spx-camera-boot}" > "$_spx_logs/camera-boot.txt" 2>&1 || echo SPX_CAMERA_NOT_READY
+        fi
+        if [ -x "${SPX_SENSORS_BOOT_BIN:-/bin/spx-sensors-boot}" ]; then
+            "${SPX_SENSORS_BOOT_BIN:-/bin/spx-sensors-boot}" > "$_spx_logs/sensors-boot.txt" 2>&1 || echo 'SPX_SENSORS_NOT_READY: see RAM log'
+        fi
+    fi
+else
+    # Safe mode retains sq2.rescue=1 in /proc/cmdline, but disables legacy debug wifi-framework-boot.
+    debug=0
+fi
+
+echo "SQ2_RESCUE_HANDOFF_COMPLETE mode=$_spx_mode rescue=${rescue:-0} debug=${debug:-0}" | tee -a "$_spx_logs/status.txt"
+unset _spx_root _spx_run _spx_logs _spx_cmdline_file _spx_continue_file _spx_net_bin _spx_ssh_bin _spx_mount_bin _spx_mode _spx_stop_ssh _raw_cmdline _new_cmdline _has_c2 _tok _k _v

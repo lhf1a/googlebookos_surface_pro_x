@@ -846,7 +846,7 @@ function New-DualBootGrubConfig {
     $lines.Add('    chainloader /EFI/Microsoft/Boot/bootmgfw.efi')
     $lines.Add('}')
     $lines.Add('')
-    $lines.Add("menuentry 'Googlebook OS - rescue (no Android data mount)' --id spx-rescue {")
+    $lines.Add("menuentry 'Googlebook OS - rescue (SSH / Wi-Fi / USB)' --id spx-rescue {")
     if ($Sq2ProbeUuid) {
         $lines.Add("    if search --no-floppy --fs-uuid --set=root $Sq2ProbeUuid; then")
         $lines.Add('        true')

@@ -316,14 +316,18 @@ exit 1
             stage_mock_private(private)
             out_cpio = root / 'initramfs.cpio.gz'
 
-            with mock.patch.object(full_image, 'module', side_effect=mock_touch_module(full_image.module)):
+            with (
+                mock.patch.object(full_image, 'module', side_effect=mock_touch_module(full_image.module)),
+                mock.patch.object(full_image, 'hybrid_runtime', return_value={'graphics': 'hybrid'}),
+                mock.patch('full_image_advanced_control.install'),
+            ):
                 report = full_image.assemble_runtime(
                     private,
                     out_cpio,
-                    graphics='baseline',
+                    graphics='hybrid',
                     ksu_modules={'device_faker.zip': fake_zip},
                 )
-            self.assertIsNone(report)
+            self.assertEqual(report, {'graphics': 'hybrid'})
             members = parse_cpio_gz(out_cpio.read_bytes())
             self.assertEqual(len(members), 2)
             main_files, cred_files = members
@@ -358,7 +362,7 @@ exit 1
                     kernel_patches=None,
                     cross_compile=None,
                     jobs=1,
-                    graphics='baseline',
+                    graphics='hybrid',
                     device_faker_zip=None,
                     device_faker_src=None,
                     skip_device_faker=False,
@@ -368,7 +372,7 @@ exit 1
                 )
                 report = full_image.build(args, lambda _: {})
 
-                self.assertEqual(report['graphics'], 'baseline')
+                self.assertEqual(report['graphics'], 'hybrid')
                 self.assertEqual(report['device_faker_fork']['source'], 'private-ksu-modules')
                 self.assertEqual(report['device_faker_fork']['fork_url'], df_mod.FORK_URL)
                 recorded = json.loads((args.output / 'FULL-IMAGE.json').read_text())
@@ -392,7 +396,7 @@ exit 1
         self.assertIn('--device-faker-zip', res.stdout)
         self.assertIn('--device-faker-src', res.stdout)
         self.assertIn('--skip-device-faker', res.stdout)
-        self.assertIn("baseline", res.stdout)
+        self.assertIn("hybrid", res.stdout)
 
 
 if __name__ == '__main__':

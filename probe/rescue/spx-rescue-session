@@ -1,0 +1,61 @@
+#!/bin/sh
+# Rescue-mode supervisor executed by PID 1 before Android mounts or starts.
+# Brings up SSH (pubkey + default password 000000), USB Ethernet and Wi-Fi,
+# then stays stopped in a rescue console until start-android triggers handoff.
+set -eu
+export PATH="${SPX_RESCUE_PATH:-/bin:/sbin:/usr/bin:/usr/sbin}"
+
+ROOT_PREFIX="${SPX_RESCUE_ROOT:-}"
+RUN_DIR="${ROOT_PREFIX}/run"
+LOGS_DIR="${ROOT_PREFIX}/logs"
+ACTIVE_FLAG="$RUN_DIR/sq2-rescue-active"
+CONTINUE_FLAG="$RUN_DIR/sq2-rescue-continue"
+
+mkdir -p "$RUN_DIR" "$LOGS_DIR"
+rm -f "$CONTINUE_FLAG"
+echo "$$" > "$ACTIVE_FLAG"
+
+echo ""
+echo "================================================================"
+echo " Surface Pro X Rescue Mode (Stopped before Android startup)"
+echo "================================================================"
+
+if /bin/spx-rescue-ssh start >> "$LOGS_DIR/rescue-ssh-init.txt" 2>&1; then
+    echo " SSH: enabled on port 22 (user: root | default pass: 000000 | pubkey enabled)"
+    echo "      Place SSH public keys in /root/.ssh/authorized_keys or /media/esp/rescue/authorized_keys"
+else
+    echo " SSH: failed to start (see /logs/rescue-ssh-init.txt and /logs/rescue-ssh.txt)"
+fi
+
+if /bin/spx-rescue-net start >> "$LOGS_DIR/rescue-net-init.txt" 2>&1; then
+    echo " Net: USB Ethernet auto-load + DHCP watcher started; Wi-Fi supplicant initializing"
+else
+    echo " Net: partial startup (see /logs/rescue-net-init.txt)"
+fi
+
+# Give immediate USB NIC / Wi-Fi initialization a brief moment before banner.
+sleep 2
+/bin/spx-rescue-net status 2>/dev/null | while IFS= read -r line; do
+    echo "   $line"
+done
+
+echo ""
+echo " Commands:"
+echo "   wifi-tui                    Interactive Wi-Fi scan / select / login TUI"
+echo "   spx-rescue-net status       Show Wi-Fi, USB Ethernet and IP status"
+echo "   spx-rescue-ssh status       Show SSH service and authorized_keys count"
+echo "   spx-rescue-usb-gadget start Optional lower Type-C USB NCM gadget (172.16.42.1)"
+echo "   start-android               Hand off Wi-Fi/USB and continue booting Android"
+echo "   start-android --safe        Continue booting Android in safe rescue mode"
+echo "   reboot / poweroff           Reboot or power off the device"
+echo "================================================================"
+echo ""
+
+while [ ! -e "$CONTINUE_FLAG" ]; do
+    setsid cttyhack /bin/spx-rescue-shell || true
+    [ -e "$CONTINUE_FLAG" ] && break
+    sleep 1
+done
+
+echo "SPX_RESCUE_SESSION_EXIT: handoff requested"
+exit 0

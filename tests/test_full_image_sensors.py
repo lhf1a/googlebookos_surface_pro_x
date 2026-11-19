@@ -31,7 +31,7 @@ class SensorAssembly(unittest.TestCase):
                 return loader(name,filename)
             output=private/'runtime.gz'
             with patch.object(image,'module',side_effect=load):
-                image.assemble_runtime(private,output,sensors=files)
+                image.assemble_runtime(private,output,graphics=None,sensors=files)
             records,result=image.records_from_gzip(output)
             for n in ('etc/shadow','bin/dropbear','etc/unrelated'):self.assertEqual(result[n],bodies[n])
             for name,target in sensors.payload_paths(files).items():self.assertEqual(result[target],files[name])

@@ -1,0 +1,111 @@
+#!/bin/sh
+# Signal PID 1 to hand off Wi-Fi/USB ownership and continue booting Android.
+# Usable from local rescue console, SSH session, or wifi-tui.
+set -eu
+export PATH="${SPX_RESCUE_PATH:-/bin:/sbin:/usr/bin:/usr/sbin}"
+
+ROOT_PREFIX="${SPX_RESCUE_ROOT:-}"
+RUN_DIR="${ROOT_PREFIX}/run"
+MOUNTS_FILE="${SPX_RESCUE_MOUNTS:-/proc/mounts}"
+ACTIVE_FLAG="$RUN_DIR/sq2-rescue-active"
+CONTINUE_FLAG="$RUN_DIR/sq2-rescue-continue"
+CONSOLE_PID_FILE="$RUN_DIR/sq2-rescue-console.pid"
+
+mode="normal"
+stop_ssh="0"
+auto_umount="0"
+
+usage() {
+    cat <<'EOF'
+Usage: start-android [options]
+  --safe       Keep sq2.rescue=1 safe mode when starting Android
+  --stop-ssh   Stop Dropbear SSH and re-lock root shadow before Android starts
+  --umount     Automatically unmount manual userdata/metadata mounts first
+  -h, --help   Show this help
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --safe) mode="safe" ;;
+        --stop-ssh) stop_ssh="1" ;;
+        --umount) auto_umount="1" ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown option: $1" >&2; usage >&2; exit 64 ;;
+    esac
+    shift
+done
+
+if [ ! -e "$ACTIVE_FLAG" ]; then
+    echo "start-android: rescue mode is not active (Android may already be running)." >&2
+    exit 1
+fi
+
+if [ -e "$CONTINUE_FLAG" ]; then
+    echo "start-android: Android startup handoff is already in progress."
+    exit 0
+fi
+
+# Check whether the user manually mounted userdata, metadata, or /newroot in rescue mode.
+check_manual_mounts() {
+    [ -r "$MOUNTS_FILE" ] || return 0
+    conflicts=""
+    for alias_name in userdata metadata; do
+        link="${ROOT_PREFIX}/dev/block/by-name/$alias_name"
+        [ -e "$link" ] || continue
+        realdev=$(readlink -f "$link" 2>/dev/null || true)
+        [ -n "$realdev" ] || continue
+        mps=$(awk -v d="$realdev" '$1 == d { print $2 }' "$MOUNTS_FILE" 2>/dev/null || true)
+        for mp in $mps; do
+            if [ "$auto_umount" = 1 ]; then
+                echo "Unmounting $alias_name ($realdev) from $mp..."
+                umount "$mp" || { echo "Failed to unmount $mp" >&2; return 1; }
+            else
+                conflicts="$conflicts $alias_name:$mp"
+            fi
+        done
+    done
+    if [ -n "$conflicts" ]; then
+        echo "Refusing to start Android while rescue manual mounts exist:$conflicts" >&2
+        echo "Unmount them first or re-run: start-android --umount" >&2
+        return 1
+    fi
+    return 0
+}
+
+check_manual_mounts
+
+mkdir -p "$RUN_DIR"
+tmp="$CONTINUE_FLAG.tmp.$$"
+cat > "$tmp" <<EOF
+mode=$mode
+stop_ssh=$stop_ssh
+EOF
+mv "$tmp" "$CONTINUE_FLAG"
+
+echo "SPX_START_ANDROID_REQUESTED mode=$mode stop_ssh=$stop_ssh"
+echo "Handing off Wi-Fi and USB ownership to Android; PID 1 is resuming Android startup..."
+echo "(Active SSH sessions over rescue Wi-Fi/USB will disconnect during interface handoff.)"
+
+if [ -r "$CONSOLE_PID_FILE" ]; then
+    cpid=$(cat "$CONSOLE_PID_FILE" 2>/dev/null || true)
+    case "$cpid" in
+        ''|*[!0-9]*) ;;
+        *)
+            if [ "$cpid" -gt 1 ] && kill -0 "$cpid" 2>/dev/null; then
+                # Wake PID 1 asynchronously so this command finishes printing and exits 0 cleanly.
+                (
+                    sleep 0.2 2>/dev/null || sleep 1
+                    kill -HUP "$cpid" 2>/dev/null || true
+                    kill -TERM -- -"$cpid" 2>/dev/null || true
+                    sleep 0.5 2>/dev/null || sleep 1
+                    if kill -0 "$cpid" 2>/dev/null; then
+                        kill -KILL -- -"$cpid" 2>/dev/null || kill -KILL "$cpid" 2>/dev/null || true
+                    fi
+                ) </dev/null >/dev/null 2>&1 &
+            fi
+            ;;
+    esac
+fi
+
+exit 0

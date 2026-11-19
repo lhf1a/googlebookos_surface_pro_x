@@ -1,0 +1,368 @@
+#!/bin/sh
+# Rescue-mode Wi-Fi & USB Ethernet manager with clean ownership handoff to Android.
+set -eu
+export PATH="${SPX_RESCUE_PATH:-/bin:/sbin:/usr/bin:/usr/sbin}"
+
+ROOT_PREFIX="${SPX_RESCUE_ROOT:-}"
+RUN_DIR="${ROOT_PREFIX}/run"
+LOGS_DIR="${ROOT_PREFIX}/logs"
+ETC_DIR="${ROOT_PREFIX}/etc"
+SYS_DIR="${ROOT_PREFIX}/sys"
+ESP_DIR="${ROOT_PREFIX}/media/esp"
+LIB_MODULES="${SPX_RESCUE_MODULES:-$ROOT_PREFIX/lib/modules/$(uname -r)}"
+ALIASES_FILE="${SPX_USB_ALIASES:-$ETC_DIR/sq2-usb-network.aliases}"
+WPA_CTRL="${SPX_WPA_CTRL:-$RUN_DIR/wpa_supplicant}"
+WPA_CONF="$RUN_DIR/sq2-rescue-wpa.conf"
+WPA_PID="$RUN_DIR/sq2-rescue-wpa.pid"
+WIFI_IFACE_FILE="$RUN_DIR/sq2-rescue-wifi.iface"
+WIFI_INIT_PID="$RUN_DIR/sq2-rescue-wifi-init.pid"
+USB_WATCH_PID="$RUN_DIR/sq2-rescue-usb-net.pid"
+USB_CACHE="$RUN_DIR/sq2-rescue-usb-cache"
+USB_IFACES_DIR="$RUN_DIR/sq2-rescue-usb-ifaces"
+CONTINUE_FLAG="$RUN_DIR/sq2-rescue-continue"
+
+IP_BIN="${SPX_IP_BIN:-ip}"
+MODPROBE_BIN="${SPX_MODPROBE_BIN:-modprobe}"
+WPA_SUPPLICANT_BIN="${SPX_WPA_SUPPLICANT_BIN:-wpa_supplicant}"
+WPA_CLI_BIN="${SPX_WPA_CLI_BIN:-wpa_cli}"
+UDHCPC_BIN="${SPX_UDHCPC_BIN:-udhcpc}"
+DHCP_HOOK="${SPX_DHCP_HOOK:-/bin/dhcp-hook}"
+WIFI_SERVICES_BIN="${SPX_WIFI_SERVICES_BIN:-wifi-services}"
+GADGET_BIN="${SPX_GADGET_BIN:-/bin/spx-rescue-usb-gadget}"
+
+pid_matches() {
+    pid=$1
+    expect=$2
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$pid" -gt 1 ] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    if [ -r "/proc/$pid/cmdline" ]; then
+        cmd=$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+        case "$cmd" in *"$expect"*) return 0 ;; *) return 1 ;; esac
+    fi
+    return 0
+}
+
+stop_pidfile() {
+    file=$1
+    expect=$2
+    [ -r "$file" ] || return 0
+    pid=$(cat "$file" 2>/dev/null || true)
+    if pid_matches "$pid" "$expect"; then
+        kill "$pid" 2>/dev/null || true
+        for _ in 1 2 3 4 5; do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+    fi
+    rm -f "$file"
+}
+
+find_wifi_iface() {
+    for d in "$SYS_DIR"/class/net/*; do
+        [ -e "$d/phy80211" ] || continue
+        basename "$d"
+        return 0
+    done
+    return 1
+}
+
+is_usb_ethernet_iface() {
+    dev=$1
+    d="$SYS_DIR/class/net/$dev"
+    [ -d "$d" ] || return 1
+    [ "$dev" != lo ] || return 1
+    [ ! -e "$d/phy80211" ] || return 1
+    # Never treat rescue gadget interface as a host USB NIC.
+    if [ -r "$RUN_DIR/sq2-rescue-usb-gadget.active" ]; then
+        gdev=$(cat "$RUN_DIR/sq2-rescue-usb-gadget.active" 2>/dev/null || true)
+        [ "$dev" != "$gdev" ] || return 1
+    fi
+    case "$dev" in
+        rmnet*|dummy*|tun*|tap*|sit*|ip6tnl*|p2p*|wlan*) return 1 ;;
+    esac
+    if [ -e "$d/device" ]; then
+        devpath=$(readlink -f "$d/device" 2>/dev/null || true)
+        case "$devpath" in
+            */usb[0-9]*/*) return 0 ;;
+        esac
+    fi
+    case "$dev" in
+        eth*|enx*|enu*|usb*) return 0 ;;
+    esac
+    return 1
+}
+
+load_usb_nic_modules_once() {
+    [ -s "$ALIASES_FILE" ] || return 0
+    mkdir -p "$USB_CACHE"
+    for d in "$SYS_DIR"/bus/usb/devices/*:*; do
+        [ -d "$d" ] || continue
+        [ ! -e "$d/driver" ] || continue
+        alias_val=$(cat "$d/modalias" 2>/dev/null || true)
+        case "$alias_val" in usb:*) ;; *) continue ;; esac
+        id=$(basename "$d")
+        physical=${d%:*}
+        devnum=$(cat "$physical/devnum" 2>/dev/null || echo 0)
+        identity="$devnum:$alias_val"
+        if [ -r "$USB_CACHE/$id" ] && [ "$(cat "$USB_CACHE/$id" 2>/dev/null || true)" = "$identity" ]; then
+            continue
+        fi
+        while read -r pattern modname; do
+            [ -n "$pattern" ] && [ -n "$modname" ] || continue
+            case "$alias_val" in
+                $pattern)
+                    if [ -r "$LIB_MODULES/modules.dep" ]; then
+                        dep_line=$(grep "/$modname.ko:" "$LIB_MODULES/modules.dep" 2>/dev/null | head -n 1 || true)
+                        deps=${dep_line#*:}
+                        ordered=""
+                        for dep in $deps; do ordered="$dep $ordered"; done
+                        for dep in $ordered; do
+                            dep=${dep##*/}
+                            "$MODPROBE_BIN" "${dep%.ko}" 2>/dev/null || true
+                        done
+                    fi
+                    if "$MODPROBE_BIN" "$modname" 2>/dev/null; then
+                        echo "RESCUE_USB_NIC_MODULE=$modname $id"
+                    fi
+                    ;;
+            esac
+        done < "$ALIASES_FILE"
+        printf '%s\n' "$identity" > "$USB_CACHE/$id"
+    done
+}
+
+bring_up_usb_nics_once() {
+    mkdir -p "$USB_IFACES_DIR"
+    for d in "$SYS_DIR"/class/net/*; do
+        [ -d "$d" ] || continue
+        dev=$(basename "$d")
+        is_usb_ethernet_iface "$dev" || continue
+        : > "$USB_IFACES_DIR/$dev"
+        "$IP_BIN" link set "$dev" up 2>/dev/null || true
+        carrier=1
+        if [ -r "$d/carrier" ]; then
+            carrier=$(cat "$d/carrier" 2>/dev/null || echo 1)
+        fi
+        [ "$carrier" = 1 ] || continue
+        pidfile="$RUN_DIR/sq2-rescue-udhcpc-$dev.pid"
+        if pid_matches "$(cat "$pidfile" 2>/dev/null || true)" udhcpc; then
+            continue
+        fi
+        if "$IP_BIN" -4 -o addr show dev "$dev" scope global 2>/dev/null | grep -q 'inet '; then
+            continue
+        fi
+        "$UDHCPC_BIN" -i "$dev" -s "$DHCP_HOOK" -p "$pidfile" -b -t 5 -T 2 >> "$LOGS_DIR/rescue-usb-dhcp.txt" 2>&1 || true
+    done
+}
+
+cmd_usb_once() {
+    mkdir -p "$RUN_DIR" "$LOGS_DIR" "$USB_CACHE" "$USB_IFACES_DIR"
+    load_usb_nic_modules_once
+    bring_up_usb_nics_once
+}
+
+cmd_usb_watch() {
+    mkdir -p "$RUN_DIR" "$LOGS_DIR" "$USB_CACHE" "$USB_IFACES_DIR"
+    if pid_matches "$(cat "$USB_WATCH_PID" 2>/dev/null || true)" spx-rescue-net; then
+        return 0
+    fi
+    echo $$ > "$USB_WATCH_PID"
+    trap 'rm -f "$USB_WATCH_PID"; exit 0' TERM INT EXIT
+    while [ ! -e "$CONTINUE_FLAG" ]; do
+        load_usb_nic_modules_once
+        bring_up_usb_nics_once
+        sleep 2
+    done
+}
+
+prepare_wpa_conf() {
+    mkdir -p "$RUN_DIR" "$WPA_CTRL"
+    if [ -r "$ESP_DIR/rescue/wpa_supplicant.conf" ]; then
+        {
+            echo "ctrl_interface=$WPA_CTRL"
+            echo "update_config=1"
+            grep -Ev '^[[:space:]]*(ctrl_interface|update_config)[[:space:]]*=' "$ESP_DIR/rescue/wpa_supplicant.conf" | tr -d '\r' || true
+        } > "$WPA_CONF"
+    elif [ ! -f "$WPA_CONF" ]; then
+        cat > "$WPA_CONF" <<EOF
+ctrl_interface=$WPA_CTRL
+update_config=1
+EOF
+    fi
+    chmod 600 "$WPA_CONF"
+}
+
+cmd_wifi_init() {
+    mkdir -p "$RUN_DIR" "$LOGS_DIR" "$WPA_CTRL"
+    wdev=$(find_wifi_iface || true)
+    if [ -z "$wdev" ]; then
+        if command -v "$WIFI_SERVICES_BIN" >/dev/null 2>&1; then
+            "$WIFI_SERVICES_BIN" >> "$LOGS_DIR/wifi-services-startup.txt" 2>&1 || true
+        fi
+        timeout 40 "$MODPROBE_BIN" ath10k_snoc >> "$LOGS_DIR/wifi-services-startup.txt" 2>&1 || true
+        for _ in $(seq 1 20); do
+            [ ! -e "$CONTINUE_FLAG" ] || return 0
+            wdev=$(find_wifi_iface || true)
+            [ -n "$wdev" ] && break
+            sleep 1
+        done
+    fi
+    if [ -z "$wdev" ]; then
+        echo "RESCUE_WIFI_NO_INTERFACE" >&2
+        return 1
+    fi
+    printf '%s\n' "$wdev" > "$WIFI_IFACE_FILE"
+    "$IP_BIN" link set "$wdev" up 2>/dev/null || true
+    prepare_wpa_conf
+    if ! "$WPA_CLI_BIN" -p "$WPA_CTRL" -i "$wdev" ping 2>/dev/null | grep -q PONG; then
+        "$WPA_SUPPLICANT_BIN" -B -D nl80211 -i "$wdev" -c "$WPA_CONF" -P "$WPA_PID" -f "$LOGS_DIR/wpa-supplicant.txt"
+    fi
+    echo "RESCUE_WIFI_READY iface=$wdev"
+    # If saved rescue Wi-Fi config exists and associates automatically, acquire DHCP in background.
+    if grep -q 'network=' "$WPA_CONF" 2>/dev/null; then
+        for _ in $(seq 1 15); do
+            [ ! -e "$CONTINUE_FLAG" ] || return 0
+            if "$WPA_CLI_BIN" -p "$WPA_CTRL" -i "$wdev" status 2>/dev/null | grep -q 'wpa_state=COMPLETED'; then
+                pidfile="$RUN_DIR/sq2-rescue-udhcpc-$wdev.pid"
+                if ! pid_matches "$(cat "$pidfile" 2>/dev/null || true)" udhcpc; then
+                    "$UDHCPC_BIN" -i "$wdev" -s "$DHCP_HOOK" -p "$pidfile" -b -t 6 -T 2 >> "$LOGS_DIR/rescue-wifi-dhcp.txt" 2>&1 || true
+                fi
+                break
+            fi
+            sleep 1
+        done
+    fi
+    return 0
+}
+
+cmd_start() {
+    mkdir -p "$RUN_DIR" "$LOGS_DIR" "$WPA_CTRL" "$USB_CACHE" "$USB_IFACES_DIR"
+    # Perform one immediate USB NIC pass, then keep watching hotplug in background.
+    cmd_usb_once >> "$LOGS_DIR/rescue-usb-net.txt" 2>&1 || true
+    if ! pid_matches "$(cat "$USB_WATCH_PID" 2>/dev/null || true)" spx-rescue-net; then
+        "$0" usb-watch >> "$LOGS_DIR/rescue-usb-net.txt" 2>&1 < /dev/null &
+    fi
+    # Initialize Wi-Fi supplicant so wifi-tui can scan/connect immediately.
+    if ! pid_matches "$(cat "$WPA_PID" 2>/dev/null || true)" wpa_supplicant; then
+        "$0" wifi-init >> "$LOGS_DIR/rescue-wifi-init.txt" 2>&1 < /dev/null &
+        echo $! > "$WIFI_INIT_PID"
+    fi
+    echo "SPX_RESCUE_NET_STARTED"
+}
+
+cmd_stop() {
+    # Relinquish ALL rescue Wi-Fi & USB NIC ownership cleanly before Android boots.
+    stop_pidfile "$USB_WATCH_PID" spx-rescue-net
+    stop_pidfile "$WIFI_INIT_PID" spx-rescue-net
+
+    # Stop all rescue DHCP clients (both Wi-Fi and USB Ethernet).
+    for pf in "$RUN_DIR"/sq2-rescue-udhcpc-*.pid "$RUN_DIR"/udhcpc-*.pid; do
+        [ -e "$pf" ] || continue
+        stop_pidfile "$pf" udhcpc
+    done
+
+    # Terminate rescue wpa_supplicant cleanly so Android's HAL/wificond/wpa_supplicant owns wlan0.
+    wifi_ifaces=""
+    if [ -r "$WIFI_IFACE_FILE" ]; then
+        wifi_ifaces=$(cat "$WIFI_IFACE_FILE" 2>/dev/null || true)
+    fi
+    for d in "$SYS_DIR"/class/net/*; do
+        [ -e "$d/phy80211" ] || continue
+        dev=$(basename "$d")
+        case " $wifi_ifaces " in
+            *" $dev "*) ;;
+            *) wifi_ifaces="$wifi_ifaces $dev" ;;
+        esac
+    done
+    for wdev in $wifi_ifaces; do
+        "$WPA_CLI_BIN" -p "$WPA_CTRL" -i "$wdev" terminate >/dev/null 2>&1 || true
+    done
+    stop_pidfile "$WPA_PID" wpa_supplicant
+    rm -rf "$WPA_CTRL"/* 2>/dev/null || true
+
+    # Flush IPs/routes and bring Wi-Fi down so Android gets a clean interface.
+    for wdev in $wifi_ifaces; do
+        [ -d "$SYS_DIR/class/net/$wdev" ] || continue
+        "$IP_BIN" addr flush dev "$wdev" 2>/dev/null || true
+        "$IP_BIN" route flush dev "$wdev" 2>/dev/null || true
+        "$IP_BIN" link set "$wdev" down 2>/dev/null || true
+    done
+
+    # Flush IPs/routes and bring rescue-managed USB Ethernet interfaces down for Android netd/EthernetTracker.
+    usb_ifaces=""
+    if [ -d "$USB_IFACES_DIR" ]; then
+        for f in "$USB_IFACES_DIR"/*; do
+            [ -e "$f" ] || continue
+            usb_ifaces="$usb_ifaces $(basename "$f")"
+        done
+    fi
+    for d in "$SYS_DIR"/class/net/*; do
+        [ -d "$d" ] || continue
+        dev=$(basename "$d")
+        is_usb_ethernet_iface "$dev" || continue
+        case " $usb_ifaces " in
+            *" $dev "*) ;;
+            *) usb_ifaces="$usb_ifaces $dev" ;;
+        esac
+    done
+    for udev in $usb_ifaces; do
+        [ -d "$SYS_DIR/class/net/$udev" ] || continue
+        "$IP_BIN" addr flush dev "$udev" 2>/dev/null || true
+        "$IP_BIN" route flush dev "$udev" 2>/dev/null || true
+        "$IP_BIN" link set "$udev" down 2>/dev/null || true
+    done
+
+    # Tear down optional rescue USB gadget on lower port and restore host role.
+    if [ -f "$RUN_DIR/sq2-rescue-usb-gadget.active" ] && [ -x "$GADGET_BIN" ]; then
+        "$GADGET_BIN" stop >/dev/null 2>&1 || true
+    fi
+
+    rm -rf "$USB_IFACES_DIR" "$USB_CACHE"
+    rm -f "$WPA_CONF" "$WIFI_IFACE_FILE" "$RUN_DIR/ssh-interface"
+    if [ -f "$ETC_DIR/resolv.conf" ]; then
+        : > "$ETC_DIR/resolv.conf" 2>/dev/null || true
+    fi
+    echo "SPX_RESCUE_NET_HANDOFF_READY"
+}
+
+cmd_status() {
+    wdev=$(find_wifi_iface || true)
+    if [ -n "$wdev" ]; then
+        wip=$("$IP_BIN" -4 -o addr show dev "$wdev" scope global 2>/dev/null | awk '{print $4; exit}' || true)
+        wstate=$("$WPA_CLI_BIN" -p "$WPA_CTRL" -i "$wdev" status 2>/dev/null | awk -F= '/^wpa_state=/{print $2; exit}' || true)
+        wssid=$("$WPA_CLI_BIN" -p "$WPA_CTRL" -i "$wdev" status 2>/dev/null | awk -F= '/^ssid=/{print $2; exit}' || true)
+        echo "wifi: iface=$wdev state=${wstate:-down} ssid=${wssid:-none} ip=${wip:-none}"
+    else
+        echo "wifi: initializing or unavailable"
+    fi
+    found_usb=0
+    for d in "$SYS_DIR"/class/net/*; do
+        [ -d "$d" ] || continue
+        dev=$(basename "$d")
+        is_usb_ethernet_iface "$dev" || continue
+        found_usb=1
+        uip=$("$IP_BIN" -4 -o addr show dev "$dev" scope global 2>/dev/null | awk '{print $4; exit}' || true)
+        ucar=$(cat "$d/carrier" 2>/dev/null || echo "?")
+        echo "usb_net: iface=$dev carrier=$ucar ip=${uip:-none}"
+    done
+    [ "$found_usb" = 1 ] || echo "usb_net: none detected"
+    if [ -f "$RUN_DIR/sq2-rescue-usb-gadget.active" ]; then
+        gdev=$(cat "$RUN_DIR/sq2-rescue-usb-gadget.active" 2>/dev/null || echo usb0)
+        gip=$("$IP_BIN" -4 -o addr show dev "$gdev" scope global 2>/dev/null | awk '{print $4; exit}' || true)
+        echo "usb_gadget: iface=$gdev ip=${gip:-none}"
+    fi
+}
+
+case "${1:-status}" in
+    start) cmd_start ;;
+    stop) cmd_stop ;;
+    usb-once) cmd_usb_once ;;
+    usb-watch) cmd_usb_watch ;;
+    wifi-init) cmd_wifi_init ;;
+    status) cmd_status ;;
+    *) echo "Usage: spx-rescue-net start|stop|status|wifi-init|usb-once|usb-watch" >&2; exit 64 ;;
+esac

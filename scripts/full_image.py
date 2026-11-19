@@ -20,6 +20,7 @@ from disk_image import module, regular, require
 from single_user_payload import ANCHOR, HOOK
 
 DEFAULT_PRIVATE = ROOT / 'private/build-inputs'
+DEFAULT_KERNEL_CONFIG = ROOT / 'configs/kernel-6.18-hybrid.config'
 DEFAULT_A6XX_PATCHES = ROOT / 'patches/drm-618-a6xx-upstream'
 DEFAULT_A6XX_MMIO_FIX_PATCHES = ROOT / 'patches/drm-618-a6xx-mmio-fix'
 
@@ -694,7 +695,7 @@ def install_userdata_growth(records, bodies, compiled_resize=None):
     for name in ('resize-userdata-partition','grow-image-userdata','surface-swap-boot'):
         records['bin/'+name]=new_record(0o100755)
 
-def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_modules=None, camera=None, sensors=None, anonymous=False,
+def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modules=None, camera=None, sensors=None, anonymous=False,
                      runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None, typec=None):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
@@ -742,8 +743,8 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
         graphics_report = mesa_runtime(records, bodies)
     elif graphics == 'hybrid':
         graphics_report = hybrid_runtime(records, bodies, **(graphics_inputs or {}))
-    elif graphics != 'baseline':
-        raise ValueError('Unknown graphics mode: ' + repr(graphics))
+    elif graphics is not None:
+        raise ValueError('Unknown graphics mode (only hybrid is supported): ' + repr(graphics))
     init = bodies['init']
     require(init.count(ANCHOR) == 1, 'Unknown Android handoff')
     init = re.sub(rb'(?m)^(\s*el2-terminal-autostart)[ \t]+[0-9]+(?=[ \t]*(?:>|&|\n|$))',rb'\1',init)
@@ -777,7 +778,7 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
     from full_image_home import apply as apply_home
     apply_home(records, bodies, new_record)
     install_default_wallpaper(private, records, bodies)
-    if ksu_modules is None and graphics == 'baseline':
+    if ksu_modules is None and graphics == 'hybrid':
         priv_df = private / 'ksu-modules' / 'device_faker.zip'
         if priv_df.is_file():
             from build_device_faker_fork import validate_device_faker_zip
@@ -803,6 +804,8 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
         from full_image_anonymous import apply as anonymize
         privacy = anonymize(records, bodies, new_record)
         (output.parent/'PRIVACY.json').write_text(json.dumps(privacy, indent=2)+'\n')
+    from full_image_rescue import install as install_rescue
+    install_rescue(records, bodies, new_record, compiled_wifi_tui=compiled_helpers.get('bin/spx-wifi-tui'))
     # Add parent directory records for every newly installed module/index.
     for name in list(bodies):
         for parent in Path(name).parents:
@@ -869,13 +872,14 @@ def build(args, compile_kernel):
                         'stdout':label+'.stdout','stderr':label+'.stderr'})
         (args.output/'BUILD-COMMANDS.json').write_text(json.dumps(records,indent=2)+'\n')
         require(result.returncode==0,'Build failed: '+str(args.output/(label+'.stderr')))
+    require(args.graphics == 'hybrid', 'Only hybrid graphics mode is supported: ' + repr(args.graphics))
     camera = None
-    if args.graphics in ('baseline', 'hybrid') and not getattr(args, 'without_camera', False):
+    if not getattr(args, 'without_camera', False):
         from full_image_camera import load
         camera = load(getattr(args, 'camera_inputs', None) or private/'camera',
                       source_build=args.kernel_mode == 'source')
     sensors = None
-    if args.graphics in ('baseline', 'hybrid') and not getattr(args, 'without_sensors', False):
+    if not getattr(args, 'without_sensors', False):
         from full_image_sensors import load
         sensors = load(getattr(args, 'sensor_inputs', None) or private/'sensors')
     compiled=reuse['kernel'] if reuse else None
@@ -933,7 +937,7 @@ def build(args, compile_kernel):
                 archive.extractall(toolchain,filter='data')
             cross=str(toolchain/'usr/bin/aarch64-linux-gnu-')
         run([sys.executable,ROOT/'scripts/build.py','compile','--source',extracted/'kernel',
-             '--external-sources',extracted/'external','--config',ROOT/'configs/kernel-6.18-baseline.config',
+             '--external-sources',extracted/'external','--config',DEFAULT_KERNEL_CONFIG,
              '--build-dir',build_dir,'--output',compiled,'--cross-compile',cross,
              '--jobs',str(args.jobs),'--build-only'])
     if camera is not None and compiled and not reuse:
@@ -970,7 +974,7 @@ def build(args, compile_kernel):
         (bundle/'qebspilaa64.efi').write_bytes(sensors['qebspilaa64.efi'])
     ksu_modules = {}
     device_faker_meta = None
-    if args.graphics == 'baseline' and not getattr(args, 'skip_device_faker', False):
+    if args.graphics == 'hybrid' and not getattr(args, 'skip_device_faker', False):
         from build_device_faker_fork import resolve_or_build_device_faker_zip
         df_bytes, device_faker_meta = resolve_or_build_device_faker_zip(
             private=private,

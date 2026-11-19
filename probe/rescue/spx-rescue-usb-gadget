@@ -1,0 +1,167 @@
+#!/bin/sh
+# Optional lower Type-C USB NCM gadget Ethernet for direct PC<->SPX rescue SSH.
+# Refuses if lower port hosts boot storage or active USB host peripherals.
+# Automatically torn down by spx-rescue-handoff before Android starts.
+set -eu
+export PATH="${SPX_RESCUE_PATH:-/bin:/sbin:/usr/bin:/usr/sbin}"
+
+ROOT_PREFIX="${SPX_RESCUE_ROOT:-}"
+RUN_DIR="${ROOT_PREFIX}/run"
+SYS_DIR="${ROOT_PREFIX}/sys"
+ROLE_NODE="$SYS_DIR/bus/platform/devices/surface-typec/lower_data_role"
+STORAGE_NODE="$SYS_DIR/bus/platform/devices/surface-typec/storage_ports"
+CFGFS="$RUN_DIR/sq2-rescue-configfs"
+GADGET="$CFGFS/usb_gadget/spx_rescue"
+STATE_FLAG="$RUN_DIR/sq2-rescue-usb-gadget.active"
+DHCPD_PID="$RUN_DIR/sq2-rescue-udhcpd.pid"
+DHCPD_CONF="$RUN_DIR/sq2-rescue-udhcpd.conf"
+DHCPD_LEASES="$RUN_DIR/sq2-rescue-udhcpd.leases"
+IP_ADDR="${SPX_RESCUE_GADGET_IP:-172.16.42.1}"
+
+stop_udhcpd() {
+    if [ -r "$DHCPD_PID" ]; then
+        pid=$(cat "$DHCPD_PID" 2>/dev/null || true)
+        case "$pid" in
+            ''|*[!0-9]*) ;;
+            *)
+                if kill -0 "$pid" 2>/dev/null; then
+                    kill "$pid" 2>/dev/null || true
+                    sleep 1
+                    kill -9 "$pid" 2>/dev/null || true
+                fi
+                ;;
+        esac
+        rm -f "$DHCPD_PID"
+    fi
+    rm -f "$DHCPD_CONF" "$DHCPD_LEASES"
+}
+
+cmd_start() {
+    [ -e "$ROLE_NODE" ] || { echo "Lower Type-C role switch unavailable" >&2; return 1; }
+    if [ -r "$STORAGE_NODE" ]; then
+        mask=$(cat "$STORAGE_NODE" 2>/dev/null || echo 0)
+        case "$mask" in
+            *[!0-9]*) mask=0 ;;
+        esac
+        if [ $((mask & 1)) -ne 0 ]; then
+            echo "Refusing USB gadget: lower port hosts boot storage" >&2
+            return 1
+        fi
+    fi
+    if [ "$(cat "$ROLE_NODE")" != device ]; then
+        for p in "$SYS_DIR"/devices/platform/soc@0/a6f8800.usb/a600000.usb/xhci-hcd.*/usb*/*/idVendor; do
+            [ ! -f "$p" ] || { echo "Disconnect lower-port USB host devices before enabling gadget Ethernet" >&2; return 1; }
+        done
+    fi
+
+    modprobe libcomposite 2>/dev/null || true
+    modprobe usb_f_ncm 2>/dev/null || true
+
+    echo device > "$ROLE_NODE"
+    udc=""
+    for _ in $(seq 1 50); do
+        if [ -d "$SYS_DIR/class/udc/a600000.usb" ]; then
+            udc="a600000.usb"
+            break
+        fi
+        sleep 0.1
+    done
+    [ -n "$udc" ] || { echo "Lower UDC a600000.usb did not appear" >&2; echo host > "$ROLE_NODE" 2>/dev/null || true; return 1; }
+
+    mkdir -p "$CFGFS"
+    if ! grep -q " $CFGFS configfs " /proc/mounts 2>/dev/null; then
+        mount -t configfs none "$CFGFS"
+    fi
+    mkdir -p "$GADGET"
+    echo 0x1d6b > "$GADGET/idVendor"
+    echo 0x0104 > "$GADGET/idProduct"
+    echo 0x0100 > "$GADGET/bcdDevice"
+    echo 0x0200 > "$GADGET/bcdUSB"
+    mkdir -p "$GADGET/strings/0x409"
+    echo "spx-rescue" > "$GADGET/strings/0x409/serialnumber"
+    echo "Surface Pro X" > "$GADGET/strings/0x409/manufacturer"
+    echo "SPX Rescue USB Ethernet (NCM)" > "$GADGET/strings/0x409/product"
+    mkdir -p "$GADGET/configs/c.1/strings/0x409"
+    echo "NCM Rescue" > "$GADGET/configs/c.1/strings/0x409/configuration"
+    echo 250 > "$GADGET/configs/c.1/MaxPower"
+    mkdir -p "$GADGET/functions/ncm.usb0"
+    [ -L "$GADGET/configs/c.1/ncm.usb0" ] || ln -s "$GADGET/functions/ncm.usb0" "$GADGET/configs/c.1/ncm.usb0"
+    echo "$udc" > "$GADGET/UDC"
+
+    iface=""
+    for _ in $(seq 1 30); do
+        if [ -r "$GADGET/functions/ncm.usb0/ifname" ]; then
+            iface=$(cat "$GADGET/functions/ncm.usb0/ifname" 2>/dev/null || true)
+            [ -n "$iface" ] && [ -d "$SYS_DIR/class/net/$iface" ] && break
+        fi
+        sleep 0.1
+    done
+    [ -n "$iface" ] || iface="usb0"
+    printf '%s\n' "$iface" > "$STATE_FLAG"
+
+    ip addr flush dev "$iface" 2>/dev/null || true
+    ip addr add "$IP_ADDR/24" dev "$iface"
+    ip link set "$iface" up
+
+    stop_udhcpd
+    if command -v udhcpd >/dev/null 2>&1; then
+        : > "$DHCPD_LEASES"
+        cat > "$DHCPD_CONF" <<EOF
+start 172.16.42.10
+end 172.16.42.50
+interface $iface
+lease_file $DHCPD_LEASES
+pidfile $DHCPD_PID
+option subnet 255.255.255.0
+option lease 3600
+EOF
+        udhcpd "$DHCPD_CONF" 2>/dev/null || true
+    fi
+    echo "SPX_RESCUE_USB_GADGET_READY iface=$iface ip=$IP_ADDR/24 ssh=root@$IP_ADDR"
+}
+
+cmd_stop() {
+    stop_udhcpd
+    if [ -r "$STATE_FLAG" ]; then
+        iface=$(cat "$STATE_FLAG" 2>/dev/null || true)
+        if [ -n "$iface" ] && [ -d "$SYS_DIR/class/net/$iface" ]; then
+            ip addr flush dev "$iface" 2>/dev/null || true
+            ip link set "$iface" down 2>/dev/null || true
+        fi
+    fi
+    if [ -d "$GADGET" ]; then
+        if [ -w "$GADGET/UDC" ]; then
+            echo "" > "$GADGET/UDC" 2>/dev/null || true
+        fi
+        rm -f "$GADGET/configs/c.1/ncm.usb0" 2>/dev/null || true
+        rmdir "$GADGET/configs/c.1/strings/0x409" 2>/dev/null || true
+        rmdir "$GADGET/configs/c.1" 2>/dev/null || true
+        rmdir "$GADGET/functions/ncm.usb0" 2>/dev/null || true
+        rmdir "$GADGET/strings/0x409" 2>/dev/null || true
+        rmdir "$GADGET" 2>/dev/null || true
+    fi
+    if grep -q " $CFGFS configfs " /proc/mounts 2>/dev/null; then
+        umount "$CFGFS" 2>/dev/null || true
+    fi
+    if [ -f "$STATE_FLAG" ] && [ -w "$ROLE_NODE" ]; then
+        echo host > "$ROLE_NODE" 2>/dev/null || true
+    fi
+    rm -f "$STATE_FLAG"
+    echo "SPX_RESCUE_USB_GADGET_STOPPED"
+}
+
+cmd_status() {
+    if [ -f "$STATE_FLAG" ]; then
+        iface=$(cat "$STATE_FLAG" 2>/dev/null || echo usb0)
+        echo "usb_gadget=active iface=$iface ip=$IP_ADDR"
+    else
+        echo "usb_gadget=inactive"
+    fi
+}
+
+case "${1:-status}" in
+    start) cmd_start ;;
+    stop) cmd_stop ;;
+    status) cmd_status ;;
+    *) echo "Usage: spx-rescue-usb-gadget start|stop|status" >&2; exit 64 ;;
+esac

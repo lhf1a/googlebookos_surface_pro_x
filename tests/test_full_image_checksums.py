@@ -53,7 +53,7 @@ class AssemblyChecksums(unittest.TestCase):
                     return SimpleNamespace(build=lambda source: ({wizard:(0o100644,b'current source wizard')},{}))
                 return load_module(name, filename)
             with patch.object(m,'module',side_effect=load):
-                m.assemble_runtime(root, output)
+                m.assemble_runtime(root, output, graphics=None)
             _, actual = m.records_from_gzip(output)
             self.assertEqual(actual[wizard],b'current source wizard')
             self.assertEqual(actual['etc/renderer/BASELINE.sha256'], baseline)
