@@ -2,11 +2,14 @@ package org.surface.advancedcontrol;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
@@ -25,6 +28,10 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -34,17 +41,24 @@ import java.util.Map;
 
 /**
  * Modern Android Settings-styled Advanced Settings app:
- *   Level 1: Home selection page (Vulkan Configuration / Performance Mode)
+ *   Level 1: Home selection page (Vulkan Configuration / Performance Mode / Touch)
  *   Level 2a: Vulkan Configuration (Default MESA/Qcom/Auto + per-app list with modified apps pinned first)
  *   Level 2b: Performance Mode (Kernel-supported CPU scheduling policies)
+ *   Level 2c: Touch (Ghost-touch patch toggle, calibration summary, recalibrate, import & clear)
  * Bilingual CN/EN following system language (non-Chinese defaults to English).
  */
 public final class MainActivity extends Activity {
     private static final int PAGE_HOME = 0;
     private static final int PAGE_VULKAN = 1;
     private static final int PAGE_PERFORMANCE = 2;
+    private static final int PAGE_TOUCH = 3;
+    private static final int REQ_IMPORT_TOUCH = 401;
+    private static final int REQ_EXPORT_TOUCH = 402;
     private static final String STATE_PAGE = "page";
     private static final String STATE_QUERY = "query";
+    private static final String STATE_EXPORT_CONTENT = "export_content";
+    private static final String CALIBRATION_PKG = "org.surface.touchcalibration.unified";
+    private static final String CALIBRATION_ACTIVITY = "org.surface.touchcalibration.MainActivity";
 
     private static final String[] DRIVER_VALUES = {"", "turnip", "qcom"};
 
@@ -96,6 +110,8 @@ public final class MainActivity extends Activity {
     private String searchQuery = "";
     private boolean busy = false;
     private boolean loadedOnce = false;
+    private boolean pendingCalibrationRefresh = false;
+    private String pendingExportContent = "";
     private String bannerText = "";
     private boolean bannerIsError = false;
 
@@ -119,6 +135,7 @@ public final class MainActivity extends Activity {
         if (savedInstanceState != null) {
             currentPage = savedInstanceState.getInt(STATE_PAGE, PAGE_HOME);
             searchQuery = savedInstanceState.getString(STATE_QUERY, "");
+            pendingExportContent = savedInstanceState.getString(STATE_EXPORT_CONTENT, "");
         }
 
         Locale locale = getResources().getConfiguration().getLocales().get(0);
@@ -159,6 +176,87 @@ public final class MainActivity extends Activity {
         super.onSaveInstanceState(outState);
         outState.putInt(STATE_PAGE, currentPage);
         outState.putString(STATE_QUERY, searchQuery);
+        outState.putString(STATE_EXPORT_CONTENT, pendingExportContent);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (pendingCalibrationRefresh && !busy) {
+            pendingCalibrationRefresh = false;
+            reloadAll(true);
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_EXPORT_TOUCH) {
+            String content = pendingExportContent;
+            pendingExportContent = "";
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                return;
+            }
+            if (content.isEmpty()) {
+                bannerText = str.touchExportFailed("empty_export");
+                bannerIsError = true;
+                renderCurrentPage();
+                return;
+            }
+            try {
+                writeExportText(data.getData(), content);
+                bannerText = str.touchExportSuccess();
+                bannerIsError = false;
+            } catch (Exception e) {
+                bannerText = str.touchExportFailed(
+                        e.getMessage() != null ? e.getMessage() : e.toString());
+                bannerIsError = true;
+            }
+            renderCurrentPage();
+            return;
+        }
+        if (requestCode != REQ_IMPORT_TOUCH || resultCode != RESULT_OK
+                || data == null || data.getData() == null) {
+            return;
+        }
+        try {
+            String rawContent = readImportText(data.getData());
+            DriverPolicy.detectTouchImportKind(rawContent);
+            importTouchCalibration(rawContent);
+        } catch (Exception e) {
+            bannerText = str.touchImportInvalid(
+                    e.getMessage() != null ? e.getMessage() : e.toString());
+            bannerIsError = true;
+            renderCurrentPage();
+        }
+    }
+
+    private void writeExportText(Uri uri, String content) throws Exception {
+        try (OutputStream out = getContentResolver().openOutputStream(uri, "w")) {
+            if (out == null) {
+                throw new IllegalArgumentException("unwritable_file");
+            }
+            out.write(content.getBytes(StandardCharsets.UTF_8));
+            out.flush();
+        }
+    }
+
+    private String readImportText(Uri uri) throws Exception {
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in == null) {
+                throw new IllegalArgumentException("unreadable_file");
+            }
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int total = 0;
+            int read;
+            while ((read = in.read(buf)) >= 0) {
+                total += read;
+                if (total > DriverPolicy.MAX_TOUCH_IMPORT_BYTES) {
+                    throw new IllegalArgumentException("file_too_large");
+                }
+                out.write(buf, 0, read);
+            }
+            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        }
     }
 
     @Override public void onBackPressed() {
@@ -376,6 +474,162 @@ public final class MainActivity extends Activity {
         }, "advanced-control-save-gov").start();
     }
 
+    @FunctionalInterface
+    private interface TouchBridgeCall {
+        String run() throws Exception;
+    }
+
+    private void runTouchBridgeCall(String threadName, boolean isImport, TouchBridgeCall call) {
+        if (busy || !bridgeState.bridgeReady) {
+            return;
+        }
+        busy = true;
+        bannerText = str.savingStatus();
+        bannerIsError = false;
+        renderCurrentPage();
+
+        new Thread(() -> {
+            try {
+                String msg = call.run();
+                runOnUiThread(() -> {
+                    if (isDestroyed()) {
+                        return;
+                    }
+                    busy = false;
+                    bannerText = msg;
+                    bannerIsError = false;
+                    renderCurrentPage();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (isDestroyed()) {
+                        return;
+                    }
+                    busy = false;
+                    String detail = e.getMessage() != null ? e.getMessage() : e.toString();
+                    bannerText = isImport ? str.touchImportInvalid(detail) : str.saveFailed(detail);
+                    bannerIsError = true;
+                    renderCurrentPage();
+                });
+            }
+        }, threadName).start();
+    }
+
+    private void saveTouchGhostPatch(boolean enabled) {
+        runTouchBridgeCall("advanced-control-touch-ghost", false, () -> {
+            bridgeState = bridge.setTouchGhostPatch(enabled);
+            return str.touchGhostSavedMessage(enabled);
+        });
+    }
+
+    private void clearTouchCalibration() {
+        runTouchBridgeCall("advanced-control-touch-clear", false, () -> {
+            bridgeState = bridge.clearTouchCalibration();
+            return str.touchClearedMessage();
+        });
+    }
+
+    private void importTouchCalibration(String rawContent) {
+        runTouchBridgeCall("advanced-control-touch-import", true, () -> {
+            BridgeClient.TouchImportResult result = bridge.importTouchCalibration(rawContent);
+            bridgeState = result.state;
+            return str.touchImportSuccess(result.kind);
+        });
+    }
+
+    private void openCalibrationApp() {
+        Intent intent = new Intent(Intent.ACTION_MAIN);
+        intent.setClassName(CALIBRATION_PKG, CALIBRATION_ACTIVITY);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            pendingCalibrationRefresh = true;
+            startActivity(intent);
+        } catch (ActivityNotFoundException e) {
+            pendingCalibrationRefresh = false;
+            bannerText = str.touchCalibrationAppMissing();
+            bannerIsError = true;
+            renderCurrentPage();
+        }
+    }
+
+    private void openTouchImportPicker() {
+        if (busy || !bridgeState.bridgeReady || !bridgeState.touchAvailable) {
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        try {
+            startActivityForResult(intent, REQ_IMPORT_TOUCH);
+        } catch (ActivityNotFoundException e) {
+            bannerText = str.touchImportInvalid(e.getMessage() != null ? e.getMessage() : "picker_unavailable");
+            bannerIsError = true;
+            renderCurrentPage();
+        }
+    }
+
+    private void prepareTouchExport() {
+        if (busy || !bridgeState.bridgeReady || !bridgeState.touchAvailable) {
+            return;
+        }
+        busy = true;
+        bannerText = "";
+        bannerIsError = false;
+        renderCurrentPage();
+
+        new Thread(() -> {
+            try {
+                String content = bridge.exportTouchCalibration();
+                runOnUiThread(() -> {
+                    if (isDestroyed()) {
+                        return;
+                    }
+                    busy = false;
+                    pendingExportContent = content;
+                    launchTouchExportPicker();
+                    renderCurrentPage();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (isDestroyed()) {
+                        return;
+                    }
+                    busy = false;
+                    bannerText = str.touchExportFailed(e.getMessage() != null ? e.getMessage() : e.toString());
+                    bannerIsError = true;
+                    renderCurrentPage();
+                });
+            }
+        }, "advanced-control-touch-export").start();
+    }
+
+    private void launchTouchExportPicker() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/octet-stream");
+        intent.putExtra(Intent.EXTRA_TITLE,
+                DriverPolicy.defaultTouchExportFilename(bridgeState.touchDeviceId));
+        try {
+            startActivityForResult(intent, REQ_EXPORT_TOUCH);
+        } catch (ActivityNotFoundException e) {
+            pendingExportContent = "";
+            bannerText = str.touchExportFailed(e.getMessage() != null ? e.getMessage() : "picker_unavailable");
+            bannerIsError = true;
+        }
+    }
+
+    private void confirmClearTouchCalibration() {
+        if (busy || !bridgeState.bridgeReady || !bridgeState.touchAvailable) {
+            return;
+        }
+        new AlertDialog.Builder(this, theme.dialogTheme())
+                .setTitle(str.touchClearDialogTitle())
+                .setMessage(str.touchClearDialogMessage())
+                .setNegativeButton(str.cancel(), null)
+                .setPositiveButton(str.touchClearConfirm(), (d, w) -> clearTouchCalibration())
+                .show();
+    }
+
     // ---- Page Rendering ----
 
     private void renderCurrentPage() {
@@ -391,6 +645,8 @@ public final class MainActivity extends Activity {
             contentSlot.addView(buildVulkanPage(), new FrameLayout.LayoutParams(-1, -1));
         } else if (currentPage == PAGE_PERFORMANCE) {
             contentSlot.addView(buildPerformancePage(), new FrameLayout.LayoutParams(-1, -1));
+        } else if (currentPage == PAGE_TOUCH) {
+            contentSlot.addView(buildTouchPage(), new FrameLayout.LayoutParams(-1, -1));
         } else {
             contentSlot.addView(buildHomePage(), new FrameLayout.LayoutParams(-1, -1));
         }
@@ -476,9 +732,44 @@ public final class MainActivity extends Activity {
                 str.perfTitle(),
                 perfSummary,
                 4f,
-                24f,
+                4f,
                 () -> navigateTo(PAGE_PERFORMANCE));
         cardGroup.addView(perfRow);
+
+        View gap2 = new View(this);
+        cardGroup.addView(gap2, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
+        String touchSummary = !loadedOnce && busy
+                ? str.loadingSummary()
+                : str.touchHomeSubtitle(
+                        bridgeState.touchAvailable,
+                        bridgeState.touchNoiseSaved,
+                        bridgeState.touchNoiseEnabled,
+                        bridgeState.touchProfileSaved);
+        View touchRow = buildCategoryRow(
+                SettingsTheme.ICON_TOUCH,
+                theme.touchBadgeBg,
+                theme.touchBadgeFg,
+                str.touchTitle(),
+                touchSummary,
+                4f,
+                4f,
+                () -> navigateTo(PAGE_TOUCH));
+        cardGroup.addView(touchRow);
+
+        View gap3 = new View(this);
+        cardGroup.addView(gap3, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
+        View otaRow = buildCategoryRow(
+                SettingsTheme.ICON_UPDATE,
+                theme.otaBadgeBg,
+                theme.otaBadgeFg,
+                str.otaTitle(),
+                str.otaHomeSubtitle(),
+                4f,
+                24f,
+                () -> startActivity(new Intent(this, SystemUpdateActivity.class)));
+        cardGroup.addView(otaRow);
 
         container.addView(cardGroup, marginBottom(20));
 
@@ -500,14 +791,28 @@ public final class MainActivity extends Activity {
                                   String titleText, String summaryText,
                                   float topRadiusDp, float bottomRadiusDp,
                                   Runnable onClick) {
+        return buildCategoryRow(
+                iconKind, badgeBg, badgeFg, titleText, summaryText,
+                topRadiusDp, bottomRadiusDp, true, onClick);
+    }
+
+    private View buildCategoryRow(int iconKind, int badgeBg, int badgeFg,
+                                  String titleText, String summaryText,
+                                  float topRadiusDp, float bottomRadiusDp,
+                                  boolean enabled, Runnable onClick) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setBackground(theme.cardItemBackground(topRadiusDp, bottomRadiusDp, theme.card));
         row.setPadding(theme.dp(16), theme.dp(18), theme.dp(16), theme.dp(18));
-        row.setClickable(true);
-        row.setFocusable(true);
-        row.setOnClickListener(v -> onClick.run());
+        row.setEnabled(enabled);
+        row.setClickable(enabled);
+        row.setFocusable(enabled);
+        if (!enabled) {
+            row.setAlpha(0.55f);
+        } else {
+            row.setOnClickListener(v -> onClick.run());
+        }
 
         FrameLayout badge = new FrameLayout(this);
         badge.setBackground(theme.roundedRect(badgeBg, 999));
@@ -960,6 +1265,248 @@ public final class MainActivity extends Activity {
 
         scroll.addView(container);
         return scroll;
+    }
+
+    // ---- Level 2c: Touch Settings Page ----
+
+    private View buildTouchPage() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        int hPad = theme.dp(18);
+        container.setPadding(hPad, theme.dp(8), hPad, theme.dp(28));
+
+        container.addView(buildSubPageHeader(str.touchTitle(), () -> navigateTo(PAGE_HOME), () -> reloadAll(true)));
+
+        if (!bridgeState.bridgeReady && !busy) {
+            container.addView(buildBanner(str.bridgeMissingBanner(), true), marginBottom(12));
+        } else if (loadedOnce && !bridgeState.touchAvailable && !busy) {
+            container.addView(buildBanner(str.touchUnavailableBanner(), true), marginBottom(12));
+        } else if (!bannerText.isEmpty()) {
+            container.addView(buildBanner(bannerText, bannerIsError), marginBottom(12));
+        }
+
+        boolean canControl = !busy && bridgeState.bridgeReady && bridgeState.touchAvailable;
+        container.addView(buildGhostPatchCard(canControl), marginBottom(16));
+
+        TextView summaryHeader = new TextView(this);
+        summaryHeader.setText(str.touchSummarySection());
+        summaryHeader.setTextColor(theme.primary);
+        summaryHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        summaryHeader.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        summaryHeader.setPadding(theme.dp(8), theme.dp(2), theme.dp(8), theme.dp(8));
+        container.addView(summaryHeader);
+
+        String[][] infoRows = {
+                {str.touchLabelHardware(), str.touchValueHardware(
+                        bridgeState.touchHidId, bridgeState.touchDeviceId, bridgeState.touchIptsdRunning)},
+                {str.touchLabelCoords(), str.touchValueCoords(
+                        bridgeState.touchProfileSaved, bridgeState.touchProfileX, bridgeState.touchProfileY,
+                        bridgeState.touchProfileXTop, bridgeState.touchProfileTopStart, bridgeState.touchProfileTopEnd)},
+                {str.touchLabelThumb(), str.touchValueThumb(bridgeState.touchProfileSizeMax)},
+                {str.touchLabelNoise(), str.touchValueNoise(
+                        bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled, bridgeState.touchNoiseInfo)},
+                {str.touchLabelTap(), str.touchValueTap(
+                        bridgeState.touchTapSaved, bridgeState.touchTapLine)},
+        };
+        LinearLayout summaryGroup = new LinearLayout(this);
+        summaryGroup.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < infoRows.length; i++) {
+            float topR = i == 0 ? 22f : 4f;
+            float botR = i == infoRows.length - 1 ? 22f : 4f;
+            summaryGroup.addView(buildTouchInfoRow(infoRows[i][0], infoRows[i][1], topR, botR));
+            if (i < infoRows.length - 1) {
+                View gap = new View(this);
+                summaryGroup.addView(gap, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+            }
+        }
+        container.addView(summaryGroup, marginBottom(16));
+
+        TextView actionHeader = new TextView(this);
+        actionHeader.setText(str.touchActionsSection());
+        actionHeader.setTextColor(theme.primary);
+        actionHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        actionHeader.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        actionHeader.setPadding(theme.dp(8), theme.dp(2), theme.dp(8), theme.dp(8));
+        container.addView(actionHeader);
+
+        LinearLayout actionGroup = new LinearLayout(this);
+        actionGroup.setOrientation(LinearLayout.VERTICAL);
+
+        actionGroup.addView(buildCategoryRow(
+                SettingsTheme.ICON_CALIBRATE,
+                theme.touchBadgeBg,
+                theme.touchBadgeFg,
+                str.touchRecalibrateTitle(),
+                str.touchRecalibrateSummary(),
+                22f,
+                4f,
+                !busy,
+                this::openCalibrationApp));
+
+        View actionGap1 = new View(this);
+        actionGroup.addView(actionGap1, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
+        boolean canExport = canControl
+                && (bridgeState.touchProfileSaved || bridgeState.touchNoiseSaved || bridgeState.touchTapSaved);
+
+        actionGroup.addView(buildCategoryRow(
+                SettingsTheme.ICON_IMPORT,
+                theme.vulkanBadgeBg,
+                theme.vulkanBadgeFg,
+                str.touchImportTitle(),
+                str.touchImportSummary(),
+                4f,
+                4f,
+                canControl,
+                this::openTouchImportPicker));
+
+        View actionGap2 = new View(this);
+        actionGroup.addView(actionGap2, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
+        actionGroup.addView(buildCategoryRow(
+                SettingsTheme.ICON_EXPORT,
+                theme.perfBadgeBg,
+                theme.perfBadgeFg,
+                str.touchExportTitle(),
+                str.touchExportSummary(canExport),
+                4f,
+                4f,
+                canExport,
+                this::prepareTouchExport));
+
+        View actionGap3 = new View(this);
+        actionGroup.addView(actionGap3, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
+        actionGroup.addView(buildCategoryRow(
+                SettingsTheme.ICON_TRASH,
+                theme.dangerBadgeBg,
+                theme.dangerBadgeFg,
+                str.touchClearTitle(),
+                str.touchClearSummary(),
+                4f,
+                22f,
+                canControl,
+                this::confirmClearTouchCalibration));
+
+        container.addView(actionGroup);
+
+        scroll.addView(container);
+        return scroll;
+    }
+
+    private View buildGhostPatchCard(boolean canControl) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(theme.cardItemBackground(22f, 22f, theme.card));
+        card.setPadding(theme.dp(18), theme.dp(16), theme.dp(18), theme.dp(16));
+        card.setEnabled(canControl);
+        card.setClickable(canControl);
+        card.setFocusable(canControl);
+        if (!canControl) {
+            card.setAlpha(0.6f);
+        }
+
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout titleCol = new LinearLayout(this);
+        titleCol.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout titleLine = new LinearLayout(this);
+        titleLine.setOrientation(LinearLayout.HORIZONTAL);
+        titleLine.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView title = new TextView(this);
+        title.setText(str.touchGhostTitle());
+        title.setTextColor(theme.textPrimary);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        titleLine.addView(title);
+
+        TextView badge = new TextView(this);
+        badge.setText(str.touchGhostBadge(bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled));
+        badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+        badge.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        badge.setPadding(theme.dp(9), theme.dp(3), theme.dp(9), theme.dp(3));
+        if (bridgeState.touchNoiseEnabled) {
+            badge.setTextColor(theme.okFg);
+            badge.setBackground(theme.roundedRect(theme.okBg, 999));
+        } else {
+            badge.setTextColor(theme.neutralChipFg);
+            badge.setBackground(theme.roundedRect(theme.neutralChipBg, 999));
+        }
+        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(-2, -2);
+        badgeLp.leftMargin = theme.dp(10);
+        titleLine.addView(badge, badgeLp);
+        titleCol.addView(titleLine);
+
+        topRow.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        View sw = theme.switchView(this, bridgeState.touchNoiseEnabled, canControl);
+        LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(theme.dp(52), theme.dp(32));
+        swLp.leftMargin = theme.dp(12);
+        topRow.addView(sw, swLp);
+        card.addView(topRow);
+
+        TextView desc = new TextView(this);
+        desc.setText(str.touchGhostDescription(
+                bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled, bridgeState.touchNoiseInfo));
+        desc.setTextColor(theme.textSecondary);
+        desc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        desc.setLineSpacing(theme.dp(2), 1.0f);
+        LinearLayout.LayoutParams descLp = new LinearLayout.LayoutParams(-1, -2);
+        descLp.topMargin = theme.dp(8);
+        card.addView(desc, descLp);
+
+        if (canControl) {
+            card.setOnClickListener(v -> {
+                if (!bridgeState.touchNoiseEnabled && !bridgeState.touchNoiseSaved) {
+                    showNoPatchDialog();
+                } else {
+                    saveTouchGhostPatch(!bridgeState.touchNoiseEnabled);
+                }
+            });
+        }
+        return card;
+    }
+
+    private void showNoPatchDialog() {
+        new AlertDialog.Builder(this, theme.dialogTheme())
+                .setTitle(str.touchNoPatchDialogTitle())
+                .setMessage(str.touchNoPatchDialogMessage())
+                .setNegativeButton(str.cancel(), null)
+                .setPositiveButton(str.touchRecalibrateTitle(), (d, w) -> openCalibrationApp())
+                .show();
+    }
+
+    private View buildTouchInfoRow(String labelText, String valueText,
+                                   float topRadiusDp, float bottomRadiusDp) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setBackground(theme.cardItemBackground(topRadiusDp, bottomRadiusDp, theme.card));
+        row.setPadding(theme.dp(18), theme.dp(13), theme.dp(18), theme.dp(13));
+
+        TextView label = new TextView(this);
+        label.setText(labelText);
+        label.setTextColor(theme.textSecondary);
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        row.addView(label);
+
+        TextView value = new TextView(this);
+        value.setText(valueText);
+        value.setTextColor(theme.textPrimary);
+        value.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
+        value.setLineSpacing(theme.dp(2), 1.0f);
+        LinearLayout.LayoutParams valLp = new LinearLayout.LayoutParams(-1, -2);
+        valLp.topMargin = theme.dp(4);
+        row.addView(value, valLp);
+
+        return row;
     }
 
     private View buildGovernorRow(String gov, boolean selected, boolean enabled,

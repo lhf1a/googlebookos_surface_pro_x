@@ -1,14 +1,26 @@
 #!/bin/sh
-# Built-in root/init bridge for Surface Advanced Settings (Vulkan policy & CPU governor).
+# Built-in root/init bridge for Surface Advanced Settings (Vulkan, Performance Mode & Touch).
 # Data-only boundary: validates every input token; never evals or hot-swaps active drivers.
 set -eu
 
+export PATH="${SPX_AC_PATH:-/bin:/sbin:/usr/bin:/usr/sbin:${PATH:-}}"
+
 DATA_ROOT="${SPX_AC_ROOT:-/proc/1/root}"
 SYSFS="${SPX_AC_SYSFS:-/sys}"
+RUN_DIR="${SPX_AC_RUN:-/run}"
+ETC_DIR="${SPX_AC_ETC:-/etc}"
 CMDLINE="${SPX_AC_CMDLINE:-/proc/cmdline}"
 LOCK_DIR="${SPX_AC_LOCK_DIR:-/run/spx-advanced-control-lock}"
 TMP_REQ="${SPX_AC_TMP_REQ:-/run/spx-advanced-control-request}"
+TMP_TOUCH="${SPX_AC_TMP_TOUCH:-/run/spx-advanced-control-touch.tmp}"
 PKG="org.surface.advancedcontrol"
+TOUCH_PKG="org.surface.touchcalibration.unified"
+
+TOUCH_CALIB_TOOL="${SPX_AC_CALIB_TOOL:-/bin/touch-calibration-profile}"
+TOUCH_NOISE_TOOL="${SPX_AC_NOISE_TOOL:-/bin/touch-noise-profile}"
+TOUCH_TAP_TOOL="${SPX_AC_TAP_TOOL:-/bin/touch-tap-profile}"
+TOUCH_READY_TOOL="${SPX_AC_READY_TOOL:-/bin/touch-framework-ready}"
+TOUCH_STORE="$DATA_ROOT/data/vendor/sq2-touch-calibration"
 
 android() {
     if [ -n "${SPX_AC_ANDROID_WRAPPER:-}" ]; then
@@ -19,7 +31,7 @@ android() {
 }
 
 cleanup() {
-    rm -f "$TMP_REQ" 2>/dev/null || true
+    rm -f "$TMP_REQ" "$TMP_TOUCH" "$TMP_TOUCH".bundle "$TMP_TOUCH".prof "$TMP_TOUCH".noise "$TMP_TOUCH".noise.out "$TMP_TOUCH".tap "$TMP_TOUCH".tap.out "$TMP_TOUCH".neutral 2>/dev/null || true
     rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 
@@ -78,6 +90,14 @@ validate_bool() {
     case "$1" in
         0|1) return 0 ;;
         *) return 1 ;;
+    esac
+}
+
+is_hex64() {
+    [ "${#1}" = 64 ] || return 1
+    case "$1" in
+        *[!0-9a-f]*) return 1 ;;
+        *) return 0 ;;
     esac
 }
 
@@ -215,6 +235,230 @@ read_policy_conf_default() {
     printf 'turnip'
 }
 
+# ---- Touch Calibration & Ghost-Touch Helpers ----
+
+TOUCH_DEVICE=""
+TOUCH_HID_ID=""
+
+resolve_touch_device() {
+    TOUCH_DEVICE=""
+    TOUCH_HID_ID=""
+    if [ -r "$RUN_DIR/iptsd-hid-id" ]; then
+        TOUCH_HID_ID="$(head -n 1 "$RUN_DIR/iptsd-hid-id" 2>/dev/null | tr -d '\r\n ')"
+    fi
+    _t_node=""
+    _has_iptsd_hidraw=0
+    if [ -r "$RUN_DIR/iptsd-hidraw" ]; then
+        read -r _t_node < "$RUN_DIR/iptsd-hidraw" || true
+        [ -z "$_t_node" ] || _has_iptsd_hidraw=1
+    fi
+    if [ -z "$_t_node" ] && [ -r "$RUN_DIR/iptsd.pid" ]; then
+        _ipid="$(tr -d '\r\n ' < "$RUN_DIR/iptsd.pid" 2>/dev/null || true)"
+        case "$_ipid" in
+            ''|*[!0-9]*) ;;
+            *)
+                if kill -0 "$_ipid" 2>/dev/null && [ -r "/proc/$_ipid/cmdline" ]; then
+                    _t_node="$(tr '\0' '\n' < "/proc/$_ipid/cmdline" 2>/dev/null | grep -m 1 '^/dev/hidraw[0-9][0-9]*$' || true)"
+                fi
+                ;;
+        esac
+    fi
+    _t_sensor=""
+    if [ -n "$_t_node" ]; then
+        _t_sensor="$SYSFS/class/hidraw/${_t_node##*/}"
+    else
+        for _d in "$SYSFS"/class/hidraw/hidraw*; do
+            [ -r "$_d/device/uevent" ] || continue
+            if grep -qE '^HID_ID=001C:0000045E:0000(0C21|0996)$' "$_d/device/uevent" 2>/dev/null; then
+                _t_sensor="$_d"
+                break
+            fi
+        done
+    fi
+    [ -n "$_t_sensor" ] || return 1
+    [ -r "$_t_sensor/device/report_descriptor" ] || return 1
+    [ -r "$_t_sensor/device/uevent" ] || return 1
+
+    if [ -z "$TOUCH_HID_ID" ]; then
+        _hid_raw="$(sed -n 's/^HID_ID=//p' "$_t_sensor/device/uevent" 2>/dev/null | head -n 1)"
+        if [ -n "$_hid_raw" ]; then
+            _rest="${_hid_raw#*:}"
+            _v="${_rest%%:*}"
+            _p="${_rest#*:}"
+            TOUCH_HID_ID="$(printf '%04X:%04X' "$((0x$_v))" "$((0x$_p))" 2>/dev/null || true)"
+        fi
+    fi
+
+    _t_display=""
+    for _conn in "$SYSFS"/class/drm/card*-eDP-*; do
+        [ -r "$_conn/status" ] || continue
+        [ "$(tr -d '\r\n ' < "$_conn/status" 2>/dev/null || true)" = "connected" ] || continue
+        [ -r "$_conn/edid" ] || continue
+        [ "$(wc -c < "$_conn/edid" 2>/dev/null || echo 0)" -ge 128 ] || continue
+        [ -z "$_t_display" ] || return 1
+        _t_display="$_conn"
+    done
+    [ -n "$_t_display" ] || return 1
+    [ -s "$SYSFS/class/dmi/id/product_uuid" ] || return 1
+
+    _dev_new="$({
+        cat "$SYSFS/class/dmi/id/product_uuid"
+        cat "$_t_display/edid"
+        grep '^HID_ID=' "$_t_sensor/device/uevent"
+        cat "$_t_sensor/device/report_descriptor"
+    } | sha256sum | cut -d ' ' -f1)"
+    _dev_legacy="$({
+        cat "$SYSFS/class/dmi/id/product_uuid"
+        cat "$_t_display/edid"
+        cat "$_t_sensor/device/report_descriptor"
+    } | sha256sum | cut -d ' ' -f1)"
+
+    # Prefer current repo's HID_ID-bound hash on new builds, while remaining compatible
+    # with earlier SQ1/SQ2 images whose calibration-boot omitted HID_ID from the digest.
+    _cur_dev=""
+    if [ -r "$RUN_DIR/touch-calibration-current.profile" ]; then
+        _cur_dev="$(read_profile_kv "$RUN_DIR/touch-calibration-current.profile" "Device" | tr -d ' ')"
+    fi
+    if [ -n "$_cur_dev" ] && [ "$_cur_dev" = "$_dev_new" ]; then
+        TOUCH_DEVICE="$_dev_new"
+    elif [ -n "$_cur_dev" ] && [ "$_cur_dev" = "$_dev_legacy" ]; then
+        TOUCH_DEVICE="$_dev_legacy"
+    elif [ "$_has_iptsd_hidraw" = "1" ] ||
+         [ -f "$TOUCH_STORE/$_dev_new.profile" ] ||
+         [ -f "$TOUCH_STORE/$_dev_new.noise" ] ||
+         [ -f "$TOUCH_STORE/$_dev_new.tap" ]; then
+        TOUCH_DEVICE="$_dev_new"
+    elif [ -f "$TOUCH_STORE/$_dev_legacy.profile" ] ||
+         [ -f "$TOUCH_STORE/$_dev_legacy.noise" ] ||
+         [ -f "$TOUCH_STORE/$_dev_legacy.tap" ]; then
+        TOUCH_DEVICE="$_dev_legacy"
+    else
+        TOUCH_DEVICE="$_dev_new"
+    fi
+    is_hex64 "$TOUCH_DEVICE" || { TOUCH_DEVICE=""; return 1; }
+    return 0
+}
+
+is_iptsd_running() {
+    [ -r "$RUN_DIR/iptsd.pid" ] || return 1
+    _ipid="$(tr -d '\r\n ' < "$RUN_DIR/iptsd.pid" 2>/dev/null || true)"
+    case "$_ipid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    kill -0 "$_ipid" 2>/dev/null || return 1
+    return 0
+}
+
+touch_reload_noise() {
+    _rnonce="$1"
+    _ndir="$RUN_DIR/iptsd-noise"
+    [ -d "$_ndir" ] || return 0
+    printf 'reload %s %s\n' "$TOUCH_DEVICE" "$_rnonce" > "$_ndir/command.new" 2>/dev/null || return 1
+    mv -f "$_ndir/command.new" "$_ndir/command" 2>/dev/null || return 1
+    if [ -s "$_ndir/version" ] && is_iptsd_running; then
+        for _k in $(seq 1 25); do
+            _st="$(head -n 1 "$_ndir/status" 2>/dev/null || true)"
+            case "$_st" in
+                "$_rnonce applied"*) return 0 ;;
+                "$_rnonce error"*) return 1 ;;
+            esac
+            sleep 0.1
+        done
+        return 1
+    fi
+    return 0
+}
+
+touch_publish_wizard_context() {
+    _cprofile="$1"
+    [ -n "${active_user:-}" ] || return 0
+    _tcb_files="$DATA_ROOT/data/user_de/$active_user/$TOUCH_PKG/files"
+    if [ -d "$_tcb_files" ] && [ ! -L "$_tcb_files" ] && [ -x "$TOUCH_CALIB_TOOL" ] && [ -r "$_cprofile" ]; then
+        "$TOUCH_CALIB_TOOL" publish "$_tcb_files" context < "$_cprofile" >/dev/null 2>&1 || true
+    fi
+}
+
+touch_apply_profile_file() {
+    _src_prof="$1"
+    _rnonce="$2"
+    [ -x "$TOUCH_CALIB_TOOL" ] || return 1
+    "$TOUCH_CALIB_TOOL" validate "$TOUCH_DEVICE" < "$_src_prof" > "$RUN_DIR/touch-calibration-section.new" 2>/dev/null || return 1
+    {
+        if [ -r "$ETC_DIR/iptsd.conf" ]; then
+            cat "$ETC_DIR/iptsd.conf"
+        fi
+        printf '\n'
+        cat "$RUN_DIR/touch-calibration-section.new"
+    } > "$RUN_DIR/iptsd-calibrated.conf.new" || return 1
+    mv -f "$RUN_DIR/iptsd-calibrated.conf.new" "$RUN_DIR/iptsd-calibrated.conf" || return 1
+    cp "$_src_prof" "$RUN_DIR/touch-calibration-current.profile.new" || return 1
+    chmod 600 "$RUN_DIR/touch-calibration-current.profile.new" 2>/dev/null || true
+    mv -f "$RUN_DIR/touch-calibration-current.profile.new" "$RUN_DIR/touch-calibration-current.profile" || return 1
+    if [ -x "$TOUCH_READY_TOOL" ]; then
+        "$TOUCH_READY_TOOL" >/dev/null 2>&1 || return 1
+    fi
+    if [ -d "$RUN_DIR/iptsd-noise" ]; then
+        touch_reload_noise "${_rnonce}-ready" || true
+    fi
+    touch_publish_wizard_context "$RUN_DIR/touch-calibration-current.profile"
+    return 0
+}
+
+touch_noise_summary_line() {
+    _nf="$1"
+    [ -f "$_nf" ] && [ ! -L "$_nf" ] || { printf ''; return 0; }
+    _raw="$(head -n 1 "$_nf" 2>/dev/null | tr -d '\r')"
+    case "$_raw" in
+        SPXNOISE3\ *)
+            printf '%s\n' "$_raw" | awk '
+            BEGIN { h="0123456789abcdef" }
+            {
+                hex=tolower($7); total=int($5)*int($6); nz=0; mx=0;
+                n=length(hex);
+                for (i=1; i+1<=n; i+=2) {
+                    hi=index(h, substr(hex,i,1))-1;
+                    lo=index(h, substr(hex,i+1,1))-1;
+                    if (hi>=0 && lo>=0) {
+                        v=hi*16+lo;
+                        if (v>0) { nz++; if (v>mx) mx=v; }
+                    }
+                }
+                printf "SPXNOISE3 %s %s %s %s %s nonzero=%d/%d max=%d", $2, $3, $4, $5, $6, nz, total, mx;
+            }'
+            ;;
+        SPXNOISE1\ *|SPXNOISE2\ *)
+            printf '%s' "$_raw"
+            ;;
+        *)
+            printf ''
+            ;;
+    esac
+}
+
+read_profile_kv() {
+    _pf="$1"
+    _k="$2"
+    sed -n "s/^${_k}=//p" "$_pf" 2>/dev/null | head -n 1 | tr -d '\r'
+}
+
+extract_touch_section() {
+    awk -v s="$2" -v e="$3" '
+        $0 == s { in_sec=1; next }
+        $0 == e { in_sec=0; exit }
+        in_sec { print }
+    ' "$1" > "$4"
+}
+
+check_touch_section_pair() {
+    _bf="$1"
+    _bs="$2"
+    _be="$3"
+    if grep -qxF "$_bs" "$_bf" 2>/dev/null; then
+        grep -qxF "$_be" "$_bf" 2>/dev/null || return 1
+    fi
+    return 0
+}
+
 publish_file() {
     _dir="$1"
     _name="$2"
@@ -261,6 +505,74 @@ publish_state() {
     if [ "$_mixed" = 1 ]; then
         _cur_gov="mixed"
     fi
+
+    _t_avail=0
+    _t_running=0
+    if is_iptsd_running; then
+        _t_running=1
+    fi
+    _t_dev=""
+    _t_hid=""
+    _t_prof_saved=0
+    _t_px=""
+    _t_py=""
+    _t_ptop=""
+    _t_pstart="0.1"
+    _t_pend="0.3"
+    _t_psize="2.0"
+    _t_noise_saved=0
+    _t_noise_enabled=0
+    _t_noise_info=""
+    _t_tap_saved=0
+    _t_tap_line=""
+
+    if resolve_touch_device; then
+        _t_avail=1
+        _t_dev="$TOUCH_DEVICE"
+        _t_hid="$TOUCH_HID_ID"
+
+        _pfile="$TOUCH_STORE/$TOUCH_DEVICE.profile"
+        if [ -f "$_pfile" ] && [ ! -L "$_pfile" ]; then
+            _t_prof_saved=1
+        elif [ -f "$RUN_DIR/touch-calibration-current.profile" ] && [ ! -L "$RUN_DIR/touch-calibration-current.profile" ]; then
+            _pfile="$RUN_DIR/touch-calibration-current.profile"
+        else
+            _pfile=""
+        fi
+        if [ -n "$_pfile" ]; then
+            _t_px="$(read_profile_kv "$_pfile" "CalibrationX")"
+            _t_py="$(read_profile_kv "$_pfile" "CalibrationY")"
+            _t_ptop="$(read_profile_kv "$_pfile" "CalibrationXTop")"
+            _s="$(read_profile_kv "$_pfile" "CalibrationTopStart")"
+            [ -z "$_s" ] || _t_pstart="$_s"
+            _e="$(read_profile_kv "$_pfile" "CalibrationTopEnd")"
+            [ -z "$_e" ] || _t_pend="$_e"
+            _z="$(read_profile_kv "$_pfile" "ContactSizeMax")"
+            [ -z "$_z" ] || _t_psize="$_z"
+        fi
+
+        _nfile="$TOUCH_STORE/$TOUCH_DEVICE.noise"
+        if [ -f "$_nfile" ] && [ ! -L "$_nfile" ]; then
+            _t_noise_saved=1
+            _t_noise_info="$(touch_noise_summary_line "$_nfile")"
+            if [ ! -e "$_nfile.disabled" ]; then
+                if [ -s "$RUN_DIR/iptsd-noise/version" ]; then
+                    if [ -s "$RUN_DIR/iptsd-noise/active" ]; then
+                        _t_noise_enabled=1
+                    fi
+                else
+                    _t_noise_enabled=1
+                fi
+            fi
+        fi
+
+        _tfile="$TOUCH_STORE/$TOUCH_DEVICE.tap"
+        if [ -f "$_tfile" ] && [ ! -L "$_tfile" ]; then
+            _t_tap_saved=1
+            _t_tap_line="$(head -n 1 "$_tfile" 2>/dev/null | tr -d '\r')"
+        fi
+    fi
+
     _body="bridge_version=1
 vulkan_available=$_vk_avail
 vulkan_default=$_vk_def
@@ -269,6 +581,22 @@ cpu_available_governors=$_avail_gov
 cpu_current_governor=$_cur_gov
 cpu_saved_governor=$_saved_gov
 cpu_policies=$_policies
+touch_available=$_t_avail
+touch_iptsd_running=$_t_running
+touch_device_id=$_t_dev
+touch_hid_id=$_t_hid
+touch_profile_saved=$_t_prof_saved
+touch_profile_x=$_t_px
+touch_profile_y=$_t_py
+touch_profile_x_top=$_t_ptop
+touch_profile_top_start=$_t_pstart
+touch_profile_top_end=$_t_pend
+touch_profile_size_max=$_t_psize
+touch_noise_saved=$_t_noise_saved
+touch_noise_enabled=$_t_noise_enabled
+touch_noise_info=$_t_noise_info
+touch_tap_saved=$_t_tap_saved
+touch_tap_line=$_t_tap_line
 "
     publish_file "$_dir" "state" "$_body"
 }
@@ -291,7 +619,7 @@ handle_request() {
     _req="$_dir/request"
     [ -f "$_req" ] && [ ! -L "$_req" ] || return 1
     _size="$(stat -c %s "$_req" 2>/dev/null || echo 999999)"
-    if [ "$_size" -gt 4096 ]; then
+    if [ "$_size" -gt 140000 ]; then
         rm -f "$_req" 2>/dev/null || true
         return 0
     fi
@@ -389,6 +717,392 @@ handle_request() {
             sync 2>/dev/null || true
             publish_state "$_dir" || true
             send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        set-touch-ghost-patch)
+            _enable="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            if ! validate_bool "$_enable"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_arguments"
+                return 0
+            fi
+            if ! resolve_touch_device; then
+                send_reply "$_dir" "$_nonce" "ERROR" "touch_device_unavailable"
+                return 0
+            fi
+            mkdir -p "$TOUCH_STORE"
+            chmod 700 "$TOUCH_STORE" 2>/dev/null || true
+            _nfile="$TOUCH_STORE/$TOUCH_DEVICE.noise"
+            _ndir="$RUN_DIR/iptsd-noise"
+            if [ "$_enable" = "0" ]; then
+                : > "$_nfile.disabled"
+                chmod 600 "$_nfile.disabled" 2>/dev/null || true
+                rm -f "$_ndir/active" 2>/dev/null || true
+                if [ -d "$_ndir" ] && ! touch_reload_noise "$_nonce"; then
+                    publish_state "$_dir" || true
+                    send_reply "$_dir" "$_nonce" "ERROR" "touch_reload_failed"
+                    return 0
+                fi
+            else
+                if [ ! -f "$_nfile" ] || [ -L "$_nfile" ]; then
+                    send_reply "$_dir" "$_nonce" "ERROR" "no_noise_patch"
+                    return 0
+                fi
+                [ -x "$TOUCH_NOISE_TOOL" ] || { send_reply "$_dir" "$_nonce" "ERROR" "noise_tool_missing"; return 0; }
+                if [ -d "$_ndir" ]; then
+                    if ! "$TOUCH_NOISE_TOOL" "$TOUCH_DEVICE" < "$_nfile" > "$_ndir/active.new" 2>/dev/null; then
+                        rm -f "$_ndir/active.new" 2>/dev/null || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "invalid_noise_patch"
+                        return 0
+                    fi
+                    mv -f "$_ndir/active.new" "$_ndir/active"
+                else
+                    "$TOUCH_NOISE_TOOL" "$TOUCH_DEVICE" < "$_nfile" > /dev/null 2>&1 || {
+                        send_reply "$_dir" "$_nonce" "ERROR" "invalid_noise_patch"
+                        return 0
+                    }
+                fi
+                rm -f "$_nfile.disabled" 2>/dev/null || true
+                if [ -d "$_ndir" ] && ! touch_reload_noise "$_nonce"; then
+                    publish_state "$_dir" || true
+                    send_reply "$_dir" "$_nonce" "ERROR" "touch_reload_failed"
+                    return 0
+                fi
+            fi
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        clear-touch-calibration)
+            if ! resolve_touch_device; then
+                send_reply "$_dir" "$_nonce" "ERROR" "touch_device_unavailable"
+                return 0
+            fi
+            mkdir -p "$TOUCH_STORE"
+            chmod 700 "$TOUCH_STORE" 2>/dev/null || true
+            rm -f "$TOUCH_STORE/$TOUCH_DEVICE.profile" \
+                  "$TOUCH_STORE/$TOUCH_DEVICE.noise" \
+                  "$TOUCH_STORE/$TOUCH_DEVICE.noise.disabled" \
+                  "$TOUCH_STORE/$TOUCH_DEVICE.tap" 2>/dev/null || true
+            : > "$TOUCH_STORE/$TOUCH_DEVICE.prompted"
+            chmod 644 "$TOUCH_STORE/$TOUCH_DEVICE.prompted" 2>/dev/null || true
+            rm -f "$RUN_DIR/iptsd-noise/active" "$RUN_DIR/iptsd-noise/tap-active" 2>/dev/null || true
+            if [ -d "$RUN_DIR/iptsd-noise" ]; then
+                touch_reload_noise "$_nonce" || true
+            fi
+            printf 'Version=1\nDevice=%s\nCalibrationX=\nCalibrationY=\nCalibrationXTop=\nCalibrationTopStart=0.1\nCalibrationTopEnd=0.3\nContactSizeMax=2.0\n' "$TOUCH_DEVICE" > "$TMP_TOUCH"
+            if ! touch_apply_profile_file "$TMP_TOUCH" "$_nonce"; then
+                rm -f "$TMP_TOUCH" 2>/dev/null || true
+                publish_state "$_dir" || true
+                send_reply "$_dir" "$_nonce" "ERROR" "clear_apply_failed"
+                return 0
+            fi
+            rm -f "$TMP_TOUCH" 2>/dev/null || true
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        import-touch-calibration)
+            if ! resolve_touch_device; then
+                send_reply "$_dir" "$_nonce" "ERROR" "touch_device_unavailable"
+                return 0
+            fi
+            tail -n +3 "$TMP_REQ" | tr -d '\r' > "$TMP_TOUCH"
+            _first="$(awk 'NF{print;exit}' "$TMP_TOUCH" 2>/dev/null || true)"
+            mkdir -p "$TOUCH_STORE"
+            chmod 700 "$TOUCH_STORE" 2>/dev/null || true
+            case "$_first" in
+                SPXTOUCH1)
+                    _hdev="$(awk '/^\[/{exit} /^Device=/{sub(/^Device=/,""); gsub(/[[:space:]]/,""); print; exit}' "$TMP_TOUCH" 2>/dev/null || true)"
+                    if is_hex64 "$_hdev" && [ "$_hdev" != "$TOUCH_DEVICE" ]; then
+                        rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "device_mismatch"
+                        return 0
+                    fi
+                    _ndis="$(awk '/^\[/{exit} /^NoiseDisabled=/{sub(/^NoiseDisabled=/,""); gsub(/[[:space:]]/,""); print; exit}' "$TMP_TOUCH" 2>/dev/null || true)"
+                    case "$_ndis" in
+                        ''|0|1) ;;
+                        *)
+                            rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                            send_reply "$_dir" "$_nonce" "ERROR" "invalid_calibration_file"
+                            return 0
+                            ;;
+                    esac
+                    if ! check_touch_section_pair "$TMP_TOUCH" "[Profile]" "[/Profile]" ||
+                       ! check_touch_section_pair "$TMP_TOUCH" "[Noise]" "[/Noise]" ||
+                       ! check_touch_section_pair "$TMP_TOUCH" "[Tap]" "[/Tap]"; then
+                        rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "invalid_calibration_file"
+                        return 0
+                    fi
+                    _bprof="$TMP_TOUCH.prof"
+                    _bnoise="$TMP_TOUCH.noise"
+                    _btap="$TMP_TOUCH.tap"
+                    extract_touch_section "$TMP_TOUCH" "[Profile]" "[/Profile]" "$_bprof"
+                    extract_touch_section "$TMP_TOUCH" "[Noise]" "[/Noise]" "$_bnoise"
+                    extract_touch_section "$TMP_TOUCH" "[Tap]" "[/Tap]" "$_btap"
+                    if [ ! -s "$_bprof" ] && [ ! -s "$_bnoise" ] && [ ! -s "$_btap" ]; then
+                        rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "invalid_calibration_file"
+                        return 0
+                    fi
+                    if [ -s "$_bprof" ]; then
+                        _fdev="$(read_profile_kv "$_bprof" "Device" | tr -d ' ')"
+                        if is_hex64 "$_fdev" && [ "$_fdev" != "$TOUCH_DEVICE" ]; then
+                            rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                            send_reply "$_dir" "$_nonce" "ERROR" "device_mismatch"
+                            return 0
+                        fi
+                        [ -x "$TOUCH_CALIB_TOOL" ] || { rm -f "$TMP_TOUCH"* 2>/dev/null || true; send_reply "$_dir" "$_nonce" "ERROR" "calib_tool_missing"; return 0; }
+                        if ! "$TOUCH_CALIB_TOOL" validate "$TOUCH_DEVICE" < "$_bprof" >/dev/null 2>&1; then
+                            rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                            send_reply "$_dir" "$_nonce" "ERROR" "invalid_calibration_file"
+                            return 0
+                        fi
+                    fi
+                    if [ -s "$_bnoise" ]; then
+                        _nf="$(awk 'NF{print;exit}' "$_bnoise" 2>/dev/null || true)"
+                        _fdev="$(printf '%s\n' "$_nf" | awk '{print $2}')"
+                        if is_hex64 "$_fdev" && [ "$_fdev" != "$TOUCH_DEVICE" ]; then
+                            rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                            send_reply "$_dir" "$_nonce" "ERROR" "device_mismatch"
+                            return 0
+                        fi
+                        [ -x "$TOUCH_NOISE_TOOL" ] || { rm -f "$TMP_TOUCH"* 2>/dev/null || true; send_reply "$_dir" "$_nonce" "ERROR" "noise_tool_missing"; return 0; }
+                        if ! "$TOUCH_NOISE_TOOL" "$TOUCH_DEVICE" < "$_bnoise" > "$_bnoise.out" 2>/dev/null; then
+                            rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                            send_reply "$_dir" "$_nonce" "ERROR" "invalid_calibration_file"
+                            return 0
+                        fi
+                    fi
+                    if [ -s "$_btap" ]; then
+                        _tf="$(awk 'NF{print;exit}' "$_btap" 2>/dev/null || true)"
+                        _fdev="$(printf '%s\n' "$_tf" | awk '{print $2}')"
+                        if is_hex64 "$_fdev" && [ "$_fdev" != "$TOUCH_DEVICE" ]; then
+                            rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                            send_reply "$_dir" "$_nonce" "ERROR" "device_mismatch"
+                            return 0
+                        fi
+                        [ -x "$TOUCH_TAP_TOOL" ] || { rm -f "$TMP_TOUCH"* 2>/dev/null || true; send_reply "$_dir" "$_nonce" "ERROR" "tap_tool_missing"; return 0; }
+                        if ! "$TOUCH_TAP_TOOL" "$TOUCH_DEVICE" < "$_btap" > "$_btap.out" 2>/dev/null; then
+                            rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                            send_reply "$_dir" "$_nonce" "ERROR" "invalid_calibration_file"
+                            return 0
+                        fi
+                    fi
+
+                    _tfile="$TOUCH_STORE/$TOUCH_DEVICE.tap"
+                    if [ -s "$_btap.out" ]; then
+                        cp "$_btap.out" "$_tfile.new"
+                        chmod 600 "$_tfile.new" 2>/dev/null || true
+                        mv -f "$_tfile.new" "$_tfile"
+                        if [ -d "$RUN_DIR/iptsd-noise" ]; then
+                            cp "$_tfile" "$RUN_DIR/iptsd-noise/tap-active.new"
+                            mv -f "$RUN_DIR/iptsd-noise/tap-active.new" "$RUN_DIR/iptsd-noise/tap-active"
+                        fi
+                    else
+                        rm -f "$_tfile" "$RUN_DIR/iptsd-noise/tap-active" 2>/dev/null || true
+                    fi
+
+                    _nfile="$TOUCH_STORE/$TOUCH_DEVICE.noise"
+                    if [ -s "$_bnoise.out" ]; then
+                        cp "$_bnoise.out" "$_nfile.new"
+                        chmod 600 "$_nfile.new" 2>/dev/null || true
+                        mv -f "$_nfile.new" "$_nfile"
+                        if [ "$_ndis" = "1" ]; then
+                            : > "$_nfile.disabled"
+                            chmod 600 "$_nfile.disabled" 2>/dev/null || true
+                            rm -f "$RUN_DIR/iptsd-noise/active" 2>/dev/null || true
+                        else
+                            rm -f "$_nfile.disabled" 2>/dev/null || true
+                            if [ -d "$RUN_DIR/iptsd-noise" ]; then
+                                cp "$_nfile" "$RUN_DIR/iptsd-noise/active.new"
+                                mv -f "$RUN_DIR/iptsd-noise/active.new" "$RUN_DIR/iptsd-noise/active"
+                            fi
+                        fi
+                    else
+                        rm -f "$_nfile" "$_nfile.disabled" "$RUN_DIR/iptsd-noise/active" 2>/dev/null || true
+                    fi
+
+                    _pfile="$TOUCH_STORE/$TOUCH_DEVICE.profile"
+                    if [ -s "$_bprof" ]; then
+                        cp "$_bprof" "$_pfile.new"
+                        chmod 600 "$_pfile.new" 2>/dev/null || true
+                        mv -f "$_pfile.new" "$_pfile"
+                        _apply_src="$_pfile"
+                    else
+                        rm -f "$_pfile" 2>/dev/null || true
+                        printf 'Version=1\nDevice=%s\nCalibrationX=\nCalibrationY=\nCalibrationXTop=\nCalibrationTopStart=0.1\nCalibrationTopEnd=0.3\nContactSizeMax=2.0\n' "$TOUCH_DEVICE" > "$TMP_TOUCH.neutral"
+                        _apply_src="$TMP_TOUCH.neutral"
+                    fi
+                    if ! touch_apply_profile_file "$_apply_src" "$_nonce"; then
+                        rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                        publish_state "$_dir" || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "apply_profile_failed"
+                        return 0
+                    fi
+                    : > "$TOUCH_STORE/$TOUCH_DEVICE.prompted"
+                    rm -f "$TMP_TOUCH"* 2>/dev/null || true
+                    sync 2>/dev/null || true
+                    publish_state "$_dir" || true
+                    send_reply "$_dir" "$_nonce" "OK" "bundle"
+                    ;;
+                SPXNOISE1\ *|SPXNOISE2\ *|SPXNOISE3\ *)
+                    _fdev="$(printf '%s\n' "$_first" | awk '{print $2}')"
+                    if is_hex64 "$_fdev" && [ "$_fdev" != "$TOUCH_DEVICE" ]; then
+                        rm -f "$TMP_TOUCH" 2>/dev/null || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "device_mismatch"
+                        return 0
+                    fi
+                    [ -x "$TOUCH_NOISE_TOOL" ] || { rm -f "$TMP_TOUCH" 2>/dev/null || true; send_reply "$_dir" "$_nonce" "ERROR" "noise_tool_missing"; return 0; }
+                    _nfile="$TOUCH_STORE/$TOUCH_DEVICE.noise"
+                    if ! "$TOUCH_NOISE_TOOL" "$TOUCH_DEVICE" < "$TMP_TOUCH" > "$_nfile.new" 2>/dev/null; then
+                        rm -f "$_nfile.new" "$TMP_TOUCH" 2>/dev/null || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "invalid_calibration_file"
+                        return 0
+                    fi
+                    chmod 600 "$_nfile.new" 2>/dev/null || true
+                    mv -f "$_nfile.new" "$_nfile"
+                    rm -f "$_nfile.disabled" 2>/dev/null || true
+                    if [ -d "$RUN_DIR/iptsd-noise" ]; then
+                        cp "$_nfile" "$RUN_DIR/iptsd-noise/active.new"
+                        mv -f "$RUN_DIR/iptsd-noise/active.new" "$RUN_DIR/iptsd-noise/active"
+                        if ! touch_reload_noise "$_nonce"; then
+                            rm -f "$TMP_TOUCH" 2>/dev/null || true
+                            publish_state "$_dir" || true
+                            send_reply "$_dir" "$_nonce" "ERROR" "touch_reload_failed"
+                            return 0
+                        fi
+                    fi
+                    : > "$TOUCH_STORE/$TOUCH_DEVICE.prompted"
+                    rm -f "$TMP_TOUCH" 2>/dev/null || true
+                    sync 2>/dev/null || true
+                    publish_state "$_dir" || true
+                    send_reply "$_dir" "$_nonce" "OK" "noise"
+                    ;;
+                SPXTAP1\ *)
+                    _fdev="$(printf '%s\n' "$_first" | awk '{print $2}')"
+                    if is_hex64 "$_fdev" && [ "$_fdev" != "$TOUCH_DEVICE" ]; then
+                        rm -f "$TMP_TOUCH" 2>/dev/null || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "device_mismatch"
+                        return 0
+                    fi
+                    [ -x "$TOUCH_TAP_TOOL" ] || { rm -f "$TMP_TOUCH" 2>/dev/null || true; send_reply "$_dir" "$_nonce" "ERROR" "tap_tool_missing"; return 0; }
+                    _tfile="$TOUCH_STORE/$TOUCH_DEVICE.tap"
+                    if ! "$TOUCH_TAP_TOOL" "$TOUCH_DEVICE" < "$TMP_TOUCH" > "$_tfile.new" 2>/dev/null; then
+                        rm -f "$_tfile.new" "$TMP_TOUCH" 2>/dev/null || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "invalid_calibration_file"
+                        return 0
+                    fi
+                    chmod 600 "$_tfile.new" 2>/dev/null || true
+                    mv -f "$_tfile.new" "$_tfile"
+                    if [ -d "$RUN_DIR/iptsd-noise" ]; then
+                        cp "$_tfile" "$RUN_DIR/iptsd-noise/tap-active.new"
+                        mv -f "$RUN_DIR/iptsd-noise/tap-active.new" "$RUN_DIR/iptsd-noise/tap-active"
+                        if ! touch_reload_noise "$_nonce"; then
+                            rm -f "$TMP_TOUCH" 2>/dev/null || true
+                            publish_state "$_dir" || true
+                            send_reply "$_dir" "$_nonce" "ERROR" "touch_reload_failed"
+                            return 0
+                        fi
+                    fi
+                    : > "$TOUCH_STORE/$TOUCH_DEVICE.prompted"
+                    rm -f "$TMP_TOUCH" 2>/dev/null || true
+                    sync 2>/dev/null || true
+                    publish_state "$_dir" || true
+                    send_reply "$_dir" "$_nonce" "OK" "tap"
+                    ;;
+                *)
+                    _fdev="$(read_profile_kv "$TMP_TOUCH" "Device" | tr -d ' ')"
+                    if is_hex64 "$_fdev" && [ "$_fdev" != "$TOUCH_DEVICE" ]; then
+                        rm -f "$TMP_TOUCH" 2>/dev/null || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "device_mismatch"
+                        return 0
+                    fi
+                    [ -x "$TOUCH_CALIB_TOOL" ] || { rm -f "$TMP_TOUCH" 2>/dev/null || true; send_reply "$_dir" "$_nonce" "ERROR" "calib_tool_missing"; return 0; }
+                    if ! "$TOUCH_CALIB_TOOL" validate "$TOUCH_DEVICE" < "$TMP_TOUCH" > /dev/null 2>&1; then
+                        rm -f "$TMP_TOUCH" 2>/dev/null || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "invalid_calibration_file"
+                        return 0
+                    fi
+                    _pfile="$TOUCH_STORE/$TOUCH_DEVICE.profile"
+                    cp "$TMP_TOUCH" "$_pfile.new"
+                    chmod 600 "$_pfile.new" 2>/dev/null || true
+                    mv -f "$_pfile.new" "$_pfile"
+                    if ! touch_apply_profile_file "$_pfile" "$_nonce"; then
+                        rm -f "$TMP_TOUCH" 2>/dev/null || true
+                        publish_state "$_dir" || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "apply_profile_failed"
+                        return 0
+                    fi
+                    : > "$TOUCH_STORE/$TOUCH_DEVICE.prompted"
+                    rm -f "$TMP_TOUCH" 2>/dev/null || true
+                    sync 2>/dev/null || true
+                    publish_state "$_dir" || true
+                    send_reply "$_dir" "$_nonce" "OK" "profile"
+                    ;;
+            esac
+            ;;
+        export-touch-calibration)
+            if ! resolve_touch_device; then
+                send_reply "$_dir" "$_nonce" "ERROR" "touch_device_unavailable"
+                return 0
+            fi
+            _pfile="$TOUCH_STORE/$TOUCH_DEVICE.profile"
+            _nfile="$TOUCH_STORE/$TOUCH_DEVICE.noise"
+            _tfile="$TOUCH_STORE/$TOUCH_DEVICE.tap"
+            _has_any=0
+            [ -f "$_pfile" ] && [ ! -L "$_pfile" ] && _has_any=1
+            [ -f "$_nfile" ] && [ ! -L "$_nfile" ] && _has_any=1
+            [ -f "$_tfile" ] && [ ! -L "$_tfile" ] && _has_any=1
+            if [ "$_has_any" = "0" ]; then
+                send_reply "$_dir" "$_nonce" "ERROR" "not_found"
+                return 0
+            fi
+            _ndis=0
+            [ -e "$_nfile.disabled" ] && _ndis=1
+            _btmp="$TMP_TOUCH.bundle"
+            rm -f "$_btmp" 2>/dev/null || true
+            if ! {
+                printf 'SPXTOUCH1\nDevice=%s\nNoiseDisabled=%s\n' "$TOUCH_DEVICE" "$_ndis"
+                if [ -f "$_pfile" ] && [ ! -L "$_pfile" ]; then
+                    printf '[Profile]\n'
+                    awk '{print}' "$_pfile"
+                    printf '[/Profile]\n'
+                fi
+                if [ -f "$_nfile" ] && [ ! -L "$_nfile" ]; then
+                    printf '[Noise]\n'
+                    awk '{print}' "$_nfile"
+                    printf '[/Noise]\n'
+                fi
+                if [ -f "$_tfile" ] && [ ! -L "$_tfile" ]; then
+                    printf '[Tap]\n'
+                    awk '{print}' "$_tfile"
+                    printf '[/Tap]\n'
+                fi
+            } > "$_btmp" 2>/dev/null; then
+                rm -f "$_btmp" 2>/dev/null || true
+                send_reply "$_dir" "$_nonce" "ERROR" "export_failed"
+                return 0
+            fi
+            _esize="$(stat -c %s "$_btmp" 2>/dev/null || echo 999999)"
+            if [ "$_esize" -le 0 ] || [ "$_esize" -gt 132096 ]; then
+                rm -f "$_btmp" 2>/dev/null || true
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_calibration_file"
+                return 0
+            fi
+            _tmp="$_dir/.bridge-$$.tmp"
+            rm -f "$_tmp" 2>/dev/null || true
+            if ! { printf '%s\nOK\n' "$_nonce"; cat "$_btmp"; } > "$_tmp" 2>/dev/null; then
+                rm -f "$_tmp" "$_btmp" 2>/dev/null || true
+                send_reply "$_dir" "$_nonce" "ERROR" "export_failed"
+                return 0
+            fi
+            rm -f "$_btmp" 2>/dev/null || true
+            chmod 600 "$_tmp" 2>/dev/null || true
+            _owner="$(stat -c '%u:%g' "$_dir" 2>/dev/null || true)"
+            if [ -n "$_owner" ] && [ "$(id -u)" = "0" ]; then
+                chown "$_owner" "$_tmp" 2>/dev/null || true
+            fi
+            mv -f "$_tmp" "$_dir/reply" || { rm -f "$_tmp" 2>/dev/null || true; send_reply "$_dir" "$_nonce" "ERROR" "export_failed"; return 0; }
             ;;
         *)
             send_reply "$_dir" "$_nonce" "ERROR" "unknown_command"

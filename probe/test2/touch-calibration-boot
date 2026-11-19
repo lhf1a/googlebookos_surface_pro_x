@@ -68,7 +68,7 @@ noise_restore() {
     noise_preview=0
 }
 # Only a validated profile for this board+EDID+descriptor can be activated.
-if [ -x /bin/touch-noise-profile ] && [ -f "$noise_saved" ] && [ ! -L "$noise_saved" ]; then
+if [ -x /bin/touch-noise-profile ] && [ -f "$noise_saved" ] && [ ! -L "$noise_saved" ] && [ ! -e "$noise_saved.disabled" ]; then
     /bin/touch-noise-profile "$device" < "$noise_saved" > "$noise/active.new" && mv "$noise/active.new" "$noise/active"
 fi
 tap_saved=$store/$device.tap
@@ -129,7 +129,8 @@ files=/proc/1/root/data/user_de/$user/$pkg/files
 if [ -d "$files" ] && [ ! -L "$files" ]; then rm -f "$files/request"; fi
 if [ "$valid" = 0 ] && [ ! -e "$store/$device.prompted" ]; then
     # Nonblocking onboarding: never dismiss the lock screen or modify credentials.
-    android am start --user "$user" -n "$pkg/org.surface.touchcalibration.MainActivity" > /dev/null
+    android am start --user "$user" --windowingMode 1 -n "$pkg/org.surface.touchcalibration.MainActivity" > /dev/null 2>&1 ||
+        android am start --user "$user" -n "$pkg/org.surface.touchcalibration.MainActivity" > /dev/null
 fi
 preview=0;until_time=0;context_sent=0;cycles=0
 reply() { printf '%s\n%s\n' "$nonce" "$1" | "$tool" publish "$files" reply; }
@@ -216,6 +217,50 @@ while true; do
                         "$tool" publish "$files" noise-patch < "$noise/export.new";reply OK
                     else reply ERROR; fi
                     ;;
+                bundle-export)
+                    b_prof=""
+                    if [ "$preview" = 1 ] && [ -f /run/touch-calibration-candidate.profile ] && [ ! -L /run/touch-calibration-candidate.profile ]; then
+                        b_prof=/run/touch-calibration-candidate.profile
+                    elif [ -f "$saved" ] && [ ! -L "$saved" ]; then
+                        b_prof="$saved"
+                    fi
+                    b_noise=""
+                    b_ndis=0
+                    if [ "$noise_preview" = 1 ] && [ -f "$noise/active" ] && [ ! -L "$noise/active" ]; then
+                        b_noise="$noise/active"
+                    elif [ -f "$noise/export.new" ] && [ ! -L "$noise/export.new" ]; then
+                        b_noise="$noise/export.new"
+                    elif [ -f "$noise_saved" ] && [ ! -L "$noise_saved" ]; then
+                        b_noise="$noise_saved"
+                        [ ! -e "$noise_saved.disabled" ] || b_ndis=1
+                    fi
+                    b_tap=""
+                    if [ "$tap_preview" = 1 ] && [ -f "$noise/tap-active" ] && [ ! -L "$noise/tap-active" ]; then
+                        b_tap="$noise/tap-active"
+                    elif [ -f "$tap_saved" ] && [ ! -L "$tap_saved" ]; then
+                        b_tap="$tap_saved"
+                    fi
+                    if [ -z "$b_prof" ] && [ -z "$b_noise" ] && [ -z "$b_tap" ]; then
+                        reply ERROR; continue
+                    fi
+                    {
+                        printf 'SPXTOUCH1\nDevice=%s\nNoiseDisabled=%s\n' "$device" "$b_ndis"
+                        if [ -n "$b_prof" ]; then
+                            printf '[Profile]\n'; awk '{print}' "$b_prof"; printf '[/Profile]\n'
+                        fi
+                        if [ -n "$b_noise" ]; then
+                            printf '[Noise]\n'; awk '{print}' "$b_noise"; printf '[/Noise]\n'
+                        fi
+                        if [ -n "$b_tap" ]; then
+                            printf '[Tap]\n'; awk '{print}' "$b_tap"; printf '[/Tap]\n'
+                        fi
+                    } > "$noise/bundle.new"
+                    if "$tool" publish "$files" calibration-bundle < "$noise/bundle.new"; then
+                        rm -f "$noise/bundle.new"; reply OK
+                    else
+                        rm -f "$noise/bundle.new"; reply ERROR
+                    fi
+                    ;;
                 noise-retest|noise-slide)
                     # A timed-out preview must not silently become a baseline retest.
                     requested=$(sed -n 3p /run/touch-calibration-request)
@@ -244,7 +289,7 @@ while true; do
                     ;;
                 noise-save)
                     if [ "$noise_preview" = 1 ] && /bin/touch-noise-profile "$device" < "$noise/active" > "$noise_saved.new"; then
-                        chmod 600 "$noise_saved.new";sync;mv "$noise_saved.new" "$noise_saved";sync
+                        chmod 600 "$noise_saved.new";sync;mv "$noise_saved.new" "$noise_saved";rm -f "$noise_saved.disabled";sync
                         noise_preview=0;if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
                     else reply ERROR; fi
                     ;;

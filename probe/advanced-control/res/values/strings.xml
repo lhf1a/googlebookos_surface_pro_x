@@ -2,5 +2,6 @@
 <resources>
     <string name="app_name">Advanced Settings</string>
     <string name="settings_title">Advanced Settings</string>
-    <string name="settings_summary">Vulkan driver &amp; performance mode</string>
+    <string name="settings_summary">Vulkan, performance, touch &amp; system update</string>
+    <string name="ota_settings_title">System update</string>
 </resources>

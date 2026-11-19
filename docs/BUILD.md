@@ -104,6 +104,7 @@ python3 scripts/build.py --reuse-components FRESH_VENUS_OUTPUT/REUSE.json \
 | `disk/work/esp-tree/` | 存储适配、正常/救援入口和 SQ1/SQ2 路由后的 ESP 树 |
 | `disk/surface-pro-x-6.18-hybrid-generic.img(.gz)` | 完整稀疏整盘与压缩包 |
 | `disk/IMAGE-MANIFEST.json`、`disk/LAYOUT.json` | 镜像结果与分区布局 |
+| `ota/surface-pro-x-6.18-hybrid-ota-*.tar.gz`、`ota/OTA-MANIFEST.json`、`ota/SHA256SUMS` | 升级包压缩包、文件清单描述与校验文件 |
 | `FULL-IMAGE.json`、`BUILD-COMMANDS.json` | 全流程结果、命令与日志位置 |
 
 ## 6. 首次启动与隐私
@@ -140,12 +141,12 @@ SQ2 热替换后 UU 连接已获用户确认正常；完整重启、SQ1 及跨�
 
 ## 7. 边界
 
-### 高级设置：Vulkan 配置与性能模式
+### 高级设置：Vulkan 配置、性能模式与触摸
 
 Hybrid 整包默认从 `probe/advanced-control/` 编译并安装“高级设置 / Advanced Settings”（`SurfaceAdvancedControl.apk`），
 并在 initramfs 中集成根桥接脚本 `/bin/spx-advanced-control-boot`，启动器与系统设置均提供入口，界面与入口文案随系统语言在中/英间切换（非中文默认英语）。
 
-- **一级选择页**：包含 **Vulkan 配置** 与 **性能模式** 两个子页面入口。
+- **一级选择页**：包含 **Vulkan 配置**、**性能模式** 与 **触摸** 三个子页面入口。
 - **Vulkan 配置**：
   - 支持修改默认 Vulkan 配置（自动策略 / MESA / Qcom），写入 `persist.sq2.vulkan.driver`；当默认切换为 Qcom 时，系统 UID（`< 10000`）与 `com.android.systemui` 仍受路由器保护并留在 Mesa Turnip。
   - 支持搜索当前 Android 用户应用并分别保存 `跟随默认 / MESA / Qcom`（写入 `persist.sq2.vulkan.app.<user>.<package>`）；所有已手动修改过的应用始终置顶显示。
@@ -153,6 +154,10 @@ Hybrid 整包默认从 `probe/advanced-control/` 编译并安装“高级设置 
 - **性能模式**：
   - 动态读取各 cpufreq 频率域共同支持的内核调度策略（如 `performance`、`schedutil`、`ondemand`、`conservative`、`powersave`、`userspace` 等），不硬编码节点或策略列表。
   - 切换时通过内置 root/init 桥接立即应用到所有 cpufreq 策略并持久化至 `/data/vendor/spx-advanced-control/cpu_governor`，重启自动恢复（救援模式或 `sq2.cpufreq=0` 自动跳过），无需手工给应用授予 KernelSU 权限；硬件温控保护保持启用。
+- **触摸**：
+  - 提供**幽灵触控补丁**总开关：关闭时保留 `/data/vendor/sq2-touch-calibration/<device>.noise` 样本并写入 `.noise.disabled` 标记，同时清空 `/run/iptsd-noise/active` 并重载 `iptsd`（`touch-calibration-boot` 重启时同样遵守禁用标记）；重新开启无需重新采样。
+  - 展示当前触摸校准数据摘要（触摸硬件 HID/设备指纹及 `iptsd` 状态、X/Y/顶部边缘曲线拟合点数、大触点/拇指阈值 `ContactSizeMax`、幽灵触控 `.noise` 模型及点按防抖 `.tap` 策略）。
+  - 支持**重新校准**（打开 `org.surface.touchcalibration.unified` 并在返回后刷新摘要）、**导出校准数据**（将当前触摸坐标、幽灵触控补丁与点击策略统一导出为单个 `.spkcal` 校准文件）、**从文件应用校准数据**（选择并校验导出的单个 `.spkcal` 文件或单文件配置并即时恢复应用），以及带确认弹窗的**清除校准数据**。
 
 单独构建 APK：`python3 scripts/full_image_advanced_control.py --output OUTPUT/SurfaceAdvancedControl.apk`。
 签名密钥位于 ignored 的 `private/advanced-control/signing.keystore`（也可通过 `SPX_ADVANCED_CONTROL_KEYSTORE` 指定）。
@@ -168,6 +173,21 @@ Hybrid 整包默认使用 `configs/kernel-6.18-hybrid.config`（内置 `r8152` �
 - **USB 网卡与 Wi-Fi TUI**：自动加载已接入的 USB 网卡驱动并运行 DHCP，同时拉起 `wifi-services`、`ath10k_snoc` 与 `wpa_supplicant`；提供静态编译的 ARM64 TUI 工具 `wifi-tui`（`/bin/spx-wifi-tui`）用于扫描、选择和登录 Open/WPA/WPA2/WPA3/隐藏 Wi-Fi，并实时显示 Wi-Fi/USB 网卡 IP 与 SSH 信息；另提供可选的 `spx-rescue-usb-gadget start|stop` 下口 USB NCM 网卡模式。
 - **继续启动 Android 与控制权交接**：运行 `start-android`（别名 `continue-android`，或 `wifi-tui` 内按 `b`；支持 `--safe` / `--stop-ssh` / `--umount`）可通知 PID 1 退出救援循环；交接脚本 `spx-rescue-handoff` 会先停止救援 USB 监听、`wpa_supplicant`、所有救援 `udhcpc`、清空并关闭救援网卡接口、卸载可选下口 USB gadget 并恢复 host 角色，再恢复正常启动参数与跳过的早期驱动钩子并继续 `exec native-handoff /newroot`。
 - 当前已在主机完成编译、ARM64 `qemu-aarch64` 运行测试与整条 initramfs 装配流水线单元测试；尚未在 SQ1/SQ2 实机完成端到端救援启动与继续进入 Android 验收。
+
+### 系统更新（OTA）与升级包构建
+
+- **全量构建默认同步产出升级包**：`python3 scripts/build.py --output FRESH_OUTPUT` 在完成 `disk/` 后自动调用 `scripts/build_ota_package.py` 在 `FRESH_OUTPUT/ota/` 生成升级包（支持 `--ota-mode auto|delta|esp|full`、`--ota-baseline PREV_BUILD_OR_MANIFEST`、`--ota-version VER`、`--skip-ota`）。
+- **单独生成升级包**：`python3 scripts/build.py ota --build-output BUILD_OUT [--previous-manifest PREV/ota/OTA-MANIFEST.json] --output OTA_OUT`（或直接运行 `scripts/build_ota_package.py`）。
+- **按 `super` 是否变化自动瘦身**：在 `auto` 模式下，若本次编译 `super` 无变化，压缩包中仅写入内容去重后的更新文件（`EFI/SQ2Nat` 与 `EFI/SQ2Res` 共用相同 `Image`/`initramfs` 载荷）及描述清单（`ota-manifest.json`、`ota-manifest.kv`、`ota-files.tsv`），不包含 `super.img`；若传入 `--previous-manifest`，仅打包变更/新增文件并记录 `DEL` 删除项；若 `super` 发生变化或显式指定 `--mode full`，则包含 `payload/super.img`。
+- **设备端升级服务与设置页面替换**：
+  - `SurfaceAdvancedControl.apk` 内置 Material You 风格的 `SystemUpdateActivity` 并声明 `android.settings.SYSTEM_UPDATE_SETTINGS`；开机后根守护进程 `/bin/spx-ota-boot` 动态停用其他包竞争该 Intent 的旧更新页面，使 **系统设置 → 系统 → 系统更新**（及高级设置首页入口）直接打开本系统更新页面。
+  - **支持两类包**：读取含描述清单的 `.tar.gz` 按清单更新（`super` 无变化且保留数据时可直接在线安全写入 ESP 并提示重启；`super` 有变化或需清数据时自动切换至 initramfs 离线阶段）；直接提供完整镜像 `.img` / `.img.gz` 时解析 GPT 并由 initramfs 早期钩子 `/bin/spx-ota-stage`（配合静态 ARM64 工具 `/bin/spx-ota-tool`）在挂载 `super`/`userdata` 前离线执行全量更新。
+  - **所有更新模式均支持手动切换数据策略**：默认保留用户数据（含应用、账户、Wi-Fi、触摸校准、高级设置与双系统 `grub.cfg`）；亦可手动选择 **不保留数据（全新安装）**，经二次确认后在离线阶段清空 `userdata`、`metadata` 与 `misc`（保留 ext4 特性与 `lost+found`）。
+- **从 `v0.7.0` 等老镜像通过 root ADB 一键升级**：
+  - Windows：`scripts/Upgrade-GooglebookViaAdb.ps1`（双击 `scripts/Upgrade-GooglebookViaAdb.cmd` 或传入 `-PackagePath`、可选 `-WipeData`）。
+  - Linux / macOS：`sh scripts/upgrade-googlebook-via-adb.sh -p <升级包> [--wipe-data]`。
+  - 自动校验包与设备兼容性（拦截在旧布局 `v0.7.0` 上误用不含 `super` 的增量包）、推送校验、备份原 `EFI/SQ2Nat` 并热替换新引导载荷后自动触发两段重启完成离线更新；默认保留用户数据与触摸校准。
+- 当前已在主机完成 `spx-ota-tool` 交叉编译、打包、在线/离线应用、全新安装清数据、Linux `sh` 与 Windows PowerShell ADB 一键脚本及 APK Intent 清单自动化单元测试；尚未在 SQ1/SQ2 实机完成端到端重启升级验收。
 
 ### 整盘验收边界
 

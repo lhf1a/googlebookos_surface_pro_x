@@ -712,7 +712,8 @@ def install_userdata_growth(records, bodies, compiled_resize=None):
         records['bin/'+name]=new_record(0o100755)
 
 def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modules=None, camera=None, sensors=None, anonymous=False,
-                     runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None, typec=None, ksu_userspace=None):
+                     runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None, typec=None, ksu_userspace=None,
+                     ota_version=None, source_commit=None, super_sha256=''):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
     bodies = {name: b'' if rec[1][1] & 0o170000 == 0o040000 else (runtime/'files'/name).read_bytes()
@@ -824,6 +825,16 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
         (output.parent/'PRIVACY.json').write_text(json.dumps(privacy, indent=2)+'\n')
     from full_image_rescue import install as install_rescue
     install_rescue(records, bodies, new_record, compiled_wifi_tui=compiled_helpers.get('bin/spx-wifi-tui'))
+    from full_image_ota import install as install_ota
+    install_ota(
+        records,
+        bodies,
+        new_record,
+        compiled_ota_tool=compiled_helpers.get('bin/spx-ota-tool'),
+        version=ota_version,
+        source_commit=source_commit,
+        super_sha256=super_sha256,
+    )
     # Add parent directory records for every newly installed module/index.
     for name in list(bodies):
         for parent in Path(name).parents:
@@ -1052,6 +1063,8 @@ def build(args, compile_kernel):
         runtime_replacements=replacements,
         graphics_inputs=graphics_inputs,
         compiled_helpers=compiled_helpers,
+        ota_version=getattr(args, 'ota_version', None),
+        source_commit=source_commit,
     )
     esp_only = bool(getattr(args, 'esp_only', False))
     from disk_image import build as disk_build
@@ -1069,12 +1082,26 @@ def build(args, compile_kernel):
         from full_image_sensors import FIRMWARE
         disk_args.additional_firmware={FIRMWARE.removeprefix('firmware/'): sensors[FIRMWARE]}
     report=disk_build(disk_args)
+    ota_report = None
+    if not getattr(args, 'skip_ota', False):
+        from build_ota_package import build_ota_package
+        ota_report = build_ota_package(
+            output_dir=args.output / 'ota',
+            build_output=args.output,
+            previous_manifest=getattr(args, 'ota_baseline', None),
+            previous_super_sha256=getattr(args, 'ota_previous_super_sha256', None),
+            mode=getattr(args, 'ota_mode', 'auto'),
+            super_unchanged_hint=True,
+            version=getattr(args, 'ota_version', None),
+            source_commit=source_commit,
+        )
     report.update(source_compiled=bool(compiled),private_root=str(private),
         source_commit=source_commit,
         build_time_parent_initramfs_used=False,postbuild_tests_performed=not esp_only,
         private_identity_present=False, first_setup_preserved=False, first_setup_skipped=True, target_models=["sq1", "sq2"],
         graphics=args.graphics,graphics_boot_option=graphics_token,
         graphics_report=graphics_report,
+        ota=ota_report,
         suspend_enabled=True,
         typec_enabled=True, lower_usb_default='adb',
         suspend_module_source=('matched-incremental-rebuild' if reuse else 'fresh-compiled') if compiled else 'image-paired-prebuilt',

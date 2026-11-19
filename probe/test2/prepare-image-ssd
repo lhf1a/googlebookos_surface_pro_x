@@ -86,7 +86,7 @@ END {
         if (sectors[name] !~ /^[0-9]+$/) { print "partition-size-" name; exit 1 }
         if (name=="userdata") {
             if (sectors[name]+0<expected[name]+0) { print "userdata-shrunk"; exit 1 }
-        } else if (sectors[name]+0!=expected[name]+0) { print "partition-size-" name; exit 1 }
+        } else if (sectors[name]+0<expected[name]+0) { print "partition-size-" name; exit 1 }
     }
     for (i=1;i<=n;i++) print order[i], device[order[i]]
 }' /etc/sq2-ssd-partitions - <<EOF

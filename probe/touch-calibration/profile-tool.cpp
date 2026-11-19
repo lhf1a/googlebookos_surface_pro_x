@@ -11,17 +11,18 @@
 
 using namespace iptsd::apps::daemon;
 int main(int argc, char **argv) try {
-    const bool noisePatch=argc==4 && std::string(argv[1])=="publish" && std::string(argv[3])=="noise-patch";
-    const size_t limit=noisePatch?132096:4096;
+    const bool largePayload=argc==4 && std::string(argv[1])=="publish"
+        && (std::string(argv[3])=="noise-patch" || std::string(argv[3])=="calibration-bundle");
+    const size_t limit=largePayload?132096:4096;
     std::string body, line;
     while (std::getline(std::cin,line)) {
-        if (line.size()>(noisePatch?limit:1024) || body.size()+line.size()>limit) throw std::runtime_error("Profile too large");
+        if (line.size()>(largePayload?limit:1024) || body.size()+line.size()>limit) throw std::runtime_error("Profile too large");
         body+=line+'\n';
     }
     if (argc==4 && std::string(argv[1])=="publish") {
         // Directory is the known package's device-protected files directory.
         std::string name=argv[3];
-        if(name!="context" && name!="reply" && name!="noise-status" && name!="noise-patch" && name!="tap-status") throw std::runtime_error("Invalid output name");
+        if(name!="context" && name!="reply" && name!="noise-status" && name!="noise-patch" && name!="tap-status" && name!="calibration-bundle") throw std::runtime_error("Invalid output name");
         int dir=open(argv[2],O_RDONLY|O_DIRECTORY|O_NOFOLLOW);
         struct stat st{};if(dir<0 || fstat(dir,&st)) throw std::runtime_error("Invalid directory");
         std::string temp=".bridge-"+std::to_string(getpid());

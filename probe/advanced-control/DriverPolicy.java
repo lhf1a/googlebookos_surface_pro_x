@@ -1,15 +1,64 @@
 package org.surface.advancedcontrol;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/** Pure policy, sorting, and bridge request encoding, shared by the UI and host tests. */
+/** Pure policy, sorting, touch summary, and bridge request encoding, shared by the UI and host tests. */
 public final class DriverPolicy {
     public static final String APP_PREFIX = "persist.sq2.vulkan.app.";
     public static final String DEFAULT_DRIVER_PROP = "persist.sq2.vulkan.driver";
+    public static final int MAX_TOUCH_IMPORT_BYTES = 132096;
+
+    public static final class CurveSummary {
+        public final int points;
+        public final boolean identity;
+        public final double maxDeltaPercent;
+
+        public CurveSummary(int points, boolean identity, double maxDeltaPercent) {
+            this.points = points;
+            this.identity = identity;
+            this.maxDeltaPercent = maxDeltaPercent;
+        }
+    }
+
+    public static final class NoiseSummary {
+        public final String format;
+        public final int rows;
+        public final int cols;
+        public final int count;
+        public final int total;
+        public final int maxLevel;
+        public final String axis;
+        public final String detail;
+
+        public NoiseSummary(String format, int rows, int cols, int count, int total,
+                            int maxLevel, String axis, String detail) {
+            this.format = format;
+            this.rows = rows;
+            this.cols = cols;
+            this.count = count;
+            this.total = total;
+            this.maxLevel = maxLevel;
+            this.axis = axis;
+            this.detail = detail;
+        }
+    }
+
+    public static final class TapSummary {
+        public final int rows;
+        public final int cols;
+        public final int frames;
+
+        public TapSummary(int rows, int cols, int frames) {
+            this.rows = rows;
+            this.cols = cols;
+            this.frames = frames;
+        }
+    }
 
     private DriverPolicy() {}
 
@@ -107,6 +156,195 @@ public final class DriverPolicy {
 
     public static String cpuGovernorRequest(String nonce, String governor) {
         return "set-cpu-governor\n" + normalizeNonce(nonce) + "\n" + normalizeGovernor(governor) + "\n";
+    }
+
+    public static String touchGhostPatchRequest(String nonce, boolean enabled) {
+        return "set-touch-ghost-patch\n" + normalizeNonce(nonce) + "\n" + (enabled ? "1" : "0") + "\n";
+    }
+
+    public static String clearTouchCalibrationRequest(String nonce) {
+        return "clear-touch-calibration\n" + normalizeNonce(nonce) + "\n";
+    }
+
+    public static String exportTouchCalibrationRequest(String nonce) {
+        return "export-touch-calibration\n" + normalizeNonce(nonce) + "\n";
+    }
+
+    public static String defaultTouchExportFilename(String deviceId) {
+        if (deviceId != null && deviceId.matches("[0-9a-f]{8,64}")) {
+            return "surface-touch-" + deviceId.substring(0, 8) + ".spkcal";
+        }
+        return "surface-touch.spkcal";
+    }
+
+    public static String detectTouchImportKind(String rawContent) {
+        if (rawContent == null) {
+            throw new IllegalArgumentException("Empty calibration file");
+        }
+        if (rawContent.indexOf('\0') >= 0) {
+            throw new IllegalArgumentException("Invalid binary calibration file");
+        }
+        String normalized = rawContent.replace("\r\n", "\n").replace('\r', '\n');
+        byte[] bytes = normalized.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length == 0 || bytes.length > MAX_TOUCH_IMPORT_BYTES) {
+            throw new IllegalArgumentException("Calibration file is empty or too large");
+        }
+        String firstNonEmpty = "";
+        for (String line : normalized.split("\n")) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty()) {
+                firstNonEmpty = trimmed;
+                break;
+            }
+        }
+        if (firstNonEmpty.isEmpty()) {
+            throw new IllegalArgumentException("Empty calibration file");
+        }
+        if ("SPXTOUCH1".equals(firstNonEmpty)
+                && (normalized.contains("\n[Profile]\n")
+                        || normalized.contains("\n[Noise]\n")
+                        || normalized.contains("\n[Tap]\n"))) {
+            return "bundle";
+        }
+        if (firstNonEmpty.startsWith("SPXNOISE1 ") || firstNonEmpty.startsWith("SPXNOISE2 ")
+                || firstNonEmpty.startsWith("SPXNOISE3 ")) {
+            return "noise";
+        }
+        if (firstNonEmpty.startsWith("SPXTAP1 ")) {
+            return "tap";
+        }
+        if (normalized.contains("Version=1") && normalized.contains("CalibrationX=")) {
+            return "profile";
+        }
+        throw new IllegalArgumentException("Unrecognized calibration file format");
+    }
+
+    public static String importTouchCalibrationRequest(String nonce, String rawContent) {
+        detectTouchImportKind(rawContent);
+        String normalized = rawContent.replace("\r\n", "\n").replace('\r', '\n');
+        if (!normalized.endsWith("\n")) {
+            normalized += "\n";
+        }
+        return "import-touch-calibration\n" + normalizeNonce(nonce) + "\n" + normalized;
+    }
+
+    public static CurveSummary summarizeCurve(String curveText) {
+        if (curveText == null || curveText.trim().isEmpty()) {
+            return new CurveSummary(0, true, 0.0);
+        }
+        String[] tokens = curveText.trim().split("\\s+");
+        int count = 0;
+        double maxDelta = 0.0;
+        boolean allEqual = true;
+        for (String tok : tokens) {
+            String[] parts = tok.split(":");
+            if (parts.length != 2) {
+                continue;
+            }
+            try {
+                double from = Double.parseDouble(parts[0]);
+                double to = Double.parseDouble(parts[1]);
+                if (!Double.isFinite(from) || !Double.isFinite(to)) {
+                    continue;
+                }
+                count++;
+                double delta = Math.abs(to - from) * 100.0;
+                if (delta > maxDelta) {
+                    maxDelta = delta;
+                }
+                if (Math.abs(to - from) > 1e-5) {
+                    allEqual = false;
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        boolean identity = count <= 2 && allEqual;
+        return new CurveSummary(count, identity, maxDelta);
+    }
+
+    public static NoiseSummary parseNoiseSummary(String rawInfo) {
+        if (rawInfo == null || rawInfo.trim().isEmpty()) {
+            return null;
+        }
+        String[] tok = rawInfo.trim().split("\\s+");
+        if (tok.length < 6) {
+            return null;
+        }
+        String tag = tok[0];
+        int rows;
+        int cols;
+        try {
+            rows = Integer.parseInt(tok[4]);
+            cols = Integer.parseInt(tok[5]);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        if ("SPXNOISE1".equals(tag) && tok.length >= 7) {
+            int cells = 0;
+            try {
+                cells = Integer.parseInt(tok[6]);
+            } catch (NumberFormatException ignored) {
+            }
+            return new NoiseSummary(tag, rows, cols, cells, rows * cols, 0, "", "");
+        }
+        if ("SPXNOISE2".equals(tag) && tok.length >= 8) {
+            String axis = tok[6];
+            int count = 0;
+            try {
+                count = Integer.parseInt(tok[7]);
+            } catch (NumberFormatException ignored) {
+            }
+            StringBuilder idx = new StringBuilder();
+            for (int i = 8; i < tok.length; i++) {
+                if (idx.length() > 0) {
+                    idx.append(',');
+                }
+                idx.append(tok[i]);
+            }
+            return new NoiseSummary(tag, rows, cols, count, rows * cols, 0, axis, idx.toString());
+        }
+        if ("SPXNOISE3".equals(tag)) {
+            int nz = 0;
+            int total = rows * cols;
+            int mx = 0;
+            for (int i = 6; i < tok.length; i++) {
+                if (tok[i].startsWith("nonzero=")) {
+                    String[] parts = tok[i].substring(8).split("/");
+                    if (parts.length == 2) {
+                        try {
+                            nz = Integer.parseInt(parts[0]);
+                            total = Integer.parseInt(parts[1]);
+                        } catch (NumberFormatException ignored) {
+                        }
+                    }
+                } else if (tok[i].startsWith("max=")) {
+                    try {
+                        mx = Integer.parseInt(tok[i].substring(4));
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+            return new NoiseSummary(tag, rows, cols, nz, total, mx, "", "");
+        }
+        return null;
+    }
+
+    public static TapSummary parseTapSummary(String rawLine) {
+        if (rawLine == null || rawLine.trim().isEmpty()) {
+            return null;
+        }
+        String[] tok = rawLine.trim().split("\\s+");
+        if (tok.length < 7 || !"SPXTAP1".equals(tok[0])) {
+            return null;
+        }
+        try {
+            return new TapSummary(
+                    Integer.parseInt(tok[4]),
+                    Integer.parseInt(tok[5]),
+                    Integer.parseInt(tok[6]));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     public static String saveCommand(int uid, String pkg, String driver, boolean stop) {

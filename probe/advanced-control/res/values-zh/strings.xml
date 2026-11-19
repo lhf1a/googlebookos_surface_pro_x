@@ -2,5 +2,6 @@
 <resources>
     <string name="app_name">高级设置</string>
     <string name="settings_title">高级设置</string>
-    <string name="settings_summary">Vulkan 配置与性能模式</string>
+    <string name="settings_summary">Vulkan 配置、性能模式、触摸设置与系统更新</string>
+    <string name="ota_settings_title">系统更新</string>
 </resources>

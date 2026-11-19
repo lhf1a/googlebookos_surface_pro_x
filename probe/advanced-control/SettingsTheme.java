@@ -39,6 +39,12 @@ final class SettingsTheme {
     final int vulkanBadgeFg;
     final int perfBadgeBg;
     final int perfBadgeFg;
+    final int touchBadgeBg;
+    final int touchBadgeFg;
+    final int otaBadgeBg;
+    final int otaBadgeFg;
+    final int dangerBadgeBg;
+    final int dangerBadgeFg;
 
     final int mesaChipBg;
     final int mesaChipFg;
@@ -120,6 +126,12 @@ final class SettingsTheme {
             vulkanBadgeFg = 0xFF9ECAFF;
             perfBadgeBg = 0xFF3E2D13;
             perfBadgeFg = 0xFFFFCA7A;
+            touchBadgeBg = 0xFF1B3B2B;
+            touchBadgeFg = 0xFF8BE0B4;
+            otaBadgeBg = 0xFF2B2752;
+            otaBadgeFg = 0xFFC7BFFF;
+            dangerBadgeBg = 0xFF45241E;
+            dangerBadgeFg = 0xFFFFB4A9;
             mesaChipBg = 0xFF1A3A4A;
             mesaChipFg = 0xFF8BE2FF;
             qcomChipBg = 0xFF472814;
@@ -135,6 +147,12 @@ final class SettingsTheme {
             vulkanBadgeFg = 0xFF1557B0;
             perfBadgeBg = 0xFFFFECD2;
             perfBadgeFg = 0xFFB85D00;
+            touchBadgeBg = 0xFFD8F3E5;
+            touchBadgeFg = 0xFF116B43;
+            otaBadgeBg = 0xFFE9E4FF;
+            otaBadgeFg = 0xFF4B38A8;
+            dangerBadgeBg = 0xFFFCE8E6;
+            dangerBadgeFg = 0xFFA50E0E;
             mesaChipBg = 0xFFD9F2FF;
             mesaChipFg = 0xFF0B5785;
             qcomChipBg = 0xFFFFE5D4;
@@ -241,6 +259,15 @@ final class SettingsTheme {
     static final int ICON_PERF = 5;
     static final int ICON_SEARCH = 6;
     static final int ICON_CLEAR = 7;
+    static final int ICON_TOUCH = 8;
+    static final int ICON_CALIBRATE = 9;
+    static final int ICON_IMPORT = 10;
+    static final int ICON_TRASH = 11;
+    static final int ICON_EXPORT = 12;
+    static final int ICON_UPDATE = 13;
+    static final int ICON_CHECK = 14;
+    static final int ICON_WARNING = 15;
+    static final int ICON_PACKAGE = 16;
 
     View iconView(Context ctx, int kind, int color, int sizeDp) {
         IconGlyphView v = new IconGlyphView(ctx, kind, color, density);
@@ -251,6 +278,10 @@ final class SettingsTheme {
 
     View radioView(Context ctx, boolean checked) {
         return new RadioIndicatorView(ctx, checked, primary, textSecondary, density);
+    }
+
+    View switchView(Context ctx, boolean checked, boolean enabled) {
+        return new MaterialSwitchView(ctx, checked, enabled, primary, onPrimary, cardAlt, textSecondary, density);
     }
 
     private static final class IconGlyphView extends View {
@@ -345,6 +376,109 @@ final class SettingsTheme {
                     c.drawLine(cx + r, cy - r, cx - r, cy + r, paint);
                     break;
                 }
+                case ICON_TOUCH: {
+                    // Stylus / fingertip tap ripples + target dot
+                    float r1 = s * 0.34f;
+                    float r2 = s * 0.19f;
+                    c.drawArc(new RectF(cx - r1, cy - r1, cx + r1, cy + r1), 165, 210, false, paint);
+                    c.drawArc(new RectF(cx - r2, cy - r2, cx + r2, cy + r2), 165, 210, false, paint);
+                    c.drawLine(cx, cy, cx, cy + r1 * 0.95f, paint);
+                    paint.setStyle(Paint.Style.FILL);
+                    c.drawCircle(cx, cy, Math.max(2.5f, 2.3f * density), paint);
+                    paint.setStyle(Paint.Style.STROKE);
+                    break;
+                }
+                case ICON_CALIBRATE: {
+                    // Crosshair target icon for Recalibrate
+                    float r = s * 0.27f;
+                    c.drawCircle(cx, cy, r, paint);
+                    float arm = s * 0.38f;
+                    c.drawLine(cx - arm, cy, cx - r * 0.45f, cy, paint);
+                    c.drawLine(cx + r * 0.45f, cy, cx + arm, cy, paint);
+                    c.drawLine(cx, cy - arm, cx, cy - r * 0.45f, paint);
+                    c.drawLine(cx, cy + r * 0.45f, cx, cy + arm, paint);
+                    break;
+                }
+                case ICON_IMPORT: {
+                    // Folder/tray + arrow down into tray
+                    float r = s * 0.30f;
+                    c.drawLine(cx, cy - r, cx, cy + r * 0.35f, paint);
+                    c.drawLine(cx - r * 0.45f, cy - r * 0.1f, cx, cy + r * 0.38f, paint);
+                    c.drawLine(cx + r * 0.45f, cy - r * 0.1f, cx, cy + r * 0.38f, paint);
+                    Path tray = new Path();
+                    tray.moveTo(cx - r, cy + r * 0.45f);
+                    tray.lineTo(cx - r, cy + r * 0.92f);
+                    tray.lineTo(cx + r, cy + r * 0.92f);
+                    tray.lineTo(cx + r, cy + r * 0.45f);
+                    c.drawPath(tray, paint);
+                    break;
+                }
+                case ICON_EXPORT: {
+                    // Tray + arrow up out of tray
+                    float r = s * 0.30f;
+                    c.drawLine(cx, cy - r * 0.95f, cx, cy + r * 0.38f, paint);
+                    c.drawLine(cx - r * 0.45f, cy - r * 0.48f, cx, cy - r * 0.95f, paint);
+                    c.drawLine(cx + r * 0.45f, cy - r * 0.48f, cx, cy - r * 0.95f, paint);
+                    Path tray = new Path();
+                    tray.moveTo(cx - r, cy + r * 0.45f);
+                    tray.lineTo(cx - r, cy + r * 0.92f);
+                    tray.lineTo(cx + r, cy + r * 0.92f);
+                    tray.lineTo(cx + r, cy + r * 0.45f);
+                    c.drawPath(tray, paint);
+                    break;
+                }
+                case ICON_TRASH: {
+                    float r = s * 0.28f;
+                    c.drawLine(cx - r * 1.05f, cy - r * 0.65f, cx + r * 1.05f, cy - r * 0.65f, paint);
+                    c.drawLine(cx - r * 0.40f, cy - r * 0.95f, cx + r * 0.40f, cy - r * 0.95f, paint);
+                    RectF body = new RectF(cx - r * 0.72f, cy - r * 0.65f, cx + r * 0.72f, cy + r * 0.95f);
+                    c.drawRoundRect(body, r * 0.2f, r * 0.2f, paint);
+                    c.drawLine(cx - r * 0.26f, cy - r * 0.2f, cx - r * 0.26f, cy + r * 0.55f, paint);
+                    c.drawLine(cx + r * 0.26f, cy - r * 0.2f, cx + r * 0.26f, cy + r * 0.55f, paint);
+                    break;
+                }
+                case ICON_UPDATE: {
+                    // System update arrow up inside soft circle arc
+                    float r = s * 0.34f;
+                    RectF oval = new RectF(cx - r, cy - r, cx + r, cy + r);
+                    c.drawArc(oval, -60, 300, false, paint);
+                    c.drawLine(cx, cy + r * 0.45f, cx, cy - r * 0.48f, paint);
+                    c.drawLine(cx - r * 0.36f, cy - r * 0.12f, cx, cy - r * 0.48f, paint);
+                    c.drawLine(cx + r * 0.36f, cy - r * 0.12f, cx, cy - r * 0.48f, paint);
+                    break;
+                }
+                case ICON_CHECK: {
+                    float r = s * 0.32f;
+                    c.drawCircle(cx, cy, r, paint);
+                    Path ck = new Path();
+                    ck.moveTo(cx - r * 0.42f, cy + r * 0.02f);
+                    ck.lineTo(cx - r * 0.10f, cy + r * 0.34f);
+                    ck.lineTo(cx + r * 0.46f, cy - r * 0.30f);
+                    c.drawPath(ck, paint);
+                    break;
+                }
+                case ICON_WARNING: {
+                    float r = s * 0.34f;
+                    Path tri = new Path();
+                    tri.moveTo(cx, cy - r * 0.92f);
+                    tri.lineTo(cx + r * 0.95f, cy + r * 0.78f);
+                    tri.lineTo(cx - r * 0.95f, cy + r * 0.78f);
+                    tri.close();
+                    c.drawPath(tri, paint);
+                    c.drawLine(cx, cy - r * 0.30f, cx, cy + r * 0.22f, paint);
+                    paint.setStyle(Paint.Style.FILL);
+                    c.drawCircle(cx, cy + r * 0.48f, Math.max(1.8f, 1.4f * density), paint);
+                    paint.setStyle(Paint.Style.STROKE);
+                    break;
+                }
+                case ICON_PACKAGE: {
+                    float r = s * 0.32f;
+                    RectF box = new RectF(cx - r, cy - r * 0.78f, cx + r, cy + r * 0.88f);
+                    c.drawRoundRect(box, r * 0.24f, r * 0.24f, paint);
+                    c.drawLine(cx - r, cy - r * 0.22f, cx + r, cy - r * 0.22f, paint);
+                    c.drawLine(cx, cy - r * 0.78f, cx, cy - r * 0.22f, paint);
+                    break;
+                }
                 default:
                     break;
             }
@@ -378,6 +512,68 @@ final class SettingsTheme {
                 paint.setStyle(Paint.Style.FILL);
                 c.drawCircle(cx, cy, outer * 0.52f, paint);
             }
+        }
+    }
+
+    private static final class MaterialSwitchView extends View {
+        private final boolean checked;
+        private final boolean enabled;
+        private final int primary;
+        private final int onPrimary;
+        private final int trackOff;
+        private final int outline;
+        private final float density;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        MaterialSwitchView(Context ctx, boolean checked, boolean enabled,
+                           int primary, int onPrimary, int trackOff, int outline, float density) {
+            super(ctx);
+            this.checked = checked;
+            this.enabled = enabled;
+            this.primary = primary;
+            this.onPrimary = onPrimary;
+            this.trackOff = trackOff;
+            this.outline = outline;
+            this.density = density;
+        }
+
+        @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            int w = resolveSize(Math.round(52f * density), widthMeasureSpec);
+            int h = resolveSize(Math.round(32f * density), heightMeasureSpec);
+            setMeasuredDimension(w, h);
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            float w = getWidth();
+            float h = getHeight();
+            float th = Math.min(h, 30f * density);
+            float tw = Math.min(w, 52f * density);
+            float left = (w - tw) / 2f;
+            float top = (h - th) / 2f;
+            float r = th / 2f;
+            RectF track = new RectF(left, top, left + tw, top + th);
+            int alpha = enabled ? 255 : 130;
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(checked ? primary : trackOff);
+            paint.setAlpha(alpha);
+            c.drawRoundRect(track, r, r, paint);
+
+            if (!checked) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(Math.max(2f, 1.8f * density));
+                paint.setColor(outline);
+                paint.setAlpha(alpha);
+                c.drawRoundRect(track, r, r, paint);
+            }
+
+            paint.setStyle(Paint.Style.FILL);
+            float thumbR = checked ? th * 0.36f : th * 0.27f;
+            float cx = checked ? (left + tw - r) : (left + r);
+            float cy = top + r;
+            paint.setColor(checked ? onPrimary : outline);
+            paint.setAlpha(alpha);
+            c.drawCircle(cx, cy, thumbR, paint);
         }
     }
 }

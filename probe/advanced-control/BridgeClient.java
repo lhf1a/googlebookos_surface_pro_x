@@ -28,6 +28,32 @@ final class BridgeClient {
         String currentGovernor = "";
         String savedGovernor = "";
         String cpuPolicies = "";
+        boolean touchAvailable;
+        boolean touchIptsdRunning;
+        String touchDeviceId = "";
+        String touchHidId = "";
+        boolean touchProfileSaved;
+        String touchProfileX = "";
+        String touchProfileY = "";
+        String touchProfileXTop = "";
+        String touchProfileTopStart = "";
+        String touchProfileTopEnd = "";
+        String touchProfileSizeMax = "";
+        boolean touchNoiseSaved;
+        boolean touchNoiseEnabled;
+        String touchNoiseInfo = "";
+        boolean touchTapSaved;
+        String touchTapLine = "";
+    }
+
+    static final class TouchImportResult {
+        final BridgeState state;
+        final String kind;
+
+        TouchImportResult(BridgeState state, String kind) {
+            this.state = state;
+            this.kind = kind;
+        }
     }
 
     private final File bridgeDir;
@@ -104,7 +130,36 @@ final class BridgeClient {
         return loadState(false);
     }
 
-    private void sendRequest(String body, long timeoutMs) throws Exception {
+    BridgeState setTouchGhostPatch(boolean enabled) throws Exception {
+        String nonce = newNonce();
+        sendRequest(DriverPolicy.touchGhostPatchRequest(nonce, enabled), 20000);
+        return loadState(false);
+    }
+
+    BridgeState clearTouchCalibration() throws Exception {
+        String nonce = newNonce();
+        sendRequest(DriverPolicy.clearTouchCalibrationRequest(nonce), 25000);
+        return loadState(false);
+    }
+
+    TouchImportResult importTouchCalibration(String rawContent) throws Exception {
+        String nonce = newNonce();
+        String expectedKind = DriverPolicy.detectTouchImportKind(rawContent);
+        String appliedKind = sendRequest(DriverPolicy.importTouchCalibrationRequest(nonce, rawContent), 25000).trim();
+        String kind = appliedKind.isEmpty() ? expectedKind : appliedKind;
+        return new TouchImportResult(loadState(false), kind);
+    }
+
+    String exportTouchCalibration() throws Exception {
+        String nonce = newNonce();
+        String content = sendRequest(DriverPolicy.exportTouchCalibrationRequest(nonce), 15000);
+        if (content == null || content.trim().isEmpty()) {
+            throw new IOException("empty_export");
+        }
+        return content;
+    }
+
+    private String sendRequest(String body, long timeoutMs) throws Exception {
         if (!bridgeDir.isDirectory() && !bridgeDir.mkdirs()) {
             throw new IOException("Bridge directory unavailable");
         }
@@ -130,14 +185,18 @@ final class BridgeClient {
             if (replyFile.isFile()) {
                 try {
                     String raw = new String(Files.readAllBytes(replyFile.toPath()), StandardCharsets.UTF_8);
-                    String[] replyLines = raw.split("\n");
-                    if (replyLines.length >= 2 && nonce.equals(replyLines[0].trim())) {
-                        String status = replyLines[1].trim();
+                    int firstNl = raw.indexOf('\n');
+                    if (firstNl > 0 && nonce.equals(raw.substring(0, firstNl).trim())) {
+                        int secondNl = raw.indexOf('\n', firstNl + 1);
+                        String status = (secondNl >= 0
+                                ? raw.substring(firstNl + 1, secondNl)
+                                : raw.substring(firstNl + 1)).trim();
+                        String payload = secondNl >= 0 ? raw.substring(secondNl + 1) : "";
                         if ("OK".equals(status)) {
-                            return;
+                            return payload;
                         }
-                        String detail = replyLines.length >= 3 ? replyLines[2].trim() : status;
-                        throw new IOException(detail.isEmpty() ? "bridge_error" : detail);
+                        String detail = payload.trim();
+                        throw new IOException(detail.isEmpty() ? (status.isEmpty() ? "bridge_error" : status) : detail);
                     }
                 } catch (IOException e) {
                     if (e.getMessage() != null && !e.getMessage().isEmpty()
@@ -169,6 +228,22 @@ final class BridgeClient {
         state.currentGovernor = map.getOrDefault("cpu_current_governor", "");
         state.savedGovernor = map.getOrDefault("cpu_saved_governor", "");
         state.cpuPolicies = map.getOrDefault("cpu_policies", "");
+        state.touchAvailable = "1".equals(map.get("touch_available"));
+        state.touchIptsdRunning = "1".equals(map.get("touch_iptsd_running"));
+        state.touchDeviceId = map.getOrDefault("touch_device_id", "");
+        state.touchHidId = map.getOrDefault("touch_hid_id", "");
+        state.touchProfileSaved = "1".equals(map.get("touch_profile_saved"));
+        state.touchProfileX = map.getOrDefault("touch_profile_x", "");
+        state.touchProfileY = map.getOrDefault("touch_profile_y", "");
+        state.touchProfileXTop = map.getOrDefault("touch_profile_x_top", "");
+        state.touchProfileTopStart = map.getOrDefault("touch_profile_top_start", "");
+        state.touchProfileTopEnd = map.getOrDefault("touch_profile_top_end", "");
+        state.touchProfileSizeMax = map.getOrDefault("touch_profile_size_max", "");
+        state.touchNoiseSaved = "1".equals(map.get("touch_noise_saved"));
+        state.touchNoiseEnabled = "1".equals(map.get("touch_noise_enabled"));
+        state.touchNoiseInfo = map.getOrDefault("touch_noise_info", "");
+        state.touchTapSaved = "1".equals(map.get("touch_tap_saved"));
+        state.touchTapLine = map.getOrDefault("touch_tap_line", "");
     }
 
     private void fillLocalFallback(BridgeState state) {

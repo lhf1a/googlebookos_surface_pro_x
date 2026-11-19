@@ -1,0 +1,442 @@
+#!/bin/busybox sh
+# Early-boot offline OTA applier for Surface Pro X Googlebook OS.
+# Runs in initramfs RAM after prepare-native-ssd mounts /media/esp and discovers
+# /dev/block/by-name/*, BEFORE super/userdata/metadata are mounted by Android.
+set -eu
+
+export PATH="${SPX_OTA_PATH:-/bin:/sbin:/usr/bin:/usr/sbin}"
+
+ESP_DIR="${SPX_OTA_ESP:-/media/esp}"
+RUN_DIR="${SPX_OTA_RUN:-/run/spx-ota}"
+OTA_TOOL="${SPX_OTA_TOOL:-/bin/spx-ota-tool}"
+SUPER_DEV="${SPX_OTA_SUPER_DEV:-/dev/block/by-name/super}"
+DATA_DEV="${SPX_OTA_DATA_DEV:-/dev/block/by-name/userdata}"
+META_DEV="${SPX_OTA_META_DEV:-/dev/block/by-name/metadata}"
+MISC_DEV="${SPX_OTA_MISC_DEV:-/dev/block/by-name/misc}"
+PENDING_FILE="$ESP_DIR/SPX-OTA-PENDING"
+INPROG_FILE="$ESP_DIR/SPX-OTA-INPROGRESS"
+RESULT_FILE="$ESP_DIR/SPX-OTA-RESULT.txt"
+LOG_FILE="$ESP_DIR/SPX-OTA-LAST.log"
+NO_REBOOT="${SPX_OTA_NO_REBOOT:-0}"
+DATA_DIR_OVERRIDE="${SPX_OTA_DATA_DIR:-}"
+META_DIR_OVERRIDE="${SPX_OTA_META_DIR:-}"
+ESP_SRC_OVERRIDE="${SPX_OTA_ESP_SRC_DIR:-}"
+
+[ -f "$PENDING_FILE" ] || exit 0
+[ ! -L "$PENDING_FILE" ] || exit 0
+
+mkdir -p "$RUN_DIR"
+: > "$LOG_FILE" 2>/dev/null || true
+
+log() {
+    printf 'SPX_OTA: %s\n' "$*"
+    printf 'SPX_OTA: %s\n' "$*" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+is_hex64() {
+    [ "${#1}" = 64 ] || return 1
+    case "$1" in
+        *[!0-9a-f]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+is_safe_relpath() {
+    _p="$1"
+    [ -n "$_p" ] || return 1
+    case "$_p" in
+        /*|*/|..|../*|*/..|*/../*|*\\*|*\'*|*\"*|*\$*|*\`*) return 1 ;;
+    esac
+    return 0
+}
+
+is_preserved_esp_path() {
+    case "$1" in
+        EFI/BOOT/grub.cfg|SPX-USERDATA-GROWN.txt|SPX-BOOT-SOURCE.txt|SPX-OTA-*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+block_size_bytes() {
+    _dev="$1"
+    if [ -b "$_dev" ]; then
+        _real="$(readlink -f "$_dev" 2>/dev/null || printf '%s' "$_dev")"
+        _node="${_real##*/}"
+        if [ -r "/sys/class/block/$_node/size" ]; then
+            _sec="$(cat "/sys/class/block/$_node/size")"
+            echo $(( _sec * 512 ))
+            return 0
+        fi
+        if command -v blockdev >/dev/null 2>&1; then
+            blockdev --getsize64 "$_dev" 2>/dev/null && return 0
+        fi
+    elif [ -f "$_dev" ]; then
+        stat -c '%s' "$_dev" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+write_result() {
+    _status="$1"
+    _err="${2:-}"
+    _tmp="$RESULT_FILE.tmp"
+    {
+        printf 'STATUS=%s\n' "$_status"
+        printf 'VERSION=%s\n' "${VERSION:-unknown}"
+        printf 'PACKAGE_KIND=%s\n' "${PACKAGE_KIND:-unknown}"
+        printf 'APPLY_SUPER=%s\n' "${APPLY_SUPER:-0}"
+        printf 'WIPE_DATA=%s\n' "${WIPE_DATA:-0}"
+        printf 'ERROR=%s\n' "$_err"
+    } > "$_tmp"
+    sync 2>/dev/null || true
+    mv -f "$_tmp" "$RESULT_FILE"
+    sync 2>/dev/null || true
+}
+
+DATA_MOUNTED=0
+ESP_SRC_MOUNTED=0
+cleanup() {
+    if [ "$ESP_SRC_MOUNTED" = 1 ]; then
+        umount "$RUN_DIR/esp-src" 2>/dev/null || true
+        ESP_SRC_MOUNTED=0
+    fi
+    if [ "$DATA_MOUNTED" = 1 ]; then
+        umount "$RUN_DIR/data" 2>/dev/null || true
+        DATA_MOUNTED=0
+    fi
+    rm -rf "$RUN_DIR/work" "$RUN_DIR/esp-stage" "$RUN_DIR/esp.fat" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+fail_ota() {
+    _reason="$1"
+    log "FAILED: $_reason"
+    write_result "ERROR" "$_reason"
+    rm -f "$INPROG_FILE" 2>/dev/null || true
+    sync 2>/dev/null || true
+    exit 1
+}
+
+# Parse pending descriptor without eval/sourcing.
+PACKAGE_REL=""
+PACKAGE_SHA256=""
+PACKAGE_KIND=""
+APPLY_SUPER="0"
+WIPE_DATA="0"
+VERSION=""
+
+while IFS='=' read -r _k _v; do
+    _v="$(printf '%s' "$_v" | tr -d '\r')"
+    case "$_k" in
+        PACKAGE_REL) PACKAGE_REL="$_v" ;;
+        PACKAGE_SHA256) PACKAGE_SHA256="$_v" ;;
+        PACKAGE_KIND) PACKAGE_KIND="$_v" ;;
+        APPLY_SUPER) APPLY_SUPER="$_v" ;;
+        WIPE_DATA) WIPE_DATA="$_v" ;;
+        VERSION) VERSION="$_v" ;;
+    esac
+done < "$PENDING_FILE"
+
+# Move pending marker immediately to prevent infinite boot loops on crash.
+mv -f "$PENDING_FILE" "$INPROG_FILE"
+sync 2>/dev/null || true
+
+log "Starting offline OTA: kind=$PACKAGE_KIND version=$VERSION apply_super=$APPLY_SUPER wipe_data=$WIPE_DATA"
+
+[ -x "$OTA_TOOL" ] || fail_ota "missing_ota_tool"
+is_safe_relpath "$PACKAGE_REL" || fail_ota "invalid_package_path"
+is_hex64 "$PACKAGE_SHA256" || fail_ota "invalid_package_sha256"
+case "$PACKAGE_KIND" in
+    manifest|full-img|full-img-gz) ;;
+    *) fail_ota "unsupported_package_kind" ;;
+esac
+case "$APPLY_SUPER" in 0|1) ;; *) fail_ota "invalid_apply_super" ;; esac
+case "$WIPE_DATA" in 0|1) ;; *) fail_ota "invalid_wipe_data" ;; esac
+
+if [ -n "$DATA_DIR_OVERRIDE" ]; then
+    DATA_ROOT="$DATA_DIR_OVERRIDE"
+else
+    mkdir -p "$RUN_DIR/data"
+    mount -t ext4 -o rw "$DATA_DEV" "$RUN_DIR/data" || fail_ota "mount_userdata_failed"
+    DATA_MOUNTED=1
+    DATA_ROOT="$RUN_DIR/data"
+fi
+
+PKG_PATH="$DATA_ROOT/$PACKAGE_REL"
+[ -f "$PKG_PATH" ] && [ ! -L "$PKG_PATH" ] || fail_ota "package_not_found"
+
+log "Verifying package SHA-256..."
+ACTUAL_PKG_SHA="$("$OTA_TOOL" sha256 "$PKG_PATH" 2>>"$LOG_FILE")" || fail_ota "package_hash_error"
+[ "$ACTUAL_PKG_SHA" = "$PACKAGE_SHA256" ] || fail_ota "package_sha256_mismatch"
+log "Package SHA-256 verified: $ACTUAL_PKG_SHA"
+
+copy_esp_file_atomic() {
+    _src="$1"
+    _rel="$2"
+    _expected_sha="${3:-}"
+    is_safe_relpath "$_rel" || fail_ota "unsafe_esp_path"
+    if is_preserved_esp_path "$_rel"; then
+        log "Preserving device-local ESP file: $_rel"
+        return 0
+    fi
+    _dst="$ESP_DIR/$_rel"
+    _dir="${_dst%/*}"
+    mkdir -p "$_dir" || fail_ota "esp_mkdir_failed"
+    _tmp="$_dst.spxtmp"
+    rm -f "$_tmp" 2>/dev/null || true
+    cp "$_src" "$_tmp" || fail_ota "esp_copy_failed"
+    sync 2>/dev/null || true
+    if [ -n "$_expected_sha" ]; then
+        _got="$("$OTA_TOOL" sha256 "$_tmp" 2>>"$LOG_FILE")" || fail_ota "esp_verify_failed"
+        [ "$_got" = "$_expected_sha" ] || { rm -f "$_tmp"; fail_ota "esp_sha256_mismatch"; }
+    fi
+    mv -f "$_tmp" "$_dst" || { rm -f "$_tmp"; fail_ota "esp_rename_failed"; }
+    sync 2>/dev/null || true
+}
+
+apply_manifest_package() {
+    mkdir -p "$RUN_DIR/work/meta" "$RUN_DIR/esp-stage"
+    log "Extracting OTA manifest..."
+    tar -xzf "$PKG_PATH" -C "$RUN_DIR/work/meta" ota-manifest.kv ota-files.tsv 2>>"$LOG_FILE" || fail_ota "manifest_extract_failed"
+    [ -f "$RUN_DIR/work/meta/ota-manifest.kv" ] || fail_ota "manifest_kv_missing"
+    [ -f "$RUN_DIR/work/meta/ota-files.tsv" ] || fail_ota "manifest_files_missing"
+
+    M_SUPER_INCLUDED="0"
+    M_SUPER_ARCHIVE=""
+    M_SUPER_SHA256=""
+    M_SUPER_BYTES="0"
+    M_VERSION=""
+    while IFS='=' read -r _k _v; do
+        _v="$(printf '%s' "$_v" | tr -d '\r')"
+        case "$_k" in
+            SUPER_INCLUDED) M_SUPER_INCLUDED="$_v" ;;
+            SUPER_ARCHIVE_PATH) M_SUPER_ARCHIVE="$_v" ;;
+            SUPER_SHA256) M_SUPER_SHA256="$_v" ;;
+            SUPER_BYTES) M_SUPER_BYTES="$_v" ;;
+            VERSION) M_VERSION="$_v" ;;
+        esac
+    done < "$RUN_DIR/work/meta/ota-manifest.kv"
+    if [ -n "$M_VERSION" ]; then
+        VERSION="$M_VERSION"
+    fi
+
+    if [ "$M_SUPER_INCLUDED" = "1" ]; then
+        is_safe_relpath "$M_SUPER_ARCHIVE" || fail_ota "invalid_super_archive_path"
+        is_hex64 "$M_SUPER_SHA256" || fail_ota "invalid_manifest_super_sha256"
+        [ "$M_SUPER_BYTES" -gt 0 ] 2>/dev/null || fail_ota "invalid_manifest_super_bytes"
+        _target_super_bytes="$(block_size_bytes "$SUPER_DEV")" || fail_ota "super_size_read_failed"
+        [ "$_target_super_bytes" -ge "$M_SUPER_BYTES" ] || fail_ota "super_partition_too_small"
+        log "Streaming super partition ($M_SUPER_BYTES bytes)..."
+        _stream_out="$(tar -xzOf "$PKG_PATH" "$M_SUPER_ARCHIVE" 2>>"$LOG_FILE" | "$OTA_TOOL" extract-stream "$SUPER_DEV" 0 "$M_SUPER_BYTES" - 0 0 2>>"$LOG_FILE")" || fail_ota "super_write_failed"
+        _written_sha="$(printf '%s\n' "$_stream_out" | sed -n 's/^SUPER_SHA256=//p' | head -n 1)"
+        [ "$_written_sha" = "$M_SUPER_SHA256" ] || fail_ota "super_sha256_mismatch"
+        log "Super partition updated and verified: $_written_sha"
+    fi
+
+    log "Extracting ESP payload files..."
+    tar -xzf "$PKG_PATH" -C "$RUN_DIR/esp-stage" payload/esp 2>>"$LOG_FILE" || fail_ota "esp_payload_extract_failed"
+
+    # Pre-verify every blob in ota-files.tsv before touching /media/esp.
+    log "Verifying staged ESP file checksums..."
+    while IFS='	' read -r _act _dst_rel _blob_rel _sha _sz; do
+        [ -n "$_act" ] || continue
+        case "$_act" in
+            PUT)
+                is_safe_relpath "$_dst_rel" || fail_ota "unsafe_manifest_dst"
+                is_safe_relpath "$_blob_rel" || fail_ota "unsafe_manifest_blob"
+                is_hex64 "$_sha" || fail_ota "invalid_file_sha256"
+                _src="$RUN_DIR/esp-stage/$_blob_rel"
+                [ -f "$_src" ] && [ ! -L "$_src" ] || fail_ota "missing_staged_blob"
+                _got="$("$OTA_TOOL" sha256 "$_src" 2>>"$LOG_FILE")" || fail_ota "staged_hash_error"
+                [ "$_got" = "$_sha" ] || fail_ota "staged_sha256_mismatch"
+                ;;
+            DEL)
+                is_safe_relpath "$_dst_rel" || fail_ota "unsafe_delete_path"
+                ;;
+            *)
+                fail_ota "unknown_manifest_action"
+                ;;
+        esac
+    done < "$RUN_DIR/work/meta/ota-files.tsv"
+
+    log "Applying verified ESP updates..."
+    while IFS='	' read -r _act _dst_rel _blob_rel _sha _sz; do
+        [ -n "$_act" ] || continue
+        case "$_act" in
+            PUT)
+                copy_esp_file_atomic "$RUN_DIR/esp-stage/$_blob_rel" "$_dst_rel" "$_sha"
+                ;;
+            DEL)
+                if ! is_preserved_esp_path "$_dst_rel"; then
+                    rm -f "$ESP_DIR/$_dst_rel" 2>/dev/null || true
+                fi
+                ;;
+        esac
+    done < "$RUN_DIR/work/meta/ota-files.tsv"
+    sync 2>/dev/null || true
+    log "Manifest OTA files applied cleanly."
+}
+
+sync_esp_tree_from_dir() {
+    _src_root="$1"
+    [ -f "$_src_root/SPX-IMAGE.txt" ] || fail_ota "esp_missing_marker"
+    grep -qx 'SPX_IMAGE_FORMAT=1' "$_src_root/SPX-IMAGE.txt" 2>/dev/null || fail_ota "esp_invalid_marker"
+    [ -f "$_src_root/EFI/SQ2Nat/Image" ] || fail_ota "esp_missing_kernel"
+    [ -f "$_src_root/EFI/SQ2Nat/initramfs.cpio.gz" ] || fail_ota "esp_missing_initramfs"
+
+    log "Syncing full ESP payload (preserving grub.cfg and device state)..."
+    # Walk all regular files in source ESP tree.
+    (
+        cd "$_src_root"
+        find . -type f | sed 's|^\./||' | sort
+    ) > "$RUN_DIR/esp-filelist.txt"
+
+    while IFS= read -r _rel; do
+        [ -n "$_rel" ] || continue
+        if is_preserved_esp_path "$_rel"; then
+            continue
+        fi
+        copy_esp_file_atomic "$_src_root/$_rel" "$_rel" ""
+    done < "$RUN_DIR/esp-filelist.txt"
+    sync 2>/dev/null || true
+    log "Full ESP tree synced cleanly."
+}
+
+apply_full_image_package() {
+    log "Inspecting full image GPT..."
+    if [ "$PACKAGE_KIND" = "full-img-gz" ]; then
+        _gpt="$(gzip -dc "$PKG_PATH" 2>>"$LOG_FILE" | "$OTA_TOOL" inspect-gpt - 2>>"$LOG_FILE")" || fail_ota "gpt_inspect_failed"
+    else
+        _gpt="$("$OTA_TOOL" inspect-gpt "$PKG_PATH" 2>>"$LOG_FILE")" || fail_ota "gpt_inspect_failed"
+    fi
+
+    _super_off=""
+    _super_len=""
+    _esp_off=""
+    _esp_len=""
+    while IFS='	' read -r _name _off _len _first _last; do
+        case "$_name" in
+            super) _super_off="$_off"; _super_len="$_len" ;;
+            SQ2PROBE) _esp_off="$_off"; _esp_len="$_len" ;;
+        esac
+    done <<EOF
+$_gpt
+EOF
+
+    [ -n "$_super_off" ] && [ -n "$_super_len" ] || fail_ota "image_missing_super"
+    [ -n "$_esp_off" ] && [ -n "$_esp_len" ] || fail_ota "image_missing_sq2probe"
+
+    _target_super_bytes="$(block_size_bytes "$SUPER_DEV")" || fail_ota "super_size_read_failed"
+    [ "$_target_super_bytes" -ge "$_super_len" ] || fail_ota "super_partition_too_small"
+
+    _esp_fat="$RUN_DIR/esp.fat"
+    log "Streaming full image: super($_super_len bytes) + SQ2PROBE($_esp_len bytes)..."
+    if [ "$PACKAGE_KIND" = "full-img-gz" ]; then
+        _stream_out="$(gzip -dc "$PKG_PATH" 2>>"$LOG_FILE" | "$OTA_TOOL" extract-stream "$SUPER_DEV" "$_super_off" "$_super_len" "$_esp_fat" "$_esp_off" "$_esp_len" 2>>"$LOG_FILE")" || fail_ota "full_image_stream_failed"
+    else
+        _stream_out="$("$OTA_TOOL" extract-stream "$SUPER_DEV" "$_super_off" "$_super_len" "$_esp_fat" "$_esp_off" "$_esp_len" < "$PKG_PATH" 2>>"$LOG_FILE")" || fail_ota "full_image_stream_failed"
+    fi
+    log "Stream extraction finished: $(printf '%s' "$_stream_out" | tr '\n' ' ')"
+
+    if [ -n "$ESP_SRC_OVERRIDE" ]; then
+        sync_esp_tree_from_dir "$ESP_SRC_OVERRIDE"
+    else
+        mkdir -p "$RUN_DIR/esp-src"
+        mount -t vfat -o ro,loop "$_esp_fat" "$RUN_DIR/esp-src" || fail_ota "mount_extracted_esp_failed"
+        ESP_SRC_MOUNTED=1
+        sync_esp_tree_from_dir "$RUN_DIR/esp-src"
+        umount "$RUN_DIR/esp-src" || true
+        ESP_SRC_MOUNTED=0
+    fi
+    rm -f "$_esp_fat" 2>/dev/null || true
+}
+
+wipe_ext4_mount() {
+    _mnt="$1"
+    # Delete every entry in the filesystem root except lost+found (including dotfiles).
+    find "$_mnt" -mindepth 1 -maxdepth 1 ! -name 'lost+found' -exec rm -rf {} + || return 1
+    sync 2>/dev/null || true
+    return 0
+}
+
+perform_clean_wipe() {
+    log "Clean install requested: wiping userdata, metadata, and misc..."
+    # Wipe userdata
+    if [ -n "$DATA_DIR_OVERRIDE" ]; then
+        wipe_ext4_mount "$DATA_DIR_OVERRIDE" || fail_ota "wipe_userdata_failed"
+    else
+        if [ "$DATA_MOUNTED" = 1 ]; then
+            wipe_ext4_mount "$RUN_DIR/data" || fail_ota "wipe_userdata_failed"
+            umount "$RUN_DIR/data" || fail_ota "umount_userdata_failed"
+            DATA_MOUNTED=0
+        else
+            mkdir -p "$RUN_DIR/data"
+            mount -t ext4 -o rw "$DATA_DEV" "$RUN_DIR/data" || fail_ota "mount_userdata_wipe_failed"
+            DATA_MOUNTED=1
+            wipe_ext4_mount "$RUN_DIR/data" || fail_ota "wipe_userdata_failed"
+            umount "$RUN_DIR/data" || fail_ota "umount_userdata_failed"
+            DATA_MOUNTED=0
+        fi
+    fi
+
+    # Wipe metadata
+    if [ -n "$META_DIR_OVERRIDE" ]; then
+        wipe_ext4_mount "$META_DIR_OVERRIDE" || fail_ota "wipe_metadata_failed"
+    elif [ -b "$META_DEV" ]; then
+        mkdir -p "$RUN_DIR/meta-wipe"
+        mount -t ext4 -o rw "$META_DEV" "$RUN_DIR/meta-wipe" || fail_ota "mount_metadata_wipe_failed"
+        wipe_ext4_mount "$RUN_DIR/meta-wipe" || { umount "$RUN_DIR/meta-wipe" 2>/dev/null || true; fail_ota "wipe_metadata_failed"; }
+        umount "$RUN_DIR/meta-wipe" || fail_ota "umount_metadata_failed"
+    fi
+
+    # Zero misc partition (first 4 MiB or file size)
+    if [ -b "$MISC_DEV" ] || [ -f "$MISC_DEV" ]; then
+        _misc_sz="$(block_size_bytes "$MISC_DEV" 2>/dev/null || echo 4194304)"
+        _misc_mb=$(( (_misc_sz + 1048575) / 1048576 ))
+        [ "$_misc_mb" -gt 16 ] && _misc_mb=16
+        dd if=/dev/zero of="$MISC_DEV" bs=1048576 count="$_misc_mb" conv=notrunc 2>>"$LOG_FILE" || true
+    fi
+
+    rm -f "$ESP_DIR/SPX-USERDATA-GROWN.txt" 2>/dev/null || true
+    sync 2>/dev/null || true
+    log "Clean install data wipe complete."
+}
+
+case "$PACKAGE_KIND" in
+    manifest)
+        apply_manifest_package
+        ;;
+    full-img|full-img-gz)
+        apply_full_image_package
+        ;;
+esac
+
+if [ "$WIPE_DATA" = "1" ]; then
+    perform_clean_wipe
+else
+    # Clean up staged OTA package under ota/ to reclaim user storage.
+    case "$PACKAGE_REL" in
+        ota/*)
+            rm -f "$PKG_PATH" 2>/dev/null || true
+            ;;
+    esac
+    if [ "$DATA_MOUNTED" = 1 ]; then
+        sync 2>/dev/null || true
+        umount "$RUN_DIR/data" || true
+        DATA_MOUNTED=0
+    fi
+fi
+
+write_result "OK" ""
+rm -f "$INPROG_FILE" 2>/dev/null || true
+sync 2>/dev/null || true
+log "OTA completed successfully; rebooting into updated system."
+
+if [ "$NO_REBOOT" != "1" ]; then
+    reboot -f
+fi
+exit 0

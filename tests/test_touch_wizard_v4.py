@@ -82,6 +82,11 @@ public class Check {
                 self.assertTrue((noise/'command').read_text().startswith('reload '))
                 self.assertEqual((noise/'active').read_bytes(),active)
                 self.assertEqual((store/(device+'.noise')).read_bytes(),active)
+                self.assertEqual(request('bundle-export'),'OK')
+                bundle=(files/'calibration-bundle').read_text()
+                self.assertTrue(bundle.startswith(f'SPXTOUCH1\\nDevice={device}\\nNoiseDisabled=0\\n'))
+                self.assertIn('[Profile]\\n',bundle);self.assertIn('[/Profile]\\n',bundle)
+                self.assertIn('[Noise]\\n'+patch+'[/Noise]\\n',bundle)
 
                 self.assertEqual(request('noise-retest','preview'),'ERROR')
                 stop(p)

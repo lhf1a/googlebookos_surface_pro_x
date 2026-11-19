@@ -1,0 +1,42 @@
+# Licensing Policy
+
+This repository uses a **per-directory / per-file SPDX multi-license model**. No single blanket license overrides third-party upstream sources, kernel patches, or components that carry their own license notices.
+
+1. **Per-File SPDX & Upstream Licenses**:
+   - Any file, patch, or directory carrying an explicit `SPDX-License-Identifier`, copyright header, or upstream `LICENSE` notice remains governed by that respective license.
+   - In particular:
+     - **Linux kernel patches, external kernel modules, and GPL-tagged hardware components** (such as `patches/`, `source-dependencies/kernel-6.18/`, `probe/camera/`, `probe/power/`, `probe/test2/`, and `probe/touch-calibration/`) are licensed under **`GPL-2.0-only`** or **`GPL-2.0-or-later`** as indicated in each file.
+     - **Android / AOSP-derived components and HAL headers** (such as `probe/graphics/android-hal-headers/`, `probe/graphics/sq2-hybrid-vulkan-router.c`, `probe/graphics/quest2-mesa-gralloc-adapter.c`, and `probe/lte/overlay/res/xml/apns.xml`) are licensed under **`Apache-2.0`** as indicated in each file.
+     - **QTI CAF / ABI components** (such as `probe/graphics/qti-mapper-abi/` and `probe/lte/fsg-record.h`) are licensed under **`BSD-3-Clause-Clear`**, **`BSD-3-Clause`**, **`BSD-2-Clause`**, or **`BSD-2-Clause-Patent`** as indicated in each file.
+     - **Mesa-aligned bridges and VM_BIND components** (such as `probe/graphics/qti-msm-vmbind*`, `probe/graphics/quest2-system-ion*`, and `probe/graphics/quest2-mesa-layout.c`) are licensed under **`MIT`** as indicated in each file.
+   - See `docs/PROVENANCE.md` and `source-dependencies/kernel-6.18/README.md` for upstream provenance details.
+
+2. **Default License for Original Scripts & Tooling (MIT)**:
+   - Unless otherwise specified by an explicit `SPDX-License-Identifier` or license header in a file or directory, all original scripts, build/deployment tooling, documentation, and user-space utilities authored in this repository (including `scripts/` and unannotated original files) are licensed under the **MIT License** below.
+
+3. **Out-of-Tree Proprietary & Private Inputs**:
+   - Proprietary Microsoft/Qualcomm OEM firmware, Windows drivers, Quest 2 vendor binaries, Google/Cuttlefish recovery artifacts, and personal credentials are not distributed in this repository and remain subject to their respective owners' terms.
+
+---
+
+## MIT License (Default for Original Repository Scripts & Tooling)
+
+Copyright (c) 2026 kanoyami and Googlebook OS on Surface Pro X contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -3,14 +3,14 @@
 
   <h1>Googlebook OS on Surface Pro X</h1>
   <p>
-    Android 17 (<code>mica 16471258</code>) + Linux <code>6.18.60-sq2-android1</code> hybrid port for Microsoft Surface Pro X (SQ1 / SQ2 · Snapdragon 8cx Gen 1/2)
+    Android 17 + Linux 6.18.60 hybrid port for Microsoft Surface Pro X SQ1 / SQ2
   </p>
 
   <p>
     <strong>English</strong> | <a href="README.zh-CN.md">简体中文</a>
     &nbsp;·&nbsp; <a href="#overview-and-architecture">Overview</a>
     &nbsp;·&nbsp; <a href="#device-compatibility-and-feature-matrix">Status</a>
-    &nbsp;·&nbsp; <a href="#capability-support-and-performance-benchmarks">Benchmarks</a>
+    &nbsp;·&nbsp; <a href="#performance-benchmarks">Benchmarks</a>
     &nbsp;·&nbsp; <a href="#real-device-deployment-guide">Install</a>
     &nbsp;·&nbsp; <a href="#building-from-source">Build</a>
     &nbsp;·&nbsp; <a href="#documentation-index">Docs</a>
@@ -18,10 +18,11 @@
 
   <p>
     <img src="https://img.shields.io/badge/Target-Surface_Pro_X_SQ1%2FSQ2-0078D4?style=flat-square" alt="Target: Surface Pro X SQ1/SQ2" />
-    <img src="https://img.shields.io/badge/Arch-ARM64_(aarch64)-blueviolet?style=flat-square" alt="Arch: ARM64" />
-    <img src="https://img.shields.io/badge/Baseline-Android_17_(mica_16471258)-3DDC84?style=flat-square" alt="Baseline: Android 17 mica 16471258" />
+    <img src="https://img.shields.io/badge/Arch-ARM64-blueviolet?style=flat-square" alt="Arch: ARM64" />
+    <img src="https://img.shields.io/badge/Baseline-Android_17_mica_16471258-3DDC84?style=flat-square" alt="Baseline: Android 17 mica 16471258" />
     <img src="https://img.shields.io/badge/Kernel-Linux_6.18.60-FCC624?style=flat-square" alt="Kernel: Linux 6.18.60" />
-    <img src="https://img.shields.io/badge/Graphics-Hybrid_(Mesa_%2B_QTI)-orange?style=flat-square" alt="Graphics: Hybrid Mesa + QTI" />
+    <img src="https://img.shields.io/badge/Graphics-Hybrid_Mesa_%2B_QTI-orange?style=flat-square" alt="Graphics: Hybrid Mesa + QTI" />
+    <img src="https://img.shields.io/badge/License-MIT_%2F_Multi--SPDX-blue?style=flat-square" alt="License: MIT / Multi-SPDX" />
   </p>
 
   <p>
@@ -34,34 +35,27 @@
 
 ## Overview and Architecture
 
-**Googlebook OS on Surface Pro X** is an ARM64 port of Android-based Googlebook OS (`mica 16471258`, Android 17) running on Linux `6.18.60-sq2-android1` for the **Microsoft Surface Pro X SQ1 and SQ2** (`sc8180x` / Snapdragon 8cx Gen 1 & Gen 2). It is an Android desktop system, **not** ChromeOS Flex.
+**Googlebook OS on Surface Pro X** is an ARM64 port of Android 17 desktop Googlebook OS based on `mica 16471258` and Linux `6.18.60` for Microsoft Surface Pro X SQ1 and SQ2.
 
-The project maintains a single unified **Hybrid** product line shared across SQ1 and SQ2:
+The project maintains a single unified image shared across SQ1 and SQ2:
 
-- **Unified Boot & SoC Routing (EL2)**: Both models share the same Linux `Image`, kernel modules, `initramfs.cpio.gz`, and **EL2 (`sq2.el2=1`)** boot path. Surface ARM64 UEFI loads custom GRUB (`BOOTAA64.EFI`), which launches `start.efi` to inspect SMBIOS and dispatch `el2launch.efi` + `android-el2.dtb` on SQ2, or `el1launch.efi` (a cloned copy of `el2launch.efi` keeping `sq2.el2=1`) + `android-sq1.dtb` (retaining SQ1 GPU/GMU OPPs from `SQ1EL2/android-el2.dtb`) on SQ1, alongside `qebspilaa64.efi` (SLPI PAS12) and `tcblaunch.exe`.
-- **Hybrid Graphics & Display Stack**:
-  - **EGL / GLES**: **Mesa Freedreno `26.2.4`** + `libdrm 2.4.133` (donor EGL/GLES stripped).
-  - **Dual-Vulkan Router (`vulkan.freedreno.so`)**: Routes per-process via `/vendor/etc/sq2-vulkan-policy.conf` between hardware-GMEM **Mesa Turnip** (`vulkan.turnip.so`, default for system UI, browsers, emulators, benchmarks, and general apps) and **Qualcomm Quest 2 v77 native Vulkan** (`vulkan.qti.so` + `libgsl`/`libadreno_utils`, default for Unity/Unreal and select titles such as *NTE* and *Wuthering Waves*). Default source builds also enable **QCOM `VM_BIND` + cached submit optimization** (`qti-msm-vmbind`) for all regular Android application UIDs opening MSM via QCOM/GSL (without a package-name allowlist; system, isolated, and SDK sandbox UIDs excluded, retaining `exclude` BO sharing).
-  - **Display & Gralloc**: **QTI SM8350 Display/HWC/SDM** and **AOSP/QTI `mapper5`/`allocator`**, backed by Quest 2 v77 `gralloc.kona.so` / `qdMetaData` and bridged to Mesa via `gralloc.sq2_mesa.so`, linear RGB layout façade (`libsq2_grallocutils_vendor.so`), and SDM-to-`pwm-backlight` shim (`libsq2_sdm_backlight.so`).
-- **Multimedia & Subsystems**: **QTI SM8250 native OMX** (`quest2-omx-service`, native ANW surface decode with `LOWLATENCY_MODE` zero-display-delay mapping and pre-start VB2 flush ownership fix) paired with Linux **Venus** (`venus-core.ko`/`venus-dec.ko`/`venus-enc.ko` with `s2idle` power hooks), **primary audio cadence adaptation** (`prepare-sq2-primary-audio.py`: 10 ms framework writes with a `>= 5760`-frame physical ALSA buffer request), **V4L2/CAMSS + software ISP Camera2 HAL**, **SLPI PAS12 + `sensors.spx.so` SubHal**, and **IPTSd `3.1.1`** touchscreen/stylus handling.
+- **Unified Boot & Device Routing**: Both SQ1 and SQ2 share the same kernel, modules, and initramfs. UEFI loads a custom GRUB bootloader and dispatches the corresponding EL2 boot payload and device tree based on SMBIOS detection.
+- **Hybrid Graphics & Display Stack**: Mesa Freedreno / Turnip handles EGL / GLES and default desktop rendering, while a dual-Vulkan router switches per-app between Turnip and QTI native Vulkan with `VM_BIND` support for regular apps. Display composition and memory allocation are handled by QTI Display / HWC / SDM and Gralloc.
+- **Multimedia & Hardware Subsystems**: Integrates OMX and Venus hardware video decode/encode, audio routing, V4L2/CAMSS + software ISP cameras, SLPI sensors, IPTSd touchscreen and stylus, dual Type-C multi-display output, and system Advanced Settings.
 
 ### Prebuilt Image Downloads
 
-Prebuilt universal disk images (`surface-pro-x-6.18-hybrid-generic.img.gz`) are hosted on cloud drives:
-
 - **Google Drive**: [surface_pro_x_gbos_images](https://drive.google.com/drive/folders/1uVAA6UnydSyUHQAO8Y5rTm8SxZ62Zykr)
-- **Baidu Netdisk (百度网盘)**: https://pan.baidu.com/s/51GjLdmTGir0PelomZvboYw
-
-See the [Real-Device Deployment Guide](#real-device-deployment-guide) below for flashing instructions (balenaEtcher / Rufus / Windows same-disk dual-boot) and integrity verification.
+- **Baidu Netdisk**: https://pan.baidu.com/s/51GjLdmTGir0PelomZvboYw
 
 ```mermaid
 flowchart LR
-    A["Windows on Surface Pro X<br/>(SQ1 / SQ2 OEM Drivers & Firmware)"] -->|Prepare-HybridDependencies.ps1| B["Private Build Inputs<br/>(tar + SHA256, out-of-tree)"]
-    C["Public Git Sources &<br/>Pinned Prebuilts"] --> D["scripts/build.py<br/>(Hybrid full-image Pipeline)"]
+    A["Windows Drivers & Firmware"] --> B["Private Build Inputs"]
+    C["Public Sources & Upstream"] --> D["Image Build Pipeline"]
     B --> D
-    D --> E["8 GiB Raw GPT Image<br/>(5-Partition Default, UEFI / GRUB + ESP + Android)"]
-    E -->|balenaEtcher / Rufus<br/>or Install-GooglebookDualBoot.ps1| F["USB Drive / NVMe SSD"]
-    F --> G["Surface Pro X (SQ1 / SQ2)<br/>Linux 6.18.60 + Android 17 Hybrid"]
+    D --> E["8 GiB GPT Disk Image"]
+    E --> F["USB Drive / Internal NVMe"]
+    F --> G["Surface Pro X Android 17"]
 ```
 
 ---
@@ -70,231 +64,147 @@ flowchart LR
 
 ### Target Devices
 
-| Device | SoC | Boot Mode & DTB | Build Profile | Current Scope |
-| :--- | :--- | :--- | :---: | :--- |
-| **Surface Pro X (Gen 1)** | Microsoft SQ1 (8cx Gen 1) | **EL2** (`el1launch.efi` [`el2launch` clone] + `android-sq1.dtb`) | `hybrid` (shared) | One USB SSD cold boot reached the Android desktop with the updated boot payload; full `6.18` parity pending |
-| **Surface Pro X (Gen 2)** | Microsoft SQ2 (8cx Gen 2) | **EL2** (`el2launch.efi` + `android-el2.dtb`) | `hybrid` (shared) | Primary verification platform across `6.3.8` and `6.18.60` builds |
+| Device | SoC | Boot Mode | Max GPU Clock | Build Profile |
+| :--- | :--- | :---: | :---: | :---: |
+| **Surface Pro X Gen 1** | Microsoft SQ1 | EL2 | 661 MHz | hybrid |
+| **Surface Pro X Gen 2** | Microsoft SQ2 | EL2 | 700 MHz | hybrid |
 
 ### Feature Support Matrix
 
 Legend: `✅ Available` · `🟡 Partially Available` · `❌ Unavailable`
 
-| Subsystem | Status | Verified Behavior, Hardware Scope & Caveats |
-| :--- | :---: | :--- |
-| **UEFI / NVMe / USB Boot & Storage** | ✅ Available | ARM64 UEFI → custom GRUB (`BOOTAA64.EFI`) → SMBIOS router (`start.efi`) → **EL2** (`sq2.el2=1`; SQ1 uses `el1launch.efi` clone + `android-sq1.dtb`, SQ2 uses `el2launch.efi` + `android-el2.dtb`). Default 8 GiB minimal 5-partition GPT image (`20 GiB` with `--preserve-template-layout`) auto-expands `userdata` online on first normal boot (`grow-image-userdata` + `resize2fs`). *Note: the `2026-11-18` minimal 5-partition image passed host checks and Windows dual-boot disk-write verification; cold reboot of the latest image on real hardware is pending.* |
-| **Audio (Speakers / Mic / USB-C)** | ✅ Available | Verified on SQ2: SoundWire WCD9340 speakers (`+12 dB` RX7/RX8 `raw=84`, FIFO fix), primary audio cadence adaptation (`prepare-sq2-primary-audio.py`: 10 ms framework writes + `>= 5760`-frame ALSA buffer request; cold boot and user listening passed for *NTE*, *Wuthering Waves*, and video), DMIC (`CARD_0_DEV_1`, `raw=96`), and USB-C audio (`05ac:110b`, 48 kHz play/record). *Caveats: built-in speakers lack bass and have a slight right-skewed stereo image; SQ1, full-image rebuild re-test, and BT A2DP/HFP are untested.* |
-| **Root / KernelSU** | ✅ Available | KernelSU Next (`v3.2.0-legacy`) + Zygisk Next (`1.5.2`) + `sq2-ksu-modules-boot`, plus optional lab `device_faker_gfx`. Generic images strip personal credentials, lock `root`, and disable SSH by default. |
-| **Android Desktop & Graphics (GLES / Vulkan)** | 🟡 Partially Available | `2880×1920@60` desktop, Mesa 26.2.4 Freedreno/Turnip, Dual-Vulkan router, QTI HWC/SDM, and default QCOM `VM_BIND` + cached submits for all regular Android app UIDs (system/isolated/SDK sandbox UIDs excluded) are integrated. *Caveats: graphics compatibility remains limited; A680.1 Wild Life GMEM root cause is open, `6.18` GMEM Wild Life re-testing is pending, and SQ2 game tests do not substitute for SQ1 acceptance.* |
-| **Video Decode (Venus / OMX)** | 🟡 Partially Available | Hardware H.264, HEVC (Main8), VP8, and VP9 (profile 0) via QTI OMX + Venus (`c2.sq2.*.experimental` for C2 trials), with `LOWLATENCY_MODE` zero-display-delay mapping and pre-start VB2 flush ownership fix (SQ2 hot-replacement UU streaming user-confirmed). *Caveats: cold boot/SQ1 acceptance of the low-latency fix is pending; internal display is SDR-only (HDR disabled, Main10 filtered in default OMX); AV1 is unsupported by firmware; MPEG-1/2 are incomplete.* |
-| **Camera (Front / Rear)** | 🟡 Partially Available | OV5693 (front) and OV13858 (rear) via V4L2/CAMSS + software ISP + Camera2 HAL; native JPEG and 480p/720p/1080p H.264/AAC verified on SQ2. *Caveats: low software-ISP fps at 720p/1080p, rear AF/exposure tuning pending, occasional CCI open/switch timeout, SQ1 untested.* |
-| **Touchscreen & Stylus** | 🟡 Partially Available | IPTSd `3.1.1` selects supported touchscreens by HID/IPTS capabilities, not by SQ1/SQ2 model. The bilingual wizard keeps calibration profiles local to the board, panel and touch controller. *Caveats: end-to-end touch latency, post-sleep `0996` recovery, and Surface Pen pressure/tilt drawing are untested.* |
-| **Sensors (Auto-Brightness / Rotation)** | 🟡 Partially Available | TCS3430 ALS + SLPI PAS12 (`qcslpi8180.mbn`, `qebspilaa64.efi`, `hexagonrpcd`) + `sensors.spx.so` SubHal + rotation overlay. Verified on SQ2 (across reboot); *SQ1 verification and post-long-sleep recovery are pending.* |
-| **Suspend (`s2idle`) & Power** | 🟡 Partially Available | SQ2 `6.18.60` Venus `s2idle` handshake + `desktop-services.jar` AC wakelock patch (`1000 ms`) verified once (`59.2s` sleep). *Caveats: `timerfd` early wakeups and freezer aborts remain, long-run battery/wattage curves and SQ1 suspend are untested.* |
-| **LTE Mobile Data** | 🟡 Partially Available | Dynamic EFI SCM/GPT FSG cache (`EFI/SPX/LTE/<uuid>.bin`, max 2 MiB) + IPA4.1/QMI/RMNET IPv4 data demonstrated on SQ1 and SQ2. *Caveats: fresh dual-device universal image acceptance, IPv6, and roaming are pending.* |
-| **Wi-Fi / Bluetooth / SSH** | 🟡 Partially Available | Android-managed Wi-Fi (`ath10k_snoc`, WCN3990) and QCA UART BT (`sq2-hci-bridge`) work on SQ2. *Caveats: BLE HID pairing/`uhid` publication verified, but live cursor/scroll events remain unconfirmed; SSH is disabled by default in generic builds (key-only when enabled).* |
-| **USB Storage / Type Cover / Buttons** | 🟡 Partially Available | FAT32 USB storage (`PUBLIC` SAF volume), USB-C audio (`05ac:110b`), Surface Type Cover (`045E:09AE/09AF/09B0`, hotplug recovery), and Volume/Power buttons work on SQ2. *Caveats: exFAT is read-only; arbitrary USB peripherals are untested.* |
-| **USB-C DP / Native Multi-Display Settings** | ✅ Available on SQ2 | Both ports: DP output, unplug/replug and internal-screen preservation accepted. Native arrangement and mirror/extend controls work. Default builds include SAM/QMP, HWC hotplug/non-seamless mode grouping and unknown-lid fixes. SQ1, DP audio and long-run external-display sleep remain unverified. |
-| **Lower-Port USB ADB** | ✅ Available on SQ2 | Default lower-port mode is authenticated USB ADB (`ro.adb.secure=1`); Windows enumeration, shell, reboot restore and host rollback verified. Switch to `spx-lower-usb host --save` over root SSH before using the lower port for DP/USB peripherals. Device-local choices/authorizations are not embedded. See [Type-C](docs/TYPEC.md). |
-| **Advanced Settings (Vulkan & Performance Mode)** | ✅ Available on SQ2 | Material You Settings app (`SurfaceAdvancedControl.apk`) with a built-in initramfs root bridge (`/bin/spx-advanced-control-boot`), bilingual CN/EN UI (non-Chinese defaults to English), two-level menu (Vulkan Configuration / Performance Mode), default Vulkan switcher (Auto / MESA / Qcom with System & SystemUI Turnip guard), per-app Vulkan overrides with modified apps pinned first, and dynamic CPU governor selector (`performance`, `schedutil`, etc.) persisted across reboots. *Caveats: live APK + bridge verified on SQ2; cold-reboot initramfs auto-restore and SQ1 parity are pending.* |
-| **IR / Windows Hello, Voice/SMS/5G/eSIM, Hibernate, Lid Sleep** | ❌ Unavailable | IR camera/Hello auth unimplemented (chip ID only); no cellular voice, SMS, IMS, eSIM, or 5G; `nohibernate` and `lid_behavior=0` (`SW_LID` unavailable). |
+| Subsystem | SQ1 | SQ2 |
+| :--- | :---: | :---: |
+| **UEFI / NVMe / USB Boot & Storage** | ✅ Available | ✅ Available |
+| **Audio: Speakers / Mic / USB-C** | ✅ Available | ✅ Available |
+| **Root / KernelSU** | ✅ Available | ✅ Available |
+| **Android Desktop & Graphics: GLES / Vulkan** | 🟡 Partially Available | 🟡 Partially Available |
+| **Video Decode: Venus / OMX** | ✅ Available | ✅ Available |
+| **Camera: Front / Rear** | ✅ Available | ✅ Available |
+| **Touchscreen & Stylus** | ✅ Available | ✅ Available |
+| **Sensors: Auto-Brightness / Rotation** | ✅ Available | ✅ Available |
+| **Suspend s2idle & Power** | 🟡 Partially Available | 🟡 Partially Available |
+| **Lid Sleep** | ✅ Available | ✅ Available |
+| **LTE Mobile Data** | ✅ Available | ✅ Available |
+| **Wi-Fi / Bluetooth / SSH** | ✅ Available | ✅ Available |
+| **USB Storage / Type Cover / Buttons** | ✅ Available | ✅ Available |
+| **USB-C DP / Native Multi-Display Settings** | ✅ Available | ✅ Available |
+| **Lower-Port USB ADB** | ✅ Available | ✅ Available |
+| **Advanced Settings: Vulkan & Performance Mode** | ✅ Available | ✅ Available |
+| **IR / Windows Hello, SMS, Hibernate** | ❌ Unavailable | ❌ Unavailable |
 
 ---
 
-## Capability Support and Performance Benchmarks
+## Performance Benchmarks
 
-> [!NOTE]
-> **Baseline Metadata**: All hardware metrics below were measured on **Surface Pro X SQ2** across pre-collapse `6.18.60-sq2-android1` (Hybrid, sensors, camera, OMX, `s2idle`) and `6.3.8-sq2-android1` (Wild Life, CPU/GPU OPP) test builds unless noted otherwise. The **`2026-11-18` minimal 5-partition universal hybrid disk image** (`surface-pro-x-6.18-hybrid-generic.img`) has passed host checks and Windows dual-boot disk-write verification; subsequent audio cadence, OMX low-latency, and QCOM `VM_BIND` UID updates are integrated in source. The SQ1 observation below used an updated boot payload, not an unmodified latest image.
+### SQ2 @ GPU 700 MHz: Googlebook OS vs Windows 11
 
-**SQ1 USB first boot — updated boot payload.** One cold boot from an external USB SSD reached the Android desktop after the `hwservicemanager` bootstrap linker fix. Logs confirm 2880×1920 eDP mode detection, first-run setup completion, and successful `userdata` expansion. The tester observed more than six minutes from power-on to desktop; this is a single observation, not a required wait or a boot-time benchmark. The saved snapshots do not identify the main delay; repeat-boot timing and broader hardware coverage remain unverified.
+| Benchmark | Windows 11 ARM64 | Googlebook OS | Relative Gain |
+| :--- | :--- | :--- | :---: |
+| **3DMark Wild Life** | Pending | **6308** score | Pending |
+| **Geekbench 6 CPU Single-Core** | **1041.4** | **1098** · [Report](https://browser.geekbench.com/v6/cpu/19492201) | **+5.4%** |
+| **Geekbench 6 CPU Multi-Core** | **3509.4** | **3387** · [Report](https://browser.geekbench.com/v6/cpu/19492201) | `-3.5%` |
+| **Geekbench 6 GPU Vulkan** | **5791** | **5923** · [Report](https://browser.geekbench.com/v6/compute/6978708) | **+2.3%** |
 
-### Verified Quantitative Metrics
+### Additional Observed Metrics
 
-| Category | Workload / Check | Hardware & Baseline | Observed Result | Source & Caveats |
-| :--- | :--- | :--- | :--- | :--- |
-| **3D / Vulkan** | 3DMark Wild Life (`v2.7.5093`), Turnip `26.2.4` forced `sysmem` (514 MHz) | SQ2 (`A680.1`), Linux `6.3.8` | **4311** score / **25.82 FPS** | [WILD-LIFE](docs/WILD-LIFE.md); sampled scenes clean |
-| **3D / Vulkan** | 3DMark Wild Life, Turnip `26.2.4` forced `sysmem` (661 MHz) | SQ2 (`A680.1`), Linux `6.3.8` | **4920** score / **29.46 FPS** | [WILD-LIFE](docs/WILD-LIFE.md); sampled scenes clean |
-| **3D / Vulkan** | 3DMark Wild Life, scoped `A680.1 + 3DMark` `sysmem` patch (661 MHz) | SQ2 (`A680.1`), Linux `6.3.8` | **5279** / **31.61 FPS** (pre-reboot); **5264** / **31.52 FPS** (post-reboot) | [WILD-LIFE](docs/WILD-LIFE.md). On `6.18`, Turnip reverted to clean HW GMEM after kernel `0003` fix; **6.18 GMEM Wild Life re-benchmark is pending** |
-| **3D / Vulkan** | 3DMark Wild Life, closed-source `v819.1` + QTI/mapper5 bridge | SQ2 (`A680.1`), Linux `6.3.8` | 6357 / 38.07 FPS, 57.2 °C — **INVALIDATED** | [WILD-LIFE](docs/WILD-LIFE.md); severe black blocks & pink/white bands |
-| **GPU Compute** | 30s `vulkan-readback` stress (`4096` words/round, `4096` ALU iters) | SQ2, Linux `6.3.8` | 590 MHz: **28,462 rounds** (`41.3 → 44.4 °C`)<br/>661 MHz: **26,626 rounds** (`43.2 → 45.9 °C`) | `scripts/test-sq2-gpu-opp.sh`; 75 °C passive throttle |
-| **Display / HWC** | `2880×1920@60` (`density=320`), QTI mapper5 + EGL + HWC | SQ2, Linux `6.18.60` (`v21`) | **20/20** RGB AHB→EGL pass; **135** YUV frames (max error `0.00048447`); **0** HWC plane disables | [DEFAULT-DISPLAY-DENSITY](docs/DEFAULT-DISPLAY-DENSITY.md), `configs/deployment-status.json` |
-| **Video (Default OMX)** | H.264 / HEVC native `quest2-omx-service` | SQ2, Linux `6.18.60` | H.264 `320×240@30`: **293** rendered / `9961 ms`; `1080p@60`: **562** rendered / `9981 ms`; HEVC `v21`: **30** exact RAM / **6** post-reboot DRC frames (`0` bad pixels) | `configs/deployment-status.json`; `1080p@60` pixel equality not checked |
-| **Video (Exp. C2)** | Experimental `c2.sq2.*.experimental` RAM trials *(not default OMX)* | SQ2, Linux `6.18.60` | HEVC Main8 `4K@60`: **600 frames / 9978 ms** (192 MiB pool); HEVC Main10 `240p@30`: **300 / 9962 ms**; VP8 `4K@30`: **300 / 9962 ms**; VP9 p0 `4K@60`: **600 / 10056 ms** | [VIDEO-CAPABILITY-ALIGNMENT](docs/VIDEO-CAPABILITY-ALIGNMENT.md); ordinary 4K Main10/60fps & Bilibili 4K persistence untested |
-| **Camera** | OV5693 (front) / OV13858 (rear) native JPEG & sw-ISP H.264+AAC | SQ2, Linux `6.18.60` | JPEG: Rear **4224×3136**, Front **2592×1944**<br/>480p: **28.6** (F) / **30.0** (R) fps; 720p: **18.3** (F) / **10.0** (R) fps; 1080p: **6.3** (F, MP4 ~5.7) / **7.7** (R, MP4 ~7.1) fps | [CAMERA-BUILD](docs/CAMERA-BUILD.md), [TODO](docs/TODO.md) |
-| **Audio** | Speakers (`RX7/8 raw=84`), DMIC (`raw=96`), USB-C (`05ac:110b`) | SQ2, Linux `6.18.60` | Speakers: `864k` + `2×192k` frames (**0 XRUNs** in isolation); DMIC: `483,328` ALSA / `480,000` `AudioRecord` frames (`0` clip); USB-C: `192k` out / `240k` in (`~5202 ms`) | [SPEAKER-LOUDNESS](docs/SPEAKER-LOUDNESS.md), [MICROPHONE](docs/MICROPHONE.md), [USB-FUNCTIONS](docs/USB-FUNCTIONS.md) |
-| **Touch & Sensors** | IPTSd `3.1.1` + TCS3430 ALS / SLPI PAS12 | SQ2, Linux `6.18.60` | Touch: `30s` idle **0** phantoms; `32` offline calibration tests passed. Sensors: **52–160 lux** → backlight **643–1053 / 4095**, rotation `0/3` verified | [TOUCH-CALIBRATION](docs/TOUCH-CALIBRATION.md), [TOUCH-DEVICE-COMPAT](docs/TOUCH-DEVICE-COMPAT.md), [SENSORS](docs/SENSORS.md) |
-| **CPU & Thermal** | 8-core 20s pinned load (`qcom-cpufreq-hw`, `schedutil`) | SQ2, Linux `6.18.60` | Little `0–3`: **300–1766.4 MHz**; Big `4–7`: **825.6–3148.8 MHz**; peak sampled CPU temp **53.3 °C** (80 °C throttle) | `scripts/test-sq2-cpu-frequency.sh` |
-| **Suspend (`s2idle`)** | Single-boot Venus + `desktop-services.jar` (`1000 ms`) check | SQ2, Linux `6.18.60` | `success=4`, Venus `stops=5/starts=5`, `failed_resume=0`, longest sleep **59.199 s** (display/touch/audio resumed) | [SUSPEND](docs/SUSPEND.md); single-boot verification only |
-
-### Qualitative Verified Behavior & Untested Areas
-
-- **Verified qualitatively**: On SQ2, Android desktop (`2880×1920@60`), Bilibili `720p/1080p/4K` switching, Dual-Vulkan (`SQ2VkRouter` Turnip/QTI paths), primary audio cadence in *NTE*/*Wuthering Waves*/video (cold boot), hot-replaced OMX `LOWLATENCY_MODE` in UU remote streaming, Type Cover hotplug recovery, FAT32 USB drives, Wi-Fi (`ath10k_snoc`), Bluetooth ON/OFF state, and KernelSU Next + Zygisk Next work in testing. Native LTE IPv4 data has been demonstrated on both SQ1 and SQ2.
-- **Not yet benchmarked / open gaps**:
-  - **SQ1 hardware parity**: SQ1 sensors, `s2idle`, camera, sustained CPU/GPU (capped at `2995.2 / 661 MHz`), and cold boot of the latest minimal 5-partition universal image.
-  - **Standard 3D & Web benchmarks**: No `glmark2`, `vkmark`, WebGL, or `6.18` GMEM Wild Life / game FPS-per-watt numbers.
-  - **Audio / Input / Display gaps**: Speaker bass and stereo balance; Bilibili seek/switch audio skip/XRUN (`1×4096` HAL skip observed); BT A2DP/HFP audio; live BLE HID cursor/scroll events; Surface Pen drawing/pressure/tilt; end-to-end touch latency.
-  - **Power & Long-Run**: Multi-cycle `s2idle` reliability (`timerfd` wakeups & freezer aborts remain), battery discharge curves, wattage telemetry, and `sq2-game-opt` FPS/power deltas.
-- **Host vs Device Tests**: `tests/` contains `347` tracked host-side packaging, policy, calibration, and ASan/UBSan files (`236` Python, `78` C/C++ sources, `6` PowerShell, and fixtures/headers); `scripts/` provides on-device diagnostics (`test-sq2-cpu-frequency.sh`, `test-sq2-gpu-opp.sh`, `test-sq2-audio-reopen.sh`, `verify-sq2-mediacodec-frames.py`). Host checks do not certify device boot.
+| Category | Workload | Observed Result |
+| :--- | :--- | :--- |
+| **Display / HWC** | `2880×1920@60` | **20/20** RGB readback pass, **0** plane disables |
+| **Video Decode** | OMX H.264 / HEVC | H.264 `1080p@60` **562** frames / `9981 ms`, `320×240@30` **293** frames / `9961 ms` |
+| **Camera** | Native JPEG & sw-ISP video | Rear **4224×3136**, Front **2592×1944**; 480p / 720p / 1080p |
+| **CPU & Thermal** | 8-core 20s load | Little **300–1766.4 MHz**, Big **825.6–3148.8 MHz**, peak **53.3 °C** |
+| **Suspend s2idle** | Single-boot suspend | Up to **59.199 s**; display, touch, and audio resumed |
 
 ---
 
 ## Real-Device Deployment Guide
 
-Download a prebuilt universal disk image from [Google Drive](https://drive.google.com/drive/folders/1uVAA6UnydSyUHQAO8Y5rTm8SxZ62Zykr) or [Baidu Netdisk](https://pan.baidu.com/s/51GjLdmTGir0PelomZvboYw), or build your own image from source (see [Building from Source](#building-from-source)). By default, `build.py` produces a slim **8 GiB** (`8,589,934,592` bytes) 5-partition (`super`, `metadata`, `misc`, `SQ2PROBE`, `userdata`, compacting only active `_a` `super` slices) sparse raw GPT disk image and its gzip archive (pass `--preserve-template-layout` to keep the legacy 39-partition 20 GiB template layout):
-
-- `disk/surface-pro-x-6.18-hybrid-generic.img` (8 GiB raw MBR+GPT full-disk image)
-- `disk/surface-pro-x-6.18-hybrid-generic.img.gz` (~3.43 GiB / `3,685,632,793` bytes compressed)
+Download the prebuilt 8 GiB compressed disk image or build it from source. On first normal boot, `userdata` automatically expands to fill the target disk.
 
 > [!CAUTION]
-> **Back up Windows & BitLocker keys before starting.**
-> - To keep Windows, use **Option D** below for same-disk dual-boot, or flash to an **external USB drive** / **USB-NVMe enclosure** (`>= 8 GiB`, or `>= 16 GiB` recommended on 8 GB RAM units for the 6 GiB swapfile; 512-byte logical sectors). Full-disk flashing onto the internal NVMe SSD overwrites Windows and all local data.
-> - **Single-Image-Disk Rule**: At boot, `prepare-image-ssd` identifies the disk carrying `PARTNAME=SQ2PROBE` + matching `SPX-BOOT-SOURCE.txt`. Avoid keeping two flashed disks attached simultaneously when testing.
+> **Back up Windows & BitLocker recovery keys before starting.**
+> - To keep Windows, use the Windows same-disk dual-boot script below or flash to an external USB drive.
+> - Ensure only one flashed disk is connected when booting.
 
-### 1. Prerequisites on Surface Pro X
+### 1. Prerequisites
 
-1. **Verify integrity** of your downloaded or built image before flashing (check `SHA256SUMS` if provided, or see [IMAGE](docs/IMAGE.md) for current local build checksums):
+1. Verify the image archive and checksums:
    ```sh
-   cd IMAGE_OUTPUT
    sha256sum -c SHA256SUMS
    gzip -t disk/surface-pro-x-6.18-hybrid-generic.img.gz
    ```
-2. **Disable Secure Boot in Surface UEFI**: The generated ARM64 EFI loaders (`BOOTAA64.EFI`, `start.efi`, `el1launch.efi`, `el2launch.efi`) are unsigned.
-   - Shut down Surface Pro X completely.
-   - Hold **Volume Up (`+`)** and press **Power** (keep holding Volume Up until the Surface UEFI menu appears).
-   - Under **Security**, set **Secure Boot** to **Disabled** (or None).
-   - Under **Boot configuration**, ensure **USB Storage** is enabled if booting externally.
+2. Disable **Secure Boot** in Surface UEFI, and enable **USB Storage** if booting externally.
 
-### 2. Flashing the Disk Image
+### 2. Flashing & Installation
 
-You do **not** need to resize `userdata` manually when flashing with standard raw block writers: on first normal boot, `grow-image-userdata` automatically relocates the backup GPT header (`sgdisk --move-second-header`), extends `userdata` to the end of the target disk, and runs `resize2fs` online.
+#### Option A: balenaEtcher
+Select `surface-pro-x-6.18-hybrid-generic.img.gz` or the extracted `.img`, choose your external USB drive, and click **Flash!**.
 
-#### Option A: balenaEtcher (Windows / macOS / Linux — Recommended for USB Drives)
+#### Option B: Rufus
+Decompress the `.img` file first and write it to your external USB drive in **DD Image** mode.
 
-1. Open **balenaEtcher** and click **Flash from file**.
-2. Select `surface-pro-x-6.18-hybrid-generic.img.gz` (or the decompressed `.img`).
-3. Click **Select target** and carefully choose your external USB drive or USB-NVMe enclosure (`>= 8 GiB`, or `>= 16 GiB` recommended on 8 GB RAM units).
-4. Click **Flash!** and wait for flashing and verification to complete, then safely eject the drive.
-
-#### Option B: Rufus (Windows — `.img` Raw / DD Write)
-
-1. Decompress `surface-pro-x-6.18-hybrid-generic.img.gz` to `surface-pro-x-6.18-hybrid-generic.img` (8 GiB raw file by default, or 20 GiB for legacy template layout).
-2. Open **Rufus** and select your target USB drive / USB-NVMe enclosure under **Device**.
-3. Click **SELECT** under **Boot selection** and choose `surface-pro-x-6.18-hybrid-generic.img`.
-   - Rufus writes raw `.img` files in **DD Image (raw block)** mode. **Never** extract partitions manually onto FAT32/NTFS or use ISO extraction mode.
-4. Click **START**, confirm the data-erasure warning, wait for completion, and safely eject.
-
-#### Option C: Linux USB-NVMe Enclosure Installer (`deploy-experimental-usb.py`)
-
-When preparing a replacement NVMe SSD in a USB-NVMe enclosure from a native Linux host (or Linux VM with exclusive USB passthrough — not WSL) using an extent-bearing image manifest, use `scripts/deploy-experimental-usb.py` ([USB-NVME-DEPLOY](docs/USB-NVME-DEPLOY.md); offline-tested only). Note that `deploy-experimental-usb.py` requires a `MANIFEST` with an `extents` list; standard `build.py` `full-image` outputs (`IMAGE-MANIFEST.json` does not include `extents`) should be flashed via **balenaEtcher**, **Rufus (`DD Image`)**, or a raw block write:
-
+#### Option C: Linux USB-NVMe Installer
 ```sh
-# Dry-run preview (lists eligible USB disks and checks manifest/layout)
-python3 scripts/deploy-experimental-usb.py \
-  --manifest MANIFEST --layout LAYOUT --image IMAGE
-
-# Add --execute --device /dev/sdX and type the exact printed ERASE confirmation string
-# ERASE ["/dev/sdX","<serial>",<size_bytes>] (or pass --confirm-erase)
+python3 scripts/deploy-experimental-usb.py --manifest MANIFEST --layout LAYOUT --image IMAGE
 ```
 
-#### Option D: Windows + Googlebook OS Dual-Boot Script (Run Directly on Windows)
-
-To set up **Windows + Googlebook OS dual-boot directly from Windows 10/11** (either same-disk dual boot on the internal NVMe SSD using unallocated space / shrinking `C:`, or flashing an external USB drive with a dual-boot GRUB menu containing **Windows**), double-click `scripts/Install-GooglebookDualBoot.cmd` as Administrator, or run in an elevated PowerShell prompt:
+#### Option D: Windows Same-Disk Dual-Boot Script
+Run `scripts/Install-GooglebookDualBoot.cmd` as Administrator, or execute in an elevated PowerShell prompt:
 
 ```powershell
-# Interactive dual-boot menu (status, same-disk install, external USB flash, switch default OS, uninstall)
-.\scripts\Install-GooglebookDualBoot.cmd
-
-# Read-only status check (disks, free gaps, UEFI/Secure Boot state)
+# Check disk and dual-boot status
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action Status
 
-# Same-disk dual-boot install (uses unallocated space or shrinks Windows C:)
+# Install same-disk dual-boot
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action Install -ImagePath D:\surface-pro-x-6.18-hybrid-generic.img.gz -TargetDiskNumber 0 -ShrinkOSVolumeGB 32
 
-# Switch default OS / repair UEFI boot order (GooglebookOS or Windows)
+# Switch default OS
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action SwitchDefault -DefaultOS Windows
 ```
 
-- **How it works**: Existing Windows ESP, MSR, `C:`, and WinRE partitions are preserved untouched. The script creates the Googlebook OS GPT partitions via Win32 `IOCTL_DISK_SET_DRIVE_LAYOUT_EX`, streams `.img`/`.img.gz` directly into those partitions, installs a small GRUB dual-boot shim at `\EFI\GooglebookOS\` on the Windows ESP (leaving `\EFI\Microsoft\Boot\bootmgfw.efi` untouched), and registers `"Googlebook OS"` in `{fwbootmgr}` via `bcdedit`. On Surface Pro X, you can select **Googlebook OS** or **Windows** using a keyboard or **Volume +/- and Power** buttons. *Note: only statically verified on the build host so far; back up your BitLocker recovery key and data before modifying partitions on live Windows hardware.*
-
 ### 3. Booting & First-Boot Setup
 
-1. Attach only **one** flashed disk to the Surface Pro X.
-2. **To boot from USB**: Power off, hold **Volume Down (`-`)** and press **Power** (release Volume Down once the Surface logo spins), or reorder **USB Storage** above **Internal Storage** in Surface UEFI.
-3. **GRUB Boot Menu** (5-second timeout):
-   - **`Surface Pro X Linux 6.18 - single user 0`** (`spx-single-user`, default): Boots Android 17 Hybrid desktop via `/EFI/SQ2Nat/start.efi`.
-   - **`Surface Pro X Linux 6.18 - rescue (no Android data mount)`** (`spx-rescue`): Diagnostic fallback (`sq2.rescue=1`) via `/EFI/SQ2Res/start.efi` without mounting Android `userdata` or expanding partitions.
-   - **`Power off`**: Powers down the device.
-4. **First Boot**: `surface-first-boot` automatically skips the Android OOBE wizard (`device_provisioned=1`, `user_setup_complete=1`) and launches HOME. The standalone bilingual **Touch Calibration Wizard** remains active on first boot to calibrate touchscreen noise thresholds for your panel and digitizer.
-
-   **Note:** On the first boot after flashing, it may take **up to 15 minutes** for the Android desktop to appear. Keep the device powered on and avoid forcing a restart during this time.
+1. Hold **Volume Down** and press **Power** to boot from USB, or adjust the boot order in Surface UEFI.
+2. The GRUB menu boots the Android 17 desktop by default, with options for rescue mode or power off.
+3. First boot automatically skips Android OOBE and launches the Touch Calibration Wizard; reaching the desktop may take up to 15 minutes, so keep the device powered.
 
 ---
 
 ## Building from Source
 
 > [!IMPORTANT]
-> **Why Windows Blob Collection & Private Inputs Stay Out of Git**
-> Proprietary Microsoft/Qualcomm OEM firmware (`ADSP`, `CDSP`, `SLPI`, `WLAN/BT`, `MCFG`, sensor configs), Google/Cuttlefish recovery artifacts, Quest 2 v77 vendor blobs, and credentials cannot be redistributed in Git. All private inputs live locally under `private/build-inputs/` (or `--private-root`).
+> Proprietary OEM firmware, recovery artifacts, and closed-source vendor libraries are not distributed in Git and must be staged in a local private input directory.
 
-### Step 1: Collect Shared Inputs on Windows Surface Pro X
-
-On an original **Surface Pro X (SQ1 or SQ2) Windows ARM64** installation (PowerShell 5.1+, Git for Windows, `curl.exe`, `tar.exe`; store output on NTFS/exFAT with sufficient space for ~7.6 GB of downloads):
+### Step 1: Collect Dependencies on Windows Surface Pro X
 
 ```powershell
-# Preview manifest without downloading
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-HybridDependencies.ps1 -Output D:\spx-deps -Plan
-
-# Download pinned upstream inputs + read-only Surface DriverStore export + package tar/SHA256
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-HybridDependencies.ps1 -Output D:\spx-deps -IncludeThirdParty
 ```
 
-- **Read-only OEM extraction**: `scripts/Export-SurfaceHybridDependencies.ps1` (also runnable offline via `-WindowsRoot`) extracts only specific `DriverStore\FileRepository` INF packages (`qcbtfmuart8180`, `qcdx8180`, `qcwlan8180`, `surfaceprox_{mcfg,subextadsp,subextcdsp,subextmpss,subextscss,sensorsconfig}`, `surfacelightsensor`) and `Windows\System32\tcblaunch.exe`. It **never** reads live registry state, user accounts, Wi-Fi profiles, SSH keys, per-device calibration, or modem EFS/NV.
-- **Clean-room boundary**: Per [DEPENDENCIES](docs/DEPENDENCIES.md), public downloads + Windows export alone cannot yet synthesize every Android/QTI runtime, `board.dts`, EFI (`start.efi`/`el2launch.efi`/`qebspilaa64.efi`), and `template.img` from scratch (`hybrid_bootstrap.py --stage all` explicitly exits non-zero at that remaining gap; see [STANDARD-BUILD](docs/STANDARD-BUILD.md) for required `private/build-inputs/` files).
-
-### Step 2: Import & Build on Linux (x86_64)
-
-Copy `spx-deps.tar` and its `.sha256.json` receipt to a Linux x86_64 host (Ubuntu 24.04, Python 3.12+; build on a native Linux filesystem, not `/mnt/c` or NTFS/9p):
+### Step 2: Import & Build on Linux x86_64
 
 ```sh
-# 1. Verify tar + hashes and extract OEM firmware / 1480-byte CRC-checked ALS golden calibration
-python3 scripts/import-hybrid-dependencies.py \
-  --archive downloads/spx-deps.tar --sha256 SHA256 \
-  --output private/dependency-import
-
-# 2. Prepare camera & sensor bundles from source against matched 6.18 kernel tree
+python3 scripts/import-hybrid-dependencies.py --archive downloads/spx-deps.tar --sha256 SHA256 --output private/dependency-import
 python3 scripts/build-spx-camera-bundle.py --inputs private/camera-build.json --output out/camera-from-source
-# (Prepare sensors bundle via scripts/build-spx-sensor-bundle.py — see docs/SENSORS.md)
-
-# 3. Default build: full-image + --kernel-mode source + --graphics hybrid
 python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUTPUT --jobs 8
 ```
-
-- **Build modes & reuse**:
-  - `scripts/build.py` (delegating to `scripts/build-lts.py`) defaults to `full-image` with `--kernel-mode source` and `--graphics hybrid` (the only supported graphics mode). Building the QCOM `VM_BIND` userland bridge requires Android NDK AArch64 API 35 `clang` (`SQ2_ANDROID_CC`), `readelf`, and `patchelf` with `--rename-dynamic-symbols`.
-  - Pass `--esp-only` to generate only the ESP payload (`disk/esp/`) instead of the full GPT image.
-  - Reuse pre-verified components (kernel, modules, camera, sensors, Mesa, glue) with `--reuse-components REUSE.json` (generated by `scripts/full_image_reuse.py`; modified `probe/touch-calibration/` Java/Manifest automatically invalidates and rebuilds `wizard.apk`).
-  - Incrementally rebuild only Venus against the exact matching `KOUT` before repacking:
-    ```sh
-    python3 scripts/rebuild-hybrid-venus.py --reuse-components PREV_REUSE.json \
-      --kernel-build MATCHED_KOUT --source PREV_VENUS_SOURCE --output FRESH_VENUS_OUTPUT
-    python3 scripts/build.py --reuse-components FRESH_VENUS_OUTPUT/REUSE.json \
-      --private-root PREPARED_INPUTS --output FRESH_IMAGE_OUTPUT
-    ```
-  - `compile` builds standalone kernel/external modules (`Image`, `modules`, `dtbs`) without an initramfs or disk image; legacy `verify` / `package` only verify or copy the pinned `EFI/SQ2Nat` baseline in `configs/kernel-baseline.json`.
 
 ### Repository Layout
 
 ```text
 .
-├── assets/                 # Project logo and visual assets
-├── configs/                # Locked dependency manifests, Vulkan routing, SoC profiles, known-issues JSON
-├── docs/                   # Build, dependency, image, deployment, and subsystem documentation
-├── patches/                # Linux 6.18 Surface baseline & DRM/A6xx MMIO/GMEM patchsets
-├── probe/                  # On-device services, Touch Calibration Wizard, Dual-Vulkan/gralloc/camera/sensor glue
-├── reference/              # Upstream reference configs and donor helper sources
-├── scripts/                # Build entrypoints (build.py, full_image.py), Windows PowerShell collectors, deployers
-├── source-dependencies/    # Reviewed kernel 6.18 external module sources and DT overlays
-├── tests/                  # Host-side Python unittest, C/C++ ASan/UBSan, and PowerShell test suites
-└── upstream/               # Git submodules / pinned external component trees
+├── assets/
+├── configs/
+├── docs/
+├── patches/
+├── probe/
+├── reference/
+├── scripts/
+├── source-dependencies/
+├── tests/
+└── upstream/
 ```
 
 ---
@@ -302,40 +212,40 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ## Documentation Index
 
 ### Build, Dependencies & Deployment
-- [BUILD](docs/BUILD.md) — Current `build.py` entry, private inputs, build order, and output artifacts
-- [STANDARD-BUILD](docs/STANDARD-BUILD.md) — Full Hybrid pipeline flow, component reuse, and `PRIVACY.json` rules
-- [DEPENDENCIES](docs/DEPENDENCIES.md) — Windows dependency collection, Quest 2 donor handling, and `hybrid_bootstrap.py` stages
-- [IMAGE](docs/IMAGE.md) — Current image checksums, first-boot OOBE policy, Touch Wizard, and host verification scope
-- [DEVELOPMENT](docs/DEVELOPMENT.md) — Portability contract (`SPX-PORTABLE-SQ1-SQ2`) across any SQ1/SQ2 unit
-- [PROVENANCE](docs/PROVENANCE.md) — Pinned runtime sources, commits, and component licensing
-- [USB-NVME-DEPLOY](docs/USB-NVME-DEPLOY.md) — Linux USB-NVMe enclosure deployment (`deploy-experimental-usb.py`)
-- [TODO](docs/TODO.md) — Open P0 portability tasks and unverified hardware/software work
+- [BUILD](docs/BUILD.md)
+- [STANDARD-BUILD](docs/STANDARD-BUILD.md)
+- [DEPENDENCIES](docs/DEPENDENCIES.md)
+- [IMAGE](docs/IMAGE.md)
+- [DEVELOPMENT](docs/DEVELOPMENT.md)
+- [PROVENANCE](docs/PROVENANCE.md)
+- [USB-NVME-DEPLOY](docs/USB-NVME-DEPLOY.md)
+- [TODO](docs/TODO.md)
 
 ### Subsystems & Hardware Bring-Up
-- [UNIFIED-SQ1-SQ2](docs/UNIFIED-SQ1-SQ2.md) — Shared SQ1/SQ2 kernel/initramfs design and per-SoC DT/OPP routing
-- [CAMERA-BUILD](docs/CAMERA-BUILD.md) — Front/rear V4L2/CAMSS + software ISP + Camera2 HAL build guide
-- [SENSORS](docs/SENSORS.md) — TCS3430 ALS, SLPI PAS12, `sensors.spx.so`, and auto-rotation setup
-- [TOUCH-CALIBRATION](docs/TOUCH-CALIBRATION.md) — Bilingual Touch Calibration Wizard workflow and key derivation
-- [TOUCH-DEVICE-COMPAT](docs/TOUCH-DEVICE-COMPAT.md) — IPTSd `3.1.1` compatibility for SQ2 (`045E:0C21`) and SQ1 (`045E:0996`)
-- [WILD-LIFE](docs/WILD-LIFE.md) — A680.1 Wild Life GMEM issue, `sysmem` workaround, and Dual-Vulkan routing notes
-- [VIDEO-CAPABILITY-ALIGNMENT](docs/VIDEO-CAPABILITY-ALIGNMENT.md) — Venus firmware limits, OMX vs experimental C2, and SDR/AV1 constraints
-- [SPEAKER-LOUDNESS](docs/SPEAKER-LOUDNESS.md) — SoundWire WCD9340 speaker gain and FIFO configuration
-- [MICROPHONE](docs/MICROPHONE.md) — WCD9340 DMIC routing (`audio-microphone-route`) and capture verification
-- [LTE-PRODUCT](docs/LTE-PRODUCT.md) — Dynamic EFI FSG cache and IPA4.1/QMI/RMNET IPv4 cellular data
-- [USB-FUNCTIONS](docs/USB-FUNCTIONS.md) — Validated USB storage, USB-C audio, and DisplayPort Alt Mode status
-- [TYPEC](docs/TYPEC.md) — Dual Type-C DisplayPort, native display settings, and lower-port USB ADB mode switching
-- [BLUETOOTH-INPUT](docs/BLUETOOTH-INPUT.md) — QCA UART Bluetooth and BLE HID (`uhid`) status
-- [SUSPEND](docs/SUSPEND.md) — `s2idle` Venus handshake, `desktop-services.jar` AC wakelock patch, and limits
-- [UNRESTRICTED-POWER](docs/UNRESTRICTED-POWER.md) — Thermal/power policy, `nohibernate`, and `lid_behavior=0`
-- [ROOT-MANAGEMENT](docs/ROOT-MANAGEMENT.md) — KernelSU Next, Zygisk Next, and `device_faker` configuration
-- [DEFAULT-DISPLAY-DENSITY](docs/DEFAULT-DISPLAY-DENSITY.md) — `2880×1920@60` display density (`320` dpi) policy
-- [PAGE-MODE-NOTIFICATION](docs/PAGE-MODE-NOTIFICATION.md) — 4 KB page size notification and runtime notes
-- [External Kernel Modules](source-dependencies/kernel-6.18/README.md) — Reviewed 6.18 external module source archive and DT overlays
+- [UNIFIED-SQ1-SQ2](docs/UNIFIED-SQ1-SQ2.md)
+- [CAMERA-BUILD](docs/CAMERA-BUILD.md)
+- [SENSORS](docs/SENSORS.md)
+- [TOUCH-CALIBRATION](docs/TOUCH-CALIBRATION.md)
+- [TOUCH-DEVICE-COMPAT](docs/TOUCH-DEVICE-COMPAT.md)
+- [WILD-LIFE](docs/WILD-LIFE.md)
+- [VIDEO-CAPABILITY-ALIGNMENT](docs/VIDEO-CAPABILITY-ALIGNMENT.md)
+- [SPEAKER-LOUDNESS](docs/SPEAKER-LOUDNESS.md)
+- [MICROPHONE](docs/MICROPHONE.md)
+- [LTE-PRODUCT](docs/LTE-PRODUCT.md)
+- [USB-FUNCTIONS](docs/USB-FUNCTIONS.md)
+- [TYPEC](docs/TYPEC.md)
+- [BLUETOOTH-INPUT](docs/BLUETOOTH-INPUT.md)
+- [SUSPEND](docs/SUSPEND.md)
+- [UNRESTRICTED-POWER](docs/UNRESTRICTED-POWER.md)
+- [ROOT-MANAGEMENT](docs/ROOT-MANAGEMENT.md)
+- [DEFAULT-DISPLAY-DENSITY](docs/DEFAULT-DISPLAY-DENSITY.md)
+- [PAGE-MODE-NOTIFICATION](docs/PAGE-MODE-NOTIFICATION.md)
+- [External Kernel Modules](source-dependencies/kernel-6.18/README.md)
 
 ---
 
 ## Acknowledgements and Disclaimer
 
-- Built on upstream work from **linux-surface** (ARM64 kernel/GRUB/IPTSd foundations), **Mesa Freedreno / Turnip**, **AOSP / Googlebook (`mica`)**, **Cuttlefish**, **QTI CAF** (`SM8350` display / `SM8250` media), and **KernelSU Next**.
-- Component licenses remain with their respective authors (see [PROVENANCE](docs/PROVENANCE.md) and `source-dependencies/kernel-6.18/README.md`). No single blanket license overrides third-party binaries or upstream sources.
-- **Verification Disclaimer**: Host-side build success, checksum validation, and unit tests do **not** guarantee real-device boot, SQ1/SQ2 cross-device acceptance, long-term `s2idle` stability, or battery/thermal safety. Flashing storage devices carries data-loss risk — back up important data before testing.
+- Sincere thanks to the upstream open-source projects and community contributors behind **linux-surface**, **Mesa Freedreno / Turnip**, **AOSP / Googlebook**, **Cuttlefish**, **QTI CAF**, and **KernelSU Next**, on whose work this port is built. Licenses remain with their respective authors.
+- **License**: Multi-licensed per directory and file SPDX headers; upstream and annotated files retain their original licenses, and unannotated original scripts and tooling default to the MIT License. See [LICENSE](LICENSE).
+- Flashing storage devices carries data-loss risk; back up important data before testing.

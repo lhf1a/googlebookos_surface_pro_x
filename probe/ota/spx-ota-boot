@@ -1,0 +1,698 @@
+#!/bin/busybox sh
+# Built-in root/init OTA bridge daemon for Surface System Update.
+# Data-only boundary: validates every input token; never evals untrusted input.
+set -eu
+
+export PATH="${SPX_OTA_PATH:-/bin:/sbin:/usr/bin:/usr/sbin:${PATH:-}}"
+
+DATA_ROOT="${SPX_OTA_ROOT:-/proc/1/root}"
+ESP_DIR="${SPX_OTA_ESP:-/media/esp}"
+RUN_DIR="${SPX_OTA_RUN:-/run}"
+ETC_DIR="${SPX_OTA_ETC:-/etc}"
+OTA_TOOL="${SPX_OTA_TOOL:-/bin/spx-ota-tool}"
+SUPER_DEV="${SPX_OTA_SUPER_DEV:-/dev/block/by-name/super}"
+LOCK_DIR="${SPX_OTA_LOCK_DIR:-/run/spx-ota-boot-lock}"
+TMP_REQ="${SPX_OTA_TMP_REQ:-/run/spx-ota-boot-request}"
+PKG="org.surface.advancedcontrol"
+UPDATE_COMPONENT="$PKG/.SystemUpdateActivity"
+NO_REBOOT="${SPX_OTA_NO_REBOOT:-0}"
+
+android() {
+    if [ -n "${SPX_OTA_ANDROID_WRAPPER:-}" ]; then
+        "$SPX_OTA_ANDROID_WRAPPER" "$@"
+    else
+        timeout "${ANDROID_COMMAND_TIMEOUT:-20}" nsenter -t 1 -m -r -- /system/bin/"$@"
+    fi
+}
+
+cleanup() {
+    rm -f "$TMP_REQ" 2>/dev/null || true
+    rm -rf "$RUN_DIR/spx-ota-inspect" 2>/dev/null || true
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+mkdir "$LOCK_DIR" 2>/dev/null || exit 0
+trap cleanup EXIT
+trap 'exit 0' TERM INT
+
+if [ "${SPX_OTA_BOOT_WAIT:-1}" != "0" ]; then
+    for _i in $(seq 1 240); do
+        if [ -x "$DATA_ROOT/system/bin/getprop" ] &&
+           [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = "1" ]; then
+            break
+        fi
+        sleep 1
+    done
+    [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = "1" ] || exit 1
+fi
+
+OTA_DATA_DIR="$DATA_ROOT/data/ota"
+mkdir -p "$OTA_DATA_DIR"
+chmod 700 "$OTA_DATA_DIR" 2>/dev/null || true
+
+is_hex64() {
+    [ "${#1}" = 64 ] || return 1
+    case "$1" in
+        *[!0-9a-f]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+validate_nonce() {
+    [ -n "$1" ] || return 1
+    [ "${#1}" -le 64 ] || return 1
+    case "$1" in
+        *[!a-z0-9-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+validate_user() {
+    [ -n "$1" ] || return 1
+    case "$1" in
+        *[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+is_safe_relpath() {
+    _p="$1"
+    [ -n "$_p" ] || return 1
+    case "$_p" in
+        /*|*/|..|../*|*/..|*/../*|*\\*|*\'*|*\"*|*\$*|*\`*) return 1 ;;
+    esac
+    return 0
+}
+
+is_preserved_esp_path() {
+    case "$1" in
+        EFI/BOOT/grub.cfg|SPX-USERDATA-GROWN.txt|SPX-BOOT-SOURCE.txt|SPX-OTA-*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+block_size_bytes() {
+    _dev="$1"
+    if [ -b "$_dev" ]; then
+        _real="$(readlink -f "$_dev" 2>/dev/null || printf '%s' "$_dev")"
+        _node="${_real##*/}"
+        if [ -r "/sys/class/block/$_node/size" ]; then
+            _sec="$(cat "/sys/class/block/$_node/size")"
+            echo $(( _sec * 512 ))
+            return 0
+        fi
+        if command -v blockdev >/dev/null 2>&1; then
+            blockdev --getsize64 "$_dev" 2>/dev/null && return 0
+        fi
+    elif [ -f "$_dev" ]; then
+        stat -c '%s' "$_dev" 2>/dev/null && return 0
+    fi
+    echo 0
+}
+
+dir_free_mb() {
+    _d="$1"
+    [ -d "$_d" ] || { echo 0; return 0; }
+    df -k "$_d" 2>/dev/null | awk 'NR==2 { printf "%d", int($4 / 1024) }'
+}
+
+dir_total_mb() {
+    _d="$1"
+    [ -d "$_d" ] || { echo 0; return 0; }
+    df -k "$_d" 2>/dev/null | awk 'NR==2 { printf "%d", int($2 / 1024) }'
+}
+
+read_kv_file() {
+    _rkv_file="$1"
+    _rkv_key="$2"
+    [ -r "$_rkv_file" ] || return 0
+    awk -F '=' -v k="$_rkv_key" '$1 == k { sub(/^[^=]*=/, ""); gsub(/\r/, ""); print; exit }' "$_rkv_file" 2>/dev/null || true
+}
+
+publish_file() {
+    _pf_dir="$1"
+    _pf_name="$2"
+    _pf_body="$3"
+    [ -d "$_pf_dir" ] && [ ! -L "$_pf_dir" ] || return 1
+    _pf_uid="$(stat -c '%u' "$_pf_dir" 2>/dev/null || echo 0)"
+    _pf_gid="$(stat -c '%g' "$_pf_dir" 2>/dev/null || echo 0)"
+    _pf_tmp="$_pf_dir/$_pf_name.tmp"
+    rm -f "$_pf_tmp" 2>/dev/null || true
+    printf '%s\n' "$_pf_body" > "$_pf_tmp"
+    chown "$_pf_uid:$_pf_gid" "$_pf_tmp" 2>/dev/null || true
+    chmod 600 "$_pf_tmp" 2>/dev/null || true
+    mv -f "$_pf_tmp" "$_pf_dir/$_pf_name"
+}
+
+publish_progress() {
+    _pp_dir="$1"
+    _pp_stage="$2"
+    _pp_pct="$3"
+    _pp_detail="${4:-}"
+    _pp_body="$(printf 'stage=%s\npercent=%s\ndetail=%s\n' "$_pp_stage" "$_pp_pct" "$_pp_detail")"
+    publish_file "$_pp_dir" "ota-progress" "$_pp_body" || true
+}
+
+send_reply() {
+    _sr_dir="$1"
+    _sr_nonce="$2"
+    _sr_status="$3"
+    _sr_detail="${4:-}"
+    _sr_body="$(printf '%s\n%s\n%s\n' "$_sr_nonce" "$_sr_status" "$_sr_detail")"
+    publish_file "$_sr_dir" "ota-reply" "$_sr_body"
+}
+
+# Replace competing stock/GMS Settings -> System update handlers dynamically.
+claim_system_update_intent() {
+    [ "${SPX_OTA_CLAIM_INTENT:-1}" != "0" ] || return 0
+    _u="$1"
+    android pm enable --user "$_u" "$UPDATE_COMPONENT" >/dev/null 2>&1 || true
+    _handlers="$(android cmd package query-activities --brief -a android.settings.SYSTEM_UPDATE_SETTINGS 2>/dev/null || true)"
+    printf '%s\n' "$_handlers" | while IFS= read -r _line; do
+        _comp="$(printf '%s' "$_line" | tr -d '\r' | awk '{print $1}')"
+        case "$_comp" in
+            */*)
+                _pkg="${_comp%%/*}"
+                if [ "$_pkg" != "$PKG" ]; then
+                    android pm disable-user --user "$_u" "$_comp" >/dev/null 2>&1 || true
+                fi
+                ;;
+        esac
+    done
+}
+
+publish_state() {
+    _dir="$1"
+    _ver="$(read_kv_file "$ETC_DIR/spx-ota-info" "SPX_OTA_VERSION")"
+    if [ -z "$_ver" ]; then
+        _ver="$(read_kv_file "$ESP_DIR/SPX-IMAGE.txt" "SPX_RELEASE")"
+    fi
+    [ -n "$_ver" ] || _ver="6.18-hybrid"
+    _commit="$(read_kv_file "$ETC_DIR/spx-ota-info" "SPX_OTA_COMMIT")"
+    _krel="$(uname -r 2>/dev/null || true)"
+    _cur_super_sha="$(read_kv_file "$ETC_DIR/spx-ota-info" "SPX_OTA_SUPER_SHA256")"
+    _super_bytes="$(block_size_bytes "$SUPER_DEV")"
+    _esp_free="$(dir_free_mb "$ESP_DIR")"
+    _esp_total="$(dir_total_mb "$ESP_DIR")"
+    _data_free="$(dir_free_mb "$DATA_ROOT/data")"
+
+    _pend_active=0
+    _pend_kind=""
+    _pend_ver=""
+    _pend_wipe=0
+    _pend_super=0
+    if [ -f "$ESP_DIR/SPX-OTA-PENDING" ] && [ ! -L "$ESP_DIR/SPX-OTA-PENDING" ]; then
+        _pend_active=1
+        _pend_kind="$(read_kv_file "$ESP_DIR/SPX-OTA-PENDING" "PACKAGE_KIND")"
+        _pend_ver="$(read_kv_file "$ESP_DIR/SPX-OTA-PENDING" "VERSION")"
+        _pend_wipe="$(read_kv_file "$ESP_DIR/SPX-OTA-PENDING" "WIPE_DATA")"
+        _pend_super="$(read_kv_file "$ESP_DIR/SPX-OTA-PENDING" "APPLY_SUPER")"
+    fi
+
+    _last_status=""
+    _last_ver=""
+    _last_kind=""
+    _last_wipe=""
+    _last_err=""
+    if [ -f "$ESP_DIR/SPX-OTA-RESULT.txt" ] && [ ! -L "$ESP_DIR/SPX-OTA-RESULT.txt" ]; then
+        _last_status="$(read_kv_file "$ESP_DIR/SPX-OTA-RESULT.txt" "STATUS")"
+        _last_ver="$(read_kv_file "$ESP_DIR/SPX-OTA-RESULT.txt" "VERSION")"
+        _last_kind="$(read_kv_file "$ESP_DIR/SPX-OTA-RESULT.txt" "PACKAGE_KIND")"
+        _last_wipe="$(read_kv_file "$ESP_DIR/SPX-OTA-RESULT.txt" "WIPE_DATA")"
+        _last_err="$(read_kv_file "$ESP_DIR/SPX-OTA-RESULT.txt" "ERROR")"
+    fi
+
+    _body="$(cat <<EOF
+ota_bridge_version=1
+current_version=$_ver
+current_commit=$_commit
+current_kernel=$_krel
+current_super_sha256=$_cur_super_sha
+super_bytes=$_super_bytes
+esp_free_mb=$_esp_free
+esp_total_mb=$_esp_total
+data_free_mb=$_data_free
+pending_active=$_pend_active
+pending_kind=$_pend_kind
+pending_version=$_pend_ver
+pending_wipe_data=$_pend_wipe
+pending_apply_super=$_pend_super
+last_status=$_last_status
+last_version=$_last_ver
+last_kind=$_last_kind
+last_wipe_data=$_last_wipe
+last_error=$_last_err
+EOF
+)"
+    publish_file "$_dir" "ota-state" "$(printf '%s\n' "$_body")"
+}
+
+# Staged inspection cache stored under $OTA_DATA_DIR/staged.meta
+STAGED_PKG="$OTA_DATA_DIR/staged.pkg"
+STAGED_META="$OTA_DATA_DIR/staged.meta"
+
+inspect_staged_package() {
+    _dir="$1"
+    _nonce="$2"
+    _rel="$3"
+
+    is_safe_relpath "$_rel" || { send_reply "$_dir" "$_nonce" "ERROR" "invalid_path"; return 0; }
+    _src="$_dir/$_rel"
+    if [ ! -f "$_src" ] || [ -L "$_src" ]; then
+        send_reply "$_dir" "$_nonce" "ERROR" "staged_file_missing"
+        return 0
+    fi
+    if [ ! -x "$OTA_TOOL" ]; then
+        send_reply "$_dir" "$_nonce" "ERROR" "missing_ota_tool"
+        return 0
+    fi
+
+    publish_progress "$_dir" "hashing" "20" ""
+    rm -f "$STAGED_PKG" "$STAGED_META" 2>/dev/null || true
+    mv -f "$_src" "$STAGED_PKG" || { send_reply "$_dir" "$_nonce" "ERROR" "stage_move_failed"; return 0; }
+    chmod 600 "$STAGED_PKG" 2>/dev/null || true
+
+    _pkg_bytes="$(stat -c '%s' "$STAGED_PKG" 2>/dev/null || echo 0)"
+    _pkg_sha="$("$OTA_TOOL" sha256 "$STAGED_PKG" 2>/dev/null || true)"
+    if ! is_hex64 "$_pkg_sha"; then
+        rm -f "$STAGED_PKG" 2>/dev/null || true
+        send_reply "$_dir" "$_nonce" "ERROR" "hash_failed"
+        return 0
+    fi
+
+    publish_progress "$_dir" "inspecting" "55" ""
+    _outer="$("$OTA_TOOL" detect "$STAGED_PKG" 2>/dev/null || echo unknown)"
+    _kind=""
+    case "$_outer" in
+        full-img)
+            _kind="full-img"
+            ;;
+        gzip)
+            _inner="$(gzip -dc "$STAGED_PKG" 2>/dev/null | "$OTA_TOOL" detect - 2>/dev/null || echo unknown)"
+            case "$_inner" in
+                tar) _kind="manifest" ;;
+                full-img) _kind="full-img-gz" ;;
+                *) _kind="unknown" ;;
+            esac
+            ;;
+        *)
+            _kind="unknown"
+            ;;
+    esac
+
+    _target_super_bytes="$(block_size_bytes "$SUPER_DEV")"
+
+    if [ "$_kind" = "manifest" ]; then
+        _work="$RUN_DIR/spx-ota-inspect"
+        rm -rf "$_work"
+        mkdir -p "$_work"
+        if ! tar -xzf "$STAGED_PKG" -C "$_work" ota-manifest.kv ota-files.tsv 2>/dev/null; then
+            rm -rf "$_work" "$STAGED_PKG"
+            send_reply "$_dir" "$_nonce" "ERROR" "invalid_ota_manifest"
+            return 0
+        fi
+        _schema="$(read_kv_file "$_work/ota-manifest.kv" "SCHEMA")"
+        if [ "$_schema" != "1" ]; then
+            rm -rf "$_work" "$STAGED_PKG"
+            send_reply "$_dir" "$_nonce" "ERROR" "unsupported_manifest_schema"
+            return 0
+        fi
+        _ver="$(read_kv_file "$_work/ota-manifest.kv" "VERSION")"
+        _krel="$(read_kv_file "$_work/ota-manifest.kv" "KERNEL_RELEASE")"
+        _commit="$(read_kv_file "$_work/ota-manifest.kv" "BUILD_COMMIT")"
+        _super_inc="$(read_kv_file "$_work/ota-manifest.kv" "SUPER_INCLUDED")"
+        _super_sha="$(read_kv_file "$_work/ota-manifest.kv" "SUPER_SHA256")"
+        _super_sz="$(read_kv_file "$_work/ota-manifest.kv" "SUPER_BYTES")"
+        _req_super="$(read_kv_file "$_work/ota-manifest.kv" "REQUIRED_SUPER_SHA256")"
+        _esp_mode="$(read_kv_file "$_work/ota-manifest.kv" "ESP_MODE")"
+        _file_cnt="$(awk 'NF>0 {c++} END {print c+0}' "$_work/ota-files.tsv")"
+        _esp_total_bytes="$(awk -F '\t' '$1=="PUT" {s+=$5} END {printf "%.0f", s+0}' "$_work/ota-files.tsv")"
+
+        [ "$_super_inc" = "1" ] || _super_inc="0"
+        [ -n "$_super_sz" ] || _super_sz="0"
+        if [ "$_super_inc" = "1" ] && [ "$_target_super_bytes" -gt 0 ] && [ "$_super_sz" -gt "$_target_super_bytes" ]; then
+            rm -rf "$_work" "$STAGED_PKG"
+            send_reply "$_dir" "$_nonce" "ERROR" "super_partition_too_small"
+            return 0
+        fi
+
+        _cur_super="$(read_kv_file "$ETC_DIR/spx-ota-info" "SPX_OTA_SUPER_SHA256")"
+        _super_compat=1
+        if [ "$_super_inc" = "0" ] && [ -n "$_req_super" ] && [ -n "$_cur_super" ] && [ "$_req_super" != "$_cur_super" ]; then
+            _super_compat=0
+        fi
+        rm -rf "$_work"
+
+        _meta="$(cat <<EOF
+package_kind=manifest
+package_sha256=$_pkg_sha
+package_bytes=$_pkg_bytes
+version=$_ver
+kernel_release=$_krel
+build_commit=$_commit
+super_included=$_super_inc
+super_sha256=$_super_sha
+super_bytes=$_super_sz
+super_compatible=$_super_compat
+esp_mode=$_esp_mode
+esp_bytes=$_esp_total_bytes
+file_count=$_file_cnt
+EOF
+)"
+        printf '%s\n' "$_meta" > "$STAGED_META"
+        chmod 600 "$STAGED_META" 2>/dev/null || true
+        publish_progress "$_dir" "ready" "100" ""
+        send_reply "$_dir" "$_nonce" "OK" "$_meta"
+        return 0
+    fi
+
+    if [ "$_kind" = "full-img" ] || [ "$_kind" = "full-img-gz" ]; then
+        if [ "$_kind" = "full-img-gz" ]; then
+            _gpt="$(gzip -dc "$STAGED_PKG" 2>/dev/null | "$OTA_TOOL" inspect-gpt - 2>/dev/null || true)"
+        else
+            _gpt="$("$OTA_TOOL" inspect-gpt "$STAGED_PKG" 2>/dev/null || true)"
+        fi
+        _super_sz="$(printf '%s\n' "$_gpt" | awk -F '\t' '$1=="super" {print $3; exit}')"
+        _esp_sz="$(printf '%s\n' "$_gpt" | awk -F '\t' '$1=="SQ2PROBE" {print $3; exit}')"
+        if [ -z "$_super_sz" ] || [ -z "$_esp_sz" ]; then
+            rm -f "$STAGED_PKG"
+            send_reply "$_dir" "$_nonce" "ERROR" "invalid_full_image_gpt"
+            return 0
+        fi
+        if [ "$_target_super_bytes" -gt 0 ] && [ "$_super_sz" -gt "$_target_super_bytes" ]; then
+            rm -f "$STAGED_PKG"
+            send_reply "$_dir" "$_nonce" "ERROR" "super_partition_too_small"
+            return 0
+        fi
+        _meta="$(cat <<EOF
+package_kind=$_kind
+package_sha256=$_pkg_sha
+package_bytes=$_pkg_bytes
+version=full-image
+kernel_release=
+build_commit=
+super_included=1
+super_sha256=
+super_bytes=$_super_sz
+super_compatible=1
+esp_mode=full
+esp_bytes=$_esp_sz
+file_count=0
+EOF
+)"
+        printf '%s\n' "$_meta" > "$STAGED_META"
+        chmod 600 "$STAGED_META" 2>/dev/null || true
+        publish_progress "$_dir" "ready" "100" ""
+        send_reply "$_dir" "$_nonce" "OK" "$_meta"
+        return 0
+    fi
+
+    rm -f "$STAGED_PKG"
+    send_reply "$_dir" "$_nonce" "ERROR" "unsupported_package_format"
+}
+
+apply_online_manifest_esp() {
+    _ao_dir="$1"
+    _ao_ver="$2"
+    _stage_dir="$OTA_DATA_DIR/stage"
+    rm -rf "$_stage_dir"
+    mkdir -p "$_stage_dir/meta" "$_stage_dir/esp"
+
+    publish_progress "$_ao_dir" "extracting" "20" ""
+    tar -xzf "$STAGED_PKG" -C "$_stage_dir/meta" ota-manifest.kv ota-files.tsv 2>/dev/null || { rm -rf "$_stage_dir"; return 1; }
+    tar -xzf "$STAGED_PKG" -C "$_stage_dir/esp" payload/esp 2>/dev/null || { rm -rf "$_stage_dir"; return 1; }
+
+    publish_progress "$_ao_dir" "verifying" "45" ""
+    _total="$(awk -F '\t' '$1=="PUT" {c++} END {print c+0}' "$_stage_dir/meta/ota-files.tsv")"
+    [ "$_total" -gt 0 ] || { rm -rf "$_stage_dir"; return 1; }
+
+    while IFS='	' read -r _act _dst_rel _blob_rel _sha _sz; do
+        [ -n "$_act" ] || continue
+        case "$_act" in
+            PUT)
+                is_safe_relpath "$_dst_rel" || { rm -rf "$_stage_dir"; return 1; }
+                is_safe_relpath "$_blob_rel" || { rm -rf "$_stage_dir"; return 1; }
+                is_hex64 "$_sha" || { rm -rf "$_stage_dir"; return 1; }
+                _src="$_stage_dir/esp/$_blob_rel"
+                [ -f "$_src" ] && [ ! -L "$_src" ] || { rm -rf "$_stage_dir"; return 1; }
+                _got="$("$OTA_TOOL" sha256 "$_src" 2>/dev/null || true)"
+                [ "$_got" = "$_sha" ] || { rm -rf "$_stage_dir"; return 1; }
+                ;;
+            DEL)
+                is_safe_relpath "$_dst_rel" || { rm -rf "$_stage_dir"; return 1; }
+                ;;
+            *)
+                rm -rf "$_stage_dir"; return 1
+                ;;
+        esac
+    done < "$_stage_dir/meta/ota-files.tsv"
+
+    publish_progress "$_ao_dir" "applying" "60" ""
+    _idx=0
+    while IFS='	' read -r _act _dst_rel _blob_rel _sha _sz; do
+        [ -n "$_act" ] || continue
+        case "$_act" in
+            PUT)
+                if ! is_preserved_esp_path "$_dst_rel"; then
+                    _dst="$ESP_DIR/$_dst_rel"
+                    mkdir -p "${_dst%/*}" || { rm -rf "$_stage_dir"; return 1; }
+                    _tmp="$_dst.spxtmp"
+                    rm -f "$_tmp" 2>/dev/null || true
+                    cp "$_stage_dir/esp/$_blob_rel" "$_tmp" || { rm -f "$_tmp"; rm -rf "$_stage_dir"; return 1; }
+                    sync 2>/dev/null || true
+                    _got="$("$OTA_TOOL" sha256 "$_tmp" 2>/dev/null || true)"
+                    if [ "$_got" != "$_sha" ]; then
+                        rm -f "$_tmp"
+                        rm -rf "$_stage_dir"
+                        return 1
+                    fi
+                    mv -f "$_tmp" "$_dst" || { rm -f "$_tmp"; rm -rf "$_stage_dir"; return 1; }
+                    sync 2>/dev/null || true
+                fi
+                _idx=$(( _idx + 1 ))
+                _pct=$(( 60 + (_idx * 35) / _total ))
+                publish_progress "$_ao_dir" "applying" "$_pct" "$_dst_rel"
+                ;;
+            DEL)
+                if ! is_preserved_esp_path "$_dst_rel"; then
+                    rm -f "$ESP_DIR/$_dst_rel" 2>/dev/null || true
+                fi
+                ;;
+        esac
+    done < "$_stage_dir/meta/ota-files.tsv"
+
+    rm -rf "$_stage_dir" "$STAGED_PKG" "$STAGED_META" 2>/dev/null || true
+    _res_tmp="$ESP_DIR/SPX-OTA-RESULT.txt.tmp"
+    {
+        printf 'STATUS=APPLIED_PENDING_REBOOT\n'
+        printf 'VERSION=%s\n' "$_ao_ver"
+        printf 'PACKAGE_KIND=manifest\n'
+        printf 'APPLY_SUPER=0\n'
+        printf 'WIPE_DATA=0\n'
+        printf 'ERROR=\n'
+    } > "$_res_tmp"
+    sync 2>/dev/null || true
+    mv -f "$_res_tmp" "$ESP_DIR/SPX-OTA-RESULT.txt"
+    sync 2>/dev/null || true
+    publish_progress "$_ao_dir" "done" "100" ""
+    return 0
+}
+
+install_staged_package() {
+    _dir="$1"
+    _nonce="$2"
+    _expected_sha="$3"
+    _wipe="$4"
+
+    is_hex64 "$_expected_sha" || { send_reply "$_dir" "$_nonce" "ERROR" "invalid_sha256"; return 0; }
+    case "$_wipe" in 0|1) ;; *) send_reply "$_dir" "$_nonce" "ERROR" "invalid_wipe_flag"; return 0 ;; esac
+
+    if [ ! -f "$STAGED_PKG" ] || [ ! -f "$STAGED_META" ]; then
+        send_reply "$_dir" "$_nonce" "ERROR" "no_staged_package"
+        return 0
+    fi
+
+    _meta_sha="$(read_kv_file "$STAGED_META" "package_sha256")"
+    if [ "$_meta_sha" != "$_expected_sha" ]; then
+        send_reply "$_dir" "$_nonce" "ERROR" "sha256_mismatch"
+        return 0
+    fi
+    _kind="$(read_kv_file "$STAGED_META" "package_kind")"
+    _super_inc="$(read_kv_file "$STAGED_META" "super_included")"
+    _ver="$(read_kv_file "$STAGED_META" "version")"
+    _super_compat="$(read_kv_file "$STAGED_META" "super_compatible")"
+
+    if [ "$_kind" = "manifest" ] && [ "$_super_inc" = "0" ] && [ "$_super_compat" = "0" ]; then
+        send_reply "$_dir" "$_nonce" "ERROR" "super_baseline_mismatch"
+        return 0
+    fi
+
+    # Fast online path: ESP-only manifest update + keep user data.
+    if [ "$_kind" = "manifest" ] && [ "$_super_inc" = "0" ] && [ "$_wipe" = "0" ]; then
+        if apply_online_manifest_esp "$_dir" "$_ver"; then
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK" "ONLINE_APPLIED"
+        else
+            publish_progress "$_dir" "error" "0" "apply_failed"
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "ERROR" "online_apply_failed"
+        fi
+        return 0
+    fi
+
+    # Offline initramfs path: super update, full disk image, or clean install (wipe_data=1).
+    publish_progress "$_dir" "staging_offline" "75" ""
+    _pending_pkg="$OTA_DATA_DIR/pending.pkg"
+    mv -f "$STAGED_PKG" "$_pending_pkg" || { send_reply "$_dir" "$_nonce" "ERROR" "pending_move_failed"; return 0; }
+    chmod 600 "$_pending_pkg" 2>/dev/null || true
+    rm -f "$STAGED_META" 2>/dev/null || true
+
+    _apply_super="$_super_inc"
+    if [ "$_kind" = "full-img" ] || [ "$_kind" = "full-img-gz" ]; then
+        _apply_super=1
+    fi
+
+    _ptmp="$ESP_DIR/SPX-OTA-PENDING.tmp"
+    {
+        printf 'PACKAGE_REL=ota/pending.pkg\n'
+        printf 'PACKAGE_SHA256=%s\n' "$_expected_sha"
+        printf 'PACKAGE_KIND=%s\n' "$_kind"
+        printf 'APPLY_SUPER=%s\n' "$_apply_super"
+        printf 'WIPE_DATA=%s\n' "$_wipe"
+        printf 'VERSION=%s\n' "$_ver"
+    } > "$_ptmp"
+    sync 2>/dev/null || true
+    mv -f "$_ptmp" "$ESP_DIR/SPX-OTA-PENDING"
+    sync 2>/dev/null || true
+
+    publish_progress "$_dir" "done" "100" ""
+    publish_state "$_dir" || true
+    send_reply "$_dir" "$_nonce" "OK" "OFFLINE_STAGED"
+}
+
+handle_request() {
+    _dir="$1"
+    _req="$_dir/ota-request"
+    [ -f "$_req" ] && [ ! -L "$_req" ] || return 0
+    _sz="$(stat -c '%s' "$_req" 2>/dev/null || echo 0)"
+    if [ "$_sz" -le 0 ] || [ "$_sz" -gt 8192 ]; then
+        rm -f "$_req" 2>/dev/null || true
+        return 0
+    fi
+    cp "$_req" "$TMP_REQ"
+    rm -f "$_req"
+
+    _cmd="$(sed -n '1p' "$TMP_REQ" | tr -d '\r')"
+    _nonce="$(sed -n '2p' "$TMP_REQ" | tr -d '\r')"
+    if ! validate_nonce "$_nonce"; then
+        rm -f "$TMP_REQ"
+        return 0
+    fi
+
+    case "$_cmd" in
+        ota-refresh)
+            publish_state "$_dir" || { send_reply "$_dir" "$_nonce" "ERROR" "state_publish_failed"; rm -f "$TMP_REQ"; return 0; }
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        ota-inspect)
+            _rel="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            inspect_staged_package "$_dir" "$_nonce" "$_rel"
+            ;;
+        ota-install)
+            _sha="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            _wipe="$(sed -n '4p' "$TMP_REQ" | tr -d '\r')"
+            install_staged_package "$_dir" "$_nonce" "$_sha" "$_wipe"
+            ;;
+        ota-cancel)
+            rm -f "$ESP_DIR/SPX-OTA-PENDING" "$OTA_DATA_DIR/pending.pkg" "$STAGED_PKG" "$STAGED_META" 2>/dev/null || true
+            rm -rf "$OTA_DATA_DIR/stage" 2>/dev/null || true
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        ota-clear-result)
+            _cur_st="$(read_kv_file "$ESP_DIR/SPX-OTA-RESULT.txt" "STATUS")"
+            if [ "$_cur_st" != "APPLIED_PENDING_REBOOT" ]; then
+                rm -f "$ESP_DIR/SPX-OTA-RESULT.txt" 2>/dev/null || true
+                sync 2>/dev/null || true
+            fi
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        ota-reboot)
+            sync 2>/dev/null || true
+            send_reply "$_dir" "$_nonce" "OK"
+            if [ "$NO_REBOOT" != "1" ]; then
+                (
+                    sleep 1
+                    sync 2>/dev/null || true
+                    android svc power reboot >/dev/null 2>&1 || android setprop sys.powerctl reboot >/dev/null 2>&1 || reboot
+                ) </dev/null >/dev/null 2>&1 &
+            fi
+            ;;
+        *)
+            send_reply "$_dir" "$_nonce" "ERROR" "unknown_command"
+            ;;
+    esac
+    rm -f "$TMP_REQ"
+}
+
+get_current_user() {
+    if [ -n "${SPX_OTA_TEST_USER:-}" ]; then
+        printf '%s\n' "$SPX_OTA_TEST_USER"
+        return 0
+    fi
+    _u="$(android cmd activity get-current-user 2>/dev/null | tr -d '\r' || true)"
+    if validate_user "$_u"; then
+        printf '%s\n' "$_u"
+    else
+        printf '0\n'
+    fi
+}
+
+CURRENT_USER="$(get_current_user)"
+claim_system_update_intent "$CURRENT_USER" || true
+
+APP_FILES="$DATA_ROOT/data/user_de/$CURRENT_USER/$PKG/files"
+if [ -d "$APP_FILES" ] && [ ! -L "$APP_FILES" ]; then
+    publish_state "$APP_FILES" || true
+fi
+
+if [ "${SPX_OTA_ONCE:-0}" = "1" ]; then
+    if [ -d "$APP_FILES" ] && [ ! -L "$APP_FILES" ]; then
+        handle_request "$APP_FILES"
+    fi
+    exit 0
+fi
+
+CYCLES=0
+LAST_PUBLISHED=0
+while true; do
+    APP_FILES="$DATA_ROOT/data/user_de/$CURRENT_USER/$PKG/files"
+    if [ -d "$APP_FILES" ] && [ ! -L "$APP_FILES" ]; then
+        if [ "$LAST_PUBLISHED" = "0" ]; then
+            publish_state "$APP_FILES" || true
+            LAST_PUBLISHED=1
+        fi
+        if [ -f "$APP_FILES/ota-request" ]; then
+            handle_request "$APP_FILES"
+        fi
+    else
+        LAST_PUBLISHED=0
+    fi
+    CYCLES=$(( CYCLES + 1 ))
+    if [ "$CYCLES" -ge 30 ]; then
+        CYCLES=0
+        _next="$(get_current_user)"
+        if [ "$_next" != "$CURRENT_USER" ]; then
+            CURRENT_USER="$_next"
+            LAST_PUBLISHED=0
+            claim_system_update_intent "$CURRENT_USER" || true
+        fi
+    fi
+    sleep "${SPX_OTA_POLL_SLEEP:-1}"
+done

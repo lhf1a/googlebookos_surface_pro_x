@@ -329,8 +329,29 @@ def main(argv=None):
                       help='GNU-EFI source for the boot-volume handoff; default PRIVATE_ROOT/kernel-6.18/gnu-efi')
     full.add_argument('--cross-compile', help='override the compiler; default extracts PRIVATE_ROOT/kernel-6.18/toolchain.tar.gz')
     full.add_argument('--build-dir', type=Path, help='fresh Linux filesystem kernel build directory')
+    full.add_argument('--ota-mode', choices=('auto', 'delta', 'esp', 'full'), default='auto',
+                      help='OTA package build mode during full-image: auto omits super when unchanged (default: auto)')
+    full.add_argument('--ota-baseline', type=Path,
+                      help='previous build directory or OTA-MANIFEST.json for delta ESP/super comparison')
+    full.add_argument('--ota-previous-super-sha256',
+                      help='explicit previous super partition SHA-256 to decide whether super changed')
+    full.add_argument('--ota-version', help='explicit version string embedded in OTA info & manifest')
+    full.add_argument('--skip-ota', action='store_true',
+                      help='skip generating the OTA update archive alongside the full disk image')
     full.add_argument('--output', type=Path, required=True)
     full.add_argument('--jobs', type=int, default=8)
+    ota_cmd = commands.add_parser('ota', help='build an OTA update archive (.tar.gz + manifest) from a build output or ESP tree')
+    ota_cmd.add_argument('--build-output', type=Path, help='completed full-image build directory')
+    ota_cmd.add_argument('--esp-tree', type=Path, help='explicit assembled ESP directory')
+    ota_cmd.add_argument('--image', type=Path, help='explicit raw GPT disk image (.img)')
+    ota_cmd.add_argument('--layout', type=Path, help='explicit LAYOUT.json matching --image')
+    ota_cmd.add_argument('--previous-manifest', type=Path, help='previous OTA-MANIFEST.json, FULL-IMAGE.json, or build dir')
+    ota_cmd.add_argument('--previous-super-sha256', help='explicit previous super SHA-256')
+    ota_cmd.add_argument('--mode', choices=('auto', 'delta', 'esp', 'full'), default='auto')
+    ota_cmd.add_argument('--super-unchanged', action='store_true', help='omit super when no previous manifest is given')
+    ota_cmd.add_argument('--version', help='explicit release version string')
+    ota_cmd.add_argument('--archive-name', help='explicit output archive filename')
+    ota_cmd.add_argument('--output', type=Path, required=True, help='output directory for OTA package & manifest')
     verify = commands.add_parser('verify', help='verify the exact accepted private baseline')
     verify.add_argument('--baseline', type=Path, default=DEFAULT_BUNDLE)
     pack = commands.add_parser('package', help='copy baseline exactly; does NOT compile or build a disk image')
@@ -375,6 +396,21 @@ def main(argv=None):
         elif args.operation == 'full-image':
             from full_image import build as full_image_build
             report = full_image_build(args, compile_kernel)
+        elif args.operation == 'ota':
+            from build_ota_package import build_ota_package
+            report = build_ota_package(
+                output_dir=args.output,
+                esp_tree=args.esp_tree,
+                build_output=args.build_output,
+                image=args.image,
+                layout=args.layout,
+                previous_manifest=args.previous_manifest,
+                previous_super_sha256=args.previous_super_sha256,
+                mode=args.mode,
+                super_unchanged_hint=(True if args.super_unchanged else None),
+                version=args.version,
+                archive_name=args.archive_name,
+            )
         elif args.operation == 'verify':
             report = {'operation': 'verify', 'kernel_release': policy()['kernel_release'],
                       'files': validate_bundle(args.baseline), 'private_identity_present': True}
