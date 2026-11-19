@@ -140,6 +140,7 @@ struct sq2_vk_eval_input {
     const char *prop_driver;
     int prop_include_system;
     const char *policy_conf_text;
+    const char *prop_app_driver;
 };
 
 struct sq2_vk_decision {
@@ -303,6 +304,33 @@ int main(int argc, char **argv) {
     assert(sq2_vk_evaluate_policy(&rescue, &dec) == 0);
     assert(dec.backend == SQ2_VK_BACKEND_TURNIP);
     assert(strcmp(dec.reason, "cmdline:sq2.rescue=1") == 0);
+    rescue.prop_app_driver = "qcom";
+    assert(sq2_vk_evaluate_policy(&rescue, &dec) == 0);
+    assert(dec.backend == SQ2_VK_BACKEND_TURNIP);
+    rescue.kernel_cmdline = "sq2.vulkan.force=turnip";
+    assert(sq2_vk_evaluate_policy(&rescue, &dec) == 0);
+    assert(dec.backend == SQ2_VK_BACKEND_TURNIP);
+    struct sq2_vk_eval_input selected = base;
+    selected.prop_app_driver = "turnip";
+    selected.prop_persist_qcom_apps = "com.kurogame.*";
+    assert(sq2_vk_evaluate_policy(&selected, &dec) == 0);
+    assert(dec.backend == SQ2_VK_BACKEND_TURNIP);
+    assert(strcmp(dec.reason, "prop:app-driver") == 0);
+    selected.prop_app_driver = "";
+    assert(sq2_vk_evaluate_policy(&selected, &dec) == 0);
+    assert(dec.backend == SQ2_VK_BACKEND_QCOM);
+
+    /* Global qcom driver also guards com.android.systemui unless include_system=1 */
+    struct sq2_vk_eval_input sysui_guard = {
+        .uid = 10120,
+        .cmdline_arg0 = "com.android.systemui",
+        .prop_driver = "qcom",
+        .prop_include_system = 0,
+        .policy_conf_text = policy_text,
+    };
+    assert(sq2_vk_evaluate_policy(&sysui_guard, &dec) == 0);
+    assert(dec.backend == SQ2_VK_BACKEND_TURNIP);
+    assert(strcmp(dec.reason, "guard:system-on-global-qcom") == 0);
 
     /* 3DMark, Chrome, Winlator default to turnip */
     struct sq2_vk_eval_input bm = {

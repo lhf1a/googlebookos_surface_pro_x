@@ -105,6 +105,9 @@ def load(path):
     camera_load(roots['camera'])  # Complete bundle, not source-only schema 2.
     sensors_load(roots['sensors'])
     graphics = {k: (roots['glue']/n).read_bytes() for k,n in GLUE.items()}
+    # The control app and router are one interface; never reuse an older router
+    # that silently ignores current per-user/package selections.
+    graphics.pop('vulkan_router_bytes', None)
     graphics['turnip_bytes'] = (roots['mesa']/'vulkan.turnip.so').read_bytes()
     replacements = {dest: (roots['mesa']/name).read_bytes() for name,dest in MESA.items()}
     return roots, replacements, graphics, data

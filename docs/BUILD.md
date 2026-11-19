@@ -140,6 +140,27 @@ SQ2 热替换后 UU 连接已获用户确认正常；完整重启、SQ1 及跨�
 
 ## 7. 边界
 
+### 高级设置：Vulkan 配置与性能模式
+
+Hybrid 整包默认从 `probe/advanced-control/` 编译并安装“高级设置 / Advanced Settings”（`SurfaceAdvancedControl.apk`），
+并在 initramfs 中集成根桥接脚本 `/bin/spx-advanced-control-boot`，启动器与系统设置均提供入口，界面与入口文案随系统语言在中/英间切换（非中文默认英语）。
+
+- **一级选择页**：包含 **Vulkan 配置** 与 **性能模式** 两个子页面入口。
+- **Vulkan 配置**：
+  - 支持修改默认 Vulkan 配置（自动策略 / MESA / Qcom），写入 `persist.sq2.vulkan.driver`；当默认切换为 Qcom 时，系统 UID（`< 10000`）与 `com.android.systemui` 仍受路由器保护并留在 Mesa Turnip。
+  - 支持搜索当前 Android 用户应用并分别保存 `跟随默认 / MESA / Qcom`（写入 `persist.sq2.vulkan.app.<user>.<package>`）；所有已手动修改过的应用始终置顶显示。
+  - 环境/启动强制项、救援模式（`sq2.rescue=1`）与 Zygote 保护、debug 列表仍优先；重新打开应用后生效，不热换活跃驱动。
+- **性能模式**：
+  - 动态读取各 cpufreq 频率域共同支持的内核调度策略（如 `performance`、`schedutil`、`ondemand`、`conservative`、`powersave`、`userspace` 等），不硬编码节点或策略列表。
+  - 切换时通过内置 root/init 桥接立即应用到所有 cpufreq 策略并持久化至 `/data/vendor/spx-advanced-control/cpu_governor`，重启自动恢复（救援模式或 `sq2.cpufreq=0` 自动跳过），无需手工给应用授予 KernelSU 权限；硬件温控保护保持启用。
+
+单独构建 APK：`python3 scripts/full_image_advanced_control.py --output OUTPUT/SurfaceAdvancedControl.apk`。
+签名密钥位于 ignored 的 `private/advanced-control/signing.keystore`（也可通过 `SPX_ADVANCED_CONTROL_KEYSTORE` 指定）。
+复用构建会重编 Vulkan 路由器、高级设置 APK 并刷新桥接脚本。
+当前为源码集成候选；尚未完成新整盘启动及 SQ1/SQ2 真机端到端验收。
+
+### 整盘验收边界
+
 - 默认只构建产物：不运行测试套件、整盘解压校验或 SHA 清单；编译错误、必要格式/ABI/配对约束仍会中止。
 - 构建成功不等于真机启动、SQ1 跨机、长期休眠或功耗验收；未启动的新整盘必须在文档中如实标注。
 - 私有库/固件仍按其许可分发，来源见 [PROVENANCE](PROVENANCE.md)。

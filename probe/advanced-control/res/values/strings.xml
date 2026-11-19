@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Advanced Settings</string>
+    <string name="settings_title">Advanced Settings</string>
+    <string name="settings_summary">Vulkan driver &amp; performance mode</string>
+</resources>

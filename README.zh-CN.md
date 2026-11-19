@@ -23,6 +23,11 @@
     <img src="https://img.shields.io/badge/Kernel-Linux_6.18.60-FCC624?style=flat-square" alt="内核：Linux 6.18.60" />
     <img src="https://img.shields.io/badge/Graphics-Hybrid_(Mesa_%2B_QTI)-orange?style=flat-square" alt="图形栈：Hybrid Mesa + QTI" />
   </p>
+
+  <p>
+    <a href="https://drive.google.com/drive/folders/1uVAA6UnydSyUHQAO8Y5rTm8SxZ62Zykr"><img src="https://img.shields.io/badge/Google_Drive-%E9%95%9C%E5%83%8F%E4%B8%8B%E8%BD%BD-4285F4?style=flat-square&logo=googledrive&logoColor=white" alt="Google Drive：镜像下载" /></a>
+    <a href="https://pan.baidu.com/s/51GjLdmTGir0PelomZvboYw"><img src="https://img.shields.io/badge/%E7%99%BE%E5%BA%A6%E7%BD%91%E7%9B%98-%E9%95%9C%E5%83%8F%E4%B8%8B%E8%BD%BD-06A7FF?style=flat-square&logo=baidu&logoColor=white" alt="百度网盘：镜像下载" /></a>
+  </p>
 </div>
 
 ---
@@ -36,17 +41,26 @@
 - **统一引导与 SoC 路由（EL2）**：SQ1 与 SQ2 共用同一份 Linux `Image`、内核模块、`initramfs.cpio.gz` 以及 **EL2（`sq2.el2=1`）** 引导路径。Surface ARM64 UEFI 加载定制 GRUB（`BOOTAA64.EFI`），再由 `start.efi` 检测 SMBIOS 机型并动态分发：SQ2 加载 `el2launch.efi` + `android-el2.dtb`，SQ1 加载 `el1launch.efi`（`el2launch.efi` 的克隆副本，仍保留 `sq2.el2=1`）+ `android-sq1.dtb`（基于 `android-el2.dtb` 保留 `SQ1EL2/android-el2.dtb` 中的 GPU/GMU OPP 配置），并协同加载 `qebspilaa64.efi`（SLPI PAS12）与 `tcblaunch.exe`。
 - **混合图形与显示栈**：
   - **EGL / GLES**：采用 **Mesa Freedreno `26.2.4`** + `libdrm 2.4.133`（已剔除参考镜像中的 EGL/GLES 库）。
-  - **双 Vulkan 路由器（`vulkan.freedreno.so`）**：通过 `/vendor/etc/sq2-vulkan-policy.conf` 按进程路由——系统 UI、浏览器、模拟器、基准测试及常规应用默认使用硬件 GMEM 模式下的 **Turnip / Mesa**（`vulkan.turnip.so`）；Unity / Unreal 引擎及部分特定游戏默认使用 **Qualcomm Quest 2 v77 原生 Vulkan**（`vulkan.qti.so` + `libgsl` / `libadreno_utils`）。
+  - **双 Vulkan 路由器（`vulkan.freedreno.so`）**：通过 `/vendor/etc/sq2-vulkan-policy.conf` 按进程路由——系统 UI、浏览器、模拟器、基准测试及常规应用默认使用硬件 GMEM 模式下的 **Turnip / Mesa**（`vulkan.turnip.so`）；Unity / Unreal 引擎及《异环》（NTE）、《鸣潮》等特定游戏默认使用 **Qualcomm Quest 2 v77 原生 Vulkan**（`vulkan.qti.so` + `libgsl` / `libadreno_utils`）。默认源码构建现已为所有普通 Android 应用 UID 经 QCOM/GSL 打开 MSM 时启用 **QCOM `VM_BIND` + 缓存提交优化**（`qti-msm-vmbind`，无需读取包名白名单；系统、隔离与 SDK 沙箱 UID 除外，BO 共享策略保持 `exclude`）。
   - **显示合成与 Gralloc**：采用 **QTI SM8350 Display / HWC / SDM** 与 **AOSP / QTI `mapper5` / `allocator`**，由 Quest 2 v77 `gralloc.kona.so` / `qdMetaData` 提供底层分配，并通过 `gralloc.sq2_mesa.so` 桥接至 Mesa，配合线性 RGB 布局适配层（`libsq2_grallocutils_vendor.so`）及 SDM 转 `pwm-backlight` 背光垫片（`libsq2_sdm_backlight.so`）。
-- **多媒体与硬件子系统**：集成 **QTI SM8250 原生 OMX**（`quest2-omx-service`，原生 ANW Surface 解码）与 Linux **Venus 硬解**模块（`venus-core.ko` / `venus-dec.ko` / `venus-enc.ko`，含 `s2idle` 电源状态钩子）、**V4L2 / CAMSS + 软件 ISP Camera2 HAL**、**SLPI PAS12 + `sensors.spx.so` SubHal**，以及 **IPTSd `3.1.1`** 触控屏与手写笔服务。
+- **多媒体与硬件子系统**：集成 **QTI SM8250 原生 OMX**（`quest2-omx-service`，原生 ANW Surface 解码，已支持 `LOWLATENCY_MODE` 零显示延迟控制映射及未启流 VB2 缓冲预热归还修复）与 Linux **Venus 硬解**模块（`venus-core.ko` / `venus-dec.ko` / `venus-enc.ko`，含 `s2idle` 电源状态钩子）、**内置音频播放节奏适配**（`prepare-sq2-primary-audio.py`：48 kHz PRIMARY 采用 10 ms 框架写入并保留至少 5760 帧物理 ALSA 播放缓冲请求）、**V4L2 / CAMSS + 软件 ISP Camera2 HAL**、**SLPI PAS12 + `sensors.spx.so` SubHal**，以及 **IPTSd `3.1.1`** 触控屏与手写笔服务。
+
+### 预构建镜像下载
+
+预构建通用整盘镜像（`surface-pro-x-6.18-hybrid-generic.img.gz`）已托管至以下网盘：
+
+- **Google Drive**：[surface_pro_x_gbos_images](https://drive.google.com/drive/folders/1uVAA6UnydSyUHQAO8Y5rTm8SxZ62Zykr)
+- **百度网盘**：https://pan.baidu.com/s/51GjLdmTGir0PelomZvboYw
+
+烧录方法（balenaEtcher / Rufus / Windows 同盘双启动脚本）与完整性校验说明请参见下文[真机部署指南](#真机部署指南)。
 
 ```mermaid
 flowchart LR
     A["Surface Pro X 原厂 Windows<br/>（SQ1 / SQ2 OEM 驱动与固件）"] -->|Prepare-HybridDependencies.ps1| B["私有构建输入<br/>（tar + SHA256，仓库外存放）"]
     C["公开 Git 源码与<br/>固定上游预编译包"] --> D["scripts/build.py<br/>（Hybrid 整盘构建流水线）"]
     B --> D
-    D --> E["20 GiB 原始 GPT 磁盘镜像<br/>（UEFI / GRUB + ESP + Android）"]
-    E -->|balenaEtcher / Rufus<br/>或 deploy-experimental-usb.py| F["USB 移动硬盘 / NVMe 固态硬盘"]
+    D --> E["8 GiB 原始 GPT 磁盘镜像<br/>（默认 5 分区，UEFI / GRUB + ESP + Android）"]
+    E -->|balenaEtcher / Rufus<br/>或 Install-GooglebookDualBoot.ps1| F["USB 移动硬盘 / NVMe 固态硬盘"]
     F --> G["Surface Pro X（SQ1 / SQ2）<br/>Linux 6.18.60 + Android 17 Hybrid"]
 ```
 
@@ -67,11 +81,11 @@ flowchart LR
 
 | 子系统 | 状态 | 已验证行为、硬件范围与限制 |
 | :--- | :---: | :--- |
-| **UEFI / NVMe / USB 启动与存储** | ✅ 可用 | ARM64 UEFI → 定制 GRUB（`BOOTAA64.EFI`）→ SMBIOS 路由（`start.efi`）→ **EL2**（`sq2.el2=1`；SQ1 使用 `el1launch.efi` 副本 + `android-sq1.dtb`，SQ2 使用 `el2launch.efi` + `android-el2.dtb`）。20 GiB GPT 镜像在首次正常启动时自动在线扩容 `userdata`（`grow-image-userdata` + `resize2fs`）。*注：`2026-11-16` 通用镜像已通过构建主机校验，真机启动验收待完成。* |
-| **音频（扬声器 / 麦克风 / USB-C）** | ✅ 可用 | SQ2 已验证：SoundWire WCD9340 扬声器（`+12 dB` RX7/RX8 `raw=84`，含 FIFO 修复）、DMIC 麦克风（`CARD_0_DEV_1`，`raw=96`）及 USB-C 音频（`05ac:110b`，48 kHz 放音/录音）。*限制：内置扬声器低频不足且声场略偏右；SQ1 音频与蓝牙 A2DP/HFP 尚未测试。* |
+| **UEFI / NVMe / USB 启动与存储** | ✅ 可用 | ARM64 UEFI → 定制 GRUB（`BOOTAA64.EFI`）→ SMBIOS 路由（`start.efi`）→ **EL2**（`sq2.el2=1`；SQ1 使用 `el1launch.efi` 副本 + `android-sq1.dtb`，SQ2 使用 `el2launch.efi` + `android-el2.dtb`）。默认 8 GiB 精简 5 分区 GPT 镜像（传入 `--preserve-template-layout` 可保留旧版 39 分区 20 GiB 布局）在首次正常启动时自动在线扩容 `userdata`（`grow-image-userdata` + `resize2fs`）。*注：`2026-11-18` 精简 5 分区镜像已通过构建主机校验与 Windows 双启动写盘检查，最新镜像的真机冷启动验收待完成。* |
+| **音频（扬声器 / 麦克风 / USB-C）** | ✅ 可用 | SQ2 已验证：SoundWire WCD9340 扬声器（`+12 dB` RX7/RX8 `raw=84`，含 FIFO 修复）、内置音频播放节奏适配（`prepare-sq2-primary-audio.py`：10 ms 框架写入 + `>= 5760` 帧 ALSA 缓冲请求，SQ2 完整重启与《异环》/《鸣潮》/视频实听确认通过）、DMIC 麦克风（`CARD_0_DEV_1`，`raw=96`）及 USB-C 音频（`05ac:110b`，48 kHz 放音/录音）。*限制：内置扬声器低频不足且声场略偏右；SQ1、整盘重编复测与蓝牙 A2DP/HFP 尚未测试。* |
 | **Root / KernelSU** | ✅ 可用 | 集成 KernelSU Next（`v3.2.0-legacy`）+ Zygisk Next（`1.5.2`）+ `sq2-ksu-modules-boot`，并提供实验性 `device_faker_gfx` 模块。通用镜像默认清除个人凭据、锁定 `root` 密码并禁用 SSH。 |
-| **Android 桌面与图形（GLES / Vulkan）** | 🟡 部分可用 | SQ2 上 `2880×1920@60` 桌面、Mesa 26.2.4 Freedreno/Turnip、双 Vulkan 路由器及 QTI HWC/SDM 均可正常使用。*限制：图形兼容性仍有限；A680.1 Wild Life GMEM 根因尚未定位，`6.18` 下开启硬件 GMEM 的 Wild Life 复测待完成。* |
-| **视频硬解（Venus / OMX）** | 🟡 部分可用 | 通过 QTI OMX + Venus 硬解支持 H.264、HEVC（Main8）、VP8 与 VP9（Profile 0），另有实验性 `c2.sq2.*.experimental` 供 C2 调试。*限制：内置屏幕仅支持 SDR（默认 OMX 已禁用 HDR 并过滤 Main10），固件不支持 AV1，MPEG-1/2 未完整集成。* |
+| **Android 桌面与图形（GLES / Vulkan）** | 🟡 部分可用 | SQ2 上 `2880×1920@60` 桌面、Mesa 26.2.4 Freedreno/Turnip、双 Vulkan 路由器、QTI HWC/SDM 及面向所有普通 Android 应用 UID 的默认 QCOM `VM_BIND` + 缓存提交优化（系统/隔离/SDK 沙箱 UID 除外）均已集成。*限制：图形兼容性仍有限；A680.1 Wild Life GMEM 根因尚未定位，`6.18` 下开启硬件 GMEM 的 Wild Life 复测待完成，SQ2 游戏测试不代替 SQ1 实机验收。* |
+| **视频硬解（Venus / OMX）** | 🟡 部分可用 | 通过 QTI OMX + Venus 硬解支持 H.264、HEVC（Main8）、VP8 与 VP9（Profile 0），另有实验性 `c2.sq2.*.experimental` 供 C2 调试；已接入 `LOWLATENCY_MODE` 零显示延迟映射及预热停止 VB2 归属修复（SQ2 热替换后 UU 远程串流连接已获用户确认）。*限制：低延迟修复的完整重启与 SQ1 验收待完成；内置屏幕仅支持 SDR（默认 OMX 已禁用 HDR 并过滤 Main10）；固件不支持 AV1；MPEG-1/2 未完整集成。* |
 | **摄像头（前置 / 后置）** | 🟡 部分可用 | 通过 V4L2/CAMSS + 软件 ISP + Camera2 HAL 驱动 OV5693（前置）与 OV13858（后置）；SQ2 已验证原生 JPEG 拍照与 480p/720p/1080p H.264/AAC 录像。*限制：720p/1080p 下软件 ISP 帧率偏低，后置自动对焦与曝光待调优，偶发 CCI 打开/切换超时，SQ1 未测。* |
 | **触控屏与手写笔** | 🟡 部分可用 | IPTSd `3.1.1` 按 HID/IPTS 能力识别兼容触控屏，不按 SQ1/SQ2 型号判定。双语向导按本机主板、实装面板和实际触控控制器保存校准。*限制：端到端触控延迟、`0996` 休眠唤醒恢复以及 Surface 触控笔压感/倾角绘图尚未测试。* |
 | **传感器（自动亮度 / 自动旋转）** | 🟡 部分可用 | TCS3430 环境光传感器 + SLPI PAS12（`qcslpi8180.mbn`、`qebspilaa64.efi`、`hexagonrpcd`）+ `sensors.spx.so` SubHal + 旋转配置覆盖层。已在 SQ2 验证（含重启保持）；*SQ1 验证及长时休眠后恢复待测。* |
@@ -81,6 +95,7 @@ flowchart LR
 | **USB 存储 / Type Cover / 物理按键** | 🟡 部分可用 | SQ2 已验证 FAT32 USB 存储（`PUBLIC` SAF 卷）、USB-C 音频（`05ac:110b`）、Surface Type Cover 键盘保护盖（`045E:09AE/09AF/09B0`，含热插拔恢复）及音量/电源按键。*限制：exFAT 仅支持只读，其他各类 USB 外设未测。* |
 | **USB-C DP / 原生多屏设置** | ✅ SQ2 可用 | 两口 DP 出图、拔插/换口和内屏保持已验收；原生屏幕排列、镜像/扩展可用。默认构建接入 SAM/QMP、HWC 热插拔/非无缝模式分组及未知合盖状态修复。SQ1、DP 音频与外屏长时休眠未验收。 |
 | **下口 USB ADB** | ✅ SQ2 可用 | 默认下口为需授权的 USB ADB（`ro.adb.secure=1`）；Windows 枚举、shell、重启恢复及 host 回切实测通过。使用下口 DP/USB 外设前，通过 root SSH 执行 `spx-lower-usb host --save`。设备选择及授权不嵌入通用包，见 [Type-C](docs/TYPEC.md)。 |
+| **高级设置（Vulkan 配置与性能模式）** | ✅ SQ2 可用 | 现代 Android Material You 风格设置页（`SurfaceAdvancedControl.apk`）+ 内置 initramfs 根桥接（`/bin/spx-advanced-control-boot`），中英双语随系统语言切换（非中文默认英语）；一级选择页包含 Vulkan 配置（支持默认配置切换 Auto/MESA/Qcom 并保护系统与 SystemUI 留在 Turnip、分应用配置已手动修改项置顶）与性能模式（动态枚举内核支持的 `performance`/`schedutil` 等调度策略并持久化）。*限制：SQ2 在线安装与桥接交互已实测；新整盘冷重启自动恢复与 SQ1 复测待完成。* |
 | **红外 / Windows Hello、通话/短信/5G/eSIM、休眠到磁盘、合盖休眠** | ❌ 不可用 | 红外摄像头/人脸认证未实现（仅识别芯片 ID）；无蜂窝语音通话、短信、IMS、eSIM 或 5G；禁用休眠到磁盘（`nohibernate`）与合盖休眠（`lid_behavior=0`，无 `SW_LID`） |
 
 ---
@@ -88,7 +103,7 @@ flowchart LR
 ## 功能能力与性能基准
 
 > [!NOTE]
-> **基线元数据**：除非另有说明，以下实测数据均采集自 **Surface Pro X SQ2** 在整合前里程碑构建上的表现，分别对应 `6.18.60-sq2-android1`（Hybrid 图形、传感器、摄像头、OMX、`s2idle`）与 `6.3.8-sq2-android1`（Wild Life、CPU/GPU OPP）测试版本。未经更新的 **`2026-11-16` 通用混合模式整盘镜像**（`surface-pro-x-6.18-hybrid-generic.img`）仍只有主机侧验证；下述 SQ1 实测使用的是更新后的启动载荷。
+> **基线元数据**：除非另有说明，以下实测数据均采集自 **Surface Pro X SQ2** 在整合前里程碑构建上的表现，分别对应 `6.18.60-sq2-android1`（Hybrid 图形、传感器、摄像头、OMX、`s2idle`）与 `6.3.8-sq2-android1`（Wild Life、CPU/GPU OPP）测试版本。**`2026-11-18` 精简 5 分区通用混合模式整盘镜像**（`surface-pro-x-6.18-hybrid-generic.img`）已完成主机侧校验与 Windows 双启动写盘检查；随后的音频节奏修复、OMX 低延迟远控与全普通应用 UID 的 QCOM `VM_BIND` 更新已合入源码。下述 SQ1 实测使用的是更新后的启动载荷，而非最新未修改整盘产物。
 
 **SQ1 USB 首次冷启动（更新后的启动载荷）。** 修复 `hwservicemanager` 的早期链接器后，单台 SQ1 从外置 USB SSD 成功进入 Android 桌面。日志确认内屏识别到 2880×1920、首次设置流程完成、`userdata` 扩容成功。本次从开机到桌面由测试者观察超过 6 分钟；这是单次结果，不是必需等待时长，也不是启动性能基准。现存快照不足以定位主要耗时，后续启动耗时与更广泛的硬件兼容性仍待验证。
 
@@ -112,19 +127,19 @@ flowchart LR
 
 ### 定性验证行为与待测项
 
-- **定性已验证行为**：在 SQ2 上，Android 桌面（`2880×1920@60`）、Bilibili `720p/1080p/4K` 清晰度切换、双 Vulkan（`SQ2VkRouter` Turnip/QTI 双路径）、Type Cover 热插拔恢复、FAT32 U 盘挂载、Wi-Fi（`ath10k_snoc`）、蓝牙开关状态以及 KernelSU Next + Zygisk Next 均可在测试中正常运行。原生 LTE IPv4 数据连接已在 SQ1 与 SQ2 上实测跑通。
+- **定性已验证行为**：在 SQ2 上，Android 桌面（`2880×1920@60`）、Bilibili `720p/1080p/4K` 清晰度切换、双 Vulkan（`SQ2VkRouter` Turnip/QTI 双路径）、完整重启后的《异环》/《鸣潮》/视频内置音频、热替换后的 OMX `LOWLATENCY_MODE`（UU 远控串流）、Type Cover 热插拔恢复、FAT32 U 盘挂载、Wi-Fi（`ath10k_snoc`）、蓝牙开关状态以及 KernelSU Next + Zygisk Next 均可在测试中正常运行。原生 LTE IPv4 数据连接已在 SQ1 与 SQ2 上实测跑通。
 - **尚未测试与待解决缺口**：
-  - **SQ1 硬件对等验证**：SQ1 的传感器、`s2idle`、摄像头、持续 CPU/GPU 负载（限制在 `2995.2 / 661 MHz`）以及未经更新的 `2026-11-16` 通用镜像启动尚待实测。
+  - **SQ1 硬件对等验证**：SQ1 的传感器、`s2idle`、摄像头、持续 CPU/GPU 负载（限制在 `2995.2 / 661 MHz`）以及最新精简 5 分区通用镜像的冷启动尚待实测。
   - **标准 3D 与 Web 基准**：缺少 `glmark2`、`vkmark`、WebGL 以及 `6.18` 硬件 GMEM 模式下的 Wild Life / 游戏帧率功耗比数据。
   - **音频 / 输入 / 显示缺口**：内置扬声器低频与左右声道平衡；Bilibili 拖放/切换清晰度时的音频跳帧或 XRUN（实测出现过 `1×4096` 帧 HAL 跳帧）；蓝牙 A2DP/HFP 音频；BLE HID 实际光标/滚轮事件；Surface 触控笔绘图/压感/倾角；端到端触控延迟。
   - **功耗与长时稳定性**：多轮连续 `s2idle` 可靠性（仍存在 `timerfd` 唤醒与冻结中止）、电池放电曲线、实时整机瓦数遥测以及 `sq2-game-opt` 开启前后的帧率/功耗对比。
-- **构建主机测试 vs 真机测试**：`tests/` 目录包含 `336` 个构建主机端打包、策略、校准及 ASan/UBSan 测试用例（`232` 个 Python、`92` 个 C/C++、`5` 个 PowerShell、`7` 个测试夹具）；`scripts/` 目录提供真机诊断脚本（`test-sq2-cpu-frequency.sh`、`test-sq2-gpu-opp.sh`、`test-sq2-audio-reopen.sh`、`verify-sq2-mediacodec-frames.py`）。主机侧校验通过并不代表真机启动已获认证。
+- **构建主机测试 vs 真机测试**：`tests/` 目录包含 `347` 个受跟踪的主机侧打包、策略、校准及 ASan/UBSan 文件（`236` 个 Python、`78` 个 C/C++ 源码、`6` 个 PowerShell 及测试夹具/头文件）；`scripts/` 目录提供真机诊断脚本（`test-sq2-cpu-frequency.sh`、`test-sq2-gpu-opp.sh`、`test-sq2-audio-reopen.sh`、`verify-sq2-mediacodec-frames.py`）。主机侧校验通过并不代表真机启动已获认证。
 
 ---
 
 ## 真机部署指南
 
-本 Git 仓库**不**分发预构建磁盘镜像、专有固件或参考二进制文件；请先自行构建镜像（参见[从源码构建](#从源码构建)）。默认构建会生成一份 **8 GiB**（`8,589,934,592` 字节）精简 5 分区（`super`、`metadata`、`misc`、`SQ2PROBE`、`userdata`，仅打包有效 `_a` 逻辑切片）稀疏原始 GPT 磁盘镜像及其 gzip 压缩包（如需保留旧版 39 分区 20 GiB 模板布局，可传入 `--preserve-template-layout`）：
+可直接从 [Google Drive](https://drive.google.com/drive/folders/1uVAA6UnydSyUHQAO8Y5rTm8SxZ62Zykr) 或[百度网盘](https://pan.baidu.com/s/51GjLdmTGir0PelomZvboYw)下载预构建通用整盘镜像，或按[从源码构建](#从源码构建)自行生成镜像。默认构建会生成一份 **8 GiB**（`8,589,934,592` 字节）精简 5 分区（`super`、`metadata`、`misc`、`SQ2PROBE`、`userdata`，仅打包有效 `_a` 逻辑切片）稀疏原始 GPT 磁盘镜像及其 gzip 压缩包（如需保留旧版 39 分区 20 GiB 模板布局，可传入 `--preserve-template-layout`）：
 
 - `disk/surface-pro-x-6.18-hybrid-generic.img`（8 GiB 原始 MBR+GPT 整盘镜像）
 - `disk/surface-pro-x-6.18-hybrid-generic.img.gz`（约 3.43 GiB / `3,685,632,793` 字节压缩包）
@@ -136,7 +151,7 @@ flowchart LR
 
 ### 1. Surface Pro X 前置准备
 
-1. **校验镜像完整性**：刷盘前请先在构建主机上校验镜像文件（当前本地构建校验值参见 [IMAGE](docs/IMAGE.md)）：
+1. **校验镜像完整性**：刷盘前请先校验下载或自行构建的镜像文件（如网盘目录附带 `SHA256SUMS` 可直接核对，当前本地构建校验值参见 [IMAGE](docs/IMAGE.md)）：
    ```sh
    cd IMAGE_OUTPUT
    sha256sum -c SHA256SUMS
@@ -156,12 +171,12 @@ flowchart LR
 
 1. 打开 **balenaEtcher**，点击 **Flash from file**（从文件烧录）。
 2. 选择 `surface-pro-x-6.18-hybrid-generic.img.gz`（或解压后的 `.img` 文件）。
-3. 点击 **Select target**（选择目标磁盘），仔细核对并选中你的外接 U 盘或 USB-NVMe 硬盘盒（容量 `>= 20 GiB`）。
+3. 点击 **Select target**（选择目标磁盘），仔细核对并选中你的外接 U 盘或 USB-NVMe 硬盘盒（容量 `>= 8 GiB`，8 GB 内存机型建议 `>= 16 GiB`）。
 4. 点击 **Flash!** 开始烧录，等待写入与校验完成后安全弹出设备。
 
 #### 方案 B：Rufus（Windows —— 使用 `.img` 进行 DD 镜像模式写入）
 
-1. 先将 `surface-pro-x-6.18-hybrid-generic.img.gz` 解压为 `surface-pro-x-6.18-hybrid-generic.img`（20 GiB 原始镜像文件）。
+1. 先将 `surface-pro-x-6.18-hybrid-generic.img.gz` 解压为 `surface-pro-x-6.18-hybrid-generic.img`（默认 8 GiB 原始镜像文件；旧版模板布局为 20 GiB）。
 2. 打开 **Rufus**，在 **设备（Device）** 中选择目标 U 盘或 USB-NVMe 硬盘盒。
 3. 在 **引导类型选择（Boot selection）** 点击 **选择（SELECT）**，选中 `surface-pro-x-6.18-hybrid-generic.img`。
    - **Rufus（DD 镜像模式）**：Rufus 会以 **DD 镜像（原始块写入）** 模式写入 `.img` 文件。**切勿**手动解包分区复制到 FAT32/NTFS 分区，也不要使用 ISO 解压模式。
@@ -218,7 +233,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-Googlebook
 
 > [!IMPORTANT]
 > **为何 Windows OEM 驱动提取与私有输入不随 Git 分发**
-> Microsoft/Qualcomm 专有 OEM 固件（`ADSP`、`CDSP`、`SLPI`、`WLAN/BT`、`MCFG` 及传感器配置）、Google/Cuttlefish 恢复包产物、Quest 2 v77 vendor 库、个人凭据以及整盘镜像均受版权或隐私约束，无法随公开 Git 仓库分发。所有私有输入均保存在本地 `private/build-inputs/`（或通过 `--private-root` 指定）。
+> Microsoft/Qualcomm 专有 OEM 固件（`ADSP`、`CDSP`、`SLPI`、`WLAN/BT`、`MCFG` 及传感器配置）、Google/Cuttlefish 恢复包产物、Quest 2 v77 vendor 库以及个人凭据均受版权或隐私约束，无法随公开 Git 仓库分发。所有私有输入均保存在本地 `private/build-inputs/`（或通过 `--private-root` 指定）。
 
 ### 第一步：在 Windows 版 Surface Pro X 上采集共用输入
 
@@ -254,8 +269,8 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ```
 
 - **构建模式与组件复用**：
-  - `scripts/build.py`（底层调用 `scripts/build-lts.py`）默认执行 `full-image`，并固定启用 `--kernel-mode source` 与 `--graphics hybrid`（唯一支持的图形模式）。
-  - 传入 `--esp-only` 可仅生成 ESP 分区载荷（`disk/esp/`），跳过 20 GiB 整盘镜像打包。
+  - `scripts/build.py`（底层调用 `scripts/build-lts.py`）默认执行 `full-image`，并固定启用 `--kernel-mode source` 与 `--graphics hybrid`（唯一支持的图形模式）。源码构建 QCOM `VM_BIND` 用户态桥接库需准备 Android NDK AArch64 API 35 `clang`（可通过 `SQ2_ANDROID_CC` 指定）、`readelf` 以及支持 `--rename-dynamic-symbols` 的 `patchelf`。
+  - 传入 `--esp-only` 可仅生成 ESP 分区载荷（`disk/esp/`），跳过整盘镜像打包。
   - 通过 `--reuse-components REUSE.json`（由 `scripts/full_image_reuse.py` 生成）可复用已验证组件（内核、模块、摄像头、传感器、Mesa 与胶水层）；若修改了 `probe/touch-calibration/` 下的 Java/Manifest 代码，流水线会自动失效缓存并重编 `wizard.apk`。
   - 仅需针对匹配的 `KOUT` 增量重编 Venus 模块并重新打包时，可执行：
     ```sh
@@ -308,6 +323,7 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 - [MICROPHONE](docs/MICROPHONE.md) —— WCD9340 DMIC 路由（`audio-microphone-route`）与录音验证
 - [LTE-PRODUCT](docs/LTE-PRODUCT.md) —— 动态 EFI FSG 缓存与 IPA4.1 / QMI / RMNET IPv4 蜂窝数据
 - [USB-FUNCTIONS](docs/USB-FUNCTIONS.md) —— 已验证 USB 存储、USB-C 音频及 DisplayPort Alt Mode 状态
+- [TYPEC](docs/TYPEC.md) —— 双 Type-C DisplayPort 输出、原生多屏设置与下口 USB ADB 切换说明
 - [BLUETOOTH-INPUT](docs/BLUETOOTH-INPUT.md) —— QCA UART 蓝牙与 BLE HID（`uhid`）当前状态
 - [SUSPEND](docs/SUSPEND.md) —— `s2idle` Venus 握手、`desktop-services.jar` 交流电持锁补丁与已知限制
 - [UNRESTRICTED-POWER](docs/UNRESTRICTED-POWER.md) —— 温控与电源策略、`nohibernate` 及 `lid_behavior=0`

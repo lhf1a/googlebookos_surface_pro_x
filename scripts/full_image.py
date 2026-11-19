@@ -765,6 +765,10 @@ def assemble_runtime(private, output, compiled=None, graphics='baseline', ksu_mo
         touch_files, _ = module('full_image_touch', 'build-touch-calibration.py').build(ROOT)
         mode, bodies[wizard] = touch_files[wizard]
     records[wizard] = new_record(mode)
+    if graphics == 'hybrid':
+        from full_image_advanced_control import install as install_advanced_control
+        # Recompile this small APK and install its bridge daemon on every assembly, including component reuse.
+        install_advanced_control(records, bodies, new_record)
     # Universal builds do not rewrite reference hashes or gate boot on content
     # hashes. Preserve imported manifests as metadata; no startup consumer uses
     # them for validation after this policy is applied.

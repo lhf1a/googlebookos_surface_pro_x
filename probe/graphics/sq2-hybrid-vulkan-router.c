@@ -144,6 +144,7 @@ struct sq2_vk_eval_input {
     const char *prop_driver;
     int prop_include_system;
     const char *policy_conf_text;
+    const char *prop_app_driver;
 };
 
 struct sq2_vk_decision {
@@ -608,6 +609,14 @@ EXPORT int sq2_vk_evaluate_policy(const struct sq2_vk_eval_input *in,
         snprintf(out->reason, sizeof(out->reason), "prop:debug.qcom_apps");
         return 0;
     }
+    /* User-scoped exact package selection from Surface Advanced Control.
+     * Do not apply to system, isolated, or SDK sandbox UIDs. */
+    if (in->uid % 100000 >= 10000 && in->uid % 100000 < 20000 &&
+        parse_backend_str(in->prop_app_driver, &b)) {
+        out->backend = b;
+        snprintf(out->reason, sizeof(out->reason), "prop:app-driver");
+        return 0;
+    }
     if (match_pattern_list(in->prop_persist_turnip_apps, out->package_name, proc)) {
         out->backend = SQ2_VK_BACKEND_TURNIP;
         snprintf(out->reason, sizeof(out->reason), "prop:persist.turnip_apps");
@@ -627,7 +636,9 @@ EXPORT int sq2_vk_evaluate_policy(const struct sq2_vk_eval_input *in,
     }
     /* Priority 6: global driver property */
     if (parse_backend_str(in->prop_driver, &b)) {
-        if (b == SQ2_VK_BACKEND_QCOM && out->app_type == SQ2_VK_TYPE_SYSTEM &&
+        if (b == SQ2_VK_BACKEND_QCOM &&
+            (out->app_type == SQ2_VK_TYPE_SYSTEM ||
+             out->app_type == SQ2_VK_TYPE_SYSTEM_UI) &&
             !in->prop_include_system) {
             out->backend = SQ2_VK_BACKEND_TURNIP;
             snprintf(out->reason, sizeof(out->reason), "guard:system-on-global-qcom");
@@ -845,6 +856,39 @@ static int validate_target_module(const sq2_hw_module_t *target, const char *pat
     return 0;
 }
 
+/* Keep in sync with DriverPolicy.propertyKey in the control app. */
+EXPORT int sq2_vk_app_property_key(uint32_t uid, const char *pkg, char *key, size_t size) {
+    if (!pkg || uid % 100000 < 10000 || uid % 100000 >= 20000) {
+        return 0;
+    }
+    int start = 1;
+    int dots = 0;
+    size_t len = 0;
+    for (const unsigned char *p = (const unsigned char *)pkg; *p; ++p) {
+        if (++len >= 192) {
+            return 0;
+        }
+        if (*p == '.') {
+            if (start) {
+                return 0;
+            }
+            start = 1;
+            dots++;
+            continue;
+        }
+        int letter = (*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z');
+        if (start ? !letter : !(letter || (*p >= '0' && *p <= '9') || *p == '_')) {
+            return 0;
+        }
+        start = 0;
+    }
+    if (start || !dots) {
+        return 0;
+    }
+    int n = snprintf(key, size, "persist.sq2.vulkan.app.%u.%s", uid / 100000, pkg);
+    return n > 0 && (size_t)n < size;
+}
+
 static int evaluate_current_process(struct sq2_vk_decision *out,
                                     char *proc_out, size_t proc_sz) {
     size_t cmd0_len = 0;
@@ -877,6 +921,11 @@ static int evaluate_current_process(struct sq2_vk_decision *out,
     char *dbg_qcom = read_android_prop("debug.sq2.vulkan.qcom_apps");
     char *pst_turnip = read_android_prop("persist.sq2.vulkan.turnip_apps");
     char *pst_qcom = read_android_prop("persist.sq2.vulkan.qcom_apps");
+    char app_key[256];
+    /* Never alias a truncated or path-stripped argv[0] to another package. */
+    char *app_driver = strcspn(arg0, ":") == strlen(pkg_tmp) &&
+        sq2_vk_app_property_key(uid, pkg_tmp, app_key, sizeof(app_key))
+        ? read_android_prop(app_key) : NULL;
     char *prop_type = read_android_prop(type_key_dbg);
     if (!prop_type) {
         prop_type = read_android_prop(type_key_pst);
@@ -903,10 +952,12 @@ static int evaluate_current_process(struct sq2_vk_decision *out,
         .prop_driver = prop_drv,
         .prop_include_system = parse_bool_prop(prop_inc_sys),
         .policy_conf_text = policy_conf,
+        .prop_app_driver = app_driver,
     };
     int rc = sq2_vk_evaluate_policy(&input, out);
 
     free(policy_conf);
+    free(app_driver);
     free(prop_inc_sys);
     free(prop_drv);
     free(prop_type);

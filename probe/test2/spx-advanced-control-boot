@@ -1,0 +1,443 @@
+#!/bin/sh
+# Built-in root/init bridge for Surface Advanced Settings (Vulkan policy & CPU governor).
+# Data-only boundary: validates every input token; never evals or hot-swaps active drivers.
+set -eu
+
+DATA_ROOT="${SPX_AC_ROOT:-/proc/1/root}"
+SYSFS="${SPX_AC_SYSFS:-/sys}"
+CMDLINE="${SPX_AC_CMDLINE:-/proc/cmdline}"
+LOCK_DIR="${SPX_AC_LOCK_DIR:-/run/spx-advanced-control-lock}"
+TMP_REQ="${SPX_AC_TMP_REQ:-/run/spx-advanced-control-request}"
+PKG="org.surface.advancedcontrol"
+
+android() {
+    if [ -n "${SPX_AC_ANDROID_WRAPPER:-}" ]; then
+        "$SPX_AC_ANDROID_WRAPPER" "$@"
+    else
+        timeout "${ANDROID_COMMAND_TIMEOUT:-15}" nsenter -t 1 -m -r -- /system/bin/"$@"
+    fi
+}
+
+cleanup() {
+    rm -f "$TMP_REQ" 2>/dev/null || true
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+mkdir "$LOCK_DIR" 2>/dev/null || exit 0
+trap cleanup EXIT
+trap 'exit 0' TERM INT
+
+if [ "${SPX_AC_BOOT_WAIT:-1}" != "0" ]; then
+    for _i in $(seq 1 240); do
+        if [ -x "$DATA_ROOT/system/bin/getprop" ] &&
+           [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = "1" ]; then
+            break
+        fi
+        sleep 1
+    done
+    [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = "1" ] || exit 1
+fi
+
+STORE="$DATA_ROOT/data/vendor/spx-advanced-control"
+mkdir -p "$STORE"
+chmod 700 "$STORE" 2>/dev/null || true
+
+is_rescue_or_no_cpufreq() {
+    _cmd=" $(cat "$CMDLINE" 2>/dev/null || true) "
+    case "$_cmd" in
+        *' sq2.rescue=1 '*|*' sq2.cpufreq=0 '*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+validate_nonce() {
+    [ -n "$1" ] || return 1
+    [ "${#1}" -le 64 ] || return 1
+    case "$1" in
+        *[!a-z0-9-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+validate_user() {
+    [ -n "$1" ] || return 1
+    case "$1" in
+        *[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+validate_driver() {
+    case "$1" in
+        ''|turnip|qcom) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+validate_bool() {
+    case "$1" in
+        0|1) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+validate_governor_token() {
+    [ -n "$1" ] || return 1
+    [ "${#1}" -le 32 ] || return 1
+    case "$1" in
+        *[!A-Za-z0-9_-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+validate_pkg() {
+    _p="$1"
+    [ -n "$_p" ] || return 1
+    [ "${#_p}" -lt 192 ] || return 1
+    case "$_p" in
+        *.* ) ;;
+        * ) return 1 ;;
+    esac
+    case "$_p" in
+        .*|*.|*..*|*[!A-Za-z0-9_.]*) return 1 ;;
+    esac
+    _old_ifs="$IFS"
+    IFS='.'
+    for _seg in $_p; do
+        case "$_seg" in
+            [A-Za-z]*) ;;
+            *) IFS="$_old_ifs"; return 1 ;;
+        esac
+    done
+    IFS="$_old_ifs"
+    return 0
+}
+
+word_in_list() {
+    _needle="$1"
+    _hay="$2"
+    for _w in $_hay; do
+        if [ "$_w" = "$_needle" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+list_cpufreq_policies() {
+    for _pol in "$SYSFS"/devices/system/cpu/cpufreq/policy*; do
+        if [ -d "$_pol" ] && [ -f "$_pol/scaling_governor" ]; then
+            printf '%s\n' "$_pol"
+        fi
+    done
+}
+
+common_available_governors() {
+    _first=1
+    _common=""
+    for _pol in $(list_cpufreq_policies); do
+        [ -r "$_pol/scaling_available_governors" ] || continue
+        _avail="$(cat "$_pol/scaling_available_governors" 2>/dev/null || true)"
+        if [ "$_first" = 1 ]; then
+            _first=0
+            _dedup=""
+            for _g in $_avail; do
+                validate_governor_token "$_g" || continue
+                if ! word_in_list "$_g" "$_dedup"; then
+                    _dedup="${_dedup:+$_dedup }$_g"
+                fi
+            done
+            _common="$_dedup"
+        else
+            _next=""
+            for _g in $_common; do
+                if word_in_list "$_g" "$_avail"; then
+                    _next="${_next:+$_next }$_g"
+                fi
+            done
+            _common="$_next"
+        fi
+    done
+    printf '%s' "$_common"
+}
+
+apply_cpu_governor_now() {
+    _target="$1"
+    validate_governor_token "$_target" || return 1
+    _avail="$(common_available_governors)"
+    word_in_list "$_target" "$_avail" || return 1
+    _applied=0
+    for _pol in $(list_cpufreq_policies); do
+        printf '%s' "$_target" > "$_pol/scaling_governor" 2>/dev/null || return 1
+        _actual="$(tr -d '\r\n' < "$_pol/scaling_governor" 2>/dev/null || true)"
+        [ "$_actual" = "$_target" ] || return 1
+        _applied=1
+    done
+    [ "$_applied" = 1 ] || return 1
+    return 0
+}
+
+read_saved_governor() {
+    _f="$STORE/cpu_governor"
+    if [ -f "$_f" ] && [ ! -L "$_f" ]; then
+        _val="$(head -n 1 "$_f" 2>/dev/null | tr -d '\r\n ')"
+        if validate_governor_token "$_val"; then
+            printf '%s' "$_val"
+            return 0
+        fi
+    fi
+    printf ''
+}
+
+restore_saved_governor_on_boot() {
+    if is_rescue_or_no_cpufreq; then
+        echo 'SPX_AC_BOOT_CPU_RESTORE_SKIPPED rescue_or_nocpufreq'
+        return 0
+    fi
+    _saved="$(read_saved_governor)"
+    [ -n "$_saved" ] || return 0
+    if apply_cpu_governor_now "$_saved"; then
+        echo "SPX_AC_BOOT_CPU_RESTORED $_saved"
+    else
+        echo "SPX_AC_BOOT_CPU_RESTORE_FAILED $_saved"
+    fi
+}
+
+read_policy_conf_default() {
+    _conf="$DATA_ROOT/vendor/etc/sq2-vulkan-policy.conf"
+    if [ -r "$_conf" ]; then
+        _val="$(sed -n 's/^[[:space:]]*default[[:space:]]*=[[:space:]]*\([A-Za-z0-9_]*\).*/\1/p' "$_conf" 2>/dev/null | tail -n 1)"
+        case "$_val" in
+            turnip|mesa) printf 'turnip'; return 0 ;;
+            qcom|qti|adreno|closed) printf 'qcom'; return 0 ;;
+        esac
+    fi
+    printf 'turnip'
+}
+
+publish_file() {
+    _dir="$1"
+    _name="$2"
+    _content="$3"
+    [ -d "$_dir" ] && [ ! -L "$_dir" ] || return 1
+    _tmp="$_dir/.bridge-$$.tmp"
+    rm -f "$_tmp" 2>/dev/null || true
+    [ ! -L "$_tmp" ] || return 1
+    printf '%s' "$_content" > "$_tmp" || return 1
+    chmod 600 "$_tmp" 2>/dev/null || true
+    _owner="$(stat -c '%u:%g' "$_dir" 2>/dev/null || true)"
+    if [ -n "$_owner" ] && [ "$(id -u)" = "0" ]; then
+        chown "$_owner" "$_tmp" 2>/dev/null || true
+    fi
+    mv -f "$_tmp" "$_dir/$_name" || { rm -f "$_tmp" 2>/dev/null || true; return 1; }
+    return 0
+}
+
+publish_state() {
+    _dir="$1"
+    _vk_avail=0
+    if [ -f "$DATA_ROOT/vendor/lib64/hw/vulkan.turnip.so" ] &&
+       [ -f "$DATA_ROOT/vendor/lib64/hw/vulkan.qti.so" ] &&
+       [ -f "$DATA_ROOT/vendor/etc/surface-vulkan-app-routing.version" ]; then
+        _vk_avail=1
+    fi
+    _vk_def="$(android getprop persist.sq2.vulkan.driver 2>/dev/null | tr -d '\r\n' || true)"
+    _pol_def="$(read_policy_conf_default)"
+    _avail_gov="$(common_available_governors)"
+    _saved_gov="$(read_saved_governor)"
+    _policies=""
+    _cur_gov=""
+    _mixed=0
+    for _pol in $(list_cpufreq_policies); do
+        _pname="${_pol##*/}"
+        _pgov="$(tr -d '\r\n ' < "$_pol/scaling_governor" 2>/dev/null || true)"
+        _policies="${_policies:+$_policies,}${_pname}:${_pgov}"
+        if [ -z "$_cur_gov" ]; then
+            _cur_gov="$_pgov"
+        elif [ "$_cur_gov" != "$_pgov" ]; then
+            _mixed=1
+        fi
+    done
+    if [ "$_mixed" = 1 ]; then
+        _cur_gov="mixed"
+    fi
+    _body="bridge_version=1
+vulkan_available=$_vk_avail
+vulkan_default=$_vk_def
+policy_default=$_pol_def
+cpu_available_governors=$_avail_gov
+cpu_current_governor=$_cur_gov
+cpu_saved_governor=$_saved_gov
+cpu_policies=$_policies
+"
+    publish_file "$_dir" "state" "$_body"
+}
+
+send_reply() {
+    _dir="$1"
+    _nonce="$2"
+    _status="$3"
+    _detail="${4:-}"
+    if [ -n "$_detail" ]; then
+        publish_file "$_dir" "reply" "$(printf '%s\n%s\n%s\n' "$_nonce" "$_status" "$_detail")"
+    else
+        publish_file "$_dir" "reply" "$(printf '%s\n%s\n' "$_nonce" "$_status")"
+    fi
+}
+
+handle_request() {
+    _dir="$1"
+    _user="$2"
+    _req="$_dir/request"
+    [ -f "$_req" ] && [ ! -L "$_req" ] || return 1
+    _size="$(stat -c %s "$_req" 2>/dev/null || echo 999999)"
+    if [ "$_size" -gt 4096 ]; then
+        rm -f "$_req" 2>/dev/null || true
+        return 0
+    fi
+    cp "$_req" "$TMP_REQ" 2>/dev/null || return 1
+    rm -f "$_req" 2>/dev/null || true
+
+    _cmd="$(sed -n '1p' "$TMP_REQ" | tr -d '\r')"
+    _nonce="$(sed -n '2p' "$TMP_REQ" | tr -d '\r')"
+    if ! validate_nonce "$_nonce"; then
+        return 0
+    fi
+
+    case "$_cmd" in
+        refresh)
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        set-app-vulkan)
+            _req_user="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            _pkg="$(sed -n '4p' "$TMP_REQ" | tr -d '\r')"
+            _drv="$(sed -n '5p' "$TMP_REQ" | tr -d '\r')"
+            _stop="$(sed -n '6p' "$TMP_REQ" | tr -d '\r')"
+            if ! validate_user "$_req_user" || [ "$_req_user" != "$_user" ] ||
+               ! validate_pkg "$_pkg" || ! validate_driver "$_drv" || ! validate_bool "$_stop"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_arguments"
+                return 0
+            fi
+            _key="persist.sq2.vulkan.app.${_req_user}.${_pkg}"
+            if ! android setprop "$_key" "$_drv" >/dev/null 2>&1; then
+                send_reply "$_dir" "$_nonce" "ERROR" "setprop_failed"
+                return 0
+            fi
+            _actual="$(android getprop "$_key" 2>/dev/null | tr -d '\r\n' || true)"
+            if [ "$_actual" != "$_drv" ]; then
+                send_reply "$_dir" "$_nonce" "ERROR" "verify_mismatch"
+                return 0
+            fi
+            if [ "$_stop" = "1" ]; then
+                if ! android am force-stop --user "$_req_user" "$_pkg" >/dev/null 2>&1; then
+                    publish_state "$_dir" || true
+                    send_reply "$_dir" "$_nonce" "ERROR" "force_stop_failed"
+                    return 0
+                fi
+            fi
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        set-default-vulkan)
+            _drv="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            if ! validate_driver "$_drv"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_driver"
+                return 0
+            fi
+            if ! android setprop persist.sq2.vulkan.driver "$_drv" >/dev/null 2>&1; then
+                send_reply "$_dir" "$_nonce" "ERROR" "setprop_failed"
+                return 0
+            fi
+            _actual="$(android getprop persist.sq2.vulkan.driver 2>/dev/null | tr -d '\r\n' || true)"
+            if [ "$_actual" != "$_drv" ]; then
+                send_reply "$_dir" "$_nonce" "ERROR" "verify_mismatch"
+                return 0
+            fi
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        set-cpu-governor)
+            _gov="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            if [ -z "$_gov" ]; then
+                rm -f "$STORE/cpu_governor" 2>/dev/null || true
+                _avail="$(common_available_governors)"
+                if word_in_list "schedutil" "$_avail"; then
+                    if ! apply_cpu_governor_now "schedutil"; then
+                        publish_state "$_dir" || true
+                        send_reply "$_dir" "$_nonce" "ERROR" "restore_default_failed"
+                        return 0
+                    fi
+                fi
+                publish_state "$_dir" || true
+                send_reply "$_dir" "$_nonce" "OK"
+                return 0
+            fi
+            if ! validate_governor_token "$_gov"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_governor"
+                return 0
+            fi
+            if ! apply_cpu_governor_now "$_gov"; then
+                publish_state "$_dir" || true
+                send_reply "$_dir" "$_nonce" "ERROR" "apply_governor_failed"
+                return 0
+            fi
+            _tmp_store="$STORE/.cpu_governor.$$.tmp"
+            printf '%s\n' "$_gov" > "$_tmp_store"
+            chmod 600 "$_tmp_store" 2>/dev/null || true
+            mv -f "$_tmp_store" "$STORE/cpu_governor"
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        *)
+            send_reply "$_dir" "$_nonce" "ERROR" "unknown_command"
+            ;;
+    esac
+    return 0
+}
+
+restore_saved_governor_on_boot
+
+active_user=""
+state_sent=0
+fast_ticks=0
+user_check_ticks=0
+
+while true; do
+    if [ -z "$active_user" ] || [ "$user_check_ticks" -ge 15 ]; then
+        user_check_ticks=0
+        next_user="$(android cmd activity get-current-user 2>/dev/null | tr -d '\r\n' || true)"
+        if validate_user "$next_user" && [ "$next_user" != "$active_user" ]; then
+            active_user="$next_user"
+            state_sent=0
+        fi
+    fi
+
+    if [ -n "$active_user" ]; then
+        files="$DATA_ROOT/data/user_de/$active_user/$PKG/files"
+        if [ -d "$files" ] && [ ! -L "$files" ]; then
+            if [ "$state_sent" = 0 ]; then
+                publish_state "$files" && state_sent=1 || true
+            fi
+            if [ -f "$files/request" ] && [ ! -L "$files/request" ]; then
+                handle_request "$files" "$active_user" || true
+                fast_ticks=50
+            fi
+        else
+            state_sent=0
+        fi
+    fi
+
+    if [ "${SPX_AC_ONCE:-0}" = "1" ]; then
+        exit 0
+    fi
+
+    user_check_ticks=$((user_check_ticks + 1))
+    if [ "$fast_ticks" -gt 0 ]; then
+        fast_ticks=$((fast_ticks - 1))
+        sleep 0.3
+    else
+        sleep 1
+    fi
+done
