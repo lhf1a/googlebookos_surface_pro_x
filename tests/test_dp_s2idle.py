@@ -96,6 +96,16 @@ class DpS2idleFixes(unittest.TestCase):
 
     def test_dp_s2idle_patch_invariants(self):
         text = (PATCHES_DIR / "spx-dp-s2idle.patch").read_text()
+        # dpu_kms.c fixes: restore SC8180X MDP_DP_PHY_INTF_SEL across MDSS_GDSC collapse
+        for snippet in (
+            "static void dpu_kms_setup_dp_phy_intf_sel(struct dpu_kms *dpu_kms)",
+            "if (!dpu_kms || !dpu_kms->hw_mdp || !dpu_kms->hw_mdp->ops.dp_phy_intf_sel)",
+            "dpu_kms_setup_dp_phy_intf_sel(dpu_kms);",
+        ):
+            self.assertIn(snippet, text)
+        self.assertEqual(text.count("dpu_kms_setup_dp_phy_intf_sel("), 3)
+        # dp_debug.c fix: initialize debug->connector to prevent debugfs NULL dereference
+        self.assertIn("debug->connector = connector;", text)
         # dp_aux.c fixes: reftimer enable, AUX reset on init/reconfig, external-HPD link check
         for snippet in (
             "msm_dp_write_aux(aux, REG_DP_AUX_TRANS_CTRL, 0);",
@@ -118,9 +128,13 @@ class DpS2idleFixes(unittest.TestCase):
             "if (link_clks_enabled_here)",
         ):
             self.assertIn(snippet, text)
-        # dp_display.c fixes: ST_DISPLAY_OFF HPD plug recovery, atomic_enable error handling,
+        # dp_display.c fixes: ensure DPU PHY mux before external DP AUX,
+        # ST_DISPLAY_OFF HPD plug recovery, atomic_enable error handling,
         # ST_MAINLINK_READY post_disable cleanup, preserve ST_DISCONNECTED, external IRQ_HPD dispatch
         for snippet in (
+            "static void msm_dp_display_ensure_kms_phy_sel(struct msm_dp_display_private *dp)",
+            "if (pm_runtime_resume_and_get(kms_dev) == 0)",
+            "pm_runtime_put_sync(kms_dev);",
             "msm_dp_display_send_hpd_event(&dp->msm_dp_display);",
             "rc = msm_dp_display_enable(msm_dp_display, force_link_train);",
             "if (phy_initted)",
@@ -130,6 +144,7 @@ class DpS2idleFixes(unittest.TestCase):
             "msm_dp_add_event(dp, EV_IRQ_HPD_INT, 0, 0);",
         ):
             self.assertIn(snippet, text)
+        self.assertEqual(text.count("msm_dp_display_ensure_kms_phy_sel("), 4)
         # Ensure host_phy_exit rollback only occurs in enable() failure, not post_enable()
         self.assertEqual(text.count("if (phy_initted)"), 1)
 
@@ -369,8 +384,10 @@ class DpS2idleFixes(unittest.TestCase):
             self.skipTest("optional local kernel/external source trees not present")
 
         kernel_relpaths = (
+            "drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c",
             "drivers/gpu/drm/msm/dp/dp_aux.c",
             "drivers/gpu/drm/msm/dp/dp_ctrl.c",
+            "drivers/gpu/drm/msm/dp/dp_debug.c",
             "drivers/gpu/drm/msm/dp/dp_display.c",
             "drivers/usb/dwc3/dwc3-qcom-legacy.c",
             "drivers/usb/dwc3/dwc3-qcom.c",
@@ -379,8 +396,10 @@ class DpS2idleFixes(unittest.TestCase):
             "drivers/usb/gadget/function/f_fs.c",
         )
         edp_relpaths = (
+            "drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c",
             "drivers/gpu/drm/msm/dp/dp_aux.c",
             "drivers/gpu/drm/msm/dp/dp_ctrl.c",
+            "drivers/gpu/drm/msm/dp/dp_debug.c",
             "drivers/gpu/drm/msm/dp/dp_display.c",
         )
         with tempfile.TemporaryDirectory() as td:
@@ -421,9 +440,16 @@ class DpS2idleFixes(unittest.TestCase):
                 (et / "drivers/gpu/drm/msm/dp/dp_aux.c").read_bytes(),
             )
             self.assertEqual(
+                (kt / "drivers/gpu/drm/msm/dp/dp_debug.c").read_bytes(),
+                (et / "drivers/gpu/drm/msm/dp/dp_debug.c").read_bytes(),
+            )
+            self.assertEqual(
                 (kt / "drivers/gpu/drm/msm/dp/dp_display.c").read_bytes(),
                 (et / "drivers/gpu/drm/msm/dp/dp_display.c").read_bytes(),
             )
+            edp_kms = (et / "drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c").read_text()
+            self.assertIn("dpu_release_wait_result", edp_kms)
+            self.assertEqual(edp_kms.count("dpu_kms_setup_dp_phy_intf_sel("), 3)
             edp_ctrl = (et / "drivers/gpu/drm/msm/dp/dp_ctrl.c").read_text()
             self.assertIn("sq2_edp_rate_index", edp_ctrl)
             self.assertIn("msm_dp_aux_reconfig(ctrl->aux);", edp_ctrl)
@@ -690,6 +716,78 @@ static void ffs_unbind(struct ffs_sim *f) {
     }
 }
 
+/* 5. SC8180X MDSS_GDSC collapse + DPU MDP_DP_PHY_INTF_SEL (0x0ae01460) model */
+#define SC8180X_DP_PHY_INTF_SEL_VAL 0x00000451u
+struct mdss_sim {
+    int gdsc_children;
+    bool gdsc_on;
+    uint32_t mdp_dp_phy_intf_sel;
+    bool dpu_hw_mdp_ready;
+    bool dpu_rpm_active;
+    int dpu_resumes;
+};
+
+static void mdss_child_get(struct mdss_sim *m) {
+    if (m->gdsc_children++ == 0)
+        m->gdsc_on = true;
+}
+
+static void mdss_child_put(struct mdss_sim *m) {
+    assert(m->gdsc_children > 0);
+    if (--m->gdsc_children == 0) {
+        m->gdsc_on = false;
+        m->mdp_dp_phy_intf_sel = 0; /* GDSC power-off wipes DPU_TOP */
+    }
+}
+
+static void mdss_s2idle_noirq_cycle(struct mdss_sim *m) {
+    /* genpd_suspend_noirq collapses MDSS_GDSC and wipes DPU_TOP */
+    m->gdsc_on = false;
+    m->mdp_dp_phy_intf_sel = 0;
+    if (m->gdsc_children > 0)
+        m->gdsc_on = true;
+}
+
+static void dpu_setup_dp_phy_intf_sel(struct mdss_sim *m) {
+    if (!m->dpu_hw_mdp_ready)
+        return;
+    assert(m->gdsc_on);
+    m->mdp_dp_phy_intf_sel = SC8180X_DP_PHY_INTF_SEL_VAL;
+}
+
+static void dpu_rpm_get(struct mdss_sim *m) {
+    if (!m->dpu_rpm_active) {
+        mdss_child_get(m);
+        m->dpu_rpm_active = true;
+        m->dpu_resumes++;
+        dpu_setup_dp_phy_intf_sel(m);
+    }
+}
+
+static void dpu_rpm_put(struct mdss_sim *m) {
+    if (m->dpu_rpm_active) {
+        m->dpu_rpm_active = false;
+        mdss_child_put(m);
+    }
+}
+
+static void dp_ensure_kms_phy_sel(struct mdss_sim *m, bool is_edp) {
+    if (is_edp)
+        return;
+    bool was_active = m->dpu_rpm_active;
+    dpu_rpm_get(m);
+    if (!was_active)
+        dpu_rpm_put(m);
+}
+
+static int dp_aux_xfer_sim(const struct mdss_sim *m, bool is_edp) {
+    if (!m->gdsc_on)
+        return -110;
+    if (!is_edp && m->mdp_dp_phy_intf_sel != SC8180X_DP_PHY_INTF_SEL_VAL)
+        return -110;
+    return 0;
+}
+
 int main(void) {
     /* Verify 1: External HPD AUX reset fires when connected, skips when unplugged */
     struct aux_hw aux = { .hpd_ctrl = 0, .hpd_status = 0, .trans_ctrl = 0x200, .enable_xfers = true };
@@ -782,6 +880,50 @@ int main(void) {
     assert(ffs.dequeues == 1);
     ffs_unbind(&ffs);
     assert(ffs.dequeues == 1);
+
+    /* Verify 5: SC8180X MDP_DP_PHY_INTF_SEL across cold boot, screen-on s2idle,
+     * screen-off s2idle, and screen-off hotplug after idle MDSS_GDSC collapse */
+    struct mdss_sim mdss = {0};
+    /* 5a: Early dpu_kms_hw_init pm_runtime_resume_and_get before hw_mdp init */
+    dpu_rpm_get(&mdss);
+    assert(mdss.mdp_dp_phy_intf_sel == 0 && mdss.dpu_resumes == 1);
+    mdss.dpu_hw_mdp_ready = true;
+    dpu_setup_dp_phy_intf_sel(&mdss);
+    assert(mdss.mdp_dp_phy_intf_sel == SC8180X_DP_PHY_INTF_SEL_VAL);
+    /* External DP plugs in at boot (holds 1 MDSS child ref) */
+    mdss_child_get(&mdss);
+    assert(dp_aux_xfer_sim(&mdss, false) == 0);
+
+    /* 5b: Screen-on s2idle -> prepare suspends DPU -> noirq wipes GDSC ->
+     * complete enable_commit resumes DPU before atomic_enable AUX */
+    dpu_rpm_put(&mdss); /* msm_kms_pm_prepare disables CRTCs */
+    mdss_s2idle_noirq_cycle(&mdss);
+    assert(mdss.mdp_dp_phy_intf_sel == 0);
+    assert(dp_aux_xfer_sim(&mdss, false) == -110); /* broken without fix */
+    dpu_rpm_get(&mdss); /* msm_atomic_commit_tail -> enable_commit */
+    assert(mdss.mdp_dp_phy_intf_sel == SC8180X_DP_PHY_INTF_SEL_VAL);
+    assert(dp_aux_xfer_sim(&mdss, false) == 0);
+
+    /* 5c: Screen-off s2idle -> DPU already suspended -> noirq wipes GDSC ->
+     * spx_complete HPD plug transiently wakes DPU while DP holds MDSS_GDSC */
+    dpu_rpm_put(&mdss); /* screen blanked before s2idle */
+    mdss_s2idle_noirq_cycle(&mdss);
+    assert(!mdss.dpu_rpm_active && mdss.mdp_dp_phy_intf_sel == 0);
+    dp_ensure_kms_phy_sel(&mdss, false);
+    assert(!mdss.dpu_rpm_active && mdss.gdsc_on);
+    assert(mdss.mdp_dp_phy_intf_sel == SC8180X_DP_PHY_INTF_SEL_VAL);
+    assert(dp_aux_xfer_sim(&mdss, false) == 0);
+
+    /* 5d: Cable unplugged + screen off -> MDSS_GDSC collapses -> cable hot-plugged
+     * while screen stays off -> ensure_kms_phy_sel restores 0x451 */
+    mdss_child_put(&mdss); /* unplug drops last MDSS child */
+    assert(!mdss.gdsc_on && mdss.mdp_dp_phy_intf_sel == 0);
+    mdss_child_get(&mdss); /* eDP check does not wake DPU */
+    dp_ensure_kms_phy_sel(&mdss, true);
+    assert(mdss.mdp_dp_phy_intf_sel == 0 && dp_aux_xfer_sim(&mdss, true) == 0);
+    dp_ensure_kms_phy_sel(&mdss, false); /* external DP plug wakes+puts DPU */
+    assert(!mdss.dpu_rpm_active && mdss.mdp_dp_phy_intf_sel == SC8180X_DP_PHY_INTF_SEL_VAL);
+    assert(dp_aux_xfer_sim(&mdss, false) == 0);
 
     return 0;
 }

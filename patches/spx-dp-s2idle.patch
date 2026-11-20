@@ -1,7 +1,45 @@
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -1139,6 +1139,16 @@ unsigned long dpu_kms_get_clk_rate(struct dpu_kms *dpu_kms, char *clock_name)
+ 
+ #define	DPU_PERF_DEFAULT_MAX_CORE_CLK_RATE	412500000
+ 
++static void dpu_kms_setup_dp_phy_intf_sel(struct dpu_kms *dpu_kms)
++{
++	if (!dpu_kms || !dpu_kms->hw_mdp || !dpu_kms->hw_mdp->ops.dp_phy_intf_sel)
++		return;
++
++	if (of_device_is_compatible(dpu_kms->pdev->dev.of_node, "qcom,sc8180x-dpu"))
++		dpu_kms->hw_mdp->ops.dp_phy_intf_sel(dpu_kms->hw_mdp,
++						     (unsigned int[]){ 1, 2, });
++}
++
+ static int dpu_kms_hw_init(struct msm_kms *kms)
+ {
+ 	struct dpu_kms *dpu_kms;
+@@ -1253,8 +1263,7 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
+ 	 * the INTF <->DP relationship isn't static anymore, this needs to be
+ 	 * configured through the DT.
+ 	 */
+-	if (of_device_is_compatible(dpu_kms->pdev->dev.of_node, "qcom,sc8180x-dpu"))
+-		dpu_kms->hw_mdp->ops.dp_phy_intf_sel(dpu_kms->hw_mdp, (unsigned int[]){ 1, 2, });
++	dpu_kms_setup_dp_phy_intf_sel(dpu_kms);
+ 
+ 	dpu_kms->hw_intr = dpu_hw_intr_init(dev, dpu_kms->mmio, dpu_kms->catalog);
+ 	if (IS_ERR(dpu_kms->hw_intr)) {
+@@ -1487,6 +1496,7 @@ static int __maybe_unused dpu_runtime_resume(struct device *dev)
+ 	}
+ 
+ 	dpu_vbif_init_memtypes(dpu_kms);
++	dpu_kms_setup_dp_phy_intf_sel(dpu_kms);
+ 
+ 	drm_for_each_encoder(encoder, ddev)
+ 		dpu_encoder_virt_runtime_resume(encoder);
 diff --git a/drivers/gpu/drm/msm/dp/dp_aux.c b/drivers/gpu/drm/msm/dp/dp_aux.c
 --- a/drivers/gpu/drm/msm/dp/dp_aux.c
 +++ b/drivers/gpu/drm/msm/dp/dp_aux.c
-@@ -76,6 +76,8 @@
+@@ -76,6 +76,8 @@ static void msm_dp_aux_reset(struct msm_dp_aux_private *aux)
  {
  	u32 aux_ctrl;
  
@@ -10,7 +48,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_aux.c b/drivers/gpu/drm/msm/dp/dp_aux.c
  	aux_ctrl = msm_dp_read_aux(aux, REG_DP_AUX_CTRL);
  
  	aux_ctrl |= DP_AUX_CTRL_RESET;
-@@ -88,7 +90,12 @@
+@@ -88,7 +90,12 @@ static void msm_dp_aux_reset(struct msm_dp_aux_private *aux)
  
  static void msm_dp_aux_enable(struct msm_dp_aux_private *aux)
  {
@@ -24,7 +62,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_aux.c b/drivers/gpu/drm/msm/dp/dp_aux.c
  
  	aux_ctrl = msm_dp_read_aux(aux, REG_DP_AUX_CTRL);
  
-@@ -513,8 +520,10 @@
+@@ -513,8 +520,10 @@ void msm_dp_aux_reconfig(struct drm_dp_aux *msm_dp_aux)
  
  	aux = container_of(msm_dp_aux, struct msm_dp_aux_private, msm_dp_aux);
  
@@ -35,7 +73,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_aux.c b/drivers/gpu/drm/msm/dp/dp_aux.c
  }
  
  void msm_dp_aux_init(struct drm_dp_aux *msm_dp_aux)
-@@ -531,6 +540,7 @@
+@@ -531,6 +540,7 @@ void msm_dp_aux_init(struct drm_dp_aux *msm_dp_aux)
  	mutex_lock(&aux->mutex);
  
  	msm_dp_aux_enable(aux);
@@ -43,7 +81,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_aux.c b/drivers/gpu/drm/msm/dp/dp_aux.c
  	aux->retry_cnt = 0;
  	aux->initted = true;
  
-@@ -672,6 +682,10 @@
+@@ -672,6 +682,10 @@ u32 msm_dp_aux_is_link_connected(struct drm_dp_aux *msm_dp_aux)
  		container_of(msm_dp_aux, struct msm_dp_aux_private, msm_dp_aux);
  	u32 status;
  
@@ -57,7 +95,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_aux.c b/drivers/gpu/drm/msm/dp/dp_aux.c
 diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
 --- a/drivers/gpu/drm/msm/dp/dp_ctrl.c
 +++ b/drivers/gpu/drm/msm/dp/dp_ctrl.c
-@@ -1787,12 +1787,19 @@
+@@ -1787,12 +1787,19 @@ static int msm_dp_ctrl_enable_mainlink_clocks(struct msm_dp_ctrl_private *ctrl)
  	ctrl->phy_opts.dp.ssc = drm_dp_max_downspread(dpcd);
  
  	phy_configure(phy, &ctrl->phy_opts);
@@ -79,7 +117,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
  
  	drm_dbg_dp(ctrl->drm_dev, "link rate=%d\n", ctrl->link->link_params.rate);
  
-@@ -1914,6 +1921,7 @@
+@@ -1914,6 +1921,7 @@ void msm_dp_ctrl_phy_init(struct msm_dp_ctrl *msm_dp_ctrl)
  
  	msm_dp_ctrl_phy_reset(ctrl);
  	phy_init(phy);
@@ -87,7 +125,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
  
  	drm_dbg_dp(ctrl->drm_dev, "phy=%p init=%d power_on=%d\n",
  			phy, phy->init_count, phy->power_count);
-@@ -2460,6 +2468,8 @@
+@@ -2460,6 +2468,8 @@ int msm_dp_ctrl_on_stream(struct msm_dp_ctrl *msm_dp_ctrl, bool force_link_train
  {
  	int ret = 0;
  	bool mainlink_ready = false;
@@ -96,7 +134,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
  	struct msm_dp_ctrl_private *ctrl;
  	unsigned long pixel_rate;
  	unsigned long pixel_rate_orig;
-@@ -2488,12 +2498,13 @@
+@@ -2488,12 +2498,13 @@ int msm_dp_ctrl_on_stream(struct msm_dp_ctrl *msm_dp_ctrl, bool force_link_train
  			DRM_ERROR("Failed to start link clocks. ret=%d\n", ret);
  			goto end;
  		}
@@ -111,7 +149,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
  	}
  
  	if (ctrl->stream_clks_on) {
-@@ -2502,13 +2513,25 @@
+@@ -2502,13 +2513,25 @@ int msm_dp_ctrl_on_stream(struct msm_dp_ctrl *msm_dp_ctrl, bool force_link_train
  		ret = clk_prepare_enable(ctrl->pixel_clk);
  		if (ret) {
  			DRM_ERROR("Failed to start pixel clocks. ret=%d\n", ret);
@@ -120,16 +158,16 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
  		}
  		ctrl->stream_clks_on = true;
 +		stream_clks_enabled_here = true;
-+	}
-+
-+	if (force_link_train) {
-+		ret = msm_dp_link_psm_config(ctrl->link, &ctrl->panel->link_info, false);
-+		if (ret == -ETIMEDOUT || ret == -ENXIO)
-+			goto err_link_train;
  	}
  
 -	if (force_link_train || !msm_dp_ctrl_channel_eq_ok(ctrl))
 -		msm_dp_ctrl_link_retrain(ctrl);
++	if (force_link_train) {
++		ret = msm_dp_link_psm_config(ctrl->link, &ctrl->panel->link_info, false);
++		if (ret == -ETIMEDOUT || ret == -ENXIO)
++			goto err_link_train;
++	}
++
 +	if (force_link_train || !msm_dp_ctrl_channel_eq_ok(ctrl)) {
 +		ret = msm_dp_ctrl_link_retrain(ctrl);
 +		if (ret) {
@@ -140,7 +178,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
  
  	/* stop txing train pattern to end link training */
  	msm_dp_ctrl_clear_training_pattern(ctrl, DP_PHY_DPRX);
-@@ -2534,12 +2557,27 @@
+@@ -2534,12 +2557,27 @@ int msm_dp_ctrl_on_stream(struct msm_dp_ctrl *msm_dp_ctrl, bool force_link_train
  
  	ret = msm_dp_ctrl_wait4video_ready(ctrl);
  	if (ret)
@@ -169,10 +207,51 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
  end:
  	return ret;
  }
+diff --git a/drivers/gpu/drm/msm/dp/dp_debug.c b/drivers/gpu/drm/msm/dp/dp_debug.c
+--- a/drivers/gpu/drm/msm/dp/dp_debug.c
++++ b/drivers/gpu/drm/msm/dp/dp_debug.c
+@@ -216,6 +216,7 @@ int msm_dp_debug_init(struct device *dev, struct msm_dp_panel *panel,
+ 
+ 	debug->link = link;
+ 	debug->panel = panel;
++	debug->connector = connector;
+ 
+ 	debugfs_create_file("dp_debug", 0444, root,
+ 			debug, &msm_dp_debug_fops);
 diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_display.c
 --- a/drivers/gpu/drm/msm/dp/dp_display.c
 +++ b/drivers/gpu/drm/msm/dp/dp_display.c
-@@ -596,6 +596,21 @@
+@@ -581,6 +581,29 @@ static int msm_dp_display_usbpd_attention_cb(struct device *dev)
+ 	return rc;
+ }
+ 
++static void msm_dp_display_ensure_kms_phy_sel(struct msm_dp_display_private *dp)
++{
++	struct device *kms_dev;
++
++	if (dp->msm_dp_display.is_edp || !dp->drm_dev)
++		return;
++
++	kms_dev = dp->drm_dev->dev;
++	if (!kms_dev)
++		return;
++
++	/*
++	 * On platforms such as SC8180X where MDP_DP_PHY_INTF_SEL lives inside
++	 * DPU_TOP (under MDSS_GDSC), waking an external DP controller while the
++	 * sibling DPU KMS device is still runtime-suspended after an MDSS_GDSC
++	 * collapse leaves MDP_DP_PHY_INTF_SEL cleared to 0, breaking DP AUX.
++	 * Transiently resume DPU while DP holds MDSS_GDSC active so
++	 * dpu_runtime_resume() restores MDP_DP_PHY_INTF_SEL before AUX runs.
++	 */
++	if (pm_runtime_resume_and_get(kms_dev) == 0)
++		pm_runtime_put_sync(kms_dev);
++}
++
+ static int msm_dp_hpd_plug_handle(struct msm_dp_display_private *dp, u32 data)
+ {
+ 	u32 state;
+@@ -596,6 +619,22 @@ static int msm_dp_hpd_plug_handle(struct msm_dp_display_private *dp, u32 data)
  			dp->msm_dp_display.connector_type, state);
  
  	if (state == ST_DISPLAY_OFF) {
@@ -182,6 +261,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_dis
 +			mutex_unlock(&dp->event_mutex);
 +			return ret;
 +		}
++		msm_dp_display_ensure_kms_phy_sel(dp);
 +		ret = msm_dp_display_usbpd_configure_cb(&pdev->dev);
 +		if (ret) {
 +			msm_dp_display_host_phy_exit(dp);
@@ -194,7 +274,11 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_dis
  		mutex_unlock(&dp->event_mutex);
  		return 0;
  	}
-@@ -621,6 +636,7 @@
+@@ -618,9 +657,11 @@ static int msm_dp_hpd_plug_handle(struct msm_dp_display_private *dp, u32 data)
+ 		mutex_unlock(&dp->event_mutex);
+ 		return ret;
+ 	}
++	msm_dp_display_ensure_kms_phy_sel(dp);
  
  	ret = msm_dp_display_usbpd_configure_cb(&pdev->dev);
  	if (ret) {	/* link train failed */
@@ -202,7 +286,15 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_dis
  		dp->hpd_state = ST_DISCONNECTED;
  		pm_runtime_put_sync(&pdev->dev);
  	} else {
-@@ -1589,6 +1605,7 @@
+@@ -734,6 +775,7 @@ static int msm_dp_irq_hpd_handle(struct msm_dp_display_private *dp, u32 data)
+ 		return 0;
+ 	}
+ 
++	msm_dp_display_ensure_kms_phy_sel(dp);
+ 	msm_dp_display_usbpd_attention_cb(&dp->msm_dp_display.pdev->dev);
+ 
+ 	drm_dbg_dp(dp->drm_dev, "After, type=%d hpd_state=%d\n",
+@@ -1589,6 +1631,7 @@ void msm_dp_bridge_atomic_enable(struct drm_bridge *drm_bridge,
  	struct msm_dp_display_private *msm_dp_display;
  	u32 hpd_state;
  	bool force_link_train = false;
@@ -210,7 +302,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_dis
  
  	msm_dp_display = container_of(dp, struct msm_dp_display_private, msm_dp_display);
  	if (!msm_dp_display->msm_dp_mode.drm_mode.clock) {
-@@ -1623,15 +1640,25 @@
+@@ -1623,15 +1666,25 @@ void msm_dp_bridge_atomic_enable(struct drm_bridge *drm_bridge,
  
  	if (hpd_state == ST_DISPLAY_OFF) {
  		msm_dp_display_host_phy_init(msm_dp_display);
@@ -237,7 +329,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_dis
  	}
  
  	/* completed connection */
-@@ -1687,10 +1714,15 @@
+@@ -1687,10 +1740,15 @@ void msm_dp_bridge_atomic_post_disable(struct drm_bridge *drm_bridge,
  		drm_dbg_dp(dp->drm_dev, "type=%d wrong hpd_state=%d\n",
  			   dp->connector_type, hpd_state);
  
@@ -255,7 +347,7 @@ diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_dis
  		/* completed disconnection */
  		msm_dp_display->hpd_state = ST_DISCONNECTED;
  	} else {
-@@ -1800,6 +1832,11 @@
+@@ -1800,6 +1858,11 @@ void msm_dp_bridge_hpd_notify(struct drm_bridge *bridge,
  
  	if (!msm_dp_display->link_ready && status == connector_status_connected)
  		msm_dp_add_event(dp, EV_HPD_PLUG_INT, 0, 0);
