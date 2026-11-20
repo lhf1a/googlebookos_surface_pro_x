@@ -12,6 +12,7 @@
     &nbsp;·&nbsp; <a href="#device-compatibility-and-feature-matrix">Status</a>
     &nbsp;·&nbsp; <a href="#performance-benchmarks">Benchmarks</a>
     &nbsp;·&nbsp; <a href="#real-device-deployment-guide">Install</a>
+    &nbsp;·&nbsp; <a href="#debugging-and-development">Debug</a>
     &nbsp;·&nbsp; <a href="#building-from-source">Build</a>
     &nbsp;·&nbsp; <a href="#documentation-index">Docs</a>
   </p>
@@ -41,7 +42,7 @@ The project maintains a single unified image shared across SQ1 and SQ2:
 
 - **Unified Boot & Device Routing**: Both SQ1 and SQ2 share the same kernel, modules, and initramfs. UEFI loads a custom GRUB bootloader and dispatches the corresponding EL2 boot payload and device tree based on SMBIOS detection.
 - **Hybrid Graphics & Display Stack**: Mesa Freedreno / Turnip handles EGL / GLES and default desktop rendering, while a dual-Vulkan router switches per-app between Turnip and QTI native Vulkan with `VM_BIND` support for regular apps. Display composition and memory allocation are handled by QTI Display / HWC / SDM and Gralloc.
-- **Multimedia & Hardware Subsystems**: Integrates OMX and Venus hardware video decode/encode, audio routing, V4L2/CAMSS + software ISP cameras, SLPI sensors, IPTSd touchscreen and stylus, dual Type-C multi-display output, and system Advanced Settings.
+- **Multimedia & Hardware Subsystems**: Integrates OMX and Venus hardware video decode/encode, audio routing, V4L2/CAMSS + software ISP cameras, SLPI sensors, IPTSd touchscreen and stylus, dual Type-C multi-display output, and system [Advanced Settings](docs/ADVANCED-SETTINGS.md).
 
 ### Prebuilt Image Downloads
 
@@ -90,7 +91,7 @@ Legend: `✅ Available` · `🟡 Partially Available` · `❌ Unavailable`
 | **USB Storage / Type Cover / Buttons** | ✅ Available | ✅ Available |
 | **USB-C DP / Native Multi-Display Settings** | ✅ Available | ✅ Available |
 | **Lower-Port USB ADB** | ✅ Available | ✅ Available |
-| **Advanced Settings: Vulkan & Performance Mode** | ✅ Available | ✅ Available |
+| **Advanced Settings**: [Full Feature Guide](docs/ADVANCED-SETTINGS.md) (Vulkan, Performance, Touch, Debugging, OTA & LiveCD Install) | ✅ Available | ✅ Available |
 | **IR / Windows Hello, SMS, Hibernate** | ❌ Unavailable | ❌ Unavailable |
 
 ---
@@ -163,11 +164,41 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-Googlebook
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action SwitchDefault -DefaultOS Windows
 ```
 
+#### Option E: LiveCD USB Boot -> Install to Internal NVMe SSD (via Advanced Settings)
+Boot the compressed image from an external USB drive first (Option A or B), verify everything works on your Surface Pro X, and install directly to the internal NVMe SSD from Android:
+
+1. Boot from USB (`Volume Down + Power`) and complete the Touch Calibration Wizard.
+2. Connect AC power and open **Advanced Settings -> Install to Internal Disk** (see [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md)).
+3. Select the target internal NVMe disk, confirm the irreversible warning (**all partitions on the internal disk, including Windows, will be erased; USB `userdata` is not migrated**), and start installation.
+4. The installer rebuilds the 5-partition GPT layout, copies `super` with full SHA-256 readback verification, and writes the standalone internal UEFI payload.
+5. Tap **Shut down now**, **unplug the USB drive** once powered off, and turn on your Surface Pro X to boot directly from the internal SSD.
+
 ### 3. Booting & First-Boot Setup
 
 1. Hold **Volume Down** and press **Power** to boot from USB, or adjust the boot order in Surface UEFI.
 2. The GRUB menu boots the Android 17 desktop by default, with options for rescue mode or power off.
 3. First boot automatically skips Android OOBE and launches the Touch Calibration Wizard; reaching the desktop may take up to 15 minutes, so keep the device powered.
+
+### 4. Upgrading Existing Installations (OTA & ADB)
+
+- **On-device OTA**: Open **Settings -> System update** (or **Advanced Settings -> System update**), select a `.tar.gz` OTA archive or full `.img` / `.img.gz` image, and choose **Keep user data** (preserves `/data`, touch calibration, Advanced Settings, and Windows dual-boot `grub.cfg`) or **Clean install**.
+- **PC ADB One-Click Upgrade**: Run `scripts/Upgrade-GooglebookViaAdb.cmd` / `scripts/Upgrade-GooglebookViaAdb.ps1` (Windows) or `scripts/upgrade-googlebook-via-adb.sh` (Linux/macOS). See [OTA-HANDOFF](docs/OTA-HANDOFF.md).
+
+---
+
+## Debugging and Development
+
+Googlebook OS exposes built-in wireless/wired debugging, initramfs `root` SSH, and hardware controls in **Advanced Settings** (`SurfaceAdvancedControl.apk`, no manual KernelSU root grant required). See [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md) for the complete reference of all six modules (**Vulkan Configuration**, **Performance Mode**, **Touch**, **Debugging**, **System update**, and **Install to Internal Disk**).
+
+### Using Advanced Settings -> Debugging
+
+1. Open **Advanced Settings -> Debugging** on the tablet to inspect live **LAN IP** and virtualization **VM IP** addresses directly.
+2. **Network ADB (`TCP 5555`)**: Toggle **Network ADB** on/off with persistent state and firewall rules across reboots (`adb connect <LAN_IP>:5555`). Because `ro.adb.secure=1` is active, approve the RSA authorization prompt on first connection. Disabling Network ADB keeps `tcp:localhost:5555` active for `adb-usb-bridge` when lower-port USB-C ADB is used.
+3. **Initramfs `root` SSH (`TCP 22`)**: Toggle **SSH Service** (Dropbear running in the early initramfs root namespace, accessible even if Android UI stalls). Manage access via:
+   - **Change Password / Clear Password**: Sets or locks the `/etc/shadow` root hash (locked by default).
+   - **Import Key / Certificate**: Import OpenSSH public keys or X.509/PEM certificates from file or clipboard in the UI.
+   - **Standard `ssh-copy-id` persistence**: `/root/.ssh` and the Dropbear host key persist across reboots under `/data/vendor/spx-advanced-control/ssh`, so running `ssh-copy-id root@<LAN_IP>` from your workstation works directly and survives reboots.
+4. **Lower-Port USB ADB & GRUB Rescue Mode**: Connect a USB-C data cable to the **lower** USB-C port for wired `adb devices` ([TYPEC](docs/TYPEC.md)). If Android fails to boot, choose **Rescue Mode** (`spx-rescue` / `sq2.rescue=1`) in GRUB for pre-Android SSH (`port 22`), built-in USB Ethernet adapters, and `wifi-tui` ([BUILD](docs/BUILD.md#7-边界)).
 
 ---
 
@@ -218,6 +249,8 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 - [IMAGE](docs/IMAGE.md)
 - [DEVELOPMENT](docs/DEVELOPMENT.md)
 - [PROVENANCE](docs/PROVENANCE.md)
+- [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md) — Full reference for all **Advanced Settings** modules (Vulkan, Performance Mode, Touch, Debugging, System update, LiveCD Install)
+- [OTA-HANDOFF](docs/OTA-HANDOFF.md) — On-device OTA & PC ADB upgrade guide
 - [USB-NVME-DEPLOY](docs/USB-NVME-DEPLOY.md)
 - [TODO](docs/TODO.md)
 

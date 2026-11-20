@@ -12,6 +12,7 @@
     &nbsp;·&nbsp; <a href="#设备兼容性与功能支持矩阵">支持状态</a>
     &nbsp;·&nbsp; <a href="#性能基准">性能基准</a>
     &nbsp;·&nbsp; <a href="#真机部署指南">安装指南</a>
+    &nbsp;·&nbsp; <a href="#调试与开发">调试开发</a>
     &nbsp;·&nbsp; <a href="#从源码构建">源码构建</a>
     &nbsp;·&nbsp; <a href="#文档索引">文档</a>
   </p>
@@ -41,7 +42,7 @@
 
 - **统一引导与设备路由**：SQ1 与 SQ2 共用同一套内核、模块与 initramfs。开机由 UEFI 加载定制 GRUB，并根据 SMBIOS 机型自动分发对应的 EL2 启动载荷与设备树。
 - **混合图形与显示栈**：EGL / GLES 与默认桌面由 Mesa Freedreno / Turnip 驱动；Vulkan 通过双 Vulkan 路由器按应用策略在 Turnip 与高通原生 Vulkan 之间切换，并为普通应用启用 `VM_BIND`；显示合成与内存分配由 QTI Display / HWC / SDM 与 Gralloc 协同完成。
-- **多媒体与硬件子系统**：集成 OMX 与 Venus 硬件视频编解码、音频路由、V4L2/CAMSS 与软件 ISP 摄像头、SLPI 传感器、IPTSd 触控与手写笔、双 Type-C 多屏输出以及系统高级设置。
+- **多媒体与硬件子系统**：集成 OMX 与 Venus 硬件视频编解码、音频路由、V4L2/CAMSS 与软件 ISP 摄像头、SLPI 传感器、IPTSd 触控与手写笔、双 Type-C 多屏输出以及系统[高级设置](docs/ADVANCED-SETTINGS.md)。
 
 ### 预构建镜像下载
 
@@ -90,7 +91,7 @@ flowchart LR
 | **USB 存储 / Type Cover / 物理按键** | ✅ 可用 | ✅ 可用 |
 | **USB-C DP / 原生多屏设置** | ✅ 可用 | ✅ 可用 |
 | **下口 USB ADB** | ✅ 可用 | ✅ 可用 |
-| **高级设置：Vulkan 配置与性能模式** | ✅ 可用 | ✅ 可用 |
+| **高级设置**：[全部功能说明](docs/ADVANCED-SETTINGS.md)（Vulkan、性能模式、触控、调试、OTA 与 LiveCD 安装） | ✅ 可用 | ✅ 可用 |
 | **红外 / Windows Hello、短信、休眠到磁盘** | ❌ 不可用 | ❌ 不可用 |
 
 ---
@@ -163,11 +164,40 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-Googlebook
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action SwitchDefault -DefaultOS Windows
 ```
 
+#### 方案 E：USB LiveCD 模式通过“高级设置”安装到内置硬盘
+先通过 **方案 A（balenaEtcher）** 或 **方案 B（Rufus）** 将镜像写入外接 USB 磁盘，在真机实测确认各功能正常后，直接在运行的 Android 桌面安装至 Surface Pro X 内置 NVMe 硬盘：
+
+1. 从 USB 磁盘启动（关机后按住音量减与电源键）并完成首次触控校准向导。
+2. 建议接通电源，打开 **高级设置 -> 写入内置硬盘**（详见 [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md)）。
+3. 选择目标内置 NVMe 磁盘，确认高风险提示（**会彻底清空内置硬盘包括 Windows 在内的全部分区，且不会迁移当前 USB 盘上的 `userdata`**）并开始安装。
+4. 安装器会自动重建 5 分区 GPT 表、复制 `super` 分区并执行全量 SHA-256 回读校验，同时写入内置独立启动所需的标准 UEFI ESP 文件。
+5. 完成后点击 **立即关机**，待完全断电后**拔出 USB 启动盘**，再开机即可直接从内置 SSD 启动（首次内置开机会自动扩容 `userdata` 并运行触控校准）。
+
 ### 3. 启动与首次开机
 
 1. 关机后按住音量减与电源键从 USB 启动，或在 UEFI 中调整启动顺序。
 2. GRUB 菜单默认启动 Android 17 桌面，也可选择救援模式或关机。
 3. 首次启动会自动跳过初始向导并运行触控校准向导，进入桌面最长可能需要约 15 分钟，请保持供电。
+
+### 4. 已有系统的升级（OTA 与 ADB）
+
+- **设备端 OTA 升级**：打开 **系统设置 -> 系统更新**（或 **高级设置 -> 系统更新**），选择 `.tar.gz` 升级包或 `.img` / `.img.gz` 整盘镜像，可选择 **保留用户数据**（保留 `/data`、触控校准、高级设置与同盘双启动 `grub.cfg`）或 **清除数据并重装**。
+- **PC 端 ADB 一键升级**：Windows 可运行 `scripts/Upgrade-GooglebookViaAdb.cmd` / `.ps1`，Linux / macOS 可运行 `scripts/upgrade-googlebook-via-adb.sh`，详见 [OTA-HANDOFF](docs/OTA-HANDOFF.md)。
+
+---
+
+## 调试与开发
+
+系统内置 **高级设置（`SurfaceAdvancedControl.apk`）**，提供免手动 KernelSU 授权的无线调试、initramfs `root` SSH 与系统调优能力。全部六个模块（**Vulkan 配置**、**性能模式**、**触控**、**调试**、**系统更新**、**写入内置硬盘**）完整说明请见 [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md)。
+
+### 使用“高级设置 -> 调试”进行日常开发
+
+1. 在平板打开 **高级设置 -> 调试**，界面顶部会实时显示可用的 **LAN IP** 与虚拟化 **VM IP**。
+2. **网络 ADB（端口 `5555`）**：一键开关 TCP `5555` 网络 ADB，开启状态与防火墙规则会自动跨重启保留；开发机通过 `adb connect <LAN_IP>:5555` 连接（镜像启用 `ro.adb.secure=1`，首次连接需在平板屏幕确认 RSA 授权）。关闭网络 ADB 时，若启用了下口 USB 桥接（`adb-usb-bridge`），系统会自动保留 `tcp:localhost:5555`，不会影响下口有线 USB ADB。
+3. **initramfs `root` SSH（端口 `22`）**：开关 Dropbear SSH 服务（运行在早期 initramfs 根命名空间，即便 Android 桌面卡死仍可登录排障）：
+   - **密码管理**：默认镜像 `root` 密码处于锁定状态，可在应用内设置或清除密码。
+   - **公钥导入与 `ssh-copy-id` 持久化**：可在应用内通过文件或粘贴导入 OpenSSH 公钥 / X.509 PEM 证书；同时 `/root/.ssh` 与 Dropbear 主机密钥已软链接持久化至 `/data/vendor/spx-advanced-control/ssh`，直接在开发机执行 `ssh-copy-id root@<LAN_IP>` 写入的公钥跨重启永久保留。
+4. **下口有线 USB ADB 与 GRUB 救援模式**：使用 **下方** Type-C 接口连接电脑即可有线 `adb devices`（见 [TYPEC](docs/TYPEC.md)）。若系统在启动前异常无法进桌面，可在 GRUB 菜单选择 **救援模式**（`spx-rescue` / `sq2.rescue=1`），使用内置 USB 网卡驱动、`wifi-tui` 配网与端口 `22` SSH 排障（见 [BUILD](docs/BUILD.md#7-边界)）。
 
 ---
 
@@ -218,6 +248,8 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 - [IMAGE](docs/IMAGE.md)
 - [DEVELOPMENT](docs/DEVELOPMENT.md)
 - [PROVENANCE](docs/PROVENANCE.md)
+- [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md) — **高级设置**全部功能说明（Vulkan、性能模式、触控、调试、系统更新、LiveCD 写入内置硬盘）
+- [OTA-HANDOFF](docs/OTA-HANDOFF.md) — 设备端 OTA 与 PC ADB 一键升级指南
 - [USB-NVME-DEPLOY](docs/USB-NVME-DEPLOY.md)
 - [TODO](docs/TODO.md)
 
