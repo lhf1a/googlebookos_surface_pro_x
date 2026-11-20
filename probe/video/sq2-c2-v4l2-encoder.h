@@ -6,6 +6,7 @@
 #include <C2Component.h>
 #include <C2PlatformSupport.h>
 #include <SimpleC2Interface.h>
+#include <android/log.h>
 #include <condition_variable>
 #include <deque>
 #include <map>
@@ -195,8 +196,12 @@ private:
 
     bool ensureSessionAndPool() {
         if (!mOutputPool) {
+            C2BlockPool::local_id_t poolId = mEncIntf->outputPoolId();
             c2_status_t st = android::GetCodec2BlockPool(
-                    mEncIntf->outputPoolId(), shared_from_this(), &mOutputPool);
+                    poolId, shared_from_this(), &mOutputPool);
+            __android_log_print(ANDROID_LOG_INFO, "sq2-c2-enc",
+                                "GetCodec2BlockPool poolId=%llu st=%d ptr=%p",
+                                static_cast<unsigned long long>(poolId), st, mOutputPool.get());
             if (st != C2_OK || !mOutputPool) {
                 fprintf(stderr, "SQ2_C2_ENC GetCodec2BlockPool failed st=%d\n", st);
                 return false;
@@ -205,6 +210,8 @@ private:
         if (!mSession.isOpen()) {
             mActiveParams = mEncIntf->snapshotParams();
             if (!mSession.openSession(mActiveParams)) {
+                __android_log_print(ANDROID_LOG_ERROR, "sq2-c2-enc",
+                                    "openSession failed errno=%d (%s)", errno, strerror(errno));
                 fprintf(stderr, "SQ2_C2_ENC openSession failed errno=%d (%s)\n", errno, strerror(errno));
                 return false;
             }
@@ -218,9 +225,19 @@ private:
         std::shared_ptr<C2LinearBlock> block;
         c2_status_t st = mOutputPool->fetchLinearBlock(
                 allocSz, {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE}, &block);
-        if (st != C2_OK || !block) return nullptr;
+        if (st != C2_OK || !block) {
+            __android_log_print(ANDROID_LOG_ERROR, "sq2-c2-enc",
+                                "fetchLinearBlock failed poolId=%llu allocId=%u allocSz=%zu st=%d",
+                                static_cast<unsigned long long>(mOutputPool->getLocalId()),
+                                static_cast<unsigned>(mOutputPool->getAllocatorId()), allocSz, st);
+            return nullptr;
+        }
         C2WriteView w = block->map().get();
-        if (w.error() != C2_OK) return nullptr;
+        if (w.error() != C2_OK) {
+            __android_log_print(ANDROID_LOG_ERROR, "sq2-c2-enc",
+                                "linear block map failed err=%d allocSz=%zu", w.error(), allocSz);
+            return nullptr;
+        }
         if (size > 0) memcpy(w.data(), bytes, size);
         std::shared_ptr<C2Buffer> buf = C2Buffer::CreateLinearBuffer(block->share(0, size, C2Fence()));
         if (buf && isSync) {

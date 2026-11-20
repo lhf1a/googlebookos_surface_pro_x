@@ -95,7 +95,22 @@ public:
 
     c2_status_t config_sm(const std::vector<C2Param *> &params,
                           std::vector<std::unique_ptr<C2SettingResult>> *const failures) override {
-        return mParams.config(params, C2_MAY_BLOCK, failures);
+        std::vector<C2Param *> remaining;
+        remaining.reserve(params.size());
+        for (C2Param *p : params) {
+            if (p && p->type() == C2StoreDmaBufUsageInfo::PARAM_TYPE) {
+                auto *info = static_cast<C2StoreDmaBufUsageInfo *>(p);
+                info->m.allocFlags = 0;
+                size_t cap = info->flexCount();
+                if (cap > 0) {
+                    snprintf(info->m.heapName, cap, "%s", "system");
+                }
+            } else {
+                remaining.push_back(p);
+            }
+        }
+        if (remaining.empty()) return C2_OK;
+        return mParams.config(remaining, C2_MAY_BLOCK, failures);
     }
 
     std::shared_ptr<C2ParamReflector> getParamReflector() const override {

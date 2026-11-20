@@ -138,6 +138,14 @@ class Sq2C2EncoderTests(unittest.TestCase):
         self.assertIn('C2StreamInitDataInfo::output::AllocUnique', enc_h)
         self.assertIn('findAnnexBCsdEnd', enc_h)
 
+        svc_cpp = (ROOT / 'probe/video/sq2-c2-enc-aidl-service.cpp').read_text()
+        self.assertIn('C2StoreDmaBufUsageInfo::PARAM_TYPE', svc_cpp)
+        self.assertIn('"system"', svc_cpp)
+
+        build_py = (ROOT / 'scripts/build-sq2-c2-enc-service.py').read_text()
+        self.assertIn('--version=2', build_py)
+        self.assertIn('2f7448ba8211c5cd1de7bd6c17fe7c5fd034ebbe', build_py)
+
     def test_xml_wiring_preserves_omx_decoders(self):
         xml_mod = load_script('prepare-sq2-c2-enc-xml.py')
         sample = b'<?xml version="1.0" encoding="utf-8"?><MediaCodecs><Include href="media_codecs_quest2_omx.xml" /></MediaCodecs>'
@@ -150,6 +158,34 @@ class Sq2C2EncoderTests(unittest.TestCase):
         root2 = ET.fromstring(out2)
         self.assertEqual([n.get('href') for n in root2.findall('./Include')],
                          ['media_codecs_quest2_omx.xml', 'media_codecs_sq2_c2_enc.xml'])
+
+    def test_pack_sq2_c2_enc_boot_fixture(self):
+        import gzip
+        pack_mod = load_script('pack-sq2-c2-enc-boot.py')
+        cpio = pack_mod.pack.cpio
+        fixture_files = {
+            'etc/sq2-qti-system/root/bin/hw/vendor.qti.hardware.display.allocator-service': (0o100755, b'old-alloc'),
+            'etc/sq2-hidl/media_codecs_hamoa.xml': (0o100644, b'<?xml version="1.0"?><MediaCodecs><Include href="media_codecs_quest2_omx.xml" /></MediaCodecs>'),
+            'etc/sq2-hidl/SHA256SUMS': (0o100644, b'0000  media_codecs_hamoa.xml\n'),
+            'etc/sq2-video-native/SHA256SUMS': (0o100644, b'0000  sq2_hfi_overlay.ko\n'),
+            'bin/quest2-hidl-stage': (0o100755, b'#!/bin/busybox sh\necho QUEST2_HIDL_STAGED\n'),
+            'bin/video-decoder-lab-start': (0o100755, b'#!/bin/busybox sh\nfor module in sq2_iris1_identify sq2_hfi_overlay venus_core venus_dec sq2_iris1_phase; do\n  echo "$module"\ndone\nmodprobe venus-dec\n'),
+            'bin/video-runtime-framework-boot': (0o100755, b'#!/bin/busybox sh\nnsenter <<\'EOF\'\nsetprop ctl.start sq2-omx\nANDROID\ntimeout 5 nsenter -t 1 -m -r -- /system/bin/setprop ctl.restart media\n'),
+            'bin/dropbear': (0o100755, b'ssh-bin'),
+            'bin/start-ssh': (0o100755, b'start-ssh'),
+            'etc/shadow': (0o100600, b'root:hash\n'),
+        }
+        raw = b''.join(cpio.entry(k, v, m) for k, (m, v) in fixture_files.items()) + cpio.entry('TRAILER!!!', b'', 0)
+        raw += b'\0' * (-len(raw) % 512)
+        base_gz = gzip.compress(raw, mtime=0)
+        out_gz = pack_mod.pack_initramfs(base_gz, b'HFI_KO', b'VENC_KO', b'C2_ENC', b'ALLOC5')
+        after = cpio.entries(gzip.decompress(out_gz))
+        self.assertEqual(after['etc/sq2-c2-enc/sq2-c2-enc-service'][1], b'C2_ENC')
+        self.assertEqual(after['lib/modules/6.18.60-sq2-android1/kernel/drivers/media/platform/qcom/venus/venus-enc.ko'][1], b'VENC_KO')
+        self.assertIn(b'modprobe venus-enc', after['bin/video-decoder-lab-start'][1])
+        self.assertIn(b'setprop ctl.restart vendor-qti-media-c2-hal-1-0', after['bin/video-runtime-framework-boot'][1])
+        self.assertIn(b'init.svc.vendor-qti-media-c2-hal-1-0', after['bin/video-runtime-framework-boot'][1])
+        self.assertEqual(after['etc/shadow'][1], b'root:hash\n')
 
 
 if __name__ == '__main__':

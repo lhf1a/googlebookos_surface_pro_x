@@ -32,8 +32,8 @@ def generate_aidl_headers(aidl_bin, hw_if, native_ref, out_dir):
     gr_srcs = sorted((hw_if / 'graphics/common/aidl/android/hardware/graphics/common').glob('*.aidl'))
     fmq_srcs = sorted((hw_if / 'common/fmq/aidl/android/hardware/common/fmq').glob('*.aidl'))
 
-    subprocess.run([
-        str(aidl_bin), '--lang=ndk', '--stability=vintf', '--structured',
+    common_inc_flags = [
+        '--lang=ndk', '--stability=vintf', '--structured',
         '-I', str(out_dir / 'aidl-extra'),
         '-I', str(native_ref / 'aidl/gui'),
         '-I', str(native_ref / 'aidl/binder'),
@@ -43,7 +43,23 @@ def generate_aidl_headers(aidl_bin, hw_if, native_ref, out_dir):
         '-I', str(hw_if / 'common/aidl'),
         '-I', str(hw_if / 'common/fmq/aidl'),
         '-h', str(inc_dir), '-o', str(src_dir),
-        *[str(p) for p in (*c2_srcs, *bp_srcs, *cm_srcs, *gr_srcs)],
+    ]
+
+    subprocess.run([
+        str(aidl_bin), *common_inc_flags,
+        '--version=2', '--hash=2f7448ba8211c5cd1de7bd6c17fe7c5fd034ebbe',
+        *[str(p) for p in c2_srcs],
+    ], check=True)
+
+    subprocess.run([
+        str(aidl_bin), *common_inc_flags,
+        '--version=2', '--hash=c12818c51418fbfc76f1b81eba6678d75cf526c1',
+        *[str(p) for p in bp_srcs],
+    ], check=True)
+
+    subprocess.run([
+        str(aidl_bin), *common_inc_flags,
+        *[str(p) for p in (*cm_srcs, *gr_srcs)],
     ], check=True)
 
     subprocess.run([
