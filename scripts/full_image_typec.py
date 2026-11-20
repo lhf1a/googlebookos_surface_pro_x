@@ -104,7 +104,7 @@ def prepare_dtb(data):
         for n in (0,1):add(con+f'/ports/port@{n}',{'reg':cell(n)});add(con+f'/ports/port@{n}/endpoint')
         put(phy,{'compatible':b'microsoft,spx-sc8180x-usb3-dp-phy\0','orientation-switch':b'','mode-switch':b''})
         put(usbwrap_path,{'wakeup-source':b''})
-        put(dp,{'status':b'okay\0'});out=dp+'/ports/port@1/endpoint';put(out,{'data-lanes':cell(0,1,2,3)})
+        put(dp,{'status':b'okay\0'});out=dp+'/ports/port@1/endpoint';put(out,{'data-lanes':cell(0,1,2,3),'link-frequencies':struct.pack('>4Q',1620000000,2700000000,5400000000,8100000000)})
         link(out,phy+'/ports/port@2/endpoint');link(phy+'/ports/port@0/endpoint',con+'/ports/port@1/endpoint');link(usb+'/ports/port@0/endpoint',con+'/ports/port@0/endpoint')
         if port==0:put(usb,{'dr_mode':b'otg\0','usb-role-switch':b'','role-switch-default-mode':b'host\0'})
     try:

@@ -146,9 +146,13 @@ class TypeC(unittest.TestCase):
             off = f.path_offset(usbwrap)
             self.assertEqual(bytes(f.getprop(off, 'wakeup-source')), b'')
         self.assertEqual(bytes(f.getprop(f.path_offset('/soc@0/usb@a6f8800/usb@a600000'), 'dr_mode')), b'otg\0')
+        expected_freqs = struct.pack('>4Q', 1620000000, 2700000000, 5400000000, 8100000000)
         for a in ('ae90000', 'ae98000'):
             n = f.path_offset('/soc@0/display-subsystem@ae00000/displayport-controller@' + a)
             self.assertEqual(bytes(f.getprop(n, 'status')), b'okay\0')
+            ep = f.path_offset('/soc@0/display-subsystem@ae00000/displayport-controller@' + a + '/ports/port@1/endpoint')
+            self.assertEqual(bytes(f.getprop(ep, 'data-lanes')), struct.pack('>4I', 0, 1, 2, 3))
+            self.assertEqual(bytes(f.getprop(ep, 'link-frequencies')), expected_freqs)
         self.assertEqual(f.getprop(f.path_offset('/soc@0/phy@aec2a00'), 'keep-edp').as_uint32(), 2)
         self.assertEqual(f.getprop(f.path_offset('/reserved-memory'), 'keep-prop').as_uint32(), 1)
 
@@ -158,9 +162,12 @@ class TypeC(unittest.TestCase):
         if not p.exists():self.skipTest('optional private live DT input')
         old=p.read_bytes();new=t.prepare_dtb(old);self.assertEqual(t.prepare_dtb(new),new)
         f=libfdt.Fdt(new);base=libfdt.Fdt(old)
+        expected_freqs=struct.pack('>4Q',1620000000,2700000000,5400000000,8100000000)
         for a in ['ae90000','ae98000']:
             n=f.path_offset('/soc@0/display-subsystem@ae00000/displayport-controller@'+a)
             self.assertEqual(bytes(f.getprop(n,'status')),b'okay\0')
+            ep=f.path_offset('/soc@0/display-subsystem@ae00000/displayport-controller@'+a+'/ports/port@1/endpoint')
+            self.assertEqual(bytes(f.getprop(ep,'link-frequencies')),expected_freqs)
         for usbwrap in ('/soc@0/usb@a6f8800', '/soc@0/usb@a8f8800'):
             self.assertEqual(bytes(f.getprop(f.path_offset(usbwrap), 'wakeup-source')), b'')
         self.assertEqual(bytes(f.getprop(f.path_offset('/soc@0/usb@a6f8800/usb@a600000'),'dr_mode')),b'otg\0')
