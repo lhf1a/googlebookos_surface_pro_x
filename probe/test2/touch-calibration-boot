@@ -117,14 +117,12 @@ mkdir -p "$noise"; chmod 700 "$noise"
 noise_saved=$store/$device.noise
 tap_saved=$store/$device.tap
 # One-time migration from the pre-HID_ID local key on the same board+EDID+descriptor.
-# Retain legacy files untouched for rollback; never overwrite existing new-key data.
-if [ "$device_legacy" != "$device" ] && [ ! -e "$store/$device.migrated" ]; then
-    if [ -f "$saved" ] || [ -f "$noise_saved" ] || [ -f "$tap_saved" ]; then
-        touch "$store/$device.migrated"
-    elif [ -e "$store/$device_legacy.profile" ] || [ -e "$store/$device_legacy.noise" ] || [ -e "$store/$device_legacy.tap" ] || [ -e "$store/$device_legacy.prompted" ]; then
+# Retain legacy files untouched for rollback; migrate each missing piece without overwriting existing new-key data.
+if [ "$device_legacy" != "$device" ] && [ ! -e "$store/$device.migrated-v2" ]; then
+    if [ -e "$store/$device_legacy.profile" ] || [ -e "$store/$device_legacy.noise" ] || [ -e "$store/$device_legacy.tap" ] || [ -e "$store/$device_legacy.prompted" ]; then
         migrated_any=0
         legacy_saved=$store/$device_legacy.profile
-        if [ -f "$legacy_saved" ] && [ ! -L "$legacy_saved" ] && "$tool" validate "$device_legacy" < "$legacy_saved" > /dev/null 2>&1; then
+        if [ ! -e "$saved" ] && [ -f "$legacy_saved" ] && [ ! -L "$legacy_saved" ] && "$tool" validate "$device_legacy" < "$legacy_saved" > /dev/null 2>&1; then
             sed "s/^Device=$device_legacy\$/Device=$device/" "$legacy_saved" > "$saved.new" 2>/dev/null || true
             if [ -s "$saved.new" ] && "$tool" validate "$device" < "$saved.new" > /dev/null 2>&1; then
                 chmod 600 "$saved.new"; sync; mv "$saved.new" "$saved"; sync
@@ -134,7 +132,7 @@ if [ "$device_legacy" != "$device" ] && [ ! -e "$store/$device.migrated" ]; then
             fi
         fi
         legacy_noise=$store/$device_legacy.noise
-        if [ -x /bin/touch-noise-profile ] && [ -f "$legacy_noise" ] && [ ! -L "$legacy_noise" ] && /bin/touch-noise-profile "$device_legacy" < "$legacy_noise" > /dev/null 2>&1; then
+        if [ ! -e "$noise_saved" ] && [ -x /bin/touch-noise-profile ] && [ -f "$legacy_noise" ] && [ ! -L "$legacy_noise" ] && /bin/touch-noise-profile "$device_legacy" < "$legacy_noise" > /dev/null 2>&1; then
             sed "1s/ $device_legacy / $device /" "$legacy_noise" | /bin/touch-noise-profile "$device" > "$noise_saved.new" 2>/dev/null || true
             if [ -s "$noise_saved.new" ]; then
                 chmod 600 "$noise_saved.new"; sync; mv "$noise_saved.new" "$noise_saved"
@@ -149,7 +147,7 @@ if [ "$device_legacy" != "$device" ] && [ ! -e "$store/$device.migrated" ]; then
             fi
         fi
         legacy_tap=$store/$device_legacy.tap
-        if [ -x /bin/touch-tap-profile ] && [ -f "$legacy_tap" ] && [ ! -L "$legacy_tap" ] && /bin/touch-tap-profile "$device_legacy" < "$legacy_tap" > /dev/null 2>&1; then
+        if [ ! -e "$tap_saved" ] && [ -x /bin/touch-tap-profile ] && [ -f "$legacy_tap" ] && [ ! -L "$legacy_tap" ] && /bin/touch-tap-profile "$device_legacy" < "$legacy_tap" > /dev/null 2>&1; then
             sed "1s/ $device_legacy / $device /" "$legacy_tap" | /bin/touch-tap-profile "$device" > "$tap_saved.new" 2>/dev/null || true
             if [ -s "$tap_saved.new" ]; then
                 chmod 600 "$tap_saved.new"; sync; mv "$tap_saved.new" "$tap_saved"; sync
@@ -158,11 +156,13 @@ if [ "$device_legacy" != "$device" ] && [ ! -e "$store/$device.migrated" ]; then
                 rm -f "$tap_saved.new"
             fi
         fi
-        if [ "$migrated_any" = 1 ] || [ -e "$store/$device_legacy.prompted" ]; then
+        if [ "$migrated_any" = 1 ] || [ -e "$store/$device_legacy.prompted" ] || [ -f "$saved" ] || [ -f "$noise_saved" ] || [ -f "$tap_saved" ]; then
             touch "$store/$device.prompted"
         fi
-        touch "$store/$device.migrated"
+        touch "$store/$device.migrated-v2"
         sync
+    elif [ -f "$saved" ] || [ -f "$noise_saved" ] || [ -f "$tap_saved" ]; then
+        touch "$store/$device.migrated-v2"
     fi
 fi
 noise_preview=0; noise_until=0
@@ -258,7 +258,7 @@ fi
 android pm disable-user --user "$user" org.surface.touchcalibration > /logs/touch-calibration-legacy-hidden.txt 2>&1 || true
 files=/proc/1/root/data/user_de/$user/$pkg/files
 if [ -d "$files" ] && [ ! -L "$files" ]; then rm -f "$files/request"; fi
-if [ "$valid" = 0 ] && [ ! -e "$store/$device.prompted" ] && [ ! -e /run/touch-disabled ]; then
+if [ "$valid" = 0 ] && [ ! -e "$store/$device.prompted" ] && [ ! -f "$noise_saved" ] && [ ! -f "$tap_saved" ] && [ ! -e /run/touch-disabled ]; then
     # Nonblocking onboarding: never dismiss the lock screen or modify credentials.
     android am start --user "$user" --windowingMode 1 -n "$pkg/org.surface.touchcalibration.MainActivity" > /dev/null 2>&1 ||
         android am start --user "$user" -n "$pkg/org.surface.touchcalibration.MainActivity" > /dev/null
@@ -324,7 +324,7 @@ while true; do
                     ;;
                 tap-save)
                     if [ "$tap_preview" = 1 ] && /bin/touch-tap-profile "$device" < "$noise/tap-active" > "$tap_saved.new"; then
-                        chmod 600 "$tap_saved.new";sync;mv "$tap_saved.new" "$tap_saved";sync;tap_preview=0;if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
+                        chmod 600 "$tap_saved.new";sync;mv "$tap_saved.new" "$tap_saved";touch "$store/$device.prompted";sync;tap_preview=0;if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
                     else reply ERROR;fi
                     ;;
                 tap-cancel)
@@ -420,7 +420,7 @@ while true; do
                     ;;
                 noise-save)
                     if [ "$noise_preview" = 1 ] && /bin/touch-noise-profile "$device" < "$noise/active" > "$noise_saved.new"; then
-                        chmod 600 "$noise_saved.new";sync;mv "$noise_saved.new" "$noise_saved";rm -f "$noise_saved.disabled";sync
+                        chmod 600 "$noise_saved.new";sync;mv "$noise_saved.new" "$noise_saved";rm -f "$noise_saved.disabled";touch "$store/$device.prompted";sync
                         noise_preview=0;if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
                     else reply ERROR; fi
                     ;;

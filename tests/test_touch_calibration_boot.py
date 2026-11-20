@@ -156,7 +156,7 @@ elif a[:2]==['am','start']:pathlib.Path({str(w/'launched')!r}).touch()
                 self.assertTrue((store/(device+'.noise')).is_file())
                 self.assertTrue((store/(device+'.tap')).is_file())
                 self.assertTrue((store/(device+'.prompted')).exists())
-                self.assertTrue((store/(device+'.migrated')).exists())
+                self.assertTrue((store/(device+'.migrated-v2')).exists())
                 self.assertIn(f'Device={device}\n', (store/(device+'.profile')).read_text())
                 self.assertIn('.02:.03', (w/'applied').read_text())
                 self.assertIn(f'SPXNOISE1 {device} ', (w/'run/iptsd-noise/active').read_text())
@@ -165,6 +165,28 @@ elif a[:2]==['am','start']:pathlib.Path({str(w/'launched')!r}).touch()
                 self.assertEqual((store/(legacy+'.profile')).read_text(), legacy_profile)
                 self.assertEqual((store/(legacy+'.noise')).read_text(), legacy_noise)
                 self.assertEqual((store/(legacy+'.tap')).read_text(), legacy_tap)
+                stop(p)
+
+                # 1b. Partial new-key state (e.g. only .noise existed from an earlier unfixed OTA,
+                # plus stale v1 .migrated marker): must preserve existing new .noise AND still migrate
+                # missing .profile, .tap, and .prompted without launching the wizard.
+                for f in list(store.iterdir()):
+                    f.unlink()
+                (store/(legacy+'.profile')).write_text(legacy_profile)
+                (store/(legacy+'.noise')).write_text(legacy_noise)
+                (store/(legacy+'.tap')).write_text(legacy_tap)
+                (store/(legacy+'.prompted')).touch()
+                custom_new_noise = f'SPXNOISE1 {device} 1118 3105 32 48 1 20 0.5\n'
+                (store/(device+'.noise')).write_text(custom_new_noise)
+                (store/(device+'.migrated')).touch()
+                p=start()
+                self.assertFalse((w/'launched').exists())
+                self.assertEqual((store/(device+'.noise')).read_text(), custom_new_noise)
+                self.assertTrue((store/(device+'.profile')).is_file())
+                self.assertTrue((store/(device+'.tap')).is_file())
+                self.assertTrue((store/(device+'.prompted')).exists())
+                self.assertTrue((store/(device+'.migrated-v2')).exists())
+                self.assertIn('.02:.03', (w/'applied').read_text())
                 stop(p)
 
                 # 2. If user clears new-key calibration later (keeping .prompted & .migrated), legacy must not resurrect.

@@ -1107,6 +1107,35 @@ print(f'$6$testsalt${digest}')
                 self.assertEqual(state['adb_tcp_port'], '-1')
                 self.assertEqual(json.loads(fw_file.read_text()), {'iptables': [], 'ip6tables': []})
 
+                # 4b. Android mica adb-usb-bridge mode: localhost:5555 at boot -> adb_tcp_active=0;
+                # enabling clears service.adb.listen_addrs; disabling restores tcp:localhost:5555.
+                usb_bridge = data_root / 'vendor/bin/adb-usb-bridge'
+                usb_bridge.parent.mkdir(parents=True, exist_ok=True)
+                usb_bridge.write_text('#!/bin/sh\n')
+                usb_bridge.chmod(0o755)
+                props_file.write_text(json.dumps({
+                    'service.adb.tcp.port': '5555',
+                    'service.adb.listen_addrs': 'tcp:localhost:5555',
+                    'init.svc.adb-usb-bridge': 'running',
+                }) + '\n')
+                state, _, _ = run_once()
+                self.assertEqual(state['adb_tcp_enabled'], '0')
+                self.assertEqual(state['adb_tcp_active'], '0')
+                state, reply, _ = run_once('set-adb-tcp\ndbg-2b\n1\n')
+                self.assertEqual(reply, ['dbg-2b', 'OK'])
+                self.assertEqual(state['adb_tcp_active'], '1')
+                props = json.loads(props_file.read_text())
+                self.assertEqual(props['service.adb.listen_addrs'], '')
+                self.assertEqual(props['service.adb.tcp.port'], '5555')
+                state, reply, _ = run_once('set-adb-tcp\ndbg-2c\n0\n')
+                self.assertEqual(reply, ['dbg-2c', 'OK'])
+                self.assertEqual(state['adb_tcp_active'], '0')
+                props = json.loads(props_file.read_text())
+                self.assertEqual(props['service.adb.listen_addrs'], 'tcp:localhost:5555')
+                self.assertEqual(props['service.adb.tcp.port'], '5555')
+                usb_bridge.unlink()
+                props_file.write_text('{}\n')
+
                 # 5. Enable SSH -> generates host key, starts Dropbear on 22, opens firewall
                 state, reply, _ = run_once('set-ssh-enabled\ndbg-3\n1\n')
                 self.assertEqual(reply, ['dbg-3', 'OK'])
@@ -1175,13 +1204,66 @@ print(f'$6$testsalt${digest}')
                 self.assertFalse((etc_dir / 'shadow').read_text().startswith('root:!:'))
                 pid_to_kill = int((run_dir / 'dropbear.pid').read_text().strip())
                 os.kill(pid_to_kill, signal.SIGKILL)
-                os.waitpid(pid_to_kill, 0) if False else None
                 (run_dir / 'dropbear.pid').unlink()
                 (etc_dir / 'dropbear/dropbear_ed25519_host_key').unlink()
+                # Simulate fresh initramfs RAM /root/.ssh directory on reboot
+                if (home_root / '.ssh').is_symlink():
+                    (home_root / '.ssh').unlink()
+                elif (home_root / '.ssh').is_dir():
+                    shutil.rmtree(home_root / '.ssh')
+                (home_root / '.ssh').mkdir(mode=0o700)
                 state, _, stdout = run_once()
                 self.assertIn('SPX_AC_BOOT_SSH_RESTORED 1', stdout)
                 self.assertEqual(state['ssh_running'], '1')
+                self.assertEqual(state['ssh_key_count'], '1')
                 self.assertTrue((etc_dir / 'dropbear/dropbear_ed25519_host_key').is_file())
+                self.assertTrue((home_root / '.ssh').is_symlink())
+                self.assertIn(k1, (home_root / '.ssh/authorized_keys').read_text())
+
+                # 11. Keys installed externally via ssh-copy-id into /root/.ssh/authorized_keys
+                # persist directly in /data and survive reboot without going through import-ssh-keys.
+                k3 = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMockCopyIdKey3333333333333333333333 copyid@laptop'
+                copy_id_res = subprocess.run(
+                    ['sh', '-c',
+                     'cd "$1" && umask 077 && mkdir -p .ssh && '
+                     '{ [ -z "$(tail -c 1 .ssh/authorized_keys 2>/dev/null)" ] || echo >> .ssh/authorized_keys; } && '
+                     'cat >> .ssh/authorized_keys',
+                     'sh', str(home_root)],
+                    input=k3 + '\n',
+                    text=True,
+                    capture_output=True,
+                )
+                self.assertEqual(copy_id_res.returncode, 0, copy_id_res.stderr)
+                state, reply, _ = run_once('refresh\ndbg-13\n')
+                self.assertEqual(reply, ['dbg-13', 'OK'])
+                self.assertEqual(state['ssh_key_count'], '2')
+
+                # Simulate another reboot: wipe initramfs /root/.ssh and dropbear pid/host key
+                pid_to_kill = int((run_dir / 'dropbear.pid').read_text().strip())
+                os.kill(pid_to_kill, signal.SIGKILL)
+                (run_dir / 'dropbear.pid').unlink()
+                (etc_dir / 'dropbear/dropbear_ed25519_host_key').unlink()
+                (home_root / '.ssh').unlink()
+                (home_root / '.ssh').mkdir(mode=0o700)
+                # Also plant a legacy single-file store key to verify upgrade migration merges cleanly
+                k4 = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMockLegacyKey44444444444444444444444 legacy@old'
+                legacy_ak = data_root / 'data/vendor/spx-advanced-control/ssh/authorized_keys'
+                legacy_ak.write_text(k4 + '\n')
+                state, _, stdout = run_once()
+                self.assertIn('SPX_AC_BOOT_SSH_RESTORED 1', stdout)
+                self.assertEqual(state['ssh_key_count'], '3')
+                self.assertFalse(legacy_ak.exists())
+                restored_ak = (home_root / '.ssh/authorized_keys').read_text()
+                self.assertIn(k1, restored_ak)
+                self.assertIn(k3, restored_ak)
+                self.assertIn(k4, restored_ak)
+                self.assertEqual(stat.S_IMODE((home_root / '.ssh/authorized_keys').stat().st_mode), 0o600)
+
+                # Clear keys removes ssh-copy-id keys permanently across reboot
+                state, reply, _ = run_once('clear-ssh-keys\ndbg-14\n')
+                self.assertEqual(reply, ['dbg-14', 'OK'])
+                self.assertEqual(state['ssh_key_count'], '0')
+                self.assertEqual((home_root / '.ssh/authorized_keys').read_text(), '')
             finally:
                 pid_file = run_dir / 'dropbear.pid'
                 if pid_file.is_file():

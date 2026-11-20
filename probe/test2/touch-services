@@ -1,6 +1,6 @@
 #!/bin/busybox sh
 # Discover the actual IPTS protocol/type, not a CPU name or VID:PID allowlist.
-if [ -e /run/touch-disabled ] || [ "$(tr -d '\r\n ' < /proc/1/root/data/vendor/spx-advanced-control/touch_disabled 2>/dev/null || true)" = "1" ]; then
+if [ -e /run/touch-disabled ] || { [ -f /proc/1/root/data/vendor/spx-advanced-control/touch_disabled ] && [ "$(tr -d '\r\n ' < /proc/1/root/data/vendor/spx-advanced-control/touch_disabled 2>/dev/null || true)" = "1" ]; }; then
     mkdir -p /logs
     echo TOUCH_DISABLED_SKIP >> /logs/touch-service.txt
     exit 0

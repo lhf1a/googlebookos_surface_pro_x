@@ -133,6 +133,7 @@ fi
 
 STORE="$DATA_ROOT/data/vendor/spx-advanced-control"
 SSH_STORE="$STORE/ssh"
+SSH_HOME_DIR="$SSH_STORE/root_ssh"
 mkdir -p "$STORE"
 chmod 700 "$STORE" 2>/dev/null || true
 
@@ -735,18 +736,47 @@ restart_adbd() {
     return 0
 }
 
+has_adb_usb_bridge() {
+    [ -x "$DATA_ROOT/vendor/bin/adb-usb-bridge" ] && return 0
+    _svc="$(android getprop init.svc.adb-usb-bridge 2>/dev/null | tr -d '\r\n' || true)"
+    [ -n "$_svc" ]
+}
+
+is_adb_listen_localhost_only() {
+    case "${1:-}" in
+        tcp:localhost:*|tcp:127.0.0.1:*|'tcp:[::1]:'*)
+            case "$1" in
+                *,*) return 1 ;;
+                *) return 0 ;;
+            esac
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 apply_adb_tcp() {
     _enable="$1"
     if [ "$_enable" = "1" ]; then
         android settings put global adb_enabled 1 >/dev/null 2>&1 || true
+        android setprop service.adb.listen_addrs "" >/dev/null 2>&1 || return 1
         android setprop service.adb.tcp.port "$ADB_TCP_PORT" >/dev/null 2>&1 || return 1
         _actual="$(android getprop service.adb.tcp.port 2>/dev/null | tr -d '\r\n' || true)"
         [ "$_actual" = "$ADB_TCP_PORT" ] || return 1
+        _listen="$(android getprop service.adb.listen_addrs 2>/dev/null | tr -d '\r\n' || true)"
+        if is_adb_listen_localhost_only "$_listen"; then
+            return 1
+        fi
         restart_adbd || return 1
         tcp_port_firewall 1 "$ADB_TCP_PORT" "spx_ac_adb_tcp"
     else
         tcp_port_firewall 0 "$ADB_TCP_PORT" "spx_ac_adb_tcp"
-        android setprop service.adb.tcp.port -1 >/dev/null 2>&1 || return 1
+        if has_adb_usb_bridge; then
+            android setprop service.adb.listen_addrs "tcp:localhost:${ADB_TCP_PORT}" >/dev/null 2>&1 || return 1
+            android setprop service.adb.tcp.port "$ADB_TCP_PORT" >/dev/null 2>&1 || true
+        else
+            android setprop service.adb.listen_addrs "" >/dev/null 2>&1 || true
+            android setprop service.adb.tcp.port -1 >/dev/null 2>&1 || return 1
+        fi
         restart_adbd || true
     fi
     return 0
@@ -898,7 +928,9 @@ append_unique_ssh_key_to_file() {
 
 count_ssh_authorized_keys() {
     _kf=""
-    if [ -f "$SSH_STORE/authorized_keys" ] && [ ! -L "$SSH_STORE/authorized_keys" ]; then
+    if [ -f "$SSH_HOME_DIR/authorized_keys" ] && [ ! -L "$SSH_HOME_DIR/authorized_keys" ]; then
+        _kf="$SSH_HOME_DIR/authorized_keys"
+    elif [ -f "$SSH_STORE/authorized_keys" ] && [ ! -L "$SSH_STORE/authorized_keys" ]; then
         _kf="$SSH_STORE/authorized_keys"
     elif [ -f "$HOME_ROOT/.ssh/authorized_keys" ] && [ ! -L "$HOME_ROOT/.ssh/authorized_keys" ]; then
         _kf="$HOME_ROOT/.ssh/authorized_keys"
@@ -907,25 +939,105 @@ count_ssh_authorized_keys() {
         printf '0'
         return 0
     fi
-    _cnt="$(grep -Ec '^(ssh-|ecdsa-|sk-)' "$_kf" 2>/dev/null || true)"
+    _cnt="$(awk '
+        /^[[:space:]]*(#|$)/ { next }
+        /(^|[[:space:]])(ssh-|ecdsa-|sk-)/ { c++ }
+        END { print c + 0 }
+    ' "$_kf" 2>/dev/null || true)"
     printf '%s' "${_cnt:-0}"
 }
 
-sync_ssh_authorized_keys() {
-    _src="$SSH_STORE/authorized_keys"
-    [ -f "$_src" ] && [ ! -L "$_src" ] || return 0
-    mkdir -p "$HOME_ROOT" "$HOME_ROOT/.ssh"
-    chmod 700 "$HOME_ROOT" "$HOME_ROOT/.ssh" 2>/dev/null || true
-    _dst="$HOME_ROOT/.ssh/authorized_keys"
-    _tmp="${_dst}.ac.$$.tmp"
-    rm -f "$_tmp" 2>/dev/null || true
-    cp "$_src" "$_tmp" || { rm -f "$_tmp" 2>/dev/null || true; return 1; }
-    chmod 600 "$_tmp" 2>/dev/null || true
-    if [ "$(id -u)" = "0" ]; then
-        chown 0:0 "$HOME_ROOT" "$HOME_ROOT/.ssh" "$_tmp" 2>/dev/null || true
+merge_authorized_keys_source() {
+    _msrc="$1"
+    _mdst="$2"
+    [ -f "$_msrc" ] && [ ! -L "$_msrc" ] || return 0
+    [ -s "$_msrc" ] || return 0
+    _mtmp="${_mdst}.merge.$$.tmp"
+    rm -f "$_mtmp" 2>/dev/null || true
+    if [ -f "$_mdst" ] && [ ! -L "$_mdst" ]; then
+        cp "$_mdst" "$_mtmp" || { rm -f "$_mtmp" 2>/dev/null || true; return 1; }
+    else
+        : > "$_mtmp"
     fi
-    mv -f "$_tmp" "$_dst" || { rm -f "$_tmp" 2>/dev/null || true; return 1; }
+    _mchanged=0
+    while IFS= read -r _mline || [ -n "$_mline" ]; do
+        _mline="$(printf '%s' "$_mline" | tr -d '\r')"
+        case "$_mline" in
+            ''|'#'*) continue ;;
+        esac
+        if _mnorm="$(normalize_ssh_key_line "$_mline")"; then
+            if append_unique_ssh_key_to_file "$_mnorm" "$_mtmp"; then
+                _mchanged=1
+            fi
+        elif ! grep -qxF "$_mline" "$_mtmp" 2>/dev/null; then
+            printf '%s\n' "$_mline" >> "$_mtmp"
+            _mchanged=1
+        fi
+    done < "$_msrc"
+    if [ "$_mchanged" = "1" ] || [ ! -f "$_mdst" ]; then
+        chmod 600 "$_mtmp" 2>/dev/null || true
+        if [ "$(id -u)" = "0" ]; then
+            chown 0:0 "$_mtmp" 2>/dev/null || true
+        fi
+        mv -f "$_mtmp" "$_mdst" || { rm -f "$_mtmp" 2>/dev/null || true; return 1; }
+    else
+        rm -f "$_mtmp" 2>/dev/null || true
+    fi
     return 0
+}
+
+ensure_persistent_ssh_home() {
+    mkdir -p "$SSH_STORE" "$SSH_HOME_DIR" "$HOME_ROOT"
+    chmod 700 "$SSH_STORE" "$SSH_HOME_DIR" "$HOME_ROOT" 2>/dev/null || true
+    if [ "$(id -u)" = "0" ]; then
+        chown 0:0 "$SSH_STORE" "$SSH_HOME_DIR" "$HOME_ROOT" 2>/dev/null || true
+    fi
+
+    _persist_ak="$SSH_HOME_DIR/authorized_keys"
+
+    # Migrate legacy single-file store from earlier builds into persistent root_ssh.
+    if [ -f "$SSH_STORE/authorized_keys" ] && [ ! -L "$SSH_STORE/authorized_keys" ]; then
+        merge_authorized_keys_source "$SSH_STORE/authorized_keys" "$_persist_ak" || return 1
+        rm -f "$SSH_STORE/authorized_keys" 2>/dev/null || true
+    fi
+
+    # Link $HOME_ROOT/.ssh -> $SSH_HOME_DIR so ssh-copy-id and manual edits under
+    # /root/.ssh write directly to persistent /data storage across reboots.
+    _cur_link=""
+    if [ -L "$HOME_ROOT/.ssh" ]; then
+        _cur_link="$(readlink "$HOME_ROOT/.ssh" 2>/dev/null || true)"
+    fi
+    if [ "$_cur_link" != "$SSH_HOME_DIR" ]; then
+        if [ -d "$HOME_ROOT/.ssh" ] && [ ! -L "$HOME_ROOT/.ssh" ]; then
+            if [ -f "$HOME_ROOT/.ssh/authorized_keys" ] && [ ! -L "$HOME_ROOT/.ssh/authorized_keys" ]; then
+                merge_authorized_keys_source "$HOME_ROOT/.ssh/authorized_keys" "$_persist_ak" || return 1
+            fi
+            for _extra in "$HOME_ROOT/.ssh"/* "$HOME_ROOT/.ssh"/.[!.]* "$HOME_ROOT/.ssh"/..?*; do
+                [ -e "$_extra" ] || [ -L "$_extra" ] || continue
+                _ebase="${_extra##*/}"
+                [ "$_ebase" != "authorized_keys" ] || continue
+                if [ ! -e "$SSH_HOME_DIR/$_ebase" ] && [ ! -L "$SSH_HOME_DIR/$_ebase" ]; then
+                    cp -a "$_extra" "$SSH_HOME_DIR/$_ebase" 2>/dev/null || true
+                fi
+            done
+            rm -rf "$HOME_ROOT/.ssh" || return 1
+        elif [ -e "$HOME_ROOT/.ssh" ] || [ -L "$HOME_ROOT/.ssh" ]; then
+            rm -f "$HOME_ROOT/.ssh" || return 1
+        fi
+        ln -s "$SSH_HOME_DIR" "$HOME_ROOT/.ssh" || return 1
+    fi
+
+    if [ -f "$_persist_ak" ] && [ ! -L "$_persist_ak" ]; then
+        chmod 600 "$_persist_ak" 2>/dev/null || true
+        if [ "$(id -u)" = "0" ]; then
+            chown 0:0 "$_persist_ak" 2>/dev/null || true
+        fi
+    fi
+    return 0
+}
+
+sync_ssh_authorized_keys() {
+    ensure_persistent_ssh_home
 }
 
 ensure_ssh_host_key() {
@@ -1152,11 +1264,16 @@ publish_state() {
     read_debug_network_ips
     _adb_saved="$(read_saved_adb_tcp)"
     _adb_prop="$(android getprop service.adb.tcp.port 2>/dev/null | tr -d '\r\n' || true)"
+    _adb_listen="$(android getprop service.adb.listen_addrs 2>/dev/null | tr -d '\r\n' || true)"
     _adb_active=0
     case "$_adb_prop" in
         ''|-1|0) _adb_active=0 ;;
         *[!0-9]*) _adb_active=0 ;;
-        *) _adb_active=1 ;;
+        *)
+            if ! is_adb_listen_localhost_only "$_adb_listen"; then
+                _adb_active=1
+            fi
+            ;;
     esac
     _ssh_avail=0
     command -v "$DROPBEAR_BIN" >/dev/null 2>&1 && _ssh_avail=1
@@ -1830,21 +1947,25 @@ handle_request() {
         import-ssh-keys)
             tail -n +3 "$TMP_REQ" | tr -d '\r' > "$TMP_TOUCH"
             rm -f "$TMP_REQ" 2>/dev/null || true
+            ensure_persistent_ssh_home || {
+                rm -f "$TMP_TOUCH" 2>/dev/null || true
+                send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
+                return 0
+            }
             : > "$TMP_TOUCH.sshkeys"
-            for _seed in "$SSH_STORE/authorized_keys" "$HOME_ROOT/.ssh/authorized_keys"; do
-                if [ -f "$_seed" ] && [ ! -L "$_seed" ]; then
-                    while IFS= read -r _sline || [ -n "$_sline" ]; do
-                        _sline="$(printf '%s' "$_sline" | tr -d '\r')"
-                        case "$_sline" in
-                            ''|'#'*) continue ;;
-                        esac
-                        if _snorm="$(normalize_ssh_key_line "$_sline")"; then
-                            append_unique_ssh_key_to_file "$_snorm" "$TMP_TOUCH.sshkeys" || true
-                        fi
-                    done < "$_seed"
-                    break
-                fi
-            done
+            if [ -f "$SSH_HOME_DIR/authorized_keys" ] && [ ! -L "$SSH_HOME_DIR/authorized_keys" ]; then
+                while IFS= read -r _sline || [ -n "$_sline" ]; do
+                    _sline="$(printf '%s' "$_sline" | tr -d '\r')"
+                    case "$_sline" in
+                        ''|'#'*) continue ;;
+                    esac
+                    if _snorm="$(normalize_ssh_key_line "$_sline")"; then
+                        append_unique_ssh_key_to_file "$_snorm" "$TMP_TOUCH.sshkeys" || true
+                    elif ! grep -qxF "$_sline" "$TMP_TOUCH.sshkeys" 2>/dev/null; then
+                        printf '%s\n' "$_sline" >> "$TMP_TOUCH.sshkeys"
+                    fi
+                done < "$SSH_HOME_DIR/authorized_keys"
+            fi
             _seen_valid=0
             _added=0
             _invalid=0
@@ -1867,28 +1988,34 @@ handle_request() {
                 send_reply "$_dir" "$_nonce" "ERROR" "invalid_ssh_key"
                 return 0
             fi
-            mkdir -p "$SSH_STORE"
-            chmod 700 "$SSH_STORE" 2>/dev/null || true
-            _auth_tmp="$SSH_STORE/authorized_keys.$$.tmp"
-            cp "$TMP_TOUCH.sshkeys" "$_auth_tmp" && chmod 600 "$_auth_tmp" 2>/dev/null && mv -f "$_auth_tmp" "$SSH_STORE/authorized_keys" || {
+            _auth_tmp="$SSH_HOME_DIR/authorized_keys.$$.tmp"
+            cp "$TMP_TOUCH.sshkeys" "$_auth_tmp" && chmod 600 "$_auth_tmp" 2>/dev/null || {
+                rm -f "$_auth_tmp" "$TMP_TOUCH" "$TMP_TOUCH.sshkeys" 2>/dev/null || true
+                send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
+                return 0
+            }
+            if [ "$(id -u)" = "0" ]; then
+                chown 0:0 "$_auth_tmp" 2>/dev/null || true
+            fi
+            mv -f "$_auth_tmp" "$SSH_HOME_DIR/authorized_keys" || {
                 rm -f "$_auth_tmp" "$TMP_TOUCH" "$TMP_TOUCH.sshkeys" 2>/dev/null || true
                 send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
                 return 0
             }
             rm -f "$TMP_TOUCH" "$TMP_TOUCH.sshkeys" 2>/dev/null || true
-            sync_ssh_authorized_keys || {
-                send_reply "$_dir" "$_nonce" "ERROR" "sync_keys_failed"
-                return 0
-            }
             _total="$(count_ssh_authorized_keys)"
             sync 2>/dev/null || true
             publish_state "$_dir" || true
             send_reply "$_dir" "$_nonce" "OK" "$_added $_total"
             ;;
         clear-ssh-keys)
+            ensure_persistent_ssh_home || true
             rm -f "$SSH_STORE/authorized_keys" 2>/dev/null || true
-            if [ -d "$HOME_ROOT/.ssh" ] && [ ! -L "$HOME_ROOT/.ssh" ]; then
-                write_atomic_file "$HOME_ROOT/.ssh/authorized_keys" 600 "" || true
+            if [ -d "$SSH_HOME_DIR" ] && [ ! -L "$SSH_HOME_DIR" ]; then
+                write_atomic_file "$SSH_HOME_DIR/authorized_keys" 600 "" || true
+                if [ "$(id -u)" = "0" ]; then
+                    chown 0:0 "$SSH_HOME_DIR/authorized_keys" 2>/dev/null || true
+                fi
             fi
             sync 2>/dev/null || true
             publish_state "$_dir" || true
