@@ -157,6 +157,43 @@ mask_vintf_manifest() {
     echo "SPX_HYGIENE_MASK_VINTF=$_rel reason=$_reason"
 }
 
+mask_empty_dir() {
+    _rel=$1
+    _reason=$2
+    _src="$ROOT/$_rel"
+    [ -d "$_src" ] || return 0
+    _empty="$STAGE/empty-$(safe_name "$_rel")"
+    mkdir -p "$_empty"
+    chmod 755 "$_empty"
+    mount --bind "$_empty" "$_src"
+    echo "SPX_HYGIENE_MASK_DIR=$_rel reason=$_reason"
+}
+
+mask_empty_xml() {
+    _rel=$1
+    _tag=$2
+    _reason=$3
+    _src="$ROOT/$_rel"
+    [ -f "$_src" ] || return 0
+    _out="$STAGE/$(safe_name "$_rel").xml"
+    printf '<!-- spx-hygiene (%s): donor OEM entry masked -->\n<%s/>\n' "$_reason" "$_tag" > "$_out"
+    bind_staged "$_out" "$_src"
+    echo "SPX_HYGIENE_MASK_XML=$_rel reason=$_reason"
+}
+
+is_dell_hardware() {
+    for _f in "$SYSFS/class/dmi/id/sys_vendor" \
+              "$SYSFS/class/dmi/id/board_vendor" \
+              "$SYSFS/firmware/devicetree/base/compatible" \
+              "$SYSFS/firmware/devicetree/base/model"; do
+        [ -r "$_f" ] || continue
+        if tr '\0' '\n' < "$_f" 2>/dev/null | tr 'A-Z' 'a-z' | grep -F -q "dell"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 has_tpm2() {
     _ver=
     if [ -c "$DEV/tpm0" ] && [ -r "$SYSFS/class/tpm/tpm0/tpm_version_major" ]; then
@@ -303,6 +340,29 @@ mask_mismatched_dlkm_modules vendor_dlkm
 if [ -d "$ROOT/vendor/firmware/rtl_nic" ] && [ -d "$ROOT/debug_ramdisk/sq2-firmware" ] && [ ! -d "$ROOT/debug_ramdisk/sq2-firmware/rtl_nic" ]; then
     cp -a "$ROOT/vendor/firmware/rtl_nic" "$ROOT/debug_ramdisk/sq2-firmware/rtl_nic"
     echo "SPX_HYGIENE_STAGED_FIRMWARE=rtl_nic"
+fi
+
+# 11. Donor Dell OEM apps/services (Mica stubs: SupportAssist/Telemetry,
+#     Diagnostics, Repair). Preserves generic Dell USB soundbar audio profiles.
+if ! is_dell_hardware; then
+    for _dell_dir in \
+        product/priv-app/DellSupportAssistStub \
+        product/priv-app/DellDiagnosticsStub \
+        product/priv-app/DellRepairStub; do
+        mask_empty_dir "$_dell_dir" non_dell_hardware
+    done
+    for _dell_perm in \
+        product/etc/permissions/privapp-permissions-com.dell.supportassist.alos.xml \
+        product/etc/permissions/privapp-permissions-com.dell.diagnostics.xml \
+        product/etc/permissions/privapp-permissions-com.dell.luxsharerma.xml; do
+        mask_empty_xml "$_dell_perm" permissions non_dell_hardware
+    done
+    for _dell_cfg in \
+        product/etc/sysconfig/preinstalled-packages-com.dell.supportassist.alos.xml \
+        product/etc/sysconfig/preinstalled-packages-com.dell.diagnostics.xml \
+        product/etc/sysconfig/preinstalled-packages-com.dell.luxsharerma.xml; do
+        mask_empty_xml "$_dell_cfg" config non_dell_hardware
+    done
 fi
 
 echo "SPX_SERVICE_HYGIENE_READY"

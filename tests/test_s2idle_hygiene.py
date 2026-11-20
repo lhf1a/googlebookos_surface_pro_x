@@ -237,6 +237,17 @@ def _make_fake_root_fixture(root: Path, *, with_testscripts: bool = False, match
         ko.parent.mkdir(parents=True, exist_ok=True)
         ko.write_bytes(b'\x7fELF\x00\x00' + vermagic)
 
+    # Donor Dell OEM priv-apps, privapp-permissions, sysconfig, and unrelated Dell USB audio profile.
+    for stub in ('DellSupportAssistStub', 'DellDiagnosticsStub', 'DellRepairStub'):
+        _write(root / f'product/priv-app/{stub}/{stub}.apk', f'fake-{stub}\n')
+    for pkg in ('com.dell.supportassist.alos', 'com.dell.diagnostics', 'com.dell.luxsharerma'):
+        _write(root / f'product/etc/permissions/privapp-permissions-{pkg}.xml',
+               f'<permissions><privapp-permissions package="{pkg}"/></permissions>\n')
+        _write(root / f'product/etc/sysconfig/preinstalled-packages-{pkg}.xml',
+               f'<config><install-in-user-type package="{pkg}"/></config>\n')
+    _write(root / 'vendor/etc/audio/for_all_boards/DELL_PROFESSIONAL_SOUND_BAR_AE5/audio_config.xml',
+           '<audio_config/>\n')
+
 
 def _run_hygiene_stage(shell_cmd, root: Path, dev: Path, sysfs: Path, krel: str = '6.18.60-sq2-android1'):
     script = (ROOT / 'probe/test2/spx-service-hygiene-stage').read_text(encoding='utf-8')
@@ -277,6 +288,7 @@ class S2IdleHygieneTests(unittest.TestCase):
     def test_shell_syntax_both_sh_and_busybox(self):
         scripts = [
             'probe/test2/spx-service-hygiene-stage',
+            'probe/test2/spx-oem-cleanup-boot',
             'probe/test2/prepare-native-gpu',
             'probe/test2/lab-input-posture',
             'probe/test2/touch-resume-watch',
@@ -293,6 +305,7 @@ class S2IdleHygieneTests(unittest.TestCase):
     def test_runtime_boot_policy_accepts_all_modified_scripts(self):
         mapping = {
             'bin/spx-service-hygiene-stage': 'probe/test2/spx-service-hygiene-stage',
+            'bin/spx-oem-cleanup-boot': 'probe/test2/spx-oem-cleanup-boot',
             'bin/prepare-native-gpu': 'probe/test2/prepare-native-gpu',
             'bin/lab-input-posture': 'probe/test2/lab-input-posture',
             'bin/touch-resume-watch': 'probe/test2/touch-resume-watch',
@@ -403,6 +416,21 @@ class S2IdleHygieneTests(unittest.TestCase):
                 # 10. Realtek rtl_nic firmware staged
                 self.assertEqual((root / 'debug_ramdisk/sq2-firmware/rtl_nic/rtl8156b-2.fw').read_text(), 'fake-rtl8156b-fw')
 
+                # 11. Donor Dell OEM apps/services masked on non-Dell hardware; USB soundbar profile preserved
+                for stub in ('DellSupportAssistStub', 'DellDiagnosticsStub', 'DellRepairStub'):
+                    self.assertEqual(list((root / f'product/priv-app/{stub}').iterdir()), [])
+                for pkg in ('com.dell.supportassist.alos', 'com.dell.diagnostics', 'com.dell.luxsharerma'):
+                    perm = (root / f'product/etc/permissions/privapp-permissions-{pkg}.xml').read_text()
+                    self.assertIn('<permissions/>', perm)
+                    self.assertNotIn(pkg, perm)
+                    cfg = (root / f'product/etc/sysconfig/preinstalled-packages-{pkg}.xml').read_text()
+                    self.assertIn('<config/>', cfg)
+                    self.assertNotIn(pkg, cfg)
+                self.assertIn(
+                    '<audio_config/>',
+                    (root / 'vendor/etc/audio/for_all_boards/DELL_PROFESSIONAL_SOUND_BAR_AE5/audio_config.xml').read_text(),
+                )
+
                 # Idempotency: re-running must leave every single file byte-identical
                 snapshot = {
                     p.relative_to(root): p.read_bytes()
@@ -435,6 +463,7 @@ class S2IdleHygieneTests(unittest.TestCase):
             _write(sysfs / 'class/input/event0/device/capabilities/sw', '0 0000000000000015\n')  # bit 0 set (SW_LID)
             (sysfs / 'bus/platform/devices/a600000.dwc3').mkdir(parents=True)
             (sysfs / 'bus/platform/devices/a600000.usb').mkdir(parents=True)
+            _write(sysfs / 'class/dmi/id/sys_vendor', 'Dell Inc.\n')
 
             before = {
                 p.relative_to(root): p.read_bytes()
@@ -710,18 +739,24 @@ class S2IdleHygieneTests(unittest.TestCase):
         after = cpio.entries(gzip.decompress(patched))
 
         self.assertIn('bin/spx-service-hygiene-stage', after)
+        self.assertIn('bin/spx-oem-cleanup-boot', after)
         self.assertIn('bin/lab-input-posture', after)
         self.assertIn('bin/spx-lower-usb', after)
         self.assertIn('bin/prepare-native-gpu', after)
 
         patched_init = after['init'][1]
         self.assertIn(b'/bin/spx-service-hygiene-stage > /logs/spx-service-hygiene.txt', patched_init)
+        self.assertIn(b'/bin/spx-oem-cleanup-boot > /logs/spx-oem-cleanup-boot.txt 2>&1 &', patched_init)
         self.assertLess(
             patched_init.index(b'/bin/gscd-availability-stage'),
             patched_init.index(b'/bin/spx-service-hygiene-stage'),
         )
         self.assertLess(
             patched_init.index(b'/bin/spx-service-hygiene-stage'),
+            patched_init.index(b'/bin/spx-oem-cleanup-boot'),
+        )
+        self.assertLess(
+            patched_init.index(b'/bin/spx-oem-cleanup-boot'),
             patched_init.index(b'exec native-handoff /newroot'),
         )
 
@@ -809,10 +844,90 @@ class S2IdleHygieneTests(unittest.TestCase):
             # Only the single startup get-current-user call; ZERO periodic calls while display is OFF!
             self.assertEqual(calls.count('cmd activity get-current-user'), 1, calls)
 
+    def test_spx_oem_cleanup_boot_removes_dell_packages_and_is_idempotent(self):
+        for shell_cmd in _shells():
+            with self.subTest(shell=shell_cmd[0]), tempfile.TemporaryDirectory() as td:
+                td_p = Path(td)
+                root = td_p / 'android'
+                sysfs = td_p / 'sys'
+                run_dir = td_p / 'run'
+                (root / 'data/vendor').mkdir(parents=True)
+                run_dir.mkdir(parents=True)
+                _write(sysfs / 'firmware/devicetree/base/model', 'Microsoft Surface Pro X (SQ2)\x00')
+
+                installed_file = td_p / 'installed.txt'
+                installed_file.write_text(
+                    'package:com.dell.supportassist.alos\n'
+                    'package:com.dell.diagnostics\n'
+                    'package:com.dell.luxsharerma\n'
+                    'package:com.android.settings\n'
+                )
+                calls_log = td_p / 'calls.log'
+                wrapper = _write(td_p / 'oem-android', textwrap.dedent(f"""\
+                    #!/bin/sh
+                    printf '%s\\n' "$*" >> "{calls_log}"
+                    case "$*" in
+                        'getprop sys.boot_completed') printf '1\\n' ;;
+                        'pm list users') printf 'Users:\\n\\tUserInfo{{0:Owner:4c13}} running\\n' ;;
+                        'pm list packages -u'|'pm list packages --user 0'|'pm list packages -e --user 0')
+                            cat "{installed_file}"
+                            ;;
+                        'pm uninstall '*)
+                            pkg="${{3:-}}"
+                            if [ -z "$pkg" ]; then pkg="${{2:-}}"; fi
+                            # Extract last arg as package name
+                            for tok in "$@"; do last="$tok"; done
+                            grep -Fxv "package:$last" "{installed_file}" > "{installed_file}.tmp" || true
+                            mv "{installed_file}.tmp" "{installed_file}"
+                            printf 'Success\\n'
+                            ;;
+                        'am force-stop'*) exit 0 ;;
+                    esac
+                """), 0o755)
+
+                env = os.environ.copy()
+                env.update({
+                    'SPX_OEM_CLEANUP_ROOT': str(root),
+                    'SPX_OEM_CLEANUP_SYSFS': str(sysfs),
+                    'SPX_OEM_CLEANUP_LOCK_DIR': str(run_dir / 'oem-lock'),
+                    'SPX_OEM_CLEANUP_ANDROID_WRAPPER': str(wrapper),
+                    'SPX_OEM_CLEANUP_BOOT_WAIT_MAX': '2',
+                    'SPX_OEM_CLEANUP_BOOT_WAIT_SLEEP': '0',
+                })
+                res = subprocess.run(
+                    [*shell_cmd, str(ROOT / 'probe/test2/spx-oem-cleanup-boot')],
+                    env=env, text=True, capture_output=True, check=True, timeout=10,
+                )
+                self.assertIn('SPX_OEM_CLEANUP_COMPLETE', res.stdout)
+                self.assertEqual(installed_file.read_text(), 'package:com.android.settings\n')
+                self.assertTrue((root / 'data/vendor/spx-oem-cleanup/done-v1').is_file())
+
+                # Second run exits immediately via stamp without invoking pm again.
+                calls_log.write_text('')
+                res2 = subprocess.run(
+                    [*shell_cmd, str(ROOT / 'probe/test2/spx-oem-cleanup-boot')],
+                    env=env, text=True, capture_output=True, check=True, timeout=10,
+                )
+                self.assertNotIn('pm uninstall', calls_log.read_text())
+                self.assertEqual(res2.stdout.strip(), '')
+
+                # Dell hardware skips cleanup completely.
+                dell_sysfs = td_p / 'dell-sys'
+                _write(dell_sysfs / 'class/dmi/id/sys_vendor', 'Dell Inc.\n')
+                env_dell = dict(env, SPX_OEM_CLEANUP_SYSFS=str(dell_sysfs))
+                calls_log.write_text('')
+                res3 = subprocess.run(
+                    [*shell_cmd, str(ROOT / 'probe/test2/spx-oem-cleanup-boot')],
+                    env=env_dell, text=True, capture_output=True, check=True, timeout=10,
+                )
+                self.assertIn('SPX_OEM_CLEANUP_SKIP=dell_hardware', res3.stdout)
+                self.assertEqual(calls_log.read_text(), '')
+
     def test_no_workstation_paths_or_device_ids_in_owned_changes(self):
         home_re = re.compile(r'/home/[A-Za-z0-9._-]+/')
         for rel in (
             'probe/test2/spx-service-hygiene-stage',
+            'probe/test2/spx-oem-cleanup-boot',
             'probe/test2/prepare-native-gpu',
             'probe/test2/lab-input-posture',
             'probe/test2/touch-resume-watch',

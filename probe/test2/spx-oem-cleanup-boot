@@ -1,0 +1,172 @@
+#!/bin/busybox sh
+# Remove leftover donor Dell OEM packages (e.g. Play Store updates in /data/app)
+# from existing userdata after spx-service-hygiene-stage masks the donor stubs.
+# One-shot per userdata; exits immediately once verified clean.
+set -eu
+
+export PATH="${SPX_OEM_CLEANUP_PATH:-/bin:/sbin:/usr/bin:/usr/sbin:${PATH:-}}"
+
+DATA_ROOT="${SPX_OEM_CLEANUP_ROOT:-/proc/1/root}"
+SYSFS="${SPX_OEM_CLEANUP_SYSFS:-/sys}"
+LOCK_DIR="${SPX_OEM_CLEANUP_LOCK_DIR:-/run/spx-oem-cleanup-lock}"
+STATE_DIR="$DATA_ROOT/data/vendor/spx-oem-cleanup"
+STAMP="$STATE_DIR/done-v1"
+BOOT_WAIT_MAX="${SPX_OEM_CLEANUP_BOOT_WAIT_MAX:-180}"
+BOOT_WAIT_SLEEP="${SPX_OEM_CLEANUP_BOOT_WAIT_SLEEP:-2}"
+CMD_TIMEOUT="${SPX_OEM_CLEANUP_CMD_TIMEOUT:-15}"
+
+DELL_PACKAGES="com.dell.supportassist.alos com.dell.diagnostics com.dell.luxsharerma"
+
+run_with_timeout() {
+    _rwt_sec=$1
+    shift
+    "$@" &
+    _rwt_cmd=$!
+    (
+        trap - EXIT
+        _rwt_armed=1
+        trap 'if [ "$_rwt_armed" = 1 ] && [ -n "${!:-}" ] && [ "$!" != "$_rwt_cmd" ]; then kill "$!" 2>/dev/null || true; wait "$!" 2>/dev/null || true; fi; exit 0' TERM INT
+        sleep "$_rwt_sec" </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -TERM "$_rwt_cmd" 2>/dev/null || true
+        _rwt_armed=1
+        sleep 1 </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -KILL "$_rwt_cmd" 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    _rwt_wd=$!
+    _rwt_rc=0
+    wait "$_rwt_cmd" 2>/dev/null || _rwt_rc=$?
+    kill -TERM "$_rwt_wd" 2>/dev/null || true
+    _rwt_try=0
+    while [ "$_rwt_try" -lt 20 ]; do
+        _rwt_st=
+        [ -r "/proc/$_rwt_wd/stat" ] || break
+        { read -r _rwt_st < "/proc/$_rwt_wd/stat"; } 2>/dev/null || break
+        case "$_rwt_st" in
+            *') Z '*|*') X '*) break ;;
+        esac
+        kill -TERM "$_rwt_wd" 2>/dev/null || break
+        sleep 0.05 2>/dev/null || break
+        _rwt_try=$((_rwt_try + 1))
+    done
+    wait "$_rwt_wd" 2>/dev/null || true
+    return "$_rwt_rc"
+}
+
+android() {
+    if [ -n "${SPX_OEM_CLEANUP_ANDROID_WRAPPER:-}" ]; then
+        run_with_timeout "$CMD_TIMEOUT" "$SPX_OEM_CLEANUP_ANDROID_WRAPPER" "$@"
+    else
+        run_with_timeout "$CMD_TIMEOUT" nsenter -t 1 -m -r -- /system/bin/"$@"
+    fi
+}
+
+is_dell_hardware() {
+    for _f in "$SYSFS/class/dmi/id/sys_vendor" \
+              "$SYSFS/class/dmi/id/board_vendor" \
+              "$SYSFS/firmware/devicetree/base/compatible" \
+              "$SYSFS/firmware/devicetree/base/model"; do
+        [ -r "$_f" ] || continue
+        if tr '\0' '\n' < "$_f" 2>/dev/null | tr 'A-Z' 'a-z' | grep -F -q "dell"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+if is_dell_hardware; then
+    echo "SPX_OEM_CLEANUP_SKIP=dell_hardware"
+    exit 0
+fi
+
+ready=0
+i=0
+while [ "$i" -lt "$BOOT_WAIT_MAX" ]; do
+    if [ "$(android getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" = 1 ]; then
+        ready=1
+        break
+    fi
+    sleep "$BOOT_WAIT_SLEEP"
+    i=$((i + 1))
+done
+[ "$ready" = 1 ] || { echo "SPX_OEM_CLEANUP_DEFERRED=boot_not_completed"; exit 0; }
+
+[ ! -f "$STAMP" ] || exit 0
+
+mkdir -p "$(dirname "$LOCK_DIR")"
+mkdir "$LOCK_DIR" 2>/dev/null || exit 0
+trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
+[ ! -f "$STAMP" ] || exit 0
+
+pkg_present() {
+    _pp_pkg=$1
+    _pp_list=$(android pm list packages -u 2>/dev/null | tr -d '\r' || true)
+    printf '%s\n' "$_pp_list" | grep -Fxq "package:$_pp_pkg"
+}
+
+pkg_installed_for_user() {
+    _pu_user=$1
+    _pu_pkg=$2
+    _pu_list=$(android pm list packages --user "$_pu_user" 2>/dev/null | tr -d '\r' || true)
+    printf '%s\n' "$_pu_list" | grep -Fxq "package:$_pu_pkg"
+}
+
+pkg_enabled_for_user() {
+    _pe_user=$1
+    _pe_pkg=$2
+    _pe_list=$(android pm list packages -e --user "$_pe_user" 2>/dev/null | tr -d '\r' || true)
+    printf '%s\n' "$_pe_list" | grep -Fxq "package:$_pe_pkg"
+}
+
+users=$(android pm list users 2>/dev/null | sed -n 's/.*UserInfo{\([0-9][0-9]*\):.*/\1/p' || true)
+[ -n "$users" ] || users=0
+
+failed=0
+for pkg in $DELL_PACKAGES; do
+    if ! pkg_present "$pkg"; then
+        continue
+    fi
+    for u in $users; do
+        android am force-stop --user "$u" "$pkg" >/dev/null 2>&1 || true
+    done
+    android am force-stop "$pkg" >/dev/null 2>&1 || true
+    if android pm uninstall "$pkg" >/dev/null 2>&1; then
+        echo "SPX_OEM_CLEANUP_UNINSTALLED=$pkg"
+        continue
+    fi
+    # Fallback when system stub is still visible (e.g. unmasked partition):
+    # strip any /data/app update and uninstall/disable per user.
+    android pm uninstall-system-updates "$pkg" >/dev/null 2>&1 || true
+    for u in $users; do
+        if pkg_installed_for_user "$u" "$pkg"; then
+            if android pm uninstall --user "$u" "$pkg" >/dev/null 2>&1; then
+                echo "SPX_OEM_CLEANUP_UNINSTALLED_USER=$pkg user=$u"
+            elif android pm disable-user --user "$u" "$pkg" >/dev/null 2>&1; then
+                echo "SPX_OEM_CLEANUP_DISABLED_USER=$pkg user=$u"
+            else
+                failed=1
+            fi
+        fi
+    done
+done
+
+for pkg in $DELL_PACKAGES; do
+    for u in $users; do
+        if pkg_enabled_for_user "$u" "$pkg"; then
+            failed=1
+        fi
+    done
+done
+
+if [ "$failed" = 0 ]; then
+    mkdir -p "$STATE_DIR"
+    printf 'v1\n' > "$STAMP.tmp"
+    mv "$STAMP.tmp" "$STAMP"
+    echo "SPX_OEM_CLEANUP_COMPLETE"
+else
+    echo "SPX_OEM_CLEANUP_INCOMPLETE"
+fi

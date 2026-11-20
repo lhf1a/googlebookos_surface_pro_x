@@ -377,12 +377,14 @@ fi
         b'exec native-handoff /newroot\n',
         b'/bin/gscd-availability-stage > /logs/gscd-availability.txt 2>&1 || echo GSC_AVAILABILITY_STAGE_FAILED_NONFATAL\n'
         b'/bin/spx-service-hygiene-stage > /logs/spx-service-hygiene.txt 2>&1 || echo SPX_SERVICE_HYGIENE_STAGE_FAILED_NONFATAL\n'
+        b'/bin/spx-oem-cleanup-boot > /logs/spx-oem-cleanup-boot.txt 2>&1 &\n'
         b'exec native-handoff /newroot\n',
         1,
     )
     delta['init'] = (mode, init)
     delta['bin/gscd-availability-stage'] = (0o100755, boot_helper('gscd-availability-stage'))
     delta['bin/spx-service-hygiene-stage'] = (0o100755, boot_helper('spx-service-hygiene-stage'))
+    delta['bin/spx-oem-cleanup-boot'] = (0o100755, boot_helper('spx-oem-cleanup-boot'))
     delta['bin/lab-input-posture'] = (0o100755, boot_helper('lab-input-posture'))
     delta['bin/touch-services'] = (0o100755, boot_helper('touch-services'))
     delta['bin/touch-framework-ready'] = (0o100755, boot_helper('touch-framework-ready'))
@@ -410,7 +412,7 @@ fi
     for name in apply(runtime_bodies):
         if name not in delta or name == 'bin/prepare-native-gpu':
             delta[name] = (before[name][0],runtime_bodies[name])
-    for name in ['init','bin/prepare-native-ssd','bin/spx-service-hygiene-stage','bin/lab-input-posture', *early_storage]:
+    for name in ['init','bin/prepare-native-ssd','bin/spx-service-hygiene-stage','bin/spx-oem-cleanup-boot','bin/lab-input-posture', *early_storage]:
         subprocess.run(['sh','-n'],input=delta[name][1],check=True)
     rest, offset, insert, identity = base, 0, len(base), False
     while rest:
