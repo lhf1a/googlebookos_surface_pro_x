@@ -48,6 +48,7 @@ def main():
         if 'struct mutex ctx_q_lock;' not in (venus/'core.h').read_text():
             invoke('prepare-sq2-lts-venus-queue-lock','patch',venus)
         invoke('patch-sq2-venus-omx','apply',venus,ROOT)
+        invoke('patch-sq2-venus-enc','apply',venus)
         invoke('patch-sq2-venus-avc-caps','apply',venus)
         invoke('patch-sq2-venus-extradata','apply',venus,ROOT)
         invoke('patch-sq2-venus-capture-layout','apply',venus)
