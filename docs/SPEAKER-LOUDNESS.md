@@ -91,3 +91,9 @@ ROLLBACK 发出 RX72/72，均 exit0。独立恢复副本的原始 hash 一致；
 私有固件、Windows 驱动、凭据、原始日志和构建产物不进入 Git。
 
 离线收尾：完整默认启动包 SHA256 为 9bb364313578587be6b32e83777db57745a102edb3e1e99d1c15d77f3e97ec3e；包含当前有效路由脚本。扬声器 5 项（含真实归档）、USB 默认集成 4 项、蓝牙 3 项、显示载荷 5 项，共 17 项回归全部通过、无跳过。
+
+## 硬件备注：SQ2 `ldoe14` XOB 扬声器供电轨审计
+
+- **上游硬件发现（`surface-pro-x-sq2-linux` 参考）**：在 Surface Pro X SQ2 上，RPMh `cmd-db` 将 `ldoe14`（地址 `0x43900`）配置为仅支持使能位的 **XOB** 资源（仅存在 `+0x4` ENABLE 寄存器），而非标准 VRM 稳压器。主线 `drivers/regulator/qcom-rpmh-regulator.c` 的 `pmc8180`/`pm8150` 表将 `ldo14` 映射为 `pmic5_pldo_lv`（VRM 类型）；若驱动向不存在的 `VRM_VOLTAGE`（`+0x0`）或 `VRM_MODE`（`+0x8`）寄存器发起主动写操作，可能导致 RPMh AMC TCS 槽位卡死。
+- **本仓库基线 DTS 审计**：`patches/kernel-6.18-surface-baseline.patch` 中的 `arch/arm64/boot/dts/qcom/sc8180x-surface-pro-x.dts` 定义了 `vreg_l14e_1p8: ldo14`（标注 `regulator-boot-on`、`regulator-always-on`、`1800000` uV、`RPMH_REGULATOR_MODE_HPM`），并由 SoundWire 左右功放节点 `left_spkr: speaker@0,3` 与 `right_spkr: speaker@0,4` 的 `vdda-supply`/`vddb-supply` 引用。
+- **当前处理与验证边界**：当前 Hybrid Linux 6.18.60 EL2 端口下现有 SQ1/SQ2 扬声器 DTS 已稳定出声，本轮**保持现有 DTS 不变**，不主动删改 `vreg_l14e_1p8` 或引入额外的独立 XOB 驱动模块；记录该硬件约束供后续内核升级、主线同步或排查 SQ2 `rpmh-regulator` TCS 卡死时参考。上游 XOB 现象来源于 Linux 7.3 外部参考，非本仓库 6.18.60 实机复现结论。

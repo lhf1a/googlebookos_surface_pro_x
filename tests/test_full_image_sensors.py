@@ -10,13 +10,14 @@ from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'scripts'))
 import full_image as image
+import full_image_rescue as rescue
 import full_image_sensors as sensors
 
 class SensorAssembly(unittest.TestCase):
     def test_archive_hooks_payload_and_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             private=Path(directory);runtime=private/'full-image-runtime'
-            bodies={'init': b'#!/bin/sh\n'+sensors.BOOT+b':\nfi\n'+sensors.STAGE+image.ANCHOR,
+            bodies={'init': b'#!/bin/sh\n'+rescue.LEGACY_RESCUE_BLOCK+sensors.STAGE+image.ANCHOR,
                     'etc/shadow':b'identity fixture','bin/dropbear':b'ssh fixture',
                     'bin/start-ssh':b'start fixture','etc/unrelated':b'preserve'}
             for name,data in bodies.items():
@@ -28,6 +29,8 @@ class SensorAssembly(unittest.TestCase):
             def load(name,filename):
                 if filename=='build-touch-calibration.py':
                     return SimpleNamespace(build=lambda root:({'etc/sq2-touch-calibration/wizard.apk':(0o100644,b'wizard')},{}))
+                if filename=='prepare-sq2-primary-audio.py':
+                    return SimpleNamespace(install=lambda bodies:None)
                 return loader(name,filename)
             output=private/'runtime.gz'
             with patch.object(image,'module',side_effect=load):

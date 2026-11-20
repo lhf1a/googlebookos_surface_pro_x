@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Replace ID-only consumers with front/rear I2C sensors in an offline SPX DT.
+"""Replace ID-only consumers with front/rear/IR I2C sensors in an offline SPX DT.
 CSI endpoints describe the existing sensor-driver modes; the CAMSS receiver
-and physical PHY routing still need to be connected before capture.
+and physical PHY routing are connected by prepare-spx-camss-dtb.py.
 """
 import argparse
 import importlib.util
 from pathlib import Path
+import struct
 import libfdt
 
 spec = importlib.util.spec_from_file_location("board", Path(__file__).with_name("prepare-spx-camera-test-dtb.py"))
@@ -18,7 +19,7 @@ def prepare(data):
     if b"microsoft,surface-pro-x" not in before.get(("/", "compatible"), b"").split(b"\0"):
         raise ValueError("Surface Pro X DT required")
     original_reserved = [f.get_mem_rsv(i) for i in range(f.num_mem_rsv())]
-    f.resize(len(data)+8192)
+    f.resize(len(data)+16384)
     def prop(path, name):
         return before[path, name]
     def add(path, properties):
@@ -31,19 +32,28 @@ def prepare(data):
     added = []
     for name, address, master, compatible, frequency, lanes in [
         ("front", 0x36, 1, "ovti,ov5693", 419200000, (1, 2)),
-        ("rear", 0x10, 0, "ovti,ov13858", 540000000, (1, 2, 3, 4))]:
+        ("rear", 0x10, 0, "ovti,ov13858", 540000000, (1, 2, 3, 4)),
+        ("ir", 0x60, 0, "ovti,ov7251", 240000000, (1,))]:
         old = "/camera-id-"+name
         path = f"/soc@0/cci@ac4a000/i2c-bus@{master}/camera@{address:x}"
-        fields = {k: prop(old,k) for k in ("power-domains","clocks","reset-gpios","pinctrl-names","pinctrl-0")}
+        fields = {k: prop(old,k) for k in ("power-domains","clocks","pinctrl-names","pinctrl-0")}
         fields.update({"compatible":board.strings(compatible), "reg":board.cells(address),
                        "assigned-clocks":prop(old,"clocks"), "assigned-clock-rates":board.cells(19200000),
                        "clock-names":board.strings("xvclk" if name=="front" else "xclk"),
-                       "orientation":board.cells(0 if name=="front" else 1)})
+                       "orientation":board.cells(1 if name=="rear" else 0)})
         if name=="front":
             # This module has one external switched input per its native ACPI.
+            fields["reset-gpios"] = prop(old, "reset-gpios")
             fields.update({key+"-supply":prop(old,"iovdd-supply") for key in ("avdd","dovdd","dvdd")})
-        else:
+        elif name=="rear":
+            fields["reset-gpios"] = prop(old, "reset-gpios")
             fields.update({key+"-supply":prop(old,key+"-supply") for key in ("iovdd","avdd","dvdd")})
+        else:
+            # OV7251 uses active-high enable-gpios (GPIO 23) and shares the on-demand LDO14 rail.
+            tlmm_ph, gpio_num, _flags = struct.unpack(">III", prop(old, "reset-gpios"))
+            fields["enable-gpios"] = board.cells(tlmm_ph, gpio_num, 0)
+            fields["clock-frequency"] = board.cells(19200000)
+            fields.update({key+"-supply":prop(old,"iovdd-supply") for key in ("vdddo","vdda","vddd")})
         add(path,fields)
         add(path+"/port",{})
         add(path+"/port/endpoint",{"bus-type":board.cells(4), "clock-lanes":board.cells(0),

@@ -16,4 +16,5 @@ sed 's/obj-$(CONFIG_VIDEO_QCOM_CAMSS)/obj-m/' "$src/drivers/media/platform/qcom/
 printf '\nobj-m += videobuf2-dma-sg.o\n' >> "$out/Makefile"
 patch --batch --forward -d "$out" -p1 < "$root/patches/camera/0003-camss-sc8180x-initial.patch"
 patch --batch --forward -d "$out" -p1 < "$root/patches/camera/0007-camss-balanced-s-stream-unwind.patch"
+patch --batch --forward -d "$out" -p1 < "$root/patches/camera/0009-camss-privacy-leds-vfe-lite-fifo.patch"
 make -C "$src" O="$build" ARCH=arm64 CROSS_COMPILE="${CROSS_COMPILE:-aarch64-linux-gnu-}" M="$out" -j"${JOBS:-8}" modules

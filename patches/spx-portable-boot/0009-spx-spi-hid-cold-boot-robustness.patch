@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SPX Kernel Integration <noreply@localhost>
+Date: Fri, 20 Nov 2026 21:25:00 +0800
+Subject: [PATCH] HID: spi-hid: harden cold-boot IRQ, header recovery, and timeouts
+
+Harden spi-hid against cold-boot timing edge cases on Surface Pro X
+SQ1/SQ2 while preserving D3 power-down in spi_hid_ll_close() /
+spi_hid_create_device_work() and system-sleep s2idle callbacks:
+
+1. Guard spi_hid_dev_irq() when the controller is unpowered or in
+   SPI_HID_POWER_MODE_OFF so spurious interrupts cannot start SPI
+   transfers against an off rail.
+2. Recover in spi_hid_input_header_complete() after an invalid header by
+   draining queued input_transfer_pending reads or scheduling error_work
+   during cold-boot (!shid->ready) instead of stalling permanently.
+3. Raise SPI_HID_MAX_RESET_ATTEMPTS from 3 to 5 and output_done response
+   timeout from 1000 ms to 2000 ms for slow cold-boot controller bringup.
+---
+ drivers/hid/spi-hid/spi-hid-core.c | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/hid/spi-hid/spi-hid-core.c b/drivers/hid/spi-hid/spi-hid-core.c
+--- a/drivers/hid/spi-hid/spi-hid-core.c
++++ b/drivers/hid/spi-hid/spi-hid-core.c
+@@ -51,7 +51,7 @@
+ #include "spi-hid_trace.h"
+ #include "../hid-ids.h"
+ 
+-#define SPI_HID_MAX_RESET_ATTEMPTS 3
++#define SPI_HID_MAX_RESET_ATTEMPTS 5
+ 
+ static struct hid_ll_driver spi_hid_ll_driver;
+ 
+@@ -502,7 +502,7 @@
+ 
+ 	mutex_unlock(&shid->lock);
+ 	ret = wait_for_completion_interruptible_timeout(&shid->output_done,
+-			msecs_to_jiffies(1000));
++			msecs_to_jiffies(2000));
+ 	mutex_lock(&shid->lock);
+ 	if (ret == 0) {
+ 		dev_err(dev, "response timed out\n");
+@@ -896,6 +896,15 @@
+ 						false);
+ 		shid->bus_error_count++;
+ 		shid->bus_last_error = ret;
++		if (--shid->input_transfer_pending) {
++			ret = spi_hid_input_async(shid, shid->input.header,
++					sizeof(shid->input.header),
++					spi_hid_input_header_complete);
++			if (ret)
++				dev_err(dev, "failed to restart header --> %d\n", ret);
++		} else if (!shid->ready) {
++			schedule_work(&shid->error_work);
++		}
+ 		goto out;
+ 	}
+ 
+@@ -1038,6 +1047,10 @@
+ 		spin_unlock(&shid->input_lock);
+ 		return IRQ_HANDLED;
+ 	}
++	if (!shid->powered || shid->power_state == SPI_HID_POWER_MODE_OFF) {
++		spin_unlock(&shid->input_lock);
++		return IRQ_HANDLED;
++	}
+ 	trace_spi_hid_dev_irq(shid, irq);
+ 
+ 	ret = spi_hid_bus_input_report(shid);
+-- 
+2.43.0

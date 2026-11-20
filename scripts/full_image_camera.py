@@ -8,7 +8,7 @@ import subprocess
 from disk_image import module, require
 from kernel_baseline import ROOT, policy, validate_kernel_source, validate_build_tree
 
-SENSORS = "qcom_spmi-regulator camcc-sc8180x i2c-qcom-cci v4l2-async v4l2-fwnode v4l2-cci ov5693 ov13858".split()
+SENSORS = "qcom_spmi-regulator camcc-sc8180x i2c-qcom-cci v4l2-async v4l2-fwnode v4l2-cci ov5693 ov13858 ov7251".split()
 CAMSS = "videobuf2-dma-sg qcom-camss".split()
 MODULES = SENSORS + CAMSS
 GRAPHICS = {
@@ -151,7 +151,7 @@ def install(records, bodies, files, new_record):
             lines.append(digest+"  "+relative)
         bodies[name] = ("\n".join(lines)+"\n").encode()
     return {"provider_sha256": sha(files["provider"]), "formats": ["JPEG", "PRIVATE", "YUV420_888"],
-            "video": ["480p", "720p", "1080p"], "ir_enabled": False}
+            "video": ["480p", "720p", "1080p"], "ir_enabled": True}
 
 
 if __name__ == "__main__":

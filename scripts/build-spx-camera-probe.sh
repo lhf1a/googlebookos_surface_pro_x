@@ -15,6 +15,7 @@ cp "$src/drivers/media/i2c/ov5693.c" "$src/drivers/media/i2c/ov13858.c" \
    "$src/drivers/media/i2c/ov7251.c" "$src/drivers/media/v4l2-core/v4l2-cci.c"    "$src/drivers/media/v4l2-core/v4l2-async.c" "$src/drivers/media/v4l2-core/v4l2-fwnode.c"    "$src/drivers/media/v4l2-core/v4l2-subdev-priv.h" "$out/"
 patch --batch --forward -d "$out" -p1 < "$root/patches/camera/0001-ov13858-of-power.patch"
 patch --batch --forward -d "$out" -p1 < "$root/patches/camera/0002-ov5693-power-sequence.patch"
+patch --batch --forward -d "$out" -p1 < "$root/patches/camera/0008-ov7251-continuous-clk-and-ir-strobe.patch"
 cp "$root/probe/camera/spx-camera-acpi.c" "$root/probe/camera/spx-camera-acpi.h" "$root/probe/camera/spx-camera-id.c" "$root/probe/camera/spx-camera-power-read.c" \
    "$root/probe/test2/sq2-ipa-acpi.h" "$out/"
 python3 - "$src/drivers/regulator/qcom_spmi-regulator.c" "$out/qcom_spmi-regulator.c" <<'PYCODE'

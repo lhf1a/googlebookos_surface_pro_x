@@ -47,16 +47,14 @@
  	case CAMSS_8300:
 --- a/camss.c
 +++ b/camss.c
-@@ -4464,7 +4464,121 @@
+@@ -4464,7 +4464,230 @@
  	.vfe_num = ARRAY_SIZE(vfe_res_x1e80100),
  };
  
 +/*
-+ * Initial SC8180X RAW path: all four PHY inputs routed through IFE0.
-+ * Rates come from SC8180X CAMCC/native ACPI, not SM8150's higher OPPs.
-+ * The native MPCS power description uses clocks/TITAN_TOP without switched
-+ * PHY regulators. Other IFE instances are not exposed by this first port.
-+ * Gen2 setup follows Andrew Gigena/Gaurav Suman's SM8150 CAMSS work.
++ * SC8180X / Titan 175 CAMSS resources: 4 CSIPHYs, 2 full IFE/CSID pairs
++ * (vfe0/csid0, vfe1/csid1) and 2 IFE-Lite/CSID-Lite pairs (vfe_lite0/csid_lite0,
++ * vfe_lite1/csid_lite1). Rates match SC8180X CAMCC frequency tables.
 + */
 +static const struct camss_subdev_resources csiphy_res_sc8180x[] = {
 +	{
@@ -114,9 +112,13 @@
 +};
 +
 +static const struct camss_subdev_resources csid_res_sc8180x[] = {
++	/* CSID0 */
 +	{
-+		.clock = { "vfe0_cphy_rx", "vfe0_csid" },
-+		.clock_rate = { { 400000000 }, { 400000000, 480000000, 600000000 } },
++		.clock = { "vfe0_cphy_rx", "vfe0_csid", "vfe0", "vfe0_axi" },
++		.clock_rate = { { 400000000 },
++				{ 400000000, 480000000, 600000000 },
++				{ 0 },
++				{ 0 } },
 +		.reg = { "csid0" },
 +		.interrupt = { "csid0" },
 +		.csid = {
@@ -125,14 +127,63 @@
 +			.formats = &csid_formats_gen2,
 +		},
 +	},
++	/* CSID1 */
++	{
++		.clock = { "vfe1_cphy_rx", "vfe1_csid", "vfe1", "vfe1_axi" },
++		.clock_rate = { { 400000000 },
++				{ 400000000, 480000000, 600000000 },
++				{ 0 },
++				{ 0 } },
++		.reg = { "csid1" },
++		.interrupt = { "csid1" },
++		.csid = {
++			.hw_ops = &csid_ops_gen2,
++			.parent_dev_ops = &vfe_parent_dev_ops,
++			.formats = &csid_formats_gen2,
++		},
++	},
++	/* CSID_LITE0 */
++	{
++		.clock = { "vfe_lite0_cphy_rx", "vfe_lite0_csid", "vfe_lite0" },
++		.clock_rate = { { 400000000 },
++				{ 400000000, 480000000, 600000000 },
++				{ 0 } },
++		.reg = { "csid_lite0" },
++		.interrupt = { "csid_lite0" },
++		.csid = {
++			.is_lite = true,
++			.hw_ops = &csid_ops_gen2,
++			.parent_dev_ops = &vfe_parent_dev_ops,
++			.formats = &csid_formats_gen2,
++		},
++	},
++	/* CSID_LITE1 */
++	{
++		.clock = { "vfe_lite1_cphy_rx", "vfe_lite1_csid", "vfe_lite1" },
++		.clock_rate = { { 400000000 },
++				{ 400000000, 480000000, 600000000 },
++				{ 0 } },
++		.reg = { "csid_lite1" },
++		.interrupt = { "csid_lite1" },
++		.csid = {
++			.is_lite = true,
++			.hw_ops = &csid_ops_gen2,
++			.parent_dev_ops = &vfe_parent_dev_ops,
++			.formats = &csid_formats_gen2,
++		},
++	},
 +};
 +
 +static const struct camss_subdev_resources vfe_res_sc8180x[] = {
++	/* VFE0 */
 +	{
-+		.clock = { "gcc_axi_hf", "camnoc_axi", "cpas_ahb", "slow_ahb_src",
-+			   "vfe0", "vfe0_axi" },
-+		.clock_rate = { { 0 }, { 400000000 }, { 0 }, { 80000000 },
-+				{ 400000000, 558000000, 637000000, 760000000 }, { 0 } },
++		.clock = { "gcc_axi_hf", "gcc_axi_sf", "camnoc_axi",
++			   "camnoc_dcd_xo", "cpas_ahb", "slow_ahb_src",
++			   "vfe0", "vfe0_axi", "vfe0_dsp" },
++		.clock_rate = { { 0 }, { 0 }, { 320000000, 400000000, 480000000 },
++				{ 0 }, { 0 }, { 80000000 },
++				{ 400000000, 558000000, 637000000, 760000000 },
++				{ 0 }, { 0 } },
 +		.reg = { "vfe0" },
 +		.interrupt = { "vfe0" },
 +		.vfe = {
@@ -144,11 +195,69 @@
 +			.formats_pix = &vfe_formats_pix_845,
 +		},
 +	},
++	/* VFE1 */
++	{
++		.clock = { "gcc_axi_hf", "gcc_axi_sf", "camnoc_axi",
++			   "camnoc_dcd_xo", "cpas_ahb", "slow_ahb_src",
++			   "vfe1", "vfe1_axi", "vfe1_dsp" },
++		.clock_rate = { { 0 }, { 0 }, { 320000000, 400000000, 480000000 },
++				{ 0 }, { 0 }, { 80000000 },
++				{ 400000000, 558000000, 637000000, 760000000 },
++				{ 0 }, { 0 } },
++		.reg = { "vfe1" },
++		.interrupt = { "vfe1" },
++		.vfe = {
++			.line_num = 3,
++			.has_pd = true,
++			.pd_name = "ife1",
++			.hw_ops = &vfe_ops_170,
++			.formats_rdi = &vfe_formats_rdi_845,
++			.formats_pix = &vfe_formats_pix_845,
++		},
++	},
++	/* VFE_LITE0 */
++	{
++		.clock = { "gcc_axi_hf", "gcc_axi_sf", "camnoc_axi",
++			   "camnoc_dcd_xo", "cpas_ahb", "slow_ahb_src",
++			   "vfe_lite0" },
++		.clock_rate = { { 0 }, { 0 }, { 320000000, 400000000, 480000000 },
++				{ 0 }, { 0 }, { 80000000 },
++				{ 320000000, 400000000, 480000000, 600000000 } },
++		.reg = { "vfe_lite0" },
++		.interrupt = { "vfe_lite0" },
++		.vfe = {
++			.is_lite = true,
++			.line_num = 4,
++			.hw_ops = &vfe_ops_170,
++			.formats_rdi = &vfe_formats_rdi_845,
++			.formats_pix = &vfe_formats_pix_845,
++		},
++	},
++	/* VFE_LITE1 */
++	{
++		.clock = { "gcc_axi_hf", "gcc_axi_sf", "camnoc_axi",
++			   "camnoc_dcd_xo", "cpas_ahb", "slow_ahb_src",
++			   "vfe_lite1" },
++		.clock_rate = { { 0 }, { 0 }, { 320000000, 400000000, 480000000 },
++				{ 0 }, { 0 }, { 80000000 },
++				{ 320000000, 400000000, 480000000, 600000000 } },
++		.reg = { "vfe_lite1" },
++		.interrupt = { "vfe_lite1" },
++		.vfe = {
++			.is_lite = true,
++			.line_num = 4,
++			.hw_ops = &vfe_ops_170,
++			.formats_rdi = &vfe_formats_rdi_845,
++			.formats_pix = &vfe_formats_pix_845,
++		},
++	},
 +};
 +
 +static const struct resources_icc icc_res_sc8180x[] = {
 +	{ .name = "ahb", .icc_bw_tbl = { .avg = 38400, .peak = 76800 } },
 +	{ .name = "hf_0", .icc_bw_tbl = { .avg = 2097152, .peak = 2097152 } },
++	{ .name = "sf_0", .icc_bw_tbl = { .avg = 2097152, .peak = 2097152 } },
++	{ .name = "hf_1", .icc_bw_tbl = { .avg = 2097152, .peak = 2097152 } },
 +};
 +
 +static const struct camss_resources sc8180x_resources = {

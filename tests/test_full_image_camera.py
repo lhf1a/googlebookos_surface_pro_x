@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/"scripts"))
 import full_image as image
 import full_image_camera as camera
+import full_image_rescue as rescue
 
 
 class CameraAssembly(unittest.TestCase):
@@ -35,7 +36,7 @@ class CameraAssembly(unittest.TestCase):
             root = Path(td)
             runtime = root/"full-image-runtime"
             bodies = {
-                "init": b"#!/bin/sh\n"+camera.BOOT+b":\nfi\n"+camera.STAGE+image.ANCHOR,
+                "init": b"#!/bin/sh\n"+rescue.LEGACY_RESCUE_BLOCK+camera.STAGE+image.ANCHOR,
                 "etc/shadow": b"identity fixture", "bin/dropbear": b"ssh fixture",
                 "bin/start-ssh": b"start fixture",
             }
@@ -56,6 +57,8 @@ class CameraAssembly(unittest.TestCase):
                 if filename == "build-touch-calibration.py":
                     return SimpleNamespace(build=lambda root: ({
                         "etc/sq2-touch-calibration/wizard.apk": (0o100644, b"wizard")}, {}))
+                if filename == "prepare-sq2-primary-audio.py":
+                    return SimpleNamespace(install=lambda bodies: None)
                 return loader(name, filename)
             output = root/"runtime.gz"
             with patch.object(image, "module", side_effect=load):
@@ -63,6 +66,7 @@ class CameraAssembly(unittest.TestCase):
             records, result = image.records_from_gzip(output)
             self.assertEqual(result["etc/shadow"], bodies["etc/shadow"])
             self.assertEqual(result["bin/dropbear"], bodies["bin/dropbear"])
+            self.assertIn("ov7251.ko", camera.payload_paths())
             for name, target in camera.payload_paths().items():
                 self.assertEqual(result[target], files[name])
             init = result["init"]
@@ -70,9 +74,11 @@ class CameraAssembly(unittest.TestCase):
             self.assertLess(init.index(camera.STAGE), init.index(camera.STAGE_HOOK))
             self.assertLess(init.index(camera.STAGE_HOOK), init.index(image.ANCHOR))
             self.assertIn(b'cameraId="1"', result["etc/spx-camera/userspace/media_profiles_spx.xml"])
+            self.assertIn(b"ov7251", result["bin/spx-camera-boot"])
             self.assertNotIn(b"old graphics", result[checksum])
             before = dict(result)
-            camera.install(records, result, files, image.new_record)
+            meta = camera.install(records, result, files, image.new_record)
+            self.assertTrue(meta["ir_enabled"])
             self.assertEqual(result, before)
             self.assertFalse(any("camera-id.ko" in n or "observe.ko" in n for n in result))
 

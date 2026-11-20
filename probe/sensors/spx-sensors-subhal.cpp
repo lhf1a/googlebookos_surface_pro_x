@@ -35,17 +35,25 @@ static std::string findNamed(const char* root,const std::string& name){
  closedir(d);return found;
 }
 class SurfaceSensors final:public ISensorsSubHal {
+ static constexpr int kSensorCount=4;
  struct State {bool available=false,enabled=false;int flushes=0;int64_t period=40000000;uint64_t generation=0;};
- State state[2];
+ struct SscConfig {const char* dataType;v2::SensorType type;float minHz;float maxHz;};
+ static const SscConfig& sscConfig(int index){
+  static constexpr SscConfig kAccel{"accel",v2::SensorType::ACCELEROMETER,26.f,52.f};
+  static constexpr SscConfig kGyro{"gyro",v2::SensorType::GYROSCOPE,26.f,52.f};
+  static constexpr SscConfig kMag{"mag",v2::SensorType::MAGNETIC_FIELD,10.f,50.f};
+  return index==2?kGyro:index==3?kMag:kAccel;
+ }
+ State state[kSensorCount];
  std::mutex mutex;
  std::condition_variable changed;
  sp<IHalProxyCallback> callback;
- std::thread workers[2];
+ std::thread workers[kSensorCount];
  bool quitting=false;
  std::string lightPath;
  spx::LuxCalibration calibration;
  std::vector<v2::SensorInfo> sensors;
- bool known(int handle)const{return handle>=1&&handle<=2&&state[handle-1].available;}
+ bool known(int handle)const{return handle>=1&&handle<=kSensorCount&&state[handle-1].available;}
  void postLocked(int index,const v2::Event* value){
   if(!callback||!state[index].enabled)return;
   std::vector<v2::Event> events;if(value)events.push_back(*value);
@@ -66,7 +74,10 @@ class SurfaceSensors final:public ISensorsSubHal {
   return calibration.convert(int(std::llround(integration/0.00278))-1,gain,raw,lux);
  }
  void work(int index){
-  spx::SscAccel accel;bool connected=false;int64_t configured=0,lastSent=0;
+  const bool isLight=index==1;
+  const SscConfig& cfg=sscConfig(index);
+  spx::SscSensor ssc(cfg.dataType);
+  bool connected=false;int64_t configured=0,lastSent=0;
   float lastLight=NAN;uint64_t generation=UINT64_MAX;
   while(true){
    int64_t period;
@@ -74,27 +85,27 @@ class SurfaceSensors final:public ISensorsSubHal {
     std::unique_lock lock(mutex);
     if(quitting)break;
     if(!state[index].enabled){
-     accel.close();connected=false;lastLight=NAN;lastSent=0;
+     ssc.close();connected=false;lastLight=NAN;lastSent=0;
      changed.wait(lock,[&]{return quitting||state[index].enabled;});
      continue;
     }
     if(generation!=state[index].generation){
-     generation=state[index].generation;accel.close();connected=false;lastLight=NAN;lastSent=0;
+     generation=state[index].generation;ssc.close();connected=false;lastLight=NAN;lastSent=0;
     }
     period=state[index].period;
    }
    v2::Event event{};event.sensorHandle=index+1;bool valid=false;
-   if(index==0){
-    if(!connected){connected=accel.open();configured=0;}
+   if(!isLight){
+    if(!connected){connected=ssc.open();configured=0;}
     if(connected&&configured!=period){
-     connected=accel.rate(std::clamp(1e9f/period,26.f,52.f));configured=period;
+     connected=ssc.rate(std::clamp(1e9f/period,cfg.minHz,cfg.maxHz));configured=period;
     }
-    spx::Acceleration sample;
-    int result=connected?accel.read(sample,100):0;
+    spx::SscSample sample{};
+    int result=connected?ssc.read(sample,100):0;
     if(result<0)connected=false;
     if(result>0){
      if(!lastSent||sample.timestamp-lastSent>=period-1000000){
-      event.sensorType=v2::SensorType::ACCELEROMETER;event.timestamp=sample.timestamp;
+      event.sensorType=cfg.type;event.timestamp=sample.timestamp;
       event.u.vec3={sample.xyz[0],sample.xyz[1],sample.xyz[2],v1::SensorStatus(sample.accuracy)};
       valid=true;lastSent=sample.timestamp;
      }
@@ -108,8 +119,8 @@ class SurfaceSensors final:public ISensorsSubHal {
    }
    std::unique_lock lock(mutex);
    if(state[index].generation==generation)postLocked(index,valid?&event:nullptr);
-   if(index==1||!connected){
-    int64_t delay=index==1?std::max<int64_t>(period,500000000):1000000000;
+   if(isLight||!connected){
+    int64_t delay=isLight?std::max<int64_t>(period,500000000):1000000000;
     changed.wait_for(lock,std::chrono::nanoseconds(delay),[&]{return quitting||!state[index].enabled||state[index].generation!=generation;});
    }
   }
@@ -118,22 +129,51 @@ class SurfaceSensors final:public ISensorsSubHal {
  SurfaceSensors(){
   auto slpi=findNamed("/sys/class/remoteproc","slpi");
   auto status=textFile(slpi+"/state");
-  state[0].available=!slpi.empty()&&(status=="attached"||status=="running");
+  const bool slpiReady=!slpi.empty()&&(status=="attached"||status=="running");
+  state[0].available=slpiReady;
+  if(slpiReady){
+   // Targeted SUID probe only; never enumerate all sensors (crashes SLPI firmware).
+   // Hide gyro/mag if SLPI explicitly reports its SUID missing; if SSC is still coming up,
+   // advertise alongside accel and degrade gracefully in the sensor's own worker thread.
+   auto gyroProbe=spx::SscSensor("gyro").probe(250);
+   if(gyroProbe==spx::SscProbeResult::Unavailable){
+    state[2].available=true;
+    state[3].available=true;
+   }else{
+    state[2].available=gyroProbe==spx::SscProbeResult::Found;
+    state[3].available=spx::SscSensor("mag").probe(250)!=spx::SscProbeResult::Missing;
+   }
+  }
   lightPath=findNamed("/sys/bus/iio/devices","spx-tcs3430");
   state[1].available=!lightPath.empty()&&calibration.load("/vendor/etc/sensors/spx-tcs3430-golden.bin");
   state[1].period=500000000;
-  for(int i=0;i<2;i++){
+  for(int i=0;i<kSensorCount;i++){
    if(!state[i].available)continue;
    v2::SensorInfo s{};s.sensorHandle=i+1;s.version=1;
-   s.name=i?"Surface TCS3430 Light":"Surface LSM6DSO Accelerometer";
-   s.vendor=i?"ams OSRAM":"STMicroelectronics";
-   s.type=i?v2::SensorType::LIGHT:v2::SensorType::ACCELEROMETER;
-   s.typeAsString=i?"android.sensor.light":"android.sensor.accelerometer";
-   s.maxRange=i?200000.f:78.4532f;s.resolution=i?1.f:0.0023941f;s.power=i?0.15f:0.17f;
-   s.minDelay=i?0:20000;s.maxDelay=i?1000000:1000000;s.flags=i?2:0;
+   if(i==0){
+    s.name="Surface LSM6DSO Accelerometer";s.vendor="STMicroelectronics";
+    s.type=v2::SensorType::ACCELEROMETER;s.typeAsString="android.sensor.accelerometer";
+    s.maxRange=78.4532f;s.resolution=0.0023941f;s.power=0.17f;
+    s.minDelay=20000;s.maxDelay=1000000;s.flags=0;
+   }else if(i==1){
+    s.name="Surface TCS3430 Light";s.vendor="ams OSRAM";
+    s.type=v2::SensorType::LIGHT;s.typeAsString="android.sensor.light";
+    s.maxRange=200000.f;s.resolution=1.f;s.power=0.15f;
+    s.minDelay=0;s.maxDelay=1000000;s.flags=2;
+   }else if(i==2){
+    s.name="Surface LSM6DSO Gyroscope";s.vendor="STMicroelectronics";
+    s.type=v2::SensorType::GYROSCOPE;s.typeAsString="android.sensor.gyroscope";
+    s.maxRange=34.9066f;s.resolution=0.0010653f;s.power=0.55f;
+    s.minDelay=20000;s.maxDelay=1000000;s.flags=0;
+   }else{
+    s.name="Surface AK0991x Magnetometer";s.vendor="AKM";
+    s.type=v2::SensorType::MAGNETIC_FIELD;s.typeAsString="android.sensor.magnetic_field";
+    s.maxRange=4912.f;s.resolution=0.15f;s.power=0.28f;
+    s.minDelay=20000;s.maxDelay=1000000;s.flags=0;
+   }
    sensors.push_back(s);
   }
-  for(int i=0;i<2;i++)workers[i]=std::thread(&SurfaceSensors::work,this,i);
+  for(int i=0;i<kSensorCount;i++)if(state[i].available)workers[i]=std::thread(&SurfaceSensors::work,this,i);
  }
  ~SurfaceSensors() override{
   {std::lock_guard lock(mutex);quitting=true;changed.notify_all();}
@@ -155,7 +195,7 @@ class SurfaceSensors final:public ISensorsSubHal {
  }
  Return<v1::Result> batch(int32_t h,int64_t period,int64_t latency)override{
   std::lock_guard lock(mutex);if(!known(h)||period<0||latency<0)return v1::Result::BAD_VALUE;
-  state[h-1].period=std::clamp<int64_t>(period,h==1?20000000:500000000,1000000000);
+  state[h-1].period=std::clamp<int64_t>(period,h==2?500000000:20000000,1000000000);
   changed.notify_all();return v1::Result::OK;
  }
  Return<v1::Result> flush(int32_t h)override{
@@ -167,7 +207,10 @@ class SurfaceSensors final:public ISensorsSubHal {
  Return<v1::Result> unregisterDirectChannel(int32_t)override{return v1::Result::INVALID_OPERATION;}
  Return<void> configDirectReport(int32_t,int32_t,v1::RateLevel,configDirectReport_cb cb)override{cb(v1::Result::INVALID_OPERATION,0);return Void();}
  Return<void> debug(const hidl_handle& fd,const hidl_vec<hidl_string>&)override{
-  std::lock_guard lock(mutex);auto*h=fd.getNativeHandle();if(h&&h->numFds)dprintf(h->data[0],"SPX sensors: accel=%d light=%d active=%d,%d\n",state[0].available,state[1].available,state[0].enabled,state[1].enabled);
+  std::lock_guard lock(mutex);auto*h=fd.getNativeHandle();
+  if(h&&h->numFds)dprintf(h->data[0],"SPX sensors: accel=%d light=%d gyro=%d mag=%d active=%d,%d,%d,%d\n",
+   state[0].available,state[1].available,state[2].available,state[3].available,
+   state[0].enabled,state[1].enabled,state[2].enabled,state[3].enabled);
   return Void();
  }
  const std::string getName()override{return "Surface Pro X sensors";}

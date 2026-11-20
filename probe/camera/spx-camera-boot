@@ -9,7 +9,7 @@ grep -q 'qcom,sc8180x-camss' "$node" || exit 0
 for m in videodev videobuf2-common videobuf2-memops videobuf2-v4l2; do
     modprobe "$m"
 done
-for m in qcom_spmi-regulator camcc-sc8180x i2c-qcom-cci v4l2-async v4l2-fwnode v4l2-cci ov5693 ov13858 videobuf2-dma-sg qcom-camss; do
+for m in qcom_spmi-regulator camcc-sc8180x i2c-qcom-cci v4l2-async v4l2-fwnode v4l2-cci ov5693 ov13858 ov7251 videobuf2-dma-sg qcom-camss; do
     name=$(echo "$m" | tr '-' '_')
     [ -d "/sys/module/$name" ] || insmod "/etc/spx-camera/modules/$m.ko"
 done

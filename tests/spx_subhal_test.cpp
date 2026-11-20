@@ -20,14 +20,15 @@ class Callback final:public impl::IHalProxyCallback{
   assert(!w.isLocked());for(auto&e:events){
    if(e.sensorType==v2::SensorType::META_DATA){flushes++;continue;}
    count++;printf("event type=%d handle=%d time=%lld value=%g\n",int(e.sensorType),e.sensorHandle,(long long)e.timestamp,e.u.scalar);
-   if(e.sensorType==v2::SensorType::ACCELEROMETER)printf("xyz %g %g %g accuracy=%d\n",e.u.vec3.x,e.u.vec3.y,e.u.vec3.z,int(e.u.vec3.status));
+   if(e.sensorType==v2::SensorType::ACCELEROMETER||e.sensorType==v2::SensorType::GYROSCOPE||e.sensorType==v2::SensorType::MAGNETIC_FIELD)
+    printf("xyz %g %g %g accuracy=%d\n",e.u.vec3.x,e.u.vec3.y,e.u.vec3.z,int(e.u.vec3.status));
    fflush(stdout);
   }
  }
  ScopedWakelock createScopedWakelock(bool locked)override{assert(!locked);return android::hardware::sensors::V2_0::implementation::ScopedWakelockTest::make();}
 };
 int main(int argc,char**argv){
- assert(argc==2||argc==3);int handle=argc==3?std::atoi(argv[2]):2;assert(handle==1||handle==2);void*lib=dlopen(argv[1],RTLD_NOW);if(!lib){puts(dlerror());return 1;}
+ assert(argc==2||argc==3);int handle=argc==3?std::atoi(argv[2]):2;assert(handle>=1&&handle<=4);void*lib=dlopen(argv[1],RTLD_NOW);if(!lib){puts(dlerror());return 1;}
  auto get=(impl::ISensorsSubHal*(*)(uint32_t*))dlsym(lib,"sensorsHalGetSubHal_2_1");assert(get);
  uint32_t version=0;auto*hal=get(&version);assert(version==SUB_HAL_2_1_VERSION);
  bool available=false;hal->getSensorsList_2_1([&](const auto&list){for(size_t i=0;i<list.size();i++){const auto&s=list[i];printf("sensor %d %s\n",s.sensorHandle,s.name.c_str());available|=s.sensorHandle==handle;}});
@@ -38,5 +39,7 @@ int main(int argc,char**argv){
  assert(hal->activate(handle,true)==v1::Result::OK);sleep(5);
  assert(hal->flush(handle)==v1::Result::OK);sleep(2);assert(cb->count>0&&cb->flushes==1);
  assert(hal->activate(handle,false)==v1::Result::OK);int count=cb->count;sleep(1);assert(cb->count==count);
- assert(hal->initialize(cb)==v1::Result::OK);puts(handle==1?"SUBHAL_ACCEL_PASS":"SUBHAL_LIGHT_PASS");
+ assert(hal->initialize(cb)==v1::Result::OK);
+ const char* pass[]={"SUBHAL_ACCEL_PASS","SUBHAL_LIGHT_PASS","SUBHAL_GYRO_PASS","SUBHAL_MAG_PASS"};
+ puts(pass[handle-1]);
 }

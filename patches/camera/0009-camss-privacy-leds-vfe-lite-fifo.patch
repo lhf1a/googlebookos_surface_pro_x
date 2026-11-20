@@ -1,0 +1,946 @@
+--- a/camss.h
++++ b/camss.h
+@@ -11,6 +11,9 @@
+ #define QC_MSM_CAMSS_H
+ 
+ #include <linux/device.h>
++#include <linux/dma-mapping.h>
++#include <linux/gpio/consumer.h>
++#include <linux/mutex.h>
+ #include <linux/types.h>
+ #include <media/v4l2-async.h>
+ #include <media/v4l2-device.h>
+@@ -129,6 +132,14 @@
+ 	struct device_link *genpd_link;
+ 	struct icc_path *icc_path[ICC_SM8250_COUNT];
+ 	const struct camss_resources *res;
++	void *dummy_buf;
++	dma_addr_t dummy_buf_iova;
++	size_t dummy_buf_size;
++	struct gpio_desc *privacy_led_front;
++	struct gpio_desc *privacy_led_rear;
++	struct mutex privacy_led_lock;
++	int front_led_refcnt;
++	int rear_led_refcnt;
+ };
+ 
+ struct camss_camera_interface {
+@@ -170,5 +181,6 @@
+ void camss_buf_done(struct camss *camss, int hw_id, int port_id);
+ void camss_reg_update(struct camss *camss, int hw_id,
+ 		      int port_id, bool is_clear);
++void camss_set_privacy_led(struct camss *camss, u8 csiphy_id, bool on);
+ 
+ #endif /* QC_MSM_CAMSS_H */
+--- a/camss.c
++++ b/camss.c
+@@ -4136,6 +4136,33 @@
+ 	dev_pm_domain_detach(camss->genpd, true);
+ }
+ 
++void camss_set_privacy_led(struct camss *camss, u8 csiphy_id, bool on)
++{
++	mutex_lock(&camss->privacy_led_lock);
++
++	if (csiphy_id == 0 || csiphy_id == 3) {
++		if (on)
++			camss->front_led_refcnt++;
++		else if (camss->front_led_refcnt > 0)
++			camss->front_led_refcnt--;
++
++		if (camss->privacy_led_front)
++			gpiod_set_value_cansleep(camss->privacy_led_front,
++						 camss->front_led_refcnt > 0 ? 1 : 0);
++	} else if (csiphy_id == 2) {
++		if (on)
++			camss->rear_led_refcnt++;
++		else if (camss->rear_led_refcnt > 0)
++			camss->rear_led_refcnt--;
++
++		if (camss->privacy_led_rear)
++			gpiod_set_value_cansleep(camss->privacy_led_rear,
++						 camss->rear_led_refcnt > 0 ? 1 : 0);
++	}
++
++	mutex_unlock(&camss->privacy_led_lock);
++}
++
+ /*
+  * camss_probe - Probe CAMSS platform device
+  * @pdev: Pointer to CAMSS platform device
+@@ -4157,6 +4184,23 @@
+ 	atomic_set(&camss->ref_count, 0);
+ 	camss->dev = dev;
+ 	platform_set_drvdata(pdev, camss);
++	mutex_init(&camss->privacy_led_lock);
++
++	camss->privacy_led_front =
++		devm_gpiod_get_optional(dev, "privacy-led-front", GPIOD_OUT_LOW);
++	if (IS_ERR(camss->privacy_led_front)) {
++		dev_warn(dev, "Failed to get front privacy LED GPIO: %ld\n",
++			 PTR_ERR(camss->privacy_led_front));
++		camss->privacy_led_front = NULL;
++	}
++
++	camss->privacy_led_rear =
++		devm_gpiod_get_optional(dev, "privacy-led-rear", GPIOD_OUT_LOW);
++	if (IS_ERR(camss->privacy_led_rear)) {
++		dev_warn(dev, "Failed to get rear privacy LED GPIO: %ld\n",
++			 PTR_ERR(camss->privacy_led_rear));
++		camss->privacy_led_rear = NULL;
++	}
+ 
+ 	camss->csiphy = devm_kcalloc(dev, camss->res->csiphy_num,
+ 				     sizeof(*camss->csiphy), GFP_KERNEL);
+@@ -4242,6 +4286,21 @@
+ 		goto err_media_device_unregister;
+ 	}
+ 
++	camss->dummy_buf_size = 18 * 1024 * 1024;
++	camss->dummy_buf = dma_alloc_coherent(camss->dev, camss->dummy_buf_size,
++					      &camss->dummy_buf_iova,
++					      GFP_KERNEL | __GFP_NOWARN);
++	if (!camss->dummy_buf) {
++		camss->dummy_buf_size = 4 * 1024 * 1024;
++		camss->dummy_buf = dma_alloc_coherent(camss->dev, camss->dummy_buf_size,
++						      &camss->dummy_buf_iova,
++						      GFP_KERNEL | __GFP_NOWARN);
++	}
++	if (!camss->dummy_buf) {
++		camss->dummy_buf_size = 0;
++		camss->dummy_buf_iova = 0;
++	}
++
+ 	return 0;
+ 
+ err_media_device_unregister:
+@@ -4262,6 +4321,16 @@
+ 
+ void camss_delete(struct camss *camss)
+ {
++	if (camss->dummy_buf) {
++		dma_free_coherent(camss->dev,
++				  camss->dummy_buf_size,
++				  camss->dummy_buf,
++				  camss->dummy_buf_iova);
++		camss->dummy_buf = NULL;
++		camss->dummy_buf_iova = 0;
++		camss->dummy_buf_size = 0;
++	}
++
+ 	v4l2_device_unregister(&camss->v4l2_dev);
+ 	media_device_unregister(&camss->media_dev);
+ 	media_device_cleanup(&camss->media_dev);
+@@ -4279,6 +4348,11 @@
+ {
+ 	struct camss *camss = platform_get_drvdata(pdev);
+ 
++	if (camss->privacy_led_front)
++		gpiod_set_value_cansleep(camss->privacy_led_front, 0);
++	if (camss->privacy_led_rear)
++		gpiod_set_value_cansleep(camss->privacy_led_rear, 0);
++
+ 	v4l2_async_nf_unregister(&camss->notifier);
+ 	v4l2_async_nf_cleanup(&camss->notifier);
+ 	camss_unregister_entities(camss);
+--- a/camss-csiphy.c
++++ b/camss-csiphy.c
+@@ -324,10 +324,14 @@
+ 	struct csiphy_device *csiphy = v4l2_get_subdevdata(sd);
+ 	int ret = 0;
+ 
+-	if (enable)
++	if (enable) {
+ 		ret = csiphy_stream_on(csiphy);
+-	else
++		if (!ret)
++			camss_set_privacy_led(csiphy->camss, csiphy->id, true);
++	} else {
++		camss_set_privacy_led(csiphy->camss, csiphy->id, false);
+ 		csiphy_stream_off(csiphy);
++	}
+ 
+ 	return ret;
+ }
+--- a/camss-csid.c
++++ b/camss-csid.c
+@@ -423,6 +423,20 @@
+ 		1,
+ 	},
+ 	{
++		MEDIA_BUS_FMT_Y10_2X8_PADHI_LE,
++		MIPI_CSI2_DT_RAW10,
++		DECODE_FORMAT_UNCOMPRESSED_10_BIT,
++		16,
++		1,
++	},
++	{
++		MEDIA_BUS_FMT_SBGGR10_2X8_PADHI_LE,
++		MIPI_CSI2_DT_RAW10,
++		DECODE_FORMAT_UNCOMPRESSED_10_BIT,
++		16,
++		1,
++	},
++	{
+ 		MEDIA_BUS_FMT_SBGGR12_1X12,
+ 		MIPI_CSI2_DT_RAW12,
+ 		DECODE_FORMAT_UNCOMPRESSED_12_BIT,
+@@ -775,10 +789,8 @@
+ 			return -ENOLINK;
+ 	}
+ 
+-	if (csid->phy.need_vc_update) {
+-		csid->res->hw_ops->configure_stream(csid, enable);
+-		csid->phy.need_vc_update = false;
+-	}
++	csid->res->hw_ops->configure_stream(csid, enable);
++	csid->phy.need_vc_update = false;
+ 
+ 	return 0;
+ }
+--- a/camss-csid-gen2.c
++++ b/camss-csid-gen2.c
+@@ -279,8 +279,15 @@
+ 	val = 1 << RDI_CFG0_BYTE_CNTR_EN;
+ 	val |= 1 << RDI_CFG0_FORMAT_MEASURE_EN;
+ 	val |= 1 << RDI_CFG0_TIMESTAMP_EN;
+-	/* note: for non-RDI path, this should be format->decode_format */
+-	val |= DECODE_FORMAT_PAYLOAD_ONLY << RDI_CFG0_DECODE_FORMAT;
++	if (input_format->code == MEDIA_BUS_FMT_SBGGR10_2X8_PADHI_LE ||
++	    input_format->code == MEDIA_BUS_FMT_Y10_2X8_PADHI_LE) {
++		val |= format->decode_format << RDI_CFG0_DECODE_FORMAT;
++		val |= PLAIN_FORMAT_PLAIN16 << RDI_CFG0_PLAIN_FORMAT;
++		val |= PLAIN_ALIGNMENT_LSB << RDI_CFG0_PLAIN_ALIGNMENT;
++	} else {
++		/* note: for non-RDI path, this should be format->decode_format */
++		val |= DECODE_FORMAT_PAYLOAD_ONLY << RDI_CFG0_DECODE_FORMAT;
++	}
+ 	val |= format->data_type << RDI_CFG0_DATA_TYPE;
+ 	val |= vc << RDI_CFG0_VIRTUAL_CHANNEL;
+ 	val |= dt_id << RDI_CFG0_DT_ID;
+@@ -318,7 +325,10 @@
+ 	writel_relaxed(val, csid->base + CSID_RDI_CTRL(port));
+ 
+ 	val = readl_relaxed(csid->base + CSID_RDI_CFG0(port));
+-	val |=  enable << RDI_CFG0_ENABLE;
++	if (enable)
++		val |= BIT(RDI_CFG0_ENABLE);
++	else
++		val &= ~BIT(RDI_CFG0_ENABLE);
+ 	writel_relaxed(val, csid->base + CSID_RDI_CFG0(port));
+ }
+ 
+@@ -330,12 +340,22 @@
+ 	/* Loop through all enabled ports and configure a stream for each */
+ 	for (i = 0; i < MSM_CSID_MAX_SRC_STREAMS; i++)
+ 		if (csid->phy.en_vc & BIT(i)) {
+-			if (tg->enabled)
+-				__csid_configure_testgen(csid, enable, i, 0);
+-
+-			__csid_configure_rdi_stream(csid, enable, i, 0);
+-			__csid_configure_rx(csid, &csid->phy, 0);
+-			__csid_ctrl_rdi(csid, enable, i);
++			if (enable) {
++				if (tg->enabled)
++					__csid_configure_testgen(csid, enable, i, 0);
++
++				__csid_configure_rx(csid, &csid->phy, 0);
++				__csid_configure_rdi_stream(csid, enable, i, 0);
++				wmb();
++				__csid_ctrl_rdi(csid, enable, i);
++			} else {
++				if (tg->enabled)
++					__csid_configure_testgen(csid, 0, i, 0);
++
++				__csid_ctrl_rdi(csid, 0, i);
++				wmb();
++				__csid_configure_rdi_stream(csid, 0, i, 0);
++			}
+ 		}
+ }
+ 
+--- a/camss-vfe.c
++++ b/camss-vfe.c
+@@ -9,6 +9,7 @@
+  */
+ #include <linux/clk.h>
+ #include <linux/completion.h>
++#include <linux/ctype.h>
+ #include <linux/interrupt.h>
+ #include <linux/iommu.h>
+ #include <linux/mutex.h>
+@@ -444,9 +445,11 @@
+  * @vfe: VFE Device
+  * @wm: Write master id
+  */
++#define VFE_DUMMY_BUF ((struct camss_buffer *)1UL)
++
+ void vfe_buf_done(struct vfe_device *vfe, int wm)
+ {
+-	struct vfe_line *line = &vfe->line[vfe->wm_output_map[wm]];
++	struct vfe_line *line;
+ 	const struct vfe_hw_ops *ops = vfe->res->hw_ops;
+ 	struct camss_buffer *ready_buf;
+ 	struct vfe_output *output;
+@@ -454,44 +457,64 @@
+ 	u32 index;
+ 	u64 ts = ktime_get_ns();
+ 
++	if (wm < 0 || wm >= MSM_VFE_IMAGE_MASTERS_NUM)
++		return;
++
+ 	spin_lock_irqsave(&vfe->output_lock, flags);
+ 
+-	if (vfe->wm_output_map[wm] == VFE_LINE_NONE) {
++	if (vfe->wm_output_map[wm] == VFE_LINE_NONE ||
++	    vfe->wm_output_map[wm] >= vfe->res->line_num) {
+ 		dev_err_ratelimited(vfe->camss->dev,
+ 				    "Received wm done for unmapped index\n");
+ 		goto out_unlock;
+ 	}
+-	output = &vfe->line[vfe->wm_output_map[wm]].output;
++	line = &vfe->line[vfe->wm_output_map[wm]];
++	output = &line->output;
+ 
+ 	ready_buf = output->buf[0];
+-	if (!ready_buf) {
+-		dev_err_ratelimited(vfe->camss->dev,
+-				    "Missing ready buf %d!\n", output->state);
++	if (!ready_buf)
+ 		goto out_unlock;
+-	}
+ 
+-	ready_buf->vb.vb2_buf.timestamp = ts;
+-	ready_buf->vb.sequence = output->sequence++;
++	if (ready_buf != VFE_DUMMY_BUF) {
++		ready_buf->vb.vb2_buf.timestamp = ts;
++		ready_buf->vb.sequence = output->sequence++;
++	}
+ 
++	/*
++	 * Titan 17x VFE_BUS_WM_IMAGE_ADDR is a 2-deep hardware FIFO:
++	 * buf[0] just completed; buf[1] is now active in hardware for the next
++	 * frame, so shift buf[1] -> buf[0] and push the next pending buffer
++	 * into FIFO slot 1. Only fall back to VFE_DUMMY_BUF on total underrun.
++	 */
+ 	index = 0;
+ 	output->buf[0] = output->buf[1];
++	output->buf[1] = NULL;
+ 	if (output->buf[0])
+ 		index = 1;
+ 
+ 	output->buf[index] = vfe_buf_get_pending(output);
+ 
+ 	if (output->buf[index]) {
++		output->gen2.active_num = index + 1;
+ 		ops->vfe_wm_update(vfe, output->wm_idx[0],
+ 				   output->buf[index]->addr[0],
+ 				   line);
+ 		ops->reg_update(vfe, line->id);
++	} else if (!output->buf[0] && vfe->camss->dummy_buf_iova) {
++		output->buf[0] = VFE_DUMMY_BUF;
++		output->gen2.active_num = 1;
++		ops->vfe_wm_update(vfe, output->wm_idx[0],
++				   vfe->camss->dummy_buf_iova,
++				   line);
++		ops->reg_update(vfe, line->id);
+ 	} else {
+-		output->gen2.active_num--;
++		output->gen2.active_num = output->buf[0] ? 1 : 0;
+ 	}
+ 
+ 	spin_unlock_irqrestore(&vfe->output_lock, flags);
+ 
+-	vb2_buffer_done(&ready_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
++	if (ready_buf != VFE_DUMMY_BUF)
++		vb2_buffer_done(&ready_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+ 
+ 	return;
+ 
+@@ -542,6 +565,9 @@
+ 
+ 	ops->vfe_wm_start(vfe, output->wm_idx[0], line);
+ 
++	/* Fill the 2-deep hardware FIFO with real buffers (buf[0] -> active, buf[1] -> next) */
++	output->buf[0] = NULL;
++	output->buf[1] = NULL;
+ 	for (i = 0; i < 2; i++) {
+ 		output->buf[i] = vfe_buf_get_pending(output);
+ 		if (!output->buf[i])
+@@ -552,6 +578,14 @@
+ 		ops->reg_update(vfe, line->id);
+ 	}
+ 
++	if (output->gen2.active_num == 0 && vfe->camss->dummy_buf_iova) {
++		output->buf[0] = VFE_DUMMY_BUF;
++		output->gen2.active_num = 1;
++		ops->vfe_wm_update(vfe, output->wm_idx[0],
++				   vfe->camss->dummy_buf_iova, line);
++		ops->reg_update(vfe, line->id);
++	}
++
+ 	spin_unlock_irqrestore(&vfe->output_lock, flags);
+ 
+ 	return 0;
+@@ -775,7 +809,7 @@
+  * @output: VFE output
+  * @state: vb2 buffer state
+  */
+-static void vfe_buf_flush_pending(struct vfe_output *output,
++static void __maybe_unused vfe_buf_flush_pending(struct vfe_output *output,
+ 				  enum vb2_buffer_state state)
+ {
+ 	struct camss_buffer *buf;
+@@ -841,6 +875,8 @@
+ 	mutex_lock(&vfe->stream_lock);
+ 
+ 	vfe->stream_count--;
++	if (!vfe->stream_count && vfe->res->hw_ops->vfe_halt)
++		vfe->res->hw_ops->vfe_halt(vfe);
+ 
+ 	mutex_unlock(&vfe->stream_lock);
+ 
+@@ -915,6 +951,9 @@
+ 	return (!strcmp(clock->name, vfe_name) ||
+ 		!strcmp(clock->name, vfe_lite_name) ||
+ 		!strcmp(clock->name, "vfe_lite") ||
++		(vfe->res->is_lite &&
++		 !strncmp(clock->name, "vfe_lite", 8) &&
++		 isdigit((unsigned char)clock->name[8])) ||
+ 		!strcmp(clock->name, "camnoc_axi"));
+ }
+ 
+@@ -1179,27 +1218,51 @@
+ 	struct vfe_line *line = container_of(vid, struct vfe_line, video_out);
+ 	struct vfe_device *vfe = to_vfe(line);
+ 	struct vfe_output *output;
++	struct camss_buffer *buf, *t;
++	struct camss_buffer *b0 = NULL, *b1 = NULL, *blast = NULL;
++	struct list_head local_pending;
+ 	unsigned long flags;
+ 
+ 	output = &line->output;
++	INIT_LIST_HEAD(&local_pending);
+ 
+ 	spin_lock_irqsave(&vfe->output_lock, flags);
+ 
+-	vfe_buf_flush_pending(output, state);
++	list_splice_init(&output->pending_bufs, &local_pending);
+ 
+-	if (output->buf[0])
+-		vb2_buffer_done(&output->buf[0]->vb.vb2_buf, state);
++	if (output->buf[0]) {
++		b0 = output->buf[0];
++		output->buf[0] = NULL;
++	}
+ 
+-	if (output->buf[1])
+-		vb2_buffer_done(&output->buf[1]->vb.vb2_buf, state);
++	if (output->buf[1]) {
++		b1 = output->buf[1];
++		output->buf[1] = NULL;
++	}
+ 
+ 	if (output->last_buffer) {
+-		vb2_buffer_done(&output->last_buffer->vb.vb2_buf, state);
++		blast = output->last_buffer;
+ 		output->last_buffer = NULL;
+ 	}
+ 
++	output->gen2.active_num = 0;
++
+ 	spin_unlock_irqrestore(&vfe->output_lock, flags);
+ 
++	list_for_each_entry_safe(buf, t, &local_pending, queue) {
++		vb2_buffer_done(&buf->vb.vb2_buf, state);
++		list_del(&buf->queue);
++	}
++
++	if (b0 && b0 != VFE_DUMMY_BUF)
++		vb2_buffer_done(&b0->vb.vb2_buf, state);
++
++	if (b1 && b1 != VFE_DUMMY_BUF)
++		vb2_buffer_done(&b1->vb.vb2_buf, state);
++
++	if (blast && blast != VFE_DUMMY_BUF)
++		vb2_buffer_done(&blast->vb.vb2_buf, state);
++
+ 	return 0;
+ }
+ 
+@@ -2137,9 +2200,6 @@
+ {
+ 	int i;
+ 
+-	mutex_destroy(&vfe->power_lock);
+-	mutex_destroy(&vfe->stream_lock);
+-
+ 	for (i = 0; i < vfe->res->line_num; i++) {
+ 		struct v4l2_subdev *sd = &vfe->line[i].subdev;
+ 		struct camss_video *video_out = &vfe->line[i].video_out;
+@@ -2148,6 +2208,9 @@
+ 		v4l2_device_unregister_subdev(sd);
+ 		media_entity_cleanup(&sd->entity);
+ 	}
++
++	mutex_destroy(&vfe->power_lock);
++	mutex_destroy(&vfe->stream_lock);
+ }
+ 
+ bool vfe_is_lite(struct vfe_device *vfe)
+--- a/camss-vfe-17x.c
++++ b/camss-vfe-17x.c
+@@ -46,6 +46,7 @@
+ #define		MASK_0_CAMIF_SOF			BIT(0)
+ #define		MASK_0_CAMIF_EOF			BIT(1)
+ #define		MASK_0_RDI_REG_UPDATE(n)		BIT((n) + 5)
++#define		MASK_0_BUS_TOP_IRQ			BIT(9)
+ #define		MASK_0_IMAGE_MASTER_n_PING_PONG(n)	BIT((n) + 8)
+ #define		MASK_0_IMAGE_COMPOSITE_DONE_n(n)	BIT((n) + 25)
+ #define		MASK_0_RESET_ACK			BIT(31)
+@@ -115,7 +116,11 @@
+ #define		STATUS0_COMP_OVERWRITE		BIT(12)
+ #define		STATUS0_OVERFLOW		BIT(13)
+ #define		STATUS0_VIOLATION		BIT(14)
+-/* WM_CLIENT_BUF_DONE defined for buffers 0:19 */
++#define		STATUS0_BUS_ERROR_MASK		(STATUS0_COMP_ERROR | \
++						 STATUS0_COMP_OVERWRITE | \
++						 STATUS0_OVERFLOW | \
++						 STATUS0_VIOLATION)
++/* WM_CLIENT_BUF_DONE defined for buffers 0:19 on Full VFE175, 0:3 on VFE Lite */
+ #define		STATUS1_WM_CLIENT_BUF_DONE(n)		BIT(n)
+ #define		STATUS1_EARLY_DONE			BIT(24)
+ #define		STATUS2_DUAL_COMP0_BUF_DONE		BIT(0)
+@@ -131,15 +136,19 @@
+ #define VFE_BUS_IRQ_CLEAR_GLOBAL		(0x2068)
+ 
+ #define VFE_BUS_WM_DEBUG_STATUS_CFG		(0x226c)
++#define VFE_BUS_WM_DEBUG_STATUS_0		(0x2270)
+ #define		DEBUG_STATUS_CFG_STATUS0(n)	BIT(n)
+ #define		DEBUG_STATUS_CFG_STATUS1(n)	BIT(8 + (n))
+ 
+ #define VFE_BUS_WM_ADDR_SYNC_FRAME_HEADER	(0x2080)
+ 
+ #define VFE_BUS_WM_ADDR_SYNC_NO_SYNC		(0x2084)
+-#define		BUS_VER2_MAX_CLIENTS (24)
++#define		BUS_VER2_MAX_CLIENTS		(20)
++#define		BUS_VER2_LITE_MAX_CLIENTS	(4)
+ #define		WM_ADDR_NO_SYNC_DEFAULT_VAL \
+ 				((1 << BUS_VER2_MAX_CLIENTS) - 1)
++#define		WM_ADDR_NO_SYNC_LITE_VAL \
++				((1 << BUS_VER2_LITE_MAX_CLIENTS) - 1)
+ 
+ #define VFE_BUS_WM_CGC_OVERRIDE			(0x200c)
+ #define		WM_CGC_OVERRIDE_ALL		(0xFFFFF)
+@@ -183,18 +192,31 @@
+ 
+ static void vfe_global_reset(struct vfe_device *vfe)
+ {
+-	u32 reset_bits = GLOBAL_RESET_CMD_CORE		|
+-			 GLOBAL_RESET_CMD_CAMIF		|
+-			 GLOBAL_RESET_CMD_BUS		|
+-			 GLOBAL_RESET_CMD_BUS_BDG	|
+-			 GLOBAL_RESET_CMD_REGISTER	|
+-			 GLOBAL_RESET_CMD_TESTGEN	|
+-			 GLOBAL_RESET_CMD_DSP		|
+-			 GLOBAL_RESET_CMD_IDLE_CGC	|
+-			 GLOBAL_RESET_CMD_RDI0		|
+-			 GLOBAL_RESET_CMD_RDI1		|
+-			 GLOBAL_RESET_CMD_RDI2		|
+-			 GLOBAL_RESET_CMD_RDI3;
++	u32 reset_bits;
++
++	if (vfe_is_lite(vfe)) {
++		reset_bits = GLOBAL_RESET_CMD_CORE	|
++			     GLOBAL_RESET_CMD_BUS	|
++			     GLOBAL_RESET_CMD_REGISTER	|
++			     GLOBAL_RESET_CMD_IDLE_CGC	|
++			     GLOBAL_RESET_CMD_RDI0	|
++			     GLOBAL_RESET_CMD_RDI1	|
++			     GLOBAL_RESET_CMD_RDI2	|
++			     GLOBAL_RESET_CMD_RDI3;
++	} else {
++		reset_bits = GLOBAL_RESET_CMD_CORE	|
++			     GLOBAL_RESET_CMD_CAMIF	|
++			     GLOBAL_RESET_CMD_BUS	|
++			     GLOBAL_RESET_CMD_BUS_BDG	|
++			     GLOBAL_RESET_CMD_REGISTER	|
++			     GLOBAL_RESET_CMD_TESTGEN	|
++			     GLOBAL_RESET_CMD_DSP	|
++			     GLOBAL_RESET_CMD_IDLE_CGC	|
++			     GLOBAL_RESET_CMD_RDI0	|
++			     GLOBAL_RESET_CMD_RDI1	|
++			     GLOBAL_RESET_CMD_RDI2	|
++			     GLOBAL_RESET_CMD_RDI3;
++	}
+ 
+ 	writel_relaxed(BIT(31), vfe->base + VFE_IRQ_MASK_0);
+ 
+@@ -206,12 +228,19 @@
+ 
+ static void vfe_wm_start(struct vfe_device *vfe, u8 wm, struct vfe_line *line)
+ {
++	struct v4l2_pix_format_mplane *pix =
++		&line->video_out.active_fmt.fmt.pix_mp;
++	u32 stride = pix->plane_fmt[0].bytesperline ?
++		     pix->plane_fmt[0].bytesperline : pix->width;
++	u32 height = pix->height;
+ 	u32 val;
+ 
+-	/*Set Debug Registers*/
+-	val = DEBUG_STATUS_CFG_STATUS0(1) |
+-	      DEBUG_STATUS_CFG_STATUS0(7);
+-	writel_relaxed(val, vfe->base + VFE_BUS_WM_DEBUG_STATUS_CFG);
++	/* Set Debug Registers (Full VFE only; VFE Lite does not implement 0x226c) */
++	if (!vfe_is_lite(vfe)) {
++		val = DEBUG_STATUS_CFG_STATUS0(1) |
++		      DEBUG_STATUS_CFG_STATUS0(7);
++		writel_relaxed(val, vfe->base + VFE_BUS_WM_DEBUG_STATUS_CFG);
++	}
+ 
+ 	/* BUS_WM_INPUT_IF_ADDR_SYNC_FRAME_HEADER */
+ 	writel_relaxed(0, vfe->base + VFE_BUS_WM_ADDR_SYNC_FRAME_HEADER);
+@@ -222,35 +251,54 @@
+ 
+ 	writel_relaxed(0x0, vfe->base + VFE_BUS_WM_TEST_BUS_CTRL);
+ 
+-	/* if addr_no_sync has default value then config the addr no sync reg */
+-	val = WM_ADDR_NO_SYNC_DEFAULT_VAL;
++	/* Configure addr no-sync mask (4 clients on VFE Lite, 20 on Full VFE) */
++	val = vfe_is_lite(vfe) ? WM_ADDR_NO_SYNC_LITE_VAL : WM_ADDR_NO_SYNC_DEFAULT_VAL;
+ 	writel_relaxed(val, vfe->base + VFE_BUS_WM_ADDR_SYNC_NO_SYNC);
+ 
+ 	writel_relaxed(0xf, vfe->base + VFE_BUS_WM_BURST_LIMIT(wm));
+-
+-	val = WM_BUFFER_DEFAULT_WIDTH;
+-	writel_relaxed(val, vfe->base + VFE_BUS_WM_BUFFER_WIDTH_CFG(wm));
+-
+-	val = 0;
+-	writel_relaxed(val, vfe->base + VFE_BUS_WM_BUFFER_HEIGHT_CFG(wm));
+-
+-	val = 0;
+-	writel_relaxed(val, vfe->base + VFE_BUS_WM_PACKER_CFG(wm)); // XXX 1 for PLAIN8?
+-
+-	/* Configure stride for RDIs */
+-	val = WM_STRIDE_DEFAULT_STRIDE;
+-	writel_relaxed(val, vfe->base + VFE_BUS_WM_STRIDE(wm));
+-
+-	/* Enable WM */
+-	val = 1 << WM_CFG_EN |
+-	      MODE_MIPI_RAW << WM_CFG_MODE;
+-	writel_relaxed(val, vfe->base + VFE_BUS_WM_CFG(wm));
++	writel_relaxed(stride * height, vfe->base + VFE_BUS_WM_FRAME_INC(wm));
++	writel_relaxed(WM_BUFFER_DEFAULT_WIDTH, vfe->base + VFE_BUS_WM_BUFFER_WIDTH_CFG(wm));
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_BUFFER_HEIGHT_CFG(wm));
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_PACKER_CFG(wm));
++	writel_relaxed(WM_STRIDE_DEFAULT_STRIDE, vfe->base + VFE_BUS_WM_STRIDE(wm));
++
++	/* No dropped frames, one IRQ per frame */
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_FRAMEDROP_PERIOD(wm));
++	writel_relaxed(1, vfe->base + VFE_BUS_WM_FRAMEDROP_PATTERN(wm));
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(wm));
++	writel_relaxed(1, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PATTERN(wm));
++
++	/*
++	 * Subscribe solely to STATUS1_WM_CLIENT_BUF_DONE(wm) (and bus errors
++	 * in Mask 0) so each completed frame fires vfe_buf_done() once.
++	 */
++	val = readl_relaxed(vfe->base + VFE_BUS_IRQ_MASK(0));
++	val |= STATUS0_BUS_ERROR_MASK;
++	writel_relaxed(val, vfe->base + VFE_BUS_IRQ_MASK(0));
++
++	val = readl_relaxed(vfe->base + VFE_BUS_IRQ_MASK(1));
++	val |= STATUS1_WM_CLIENT_BUF_DONE(wm);
++	writel_relaxed(val, vfe->base + VFE_BUS_IRQ_MASK(1));
++
++	/*
++	 * Defer WM_CFG_EN until vfe_wm_update() writes buf[0]'s real IOVA into
++	 * the 2-deep VFE_BUS_WM_IMAGE_ADDR FIFO so no dummy address shifts frames.
++	 */
++	wmb();
+ }
+ 
+ static void vfe_wm_stop(struct vfe_device *vfe, u8 wm)
+ {
++	u32 val;
++
++	val = readl_relaxed(vfe->base + VFE_BUS_IRQ_MASK(1));
++	val &= ~STATUS1_WM_CLIENT_BUF_DONE(wm);
++	writel_relaxed(val, vfe->base + VFE_BUS_IRQ_MASK(1));
++	wmb();
++
+ 	/* Disable WM */
+ 	writel_relaxed(0, vfe->base + VFE_BUS_WM_CFG(wm));
++	wmb();
+ }
+ 
+ static void vfe_wm_update(struct vfe_device *vfe, u8 wm, u32 addr,
+@@ -260,8 +308,16 @@
+ 		&line->video_out.active_fmt.fmt.pix_mp;
+ 	u32 stride = pix->plane_fmt[0].bytesperline;
+ 
++	if (!addr)
++		addr = (u32)vfe->camss->dummy_buf_iova;
++
+ 	writel_relaxed(addr, vfe->base + VFE_BUS_WM_IMAGE_ADDR(wm));
+-	writel_relaxed(stride * pix->height, vfe->base + VFE_BUS_WM_FRAME_INC(wm));
++	writel_relaxed((addr == (u32)vfe->camss->dummy_buf_iova) ? 0 : (stride * pix->height),
++		       vfe->base + VFE_BUS_WM_FRAME_INC(wm));
++	wmb();
++	writel_relaxed((1 << WM_CFG_EN) | (MODE_MIPI_RAW << WM_CFG_MODE),
++		       vfe->base + VFE_BUS_WM_CFG(wm));
++	wmb();
+ }
+ 
+ static void vfe_reg_update(struct vfe_device *vfe, enum vfe_line_id line_id)
+@@ -285,12 +341,22 @@
+ 
+ static void vfe_enable_irq_common(struct vfe_device *vfe)
+ {
+-	vfe_reg_set(vfe, VFE_IRQ_MASK_0, ~0u);
+-	vfe_reg_set(vfe, VFE_IRQ_MASK_1, ~0u);
++	writel_relaxed(STATUS_0_RESET_ACK | 0x780001e0 | BIT(4) | BIT(7) |
++		       MASK_0_BUS_TOP_IRQ, vfe->base + VFE_IRQ_MASK_0);
++	writel_relaxed(MASK_1_CAMIF_ERROR | MASK_1_VIOLATION |
++		       MASK_1_BUS_BDG_HALT_ACK, vfe->base + VFE_IRQ_MASK_1);
++
++	/* Keep VFE_CORE_CFG = 0 for local SOF latching (BIT(4) is slave mode). */
++	writel_relaxed(0, vfe->base + VFE_CORE_CFG);
++
++	/* Override clock gating for bus bridge (VFE TOP 0x3c) */
++	writel_relaxed(0xffffffff, vfe->base + 0x03c);
++	wmb();
+ 
+-	writel_relaxed(~0u, vfe->base + VFE_BUS_IRQ_MASK(0));
+-	writel_relaxed(~0u, vfe->base + VFE_BUS_IRQ_MASK(1));
+-	writel_relaxed(~0u, vfe->base + VFE_BUS_IRQ_MASK(2));
++	/* Enable bus error IRQs; per-WM completion is enabled in vfe_wm_start() */
++	writel_relaxed(STATUS0_BUS_ERROR_MASK, vfe->base + VFE_BUS_IRQ_MASK(0));
++	writel_relaxed(0, vfe->base + VFE_BUS_IRQ_MASK(1));
++	writel_relaxed(STATUS2_DUAL_COMP_ERROR, vfe->base + VFE_BUS_IRQ_MASK(2));
+ }
+ 
+ static void vfe_isr_halt_ack(struct vfe_device *vfe)
+@@ -328,7 +394,8 @@
+ static irqreturn_t vfe_isr(int irq, void *dev)
+ {
+ 	struct vfe_device *vfe = dev;
+-	u32 status0, status1, vfe_bus_status[VFE_LINE_NUM_MAX];
++	u32 status0, status1;
++	u32 vfe_bus_status[3] = { 0 };
+ 	int i, wm;
+ 
+ 	status0 = readl_relaxed(vfe->base + VFE_IRQ_STATUS_0);
+@@ -337,26 +404,33 @@
+ 	writel_relaxed(status0, vfe->base + VFE_IRQ_CLEAR_0);
+ 	writel_relaxed(status1, vfe->base + VFE_IRQ_CLEAR_1);
+ 
+-	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++) {
++	for (i = 0; i < 3; i++) {
+ 		vfe_bus_status[i] = readl_relaxed(vfe->base + VFE_BUS_IRQ_STATUS(i));
+ 		writel_relaxed(vfe_bus_status[i], vfe->base + VFE_BUS_IRQ_CLEAR(i));
+ 	}
+ 
+-	/* Enforce ordering between IRQ reading and interpretation */
++	/*
++	 * Clear Bus sub-controller global IRQ before VFE top-level IRQ with
++	 * barriers so pending bus events are not lost across re-arm.
++	 */
+ 	wmb();
+-
+-	writel_relaxed(CMD_GLOBAL_CLEAR, vfe->base + VFE_IRQ_CMD);
+ 	writel_relaxed(1, vfe->base + VFE_BUS_IRQ_CLEAR_GLOBAL);
++	wmb();
++	writel_relaxed(CMD_GLOBAL_CLEAR, vfe->base + VFE_IRQ_CMD);
+ 
+ 	if (status0 & STATUS_0_RESET_ACK)
+ 		vfe->isr_ops.reset_ack(vfe);
+ 
++	if (status1 & STATUS_1_VIOLATION)
++		vfe_violation_read(vfe);
++
+ 	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++)
+ 		if (status0 & STATUS_0_RDI_REG_UPDATE(i))
+ 			vfe->isr_ops.reg_update(vfe, i);
+ 
+ 	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++)
+-		if (status0 & STATUS_1_RDI_SOF(i))
++		if ((status1 & STATUS_1_RDI_SOF(i)) ||
++		    (status0 & BIT(27 + i)))
+ 			vfe->isr_ops.sof(vfe, i);
+ 
+ 	for (i = 0; i < MSM_VFE_COMPOSITE_IRQ_NUM; i++)
+@@ -364,9 +438,8 @@
+ 			vfe->isr_ops.comp_done(vfe, i);
+ 
+ 	for (wm = 0; wm < MSM_VFE_IMAGE_MASTERS_NUM; wm++)
+-		if (status0 & BIT(9))
+-			if (vfe_bus_status[1] & STATUS1_WM_CLIENT_BUF_DONE(wm))
+-				vfe->isr_ops.wm_done(vfe, wm);
++		if (vfe_bus_status[1] & STATUS1_WM_CLIENT_BUF_DONE(wm))
++			vfe->isr_ops.wm_done(vfe, wm);
+ 
+ 	return IRQ_HANDLED;
+ }
+@@ -379,47 +452,23 @@
+  */
+ static int vfe_halt(struct vfe_device *vfe)
+ {
+-	/* rely on vfe_disable_output() to stop the VFE */
+-	return 0;
+-}
+-
+-static int vfe_get_output(struct vfe_line *line)
+-{
+-	struct vfe_device *vfe = to_vfe(line);
+-	struct vfe_output *output;
+-	unsigned long flags;
+-	int wm_idx;
+-
+-	spin_lock_irqsave(&vfe->output_lock, flags);
+-
+-	output = &line->output;
+-	if (output->state > VFE_OUTPUT_RESERVED) {
+-		dev_err(vfe->camss->dev, "Output is running\n");
+-		goto error;
+-	}
+-
+-	output->wm_num = 1;
+-
+-	wm_idx = vfe_reserve_wm(vfe, line->id);
+-	if (wm_idx < 0) {
+-		dev_err(vfe->camss->dev, "Can not reserve wm\n");
+-		goto error_get_wm;
+-	}
+-	output->wm_idx[0] = wm_idx;
+-
+-	output->drop_update_idx = 0;
++	writel_relaxed(0, vfe->base + VFE_IRQ_MASK_0);
++	writel_relaxed(0, vfe->base + VFE_IRQ_MASK_1);
++	writel_relaxed(~0u, vfe->base + VFE_IRQ_CLEAR_0);
++	writel_relaxed(~0u, vfe->base + VFE_IRQ_CLEAR_1);
++	writel_relaxed(CMD_GLOBAL_CLEAR, vfe->base + VFE_IRQ_CMD);
+ 
+-	spin_unlock_irqrestore(&vfe->output_lock, flags);
++	writel_relaxed(0, vfe->base + VFE_BUS_IRQ_MASK(0));
++	writel_relaxed(0, vfe->base + VFE_BUS_IRQ_MASK(1));
++	writel_relaxed(0, vfe->base + VFE_BUS_IRQ_MASK(2));
++	writel_relaxed(~0u, vfe->base + VFE_BUS_IRQ_CLEAR(0));
++	writel_relaxed(~0u, vfe->base + VFE_BUS_IRQ_CLEAR(1));
++	writel_relaxed(~0u, vfe->base + VFE_BUS_IRQ_CLEAR(2));
++	writel_relaxed(1, vfe->base + VFE_BUS_IRQ_CLEAR_GLOBAL);
++	vfe->reg_update = 0;
++	wmb();
+ 
+ 	return 0;
+-
+-error_get_wm:
+-	vfe_release_wm(vfe, output->wm_idx[0]);
+-	output->state = VFE_OUTPUT_OFF;
+-error:
+-	spin_unlock_irqrestore(&vfe->output_lock, flags);
+-
+-	return -EINVAL;
+ }
+ 
+ /*
+@@ -442,7 +491,7 @@
+ 
+ 	mutex_unlock(&vfe->stream_lock);
+ 
+-	ret = vfe_get_output(line);
++	ret = vfe_get_output_v2(line);
+ 	if (ret < 0)
+ 		goto error_get_output;
+ 
+@@ -507,52 +556,7 @@
+  */
+ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ {
+-	struct vfe_line *line = &vfe->line[vfe->wm_output_map[wm]];
+-	struct camss_buffer *ready_buf;
+-	struct vfe_output *output;
+-	unsigned long flags;
+-	u32 index;
+-	u64 ts = ktime_get_ns();
+-
+-	spin_lock_irqsave(&vfe->output_lock, flags);
+-
+-	if (vfe->wm_output_map[wm] == VFE_LINE_NONE) {
+-		dev_err_ratelimited(vfe->camss->dev,
+-				    "Received wm done for unmapped index\n");
+-		goto out_unlock;
+-	}
+-	output = &vfe->line[vfe->wm_output_map[wm]].output;
+-
+-	ready_buf = output->buf[0];
+-	if (!ready_buf) {
+-		dev_err_ratelimited(vfe->camss->dev,
+-				    "Missing ready buf %d!\n", output->state);
+-		goto out_unlock;
+-	}
+-
+-	ready_buf->vb.vb2_buf.timestamp = ts;
+-	ready_buf->vb.sequence = output->sequence++;
+-
+-	index = 0;
+-	output->buf[0] = output->buf[1];
+-	if (output->buf[0])
+-		index = 1;
+-
+-	output->buf[index] = vfe_buf_get_pending(output);
+-
+-	if (output->buf[index])
+-		vfe_wm_update(vfe, output->wm_idx[0], output->buf[index]->addr[0], line);
+-	else
+-		output->gen2.active_num--;
+-
+-	spin_unlock_irqrestore(&vfe->output_lock, flags);
+-
+-	vb2_buffer_done(&ready_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+-
+-	return;
+-
+-out_unlock:
+-	spin_unlock_irqrestore(&vfe->output_lock, flags);
++	vfe_buf_done(vfe, wm);
+ }
+ 
+ static const struct vfe_isr_ops vfe_isr_ops_170 = {
+--- a/camss-video.c
++++ b/camss-video.c
+@@ -69,6 +69,10 @@
+ {
+ 	struct media_pad *remote;
+ 
++	if (!video->vdev.entity.graph_obj.mdev ||
++	    !video->vdev.entity.links.next)
++		return NULL;
++
+ 	remote = media_pad_remote_pad_first(&video->pad);
+ 
+ 	if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
+@@ -467,6 +471,7 @@
+ 	struct v4l2_pix_format_mplane *pix_mp;
+ 	const struct camss_format_info *fi;
+ 	struct v4l2_plane_pix_format *p;
++	struct v4l2_format sd_fmt = { 0 };
+ 	u32 bytesperline[3] = { 0 };
+ 	u32 sizeimage[3] = { 0 };
+ 	u32 width, height;
+@@ -475,6 +480,15 @@
+ 
+ 	pix_mp = &f->fmt.pix_mp;
+ 
++	if (!video->line_based && video->vdev.entity.graph_obj.mdev) {
++		sd_fmt.fmt.pix_mp.pixelformat = pix_mp->pixelformat;
++		if (video_get_subdev_format(video, &sd_fmt) == 0) {
++			pix_mp->pixelformat = sd_fmt.fmt.pix_mp.pixelformat;
++			pix_mp->width = sd_fmt.fmt.pix_mp.width;
++			pix_mp->height = sd_fmt.fmt.pix_mp.height;
++		}
++	}
++
+ 	if (video->line_based)
+ 		for (i = 0; i < pix_mp->num_planes && i < 3; i++) {
+ 			p = &pix_mp->plane_fmt[i];

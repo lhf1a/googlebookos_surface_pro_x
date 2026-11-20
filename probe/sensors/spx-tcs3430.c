@@ -18,12 +18,18 @@
 #define TCS_CFG3 0xab
 #define TCS_INTENAB 0xdd
 #define TCS_CYCLES 36
-#define TCS_GAIN 16
+#define TCS_GAIN_DEFAULT_CODE 2
+#define TCS_GAIN_HIGH_Y 52000
+#define TCS_GAIN_LOW_Y 200
+
+static const int tcs_gains[4] = { 1, 4, 16, 64 };
 
 struct spx_tcs3430 {
 	struct i2c_client *client;
 	struct mutex lock;
 	int frame[4];
+	int frame_gain;
+	u8 gain_code;
 	unsigned long expires;
 	unsigned int read_mask;
 	bool frame_valid;
@@ -34,40 +40,81 @@ static int tcs_write(struct spx_tcs3430 *s, u8 reg, u8 value)
 	return i2c_smbus_write_byte_data(s->client, reg, value);
 }
 
+static int tcs_set_gain(struct spx_tcs3430 *s, u8 code)
+{
+	int ret;
+
+	ret = tcs_write(s, TCS_CFG1, code);
+	if (ret < 0)
+		return ret;
+	s->gain_code = code;
+	return 0;
+}
+
 static int tcs_sample(struct spx_tcs3430 *s, unsigned int channel, int *value)
 {
 	u8 raw[8];
-	int ret, stop;
+	int ret, stop, attempt, used_gain, y;
 	unsigned int i;
 
-	/* One conversion, no interrupt, no background sampling or wake lock. */
-	ret = tcs_write(s, TCS_ENABLE, 0);
-	if (ret < 0)
-		return ret;
-	ret = tcs_write(s, TCS_STATUS, 0x90);
-	if (ret < 0)
-		return ret;
-	ret = tcs_write(s, TCS_ENABLE, 3);
-	if (ret < 0)
-		goto power_off;
-	/* Autozero can precede the 100.08 ms integration cycle. */
-	msleep(120);
-	ret = i2c_smbus_read_byte_data(s->client, TCS_STATUS);
-	if (ret < 0)
-		goto power_off;
-	if (ret & 0x80) {
-		ret = -EOVERFLOW;
-		goto power_off;
-	}
-	ret = i2c_smbus_read_i2c_block_data(s->client, TCS_DATA, sizeof(raw), raw);
-	if (ret == sizeof(raw)) {
+	for (attempt = 0; attempt < 2; attempt++) {
+		used_gain = tcs_gains[s->gain_code & 3];
+		/* One conversion, no interrupt, no background sampling or wake lock. */
+		ret = tcs_write(s, TCS_ENABLE, 0);
+		if (ret < 0)
+			return ret;
+		ret = tcs_write(s, TCS_STATUS, 0x90);
+		if (ret < 0)
+			return ret;
+		ret = tcs_write(s, TCS_ENABLE, 3);
+		if (ret < 0)
+			goto power_off;
+		/* Autozero can precede the 100.08 ms integration cycle. */
+		msleep(120);
+		ret = i2c_smbus_read_byte_data(s->client, TCS_STATUS);
+		if (ret < 0)
+			goto power_off;
+		if (ret & 0x80) {
+			stop = tcs_write(s, TCS_ENABLE, 0);
+			if (stop < 0)
+				return stop;
+			if (s->gain_code > 0) {
+				ret = tcs_set_gain(s, s->gain_code - 1);
+				if (ret < 0)
+					return ret;
+				if (attempt == 0)
+					continue;
+			}
+			return -EOVERFLOW;
+		}
+		ret = i2c_smbus_read_i2c_block_data(s->client, TCS_DATA, sizeof(raw), raw);
+		stop = tcs_write(s, TCS_ENABLE, 0);
+		if (stop < 0)
+			return stop;
+		if (ret < 0)
+			return ret;
+		if (ret != sizeof(raw))
+			return -EIO;
 		for (i = 0; i < 4; i++)
 			s->frame[i] = raw[i * 2] | (raw[i * 2 + 1] << 8);
+		s->frame_gain = used_gain;
+		y = s->frame[1];
+		if (y > TCS_GAIN_HIGH_Y && s->gain_code > 0) {
+			ret = tcs_set_gain(s, s->gain_code - 1);
+			if (ret < 0)
+				return ret;
+			if (attempt == 0)
+				continue;
+		} else if (y < TCS_GAIN_LOW_Y && s->gain_code < 3) {
+			ret = tcs_set_gain(s, s->gain_code + 1);
+			if (ret < 0)
+				return ret;
+		}
 		*value = s->frame[channel];
-		ret = IIO_VAL_INT;
-	} else if (ret >= 0) {
-		ret = -EIO;
+		return IIO_VAL_INT;
 	}
+	return -EOVERFLOW;
+
 power_off:
 	stop = tcs_write(s, TCS_ENABLE, 0);
 	return stop < 0 ? stop : ret;
@@ -76,25 +123,26 @@ power_off:
 /* Consecutive channel reads share one conversion; repeated channels refresh it. */
 static int tcs_cached_sample(struct spx_tcs3430 *s, unsigned int channel, int *value)
 {
- int ret;
- if (!s->frame_valid || !time_before(jiffies, s->expires) ||
-     (s->read_mask & BIT(channel))) {
-  s->frame_valid = false;
-  ret = tcs_sample(s, channel, value);
-  if (ret != IIO_VAL_INT)
-   return ret;
-  s->frame_valid = true;
-  s->read_mask = 0;
-  s->expires = jiffies + msecs_to_jiffies(200);
- }
- *value = s->frame[channel];
- s->read_mask |= BIT(channel);
- return IIO_VAL_INT;
+	int ret;
+
+	if (!s->frame_valid || !time_before(jiffies, s->expires) ||
+	    (s->read_mask & BIT(channel))) {
+		s->frame_valid = false;
+		ret = tcs_sample(s, channel, value);
+		if (ret != IIO_VAL_INT)
+			return ret;
+		s->frame_valid = true;
+		s->read_mask = 0;
+		s->expires = jiffies + msecs_to_jiffies(200);
+	}
+	*value = s->frame[channel];
+	s->read_mask |= BIT(channel);
+	return IIO_VAL_INT;
 }
 
 static int tcs_read_raw(struct iio_dev *indio,
-		       const struct iio_chan_spec *chan,
-		       int *val, int *val2, long mask)
+			const struct iio_chan_spec *chan,
+			int *val, int *val2, long mask)
 {
 	struct spx_tcs3430 *s = iio_priv(indio);
 	int ret;
@@ -106,7 +154,9 @@ static int tcs_read_raw(struct iio_dev *indio,
 		mutex_unlock(&s->lock);
 		return ret;
 	case IIO_CHAN_INFO_HARDWAREGAIN:
-		*val = TCS_GAIN;
+		mutex_lock(&s->lock);
+		*val = s->frame_valid ? s->frame_gain : tcs_gains[s->gain_code & 3];
+		mutex_unlock(&s->lock);
 		return IIO_VAL_INT;
 	case IIO_CHAN_INFO_INT_TIME:
 		*val = 0;
@@ -148,7 +198,7 @@ static int tcs_probe(struct i2c_client *client)
 	int ret;
 	static const u8 config[][2] = {
 		{TCS_ENABLE, 0}, {TCS_ATIME, TCS_CYCLES - 1},
-		{TCS_CFG1, 2}, {TCS_CFG2, 4}, {TCS_CFG3, 0x0c},
+		{TCS_CFG1, TCS_GAIN_DEFAULT_CODE}, {TCS_CFG2, 4}, {TCS_CFG3, 0x0c},
 		{TCS_INTENAB, 0},
 	};
 	unsigned int i;
@@ -166,6 +216,8 @@ static int tcs_probe(struct i2c_client *client)
 		return -ENOMEM;
 	s = iio_priv(indio);
 	s->client = client;
+	s->gain_code = TCS_GAIN_DEFAULT_CODE;
+	s->frame_gain = tcs_gains[TCS_GAIN_DEFAULT_CODE];
 	mutex_init(&s->lock);
 	for (i = 0; i < ARRAY_SIZE(config); i++) {
 		ret = tcs_write(s, config[i][0], config[i][1]);

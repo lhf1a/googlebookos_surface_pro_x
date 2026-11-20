@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SPX Kernel Integration <noreply@localhost>
+Date: Fri, 20 Nov 2026 21:25:00 +0800
+Subject: [PATCH] clk: qcom: dispcc-sm8250: avoid parking MDP RCG at init
+
+On SC8180X (Surface Pro X SQ1/SQ2), UEFI leaves the internal eDP panel
+scanning out on disp_cc_mdss_mdp_clk_src during handoff. Using
+clk_rcg2_shared_ops parks the RCG at probe time before drm/msm takes over
+the display pipeline.
+
+Switch disp_cc_mdss_mdp_clk_src to clk_rcg2_shared_no_init_park_ops
+(exported by drivers/clk/qcom/clk-rcg2.c in Linux 6.18), preserving
+normal runtime enable/disable and s2idle parking behavior while leaving
+the bootloader clock untouched during registration.
+---
+ drivers/clk/qcom/dispcc-sm8250.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/clk/qcom/dispcc-sm8250.c b/drivers/clk/qcom/dispcc-sm8250.c
+--- a/drivers/clk/qcom/dispcc-sm8250.c
++++ b/drivers/clk/qcom/dispcc-sm8250.c
+@@ -565,7 +565,7 @@ static struct clk_rcg2 disp_cc_mdss_mdp_clk_src = {
+ 		.parent_data = disp_cc_parent_data_5,
+ 		.num_parents = ARRAY_SIZE(disp_cc_parent_data_5),
+ 		.flags = CLK_SET_RATE_PARENT,
+-		.ops = &clk_rcg2_shared_ops,
++		.ops = &clk_rcg2_shared_no_init_park_ops,
+ 	},
+ };
+ 
+-- 
+2.43.0

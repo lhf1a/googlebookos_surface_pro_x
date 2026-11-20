@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SPX Kernel Integration <noreply@localhost>
+Date: Fri, 20 Nov 2026 21:25:00 +0800
+Subject: [PATCH] drm/msm/dpu: count pending frame before encoder kickoff
+
+In dpu_crtc_commit_kickoff(), dpu_crtc->frame_pending was incremented
+after dpu_encoder_kickoff(). On fast command/video transitions the
+frame-done interrupt can fire and decrement frame_pending before
+dpu_encoder_kickoff() returns, causing frame_pending underflow or
+mismatched completion accounting.
+
+Count the pending frame via dpu_crtc_count_pending_frame() immediately
+before dpu_encoder_kickoff() in both clone mode and normal kickoff paths.
+---
+ drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c | 23 +++++++++++++++--------
+ 1 file changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+@@ -985,6 +985,19 @@ static int _dpu_crtc_wait_for_frame_done(struct drm_crtc *crtc)
+ 	return rc;
+ }
+ 
++/* Must precede the kickoff: the frame-done can be handled before it returns. */
++static void dpu_crtc_count_pending_frame(struct drm_crtc *crtc)
++{
++	struct dpu_crtc *dpu_crtc = to_dpu_crtc(crtc);
++
++	if (atomic_inc_return(&dpu_crtc->frame_pending) == 1) {
++		/* acquire bandwidth and other resources */
++		DRM_DEBUG_ATOMIC("crtc%d first commit\n", crtc->base.id);
++	} else {
++		DRM_DEBUG_ATOMIC("crtc%d commit\n", crtc->base.id);
++	}
++}
++
+ static int dpu_crtc_kickoff_clone_mode(struct drm_crtc *crtc)
+ {
+ 	struct drm_encoder *encoder;
+@@ -1010,6 +1023,8 @@ static int dpu_crtc_kickoff_clone_mode(struct drm_crtc *crtc)
+ 
+ 	dpu_vbif_clear_errors(dpu_kms);
+ 
++	dpu_crtc_count_pending_frame(crtc);
++
+ 	/*
+ 	 * Kickoff real time encoder last as it's the encoder that
+ 	 * will do the flush
+@@ -1068,15 +1083,11 @@ void dpu_crtc_commit_kickoff(struct drm_crtc *crtc)
+ 		dpu_vbif_clear_errors(dpu_kms);
++
++		dpu_crtc_count_pending_frame(crtc);
+ 
+ 		drm_for_each_encoder_mask(encoder, crtc->dev,
+ 				crtc->state->encoder_mask) {
+ 			dpu_encoder_kickoff(encoder);
+ 			dpu_encoder_start_frame_done_timer(encoder);
+ 		}
+ 	}
+-
+-	if (atomic_inc_return(&dpu_crtc->frame_pending) == 1) {
+-		/* acquire bandwidth and other resources */
+-		DRM_DEBUG_ATOMIC("crtc%d first commit\n", crtc->base.id);
+-	} else
+-		DRM_DEBUG_ATOMIC("crtc%d commit\n", crtc->base.id);
+ 
+-- 
+2.43.0

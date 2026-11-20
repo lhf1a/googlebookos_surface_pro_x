@@ -24,6 +24,7 @@ DEFAULT_PRIVATE = ROOT / 'private/build-inputs'
 DEFAULT_KERNEL_CONFIG = ROOT / 'configs/kernel-6.18-hybrid.config'
 DEFAULT_A6XX_PATCHES = ROOT / 'patches/drm-618-a6xx-upstream'
 DEFAULT_A6XX_MMIO_FIX_PATCHES = ROOT / 'patches/drm-618-a6xx-mmio-fix'
+DEFAULT_DPU_CRTC_KICKOFF_PATCHES = ROOT / 'patches/drm-618-dpu-crtc-kickoff'
 # In-tree kernel/edp-618 s2idle patches applied unconditionally in source mode.
 # Out-of-tree Type-C module patches (spx-qmp-lifecycle.patch and
 # spx-dwc3-ffs-ep0-dequeue.patch) are applied by scripts/build-spx-typec.py onto
@@ -1076,7 +1077,9 @@ def build(args, compile_kernel):
         if kernel_patches:
             extra_patches = ()
             if Path(kernel_patches).resolve() == DEFAULT_A6XX_PATCHES.resolve():
-                extra_patches = (DEFAULT_A6XX_MMIO_FIX_PATCHES, ROOT / "patches/drm-618-msm-submit",
+                extra_patches = (DEFAULT_A6XX_MMIO_FIX_PATCHES,
+                                 DEFAULT_DPU_CRTC_KICKOFF_PATCHES,
+                                 ROOT / "patches/drm-618-msm-submit",
                                  ROOT / "patches/drm-618-msm-vmbind-resv")
             patch_report = apply_kernel_patches(kernel_patches, extracted/'kernel', args.output, run,
                                                 external_source=extracted/'external',

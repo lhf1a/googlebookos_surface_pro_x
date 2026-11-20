@@ -31,7 +31,7 @@ delta = {'init': (mode, init.replace(marker, hook+marker)),
          'etc/spx-camera': (0o40755, b''), 'etc/spx-camera/modules': (0o40755, b''),
          'bin/spx-camera-boot': (0o100755, (root/'probe/camera/spx-camera-boot').read_bytes())}
 vermagic = set()
-for directory, names in ((args.sensor_modules, 'qcom_spmi-regulator camcc-sc8180x i2c-qcom-cci v4l2-async v4l2-fwnode v4l2-cci ov5693 ov13858'),
+for directory, names in ((args.sensor_modules, 'qcom_spmi-regulator camcc-sc8180x i2c-qcom-cci v4l2-async v4l2-fwnode v4l2-cci ov5693 ov13858 ov7251'),
                          (args.camss_modules, 'videobuf2-dma-sg qcom-camss')):
     for name in names.split():
         module = directory/(name+'.ko')
