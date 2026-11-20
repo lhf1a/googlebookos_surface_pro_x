@@ -127,7 +127,13 @@ class Sq2C2EncoderTests(unittest.TestCase):
         session_h = (ROOT / 'probe/video/sq2-v4l2-enc-session.h').read_text()
         self.assertIn('VIDIOC_S_SELECTION', session_h)
         self.assertIn('fillNv12FromRgba', session_h)
+        self.assertIn('padNv12Margins', session_h)
         self.assertIn('vld4q_u8', session_h)
+        self.assertLess(
+            session_h.index('capFmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE'),
+            session_h.index('VIDIOC_S_SELECTION'),
+            'VIDIOC_S_SELECTION must run after CAPTURE S_FMT so Venus does not reset crop width/height',
+        )
 
         intf_h = (ROOT / 'probe/video/sq2-c2-enc-interface.h').read_text()
         self.assertIn('C2MemoryUsage::CPU_READ', intf_h)

@@ -73,12 +73,6 @@ public:
         if (mOutStride < mOutCodedWidth) mOutStride = (mOutCodedWidth + 127u) & ~127u;
         mOutSizeImage = outFmt.fmt.pix_mp.plane_fmt[0].sizeimage;
 
-        v4l2_selection sel{};
-        sel.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-        sel.target = V4L2_SEL_TGT_CROP;
-        sel.r = {0, 0, p.width, p.height};
-        (void)ioctl(mFd, VIDIOC_S_SELECTION, &sel);
-
         v4l2_format capFmt{};
         capFmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
         capFmt.fmt.pix_mp.width = p.width;
@@ -89,6 +83,14 @@ public:
             closeSession();
             return false;
         }
+
+        // Apply OUTPUT crop AFTER both S_FMT calls because Venus venc_s_fmt(CAPTURE)
+        // resets inst->width/height to aligned dimensions.
+        v4l2_selection sel{};
+        sel.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+        sel.target = V4L2_SEL_TGT_CROP;
+        sel.r = {0, 0, p.width, p.height};
+        (void)ioctl(mFd, VIDIOC_S_SELECTION, &sel);
 
         v4l2_streamparm sp{};
         sp.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
@@ -395,6 +397,7 @@ public:
                     uvRow[x + 1] = static_cast<uint8_t>(std::clamp(v, 0, 255));
                 }
             }
+            padNv12Margins(dstY, dstUV, w, h);
             return;
         }
 
@@ -414,6 +417,7 @@ public:
                 }
             }
         }
+        padNv12Margins(dstY, dstUV, w, h);
     }
 
     void fillNv12FromYuv(void *dstBuf, const uint8_t *yPtr, const uint8_t *uPtr, const uint8_t *vPtr,
@@ -435,6 +439,7 @@ public:
                 memcpy(dstUV + static_cast<size_t>(y) * mOutStride,
                        uPtr + static_cast<ptrdiff_t>(y) * uRowInc, uvW * 2);
             }
+            padNv12Margins(dstY, dstUV, w, h);
             return;
         }
         for (uint32_t y = 0; y < uvH; ++y) {
@@ -446,10 +451,53 @@ public:
                 uvRow[2 * x + 1] = vRow[static_cast<ptrdiff_t>(x) * vColInc];
             }
         }
+        padNv12Margins(dstY, dstUV, w, h);
     }
 
 private:
     struct MmapBuf { void *ptr = nullptr; size_t len = 0; };
+
+    void padNv12Margins(uint8_t *dstY, uint8_t *dstUV, uint32_t w, uint32_t h) const {
+        if (w == 0 || h == 0) {
+            memset(dstY, 16, static_cast<size_t>(mOutStride) * mOutCodedHeight);
+            memset(dstUV, 128, static_cast<size_t>(mOutStride) * (mOutCodedHeight / 2));
+            return;
+        }
+        if (w < mOutStride) {
+            const size_t padW = mOutStride - w;
+            for (uint32_t y = 0; y < h; ++y) {
+                uint8_t *row = dstY + static_cast<size_t>(y) * mOutStride;
+                memset(row + w, row[w - 1], padW);
+            }
+            const uint32_t uvW2 = (w & ~1u);
+            const uint32_t uvH = (h + 1u) >> 1;
+            if (uvW2 < mOutStride) {
+                for (uint32_t y = 0; y < uvH; ++y) {
+                    uint8_t *row = dstUV + static_cast<size_t>(y) * mOutStride;
+                    uint8_t u = (uvW2 >= 2) ? row[uvW2 - 2] : 128;
+                    uint8_t v = (uvW2 >= 2) ? row[uvW2 - 1] : 128;
+                    for (uint32_t x = uvW2; x + 1 < mOutStride; x += 2) {
+                        row[x] = u;
+                        row[x + 1] = v;
+                    }
+                }
+            }
+        }
+        if (h < mOutCodedHeight) {
+            const uint8_t *lastY = dstY + static_cast<size_t>(h - 1) * mOutStride;
+            for (uint32_t y = h; y < mOutCodedHeight; ++y) {
+                memcpy(dstY + static_cast<size_t>(y) * mOutStride, lastY, mOutStride);
+            }
+            const uint32_t uvH = (h + 1u) >> 1;
+            const uint32_t codedUvH = mOutCodedHeight >> 1;
+            if (uvH > 0 && uvH < codedUvH) {
+                const uint8_t *lastUV = dstUV + static_cast<size_t>(uvH - 1) * mOutStride;
+                for (uint32_t y = uvH; y < codedUvH; ++y) {
+                    memcpy(dstUV + static_cast<size_t>(y) * mOutStride, lastUV, mOutStride);
+                }
+            }
+        }
+    }
 
     static uint32_t toV4l2Format(Sq2EncCodec c) {
         switch (c) {
