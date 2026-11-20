@@ -22,11 +22,11 @@ int main(int argc,char** argv) {
     auto load=reinterpret_cast<AIMapper_Error(*)(AIMapper**)>(dlsym(lib,"AIMapper_loadIMapper"));
     AIMapper* m=nullptr;assert(load && load(&m)==0);
     auto allocator=ndk::SharedRefBase::make<QuestAllocator>();
-    for(int test:{1,0x32315659,33,35,0x10001}) {
-        int format=test==0x10001?1:test;
+    for(int test:{1,0x32315659,33,35,0x10001,0x10303}) {
+        int format=(test==0x10001 || test==0x10303)?1:test;
         aa::BufferDescriptorInfo d{};d.width=format==33?1048576:640;d.height=format==33?1:480;d.layerCount=1;
         d.format=static_cast<aidl::android::hardware::graphics::common::PixelFormat>(format);
-        d.usage=static_cast<aidl::android::hardware::graphics::common::BufferUsage>(test==0x10001?0x10033:0x33);
+        d.usage=static_cast<aidl::android::hardware::graphics::common::BufferUsage>(test==0x10001?0x10033:(test==0x10303?0x10303:0x33));
         aa::AllocationResult a;auto r=allocator->allocate2(d,1,&a);
         if(!r.isOk()){printf("allocate format=%x: %s\n",format,r.getDescription().c_str());return 2;}
         assert(a.buffers.size()==1 && a.stride>=d.width);

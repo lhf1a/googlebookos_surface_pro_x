@@ -84,7 +84,7 @@ if a.venus_decoder:
     if not a.reference_overlay:
         assert hashlib.sha256(dsdt.read_bytes()).hexdigest() == '9d033e8d650e27f0f7e67b98addc388927d5abe80b99cd800dcda6e88d22e544'
     assert prop('/', 'interrupt-parent') == '1'
-    irq_child = 'interrupts = <0 174 4>; video-decoder { compatible = "venus-decoder"; };'
+    irq_child = 'interrupts = <0 174 4>; video-decoder { compatible = "venus-decoder"; }; video-encoder { compatible = "venus-encoder"; };'
 dts = f'''/dts-v1/;
 /plugin/;
 / {{ fragment@0 {{ target-path = "/soc@0";
