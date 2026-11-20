@@ -1,0 +1,47 @@
+#!/bin/busybox sh
+# Stage the native Surface Pro X GNSS AIDL V4 HAL when Surface Pro X modem is present.
+set -eu
+case " $(cat /proc/cmdline) " in *' spx.gnss=0 '*|*' sq2.rescue=1 '*) exit 0;; esac
+grep -q 'microsoft,surface-pro-x' /sys/firmware/devicetree/base/compatible || exit 0
+
+has_modem=0
+for r in /sys/class/remoteproc/remoteproc*; do
+    [ -f "$r/name" ] || continue
+    case "$(tr -d '\0\r\n' < "$r/name" 2>/dev/null || true)" in
+        *modem*|*mpss*) has_modem=1; break ;;
+    esac
+done
+[ "$has_modem" = 1 ] || exit 0
+
+source=/etc/spx-gnss
+vendor=/newroot/vendor
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+test -x "$source/android.hardware.gnss-service.example"
+
+mkdir -p "$vendor/bin/hw" "$vendor/etc/vintf/manifest" "$vendor/etc/init" "$vendor/etc/permissions"
+cp "$source/android.hardware.gnss-service.example" "$vendor/bin/hw/android.hardware.gnss-service.example"
+chmod 755 "$vendor/bin/hw/android.hardware.gnss-service.example"
+cp "$source/android.hardware.gnss-service.spx.xml" "$vendor/etc/vintf/manifest/android.hardware.gnss-service.spx.xml"
+chmod 644 "$vendor/etc/vintf/manifest/android.hardware.gnss-service.spx.xml"
+cp "$source/android.hardware.gnss-service.spx.rc" "$vendor/etc/init/android.hardware.gnss-service.spx.rc"
+chmod 644 "$vendor/etc/init/android.hardware.gnss-service.spx.rc"
+
+if [ ! -f "$vendor/etc/permissions/android.hardware.location.gps.xml" ]; then
+    cat > "$vendor/etc/permissions/spx-gnss.xml" <<'XML'
+<permissions>
+  <feature name="android.hardware.location" />
+  <feature name="android.hardware.location.gps" />
+</permissions>
+XML
+    chmod 644 "$vendor/etc/permissions/spx-gnss.xml"
+fi
+
+features=/newroot/system/etc/permissions/features.xml
+if [ -f "$features" ] && grep -q 'android\.hardware\.location\.gps' "$features"; then
+    staged=/newroot/debug_ramdisk/spx-gnss-features.xml
+    sed '/<unavailable-feature[[:space:]]\+name="android\.hardware\.location\.gps"[[:space:]]*\/>/d' "$features" > "$staged"
+    chmod 644 "$staged"
+    mount --bind "$staged" "$features"
+fi
+
+echo SPX_GNSS_HAL_STAGED

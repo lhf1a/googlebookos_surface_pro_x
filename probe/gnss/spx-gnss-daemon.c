@@ -153,6 +153,17 @@ static int daemon_start_loc(void *ctx, uint8_t session_id, uint32_t interval_ms)
 		return -1;
 	}
 
+	/* Surface Pro X MPSS may boot with MI engine lock active; clear it so
+	 * mobile-initiated GNSS sessions do not stall with PHONE_OFFLINE (7).
+	 */
+	rc = spx_qmi_loc_set_engine_lock(&st->loc, SPX_QMI_LOC_LOCK_NONE,
+					 SPX_GNSS_QMI_TIMEOUT_MS, &res);
+	if (rc != 0) {
+		fprintf(stderr,
+			"spx-gnss: QMI_LOC_SET_ENGINE_LOCK(NONE) warning (rc=%d result=%u error=%u)\n",
+			rc, res.result, res.error);
+	}
+
 	/* Set NMEA sentence types (warn and continue if unsupported by firmware). */
 	rc = spx_qmi_loc_set_nmea_types(&st->loc, st->nmea_mask,
 					SPX_GNSS_QMI_TIMEOUT_MS, &res);

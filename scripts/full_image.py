@@ -817,7 +817,7 @@ def install_userdata_growth(records, bodies, compiled_resize=None):
         records['bin/'+name]=new_record(0o100755)
 
 def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modules=None, camera=None, sensors=None, anonymous=False,
-                     runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None, typec=None, ksu_userspace=None,
+                     runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None, typec=None, gnss=None, ksu_userspace=None,
                      ota_version=None, source_commit=None, super_sha256=''):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
@@ -958,6 +958,9 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
     if typec is not None:
         from full_image_typec import install
         install(records, bodies, typec, new_record)
+    if gnss is not None:
+        from full_image_gnss import install as install_gnss
+        install_gnss(records, bodies, gnss, new_record)
     if anonymous:
         from full_image_anonymous import apply as anonymize
         privacy = anonymize(records, bodies, new_record)
@@ -1050,6 +1053,13 @@ def build(args, compile_kernel):
     if not getattr(args, 'without_sensors', False):
         from full_image_sensors import load
         sensors = load(getattr(args, 'sensor_inputs', None) or private/'sensors')
+    gnss = None
+    if not getattr(args, 'without_gnss', False):
+        from full_image_gnss import HAL_TARGET as GNSS_HAL_TARGET, load as load_gnss
+        gnss = load_gnss(
+            gnss_hal_path=getattr(args, 'gnss_hal', None),
+            compiled_hal=compiled_helpers.get(GNSS_HAL_TARGET),
+        )
     compiled=reuse['kernel'] if reuse else None
     kernel_build_dir = None
     kernel_cross = None
@@ -1203,6 +1213,7 @@ def build(args, compile_kernel):
         sensors=sensors,
         suspend=suspend,
         typec=typec,
+        gnss=gnss,
         anonymous=True,
         runtime_replacements=replacements,
         graphics_inputs=graphics_inputs,
@@ -1258,6 +1269,9 @@ def build(args, compile_kernel):
         camera_enabled=camera is not None,
         camera_provider_sha256=_sha256(camera['provider']) if camera else None,
         camera_modules_rebuilt=bool(camera is not None and compiled and not reuse),
+        gnss_enabled=gnss is not None,
+        gnss_aidl_version=(4 if gnss is not None else None),
+        gnss_hal_sha256=_sha256(gnss) if gnss is not None else None,
         components_reused=bool(reuse),
         kernel_compiled_this_run=bool(compiled and not reuse),
         esp_only=esp_only,

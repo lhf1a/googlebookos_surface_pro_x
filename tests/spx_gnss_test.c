@@ -645,6 +645,92 @@ static void test_on_demand_session_state_machine(void)
 	assert(!sess.active && mock.starts == 3);
 }
 
+static void test_qmi_loc_control_and_sv_extensions(void)
+{
+	uint8_t buf[128];
+	size_t n;
+
+	n = spx_qmi_loc_encode_set_engine_lock(buf, sizeof(buf), 10u,
+					       SPX_QMI_LOC_LOCK_NONE);
+	assert(n == 14u);
+	assert(buf[0] == 0x00u && buf[3] == 0x3Au && buf[4] == 0x00u);
+	assert(buf[7] == 0x01u && buf[10] == 0x01u);
+	assert(spx_qmi_loc_encode_set_engine_lock(buf, sizeof(buf), 10u, 99u) == 0);
+
+	n = spx_qmi_loc_encode_set_operation_mode(buf, sizeof(buf), 11u,
+						  SPX_QMI_LOC_OPMODE_STANDALONE);
+	assert(n == 14u);
+	assert(buf[3] == 0x4Au && buf[10] == 0x04u);
+
+	n = spx_qmi_loc_encode_inject_utc_time(buf, sizeof(buf), 12u,
+					       1700000000000ULL, 2000u, 1);
+	assert(n == 32u);
+	assert(buf[3] == 0x38u && buf[7] == 0x01u && buf[18] == 0x02u);
+
+	n = spx_qmi_loc_encode_inject_position(buf, sizeof(buf), 13u,
+					       37.422, -122.084, 50.0f);
+	assert(n == 36u);
+	assert(buf[3] == 0x39u && buf[7] == 0x10u);
+	assert(spx_qmi_loc_encode_inject_position(buf, sizeof(buf), 13u,
+						  91.0, 0.0, 10.0f) == 0);
+
+	n = spx_qmi_loc_encode_delete_all_aiding(buf, sizeof(buf), 14u);
+	assert(n == 11u);
+	assert(buf[3] == 0x44u && buf[7] == 0x01u && buf[10] == 0x01u);
+
+	/* Live SQ2 MPSS coarse CELLID packet: status=1, tech=CELLID, ellipse unc ~1155km */
+	const uint8_t cell_pos[] = {
+		0x04, 0x08, 0x00, 0x24, 0x00, 32u, 0x00,
+		0x01, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00,
+		0x02, 0x01, 0x00, 0x01,
+		0x13, 0x04, 0x00, 0xe4, 0x01, 0x8d, 0x49,
+		0x14, 0x04, 0x00, 0xe4, 0x01, 0x8d, 0x49,
+		0x23, 0x04, 0x00, 0x02, 0x00, 0x00, 0x00
+	};
+	struct spx_qmi_loc_position pos;
+	assert(spx_qmi_loc_decode_position_ind(cell_pos, sizeof(cell_pos), &pos) == 0);
+	assert(pos.session_status == SPX_QMI_LOC_SESSION_IN_PROGRESS);
+	assert(!pos.has_hor_unc_circular);
+	assert(pos.has_hor_unc_ellipse_minor && pos.has_hor_unc_ellipse_major);
+	assert(pos.hor_unc_ellipse_major > 1000000.0f);
+	assert(pos.has_technology && pos.technology == SPX_QMI_LOC_TECH_CELLULAR);
+
+	/* Live SQ2 MPSS SV Info indication: altitude_assumed=0, no SVs yet. */
+	const uint8_t empty_sv[] = {
+		0x04, 0x0c, 0x00, 0x25, 0x00, 0x04, 0x00, 0x01, 0x01, 0x00, 0x00
+	};
+	struct spx_qmi_loc_sv_info sv_info;
+	assert(spx_qmi_loc_decode_sv_info_ind(empty_sv, sizeof(empty_sv),
+					      &sv_info) == 0);
+	assert(sv_info.has_altitude_assumed && !sv_info.altitude_assumed);
+	assert(sv_info.count == 0);
+
+	/* Non-empty SV Info with 1 GPS satellite (28-byte entry). */
+	uint8_t one_sv[7u + 4u + 4u + 28u];
+	memset(one_sv, 0, sizeof(one_sv));
+	one_sv[0] = 0x04;
+	one_sv[3] = 0x25;
+	one_sv[5] = (uint8_t)(sizeof(one_sv) - 7u);
+	one_sv[7] = 0x01; one_sv[8] = 0x01; one_sv[10] = 0x01;
+	one_sv[11] = 0x10; one_sv[12] = 29u; one_sv[14] = 1u;
+	uint8_t *e = &one_sv[15];
+	e[0] = 0xEB;
+	e[4] = SPX_QMI_LOC_SYSTEM_GPS;
+	e[8] = 12u;
+	e[11] = SPX_QMI_LOC_SV_STATUS_TRACKING;
+	float elev = 45.0f, az = 120.0f, snr = 34.5f;
+	memcpy(e + 16, &elev, 4);
+	memcpy(e + 20, &az, 4);
+	memcpy(e + 24, &snr, 4);
+	assert(spx_qmi_loc_decode_sv_info_ind(one_sv, sizeof(one_sv),
+					      &sv_info) == 0);
+	assert(sv_info.has_altitude_assumed && sv_info.altitude_assumed);
+	assert(sv_info.count == 1u);
+	assert(sv_info.svs[0].system == SPX_QMI_LOC_SYSTEM_GPS);
+	assert(sv_info.svs[0].sv_id == 12u);
+	assert(sv_info.svs[0].snr_dbhz > 34.0f && sv_info.svs[0].snr_dbhz < 35.0f);
+}
+
 int main(void)
 {
 	test_qmi_loc_request_vectors();
@@ -654,6 +740,7 @@ int main(void)
 	test_nmea_parser_and_aggregator();
 	test_malformed_and_fuzz_inputs();
 	test_on_demand_session_state_machine();
+	test_qmi_loc_control_and_sv_extensions();
 	puts("PASS spx_gnss_test: QMI LOC v2 vectors, QRTR ctrl, NMEA-0183 fuzz, on-demand session");
 	return 0;
 }

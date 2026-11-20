@@ -67,6 +67,20 @@ static void put_le64(uint8_t *p, uint64_t v)
 	put_le32(p + 4, (uint32_t)(v >> 32));
 }
 
+static void put_le_f32(uint8_t *p, float v)
+{
+	uint32_t bits;
+	memcpy(&bits, &v, sizeof(bits));
+	put_le32(p, bits);
+}
+
+static void put_le_f64(uint8_t *p, double v)
+{
+	uint64_t bits;
+	memcpy(&bits, &v, sizeof(bits));
+	put_le64(p, bits);
+}
+
 static int64_t mono_ms(void)
 {
 	struct timespec ts;
@@ -196,6 +210,122 @@ size_t spx_qmi_loc_encode_stop(uint8_t *buf, size_t cap, uint16_t txn,
 	if (pos == 0)
 		return 0;
 	write_qmi_header(buf, SPX_QMI_FLAG_REQUEST, txn, SPX_QMI_LOC_STOP,
+			 (uint16_t)(pos - SPX_QMI_HEADER_LEN));
+	return pos;
+}
+
+static size_t encode_u32_tlv1(uint8_t *buf, size_t cap, uint16_t txn,
+			      uint16_t msg, uint32_t val)
+{
+	uint8_t u32_buf[4];
+	size_t pos;
+
+	if (!buf || txn == 0 || cap < SPX_QMI_HEADER_LEN + 7u)
+		return 0;
+	put_le32(u32_buf, val);
+	pos = append_tlv(buf, cap, SPX_QMI_HEADER_LEN, 0x01u, u32_buf, 4u);
+	if (pos == 0)
+		return 0;
+	write_qmi_header(buf, SPX_QMI_FLAG_REQUEST, txn, msg,
+			 (uint16_t)(pos - SPX_QMI_HEADER_LEN));
+	return pos;
+}
+
+size_t spx_qmi_loc_encode_set_engine_lock(uint8_t *buf, size_t cap,
+					  uint16_t txn, uint32_t lock_type)
+{
+	if (lock_type < SPX_QMI_LOC_LOCK_NONE ||
+	    lock_type > SPX_QMI_LOC_LOCK_ALL)
+		return 0;
+	return encode_u32_tlv1(buf, cap, txn, SPX_QMI_LOC_SET_ENGINE_LOCK,
+			       lock_type);
+}
+
+size_t spx_qmi_loc_encode_set_operation_mode(uint8_t *buf, size_t cap,
+					     uint16_t txn, uint32_t mode)
+{
+	if (mode < SPX_QMI_LOC_OPMODE_DEFAULT ||
+	    mode > SPX_QMI_LOC_OPMODE_CELLID)
+		return 0;
+	return encode_u32_tlv1(buf, cap, txn, SPX_QMI_LOC_SET_OPERATION_MODE,
+			       mode);
+}
+
+size_t spx_qmi_loc_encode_inject_utc_time(uint8_t *buf, size_t cap,
+					  uint16_t txn, uint64_t utc_ms,
+					  uint32_t uncertainty_ms,
+					  int32_t time_source)
+{
+	uint8_t u64_buf[8];
+	uint8_t u32_buf[4];
+	size_t pos = SPX_QMI_HEADER_LEN;
+
+	if (!buf || txn == 0 || cap < SPX_QMI_HEADER_LEN + 25u)
+		return 0;
+	put_le64(u64_buf, utc_ms);
+	pos = append_tlv(buf, cap, pos, 0x01u, u64_buf, 8u);
+	if (pos == 0)
+		return 0;
+	put_le32(u32_buf, uncertainty_ms);
+	pos = append_tlv(buf, cap, pos, 0x02u, u32_buf, 4u);
+	if (pos == 0)
+		return 0;
+	put_le32(u32_buf, (uint32_t)time_source);
+	pos = append_tlv(buf, cap, pos, 0x10u, u32_buf, 4u);
+	if (pos == 0)
+		return 0;
+	write_qmi_header(buf, SPX_QMI_FLAG_REQUEST, txn,
+			 SPX_QMI_LOC_INJECT_UTC_TIME,
+			 (uint16_t)(pos - SPX_QMI_HEADER_LEN));
+	return pos;
+}
+
+size_t spx_qmi_loc_encode_inject_position(uint8_t *buf, size_t cap,
+					  uint16_t txn, double latitude,
+					  double longitude,
+					  float hor_unc_circular)
+{
+	uint8_t f64_buf[8];
+	uint8_t f32_buf[4];
+	size_t pos = SPX_QMI_HEADER_LEN;
+
+	if (!buf || txn == 0 || !isfinite(latitude) || !isfinite(longitude) ||
+	    latitude < -90.0 || latitude > 90.0 ||
+	    longitude < -180.0 || longitude > 180.0 ||
+	    !isfinite(hor_unc_circular) || hor_unc_circular < 0.0f ||
+	    cap < SPX_QMI_HEADER_LEN + 29u)
+		return 0;
+	put_le_f64(f64_buf, latitude);
+	pos = append_tlv(buf, cap, pos, 0x10u, f64_buf, 8u);
+	if (pos == 0)
+		return 0;
+	put_le_f64(f64_buf, longitude);
+	pos = append_tlv(buf, cap, pos, 0x11u, f64_buf, 8u);
+	if (pos == 0)
+		return 0;
+	put_le_f32(f32_buf, hor_unc_circular);
+	pos = append_tlv(buf, cap, pos, 0x12u, f32_buf, 4u);
+	if (pos == 0)
+		return 0;
+	write_qmi_header(buf, SPX_QMI_FLAG_REQUEST, txn,
+			 SPX_QMI_LOC_INJECT_POSITION,
+			 (uint16_t)(pos - SPX_QMI_HEADER_LEN));
+	return pos;
+}
+
+size_t spx_qmi_loc_encode_delete_all_aiding(uint8_t *buf, size_t cap,
+					    uint16_t txn)
+{
+	uint8_t del_all = 1u;
+	size_t pos;
+
+	if (!buf || txn == 0 || cap < SPX_QMI_HEADER_LEN + 4u)
+		return 0;
+	pos = append_tlv(buf, cap, SPX_QMI_HEADER_LEN, 0x01u, &del_all, 1u);
+	if (pos == 0)
+		return 0;
+	write_qmi_header(buf, SPX_QMI_FLAG_REQUEST, txn,
+			 SPX_QMI_LOC_DELETE_ASSISTANCE_DATA,
 			 (uint16_t)(pos - SPX_QMI_HEADER_LEN));
 	return pos;
 }
@@ -430,6 +560,24 @@ int spx_qmi_loc_decode_position_ind(const uint8_t *buf, size_t len,
 				return -1;
 			p.has_hor_unc_circular = true;
 			break;
+		case 0x13u: /* Horizontal Uncertainty Elliptical Minor (float, m) */
+			if (tlen != 4u)
+				return -1;
+			p.hor_unc_ellipse_minor = get_le_f32(v);
+			if (!isfinite(p.hor_unc_ellipse_minor) ||
+			    p.hor_unc_ellipse_minor < 0.0f)
+				return -1;
+			p.has_hor_unc_ellipse_minor = true;
+			break;
+		case 0x14u: /* Horizontal Uncertainty Elliptical Major (float, m) */
+			if (tlen != 4u)
+				return -1;
+			p.hor_unc_ellipse_major = get_le_f32(v);
+			if (!isfinite(p.hor_unc_ellipse_major) ||
+			    p.hor_unc_ellipse_major < 0.0f)
+				return -1;
+			p.has_hor_unc_ellipse_major = true;
+			break;
 		case 0x18u: /* Horizontal Speed (float, m/s) */
 			if (tlen != 4u)
 				return -1;
@@ -547,6 +695,74 @@ int spx_qmi_loc_decode_position_ind(const uint8_t *buf, size_t len,
 		return -1;
 
 	*out = p;
+	return 0;
+}
+
+int spx_qmi_loc_decode_sv_info_ind(const uint8_t *buf, size_t len,
+				   struct spx_qmi_loc_sv_info *out)
+{
+	uint8_t seen[256] = {0};
+	struct spx_qmi_loc_sv_info info;
+	size_t pos;
+
+	if (!buf || !out || len < SPX_QMI_HEADER_LEN)
+		return -1;
+	if (buf[0] != SPX_QMI_FLAG_INDICATION ||
+	    get_le16(buf + 3) != SPX_QMI_LOC_EVENT_GNSS_SV_INFO_IND ||
+	    get_le16(buf + 5) != len - SPX_QMI_HEADER_LEN)
+		return -1;
+
+	memset(&info, 0, sizeof(info));
+
+	for (pos = SPX_QMI_HEADER_LEN; pos < len;) {
+		uint8_t type;
+		uint16_t tlen;
+		const uint8_t *v;
+
+		if (len - pos < 3u)
+			return -1;
+		type = buf[pos];
+		tlen = get_le16(buf + pos + 1);
+		pos += 3u;
+		if (tlen > len - pos || seen[type])
+			return -1;
+		seen[type] = 1;
+		v = buf + pos;
+
+		if (type == 0x01u) {
+			if (tlen != 1u)
+				return -1;
+			info.altitude_assumed = (v[0] != 0);
+			info.has_altitude_assumed = true;
+		} else if (type == 0x10u) {
+			/* uint8 count + count * 28-byte SV struct */
+			uint8_t count;
+			if (tlen < 1u)
+				return -1;
+			count = v[0];
+			if (tlen != (uint16_t)(1u + 28u * count))
+				return -1;
+			info.count = count > SPX_QMI_LOC_MAX_SATS_USED
+					     ? (uint8_t)SPX_QMI_LOC_MAX_SATS_USED
+					     : count;
+			for (uint8_t i = 0; i < info.count; i++) {
+				const uint8_t *e = v + 1u + 28u * i;
+				struct spx_qmi_loc_sv_entry *sv = &info.svs[i];
+				sv->valid_mask = get_le32(e + 0);
+				sv->system = get_le32(e + 4);
+				sv->sv_id = get_le16(e + 8);
+				sv->health_status = e[10];
+				sv->satellite_status = get_le32(e + 11);
+				sv->nav_data_mask = e[15];
+				sv->elevation_deg = get_le_f32(e + 16);
+				sv->azimuth_deg = get_le_f32(e + 20);
+				sv->snr_dbhz = get_le_f32(e + 24);
+			}
+		}
+		pos += tlen;
+	}
+
+	*out = info;
 	return 0;
 }
 
@@ -893,6 +1109,105 @@ int spx_qmi_loc_stop(struct spx_qmi_loc_client *client, uint8_t session_id,
 		return -1;
 	return qmi_exchange(client, req, len, txn, SPX_QMI_LOC_STOP,
 			    timeout_ms, qmi_res);
+}
+
+int spx_qmi_loc_set_engine_lock(struct spx_qmi_loc_client *client,
+				uint32_t lock_type, int timeout_ms,
+				struct spx_qmi_result *qmi_res)
+{
+	uint8_t req[32];
+	uint16_t txn;
+	size_t len;
+
+	if (!client || !client->connected)
+		return -1;
+	txn = alloc_txn(client);
+	len = spx_qmi_loc_encode_set_engine_lock(req, sizeof(req), txn,
+						 lock_type);
+	if (len == 0)
+		return -1;
+	return qmi_exchange(client, req, len, txn, SPX_QMI_LOC_SET_ENGINE_LOCK,
+			    timeout_ms, qmi_res);
+}
+
+int spx_qmi_loc_set_operation_mode(struct spx_qmi_loc_client *client,
+				   uint32_t mode, int timeout_ms,
+				   struct spx_qmi_result *qmi_res)
+{
+	uint8_t req[32];
+	uint16_t txn;
+	size_t len;
+
+	if (!client || !client->connected)
+		return -1;
+	txn = alloc_txn(client);
+	len = spx_qmi_loc_encode_set_operation_mode(req, sizeof(req), txn,
+						    mode);
+	if (len == 0)
+		return -1;
+	return qmi_exchange(client, req, len, txn,
+			    SPX_QMI_LOC_SET_OPERATION_MODE, timeout_ms,
+			    qmi_res);
+}
+
+int spx_qmi_loc_inject_utc_time(struct spx_qmi_loc_client *client,
+				uint64_t utc_ms, uint32_t uncertainty_ms,
+				int32_t time_source, int timeout_ms,
+				struct spx_qmi_result *qmi_res)
+{
+	uint8_t req[64];
+	uint16_t txn;
+	size_t len;
+
+	if (!client || !client->connected)
+		return -1;
+	txn = alloc_txn(client);
+	len = spx_qmi_loc_encode_inject_utc_time(req, sizeof(req), txn, utc_ms,
+						 uncertainty_ms, time_source);
+	if (len == 0)
+		return -1;
+	return qmi_exchange(client, req, len, txn, SPX_QMI_LOC_INJECT_UTC_TIME,
+			    timeout_ms, qmi_res);
+}
+
+int spx_qmi_loc_inject_position(struct spx_qmi_loc_client *client,
+				double latitude, double longitude,
+				float hor_unc_circular, int timeout_ms,
+				struct spx_qmi_result *qmi_res)
+{
+	uint8_t req[64];
+	uint16_t txn;
+	size_t len;
+
+	if (!client || !client->connected)
+		return -1;
+	txn = alloc_txn(client);
+	len = spx_qmi_loc_encode_inject_position(req, sizeof(req), txn,
+						 latitude, longitude,
+						 hor_unc_circular);
+	if (len == 0)
+		return -1;
+	return qmi_exchange(client, req, len, txn, SPX_QMI_LOC_INJECT_POSITION,
+			    timeout_ms, qmi_res);
+}
+
+int spx_qmi_loc_delete_all_aiding(struct spx_qmi_loc_client *client,
+				  int timeout_ms,
+				  struct spx_qmi_result *qmi_res)
+{
+	uint8_t req[32];
+	uint16_t txn;
+	size_t len;
+
+	if (!client || !client->connected)
+		return -1;
+	txn = alloc_txn(client);
+	len = spx_qmi_loc_encode_delete_all_aiding(req, sizeof(req), txn);
+	if (len == 0)
+		return -1;
+	return qmi_exchange(client, req, len, txn,
+			    SPX_QMI_LOC_DELETE_ASSISTANCE_DATA, timeout_ms,
+			    qmi_res);
 }
 
 int spx_qmi_loc_recv(struct spx_qmi_loc_client *client, uint8_t *buf,

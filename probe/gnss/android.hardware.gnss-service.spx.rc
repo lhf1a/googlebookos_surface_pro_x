@@ -1,0 +1,11 @@
+on post-fs
+    restorecon /vendor/bin/hw/android.hardware.gnss-service.example
+    restorecon /vendor/etc/vintf/manifest/android.hardware.gnss-service.spx.xml
+    restorecon /vendor/etc/init/android.hardware.gnss-service.spx.rc
+    restorecon /vendor/etc/permissions/android.hardware.location.gps.xml
+
+service vendor.gnss-default /vendor/bin/hw/android.hardware.gnss-service.example
+    class hal
+    user gps
+    group gps
+    interface aidl android.hardware.gnss.IGnss/default
