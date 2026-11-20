@@ -12,7 +12,7 @@
              (!QuestGralloc::yuvFormat(int(d.format)) || (!(d.width&1) && !(d.height&1))) &&
 -            !(usage&~(0x1b33ULL|external_display|uint64_t(aidl::android::hardware::graphics::common::BufferUsage::VIDEO_DECODER)|qti_alloc_ubwc|qti_uncached)) && (!read || read==2 || read==3) && (!write || write==0x20 || write==0x30) &&
 +            !(usage&~(0x1b33ULL|external_display|video_encoder|uint64_t(aidl::android::hardware::graphics::common::BufferUsage::VIDEO_DECODER)|qti_alloc_ubwc|qti_uncached)) && (!read || read==2 || read==3) && (!write || write==0x20 || write==0x30) &&
-+            (!(usage&video_encoder) || (int(d.format)==1 && usage==0x10033)) &&
++            (!(usage&video_encoder) || (int(d.format)==1 && !(usage&~(0x1b33ULL|video_encoder)))) &&
              (!gralloc::IsUBwcEnabled(int(d.format),usage) ||
               (!QuestGralloc::yuvFormat(int(d.format)) && !(usage&0xff)));
      }

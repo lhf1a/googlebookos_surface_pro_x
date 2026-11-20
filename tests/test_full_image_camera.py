@@ -2,6 +2,8 @@
 import gzip
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -43,8 +45,11 @@ class CameraAssembly(unittest.TestCase):
             for relative in camera.GRAPHICS:
                 bodies[camera.PREFIX+"root/"+relative] = b"old graphics"
             checksum = camera.PREFIX+"SHA256SUMS"
+            installed_checksum = camera.PREFIX+"INSTALLED_SHA256SUMS"
             bodies[checksum] = b"".join((camera.sha(b"old graphics")+"  root/"+n+"\n").encode()
                                         for n in camera.GRAPHICS)
+            bodies[installed_checksum] = b"".join((camera.sha(b"old graphics")+"  "+n+"\n").encode()
+                                                  for n in camera.GRAPHICS)
             for name, data in bodies.items():
                 p = runtime/"files"/name
                 p.parent.mkdir(parents=True, exist_ok=True)
@@ -67,15 +72,24 @@ class CameraAssembly(unittest.TestCase):
             self.assertEqual(result["etc/shadow"], bodies["etc/shadow"])
             self.assertEqual(result["bin/dropbear"], bodies["bin/dropbear"])
             self.assertIn("ov7251.ko", camera.payload_paths())
-            for name, target in camera.payload_paths().items():
+            for target, name in camera.install_targets().items():
                 self.assertEqual(result[target], files[name])
+            self.assertEqual(
+                result[camera.PREFIX+"root/lib64/hw/mapper.quest2.so"],
+                files["mapper.quest2.so"],
+            )
+            self.assertEqual(
+                result[camera.PREFIX+"root/lib64/sq2-qti-display/mapper.quest2.so"],
+                files["mapper.quest2.so"],
+            )
             init = result["init"]
             self.assertLess(init.index(camera.BOOT_HOOK), init.index(camera.BOOT))
             self.assertLess(init.index(camera.STAGE), init.index(camera.STAGE_HOOK))
             self.assertLess(init.index(camera.STAGE_HOOK), init.index(image.ANCHOR))
             self.assertIn(b'cameraId="1"', result["etc/spx-camera/userspace/media_profiles_spx.xml"])
             self.assertIn(b"ov7251", result["bin/spx-camera-boot"])
-            self.assertNotIn(b"old graphics", result[checksum])
+            self.assertNotIn(camera.sha(b"old graphics").encode(), result[checksum])
+            self.assertNotIn(camera.sha(b"old graphics").encode(), result[installed_checksum])
             before = dict(result)
             meta = camera.install(records, result, files, image.new_record)
             self.assertTrue(meta["ir_enabled"])
@@ -124,6 +138,38 @@ class CameraAssembly(unittest.TestCase):
             (root/name).write_bytes(elf)
             with self.assertRaisesRegex(ValueError, "checksum mismatch"):
                 camera.load(root)
+
+    def test_encoder_usage_patch_allows_screenrecord_gpu_cpu_rgba_and_test_covers_it(self):
+        with tempfile.TemporaryDirectory() as td:
+            staged = Path(td) / "graphics"
+            staged.mkdir()
+            for name in (
+                "quest2-gralloc-backend.h",
+                "quest2-gralloc-metadata.h",
+                "quest2-allocator5-service.cpp",
+                "quest2-native-mapper5.cpp",
+            ):
+                shutil.copy2(ROOT / "probe/graphics" / name, staged / name)
+            for patch_name in (
+                "0004-hybrid-camera-blob.patch",
+                "0005-hybrid-camera-flex-yuv.patch",
+                "0006-hybrid-camera-encoder-usage.patch",
+            ):
+                data = (ROOT / "patches/camera" / patch_name).read_bytes()
+                subprocess.run(
+                    ["patch", "--batch", "--forward", "-p1", "-d", str(staged)],
+                    input=data,
+                    check=True,
+                )
+            patched = (staged / "quest2-allocator5-service.cpp").read_text()
+            self.assertIn(
+                "(!(usage&video_encoder) || (int(d.format)==1 && !(usage&~(0x1b33ULL|video_encoder))))",
+                patched,
+            )
+            self.assertNotIn("usage==0x10033", patched)
+            buffer_test = (ROOT / "probe/camera/hybrid-buffer-test.cpp").read_text()
+            self.assertIn("0x10303", buffer_test)
+            self.assertIn("0x10033", buffer_test)
 
 
 if __name__ == "__main__":

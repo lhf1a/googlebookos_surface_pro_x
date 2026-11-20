@@ -32,6 +32,12 @@ def payload_paths():
             | {binary: PREFIX+"root/"+relative for relative, binary in GRAPHICS.items()})
 
 
+def install_targets():
+    return ({"etc/spx-camera/modules/"+name+".ko": name+".ko" for name in MODULES}
+            | {"etc/spx-camera/userspace/provider": "provider"}
+            | {PREFIX+"root/"+relative: binary for relative, binary in GRAPHICS.items()})
+
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -128,25 +134,31 @@ def install(records, bodies, files, new_record):
         require(init.count(STAGE) == 1, "Camera requires QTI display stage")
         init = init.replace(STAGE, STAGE+STAGE_HOOK)
     bodies["init"] = init
-    for binary, target in payload_paths().items():
+    for target, binary in install_targets().items():
         if target.startswith(PREFIX):
             require(target in bodies, "QTI camera buffer target missing: "+target)
         bodies[target] = files[binary]
         records[target] = new_record(0o100755 if binary in ("provider", "quest2-allocator5-service") else 0o100644)
+    require(bodies[PREFIX+"root/lib64/hw/mapper.quest2.so"] ==
+            bodies[PREFIX+"root/lib64/sq2-qti-display/mapper.quest2.so"], "Mapper copies differ")
     for name in ("spx-camera-boot", "spx-camera-stage"):
         bodies["bin/"+name] = (ROOT/"probe/camera"/name).read_bytes()
         records["bin/"+name] = new_record(0o100755)
     profiles = "etc/spx-camera/userspace/media_profiles_spx.xml"
     bodies[profiles] = (ROOT/"probe/camera/media_profiles_spx.xml").read_bytes()
     records[profiles] = new_record(0o100644)
-    for name in (PREFIX+"SHA256SUMS", PREFIX+"root/SHA256SUMS"):
+    graphics_targets = {PREFIX+"root/"+p for p in GRAPHICS}
+    for name in (PREFIX+"SHA256SUMS", PREFIX+"root/SHA256SUMS", PREFIX+"INSTALLED_SHA256SUMS"):
         if name not in bodies:
             continue
         lines = []
         for line in bodies[name].decode().splitlines():
             digest, relative = line.split(None, 1)
-            target = str(Path(name).parent/relative)
-            if target in {PREFIX+"root/"+p for p in GRAPHICS}:
+            if name == PREFIX+"INSTALLED_SHA256SUMS":
+                target = PREFIX+"root/"+relative
+            else:
+                target = str(Path(name).parent/relative)
+            if target in graphics_targets:
                 digest = sha(bodies[target])
             lines.append(digest+"  "+relative)
         bodies[name] = ("\n".join(lines)+"\n").encode()
