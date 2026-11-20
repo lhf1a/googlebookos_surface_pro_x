@@ -90,7 +90,7 @@ class AssemblyChecksums(unittest.TestCase):
                 for line in result.splitlines():
                     if b'sha256sum' in line:
                         self.assertEqual(name,'touch-calibration-boot')
-                        self.assertTrue(line.startswith(b'device=$('))
+                        self.assertTrue(line.startswith((b'device=$(', b'device_legacy=$(')))
                 self.assertEqual(boot.without_hash_checks('bin/'+name,result),result)
 
     def test_unknown_hash_control_flow_is_not_blindly_deleted(self):

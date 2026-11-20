@@ -21,5 +21,10 @@ if [ -r /run/iptsd.pid ]; then
     fi
     rm /run/iptsd.pid
 fi
+if [ -e /run/touch-disabled ] || [ "$(tr -d '\r\n ' < /proc/1/root/data/vendor/spx-advanced-control/touch_disabled 2>/dev/null || true)" = "1" ]; then
+    : > /run/touch-disabled
+    echo SQ2_TOUCH_DISABLED
+    exit 0
+fi
 /bin/touch-services
 echo SQ2_TOUCH_FRAMEWORK_REINITIALIZED

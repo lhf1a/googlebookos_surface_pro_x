@@ -1,0 +1,270 @@
+diff --git a/drivers/gpu/drm/msm/dp/dp_aux.c b/drivers/gpu/drm/msm/dp/dp_aux.c
+--- a/drivers/gpu/drm/msm/dp/dp_aux.c
++++ b/drivers/gpu/drm/msm/dp/dp_aux.c
+@@ -76,6 +76,8 @@
+ {
+ 	u32 aux_ctrl;
+ 
++	msm_dp_write_aux(aux, REG_DP_AUX_TRANS_CTRL, 0);
++
+ 	aux_ctrl = msm_dp_read_aux(aux, REG_DP_AUX_CTRL);
+ 
+ 	aux_ctrl |= DP_AUX_CTRL_RESET;
+@@ -88,7 +90,12 @@
+ 
+ static void msm_dp_aux_enable(struct msm_dp_aux_private *aux)
+ {
+-	u32 aux_ctrl;
++	u32 aux_ctrl, reftimer;
++
++	/* Keep the 1us AUX/HPD reference timer running even without internal HPD. */
++	reftimer = msm_dp_read_aux(aux, REG_DP_DP_HPD_REFTIMER);
++	reftimer |= DP_DP_HPD_REFTIMER_ENABLE;
++	msm_dp_write_aux(aux, REG_DP_DP_HPD_REFTIMER, reftimer);
+ 
+ 	aux_ctrl = msm_dp_read_aux(aux, REG_DP_AUX_CTRL);
+ 
+@@ -513,8 +520,10 @@
+ 
+ 	aux = container_of(msm_dp_aux, struct msm_dp_aux_private, msm_dp_aux);
+ 
++	mutex_lock(&aux->mutex);
+ 	phy_calibrate(aux->phy);
+ 	msm_dp_aux_reset(aux);
++	mutex_unlock(&aux->mutex);
+ }
+ 
+ void msm_dp_aux_init(struct drm_dp_aux *msm_dp_aux)
+@@ -531,6 +540,7 @@
+ 	mutex_lock(&aux->mutex);
+ 
+ 	msm_dp_aux_enable(aux);
++	msm_dp_aux_reset(aux);
+ 	aux->retry_cnt = 0;
+ 	aux->initted = true;
+ 
+@@ -672,6 +682,10 @@
+ 		container_of(msm_dp_aux, struct msm_dp_aux_private, msm_dp_aux);
+ 	u32 status;
+ 
++	/* External HPD bridges leave HPD_CTRL disabled; use HPD xfer state instead. */
++	if (!(msm_dp_read_aux(aux, REG_DP_DP_HPD_CTRL) & DP_DP_HPD_CTRL_HPD_EN))
++		return aux->enable_xfers ? 1 : 0;
++
+ 	status = msm_dp_read_aux(aux, REG_DP_DP_HPD_INT_STATUS);
+ 	status >>= DP_DP_HPD_STATE_STATUS_BITS_SHIFT;
+ 	status &= DP_DP_HPD_STATE_STATUS_BITS_MASK;
+diff --git a/drivers/gpu/drm/msm/dp/dp_ctrl.c b/drivers/gpu/drm/msm/dp/dp_ctrl.c
+--- a/drivers/gpu/drm/msm/dp/dp_ctrl.c
++++ b/drivers/gpu/drm/msm/dp/dp_ctrl.c
+@@ -1787,12 +1787,19 @@
+ 	ctrl->phy_opts.dp.ssc = drm_dp_max_downspread(dpcd);
+ 
+ 	phy_configure(phy, &ctrl->phy_opts);
+-	phy_power_on(phy);
++	ret = phy_power_on(phy);
++	if (ret) {
++		DRM_ERROR("Unable to power on DP PHY. ret=%d\n", ret);
++		return ret;
++	}
+ 
+ 	dev_pm_opp_set_rate(ctrl->dev, ctrl->link->link_params.rate * 1000);
+ 	ret = msm_dp_ctrl_link_clk_enable(&ctrl->msm_dp_ctrl);
+-	if (ret)
++	if (ret) {
+ 		DRM_ERROR("Unable to start link clocks. ret=%d\n", ret);
++		dev_pm_opp_set_rate(ctrl->dev, 0);
++		phy_power_off(phy);
++	}
+ 
+ 	drm_dbg_dp(ctrl->drm_dev, "link rate=%d\n", ctrl->link->link_params.rate);
+ 
+@@ -1914,6 +1921,7 @@
+ 
+ 	msm_dp_ctrl_phy_reset(ctrl);
+ 	phy_init(phy);
++	msm_dp_aux_reconfig(ctrl->aux);
+ 
+ 	drm_dbg_dp(ctrl->drm_dev, "phy=%p init=%d power_on=%d\n",
+ 			phy, phy->init_count, phy->power_count);
+@@ -2460,6 +2468,8 @@
+ {
+ 	int ret = 0;
+ 	bool mainlink_ready = false;
++	bool link_clks_enabled_here = false;
++	bool stream_clks_enabled_here = false;
+ 	struct msm_dp_ctrl_private *ctrl;
+ 	unsigned long pixel_rate;
+ 	unsigned long pixel_rate_orig;
+@@ -2488,12 +2498,13 @@
+ 			DRM_ERROR("Failed to start link clocks. ret=%d\n", ret);
+ 			goto end;
+ 		}
++		link_clks_enabled_here = true;
+ 	}
+ 
+ 	ret = clk_set_rate(ctrl->pixel_clk, pixel_rate * 1000);
+ 	if (ret) {
+ 		DRM_ERROR("Failed to set pixel clock rate. ret=%d\n", ret);
+-		goto end;
++		goto err_stream;
+ 	}
+ 
+ 	if (ctrl->stream_clks_on) {
+@@ -2502,13 +2513,25 @@
+ 		ret = clk_prepare_enable(ctrl->pixel_clk);
+ 		if (ret) {
+ 			DRM_ERROR("Failed to start pixel clocks. ret=%d\n", ret);
+-			goto end;
++			goto err_stream;
+ 		}
+ 		ctrl->stream_clks_on = true;
++		stream_clks_enabled_here = true;
++	}
++
++	if (force_link_train) {
++		ret = msm_dp_link_psm_config(ctrl->link, &ctrl->panel->link_info, false);
++		if (ret == -ETIMEDOUT || ret == -ENXIO)
++			goto err_link_train;
+ 	}
+ 
+-	if (force_link_train || !msm_dp_ctrl_channel_eq_ok(ctrl))
+-		msm_dp_ctrl_link_retrain(ctrl);
++	if (force_link_train || !msm_dp_ctrl_channel_eq_ok(ctrl)) {
++		ret = msm_dp_ctrl_link_retrain(ctrl);
++		if (ret) {
++			DRM_ERROR("Failed to retrain DP link. ret=%d\n", ret);
++			goto err_link_train;
++		}
++	}
+ 
+ 	/* stop txing train pattern to end link training */
+ 	msm_dp_ctrl_clear_training_pattern(ctrl, DP_PHY_DPRX);
+@@ -2534,12 +2557,27 @@
+ 
+ 	ret = msm_dp_ctrl_wait4video_ready(ctrl);
+ 	if (ret)
+-		return ret;
++		goto err_link_train;
+ 
+ 	mainlink_ready = msm_dp_ctrl_mainlink_ready(ctrl);
+ 	drm_dbg_dp(ctrl->drm_dev,
+ 		"mainlink %s\n", mainlink_ready ? "READY" : "NOT READY");
+ 
++	return 0;
++
++err_link_train:
++	msm_dp_write_link(ctrl, REG_DP_STATE_CTRL, 0);
++	msm_dp_ctrl_mainlink_disable(ctrl);
++err_stream:
++	if (stream_clks_enabled_here) {
++		clk_disable_unprepare(ctrl->pixel_clk);
++		ctrl->stream_clks_on = false;
++	}
++	if (link_clks_enabled_here) {
++		dev_pm_opp_set_rate(ctrl->dev, 0);
++		msm_dp_ctrl_link_clk_disable(&ctrl->msm_dp_ctrl);
++		phy_power_off(ctrl->phy);
++	}
+ end:
+ 	return ret;
+ }
+diff --git a/drivers/gpu/drm/msm/dp/dp_display.c b/drivers/gpu/drm/msm/dp/dp_display.c
+--- a/drivers/gpu/drm/msm/dp/dp_display.c
++++ b/drivers/gpu/drm/msm/dp/dp_display.c
+@@ -596,6 +596,21 @@
+ 			dp->msm_dp_display.connector_type, state);
+ 
+ 	if (state == ST_DISPLAY_OFF) {
++		ret = pm_runtime_resume_and_get(&pdev->dev);
++		if (ret) {
++			DRM_ERROR("failed to pm_runtime_resume\n");
++			mutex_unlock(&dp->event_mutex);
++			return ret;
++		}
++		ret = msm_dp_display_usbpd_configure_cb(&pdev->dev);
++		if (ret) {
++			msm_dp_display_host_phy_exit(dp);
++		} else {
++			dp->hpd_state = ST_MAINLINK_READY;
++			msm_dp_display_send_hpd_event(&dp->msm_dp_display);
++		}
++		/* Original plug runtime PM ref remains held until unplug. */
++		pm_runtime_put_sync(&pdev->dev);
+ 		mutex_unlock(&dp->event_mutex);
+ 		return 0;
+ 	}
+@@ -621,6 +636,7 @@
+ 
+ 	ret = msm_dp_display_usbpd_configure_cb(&pdev->dev);
+ 	if (ret) {	/* link train failed */
++		msm_dp_display_host_phy_exit(dp);
+ 		dp->hpd_state = ST_DISCONNECTED;
+ 		pm_runtime_put_sync(&pdev->dev);
+ 	} else {
+@@ -1589,6 +1605,7 @@
+ 	struct msm_dp_display_private *msm_dp_display;
+ 	u32 hpd_state;
+ 	bool force_link_train = false;
++	bool phy_initted = false;
+ 
+ 	msm_dp_display = container_of(dp, struct msm_dp_display_private, msm_dp_display);
+ 	if (!msm_dp_display->msm_dp_mode.drm_mode.clock) {
+@@ -1623,15 +1640,25 @@
+ 
+ 	if (hpd_state == ST_DISPLAY_OFF) {
+ 		msm_dp_display_host_phy_init(msm_dp_display);
++		phy_initted = true;
+ 		force_link_train = true;
+ 	}
+ 
+-	msm_dp_display_enable(msm_dp_display, force_link_train);
++	rc = msm_dp_display_enable(msm_dp_display, force_link_train);
++	if (rc) {
++		DRM_ERROR("DP display enable failed, rc=%d\n", rc);
++		if (phy_initted)
++			msm_dp_display_host_phy_exit(msm_dp_display);
++		mutex_unlock(&msm_dp_display->event_mutex);
++		return;
++	}
+ 
+ 	rc = msm_dp_display_post_enable(dp);
+ 	if (rc) {
+ 		DRM_ERROR("DP display post enable failed, rc=%d\n", rc);
+ 		msm_dp_display_disable(msm_dp_display);
++		mutex_unlock(&msm_dp_display->event_mutex);
++		return;
+ 	}
+ 
+ 	/* completed connection */
+@@ -1687,10 +1714,15 @@
+ 		drm_dbg_dp(dp->drm_dev, "type=%d wrong hpd_state=%d\n",
+ 			   dp->connector_type, hpd_state);
+ 
+-	msm_dp_display_disable(msm_dp_display);
++	if (!dp->power_on && hpd_state == ST_MAINLINK_READY) {
++		msm_dp_ctrl_off_link(msm_dp_display->ctrl);
++		msm_dp_display_host_phy_exit(msm_dp_display);
++	} else {
++		msm_dp_display_disable(msm_dp_display);
++	}
+ 
+ 	hpd_state =  msm_dp_display->hpd_state;
+-	if (hpd_state == ST_DISCONNECT_PENDING) {
++	if (hpd_state == ST_DISCONNECT_PENDING || hpd_state == ST_DISCONNECTED) {
+ 		/* completed disconnection */
+ 		msm_dp_display->hpd_state = ST_DISCONNECTED;
+ 	} else {
+@@ -1800,6 +1832,11 @@
+ 
+ 	if (!msm_dp_display->link_ready && status == connector_status_connected)
+ 		msm_dp_add_event(dp, EV_HPD_PLUG_INT, 0, 0);
+-	else if (msm_dp_display->link_ready && status == connector_status_disconnected)
++	else if (msm_dp_display->link_ready && status == connector_status_connected) {
++		if (READ_ONCE(dp->hpd_state) == ST_DISPLAY_OFF)
++			msm_dp_add_event(dp, EV_HPD_PLUG_INT, 0, 0);
++		else
++			msm_dp_add_event(dp, EV_IRQ_HPD_INT, 0, 0);
++	} else if (msm_dp_display->link_ready && status == connector_status_disconnected)
+ 		msm_dp_add_event(dp, EV_HPD_UNPLUG_INT, 0, 0);
+ }

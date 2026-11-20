@@ -1,3 +1,4 @@
+diff --git a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
 --- a/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
 +++ b/drivers/phy/qualcomm/phy-qcom-qmp-combo.c
 @@ -2275,7 +2275,8 @@
@@ -10,7 +11,15 @@
  
  	struct phy *dp_phy;
  	unsigned int dp_aux_cfg;
-@@ -3695,7 +3696,8 @@
+@@ -3270,6 +3271,7 @@
+ 
+ 	/* Turn on BIAS current for PHY/PLL */
+ 	writel(0x17, qmp->dp_serdes + cfg->regs[QPHY_COM_BIAS_EN_CLKBUFLR_EN]);
++	usleep_range(1000, 1100);
+ 
+ 	writel(0x00, qmp->dp_dp_phy + QSERDES_DP_PHY_AUX_CFG0);
+ 	writel(0x13, qmp->dp_dp_phy + QSERDES_DP_PHY_AUX_CFG1);
+@@ -3695,7 +3697,8 @@
  err_disable_regulators:
  	regulator_bulk_disable(cfg->num_vregs, qmp->vregs);
  err_decrement_count:
@@ -20,7 +29,34 @@
  
  	return ret;
  }
-@@ -3758,6 +3760,7 @@
+@@ -3731,6 +3734,8 @@
+ 	cfg->dp_aux_init(qmp);
+ 
+ 	qmp->dp_init_count++;
++	/* phy_init() already resumed qmp->dev; keep aux/com_aux clocks active until dp_exit(). */
++	pm_runtime_get_noresume(qmp->dev);
+ 
+ out_unlock:
+ 	mutex_unlock(&qmp->phy_mutex);
+@@ -3742,12 +3747,17 @@
+ 	struct qmp_combo *qmp = phy_get_drvdata(phy);
+ 
+ 	mutex_lock(&qmp->phy_mutex);
++	if (!qmp->dp_init_count) {
++		mutex_unlock(&qmp->phy_mutex);
++		return -EINVAL;
++	}
+ 
+ 	qmp_combo_com_exit(qmp, false);
+ 
+ 	qmp->dp_init_count--;
+ 
+ 	mutex_unlock(&qmp->phy_mutex);
++	pm_runtime_put(qmp->dev);
+ 
+ 	return 0;
+ }
+@@ -3758,10 +3768,16 @@
  	const struct qmp_phy_cfg *cfg = qmp->cfg;
  	void __iomem *tx = qmp->dp_tx;
  	void __iomem *tx2 = qmp->dp_tx2;
@@ -28,7 +64,17 @@
  
  	mutex_lock(&qmp->phy_mutex);
  
-@@ -3770,7 +3773,12 @@
+-	qmp_combo_dp_serdes_init(qmp);
++	ret = qmp_combo_dp_serdes_init(qmp);
++	if (ret) {
++		writel(DP_PHY_PD_CTL_PSR_PWRDN, qmp->dp_dp_phy + QSERDES_DP_PHY_PD_CTL);
++		mutex_unlock(&qmp->phy_mutex);
++		return ret;
++	}
+ 
+ 	qmp_configure_lane(qmp->dev, tx, cfg->dp_tx_tbl, cfg->dp_tx_tbl_num, 1);
+ 	qmp_configure_lane(qmp->dev, tx2, cfg->dp_tx_tbl, cfg->dp_tx_tbl_num, 2);
+@@ -3770,7 +3786,12 @@
  	cfg->configure_dp_tx(qmp);
  
  	/* Configure link rate, swing, etc. */
@@ -42,7 +88,7 @@
  
  	qmp->dp_powered_on = true;
  
-@@ -3810,6 +3818,9 @@
+@@ -3810,6 +3831,9 @@
  	unsigned int val;
  	int ret;
  
@@ -52,7 +98,7 @@
  	qmp_configure(qmp->dev, serdes, cfg->serdes_tbl, cfg->serdes_tbl_num);
  
  	ret = clk_prepare_enable(qmp->pipe_clk);
-@@ -3850,6 +3861,7 @@
+@@ -3850,6 +3874,7 @@
  		goto err_disable_pipe_clk;
  	}
  
@@ -60,17 +106,17 @@
  	return 0;
  
  err_disable_pipe_clk:
-@@ -3862,6 +3874,9 @@
- {
+@@ -3863,6 +3888,9 @@
  	struct qmp_combo *qmp = phy_get_drvdata(phy);
  	const struct qmp_phy_cfg *cfg = qmp->cfg;
-+
+ 
 +	if (!qmp->usb_powered_on)
 +		return 0;
- 
++
  	clk_disable_unprepare(qmp->pipe_clk);
  
-@@ -3876,6 +3891,7 @@
+ 	/* PHY reset */
+@@ -3876,6 +3904,7 @@
  	qphy_clrbits(qmp->pcs, cfg->regs[QPHY_PCS_POWER_DOWN_CONTROL],
  			SW_PWRDN);
  
@@ -78,7 +124,7 @@
  	return 0;
  }
  
-@@ -3889,10 +3905,14 @@
+@@ -3889,10 +3918,14 @@
  	if (ret)
  		goto out_unlock;
  
@@ -97,7 +143,7 @@
  	}
  
  	qmp->usb_init_count++;
-@@ -3908,6 +3928,10 @@
+@@ -3908,6 +3941,10 @@
  	int ret;
  
  	mutex_lock(&qmp->phy_mutex);
@@ -108,7 +154,7 @@
  	ret = qmp_combo_usb_power_off(phy);
  	if (ret)
  		goto out_unlock;
-@@ -4016,9 +4040,10 @@
+@@ -4016,9 +4053,10 @@
  		return 0;
  	}
  
@@ -122,7 +168,7 @@
  	clk_bulk_disable_unprepare(qmp->num_clks, qmp->clks);
  
  	return 0;
-@@ -4040,14 +4065,15 @@
+@@ -4040,15 +4078,16 @@
  	if (ret)
  		return ret;
  
@@ -140,12 +186,13 @@
 +		}
 +		qmp_combo_disable_autonomous_mode(qmp);
  	}
--
--	qmp_combo_disable_autonomous_mode(qmp);
  
+-	qmp_combo_disable_autonomous_mode(qmp);
+-
  	return 0;
  }
-@@ -4362,39 +4388,54 @@
+ 
+@@ -4362,39 +4401,54 @@
  }
  
  #if IS_ENABLED(CONFIG_TYPEC)
@@ -190,16 +237,14 @@
  	mutex_unlock(&qmp->phy_mutex);
 -
  	return 0;
--}
--
--static int qmp_combo_typec_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *state)
 +
 +out_restore_orientation:
 +	qmp->orientation = old_orientation;
 +	mutex_unlock(&qmp->phy_mutex);
 +	return ret;
-+}
-+
+ }
+ 
+-static int qmp_combo_typec_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *state)
 +static int qmp_combo_typec_mux_set_active(struct typec_mux_dev *mux, struct typec_mux_state *state)
  {
  	struct qmp_combo *qmp = typec_mux_get_drvdata(mux);
@@ -210,7 +255,7 @@
  	unsigned int svid;
  
  	guard(mutex)(&qmp->phy_mutex);
-@@ -4439,10 +4480,11 @@
+@@ -4439,10 +4493,11 @@
  	dev_dbg(qmp->dev, "typec_mux_set: switching from qmpphy mode %d to %d\n",
  		qmp->qmpphy_mode, new_mode);
  
@@ -223,7 +268,7 @@
  			qmp_combo_usb_power_off(qmp->usb_phy);
  
  		if (qmp->dp_init_count)
-@@ -4451,17 +4493,18 @@
+@@ -4451,17 +4506,18 @@
  		qmp_combo_com_exit(qmp, true);
  
  		/* Now everything's powered down, power up the right PHYs */
@@ -251,12 +296,10 @@
  		}
  
  		if (new_mode == QMPPHY_MODE_DP_ONLY || new_mode == QMPPHY_MODE_USB3DP) {
-@@ -4471,6 +4514,30 @@
- 	}
- 
+@@ -4473,6 +4529,30 @@
  	return 0;
-+}
-+
+ }
+ 
 +/* Type-C callbacks are not PHY consumers: take a temporary runtime
 + * reference before touching clocks, without altering consumer init counts. */
 +static int qmp_combo_typec_switch_set(struct typec_switch_dev *sw,
@@ -279,6 +322,8 @@
 + ret = qmp_combo_typec_mux_set_active(mux, state);
 + pm_runtime_put(qmp->dev);
 + return ret;
- }
- 
++}
++
  static void qmp_combo_typec_switch_unregister(void *data)
+ {
+ 	struct qmp_combo *qmp = data;

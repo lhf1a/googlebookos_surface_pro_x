@@ -3,11 +3,120 @@
 from pathlib import Path
 import sys
 
+def repair_pending_irq(source):
+    # Clear stale latched falling edge while touch IC is still held in reset
+    # (after power-up + INT pull-up settle, before reset deassert) on both
+    # resume open and initial probe so enable_irq never reads 00 00 00 00.
+    marker = 'SQ2_SPI_PM_CLEAR_PENDING_IRQ_V3'
+    if marker in source:
+        return source
+    start = source.index('static int spi_hid_ll_open(')
+    end = source.index('static void spi_hid_ll_close(', start)
+    body = source[start:end]
+    power_anchor = """	ret = spi_hid_power_up(shid);
+	if (ret) {
+		dev_err(dev, "%s: could not power up\\n", __func__);
+		goto err1;
+	}
+"""
+    assert body.count(power_anchor) == 1, 'SPI open power-up sequence changed'
+    clear_call = (
+        '\n\t/* ' + marker + ': discard stale edge latched during power-down/reset/power-up\n'
+        '\t * while reset is still asserted and the INT line pull-up is active.\n'
+        '\t */\n'
+        '\tirq_set_irqchip_state(spi->irq, IRQCHIP_STATE_PENDING, false);\n'
+    )
+    body = body.replace(power_anchor, power_anchor + clear_call, 1)
+    source = source[:start] + body + source[end:]
+
+    pstart = source.index('static int spi_hid_probe(')
+    pend = source.index('static void spi_hid_remove(', pstart)
+    pbody = source[pstart:pend]
+    old_probe = """	irqflags = irq_get_trigger_type(spi->irq) | IRQF_ONESHOT;
+	ret = request_irq(spi->irq, spi_hid_dev_irq, irqflags,
+			dev_name(&spi->dev), shid);
+	if (ret)
+		goto err1;
+	else
+		shid->irq_enabled = true;
+
+	ret = spi_hid_assert_reset(shid);
+	if (ret) {
+		dev_err(dev, "%s: failed to assert reset\\n", __func__);
+		goto err1;
+	}
+
+	ret = spi_hid_power_up(shid);
+	if (ret) {
+		dev_err(dev, "%s: could not power up\\n", __func__);
+		goto err1;
+	}
+
+	ret = spi_hid_deassert_reset(shid);
+	if (ret) {
+		dev_err(dev, "%s: failed to deassert reset\\n", __func__);
+		goto err1;
+	}
+
+	dev_err(dev, "%s: d3 -> %s\\n", __func__,
+			spi_hid_power_mode_string(shid->power_state));
+
+	return 0;
+
+err1:
+"""
+    new_probe = """	irqflags = irq_get_trigger_type(spi->irq) | IRQF_ONESHOT | IRQF_NO_AUTOEN;
+	ret = request_irq(spi->irq, spi_hid_dev_irq, irqflags,
+			dev_name(&spi->dev), shid);
+	if (ret)
+		goto err1;
+
+	ret = spi_hid_assert_reset(shid);
+	if (ret) {
+		dev_err(dev, "%s: failed to assert reset\\n", __func__);
+		goto err_irq;
+	}
+
+	ret = spi_hid_power_up(shid);
+	if (ret) {
+		dev_err(dev, "%s: could not power up\\n", __func__);
+		goto err_irq;
+	}
+
+	irq_set_irqchip_state(spi->irq, IRQCHIP_STATE_PENDING, false);
+
+	ret = spi_hid_deassert_reset(shid);
+	if (ret) {
+		dev_err(dev, "%s: failed to deassert reset\\n", __func__);
+		goto err_power;
+	}
+
+	enable_irq(spi->irq);
+	shid->irq_enabled = true;
+
+	dev_err(dev, "%s: d3 -> %s\\n", __func__,
+			spi_hid_power_mode_string(shid->power_state));
+
+	return 0;
+
+err_power:
+	spi_hid_power_down(shid);
+
+err_irq:
+	free_irq(spi->irq, shid);
+
+err1:
+"""
+    assert pbody.count(old_probe) == 1, 'SPI probe IRQ/reset sequence changed'
+    pbody = pbody.replace(old_probe, new_probe, 1)
+    return source[:pstart] + pbody + source[pend:]
+
+
 def repair_resume_input(source):
     # Opening the IRQ while reset is asserted can read an all-zero header.
     marker = 'SQ2_SPI_PM_INPUT_RECOVERY_V2'
     if marker in source:
-        return source
+        return repair_pending_irq(source)
     irq = """	if (!shid->irq_enabled) {
 		enable_irq(spi->irq);
 		shid->irq_enabled = true;
@@ -42,7 +151,7 @@ def repair_resume_input(source):
     body = source[start:end]
     assert body.count(invalid) == 1, 'SPI invalid-header recovery changed'
     body = body.replace(invalid, invalid.replace('\t\tgoto out;', '\t\tschedule_work(&shid->error_work);\n\t\tgoto out;'), 1)
-    return source[:start] + body + source[end:]
+    return repair_pending_irq(source[:start] + body + source[end:])
 
 
 base = Path(sys.argv[1])

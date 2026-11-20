@@ -29,7 +29,11 @@ def build(source, kout, output, cross='aarch64-linux-gnu-'):
         shutil.copy2(ROOT/'probe/typec'/name, output/name)
     shutil.copy2(source/'drivers/usb/typec/ucsi/ucsi.h',output/'ucsi.h')
     shutil.copy2(source/'drivers/hid/surface-hid/surface_hid_core.h',output/'surface_hid_core.h')
-    shutil.copy2(source/'drivers/usb/gadget/function/f_fs.c',output/'f_fs.c')
+    ffs=source/'drivers/usb/gadget/function/f_fs.c'
+    ffs_tree=output/'patch/drivers/usb/gadget/function';ffs_tree.mkdir(parents=True)
+    shutil.copy2(ffs,ffs_tree/ffs.name)
+    subprocess.run(['patch','--batch','--fuzz=0','-p1','-i',str(ROOT/'patches/spx-dwc3-ffs-ep0-dequeue.patch')],cwd=output/'patch',check=True)
+    shutil.copy2(ffs_tree/ffs.name,output/'f_fs.c')
     names=('spx-typec','spx-ucsi-transport','ucsi_surface_hid','phy-spx-qmp-combo','usb_f_fs')
     includes=[source/'drivers/phy/qualcomm',source/'drivers/usb/gadget',source/'drivers/usb/gadget/function']
     (output/'Makefile').write_text('obj-m += '+' '.join(n+'.o' for n in names)+'\nusb_f_fs-y := f_fs.o\nccflags-y += '+' '.join('-I'+str(p) for p in includes)+'\n')

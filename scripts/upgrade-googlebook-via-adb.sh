@@ -297,7 +297,7 @@ shift
 
 is_preserved_esp() {
     case "$1" in
-        EFI/BOOT/grub.cfg|SPX-USERDATA-GROWN.txt|SPX-BOOT-SOURCE.txt|SPX-OTA-*) return 0 ;;
+        EFI/BOOT/grub.cfg|SPX-USERDATA-GROWN.txt|SPX-BOOT-SOURCE.txt|SPX-OTA-*|EFI/SPX/LTE/*) return 0 ;;
         *) return 1 ;;
     esac
 }

@@ -18,7 +18,10 @@ def without_hash_checks(name, body):
         return body
     text = body.decode().replace('\r\n', '\n')
     if name == 'bin/touch-calibration-boot' and all(
-            'sha256sum' not in line or line.startswith('device=$({ cat /sys/class/dmi/id/product_uuid;')
+            'sha256sum' not in line or line.startswith((
+                'device=$({ cat /sys/class/dmi/id/product_uuid;',
+                'device_legacy=$({ cat /sys/class/dmi/id/product_uuid;',
+            ))
             for line in text.splitlines()):
         return body
     if name == 'bin/spx-advanced-control-boot' and all(
@@ -71,7 +74,10 @@ def without_hash_checks(name, body):
         stripped = line.strip()
         if 'sha256sum' not in line:
             lines.append(line)
-        elif name == 'bin/touch-calibration-boot' and stripped.startswith('device=$({ cat /sys/class/dmi/id/product_uuid;'):
+        elif name == 'bin/touch-calibration-boot' and stripped.startswith((
+                'device=$({ cat /sys/class/dmi/id/product_uuid;',
+                'device_legacy=$({ cat /sys/class/dmi/id/product_uuid;',
+        )):
             # This derives the calibration storage key; it is NOT a file check.
             lines.append(line)
         elif re.fullmatch(r'\(cd [^;]+; sha256sum -c [^\n]+\)', stripped):

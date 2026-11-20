@@ -2,6 +2,9 @@
 import json
 import os
 from pathlib import Path
+import re
+import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -103,9 +106,27 @@ int main(void) {
         )
 
     def test_java_policy_sorting_and_i18n(self):
+        cert_pem = self.work / 'test-cert.pem'
+        key_pem = self.work / 'test-key.pem'
+        if shutil.which('openssl'):
+            subprocess.run(
+                ['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+                 '-keyout', str(key_pem), '-out', str(cert_pem),
+                 '-subj', '/CN=spx-test', '-days', '1'],
+                check=True, capture_output=True, text=True,
+            )
         runner = self.work / 'PolicyAndStringsTest.java'
         runner.write_text(r'''
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.spec.ECGenParameterSpec;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import org.surface.advancedcontrol.DriverPolicy;
@@ -115,7 +136,20 @@ public class PolicyAndStringsTest {
   static void check(boolean b, String msg) {
     if (!b) throw new AssertionError(msg);
   }
-  public static void main(String[] args) {
+  static String makeEd25519BlobB64(byte fill) throws Exception {
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    DataOutputStream dos = new DataOutputStream(baos);
+    byte[] t = "ssh-ed25519".getBytes(StandardCharsets.US_ASCII);
+    dos.writeInt(t.length);
+    dos.write(t);
+    byte[] k = new byte[32];
+    Arrays.fill(k, fill);
+    dos.writeInt(k.length);
+    dos.write(k);
+    dos.flush();
+    return Base64.getEncoder().encodeToString(baos.toByteArray());
+  }
+  public static void main(String[] args) throws Exception {
     check(DriverPolicy.propertyKey(1010123, "com.example.game")
         .equals("persist.sq2.vulkan.app.10.com.example.game"), "key");
     check(!DriverPolicy.propertyKey(10123, "com.example.game")
@@ -196,6 +230,17 @@ public class PolicyAndStringsTest {
     check(en.touchTitle().equals(jpFallback.touchTitle()), "jp->en touch");
 
     // Touch request formatting, validation & summaries
+    check(DriverPolicy.touchDisabledRequest("abc-123", true)
+        .equals("set-touch-disabled\nabc-123\n1\n"), "touchDisableOnReq");
+    check(DriverPolicy.touchDisabledRequest("abc-123", false)
+        .equals("set-touch-disabled\nabc-123\n0\n"), "touchDisableOffReq");
+    check("禁用触摸".equals(zh.touchDisableTitle()), "zh touch disable title");
+    check("Disable Touchscreen".equals(en.touchDisableTitle()), "en touch disable title");
+    check(zh.touchHomeSubtitle(true, true, false, false, false).contains("已禁用"), "zh home touch disabled");
+    check(en.touchHomeSubtitle(true, true, false, false, false).contains("disabled"), "en home touch disabled");
+    check(zh.touchValueHardware("045E:0C21", "0123456789abcdef", false, true).contains("已禁用"), "zh hw disabled");
+    check(en.touchValueHardware("045E:0C21", "0123456789abcdef", false, true).contains("disabled"), "en hw disabled");
+
     check(DriverPolicy.touchGhostPatchRequest("abc-123", true)
         .equals("set-touch-ghost-patch\nabc-123\n1\n"), "ghostOnReq");
     check(DriverPolicy.touchGhostPatchRequest("abc-123", false)
@@ -244,6 +289,69 @@ public class PolicyAndStringsTest {
     check(en.touchGhostTitle().contains("Ghost-Touch"), "en ghost");
     check(en.touchValueCoords(true, "0.0:0.0 0.5:0.52 1.0:1.0", "0.0:0.0 1.0:1.0", "", "", "").contains("X 3 pts"), "en coords");
 
+    // Debugging requests, key/certificate normalization & bilingual strings
+    check(DriverPolicy.adbTcpRequest("abc-123", true).equals("set-adb-tcp\nabc-123\n1\n"), "adbOnReq");
+    check(DriverPolicy.adbTcpRequest("abc-123", false).equals("set-adb-tcp\nabc-123\n0\n"), "adbOffReq");
+    check(DriverPolicy.sshEnabledRequest("abc-123", true).equals("set-ssh-enabled\nabc-123\n1\n"), "sshOnReq");
+    check(DriverPolicy.sshEnabledRequest("abc-123", false).equals("set-ssh-enabled\nabc-123\n0\n"), "sshOffReq");
+    check(DriverPolicy.sshPasswordRequest("abc-123", "-Pass@123!").equals("set-ssh-password\nabc-123\n-Pass@123!\n"), "sshPwReq");
+    check(DriverPolicy.sshPasswordRequest("abc-123", "").equals("set-ssh-password\nabc-123\n\n"), "sshPwClearReq");
+    check(DriverPolicy.clearSshKeysRequest("abc-123").equals("clear-ssh-keys\nabc-123\n"), "sshClearReq");
+
+    for (String badPw : new String[]{"bad\nline", "bad\0null", new String(new char[129]).replace('\0', 'a')}) {
+      try { DriverPolicy.sshPasswordRequest("abc-123", badPw); throw new AssertionError("badPw"); }
+      catch (IllegalArgumentException expected) {}
+    }
+
+    String edB64 = makeEd25519BlobB64((byte) 0x42);
+    String edLine1 = "ssh-ed25519 " + edB64 + " user@host";
+    String edLine2 = "ssh-ed25519 " + edB64 + " duplicate-comment";
+    String rfc4716 = "---- BEGIN SSH2 PUBLIC KEY ----\nComment: \"converted\"\n"
+        + edB64.substring(0, 32) + "\n" + edB64.substring(32) + "\n---- END SSH2 PUBLIC KEY ----\n";
+    String normEd = DriverPolicy.normalizeSshKeyImport("# header comment\n" + edLine1 + "\n" + edLine2 + "\n" + rfc4716);
+    check(normEd.equals(edLine1 + "\n"), "ed dedup: " + normEd);
+    check(DriverPolicy.importSshKeysRequest("abc-123", edLine1).equals("import-ssh-keys\nabc-123\n" + edLine1 + "\n"), "importSshReq");
+
+    KeyPairGenerator rsaGen = KeyPairGenerator.getInstance("RSA");
+    rsaGen.initialize(2048);
+    KeyPair rsaKp = rsaGen.generateKeyPair();
+    String rsaPem = "-----BEGIN PUBLIC KEY-----\n"
+        + Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.US_ASCII)).encodeToString(rsaKp.getPublic().getEncoded())
+        + "\n-----END PUBLIC KEY-----\n";
+    check(DriverPolicy.normalizeSshKeyImport(rsaPem).startsWith("ssh-rsa "), "rsa spki pem");
+
+    KeyPairGenerator ecGen = KeyPairGenerator.getInstance("EC");
+    ecGen.initialize(new ECGenParameterSpec("secp256r1"));
+    KeyPair ecKp = ecGen.generateKeyPair();
+    String ecPem = "-----BEGIN PUBLIC KEY-----\n"
+        + Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.US_ASCII)).encodeToString(ecKp.getPublic().getEncoded())
+        + "\n-----END PUBLIC KEY-----\n";
+    check(DriverPolicy.normalizeSshKeyImport(ecPem).startsWith("ecdsa-sha2-nistp256 "), "ec spki pem");
+
+    if (args.length > 0 && !args[0].isEmpty()) {
+      String certContent = new String(Files.readAllBytes(Paths.get(args[0])), StandardCharsets.UTF_8);
+      String certSsh = DriverPolicy.normalizeSshKeyImport(certContent);
+      check(certSsh.startsWith("ssh-rsa ") && certSsh.endsWith(" imported-cert\n"), "x509 cert: " + certSsh);
+    }
+
+    for (String badKey : new String[]{
+        "", "   \n# only comment\n", "not-a-key AAAAAAAAAAAAAAAAAAAAAAAA",
+        "ssh-ed25519 AAAABBBBCCCCDDDD", "ssh-ed25519 " + edB64 + "\0bad",
+        "-----BEGIN CERTIFICATE-----\nnot-closed"
+    }) {
+      try { DriverPolicy.normalizeSshKeyImport(badKey); throw new AssertionError("badKey: " + badKey); }
+      catch (IllegalArgumentException expected) {}
+    }
+
+    check("调试".equals(zh.debugTitle()), "zh debug title");
+    check("Debugging".equals(en.debugTitle()), "en debug title");
+    check(en.debugTitle().equals(jpFallback.debugTitle()), "jp->en debug title");
+    check("网络 ADB".equals(zh.debugAdbTitle()), "zh adb title");
+    check("Network ADB".equals(en.debugAdbTitle()), "en adb title");
+    check("SSH 服务".equals(zh.debugSshTitle()), "zh ssh title");
+    check("SSH Service".equals(en.debugSshTitle()), "en ssh title");
+    check(zh.debugAdbSummary(true, true, "5555", "192.168.0.1", "wlan0:192.168.1.50").contains("192.168.0.1:5555"), "vm ip in adb summary");
+
     System.out.println("DRIVER_POLICY_AND_I18N_OK");
   }
 }
@@ -252,7 +360,10 @@ public class PolicyAndStringsTest {
                         str(ROOT / 'probe/advanced-control/DriverPolicy.java'),
                         str(ROOT / 'probe/advanced-control/Strings.java'),
                         str(runner)], check=True)
-        result = subprocess.run(['java', '-cp', str(self.work), 'PolicyAndStringsTest'], capture_output=True, text=True)
+        run_args = ['java', '-cp', str(self.work), 'PolicyAndStringsTest']
+        if cert_pem.is_file():
+            run_args.append(str(cert_pem))
+        result = subprocess.run(run_args, capture_output=True, text=True)
         self.assertEqual((result.returncode, result.stdout), (0, 'DRIVER_POLICY_AND_I18N_OK\n'), result.stderr)
 
     def test_bridge_daemon_vulkan_and_performance_flow(self):
@@ -661,6 +772,61 @@ with pathlib.Path({str(calls_log)!r}).open('a') as f:
             self.assertEqual(state['touch_tap_line'], tap_new.strip())
             self.assertTrue((touch_store / f'{dev_id}.noise.disabled').exists())
 
+            # 8. Disable Touchscreen: stops iptsd, persists across reboot, keeps hardware discoverable, and re-enables cleanly
+            dummy_iptsd = subprocess.Popen(['sleep', '60'])
+            try:
+                (run_dir / 'iptsd.pid').write_text(f'{dummy_iptsd.pid}\n')
+                state, _ = run_once()
+                self.assertEqual(state['touch_iptsd_running'], '1')
+                self.assertEqual(state['touch_disabled'], '0')
+
+                _, reply = run_once('set-touch-disabled\ntn-dis-bad\n2\n')
+                self.assertEqual(reply, ['tn-dis-bad', 'ERROR', 'invalid_arguments'])
+
+                state, reply = run_once('set-touch-disabled\ntn-dis-1\n1\n')
+                self.assertEqual(reply[:2], ['tn-dis-1', 'OK'])
+                dummy_iptsd.wait(timeout=5)
+                self.assertEqual(state['touch_disabled'], '1')
+                self.assertEqual(state['touch_iptsd_running'], '0')
+                self.assertEqual(state['touch_available'], '1')
+                self.assertTrue((run_dir / 'touch-disabled').exists())
+                self.assertEqual((data_root / 'data/vendor/spx-advanced-control/touch_disabled').read_text().strip(), '1')
+                self.assertFalse((run_dir / 'iptsd.pid').exists())
+            finally:
+                if dummy_iptsd.poll() is None:
+                    dummy_iptsd.kill()
+                    dummy_iptsd.wait(timeout=5)
+
+            # Simulate reboot with persisted touch_disabled=1: restore_touch_disabled_on_boot stops early iptsd
+            (run_dir / 'touch-disabled').unlink()
+            boot_iptsd = subprocess.Popen(['sleep', '60'])
+            try:
+                (run_dir / 'iptsd.pid').write_text(f'{boot_iptsd.pid}\n')
+                state, _ = run_once()
+                boot_iptsd.wait(timeout=5)
+                self.assertEqual(state['touch_disabled'], '1')
+                self.assertEqual(state['touch_iptsd_running'], '0')
+                self.assertTrue((run_dir / 'touch-disabled').exists())
+            finally:
+                if boot_iptsd.poll() is None:
+                    boot_iptsd.kill()
+                    boot_iptsd.wait(timeout=5)
+
+            # Re-enable touch: clears persistent + runtime flags and calls TOUCH_READY_TOOL
+            calls_log.write_text('')
+            state, reply = run_once('set-touch-disabled\ntn-dis-0\n0\n')
+            self.assertEqual(reply[:2], ['tn-dis-0', 'OK'])
+            self.assertEqual(state['touch_disabled'], '0')
+            self.assertFalse((run_dir / 'touch-disabled').exists())
+            self.assertFalse((data_root / 'data/vendor/spx-advanced-control/touch_disabled').exists())
+            self.assertIn('ready', calls_log.read_text())
+
+            # Verify touch boot/resume scripts respect /run/touch-disabled and pass sh -n
+            for helper_name in ('touch-services', 'touch-framework-ready', 'touch-resume-watch', 'touch-calibration-boot'):
+                helper_src = (ROOT / 'probe/test2' / helper_name).read_text(encoding='utf-8')
+                subprocess.run(['sh', '-n'], input=helper_src, text=True, check=True)
+                self.assertIn('/run/touch-disabled', helper_src)
+
     def test_install_idempotent_and_hooks_init(self):
         records = {}
         init_base = b'#!/bin/sh\necho hi\nexec native-handoff /newroot\n'
@@ -712,6 +878,335 @@ with pathlib.Path({str(calls_log)!r}).open('a') as f:
             self.assertEqual(graphics['gralloc_adapter_bytes'], b'fixture')
             self.assertEqual(graphics['turnip_bytes'], b'fixture')
             self.assertEqual(len(replacements), len(reuse.MESA))
+
+    def test_bridge_daemon_debug_adb_and_ssh_flow(self):
+        bridge = ROOT / 'probe/test2/spx-advanced-control-boot'
+        with tempfile.TemporaryDirectory(prefix='spx-debug-bridge-test-') as td:
+            root = Path(td)
+            data_root = root / 'root'
+            sysfs = root / 'sys'
+            run_dir = root / 'run'
+            etc_dir = root / 'etc'
+            home_root = root / 'home_root'
+            logs_dir = root / 'logs'
+            cmdline = root / 'cmdline'
+            cmdline.write_text('console=tty0 androidboot.hardware=android-desktop\n')
+
+            run_dir.mkdir(parents=True, exist_ok=True)
+            etc_dir.mkdir(parents=True, exist_ok=True)
+            home_root.mkdir(parents=True, exist_ok=True)
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            (etc_dir / 'shadow').write_text('root:!:0:0:99999:7:::\n')
+
+            app_files = data_root / 'data/user_de/0/org.surface.advancedcontrol/files'
+            app_files.mkdir(parents=True, exist_ok=True)
+
+            props_file = root / 'props.json'
+            props_file.write_text('{}\n')
+            fw_file = root / 'firewall.json'
+            fw_file.write_text('{"iptables": [], "ip6tables": []}\n')
+            calls_log = root / 'android_calls.log'
+
+            wrapper = root / 'mock-android'
+            wrapper.write_text(f'''#!/usr/bin/env python3
+import json, pathlib, sys
+props_p = pathlib.Path({str(props_file)!r})
+fw_p = pathlib.Path({str(fw_file)!r})
+calls_p = pathlib.Path({str(calls_log)!r})
+args = sys.argv[1:]
+with calls_p.open('a') as f:
+    f.write(' '.join(args) + '\\n')
+if args == ['cmd', 'activity', 'get-current-user']:
+    print('0')
+elif args[:1] == ['getprop'] and len(args) == 2:
+    data = json.loads(props_p.read_text())
+    print(data.get(args[1], ''))
+elif args[:1] == ['setprop'] and len(args) == 3:
+    data = json.loads(props_p.read_text())
+    if args[1] == 'ctl.start' and args[2] == 'adbd':
+        data['init.svc.adbd'] = 'running'
+    elif args[1] == 'ctl.stop' and args[2] == 'adbd':
+        data['init.svc.adbd'] = 'stopped'
+    else:
+        data[args[1]] = args[2]
+    props_p.write_text(json.dumps(data))
+elif args[:3] == ['settings', 'put', 'global']:
+    data = json.loads(props_p.read_text())
+    data['settings.' + args[3]] = args[4]
+    props_p.write_text(json.dumps(data))
+elif args[:1] in (['iptables'], ['ip6tables']):
+    tool = args[0]
+    rest = args[1:]
+    if rest and rest[0] == '-w':
+        rest = rest[1:]
+    fw = json.loads(fw_p.read_text())
+    rules = fw[tool]
+    op = rest[0] if rest else ''
+    rule = rest[2:]
+    if op == '-C':
+        sys.exit(0 if rule in rules else 1)
+    elif op == '-I':
+        rule = rest[3:]
+        rules.insert(0, rule)
+        fw_p.write_text(json.dumps(fw))
+    elif op == '-D':
+        if rule in rules:
+            rules.remove(rule)
+            fw_p.write_text(json.dumps(fw))
+        else:
+            sys.exit(1)
+else:
+    sys.exit(2)
+''')
+            wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+
+            mock_ip = root / 'mock-ip'
+            mock_ip.write_text('''#!/bin/sh
+cat <<'EOF'
+1: lo    inet 10.255.255.254/32 scope global lo
+3: avf_tap_fixed    inet 192.168.0.1/24 brd 192.168.0.255 scope global avf_tap_fixed
+4: wlan0    inet 192.168.1.50/24 brd 192.168.1.255 scope global wlan0
+EOF
+''')
+            mock_ip.chmod(mock_ip.stat().st_mode | stat.S_IXUSR)
+
+            mock_dropbear = root / 'dropbear'
+            mock_dropbear.write_text(f'''#!/usr/bin/env python3
+import pathlib, subprocess, sys, time
+if sys.argv[1:] == ['--daemon-sleep']:
+    time.sleep(60)
+    sys.exit(0)
+pidfile = None
+args = sys.argv[1:]
+i = 0
+while i < len(args):
+    if args[i] == '-P' and i + 1 < len(args):
+        pidfile = args[i + 1]
+        i += 2
+    else:
+        i += 1
+with pathlib.Path({str(calls_log)!r}).open('a') as f:
+    f.write('dropbear ' + ' '.join(args) + '\\n')
+proc = subprocess.Popen(
+    [sys.argv[0], '--daemon-sleep'],
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    start_new_session=True,
+)
+if pidfile:
+    pathlib.Path(pidfile).write_text(str(proc.pid) + '\\n')
+''')
+            mock_dropbear.chmod(mock_dropbear.stat().st_mode | stat.S_IXUSR)
+
+            mock_dropbearkey = root / 'dropbearkey'
+            mock_dropbearkey.write_text('''#!/bin/sh
+keyfile=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -f) keyfile="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+printf 'MOCK-ED25519-HOST-KEY\n' > "$keyfile"
+''')
+            mock_dropbearkey.chmod(mock_dropbearkey.stat().st_mode | stat.S_IXUSR)
+
+            mock_mkpasswd = root / 'mkpasswd'
+            mock_mkpasswd.write_text('''#!/usr/bin/env python3
+import hashlib, sys
+pw = sys.stdin.readline().rstrip('\\n') if '-P' in sys.argv else sys.argv[-1]
+digest = hashlib.sha256(pw.encode('utf-8')).hexdigest()[:32]
+print(f'$6$testsalt${digest}')
+''')
+            mock_mkpasswd.chmod(mock_mkpasswd.stat().st_mode | stat.S_IXUSR)
+
+            def run_once(req_body=None):
+                if req_body is not None:
+                    (app_files / 'request').write_text(req_body)
+                env = dict(
+                    os.environ,
+                    SPX_AC_ROOT=str(data_root),
+                    SPX_AC_SYSFS=str(sysfs),
+                    SPX_AC_RUN=str(run_dir),
+                    SPX_AC_ETC=str(etc_dir),
+                    SPX_AC_HOME_ROOT=str(home_root),
+                    SPX_AC_LOGS=str(logs_dir),
+                    SPX_AC_CMDLINE=str(cmdline),
+                    SPX_AC_ANDROID_WRAPPER=str(wrapper),
+                    SPX_AC_IP_BIN=str(mock_ip),
+                    SPX_AC_DROPBEAR_BIN=str(mock_dropbear),
+                    SPX_AC_DROPBEARKEY_BIN=str(mock_dropbearkey),
+                    SPX_AC_MKPASSWD_BIN=str(mock_mkpasswd),
+                    SPX_AC_LOCK_DIR=str(root / 'lock'),
+                    SPX_AC_TMP_REQ=str(root / 'tmp.req'),
+                    SPX_AC_TMP_TOUCH=str(root / 'tmp.touch'),
+                    SPX_AC_BOOT_WAIT='0',
+                    SPX_AC_ONCE='1',
+                )
+                res = subprocess.run(['sh', str(bridge)], env=env, text=True, capture_output=True)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                state = {}
+                for line in (app_files / 'state').read_text().splitlines():
+                    if '=' in line:
+                        k, v = line.split('=', 1)
+                        state[k] = v
+                reply = (app_files / 'reply').read_text().splitlines() if (app_files / 'reply').is_file() else []
+                return state, reply, res.stdout
+
+            try:
+                # 1. Default boot keeps Network ADB and SSH OFF and reports VM/LAN IPs
+                state, _, _ = run_once()
+                self.assertEqual(state['adb_tcp_enabled'], '0')
+                self.assertEqual(state['adb_tcp_active'], '0')
+                self.assertEqual(state['ssh_available'], '1')
+                self.assertEqual(state['ssh_enabled'], '0')
+                self.assertEqual(state['ssh_running'], '0')
+                self.assertEqual(state['ssh_password_set'], '0')
+                self.assertEqual(state['ssh_key_count'], '0')
+                self.assertEqual(state['debug_vm_ip'], '192.168.0.1')
+                self.assertEqual(state['debug_lan_ips'], 'wlan0:192.168.1.50')
+
+                # 2. Enable Network ADB -> sets port 5555, restarts adbd, opens INPUT tcp 5555 without DROP
+                state, reply, _ = run_once('set-adb-tcp\ndbg-1\n1\n')
+                self.assertEqual(reply, ['dbg-1', 'OK'])
+                self.assertEqual(state['adb_tcp_enabled'], '1')
+                self.assertEqual(state['adb_tcp_active'], '1')
+                self.assertEqual(state['adb_tcp_port'], '5555')
+                props = json.loads(props_file.read_text())
+                self.assertEqual(props['settings.adb_enabled'], '1')
+                self.assertEqual(props['service.adb.tcp.port'], '5555')
+                self.assertEqual(props['init.svc.adbd'], 'running')
+                fw = json.loads(fw_file.read_text())
+                self.assertEqual(len(fw['iptables']), 1)
+                self.assertEqual(len(fw['ip6tables']), 1)
+                self.assertIn('5555', fw['iptables'][0])
+                self.assertIn('ACCEPT', fw['iptables'][0])
+                self.assertNotIn('DROP', calls_log.read_text())
+
+                # 3. Simulated reboot restores ADB TCP; rescue boot skips restore
+                props_file.write_text('{}\n')
+                fw_file.write_text('{"iptables": [], "ip6tables": []}\n')
+                state, _, stdout = run_once()
+                self.assertIn('SPX_AC_BOOT_ADB_TCP_RESTORED 1', stdout)
+                self.assertEqual(state['adb_tcp_active'], '1')
+
+                props_file.write_text('{}\n')
+                fw_file.write_text('{"iptables": [], "ip6tables": []}\n')
+                cmdline.write_text('console=tty0 sq2.rescue=1\n')
+                state, _, stdout = run_once()
+                self.assertIn('SPX_AC_BOOT_DEBUG_RESTORE_SKIPPED rescue', stdout)
+                self.assertEqual(state['adb_tcp_active'], '0')
+                cmdline.write_text('console=tty0\n')
+
+                # 4. Disable Network ADB -> clears firewall rules and resets property to -1
+                state, reply, _ = run_once('set-adb-tcp\ndbg-2\n0\n')
+                self.assertEqual(reply, ['dbg-2', 'OK'])
+                self.assertEqual(state['adb_tcp_enabled'], '0')
+                self.assertEqual(state['adb_tcp_active'], '0')
+                self.assertEqual(state['adb_tcp_port'], '-1')
+                self.assertEqual(json.loads(fw_file.read_text()), {'iptables': [], 'ip6tables': []})
+
+                # 5. Enable SSH -> generates host key, starts Dropbear on 22, opens firewall
+                state, reply, _ = run_once('set-ssh-enabled\ndbg-3\n1\n')
+                self.assertEqual(reply, ['dbg-3', 'OK'])
+                self.assertEqual(state['ssh_enabled'], '1')
+                self.assertEqual(state['ssh_running'], '1')
+                self.assertTrue((data_root / 'data/vendor/spx-advanced-control/ssh/dropbear_ed25519_host_key').is_file())
+                self.assertTrue((etc_dir / 'dropbear/dropbear_ed25519_host_key').is_file())
+                self.assertTrue((run_dir / 'dropbear.pid').is_file())
+                self.assertEqual(len(json.loads(fw_file.read_text())['iptables']), 1)
+
+                # 6. Set SSH password (including leading '-') -> hashes into store & shadow, never stores plaintext
+                secret_pw = '-Pass@123!'
+                state, reply, _ = run_once(f'set-ssh-password\ndbg-4\n{secret_pw}\n')
+                self.assertEqual(reply, ['dbg-4', 'OK'])
+                self.assertEqual(state['ssh_password_set'], '1')
+                saved_hash = (data_root / 'data/vendor/spx-advanced-control/ssh/root_shadow_hash').read_text().strip()
+                self.assertTrue(saved_hash.startswith('$6$'))
+                self.assertNotIn(secret_pw, saved_hash)
+                self.assertIn(saved_hash, (etc_dir / 'shadow').read_text())
+
+                # 7. Import SSH keys (with dedup) & reject invalid key payload
+                k1 = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMockKeyData111111111111111111111111 test1@vm'
+                k2 = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDMockRsaData2222222222222222222 test2@vm'
+                state, reply, _ = run_once(f'import-ssh-keys\ndbg-5\n{k1}\n{k1}\n{k2}\n')
+                self.assertEqual(reply, ['dbg-5', 'OK', '2 2'])
+                self.assertEqual(state['ssh_key_count'], '2')
+                auth_keys = home_root / '.ssh/authorized_keys'
+                self.assertEqual(stat.S_IMODE(auth_keys.stat().st_mode), 0o600)
+                self.assertEqual(len(auth_keys.read_text().splitlines()), 2)
+
+                _, reply, _ = run_once('import-ssh-keys\ndbg-6\nnot-a-valid-key abc\n')
+                self.assertEqual(reply, ['dbg-6', 'ERROR', 'invalid_ssh_key'])
+
+                # 8. Clear SSH keys & clear SSH password
+                state, reply, _ = run_once('clear-ssh-keys\ndbg-7\n')
+                self.assertEqual(reply, ['dbg-7', 'OK'])
+                self.assertEqual(state['ssh_key_count'], '0')
+                self.assertEqual(auth_keys.read_text(), '')
+
+                state, reply, _ = run_once('set-ssh-password\ndbg-8\n\n')
+                self.assertEqual(reply, ['dbg-8', 'OK'])
+                self.assertEqual(state['ssh_password_set'], '0')
+                self.assertTrue((etc_dir / 'shadow').read_text().startswith('root:!:'))
+
+                # 9. Re-set password + key, stop SSH -> locks live shadow while preserving saved config
+                state, reply, _ = run_once('set-ssh-password\ndbg-9\nkeep-secret\n')
+                self.assertEqual(reply, ['dbg-9', 'OK'])
+                state, reply, _ = run_once(f'import-ssh-keys\ndbg-10\n{k1}\n')
+                self.assertEqual(reply, ['dbg-10', 'OK', '1 1'])
+
+                old_pid = int((run_dir / 'dropbear.pid').read_text().strip())
+                state, reply, _ = run_once('set-ssh-enabled\ndbg-11\n0\n')
+                self.assertEqual(reply, ['dbg-11', 'OK'])
+                self.assertEqual(state['ssh_enabled'], '0')
+                self.assertEqual(state['ssh_running'], '0')
+                self.assertEqual(state['ssh_password_set'], '1')
+                self.assertEqual(state['ssh_key_count'], '1')
+                self.assertTrue((etc_dir / 'shadow').read_text().startswith('root:!:'))
+                self.assertEqual(json.loads(fw_file.read_text()), {'iptables': [], 'ip6tables': []})
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(old_pid, 0)
+
+                # 10. Enable SSH again -> restores live shadow & restarts Dropbear; simulated reboot restores SSH
+                state, reply, _ = run_once('set-ssh-enabled\ndbg-12\n1\n')
+                self.assertEqual(reply, ['dbg-12', 'OK'])
+                self.assertFalse((etc_dir / 'shadow').read_text().startswith('root:!:'))
+                pid_to_kill = int((run_dir / 'dropbear.pid').read_text().strip())
+                os.kill(pid_to_kill, signal.SIGKILL)
+                os.waitpid(pid_to_kill, 0) if False else None
+                (run_dir / 'dropbear.pid').unlink()
+                (etc_dir / 'dropbear/dropbear_ed25519_host_key').unlink()
+                state, _, stdout = run_once()
+                self.assertIn('SPX_AC_BOOT_SSH_RESTORED 1', stdout)
+                self.assertEqual(state['ssh_running'], '1')
+                self.assertTrue((etc_dir / 'dropbear/dropbear_ed25519_host_key').is_file())
+            finally:
+                pid_file = run_dir / 'dropbear.pid'
+                if pid_file.is_file():
+                    try:
+                        os.kill(int(pid_file.read_text().strip()), signal.SIGKILL)
+                    except Exception:
+                        pass
+
+    def test_apk_build_and_settings_icon_metadata(self):
+        with tempfile.TemporaryDirectory(prefix='spx-apk-icon-test-') as td:
+            apk_path = Path(td) / 'SurfaceAdvancedControl.apk'
+            control.build_apk(apk_path)
+            aapt2 = control._find_sdk() / 'android-15/aapt2'
+            dump = subprocess.check_output(
+                [str(aapt2), 'dump', 'xmltree', str(apk_path), '--file', 'AndroidManifest.xml'],
+                text=True,
+            )
+            self.assertIn('versionCode(0x0101021b)=4', dump)
+            self.assertRegex(dump, r'android:icon\(0x01010002\)=@0x7f[0-9a-f]{6}')
+            self.assertIn('com.android.settings.icon', dump)
+            self.assertRegex(
+                dump,
+                r'com\.android\.settings\.icon"\)\s*\n\s*A: http://schemas\.android\.com/apk/res/android:resource\(0x01010025\)=@0x7f[0-9a-f]{6}',
+            )
+            self.assertIn('com.android.settings.icon_tintable', dump)
 
 
 if __name__ == '__main__':

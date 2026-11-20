@@ -195,41 +195,109 @@ static int shid_set_feature_report(struct surface_hid_device *shid, u8 rprt_id, 
 
 
 
-/* Temporary standalone SPX-only transport, does not replace active keyboard HID. */
-static struct platform_device *owner;
-static struct surface_hid_device hid;
+/* Isolated SPX UCSI transport bound to a platform driver so surface_hid_pm_ops
+ * forwards system sleep suspend/resume to ucsi_surface_hid. */
+static struct platform_device *spx_ucsi_pdev;
+
+static int spx_ucsi_probe(struct platform_device *pdev)
+{
+	struct surface_hid_device *shid;
+	struct ssam_controller *ctrl;
+	int ret;
+
+	ctrl = ssam_client_bind(&pdev->dev);
+	if (IS_ERR(ctrl))
+		return PTR_ERR(ctrl);
+
+	shid = devm_kzalloc(&pdev->dev, sizeof(*shid), GFP_KERNEL);
+	if (!shid)
+		return -ENOMEM;
+
+	shid->dev = &pdev->dev;
+	shid->ctrl = ctrl;
+	shid->uid = (struct ssam_device_uid){
+		.domain = 1,
+		.category = 0x15,
+		.target = 1,
+		.instance = 0,
+		.function = 0,
+	};
+	shid->notif.base.priority = 1;
+	shid->notif.base.fn = ssam_hid_event_fn;
+	shid->notif.event.reg = SSAM_EVENT_REGISTRY_SAM;
+	shid->notif.event.id.target_category = 0x15;
+	shid->notif.event.id.instance = 0;
+	shid->notif.event.mask = SSAM_EVENT_MASK_STRICT;
+	shid->notif.event.flags = 0;
+	shid->ops.get_descriptor = ssam_hid_get_descriptor;
+	shid->ops.output_report = shid_output_report;
+	shid->ops.get_feature_report = shid_get_feature_report;
+	shid->ops.set_feature_report = shid_set_feature_report;
+
+	platform_set_drvdata(pdev, shid);
+
+	ret = surface_hid_device_add(shid);
+	if (ret) {
+		platform_set_drvdata(pdev, NULL);
+		return ret;
+	}
+
+	return 0;
+}
+
+static void spx_ucsi_remove(struct platform_device *pdev)
+{
+	struct surface_hid_device *shid = platform_get_drvdata(pdev);
+
+	if (!shid)
+		return;
+
+	surface_hid_device_destroy(shid);
+	platform_set_drvdata(pdev, NULL);
+}
+
+static struct platform_driver spx_ucsi_driver = {
+	.probe = spx_ucsi_probe,
+	.remove = spx_ucsi_remove,
+	.driver = {
+		.name = "spx-ucsi-transport",
+		.pm = &surface_hid_pm_ops,
+	},
+};
+
 static int __init spx_ucsi_start(void)
 {
- int ret;
- hid.ctrl=ssam_get_controller();
- if(!hid.ctrl)return -ENODEV;
- owner=platform_device_register_simple("spx-ucsi-transport",-1,NULL,0);
- if(IS_ERR(owner)){ret=PTR_ERR(owner);goto put;}
- hid.dev=&owner->dev;
- hid.uid=(struct ssam_device_uid){.domain=1,.category=0x15,.target=1,.instance=0,.function=0};
- hid.notif.base.priority=1;
- hid.notif.base.fn=ssam_hid_event_fn;
- hid.notif.event.reg=SSAM_EVENT_REGISTRY_SAM;
- hid.notif.event.id.target_category=0x15;
- hid.notif.event.id.instance=0;
- hid.notif.event.mask=SSAM_EVENT_MASK_STRICT;
- hid.notif.event.flags=0;
- hid.ops.get_descriptor=ssam_hid_get_descriptor;
- hid.ops.output_report=shid_output_report;
- hid.ops.get_feature_report=shid_get_feature_report;
- hid.ops.set_feature_report=shid_set_feature_report;
- ret=surface_hid_device_add(&hid);
- if(!ret)return 0;
- platform_device_unregister(owner);
-put:
- ssam_controller_put(hid.ctrl);return ret;
+	int ret;
+
+	ret = platform_driver_register(&spx_ucsi_driver);
+	if (ret)
+		return ret;
+
+	spx_ucsi_pdev = platform_device_register_simple("spx-ucsi-transport", -1, NULL, 0);
+	if (IS_ERR(spx_ucsi_pdev)) {
+		ret = PTR_ERR(spx_ucsi_pdev);
+		spx_ucsi_pdev = NULL;
+		platform_driver_unregister(&spx_ucsi_driver);
+		return ret;
+	}
+
+	if (!platform_get_drvdata(spx_ucsi_pdev)) {
+		platform_device_unregister(spx_ucsi_pdev);
+		spx_ucsi_pdev = NULL;
+		platform_driver_unregister(&spx_ucsi_driver);
+		return -ENODEV;
+	}
+
+	return 0;
 }
+
 static void __exit spx_ucsi_stop(void)
 {
- surface_hid_device_destroy(&hid);
- platform_device_unregister(owner);
- ssam_controller_put(hid.ctrl);
+	platform_device_unregister(spx_ucsi_pdev);
+	spx_ucsi_pdev = NULL;
+	platform_driver_unregister(&spx_ucsi_driver);
 }
-module_init(spx_ucsi_start);module_exit(spx_ucsi_stop);
+module_init(spx_ucsi_start);
+module_exit(spx_ucsi_stop);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Isolated SPX UCSI HID transport via SAM registry, no keyboard replacement");

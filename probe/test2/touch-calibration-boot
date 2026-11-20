@@ -5,6 +5,79 @@ export PATH=/bin:/sbin
 grep -qE 'sq2.rescue=1|sq2.calibration=0' /proc/cmdline && exit 0
 mkdir /run/touch-calibration-lock 2>/dev/null || exit 0
 trap 'rmdir /run/touch-calibration-lock 2>/dev/null || true' EXIT
+# Race-free, zero-orphan timeout override (BusyBox timeout orphans its sleeping
+# watchdog child to PID 1, spamming "Untracked process (timeout)" in dmesg).
+timeout() {
+    _rwt_sec=$1
+    shift
+    "$@" &
+    _rwt_cmd=$!
+    (
+        trap - EXIT
+        _rwt_armed=1
+        trap 'if [ "$_rwt_armed" = 1 ] && [ -n "${!:-}" ] && [ "$!" != "$_rwt_cmd" ]; then kill "$!" 2>/dev/null || true; wait "$!" 2>/dev/null || true; fi; exit 0' TERM INT
+        sleep "$_rwt_sec" </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -TERM "$_rwt_cmd" 2>/dev/null || true
+        _rwt_armed=1
+        sleep 1 </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -KILL "$_rwt_cmd" 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    _rwt_wd=$!
+    _rwt_rc=0
+    wait "$_rwt_cmd" 2>/dev/null || _rwt_rc=$?
+    kill -TERM "$_rwt_wd" 2>/dev/null || true
+    _rwt_try=0
+    while [ "$_rwt_try" -lt 20 ]; do
+        _rwt_st=
+        [ -r "/proc/$_rwt_wd/stat" ] || break
+        { read -r _rwt_st < "/proc/$_rwt_wd/stat"; } 2>/dev/null || break
+        case "$_rwt_st" in
+            *') Z '*|*') X '*) break ;;
+        esac
+        kill -TERM "$_rwt_wd" 2>/dev/null || break
+        sleep 0.05 2>/dev/null || break
+        _rwt_try=$((_rwt_try + 1))
+    done
+    wait "$_rwt_wd" 2>/dev/null || true
+    return "$_rwt_rc"
+}
+display_is_on() {
+    _dio_found=0
+    for _dio_en in /sys/class/drm/card*-*/enabled; do
+        [ -r "$_dio_en" ] || continue
+        _dio_found=1
+        read -r _dio_val < "$_dio_en" 2>/dev/null || _dio_val=
+        if [ "$_dio_val" = enabled ]; then
+            _dio_dpms="${_dio_en%/*}/dpms"
+            if [ -r "$_dio_dpms" ]; then
+                read -r _dio_dv < "$_dio_dpms" 2>/dev/null || _dio_dv=
+                [ "$_dio_dv" = On ] || continue
+            fi
+            return 0
+        fi
+    done
+    if [ "$_dio_found" = 1 ]; then
+        return 1
+    fi
+    for _dio_bl in /sys/class/backlight/*; do
+        [ -d "$_dio_bl" ] || continue
+        _dio_found=1
+        if [ -r "$_dio_bl/bl_power" ]; then
+            read -r _dio_bp < "$_dio_bl/bl_power" 2>/dev/null || _dio_bp=0
+            [ "$_dio_bp" = 0 ] || continue
+        fi
+        if [ -r "$_dio_bl/brightness" ]; then
+            read -r _dio_br < "$_dio_bl/brightness" 2>/dev/null || _dio_br=1
+            [ "$_dio_br" != 0 ] || continue
+        fi
+        return 0
+    done
+    [ "$_dio_found" = 0 ]
+}
 android() { timeout "${ANDROID_COMMAND_TIMEOUT:-15}" nsenter -t 1 -m -r -- /system/bin/"$@"; }
 tool=/bin/touch-calibration-profile
 for n in $(seq 1 240); do
@@ -35,12 +108,63 @@ done
 # Stronger local key: changed controller/panel does not reuse previous tuning.
 # Old profile files are retained, never deleted or copied to another machine.
 device=$({ cat /sys/class/dmi/id/product_uuid; cat "$display/edid"; grep '^HID_ID=' "$sensor/device/uevent"; cat "$sensor/device/report_descriptor"; } | sha256sum | cut -d ' ' -f1)
+device_legacy=$({ cat /sys/class/dmi/id/product_uuid; cat "$display/edid"; cat "$sensor/device/report_descriptor"; } | sha256sum | cut -d ' ' -f1)
 store=/proc/1/root/data/vendor/sq2-touch-calibration
 mkdir -p "$store"; chmod 700 "$store"
 saved=$store/$device.profile
 noise=/run/iptsd-noise
 mkdir -p "$noise"; chmod 700 "$noise"
 noise_saved=$store/$device.noise
+tap_saved=$store/$device.tap
+# One-time migration from the pre-HID_ID local key on the same board+EDID+descriptor.
+# Retain legacy files untouched for rollback; never overwrite existing new-key data.
+if [ "$device_legacy" != "$device" ] && [ ! -e "$store/$device.migrated" ]; then
+    if [ -f "$saved" ] || [ -f "$noise_saved" ] || [ -f "$tap_saved" ]; then
+        touch "$store/$device.migrated"
+    elif [ -e "$store/$device_legacy.profile" ] || [ -e "$store/$device_legacy.noise" ] || [ -e "$store/$device_legacy.tap" ] || [ -e "$store/$device_legacy.prompted" ]; then
+        migrated_any=0
+        legacy_saved=$store/$device_legacy.profile
+        if [ -f "$legacy_saved" ] && [ ! -L "$legacy_saved" ] && "$tool" validate "$device_legacy" < "$legacy_saved" > /dev/null 2>&1; then
+            sed "s/^Device=$device_legacy\$/Device=$device/" "$legacy_saved" > "$saved.new" 2>/dev/null || true
+            if [ -s "$saved.new" ] && "$tool" validate "$device" < "$saved.new" > /dev/null 2>&1; then
+                chmod 600 "$saved.new"; sync; mv "$saved.new" "$saved"; sync
+                migrated_any=1
+            else
+                rm -f "$saved.new"
+            fi
+        fi
+        legacy_noise=$store/$device_legacy.noise
+        if [ -x /bin/touch-noise-profile ] && [ -f "$legacy_noise" ] && [ ! -L "$legacy_noise" ] && /bin/touch-noise-profile "$device_legacy" < "$legacy_noise" > /dev/null 2>&1; then
+            sed "1s/ $device_legacy / $device /" "$legacy_noise" | /bin/touch-noise-profile "$device" > "$noise_saved.new" 2>/dev/null || true
+            if [ -s "$noise_saved.new" ]; then
+                chmod 600 "$noise_saved.new"; sync; mv "$noise_saved.new" "$noise_saved"
+                if [ -e "$legacy_noise.disabled" ]; then
+                    : > "$noise_saved.disabled"
+                    chmod 600 "$noise_saved.disabled" 2>/dev/null || true
+                fi
+                sync
+                migrated_any=1
+            else
+                rm -f "$noise_saved.new"
+            fi
+        fi
+        legacy_tap=$store/$device_legacy.tap
+        if [ -x /bin/touch-tap-profile ] && [ -f "$legacy_tap" ] && [ ! -L "$legacy_tap" ] && /bin/touch-tap-profile "$device_legacy" < "$legacy_tap" > /dev/null 2>&1; then
+            sed "1s/ $device_legacy / $device /" "$legacy_tap" | /bin/touch-tap-profile "$device" > "$tap_saved.new" 2>/dev/null || true
+            if [ -s "$tap_saved.new" ]; then
+                chmod 600 "$tap_saved.new"; sync; mv "$tap_saved.new" "$tap_saved"; sync
+                migrated_any=1
+            else
+                rm -f "$tap_saved.new"
+            fi
+        fi
+        if [ "$migrated_any" = 1 ] || [ -e "$store/$device_legacy.prompted" ]; then
+            touch "$store/$device.prompted"
+        fi
+        touch "$store/$device.migrated"
+        sync
+    fi
+fi
 noise_preview=0; noise_until=0
 noise_cmd() {
     printf '%s %s %s\n' "$1" "$device" "$2" > "$noise/command.new"
@@ -102,7 +226,7 @@ apply() {
     reload_nonce="coordinate-$(cut -d ' ' -f1 /proc/uptime | tr -d .)"
     noise_cmd reload "$reload_nonce"
     /bin/touch-framework-ready || return 1
-    if [ -s "$noise/version" ]; then noise_reload "$reload_nonce-ready" || return 1; fi
+    if [ -s "$noise/version" ] && [ ! -e /run/touch-disabled ]; then noise_reload "$reload_nonce-ready" || return 1; fi
 }
 valid=0
 if [ -f "$saved" ] && [ ! -L "$saved" ] && "$tool" validate "$device" < "$saved" > /dev/null; then valid=1; fi
@@ -134,7 +258,7 @@ fi
 android pm disable-user --user "$user" org.surface.touchcalibration > /logs/touch-calibration-legacy-hidden.txt 2>&1 || true
 files=/proc/1/root/data/user_de/$user/$pkg/files
 if [ -d "$files" ] && [ ! -L "$files" ]; then rm -f "$files/request"; fi
-if [ "$valid" = 0 ] && [ ! -e "$store/$device.prompted" ]; then
+if [ "$valid" = 0 ] && [ ! -e "$store/$device.prompted" ] && [ ! -e /run/touch-disabled ]; then
     # Nonblocking onboarding: never dismiss the lock screen or modify credentials.
     android am start --user "$user" --windowingMode 1 -n "$pkg/org.surface.touchcalibration.MainActivity" > /dev/null 2>&1 ||
         android am start --user "$user" -n "$pkg/org.surface.touchcalibration.MainActivity" > /dev/null
@@ -333,7 +457,7 @@ while true; do
     fi
     # A user switch closes the old preview and installs/serves the current user's UI.
     cycles=$((cycles+1))
-    if [ "$cycles" -ge 10 ]; then
+    if [ "$cycles" -ge 10 ] && display_is_on; then
         cycles=0
         if [ "$(android cmd activity get-current-user)" != "$user" ]; then
             cleanup;trap - EXIT TERM INT;exec /bin/touch-calibration-boot

@@ -64,7 +64,7 @@ is_safe_relpath() {
 
 is_preserved_esp_path() {
     case "$1" in
-        EFI/BOOT/grub.cfg|SPX-USERDATA-GROWN.txt|SPX-BOOT-SOURCE.txt|SPX-OTA-*)
+        EFI/BOOT/grub.cfg|SPX-USERDATA-GROWN.txt|SPX-BOOT-SOURCE.txt|SPX-OTA-*|EFI/SPX/LTE/*)
             return 0
             ;;
         *)

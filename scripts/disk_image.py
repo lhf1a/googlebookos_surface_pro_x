@@ -373,22 +373,44 @@ fi
         delta['bin/grow-image-userdata'] = (0o100755, boot_helper('grow-image-userdata'))
         delta['bin/storage-ready-stage'] = (0o100755, boot_helper('storage-ready-stage'))
     require(init.count(b'exec native-handoff /newroot\n') == 1, 'Unknown GSC stage anchor')
-    init = init.replace(b'exec native-handoff /newroot\n', b'/bin/gscd-availability-stage > /logs/gscd-availability.txt 2>&1 || echo GSC_AVAILABILITY_STAGE_FAILED_NONFATAL\n'+b'exec native-handoff /newroot\n', 1)
+    init = init.replace(
+        b'exec native-handoff /newroot\n',
+        b'/bin/gscd-availability-stage > /logs/gscd-availability.txt 2>&1 || echo GSC_AVAILABILITY_STAGE_FAILED_NONFATAL\n'
+        b'/bin/spx-service-hygiene-stage > /logs/spx-service-hygiene.txt 2>&1 || echo SPX_SERVICE_HYGIENE_STAGE_FAILED_NONFATAL\n'
+        b'exec native-handoff /newroot\n',
+        1,
+    )
     delta['init'] = (mode, init)
     delta['bin/gscd-availability-stage'] = (0o100755, boot_helper('gscd-availability-stage'))
+    delta['bin/spx-service-hygiene-stage'] = (0o100755, boot_helper('spx-service-hygiene-stage'))
+    delta['bin/lab-input-posture'] = (0o100755, boot_helper('lab-input-posture'))
     delta['bin/touch-services'] = (0o100755, boot_helper('touch-services'))
+    delta['bin/touch-framework-ready'] = (0o100755, boot_helper('touch-framework-ready'))
     delta['bin/touch-resume-watch'] = (0o100755, boot_helper('touch-resume-watch'))
     delta['bin/touch-calibration-boot'] = (0o100755, boot_helper('touch-calibration-boot'))
     delta['bin/refresh-iptsd-input-nodes'] = (0o100755, boot_helper('refresh-iptsd-input-nodes'))
     if 'bin/apply-device-info' in before:
         delta['bin/apply-device-info'] = (0o100755, boot_helper('apply-device-info'))
+    if 'bin/spx-lower-usb' in before:
+        delta['bin/spx-lower-usb'] = (0o100755, boot_helper('spx-lower-usb'))
     delta.update(early_hidl_bootstrap(before))
     from runtime_boot_policy import apply
     runtime_bodies = {name: body for name, (_,body) in before.items()}
+    if 'bin/prepare-native-gpu' in runtime_bodies:
+        gpu_body = runtime_bodies['bin/prepare-native-gpu'].replace(b'\r\n', b'\n')
+        rtl_anchor = b'cp -a /lib/firmware/. "$dest/"\n'
+        rtl_hook = (
+            b'if [ -d "$target/vendor/firmware/rtl_nic" ] && [ ! -d "$dest/rtl_nic" ]; then\n'
+            b'    cp -a "$target/vendor/firmware/rtl_nic" "$dest/rtl_nic"\n'
+            b'fi\n'
+        )
+        if rtl_anchor in gpu_body and b'rtl_nic' not in gpu_body:
+            runtime_bodies['bin/prepare-native-gpu'] = gpu_body.replace(rtl_anchor, rtl_anchor + rtl_hook, 1)
+            delta['bin/prepare-native-gpu'] = (before['bin/prepare-native-gpu'][0], runtime_bodies['bin/prepare-native-gpu'])
     for name in apply(runtime_bodies):
-        if name not in delta:
+        if name not in delta or name == 'bin/prepare-native-gpu':
             delta[name] = (before[name][0],runtime_bodies[name])
-    for name in ['init','bin/prepare-native-ssd', *early_storage]:
+    for name in ['init','bin/prepare-native-ssd','bin/spx-service-hygiene-stage','bin/lab-input-posture', *early_storage]:
         subprocess.run(['sh','-n'],input=delta[name][1],check=True)
     rest, offset, insert, identity = base, 0, len(base), False
     while rest:
@@ -430,10 +452,18 @@ def typec_early_handoff(init, early_storage, before):
     discovery = b'    . /bin/prepare-native-ssd\n'
     require(init.count(discovery) == 1, 'Ambiguous storage preparation')
     init = init.replace(discovery, b'    /bin/spx-typec-early >> /logs/spx-typec.txt 2>&1 || fail typec-early\n', 1)
+    # Mount /media/esp BEFORE wifi-services runs lte-unit-seed (which seeds
+    # /run/rmtfs/modem_fsg from /media/esp/EFI/SPX/LTE/<uuid>.bin before rmtfs
+    # starts), while still running after spx-typec-early firmware handoff and
+    # giving USB-C storage enumeration time during early module loads.
+    pre_wifi = b'    timeout 5 hwclock -s -u >> /logs/module-load.txt 2>&1\n'
+    require(init.count(pre_wifi) == 1, 'Unknown pre-wifi storage discovery boundary')
+    acquire_pre_wifi = b'    if [ "$ssd" = 1 ]; then\n        . /bin/prepare-native-ssd\n    fi\n'
+    init = init.replace(pre_wifi, pre_wifi + acquire_pre_wifi, 1)
     rescue = b'if [ "$rescue" = 1 ]; then\n    echo '
     require(init.count(rescue) == 1, 'Unknown pre-mount/rescue boundary')
-    acquire = b'if [ "$ssd" = 1 ]; then\n    . /bin/prepare-native-ssd\nfi\n'
-    init = init.replace(rescue, acquire+rescue, 1)
+    acquire_fallback = b'if [ "$ssd" = 1 ] && [ ! -f /run/sq2-ssd-device ]; then\n    . /bin/prepare-native-ssd\nfi\n'
+    init = init.replace(rescue, acquire_fallback + rescue, 1)
     late = b'echo 1 > /sys/bus/platform/devices/surface-typec/events_enabled 2>> /logs/spx-typec.txt || echo SPX_TYPEC_EVENTS_FAILED\n'
     require(init.count(late) == 1, 'Unknown late firmware enable')
     init = init.replace(late, b'echo 1 > /sys/bus/platform/devices/surface-typec/routing_ready 2>> /logs/spx-typec.txt || fail typec-routing\n', 1)

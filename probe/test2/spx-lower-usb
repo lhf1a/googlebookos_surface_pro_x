@@ -2,12 +2,21 @@
 # Lower connector only. Standard Android init/adbd owns ADB descriptors and auth.
 set -eu
 export PATH=/bin:/sbin
-android() { nsenter -t 1 -m -r -- "$@"; }
+android() {
+ if [ -n "${SPX_LOWER_USB_ANDROID_WRAPPER:-}" ]; then
+  "$SPX_LOWER_USB_ANDROID_WRAPPER" "$@"
+ else
+  nsenter -t 1 -m -r -- "$@"
+ fi
+}
 get() { android /system/bin/getprop "$1"; }
 setprop() { android /system/bin/setprop "$1" "$2"; }
-role=/sys/bus/platform/devices/surface-typec/lower_data_role
-state=/proc/1/root/data/vendor/surface-usb
-g=/proc/1/root/config/usb_gadget/g1
+root=${SPX_LOWER_USB_ROOT:-/proc/1/root}
+role=${SPX_LOWER_USB_ROLE:-/sys/bus/platform/devices/surface-typec/lower_data_role}
+state=$root/data/vendor/surface-usb
+g=$root/config/usb_gadget/g1
+usb_vintf=${SPX_USB_VINTF:-$root/vendor/etc/vintf/manifest/android.hardware.usb-service.qti.xml}
+qti_usb_hal_declared() { [ -r "$usb_vintf" ] && grep -Fq 'IUsb/default' "$usb_vintf"; }
 mode=${1:-status}
 case "$mode" in
  status)
@@ -47,8 +56,10 @@ if [ "$mode" = adb ]; then
  test -d /sys/class/udc/a600000.usb
  # Requested ADB mode also enables Android's authorization UI; never disables auth.
  android /system/bin/settings put global adb_enabled 1
- setprop ctl.stop vendor.usb-hal
- for i in $(seq 1 30); do [ "$(get init.svc.vendor.usb-hal)" != running ] && break; sleep 0.1; done
+ if [ "$(get init.svc.vendor.usb-hal)" = running ]; then
+  setprop ctl.stop vendor.usb-hal
+  for i in $(seq 1 30); do [ "$(get init.svc.vendor.usb-hal)" != running ] && break; sleep 0.1; done
+ fi
  test "$(get init.svc.vendor.usb-hal)" != running
  test -d "$g/functions/ffs.adb"
  if [ -n "$(cat "$g/UDC")" ]; then echo '' > "$g/UDC"; fi
@@ -76,8 +87,12 @@ else
  for i in $(seq 1 30); do [ "$(get sys.usb.state)" = none ] && break; sleep 0.1; done
  for p in "$g/configs/b.1/"*; do [ ! -L "$p" ] || rm "$p"; done
  echo host > "$role"
- setprop sys.usb.configfs 2
- setprop ctl.start vendor.usb-hal
+ if qti_usb_hal_declared; then
+  setprop sys.usb.configfs 2
+  setprop ctl.start vendor.usb-hal
+ else
+  setprop sys.usb.configfs 1
+ fi
  # Restore the original local authenticated ADB/bridge service; do not enable TCP externally.
  setprop ctl.start adbd
 fi

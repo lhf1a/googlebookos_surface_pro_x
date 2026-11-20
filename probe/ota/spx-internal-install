@@ -1,0 +1,807 @@
+#!/bin/busybox sh
+# Fresh internal-disk installer for Surface Pro X Googlebook OS.
+# When booted from USB, cleanly installs the currently running system (super + ESP)
+# onto an internal non-USB disk with fresh metadata, misc, and full-capacity userdata.
+# Does NOT preserve existing internal-disk data and does NOT migrate USB userdata.
+# Never hardcodes device serials, disk paths, or single-machine allowlists.
+set -eu
+
+export PATH="${SPX_INSTALL_PATH:-/bin:/sbin:/usr/bin:/usr/sbin:${PATH:-}}"
+
+SYSFS="${SPX_INSTALL_SYSFS:-/sys}"
+ETC_DIR="${SPX_INSTALL_ETC:-/etc}"
+ESP_DIR="${SPX_INSTALL_ESP:-/media/esp}"
+RUN_DIR="${SPX_INSTALL_RUN:-/run/spx-internal-install}"
+BOOT_DISK_FILE="${SPX_INSTALL_BOOT_DISK_FILE:-/run/sq2-ssd-device}"
+SUPER_DEV="${SPX_INSTALL_SUPER_DEV:-/dev/block/by-name/super}"
+OTA_TOOL="${SPX_INSTALL_OTA_TOOL:-/bin/spx-ota-tool}"
+MOUNTS_FILE="${SPX_INSTALL_MOUNTS:-/proc/mounts}"
+MOUNTINFO_FILE="${SPX_INSTALL_MOUNTINFO:-/proc/1/mountinfo}"
+SWAPS_FILE="${SPX_INSTALL_SWAPS:-/proc/swaps}"
+DEV_PREFIX="${SPX_INSTALL_DEV_PREFIX:-/dev}"
+LOG_FILE="${SPX_INSTALL_LOG:-/logs/spx-internal-install.txt}"
+
+MIB=1048576
+GIB=1073741824
+
+log() {
+    _lg_dir="${LOG_FILE%/*}"
+    [ -d "$_lg_dir" ] || mkdir -p "$_lg_dir" 2>/dev/null || true
+    printf 'SPX_DISK_INSTALL: %s\n' "$*" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+android() {
+    if [ -n "${SPX_INSTALL_ANDROID_WRAPPER:-}" ]; then
+        "$SPX_INSTALL_ANDROID_WRAPPER" "$@"
+    else
+        timeout "${ANDROID_COMMAND_TIMEOUT:-60}" nsenter -t 1 -m -r -- /system/bin/"$@"
+    fi
+}
+
+write_progress() {
+    _wp_file="$1"
+    _wp_stage="$2"
+    _wp_pct="$3"
+    _wp_detail="${4:-}"
+    [ -n "$_wp_file" ] && [ "$_wp_file" != "-" ] || return 0
+    _wp_tmp="${_wp_file}.tmp"
+    {
+        printf 'stage=%s\n' "$_wp_stage"
+        printf 'percent=%s\n' "$_wp_pct"
+        printf 'detail=%s\n' "$_wp_detail"
+    } > "$_wp_tmp" 2>/dev/null || return 0
+    chmod 644 "$_wp_tmp" 2>/dev/null || true
+    mv -f "$_wp_tmp" "$_wp_file" 2>/dev/null || true
+}
+
+fail_install() {
+    _fi_reason="$1"
+    log "FAILED: $_fi_reason"
+    if [ -n "${PROGRESS_FILE:-}" ]; then
+        write_progress "$PROGRESS_FILE" "error" "0" "$_fi_reason"
+    fi
+    printf 'ERROR=%s\n' "$_fi_reason" >&2
+    exit 1
+}
+
+TARGET_ESP_MOUNTED=0
+cleanup() {
+    if [ "$TARGET_ESP_MOUNTED" = 1 ]; then
+        umount "$RUN_DIR/target-esp" 2>/dev/null || true
+        TARGET_ESP_MOUNTED=0
+    fi
+    rm -rf "$RUN_DIR/target-esp" "$RUN_DIR/esp-filelist.txt" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+align_up_1m() {
+    awk -v v="$1" 'BEGIN {
+        m = 1048576;
+        printf "%.0f\n", int((v + m - 1) / m) * m;
+    }'
+}
+
+max_u64() {
+    awk -v a="$1" -v b="$2" 'BEGIN { printf "%.0f\n", (a + 0 >= b + 0) ? a + 0 : b + 0 }'
+}
+
+ge_u64() {
+    awk -v a="$1" -v b="$2" 'BEGIN { exit (a + 0 >= b + 0) ? 0 : 1 }'
+}
+
+gt_u64() {
+    awk -v a="$1" -v b="$2" 'BEGIN { exit (a + 0 > b + 0) ? 0 : 1 }'
+}
+
+block_size_bytes() {
+    _bs_dev="$1"
+    if [ -b "$_bs_dev" ]; then
+        if command -v blockdev >/dev/null 2>&1; then
+            _bs_b="$(blockdev --getsize64 "$_bs_dev" 2>/dev/null || true)"
+            case "$_bs_b" in ''|*[!0-9]*) ;; *) [ "$_bs_b" != "0" ] && { printf '%s\n' "$_bs_b"; return 0; } ;; esac
+        fi
+        _bs_real="$(readlink -f "$_bs_dev" 2>/dev/null || printf '%s' "$_bs_dev")"
+        _bs_node="${_bs_real##*/}"
+        if [ -r "$SYSFS/class/block/$_bs_node/size" ]; then
+            _bs_sec="$(cat "$SYSFS/class/block/$_bs_node/size")"
+            awk -v s="$_bs_sec" 'BEGIN { printf "%.0f\n", s * 512 }'
+            return 0
+        fi
+    elif [ -f "$_bs_dev" ]; then
+        stat -c '%s' "$_bs_dev" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+is_safe_dev_path() {
+    _sd_p="$1"
+    if [ "${SPX_INSTALL_ALLOW_FILE_TARGET:-0}" = "1" ]; then
+        [ -n "$_sd_p" ] && [ -f "$_sd_p" ] && [ ! -L "$_sd_p" ] && return 0
+    fi
+    case "$_sd_p" in
+        "${DEV_PREFIX}"/*) ;;
+        *) return 1 ;;
+    esac
+    _sd_name="${_sd_p#${DEV_PREFIX}/}"
+    [ -n "$_sd_name" ] || return 1
+    case "$_sd_name" in
+        */*|*..*|.*|*[!a-zA-Z0-9_-]*) return 1 ;;
+    esac
+    return 0
+}
+
+is_usb_block_device() {
+    _ub_name="$1"
+    _ub_sys="$SYSFS/class/block/$_ub_name"
+    [ -e "$_ub_sys" ] || return 1
+    _ub_cur="$(readlink -f "$_ub_sys" 2>/dev/null || printf '%s' "$_ub_sys")"
+    case "$_ub_cur" in
+        */usb[0-9]*/*) return 0 ;;
+    esac
+    while [ -n "$_ub_cur" ] && [ "$_ub_cur" != "/" ]; do
+        if [ -f "$_ub_cur/idVendor" ]; then
+            return 0
+        fi
+        if [ -L "$_ub_cur/subsystem" ]; then
+            _ub_sub="$(readlink -f "$_ub_cur/subsystem" 2>/dev/null || true)"
+            case "${_ub_sub##*/}" in
+                usb|usb-storage) return 0 ;;
+            esac
+        fi
+        if [ -f "$_ub_cur/spx_test_bus" ]; then
+            _ub_tb="$(cat "$_ub_cur/spx_test_bus" 2>/dev/null || true)"
+            [ "$_ub_tb" = "usb" ] && return 0
+        fi
+        _ub_next="${_ub_cur%/*}"
+        [ "$_ub_next" != "$_ub_cur" ] || break
+        _ub_cur="$_ub_next"
+    done
+    return 1
+}
+
+detect_block_bus() {
+    _db_name="$1"
+    if is_usb_block_device "$_db_name"; then
+        printf 'usb\n'
+        return 0
+    fi
+    _db_sys="$SYSFS/class/block/$_db_name"
+    _db_cur="$(readlink -f "$_db_sys" 2>/dev/null || printf '%s' "$_db_sys")"
+    case "$_db_name" in
+        nvme*) printf 'nvme\n'; return 0 ;;
+        mmcblk*) printf 'mmc\n'; return 0 ;;
+        vd*) printf 'virtio\n'; return 0 ;;
+    esac
+    case "$_db_cur" in
+        */nvme/*) printf 'nvme\n'; return 0 ;;
+        */mmc_host/*) printf 'mmc\n'; return 0 ;;
+    esac
+    printf 'internal\n'
+}
+
+sanitize_model() {
+    printf '%s' "$1" | tr '\r\n\t' '   ' | tr -cd 'A-Za-z0-9 ._+-/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[[:space:]][[:space:]]*/ /g'
+}
+
+is_virtual_block_name() {
+    case "$1" in
+        loop*|ram*|zram*|dm-*|sr*|fd*|nbd*|mtd*|mmcblk*boot*|mmcblk*rpmb*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# ---- Source Layout & Boot-Origin Analysis ----
+
+BOOT_DISK=""
+BOOT_NAME=""
+BOOT_IS_USB=0
+BOOT_TRANSPORT="unknown"
+LAYOUT_COMPATIBLE=0
+LAYOUT_REASON=""
+REQ_SUPER_BYTES=0
+REQ_META_BYTES=0
+REQ_MISC_BYTES=0
+REQ_ESP_BYTES=0
+MIN_TARGET_BYTES=0
+SRC_SUPER_BYTES=0
+
+analyze_source() {
+    BOOT_DISK=""
+    BOOT_NAME=""
+    BOOT_IS_USB=0
+    BOOT_TRANSPORT="unknown"
+    LAYOUT_COMPATIBLE=0
+    LAYOUT_REASON=""
+
+    if [ -r "$BOOT_DISK_FILE" ]; then
+        BOOT_DISK="$(head -n 1 "$BOOT_DISK_FILE" 2>/dev/null | tr -d '\r\n' || true)"
+    fi
+    if [ -n "$BOOT_DISK" ]; then
+        BOOT_NAME="${BOOT_DISK##*/}"
+        if [ -e "$SYSFS/class/block/$BOOT_NAME" ]; then
+            BOOT_TRANSPORT="$(detect_block_bus "$BOOT_NAME")"
+            if [ "$BOOT_TRANSPORT" = "usb" ]; then
+                BOOT_IS_USB=1
+            fi
+        fi
+    fi
+
+    # Check source ESP integrity
+    if [ ! -f "$ESP_DIR/SPX-IMAGE.txt" ] || \
+       ! grep -qx 'SPX_IMAGE_FORMAT=1' "$ESP_DIR/SPX-IMAGE.txt" 2>/dev/null || \
+       [ ! -f "$ESP_DIR/EFI/BOOT/BOOTAA64.EFI" ] || \
+       [ ! -f "$ESP_DIR/EFI/SQ2Nat/start.efi" ] || \
+       [ ! -f "$ESP_DIR/EFI/SQ2Nat/Image" ] || \
+       [ ! -f "$ESP_DIR/EFI/SQ2Nat/initramfs.cpio.gz" ]; then
+        LAYOUT_COMPATIBLE=0
+        LAYOUT_REASON="source_esp_incomplete"
+        return 0
+    fi
+
+    if [ ! -f "$ETC_DIR/sq2-ssd-partitions" ] || [ ! -f "$ETC_DIR/sq2-ssd-super-slices" ]; then
+        LAYOUT_COMPATIBLE=0
+        LAYOUT_REASON="missing_partition_table"
+        return 0
+    fi
+
+    # Parse /etc/sq2-ssd-partitions and require standard 5-partition layout.
+    _as_parsed="$(awk '
+    NF == 0 || $1 ~ /^#/ { next }
+    {
+        if (NF < 3 || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/) { print "ERR=bad_partition_entry"; exit 1 }
+        seen[$1]++
+        sec[$1] = $3
+        total++
+    }
+    END {
+        if (total != 5 || seen["super"] != 1 || seen["metadata"] != 1 ||
+            seen["misc"] != 1 || seen["SQ2PROBE"] != 1 || seen["userdata"] != 1) {
+            print "ERR=unsupported_source_layout"
+            exit 1
+        }
+        printf "SUPER_SEC=%s\nMETA_SEC=%s\nMISC_SEC=%s\nESP_SEC=%s\nDATA_SEC=%s\n",
+               sec["super"], sec["metadata"], sec["misc"], sec["SQ2PROBE"], sec["userdata"]
+    }' "$ETC_DIR/sq2-ssd-partitions" 2>/dev/null || true)"
+
+    case "$_as_parsed" in
+        *ERR=*|'')
+            LAYOUT_COMPATIBLE=0
+            LAYOUT_REASON="unsupported_source_layout"
+            return 0
+            ;;
+    esac
+
+    _as_super_sec="$(printf '%s\n' "$_as_parsed" | sed -n 's/^SUPER_SEC=//p')"
+    _as_meta_sec="$(printf '%s\n' "$_as_parsed" | sed -n 's/^META_SEC=//p')"
+    _as_misc_sec="$(printf '%s\n' "$_as_parsed" | sed -n 's/^MISC_SEC=//p')"
+    _as_esp_sec="$(printf '%s\n' "$_as_parsed" | sed -n 's/^ESP_SEC=//p')"
+
+    _as_slices_end="$(awk '
+    NF == 0 || $1 ~ /^#/ { next }
+    {
+        if (NF < 3 || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/) { print "ERR"; exit 1 }
+        end = $2 + $3
+        if (end > mx) mx = end
+    }
+    END {
+        if (mx <= 0) { print "ERR"; exit 1 }
+        printf "%.0f\n", mx
+    }' "$ETC_DIR/sq2-ssd-super-slices" 2>/dev/null || true)"
+
+    case "$_as_slices_end" in
+        ''|ERR|*[!0-9]*)
+            LAYOUT_COMPATIBLE=0
+            LAYOUT_REASON="invalid_super_slices"
+            return 0
+            ;;
+    esac
+
+    if [ ! -b "$SUPER_DEV" ] && [ ! -f "$SUPER_DEV" ]; then
+        LAYOUT_COMPATIBLE=0
+        LAYOUT_REASON="missing_super_device"
+        return 0
+    fi
+    SRC_SUPER_BYTES="$(block_size_bytes "$SUPER_DEV" 2>/dev/null || echo 0)"
+
+    _as_etc_super_bytes="$(awk -v s="$_as_super_sec" 'BEGIN { printf "%.0f\n", s * 512 }')"
+    _as_etc_meta_bytes="$(awk -v s="$_as_meta_sec" 'BEGIN { printf "%.0f\n", s * 512 }')"
+    _as_etc_misc_bytes="$(awk -v s="$_as_misc_sec" 'BEGIN { printf "%.0f\n", s * 512 }')"
+    _as_etc_esp_bytes="$(awk -v s="$_as_esp_sec" 'BEGIN { printf "%.0f\n", s * 512 }')"
+
+    REQ_SUPER_BYTES="$(align_up_1m "$(max_u64 "$_as_etc_super_bytes" "$_as_slices_end")")"
+    if ! ge_u64 "$SRC_SUPER_BYTES" "$REQ_SUPER_BYTES"; then
+        LAYOUT_COMPATIBLE=0
+        LAYOUT_REASON="source_super_truncated"
+        return 0
+    fi
+
+    REQ_META_BYTES="$(align_up_1m "$(max_u64 67108864 "$_as_etc_meta_bytes")")"
+    REQ_MISC_BYTES="$(align_up_1m "$(max_u64 4194304 "$_as_etc_misc_bytes")")"
+
+    # Ensure ESP is at least 1 GiB, at least /etc/sq2-ssd-partitions requirement,
+    # and has >= 128 MiB headroom above current ESP contents.
+    _as_esp_used_kb="$(du -sk "$ESP_DIR" 2>/dev/null | awk '{print $1}' || echo 0)"
+    _as_esp_need="$(awk -v kb="${_as_esp_used_kb:-0}" 'BEGIN { printf "%.0f\n", kb * 1024 + 134217728 }')"
+    REQ_ESP_BYTES="$(align_up_1m "$(max_u64 "$(max_u64 1073741824 "$_as_etc_esp_bytes")" "$_as_esp_need")")"
+
+    # 1 MiB header + 4 fixed partitions + >= 1 GiB userdata + 1 MiB tail margin
+    MIN_TARGET_BYTES="$(awk -v s="$REQ_SUPER_BYTES" -v m="$REQ_META_BYTES" -v mi="$REQ_MISC_BYTES" -v e="$REQ_ESP_BYTES" \
+        'BEGIN { printf "%.0f\n", 1048576 + s + m + mi + e + 1073741824 + 1048576 }')"
+
+    LAYOUT_COMPATIBLE=1
+    LAYOUT_REASON=""
+}
+
+count_target_mounts() {
+    _cm_dev="$1"
+    _cm_pref="$_cm_dev"
+    case "$_cm_dev" in *[0-9]) _cm_pref="${_cm_dev}p" ;; esac
+    _cm_cnt=0
+    if [ -r "$MOUNTS_FILE" ]; then
+        _cm_c1="$(awk -v d="$_cm_dev" -v p="$_cm_pref" '
+        function match_dev(s) {
+            if (s == d) return 1
+            if (index(s, p) == 1) {
+                rest = substr(s, length(p) + 1)
+                if (rest ~ /^[0-9]+$/) return 1
+            }
+            return 0
+        }
+        match_dev($1) { c++ } END { print c + 0 }' "$MOUNTS_FILE" 2>/dev/null || echo 0)"
+        _cm_cnt=$((_cm_cnt + _cm_c1))
+    fi
+    if [ -r "$SWAPS_FILE" ]; then
+        _cm_c2="$(awk -v d="$_cm_dev" -v p="$_cm_pref" '
+        function match_dev(s) {
+            if (s == d) return 1
+            if (index(s, p) == 1) {
+                rest = substr(s, length(p) + 1)
+                if (rest ~ /^[0-9]+$/) return 1
+            }
+            return 0
+        }
+        NR > 1 && match_dev($1) { c++ } END { print c + 0 }' "$SWAPS_FILE" 2>/dev/null || echo 0)"
+        _cm_cnt=$((_cm_cnt + _cm_c2))
+    fi
+    printf '%s\n' "$_cm_cnt"
+}
+
+validate_candidate_disk() {
+    # Sets CAND_BYTES, CAND_BUS, CAND_MODEL, CAND_ENOUGH, CAND_REASON
+    _vc_name="$1"
+    CAND_BYTES=0
+    CAND_BUS=""
+    CAND_MODEL=""
+    CAND_ENOUGH=0
+    CAND_REASON=""
+
+    _vc_sys="$SYSFS/class/block/$_vc_name"
+    [ -e "$_vc_sys" ] || { CAND_REASON="missing_sysfs"; return 1; }
+    [ ! -f "$_vc_sys/partition" ] || { CAND_REASON="is_partition"; return 1; }
+    if is_virtual_block_name "$_vc_name"; then
+        CAND_REASON="virtual_device"
+        return 1
+    fi
+    _vc_dev="$DEV_PREFIX/$_vc_name"
+    if [ -n "$BOOT_DISK" ] && [ "$_vc_dev" = "$BOOT_DISK" ]; then
+        CAND_REASON="is_boot_disk"
+        return 1
+    fi
+    if [ -n "$BOOT_NAME" ] && [ "$_vc_name" = "$BOOT_NAME" ]; then
+        CAND_REASON="is_boot_disk"
+        return 1
+    fi
+    if is_usb_block_device "$_vc_name"; then
+        CAND_REASON="is_usb_device"
+        return 1
+    fi
+    _vc_rem="$(cat "$_vc_sys/removable" 2>/dev/null || echo 0)"
+    [ "$_vc_rem" = "0" ] || { CAND_REASON="is_removable"; return 1; }
+
+    _vc_ro="$(cat "$_vc_sys/ro" 2>/dev/null || echo 0)"
+    [ "$_vc_ro" = "0" ] || { CAND_REASON="is_readonly"; return 1; }
+
+    if [ -r "$_vc_sys/queue/logical_block_size" ]; then
+        _vc_ssz="$(cat "$_vc_sys/queue/logical_block_size" 2>/dev/null || echo 512)"
+        [ "$_vc_ssz" = "512" ] || { CAND_REASON="unsupported_sector_size"; return 1; }
+    fi
+
+    _vc_sec="$(cat "$_vc_sys/size" 2>/dev/null || echo 0)"
+    case "$_vc_sec" in
+        ''|0|*[!0-9]*) CAND_REASON="zero_size"; return 1 ;;
+    esac
+    CAND_BYTES="$(awk -v s="$_vc_sec" 'BEGIN { printf "%.0f\n", s * 512 }')"
+    CAND_BUS="$(detect_block_bus "$_vc_name")"
+
+    _vc_raw_model=""
+    if [ -r "$_vc_sys/device/model" ]; then
+        _vc_raw_model="$(cat "$_vc_sys/device/model" 2>/dev/null || true)"
+    elif [ -r "$_vc_sys/device/name" ]; then
+        _vc_raw_model="$(cat "$_vc_sys/device/name" 2>/dev/null || true)"
+    fi
+    CAND_MODEL="$(sanitize_model "$_vc_raw_model")"
+    [ -n "$CAND_MODEL" ] || CAND_MODEL="$_vc_name"
+
+    if [ "$LAYOUT_COMPATIBLE" = "1" ] && ge_u64 "$CAND_BYTES" "$MIN_TARGET_BYTES"; then
+        CAND_ENOUGH=1
+    else
+        CAND_ENOUGH=0
+    fi
+    return 0
+}
+
+cmd_probe() {
+    analyze_source
+
+    printf 'disk_install_version=1\n'
+    printf 'boot_disk=%s\n' "$BOOT_DISK"
+    printf 'boot_transport=%s\n' "$BOOT_TRANSPORT"
+    printf 'boot_is_usb=%s\n' "$BOOT_IS_USB"
+    printf 'layout_compatible=%s\n' "$LAYOUT_COMPATIBLE"
+    printf 'layout_reason=%s\n' "$LAYOUT_REASON"
+    printf 'required_super_bytes=%s\n' "$REQ_SUPER_BYTES"
+    printf 'required_metadata_bytes=%s\n' "$REQ_META_BYTES"
+    printf 'required_misc_bytes=%s\n' "$REQ_MISC_BYTES"
+    printf 'required_esp_bytes=%s\n' "$REQ_ESP_BYTES"
+    printf 'min_target_bytes=%s\n' "$MIN_TARGET_BYTES"
+
+    _pr_idx=0
+    _pr_enough_cnt=0
+    _pr_entries=""
+    for _pr_p in "$SYSFS"/class/block/*; do
+        [ -e "$_pr_p" ] || continue
+        _pr_name="${_pr_p##*/}"
+        if validate_candidate_disk "$_pr_name"; then
+            _pr_dev="$DEV_PREFIX/$_pr_name"
+            _pr_mnts="$(count_target_mounts "$_pr_dev")"
+            _pr_entries="${_pr_entries}target_${_pr_idx}_dev=${_pr_dev}
+target_${_pr_idx}_name=${_pr_name}
+target_${_pr_idx}_model=${CAND_MODEL}
+target_${_pr_idx}_bytes=${CAND_BYTES}
+target_${_pr_idx}_bus=${CAND_BUS}
+target_${_pr_idx}_enough_space=${CAND_ENOUGH}
+target_${_pr_idx}_mounted_parts=${_pr_mnts}
+"
+            [ "$CAND_ENOUGH" = "1" ] && _pr_enough_cnt=$((_pr_enough_cnt + 1))
+            _pr_idx=$((_pr_idx + 1))
+        fi
+    done
+
+    _pr_eligible=0
+    _pr_reason=""
+    if [ -z "$BOOT_DISK" ]; then
+        _pr_reason="boot_disk_unknown"
+    elif [ "$BOOT_IS_USB" != "1" ]; then
+        _pr_reason="not_usb_boot"
+    elif [ "$LAYOUT_COMPATIBLE" != "1" ]; then
+        _pr_reason="${LAYOUT_REASON:-unsupported_source_layout}"
+    elif [ "$_pr_idx" -eq 0 ]; then
+        _pr_reason="no_internal_disk"
+    elif [ "$_pr_enough_cnt" -eq 0 ]; then
+        _pr_reason="internal_disk_too_small"
+    else
+        _pr_eligible=1
+        _pr_reason=""
+    fi
+
+    printf 'eligible=%s\n' "$_pr_eligible"
+    printf 'ineligible_reason=%s\n' "$_pr_reason"
+    printf 'target_count=%s\n' "$_pr_idx"
+    printf '%s' "$_pr_entries"
+}
+
+unmount_target_disk() {
+    _ut_dev="$1"
+    _ut_name="${_ut_dev##*/}"
+    _ut_pref="$_ut_dev"
+    case "$_ut_dev" in *[0-9]) _ut_pref="${_ut_dev}p" ;; esac
+
+    # 1. Disable any active swap on target disk
+    if [ -r "$SWAPS_FILE" ]; then
+        _ut_swaps="$(awk -v d="$_ut_dev" -v p="$_ut_pref" '
+        function match_dev(s) {
+            if (s == d) return 1
+            if (index(s, p) == 1) { rest = substr(s, length(p) + 1); if (rest ~ /^[0-9]+$/) return 1 }
+            return 0
+        }
+        NR > 1 && match_dev($1) { print $1 }' "$SWAPS_FILE" 2>/dev/null || true)"
+        for _ut_sw in $_ut_swaps; do
+            log "Disabling swap on target: $_ut_sw"
+            swapoff "$_ut_sw" 2>>"$LOG_FILE" || fail_install "target_swap_busy"
+        done
+    fi
+
+    # 2. Unmount any host-namespace mounts on target disk (reverse order)
+    if [ -r "$MOUNTS_FILE" ]; then
+        _ut_mps="$(awk -v d="$_ut_dev" -v p="$_ut_pref" '
+        function match_dev(s) {
+            if (s == d) return 1
+            if (index(s, p) == 1) { rest = substr(s, length(p) + 1); if (rest ~ /^[0-9]+$/) return 1 }
+            return 0
+        }
+        match_dev($1) { print $2 }' "$MOUNTS_FILE" 2>/dev/null | awk '{ a[NR]=$0 } END { for(i=NR;i>=1;i--) print a[i] }' || true)"
+        for _ut_mp in $_ut_mps; do
+            log "Unmounting host mount on target: $_ut_mp"
+            umount "$_ut_mp" 2>>"$LOG_FILE" || fail_install "target_disk_busy"
+        done
+    fi
+
+    # 3. Unmount any Android PID-1 mount-namespace mounts backed by target disk partitions
+    if [ -r "$MOUNTINFO_FILE" ]; then
+        _ut_majmins=""
+        for _ut_sp in "$SYSFS/class/block/$_ut_name" "$SYSFS/class/block/$_ut_name"/*; do
+            [ -r "$_ut_sp/dev" ] || continue
+            _ut_mm="$(cat "$_ut_sp/dev" 2>/dev/null || true)"
+            [ -n "$_ut_mm" ] && _ut_majmins="${_ut_majmins} ${_ut_mm}"
+        done
+        _ut_amps="$(awk -v mmlist="$_ut_majmins" -v d="$_ut_dev" -v p="$_ut_pref" '
+        function match_dev(s) {
+            if (s == d) return 1
+            if (index(s, p) == 1) { rest = substr(s, length(p) + 1); if (rest ~ /^[0-9]+$/) return 1 }
+            return 0
+        }
+        BEGIN {
+            n = split(mmlist, arr, " ")
+            for (i = 1; i <= n; i++) if (arr[i] != "") mm[arr[i]] = 1
+        }
+        {
+            hit = 0
+            if ($3 in mm) hit = 1
+            for (i = 7; i <= NF; i++) {
+                if ($i == "-") {
+                    src = $(i + 2)
+                    if (match_dev(src)) hit = 1
+                    break
+                }
+            }
+            if (hit) mps[++cnt] = $5
+        }
+        END {
+            for (i = cnt; i >= 1; i--) print mps[i]
+        }' "$MOUNTINFO_FILE" 2>/dev/null || true)"
+        for _ut_amp in $_ut_amps; do
+            log "Unmounting Android mount on target: $_ut_amp"
+            android umount "$_ut_amp" 2>>"$LOG_FILE" || fail_install "target_disk_busy"
+        done
+    fi
+
+    # 4. Final busy check
+    _ut_rem="$(count_target_mounts "$_ut_dev")"
+    [ "$_ut_rem" = "0" ] || fail_install "target_disk_busy"
+}
+
+write_standard_grub_cfg() {
+    _wg_dst="$1"
+    cat > "$_wg_dst.spxtmp" <<'GRUBEOF'
+set timeout=5
+set default=spx-single-user
+
+menuentry 'Surface Pro X Linux 6.18 - single user 0' --id spx-single-user {
+ chainloader /EFI/SQ2Nat/start.efi
+}
+menuentry 'Surface Pro X Linux 6.18 - rescue (SSH / Wi-Fi / USB)' --id spx-rescue {
+ chainloader /EFI/SQ2Res/start.efi
+}
+menuentry 'Power off' { halt }
+GRUBEOF
+    sync 2>/dev/null || true
+    mv -f "$_wg_dst.spxtmp" "$_wg_dst"
+    sync 2>/dev/null || true
+}
+
+is_skipped_esp_rel() {
+    case "$1" in
+        SPX-BOOT-SOURCE.txt|SPX-USERDATA-GROWN.txt|SPX-OTA-*|EFI/BOOT/grubenv|EFI/BOOT/grub.cfg|EFI/BOOT/grubenv.*|EFI/BOOT/grub.cfg.*|*.ota-bak|*.spxtmp)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+sync_clean_esp_tree() {
+    _se_src="$1"
+    _se_dst="$2"
+    (
+        cd "$_se_src"
+        find . -type f | sed 's|^\./||' | sort
+    ) > "$RUN_DIR/esp-filelist.txt"
+
+    _se_total="$(wc -l < "$RUN_DIR/esp-filelist.txt" | tr -d ' ')"
+    [ "${_se_total:-0}" -gt 0 ] || fail_install "source_esp_empty"
+    _se_done=0
+    while IFS= read -r _se_rel; do
+        [ -n "$_se_rel" ] || continue
+        if is_skipped_esp_rel "$_se_rel"; then
+            continue
+        fi
+        _se_sfile="$_se_src/$_se_rel"
+        _se_dfile="$_se_dst/$_se_rel"
+        _se_ddir="${_se_dfile%/*}"
+        mkdir -p "$_se_ddir" || fail_install "esp_mkdir_failed"
+        cp "$_se_sfile" "$_se_dfile" || fail_install "esp_copy_failed"
+        _se_src_sha="$("$OTA_TOOL" sha256 "$_se_sfile" 2>>"$LOG_FILE")" || fail_install "esp_hash_failed"
+        _se_dst_sha="$("$OTA_TOOL" sha256 "$_se_dfile" 2>>"$LOG_FILE")" || fail_install "esp_verify_failed"
+        [ "$_se_src_sha" = "$_se_dst_sha" ] || fail_install "esp_sha256_mismatch"
+        _se_done=$((_se_done + 1))
+    done < "$RUN_DIR/esp-filelist.txt"
+
+    mkdir -p "$_se_dst/EFI/BOOT" || fail_install "esp_mkdir_failed"
+    write_standard_grub_cfg "$_se_dst/EFI/BOOT/grub.cfg" || fail_install "esp_grub_write_failed"
+
+    # Verify required boot files exist on target ESP
+    [ -f "$_se_dst/SPX-IMAGE.txt" ] && grep -qx 'SPX_IMAGE_FORMAT=1' "$_se_dst/SPX-IMAGE.txt" 2>/dev/null || fail_install "esp_verify_marker_failed"
+    [ -f "$_se_dst/EFI/BOOT/BOOTAA64.EFI" ] || fail_install "esp_verify_bootloader_failed"
+    [ -f "$_se_dst/EFI/BOOT/grub.cfg" ] || fail_install "esp_verify_grub_failed"
+    [ -f "$_se_dst/EFI/SQ2Nat/start.efi" ] || fail_install "esp_verify_start_failed"
+    [ -f "$_se_dst/EFI/SQ2Nat/Image" ] || fail_install "esp_verify_kernel_failed"
+    [ -f "$_se_dst/EFI/SQ2Nat/initramfs.cpio.gz" ] || fail_install "esp_verify_initramfs_failed"
+    [ ! -e "$_se_dst/SPX-BOOT-SOURCE.txt" ] || fail_install "esp_stale_boot_token"
+    [ ! -e "$_se_dst/SPX-USERDATA-GROWN.txt" ] || fail_install "esp_stale_grown_marker"
+    log "Clean ESP copied and SHA-256 verified ($_se_done files)."
+}
+
+wait_for_partitions() {
+    _wf_disk="$1"
+    _wf_pref="$_wf_disk"
+    case "$_wf_disk" in *[0-9]) _wf_pref="${_wf_disk}p" ;; esac
+
+    if [ "${SPX_INSTALL_SKIP_REREAD:-0}" != "1" ] && [ -b "$_wf_disk" ]; then
+        partprobe "$_wf_disk" 2>>"$LOG_FILE" || blockdev --rereadpt "$_wf_disk" 2>>"$LOG_FILE" || true
+    fi
+
+    _wf_i=0
+    while [ "$_wf_i" -lt 30 ]; do
+        if [ -b "${_wf_pref}1" ] && [ -b "${_wf_pref}2" ] && \
+           [ -b "${_wf_pref}3" ] && [ -b "${_wf_pref}4" ] && [ -b "${_wf_pref}5" ]; then
+            _wf_s1="$(block_size_bytes "${_wf_pref}1" 2>/dev/null || echo 0)"
+            _wf_s4="$(block_size_bytes "${_wf_pref}4" 2>/dev/null || echo 0)"
+            if [ "$_wf_s1" = "$REQ_SUPER_BYTES" ] && [ "$_wf_s4" = "$REQ_ESP_BYTES" ]; then
+                return 0
+            fi
+        fi
+        sleep 1
+        _wf_i=$((_wf_i + 1))
+    done
+    fail_install "partition_nodes_timeout"
+}
+
+cmd_install() {
+    _ci_target="${1:-}"
+    PROGRESS_FILE="${2:-}"
+
+    mkdir -p "$RUN_DIR"
+    log "Install requested for target=$_ci_target"
+    write_progress "$PROGRESS_FILE" "preparing" "2" "$_ci_target"
+
+    [ -x "$OTA_TOOL" ] || fail_install "missing_ota_tool"
+    is_safe_dev_path "$_ci_target" || fail_install "invalid_target_device"
+
+    analyze_source
+    [ -n "$BOOT_DISK" ] || fail_install "boot_disk_unknown"
+    [ "$BOOT_IS_USB" = "1" ] || fail_install "not_usb_boot"
+    [ "$LAYOUT_COMPATIBLE" = "1" ] || fail_install "${LAYOUT_REASON:-unsupported_source_layout}"
+
+    _ci_name="${_ci_target##*/}"
+    if [ "${SPX_INSTALL_ALLOW_FILE_TARGET:-0}" = "1" ] && [ -f "$_ci_target" ]; then
+        _ci_total_bytes="$(stat -c '%s' "$_ci_target")"
+        ge_u64 "$_ci_total_bytes" "$MIN_TARGET_BYTES" || fail_install "internal_disk_too_small"
+    else
+        [ -b "$_ci_target" ] || fail_install "target_not_block_device"
+        validate_candidate_disk "$_ci_name" || fail_install "${CAND_REASON:-invalid_target_disk}"
+        [ "$CAND_ENOUGH" = "1" ] || fail_install "internal_disk_too_small"
+        _ci_total_bytes="$CAND_BYTES"
+    fi
+
+    # Step 1: Unmount any existing mounts or swaps on target disk
+    write_progress "$PROGRESS_FILE" "preparing" "5" "$_ci_target"
+    if [ -b "$_ci_target" ]; then
+        unmount_target_disk "$_ci_target"
+    fi
+
+    # Step 2: Write fresh 5-partition GPT (super, metadata, misc, SQ2PROBE, userdata)
+    write_progress "$PROGRESS_FILE" "partitioning" "10" "$_ci_target"
+    log "Writing fresh 5-partition GPT to $_ci_target (super=$REQ_SUPER_BYTES meta=$REQ_META_BYTES misc=$REQ_MISC_BYTES esp=$REQ_ESP_BYTES total=$_ci_total_bytes)..."
+    _ci_gpt_plan="$("$OTA_TOOL" write-gpt-5part "$_ci_target" "$REQ_SUPER_BYTES" "$REQ_META_BYTES" "$REQ_MISC_BYTES" "$REQ_ESP_BYTES" 2>>"$LOG_FILE")" || fail_install "gpt_write_failed"
+    _ci_userdata_bytes="$(printf '%s\n' "$_ci_gpt_plan" | awk -F '\t' '$1 == "userdata" { print $4 }')"
+    [ -n "$_ci_userdata_bytes" ] || fail_install "gpt_plan_missing_userdata"
+
+    # Immediately verify GPT CRCs
+    _ci_gpt_check="$("$OTA_TOOL" inspect-gpt "$_ci_target" 2>>"$LOG_FILE")" || fail_install "gpt_verify_failed"
+    _ci_pcount="$(printf '%s\n' "$_ci_gpt_check" | grep -c '^[A-Za-z0-9_]' || true)"
+    [ "$_ci_pcount" = "5" ] || fail_install "gpt_partition_count_mismatch"
+
+    if [ -n "${SPX_INSTALL_PART_SUPER:-}" ]; then
+        _ci_p_super="$SPX_INSTALL_PART_SUPER"
+        _ci_p_meta="$SPX_INSTALL_PART_META"
+        _ci_p_misc="$SPX_INSTALL_PART_MISC"
+        _ci_p_esp="$SPX_INSTALL_PART_ESP"
+        _ci_p_data="$SPX_INSTALL_PART_DATA"
+    else
+        wait_for_partitions "$_ci_target"
+        _ci_pref="$_ci_target"
+        case "$_ci_target" in *[0-9]) _ci_pref="${_ci_target}p" ;; esac
+        _ci_p_super="${_ci_pref}1"
+        _ci_p_meta="${_ci_pref}2"
+        _ci_p_misc="${_ci_pref}3"
+        _ci_p_esp="${_ci_pref}4"
+        _ci_p_data="${_ci_pref}5"
+    fi
+
+    # Step 3: Stream-copy & readback-verify super partition
+    write_progress "$PROGRESS_FILE" "copying_super" "15" ""
+    log "Copying and verifying super ($REQ_SUPER_BYTES bytes) from $SUPER_DEV -> $_ci_p_super..."
+    _ci_copy_out="$("$OTA_TOOL" copy-verify "$SUPER_DEV" "$_ci_p_super" "$REQ_SUPER_BYTES" "$PROGRESS_FILE" 2>>"$LOG_FILE")" || fail_install "super_copy_verify_failed"
+    _ci_super_sha="$(printf '%s\n' "$_ci_copy_out" | sed -n 's/^SUPER_SHA256=//p' | head -n 1)"
+    [ "${#_ci_super_sha}" = 64 ] || fail_install "super_sha_missing"
+    log "Super partition copied and verified: $_ci_super_sha"
+
+    # Step 4: Format SQ2PROBE as FAT32 and copy clean boot payload
+    write_progress "$PROGRESS_FILE" "formatting_esp" "84" "SQ2PROBE"
+    log "Formatting SQ2PROBE FAT32 on $_ci_p_esp..."
+    if [ -n "${SPX_INSTALL_ESP_DST_DIR:-}" ]; then
+        mkdir -p "$SPX_INSTALL_ESP_DST_DIR"
+        sync_clean_esp_tree "$ESP_DIR" "$SPX_INSTALL_ESP_DST_DIR"
+    else
+        if command -v mkfs.vfat >/dev/null 2>&1; then
+            mkfs.vfat -n SQ2PROBE "$_ci_p_esp" >>"$LOG_FILE" 2>&1 || fail_install "format_esp_failed"
+        else
+            ANDROID_COMMAND_TIMEOUT=120 android newfs_msdos -F 32 -L SQ2PROBE "$_ci_p_esp" >>"$LOG_FILE" 2>&1 || fail_install "format_esp_failed"
+        fi
+        mkdir -p "$RUN_DIR/target-esp"
+        mount -t vfat -o rw,sync "$_ci_p_esp" "$RUN_DIR/target-esp" 2>>"$LOG_FILE" || fail_install "mount_target_esp_failed"
+        TARGET_ESP_MOUNTED=1
+        write_progress "$PROGRESS_FILE" "copying_esp" "87" ""
+        sync_clean_esp_tree "$ESP_DIR" "$RUN_DIR/target-esp"
+        sync 2>/dev/null || true
+        umount "$RUN_DIR/target-esp" 2>>"$LOG_FILE" || fail_install "umount_target_esp_failed"
+        TARGET_ESP_MOUNTED=0
+        if [ -x /proc/1/root/system/bin/fsck_msdos ] || [ -n "${SPX_INSTALL_ANDROID_WRAPPER:-}" ]; then
+            ANDROID_COMMAND_TIMEOUT=60 android fsck_msdos -n "$_ci_p_esp" >>"$LOG_FILE" 2>&1 || fail_install "verify_esp_fs_failed"
+        fi
+    fi
+
+    # Step 5: Format fresh metadata and full-capacity userdata (misc already zeroed by write-gpt-5part)
+    write_progress "$PROGRESS_FILE" "formatting_data" "92" "metadata"
+    log "Formatting fresh metadata ext4 on $_ci_p_meta..."
+    ANDROID_COMMAND_TIMEOUT=120 android mke2fs -q -F -t ext4 -b 4096 -m 0 -L SPXMETA \
+        -E lazy_itable_init=0,lazy_journal_init=0 "$_ci_p_meta" >>"$LOG_FILE" 2>&1 || fail_install "format_metadata_failed"
+    ANDROID_COMMAND_TIMEOUT=120 android e2fsck -fn "$_ci_p_meta" >>"$LOG_FILE" 2>&1 || fail_install "verify_metadata_failed"
+
+    write_progress "$PROGRESS_FILE" "formatting_data" "95" "userdata"
+    log "Formatting fresh userdata ext4 ($_ci_userdata_bytes bytes) on $_ci_p_data..."
+    ANDROID_COMMAND_TIMEOUT=300 android mke2fs -q -F -t ext4 -b 4096 -m 0 -L SPXDATA \
+        -O extent,64bit,metadata_csum,casefold,encrypt,verity \
+        -E encoding=utf8,lazy_itable_init=0,lazy_journal_init=0 "$_ci_p_data" >>"$LOG_FILE" 2>&1 || fail_install "format_userdata_failed"
+    ANDROID_COMMAND_TIMEOUT=180 android e2fsck -fn "$_ci_p_data" >>"$LOG_FILE" 2>&1 || fail_install "verify_userdata_failed"
+
+    # Step 6: Final sync and GPT readback check
+    write_progress "$PROGRESS_FILE" "finalizing" "98" ""
+    sync 2>/dev/null || true
+    "$OTA_TOOL" inspect-gpt "$_ci_target" >/dev/null 2>>"$LOG_FILE" || fail_install "final_gpt_check_failed"
+    write_progress "$PROGRESS_FILE" "done" "100" "$_ci_target"
+    log "Clean internal-disk installation completed successfully on $_ci_target."
+
+    printf 'STATUS=OK\n'
+    printf 'TARGET_DEV=%s\n' "$_ci_target"
+    printf 'SUPER_SHA256=%s\n' "$_ci_super_sha"
+    printf 'SUPER_BYTES=%s\n' "$REQ_SUPER_BYTES"
+    printf 'USERDATA_BYTES=%s\n' "$_ci_userdata_bytes"
+    return 0
+}
+
+ACTION="${1:-}"
+case "$ACTION" in
+    probe)
+        cmd_probe
+        ;;
+    install)
+        shift
+        cmd_install "$@"
+        ;;
+    *)
+        printf 'usage: spx-internal-install <probe|install <target_dev> [progress_file]>\n' >&2
+        exit 2
+        ;;
+esac

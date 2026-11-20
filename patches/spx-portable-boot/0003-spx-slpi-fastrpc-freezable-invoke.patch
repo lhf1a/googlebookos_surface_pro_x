@@ -1,0 +1,18 @@
+--- a/drivers/misc/fastrpc.c
++++ b/drivers/misc/fastrpc.c
+@@ -1249,7 +1249,14 @@
+ 		if (!wait_for_completion_timeout(&ctx->work, 10 * HZ))
+ 			err = -ETIMEDOUT;
+ 	} else {
+-		err = wait_for_completion_interruptible(&ctx->work);
++		/*
++		 * Use TASK_FREEZABLE so system suspend (s2idle) freezes waiting
++		 * FastRPC reverse-RPC daemons (e.g. SLPI sensor_process listener)
++		 * in place instead of waking them with -ERESTARTSYS and replaying
++		 * a duplicate invoke on thaw. Real signals still interrupt normally.
++		 */
++		err = wait_for_completion_state(&ctx->work,
++						TASK_INTERRUPTIBLE | TASK_FREEZABLE);
+ 	}
+ 
+ 	if (err)

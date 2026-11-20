@@ -5,6 +5,7 @@
  */
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
 #include <linux/auxiliary_bus.h>
 #include <linux/of.h>
 #include <linux/property.h>
@@ -33,6 +34,7 @@ struct spx_port {
  struct usb_role_switch *role_sw;
  enum usb_role requested_role;
  bool dp_active;
+ bool hpd_asserted;
  bool state_valid;
  u8 state[11];
 };
@@ -45,19 +47,21 @@ struct spx_typec {
  bool events_enabled;
  bool storage_ports_set;
  bool routing_ready;
+ bool suspended;
  struct spx_port ports[2];
 };
 struct spx_event {struct work_struct work;struct spx_typec *ctx;u8 bytes[11];};
 static void put_switch(void *p){typec_switch_put(p);}
 static void put_mux(void *p){typec_mux_put(p);}
 static void put_role(void *p){usb_role_switch_put(p);}
-static int spx_apply(struct spx_typec *ctx,const u8 *b)
+static int spx_apply(struct spx_typec *ctx,const u8 *b,bool force_hpd)
 {
  struct spx_port *p=&ctx->ports[b[4]];
  struct typec_mux_state state={};
  struct typec_displayport_data dp={};
  enum typec_orientation orientation;
  int pin,ret;
+ bool hpd,irq_hpd;
  if(!p->present)return -ENODEV;
  if(b[5]>2 || b[6]>3 || b[9]>1 || b[10]>1)return -EPROTO;
  /* Intentionally retain the boot connector: no mux/role/HPD writes. */
@@ -74,6 +78,7 @@ static int spx_apply(struct spx_typec *ctx,const u8 *b)
  } else {
   /* Withdraw HPD before disconnect/USB routing changes. */
   drm_aux_hpd_bridge_notify(&p->bridge->dev,connector_status_disconnected);
+  p->hpd_asserted=false;
   state.mode=TYPEC_STATE_USB;
  }
  ret=typec_switch_set(p->sw,orientation);if(ret)return ret;
@@ -82,8 +87,16 @@ static int spx_apply(struct spx_typec *ctx,const u8 *b)
   ret=usb_role_switch_set_role(p->role_sw,p->requested_role);if(ret)return ret;
  }
  p->dp_active=b[6]==2 || b[6]==3;
- if(b[6]==2 || b[6]==3)
-  drm_aux_hpd_bridge_notify(&p->bridge->dev,b[9]?connector_status_connected:connector_status_disconnected);
+ if(p->dp_active) {
+  hpd=!!b[9];
+  irq_hpd=!!b[10];
+  if(hpd!=p->hpd_asserted || irq_hpd || force_hpd) {
+   if(irq_hpd)
+    dev_dbg(ctx->dev,"USC port=%u forwarding IRQ_HPD (hpd=%u)\n",b[4],hpd);
+   drm_aux_hpd_bridge_notify(&p->bridge->dev,hpd?connector_status_connected:connector_status_disconnected);
+   p->hpd_asserted=hpd;
+  }
+ }
  return 0;
 }
 /* SAM event registration is a firmware operation, not a passive listener.
@@ -94,13 +107,16 @@ static int spx_apply(struct spx_typec *ctx,const u8 *b)
 static int spx_handle_state(struct spx_typec *ctx,const u8 *b)
 {
  struct spx_port *p;
+ int ret;
  if(b[4]>=ARRAY_SIZE(ctx->ports))return -EPROTO;
  p=&ctx->ports[b[4]];
  if(!p->present)return -ENODEV;
  if(b[5]>2 || b[6]>3 || b[9]>1 || b[10]>1)return -EPROTO;
  memcpy(p->state,b,sizeof(p->state));p->state_valid=true;
- if(!ctx->routing_ready)return 0;
- return spx_apply(ctx,b);
+ if(!ctx->routing_ready || ctx->suspended)return 0;
+ ret=spx_apply(ctx,b,false);
+ if(!ret)p->state[10]=0;
+ return ret;
 }
 static int spx_set_storage_ports(struct spx_typec *ctx,unsigned int mask)
 {
@@ -117,8 +133,9 @@ static int spx_activate_routing(struct spx_typec *ctx)
  if(ctx->routing_ready)return 0;
  for(i=0;i<ARRAY_SIZE(ctx->ports);i++) {
   if(!ctx->ports[i].state_valid)continue;
-  ret=spx_apply(ctx,ctx->ports[i].state);
+  ret=spx_apply(ctx,ctx->ports[i].state,true);
   if(ret)return ret;
+  ctx->ports[i].state[10]=0;
  }
  ctx->routing_ready=true;
  return 0;
@@ -252,7 +269,8 @@ static int spx_probe(struct platform_device *pdev)
   ret=devm_drm_dp_hpd_bridge_add(dev,p->bridge);if(ret)return ret;
   p->alt.svid=USB_TYPEC_DP_SID;p->alt.mode=USB_TYPEC_DP_MODE;p->alt.active=1;p->present=true;
  }
- ctx->queue=alloc_ordered_workqueue("spx-typec",WQ_MEM_RECLAIM | WQ_FREEZABLE);if(!ctx->queue)return -ENOMEM;
+ /* Non-freezable so SAM USC events are still cached and ACKed across s2idle. */
+ ctx->queue=alloc_ordered_workqueue("spx-typec",WQ_MEM_RECLAIM);if(!ctx->queue)return -ENOMEM;
  ctx->notifier.base.fn=spx_notify;ctx->notifier.base.priority=1;
  ctx->notifier.event.reg=SSAM_EVENT_REGISTRY_SAM;
  ctx->notifier.event.id.target_category=0x1b;ctx->notifier.event.id.instance=1;
@@ -270,9 +288,46 @@ static void spx_remove(struct platform_device *pdev)
  for(int i=0;i<ARRAY_SIZE(ctx->ports);i++)if(ctx->ports[i].present)
   drm_aux_hpd_bridge_notify(&ctx->ports[i].bridge->dev,connector_status_disconnected);
 }
+static int spx_suspend(struct device *dev)
+{
+ struct spx_typec *ctx=dev_get_drvdata(dev);
+ mutex_lock(&ctx->event_lock);
+ ctx->suspended=true;
+ mutex_unlock(&ctx->event_lock);
+ flush_workqueue(ctx->queue);
+ return 0;
+}
+static int spx_resume(struct device *dev)
+{
+ /* Keep hardware applies deferred until spx_complete() after SSAM display_on
+  * and DRM resume; spx_process() still caches and ACKs SAM USC events now. */
+ return 0;
+}
+static void spx_complete(struct device *dev)
+{
+ struct spx_typec *ctx=dev_get_drvdata(dev);
+ int i,ret=0;
+ mutex_lock(&ctx->event_lock);
+ ctx->suspended=false;
+ if(ctx->routing_ready) {
+  for(i=0;i<ARRAY_SIZE(ctx->ports);i++) {
+   int err;
+   if(!ctx->ports[i].present || !ctx->ports[i].state_valid)continue;
+   err=spx_apply(ctx,ctx->ports[i].state,true);
+   if(!err)ctx->ports[i].state[10]=0;
+   else if(!ret)ret=err;
+  }
+ }
+ mutex_unlock(&ctx->event_lock);
+ if(ret)dev_err(ctx->dev,"USC resume replay failed: %d\n",ret);
+}
+static const struct dev_pm_ops spx_pm_ops={
+ SYSTEM_SLEEP_PM_OPS(spx_suspend,spx_resume)
+ .complete=pm_sleep_ptr(spx_complete),
+};
 static const struct of_device_id spx_match[]={ {.compatible="microsoft,surface-pro-x-typec"},{} };
 MODULE_DEVICE_TABLE(of,spx_match);
-static struct platform_driver spx_driver={.probe=spx_probe,.remove=spx_remove,.driver={.name="spx-typec",.of_match_table=spx_match}};
+static struct platform_driver spx_driver={.probe=spx_probe,.remove=spx_remove,.driver={.name="spx-typec",.of_match_table=spx_match,.pm=pm_sleep_ptr(&spx_pm_ops)}};
 module_platform_driver(spx_driver);
 MODULE_LICENSE("GPL");MODULE_DESCRIPTION("Surface Pro X SAM USC to native QMP mux and DisplayPort HPD");
 

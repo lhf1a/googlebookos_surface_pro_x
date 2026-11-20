@@ -23,7 +23,7 @@ public final class Strings {
     }
 
     public String homeSubtitle() {
-        return t("图形驱动、性能调度与触摸校准", "Graphics driver, performance & touch");
+        return t("Vulkan、性能、触摸、调试与更新", "Vulkan, performance, touch, debugging & updates");
     }
 
     public String vulkanTitle() {
@@ -32,14 +32,13 @@ public final class Strings {
 
     public String vulkanSubtitle(String defaultLabel, int customCount, boolean available) {
         if (!available) {
-            return t("当前镜像缺少双 Vulkan 路由器", "Dual-Vulkan router unavailable in this image");
+            return t("不可用", "Unavailable");
         }
         if (customCount > 0) {
-            return t("默认：" + defaultLabel + " · 已自定义 " + customCount + " 个应用",
+            return t("默认：" + defaultLabel + " · 已修改 " + customCount + " 个应用",
                     "Default: " + defaultLabel + " · " + customCount + " custom");
         }
-        return t("默认：" + defaultLabel + " · 全部使用默认配置",
-                "Default: " + defaultLabel + " · All apps using default");
+        return t("默认：" + defaultLabel, "Default: " + defaultLabel);
     }
 
     public String perfTitle() {
@@ -48,23 +47,16 @@ public final class Strings {
 
     public String perfSubtitle(String currentGov, boolean available) {
         if (!available || currentGov == null || currentGov.isEmpty()) {
-            return t("未检测到可用的 CPU 调度策略", "No CPU frequency governors detected");
+            return t("不可用", "Unavailable");
         }
         if ("mixed".equals(currentGov)) {
-            return t("当前策略：多核心混合状态", "Active policy: Mixed across clusters");
+            return t("混合调度", "Mixed");
         }
-        return t("当前调度策略：" + governorShortName(currentGov),
-                "Active policy: " + governorShortName(currentGov));
-    }
-
-    public String homeFooter() {
-        return t("设置通过内置系统桥接保存并在重启后自动恢复。救援模式（sq2.rescue=1）下会自动回退到安全默认配置。",
-                "Settings are saved via the built-in system bridge and restored on reboot. Safe defaults apply automatically in rescue mode (sq2.rescue=1).");
+        return governorShortName(currentGov);
     }
 
     public String bridgeMissingBanner() {
-        return t("系统桥接服务未响应：当前仅可查看状态，修改功能需要配套的 Hybrid 系统镜像。",
-                "System bridge is not responding: read-only mode. Saving changes requires a matching Hybrid system image.");
+        return t("桥接服务未就绪（只读）", "Bridge unavailable (read-only)");
     }
 
     public String loadingSummary() {
@@ -99,16 +91,14 @@ public final class Strings {
 
     public String defaultConfigHint(String defaultDriver, String policyDefault) {
         if ("turnip".equals(defaultDriver)) {
-            return t("所有未单独配置的应用默认使用 MESA (Turnip) 驱动。重新打开应用后生效。",
-                    "All non-customized apps default to MESA (Turnip). Takes effect on next app launch.");
+            return t("默认 MESA (Turnip)", "Default: MESA (Turnip)");
         }
         if ("qcom".equals(defaultDriver)) {
-            return t("所有未单独配置的普通应用默认使用 Qcom (Qualcomm QTI) 驱动；系统组件与 SystemUI 保持受保护的 MESA。",
-                    "All non-customized regular apps default to Qcom (Qualcomm QTI); System & SystemUI stay protected on MESA.");
+            return t("默认 Qcom (QTI)", "Default: Qcom (QTI)");
         }
         String base = "qcom".equals(policyDefault) ? "Qcom" : "MESA";
-        return t("自动策略（出厂默认）：基础默认 " + base + "，Unity/Unreal 游戏自动路由至 Qcom，浏览器与系统组件使用 MESA。",
-                "Auto Policy (factory default): base " + base + ", Unity/Unreal games route to Qcom, browsers & system use MESA.");
+        return t("自动（基础 " + base + " · 游戏自动切 Qcom）",
+                "Auto (base " + base + " · games route to Qcom)");
     }
 
     public String driverAutoLabel() {
@@ -148,18 +138,18 @@ public final class Strings {
 
     public String[] appChoiceLabels() {
         return new String[] {
-            t("跟随默认配置", "Follow Default"),
+            t("跟随默认", "Follow Default"),
             t("MESA (Turnip)", "MESA (Turnip)"),
-            t("Qcom (Qualcomm QTI · 实验性)", "Qcom (Qualcomm QTI · Experimental)")
+            t("Qcom (QTI)", "Qcom (QTI)")
         };
     }
 
     public String searchHint() {
-        return t("搜索应用名称或包名", "Search app name or package");
+        return t("搜索应用", "Search apps");
     }
 
     public String customSectionHeader(int count) {
-        return t("已手动修改（" + count + "）", "Customized (" + count + ")");
+        return t("已修改（" + count + "）", "Customized (" + count + ")");
     }
 
     public String defaultSectionHeader(int count) {
@@ -168,19 +158,17 @@ public final class Strings {
 
     public String vulkanSummaryBar(int user, int total, int custom, boolean available) {
         if (!available) {
-            return t("当前镜像缺少双 Vulkan 路由器或驱动，请先更新 Hybrid 镜像。",
-                    "Dual-Vulkan router or drivers missing. Please update your Hybrid image.");
+            return t("双 Vulkan 不可用", "Dual-Vulkan unavailable");
         }
         if (custom > 0) {
-            return t("用户 " + user + " · 共 " + total + " 个应用 · " + custom + " 项已修改（已置顶）",
-                    "User " + user + " · " + total + " apps · " + custom + " customized (pinned first)");
+            return t("共 " + total + " 个应用 · 已修改 " + custom + " 项",
+                    total + " apps · " + custom + " customized");
         }
-        return t("用户 " + user + " · 共 " + total + " 个应用 · 点击应用单独配置",
-                "User " + user + " · " + total + " apps · Tap an app to configure");
+        return t("共 " + total + " 个应用", total + " apps");
     }
 
     public String emptySearchResult() {
-        return t("没有匹配的应用", "No matching applications");
+        return t("无匹配应用", "No matching apps");
     }
 
     public String cancel() {
@@ -192,7 +180,7 @@ public final class Strings {
     }
 
     public String saveAndStop() {
-        return t("保存并停止应用", "Save & Force Stop");
+        return t("保存并停止", "Save & Stop");
     }
 
     public String confirmStopTitle() {
@@ -200,23 +188,22 @@ public final class Strings {
     }
 
     public String confirmStopMessage(String pkg) {
-        return t("将强制停止 " + pkg + "，未保存的内容可能丢失。之后请手动重新打开应用使配置生效。",
-                "This will force-stop " + pkg + ". Unsaved data may be lost. Reopen the app manually afterward.");
+        return t("强制停止 " + pkg + "？", "Force stop " + pkg + "?");
     }
 
     public String confirmStopAction() {
-        return t("确认停止", "Force Stop");
+        return t("停止", "Stop");
     }
 
     public String savedAppMessage(boolean stopped) {
         return stopped
-                ? t("已保存并停止应用，重新打开后生效。", "Saved and force-stopped. Reopen the app to apply.")
-                : t("已保存，完全关闭并重新打开应用后生效。", "Saved. Restart the app for changes to take effect.");
+                ? t("已保存并停止应用", "Saved and stopped")
+                : t("已保存", "Saved");
     }
 
     public String savedDefaultMessage(String driver) {
-        return t("默认 Vulkan 配置已切换为：" + driverDisplayName(driver),
-                "Default Vulkan configuration set to: " + driverDisplayName(driver));
+        return t("默认 Vulkan：" + driverDisplayName(driver),
+                "Default Vulkan: " + driverDisplayName(driver));
     }
 
     public String saveFailed(String detail) {
@@ -240,42 +227,30 @@ public final class Strings {
     public String perfClusterDetail(String policies, String savedGov) {
         StringBuilder sb = new StringBuilder();
         if (policies != null && !policies.isEmpty()) {
-            sb.append(t("核心簇：", "Clusters: ")).append(policies.replace(",", " · "));
+            sb.append(policies.replace(",", " · "));
         }
         if (savedGov != null && !savedGov.isEmpty()) {
             if (sb.length() > 0) {
                 sb.append("\n");
             }
-            sb.append(t("重启自动恢复：", "Restores on reboot: ")).append(savedGov);
-        } else {
-            if (sb.length() > 0) {
-                sb.append("\n");
-            }
-            sb.append(t("当前遵循内核启动默认策略", "Following kernel boot default"));
+            sb.append(t("已保存：", "Saved: ")).append(savedGov);
         }
         return sb.toString();
     }
 
     public String perfNoGovernors() {
-        return t("当前设备未暴露 cpufreq 调度策略节点（可能启用了 sq2.cpufreq=0 或救援模式）。",
-                "No cpufreq governor nodes exposed (sq2.cpufreq=0 or rescue mode may be active).");
+        return t("未检测到调度策略", "No cpufreq governors detected");
     }
 
     public String perfRestoreDefault() {
-        return t("恢复系统默认策略", "Restore System Default");
+        return t("恢复默认策略", "Restore Default");
     }
 
     public String perfSavedMessage(String gov) {
         if (gov == null || gov.isEmpty()) {
-            return t("已恢复系统默认调度策略。", "Restored system default scheduling policy.");
+            return t("已恢复默认策略", "Restored default policy");
         }
-        return t("已切换调度策略为：" + governorShortName(gov) + "（重启后自动恢复）",
-                "Switched governor to: " + governorShortName(gov) + " (persisted across reboots)");
-    }
-
-    public String perfFooter() {
-        return t("切换调度策略会立即应用到所有 CPU 频率域并持久保存。硬件温控保护始终保持启用。",
-                "Changes apply immediately to all CPU frequency policies and persist across reboots. Hardware thermal throttling remains active.");
+        return t("已切换：" + governorShortName(gov), "Switched to: " + governorShortName(gov));
     }
 
     public String activeTag() {
@@ -296,40 +271,34 @@ public final class Strings {
             return t("保守省电 (conservative)", "Conservative (conservative)");
         }
         if ("powersave".equals(gov)) {
-            return t("极致省电 (powersave)", "Power Save (powersave)");
+            return t("省电模式 (powersave)", "Power Save (powersave)");
         }
         if ("userspace".equals(gov)) {
-            return t("用户态控制 (userspace)", "Userspace (userspace)");
+            return t("用户态 (userspace)", "Userspace (userspace)");
         }
         return gov == null ? "" : gov;
     }
 
     public String governorDescription(String gov) {
         if ("performance".equals(gov)) {
-            return t("锁定 CPU 最高可用频率，响应最快，功耗与发热最高",
-                    "Locks CPU to maximum available frequency for lowest latency; highest power & heat");
+            return t("最高频率", "Maximum frequency");
         }
         if ("schedutil".equals(gov)) {
-            return t("系统默认策略，结合内核调度负载实时动态调频，兼顾性能与续航",
-                    "System default; scales frequency dynamically using kernel scheduler utilization");
+            return t("负载动态调频", "Scheduler-guided scaling");
         }
         if ("ondemand".equals(gov)) {
-            return t("负载升高时迅速升至高频，空闲时逐步回落",
-                    "Rapidly ramps frequency under load and steps down when idle");
+            return t("按需升降频", "Dynamic load scaling");
         }
         if ("conservative".equals(gov)) {
-            return t("平滑渐进地升降频率，优先控制功耗与温度",
-                    "Adjusts frequency gradually to favor power efficiency and lower temperature");
+            return t("渐进调频", "Gradual scaling");
         }
         if ("powersave".equals(gov)) {
-            return t("锁定 CPU 最低可用频率，最大化续航（性能受限）",
-                    "Locks CPU to minimum available frequency for maximum battery life");
+            return t("最低频率", "Minimum frequency");
         }
         if ("userspace".equals(gov)) {
-            return t("允许用户态工具直接设定固定 CPU 频率",
-                    "Allows userspace tools to control CPU frequency directly");
+            return t("用户态控频", "Userspace frequency control");
         }
-        return t("内核支持的 CPU 调频调度策略", "Kernel-supported CPU frequency scaling governor");
+        return "";
     }
 
     // ---- Touch Sub-page ----
@@ -339,19 +308,61 @@ public final class Strings {
     }
 
     public String touchHomeSubtitle(boolean available, boolean noiseSaved, boolean noiseEnabled, boolean profileSaved) {
+        return touchHomeSubtitle(available, false, noiseSaved, noiseEnabled, profileSaved);
+    }
+
+    public String touchHomeSubtitle(boolean available, boolean touchDisabled, boolean noiseSaved,
+                                    boolean noiseEnabled, boolean profileSaved) {
+        if (touchDisabled) {
+            return t("触摸屏已禁用", "Touchscreen disabled");
+        }
         if (!available) {
-            return t("未检测到可用的 IPTS 触摸设备", "No active IPTS touch device detected");
+            return t("未检测到触摸设备", "No touch device");
         }
         String patchText = !noiseSaved
                 ? t("幽灵补丁：未配置", "Ghost patch: None")
-                : (noiseEnabled ? t("幽灵补丁：已启用", "Ghost patch: On") : t("幽灵补丁：已停用", "Ghost patch: Off"));
+                : (noiseEnabled ? t("幽灵补丁：开", "Ghost patch: On") : t("幽灵补丁：关", "Ghost patch: Off"));
         String calText = profileSaved ? t("已校准", "Calibrated") : t("未校准", "Uncalibrated");
         return patchText + " · " + calText;
     }
 
+    public String touchDisableTitle() {
+        return t("禁用触摸", "Disable Touchscreen");
+    }
+
+    public String touchDisableBadge(boolean disabled) {
+        return disabled ? t("已禁用", "Disabled") : t("正常启用", "Active");
+    }
+
+    public String touchDisableDescription(boolean disabled) {
+        return disabled
+                ? t("触摸屏输入已停用，休眠唤醒与重启后保持禁用；键鼠与触控板不受影响",
+                    "Touchscreen input is off and stays disabled across sleep and reboots. Keyboard, mouse, and touchpad still work.")
+                : t("关闭屏幕触控输入（适合外接键鼠或屏幕触控故障时使用）",
+                    "Turn off touchscreen input (useful with external keyboard/mouse or a faulty digitizer).");
+    }
+
+    public String touchDisableDialogTitle() {
+        return t("禁用触摸屏？", "Disable touchscreen?");
+    }
+
+    public String touchDisableDialogMessage() {
+        return t("禁用后屏幕将立即停止响应触控输入，且在休眠唤醒或重启后保持禁用。\n\n请确认已连接 Type Cover、外接键鼠，或可通过 ADB 恢复启用。",
+                 "Touchscreen input will stop immediately and remain disabled across sleep and reboots.\n\nMake sure a Type Cover, external keyboard/mouse, or ADB is available to re-enable it.");
+    }
+
+    public String touchDisableConfirm() {
+        return t("禁用触摸", "Disable");
+    }
+
+    public String touchDisableSavedMessage(boolean disabled) {
+        return disabled
+                ? t("触摸屏已禁用", "Touchscreen disabled")
+                : t("触摸屏已重新启用", "Touchscreen re-enabled");
+    }
+
     public String touchUnavailableBanner() {
-        return t("未检测到当前 IPTS 触摸控制器节点，仅可从已保存摘要查看或稍后刷新。",
-                "No active IPTS touch controller node detected. Refresh once touchscreen service is ready.");
+        return t("未检测到触摸设备", "Touch device unavailable");
     }
 
     public String touchGhostTitle() {
@@ -367,32 +378,25 @@ public final class Strings {
 
     public String touchGhostDescription(boolean noiseSaved, boolean noiseEnabled, String noiseInfo) {
         if (!noiseSaved) {
-            return t("当前设备尚未保存幽灵触控噪声补丁。可通过「重新校准」自动学习，或「从文件应用校准数据」导入 .noise 文件。",
-                    "No ghost-touch noise patch is saved yet. Run Recalibrate to learn one or import a .noise file below.");
+            return t("未保存补丁", "No patch saved");
         }
         DriverPolicy.NoiseSummary ns = DriverPolicy.parseNoiseSummary(noiseInfo);
         String modelDesc = formatNoiseDetail(ns);
-        if (noiseEnabled) {
-            return t("已激活并实时过滤异常触点：" + modelDesc + "。关闭将立即停用过滤，同时保留已学习数据。",
-                    "Actively filtering abnormal contacts: " + modelDesc + ". Turning off pauses filtering while keeping saved data.");
-        }
-        return t("已暂停过滤（保留已学习数据：" + modelDesc + "）。开启后将立即生效。",
-                "Paused (saved data kept: " + modelDesc + "). Toggle on to re-enable immediately.");
+        return (noiseEnabled ? t("已启用 · ", "Active · ") : t("已停用 · ", "Disabled · ")) + modelDesc;
     }
 
     public String touchNoPatchDialogTitle() {
-        return t("尚未保存幽灵触控补丁", "No Ghost-Touch Patch Saved");
+        return t("未保存幽灵触控补丁", "No Ghost-Touch Patch");
     }
 
     public String touchNoPatchDialogMessage() {
-        return t("系统尚未为当前触控模组保存 .noise 补丁文件。你可以打开触屏校准向导完成静置/滑动检测，或直接从本地文件导入 .noise 补丁。",
-                "No .noise patch file is saved for this touch module yet. Run the touch calibration wizard or import an existing .noise file.");
+        return t("请先运行校准或导入 .noise 文件。", "Run calibration or import a .noise file first.");
     }
 
     public String touchGhostSavedMessage(boolean enabled) {
         return enabled
-                ? t("幽灵触控补丁已启用并即时应用到触摸服务。", "Ghost-touch patch enabled and applied live.")
-                : t("幽灵触控补丁已停用（已保留原补丁文件）。", "Ghost-touch patch disabled (saved patch kept on disk).");
+                ? t("幽灵触控补丁已启用", "Ghost-touch patch enabled")
+                : t("幽灵触控补丁已停用", "Ghost-touch patch disabled");
     }
 
     public String touchSummarySection() {
@@ -404,9 +408,15 @@ public final class Strings {
     }
 
     public String touchValueHardware(String hidId, String deviceId, boolean iptsdRunning) {
+        return touchValueHardware(hidId, deviceId, iptsdRunning, false);
+    }
+
+    public String touchValueHardware(String hidId, String deviceId, boolean iptsdRunning, boolean touchDisabled) {
         String shortId = (deviceId != null && deviceId.length() >= 12) ? deviceId.substring(0, 12) : "—";
         String hid = (hidId != null && !hidId.isEmpty()) ? hidId : "—";
-        String svc = iptsdRunning ? t("iptsd 运行中", "iptsd running") : t("iptsd 未运行", "iptsd stopped");
+        String svc = touchDisabled
+                ? t("已禁用", "disabled")
+                : (iptsdRunning ? t("iptsd 运行中", "iptsd running") : t("iptsd 未运行", "iptsd stopped"));
         return hid + " · ID " + shortId + " · " + svc;
     }
 
@@ -509,15 +519,15 @@ public final class Strings {
     }
 
     public String touchRecalibrateSummary() {
-        return t("打开触屏校准应用，执行幽灵触控检测与坐标校准", "Open the touch calibration wizard for noise & coordinate calibration");
+        return t("打开校准向导", "Open calibration wizard");
     }
 
     public String touchImportTitle() {
-        return t("从文件应用校准数据", "Apply Calibration from File");
+        return t("导入校准数据", "Import Calibration");
     }
 
     public String touchImportSummary() {
-        return t("选择并校验导出的校准文件（.spkcal）后立即应用", "Pick and validate an exported calibration file (.spkcal) to apply");
+        return t("选择 .spkcal / .profile / .noise 文件", "Choose .spkcal / .profile / .noise file");
     }
 
     public String touchExportTitle() {
@@ -526,52 +536,50 @@ public final class Strings {
 
     public String touchExportSummary(boolean hasAnySaved) {
         if (!hasAnySaved) {
-            return t("暂无已保存的校准数据可导出", "No saved calibration data to export");
+            return t("无数据", "No data");
         }
-        return t("将当前触摸校准与幽灵触控补丁导出为单个文件", "Export current touch calibration and patch as a single file");
+        return t("导出为 .spkcal 文件", "Export to .spkcal file");
     }
 
     public String touchClearTitle() {
-        return t("清除校准数据", "Clear Calibration Data");
+        return t("清除校准数据", "Clear Calibration");
     }
 
     public String touchClearSummary() {
-        return t("清除坐标曲线、幽灵触控补丁与点击策略，恢复出厂默认", "Delete coordinate curves, ghost-touch patch, and tap policy");
+        return t("恢复出厂默认", "Restore defaults");
     }
 
     public String touchClearDialogTitle() {
-        return t("清除触摸校准数据？", "Clear touch calibration data?");
+        return t("清除触摸校准数据？", "Clear calibration data?");
     }
 
     public String touchClearDialogMessage() {
-        return t("将删除当前设备保存的所有触摸校准文件（坐标曲线、幽灵触控噪声补丁、连点策略），并立即恢复默认未校准状态。需要时可随时重新校准或从文件导入。",
-                "This deletes all saved calibration data (.profile, .noise, .tap) for this device and restores uncalibrated defaults immediately.");
+        return t("将删除已保存的坐标曲线、幽灵补丁与点击策略。", "Deletes saved curves, noise patch, and tap policy.");
     }
 
     public String touchClearConfirm() {
-        return t("确认清除", "Clear Data");
+        return t("清除", "Clear");
     }
 
     public String touchClearedMessage() {
-        return t("已清除当前设备的触摸校准数据并恢复默认配置。", "Touch calibration data cleared and defaults restored.");
+        return t("已清除校准数据", "Calibration data cleared");
     }
 
     public String touchImportSuccess(String kind) {
         if ("bundle".equals(kind)) {
-            return t("已从校准文件验证并应用当前设备的校准与补丁配置。",
-                    "Validated and applied calibration bundle from file.");
+            return t("已导入校准包", "Imported calibration bundle");
         }
         if ("noise".equals(kind)) {
-            return t("已从文件验证并应用幽灵触控补丁（.noise）。", "Validated and applied ghost-touch patch (.noise) from file.");
+            return t("已导入幽灵补丁", "Imported ghost-touch patch");
         }
         if ("tap".equals(kind)) {
-            return t("已从文件验证并应用点击连续性策略（.tap）。", "Validated and applied tap continuity policy (.tap) from file.");
+            return t("已导入点击策略", "Imported tap policy");
         }
-        return t("已从文件验证并应用触摸坐标校准（.profile）。", "Validated and applied coordinate calibration (.profile) from file.");
+        return t("已导入坐标校准", "Imported coordinate profile");
     }
 
     public String touchExportSuccess() {
-        return t("已将当前触摸校准数据导出为单个文件。", "Exported current touch calibration data to file.");
+        return t("已导出校准数据", "Calibration exported");
     }
 
     public String touchExportFailed(String detail) {
@@ -580,19 +588,225 @@ public final class Strings {
 
     public String touchImportInvalid(String detail) {
         if ("device_mismatch".equals(detail)) {
-            return t("导入失败：该校准文件绑定的硬件/面板标识与当前设备不匹配。",
-                    "Import failed: file device identity does not match this hardware.");
+            return t("导入失败：设备不匹配", "Import failed: device mismatch");
         }
         if ("invalid_calibration_file".equals(detail)) {
-            return t("导入失败：校准文件格式无效或数值越界。",
-                    "Import failed: invalid calibration file format or values.");
+            return t("导入失败：文件无效", "Import failed: invalid file");
         }
         return t("导入失败：" + detail, "Import failed: " + detail);
     }
 
     public String touchCalibrationAppMissing() {
-        return t("未找到触屏校准应用（org.surface.touchcalibration.unified）。",
-                "Touch calibration app (org.surface.touchcalibration.unified) is not installed.");
+        return t("未安装触屏校准应用", "Touch calibration app not installed");
+    }
+
+    // ---- Debugging Sub-page ----
+
+    public String debugTitle() {
+        return t("调试", "Debugging");
+    }
+
+    public String debugHomeSubtitle(boolean adbOn, boolean sshRunning, int keyCount) {
+        String adbText = adbOn ? t("网络 ADB：开", "Network ADB: On") : t("网络 ADB：关", "Network ADB: Off");
+        String sshText = sshRunning ? t("SSH：开", "SSH: On") : t("SSH：关", "SSH: Off");
+        if (keyCount > 0) {
+            return adbText + " · " + sshText + " · " + t(keyCount + " 密钥", keyCount + " key(s)");
+        }
+        return adbText + " · " + sshText;
+    }
+
+    public String debugAdbSection() {
+        return "ADB";
+    }
+
+    public String debugAdbTitle() {
+        return t("网络 ADB", "Network ADB");
+    }
+
+    public String debugAdbBadge(boolean active) {
+        return active ? t("已开启", "On") : t("已关闭", "Off");
+    }
+
+    public String debugAdbSummary(boolean enabled, boolean active, String port, String vmIp, String lanIps) {
+        String p = (port == null || port.isEmpty() || "-1".equals(port)) ? "5555" : port;
+        if (!enabled && !active) {
+            return t("端口 " + p + " · 已关闭", "Port " + p + " · Off");
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(t("端口 ", "Port ")).append(p);
+        if (vmIp != null && !vmIp.isEmpty()) {
+            sb.append(" · VM ").append(vmIp).append(":").append(p);
+        }
+        if (lanIps != null && !lanIps.isEmpty()) {
+            sb.append(" · ").append(lanIps.replace(",", " · "));
+        }
+        return sb.toString();
+    }
+
+    public String debugAdbSavedMessage(boolean enabled) {
+        return enabled
+                ? t("网络 ADB 已开启（5555）", "Network ADB enabled (5555)")
+                : t("网络 ADB 已关闭", "Network ADB disabled");
+    }
+
+    public String debugSshSection() {
+        return "SSH";
+    }
+
+    public String debugSshTitle() {
+        return t("SSH 服务", "SSH Service");
+    }
+
+    public String debugSshBadge(boolean available, boolean running) {
+        if (!available) {
+            return t("不可用", "Unavailable");
+        }
+        return running ? t("运行中", "Running") : t("已停止", "Stopped");
+    }
+
+    public String debugSshSummary(boolean available, boolean running, String port,
+                                  boolean pwSet, int keyCount, String vmIp, String lanIps) {
+        if (!available) {
+            return t("不可用", "Unavailable");
+        }
+        String p = (port == null || port.isEmpty()) ? "22" : port;
+        StringBuilder sb = new StringBuilder();
+        sb.append("root · ").append(t("端口 ", "Port ")).append(p)
+                .append(" · ").append(pwSet ? t("已设密码", "Password set") : t("未设密码", "No password"))
+                .append(" · ").append(t(keyCount + " 个密钥", keyCount + " key(s)"));
+        if (running) {
+            if (vmIp != null && !vmIp.isEmpty()) {
+                sb.append("\nVM ").append(vmIp);
+            }
+            if (lanIps != null && !lanIps.isEmpty()) {
+                sb.append(vmIp != null && !vmIp.isEmpty() ? " · " : "\n")
+                        .append(lanIps.replace(",", " · "));
+            }
+        }
+        return sb.toString();
+    }
+
+    public String debugSshSavedMessage(boolean enabled) {
+        return enabled
+                ? t("SSH 服务已开启（端口 22）", "SSH service started (port 22)")
+                : t("SSH 服务已关闭", "SSH service stopped");
+    }
+
+    public String debugSshPasswordTitle() {
+        return t("修改密码", "Change Password");
+    }
+
+    public String debugSshPasswordSummary(boolean pwSet) {
+        return pwSet ? t("root 密码已设置", "root password set") : t("root 密码未设置", "root password not set");
+    }
+
+    public String debugSshPasswordDialogTitle() {
+        return t("修改 root 密码", "Change root Password");
+    }
+
+    public String debugSshPasswordHint() {
+        return t("新密码", "New password");
+    }
+
+    public String debugSshPasswordConfirmHint() {
+        return t("确认新密码", "Confirm password");
+    }
+
+    public String debugSshPasswordEmpty() {
+        return t("密码不能为空", "Password cannot be empty");
+    }
+
+    public String debugSshPasswordMismatch() {
+        return t("两次密码不一致", "Passwords do not match");
+    }
+
+    public String debugSshPasswordClearButton() {
+        return t("清除密码", "Clear");
+    }
+
+    public String debugSshPasswordSavedMessage() {
+        return t("SSH 密码已更新", "SSH password updated");
+    }
+
+    public String debugSshPasswordClearedMessage() {
+        return t("SSH 密码已清除", "SSH password cleared");
+    }
+
+    public String debugSshKeyImportTitle() {
+        return t("导入证书", "Import Key / Certificate");
+    }
+
+    public String debugSshKeyImportSummary() {
+        return t("OpenSSH 公钥 / PEM 证书", "OpenSSH public key / PEM certificate");
+    }
+
+    public String debugSshKeyImportModeTitle() {
+        return t("导入方式", "Import Source");
+    }
+
+    public String debugSshKeyImportFileOption() {
+        return t("从文件选择", "Choose file");
+    }
+
+    public String debugSshKeyImportPasteOption() {
+        return t("粘贴内容", "Paste text");
+    }
+
+    public String debugSshKeyPasteHint() {
+        return t("粘贴 OpenSSH 公钥或 PEM 证书", "Paste OpenSSH public key or PEM certificate");
+    }
+
+    public String debugSshKeyPasteConfirm() {
+        return t("导入", "Import");
+    }
+
+    public String debugSshKeyImportedMessage(int added, int total) {
+        return t("已导入 " + added + " 项（共 " + total + " 项）",
+                "Imported " + added + " (" + total + " total)");
+    }
+
+    public String debugSshKeyClearTitle() {
+        return t("清除密钥", "Clear Keys");
+    }
+
+    public String debugSshKeyClearSummary(int keyCount) {
+        return keyCount > 0
+                ? t("已保存 " + keyCount + " 个密钥", keyCount + " saved key(s)")
+                : t("无已保存密钥", "No saved keys");
+    }
+
+    public String debugSshKeyClearDialogTitle() {
+        return t("清除全部 SSH 密钥？", "Clear all SSH keys?");
+    }
+
+    public String debugSshKeyClearConfirm() {
+        return t("清除", "Clear");
+    }
+
+    public String debugSshKeyClearedMessage() {
+        return t("已清除 SSH 密钥", "SSH keys cleared");
+    }
+
+    public String debugErrorMessage(String code) {
+        if ("invalid_ssh_key".equals(code)) {
+            return t("无效的公钥或证书格式", "Invalid key or certificate format");
+        }
+        if ("invalid_password".equals(code)) {
+            return t("密码格式无效", "Invalid password");
+        }
+        if ("adb_tcp_failed".equals(code)) {
+            return t("切换网络 ADB 失败", "Failed to toggle Network ADB");
+        }
+        if ("ssh_start_failed".equals(code)) {
+            return t("启动 SSH 服务失败", "Failed to start SSH service");
+        }
+        if ("mkpasswd_failed".equals(code)) {
+            return t("密码加密失败", "Password hashing failed");
+        }
+        if ("bridge_timeout".equals(code)) {
+            return t("桥接服务响应超时", "Bridge timed out");
+        }
+        return t("操作失败：" + code, "Failed: " + code);
     }
 
     // ---- System Update (OTA) ----
@@ -602,17 +816,15 @@ public final class Strings {
     }
 
     public String otaHomeSubtitle() {
-        return t("本地增量描述包与完整镜像包更新，可选保留或清除数据",
-                "Local delta manifest & full image updates, keep or wipe data");
+        return t("本地升级包更新", "Local package updates");
     }
 
     public String otaHeroSubtitle() {
-        return t("Googlebook OS · Surface Pro X (Hybrid)", "Googlebook OS · Surface Pro X (Hybrid)");
+        return "Googlebook OS · Surface Pro X";
     }
 
     public String otaBridgeUnavailable() {
-        return t("OTA 更新服务未响应：当前镜像未包含内置 OTA 守护进程（spx-ota-boot）。",
-                "OTA service is not responding: this image does not include the built-in spx-ota-boot daemon.");
+        return t("OTA 服务未就绪", "OTA service unavailable");
     }
 
     public String otaVersionLabel(String version) {
@@ -635,12 +847,11 @@ public final class Strings {
     }
 
     public String otaSelectTitle() {
-        return t("从本地存储选择升级包", "Choose an update package");
+        return t("选择本地升级包", "Choose update package");
     }
 
     public String otaSelectHint() {
-        return t("支持增量/描述更新包（.tar.gz，仅更新变化文件）以及完整磁盘镜像包（.img / .img.gz，全量更新）。",
-                "Supports manifest/delta archives (.tar.gz, updates only changed files) and full disk images (.img / .img.gz).");
+        return t("支持 .tar.gz / .img / .img.gz", "Supports .tar.gz / .img / .img.gz");
     }
 
     public String otaSelectButton() {
@@ -695,15 +906,14 @@ public final class Strings {
 
     public String otaSuperSummary(boolean superIncluded, boolean compatible, long superBytes) {
         if (superIncluded) {
-            return t("将离线全量更新 super 分区（" + fmtBytes(superBytes) + "）与系统启动载荷。",
-                    "Will update super partition (" + fmtBytes(superBytes) + ") & boot payload offline.");
+            return t("包含 super 分区（" + fmtBytes(superBytes) + "）",
+                    "Includes super (" + fmtBytes(superBytes) + ")");
         }
         if (!compatible) {
-            return t("警告：当前设备的 super 分区基线与该增量包不匹配，请使用完整镜像包进行全量更新。",
-                    "Warning: current super baseline does not match this delta package. Use a full image instead.");
+            return t("super 基线不匹配，请使用完整镜像包",
+                    "super baseline mismatch; use a full image");
         }
-        return t("super 分区无变化，仅按清单更新变更的内核/驱动/系统载荷文件。",
-                "super partition unchanged; only manifest-listed boot & driver files will be updated.");
+        return t("仅更新引导与系统载荷", "Updates boot & system payload only");
     }
 
     public String otaPackageMeta(String version, int fileCount, long pkgBytes, String sha) {
@@ -722,7 +932,7 @@ public final class Strings {
     }
 
     public String otaDataModeSection() {
-        return t("数据保留选项", "Data retention");
+        return t("数据保留", "Data retention");
     }
 
     public String otaKeepDataTitle() {
@@ -730,8 +940,7 @@ public final class Strings {
     }
 
     public String otaKeepDataSummary() {
-        return t("保留已安装应用、账户、Wi-Fi、触摸校准与高级设置，同时保留双系统引导菜单。",
-                "Preserves apps, accounts, Wi-Fi, touch calibration, advanced settings, and dual-boot GRUB menu.");
+        return t("保留应用、账户与设置", "Keep apps, accounts & settings");
     }
 
     public String otaWipeDataTitle() {
@@ -739,13 +948,11 @@ public final class Strings {
     }
 
     public String otaWipeDataSummary() {
-        return t("更新完成后清除 userdata、metadata 与 misc，所有个人文件、应用与触摸校准将被重置。",
-                "Wipes userdata, metadata, and misc during offline install. All personal data & touch calibration will be erased.");
+        return t("清除 userdata、metadata 与 misc", "Wipe userdata, metadata & misc");
     }
 
     public String otaWipeWarningBanner() {
-        return t("已选择全新安装：重启进入离线更新后将清空全部用户数据与触摸校准，此操作不可撤销。",
-                "Clean install selected: all user data and touch calibration will be wiped during offline reboot. This cannot be undone.");
+        return t("全新安装将清空全部用户数据", "Clean install will wipe all user data");
     }
 
     public String otaInstallButton(boolean willBeOffline, boolean wipeData) {
@@ -753,22 +960,21 @@ public final class Strings {
             return t("准备全新安装并重启", "Stage clean install");
         }
         if (willBeOffline) {
-            return t("准备离线全量更新", "Stage offline update");
+            return t("准备离线更新", "Stage offline update");
         }
-        return t("立即应用更新", "Apply update now");
+        return t("应用更新", "Apply update");
     }
 
     public String otaWipeConfirmTitle() {
-        return t("确认清除全部用户数据？", "Wipe all user data?");
+        return t("确认全新安装？", "Wipe all user data?");
     }
 
     public String otaWipeConfirmMessage() {
-        return t("您已选择“不保留数据（全新安装）”。系统重启进入离线更新阶段时，将更新系统并清空全部用户应用、账户、Wi-Fi、个人文件及触摸校准记录。确定继续吗？",
-                "You selected Clean install (Wipe user data). On reboot, the offline updater will install the package and erase all user apps, accounts, Wi-Fi, files, and touch calibration. Continue?");
+        return t("重启更新时将清空全部用户数据。", "All user data will be erased during update.");
     }
 
     public String otaWipeConfirmPositive() {
-        return t("确认清除并更新", "Wipe & Update");
+        return t("确认更新", "Wipe & Update");
     }
 
     public String otaPendingTitle() {
@@ -778,30 +984,28 @@ public final class Strings {
     public String otaPendingBody(String version, String kind, boolean applySuper, boolean wipeData) {
         String ver = (version == null || version.isEmpty()) ? t("本地升级包", "Local package") : version;
         String scope = applySuper
-                ? t("全量更新（含 super + 启动载荷）", "Full update (super + boot payload)")
-                : t("描述包更新（启动与系统载荷）", "Manifest update (boot & system payload)");
+                ? t("全量更新", "Full update")
+                : t("增量更新", "Manifest update");
         String data = wipeData
-                ? t("不保留数据（全新安装）", "Clean install (wipe user data)")
-                : t("保留用户数据", "Keep user data");
-        return t("待安装：" + ver + "\n模式：" + scope + "\n数据：" + data + "\n重启后将在进入 Android 前自动完成安装，期间请勿断电。",
-                "Queued: " + ver + "\nMode: " + scope + "\nData: " + data + "\nInstalls automatically before Android boots. Keep power connected.");
+                ? t("全新安装", "Clean install")
+                : t("保留数据", "Keep data");
+        return ver + " · " + scope + " · " + data;
     }
 
     public String otaAppliedRebootTitle() {
-        return t("更新已写入，等待重启", "Update applied — restart required");
+        return t("更新已写入，请重启", "Update ready — restart required");
     }
 
     public String otaAppliedRebootBody(String version) {
         String ver = (version == null || version.isEmpty()) ? "" : (" (" + version + ")");
-        return t("新的内核、驱动与系统载荷已校验并安全写入" + ver + "，用户数据与引导菜单已完整保留。立即重启即可进入新版本。",
-                "New kernel, drivers, and system payload have been verified and written" + ver + ". User data and boot menu are preserved. Restart now to boot into the update.");
+        return t("已写入" + ver + "，重启生效。", "Written" + ver + ". Restart to apply.");
     }
 
     public String otaLastSuccessTitle(String version, boolean wiped) {
         String ver = (version == null || version.isEmpty()) ? "" : (" " + version);
         return wiped
                 ? t("已完成全新安装" + ver, "Clean install completed" + ver)
-                : t("系统已更新至" + ver, "Updated successfully" + ver);
+                : t("系统已更新至" + ver, "Updated to" + ver);
     }
 
     public String otaLastErrorTitle() {
@@ -813,7 +1017,7 @@ public final class Strings {
     }
 
     public String otaRebootInstallButton() {
-        return t("立即重启并安装", "Restart & install");
+        return t("重启并安装", "Restart & install");
     }
 
     public String otaCancelPendingButton() {
@@ -821,19 +1025,17 @@ public final class Strings {
     }
 
     public String otaDismissButton() {
-        return t("知道了", "Dismiss");
+        return t("关闭", "Dismiss");
     }
 
     public String otaRebootConfirmTitle() {
-        return t("立即重启设备？", "Restart device now?");
+        return t("立即重启？", "Restart now?");
     }
 
     public String otaRebootConfirmMessage(boolean isOffline) {
         return isOffline
-                ? t("设备将立即重启并在进入 Android 前自动完成离线系统更新。请保持供电充足，更新完成后将自动再次重启进入桌面。",
-                    "Device will restart and automatically apply the offline update before Android boots. Keep power connected.")
-                : t("设备将立即重启以启用刚刚安装的系统更新。",
-                    "Device will restart immediately to boot into the newly applied update.");
+                ? t("重启后自动安装更新。", "Restarting to install update.")
+                : t("重启以启用新版本。", "Restarting to boot update.");
     }
 
     public String otaProgressLabel(String stage, String detail) {
@@ -860,37 +1062,26 @@ public final class Strings {
 
     public String otaErrorMessage(String code) {
         if ("unsupported_package_format".equals(code)) {
-            return t("无法识别的升级包格式：请选择本系统构建的 OTA 压缩包（.tar.gz）或完整镜像（.img / .img.gz）。",
-                    "Unrecognized package format: choose an OTA archive (.tar.gz) or full disk image (.img / .img.gz).");
+            return t("不支持的升级包格式", "Unsupported package format");
         }
         if ("invalid_ota_manifest".equals(code) || "unsupported_manifest_schema".equals(code)) {
-            return t("升级包缺少有效的更新描述清单（ota-manifest.kv / ota-files.tsv）。",
-                    "Package is missing a valid OTA manifest (ota-manifest.kv / ota-files.tsv).");
+            return t("无效的 OTA 清单", "Invalid OTA manifest");
         }
         if ("invalid_full_image_gpt".equals(code)) {
-            return t("完整镜像 GPT 分区表无效，或缺少 super / SQ2PROBE 分区。",
-                    "Invalid full image GPT table or missing super / SQ2PROBE partitions.");
+            return t("无效的镜像分区表", "Invalid GPT image");
         }
         if ("super_partition_too_small".equals(code)) {
-            return t("当前磁盘的 super 分区容量小于该升级包要求，无法直接覆盖。",
-                    "Target disk super partition is smaller than required by this package.");
+            return t("super 分区空间不足", "super partition too small");
         }
         if ("super_baseline_mismatch".equals(code)) {
-            return t("该增量包要求的 super 基线与当前系统不一致，请改用完整镜像包全量更新。",
-                    "Delta package requires a different super baseline; please use a full image package.");
+            return t("super 基线不匹配", "super baseline mismatch");
         }
         if ("online_apply_failed".equals(code)) {
-            return t("写入 ESP 载荷失败，请检查 ESP 剩余空间或重新下载升级包。",
-                    "Failed to apply ESP payload; check free ESP space or re-download the package.");
+            return t("写入 ESP 失败", "Failed to apply ESP payload");
         }
         if ("bridge_timeout".equals(code)) {
-            return t("等待 OTA 服务响应超时。", "Timed out waiting for OTA daemon.");
+            return t("OTA 服务超时", "OTA service timeout");
         }
-        return t("更新操作失败：" + code, "Update failed: " + code);
-    }
-
-    public String otaFooter() {
-        return t("更新过程自动保留双系统 GRUB 引导菜单与本机启动标识；选择“保留用户数据”时，触摸校准、Wi-Fi、应用与高级设置均完整保留。",
-                "Dual-boot GRUB menu and boot markers are always preserved. Touch calibration, Wi-Fi, apps, and settings remain intact when keeping user data.");
+        return t("更新失败：" + code, "Update failed: " + code);
     }
 }

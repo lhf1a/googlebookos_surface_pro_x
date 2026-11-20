@@ -13,6 +13,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.TypedValue;
@@ -52,8 +53,10 @@ public final class MainActivity extends Activity {
     private static final int PAGE_VULKAN = 1;
     private static final int PAGE_PERFORMANCE = 2;
     private static final int PAGE_TOUCH = 3;
+    private static final int PAGE_DEBUG = 4;
     private static final int REQ_IMPORT_TOUCH = 401;
     private static final int REQ_EXPORT_TOUCH = 402;
+    private static final int REQ_IMPORT_SSH_KEY = 403;
     private static final String STATE_PAGE = "page";
     private static final String STATE_QUERY = "query";
     private static final String STATE_EXPORT_CONTENT = "export_content";
@@ -213,12 +216,28 @@ public final class MainActivity extends Activity {
             renderCurrentPage();
             return;
         }
+        if (requestCode == REQ_IMPORT_SSH_KEY) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                return;
+            }
+            try {
+                String rawContent = readImportText(data.getData(), DriverPolicy.MAX_SSH_KEY_IMPORT_BYTES);
+                DriverPolicy.normalizeSshKeyImport(rawContent);
+                importSshKeys(rawContent);
+            } catch (Exception e) {
+                bannerText = str.debugErrorMessage(
+                        e.getMessage() != null ? e.getMessage() : "invalid_ssh_key");
+                bannerIsError = true;
+                renderCurrentPage();
+            }
+            return;
+        }
         if (requestCode != REQ_IMPORT_TOUCH || resultCode != RESULT_OK
                 || data == null || data.getData() == null) {
             return;
         }
         try {
-            String rawContent = readImportText(data.getData());
+            String rawContent = readImportText(data.getData(), DriverPolicy.MAX_TOUCH_IMPORT_BYTES);
             DriverPolicy.detectTouchImportKind(rawContent);
             importTouchCalibration(rawContent);
         } catch (Exception e) {
@@ -239,7 +258,7 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private String readImportText(Uri uri) throws Exception {
+    private String readImportText(Uri uri, int maxBytes) throws Exception {
         try (InputStream in = getContentResolver().openInputStream(uri)) {
             if (in == null) {
                 throw new IllegalArgumentException("unreadable_file");
@@ -250,7 +269,7 @@ public final class MainActivity extends Activity {
             int read;
             while ((read = in.read(buf)) >= 0) {
                 total += read;
-                if (total > DriverPolicy.MAX_TOUCH_IMPORT_BYTES) {
+                if (total > maxBytes) {
                     throw new IllegalArgumentException("file_too_large");
                 }
                 out.write(buf, 0, read);
@@ -475,11 +494,16 @@ public final class MainActivity extends Activity {
     }
 
     @FunctionalInterface
-    private interface TouchBridgeCall {
+    private interface BridgeAction {
         String run() throws Exception;
     }
 
-    private void runTouchBridgeCall(String threadName, boolean isImport, TouchBridgeCall call) {
+    @FunctionalInterface
+    private interface ErrorFormatter {
+        String format(String detail);
+    }
+
+    private void runBridgeCall(String threadName, BridgeAction call, ErrorFormatter errorFormatter) {
         if (busy || !bridgeState.bridgeReady) {
             return;
         }
@@ -507,7 +531,7 @@ public final class MainActivity extends Activity {
                     }
                     busy = false;
                     String detail = e.getMessage() != null ? e.getMessage() : e.toString();
-                    bannerText = isImport ? str.touchImportInvalid(detail) : str.saveFailed(detail);
+                    bannerText = errorFormatter.format(detail);
                     bannerIsError = true;
                     renderCurrentPage();
                 });
@@ -515,26 +539,224 @@ public final class MainActivity extends Activity {
         }, threadName).start();
     }
 
+    private void saveTouchDisabled(boolean disabled) {
+        runBridgeCall("advanced-control-touch-disable", () -> {
+            bridgeState = bridge.setTouchDisabled(disabled);
+            return str.touchDisableSavedMessage(disabled);
+        }, str::saveFailed);
+    }
+
     private void saveTouchGhostPatch(boolean enabled) {
-        runTouchBridgeCall("advanced-control-touch-ghost", false, () -> {
+        runBridgeCall("advanced-control-touch-ghost", () -> {
             bridgeState = bridge.setTouchGhostPatch(enabled);
             return str.touchGhostSavedMessage(enabled);
-        });
+        }, str::saveFailed);
     }
 
     private void clearTouchCalibration() {
-        runTouchBridgeCall("advanced-control-touch-clear", false, () -> {
+        runBridgeCall("advanced-control-touch-clear", () -> {
             bridgeState = bridge.clearTouchCalibration();
             return str.touchClearedMessage();
-        });
+        }, str::saveFailed);
     }
 
     private void importTouchCalibration(String rawContent) {
-        runTouchBridgeCall("advanced-control-touch-import", true, () -> {
+        runBridgeCall("advanced-control-touch-import", () -> {
             BridgeClient.TouchImportResult result = bridge.importTouchCalibration(rawContent);
             bridgeState = result.state;
             return str.touchImportSuccess(result.kind);
+        }, str::touchImportInvalid);
+    }
+
+    private void saveAdbTcp(boolean enabled) {
+        runBridgeCall("advanced-control-adb-tcp", () -> {
+            bridgeState = bridge.setAdbTcp(enabled);
+            return str.debugAdbSavedMessage(enabled);
+        }, str::debugErrorMessage);
+    }
+
+    private void saveSshEnabled(boolean enabled) {
+        runBridgeCall("advanced-control-ssh-toggle", () -> {
+            bridgeState = bridge.setSshEnabled(enabled);
+            return str.debugSshSavedMessage(enabled);
+        }, str::debugErrorMessage);
+    }
+
+    private void saveSshPassword(String password) {
+        runBridgeCall("advanced-control-ssh-password", () -> {
+            bridgeState = bridge.setSshPassword(password);
+            return password.isEmpty() ? str.debugSshPasswordClearedMessage() : str.debugSshPasswordSavedMessage();
+        }, str::debugErrorMessage);
+    }
+
+    private void importSshKeys(String rawContent) {
+        runBridgeCall("advanced-control-ssh-import", () -> {
+            BridgeClient.SshKeyImportResult result = bridge.importSshKeys(rawContent);
+            bridgeState = result.state;
+            return str.debugSshKeyImportedMessage(result.added, result.total);
+        }, str::debugErrorMessage);
+    }
+
+    private void clearSshKeys() {
+        runBridgeCall("advanced-control-ssh-clear", () -> {
+            bridgeState = bridge.clearSshKeys();
+            return str.debugSshKeyClearedMessage();
+        }, str::debugErrorMessage);
+    }
+
+    private void showSshPasswordDialog() {
+        if (busy || !bridgeState.bridgeReady || !bridgeState.sshAvailable) {
+            return;
+        }
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(theme.dp(20), theme.dp(12), theme.dp(20), theme.dp(4));
+
+        EditText pwInput = new EditText(this);
+        pwInput.setHint(str.debugSshPasswordHint());
+        pwInput.setSingleLine(true);
+        pwInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        box.addView(pwInput);
+
+        EditText confirmInput = new EditText(this);
+        confirmInput.setHint(str.debugSshPasswordConfirmHint());
+        confirmInput.setSingleLine(true);
+        confirmInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(-1, -2);
+        cLp.topMargin = theme.dp(8);
+        box.addView(confirmInput, cLp);
+
+        TextView errView = new TextView(this);
+        errView.setTextColor(theme.warnFg);
+        errView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        errView.setVisibility(View.GONE);
+        LinearLayout.LayoutParams eLp = new LinearLayout.LayoutParams(-1, -2);
+        eLp.topMargin = theme.dp(8);
+        box.addView(errView, eLp);
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this, theme.dialogTheme())
+                .setTitle(str.debugSshPasswordDialogTitle())
+                .setView(box)
+                .setNegativeButton(str.cancel(), null)
+                .setPositiveButton(str.saveOnly(), null);
+        if (bridgeState.sshPasswordSet) {
+            builder.setNeutralButton(str.debugSshPasswordClearButton(), (d, w) -> saveSshPassword(""));
+        }
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String pw = pwInput.getText() == null ? "" : pwInput.getText().toString();
+            String confirm = confirmInput.getText() == null ? "" : confirmInput.getText().toString();
+            if (pw.isEmpty()) {
+                errView.setText(str.debugSshPasswordEmpty());
+                errView.setVisibility(View.VISIBLE);
+                return;
+            }
+            if (!pw.equals(confirm)) {
+                errView.setText(str.debugSshPasswordMismatch());
+                errView.setVisibility(View.VISIBLE);
+                return;
+            }
+            try {
+                DriverPolicy.sshPasswordRequest("check", pw);
+            } catch (IllegalArgumentException ex) {
+                errView.setText(str.debugErrorMessage("invalid_password"));
+                errView.setVisibility(View.VISIBLE);
+                return;
+            }
+            dialog.dismiss();
+            saveSshPassword(pw);
         });
+    }
+
+    private void showImportSshKeyChooser() {
+        if (busy || !bridgeState.bridgeReady || !bridgeState.sshAvailable) {
+            return;
+        }
+        String[] choices = {
+                str.debugSshKeyImportFileOption(),
+                str.debugSshKeyImportPasteOption()
+        };
+        new AlertDialog.Builder(this, theme.dialogTheme())
+                .setTitle(str.debugSshKeyImportModeTitle())
+                .setItems(choices, (d, which) -> {
+                    if (which == 0) {
+                        openSshKeyImportPicker();
+                    } else {
+                        showPasteSshKeyDialog();
+                    }
+                })
+                .setNegativeButton(str.cancel(), null)
+                .show();
+    }
+
+    private void openSshKeyImportPicker() {
+        if (busy || !bridgeState.bridgeReady || !bridgeState.sshAvailable) {
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        try {
+            startActivityForResult(intent, REQ_IMPORT_SSH_KEY);
+        } catch (ActivityNotFoundException e) {
+            bannerText = str.debugErrorMessage(e.getMessage() != null ? e.getMessage() : "picker_unavailable");
+            bannerIsError = true;
+            renderCurrentPage();
+        }
+    }
+
+    private void showPasteSshKeyDialog() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(theme.dp(20), theme.dp(12), theme.dp(20), theme.dp(4));
+
+        EditText keyInput = new EditText(this);
+        keyInput.setHint(str.debugSshKeyPasteHint());
+        keyInput.setMinLines(4);
+        keyInput.setMaxLines(8);
+        keyInput.setGravity(Gravity.TOP | Gravity.START);
+        keyInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        box.addView(keyInput);
+
+        TextView errView = new TextView(this);
+        errView.setTextColor(theme.warnFg);
+        errView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        errView.setVisibility(View.GONE);
+        LinearLayout.LayoutParams eLp = new LinearLayout.LayoutParams(-1, -2);
+        eLp.topMargin = theme.dp(8);
+        box.addView(errView, eLp);
+
+        AlertDialog dialog = new AlertDialog.Builder(this, theme.dialogTheme())
+                .setTitle(str.debugSshKeyImportTitle())
+                .setView(box)
+                .setNegativeButton(str.cancel(), null)
+                .setPositiveButton(str.debugSshKeyPasteConfirm(), null)
+                .create();
+        dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String raw = keyInput.getText() == null ? "" : keyInput.getText().toString();
+            try {
+                DriverPolicy.normalizeSshKeyImport(raw);
+            } catch (IllegalArgumentException ex) {
+                errView.setText(str.debugErrorMessage("invalid_ssh_key"));
+                errView.setVisibility(View.VISIBLE);
+                return;
+            }
+            dialog.dismiss();
+            importSshKeys(raw);
+        });
+    }
+
+    private void confirmClearSshKeys() {
+        if (busy || !bridgeState.bridgeReady || !bridgeState.sshAvailable || bridgeState.sshKeyCount <= 0) {
+            return;
+        }
+        new AlertDialog.Builder(this, theme.dialogTheme())
+                .setTitle(str.debugSshKeyClearDialogTitle())
+                .setNegativeButton(str.cancel(), null)
+                .setPositiveButton(str.debugSshKeyClearConfirm(), (d, w) -> clearSshKeys())
+                .show();
     }
 
     private void openCalibrationApp() {
@@ -618,6 +840,18 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void confirmDisableTouch() {
+        if (busy || !bridgeState.bridgeReady || bridgeState.touchDisabled) {
+            return;
+        }
+        new AlertDialog.Builder(this, theme.dialogTheme())
+                .setTitle(str.touchDisableDialogTitle())
+                .setMessage(str.touchDisableDialogMessage())
+                .setNegativeButton(str.cancel(), null)
+                .setPositiveButton(str.touchDisableConfirm(), (d, w) -> saveTouchDisabled(true))
+                .show();
+    }
+
     private void confirmClearTouchCalibration() {
         if (busy || !bridgeState.bridgeReady || !bridgeState.touchAvailable) {
             return;
@@ -647,6 +881,8 @@ public final class MainActivity extends Activity {
             contentSlot.addView(buildPerformancePage(), new FrameLayout.LayoutParams(-1, -1));
         } else if (currentPage == PAGE_TOUCH) {
             contentSlot.addView(buildTouchPage(), new FrameLayout.LayoutParams(-1, -1));
+        } else if (currentPage == PAGE_DEBUG) {
+            contentSlot.addView(buildDebugPage(), new FrameLayout.LayoutParams(-1, -1));
         } else {
             contentSlot.addView(buildHomePage(), new FrameLayout.LayoutParams(-1, -1));
         }
@@ -664,10 +900,11 @@ public final class MainActivity extends Activity {
         int hPad = theme.dp(20);
         container.setPadding(hPad, theme.dp(16), hPad, theme.dp(28));
 
-        // Top action row with Refresh button
+        // Top action row with Back and Refresh buttons
         LinearLayout topRow = new LinearLayout(this);
         topRow.setOrientation(LinearLayout.HORIZONTAL);
         topRow.setGravity(Gravity.CENTER_VERTICAL);
+        topRow.addView(buildIconButton(SettingsTheme.ICON_BACK, str.backDesc(), this::finish));
         View spacer = new View(this);
         topRow.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
         topRow.addView(buildIconButton(SettingsTheme.ICON_REFRESH, str.refreshDesc(), () -> reloadAll(true)));
@@ -743,6 +980,7 @@ public final class MainActivity extends Activity {
                 ? str.loadingSummary()
                 : str.touchHomeSubtitle(
                         bridgeState.touchAvailable,
+                        bridgeState.touchDisabled,
                         bridgeState.touchNoiseSaved,
                         bridgeState.touchNoiseEnabled,
                         bridgeState.touchProfileSaved);
@@ -760,6 +998,26 @@ public final class MainActivity extends Activity {
         View gap3 = new View(this);
         cardGroup.addView(gap3, new LinearLayout.LayoutParams(-1, theme.dp(2)));
 
+        String debugSummary = !loadedOnce && busy
+                ? str.loadingSummary()
+                : str.debugHomeSubtitle(
+                        bridgeState.adbTcpEnabled || bridgeState.adbTcpActive,
+                        bridgeState.sshRunning,
+                        bridgeState.sshKeyCount);
+        View debugRow = buildCategoryRow(
+                SettingsTheme.ICON_DEBUG,
+                theme.debugBadgeBg,
+                theme.debugBadgeFg,
+                str.debugTitle(),
+                debugSummary,
+                4f,
+                4f,
+                () -> navigateTo(PAGE_DEBUG));
+        cardGroup.addView(debugRow);
+
+        View gapDebug = new View(this);
+        cardGroup.addView(gapDebug, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
         View otaRow = buildCategoryRow(
                 SettingsTheme.ICON_UPDATE,
                 theme.otaBadgeBg,
@@ -767,21 +1025,27 @@ public final class MainActivity extends Activity {
                 str.otaTitle(),
                 str.otaHomeSubtitle(),
                 4f,
-                24f,
+                4f,
                 () -> startActivity(new Intent(this, SystemUpdateActivity.class)));
         cardGroup.addView(otaRow);
 
-        container.addView(cardGroup, marginBottom(20));
+        View gap4 = new View(this);
+        cardGroup.addView(gap4, new LinearLayout.LayoutParams(-1, theme.dp(2)));
 
-        // Subtle footer info card
-        TextView footer = new TextView(this);
-        footer.setText(str.homeFooter());
-        footer.setTextColor(theme.textSecondary);
-        footer.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        footer.setLineSpacing(theme.dp(3), 1.0f);
-        footer.setBackground(theme.roundedRect(theme.cardAlt, 18));
-        footer.setPadding(theme.dp(16), theme.dp(14), theme.dp(16), theme.dp(14));
-        container.addView(footer);
+        DiskInstallStrings diskStr = new DiskInstallStrings(
+                getResources().getConfiguration().getLocales().get(0));
+        View diskInstallRow = buildCategoryRow(
+                SettingsTheme.ICON_DISK,
+                theme.dangerBadgeBg,
+                theme.dangerBadgeFg,
+                diskStr.title(),
+                diskStr.homeSubtitle(),
+                4f,
+                24f,
+                () -> startActivity(new Intent(this, InternalDiskInstallActivity.class)));
+        cardGroup.addView(diskInstallRow);
+
+        container.addView(cardGroup, marginBottom(20));
 
         scroll.addView(container);
         return scroll;
@@ -1254,15 +1518,6 @@ public final class MainActivity extends Activity {
             container.addView(restoreBtn, marginBottom(16));
         }
 
-        TextView footer = new TextView(this);
-        footer.setText(str.perfFooter());
-        footer.setTextColor(theme.textSecondary);
-        footer.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        footer.setLineSpacing(theme.dp(3), 1.0f);
-        footer.setBackground(theme.roundedRect(theme.cardAlt, 18));
-        footer.setPadding(theme.dp(16), theme.dp(14), theme.dp(16), theme.dp(14));
-        container.addView(footer);
-
         scroll.addView(container);
         return scroll;
     }
@@ -1290,6 +1545,9 @@ public final class MainActivity extends Activity {
         }
 
         boolean canControl = !busy && bridgeState.bridgeReady && bridgeState.touchAvailable;
+        boolean canToggleDisable = !busy && bridgeState.bridgeReady
+                && (bridgeState.touchAvailable || bridgeState.touchDisabled);
+        container.addView(buildTouchDisableCard(canToggleDisable), marginBottom(12));
         container.addView(buildGhostPatchCard(canControl), marginBottom(16));
 
         TextView summaryHeader = new TextView(this);
@@ -1302,7 +1560,8 @@ public final class MainActivity extends Activity {
 
         String[][] infoRows = {
                 {str.touchLabelHardware(), str.touchValueHardware(
-                        bridgeState.touchHidId, bridgeState.touchDeviceId, bridgeState.touchIptsdRunning)},
+                        bridgeState.touchHidId, bridgeState.touchDeviceId,
+                        bridgeState.touchIptsdRunning, bridgeState.touchDisabled)},
                 {str.touchLabelCoords(), str.touchValueCoords(
                         bridgeState.touchProfileSaved, bridgeState.touchProfileX, bridgeState.touchProfileY,
                         bridgeState.touchProfileXTop, bridgeState.touchProfileTopStart, bridgeState.touchProfileTopEnd)},
@@ -1344,7 +1603,7 @@ public final class MainActivity extends Activity {
                 str.touchRecalibrateSummary(),
                 22f,
                 4f,
-                !busy,
+                !busy && !bridgeState.touchDisabled,
                 this::openCalibrationApp));
 
         View actionGap1 = new View(this);
@@ -1398,15 +1657,162 @@ public final class MainActivity extends Activity {
         return scroll;
     }
 
+    private View buildTouchDisableCard(boolean canControl) {
+        return buildToggleCard(
+                str.touchDisableTitle(),
+                str.touchDisableBadge(bridgeState.touchDisabled),
+                bridgeState.touchDisabled,
+                str.touchDisableDescription(bridgeState.touchDisabled),
+                bridgeState.touchDisabled,
+                canControl,
+                () -> {
+                    if (!bridgeState.touchDisabled) {
+                        confirmDisableTouch();
+                    } else {
+                        saveTouchDisabled(false);
+                    }
+                });
+    }
+
     private View buildGhostPatchCard(boolean canControl) {
+        return buildToggleCard(
+                str.touchGhostTitle(),
+                str.touchGhostBadge(bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled),
+                bridgeState.touchNoiseEnabled,
+                str.touchGhostDescription(
+                        bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled, bridgeState.touchNoiseInfo),
+                bridgeState.touchNoiseEnabled,
+                canControl,
+                () -> {
+                    if (!bridgeState.touchNoiseEnabled && !bridgeState.touchNoiseSaved) {
+                        showNoPatchDialog();
+                    } else {
+                        saveTouchGhostPatch(!bridgeState.touchNoiseEnabled);
+                    }
+                });
+    }
+
+    private View buildDebugPage() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        int hPad = theme.dp(18);
+        container.setPadding(hPad, theme.dp(8), hPad, theme.dp(28));
+
+        container.addView(buildSubPageHeader(str.debugTitle(), () -> navigateTo(PAGE_HOME), () -> reloadAll(true)));
+
+        if (!bridgeState.bridgeReady && !busy) {
+            container.addView(buildBanner(str.bridgeMissingBanner(), true), marginBottom(12));
+        } else if (!bannerText.isEmpty()) {
+            container.addView(buildBanner(bannerText, bannerIsError), marginBottom(12));
+        }
+
+        boolean canBridge = !busy && bridgeState.bridgeReady;
+
+        TextView adbHeader = new TextView(this);
+        adbHeader.setText(str.debugAdbSection());
+        adbHeader.setTextColor(theme.primary);
+        adbHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        adbHeader.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        adbHeader.setPadding(theme.dp(8), theme.dp(2), theme.dp(8), theme.dp(8));
+        container.addView(adbHeader);
+
+        boolean adbOn = bridgeState.adbTcpEnabled || bridgeState.adbTcpActive;
+        container.addView(buildToggleCard(
+                str.debugAdbTitle(),
+                str.debugAdbBadge(bridgeState.adbTcpActive || bridgeState.adbTcpEnabled),
+                bridgeState.adbTcpActive || bridgeState.adbTcpEnabled,
+                str.debugAdbSummary(
+                        bridgeState.adbTcpEnabled, bridgeState.adbTcpActive,
+                        bridgeState.adbTcpPort, bridgeState.debugVmIp, bridgeState.debugLanIps),
+                adbOn,
+                canBridge,
+                () -> saveAdbTcp(!adbOn)), marginBottom(16));
+
+        TextView sshHeader = new TextView(this);
+        sshHeader.setText(str.debugSshSection());
+        sshHeader.setTextColor(theme.primary);
+        sshHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        sshHeader.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        sshHeader.setPadding(theme.dp(8), theme.dp(2), theme.dp(8), theme.dp(8));
+        container.addView(sshHeader);
+
+        boolean canSsh = canBridge && bridgeState.sshAvailable;
+        boolean sshOn = bridgeState.sshEnabled || bridgeState.sshRunning;
+        container.addView(buildToggleCard(
+                str.debugSshTitle(),
+                str.debugSshBadge(bridgeState.sshAvailable, bridgeState.sshRunning),
+                bridgeState.sshRunning,
+                str.debugSshSummary(
+                        bridgeState.sshAvailable, bridgeState.sshRunning, bridgeState.sshPort,
+                        bridgeState.sshPasswordSet, bridgeState.sshKeyCount,
+                        bridgeState.debugVmIp, bridgeState.debugLanIps),
+                sshOn,
+                canSsh,
+                () -> saveSshEnabled(!sshOn)), marginBottom(10));
+
+        LinearLayout sshActions = new LinearLayout(this);
+        sshActions.setOrientation(LinearLayout.VERTICAL);
+
+        sshActions.addView(buildCategoryRow(
+                SettingsTheme.ICON_KEY,
+                theme.perfBadgeBg,
+                theme.perfBadgeFg,
+                str.debugSshPasswordTitle(),
+                str.debugSshPasswordSummary(bridgeState.sshPasswordSet),
+                22f,
+                4f,
+                canSsh,
+                this::showSshPasswordDialog));
+
+        View sshGap1 = new View(this);
+        sshActions.addView(sshGap1, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
+        sshActions.addView(buildCategoryRow(
+                SettingsTheme.ICON_CERT,
+                theme.vulkanBadgeBg,
+                theme.vulkanBadgeFg,
+                str.debugSshKeyImportTitle(),
+                str.debugSshKeyImportSummary(),
+                4f,
+                4f,
+                canSsh,
+                this::showImportSshKeyChooser));
+
+        View sshGap2 = new View(this);
+        sshActions.addView(sshGap2, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
+        sshActions.addView(buildCategoryRow(
+                SettingsTheme.ICON_TRASH,
+                theme.dangerBadgeBg,
+                theme.dangerBadgeFg,
+                str.debugSshKeyClearTitle(),
+                str.debugSshKeyClearSummary(bridgeState.sshKeyCount),
+                4f,
+                22f,
+                canSsh && bridgeState.sshKeyCount > 0,
+                this::confirmClearSshKeys));
+
+        container.addView(sshActions);
+
+        scroll.addView(container);
+        return scroll;
+    }
+
+    private View buildToggleCard(String titleText, String badgeText, boolean badgeActive,
+                                 String descText, boolean checked, boolean enabled,
+                                 Runnable onClick) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setBackground(theme.cardItemBackground(22f, 22f, theme.card));
         card.setPadding(theme.dp(18), theme.dp(16), theme.dp(18), theme.dp(16));
-        card.setEnabled(canControl);
-        card.setClickable(canControl);
-        card.setFocusable(canControl);
-        if (!canControl) {
+        card.setEnabled(enabled);
+        card.setClickable(enabled);
+        card.setFocusable(enabled);
+        if (!enabled) {
             card.setAlpha(0.6f);
         }
 
@@ -1422,18 +1828,18 @@ public final class MainActivity extends Activity {
         titleLine.setGravity(Gravity.CENTER_VERTICAL);
 
         TextView title = new TextView(this);
-        title.setText(str.touchGhostTitle());
+        title.setText(titleText);
         title.setTextColor(theme.textPrimary);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         titleLine.addView(title);
 
         TextView badge = new TextView(this);
-        badge.setText(str.touchGhostBadge(bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled));
+        badge.setText(badgeText);
         badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
         badge.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         badge.setPadding(theme.dp(9), theme.dp(3), theme.dp(9), theme.dp(3));
-        if (bridgeState.touchNoiseEnabled) {
+        if (badgeActive) {
             badge.setTextColor(theme.okFg);
             badge.setBackground(theme.roundedRect(theme.okBg, 999));
         } else {
@@ -1447,15 +1853,14 @@ public final class MainActivity extends Activity {
 
         topRow.addView(titleCol, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        View sw = theme.switchView(this, bridgeState.touchNoiseEnabled, canControl);
+        View sw = theme.switchView(this, checked, enabled);
         LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(theme.dp(52), theme.dp(32));
         swLp.leftMargin = theme.dp(12);
         topRow.addView(sw, swLp);
         card.addView(topRow);
 
         TextView desc = new TextView(this);
-        desc.setText(str.touchGhostDescription(
-                bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled, bridgeState.touchNoiseInfo));
+        desc.setText(descText);
         desc.setTextColor(theme.textSecondary);
         desc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
         desc.setLineSpacing(theme.dp(2), 1.0f);
@@ -1463,14 +1868,8 @@ public final class MainActivity extends Activity {
         descLp.topMargin = theme.dp(8);
         card.addView(desc, descLp);
 
-        if (canControl) {
-            card.setOnClickListener(v -> {
-                if (!bridgeState.touchNoiseEnabled && !bridgeState.touchNoiseSaved) {
-                    showNoPatchDialog();
-                } else {
-                    saveTouchGhostPatch(!bridgeState.touchNoiseEnabled);
-                }
-            });
+        if (enabled) {
+            card.setOnClickListener(v -> onClick.run());
         }
         return card;
     }

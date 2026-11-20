@@ -1,0 +1,90 @@
+# Incremental source patch layered on top of patches/sm8350-dpu-events.patch
+# for LineageOS/android_hardware_qcom_display (commit e9bbe9a980d408af36b52f2abaae7c35647b7425).
+#
+# Root cause (verified via live logcat + disassembly of libsdmcore.so):
+# 1. HWEventsDRM::SetEventState(HWEvent::VSYNC, false) clears vsync_enabled_ and
+#    vsync_registered_ without rotating vsync_cookie_, leaving an already-queued
+#    DRM_VBLANK_EVENT armed in the kernel event queue. When multi-display pacing
+#    re-enables VSYNC within one 16.67ms frame, RegisterVSync() queues a second
+#    event for the same vblank.
+# 2. HWEventsDRM::HandleVSync() calls RegisterVSync() before drmHandleEvent(),
+#    then checks `if (vsync_handler_count_ > 1)` after drmHandleEvent() and calls
+#    RegisterVSync() a SECOND time. Once two events arrive in one wakeup, two
+#    vblank requests are re-queued on every subsequent frame forever, causing
+#    SurfaceFlinger "Ignoring duplicate VSYNC event from HWC" every 16.67ms.
+#
+# Fix (kernel_managed_dpu_ path):
+# - Rotate vsync_cookie_ on VSYNC disable so stale pre-disable events are dropped.
+# - Do not double-register in HandleVSync()'s vsync_handler_count_ > 1 tail.
+# - Deduplicate non-monotonic / identical timestamps in KernelVSyncHandlerCallback().
+#
+# Note: Rebuilding libsdmcore.so requires the external LineageOS display source
+# tree; once applied there, record this patch and its patched_sources SHA256 in
+# configs/sm8350-display-build.json.
+--- a/sdm/libs/core/drm/hw_events_drm.h
++++ b/sdm/libs/core/drm/hw_events_drm.h
+@@ -76,6 +76,7 @@
+   static std::atomic<unsigned long> next_vsync_cookie_;
+   static thread_local HWEventsDRM *vsync_dispatcher_;
+   unsigned long vsync_cookie_ = 0;
++  int64_t last_vsync_timestamp_ = -1;
+   void *DisplayEventHandler();
+   void HandleVSync(char *data);
+   void HandleIdleTimeout(char *data);
+--- a/sdm/libs/core/drm/hw_events_drm.cpp
++++ b/sdm/libs/core/drm/hw_events_drm.cpp
+@@ -298,6 +298,7 @@
+   exit_threads_ = false;
+   vsync_enabled_ = vsync_registered_ = false;
+   vsync_cookie_ = next_vsync_cookie_.fetch_add(1, std::memory_order_relaxed);
++  last_vsync_timestamp_ = -1;
+   event_thread_name_ = "SDM_EventThread - " + std::to_string(display_id) + "-" + std::to_string(display_type);
+ 
+   DisplayError error = PopulateHWEventData(event_list);
+@@ -352,6 +353,8 @@
+       std::lock_guard<std::mutex> lock(vsync_mutex_);
+       vsync_enabled_ = false;
+       vsync_registered_ = false;
++      vsync_cookie_ = next_vsync_cookie_.fetch_add(1, std::memory_order_relaxed);
++      last_vsync_timestamp_ = -1;
+     }
+     WakeUpEventThread();
+     pthread_join(event_thread_, NULL);
+@@ -374,6 +377,9 @@
+         }
+         vsync_registered_ = true;
+       } else if (!vsync_enabled_) {
++        if (kernel_managed_dpu_) {
++          vsync_cookie_ = next_vsync_cookie_.fetch_add(1, std::memory_order_relaxed);
++        }
+         vsync_registered_ = false;
+       }
+     } break;
+@@ -722,7 +728,7 @@
+     DLOGE("drmHandleEvent failed: %i", error);
+   }
+ 
+-  if (vsync_handler_count_ > 1) {
++  if (!kernel_managed_dpu_ && vsync_handler_count_ > 1) {
+     //  probable thread preemption caused > 1 vsync handling. Re-enable vsync before polling
+     std::lock_guard<std::mutex> lock(vsync_mutex_);
+     vsync_registered_ = false;
+@@ -777,8 +783,16 @@
+ void HWEventsDRM::KernelVSyncHandlerCallback(int fd, unsigned int sequence, unsigned int tv_sec,
+                                              unsigned int tv_usec, void *data) {
+   HWEventsDRM *handler = vsync_dispatcher_;
+-  if (!handler || handler->exit_threads_ ||
+-      reinterpret_cast<unsigned long>(data) != handler->vsync_cookie_) return;
++  if (!handler || handler->exit_threads_) return;
++  int64_t timestamp = (int64_t)(tv_sec) * 1000000000LL + (int64_t)(tv_usec) * 1000LL;
++  {
++    std::lock_guard<std::mutex> lock(handler->vsync_mutex_);
++    if (reinterpret_cast<unsigned long>(data) != handler->vsync_cookie_) return;
++    if (handler->last_vsync_timestamp_ >= 0 && timestamp <= handler->last_vsync_timestamp_) {
++      return;
++    }
++    handler->last_vsync_timestamp_ = timestamp;
++  }
+   VSyncHandlerCallback(fd, sequence, tv_sec, tv_usec, handler);
+ }
+ 

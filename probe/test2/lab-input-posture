@@ -1,42 +1,178 @@
 #!/bin/busybox sh
 # Bridge actual SSAM cover posture to mica's missing platform posture provider.
 # Retain OPEN fallback only when the kernel has no SSAM state device.
-export PATH=/bin:/sbin
-android() { timeout 8 nsenter -t 1 -m -r -- /system/bin/"$@"; }
-configured=
-previous=
-cover=/sys/bus/surface_aggregator/devices/01:0e:01:00:01/state
-while true; do
+export PATH="${SPX_POSTURE_PATH:-/bin:/sbin:${PATH:-}}"
+
+SYSFS="${SPX_POSTURE_SYSFS:-/sys}"
+cover="${SPX_POSTURE_COVER:-$SYSFS/bus/surface_aggregator/devices/01:0e:01:00:01/state}"
+poll_sleep="${SPX_POSTURE_POLL_SLEEP:-1}"
+prop_check_ticks="${SPX_POSTURE_PROP_TICKS:-30}"
+max_loops="${SPX_POSTURE_MAX_LOOPS:-0}"
+
+# Race-free, zero-orphan timeout wrapper (BusyBox timeout orphans its sleeping
+# watchdog child to PID 1, spamming "Untracked process (timeout)" in dmesg).
+run_with_timeout() {
+    _rwt_sec=$1
+    shift
+    "$@" &
+    _rwt_cmd=$!
+    (
+        trap - EXIT
+        _rwt_armed=1
+        trap 'if [ "$_rwt_armed" = 1 ] && [ -n "${!:-}" ] && [ "$!" != "$_rwt_cmd" ]; then kill "$!" 2>/dev/null || true; wait "$!" 2>/dev/null || true; fi; exit 0' TERM INT
+        sleep "$_rwt_sec" </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -TERM "$_rwt_cmd" 2>/dev/null || true
+        _rwt_armed=1
+        sleep 1 </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -KILL "$_rwt_cmd" 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    _rwt_wd=$!
+    _rwt_rc=0
+    wait "$_rwt_cmd" 2>/dev/null || _rwt_rc=$?
+    kill -TERM "$_rwt_wd" 2>/dev/null || true
+    _rwt_try=0
+    while [ "$_rwt_try" -lt 20 ]; do
+        _rwt_st=
+        [ -r "/proc/$_rwt_wd/stat" ] || break
+        { read -r _rwt_st < "/proc/$_rwt_wd/stat"; } 2>/dev/null || break
+        case "$_rwt_st" in
+            *') Z '*|*') X '*) break ;;
+        esac
+        kill -TERM "$_rwt_wd" 2>/dev/null || break
+        sleep 0.05 2>/dev/null || break
+        _rwt_try=$((_rwt_try + 1))
+    done
+    wait "$_rwt_wd" 2>/dev/null || true
+    return "$_rwt_rc"
+}
+
+android() {
+    if [ -n "${SPX_POSTURE_ANDROID_WRAPPER:-}" ]; then
+        "$SPX_POSTURE_ANDROID_WRAPPER" "$@"
+    else
+        run_with_timeout "${ANDROID_COMMAND_TIMEOUT:-8}" nsenter -t 1 -m -r -- /system/bin/"$@"
+    fi
+}
+
+display_is_on() {
+    _dio_found=0
+    for _dio_en in "$SYSFS"/class/drm/card*-*/enabled; do
+        [ -r "$_dio_en" ] || continue
+        _dio_found=1
+        read -r _dio_val < "$_dio_en" 2>/dev/null || _dio_val=
+        if [ "$_dio_val" = enabled ]; then
+            _dio_dpms="${_dio_en%/*}/dpms"
+            if [ -r "$_dio_dpms" ]; then
+                read -r _dio_dv < "$_dio_dpms" 2>/dev/null || _dio_dv=
+                [ "$_dio_dv" = On ] || continue
+            fi
+            return 0
+        fi
+    done
+    if [ "$_dio_found" = 1 ]; then
+        return 1
+    fi
+    for _dio_bl in "$SYSFS"/class/backlight/*; do
+        [ -d "$_dio_bl" ] || continue
+        _dio_found=1
+        if [ -r "$_dio_bl/bl_power" ]; then
+            read -r _dio_bp < "$_dio_bl/bl_power" 2>/dev/null || _dio_bp=0
+            [ "$_dio_bp" = 0 ] || continue
+        fi
+        if [ -r "$_dio_bl/brightness" ]; then
+            read -r _dio_br < "$_dio_bl/brightness" 2>/dev/null || _dio_br=1
+            [ "$_dio_br" != 0 ] || continue
+        fi
+        return 0
+    done
+    [ "$_dio_found" = 0 ]
+}
+
+get_system_server_pid() {
+    if [ -n "${SPX_POSTURE_SERVER_PID:-}" ]; then
+        printf '%s\n' "$SPX_POSTURE_SERVER_PID"
+        return 0
+    fi
+    if [ -n "$last_server" ] && [ -r "/proc/$last_server/cmdline" ]; then
+        _gss_cmd=$(tr '\0' ' ' < "/proc/$last_server/cmdline" 2>/dev/null || true)
+        case "$_gss_cmd" in
+            system_server|system_server' '*) printf '%s\n' "$last_server"; return 0 ;;
+        esac
+    fi
+    pidof system_server 2>/dev/null || true
+}
+
+check_auto_posture() {
     if [ "$(android getprop persist.sq2.input_posture 2>/dev/null)" = auto ]; then
         echo 'SQ2_INPUT_POSTURE: automatic posture requested; lab override skipped.'
         exit 0
     fi
-    server=$(pidof system_server)
-    physical=$(cat "$cover" 2>/dev/null || echo unavailable)
+}
+
+configured=
+previous=
+last_server=
+boot_completed=0
+prop_ticks=0
+loops=0
+
+while true; do
+    server=$(get_system_server_pid)
+    if [ "$server" != "$last_server" ]; then
+        last_server=$server
+        boot_completed=0
+    fi
+    if [ -r "$cover" ]; then
+        read -r physical < "$cover" 2>/dev/null || physical=unavailable
+    else
+        physical=unavailable
+    fi
     case "$physical" in
         closed) target=0;;
         laptop) target=2;;
         disconnected|folded-canvas|folded-back|book) target=3;;
         unavailable) target=2;;
-        *) sleep 1; continue;;
+        *) target=;;
     esac
-    if [ -n "$server" ] && [ "$server:$target" != "$configured" ] &&
-       [ "$(android getprop sys.boot_completed 2>/dev/null)" = 1 ]; then
-        states=$(android cmd device_state print-states 2>/dev/null)
-        # IDs belong to the pinned mica build; fail closed on another schema.
-        if ! printf '%s\n' "$states" | grep "identifier=2, name='OPEN'" >/dev/null; then
-            echo 'SQ2_INPUT_POSTURE: expected OPEN state 2 absent; no override applied.'
-            exit 1
-        fi
-        if android cmd device_state base-state "$target"; then
-            if [ "$previous" = closed ] && [ "$physical" != closed ]; then
-                android cmd power wakeup || true
+    if [ -n "$target" ] && [ -n "$server" ] && [ "$server:$target" != "$configured" ]; then
+        check_auto_posture
+        prop_ticks=0
+        if [ "$boot_completed" = 0 ]; then
+            if [ "$(android getprop sys.boot_completed 2>/dev/null)" = 1 ]; then
+                boot_completed=1
             fi
-            previous=$physical
-            configured=$server:$target
-            echo "SQ2_INPUT_POSTURE: physical=$physical base=$target system_server=$server"
-            android dumpsys device_state
+        fi
+        if [ "$boot_completed" = 1 ]; then
+            states=$(android cmd device_state print-states 2>/dev/null)
+            # IDs belong to the pinned mica build; fail closed on another schema.
+            if ! printf '%s\n' "$states" | grep "identifier=2, name='OPEN'" >/dev/null; then
+                echo 'SQ2_INPUT_POSTURE: expected OPEN state 2 absent; no override applied.'
+                exit 1
+            fi
+            if android cmd device_state base-state "$target"; then
+                if [ "$previous" = closed ] && [ "$physical" != closed ]; then
+                    android cmd power wakeup || true
+                fi
+                previous=$physical
+                configured=$server:$target
+                echo "SQ2_INPUT_POSTURE: physical=$physical base=$target system_server=$server"
+                android dumpsys device_state
+            fi
+        fi
+    elif [ -n "$configured" ]; then
+        prop_ticks=$((prop_ticks + 1))
+        if [ "$prop_ticks" -ge "$prop_check_ticks" ] && display_is_on; then
+            prop_ticks=0
+            check_auto_posture
         fi
     fi
-    sleep 1
+    loops=$((loops + 1))
+    if [ "$max_loops" -gt 0 ] && [ "$loops" -ge "$max_loops" ]; then
+        exit 0
+    fi
+    sleep "$poll_sleep"
 done

@@ -2,33 +2,101 @@
 # Follow the selected transport; USB/I2C/other HID devices without this SPI
 # driver's resume counter are not subjected to SPI-specific restarts.
 set -u
-export PATH=/bin:/sbin
+export PATH="${SPX_TOUCH_PATH:-/bin:/sbin:${PATH:-}}"
+
+SYSFS="${SPX_TOUCH_SYSFS:-/sys}"
+RUN_DIR="${SPX_TOUCH_RUN:-/run}"
+DATA_ROOT="${SPX_TOUCH_ROOT:-/proc/1/root}"
+TOUCH_SERVICES="${SPX_TOUCH_SERVICES:-/bin/touch-services}"
+TOUCH_DISABLED="${SPX_TOUCH_DISABLED:-/run/touch-disabled}"
+POLL_SLEEP="${SPX_TOUCH_POLL_SLEEP:-0.5}"
+MAX_LOOPS="${SPX_TOUCH_MAX_LOOPS:-0}"
+
+panel_is_on() {
+    for _pio_en in "$SYSFS"/class/drm/card*-eDP-*/enabled; do
+        [ -r "$_pio_en" ] || continue
+        read -r _pio_val < "$_pio_en" 2>/dev/null || _pio_val=
+        [ "$_pio_val" = enabled ] || return 1
+        _pio_dpms="${_pio_en%/*}/dpms"
+        if [ -r "$_pio_dpms" ]; then
+            read -r _pio_dv < "$_pio_dpms" 2>/dev/null || _pio_dv=
+            [ "$_pio_dv" = On ] || return 1
+        fi
+    done
+    for _pio_bl in "$SYSFS"/class/backlight/*; do
+        [ -d "$_pio_bl" ] || continue
+        if [ -r "$_pio_bl/bl_power" ]; then
+            read -r _pio_bp < "$_pio_bl/bl_power" 2>/dev/null || _pio_bp=0
+            [ "$_pio_bp" = 0 ] || return 1
+        fi
+        if [ -r "$_pio_bl/brightness" ]; then
+            read -r _pio_br < "$_pio_bl/brightness" 2>/dev/null || _pio_br=1
+            [ "$_pio_br" != 0 ] || return 1
+        fi
+    done
+    return 0
+}
+
 previous=
 watched=
+pending_reinit=0
+pending_count=
+loops=0
 while :; do
-    if [ ! -r /run/iptsd-hidraw ]; then sleep 0.5;continue;fi
-    [ -r /run/iptsd-ready ] || exit 0
-    read -r ready_path < /run/iptsd-ready
+    if [ ! -r "$RUN_DIR/iptsd-hidraw" ]; then
+        loops=$((loops + 1))
+        if [ "$MAX_LOOPS" -gt 0 ] && [ "$loops" -ge "$MAX_LOOPS" ]; then exit 0; fi
+        sleep "$POLL_SLEEP"
+        continue
+    fi
+    [ -r "$RUN_DIR/iptsd-ready" ] || exit 0
+    read -r ready_path < "$RUN_DIR/iptsd-ready"
     counter=${ready_path%/*}/resume_count
     [ -r "$counter" ] || exit 0
-    current=$(cat "$counter" 2>/dev/null) || { sleep 0.5;continue; }
-    if [ "$watched" != "$counter" ]; then previous=$current;watched=$counter;fi
+    current=$(cat "$counter" 2>/dev/null) || {
+        loops=$((loops + 1))
+        if [ "$MAX_LOOPS" -gt 0 ] && [ "$loops" -ge "$MAX_LOOPS" ]; then exit 0; fi
+        sleep "$POLL_SLEEP"
+        continue
+    }
+    if [ "$watched" != "$counter" ]; then previous=$current; watched=$counter; pending_reinit=0; fi
     if [ "$current" != "$previous" ]; then
         previous=$current
+        pending_reinit=1
+        pending_count=$current
+    fi
+    if [ "$pending_reinit" = 1 ] && panel_is_on; then
+        pending_reinit=0
         ready=0
         for n in $(seq 1 60); do
-            if [ "$(cat "$ready_path" 2>/dev/null)" = ready ]; then ready=1;break;fi
+            if [ "$(cat "$ready_path" 2>/dev/null)" = ready ]; then ready=1; break; fi
             sleep 0.1
         done
-        if [ "$ready" = 0 ]; then echo "TOUCH_RESUME_NOT_READY count=$current";continue;fi
-        if [ -r /run/iptsd.pid ]; then
-            pid=$(cat /run/iptsd.pid)
-            case "$pid" in ''|*[!0-9]*) exit 1;; esac
-            if [ "$(cat /proc/$pid/comm 2>/dev/null)" = iptsd ]; then kill "$pid" 2>/dev/null || true;sleep 1;fi
-            rm -f /run/iptsd.pid
+        if [ "$ready" = 0 ]; then
+            echo "TOUCH_RESUME_NOT_READY count=$pending_count"
+        else
+            if [ -r "$RUN_DIR/iptsd.pid" ]; then
+                pid=$(cat "$RUN_DIR/iptsd.pid")
+                case "$pid" in ''|*[!0-9]*) exit 1;; esac
+                if [ "$(cat "/proc/$pid/comm" 2>/dev/null)" = iptsd ]; then
+                    kill "$pid" 2>/dev/null || true
+                    for w in $(seq 1 10); do
+                        kill -0 "$pid" 2>/dev/null || break
+                        sleep 0.1
+                    done
+                fi
+                rm -f "$RUN_DIR/iptsd.pid"
+            fi
+            if [ -e "$TOUCH_DISABLED" ] || [ "$(tr -d '\r\n ' < "$DATA_ROOT/data/vendor/spx-advanced-control/touch_disabled" 2>/dev/null || true)" = "1" ]; then
+                : > "$TOUCH_DISABLED"
+                echo "TOUCH_RESUME_SKIPPED_DISABLED count=$pending_count"
+            else
+                echo "TOUCH_RESUME_REINITIALIZE count=$pending_count"
+                "$TOUCH_SERVICES" || echo "TOUCH_RESUME_FAILED count=$pending_count"
+            fi
         fi
-        echo "TOUCH_RESUME_REINITIALIZE count=$current"
-        /bin/touch-services || echo "TOUCH_RESUME_FAILED count=$current"
     fi
-    sleep 0.5
+    loops=$((loops + 1))
+    if [ "$MAX_LOOPS" -gt 0 ] && [ "$loops" -ge "$MAX_LOOPS" ]; then exit 0; fi
+    sleep "$POLL_SLEEP"
 done

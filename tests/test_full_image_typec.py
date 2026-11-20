@@ -50,6 +50,108 @@ class TypeC(unittest.TestCase):
         for n in ['spx-lower-usb','spx-lower-usb-boot']:
             subprocess.run(['sh','-n',str(ROOT/'probe/test2'/n)],check=True)
 
+    def test_synthetic_dtb_wakeup_source_and_idempotence(self):
+        import libfdt
+        dts = """/dts-v1/;
+/ {
+    compatible = "microsoft,surface-pro-x", "qcom,sc8180x";
+    #address-cells = <2>;
+    #size-cells = <2>;
+    reserved-memory {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+        keep-prop = <1>;
+    };
+    soc@0 {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+        phy@aec2a00 {
+            compatible = "qcom,sc8180x-edp-phy";
+            keep-edp = <2>;
+        };
+        phy@88e8000 {
+            compatible = "qcom,sc8180x-qmp-usb3-dp-phy";
+            ports {
+                #address-cells = <1>;
+                #size-cells = <0>;
+                port@0 { reg = <0>; endpoint {}; };
+                port@2 { reg = <2>; endpoint {}; };
+            };
+        };
+        phy@88ed000 {
+            compatible = "qcom,sc8180x-qmp-usb3-dp-phy";
+            ports {
+                #address-cells = <1>;
+                #size-cells = <0>;
+                port@0 { reg = <0>; endpoint {}; };
+                port@2 { reg = <2>; endpoint {}; };
+            };
+        };
+        usb@a4f8800 {
+            compatible = "qcom,sc8180x-dwc3-mp", "qcom,dwc3";
+        };
+        usb@a6f8800 {
+            compatible = "qcom,sc8180x-dwc3", "qcom,dwc3";
+            usb@a600000 {
+                compatible = "snps,dwc3";
+                ports {
+                    #address-cells = <1>;
+                    #size-cells = <0>;
+                    port@0 { reg = <0>; endpoint {}; };
+                };
+            };
+        };
+        usb@a8f8800 {
+            compatible = "qcom,sc8180x-dwc3", "qcom,dwc3";
+            usb@a800000 {
+                compatible = "snps,dwc3";
+                ports {
+                    #address-cells = <1>;
+                    #size-cells = <0>;
+                    port@0 { reg = <0>; endpoint {}; };
+                };
+            };
+        };
+        display-subsystem@ae00000 {
+            displayport-controller@ae90000 {
+                compatible = "qcom,sc8180x-dp";
+                status = "disabled";
+                ports {
+                    #address-cells = <1>;
+                    #size-cells = <0>;
+                    port@1 { reg = <1>; endpoint {}; };
+                };
+            };
+            displayport-controller@ae98000 {
+                compatible = "qcom,sc8180x-dp";
+                status = "disabled";
+                ports {
+                    #address-cells = <1>;
+                    #size-cells = <0>;
+                    port@1 { reg = <1>; endpoint {}; };
+                };
+            };
+        };
+    };
+};
+"""
+        res = subprocess.run(['dtc', '-q', '-I', 'dts', '-O', 'dtb'], input=dts.encode(), capture_output=True, check=True)
+        base_dtb = res.stdout
+        new = t.prepare_dtb(base_dtb)
+        self.assertEqual(t.prepare_dtb(new), new)
+        f = libfdt.Fdt(new)
+        for usbwrap in ('/soc@0/usb@a4f8800', '/soc@0/usb@a6f8800', '/soc@0/usb@a8f8800'):
+            off = f.path_offset(usbwrap)
+            self.assertEqual(bytes(f.getprop(off, 'wakeup-source')), b'')
+        self.assertEqual(bytes(f.getprop(f.path_offset('/soc@0/usb@a6f8800/usb@a600000'), 'dr_mode')), b'otg\0')
+        for a in ('ae90000', 'ae98000'):
+            n = f.path_offset('/soc@0/display-subsystem@ae00000/displayport-controller@' + a)
+            self.assertEqual(bytes(f.getprop(n, 'status')), b'okay\0')
+        self.assertEqual(f.getprop(f.path_offset('/soc@0/phy@aec2a00'), 'keep-edp').as_uint32(), 2)
+        self.assertEqual(f.getprop(f.path_offset('/reserved-memory'), 'keep-prop').as_uint32(), 1)
+
     def test_real_dtb_graph_if_available(self):
         import libfdt
         p=ROOT/'out/typec-dp-20261116/BOOT_BASELINE.dtb'
@@ -59,6 +161,8 @@ class TypeC(unittest.TestCase):
         for a in ['ae90000','ae98000']:
             n=f.path_offset('/soc@0/display-subsystem@ae00000/displayport-controller@'+a)
             self.assertEqual(bytes(f.getprop(n,'status')),b'okay\0')
+        for usbwrap in ('/soc@0/usb@a6f8800', '/soc@0/usb@a8f8800'):
+            self.assertEqual(bytes(f.getprop(f.path_offset(usbwrap), 'wakeup-source')), b'')
         self.assertEqual(bytes(f.getprop(f.path_offset('/soc@0/usb@a6f8800/usb@a600000'),'dr_mode')),b'otg\0')
         # Preserve memory ownership and eDP node byte properties.
         for path in ['/reserved-memory','/soc@0/phy@aec2a00']:

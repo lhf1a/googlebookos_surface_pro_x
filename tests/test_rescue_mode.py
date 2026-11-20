@@ -652,8 +652,13 @@ class RescueInitPipelineIntegrationTests(unittest.TestCase):
         self.assertIn(b'if [ "$debug" = 1 ] && [ "$rescue" = 0 ]; then', final_init)
         self.assertIn(b'/bin/spx-rescue-session || true', final_init)
         self.assertIn(b'. /bin/spx-rescue-handoff', final_init)
-        # Disk discovery runs before rescue stop; Android mount and native-handoff come after!
+        # Disk discovery runs AFTER spx-typec-early and BEFORE wifi-services (so lte-unit-seed
+        # can read /media/esp/EFI/SPX/LTE/<uuid>.bin before rmtfs starts) and BEFORE rescue stop;
+        # Android mount and native-handoff come after!
+        self.assertLess(final_init.index(b'/bin/spx-typec-early'), final_init.index(b'. /bin/prepare-native-ssd'))
+        self.assertLess(final_init.index(b'. /bin/prepare-native-ssd'), final_init.index(b'wifi-services > /logs/wifi-services-startup.txt'))
         self.assertLess(final_init.index(b'. /bin/prepare-native-ssd'), final_init.index(b'/bin/spx-rescue-session'))
+        self.assertIn(b'if [ "$ssd" = 1 ] && [ ! -f /run/sq2-ssd-device ]; then', final_init)
         self.assertLess(final_init.index(b'. /bin/spx-rescue-handoff'), final_init.index(b'mount -t erofs -o ro /dev/mapper/system_a /newroot'))
         self.assertLess(final_init.index(b'mount -t erofs -o ro /dev/mapper/system_a /newroot'), final_init.index(b'exec native-handoff /newroot'))
         # Normal boot shadow remains locked in the final initramfs!

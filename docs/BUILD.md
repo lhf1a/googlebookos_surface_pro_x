@@ -189,6 +189,13 @@ Hybrid 整包默认使用 `configs/kernel-6.18-hybrid.config`（内置 `r8152` �
   - 自动校验包与设备兼容性（拦截在旧布局 `v0.7.0` 上误用不含 `super` 的增量包）、推送校验、备份原 `EFI/SQ2Nat` 并热替换新引导载荷后自动触发两段重启完成离线更新；默认保留用户数据与触摸校准。
 - 当前已在主机完成 `spx-ota-tool` 交叉编译、打包、在线/离线应用、全新安装清数据、Linux `sh` 与 Windows PowerShell ADB 一键脚本及 APK Intent 清单自动化单元测试；尚未在 SQ1/SQ2 实机完成端到端重启升级验收。
 
+- **写入内置硬盘（从 USB 全新安装）**：
+  - `SurfaceAdvancedControl.apk` 首页提供 `InternalDiskInstallActivity`，经 `/bin/spx-ota-boot` 调用 `/bin/spx-internal-install` 与静态 ARM64 工具 `/bin/spx-ota-tool`（`write-gpt-5part`、`copy-verify`）。
+  - 仅在运行时确认为 USB 启动、源盘为标准 5 分区布局且存在满足容量的内置非 USB 硬盘时开放；不硬编码设备号或单机白名单，自动排除当前启动盘、其他 USB 盘、可移动介质与虚拟块设备。
+  - 在目标内置硬盘重建全新 5 分区 GPT（`super`、`metadata`、`misc`、`SQ2PROBE` 与铺满全盘的全新 `userdata`，使用全新随机 UUID），流式复制当前 `super` 并清缓存读回做 SHA-256 校验，格式化 FAT32 `SQ2PROBE` 并写入标准 `\EFI\BOOT\BOOTAA64.EFI` 与单系统 `EFI/BOOT/grub.cfg`（排除 USB 运行时状态文件），清零 `misc` 并格式化全新 `metadata`/`userdata`（不保留原内置硬盘数据，也不迁移 USB `userdata`）。
+  - 完成后提示用户选择 **立即关机（推荐）** 或 **稍后手动关机**，待关机拔除 USB 后从内置硬盘冷启动。
+  - 当前已在主机完成 `spx-ota-tool` ARM64 交叉编译与 `qemu-aarch64` 验证、磁盘筛选/安全拦截、GPT/ext4/ESP 端到端单元测试与 APK 构建；尚未在 SQ1/SQ2 实机完成“USB 启动写入内置 NVMe → 关机拔盘 → 内置硬盘冷启动”验收。
+
 ### 整盘验收边界
 
 - 默认只构建产物：不运行测试套件、整盘解压校验或 SHA 清单；编译错误、必要格式/ABI/配对约束仍会中止。

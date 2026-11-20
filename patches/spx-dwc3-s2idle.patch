@@ -1,0 +1,68 @@
+diff --git a/drivers/usb/dwc3/dwc3-qcom-legacy.c b/drivers/usb/dwc3/dwc3-qcom-legacy.c
+--- a/drivers/usb/dwc3/dwc3-qcom-legacy.c
++++ b/drivers/usb/dwc3/dwc3-qcom-legacy.c
+@@ -431,10 +431,12 @@
+ 	if (qcom->is_suspended)
+ 		return 0;
+ 
+-	for (i = 0; i < qcom->num_ports; i++) {
+-		val = readl(qcom->qscratch_base + pwr_evnt_irq_stat_reg[i]);
+-		if (!(val & PWR_EVNT_LPM_IN_L2_MASK))
+-			dev_err(qcom->dev, "port-%d HS-PHY not in L2\n", i + 1);
++	if (dwc3_qcom_is_host(qcom) && wakeup) {
++		for (i = 0; i < qcom->num_ports; i++) {
++			val = readl(qcom->qscratch_base + pwr_evnt_irq_stat_reg[i]);
++			if (!(val & PWR_EVNT_LPM_IN_L2_MASK))
++				dev_err(qcom->dev, "port-%d HS-PHY not in L2\n", i + 1);
++		}
+ 	}
+ 
+ 	for (i = qcom->num_clocks - 1; i >= 0; i--)
+diff --git a/drivers/usb/dwc3/dwc3-qcom.c b/drivers/usb/dwc3/dwc3-qcom.c
+--- a/drivers/usb/dwc3/dwc3-qcom.c
++++ b/drivers/usb/dwc3/dwc3-qcom.c
+@@ -343,10 +343,12 @@
+ 	if (qcom->is_suspended)
+ 		return 0;
+ 
+-	for (i = 0; i < qcom->num_ports; i++) {
+-		val = readl(qcom->qscratch_base + pwr_evnt_irq_stat_reg[i]);
+-		if (!(val & PWR_EVNT_LPM_IN_L2_MASK))
+-			dev_err(qcom->dev, "port-%d HS-PHY not in L2\n", i + 1);
++	if (dwc3_qcom_is_host(qcom) && wakeup) {
++		for (i = 0; i < qcom->num_ports; i++) {
++			val = readl(qcom->qscratch_base + pwr_evnt_irq_stat_reg[i]);
++			if (!(val & PWR_EVNT_LPM_IN_L2_MASK))
++				dev_err(qcom->dev, "port-%d HS-PHY not in L2\n", i + 1);
++		}
+ 	}
+ 	clk_bulk_disable_unprepare(qcom->num_clocks, qcom->clks);
+ 
+diff --git a/arch/arm64/boot/dts/qcom/sc8180x.dtsi b/arch/arm64/boot/dts/qcom/sc8180x.dtsi
+--- a/arch/arm64/boot/dts/qcom/sc8180x.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8180x.dtsi
+@@ -2750,6 +2750,8 @@
+ 
+ 			resets = <&gcc GCC_USB30_MP_BCR>;
+ 
++			wakeup-source;
++
+ 			status = "disabled";
+ 
+ 			usb_mp_dwc3: usb@a400000 {
+@@ -2801,6 +2803,7 @@
+ 				      "xo";
+ 			resets = <&gcc GCC_USB30_PRIM_BCR>;
+ 			power-domains = <&gcc USB30_PRIM_GDSC>;
++			wakeup-source;
+ 
+ 			interconnects = <&aggre1_noc MASTER_USB3 0 &mc_virt SLAVE_EBI_CH0 0>,
+ 					<&gem_noc MASTER_AMPSS_M0 0 &config_noc SLAVE_USB3 0>;
+@@ -2869,6 +2872,7 @@
+ 				      "xo";
+ 			resets = <&gcc GCC_USB30_SEC_BCR>;
+ 			power-domains = <&gcc USB30_SEC_GDSC>;
++			wakeup-source;
+ 
+ 			interrupts-extended = <&intc GIC_SPI 135 IRQ_TYPE_LEVEL_HIGH>,
+ 					      <&intc GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>,

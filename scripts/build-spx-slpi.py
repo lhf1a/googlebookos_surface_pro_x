@@ -4,7 +4,6 @@ import argparse
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 
 
@@ -28,6 +27,23 @@ def source_for_slpi(source):
     return source.replace('.name = "qcom_q6v5_pas"', '.name = "spx_slpi_pas"')
 
 
+def source_for_fastrpc(source):
+    freezable = "wait_for_completion_state(&ctx->work,\n\t\t\t\t\t\tTASK_INTERRUPTIBLE | TASK_FREEZABLE)"
+    if freezable in source or "TASK_INTERRUPTIBLE | TASK_FREEZABLE" in source:
+        return source
+    original = "\t\terr = wait_for_completion_interruptible(&ctx->work);\n"
+    if source.count(original) != 1:
+        raise ValueError("unexpected fastrpc invoke wait sequence")
+    replacement = (
+        "\t\t/* Freeze FastRPC reverse-RPC listeners in place during s2idle instead of\n"
+        "\t\t * returning -ERESTARTSYS and replaying a duplicate invoke on thaw.\n"
+        "\t\t */\n"
+        "\t\terr = wait_for_completion_state(&ctx->work,\n"
+        "\t\t\t\t\t\tTASK_INTERRUPTIBLE | TASK_FREEZABLE);\n"
+    )
+    return source.replace(original, replacement, 1)
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("source", type=Path)
@@ -38,9 +54,10 @@ if __name__ == "__main__":
     if not (build/".config").is_file() or not (build/"Module.symvers").stat().st_size:
         p.error("complete matching kernel build required")
     code = source_for_slpi((source/"drivers/remoteproc/qcom_q6v5_pas.c").read_text())
+    fastrpc_code = source_for_fastrpc((source/"drivers/misc/fastrpc.c").read_text())
     out.mkdir(parents=True, exist_ok=False)
     (out/"spx-slpi-pas.c").write_text(code)
-    shutil.copyfile(source/"drivers/misc/fastrpc.c", out/"fastrpc.c")
+    (out/"fastrpc.c").write_text(fastrpc_code)
     (out/"Makefile").write_text(
         "obj-m += spx-slpi-pas.o fastrpc.o\n"
         f"ccflags-y += -I{source}/drivers/remoteproc\n")

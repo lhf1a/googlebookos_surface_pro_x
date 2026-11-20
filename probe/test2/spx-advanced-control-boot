@@ -1,5 +1,5 @@
 #!/bin/sh
-# Built-in root/init bridge for Surface Advanced Settings (Vulkan, Performance Mode & Touch).
+# Built-in root/init bridge for Surface Advanced Settings (Vulkan, Performance, Touch & Debugging).
 # Data-only boundary: validates every input token; never evals or hot-swaps active drivers.
 set -eu
 
@@ -9,6 +9,8 @@ DATA_ROOT="${SPX_AC_ROOT:-/proc/1/root}"
 SYSFS="${SPX_AC_SYSFS:-/sys}"
 RUN_DIR="${SPX_AC_RUN:-/run}"
 ETC_DIR="${SPX_AC_ETC:-/etc}"
+HOME_ROOT="${SPX_AC_HOME_ROOT:-/root}"
+LOGS_DIR="${SPX_AC_LOGS:-/logs}"
 CMDLINE="${SPX_AC_CMDLINE:-/proc/cmdline}"
 LOCK_DIR="${SPX_AC_LOCK_DIR:-/run/spx-advanced-control-lock}"
 TMP_REQ="${SPX_AC_TMP_REQ:-/run/spx-advanced-control-request}"
@@ -21,17 +23,96 @@ TOUCH_NOISE_TOOL="${SPX_AC_NOISE_TOOL:-/bin/touch-noise-profile}"
 TOUCH_TAP_TOOL="${SPX_AC_TAP_TOOL:-/bin/touch-tap-profile}"
 TOUCH_READY_TOOL="${SPX_AC_READY_TOOL:-/bin/touch-framework-ready}"
 TOUCH_STORE="$DATA_ROOT/data/vendor/sq2-touch-calibration"
+DROPBEAR_BIN="${SPX_AC_DROPBEAR_BIN:-dropbear}"
+DROPBEARKEY_BIN="${SPX_AC_DROPBEARKEY_BIN:-dropbearkey}"
+MKPASSWD_BIN="${SPX_AC_MKPASSWD_BIN:-mkpasswd}"
+IP_BIN="${SPX_AC_IP_BIN:-ip}"
+ADB_TCP_PORT="5555"
+SSH_PORT="22"
+
+run_with_timeout() {
+    _rwt_sec=$1
+    shift
+    "$@" &
+    _rwt_cmd=$!
+    (
+        trap - EXIT
+        _rwt_armed=1
+        trap 'if [ "$_rwt_armed" = 1 ] && [ -n "${!:-}" ] && [ "$!" != "$_rwt_cmd" ]; then kill "$!" 2>/dev/null || true; wait "$!" 2>/dev/null || true; fi; exit 0' TERM INT
+        sleep "$_rwt_sec" </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -TERM "$_rwt_cmd" 2>/dev/null || true
+        _rwt_armed=1
+        sleep 1 </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -KILL "$_rwt_cmd" 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    _rwt_wd=$!
+    _rwt_rc=0
+    wait "$_rwt_cmd" 2>/dev/null || _rwt_rc=$?
+    kill -TERM "$_rwt_wd" 2>/dev/null || true
+    _rwt_try=0
+    while [ "$_rwt_try" -lt 20 ]; do
+        _rwt_st=
+        [ -r "/proc/$_rwt_wd/stat" ] || break
+        { read -r _rwt_st < "/proc/$_rwt_wd/stat"; } 2>/dev/null || break
+        case "$_rwt_st" in
+            *') Z '*|*') X '*) break ;;
+        esac
+        kill -TERM "$_rwt_wd" 2>/dev/null || break
+        sleep 0.05 2>/dev/null || break
+        _rwt_try=$((_rwt_try + 1))
+    done
+    wait "$_rwt_wd" 2>/dev/null || true
+    return "$_rwt_rc"
+}
+
+display_is_on() {
+    _dio_found=0
+    for _dio_en in "$SYSFS"/class/drm/card*-*/enabled; do
+        [ -r "$_dio_en" ] || continue
+        _dio_found=1
+        read -r _dio_val < "$_dio_en" 2>/dev/null || _dio_val=
+        if [ "$_dio_val" = enabled ]; then
+            _dio_dpms="${_dio_en%/*}/dpms"
+            if [ -r "$_dio_dpms" ]; then
+                read -r _dio_dv < "$_dio_dpms" 2>/dev/null || _dio_dv=
+                [ "$_dio_dv" = On ] || continue
+            fi
+            return 0
+        fi
+    done
+    if [ "$_dio_found" = 1 ]; then
+        return 1
+    fi
+    for _dio_bl in "$SYSFS"/class/backlight/*; do
+        [ -d "$_dio_bl" ] || continue
+        _dio_found=1
+        if [ -r "$_dio_bl/bl_power" ]; then
+            read -r _dio_bp < "$_dio_bl/bl_power" 2>/dev/null || _dio_bp=0
+            [ "$_dio_bp" = 0 ] || continue
+        fi
+        if [ -r "$_dio_bl/brightness" ]; then
+            read -r _dio_br < "$_dio_bl/brightness" 2>/dev/null || _dio_br=1
+            [ "$_dio_br" != 0 ] || continue
+        fi
+        return 0
+    done
+    [ "$_dio_found" = 0 ]
+}
 
 android() {
     if [ -n "${SPX_AC_ANDROID_WRAPPER:-}" ]; then
         "$SPX_AC_ANDROID_WRAPPER" "$@"
     else
-        timeout "${ANDROID_COMMAND_TIMEOUT:-15}" nsenter -t 1 -m -r -- /system/bin/"$@"
+        run_with_timeout "${ANDROID_COMMAND_TIMEOUT:-15}" nsenter -t 1 -m -r -- /system/bin/"$@"
     fi
 }
 
 cleanup() {
-    rm -f "$TMP_REQ" "$TMP_TOUCH" "$TMP_TOUCH".bundle "$TMP_TOUCH".prof "$TMP_TOUCH".noise "$TMP_TOUCH".noise.out "$TMP_TOUCH".tap "$TMP_TOUCH".tap.out "$TMP_TOUCH".neutral 2>/dev/null || true
+    rm -f "$TMP_REQ" "$TMP_TOUCH" "$TMP_TOUCH".bundle "$TMP_TOUCH".prof "$TMP_TOUCH".noise "$TMP_TOUCH".noise.out "$TMP_TOUCH".tap "$TMP_TOUCH".tap.out "$TMP_TOUCH".neutral "$TMP_TOUCH".sshkeys 2>/dev/null || true
     rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 
@@ -51,8 +132,17 @@ if [ "${SPX_AC_BOOT_WAIT:-1}" != "0" ]; then
 fi
 
 STORE="$DATA_ROOT/data/vendor/spx-advanced-control"
+SSH_STORE="$STORE/ssh"
 mkdir -p "$STORE"
 chmod 700 "$STORE" 2>/dev/null || true
+
+is_rescue_boot() {
+    _cmd=" $(cat "$CMDLINE" 2>/dev/null || true) "
+    case "$_cmd" in
+        *' sq2.rescue=1 '*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
 is_rescue_or_no_cpufreq() {
     _cmd=" $(cat "$CMDLINE" 2>/dev/null || true) "
@@ -349,6 +439,86 @@ is_iptsd_running() {
     return 0
 }
 
+read_saved_touch_disabled() {
+    _td_f="$STORE/touch_disabled"
+    if [ -f "$_td_f" ] && [ ! -L "$_td_f" ]; then
+        _td_val="$(head -n 1 "$_td_f" 2>/dev/null | tr -d '\r\n ')"
+        if [ "$_td_val" = "1" ]; then
+            printf '1'
+            return 0
+        fi
+    fi
+    printf '0'
+}
+
+is_touch_disabled() {
+    [ -e "$RUN_DIR/touch-disabled" ] || [ "$(read_saved_touch_disabled)" = "1" ]
+}
+
+stop_iptsd_now() {
+    _pidfile="$RUN_DIR/iptsd.pid"
+    if [ -r "$_pidfile" ]; then
+        _ipid="$(tr -d '\r\n ' < "$_pidfile" 2>/dev/null || true)"
+        case "$_ipid" in
+            ''|*[!0-9]*) ;;
+            *)
+                if kill -0 "$_ipid" 2>/dev/null; then
+                    kill "$_ipid" 2>/dev/null || true
+                    _i=0
+                    while [ "$_i" -lt 30 ]; do
+                        kill -0 "$_ipid" 2>/dev/null || break
+                        sleep 0.1
+                        _i=$((_i + 1))
+                    done
+                    kill -9 "$_ipid" 2>/dev/null || true
+                fi
+                ;;
+        esac
+        rm -f "$_pidfile" 2>/dev/null || true
+    fi
+    ! is_iptsd_running
+}
+
+apply_touch_disabled() {
+    _dis="$1"
+    _rnonce="$2"
+    if [ "$_dis" = "1" ]; then
+        : > "$RUN_DIR/touch-disabled"
+        chmod 644 "$RUN_DIR/touch-disabled" 2>/dev/null || true
+        stop_iptsd_now || return 1
+        return 0
+    fi
+    rm -f "$RUN_DIR/touch-disabled" 2>/dev/null || true
+    if [ -x "$TOUCH_READY_TOOL" ]; then
+        "$TOUCH_READY_TOOL" >/dev/null 2>&1 || return 1
+    fi
+    if [ -d "$RUN_DIR/iptsd-noise" ] && is_iptsd_running; then
+        if [ -z "$TOUCH_DEVICE" ]; then
+            resolve_touch_device || true
+        fi
+        if [ -n "$TOUCH_DEVICE" ]; then
+            touch_reload_noise "${_rnonce}-ready" || true
+        fi
+    fi
+    return 0
+}
+
+restore_touch_disabled_on_boot() {
+    if is_rescue_boot; then
+        echo 'SPX_AC_BOOT_TOUCH_DISABLE_SKIPPED rescue'
+        return 0
+    fi
+    if [ "$(read_saved_touch_disabled)" = "1" ]; then
+        : > "$RUN_DIR/touch-disabled"
+        chmod 644 "$RUN_DIR/touch-disabled" 2>/dev/null || true
+        if stop_iptsd_now; then
+            echo 'SPX_AC_BOOT_TOUCH_DISABLED 1'
+        else
+            echo 'SPX_AC_BOOT_TOUCH_DISABLE_FAILED'
+        fi
+    fi
+}
+
 touch_reload_noise() {
     _rnonce="$1"
     _ndir="$RUN_DIR/iptsd-noise"
@@ -394,7 +564,7 @@ touch_apply_profile_file() {
     cp "$_src_prof" "$RUN_DIR/touch-calibration-current.profile.new" || return 1
     chmod 600 "$RUN_DIR/touch-calibration-current.profile.new" 2>/dev/null || true
     mv -f "$RUN_DIR/touch-calibration-current.profile.new" "$RUN_DIR/touch-calibration-current.profile" || return 1
-    if [ -x "$TOUCH_READY_TOOL" ]; then
+    if ! is_touch_disabled && [ -x "$TOUCH_READY_TOOL" ]; then
         "$TOUCH_READY_TOOL" >/dev/null 2>&1 || return 1
     fi
     if [ -d "$RUN_DIR/iptsd-noise" ]; then
@@ -459,6 +629,408 @@ check_touch_section_pair() {
     return 0
 }
 
+# ---- Network ADB & SSH Helpers ----
+
+write_atomic_file() {
+    _target="$1"
+    _mode="$2"
+    _content="$3"
+    _parent="$(dirname "$_target")"
+    mkdir -p "$_parent"
+    _tmp="${_target}.$$.tmp"
+    rm -f "$_tmp" 2>/dev/null || true
+    printf '%s' "$_content" > "$_tmp" || { rm -f "$_tmp" 2>/dev/null || true; return 1; }
+    chmod "$_mode" "$_tmp" 2>/dev/null || true
+    mv -f "$_tmp" "$_target" || { rm -f "$_tmp" 2>/dev/null || true; return 1; }
+    return 0
+}
+
+tcp_port_firewall() {
+    _action="$1"
+    _port="$2"
+    _tag="$3"
+    for _ipt in iptables ip6tables; do
+        if [ "$_action" = "1" ]; then
+            if ! android "$_ipt" -w -C INPUT -p tcp --dport "$_port" -m comment --comment "$_tag" -j ACCEPT >/dev/null 2>&1; then
+                android "$_ipt" -w -I INPUT 1 -p tcp --dport "$_port" -m comment --comment "$_tag" -j ACCEPT >/dev/null 2>&1 || true
+            fi
+        else
+            while android "$_ipt" -w -C INPUT -p tcp --dport "$_port" -m comment --comment "$_tag" -j ACCEPT >/dev/null 2>&1; do
+                android "$_ipt" -w -D INPUT -p tcp --dport "$_port" -m comment --comment "$_tag" -j ACCEPT >/dev/null 2>&1 || break
+            done
+        fi
+    done
+}
+
+DEBUG_VM_IP=""
+DEBUG_LAN_IPS=""
+
+read_debug_network_ips() {
+    DEBUG_VM_IP=""
+    DEBUG_LAN_IPS=""
+    _ip_lines="$("$IP_BIN" -4 -o addr show scope global 2>/dev/null || true)"
+    [ -n "$_ip_lines" ] || return 0
+    while IFS= read -r _line; do
+        [ -n "$_line" ] || continue
+        set -f
+        # shellcheck disable=SC2086
+        set -- $_line
+        set +f
+        _iface="${2:-}"
+        _fam="${3:-}"
+        _cidr="${4:-}"
+        [ "$_fam" = "inet" ] || continue
+        _iface="${_iface%%@*}"
+        _iface="${_iface%:}"
+        _ip="${_cidr%%/*}"
+        case "$_ip" in
+            ''|*[!0-9.]*) continue ;;
+        esac
+        case "$_iface" in
+            avf_tap*|vmnic*|crosvm*)
+                [ -n "$DEBUG_VM_IP" ] || DEBUG_VM_IP="$_ip"
+                ;;
+            lo|rmnet*|ccmni*|dummy*|tun*|ip_vti*|sit*|v4-*)
+                ;;
+            *)
+                [ -n "$_iface" ] && DEBUG_LAN_IPS="${DEBUG_LAN_IPS:+$DEBUG_LAN_IPS,}${_iface}:${_ip}"
+                ;;
+        esac
+    done <<EOF
+$_ip_lines
+EOF
+}
+
+read_saved_adb_tcp() {
+    _f="$STORE/adb_tcp_enabled"
+    if [ -f "$_f" ] && [ ! -L "$_f" ]; then
+        _v="$(head -n 1 "$_f" 2>/dev/null | tr -d '\r\n ')"
+        if [ "$_v" = "1" ]; then
+            printf '1'
+            return 0
+        fi
+    fi
+    printf '0'
+}
+
+restart_adbd() {
+    android setprop ctl.stop adbd >/dev/null 2>&1 || true
+    _i=0
+    while [ "$_i" -lt 20 ]; do
+        _svc="$(android getprop init.svc.adbd 2>/dev/null | tr -d '\r\n' || true)"
+        [ "$_svc" = "running" ] || break
+        sleep 0.1
+        _i=$((_i + 1))
+    done
+    android setprop ctl.start adbd >/dev/null 2>&1 || return 1
+    _i=0
+    while [ "$_i" -lt 30 ]; do
+        _svc="$(android getprop init.svc.adbd 2>/dev/null | tr -d '\r\n' || true)"
+        if [ -z "$_svc" ] || [ "$_svc" = "running" ]; then
+            return 0
+        fi
+        sleep 0.1
+        _i=$((_i + 1))
+    done
+    return 0
+}
+
+apply_adb_tcp() {
+    _enable="$1"
+    if [ "$_enable" = "1" ]; then
+        android settings put global adb_enabled 1 >/dev/null 2>&1 || true
+        android setprop service.adb.tcp.port "$ADB_TCP_PORT" >/dev/null 2>&1 || return 1
+        _actual="$(android getprop service.adb.tcp.port 2>/dev/null | tr -d '\r\n' || true)"
+        [ "$_actual" = "$ADB_TCP_PORT" ] || return 1
+        restart_adbd || return 1
+        tcp_port_firewall 1 "$ADB_TCP_PORT" "spx_ac_adb_tcp"
+    else
+        tcp_port_firewall 0 "$ADB_TCP_PORT" "spx_ac_adb_tcp"
+        android setprop service.adb.tcp.port -1 >/dev/null 2>&1 || return 1
+        restart_adbd || true
+    fi
+    return 0
+}
+
+is_dropbear_running() {
+    _pidfile="$RUN_DIR/dropbear.pid"
+    [ -r "$_pidfile" ] || return 1
+    _dpid="$(head -n 1 "$_pidfile" 2>/dev/null | tr -d '\r\n ')"
+    case "$_dpid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$_dpid" -gt 1 ] || return 1
+    kill -0 "$_dpid" 2>/dev/null || return 1
+    if [ -r "/proc/$_dpid/cmdline" ]; then
+        _dcmd="$(tr '\000' ' ' < "/proc/$_dpid/cmdline" 2>/dev/null || true)"
+        case "$_dcmd" in
+            *dropbear*) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    return 0
+}
+
+read_saved_ssh_enabled() {
+    _f="$SSH_STORE/enabled"
+    if [ -f "$_f" ] && [ ! -L "$_f" ]; then
+        _v="$(head -n 1 "$_f" 2>/dev/null | tr -d '\r\n ')"
+        case "$_v" in
+            0|1) printf '%s' "$_v"; return 0 ;;
+        esac
+    fi
+    printf ''
+}
+
+validate_shadow_hash() {
+    _h="$1"
+    case "$_h" in
+        '$6$'*|'$5$'*|'$y$'*|'$1$'*) ;;
+        *) return 1 ;;
+    esac
+    [ "${#_h}" -ge 12 ] || return 1
+    case "$_h" in
+        *:*|*\\*|*' '*|*'	'*) return 1 ;;
+    esac
+    _bad="$(printf '%s' "$_h" | tr -dc '\000-\037\177')"
+    [ -z "$_bad" ] || return 1
+    return 0
+}
+
+write_root_shadow_hash() {
+    _hash="$1"
+    if [ "$_hash" != "!" ]; then
+        validate_shadow_hash "$_hash" || return 1
+    fi
+    mkdir -p "$ETC_DIR"
+    _shadow="$ETC_DIR/shadow"
+    _tmp="${_shadow}.ac.$$.tmp"
+    rm -f "$_tmp" 2>/dev/null || true
+    if [ -r "$_shadow" ]; then
+        awk -F: -v h="$_hash" 'BEGIN{OFS=":"} $1=="root"{$2=h; found=1} {print} END{if(!found) print "root:" h ":0:0:99999:7:::"}' "$_shadow" > "$_tmp" || { rm -f "$_tmp" 2>/dev/null || true; return 1; }
+    else
+        printf 'root:%s:0:0:99999:7:::\n' "$_hash" > "$_tmp" || { rm -f "$_tmp" 2>/dev/null || true; return 1; }
+    fi
+    chmod 600 "$_tmp" 2>/dev/null || true
+    mv -f "$_tmp" "$_shadow" || { rm -f "$_tmp" 2>/dev/null || true; return 1; }
+    return 0
+}
+
+read_saved_ssh_shadow_hash() {
+    _f="$SSH_STORE/root_shadow_hash"
+    if [ -f "$_f" ] && [ ! -L "$_f" ]; then
+        _h="$(head -n 1 "$_f" 2>/dev/null | tr -d '\r\n')"
+        if validate_shadow_hash "$_h"; then
+            printf '%s' "$_h"
+            return 0
+        fi
+    fi
+    printf ''
+}
+
+is_ssh_password_set() {
+    if [ -n "$(read_saved_ssh_shadow_hash)" ]; then
+        return 0
+    fi
+    if [ -z "$(read_saved_ssh_enabled)" ] && [ -r "$ETC_DIR/shadow" ]; then
+        _cur="$(awk -F: '$1 == "root" { print $2; exit }' "$ETC_DIR/shadow" 2>/dev/null || true)"
+        validate_shadow_hash "$_cur" && return 0
+    fi
+    return 1
+}
+
+hash_ssh_password() {
+    _pw="$1"
+    _h=""
+    if command -v "$MKPASSWD_BIN" >/dev/null 2>&1; then
+        _h="$(printf '%s\n' "$_pw" | "$MKPASSWD_BIN" -m sha512 -P 0 2>/dev/null || true)"
+        if [ -z "$_h" ]; then
+            _h="$("$MKPASSWD_BIN" -m sha512 -- "$_pw" 2>/dev/null || true)"
+        fi
+    fi
+    if [ -z "$_h" ] && command -v busybox >/dev/null 2>&1; then
+        _h="$(printf '%s\n' "$_pw" | busybox mkpasswd -m sha512 -P 0 2>/dev/null || true)"
+    fi
+    validate_shadow_hash "$_h" || return 1
+    printf '%s' "$_h"
+}
+
+normalize_ssh_key_line() {
+    _raw="$1"
+    set -f
+    # shellcheck disable=SC2086
+    set -- $_raw
+    set +f
+    _ktype="${1:-}"
+    _kb64="${2:-}"
+    case "$_ktype" in
+        ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh.com|sk-ecdsa-sha2-nistp256@openssh.com) ;;
+        *) return 1 ;;
+    esac
+    [ "${#_kb64}" -ge 16 ] || return 1
+    case "$_kb64" in
+        *[!A-Za-z0-9+/=]*) return 1 ;;
+    esac
+    shift 2 || true
+    _comment="$*"
+    if [ -n "$_comment" ]; then
+        _bad="$(printf '%s' "$_comment" | tr -dc '\000-\037\177')"
+        [ -z "$_bad" ] || return 1
+        printf '%s %s %s' "$_ktype" "$_kb64" "$_comment"
+    else
+        printf '%s %s' "$_ktype" "$_kb64"
+    fi
+}
+
+append_unique_ssh_key_to_file() {
+    _norm="$1"
+    _dest="$2"
+    set -f
+    # shellcheck disable=SC2086
+    set -- $_norm
+    set +f
+    if ! awk -v kt="$1" -v kb="$2" '$1==kt && $2==kb {f=1; exit} END{exit !f}' "$_dest"; then
+        printf '%s\n' "$_norm" >> "$_dest"
+        return 0
+    fi
+    return 1
+}
+
+count_ssh_authorized_keys() {
+    _kf=""
+    if [ -f "$SSH_STORE/authorized_keys" ] && [ ! -L "$SSH_STORE/authorized_keys" ]; then
+        _kf="$SSH_STORE/authorized_keys"
+    elif [ -f "$HOME_ROOT/.ssh/authorized_keys" ] && [ ! -L "$HOME_ROOT/.ssh/authorized_keys" ]; then
+        _kf="$HOME_ROOT/.ssh/authorized_keys"
+    fi
+    if [ -z "$_kf" ]; then
+        printf '0'
+        return 0
+    fi
+    _cnt="$(grep -Ec '^(ssh-|ecdsa-|sk-)' "$_kf" 2>/dev/null || true)"
+    printf '%s' "${_cnt:-0}"
+}
+
+sync_ssh_authorized_keys() {
+    _src="$SSH_STORE/authorized_keys"
+    [ -f "$_src" ] && [ ! -L "$_src" ] || return 0
+    mkdir -p "$HOME_ROOT" "$HOME_ROOT/.ssh"
+    chmod 700 "$HOME_ROOT" "$HOME_ROOT/.ssh" 2>/dev/null || true
+    _dst="$HOME_ROOT/.ssh/authorized_keys"
+    _tmp="${_dst}.ac.$$.tmp"
+    rm -f "$_tmp" 2>/dev/null || true
+    cp "$_src" "$_tmp" || { rm -f "$_tmp" 2>/dev/null || true; return 1; }
+    chmod 600 "$_tmp" 2>/dev/null || true
+    if [ "$(id -u)" = "0" ]; then
+        chown 0:0 "$HOME_ROOT" "$HOME_ROOT/.ssh" "$_tmp" 2>/dev/null || true
+    fi
+    mv -f "$_tmp" "$_dst" || { rm -f "$_tmp" 2>/dev/null || true; return 1; }
+    return 0
+}
+
+ensure_ssh_host_key() {
+    _db_dir="$ETC_DIR/dropbear"
+    _host_key="$_db_dir/dropbear_ed25519_host_key"
+    _saved_key="$SSH_STORE/dropbear_ed25519_host_key"
+    mkdir -p "$_db_dir" "$SSH_STORE"
+    chmod 700 "$_db_dir" "$SSH_STORE" 2>/dev/null || true
+    if [ -s "$_saved_key" ] && [ ! -L "$_saved_key" ]; then
+        _tmp="${_host_key}.ac.$$.tmp"
+        cp "$_saved_key" "$_tmp" && chmod 600 "$_tmp" 2>/dev/null && mv -f "$_tmp" "$_host_key" || { rm -f "$_tmp" 2>/dev/null || true; return 1; }
+    elif [ -s "$_host_key" ] && [ ! -L "$_host_key" ]; then
+        _tmp="${_saved_key}.ac.$$.tmp"
+        cp "$_host_key" "$_tmp" && chmod 600 "$_tmp" 2>/dev/null && mv -f "$_tmp" "$_saved_key" || rm -f "$_tmp" 2>/dev/null || true
+    elif command -v "$DROPBEARKEY_BIN" >/dev/null 2>&1; then
+        mkdir -p "$LOGS_DIR"
+        "$DROPBEARKEY_BIN" -t ed25519 -f "$_host_key" >> "$LOGS_DIR/spx-advanced-control-dropbearkey.txt" 2>&1 || return 1
+        chmod 600 "$_host_key" 2>/dev/null || true
+        _tmp="${_saved_key}.ac.$$.tmp"
+        cp "$_host_key" "$_tmp" && chmod 600 "$_tmp" 2>/dev/null && mv -f "$_tmp" "$_saved_key" || rm -f "$_tmp" 2>/dev/null || true
+    fi
+    return 0
+}
+
+ssh_start_now() {
+    command -v "$DROPBEAR_BIN" >/dev/null 2>&1 || return 1
+    mkdir -p "$RUN_DIR" "$LOGS_DIR"
+    if [ "$ETC_DIR" = "/etc" ] && [ "$(id -u)" = "0" ]; then
+        mkdir -p /dev/pts
+        grep -q ' /dev/pts ' /proc/mounts 2>/dev/null || mount -t devpts devpts /dev/pts -o mode=620,ptmxmode=666 || true
+    fi
+    _saved_hash="$(read_saved_ssh_shadow_hash)"
+    if [ -n "$_saved_hash" ]; then
+        write_root_shadow_hash "$_saved_hash" || return 1
+    fi
+    sync_ssh_authorized_keys || return 1
+    ensure_ssh_host_key || return 1
+    if ! is_dropbear_running; then
+        if [ -s "$ETC_DIR/dropbear/dropbear_ed25519_host_key" ]; then
+            "$DROPBEAR_BIN" -E -p "$SSH_PORT" -P "$RUN_DIR/dropbear.pid" -r "$ETC_DIR/dropbear/dropbear_ed25519_host_key" 2>> "$LOGS_DIR/ssh.txt"
+        else
+            "$DROPBEAR_BIN" -R -E -p "$SSH_PORT" -P "$RUN_DIR/dropbear.pid" -r "$ETC_DIR/dropbear/dropbear_ed25519_host_key" 2>> "$LOGS_DIR/ssh.txt"
+        fi
+        _i=0
+        while [ "$_i" -lt 15 ]; do
+            is_dropbear_running && break
+            sleep 0.1
+            _i=$((_i + 1))
+        done
+    fi
+    is_dropbear_running || return 1
+    tcp_port_firewall 1 "$SSH_PORT" "spx_ac_ssh"
+    return 0
+}
+
+ssh_stop_now() {
+    _pidfile="$RUN_DIR/dropbear.pid"
+    if is_dropbear_running; then
+        _dpid="$(head -n 1 "$_pidfile" 2>/dev/null | tr -d '\r\n ')"
+        kill "$_dpid" 2>/dev/null || true
+        _i=0
+        while [ "$_i" -lt 30 ]; do
+            kill -0 "$_dpid" 2>/dev/null || break
+            sleep 0.1
+            _i=$((_i + 1))
+        done
+        kill -9 "$_dpid" 2>/dev/null || true
+    fi
+    rm -f "$_pidfile"
+    tcp_port_firewall 0 "$SSH_PORT" "spx_ac_ssh"
+    if [ -r "$ETC_DIR/shadow" ]; then
+        write_root_shadow_hash "!" || true
+    fi
+    return 0
+}
+
+restore_debug_settings_on_boot() {
+    if is_rescue_boot; then
+        echo 'SPX_AC_BOOT_DEBUG_RESTORE_SKIPPED rescue'
+        return 0
+    fi
+    if [ "$(read_saved_adb_tcp)" = "1" ]; then
+        if apply_adb_tcp 1; then
+            echo 'SPX_AC_BOOT_ADB_TCP_RESTORED 1'
+        else
+            echo 'SPX_AC_BOOT_ADB_TCP_RESTORE_FAILED'
+        fi
+    fi
+    sync_ssh_authorized_keys || true
+    if [ -s "$SSH_STORE/dropbear_ed25519_host_key" ] && [ ! -L "$SSH_STORE/dropbear_ed25519_host_key" ]; then
+        ensure_ssh_host_key || true
+    fi
+    _ssh_saved="$(read_saved_ssh_enabled)"
+    if [ "$_ssh_saved" = "1" ]; then
+        if ssh_start_now; then
+            echo 'SPX_AC_BOOT_SSH_RESTORED 1'
+        else
+            echo 'SPX_AC_BOOT_SSH_RESTORE_FAILED'
+        fi
+    elif [ "$_ssh_saved" = "0" ]; then
+        ssh_stop_now
+        echo 'SPX_AC_BOOT_SSH_STOPPED 0'
+    fi
+}
+
 publish_file() {
     _dir="$1"
     _name="$2"
@@ -510,6 +1082,10 @@ publish_state() {
     _t_running=0
     if is_iptsd_running; then
         _t_running=1
+    fi
+    _t_disabled=0
+    if is_touch_disabled; then
+        _t_disabled=1
     fi
     _t_dev=""
     _t_hid=""
@@ -573,6 +1149,29 @@ publish_state() {
         fi
     fi
 
+    read_debug_network_ips
+    _adb_saved="$(read_saved_adb_tcp)"
+    _adb_prop="$(android getprop service.adb.tcp.port 2>/dev/null | tr -d '\r\n' || true)"
+    _adb_active=0
+    case "$_adb_prop" in
+        ''|-1|0) _adb_active=0 ;;
+        *[!0-9]*) _adb_active=0 ;;
+        *) _adb_active=1 ;;
+    esac
+    _ssh_avail=0
+    command -v "$DROPBEAR_BIN" >/dev/null 2>&1 && _ssh_avail=1
+    _ssh_run=0
+    is_dropbear_running && _ssh_run=1
+    _ssh_saved="$(read_saved_ssh_enabled)"
+    if [ -n "$_ssh_saved" ]; then
+        _ssh_en="$_ssh_saved"
+    else
+        _ssh_en="$_ssh_run"
+    fi
+    _ssh_pw_set=0
+    is_ssh_password_set && _ssh_pw_set=1
+    _ssh_keys="$(count_ssh_authorized_keys)"
+
     _body="bridge_version=1
 vulkan_available=$_vk_avail
 vulkan_default=$_vk_def
@@ -583,6 +1182,7 @@ cpu_saved_governor=$_saved_gov
 cpu_policies=$_policies
 touch_available=$_t_avail
 touch_iptsd_running=$_t_running
+touch_disabled=$_t_disabled
 touch_device_id=$_t_dev
 touch_hid_id=$_t_hid
 touch_profile_saved=$_t_prof_saved
@@ -597,6 +1197,17 @@ touch_noise_enabled=$_t_noise_enabled
 touch_noise_info=$_t_noise_info
 touch_tap_saved=$_t_tap_saved
 touch_tap_line=$_t_tap_line
+adb_tcp_enabled=$_adb_saved
+adb_tcp_active=$_adb_active
+adb_tcp_port=$_adb_prop
+ssh_available=$_ssh_avail
+ssh_enabled=$_ssh_en
+ssh_running=$_ssh_run
+ssh_port=$SSH_PORT
+ssh_password_set=$_ssh_pw_set
+ssh_key_count=$_ssh_keys
+debug_vm_ip=$DEBUG_VM_IP
+debug_lan_ips=$DEBUG_LAN_IPS
 "
     publish_file "$_dir" "state" "$_body"
 }
@@ -714,6 +1325,36 @@ handle_request() {
             printf '%s\n' "$_gov" > "$_tmp_store"
             chmod 600 "$_tmp_store" 2>/dev/null || true
             mv -f "$_tmp_store" "$STORE/cpu_governor"
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        set-touch-disabled)
+            _disable="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            if ! validate_bool "$_disable"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_arguments"
+                return 0
+            fi
+            if [ "$_disable" = "1" ]; then
+                write_atomic_file "$STORE/touch_disabled" 600 "$(printf '1\n')" || {
+                    send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
+                    return 0
+                }
+                sync 2>/dev/null || true
+                if ! apply_touch_disabled 1 "$_nonce"; then
+                    publish_state "$_dir" || true
+                    send_reply "$_dir" "$_nonce" "ERROR" "touch_disable_failed"
+                    return 0
+                fi
+            else
+                rm -f "$STORE/touch_disabled" "$RUN_DIR/touch-disabled" 2>/dev/null || true
+                sync 2>/dev/null || true
+                if ! apply_touch_disabled 0 "$_nonce"; then
+                    publish_state "$_dir" || true
+                    send_reply "$_dir" "$_nonce" "ERROR" "touch_enable_failed"
+                    return 0
+                fi
+            fi
             sync 2>/dev/null || true
             publish_state "$_dir" || true
             send_reply "$_dir" "$_nonce" "OK"
@@ -1104,6 +1745,155 @@ handle_request() {
             fi
             mv -f "$_tmp" "$_dir/reply" || { rm -f "$_tmp" 2>/dev/null || true; send_reply "$_dir" "$_nonce" "ERROR" "export_failed"; return 0; }
             ;;
+        set-adb-tcp)
+            _enable="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            if ! validate_bool "$_enable"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_arguments"
+                return 0
+            fi
+            if ! apply_adb_tcp "$_enable"; then
+                publish_state "$_dir" || true
+                send_reply "$_dir" "$_nonce" "ERROR" "adb_tcp_failed"
+                return 0
+            fi
+            write_atomic_file "$STORE/adb_tcp_enabled" 600 "$(printf '%s\n' "$_enable")" || {
+                send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
+                return 0
+            }
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        set-ssh-enabled)
+            _enable="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            if ! validate_bool "$_enable"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_arguments"
+                return 0
+            fi
+            if [ "$_enable" = "1" ]; then
+                if ! ssh_start_now; then
+                    publish_state "$_dir" || true
+                    send_reply "$_dir" "$_nonce" "ERROR" "ssh_start_failed"
+                    return 0
+                fi
+            else
+                ssh_stop_now || true
+            fi
+            write_atomic_file "$SSH_STORE/enabled" 600 "$(printf '%s\n' "$_enable")" || {
+                send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
+                return 0
+            }
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        set-ssh-password)
+            _pw="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            rm -f "$TMP_REQ" 2>/dev/null || true
+            if [ -z "$_pw" ]; then
+                rm -f "$SSH_STORE/root_shadow_hash" 2>/dev/null || true
+                if [ -r "$ETC_DIR/shadow" ]; then
+                    write_root_shadow_hash "!" || {
+                        send_reply "$_dir" "$_nonce" "ERROR" "shadow_write_failed"
+                        return 0
+                    }
+                fi
+                sync 2>/dev/null || true
+                publish_state "$_dir" || true
+                send_reply "$_dir" "$_nonce" "OK"
+                return 0
+            fi
+            _bad_pw="$(printf '%s' "$_pw" | tr -dc '\000-\037\177')"
+            if [ "${#_pw}" -gt 128 ] || [ -n "$_bad_pw" ]; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_password"
+                return 0
+            fi
+            _hash="$(hash_ssh_password "$_pw" || true)"
+            if ! validate_shadow_hash "$_hash"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "mkpasswd_failed"
+                return 0
+            fi
+            write_atomic_file "$SSH_STORE/root_shadow_hash" 600 "$(printf '%s\n' "$_hash")" || {
+                send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
+                return 0
+            }
+            if [ "$(read_saved_ssh_enabled)" = "1" ] || is_dropbear_running; then
+                write_root_shadow_hash "$_hash" || {
+                    send_reply "$_dir" "$_nonce" "ERROR" "shadow_write_failed"
+                    return 0
+                }
+            fi
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        import-ssh-keys)
+            tail -n +3 "$TMP_REQ" | tr -d '\r' > "$TMP_TOUCH"
+            rm -f "$TMP_REQ" 2>/dev/null || true
+            : > "$TMP_TOUCH.sshkeys"
+            for _seed in "$SSH_STORE/authorized_keys" "$HOME_ROOT/.ssh/authorized_keys"; do
+                if [ -f "$_seed" ] && [ ! -L "$_seed" ]; then
+                    while IFS= read -r _sline || [ -n "$_sline" ]; do
+                        _sline="$(printf '%s' "$_sline" | tr -d '\r')"
+                        case "$_sline" in
+                            ''|'#'*) continue ;;
+                        esac
+                        if _snorm="$(normalize_ssh_key_line "$_sline")"; then
+                            append_unique_ssh_key_to_file "$_snorm" "$TMP_TOUCH.sshkeys" || true
+                        fi
+                    done < "$_seed"
+                    break
+                fi
+            done
+            _seen_valid=0
+            _added=0
+            _invalid=0
+            while IFS= read -r _kline || [ -n "$_kline" ]; do
+                _trimmed="$(printf '%s' "$_kline" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+                case "$_trimmed" in
+                    ''|'#'*) continue ;;
+                esac
+                if ! _knorm="$(normalize_ssh_key_line "$_trimmed")"; then
+                    _invalid=1
+                    break
+                fi
+                _seen_valid=$((_seen_valid + 1))
+                if append_unique_ssh_key_to_file "$_knorm" "$TMP_TOUCH.sshkeys"; then
+                    _added=$((_added + 1))
+                fi
+            done < "$TMP_TOUCH"
+            if [ "$_invalid" = "1" ] || [ "$_seen_valid" -eq 0 ]; then
+                rm -f "$TMP_TOUCH" "$TMP_TOUCH.sshkeys" 2>/dev/null || true
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_ssh_key"
+                return 0
+            fi
+            mkdir -p "$SSH_STORE"
+            chmod 700 "$SSH_STORE" 2>/dev/null || true
+            _auth_tmp="$SSH_STORE/authorized_keys.$$.tmp"
+            cp "$TMP_TOUCH.sshkeys" "$_auth_tmp" && chmod 600 "$_auth_tmp" 2>/dev/null && mv -f "$_auth_tmp" "$SSH_STORE/authorized_keys" || {
+                rm -f "$_auth_tmp" "$TMP_TOUCH" "$TMP_TOUCH.sshkeys" 2>/dev/null || true
+                send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
+                return 0
+            }
+            rm -f "$TMP_TOUCH" "$TMP_TOUCH.sshkeys" 2>/dev/null || true
+            sync_ssh_authorized_keys || {
+                send_reply "$_dir" "$_nonce" "ERROR" "sync_keys_failed"
+                return 0
+            }
+            _total="$(count_ssh_authorized_keys)"
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK" "$_added $_total"
+            ;;
+        clear-ssh-keys)
+            rm -f "$SSH_STORE/authorized_keys" 2>/dev/null || true
+            if [ -d "$HOME_ROOT/.ssh" ] && [ ! -L "$HOME_ROOT/.ssh" ]; then
+                write_atomic_file "$HOME_ROOT/.ssh/authorized_keys" 600 "" || true
+            fi
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
         *)
             send_reply "$_dir" "$_nonce" "ERROR" "unknown_command"
             ;;
@@ -1112,6 +1902,8 @@ handle_request() {
 }
 
 restore_saved_governor_on_boot
+restore_touch_disabled_on_boot
+restore_debug_settings_on_boot
 
 active_user=""
 state_sent=0
@@ -1119,7 +1911,7 @@ fast_ticks=0
 user_check_ticks=0
 
 while true; do
-    if [ -z "$active_user" ] || [ "$user_check_ticks" -ge 15 ]; then
+    if [ -z "$active_user" ] || { [ "$user_check_ticks" -ge 15 ] && display_is_on; }; then
         user_check_ticks=0
         next_user="$(android cmd activity get-current-user 2>/dev/null | tr -d '\r\n' || true)"
         if validate_user "$next_user" && [ "$next_user" != "$active_user" ]; then

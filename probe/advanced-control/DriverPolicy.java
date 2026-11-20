@@ -1,10 +1,28 @@
 package org.surface.advancedcontrol;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
+import java.security.PublicKey;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
+import java.security.interfaces.ECPublicKey;
+import java.security.interfaces.RSAPublicKey;
+import java.security.spec.ECPoint;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /** Pure policy, sorting, touch summary, and bridge request encoding, shared by the UI and host tests. */
@@ -12,6 +30,22 @@ public final class DriverPolicy {
     public static final String APP_PREFIX = "persist.sq2.vulkan.app.";
     public static final String DEFAULT_DRIVER_PROP = "persist.sq2.vulkan.driver";
     public static final int MAX_TOUCH_IMPORT_BYTES = 132096;
+    public static final int MAX_SSH_KEY_IMPORT_BYTES = 65536;
+    public static final int MAX_SSH_PASSWORD_LENGTH = 128;
+
+    private static final Set<String> SUPPORTED_SSH_KEY_TYPES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+            "ssh-ed25519",
+            "ssh-rsa",
+            "ecdsa-sha2-nistp256",
+            "ecdsa-sha2-nistp384",
+            "ecdsa-sha2-nistp521",
+            "sk-ssh-ed25519@openssh.com",
+            "sk-ecdsa-sha2-nistp256@openssh.com"
+    )));
+
+    private static final byte[] ED25519_SPKI_PREFIX = new byte[] {
+            0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00
+    };
 
     public static final class CurveSummary {
         public final int points;
@@ -158,6 +192,10 @@ public final class DriverPolicy {
         return "set-cpu-governor\n" + normalizeNonce(nonce) + "\n" + normalizeGovernor(governor) + "\n";
     }
 
+    public static String touchDisabledRequest(String nonce, boolean disabled) {
+        return "set-touch-disabled\n" + normalizeNonce(nonce) + "\n" + (disabled ? "1" : "0") + "\n";
+    }
+
     public static String touchGhostPatchRequest(String nonce, boolean enabled) {
         return "set-touch-ghost-patch\n" + normalizeNonce(nonce) + "\n" + (enabled ? "1" : "0") + "\n";
     }
@@ -226,6 +264,330 @@ public final class DriverPolicy {
             normalized += "\n";
         }
         return "import-touch-calibration\n" + normalizeNonce(nonce) + "\n" + normalized;
+    }
+
+    public static String adbTcpRequest(String nonce, boolean enabled) {
+        return "set-adb-tcp\n" + normalizeNonce(nonce) + "\n" + (enabled ? "1" : "0") + "\n";
+    }
+
+    public static String sshEnabledRequest(String nonce, boolean enabled) {
+        return "set-ssh-enabled\n" + normalizeNonce(nonce) + "\n" + (enabled ? "1" : "0") + "\n";
+    }
+
+    public static String sshPasswordRequest(String nonce, String password) {
+        if (password == null) {
+            throw new IllegalArgumentException("invalid_password");
+        }
+        if (password.length() > MAX_SSH_PASSWORD_LENGTH) {
+            throw new IllegalArgumentException("invalid_password");
+        }
+        for (int i = 0; i < password.length(); i++) {
+            char c = password.charAt(i);
+            if (c < 0x20 || c == 0x7f) {
+                throw new IllegalArgumentException("invalid_password");
+            }
+        }
+        return "set-ssh-password\n" + normalizeNonce(nonce) + "\n" + password + "\n";
+    }
+
+    public static String clearSshKeysRequest(String nonce) {
+        return "clear-ssh-keys\n" + normalizeNonce(nonce) + "\n";
+    }
+
+    public static String importSshKeysRequest(String nonce, String rawContent) {
+        String normalized = normalizeSshKeyImport(rawContent);
+        return "import-ssh-keys\n" + normalizeNonce(nonce) + "\n" + normalized;
+    }
+
+    public static String normalizeSshKeyImport(String rawContent) {
+        if (rawContent == null || rawContent.indexOf('\0') >= 0) {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+        String normalized = rawContent.replace("\r\n", "\n").replace('\r', '\n');
+        byte[] bytes = normalized.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length == 0 || bytes.length > MAX_SSH_KEY_IMPORT_BYTES) {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+
+        Map<String, String> dedup = new LinkedHashMap<>();
+        String[] lines = normalized.split("\n", -1);
+        int blockMode = 0; // 0=none, 1=pem cert, 2=pem spki, 3=rfc4716 ssh2
+        StringBuilder blockBuf = new StringBuilder();
+        boolean ssh2SkipNextContinuation = false;
+
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (blockMode == 0) {
+                if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                    continue;
+                }
+                if ("-----BEGIN CERTIFICATE-----".equals(trimmed)) {
+                    blockMode = 1;
+                    blockBuf.setLength(0);
+                    continue;
+                }
+                if ("-----BEGIN PUBLIC KEY-----".equals(trimmed)) {
+                    blockMode = 2;
+                    blockBuf.setLength(0);
+                    continue;
+                }
+                if ("---- BEGIN SSH2 PUBLIC KEY ----".equals(trimmed)) {
+                    blockMode = 3;
+                    blockBuf.setLength(0);
+                    ssh2SkipNextContinuation = false;
+                    continue;
+                }
+                addOpenSshLine(trimmed, dedup);
+            } else if (blockMode == 1) {
+                if ("-----END CERTIFICATE-----".equals(trimmed)) {
+                    addX509CertPem(blockBuf.toString(), dedup);
+                    blockMode = 0;
+                    blockBuf.setLength(0);
+                } else {
+                    blockBuf.append(trimmed);
+                }
+            } else if (blockMode == 2) {
+                if ("-----END PUBLIC KEY-----".equals(trimmed)) {
+                    addSpkiPem(blockBuf.toString(), dedup);
+                    blockMode = 0;
+                    blockBuf.setLength(0);
+                } else {
+                    blockBuf.append(trimmed);
+                }
+            } else {
+                if ("---- END SSH2 PUBLIC KEY ----".equals(trimmed)) {
+                    addSsh2Blob(blockBuf.toString(), dedup);
+                    blockMode = 0;
+                    blockBuf.setLength(0);
+                    ssh2SkipNextContinuation = false;
+                } else if (ssh2SkipNextContinuation) {
+                    ssh2SkipNextContinuation = trimmed.endsWith("\\");
+                } else if (trimmed.contains(":")) {
+                    ssh2SkipNextContinuation = trimmed.endsWith("\\");
+                } else if (!trimmed.isEmpty()) {
+                    blockBuf.append(trimmed);
+                }
+            }
+        }
+
+        if (blockMode != 0 || dedup.isEmpty()) {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+        StringBuilder out = new StringBuilder();
+        for (String keyLine : dedup.values()) {
+            out.append(keyLine).append('\n');
+        }
+        return out.toString();
+    }
+
+    private static void addOpenSshLine(String line, Map<String, String> dedup) {
+        String[] parts = line.split("\\s+", 3);
+        if (parts.length < 2) {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+        String type = parts[0];
+        String b64 = parts[1];
+        if (!SUPPORTED_SSH_KEY_TYPES.contains(type) || !b64.matches("[A-Za-z0-9+/=]{16,}")) {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+        byte[] blob;
+        try {
+            blob = Base64.getDecoder().decode(b64);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("invalid_ssh_key", e);
+        }
+        String wireType = readLeadingSshType(blob);
+        if (!type.equals(wireType)) {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+        String comment = parts.length == 3 ? sanitizeComment(parts[2]) : "";
+        String formatted = comment.isEmpty() ? (type + " " + b64) : (type + " " + b64 + " " + comment);
+        dedup.putIfAbsent(type + " " + b64, formatted);
+    }
+
+    private static void addSsh2Blob(String b64Content, Map<String, String> dedup) {
+        byte[] blob;
+        try {
+            blob = Base64.getMimeDecoder().decode(b64Content);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("invalid_ssh_key", e);
+        }
+        String wireType = readLeadingSshType(blob);
+        if (!SUPPORTED_SSH_KEY_TYPES.contains(wireType)) {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+        String canonicalB64 = Base64.getEncoder().encodeToString(blob);
+        dedup.putIfAbsent(wireType + " " + canonicalB64, wireType + " " + canonicalB64);
+    }
+
+    private static void addX509CertPem(String b64Content, Map<String, String> dedup) {
+        try {
+            byte[] der = Base64.getMimeDecoder().decode(b64Content);
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            Certificate cert = cf.generateCertificate(new ByteArrayInputStream(der));
+            addPublicKeyLine(cert.getPublicKey(), "imported-cert", dedup);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("invalid_ssh_key", e);
+        }
+    }
+
+    private static void addSpkiPem(String b64Content, Map<String, String> dedup) {
+        byte[] der;
+        try {
+            der = Base64.getMimeDecoder().decode(b64Content);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("invalid_ssh_key", e);
+        }
+        if (isEd25519Spki(der)) {
+            String line = encodeEd25519OpenSsh(Arrays.copyOfRange(der, ED25519_SPKI_PREFIX.length, der.length),
+                    "imported-cert");
+            String[] p = line.split(" ", 3);
+            dedup.putIfAbsent(p[0] + " " + p[1], line);
+            return;
+        }
+        X509EncodedKeySpec spec = new X509EncodedKeySpec(der);
+        for (String alg : new String[] {"RSA", "EC"}) {
+            try {
+                PublicKey pk = KeyFactory.getInstance(alg).generatePublic(spec);
+                addPublicKeyLine(pk, "imported-cert", dedup);
+                return;
+            } catch (Exception ignored) {
+            }
+        }
+        throw new IllegalArgumentException("invalid_ssh_key");
+    }
+
+    private static void addPublicKeyLine(PublicKey key, String comment, Map<String, String> dedup) throws Exception {
+        if (key == null) {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+        byte[] encoded = key.getEncoded();
+        String line;
+        if (isEd25519Spki(encoded)) {
+            line = encodeEd25519OpenSsh(
+                    Arrays.copyOfRange(encoded, ED25519_SPKI_PREFIX.length, encoded.length), comment);
+        } else if (key instanceof RSAPublicKey) {
+            RSAPublicKey rsa = (RSAPublicKey) key;
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream dos = new DataOutputStream(baos);
+            writeSshString(dos, "ssh-rsa");
+            writeSshBytes(dos, rsa.getPublicExponent().toByteArray());
+            writeSshBytes(dos, rsa.getModulus().toByteArray());
+            dos.flush();
+            line = "ssh-rsa " + Base64.getEncoder().encodeToString(baos.toByteArray()) + " " + comment;
+        } else if (key instanceof ECPublicKey) {
+            ECPublicKey ec = (ECPublicKey) key;
+            int bits = ec.getParams().getCurve().getField().getFieldSize();
+            String sshType;
+            String curveName;
+            int coordLen;
+            if (bits == 256) {
+                sshType = "ecdsa-sha2-nistp256";
+                curveName = "nistp256";
+                coordLen = 32;
+            } else if (bits == 384) {
+                sshType = "ecdsa-sha2-nistp384";
+                curveName = "nistp384";
+                coordLen = 48;
+            } else if (bits == 521) {
+                sshType = "ecdsa-sha2-nistp521";
+                curveName = "nistp521";
+                coordLen = 66;
+            } else {
+                throw new IllegalArgumentException("invalid_ssh_key");
+            }
+            ECPoint w = ec.getW();
+            byte[] point = new byte[1 + 2 * coordLen];
+            point[0] = 0x04;
+            copyFixedUnsigned(w.getAffineX(), point, 1, coordLen);
+            copyFixedUnsigned(w.getAffineY(), point, 1 + coordLen, coordLen);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream dos = new DataOutputStream(baos);
+            writeSshString(dos, sshType);
+            writeSshString(dos, curveName);
+            writeSshBytes(dos, point);
+            dos.flush();
+            line = sshType + " " + Base64.getEncoder().encodeToString(baos.toByteArray()) + " " + comment;
+        } else {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+        String[] p = line.split(" ", 3);
+        dedup.putIfAbsent(p[0] + " " + p[1], line);
+    }
+
+    private static boolean isEd25519Spki(byte[] der) {
+        if (der == null || der.length != ED25519_SPKI_PREFIX.length + 32) {
+            return false;
+        }
+        for (int i = 0; i < ED25519_SPKI_PREFIX.length; i++) {
+            if (der[i] != ED25519_SPKI_PREFIX[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String encodeEd25519OpenSsh(byte[] raw32, String comment) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream dos = new DataOutputStream(baos);
+            writeSshString(dos, "ssh-ed25519");
+            writeSshBytes(dos, raw32);
+            dos.flush();
+            return "ssh-ed25519 " + Base64.getEncoder().encodeToString(baos.toByteArray()) + " " + comment;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("invalid_ssh_key", e);
+        }
+    }
+
+    private static void copyFixedUnsigned(BigInteger value, byte[] dst, int offset, int len) {
+        byte[] raw = value.toByteArray();
+        int srcOff = 0;
+        int srcLen = raw.length;
+        if (srcLen > len && raw[0] == 0) {
+            srcOff = 1;
+            srcLen--;
+        }
+        if (srcLen > len) {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+        System.arraycopy(raw, srcOff, dst, offset + (len - srcLen), srcLen);
+    }
+
+    private static void writeSshString(DataOutputStream dos, String ascii) throws Exception {
+        writeSshBytes(dos, ascii.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    private static void writeSshBytes(DataOutputStream dos, byte[] data) throws Exception {
+        dos.writeInt(data.length);
+        dos.write(data);
+    }
+
+    private static String readLeadingSshType(byte[] blob) {
+        if (blob == null || blob.length < 8) {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+        int len = ((blob[0] & 0xFF) << 24)
+                | ((blob[1] & 0xFF) << 16)
+                | ((blob[2] & 0xFF) << 8)
+                | (blob[3] & 0xFF);
+        if (len <= 0 || len > 64 || 4 + len > blob.length) {
+            throw new IllegalArgumentException("invalid_ssh_key");
+        }
+        return new String(blob, 4, len, StandardCharsets.US_ASCII);
+    }
+
+    private static String sanitizeComment(String raw) {
+        String trimmed = raw.trim();
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if (c < 0x20 || c == 0x7f) {
+                throw new IllegalArgumentException("invalid_ssh_key");
+            }
+        }
+        return trimmed;
     }
 
     public static CurveSummary summarizeCurve(String curveText) {

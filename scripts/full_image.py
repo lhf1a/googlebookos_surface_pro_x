@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 
 from kernel_baseline import ROOT, policy
 from disk_image import module, regular, require
@@ -23,6 +24,14 @@ DEFAULT_PRIVATE = ROOT / 'private/build-inputs'
 DEFAULT_KERNEL_CONFIG = ROOT / 'configs/kernel-6.18-hybrid.config'
 DEFAULT_A6XX_PATCHES = ROOT / 'patches/drm-618-a6xx-upstream'
 DEFAULT_A6XX_MMIO_FIX_PATCHES = ROOT / 'patches/drm-618-a6xx-mmio-fix'
+# In-tree kernel/edp-618 s2idle patches applied unconditionally in source mode.
+# Out-of-tree Type-C module patches (spx-qmp-lifecycle.patch and
+# spx-dwc3-ffs-ep0-dequeue.patch) are applied by scripts/build-spx-typec.py onto
+# isolated scratch copies of extracted/kernel files and must not pre-patch them.
+SPX_S2IDLE_PATCHES = (
+    ROOT / 'patches/spx-dp-s2idle.patch',
+    ROOT / 'patches/spx-dwc3-s2idle.patch',
+)
 
 # Full Mesa chain: keep the Mesa/minigbm/drm-HWC vendor overlay, remove the
 # closed Qualcomm graphics payloads and their pre-Android stage helpers.
@@ -567,6 +576,101 @@ def apply_kernel_patches(patch_dir, kernel_source, output, run, external_source=
     return report
 
 
+def _apply_patch_idempotent(patch_path, target_dir, run):
+    """Apply patch_path to target_dir with --fuzz=0, skipping only if cleanly applied."""
+    patch_path = Path(patch_path).resolve()
+    target_dir = Path(target_dir)
+    forward = subprocess.run(
+        ['patch', '-p1', '--dry-run', '--batch', '--forward', '--fuzz=0', '-i', str(patch_path)],
+        cwd=target_dir,
+        capture_output=True,
+        text=True,
+    )
+    if forward.returncode == 0:
+        run(['patch', '-p1', '--batch', '--forward', '--fuzz=0', '-i', str(patch_path)],
+            cwd=target_dir)
+        return True
+    reverse = subprocess.run(
+        ['patch', '-p1', '--dry-run', '--force', '--reverse', '--fuzz=0', '-i', str(patch_path)],
+        cwd=target_dir,
+        capture_output=True,
+        text=True,
+    )
+    if reverse.returncode == 0:
+        return False
+    run(['patch', '-p1', '--dry-run', '--batch', '--forward', '--fuzz=0', '-i', str(patch_path)],
+        cwd=target_dir)
+    raise ValueError('Patch failed to apply cleanly with --fuzz=0: ' + str(patch_path))
+
+
+def apply_spx_s2idle_patches(kernel_source, run, external_source=None,
+                             patches=SPX_S2IDLE_PATCHES):
+    """Apply Surface Pro X DP/DWC3 s2idle patches to kernel and external/edp-618."""
+    kernel_source = Path(kernel_source)
+    patch_files = [Path(p) for p in patches]
+    require(patch_files, 'No SPX s2idle patches specified')
+    edp_tree = Path(external_source) / 'edp-618' if external_source is not None else None
+    if edp_tree is not None:
+        require((edp_tree / 'drivers/gpu/drm/msm').is_dir(),
+                'External MSM override directory is missing: ' + str(edp_tree))
+    applied = []
+    for patch in patch_files:
+        require(patch.is_file(), 'SPX s2idle patch is missing: ' + str(patch))
+        text = patch.read_text()
+        header, blocks = split_git_diffs(text)
+        touched = list(dict.fromkeys(name for name, _ in blocks))
+        require(touched, 'Patch has no diff header: ' + patch.name)
+        if edp_tree is not None:
+            unsynced = [n for n in touched if n.startswith(EXTERNAL_UNSYNCED_PREFIXES)]
+            require(not unsynced,
+                    'Patch touches unsynced external module override(s): ' + ', '.join(unsynced))
+        msm_blocks = [(name, block) for name, block in blocks
+                      if name.startswith('drivers/gpu/drm/msm/')]
+        msm_touched = list(dict.fromkeys(name for name, _ in msm_blocks))
+        pre_matched_msm = set()
+        if edp_tree is not None:
+            for name in msm_touched:
+                k_file, e_file = kernel_source / name, edp_tree / name
+                if k_file.is_file() and e_file.is_file() and k_file.read_bytes() == e_file.read_bytes():
+                    pre_matched_msm.add(name)
+        changed = _apply_patch_idempotent(patch, kernel_source, run)
+        hashes = {}
+        for name in touched:
+            path = kernel_source / name
+            require(path.is_file(), 'Patched file missing: ' + name)
+            hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        entry = {
+            'path': str(patch),
+            'sha256': hashlib.sha256(patch.read_bytes()).hexdigest(),
+            'applied': changed,
+            'files': hashes,
+        }
+        if edp_tree is not None and msm_blocks:
+            if len(msm_blocks) == len(blocks):
+                ext_changed = _apply_patch_idempotent(patch, edp_tree, run)
+            else:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    ext_patch = Path(tmpdir) / ('edp-618-' + patch.name)
+                    ext_patch.write_text(header + ''.join(block for _, block in msm_blocks))
+                    ext_changed = _apply_patch_idempotent(ext_patch, edp_tree, run)
+            ext_hashes = {}
+            for name in msm_touched:
+                ext_path = edp_tree / name
+                require(ext_path.is_file(), 'Patched external MSM file missing: ' + name)
+                ext_hashes[name] = hashlib.sha256(ext_path.read_bytes()).hexdigest()
+                if name in pre_matched_msm:
+                    require(ext_hashes[name] == hashes[name],
+                            'External MSM patch result diverged from kernel: ' + name)
+            entry['external_applied'] = ext_changed
+            entry['external_files'] = ext_hashes
+        applied.append(entry)
+    return {
+        'patch_count': len(applied),
+        'patches': applied,
+        'external_msm_synced': edp_tree is not None,
+    }
+
+
 def records_from_gzip(path):
     """Read effective newc records, preserving ownership/device metadata."""
     records, bodies = {}, {}
@@ -950,6 +1054,9 @@ def build(args, compile_kernel):
         from full_image_display import prepare as prepare_display
         display = prepare_display(extracted/'external')
         (args.output/'DISPLAY-SOURCE.json').write_text(json.dumps(display,indent=2)+'\n')
+        s2idle_patches = apply_spx_s2idle_patches(
+            extracted/'kernel', run, external_source=extracted/'external')
+        (args.output/'SPX-S2IDLE-PATCHES.json').write_text(json.dumps(s2idle_patches,indent=2)+'\n')
         # The preserved source-only archive omitted Git's include-prefix
         # symlinks. Recreate the standard local DTC include namespace from
         # existing source directories, never from an old host absolute path.

@@ -97,15 +97,21 @@ def prepare_dtb(data):
     root='/surface-typec';add(root,{'compatible':b'microsoft,surface-pro-x-typec\0','#address-cells':cell(1),'#size-cells':cell(0)})
     # These are SC8180X hardware resources, not boot-specific node/card indices.
     for port,phyaddr,dpaddr,usbwrap,usbaddr in [(0,'88e8000','ae90000','a6f8800','a600000'),(1,'88ed000','ae98000','a8f8800','a800000')]:
-        phy='/soc@0/phy@'+phyaddr;dp='/soc@0/display-subsystem@ae00000/displayport-controller@'+dpaddr;usb='/soc@0/usb@'+usbwrap+'/usb@'+usbaddr
+        phy='/soc@0/phy@'+phyaddr;dp='/soc@0/display-subsystem@ae00000/displayport-controller@'+dpaddr;usbwrap_path='/soc@0/usb@'+usbwrap;usb=usbwrap_path+'/usb@'+usbaddr
         require(bytes(f.getprop(f.path_offset(dp),'compatible'))==b'qcom,sc8180x-dp\0','Unexpected DP controller')
         con=root+f'/connector@{port}';add(con,{'compatible':b'usb-c-connector\0','reg':cell(port),'data-role':b'dual\0','power-role':b'dual\0'})
         add(con+'/ports',{'#address-cells':cell(1),'#size-cells':cell(0)})
         for n in (0,1):add(con+f'/ports/port@{n}',{'reg':cell(n)});add(con+f'/ports/port@{n}/endpoint')
         put(phy,{'compatible':b'microsoft,spx-sc8180x-usb3-dp-phy\0','orientation-switch':b'','mode-switch':b''})
+        put(usbwrap_path,{'wakeup-source':b''})
         put(dp,{'status':b'okay\0'});out=dp+'/ports/port@1/endpoint';put(out,{'data-lanes':cell(0,1,2,3)})
         link(out,phy+'/ports/port@2/endpoint');link(phy+'/ports/port@0/endpoint',con+'/ports/port@1/endpoint');link(usb+'/ports/port@0/endpoint',con+'/ports/port@0/endpoint')
         if port==0:put(usb,{'dr_mode':b'otg\0','usb-role-switch':b'','role-switch-default-mode':b'host\0'})
+    try:
+        f.path_offset('/soc@0/usb@a4f8800')
+        put('/soc@0/usb@a4f8800',{'wakeup-source':b''})
+    except libfdt.FdtException:
+        pass
     f.pack();return bytes(f.as_bytearray())
 
 

@@ -49,10 +49,20 @@ struct spi_hid {
 #define spin_unlock_irqrestore(lock, flags) ((void)(lock), (void)(flags))
 #define READ_ONCE(x) (x)
 #define spi_get_drvdata(spi) ((spi)->data)
-static int fail_step, step, irq_step, recovery, bodies, async_error, sleep_calls, down_calls;
-static bool stable, early_irq;
+static int fail_step, step, irq_step, clear_step, clear_calls, recovery, bodies, async_error, sleep_calls, down_calls;
+static bool stable, early_irq, stale_pending;
 static void *body_buffer;
 static int body_length;
+enum irqchip_irq_state { IRQCHIP_STATE_PENDING = 0 };
+static int __attribute__((unused)) irq_set_irqchip_state(int irq, enum irqchip_irq_state which, bool state) {
+    (void)irq;
+    if (which == IRQCHIP_STATE_PENDING && !state) {
+        clear_calls++;
+        clear_step = step;
+        stale_pending = false;
+    }
+    return 0;
+}
 static int spi_hid_assert_reset(struct spi_hid *s) { (void)s; step++; return fail_step==1?-EIO:0; }
 static int spi_hid_power_up(struct spi_hid *s) { step++; s->powered=fail_step!=2; return fail_step==2?-EIO:0; }
 static int spi_hid_deassert_reset(struct spi_hid *s) { (void)s; step++; stable=fail_step!=3; return fail_step==3?-EIO:0; }
@@ -74,8 +84,8 @@ static void init(void) {
     memset(&s, 0, sizeof(s)); memset(&spi, 0, sizeof(spi));
     spi.data=&s; s.spi=&spi; hid.driver_data=&spi;
     s.power_state=SPI_HID_POWER_MODE_OFF;
-    fail_step=step=irq_step=recovery=bodies=async_error=sleep_calls=down_calls=0;
-    stable=early_irq=false; body_buffer=NULL; body_length=0;
+    fail_step=step=irq_step=clear_step=clear_calls=recovery=bodies=async_error=sleep_calls=down_calls=0;
+    stable=early_irq=false; stale_pending=true; body_buffer=NULL; body_length=0;
 }
 static void header(u8 first, u8 length, u8 sync) {
     init(); s.powered=true; s.power_state=SPI_HID_POWER_MODE_ACTIVE;
@@ -86,6 +96,9 @@ int main(void) {
     init(); assert(spi_hid_ll_open(&hid)==0);
     assert(s.powered && s.irq_enabled && stable);
     assert(early_irq==!FIXED); assert(irq_step==(FIXED?3:1));
+    assert(clear_calls==(FIXED?1:0));
+    assert(clear_step==(FIXED?2:0));
+    assert(stale_pending==!FIXED);
     for (int f=1; f<=3; f++) {
         init(); fail_step=f; assert(spi_hid_ll_open(&hid)==-EIO);
         assert(!s.powered && s.power_state==SPI_HID_POWER_MODE_OFF);

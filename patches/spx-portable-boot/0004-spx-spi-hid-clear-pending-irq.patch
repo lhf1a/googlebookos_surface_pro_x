@@ -1,0 +1,144 @@
+--- a/drivers/pinctrl/qcom/pinctrl-msm.c
++++ b/drivers/pinctrl/qcom/pinctrl-msm.c
+@@ -1364,6 +1364,32 @@
+ 	return device_property_count_u16(pctrl->dev, "gpios") > 0;
+ }
+ 
++static int msm_gpio_irq_set_irqchip_state(struct irq_data *d,
++					  enum irqchip_irq_state which,
++					  bool state)
++{
++	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
++	struct msm_pinctrl *pctrl = gpiochip_get_data(gc);
++	const struct msm_pingroup *g;
++	unsigned long flags;
++
++	if (test_bit(d->hwirq, pctrl->skip_wake_irqs)) {
++		if (!d->parent_data)
++			return -EINVAL;
++		return irq_chip_set_parent_state(d, which, state);
++	}
++
++	if (which != IRQCHIP_STATE_PENDING || state)
++		return -EINVAL;
++
++	g = &pctrl->soc->groups[d->hwirq];
++	raw_spin_lock_irqsave(&pctrl->lock, flags);
++	msm_ack_intr_status(pctrl, g);
++	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
++
++	return 0;
++}
++
+ static const struct irq_chip msm_gpio_irq_chip = {
+ 	.name			= "msmgpio",
+ 	.irq_enable		= msm_gpio_irq_enable,
+@@ -1374,6 +1400,7 @@
+ 	.irq_eoi		= msm_gpio_irq_eoi,
+ 	.irq_set_type		= msm_gpio_irq_set_type,
+ 	.irq_set_wake		= msm_gpio_irq_set_wake,
++	.irq_set_irqchip_state	= msm_gpio_irq_set_irqchip_state,
+ 	.irq_request_resources	= msm_gpio_irq_reqres,
+ 	.irq_release_resources	= msm_gpio_irq_relres,
+ 	.irq_set_affinity	= msm_gpio_irq_set_affinity,
+--- a/drivers/hid/spi-hid/spi-hid-core.c
++++ b/drivers/hid/spi-hid/spi-hid-core.c
+@@ -1090,6 +1090,25 @@
+ 	}
+ 
+ 	shid->power_state = SPI_HID_POWER_MODE_ACTIVE;
++
++	ret = spi_hid_power_up(shid);
++	if (ret) {
++		dev_err(dev, "%s: could not power up\n", __func__);
++		goto err1;
++	}
++
++	/*
++	 * Discard any stale edge latched during power-down/reset/power-up while
++	 * reset is still asserted and the INT line pull-up is already active.
++	 */
++	irq_set_irqchip_state(spi->irq, IRQCHIP_STATE_PENDING, false);
++
++	ret = spi_hid_deassert_reset(shid);
++	if (ret) {
++		dev_err(dev, "%s: failed to deassert reset\n", __func__);
++		goto err2;
++	}
++
+ 	if (!shid->irq_enabled) {
+ 		enable_irq(spi->irq);
+ 		shid->irq_enabled = true;
+@@ -1098,18 +1117,6 @@
+ 								__func__);
+ 		shid->logic_error_count++;
+ 		shid->logic_last_error = -EEXIST;
+-	}
+-
+-	ret = spi_hid_power_up(shid);
+-	if (ret) {
+-		dev_err(dev, "%s: could not power up\n", __func__);
+-		goto err1;
+-	}
+-
+-	ret = spi_hid_deassert_reset(shid);
+-	if (ret) {
+-		dev_err(dev, "%s: failed to deassert reset\n", __func__);
+-		goto err2;
+ 	}
+ 
+ 	dev_err(dev, "%s: %s -> %s\n", __func__,
+@@ -1552,36 +1559,45 @@
+ 	INIT_WORK(&shid->refresh_device_work, spi_hid_refresh_device_work);
+ 	INIT_WORK(&shid->error_work, spi_hid_error_work);
+ 
+-	irqflags = irq_get_trigger_type(spi->irq) | IRQF_ONESHOT;
++	irqflags = irq_get_trigger_type(spi->irq) | IRQF_ONESHOT | IRQF_NO_AUTOEN;
+ 	ret = request_irq(spi->irq, spi_hid_dev_irq, irqflags,
+ 			dev_name(&spi->dev), shid);
+ 	if (ret)
+ 		goto err1;
+-	else
+-		shid->irq_enabled = true;
+ 
+ 	ret = spi_hid_assert_reset(shid);
+ 	if (ret) {
+ 		dev_err(dev, "%s: failed to assert reset\n", __func__);
+-		goto err1;
++		goto err_irq;
+ 	}
+ 
+ 	ret = spi_hid_power_up(shid);
+ 	if (ret) {
+ 		dev_err(dev, "%s: could not power up\n", __func__);
+-		goto err1;
+-	}
++		goto err_irq;
++	}
++
++	irq_set_irqchip_state(spi->irq, IRQCHIP_STATE_PENDING, false);
+ 
+ 	ret = spi_hid_deassert_reset(shid);
+ 	if (ret) {
+ 		dev_err(dev, "%s: failed to deassert reset\n", __func__);
+-		goto err1;
+-	}
++		goto err_power;
++	}
++
++	enable_irq(spi->irq);
++	shid->irq_enabled = true;
+ 
+ 	dev_err(dev, "%s: d3 -> %s\n", __func__,
+ 			spi_hid_power_mode_string(shid->power_state));
+ 
+ 	return 0;
++
++err_power:
++	spi_hid_power_down(shid);
++
++err_irq:
++	free_irq(spi->irq, shid);
+ 
+ err1:
+ 	sysfs_remove_files(&dev->kobj, spi_hid_attributes);

@@ -20,6 +20,7 @@ OTA_DIR = ROOT / 'probe/ota'
 OTA_TOOL_SRC = OTA_DIR / 'spx-ota-tool.c'
 OTA_STAGE_SRC = OTA_DIR / 'spx-ota-stage'
 OTA_BOOT_SRC = OTA_DIR / 'spx-ota-boot'
+INTERNAL_INSTALL_SRC = OTA_DIR / 'spx-internal-install'
 
 EARLY_ANCHOR = b'base=/media/data/googlebook-stage\n'
 LEGACY_EARLY_HOOK = (
@@ -194,8 +195,10 @@ def install(
 
     stage_bytes = OTA_STAGE_SRC.read_bytes().replace(b'\r\n', b'\n')
     boot_bytes = OTA_BOOT_SRC.read_bytes().replace(b'\r\n', b'\n')
+    install_bytes = INTERNAL_INSTALL_SRC.read_bytes().replace(b'\r\n', b'\n')
     subprocess.run(['sh', '-n'], input=stage_bytes, check=True, capture_output=True)
     subprocess.run(['sh', '-n'], input=boot_bytes, check=True, capture_output=True)
+    subprocess.run(['sh', '-n'], input=install_bytes, check=True, capture_output=True)
 
     ver = version or detect_version(source_commit)
     commit = (source_commit or '').strip()
@@ -214,13 +217,15 @@ def install(
     records['bin/spx-ota-stage'] = new_record(0o100755)
     bodies['bin/spx-ota-boot'] = boot_bytes
     records['bin/spx-ota-boot'] = new_record(0o100755)
+    bodies['bin/spx-internal-install'] = install_bytes
+    records['bin/spx-internal-install'] = new_record(0o100755)
     bodies['etc/spx-ota-info'] = info_text
     records['etc/spx-ota-info'] = new_record(0o100644)
 
     if 'init' in bodies:
         bodies['init'] = patch_init_for_ota(bodies['init'])
 
-    for name in ('bin/spx-ota-tool', 'bin/spx-ota-stage', 'bin/spx-ota-boot', 'etc/spx-ota-info'):
+    for name in ('bin/spx-ota-tool', 'bin/spx-ota-stage', 'bin/spx-ota-boot', 'bin/spx-internal-install', 'etc/spx-ota-info'):
         for parent in Path(name).parents:
             key = parent.as_posix()
             if key != '.' and key not in records:

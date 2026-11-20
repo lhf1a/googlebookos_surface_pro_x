@@ -30,6 +30,7 @@ final class BridgeClient {
         String cpuPolicies = "";
         boolean touchAvailable;
         boolean touchIptsdRunning;
+        boolean touchDisabled;
         String touchDeviceId = "";
         String touchHidId = "";
         boolean touchProfileSaved;
@@ -44,6 +45,17 @@ final class BridgeClient {
         String touchNoiseInfo = "";
         boolean touchTapSaved;
         String touchTapLine = "";
+        boolean adbTcpEnabled;
+        boolean adbTcpActive;
+        String adbTcpPort = "";
+        boolean sshAvailable;
+        boolean sshEnabled;
+        boolean sshRunning;
+        String sshPort = "22";
+        boolean sshPasswordSet;
+        int sshKeyCount;
+        String debugVmIp = "";
+        String debugLanIps = "";
     }
 
     static final class TouchImportResult {
@@ -53,6 +65,18 @@ final class BridgeClient {
         TouchImportResult(BridgeState state, String kind) {
             this.state = state;
             this.kind = kind;
+        }
+    }
+
+    static final class SshKeyImportResult {
+        final BridgeState state;
+        final int added;
+        final int total;
+
+        SshKeyImportResult(BridgeState state, int added, int total) {
+            this.state = state;
+            this.added = added;
+            this.total = total;
         }
     }
 
@@ -130,6 +154,12 @@ final class BridgeClient {
         return loadState(false);
     }
 
+    BridgeState setTouchDisabled(boolean disabled) throws Exception {
+        String nonce = newNonce();
+        sendRequest(DriverPolicy.touchDisabledRequest(nonce, disabled), 25000);
+        return loadState(false);
+    }
+
     BridgeState setTouchGhostPatch(boolean enabled) throws Exception {
         String nonce = newNonce();
         sendRequest(DriverPolicy.touchGhostPatchRequest(nonce, enabled), 20000);
@@ -157,6 +187,49 @@ final class BridgeClient {
             throw new IOException("empty_export");
         }
         return content;
+    }
+
+    BridgeState setAdbTcp(boolean enabled) throws Exception {
+        String nonce = newNonce();
+        sendRequest(DriverPolicy.adbTcpRequest(nonce, enabled), 15000);
+        return loadState(false);
+    }
+
+    BridgeState setSshEnabled(boolean enabled) throws Exception {
+        String nonce = newNonce();
+        sendRequest(DriverPolicy.sshEnabledRequest(nonce, enabled), 15000);
+        return loadState(false);
+    }
+
+    BridgeState setSshPassword(String password) throws Exception {
+        String nonce = newNonce();
+        sendRequest(DriverPolicy.sshPasswordRequest(nonce, password), 15000);
+        return loadState(false);
+    }
+
+    SshKeyImportResult importSshKeys(String rawContent) throws Exception {
+        String nonce = newNonce();
+        String payload = sendRequest(DriverPolicy.importSshKeysRequest(nonce, rawContent), 15000).trim();
+        int added = 0;
+        int total = 0;
+        if (!payload.isEmpty()) {
+            String[] parts = payload.split("\\s+");
+            try {
+                added = Integer.parseInt(parts[0]);
+                if (parts.length > 1) {
+                    total = Integer.parseInt(parts[1]);
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        BridgeState next = loadState(false);
+        return new SshKeyImportResult(next, added, total > 0 ? total : next.sshKeyCount);
+    }
+
+    BridgeState clearSshKeys() throws Exception {
+        String nonce = newNonce();
+        sendRequest(DriverPolicy.clearSshKeysRequest(nonce), 15000);
+        return loadState(false);
     }
 
     private String sendRequest(String body, long timeoutMs) throws Exception {
@@ -230,6 +303,7 @@ final class BridgeClient {
         state.cpuPolicies = map.getOrDefault("cpu_policies", "");
         state.touchAvailable = "1".equals(map.get("touch_available"));
         state.touchIptsdRunning = "1".equals(map.get("touch_iptsd_running"));
+        state.touchDisabled = "1".equals(map.get("touch_disabled"));
         state.touchDeviceId = map.getOrDefault("touch_device_id", "");
         state.touchHidId = map.getOrDefault("touch_hid_id", "");
         state.touchProfileSaved = "1".equals(map.get("touch_profile_saved"));
@@ -244,6 +318,22 @@ final class BridgeClient {
         state.touchNoiseInfo = map.getOrDefault("touch_noise_info", "");
         state.touchTapSaved = "1".equals(map.get("touch_tap_saved"));
         state.touchTapLine = map.getOrDefault("touch_tap_line", "");
+        state.adbTcpEnabled = "1".equals(map.get("adb_tcp_enabled"));
+        state.adbTcpActive = "1".equals(map.get("adb_tcp_active"));
+        state.adbTcpPort = map.getOrDefault("adb_tcp_port", "");
+        state.sshAvailable = "1".equals(map.get("ssh_available"));
+        state.sshEnabled = "1".equals(map.get("ssh_enabled"));
+        state.sshRunning = "1".equals(map.get("ssh_running"));
+        String port = map.getOrDefault("ssh_port", "22");
+        state.sshPort = port.isEmpty() ? "22" : port;
+        state.sshPasswordSet = "1".equals(map.get("ssh_password_set"));
+        try {
+            state.sshKeyCount = Integer.parseInt(map.getOrDefault("ssh_key_count", "0"));
+        } catch (NumberFormatException e) {
+            state.sshKeyCount = 0;
+        }
+        state.debugVmIp = map.getOrDefault("debug_vm_ip", "");
+        state.debugLanIps = map.getOrDefault("debug_lan_ips", "");
     }
 
     private void fillLocalFallback(BridgeState state) {

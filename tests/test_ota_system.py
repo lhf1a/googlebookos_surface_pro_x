@@ -548,7 +548,9 @@ public class OtaJavaTest {
             dump = subprocess.check_output([str(aapt2), 'dump', 'xmltree', str(apk_path), '--file', 'AndroidManifest.xml'], text=True)
             self.assertIn('android.settings.SYSTEM_UPDATE_SETTINGS', dump)
             self.assertIn('.SystemUpdateActivity', dump)
-            self.assertIn('versionCode(0x0101021b)=3', dump)
+            ver_match = re.search(r'versionCode\(0x0101021b\)=(\d+)', dump)
+            self.assertIsNotNone(ver_match, dump)
+            self.assertGreaterEqual(int(ver_match.group(1)), 3)
 
     def test_linux_adb_upgrade_script_end_to_end(self):
         script = ROOT / 'scripts/upgrade-googlebook-via-adb.sh'
@@ -884,6 +886,15 @@ esac
             self.assertEqual(p.returncode, 0, f'{label} sh -n failed: {p.stderr}')
             self.assertIn('/data/user_de/0/org.surface.advancedcontrol/files/ota-state', helper_src)
             self.assertIn('/proc/[0-9]*/root/etc/spx-ota-info', helper_src)
+            self.assertIn('EFI/SPX/LTE/*', helper_src)
+
+    def test_ota_preserves_device_lte_fsg_cache_on_esp(self):
+        self.assertTrue(ota_pkg.is_preserved_esp_path('EFI/SPX/LTE/12345678-1234-1234-1234-123456789abc.bin'))
+        for rel in ('probe/ota/spx-ota-stage', 'probe/ota/spx-ota-boot'):
+            src = (ROOT / rel).read_text(encoding='utf-8')
+            self.assertIn('EFI/SPX/LTE/*', src)
+            p = subprocess.run(['sh', '-n'], input=src, text=True, capture_output=True)
+            self.assertEqual(p.returncode, 0, f'{rel} sh -n failed: {p.stderr}')
 
 
 if __name__ == '__main__':

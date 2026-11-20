@@ -1,0 +1,18 @@
+--- a/fs/timerfd.c
++++ b/fs/timerfd.c
+@@ -126,7 +126,14 @@
+  */
+ void timerfd_resume(void)
+ {
+-	schedule_work(&timerfd_work);
++	/*
++	 * Queue on system_freezable_wq so transient s2idle CPU wakeups
++	 * (tick_unfreeze -> timekeeping_resume) do not execute
++	 * timerfd_clock_was_set() while still in s2idle_enter() and abort
++	 * suspend via EPOLLWAKEUP. On final resume, thaw_workqueues() runs
++	 * timerfd_work before userspace thaws.
++	 */
++	queue_work(system_freezable_wq, &timerfd_work);
+ }
+ 
+ static void __timerfd_remove_cancel(struct timerfd_ctx *ctx)

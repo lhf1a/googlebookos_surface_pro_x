@@ -1,0 +1,308 @@
+#!/bin/busybox sh
+# Gate hardware-specific Android init services, VINTF manifests, and donor DLKM
+# modules on real runtime capabilities before Android PID 1 starts.
+# Preserves security policy, real wake locks, and active hardware services.
+set -eu
+
+ROOT=${SPX_HYGIENE_ROOT:-/newroot}
+STAGE=${SPX_HYGIENE_STAGE:-$ROOT/debug_ramdisk/spx-service-hygiene}
+DEV=${SPX_HYGIENE_DEV:-/dev}
+SYSFS=${SPX_HYGIENE_SYSFS:-/sys}
+KREL=${SPX_HYGIENE_KREL:-$(uname -r)}
+
+mkdir -p "$STAGE"
+chmod 755 "$STAGE"
+
+safe_name() {
+    printf '%s' "$1" | tr '/.' '__'
+}
+
+bind_staged() {
+    _bs_src=$1
+    _bs_dst=$2
+    chmod 644 "$_bs_src"
+    mount --bind "$_bs_src" "$_bs_dst"
+}
+
+# Disable every service declared in a single-purpose .rc file, comment out any
+# explicit "start <svc>" trigger for those services and any lazy-start
+# "interface ..." binding, while keeping unrelated directory/permission actions.
+disable_service_rc() {
+    _rel=$1
+    _reason=$2
+    _src="$ROOT/$_rel"
+    [ -f "$_src" ] || return 0
+    _out="$STAGE/$(safe_name "$_rel").rc"
+    awk -v reason="$_reason" '
+        NR == FNR {
+            if ($1 == "service" && NF >= 2) svcs[$2] = 1
+            next
+        }
+        {
+            if (in_svc && $0 ~ /^[^ \t#]/) {
+                if (!has_disabled) print "    disabled"
+                in_svc = 0
+                has_disabled = 0
+            }
+            if ($1 == "service" && NF >= 2) {
+                in_svc = 1
+                has_disabled = 0
+                print
+                next
+            }
+            if (in_svc) {
+                if ($1 == "disabled") {
+                    has_disabled = 1
+                    print
+                    next
+                }
+                if ($1 == "interface") {
+                    print "    # spx-hygiene (" reason "): " $0
+                    next
+                }
+                print
+                next
+            }
+            if ($1 == "start" && ($2 in svcs)) {
+                print "    # spx-hygiene (" reason "): " $0
+                next
+            }
+            print
+        }
+        END {
+            if (in_svc && !has_disabled) print "    disabled"
+        }
+    ' "$_src" "$_src" > "$_out"
+    bind_staged "$_out" "$_src"
+    echo "SPX_HYGIENE_DISABLE_RC=$_rel reason=$_reason"
+}
+
+# Disable only one named service (and its explicit "start <svc>" triggers)
+# inside a multi-service .rc file, leaving all other services intact.
+disable_named_service_rc() {
+    _rel=$1
+    _target=$2
+    _reason=$3
+    _src="$ROOT/$_rel"
+    [ -f "$_src" ] || return 0
+    _out="$STAGE/$(safe_name "$_rel").rc"
+    awk -v target="$_target" -v reason="$_reason" '
+        {
+            if (in_target && $0 ~ /^[^ \t#]/) {
+                if (!has_disabled) print "    disabled"
+                in_target = 0
+                has_disabled = 0
+            }
+            if ($1 == "service" && $2 == target) {
+                in_target = 1
+                has_disabled = 0
+                print
+                next
+            }
+            if (in_target) {
+                if ($1 == "disabled") {
+                    has_disabled = 1
+                    print
+                    next
+                }
+                if ($1 == "interface") {
+                    print "    # spx-hygiene (" reason "): " $0
+                    next
+                }
+                print
+                next
+            }
+            if ($1 == "start" && $2 == target) {
+                print "    # spx-hygiene (" reason "): " $0
+                next
+            }
+            print
+        }
+        END {
+            if (in_target && !has_disabled) print "    disabled"
+        }
+    ' "$_src" > "$_out"
+    bind_staged "$_out" "$_src"
+    echo "SPX_HYGIENE_DISABLE_SVC=$_rel svc=$_target reason=$_reason"
+}
+
+comment_exec_in_rc() {
+    _rel=$1
+    _needle=$2
+    _reason=$3
+    _src="$ROOT/$_rel"
+    [ -f "$_src" ] || return 0
+    _out="$STAGE/$(safe_name "$_rel").rc"
+    awk -v needle="$_needle" -v reason="$_reason" '
+        {
+            if ($1 ~ /^exec/ && index($0, needle) > 0) {
+                print "    # spx-hygiene (" reason "): " $0
+                next
+            }
+            print
+        }
+    ' "$_src" > "$_out"
+    bind_staged "$_out" "$_src"
+    echo "SPX_HYGIENE_DISABLE_EXEC=$_rel target=$_needle reason=$_reason"
+}
+
+mask_vintf_manifest() {
+    _rel=$1
+    _reason=$2
+    _src="$ROOT/$_rel"
+    [ -f "$_src" ] || return 0
+    _out="$STAGE/$(safe_name "$_rel").xml"
+    printf '<!-- spx-hygiene (%s): hardware backend unavailable -->\n<manifest version="9.0" type="device"/>\n' "$_reason" > "$_out"
+    bind_staged "$_out" "$_src"
+    echo "SPX_HYGIENE_MASK_VINTF=$_rel reason=$_reason"
+}
+
+has_tpm2() {
+    _ver=
+    if [ -c "$DEV/tpm0" ] && [ -r "$SYSFS/class/tpm/tpm0/tpm_version_major" ]; then
+        read -r _ver < "$SYSFS/class/tpm/tpm0/tpm_version_major" || _ver=
+        [ "$_ver" = 2 ] && return 0
+    fi
+    return 1
+}
+
+has_fastrpc_domain() {
+    _dom=$1
+    for _d in "$DEV/fastrpc-${_dom}" "$DEV/fastrpc-${_dom}-secure"; do
+        [ -c "$_d" ] && return 0
+    done
+    if [ "$_dom" = adsp ]; then
+        for _d in "$DEV/adsprpc-smd" "$DEV/adsprpc-smd-secure"; do
+            [ -c "$_d" ] && return 0
+        done
+    fi
+    for _lbl in "$SYSFS"/firmware/devicetree/base/soc@*/remoteproc@*/glink-edge/fastrpc/label \
+                "$SYSFS"/firmware/devicetree/base/soc@*/remoteproc@*/glink-edge/fastrpc@*/label; do
+        [ -f "$_lbl" ] || continue
+        _val=$(tr -d '\0\r\n' < "$_lbl" 2>/dev/null || true)
+        [ "$_val" = "$_dom" ] && return 0
+    done
+    return 1
+}
+
+has_lid_switch() {
+    for _acpi in "$SYSFS"/bus/acpi/devices/PNP0C0D*; do
+        [ -e "$_acpi" ] && return 0
+    done
+    for _sw in "$SYSFS"/class/input/event*/device/capabilities/sw; do
+        [ -f "$_sw" ] || continue
+        _bits=$(tr -d ' \t\r\n' < "$_sw" 2>/dev/null || true)
+        # Bit 0 of EV_SW is SW_LID (lowest bit of the rightmost hex word).
+        case "$_bits" in
+            *[13579bdfBDF]) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+has_qti_dwc3_platform() {
+    for _p in "$SYSFS"/bus/platform/devices/*.dwc3; do
+        [ -e "$_p" ] && return 0
+    done
+    return 1
+}
+
+mask_mismatched_dlkm_modules() {
+    _part=$1
+    _mdir="$ROOT/$_part/lib/modules"
+    [ -d "$_mdir" ] || return 0
+    _sample=
+    for _ko in "$_mdir"/*.ko "$_mdir"/*/*.ko; do
+        [ -f "$_ko" ] || continue
+        _sample=$_ko
+        break
+    done
+    [ -n "$_sample" ] || return 0
+    # BusyBox grep stops at NUL bytes, so convert NULs to newlines before checking vermagic.
+    if tr '\0' '\n' < "$_sample" 2>/dev/null | grep -F -q "vermagic=${KREL} "; then
+        return 0
+    fi
+    _empty="$STAGE/empty-${_part}-modules"
+    mkdir -p "$_empty"
+    chmod 755 "$_empty"
+    mount --bind "$_empty" "$_mdir"
+    echo "SPX_HYGIENE_MASK_DLKM=$_part krel=$KREL"
+}
+
+# 1. Boot init SIGABRT fixes: absent QTI testscripts with invalid SELinux labels.
+if [ ! -e "$ROOT/vendor/bin/init.qti.ufs.debug.sh" ]; then
+    comment_exec_in_rc vendor/etc/init/hw/init.qti.ufs.rc /vendor/bin/init.qti.ufs.debug.sh missing_ufs_debug_script
+fi
+if [ ! -e "$ROOT/product/etc/init.qcom.testscripts.sh" ]; then
+    disable_named_service_rc vendor/etc/init/hw/init.qcom.rc qti-testscripts missing_qcom_testscripts
+fi
+
+# 2. TPM2/GSC attestation client (gscd itself is gated by gscd-availability-stage).
+if ! has_tpm2; then
+    disable_service_rc system/etc/init/udsattestation.rc no_tpm2_backend
+fi
+
+# 3. ChromeOS EC services (timberslide crash-loop also triggers flags_health_check).
+has_cros_ec=0
+[ -c "$DEV/cros_ec" ] && has_cros_ec=1
+if [ "$has_cros_ec" = 0 ]; then
+    disable_service_rc system/etc/init/timberslide.rc no_cros_ec
+    disable_service_rc system/etc/init/ec_crash_collector.rc no_cros_ec
+    disable_named_service_rc vendor/etc/init/android.hardware.health-service.android-desktop.rc vendor.ec-battery-limits-setprop no_cros_ec
+    disable_service_rc vendor/etc/init/ec-executor.rc no_cros_ec
+    mask_vintf_manifest vendor/etc/vintf/manifest/vendor.google.desktop.ec-executor.xml no_cros_ec
+fi
+
+# 4. Suspend notifier & suspend diagnostics.
+has_suspend_notifier=0
+[ -c "$DEV/suspend_notifier" ] && has_suspend_notifier=1
+if [ "$has_suspend_notifier" = 0 ]; then
+    disable_service_rc vendor/etc/init/suspend_notification_service.rc no_suspend_notifier
+    mask_vintf_manifest vendor/etc/vintf/manifest/com.android.desktop.power.suspend_notification_service.xml no_suspend_notifier
+    if [ "$has_cros_ec" = 0 ]; then
+        disable_service_rc vendor/etc/init/suspend_diagnostics.rc no_suspend_notifier_or_cros_ec
+    fi
+fi
+
+# 5. FastRPC ADSP/CDSP daemons (never touch SDSP /dev/fastrpc-sdsp or spx-sensor-rpcd).
+if ! has_fastrpc_domain adsp; then
+    disable_service_rc vendor/etc/init/vendor.qti.adsprpc-guestos-service.rc no_adsp_fastrpc
+    disable_service_rc vendor/etc/init/vendor.qti.audio-adsprpc-service.rc no_adsp_fastrpc
+    disable_service_rc vendor/etc/init/vendor.sensors.sscrpcd.rc no_adsp_fastrpc
+    disable_named_service_rc vendor/etc/init/init.vendor.sensors.rc vendor.sensors no_adsp_fastrpc
+fi
+if ! has_fastrpc_domain cdsp; then
+    disable_service_rc vendor/etc/init/vendor.qti.cdsprpc-service.rc no_cdsp_fastrpc
+fi
+
+# 6. QSEECOM daemon (requires /dev/qseecom or /dev/smcinvoke).
+if [ ! -c "$DEV/qseecom" ] && [ ! -c "$DEV/smcinvoke" ]; then
+    disable_service_rc vendor/etc/init/qseecomd.rc no_qseecom_device
+fi
+
+# 7. Touchpad inhibitor (requires an EV_SW SW_LID or ACPI PNP0C0D lid switch).
+if ! has_lid_switch; then
+    disable_service_rc vendor/etc/init/touchpad-inhibitor-service.rc no_lid_switch
+fi
+
+# 8. Downstream QTI USB HAL (hardcodes *.dwc3 sysfs; incompatible with mainline
+#    a600000.usb + surface-typec, and stopping it deadlocks UsbPortManager).
+if ( [ -e "$SYSFS/bus/platform/devices/a600000.usb" ] || [ -e "$SYSFS/bus/platform/devices/surface-typec" ] ) &&
+   ! has_qti_dwc3_platform; then
+    disable_service_rc vendor/etc/init/android.hardware.usb-service.qti.rc mainline_spx_usb_no_qti_dwc3
+    mask_vintf_manifest vendor/etc/vintf/manifest/android.hardware.usb-service.qti.xml mainline_spx_usb_no_qti_dwc3
+    mask_vintf_manifest vendor/etc/vintf/manifest/android.hardware.usb.gadget-service.qti.xml mainline_spx_usb_no_qti_dwc3
+fi
+
+# 9. Donor DLKM modules built for an incompatible kernel release (keeps build.prop
+#    and kernel ABI checks intact; avoids ueventd insmod mismatch spam).
+mask_mismatched_dlkm_modules system_dlkm
+mask_mismatched_dlkm_modules vendor_dlkm
+
+# 10. Realtek USB NIC firmware staging into firmware_class.path.
+if [ -d "$ROOT/vendor/firmware/rtl_nic" ] && [ -d "$ROOT/debug_ramdisk/sq2-firmware" ] && [ ! -d "$ROOT/debug_ramdisk/sq2-firmware/rtl_nic" ]; then
+    cp -a "$ROOT/vendor/firmware/rtl_nic" "$ROOT/debug_ramdisk/sq2-firmware/rtl_nic"
+    echo "SPX_HYGIENE_STAGED_FIRMWARE=rtl_nic"
+fi
+
+echo "SPX_SERVICE_HYGIENE_READY"

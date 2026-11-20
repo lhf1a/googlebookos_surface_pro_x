@@ -43,6 +43,8 @@ final class SettingsTheme {
     final int touchBadgeFg;
     final int otaBadgeBg;
     final int otaBadgeFg;
+    final int debugBadgeBg;
+    final int debugBadgeFg;
     final int dangerBadgeBg;
     final int dangerBadgeFg;
 
@@ -130,6 +132,8 @@ final class SettingsTheme {
             touchBadgeFg = 0xFF8BE0B4;
             otaBadgeBg = 0xFF2B2752;
             otaBadgeFg = 0xFFC7BFFF;
+            debugBadgeBg = 0xFF133A3E;
+            debugBadgeFg = 0xFF7ADBE3;
             dangerBadgeBg = 0xFF45241E;
             dangerBadgeFg = 0xFFFFB4A9;
             mesaChipBg = 0xFF1A3A4A;
@@ -151,6 +155,8 @@ final class SettingsTheme {
             touchBadgeFg = 0xFF116B43;
             otaBadgeBg = 0xFFE9E4FF;
             otaBadgeFg = 0xFF4B38A8;
+            debugBadgeBg = 0xFFD4F1F4;
+            debugBadgeFg = 0xFF0A6670;
             dangerBadgeBg = 0xFFFCE8E6;
             dangerBadgeFg = 0xFFA50E0E;
             mesaChipBg = 0xFFD9F2FF;
@@ -268,6 +274,10 @@ final class SettingsTheme {
     static final int ICON_CHECK = 14;
     static final int ICON_WARNING = 15;
     static final int ICON_PACKAGE = 16;
+    static final int ICON_DEBUG = 17;
+    static final int ICON_KEY = 18;
+    static final int ICON_CERT = 19;
+    static final int ICON_DISK = 20;
 
     View iconView(Context ctx, int kind, int color, int sizeDp) {
         IconGlyphView v = new IconGlyphView(ctx, kind, color, density);
@@ -477,6 +487,46 @@ final class SettingsTheme {
                     c.drawRoundRect(box, r * 0.24f, r * 0.24f, paint);
                     c.drawLine(cx - r, cy - r * 0.22f, cx + r, cy - r * 0.22f, paint);
                     c.drawLine(cx, cy - r * 0.78f, cx, cy - r * 0.22f, paint);
+                    break;
+                }
+                case ICON_DEBUG: {
+                    float r = s * 0.34f;
+                    RectF box = new RectF(cx - r, cy - r * 0.78f, cx + r, cy + r * 0.78f);
+                    c.drawRoundRect(box, r * 0.24f, r * 0.24f, paint);
+                    Path prompt = new Path();
+                    prompt.moveTo(cx - r * 0.52f, cy - r * 0.26f);
+                    prompt.lineTo(cx - r * 0.14f, cy);
+                    prompt.lineTo(cx - r * 0.52f, cy + r * 0.26f);
+                    c.drawPath(prompt, paint);
+                    c.drawLine(cx + r * 0.04f, cy + r * 0.26f, cx + r * 0.50f, cy + r * 0.26f, paint);
+                    break;
+                }
+                case ICON_KEY: {
+                    float r = s * 0.34f;
+                    c.drawCircle(cx - r * 0.40f, cy, r * 0.34f, paint);
+                    c.drawLine(cx - r * 0.06f, cy, cx + r * 0.88f, cy, paint);
+                    c.drawLine(cx + r * 0.50f, cy, cx + r * 0.50f, cy + r * 0.34f, paint);
+                    c.drawLine(cx + r * 0.84f, cy, cx + r * 0.84f, cy + r * 0.34f, paint);
+                    break;
+                }
+                case ICON_CERT: {
+                    float r = s * 0.32f;
+                    RectF doc = new RectF(cx - r * 0.74f, cy - r * 0.88f, cx + r * 0.74f, cy + r * 0.88f);
+                    c.drawRoundRect(doc, r * 0.22f, r * 0.22f, paint);
+                    c.drawLine(cx - r * 0.38f, cy - r * 0.42f, cx + r * 0.38f, cy - r * 0.42f, paint);
+                    c.drawCircle(cx, cy + r * 0.10f, r * 0.26f, paint);
+                    c.drawLine(cx - r * 0.14f, cy + r * 0.34f, cx - r * 0.22f, cy + r * 0.66f, paint);
+                    c.drawLine(cx + r * 0.14f, cy + r * 0.34f, cx + r * 0.22f, cy + r * 0.66f, paint);
+                    break;
+                }
+                case ICON_DISK: {
+                    float r = s * 0.34f;
+                    RectF body = new RectF(cx - r * 0.88f, cy - r * 0.72f, cx + r * 0.88f, cy + r * 0.72f);
+                    c.drawRoundRect(body, r * 0.24f, r * 0.24f, paint);
+                    c.drawLine(cx - r * 0.88f, cy + r * 0.18f, cx + r * 0.88f, cy + r * 0.18f, paint);
+                    paint.setStyle(Paint.Style.FILL);
+                    c.drawCircle(cx + r * 0.46f, cy + r * 0.45f, Math.max(1.8f, 1.3f * density), paint);
+                    paint.setStyle(Paint.Style.STROKE);
                     break;
                 }
                 default:

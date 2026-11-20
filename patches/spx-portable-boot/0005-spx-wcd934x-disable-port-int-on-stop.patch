@@ -1,0 +1,99 @@
+--- a/sound/soc/codecs/wcd934x.c
++++ b/sound/soc/codecs/wcd934x.c
+@@ -1869,6 +1869,11 @@
+ 	return 0;
+ }
+ 
++static void wcd934x_codec_enable_int_port(struct wcd_slim_codec_dai_data *dai,
++					  struct snd_soc_component *component);
++static void wcd934x_codec_disable_int_port(struct wcd_slim_codec_dai_data *dai,
++					   struct snd_soc_component *component);
++
+ static int wcd934x_trigger(struct snd_pcm_substream *substream, int cmd,
+ 			   struct snd_soc_dai *dai)
+ {
+@@ -1887,12 +1892,15 @@
+ 		cfg = &dai_data->sconfig;
+ 		slim_stream_prepare(dai_data->sruntime, cfg);
+ 		slim_stream_enable(dai_data->sruntime);
++		wcd934x_codec_enable_int_port(dai_data, dai->component);
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_STOP:
+ 	case SNDRV_PCM_TRIGGER_SUSPEND:
+ 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		wcd934x_codec_disable_int_port(dai_data, dai->component);
+ 		slim_stream_disable(dai_data->sruntime);
+ 		slim_stream_unprepare(dai_data->sruntime);
++		wcd934x_codec_disable_int_port(dai_data, dai->component);
+ 		break;
+ 	default:
+ 		break;
+@@ -4086,6 +4094,7 @@
+ {
+ 	int port_num = 0;
+ 	unsigned short reg = 0;
++	unsigned short clr_reg = 0;
+ 	unsigned int val = 0;
+ 	struct wcd934x_codec *wcd = dev_get_drvdata(component->dev);
+ 	struct wcd934x_slim_ch *ch;
+@@ -4094,11 +4103,14 @@
+ 		if (ch->port >= WCD934X_RX_START) {
+ 			port_num = ch->port - WCD934X_RX_START;
+ 			reg = WCD934X_SLIM_PGD_PORT_INT_EN0 + (port_num / 8);
++			clr_reg = WCD934X_SLIM_PGD_PORT_INT_CLR_RX_0 + (port_num / 8);
+ 		} else {
+ 			port_num = ch->port;
+ 			reg = WCD934X_SLIM_PGD_PORT_INT_TX_EN0 + (port_num / 8);
++			clr_reg = WCD934X_SLIM_PGD_PORT_INT_CLR_TX_0 + (port_num / 8);
+ 		}
+ 
++		regmap_write(wcd->if_regmap, clr_reg, BIT(port_num % 8));
+ 		regmap_read(wcd->if_regmap, reg, &val);
+ 		if (!(val & BIT(port_num % 8)))
+ 			regmap_write(wcd->if_regmap, reg,
+@@ -4106,6 +4118,35 @@
+ 	}
+ }
+ 
++static void wcd934x_codec_disable_int_port(struct wcd_slim_codec_dai_data *dai,
++					   struct snd_soc_component *component)
++{
++	int port_num = 0;
++	unsigned short reg = 0;
++	unsigned short clr_reg = 0;
++	unsigned int val = 0;
++	struct wcd934x_codec *wcd = dev_get_drvdata(component->dev);
++	struct wcd934x_slim_ch *ch;
++
++	list_for_each_entry(ch, &dai->slim_ch_list, list) {
++		if (ch->port >= WCD934X_RX_START) {
++			port_num = ch->port - WCD934X_RX_START;
++			reg = WCD934X_SLIM_PGD_PORT_INT_EN0 + (port_num / 8);
++			clr_reg = WCD934X_SLIM_PGD_PORT_INT_CLR_RX_0 + (port_num / 8);
++		} else {
++			port_num = ch->port;
++			reg = WCD934X_SLIM_PGD_PORT_INT_TX_EN0 + (port_num / 8);
++			clr_reg = WCD934X_SLIM_PGD_PORT_INT_CLR_TX_0 + (port_num / 8);
++		}
++
++		regmap_read(wcd->if_regmap, reg, &val);
++		if (val & BIT(port_num % 8))
++			regmap_write(wcd->if_regmap, reg,
++				     val & ~BIT(port_num % 8));
++		regmap_write(wcd->if_regmap, clr_reg, BIT(port_num % 8));
++	}
++}
++
+ static int wcd934x_codec_enable_slim(struct snd_soc_dapm_widget *w,
+ 				     struct snd_kcontrol *kc, int event)
+ {
+@@ -4116,6 +4157,9 @@
+ 	switch (event) {
+ 	case SND_SOC_DAPM_POST_PMU:
+ 		wcd934x_codec_enable_int_port(dai, comp);
++		break;
++	case SND_SOC_DAPM_POST_PMD:
++		wcd934x_codec_disable_int_port(dai, comp);
+ 		break;
+ 	}
+ 

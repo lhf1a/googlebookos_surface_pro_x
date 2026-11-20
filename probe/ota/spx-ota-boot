@@ -6,10 +6,12 @@ set -eu
 export PATH="${SPX_OTA_PATH:-/bin:/sbin:/usr/bin:/usr/sbin:${PATH:-}}"
 
 DATA_ROOT="${SPX_OTA_ROOT:-/proc/1/root}"
+SYSFS="${SPX_OTA_SYSFS:-/sys}"
 ESP_DIR="${SPX_OTA_ESP:-/media/esp}"
 RUN_DIR="${SPX_OTA_RUN:-/run}"
 ETC_DIR="${SPX_OTA_ETC:-/etc}"
 OTA_TOOL="${SPX_OTA_TOOL:-/bin/spx-ota-tool}"
+INTERNAL_INSTALLER="${SPX_OTA_INSTALLER:-/bin/spx-internal-install}"
 SUPER_DEV="${SPX_OTA_SUPER_DEV:-/dev/block/by-name/super}"
 LOCK_DIR="${SPX_OTA_LOCK_DIR:-/run/spx-ota-boot-lock}"
 TMP_REQ="${SPX_OTA_TMP_REQ:-/run/spx-ota-boot-request}"
@@ -17,11 +19,84 @@ PKG="org.surface.advancedcontrol"
 UPDATE_COMPONENT="$PKG/.SystemUpdateActivity"
 NO_REBOOT="${SPX_OTA_NO_REBOOT:-0}"
 
+run_with_timeout() {
+    _rwt_sec=$1
+    shift
+    "$@" &
+    _rwt_cmd=$!
+    (
+        trap - EXIT
+        _rwt_armed=1
+        trap 'if [ "$_rwt_armed" = 1 ] && [ -n "${!:-}" ] && [ "$!" != "$_rwt_cmd" ]; then kill "$!" 2>/dev/null || true; wait "$!" 2>/dev/null || true; fi; exit 0' TERM INT
+        sleep "$_rwt_sec" </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -TERM "$_rwt_cmd" 2>/dev/null || true
+        _rwt_armed=1
+        sleep 1 </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -KILL "$_rwt_cmd" 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    _rwt_wd=$!
+    _rwt_rc=0
+    wait "$_rwt_cmd" 2>/dev/null || _rwt_rc=$?
+    kill -TERM "$_rwt_wd" 2>/dev/null || true
+    _rwt_try=0
+    while [ "$_rwt_try" -lt 20 ]; do
+        _rwt_st=
+        [ -r "/proc/$_rwt_wd/stat" ] || break
+        { read -r _rwt_st < "/proc/$_rwt_wd/stat"; } 2>/dev/null || break
+        case "$_rwt_st" in
+            *') Z '*|*') X '*) break ;;
+        esac
+        kill -TERM "$_rwt_wd" 2>/dev/null || break
+        sleep 0.05 2>/dev/null || break
+        _rwt_try=$((_rwt_try + 1))
+    done
+    wait "$_rwt_wd" 2>/dev/null || true
+    return "$_rwt_rc"
+}
+
+display_is_on() {
+    _dio_found=0
+    for _dio_en in "$SYSFS"/class/drm/card*-*/enabled; do
+        [ -r "$_dio_en" ] || continue
+        _dio_found=1
+        read -r _dio_val < "$_dio_en" 2>/dev/null || _dio_val=
+        if [ "$_dio_val" = enabled ]; then
+            _dio_dpms="${_dio_en%/*}/dpms"
+            if [ -r "$_dio_dpms" ]; then
+                read -r _dio_dv < "$_dio_dpms" 2>/dev/null || _dio_dv=
+                [ "$_dio_dv" = On ] || continue
+            fi
+            return 0
+        fi
+    done
+    if [ "$_dio_found" = 1 ]; then
+        return 1
+    fi
+    for _dio_bl in "$SYSFS"/class/backlight/*; do
+        [ -d "$_dio_bl" ] || continue
+        _dio_found=1
+        if [ -r "$_dio_bl/bl_power" ]; then
+            read -r _dio_bp < "$_dio_bl/bl_power" 2>/dev/null || _dio_bp=0
+            [ "$_dio_bp" = 0 ] || continue
+        fi
+        if [ -r "$_dio_bl/brightness" ]; then
+            read -r _dio_br < "$_dio_bl/brightness" 2>/dev/null || _dio_br=1
+            [ "$_dio_br" != 0 ] || continue
+        fi
+        return 0
+    done
+    [ "$_dio_found" = 0 ]
+}
+
 android() {
     if [ -n "${SPX_OTA_ANDROID_WRAPPER:-}" ]; then
         "$SPX_OTA_ANDROID_WRAPPER" "$@"
     else
-        timeout "${ANDROID_COMMAND_TIMEOUT:-20}" nsenter -t 1 -m -r -- /system/bin/"$@"
+        run_with_timeout "${ANDROID_COMMAND_TIMEOUT:-20}" nsenter -t 1 -m -r -- /system/bin/"$@"
     fi
 }
 
@@ -86,7 +161,7 @@ is_safe_relpath() {
 
 is_preserved_esp_path() {
     case "$1" in
-        EFI/BOOT/grub.cfg|SPX-USERDATA-GROWN.txt|SPX-BOOT-SOURCE.txt|SPX-OTA-*)
+        EFI/BOOT/grub.cfg|SPX-USERDATA-GROWN.txt|SPX-BOOT-SOURCE.txt|SPX-OTA-*|EFI/SPX/LTE/*)
             return 0
             ;;
         *)
@@ -241,6 +316,48 @@ send_reply() {
     _sr_detail="${4:-}"
     _sr_body="$(printf '%s\n%s\n%s\n' "$_sr_nonce" "$_sr_status" "$_sr_detail")"
     publish_file "$_sr_dir" "ota-reply" "$_sr_body"
+}
+
+send_disk_reply() {
+    _sdr_dir="$1"
+    _sdr_nonce="$2"
+    _sdr_status="$3"
+    _sdr_detail="${4:-}"
+    _sdr_body="$(printf '%s\n%s\n%s\n' "$_sdr_nonce" "$_sdr_status" "$_sdr_detail")"
+    publish_file "$_sdr_dir" "disk-reply" "$_sdr_body"
+}
+
+validate_disk_dev() {
+    _vdd_p="$1"
+    [ -n "$_vdd_p" ] || return 1
+    [ "${#_vdd_p}" -le 64 ] || return 1
+    case "$_vdd_p" in
+        /dev/*) ;;
+        *) return 1 ;;
+    esac
+    _vdd_n="${_vdd_p#/dev/}"
+    [ -n "$_vdd_n" ] || return 1
+    case "$_vdd_n" in
+        */*|*..*|.*|*[!a-zA-Z0-9_-]*) return 1 ;;
+    esac
+    return 0
+}
+
+publish_disk_state() {
+    _pds_dir="$1"
+    [ -d "$_pds_dir" ] && [ ! -L "$_pds_dir" ] || return 1
+    if [ ! -x "$INTERNAL_INSTALLER" ]; then
+        _pds_body="$(printf 'disk_install_version=1\nbridge_ready=1\neligible=0\nineligible_reason=installer_missing\ntarget_count=0\n')"
+        publish_file "$_pds_dir" "disk-state" "$_pds_body"
+        return 0
+    fi
+    _pds_out="$("$INTERNAL_INSTALLER" probe 2>/dev/null || true)"
+    if [ -z "$_pds_out" ]; then
+        _pds_body="$(printf 'disk_install_version=1\nbridge_ready=1\neligible=0\nineligible_reason=probe_failed\ntarget_count=0\n')"
+    else
+        _pds_body="$(printf 'bridge_ready=1\n%s\n' "$_pds_out")"
+    fi
+    publish_file "$_pds_dir" "disk-state" "$_pds_body"
 }
 
 # Replace competing stock/GMS Settings -> System update handlers dynamically.
@@ -732,6 +849,74 @@ handle_request() {
     rm -f "$TMP_REQ"
 }
 
+handle_disk_request() {
+    _hdr_dir="$1"
+    _hdr_req="$_hdr_dir/disk-request"
+    [ -f "$_hdr_req" ] && [ ! -L "$_hdr_req" ] || return 0
+    _hdr_sz="$(stat -c '%s' "$_hdr_req" 2>/dev/null || echo 0)"
+    if [ "$_hdr_sz" -le 0 ] || [ "$_hdr_sz" -gt 4096 ]; then
+        rm -f "$_hdr_req" 2>/dev/null || true
+        return 0
+    fi
+    cp "$_hdr_req" "$TMP_REQ"
+    rm -f "$_hdr_req"
+
+    _hdr_cmd="$(sed -n '1p' "$TMP_REQ" | tr -d '\r')"
+    _hdr_nonce="$(sed -n '2p' "$TMP_REQ" | tr -d '\r')"
+    if ! validate_nonce "$_hdr_nonce"; then
+        rm -f "$TMP_REQ"
+        return 0
+    fi
+
+    case "$_hdr_cmd" in
+        disk-refresh)
+            publish_disk_state "$_hdr_dir" || { send_disk_reply "$_hdr_dir" "$_hdr_nonce" "ERROR" "state_publish_failed"; rm -f "$TMP_REQ"; return 0; }
+            send_disk_reply "$_hdr_dir" "$_hdr_nonce" "OK"
+            ;;
+        disk-install)
+            _hdr_target="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            if ! validate_disk_dev "$_hdr_target"; then
+                send_disk_reply "$_hdr_dir" "$_hdr_nonce" "ERROR" "invalid_target_device"
+                rm -f "$TMP_REQ"
+                return 0
+            fi
+            if [ ! -x "$INTERNAL_INSTALLER" ]; then
+                send_disk_reply "$_hdr_dir" "$_hdr_nonce" "ERROR" "installer_missing"
+                rm -f "$TMP_REQ"
+                return 0
+            fi
+            _hdr_err_file="$RUN_DIR/spx-disk-install.err"
+            rm -f "$_hdr_err_file" "$_hdr_dir/disk-progress" 2>/dev/null || true
+            if _hdr_out="$("$INTERNAL_INSTALLER" install "$_hdr_target" "$_hdr_dir/disk-progress" 2>"$_hdr_err_file")"; then
+                rm -f "$_hdr_err_file" 2>/dev/null || true
+                publish_disk_state "$_hdr_dir" || true
+                send_disk_reply "$_hdr_dir" "$_hdr_nonce" "OK" "$_hdr_out"
+            else
+                _hdr_reason="$(sed -n 's/^ERROR=//p' "$_hdr_err_file" 2>/dev/null | tail -n 1 | tr -d '\r' || true)"
+                [ -n "$_hdr_reason" ] || _hdr_reason="install_failed"
+                rm -f "$_hdr_err_file" 2>/dev/null || true
+                publish_disk_state "$_hdr_dir" || true
+                send_disk_reply "$_hdr_dir" "$_hdr_nonce" "ERROR" "$_hdr_reason"
+            fi
+            ;;
+        disk-poweroff)
+            sync 2>/dev/null || true
+            send_disk_reply "$_hdr_dir" "$_hdr_nonce" "OK"
+            if [ "$NO_REBOOT" != "1" ]; then
+                (
+                    sleep 1
+                    sync 2>/dev/null || true
+                    android svc power shutdown >/dev/null 2>&1 || android setprop sys.powerctl shutdown >/dev/null 2>&1 || poweroff -f
+                ) </dev/null >/dev/null 2>&1 &
+            fi
+            ;;
+        *)
+            send_disk_reply "$_hdr_dir" "$_hdr_nonce" "ERROR" "unknown_command"
+            ;;
+    esac
+    rm -f "$TMP_REQ"
+}
+
 get_current_user() {
     if [ -n "${SPX_OTA_TEST_USER:-}" ]; then
         printf '%s\n' "$SPX_OTA_TEST_USER"
@@ -751,40 +936,54 @@ claim_system_update_intent "$CURRENT_USER" || true
 APP_FILES="$DATA_ROOT/data/user_de/$CURRENT_USER/$PKG/files"
 if [ -d "$APP_FILES" ] && [ ! -L "$APP_FILES" ]; then
     publish_state "$APP_FILES" || true
+    publish_disk_state "$APP_FILES" || true
 fi
 
 if [ "${SPX_OTA_ONCE:-0}" = "1" ]; then
     if [ -d "$APP_FILES" ] && [ ! -L "$APP_FILES" ]; then
         handle_request "$APP_FILES"
+        handle_disk_request "$APP_FILES"
     fi
     exit 0
 fi
 
 CYCLES=0
+CLAIM_CYCLES=0
 LAST_PUBLISHED=0
 while true; do
     APP_FILES="$DATA_ROOT/data/user_de/$CURRENT_USER/$PKG/files"
     if [ -d "$APP_FILES" ] && [ ! -L "$APP_FILES" ]; then
         if [ "$LAST_PUBLISHED" = "0" ]; then
             publish_state "$APP_FILES" || true
+            publish_disk_state "$APP_FILES" || true
             LAST_PUBLISHED=1
         fi
         if [ -f "$APP_FILES/ota-request" ]; then
             handle_request "$APP_FILES"
         fi
+        if [ -f "$APP_FILES/disk-request" ]; then
+            handle_disk_request "$APP_FILES"
+        fi
     else
         LAST_PUBLISHED=0
     fi
     CYCLES=$(( CYCLES + 1 ))
-    if [ "$CYCLES" -ge 30 ]; then
+    if [ "$CYCLES" -ge 30 ] && display_is_on; then
         CYCLES=0
         _next="$(get_current_user)"
         if [ "$_next" != "$CURRENT_USER" ]; then
             CURRENT_USER="$_next"
             LAST_PUBLISHED=0
+            CLAIM_CYCLES=0
+            claim_system_update_intent "$CURRENT_USER" || true
+        else
+            CLAIM_CYCLES=$(( CLAIM_CYCLES + 1 ))
+            if [ "$CLAIM_CYCLES" -ge 10 ]; then
+                CLAIM_CYCLES=0
+                # Re-assert System Update intent in case GMS re-enables its update activity after boot.
+                claim_system_update_intent "$CURRENT_USER" || true
+            fi
         fi
-        # Re-assert System Update intent in case GMS re-enables its update activity after boot.
-        claim_system_update_intent "$CURRENT_USER" || true
     fi
     sleep "${SPX_OTA_POLL_SLEEP:-1}"
 done

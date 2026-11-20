@@ -445,15 +445,6 @@ public final class SystemUpdateActivity extends Activity {
             container.addView(buildSelectPackageCard(), marginBottom(20));
         }
 
-        // Footer
-        TextView footer = new TextView(this);
-        footer.setText(str.otaFooter());
-        footer.setTextColor(theme.textSecondary);
-        footer.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
-        footer.setLineSpacing(theme.dp(3), 1.0f);
-        footer.setPadding(theme.dp(4), theme.dp(4), theme.dp(4), theme.dp(8));
-        container.addView(footer);
-
         // Constrain max width cleanly on large tablet/desktop displays
         int screenW = getResources().getDisplayMetrics().widthPixels;
         int maxW = theme.dp(680);
