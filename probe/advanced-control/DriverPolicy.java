@@ -726,4 +726,53 @@ public final class DriverPolicy {
         String combined = ((label == null ? "" : label) + " " + (pkg == null ? "" : pkg)).toLowerCase(Locale.ROOT);
         return combined.contains(q);
     }
+
+    public static final String FACE_ENABLED_PROP = "persist.spx.face.enabled";
+    public static final String FACE_ROTATION_PROP = "persist.spx.face.rotation";
+    public static final String[] FACE_ROTATIONS = new String[] {"0", "90", "180", "270"};
+
+    public static boolean isValidRotation(String raw) {
+        if (raw == null) {
+            return false;
+        }
+        String t = raw.trim();
+        return "0".equals(t) || "90".equals(t) || "180".equals(t) || "270".equals(t);
+    }
+
+    public static String validateRotation(String raw) {
+        if (!isValidRotation(raw)) {
+            throw new IllegalArgumentException("invalid_rotation");
+        }
+        return raw.trim();
+    }
+
+    public static String setHallLidRequest(String nonce, boolean enabled) {
+        return "set-hall-lid\n" + normalizeNonce(nonce) + "\n" + (enabled ? "1" : "0") + "\n";
+    }
+
+    public static String setFaceUnlockRequest(String nonce, boolean enabled) {
+        return "set-face-unlock\n" + normalizeNonce(nonce) + "\n" + (enabled ? "1" : "0") + "\n";
+    }
+
+    public static String setFaceRotationRequest(String nonce, String rotation) {
+        return "set-face-rotation\n" + normalizeNonce(nonce) + "\n" + validateRotation(rotation) + "\n";
+    }
+
+    public static String faceSelfCheckRequest(String nonce) {
+        return "run-face-self-check\n" + normalizeNonce(nonce) + "\n";
+    }
+
+    public static Map<String, String> parseSelfCheckSummary(String raw) {
+        Map<String, String> out = new java.util.LinkedHashMap<>();
+        if (raw == null) {
+            return out;
+        }
+        for (String token : raw.trim().split(";")) {
+            int eq = token.indexOf('=');
+            if (eq > 0) {
+                out.put(token.substring(0, eq).trim(), token.substring(eq + 1).trim());
+            }
+        }
+        return out;
+    }
 }

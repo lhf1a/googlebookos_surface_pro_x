@@ -1,0 +1,3 @@
+<permissions>
+    <feature name="android.hardware.biometrics.face" />
+</permissions>

@@ -91,8 +91,9 @@ Legend: `✅ Available` · `🟡 Partially Available` · `❌ Unavailable`
 | **USB Storage / Type Cover / Buttons** | ✅ Available | ✅ Available |
 | **USB-C DP / Native Multi-Display Settings** | ✅ Available | ✅ Available |
 | **Lower-Port USB ADB** | ✅ Available | ✅ Available |
-| **Advanced Settings**: [Full Feature Guide](docs/ADVANCED-SETTINGS.md) (Vulkan, Performance, Touch, Debugging, OTA & LiveCD Install) | ✅ Available | ✅ Available |
-| **IR / Windows Hello, SMS, Hibernate** | ❌ Unavailable | ❌ Unavailable |
+| **Advanced Settings**: [Full Feature Guide](docs/ADVANCED-SETTINGS.md) (Vulkan, Performance, Touch, Debugging, Lid & IR Face Unlock, OTA & LiveCD Install) | ✅ Available | ✅ Available |
+| **IR Face Unlock (Class 2)** | 🟡 Partially Available (HAL Implemented, Pending Live Test) | 🟡 Partially Available (HAL Implemented, Pending Live Test) |
+| **SMS, Hibernate** | ❌ Unavailable | ❌ Unavailable |
 
 ---
 
@@ -249,7 +250,7 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 - [IMAGE](docs/IMAGE.md)
 - [DEVELOPMENT](docs/DEVELOPMENT.md)
 - [PROVENANCE](docs/PROVENANCE.md)
-- [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md) — Full reference for all **Advanced Settings** modules (Vulkan, Performance Mode, Touch, Debugging, System update, LiveCD Install)
+- [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md) — Full reference for all **Advanced Settings** modules (Vulkan, Performance Mode, Touch, Debugging, Lid & IR Face Unlock, System update, LiveCD Install)
 - [OTA-HANDOFF](docs/OTA-HANDOFF.md) — On-device OTA & PC ADB upgrade guide
 - [USB-NVME-DEPLOY](docs/USB-NVME-DEPLOY.md)
 - [TODO](docs/TODO.md)
@@ -257,6 +258,7 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ### Subsystems & Hardware Bring-Up
 - [UNIFIED-SQ1-SQ2](docs/UNIFIED-SQ1-SQ2.md)
 - [CAMERA-BUILD](docs/CAMERA-BUILD.md)
+- [IR-HALL-FACE-UNLOCK-PLAN](docs/IR-HALL-FACE-UNLOCK-PLAN.md)
 - [SENSORS](docs/SENSORS.md)
 - [TOUCH-CALIBRATION](docs/TOUCH-CALIBRATION.md)
 - [TOUCH-DEVICE-COMPAT](docs/TOUCH-DEVICE-COMPAT.md)

@@ -54,6 +54,7 @@ public final class MainActivity extends Activity {
     private static final int PAGE_PERFORMANCE = 2;
     private static final int PAGE_TOUCH = 3;
     private static final int PAGE_DEBUG = 4;
+    private static final int PAGE_FACE_LID = 5;
     private static final int REQ_IMPORT_TOUCH = 401;
     private static final int REQ_EXPORT_TOUCH = 402;
     private static final int REQ_IMPORT_SSH_KEY = 403;
@@ -604,6 +605,49 @@ public final class MainActivity extends Activity {
         }, str::debugErrorMessage);
     }
 
+    private void saveHallLid(boolean enabled) {
+        runBridgeCall("advanced-control-hall-lid", () -> {
+            bridgeState = bridge.setHallLid(enabled);
+            return str.faceHallSavedMessage(enabled);
+        }, str::faceErrorMessage);
+    }
+
+    private void saveFaceUnlock(boolean enabled) {
+        runBridgeCall("advanced-control-face-toggle", () -> {
+            bridgeState = bridge.setFaceUnlock(enabled);
+            return str.faceUnlockSavedMessage(enabled);
+        }, str::faceErrorMessage);
+    }
+
+    private void saveFaceRotation(String rotation) {
+        runBridgeCall("advanced-control-face-rot", () -> {
+            bridgeState = bridge.setFaceRotation(rotation);
+            return str.faceRotationSavedMessage(rotation);
+        }, str::faceErrorMessage);
+    }
+
+    private void runFaceSelfCheck() {
+        runBridgeCall("advanced-control-face-check", () -> {
+            BridgeClient.FaceSelfCheckResult res = bridge.runFaceSelfCheck();
+            bridgeState = res.state;
+            return str.faceSelfCheckResultMessage(res.summary);
+        }, str::faceErrorMessage);
+    }
+
+    private void openSystemFaceSettings() {
+        try {
+            startActivity(new Intent("android.settings.FACE_SETTINGS"));
+        } catch (ActivityNotFoundException e) {
+            try {
+                startActivity(new Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS));
+            } catch (ActivityNotFoundException ex) {
+                bannerText = str.faceSystemSettingsUnavailable();
+                bannerIsError = true;
+                renderCurrentPage();
+            }
+        }
+    }
+
     private void showSshPasswordDialog() {
         if (busy || !bridgeState.bridgeReady || !bridgeState.sshAvailable) {
             return;
@@ -883,6 +927,8 @@ public final class MainActivity extends Activity {
             contentSlot.addView(buildTouchPage(), new FrameLayout.LayoutParams(-1, -1));
         } else if (currentPage == PAGE_DEBUG) {
             contentSlot.addView(buildDebugPage(), new FrameLayout.LayoutParams(-1, -1));
+        } else if (currentPage == PAGE_FACE_LID) {
+            contentSlot.addView(buildFaceLidPage(), new FrameLayout.LayoutParams(-1, -1));
         } else {
             contentSlot.addView(buildHomePage(), new FrameLayout.LayoutParams(-1, -1));
         }
@@ -1017,6 +1063,28 @@ public final class MainActivity extends Activity {
 
         View gapDebug = new View(this);
         cardGroup.addView(gapDebug, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
+        String faceLidSummary = !loadedOnce && busy
+                ? str.loadingSummary()
+                : str.faceLidHomeSubtitle(
+                        bridgeState.hallLidAvailable,
+                        bridgeState.hallLidEnabled,
+                        bridgeState.faceIrAvailable,
+                        bridgeState.faceUnlockEnabled,
+                        bridgeState.faceIrRotation);
+        View faceLidRow = buildCategoryRow(
+                SettingsTheme.ICON_FACE,
+                theme.faceBadgeBg,
+                theme.faceBadgeFg,
+                str.faceLidTitle(),
+                faceLidSummary,
+                4f,
+                4f,
+                () -> navigateTo(PAGE_FACE_LID));
+        cardGroup.addView(faceLidRow);
+
+        View gapFace = new View(this);
+        cardGroup.addView(gapFace, new LinearLayout.LayoutParams(-1, theme.dp(2)));
 
         View otaRow = buildCategoryRow(
                 SettingsTheme.ICON_UPDATE,
@@ -1797,6 +1865,163 @@ public final class MainActivity extends Activity {
                 this::confirmClearSshKeys));
 
         container.addView(sshActions);
+
+        scroll.addView(container);
+        return scroll;
+    }
+
+    private View buildFaceLidPage() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        int hPad = theme.dp(18);
+        container.setPadding(hPad, theme.dp(8), hPad, theme.dp(28));
+
+        container.addView(buildSubPageHeader(
+                str.faceLidTitle(), () -> navigateTo(PAGE_HOME), () -> reloadAll(true)));
+
+        if (!bridgeState.bridgeReady && !busy) {
+            container.addView(buildBanner(str.bridgeMissingBanner(), true), marginBottom(12));
+        } else if (!bannerText.isEmpty()) {
+            container.addView(buildBanner(bannerText, bannerIsError), marginBottom(12));
+        }
+
+        boolean canBridge = !busy && bridgeState.bridgeReady;
+
+        TextView lidHeader = new TextView(this);
+        lidHeader.setText(str.faceLidSection());
+        lidHeader.setTextColor(theme.primary);
+        lidHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        lidHeader.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        lidHeader.setPadding(theme.dp(8), theme.dp(2), theme.dp(8), theme.dp(8));
+        container.addView(lidHeader);
+
+        boolean canLid = canBridge && bridgeState.hallLidAvailable;
+        container.addView(buildToggleCard(
+                str.faceLidToggleTitle(),
+                str.faceLidBadge(bridgeState.hallLidAvailable, bridgeState.hallLidEnabled),
+                bridgeState.hallLidAvailable && bridgeState.hallLidEnabled,
+                str.faceLidSummary(bridgeState.hallLidAvailable, bridgeState.hallLidEnabled),
+                bridgeState.hallLidEnabled,
+                canLid,
+                () -> saveHallLid(!bridgeState.hallLidEnabled)), marginBottom(10));
+
+        LinearLayout lidInfoCard = new LinearLayout(this);
+        lidInfoCard.setOrientation(LinearLayout.VERTICAL);
+        lidInfoCard.addView(buildTouchInfoRow(
+                str.faceLidStateFieldLabel(),
+                str.faceLidStateLabel(bridgeState.hallLidState),
+                22f,
+                4f));
+        View lidGap = new View(this);
+        lidInfoCard.addView(lidGap, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+        lidInfoCard.addView(buildTouchInfoRow(
+                str.ssamCoverPostureFieldLabel(),
+                str.ssamCoverStateLabel(bridgeState.ssamCoverState),
+                4f,
+                22f));
+        container.addView(lidInfoCard, marginBottom(16));
+
+        TextView faceHeader = new TextView(this);
+        faceHeader.setText(str.faceUnlockSection());
+        faceHeader.setTextColor(theme.primary);
+        faceHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        faceHeader.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        faceHeader.setPadding(theme.dp(8), theme.dp(2), theme.dp(8), theme.dp(8));
+        container.addView(faceHeader);
+
+        boolean canFace = canBridge && bridgeState.faceIrAvailable;
+        container.addView(buildToggleCard(
+                str.faceUnlockTitle(),
+                str.faceUnlockBadge(bridgeState.faceIrAvailable, bridgeState.faceUnlockEnabled),
+                bridgeState.faceIrAvailable && bridgeState.faceUnlockEnabled,
+                str.faceUnlockSummary(bridgeState.faceIrAvailable, bridgeState.faceUnlockEnabled),
+                bridgeState.faceUnlockEnabled,
+                canFace,
+                () -> saveFaceUnlock(!bridgeState.faceUnlockEnabled)), marginBottom(10));
+
+        LinearLayout faceActions = new LinearLayout(this);
+        faceActions.setOrientation(LinearLayout.VERTICAL);
+
+        // Sensor rotation selector card
+        LinearLayout rotCard = new LinearLayout(this);
+        rotCard.setOrientation(LinearLayout.VERTICAL);
+        rotCard.setBackground(theme.cardItemBackground(22f, 4f, theme.card));
+        rotCard.setPadding(theme.dp(18), theme.dp(14), theme.dp(18), theme.dp(14));
+
+        TextView rotTitle = new TextView(this);
+        rotTitle.setText(str.faceRotationTitle());
+        rotTitle.setTextColor(theme.textPrimary);
+        rotTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        rotTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        rotCard.addView(rotTitle);
+
+        TextView rotSummary = new TextView(this);
+        rotSummary.setText(str.faceRotationSummary(bridgeState.faceIrRotation));
+        rotSummary.setTextColor(theme.textSecondary);
+        rotSummary.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        LinearLayout.LayoutParams rotSumLp = new LinearLayout.LayoutParams(-1, -2);
+        rotSumLp.topMargin = theme.dp(3);
+        rotSumLp.bottomMargin = theme.dp(10);
+        rotCard.addView(rotSummary, rotSumLp);
+
+        LinearLayout segRow = new LinearLayout(this);
+        segRow.setOrientation(LinearLayout.HORIZONTAL);
+        segRow.setBackground(theme.roundedRect(theme.cardAlt, 999));
+        segRow.setPadding(theme.dp(4), theme.dp(4), theme.dp(4), theme.dp(4));
+        for (String deg : DriverPolicy.FACE_ROTATIONS) {
+            boolean selected = deg.equals(bridgeState.faceIrRotation);
+            View seg = buildSegmentButton(
+                    str.faceRotationLabel(deg),
+                    selected,
+                    canFace,
+                    () -> saveFaceRotation(deg));
+            segRow.addView(seg, new LinearLayout.LayoutParams(0, -2, 1f));
+        }
+        rotCard.addView(segRow);
+        faceActions.addView(rotCard);
+
+        View fGap1 = new View(this);
+        faceActions.addView(fGap1, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
+        faceActions.addView(buildCategoryRow(
+                SettingsTheme.ICON_FACE,
+                theme.faceBadgeBg,
+                theme.faceBadgeFg,
+                str.faceSystemSettingsTitle(),
+                str.faceSystemSettingsSummary(),
+                4f,
+                4f,
+                bridgeState.faceIrAvailable,
+                this::openSystemFaceSettings));
+
+        View fGap2 = new View(this);
+        faceActions.addView(fGap2, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
+        faceActions.addView(buildTouchInfoRow(
+                str.faceHalStatusLabel(),
+                str.faceHalStatusValue(bridgeState.faceHalRunning, bridgeState.faceIrAvailable),
+                4f,
+                4f));
+
+        View fGap3 = new View(this);
+        faceActions.addView(fGap3, new LinearLayout.LayoutParams(-1, theme.dp(2)));
+
+        faceActions.addView(buildCategoryRow(
+                SettingsTheme.ICON_CHECK,
+                theme.okBg,
+                theme.okFg,
+                str.faceSelfCheckTitle(),
+                str.faceSelfCheckSummary(),
+                4f,
+                22f,
+                canBridge,
+                this::runFaceSelfCheck));
+
+        container.addView(faceActions);
 
         scroll.addView(container);
         return scroll;

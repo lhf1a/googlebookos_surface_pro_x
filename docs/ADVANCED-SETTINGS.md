@@ -1,6 +1,6 @@
 # 高级设置与设备端管理（Surface Advanced Settings）
 
-> 相关文档：[README（中文）](../README.zh-CN.md) · [README (EN)](../README.md) · [系统更新（OTA）与刷机移交说明](OTA-HANDOFF.md) · [触控校准](TOUCH-CALIBRATION.md) · [Type-C 与 USB 调试](TYPEC.md)
+> 相关文档：[README（中文）](../README.zh-CN.md) · [README (EN)](../README.md) · [霍尔 + IR 人脸解锁方案](IR-HALL-FACE-UNLOCK-PLAN.md) · [系统更新（OTA）与刷机移交说明](OTA-HANDOFF.md) · [触控校准](TOUCH-CALIBRATION.md) · [Type-C 与 USB 调试](TYPEC.md)
 
 Surface Pro X 移植版在 Android 系统内置 **高级设置（`SurfaceAdvancedControl.apk`，包名 `org.surface.advancedcontrol`）**，提供从日常性能/图形调优、触控校准备份、无线 ADB / root SSH 开发调试，到本机 OTA 升级及 USB LiveCD 一键安装至内置 NVMe 硬盘的一站式图形化管理能力。
 
@@ -10,7 +10,7 @@ Surface Pro X 移植版在 Android 系统内置 **高级设置（`SurfaceAdvance
 
 - **界面与本地化**：采用 Material 3 / Material You 风格设计，支持系统浅色 / 深色主题、动态取色及中英双语自动切换（非中文系统默认显示英文）。
 - **无人工授权提权的 Root 桥接**：应用本身仅运行于普通系统应用权限，无需用户手动向 KernelSU 授权。所有特权操作均通过内置于 initramfs root 上下文的守护脚本转发执行：
-  - `/bin/spx-advanced-control-boot`：负责 Vulkan 策略、CPU 调速器、触控停用/防误触/校准、网络 ADB 与 Dropbear SSH。
+  - `/bin/spx-advanced-control-boot`：负责 Vulkan 策略、CPU 调速器、触控停用/防误触/校准、霍尔传感器与 OV7251 红外人脸解锁开关、网络 ADB 与 Dropbear SSH。
   - `/bin/spx-ota-boot`、`spx-ota-stage`、`/bin/spx-internal-install`、`/bin/spx-ota-tool`：负责 OTA 校验/暂存升级以及 USB LiveCD 到内置硬盘的全盘写入。
 - **结构化数据边界**：应用与 root 桥接脚本之间仅通过带随机 nonce 的结构化请求交互（`/run/spx-advanced-control-request`、`/run/spx-ota-boot-request`），严格校验包名、调速器名、公钥格式、块设备路径与文件大小上限，不拼接或 `eval` 任何不可信命令字符串。
 - **配置持久化与救援保护**：配置保存于 `/data/vendor/spx-advanced-control` 与 `/data/vendor/sq2-touch-calibration`，每次正常开机由桥接服务自动恢复；若从 GRUB 进入救援模式（`sq2.rescue=1`）或显式传入 `sq2.cpufreq=0`，将按策略跳过调试/停用触控/调速器恢复，避免影响救援排查。
@@ -19,7 +19,7 @@ Surface Pro X 移植版在 Android 系统内置 **高级设置（`SurfaceAdvance
 
 ## 2. 主页功能模块总览
 
-高级设置主页包含六个一级卡片入口：
+高级设置主页包含七个一级卡片入口：
 
 | 模块 | 英文名称 | 核心用途 |
 | :--- | :--- | :--- |
@@ -27,6 +27,7 @@ Surface Pro X 移植版在 Android 系统内置 **高级设置（`SurfaceAdvance
 | **性能模式** | Performance Mode | 实时切换并持久化全核 cpufreq 调度策略 |
 | **触控** | Touch | 停用触控屏、切换防误触补丁、查看状态及导入/导出/重校准 |
 | **调试** | Debugging | 开关网络 ADB（5555）、initramfs `root` SSH（22）、管理密码与公钥 |
+| **霍尔与红外解锁** | Lid & IR Face Unlock | 开关霍尔开盖唤醒、监测键盘姿态、控制 OV7251 IR 人脸解锁（Class 2 / WEAK）及自检 |
 | **系统更新** | System update | 选择本地 `.tar.gz` / `.img` / `.img.gz` 进行无损或清空数据的系统升级 |
 | **写入内置硬盘** | Install to Internal Disk | 从 USB LiveCD 启动后，将系统完整写入 Surface Pro X 内置 NVMe SSD |
 
@@ -87,7 +88,20 @@ Surface Pro X 移植版在 Android 系统内置 **高级设置（`SurfaceAdvance
 
 > 提示：若在 Android 启动前即发生故障（无法进入桌面），可在 GRUB 启动菜单选择救援模式，参见 [BUILD — 第 7 节（救援模式与边界）](BUILD.md#7-边界)。
 
-### 3.5 系统更新（System update）
+### 3.5 霍尔与红外解锁（Lid & IR Face Unlock）
+
+详见架构设计文档：[霍尔传感器 + OV7251 IR 人脸解锁实施计划](IR-HALL-FACE-UNLOCK-PLAN.md)。
+
+- **霍尔开盖唤醒与合盖休眠（`SW_LID`）**：
+  - 通过动态发现 `/sys/devices/platform/gpio-keys-lid`（或对应 `gpio-keys` `switches` 含 `0` 的节点）读写 `disabled_switches`，可在不停用内核其他按键的前提下关闭或恢复 `SW_LID`（使用第三方强磁皮套误触发休眠时尤其实用，配置持久化于 `/data/vendor/spx-advanced-control/hall_lid_enabled`）。
+  - 若在内核命令行传入 `spx.hall_lid=0`（或以救援模式 `sq2.rescue=1` 启动），桥接服务将按命令行强制禁用 `SW_LID` 并阻止界面开启。
+  - **实时状态与反折保护**：同页实时展示 `OPEN` / `CLOSED` / `FOLDED_IGNORED` / `DISABLED` 以及 SSAM 键盘姿态（`laptop` / `closed` / `folded-back` / `folded-canvas` / `book` / `disconnected`）；当键盘反折至机身背面时，内核与 HAL 协同屏蔽误吸触发。
+- **OV7251 850nm 红外人脸解锁（Class 2 / `WEAK`）**：
+  - 当系统启动检测到 `ov7251` I2C 传感器且未通过 `spx.face=0` / `sq2.camera=0` 禁用时，`/bin/spx-face-stage` 自动挂载 `android.hardware.biometrics.face.IFace/default`（AIDL V4，`WEAK`）。
+  - **总开关与旋转角**：支持即时切换 `persist.spx.face.enabled`（禁用后 HAL 在打开相机前即拒绝认证/录入，保证 850nm 红外补光灯零点亮），以及按需调节 OV7251 传感器顺时针旋转角度（`0°` / `90°` / `180°` / `270°`，默认 `90°`，写入 `persist.spx.face.rotation`），两项配置均持久保存并在开机恢复。
+  - **快捷跳转与一键自检**：提供 **打开系统人脸解锁设置**（优先尝试 `android.settings.FACE_SETTINGS`，不可用时回退安全设置），以及通过 `spx-face-cli`（`--self-test`、`--status` 与开盖态 `--benchmark-ir 5`）一键核验 HMAC/HAT 密码原语、活体引擎、霍尔开关与 OV7251 预处理延迟的诊断按钮。
+
+### 3.6 系统更新（System update）
 
 - 同时接入 Android 系统设置中的 **系统更新** 入口（`android.settings.SYSTEM_UPDATE_SETTINGS`）与高级设置主页。
 - 支持选择本机存储上的升级包（`.tar.gz`）或完整压缩/原始镜像（`.img.gz` / `.img`）：
@@ -95,7 +109,7 @@ Surface Pro X 移植版在 Android 系统内置 **高级设置（`SurfaceAdvance
   - **清除数据并重装**：重新格式化 `userdata` 与 `metadata`（仅保留新系统基础分区状态）。
 - 支持两种底层写入通道：纯 ESP 更新可在必要校验后快速写入并重启；涉及 `super` 或完整镜像升级时，会通过 `/bin/spx-ota-stage` 写入 `SQ2PROBE` 与启动阶段标识，在重启早期 initramfs（Android 挂载 `super` 前）安全完成全量更新与 SHA-256 校验。完整用法与 PC 端一步脚本见 [OTA-HANDOFF](OTA-HANDOFF.md)。
 
-### 3.6 写入内置硬盘（Install to Internal Disk，LiveCD 模式）
+### 3.7 写入内置硬盘（Install to Internal Disk，LiveCD 模式）
 
 当你先将 Googlebook OS 刷入外接 USB SSD / U 盘试用（LiveCD 模式），确认硬件与使用习惯均符合预期后，可直接在运行中的 USB Android 桌面使用该功能将系统安装到 Surface Pro X 内置 NVMe 硬盘：
 

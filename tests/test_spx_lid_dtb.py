@@ -66,13 +66,46 @@ class LidDtbTests(unittest.TestCase):
         self.assertEqual(b[sw, "gpios"], liddt.cells(tlmm_phandle, 121, 1))
         self.assertEqual(b[sw, "linux,input-type"], liddt.cells(5))
         self.assertEqual(b[sw, "linux,code"], liddt.cells(0))
+        self.assertEqual(b[sw, "linux,can-disable"], b"")
+        self.assertEqual(b[sw, "debounce-interval"], liddt.cells(20))
         self.assertEqual(b[sw, "wakeup-source"], b"")
         self.assertEqual(b[sw, "wakeup-event-action"], liddt.cells(2))
+        self.assertFalse(liddt.has_hall_lid_node(before))
+        self.assertTrue(liddt.has_hall_lid_node(after))
 
         # Verify dtc decompiles the generated DTB cleanly.
         dts = subprocess.check_output(["dtc", "-q", "-I", "dtb", "-O", "dts"], input=after).decode()
         self.assertIn("gpio-keys-lid", dts)
         self.assertIn("lid-default-state", dts)
+        self.assertIn("linux,can-disable", dts)
+        self.assertIn("debounce-interval", dts)
+
+    def test_active_high_and_custom_debounce_validation(self):
+        before = self.fixture()
+        after = liddt.prepare(before, enable=True, active_low=False, debounce_ms=50)
+        b = liddt.dt.properties(libfdt.Fdt(after))
+        tlmm_phandle = int.from_bytes(b["/soc@0/pinctrl@3100000", "phandle"], "big")
+        sw = "/gpio-keys-lid/switch-lid"
+        self.assertEqual(b[sw, "gpios"], liddt.cells(tlmm_phandle, 121, 0))
+        self.assertEqual(b[sw, "wakeup-event-action"], liddt.cells(1))
+        self.assertEqual(b[sw, "debounce-interval"], liddt.cells(50))
+        with self.assertRaisesRegex(ValueError, "debounce_ms"):
+            liddt.prepare(before, debounce_ms=2000)
+
+    def test_folded_cover_kernel_patch_applies_cleanly(self):
+        patch_path = ROOT / "patches/spx-portable-boot/0010-spx-hall-lid-ignore-folded-cover.patch"
+        self.assertTrue(patch_path.is_file())
+        text = patch_path.read_text()
+        for symbol in ("input_spx_set_cover_folded", "input_spx_cover_is_folded", "folded-back", "folded-canvas", "book"):
+            self.assertIn(symbol, text)
+        ksrc = Path("/mnt/spx-workspace/chromebookOS/out/release-v0.8.0/kernel-build-sources/kernel")
+        if (ksrc / "drivers/input/input.c").is_file():
+            res = subprocess.run(
+                ["patch", "--dry-run", "--batch", "--forward", "--fuzz=0", "-p1", "-d", str(ksrc), "-i", str(patch_path)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
 
     def test_enable_and_ssam_lid_conflict_guard(self):
         before = self.fixture()
@@ -118,9 +151,10 @@ class LidDtbTests(unittest.TestCase):
 
     def test_overlay_dts_compiles_with_dtc(self):
         for enable in (False, True):
-            dts = liddt.emit_dts(enable=enable)
-            dtbo = subprocess.check_output(["dtc", "-q", "-@", "-I", "dts", "-O", "dtb"], input=dts.encode())
-            self.assertGreater(len(dtbo), 64)
+            for active_low in (True, False):
+                dts = liddt.emit_dts(enable=enable, active_low=active_low, debounce_ms=20)
+                dtbo = subprocess.check_output(["dtc", "-q", "-@", "-I", "dts", "-O", "dtb"], input=dts.encode())
+                self.assertGreater(len(dtbo), 64)
 
 
 if __name__ == "__main__":

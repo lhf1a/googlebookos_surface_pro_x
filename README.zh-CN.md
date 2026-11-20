@@ -91,8 +91,9 @@ flowchart LR
 | **USB 存储 / Type Cover / 物理按键** | ✅ 可用 | ✅ 可用 |
 | **USB-C DP / 原生多屏设置** | ✅ 可用 | ✅ 可用 |
 | **下口 USB ADB** | ✅ 可用 | ✅ 可用 |
-| **高级设置**：[全部功能说明](docs/ADVANCED-SETTINGS.md)（Vulkan、性能模式、触控、调试、OTA 与 LiveCD 安装） | ✅ 可用 | ✅ 可用 |
-| **红外 / Windows Hello、短信、休眠到磁盘** | ❌ 不可用 | ❌ 不可用 |
+| **高级设置**：[全部功能说明](docs/ADVANCED-SETTINGS.md)（Vulkan、性能模式、触控、调试、霍尔与红外解锁、OTA 与 LiveCD 安装） | ✅ 可用 | ✅ 可用 |
+| **红外人脸解锁（Class 2）** | 🟡 部分可用（HAL 已实现，待真机实测） | 🟡 部分可用（HAL 已实现，待真机实测） |
+| **短信、休眠到磁盘** | ❌ 不可用 | ❌ 不可用 |
 
 ---
 
@@ -248,7 +249,7 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 - [IMAGE](docs/IMAGE.md)
 - [DEVELOPMENT](docs/DEVELOPMENT.md)
 - [PROVENANCE](docs/PROVENANCE.md)
-- [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md) — **高级设置**全部功能说明（Vulkan、性能模式、触控、调试、系统更新、LiveCD 写入内置硬盘）
+- [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md) — **高级设置**全部功能说明（Vulkan、性能模式、触控、调试、霍尔与红外解锁、系统更新、LiveCD 写入内置硬盘）
 - [OTA-HANDOFF](docs/OTA-HANDOFF.md) — 设备端 OTA 与 PC ADB 一键升级指南
 - [USB-NVME-DEPLOY](docs/USB-NVME-DEPLOY.md)
 - [TODO](docs/TODO.md)
@@ -256,6 +257,7 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ### 子系统与硬件适配
 - [UNIFIED-SQ1-SQ2](docs/UNIFIED-SQ1-SQ2.md)
 - [CAMERA-BUILD](docs/CAMERA-BUILD.md)
+- [IR-HALL-FACE-UNLOCK-PLAN](docs/IR-HALL-FACE-UNLOCK-PLAN.md)
 - [SENSORS](docs/SENSORS.md)
 - [TOUCH-CALIBRATION](docs/TOUCH-CALIBRATION.md)
 - [TOUCH-DEVICE-COMPAT](docs/TOUCH-DEVICE-COMPAT.md)

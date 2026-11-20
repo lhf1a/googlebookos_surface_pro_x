@@ -27,10 +27,13 @@ dt = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dt)
 
 TLMM_LID_GPIO = 121
+GPIO_ACTIVE_HIGH = 0
 GPIO_ACTIVE_LOW = 1
 EV_SW = 5
 SW_LID = 0
+EV_ACT_ASSERTED = 1
 EV_ACT_DEASSERTED = 2
+DEFAULT_DEBOUNCE_MS = 20
 SSAM_LID_MARKER = "SQ2_LID_SWITCH_V1"
 
 
@@ -49,6 +52,11 @@ def has_ssam_lid_patch(kernel_source):
     if not path.is_file():
         return False
     return SSAM_LID_MARKER in path.read_text(errors="replace")
+
+
+def has_hall_lid_node(data):
+    fdt = libfdt.Fdt(data)
+    return fdt.path_offset("/gpio-keys-lid", quiet=(libfdt.NOTFOUND,)) >= 0
 
 
 def _claims_gpio121(before, tlmm_path):
@@ -74,7 +82,17 @@ def _existing_sw_lid_node(before):
     return None
 
 
-def prepare(data, *, enable=False, kernel_source=None, allow_ssam_conflict=False):
+def prepare(
+    data,
+    *,
+    enable=False,
+    active_low=True,
+    debounce_ms=DEFAULT_DEBOUNCE_MS,
+    kernel_source=None,
+    allow_ssam_conflict=False,
+):
+    if not (0 <= debounce_ms <= 1000):
+        raise ValueError(f"debounce_ms must be between 0 and 1000, got {debounce_ms}")
     if enable and kernel_source is not None and not allow_ssam_conflict:
         if has_ssam_lid_patch(kernel_source):
             raise ValueError(
@@ -145,6 +163,8 @@ def prepare(data, *, enable=False, kernel_source=None, allow_ssam_conflict=False
     )
     pin_phandle = ref(pin_node)
 
+    gpio_flags = GPIO_ACTIVE_LOW if active_low else GPIO_ACTIVE_HIGH
+    wakeup_action = EV_ACT_DEASSERTED if active_low else EV_ACT_ASSERTED
     lid_node = add(
         "/gpio-keys-lid",
         {
@@ -159,11 +179,13 @@ def prepare(data, *, enable=False, kernel_source=None, allow_ssam_conflict=False
         f"{lid_node}/switch-lid",
         {
             "label": strings("Lid"),
-            "gpios": cells(tlmm_phandle, TLMM_LID_GPIO, GPIO_ACTIVE_LOW),
+            "gpios": cells(tlmm_phandle, TLMM_LID_GPIO, gpio_flags),
             "linux,input-type": cells(EV_SW),
             "linux,code": cells(SW_LID),
+            "linux,can-disable": b"",
+            "debounce-interval": cells(debounce_ms),
             "wakeup-source": b"",
-            "wakeup-event-action": cells(EV_ACT_DEASSERTED),
+            "wakeup-event-action": cells(wakeup_action),
         },
     )
 
@@ -177,8 +199,12 @@ def prepare(data, *, enable=False, kernel_source=None, allow_ssam_conflict=False
     return bytes(fdt.as_bytearray())
 
 
-def emit_dts(*, enable=False):
+def emit_dts(*, enable=False, active_low=True, debounce_ms=DEFAULT_DEBOUNCE_MS):
+    if not (0 <= debounce_ms <= 1000):
+        raise ValueError(f"debounce_ms must be between 0 and 1000, got {debounce_ms}")
     status = "okay" if enable else "disabled"
+    gpio_flags = GPIO_ACTIVE_LOW if active_low else GPIO_ACTIVE_HIGH
+    wakeup_action = EV_ACT_DEASSERTED if active_low else EV_ACT_ASSERTED
     return f"""/dts-v1/;
 /plugin/;
 
@@ -192,11 +218,13 @@ def emit_dts(*, enable=False):
 
 		switch-lid {{
 			label = "Lid";
-			gpios = <&tlmm {TLMM_LID_GPIO} {GPIO_ACTIVE_LOW}>;
+			gpios = <&tlmm {TLMM_LID_GPIO} {gpio_flags}>;
 			linux,input-type = <{EV_SW}>;
 			linux,code = <{SW_LID}>;
+			linux,can-disable;
+			debounce-interval = <{debounce_ms}>;
 			wakeup-source;
-			wakeup-event-action = <{EV_ACT_DEASSERTED}>;
+			wakeup-event-action = <{wakeup_action}>;
 		}};
 	}};
 }};
@@ -222,6 +250,17 @@ if __name__ == "__main__":
         help='Set status = "okay" (default is "disabled" to avoid duplicate SW_LID with patch-sq2-lid.py)',
     )
     parser.add_argument(
+        "--active-high",
+        action="store_true",
+        help="Configure GPIO_ACTIVE_HIGH / EV_ACT_ASSERTED instead of GPIO_ACTIVE_LOW",
+    )
+    parser.add_argument(
+        "--debounce-ms",
+        type=int,
+        default=DEFAULT_DEBOUNCE_MS,
+        help=f"Switch debounce interval in milliseconds (default: {DEFAULT_DEBOUNCE_MS})",
+    )
+    parser.add_argument(
         "--kernel-source",
         type=Path,
         default=None,
@@ -236,6 +275,8 @@ if __name__ == "__main__":
     result = prepare(
         args.input.read_bytes(),
         enable=args.enable,
+        active_low=not args.active_high,
+        debounce_ms=args.debounce_ms,
         kernel_source=args.kernel_source,
         allow_ssam_conflict=args.allow_ssam_conflict,
     )

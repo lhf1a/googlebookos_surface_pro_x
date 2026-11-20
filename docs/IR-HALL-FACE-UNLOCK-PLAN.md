@@ -1,7 +1,7 @@
 # Surface Pro X (SQ1/SQ2) 霍尔传感器 + OV7251 IR 人脸解锁实施计划
 
 > **适用平台**：Microsoft Surface Pro X (SQ1 / SQ2)，Android 17 (`mica 16471258`) + Linux `6.18.60-sq2-android1` Hybrid (EL2)  
-> **状态**：设计方案（待按阶段落地与真机验证）  
+> **状态**：Phase 1–5 代码与主机验证已实现于分支 `feat/ir-hall-face-unlock`（包含霍尔 `SW_LID` DT 补丁与反折保护内核补丁 `0010`、OV7251 850nm 预处理/加密/活体/识别引擎、`IFace/default` AIDL V4 Class 2 HAL、initramfs 阶段挂载脚本及 `SurfaceAdvancedControl` 控制面板）；Phase 0 / Gate 5 实机端到端验收尚未执行（`hardware_validated = false`，仍需 SQ2 与 SQ1 真机实测确认极性、误识别率与续航功耗）。  
 > **核心原则**：不启用 QSEE fTPM、保持 `SPX-PORTABLE-SQ1-SQ2` 单镜像通用性、零常驻功耗回归、`s2idle` 休眠安全优先
 
 ---
@@ -270,19 +270,25 @@ sequenceDiagram
 
 ---
 
-## 6. 预计新增与修改文件清单
+## 6. 已实现的新增与修改文件清单
 
-| 阶段 | 路径 | 用途 |
+| 阶段 | 路径 | 用途 / 实现说明 |
 | :--- | :--- | :--- |
-| Phase 1 | `scripts/prepare-spx-lid-dtb.py` | 按真机实测完善 GPIO 121 极性与可选构建接入 |
-| Phase 1 | `scripts/full_image.py` | 接入霍尔 DT 可选开关（与 `patch-sq2-lid.py` 互斥校验） |
-| Phase 2 | `probe/face/spx-ir-preprocess.{h,cpp}` | OV7251 Y10 90° 旋转、归一化与 ROI 亮度评估 |
-| Phase 2 | `probe/face/spx-face-engine.{h,cpp}` | 轻量 ncnn/ONNX 人脸检测、活体与特征比对引擎 |
-| Phase 2 | `probe/face/spx-face-cli.cpp` | 真机脱机采集、延迟与准确率基准工具（仅测试用） |
-| Phase 3–4 | `probe/face/spx-face-hal.cpp` | `android.hardware.biometrics.face.IFace/default` AIDL 服务 + `SW_LID` 门控 + 看门狗 |
-| Phase 3–4 | `probe/face/spx-face-stage` | 启动阶段部署 HAL、模型、VINTF XML、feature XML 与 `.rc` |
-| Phase 5 | `scripts/full_image_face.py` | 全镜像打包、SHA256 清单与产物校验 |
-| Phase 5 | `tests/test_spx_face_hal.py` | 打包、状态机、锁定计数与霍尔冲突单元测试 |
+| Phase 1 | `scripts/prepare-spx-lid-dtb.py` | GPIO 121 `SW_LID`（支持 `--active-high`、`--debounce-ms`、`linux,can-disable` 与冲突检查） |
+| Phase 1 | `patches/spx-portable-boot/0010-spx-hall-lid-ignore-folded-cover.patch` | 键盘反折（`folded-back` / `folded-canvas` / `book`）时在输入核心抑制 `SW_LID=1` |
+| Phase 1 | `scripts/full_image.py` / `scripts/build-lts.py` | 接入霍尔 DT 与人脸 HAL 可选构建开关（`--without-hall-lid`、`--face-hal`、`--without-face`） |
+| Phase 1 | `tests/test_spx_lid_dtb.py` | DT `debounce-interval`/`linux,can-disable`、极性参数与补丁无模糊应用测试 |
+| Phase 2 | `probe/face/spx-ir-preprocess.{h,cpp}` | OV7251 `Y10`/`Y10P` 解包、`0/90/180/270` 旋转、ROI 亮度统计与 `gray8ToRgba` |
+| Phase 2 | `probe/face/spx-face-crypto.{h,cpp}` | SHA-256 / HMAC-SHA256 / HKDF-SHA256 / ChaCha20 与 37B `hw_auth_token_t` 校验封装 |
+| Phase 2 | `probe/face/spx-face-engine.{h,cpp}` | 主动 850nm 近红外检测、三层活体防伪、256-D 归一化嵌入、`/data/vendor_de/<userId>/facedata/` 加密存储与锁定计数 |
+| Phase 2 | `probe/face/spx-lid-monitor.{h,cpp}` | 动态 `EV_SW` (`SW_LID`) `poll()` + SSAM posture 只读监听与瞬间中止回调 |
+| Phase 2 | `probe/face/spx-face-cli.cpp` | 主机/真机自检（`--self-test`）、状态查询（`--status`）与 IR 基准工具（`--benchmark-ir`） |
+| Phase 3–4 | `probe/face/spx-face-hal.cpp` | `android.hardware.biometrics.face.IFace/default`（AIDL V4，Class 2 `WEAK`）HAL + `SW_LID` 门控 + 8s/45s 看门狗 |
+| Phase 3–4 | `probe/face/spx-face-stage` + `.xml` + `.rc` | 启动阶段按 `ov7251` 存在动态挂载 HAL、CLI、VINTF/权限 XML（剥离 `unavailable-feature`）与 `.rc` |
+| Phase 5 | `scripts/build-spx-face-aidl.py` / `scripts/build-spx-face-hal.py` | AIDL V4 NDK 存根归档、ARM64 NDK 编译与 `--run-host-tests` |
+| Phase 5 | `scripts/full_image_face.py` | 全镜像打包、ELF64 AArch64 校验与 initramfs hook 注入 |
+| Phase 5 | `probe/test2/spx-advanced-control-boot` & `probe/advanced-control/*.java` | `SurfaceAdvancedControl`「霍尔与红外解锁」页面：开盖开关、姿态监测、人脸开关、旋转角与一键自检 |
+| Phase 5 | `tests/spx_face_test.cpp` / `tests/test_spx_face_hal.py` / `tests/test_advanced_control.py` | 主机 ASan/UBSan 单元测试、APK 编译及桥接状态机验证 |
 
 ---
 

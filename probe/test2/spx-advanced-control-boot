@@ -23,6 +23,7 @@ TOUCH_NOISE_TOOL="${SPX_AC_NOISE_TOOL:-/bin/touch-noise-profile}"
 TOUCH_TAP_TOOL="${SPX_AC_TAP_TOOL:-/bin/touch-tap-profile}"
 TOUCH_READY_TOOL="${SPX_AC_READY_TOOL:-/bin/touch-framework-ready}"
 TOUCH_STORE="$DATA_ROOT/data/vendor/sq2-touch-calibration"
+FACE_CLI_BIN="${SPX_AC_FACE_CLI:-}"
 DROPBEAR_BIN="${SPX_AC_DROPBEAR_BIN:-dropbear}"
 DROPBEARKEY_BIN="${SPX_AC_DROPBEARKEY_BIN:-dropbearkey}"
 MKPASSWD_BIN="${SPX_AC_MKPASSWD_BIN:-mkpasswd}"
@@ -1143,6 +1144,300 @@ restore_debug_settings_on_boot() {
     fi
 }
 
+# ---- Hall Lid Switch & OV7251 IR Face Unlock Helpers ----
+
+is_hall_lid_cmdline_disabled() {
+    _cmd=" $(cat "$CMDLINE" 2>/dev/null || true) "
+    case "$_cmd" in
+        *' spx.hall_lid=0 '*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+validate_rotation() {
+    case "$1" in
+        0|90|180|270) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+resolve_face_cli_bin() {
+    if [ -n "$FACE_CLI_BIN" ] && [ -x "$FACE_CLI_BIN" ]; then
+        printf '%s' "$FACE_CLI_BIN"
+        return 0
+    fi
+    for _cand in \
+        "$DATA_ROOT/vendor/bin/spx-face-cli" \
+        /vendor/bin/spx-face-cli \
+        /etc/spx-face/spx-face-cli \
+        "$DATA_ROOT/etc/spx-face/spx-face-cli"; do
+        if [ -x "$_cand" ]; then
+            printf '%s' "$_cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
+bitmap_has_zero() {
+    _bm="$(printf '%s' "$1" | tr -d '\r\n ')"
+    [ -n "$_bm" ] || return 1
+    _old_ifs="$IFS"
+    IFS=','
+    for _tok in $_bm; do
+        case "$_tok" in
+            0|0-*)
+                IFS="$_old_ifs"
+                return 0
+                ;;
+        esac
+    done
+    IFS="$_old_ifs"
+    return 1
+}
+
+find_hall_lid_sysfs() {
+    _plat="$SYSFS/devices/platform/gpio-keys-lid"
+    if [ -d "$_plat" ] && { [ -e "$_plat/disabled_switches" ] || [ -e "$_plat/switches" ]; }; then
+        printf '%s' "$_plat"
+        return 0
+    fi
+    for _drv_dev in "$SYSFS"/bus/platform/drivers/gpio-keys/*; do
+        [ -d "$_drv_dev" ] || continue
+        [ -r "$_drv_dev/switches" ] || continue
+        _sw="$(cat "$_drv_dev/switches" 2>/dev/null || true)"
+        if bitmap_has_zero "$_sw"; then
+            printf '%s' "$_drv_dev"
+            return 0
+        fi
+    done
+    return 1
+}
+
+read_hall_lid_disabled_now() {
+    _ldir="$1"
+    [ -r "$_ldir/disabled_switches" ] || { printf '0'; return 0; }
+    _dis_bm="$(cat "$_ldir/disabled_switches" 2>/dev/null || true)"
+    if bitmap_has_zero "$_dis_bm"; then
+        printf '1'
+    else
+        printf '0'
+    fi
+}
+
+read_saved_hall_lid() {
+    _f="$STORE/hall_lid_enabled"
+    if [ -f "$_f" ] && [ ! -L "$_f" ]; then
+        _v="$(head -n 1 "$_f" 2>/dev/null | tr -d '\r\n ')"
+        case "$_v" in
+            0|1) printf '%s' "$_v"; return 0 ;;
+        esac
+    fi
+    printf ''
+}
+
+apply_hall_lid_now() {
+    _enable="$1"
+    validate_bool "$_enable" || return 1
+    _ldir="$(find_hall_lid_sysfs 2>/dev/null || true)"
+    [ -n "$_ldir" ] || return 1
+    [ -e "$_ldir/disabled_switches" ] || return 1
+    if [ "$_enable" = "1" ]; then
+        printf '\n' > "$_ldir/disabled_switches" 2>/dev/null || return 1
+        [ "$(read_hall_lid_disabled_now "$_ldir")" = "0" ] || return 1
+    else
+        printf '0\n' > "$_ldir/disabled_switches" 2>/dev/null || return 1
+        [ "$(read_hall_lid_disabled_now "$_ldir")" = "1" ] || return 1
+    fi
+    return 0
+}
+
+restore_hall_lid_on_boot() {
+    if is_rescue_boot; then
+        echo 'SPX_AC_BOOT_HALL_LID_SKIPPED rescue'
+        return 0
+    fi
+    if is_hall_lid_cmdline_disabled; then
+        _ldir="$(find_hall_lid_sysfs 2>/dev/null || true)"
+        if [ -n "$_ldir" ] && [ -e "$_ldir/disabled_switches" ]; then
+            apply_hall_lid_now 0 || true
+        fi
+        echo 'SPX_AC_BOOT_HALL_LID_SKIPPED cmdline'
+        return 0
+    fi
+    _saved="$(read_saved_hall_lid)"
+    [ -n "$_saved" ] || return 0
+    if apply_hall_lid_now "$_saved"; then
+        echo "SPX_AC_BOOT_HALL_LID_RESTORED $_saved"
+    else
+        echo "SPX_AC_BOOT_HALL_LID_RESTORE_FAILED $_saved"
+    fi
+}
+
+read_ssam_cover_state() {
+    for _sd in "$SYSFS"/bus/ssam/devices/*; do
+        [ -r "$_sd/state" ] || continue
+        _st="$(head -n 1 "$_sd/state" 2>/dev/null | tr -d '\r\n ')"
+        case "$_st" in
+            laptop|closed|disconnected|folded-back|folded-canvas|book|slate|tablet)
+                printf '%s' "$_st"
+                return 0
+                ;;
+        esac
+    done
+    printf 'unavailable'
+}
+
+has_ov7251_sysfs() {
+    for _od in "$SYSFS"/bus/i2c/drivers/ov7251/*-*; do
+        [ -e "$_od/name" ] || continue
+        return 0
+    done
+    return 1
+}
+
+read_saved_face_enabled() {
+    _f="$STORE/face_unlock_enabled"
+    if [ -f "$_f" ] && [ ! -L "$_f" ]; then
+        _v="$(head -n 1 "$_f" 2>/dev/null | tr -d '\r\n ')"
+        case "$_v" in
+            0|1) printf '%s' "$_v"; return 0 ;;
+        esac
+    fi
+    printf ''
+}
+
+read_saved_face_rotation() {
+    _f="$STORE/face_ir_rotation"
+    if [ -f "$_f" ] && [ ! -L "$_f" ]; then
+        _v="$(head -n 1 "$_f" 2>/dev/null | tr -d '\r\n ')"
+        if validate_rotation "$_v"; then
+            printf '%s' "$_v"
+            return 0
+        fi
+    fi
+    printf ''
+}
+
+restore_face_settings_on_boot() {
+    if is_rescue_boot; then
+        echo 'SPX_AC_BOOT_FACE_RESTORE_SKIPPED rescue'
+        return 0
+    fi
+    _fe="$(read_saved_face_enabled)"
+    if [ -n "$_fe" ]; then
+        android setprop persist.spx.face.enabled "$_fe" >/dev/null 2>&1 || true
+    fi
+    _fr="$(read_saved_face_rotation)"
+    if [ -n "$_fr" ]; then
+        android setprop persist.spx.face.rotation "$_fr" >/dev/null 2>&1 || true
+    fi
+}
+
+read_face_hal_running() {
+    _svc="$(android getprop init.svc.vendor.face-default 2>/dev/null | tr -d '\r\n ' || true)"
+    if [ "$_svc" = "running" ]; then
+        printf '1'
+    else
+        printf '0'
+    fi
+}
+
+json_bool_field() {
+    _jb_json="$1"
+    _jb_key="$2"
+    printf '%s' "$_jb_json" | sed -n "s/.*\"${_jb_key}\"[[:space:]]*:[[:space:]]*\\(true\\|false\\).*/\\1/p" | head -n 1
+}
+
+json_str_field() {
+    _js_json="$1"
+    _js_key="$2"
+    printf '%s' "$_js_json" | sed -n "s/.*\"${_js_key}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
+}
+
+json_num_field() {
+    _jn_json="$1"
+    _jn_key="$2"
+    printf '%s' "$_jn_json" | sed -n "s/.*\"${_jn_key}\"[[:space:]]*:[[:space:]]*\\([0-9][0-9.]*\\).*/\\1/p" | head -n 1
+}
+
+read_hall_and_face_snapshot() {
+    _lid_avail=0
+    _lid_enabled=0
+    _lid_state="UNAVAILABLE"
+    _ssam_state="$(read_ssam_cover_state)"
+
+    _ldir="$(find_hall_lid_sysfs 2>/dev/null || true)"
+    _cli_json=""
+    _cli_bin="$(resolve_face_cli_bin 2>/dev/null || true)"
+    if [ -n "$_cli_bin" ] && { [ -n "$FACE_CLI_BIN" ] || [ "$SYSFS" = "/sys" ]; }; then
+        _cli_json="$(run_with_timeout 5 "$_cli_bin" --status 2>/dev/null | tr -d '\r\n' || true)"
+    fi
+
+    if [ -n "$_ldir" ] && ! is_hall_lid_cmdline_disabled; then
+        _lid_avail=1
+        if [ "$(read_hall_lid_disabled_now "$_ldir")" = "1" ]; then
+            _lid_enabled=0
+            _lid_state="DISABLED"
+        else
+            _lid_enabled=1
+            _raw_closed=""
+            _eff_closed=""
+            if [ -n "$_cli_json" ]; then
+                _raw_closed="$(json_bool_field "$_cli_json" "raw_sw_lid_closed")"
+                _eff_closed="$(json_bool_field "$_cli_json" "effective_lid_closed")"
+                _cli_ssam="$(json_str_field "$_cli_json" "ssam_cover_state")"
+                if [ -n "$_cli_ssam" ] && [ "$_ssam_state" = "unavailable" ]; then
+                    _ssam_state="$_cli_ssam"
+                fi
+            elif [ -r "$_ldir/sw_state" ]; then
+                _sw_v="$(head -n 1 "$_ldir/sw_state" 2>/dev/null | tr -d '\r\n ')"
+                [ "$_sw_v" = "1" ] && _raw_closed="true" || _raw_closed="false"
+            fi
+            if [ "$_raw_closed" = "true" ]; then
+                case "$_ssam_state" in
+                    folded-back|folded-canvas|book) _lid_state="FOLDED_IGNORED" ;;
+                    *)
+                        if [ "$_eff_closed" = "false" ]; then
+                            _lid_state="FOLDED_IGNORED"
+                        else
+                            _lid_state="CLOSED"
+                        fi
+                        ;;
+                esac
+            else
+                _lid_state="OPEN"
+            fi
+        fi
+    fi
+
+    _face_avail=0
+    if has_ov7251_sysfs; then
+        _face_avail=1
+    elif [ -n "$_cli_json" ] && [ "$(json_bool_field "$_cli_json" "ov7251_bound")" = "true" ]; then
+        _face_avail=1
+    fi
+
+    _face_enabled="$(android getprop persist.spx.face.enabled 2>/dev/null | tr -d '\r\n ' || true)"
+    case "$_face_enabled" in
+        0|1) ;;
+        *)
+            _face_enabled="$(read_saved_face_enabled)"
+            [ -n "$_face_enabled" ] || _face_enabled=1
+            ;;
+    esac
+    case " $(cat "$CMDLINE" 2>/dev/null || true) " in
+        *' spx.face=0 '*|*' sq2.camera=0 '*|*' sq2.rescue=1 '*) _face_avail=0 ;;
+    esac
+
+    _face_rot="$(android getprop persist.spx.face.rotation 2>/dev/null | tr -d '\r\n ' || true)"
+    if ! validate_rotation "$_face_rot"; then
+        _face_rot="$(read_saved_face_rotation)"
+        validate_rotation "$_face_rot" || _face_rot="90"
+    fi
+    _face_hal_running="$(read_face_hal_running)"
+}
+
 publish_file() {
     _dir="$1"
     _name="$2"
@@ -1288,6 +1583,7 @@ publish_state() {
     _ssh_pw_set=0
     is_ssh_password_set && _ssh_pw_set=1
     _ssh_keys="$(count_ssh_authorized_keys)"
+    read_hall_and_face_snapshot
 
     _body="bridge_version=1
 vulkan_available=$_vk_avail
@@ -1325,6 +1621,14 @@ ssh_password_set=$_ssh_pw_set
 ssh_key_count=$_ssh_keys
 debug_vm_ip=$DEBUG_VM_IP
 debug_lan_ips=$DEBUG_LAN_IPS
+hall_lid_available=$_lid_avail
+hall_lid_enabled=$_lid_enabled
+hall_lid_state=$_lid_state
+ssam_cover_state=$_ssam_state
+face_ir_available=$_face_avail
+face_unlock_enabled=$_face_enabled
+face_hal_running=$_face_hal_running
+face_ir_rotation=$_face_rot
 "
     publish_file "$_dir" "state" "$_body"
 }
@@ -2021,6 +2325,109 @@ handle_request() {
             publish_state "$_dir" || true
             send_reply "$_dir" "$_nonce" "OK"
             ;;
+        set-hall-lid)
+            _en="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            if ! validate_bool "$_en"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_arguments"
+                return 0
+            fi
+            if [ "$_en" = "1" ] && is_hall_lid_cmdline_disabled; then
+                send_reply "$_dir" "$_nonce" "ERROR" "hall_lid_cmdline_disabled"
+                return 0
+            fi
+            if ! apply_hall_lid_now "$_en"; then
+                publish_state "$_dir" || true
+                send_reply "$_dir" "$_nonce" "ERROR" "hall_lid_unavailable"
+                return 0
+            fi
+            if ! write_atomic_file "$STORE/hall_lid_enabled" 600 "$_en"; then
+                publish_state "$_dir" || true
+                send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
+                return 0
+            fi
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        set-face-unlock)
+            _en="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            if ! validate_bool "$_en"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_arguments"
+                return 0
+            fi
+            if ! android setprop persist.spx.face.enabled "$_en" >/dev/null 2>&1; then
+                send_reply "$_dir" "$_nonce" "ERROR" "setprop_failed"
+                return 0
+            fi
+            _actual="$(android getprop persist.spx.face.enabled 2>/dev/null | tr -d '\r\n' || true)"
+            if [ "$_actual" != "$_en" ]; then
+                send_reply "$_dir" "$_nonce" "ERROR" "verify_mismatch"
+                return 0
+            fi
+            if ! write_atomic_file "$STORE/face_unlock_enabled" 600 "$_en"; then
+                publish_state "$_dir" || true
+                send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
+                return 0
+            fi
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        set-face-rotation)
+            _rot="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            if ! validate_rotation "$_rot"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_rotation"
+                return 0
+            fi
+            if ! android setprop persist.spx.face.rotation "$_rot" >/dev/null 2>&1; then
+                send_reply "$_dir" "$_nonce" "ERROR" "setprop_failed"
+                return 0
+            fi
+            _actual="$(android getprop persist.spx.face.rotation 2>/dev/null | tr -d '\r\n' || true)"
+            if [ "$_actual" != "$_rot" ]; then
+                send_reply "$_dir" "$_nonce" "ERROR" "verify_mismatch"
+                return 0
+            fi
+            if ! write_atomic_file "$STORE/face_ir_rotation" 600 "$_rot"; then
+                publish_state "$_dir" || true
+                send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
+                return 0
+            fi
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        run-face-self-check)
+            _cli_bin="$(resolve_face_cli_bin 2>/dev/null || true)"
+            if [ -z "$_cli_bin" ]; then
+                publish_state "$_dir" || true
+                send_reply "$_dir" "$_nonce" "ERROR" "face_cli_missing"
+                return 0
+            fi
+            if ! run_with_timeout 10 "$_cli_bin" --self-test >/dev/null 2>&1; then
+                publish_state "$_dir" || true
+                send_reply "$_dir" "$_nonce" "ERROR" "face_self_test_failed"
+                return 0
+            fi
+            read_hall_and_face_snapshot
+            _bench="skip"
+            _bench_p50=""
+            _bench_mean=""
+            if [ "$_face_avail" = "1" ] && [ "$_lid_state" != "CLOSED" ]; then
+                _bjson="$(run_with_timeout 8 "$_cli_bin" --benchmark-ir 5 --rotation "$_face_rot" 2>/dev/null | tr -d '\r\n' || true)"
+                _bp="$(json_num_field "$_bjson" "proc_p50_ms")"
+                _bm="$(json_num_field "$_bjson" "last_roi_mean")"
+                if [ -n "$_bp" ]; then
+                    _bench="pass"
+                    _bench_p50="$_bp"
+                    _bench_mean="${_bm:-0}"
+                else
+                    _bench="fail"
+                fi
+            fi
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK" "self_test=pass;ov7251=$_face_avail;hal_running=$_face_hal_running;lid_state=$_lid_state;ssam=$_ssam_state;ir_bench=$_bench;proc_p50_ms=${_bench_p50:-na};last_roi_mean=${_bench_mean:-na}"
+            ;;
         *)
             send_reply "$_dir" "$_nonce" "ERROR" "unknown_command"
             ;;
@@ -2031,6 +2438,8 @@ handle_request() {
 restore_saved_governor_on_boot
 restore_touch_disabled_on_boot
 restore_debug_settings_on_boot
+restore_hall_lid_on_boot
+restore_face_settings_on_boot
 
 active_user=""
 state_sent=0

@@ -817,7 +817,7 @@ def install_userdata_growth(records, bodies, compiled_resize=None):
         records['bin/'+name]=new_record(0o100755)
 
 def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modules=None, camera=None, sensors=None, anonymous=False,
-                     runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None, typec=None, gnss=None, ksu_userspace=None,
+                     runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None, typec=None, gnss=None, face=None, ksu_userspace=None,
                      ota_version=None, source_commit=None, super_sha256=''):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
@@ -987,6 +987,9 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
     if gnss is not None:
         from full_image_gnss import install as install_gnss
         install_gnss(records, bodies, gnss, new_record)
+    if face is not None:
+        from full_image_face import install as install_face
+        install_face(records, bodies, face, new_record)
     if anonymous:
         from full_image_anonymous import apply as anonymize
         privacy = anonymize(records, bodies, new_record)
@@ -1085,6 +1088,19 @@ def build(args, compile_kernel):
         gnss = load_gnss(
             gnss_hal_path=getattr(args, 'gnss_hal', None),
             compiled_hal=compiled_helpers.get(GNSS_HAL_TARGET),
+        )
+    face = None
+    if not getattr(args, 'without_face', False):
+        from full_image_face import CLI_TARGET as FACE_CLI_TARGET, HAL_TARGET as FACE_HAL_TARGET, load as load_face
+        compiled_face = None
+        if FACE_HAL_TARGET in compiled_helpers:
+            compiled_face = {
+                'hal': compiled_helpers[FACE_HAL_TARGET],
+                'cli': compiled_helpers.get(FACE_CLI_TARGET),
+            }
+        face = load_face(
+            face_hal_path=getattr(args, 'face_hal', None),
+            compiled_payload=compiled_face,
         )
     compiled=reuse['kernel'] if reuse else None
     kernel_build_dir = None
@@ -1224,6 +1240,19 @@ def build(args, compile_kernel):
     dt=bundle/'android-el2.dtb'
     dt.write_bytes(typec_dtb(dt.read_bytes()))
     dt.write_bytes(module('spx_backlight_dt', 'prepare-spx-backlight-dtb.py').prepare(dt.read_bytes()))
+    lid_dt = module('spx_lid_dt', 'prepare-spx-lid-dtb.py')
+    hall_lid_enabled = bool(
+        (args.kernel_mode == 'source' or getattr(args, 'enable_hall_lid', False))
+        and not getattr(args, 'without_hall_lid', False)
+    )
+    if not lid_dt.has_hall_lid_node(dt.read_bytes()):
+        dt.write_bytes(
+            lid_dt.prepare(
+                dt.read_bytes(),
+                enable=hall_lid_enabled,
+                kernel_source=(extracted/'kernel' if compiled and not reuse else None),
+            )
+        )
     if args.graphics == 'hybrid' and args.kernel_mode == 'source':
         from full_image_qti_submit import build_payload
         graphics_inputs['qti_submit_payload'] = build_payload(
@@ -1241,6 +1270,7 @@ def build(args, compile_kernel):
         suspend=suspend,
         typec=typec,
         gnss=gnss,
+        face=face,
         anonymous=True,
         runtime_replacements=replacements,
         graphics_inputs=graphics_inputs,
@@ -1285,6 +1315,7 @@ def build(args, compile_kernel):
         graphics_report=graphics_report,
         ota=ota_report,
         suspend_enabled=True,
+        hall_lid_enabled=hall_lid_enabled,
         typec_enabled=True, lower_usb_default='adb',
         suspend_module_source=('matched-incremental-rebuild' if reuse else 'fresh-compiled') if compiled else 'image-paired-prebuilt',
         ksu_next=({k: str(v) if isinstance(v, Path) else v for k, v in ksu_next_info.items() if not k.endswith('_bytes')} if ksu_next_info else None),
@@ -1299,6 +1330,9 @@ def build(args, compile_kernel):
         gnss_enabled=gnss is not None,
         gnss_aidl_version=(4 if gnss is not None else None),
         gnss_hal_sha256=_sha256(gnss) if gnss is not None else None,
+        face_enabled=face is not None,
+        face_aidl_version=(4 if face is not None else None),
+        face_hal_sha256=_sha256(face['hal']) if face is not None else None,
         components_reused=bool(reuse),
         kernel_compiled_this_run=bool(compiled and not reuse),
         esp_only=esp_only,

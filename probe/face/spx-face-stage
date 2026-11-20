@@ -1,0 +1,50 @@
+#!/bin/busybox sh
+# Stage the native Surface Pro X OV7251 IR IFace AIDL V4 HAL when OV7251 is present.
+set -eu
+case " $(cat /proc/cmdline) " in *' spx.face=0 '*|*' sq2.camera=0 '*|*' sq2.rescue=1 '*) exit 0;; esac
+grep -q 'microsoft,surface-pro-x' /sys/firmware/devicetree/base/compatible || exit 0
+
+has_ir=0
+for dev in /sys/bus/i2c/drivers/ov7251/*-*; do
+    [ -e "$dev/name" ] || continue
+    has_ir=1
+    break
+done
+[ "$has_ir" = 1 ] || exit 0
+
+source=/etc/spx-face
+vendor=/newroot/vendor
+grep -q '^overlay /newroot/vendor overlay ' /proc/mounts
+test -x "$source/android.hardware.biometrics.face-service.default"
+
+mkdir -p "$vendor/bin/hw" "$vendor/etc/vintf/manifest" "$vendor/etc/init" "$vendor/etc/permissions"
+cp "$source/android.hardware.biometrics.face-service.default" \
+    "$vendor/bin/hw/android.hardware.biometrics.face-service.default"
+chmod 755 "$vendor/bin/hw/android.hardware.biometrics.face-service.default"
+
+if [ -x "$source/spx-face-cli" ]; then
+    cp "$source/spx-face-cli" "$vendor/bin/spx-face-cli"
+    chmod 755 "$vendor/bin/spx-face-cli"
+fi
+
+cp "$source/android.hardware.biometrics.face-service.spx.xml" \
+    "$vendor/etc/vintf/manifest/android.hardware.biometrics.face-service.spx.xml"
+chmod 644 "$vendor/etc/vintf/manifest/android.hardware.biometrics.face-service.spx.xml"
+
+cp "$source/android.hardware.biometrics.face-service.spx.rc" \
+    "$vendor/etc/init/android.hardware.biometrics.face-service.spx.rc"
+chmod 644 "$vendor/etc/init/android.hardware.biometrics.face-service.spx.rc"
+
+cp "$source/android.hardware.biometrics.face.xml" \
+    "$vendor/etc/permissions/android.hardware.biometrics.face.xml"
+chmod 644 "$vendor/etc/permissions/android.hardware.biometrics.face.xml"
+
+features=/newroot/system/etc/permissions/features.xml
+if [ -f "$features" ] && grep -q 'android\.hardware\.biometrics\.face' "$features"; then
+    staged=/newroot/debug_ramdisk/spx-face-features.xml
+    sed '/<unavailable-feature[[:space:]]\+name="android\.hardware\.biometrics\.face"[[:space:]]*\/>/d' "$features" > "$staged"
+    chmod 644 "$staged"
+    mount --bind "$staged" "$features"
+fi
+
+echo SPX_FACE_HAL_STAGED

@@ -1,0 +1,157 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SPX Kernel Integration <noreply@localhost>
+Date: Sat, 21 Nov 2026 03:54:00 +0800
+Subject: [PATCH] Input: surface_aggregator_tabletsw: mask Hall SW_LID when cover is folded back
+
+When a Surface Type Cover is folded 180 degrees behind the tablet
+("folded-back", "folded-canvas", or "book" posture), its hinge/edge
+magnets can falsely trip the chassis Hall lid sensor (TLMM GPIO 121) and
+emit SW_LID=1 during tablet use.
+
+Track the SSAM cover folded posture in the built-in input core so
+gpio_keys and surface_aggregator_tabletsw have no module load-order
+dependency, force SW_LID=0 whenever the cover is folded behind the
+screen, and clear any already-asserted SW_LID switch on transition into a
+folded state. Standard "closed", "laptop", and "disconnected" (third-party
+magnetic folio) postures remain completely unaffected.
+---
+ drivers/input/input.c                         | 33 +++++++++++++++++++
+ drivers/platform/surface/surface_aggregator_tabletsw.c | 19 +++++++++++
+ include/linux/input.h                         |  3 ++
+ 3 files changed, 55 insertions(+)
+
+diff --git a/drivers/input/input.c b/drivers/input/input.c
+--- a/drivers/input/input.c
++++ b/drivers/input/input.c
+@@ -24,6 +24,7 @@
+ #include <linux/poll.h>
+ #include <linux/device.h>
+ #include <linux/kstrtox.h>
++#include <linux/atomic.h>
+ #include <linux/mutex.h>
+ #include <linux/rcupdate.h>
+ #include "input-compat.h"
+@@ -48,6 +49,7 @@
+  * input handlers.
+  */
+ static DEFINE_MUTEX(input_mutex);
++static atomic_t spx_cover_folded = ATOMIC_INIT(0);
+ 
+ static const struct input_value input_value_sync = { EV_SYN, SYN_REPORT, 1 };
+ 
+@@ -250,6 +252,10 @@
+ 		break;
+ 
+ 	case EV_SW:
++		if (code == SW_LID && value && input_spx_cover_is_folded()) {
++			value = 0;
++			*pval = 0;
++		}
+ 		if (is_event_supported(code, dev->swbit, SW_MAX) &&
+ 		    !!test_bit(code, dev->sw) != !!value) {
+ 
+@@ -398,6 +404,33 @@
+ }
+ EXPORT_SYMBOL(input_event);
+ 
++bool input_spx_cover_is_folded(void)
++{
++	return atomic_read(&spx_cover_folded) != 0;
++}
++EXPORT_SYMBOL_GPL(input_spx_cover_is_folded);
++
++void input_spx_set_cover_folded(bool folded)
++{
++	int prev = atomic_xchg(&spx_cover_folded, folded ? 1 : 0);
++	struct input_dev *dev;
++
++	if (!folded || prev)
++		return;
++
++	guard(mutex)(&input_mutex);
++
++	list_for_each_entry(dev, &input_dev_list, node) {
++		if (test_bit(EV_SW, dev->evbit) &&
++		    test_bit(SW_LID, dev->swbit)) {
++			input_report_switch(dev, SW_LID, 0);
++			input_sync(dev);
++		}
++	}
++}
++EXPORT_SYMBOL_GPL(input_spx_set_cover_folded);
++
++
+ /**
+  * input_inject_event() - send input event from input handler
+  * @handle: input handle to send event through
+diff --git a/drivers/platform/surface/surface_aggregator_tabletsw.c b/drivers/platform/surface/surface_aggregator_tabletsw.c
+--- a/drivers/platform/surface/surface_aggregator_tabletsw.c
++++ b/drivers/platform/surface/surface_aggregator_tabletsw.c
+@@ -9,6 +9,7 @@
+ #include <linux/input.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
++#include <linux/string.h>
+ #include <linux/types.h>
+ #include <linux/workqueue.h>
+ 
+@@ -85,6 +86,16 @@
+ 	.attrs = ssam_tablet_sw_attrs,
+ };
+ 
++static bool ssam_tablet_sw_is_folded(struct ssam_tablet_sw *sw,
++				     const struct ssam_tablet_sw_state *state)
++{
++	const char *name = sw->ops.state_name(sw, state);
++
++	return !strcmp(name, "folded-back") ||
++	       !strcmp(name, "folded-canvas") ||
++	       !strcmp(name, "book");
++}
++
+ static void ssam_tablet_sw_update_workfn(struct work_struct *work)
+ {
+ 	struct ssam_tablet_sw *sw = container_of(work, struct ssam_tablet_sw, update_work);
+@@ -99,6 +110,9 @@
+ 		return;
+ 	sw->state = state;
+ 
++	/* Update folded posture before lid/tablet switch synchronization. */
++	input_spx_set_cover_folded(ssam_tablet_sw_is_folded(sw, &state));
++
+ 	/* Send SW_TABLET_MODE event. */
+ 	tablet = sw->ops.state_is_tablet_mode(sw, &state);
+ 	input_report_switch(sw->mode_switch, SW_TABLET_MODE, tablet);
+@@ -155,6 +169,8 @@
+ 	sw->mode_switch->id.bustype = BUS_HOST;
+ 	sw->mode_switch->dev.parent = &sdev->dev;
+ 
++	input_spx_set_cover_folded(ssam_tablet_sw_is_folded(sw, &sw->state));
++
+ 	tablet = sw->ops.state_is_tablet_mode(sw, &sw->state);
+ 	input_set_capability(sw->mode_switch, EV_SW, SW_TABLET_MODE);
+ 	input_report_switch(sw->mode_switch, SW_TABLET_MODE, tablet);
+@@ -193,6 +210,8 @@
+ {
+ 	struct ssam_tablet_sw *sw = ssam_device_get_drvdata(sdev);
+ 
++	input_spx_set_cover_folded(false);
++
+ 	sysfs_remove_group(&sdev->dev.kobj, &ssam_tablet_sw_group);
+ 
+ 	ssam_device_notifier_unregister(sdev, &sw->notif);
+diff --git a/include/linux/input.h b/include/linux/input.h
+--- a/include/linux/input.h
++++ b/include/linux/input.h
+@@ -459,6 +459,9 @@
+ 	input_event(dev, EV_SW, code, !!value);
+ }
+ 
++void input_spx_set_cover_folded(bool folded);
++bool input_spx_cover_is_folded(void);
++
+ static inline void input_sync(struct input_dev *dev)
+ {
+ 	input_event(dev, EV_SYN, SYN_REPORT, 0);
+-- 
+2.43.0

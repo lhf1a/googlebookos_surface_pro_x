@@ -56,6 +56,14 @@ final class BridgeClient {
         int sshKeyCount;
         String debugVmIp = "";
         String debugLanIps = "";
+        boolean hallLidAvailable;
+        boolean hallLidEnabled;
+        String hallLidState = "UNAVAILABLE";
+        String ssamCoverState = "unavailable";
+        boolean faceIrAvailable;
+        boolean faceUnlockEnabled = true;
+        boolean faceHalRunning;
+        String faceIrRotation = "90";
     }
 
     static final class TouchImportResult {
@@ -334,6 +342,49 @@ final class BridgeClient {
         }
         state.debugVmIp = map.getOrDefault("debug_vm_ip", "");
         state.debugLanIps = map.getOrDefault("debug_lan_ips", "");
+        state.hallLidAvailable = "1".equals(map.get("hall_lid_available"));
+        state.hallLidEnabled = "1".equals(map.get("hall_lid_enabled"));
+        String lidState = map.getOrDefault("hall_lid_state", "UNAVAILABLE");
+        state.hallLidState = lidState.isEmpty() ? "UNAVAILABLE" : lidState;
+        String cover = map.getOrDefault("ssam_cover_state", "unavailable");
+        state.ssamCoverState = cover.isEmpty() ? "unavailable" : cover;
+        state.faceIrAvailable = "1".equals(map.get("face_ir_available"));
+        String faceEn = map.get("face_unlock_enabled");
+        state.faceUnlockEnabled = faceEn == null ? state.faceIrAvailable : "1".equals(faceEn);
+        state.faceHalRunning = "1".equals(map.get("face_hal_running"));
+        String rot = map.getOrDefault("face_ir_rotation", "90");
+        state.faceIrRotation = DriverPolicy.isValidRotation(rot) ? rot : "90";
+    }
+
+    static final class FaceSelfCheckResult {
+        final BridgeState state;
+        final String summary;
+
+        FaceSelfCheckResult(BridgeState state, String summary) {
+            this.state = state;
+            this.summary = summary;
+        }
+    }
+
+    BridgeState setHallLid(boolean enabled) throws Exception {
+        sendRequest(DriverPolicy.setHallLidRequest(newNonce(), enabled), 15000);
+        return loadState(false);
+    }
+
+    BridgeState setFaceUnlock(boolean enabled) throws Exception {
+        sendRequest(DriverPolicy.setFaceUnlockRequest(newNonce(), enabled), 15000);
+        return loadState(false);
+    }
+
+    BridgeState setFaceRotation(String rotation) throws Exception {
+        sendRequest(DriverPolicy.setFaceRotationRequest(newNonce(), rotation), 15000);
+        return loadState(false);
+    }
+
+    FaceSelfCheckResult runFaceSelfCheck() throws Exception {
+        String payload = sendRequest(DriverPolicy.faceSelfCheckRequest(newNonce()), 25000);
+        BridgeState state = loadState(false);
+        return new FaceSelfCheckResult(state, payload != null ? payload.trim() : "");
     }
 
     private void fillLocalFallback(BridgeState state) {
@@ -389,6 +440,52 @@ final class BridgeClient {
             }
             state.currentGovernor = mixed ? "mixed" : current;
             state.cpuPolicies = pols.toString();
+        }
+        File lidDir = new File("/sys/devices/platform/gpio-keys-lid");
+        if (lidDir.isDirectory()) {
+            state.hallLidAvailable = true;
+            state.hallLidEnabled = true;
+            File disFile = new File(lidDir, "disabled_switches");
+            if (disFile.isFile()) {
+                try {
+                    String dis = new String(Files.readAllBytes(disFile.toPath()), StandardCharsets.UTF_8).trim();
+                    for (String tok : dis.split(",")) {
+                        if ("0".equals(tok) || tok.startsWith("0-")) {
+                            state.hallLidEnabled = false;
+                            break;
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            state.hallLidState = state.hallLidEnabled ? "OPEN" : "DISABLED";
+        }
+        File ovDir = new File("/sys/bus/i2c/drivers/ov7251");
+        File[] ovEntries = ovDir.listFiles();
+        if (ovEntries != null) {
+            for (File f : ovEntries) {
+                if (f.getName().contains("-")) {
+                    state.faceIrAvailable = true;
+                    break;
+                }
+            }
+        }
+        try {
+            String fe = runReadOnly("/system/bin/getprop", DriverPolicy.FACE_ENABLED_PROP).trim();
+            state.faceUnlockEnabled = !"0".equals(fe);
+        } catch (Exception ignored) {
+        }
+        try {
+            String fr = runReadOnly("/system/bin/getprop", DriverPolicy.FACE_ROTATION_PROP).trim();
+            if (DriverPolicy.isValidRotation(fr)) {
+                state.faceIrRotation = fr;
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            String svc = runReadOnly("/system/bin/getprop", "init.svc.vendor.face-default").trim();
+            state.faceHalRunning = "running".equals(svc);
+        } catch (Exception ignored) {
         }
     }
 

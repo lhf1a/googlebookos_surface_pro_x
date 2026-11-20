@@ -352,6 +352,33 @@ public class PolicyAndStringsTest {
     check("SSH Service".equals(en.debugSshTitle()), "en ssh title");
     check(zh.debugAdbSummary(true, true, "5555", "192.168.0.1", "wlan0:192.168.1.50").contains("192.168.0.1:5555"), "vm ip in adb summary");
 
+    // Hall Lid & IR Face Unlock policy requests & bilingual strings
+    check("90".equals(DriverPolicy.validateRotation("90")), "rot 90");
+    check("180".equals(DriverPolicy.validateRotation(" 180 ")), "rot 180");
+    for (String r : new String[]{"0", "90", "180", "270"}) {
+      check(DriverPolicy.isValidRotation(r), "valid rot " + r);
+    }
+    for (String badRot : new String[]{"", "45", "-90", "90;id", null}) {
+      try { DriverPolicy.validateRotation(badRot); throw new AssertionError("badRot: " + badRot); }
+      catch (IllegalArgumentException expected) {}
+    }
+    check(DriverPolicy.setHallLidRequest("abc-123", true).equals("set-hall-lid\nabc-123\n1\n"), "hallOnReq");
+    check(DriverPolicy.setHallLidRequest("abc-123", false).equals("set-hall-lid\nabc-123\n0\n"), "hallOffReq");
+    check(DriverPolicy.setFaceUnlockRequest("abc-123", true).equals("set-face-unlock\nabc-123\n1\n"), "faceOnReq");
+    check(DriverPolicy.setFaceUnlockRequest("abc-123", false).equals("set-face-unlock\nabc-123\n0\n"), "faceOffReq");
+    check(DriverPolicy.setFaceRotationRequest("abc-123", "270").equals("set-face-rotation\nabc-123\n270\n"), "faceRotReq");
+    check(DriverPolicy.faceSelfCheckRequest("abc-123").equals("run-face-self-check\nabc-123\n"), "faceSelfCheckReq");
+    java.util.Map<String, String> sc = DriverPolicy.parseSelfCheckSummary("self_test=pass;ov7251=1;ir_bench=pass;proc_p50_ms=3.1");
+    check("pass".equals(sc.get("self_test")) && "1".equals(sc.get("ov7251")), "parseSelfCheckSummary");
+
+    check("霍尔与红外解锁".equals(zh.faceLidTitle()), "zh faceLid title");
+    check("Lid & IR Face Unlock".equals(en.faceLidTitle()), "en faceLid title");
+    check(en.faceLidTitle().equals(jpFallback.faceLidTitle()), "jp->en faceLid title");
+    check("红外人脸解锁".equals(zh.faceUnlockTitle()), "zh faceUnlock title");
+    check("IR Face Unlock".equals(en.faceUnlockTitle()), "en faceUnlock title");
+    check(en.faceLidHomeSubtitle(true, true, true, true, "90").contains("90°"), "en faceLid home sub");
+    check(zh.faceSelfCheckResultMessage("self_test=pass;ov7251=1;ir_bench=pass;proc_p50_ms=3.1;lid_state=OPEN;ssam=laptop").contains("3.1"), "zh self check msg");
+
     System.out.println("DRIVER_POLICY_AND_I18N_OK");
   }
 }
@@ -1289,6 +1316,199 @@ print(f'$6$testsalt${digest}')
                 r'com\.android\.settings\.icon"\)\s*\n\s*A: http://schemas\.android\.com/apk/res/android:resource\(0x01010025\)=@0x7f[0-9a-f]{6}',
             )
             self.assertIn('com.android.settings.icon_tintable', dump)
+
+    def test_bridge_daemon_hall_lid_and_face_unlock_flow(self):
+        bridge = ROOT / 'probe/test2/spx-advanced-control-boot'
+        with tempfile.TemporaryDirectory(prefix='spx-face-lid-bridge-test-') as td:
+            root = Path(td)
+            data_root = root / 'root'
+            sysfs = root / 'sys'
+            run_dir = root / 'run'
+            cmdline = root / 'cmdline'
+            cmdline.write_text('console=tty0 androidboot.hardware=android-desktop\n')
+            run_dir.mkdir(parents=True, exist_ok=True)
+
+            # Stage Hall gpio-keys-lid, SSAM posture, and OV7251 I2C driver sysfs
+            lid_dir = sysfs / 'devices/platform/gpio-keys-lid'
+            lid_dir.mkdir(parents=True, exist_ok=True)
+            (lid_dir / 'switches').write_text('0\n')
+            (lid_dir / 'disabled_switches').write_text('\n')
+            (lid_dir / 'sw_state').write_text('0\n')
+
+            ssam_dir = sysfs / 'bus/ssam/devices/01:03:00:01:01'
+            ssam_dir.mkdir(parents=True, exist_ok=True)
+            (ssam_dir / 'state').write_text('laptop\n')
+
+            ov_dir = sysfs / 'bus/i2c/drivers/ov7251/19-0060'
+            ov_dir.mkdir(parents=True, exist_ok=True)
+            (ov_dir / 'name').write_text('ov7251\n')
+
+            app_files = data_root / 'data/user_de/0/org.surface.advancedcontrol/files'
+            app_files.mkdir(parents=True, exist_ok=True)
+
+            props_file = root / 'props.json'
+            props_file.write_text(json.dumps({
+                'sys.boot_completed': '1',
+                'init.svc.vendor.face-default': 'running',
+            }))
+            wrapper = root / 'mock-android'
+            wrapper.write_text(f'''#!/usr/bin/env python3
+import json, pathlib, sys
+props_p = pathlib.Path({str(props_file)!r})
+args = sys.argv[1:]
+if args == ['cmd', 'activity', 'get-current-user']:
+    print('0')
+elif args[:1] == ['getprop'] and len(args) == 2:
+    print(json.loads(props_p.read_text()).get(args[1], ''))
+elif args[:1] == ['setprop'] and len(args) == 3:
+    data = json.loads(props_p.read_text())
+    data[args[1]] = args[2]
+    props_p.write_text(json.dumps(data))
+else:
+    sys.exit(2)
+''')
+            wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+
+            cli_mock = root / 'mock-face-cli'
+            cli_mock.write_text(f'''#!/usr/bin/env python3
+import json, pathlib, sys
+sysfs = pathlib.Path({str(sysfs)!r})
+args = sys.argv[1:]
+if '--self-test' in args:
+    print('PASS spx-face-cli --self-test')
+elif '--status' in args:
+    sw = (sysfs / 'devices/platform/gpio-keys-lid/sw_state').read_text().strip()
+    ssam = (sysfs / 'bus/ssam/devices/01:03:00:01:01/state').read_text().strip()
+    raw_closed = sw == '1'
+    folded = ssam in ('folded-back', 'folded-canvas', 'book')
+    print(json.dumps({{
+        'lid_device_found': True,
+        'raw_sw_lid_closed': raw_closed,
+        'ssam_cover_state': ssam,
+        'effective_lid_closed': raw_closed and not folded,
+        'ov7251_bound': True,
+    }}))
+elif '--benchmark-ir' in args:
+    print(json.dumps({{
+        'frames': 5, 'detected': 0, 'live': 0,
+        'proc_p50_ms': 3.21, 'proc_p95_ms': 4.10, 'last_roi_mean': 0.42,
+    }}))
+else:
+    sys.exit(2)
+''')
+            cli_mock.chmod(cli_mock.stat().st_mode | stat.S_IXUSR)
+
+            def run_once(req_body=None, use_cli=True):
+                if req_body is not None:
+                    (app_files / 'request').write_text(req_body)
+                env = dict(
+                    os.environ,
+                    SPX_AC_ROOT=str(data_root),
+                    SPX_AC_SYSFS=str(sysfs),
+                    SPX_AC_RUN=str(run_dir),
+                    SPX_AC_CMDLINE=str(cmdline),
+                    SPX_AC_ANDROID_WRAPPER=str(wrapper),
+                    SPX_AC_LOCK_DIR=str(root / 'lock'),
+                    SPX_AC_TMP_REQ=str(root / 'tmp.req'),
+                    SPX_AC_TMP_TOUCH=str(root / 'tmp.touch'),
+                    SPX_AC_FACE_CLI=str(cli_mock) if use_cli else '',
+                    SPX_AC_BOOT_WAIT='0',
+                    SPX_AC_ONCE='1',
+                )
+                res = subprocess.run(['sh', str(bridge)], env=env, text=True, capture_output=True)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                state = {}
+                for line in (app_files / 'state').read_text().splitlines():
+                    if '=' in line:
+                        k, v = line.split('=', 1)
+                        state[k] = v
+                reply = (app_files / 'reply').read_text().splitlines() if (app_files / 'reply').is_file() else []
+                return state, reply, res.stdout
+
+            # 1. Initial snapshot
+            state, _, _ = run_once()
+            self.assertEqual(state['hall_lid_available'], '1')
+            self.assertEqual(state['hall_lid_enabled'], '1')
+            self.assertEqual(state['hall_lid_state'], 'OPEN')
+            self.assertEqual(state['ssam_cover_state'], 'laptop')
+            self.assertEqual(state['face_ir_available'], '1')
+            self.assertEqual(state['face_unlock_enabled'], '1')
+            self.assertEqual(state['face_hal_running'], '1')
+            self.assertEqual(state['face_ir_rotation'], '90')
+
+            # 2. Folded-back masking vs true closed (both CLI + pure-shell fallback)
+            (lid_dir / 'sw_state').write_text('1\n')
+            (ssam_dir / 'state').write_text('folded-back\n')
+            state, reply, _ = run_once('refresh\nfl-1\n', use_cli=True)
+            self.assertEqual(reply, ['fl-1', 'OK'])
+            self.assertEqual(state['hall_lid_state'], 'FOLDED_IGNORED')
+            state, _, _ = run_once(use_cli=False)
+            self.assertEqual(state['hall_lid_state'], 'FOLDED_IGNORED')
+
+            (ssam_dir / 'state').write_text('closed\n')
+            state, _, _ = run_once(use_cli=True)
+            self.assertEqual(state['hall_lid_state'], 'CLOSED')
+            (lid_dir / 'sw_state').write_text('0\n')
+            (ssam_dir / 'state').write_text('laptop\n')
+
+            # 3. Toggle Hall lid off -> persists and restores across simulated reboot
+            state, reply, _ = run_once('set-hall-lid\nfl-2\n0\n')
+            self.assertEqual(reply, ['fl-2', 'OK'])
+            self.assertEqual(state['hall_lid_enabled'], '0')
+            self.assertEqual(state['hall_lid_state'], 'DISABLED')
+            self.assertEqual((lid_dir / 'disabled_switches').read_text().strip(), '0')
+
+            (lid_dir / 'disabled_switches').write_text('\n')
+            state, _, stdout = run_once()
+            self.assertIn('SPX_AC_BOOT_HALL_LID_RESTORED 0', stdout)
+            self.assertEqual((lid_dir / 'disabled_switches').read_text().strip(), '0')
+            self.assertEqual(state['hall_lid_enabled'], '0')
+
+            state, reply, _ = run_once('set-hall-lid\nfl-3\n1\n')
+            self.assertEqual(reply, ['fl-3', 'OK'])
+            self.assertEqual(state['hall_lid_enabled'], '1')
+            self.assertEqual(state['hall_lid_state'], 'OPEN')
+            self.assertEqual((lid_dir / 'disabled_switches').read_text().strip(), '')
+
+            # 4. IR Face Unlock toggle, rotation validation, persistence & self-check
+            state, reply, _ = run_once('set-face-unlock\nfl-4\n0\n')
+            self.assertEqual(reply, ['fl-4', 'OK'])
+            self.assertEqual(state['face_unlock_enabled'], '0')
+            self.assertEqual(json.loads(props_file.read_text())['persist.spx.face.enabled'], '0')
+
+            _, reply, _ = run_once('set-face-rotation\nfl-bad-rot\n45\n')
+            self.assertEqual(reply, ['fl-bad-rot', 'ERROR', 'invalid_rotation'])
+
+            state, reply, _ = run_once('set-face-rotation\nfl-5\n180\n')
+            self.assertEqual(reply, ['fl-5', 'OK'])
+            self.assertEqual(state['face_ir_rotation'], '180')
+
+            # Simulate reboot wiping live properties while /data store remains
+            props_file.write_text(json.dumps({
+                'sys.boot_completed': '1',
+                'init.svc.vendor.face-default': 'running',
+            }))
+            state, _, _ = run_once()
+            self.assertEqual(state['face_unlock_enabled'], '0')
+            self.assertEqual(state['face_ir_rotation'], '180')
+            self.assertEqual(json.loads(props_file.read_text())['persist.spx.face.rotation'], '180')
+
+            state, reply, _ = run_once('run-face-self-check\nfl-6\n')
+            self.assertEqual(reply[:2], ['fl-6', 'OK'])
+            self.assertIn('self_test=pass', reply[2])
+            self.assertIn('ov7251=1', reply[2])
+            self.assertIn('ir_bench=pass', reply[2])
+            self.assertIn('proc_p50_ms=3.21', reply[2])
+
+            # 5. Kernel cmdline spx.hall_lid=0 forces Hall lid disabled and blocks enable
+            cmdline.write_text('console=tty0 spx.hall_lid=0 androidboot.hardware=android-desktop\n')
+            (lid_dir / 'disabled_switches').write_text('\n')
+            state, _, stdout = run_once()
+            self.assertIn('SPX_AC_BOOT_HALL_LID_SKIPPED cmdline', stdout)
+            self.assertEqual(state['hall_lid_available'], '0')
+            self.assertEqual((lid_dir / 'disabled_switches').read_text().strip(), '0')
+            _, reply, _ = run_once('set-hall-lid\nfl-7\n1\n')
+            self.assertEqual(reply, ['fl-7', 'ERROR', 'hall_lid_cmdline_disabled'])
 
 
 if __name__ == '__main__':

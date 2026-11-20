@@ -45,6 +45,8 @@ final class SettingsTheme {
     final int otaBadgeFg;
     final int debugBadgeBg;
     final int debugBadgeFg;
+    final int faceBadgeBg;
+    final int faceBadgeFg;
     final int dangerBadgeBg;
     final int dangerBadgeFg;
 
@@ -134,6 +136,8 @@ final class SettingsTheme {
             otaBadgeFg = 0xFFC7BFFF;
             debugBadgeBg = 0xFF133A3E;
             debugBadgeFg = 0xFF7ADBE3;
+            faceBadgeBg = 0xFF1F364D;
+            faceBadgeFg = 0xFF9CD4FF;
             dangerBadgeBg = 0xFF45241E;
             dangerBadgeFg = 0xFFFFB4A9;
             mesaChipBg = 0xFF1A3A4A;
@@ -157,6 +161,8 @@ final class SettingsTheme {
             otaBadgeFg = 0xFF4B38A8;
             debugBadgeBg = 0xFFD4F1F4;
             debugBadgeFg = 0xFF0A6670;
+            faceBadgeBg = 0xFFD9EDFF;
+            faceBadgeFg = 0xFF0E5A9E;
             dangerBadgeBg = 0xFFFCE8E6;
             dangerBadgeFg = 0xFFA50E0E;
             mesaChipBg = 0xFFD9F2FF;
@@ -278,6 +284,7 @@ final class SettingsTheme {
     static final int ICON_KEY = 18;
     static final int ICON_CERT = 19;
     static final int ICON_DISK = 20;
+    static final int ICON_FACE = 21;
 
     View iconView(Context ctx, int kind, int color, int sizeDp) {
         IconGlyphView v = new IconGlyphView(ctx, kind, color, density);
@@ -527,6 +534,26 @@ final class SettingsTheme {
                     paint.setStyle(Paint.Style.FILL);
                     c.drawCircle(cx + r * 0.46f, cy + r * 0.45f, Math.max(1.8f, 1.3f * density), paint);
                     paint.setStyle(Paint.Style.STROKE);
+                    break;
+                }
+                case ICON_FACE: {
+                    float r = s * 0.34f;
+                    float corner = r * 0.42f;
+                    // Four biometric scan bracket corners + stylized face
+                    c.drawLine(cx - r, cy - r, cx - r + corner, cy - r, paint);
+                    c.drawLine(cx - r, cy - r, cx - r, cy - r + corner, paint);
+                    c.drawLine(cx + r, cy - r, cx + r - corner, cy - r, paint);
+                    c.drawLine(cx + r, cy - r, cx + r, cy - r + corner, paint);
+                    c.drawLine(cx - r, cy + r, cx - r + corner, cy + r, paint);
+                    c.drawLine(cx - r, cy + r, cx - r, cy + r - corner, paint);
+                    c.drawLine(cx + r, cy + r, cx + r - corner, cy + r, paint);
+                    c.drawLine(cx + r, cy + r, cx + r, cy + r - corner, paint);
+
+                    c.drawLine(cx - r * 0.34f, cy - r * 0.28f, cx - r * 0.34f, cy - r * 0.08f, paint);
+                    c.drawLine(cx + r * 0.34f, cy - r * 0.28f, cx + r * 0.34f, cy - r * 0.08f, paint);
+                    c.drawLine(cx, cy - r * 0.26f, cx, cy + r * 0.10f, paint);
+                    RectF smile = new RectF(cx - r * 0.38f, cy + r * 0.08f, cx + r * 0.38f, cy + r * 0.48f);
+                    c.drawArc(smile, 20f, 140f, false, paint);
                     break;
                 }
                 default:
