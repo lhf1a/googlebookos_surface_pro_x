@@ -1197,6 +1197,7 @@ def build(args, compile_kernel):
     typec = load_typec(private/'typec', bundle/'Image', args.output/'typec', compiled)
     dt=bundle/'android-el2.dtb'
     dt.write_bytes(typec_dtb(dt.read_bytes()))
+    dt.write_bytes(module('spx_backlight_dt', 'prepare-spx-backlight-dtb.py').prepare(dt.read_bytes()))
     if args.graphics == 'hybrid' and args.kernel_mode == 'source':
         from full_image_qti_submit import build_payload
         graphics_inputs['qti_submit_payload'] = build_payload(

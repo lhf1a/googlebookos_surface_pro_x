@@ -1,3 +1,6 @@
 <resources>
     <bool name="config_supportAutoRotation">true</bool>
+    <item name="config_screenBrightnessSettingMinimumFloat" format="float" type="dimen">0.006</item>
+    <item name="config_screenBrightnessSettingMaximumFloat" format="float" type="dimen">1.0</item>
+    <item name="config_screenBrightnessSettingDefaultFloat" format="float" type="dimen">0.4</item>
 </resources>
