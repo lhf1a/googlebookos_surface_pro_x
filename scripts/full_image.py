@@ -890,6 +890,38 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
         touch_files, _ = module('full_image_touch', 'build-touch-calibration.py').build(ROOT)
         mode, bodies[wizard] = touch_files[wizard]
     records[wizard] = new_record(mode)
+    wifi_hal = 'etc/googlebook-security/lib64/libsq2-wifi-hal.so'
+    if wifi_hal in compiled_helpers:
+        bodies[wifi_hal] = compiled_helpers[wifi_hal]
+        records[wifi_hal] = new_record(0o100644)
+    elif wifi_hal in bodies and wifi_hal not in (runtime_replacements or {}):
+        connectivity_bin = ROOT / 'out/connectivity/libsq2-wifi-hal.so'
+        connectivity_sources = [
+            ROOT / 'probe/test2/sq2-wifi-hal.cpp',
+            ROOT / 'probe/test2/sq2-wifi-driver.c',
+            ROOT / 'probe/test2/sq2-hci-bridge.c',
+            ROOT / 'scripts/build-sq2-connectivity.sh',
+        ]
+        source_mtime = max(p.stat().st_mtime for p in connectivity_sources)
+        headers_ready = (ROOT / 'out/connectivity/source/headers/wifi_hal.h').is_file()
+        is_fresh = connectivity_bin.is_file() and connectivity_bin.stat().st_mtime >= source_mtime
+        if not is_fresh and headers_ready:
+            ndk_clang = next(
+                (
+                    cand for cand in (
+                        Path('/mnt/spx-workspace/toolchains/sq2-graphics/android-ndk-r28c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang'),
+                        Path('/root/.cache/sq2-graphics/android-ndk-r28c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang'),
+                    ) if cand.is_file()
+                ),
+                None,
+            )
+            if ndk_clang is not None:
+                subprocess.run(['bash', str(ROOT / 'scripts/build-sq2-connectivity.sh')], check=True)
+                is_fresh = connectivity_bin.is_file() and connectivity_bin.stat().st_mtime >= source_mtime
+        if connectivity_bin.is_file():
+            require(is_fresh, 'Stale out/connectivity/libsq2-wifi-hal.so; rebuild via scripts/build-sq2-connectivity.sh')
+            bodies[wifi_hal] = connectivity_bin.read_bytes()
+            records[wifi_hal] = new_record(0o100644)
     if graphics == 'hybrid':
         from full_image_advanced_control import install as install_advanced_control
         # Recompile this small APK and install its bridge daemon on every assembly, including component reuse.
