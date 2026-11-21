@@ -1,0 +1,7 @@
+<resources>
+    <!-- Non-Pixel hardware has no vendor.google.google_battery.IGoogleBattery HAL. -->
+    <bool name="config_battery_defender_warning_enabled">false</bool>
+    <bool name="config_adaptive_charging_warning_enabled">false</bool>
+    <bool name="config_incompatible_charging_warning_enabled">false</bool>
+    <bool name="config_insufficient_charging_warning_enabled">false</bool>
+</resources>

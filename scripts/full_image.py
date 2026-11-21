@@ -926,6 +926,32 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
         from full_image_advanced_control import install as install_advanced_control
         # Recompile this small APK and install its bridge daemon on every assembly, including component reuse.
         install_advanced_control(records, bodies, new_record)
+    from full_image_hygiene_runtime import (
+        EC_STUB_TARGET,
+        SYSUI_OVERLAY_REL,
+        install as install_hygiene_runtime,
+    )
+    install_hygiene_runtime(
+        records,
+        bodies,
+        new_record,
+        private=private,
+        sysui_overlay=compiled_helpers.get('etc/sq2-qti-system/root/' + SYSUI_OVERLAY_REL),
+        ec_stub=compiled_helpers.get(EC_STUB_TARGET),
+    )
+    from full_image_radio import (
+        RADIO_BIN_TARGET,
+        RADIO_OVERLAY_TARGET,
+        install as install_radio_runtime,
+    )
+    install_radio_runtime(
+        records,
+        bodies,
+        new_record,
+        private=private,
+        radio_bin=compiled_helpers.get(RADIO_BIN_TARGET),
+        radio_overlay=compiled_helpers.get(RADIO_OVERLAY_TARGET),
+    )
     # Universal builds do not rewrite reference hashes or gate boot on content
     # hashes. Preserve imported manifests as metadata; no startup consumer uses
     # them for validation after this policy is applied.

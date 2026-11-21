@@ -9,6 +9,7 @@ STAGE=${SPX_HYGIENE_STAGE:-$ROOT/debug_ramdisk/spx-service-hygiene}
 DEV=${SPX_HYGIENE_DEV:-/dev}
 SYSFS=${SPX_HYGIENE_SYSFS:-/sys}
 KREL=${SPX_HYGIENE_KREL:-$(uname -r)}
+EC_STUB=${SPX_HYGIENE_EC_STUB:-/etc/spx-hygiene/spx-ec-executor-stub}
 
 mkdir -p "$STAGE"
 chmod 755 "$STAGE"
@@ -286,8 +287,36 @@ if [ "$has_cros_ec" = 0 ]; then
     disable_service_rc system/etc/init/timberslide.rc no_cros_ec
     disable_service_rc system/etc/init/ec_crash_collector.rc no_cros_ec
     disable_named_service_rc vendor/etc/init/android.hardware.health-service.android-desktop.rc vendor.ec-battery-limits-setprop no_cros_ec
-    disable_service_rc vendor/etc/init/ec-executor.rc no_cros_ec
-    mask_vintf_manifest vendor/etc/vintf/manifest/vendor.google.desktop.ec-executor.xml no_cros_ec
+    if [ -x "$EC_STUB" ] && [ -f "$ROOT/vendor/etc/init/ec-executor.rc" ]; then
+        _ec_bin="$ROOT/vendor/bin/hw/vendor.google.desktop.ec-executor"
+        if grep -q "^overlay $ROOT/vendor overlay " /proc/mounts 2>/dev/null; then
+            mkdir -p "$ROOT/vendor/bin/hw"
+            cp "$EC_STUB" "$_ec_bin"
+            chmod 755 "$_ec_bin"
+        elif [ -f "$_ec_bin" ]; then
+            _ec_staged="$STAGE/spx-ec-executor-stub"
+            cp "$EC_STUB" "$_ec_staged"
+            chmod 755 "$_ec_staged"
+            mount --bind "$_ec_staged" "$_ec_bin"
+        fi
+        _ec_rc="$STAGE/$(safe_name vendor/etc/init/ec-executor.rc).rc"
+        cat > "$_ec_rc" <<'EOF'
+# spx-hygiene (no_cros_ec): no-op IEcExecutor/default stub avoids health HAL VINTF lookup spam
+on post-fs
+    restorecon /vendor/bin/hw/vendor.google.desktop.ec-executor
+
+service vendor.google.desktop.ec-executor /vendor/bin/hw/vendor.google.desktop.ec-executor
+    class hal
+    user system
+    group system
+    interface aidl vendor.google.desktop.IEcExecutor/default
+EOF
+        bind_staged "$_ec_rc" "$ROOT/vendor/etc/init/ec-executor.rc"
+        echo "SPX_HYGIENE_STUB_SVC=vendor/etc/init/ec-executor.rc reason=no_cros_ec"
+    else
+        disable_service_rc vendor/etc/init/ec-executor.rc no_cros_ec
+        mask_vintf_manifest vendor/etc/vintf/manifest/vendor.google.desktop.ec-executor.xml no_cros_ec
+    fi
 fi
 
 # 4. Suspend notifier & suspend diagnostics.

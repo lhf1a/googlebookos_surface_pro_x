@@ -9,7 +9,9 @@
 #include <sys/file.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <time.h>
 #include <atomic>
+#include <climits>
 #include <condition_variable>
 #include <functional>
 #include <queue>
@@ -261,6 +263,25 @@ public:
         if(auto r=R())r->getDeviceIdentityResponse(info(s,e),v[0],v[1],v[2],v[3]);return ok();
     }
     Status getImei(int32_t s) override { RadioError e=RadioError::NONE;auto v=query<mdm::ImeiInfo>([]{auto r=core->dms.call(0x25);if(r.error)throw std::runtime_error("IMEI unavailable");mdm::ImeiInfo i;i.type=mdm::ImeiInfo::ImeiType::PRIMARY;i.imei=ascii(r.get(0x11));i.svn=ascii(r.get(0x13));return i;},e);if(auto r=R())r->getImeiResponse(info(s,e),v);return ok(); }
+    Status getModemActivityInfo(int32_t s) override {
+        mdm::ActivityStatsInfo stats{};
+        struct timespec ts{};
+        uint64_t ms = 1;
+        if (clock_gettime(CLOCK_BOOTTIME, &ts) == 0 && ts.tv_sec >= 0) {
+            ms = static_cast<uint64_t>(ts.tv_sec) * 1000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000000ULL;
+            if (ms == 0) ms = 1;
+        }
+        stats.sleepModeTimeMs = 0;
+        stats.idleModeTimeMs = ms > static_cast<uint64_t>(INT_MAX) ? INT_MAX : static_cast<int32_t>(ms);
+        mdm::ActivityStatsTechSpecificInfo lte{};
+        lte.rat = AccessNetwork::EUTRAN;
+        lte.frequencyRange = mdm::ActivityStatsTechSpecificInfo::FREQUENCY_RANGE_UNKNOWN;
+        lte.txmModetimeMs = {0, 0, 0, 0, 0};
+        lte.rxModeTimeMs = 0;
+        stats.techSpecificInfo = {lte};
+        if (auto r = R()) r->getModemActivityInfoResponse(info(s), stats);
+        return ok();
+    }
     Status getModemStackStatus(int32_t s) override { if(auto r=R())r->getModemStackStatusResponse(info(s),true);return ok(); }
     Status getRadioCapability(int32_t s) override { mdm::RadioCapability c;c.raf=LTE_RAF;c.logicalModemUuid="sq2-modem0";c.status=mdm::RadioCapability::STATUS_SUCCESS;if(auto r=R())r->getRadioCapabilityResponse(info(s),c);return ok(); }
     Status sendDeviceState(int32_t s,mdm::DeviceStateType,bool) override { if(auto r=R())r->sendDeviceStateResponse(info(s));return ok(); }

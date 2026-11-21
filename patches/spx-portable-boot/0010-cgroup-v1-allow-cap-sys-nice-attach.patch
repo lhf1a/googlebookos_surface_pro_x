@@ -1,0 +1,25 @@
+From: kanoyami <secpro@foxmail.com>
+Subject: [PATCH] ANDROID: cgroup-v1: allow CAP_SYS_NICE to attach tasks
+
+Android's system_server runs as UID 1000 with CAP_SYS_NICE (without
+CAP_SYS_ADMIN) and moves application tasks across cgroup v1 hierarchies
+(/dev/cpuctl, /dev/cpuset, /dev/blkio) via libprocessgroup. On mainline
+Linux, __cgroup1_procs_write() rejects non-root cross-UID moves with
+-EACCES unless CAP_SYS_NICE is accepted alongside UID matching.
+
+Check CAP_SYS_NICE against the file-open credentials (of->file) in the
+target task's user namespace, matching Android GKI while preserving
+protection against inherited-fd attacks.
+
+--- a/kernel/cgroup/cgroup-v1.c
++++ b/kernel/cgroup/cgroup-v1.c
+@@ -523,7 +523,8 @@
+ 	tcred = get_task_cred(task);
+ 	if (!uid_eq(cred->euid, GLOBAL_ROOT_UID) &&
+ 	    !uid_eq(cred->euid, tcred->uid) &&
+-	    !uid_eq(cred->euid, tcred->suid))
++	    !uid_eq(cred->euid, tcred->suid) &&
++	    !file_ns_capable(of->file, tcred->user_ns, CAP_SYS_NICE))
+ 		ret = -EACCES;
+ 	put_cred(tcred);
+ 	if (ret)

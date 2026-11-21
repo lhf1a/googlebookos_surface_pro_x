@@ -1,0 +1,410 @@
+From: kanoyami <secpro@foxmail.com>
+Subject: [PATCH] ANDROID: netfilter: xt_quota2: add quota2 match support for Android netd
+
+Android's netd BandwidthController enforces per-interface data quotas
+(bw_costly_<iface>) using xtables match "quota2" revision 3. Without
+xt_quota2, NetworkPolicyManagerService fails setInterfaceLimit() every
+two minutes with Remote I/O error (code 121) and emits paired am_wtf
+entries in system_server.
+
+Port Android's xt_quota2 match (including optional NFLOG notification
+and /proc/net/xt_quota/<name> counter entries) to Linux 6.18.
+
+--- a/include/uapi/linux/netfilter/xt_quota2.h
++++ b/include/uapi/linux/netfilter/xt_quota2.h
+@@ -0,0 +1,28 @@
++/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
++#ifndef _XT_QUOTA_H2
++#define _XT_QUOTA_H2
++
++#include <linux/types.h>
++
++enum xt_quota_flags {
++	XT_QUOTA_INVERT		= 1 << 0,
++	XT_QUOTA_GROW		= 1 << 1,
++	XT_QUOTA_PACKET		= 1 << 2,
++	XT_QUOTA_NO_CHANGE	= 1 << 3,
++	XT_QUOTA_MASK		= 0x0F,
++};
++
++struct xt_quota_counter;
++
++struct xt_quota_mtinfo2 {
++	char name[15];
++	__u8 flags;
++
++	/* Comparison-invariant */
++	__aligned_u64 quota;
++
++	/* Used internally by the kernel */
++	struct xt_quota_counter *master __attribute__((aligned(8)));
++};
++
++#endif /* _XT_QUOTA_H2 */
+--- a/net/netfilter/Kconfig
++++ b/net/netfilter/Kconfig
+@@ -1531,6 +1531,20 @@ config NETFILTER_XT_MATCH_QUOTA
+ 	  If you want to compile it as a module, say M here and read
+ 	  <file:Documentation/kbuild/modules.rst>.  If unsure, say `N'.
+ 
++config NETFILTER_XT_MATCH_QUOTA2
++	tristate '"quota2" match support'
++	depends on NETFILTER_ADVANCED
++	help
++	  This option adds a `quota2' match, which allows to match on a
++	  named byte or packet counter as used by Android netd.
++
++config NETFILTER_XT_MATCH_QUOTA2_LOG
++	bool '"quota2" NFLOG support'
++	depends on NETFILTER_XT_MATCH_QUOTA2
++	help
++	  This option enables NFLOG notifications when a `quota2' counter
++	  reaches zero.
++
+ config NETFILTER_XT_MATCH_RATEEST
+ 	tristate '"rateest" match support'
+ 	depends on NETFILTER_ADVANCED
+--- a/net/netfilter/Makefile
++++ b/net/netfilter/Makefile
+@@ -220,6 +220,7 @@ obj-$(CONFIG_NETFILTER_XT_MATCH_PHYSDEV) += xt_physdev.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_PKTTYPE) += xt_pkttype.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_POLICY) += xt_policy.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_QUOTA) += xt_quota.o
++obj-$(CONFIG_NETFILTER_XT_MATCH_QUOTA2) += xt_quota2.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_RATEEST) += xt_rateest.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_REALM) += xt_realm.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_RECENT) += xt_recent.o
+--- a/net/netfilter/xt_quota2.c
++++ b/net/netfilter/xt_quota2.c
+@@ -0,0 +1,331 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * xt_quota2 - enhanced quota match for Android netd BandwidthController
++ *
++ * Based on xtables-addons xt_quota2 by Jan Engelhardt and AOSP common kernel.
++ */
++#include <linux/list.h>
++#include <linux/module.h>
++#include <linux/proc_fs.h>
++#include <linux/skbuff.h>
++#include <linux/slab.h>
++#include <linux/spinlock.h>
++#include <linux/string.h>
++#include <linux/uaccess.h>
++#include <linux/netfilter/x_tables.h>
++#include <linux/netfilter/xt_quota2.h>
++#include <net/net_namespace.h>
++#include <net/netfilter/nf_log.h>
++
++#ifdef CONFIG_NETFILTER_XT_MATCH_QUOTA2_LOG
++#include <linux/netfilter_ipv4/ip_tables.h>
++#include <linux/netfilter_ipv6/ip6_tables.h>
++#endif
++
++struct xt_quota_counter {
++	u64 quota;
++	spinlock_t lock;
++	struct list_head list;
++	atomic_t ref;
++	char name[sizeof(((struct xt_quota_mtinfo2 *)NULL)->name)];
++	struct proc_dir_entry *procfs_entry;
++};
++
++#ifdef CONFIG_NETFILTER_XT_MATCH_QUOTA2_LOG
++static struct nf_loginfo nf_log_info = {
++	.type = NF_LOG_TYPE_ULOG,
++	.u = {
++		.ulog = {
++			.copy_len = 0,
++			.group = 1,
++			.qthreshold = 1,
++		},
++	},
++};
++#endif
++
++static LIST_HEAD(counter_list);
++static DEFINE_SPINLOCK(counter_list_lock);
++
++static struct proc_dir_entry *proc_xt_quota;
++static unsigned int quota_list_perms = 0644;
++static unsigned int quota_list_uid;
++static unsigned int quota_list_gid;
++
++module_param_named(perms, quota_list_perms, uint, 0600);
++module_param_named(uid, quota_list_uid, uint, 0600);
++module_param_named(gid, quota_list_gid, uint, 0600);
++
++static void quota2_log(const struct sk_buff *skb,
++		       const struct xt_action_param *par,
++		       const char *prefix)
++{
++#ifdef CONFIG_NETFILTER_XT_MATCH_QUOTA2_LOG
++	nf_log_packet(xt_net(par), xt_family(par), xt_hooknum(par), skb,
++		      xt_in(par), xt_out(par), &nf_log_info, "%s", prefix);
++#endif
++}
++
++static ssize_t quota_proc_read(struct file *file, char __user *buf,
++			       size_t size, loff_t *ppos)
++{
++	struct xt_quota_counter *e = pde_data(file_inode(file));
++	char tmp[32];
++	u64 val;
++	int len;
++
++	spin_lock_bh(&e->lock);
++	val = e->quota;
++	spin_unlock_bh(&e->lock);
++
++	len = scnprintf(tmp, sizeof(tmp), "%llu\n", (unsigned long long)val);
++	return simple_read_from_buffer(buf, size, ppos, tmp, len);
++}
++
++static ssize_t quota_proc_write(struct file *file, const char __user *input,
++				size_t size, loff_t *loff)
++{
++	struct xt_quota_counter *e = pde_data(file_inode(file));
++	char buf[32];
++	char *p;
++	bool add = false;
++	size_t copy_len;
++	u64 val;
++	int err;
++
++	if (size == 0)
++		return 0;
++
++	copy_len = min(size, sizeof(buf) - 1);
++	if (copy_from_user(buf, input, copy_len))
++		return -EFAULT;
++	buf[copy_len] = '\0';
++
++	p = strim(buf);
++	if (*p == '+') {
++		add = true;
++		p++;
++	}
++	err = kstrtoull(p, 0, &val);
++	if (err)
++		return err;
++
++	spin_lock_bh(&e->lock);
++	if (add)
++		e->quota += val;
++	else
++		e->quota = val;
++	spin_unlock_bh(&e->lock);
++
++	return size;
++}
++
++static const struct proc_ops q2_counter_fops = {
++	.proc_read = quota_proc_read,
++	.proc_write = quota_proc_write,
++	.proc_lseek = default_llseek,
++};
++
++static struct xt_quota_counter *
++q2_new_counter(const struct xt_quota_mtinfo2 *q, bool anon)
++{
++	struct xt_quota_counter *e;
++	unsigned int size;
++
++	size = anon ? offsetof(struct xt_quota_counter, list) : sizeof(*e);
++	e = kzalloc(size, GFP_KERNEL);
++	if (!e)
++		return NULL;
++
++	e->quota = q->quota;
++	spin_lock_init(&e->lock);
++	return e;
++}
++
++static struct xt_quota_counter *
++q2_get_counter(const struct xt_quota_mtinfo2 *q)
++{
++	struct proc_dir_entry *p;
++	struct xt_quota_counter *e = NULL;
++	struct xt_quota_counter *new_e;
++
++	if (*q->name == '\0')
++		return q2_new_counter(q, true);
++
++	if (strchr(q->name, '/'))
++		return NULL;
++
++	spin_lock_bh(&counter_list_lock);
++	list_for_each_entry(e, &counter_list, list) {
++		if (strcmp(e->name, q->name) == 0) {
++			atomic_inc(&e->ref);
++			spin_unlock_bh(&counter_list_lock);
++			return e;
++		}
++	}
++	spin_unlock_bh(&counter_list_lock);
++
++	new_e = q2_new_counter(q, false);
++	if (!new_e)
++		return NULL;
++
++	strscpy(new_e->name, q->name, sizeof(new_e->name));
++	atomic_set(&new_e->ref, 1);
++
++	spin_lock_bh(&counter_list_lock);
++	list_for_each_entry(e, &counter_list, list) {
++		if (strcmp(e->name, q->name) == 0) {
++			atomic_inc(&e->ref);
++			spin_unlock_bh(&counter_list_lock);
++			kfree(new_e);
++			return e;
++		}
++	}
++	list_add_tail(&new_e->list, &counter_list);
++	spin_unlock_bh(&counter_list_lock);
++
++	if (proc_xt_quota) {
++		p = proc_create_data(new_e->name, quota_list_perms,
++				     proc_xt_quota, &q2_counter_fops, new_e);
++		if (p) {
++			proc_set_user(p,
++				      make_kuid(&init_user_ns, quota_list_uid),
++				      make_kgid(&init_user_ns, quota_list_gid));
++			new_e->procfs_entry = p;
++		}
++	}
++
++	return new_e;
++}
++
++static int quota_mt2_check(const struct xt_mtchk_param *par)
++{
++	struct xt_quota_mtinfo2 *q = par->matchinfo;
++
++	if (q->flags & ~XT_QUOTA_MASK)
++		return -EINVAL;
++
++	q->name[sizeof(q->name) - 1] = '\0';
++	if (*q->name == '.' || strchr(q->name, '/'))
++		return -EINVAL;
++
++	q->master = q2_get_counter(q);
++	if (!q->master)
++		return -ENOMEM;
++
++	return 0;
++}
++
++static void quota_mt2_destroy(const struct xt_mtdtor_param *par)
++{
++	struct xt_quota_mtinfo2 *q = par->matchinfo;
++	struct xt_quota_counter *e = q->master;
++
++	if (!e)
++		return;
++
++	if (*q->name == '\0') {
++		kfree(e);
++		return;
++	}
++
++	spin_lock_bh(&counter_list_lock);
++	if (!atomic_dec_and_test(&e->ref)) {
++		spin_unlock_bh(&counter_list_lock);
++		return;
++	}
++	list_del(&e->list);
++	spin_unlock_bh(&counter_list_lock);
++
++	if (e->procfs_entry)
++		remove_proc_entry(e->name, proc_xt_quota);
++	kfree(e);
++}
++
++static bool quota_mt2(const struct sk_buff *skb, struct xt_action_param *par)
++{
++	struct xt_quota_mtinfo2 *q = (void *)par->matchinfo;
++	struct xt_quota_counter *e = q->master;
++	bool ret = q->flags & XT_QUOTA_INVERT;
++	u64 delta = (q->flags & XT_QUOTA_PACKET) ? 1 : skb->len;
++
++	spin_lock_bh(&e->lock);
++	if (q->flags & XT_QUOTA_GROW) {
++		e->quota += delta;
++		ret = true;
++	} else {
++		if (e->quota >= delta) {
++			if (!(q->flags & XT_QUOTA_NO_CHANGE))
++				e->quota -= delta;
++			ret = !ret;
++		} else {
++			if (!(q->flags & XT_QUOTA_NO_CHANGE)) {
++				if (e->quota)
++					quota2_log(skb, par, q->name);
++				e->quota = 0;
++			}
++		}
++	}
++	spin_unlock_bh(&e->lock);
++
++	return ret;
++}
++
++static struct xt_match quota_mt2_reg[] __read_mostly = {
++	{
++		.name		= "quota2",
++		.revision	= 3,
++		.family		= NFPROTO_IPV4,
++		.checkentry	= quota_mt2_check,
++		.match		= quota_mt2,
++		.destroy	= quota_mt2_destroy,
++		.matchsize	= sizeof(struct xt_quota_mtinfo2),
++		.usersize	= offsetof(struct xt_quota_mtinfo2, master),
++		.me		= THIS_MODULE,
++	},
++	{
++		.name		= "quota2",
++		.revision	= 3,
++		.family		= NFPROTO_IPV6,
++		.checkentry	= quota_mt2_check,
++		.match		= quota_mt2,
++		.destroy	= quota_mt2_destroy,
++		.matchsize	= sizeof(struct xt_quota_mtinfo2),
++		.usersize	= offsetof(struct xt_quota_mtinfo2, master),
++		.me		= THIS_MODULE,
++	},
++};
++
++static int __init quota_mt2_init(void)
++{
++	int ret;
++
++	proc_xt_quota = proc_mkdir("xt_quota", init_net.proc_net);
++	if (!proc_xt_quota)
++		return -ENOMEM;
++
++	ret = xt_register_matches(quota_mt2_reg, ARRAY_SIZE(quota_mt2_reg));
++	if (ret < 0) {
++		remove_proc_entry("xt_quota", init_net.proc_net);
++		proc_xt_quota = NULL;
++	}
++	return ret;
++}
++
++static void __exit quota_mt2_exit(void)
++{
++	xt_unregister_matches(quota_mt2_reg, ARRAY_SIZE(quota_mt2_reg));
++	if (proc_xt_quota) {
++		remove_proc_entry("xt_quota", init_net.proc_net);
++		proc_xt_quota = NULL;
++	}
++}
++
++module_init(quota_mt2_init);
++module_exit(quota_mt2_exit);
++
++MODULE_DESCRIPTION("Xtables: countdown quota match (version 2)");
++MODULE_AUTHOR("Jan Engelhardt <jengelh@medozas.de>");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("ipt_quota2");
++MODULE_ALIAS("ip6t_quota2");
