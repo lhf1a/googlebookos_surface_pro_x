@@ -955,6 +955,8 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
     # Universal builds do not rewrite reference hashes or gate boot on content
     # hashes. Preserve imported manifests as metadata; no startup consumer uses
     # them for validation after this policy is applied.
+    from full_image_video import install_p010_stage
+    install_p010_stage(records, bodies, new_record)
     from runtime_boot_policy import apply
     apply(bodies)
     from full_image_home import apply as apply_home

@@ -1,6 +1,8 @@
 """Host tests for full-image Venus source hooks and Mesa OMX transformation."""
 import hashlib
+import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -8,6 +10,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import full_image_video as v  # noqa: E402
+import runtime_boot_policy as boot  # noqa: E402
 
 RUNTIME = ROOT / 'private/build-inputs/full-image-runtime/files'
 
@@ -90,6 +93,89 @@ class VenusSourceHooks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'lacks SQ2 capability exports'):
             v.validate_venus_core_module(elf64_aarch64(b'incomplete'))
         v.validate_venus_core_module(elf64_aarch64(b''.join(v.VENUS_CORE_REQUIRED_STRINGS)))
+
+
+class LibguiGenerationStageTest(unittest.TestCase):
+    def test_install_p010_stage_updates_helper_rc_and_checksums_idempotently(self):
+        rc_old = b'on post-fs\n    restorecon /system/lib64/libstagefright.so\n'
+        sums_old = (
+            hashlib.sha256(b'stagefright').hexdigest() + '  libstagefright.so\n' +
+            hashlib.sha256(rc_old).hexdigest() + '  service.rc\n'
+        ).encode()
+        bodies = {
+            v.P010_STAGE: b'#!/bin/sh\nold\n',
+            v.P010_RC: rc_old,
+            v.P010_SUMS: sums_old,
+        }
+        records = {k: record(0o100644) for k in bodies}
+        first = v.install_p010_stage(records, bodies, record)
+        self.assertTrue(first['updated'])
+        self.assertEqual(records[v.P010_STAGE], record(0o100755))
+        self.assertEqual(records[v.P010_RC], record(0o100644))
+        self.assertIn(b'restorecon /system/lib64/libgui.so', bodies[v.P010_RC])
+        expected_rc_sum = hashlib.sha256(bodies[v.P010_RC]).hexdigest()
+        self.assertIn(expected_rc_sum + '  service.rc', bodies[v.P010_SUMS].decode())
+        subprocess.run(['sh', '-n'], input=bodies[v.P010_STAGE], check=True)
+        stripped = boot.without_hash_checks(v.P010_STAGE, bodies[v.P010_STAGE])
+        self.assertIn(b'SQ2_LIBGUI_GENERATION_PATCHED', stripped)
+
+        snap_bodies = dict(bodies)
+        snap_records = dict(records)
+        v.install_p010_stage(records, bodies, record)
+        self.assertEqual(bodies, snap_bodies)
+        self.assertEqual(records, snap_records)
+
+    def test_libgui_generation_patch_snippet_only_patches_exact_anchor(self):
+        stage_text = (ROOT / 'probe/test2/sq2-p010-renderer-stage').read_text(encoding='utf-8')
+        start = stage_text.index('if [ -f "$stage/lower/libgui.so" ]; then')
+        end = stage_text.index('(cd "$stage/merged"; sha256sum')
+        snippet = stage_text[start:end]
+
+        anchor_offset = 0x11db3c
+        before_bytes = bytes.fromhex('7f8212397fa212397f6a03b968b20d397fc21239')
+        nop_bytes = bytes.fromhex('1f2003d5')
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / 'bin').mkdir()
+            chown_stub = root / 'bin/chown'
+            chown_stub.write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+            chown_stub.chmod(0o755)
+            env = dict(os.environ)
+            env['PATH'] = f"{root / 'bin'}:{env.get('PATH', '')}"
+
+            (root / 'lower').mkdir()
+            (root / 'merged').mkdir()
+            orig = bytearray(b'\xaa' * (anchor_offset + 64))
+            orig[anchor_offset:anchor_offset + len(before_bytes)] = before_bytes
+            (root / 'lower/libgui.so').write_bytes(orig)
+
+            res = subprocess.run(
+                ['sh', '-euc', f'stage={root}\n{snippet}'],
+                text=True,
+                capture_output=True,
+                env=env,
+                check=True,
+            )
+            self.assertIn('SQ2_LIBGUI_GENERATION_PATCHED', res.stdout)
+            patched = (root / 'merged/libgui.so').read_bytes()
+            self.assertEqual(len(patched), len(orig))
+            diffs = [i for i, (a, b) in enumerate(zip(orig, patched)) if a != b]
+            self.assertGreaterEqual(min(diffs), 0x11db44)
+            self.assertLess(max(diffs), 0x11db48)
+            self.assertEqual(patched[0x11db44:0x11db48], nop_bytes)
+
+            # Non-matching binary must be ignored cleanly without writing merged/libgui.so.
+            (root / 'merged/libgui.so').unlink()
+            (root / 'lower/libgui.so').write_bytes(b'\xbb' * (anchor_offset + 64))
+            res2 = subprocess.run(
+                ['sh', '-euc', f'stage={root}\n{snippet}'],
+                text=True,
+                capture_output=True,
+                env=env,
+                check=True,
+            )
+            self.assertEqual(res2.stdout, '')
+            self.assertFalse((root / 'merged/libgui.so').exists())
 
 
 if __name__ == '__main__':

@@ -48,6 +48,10 @@ OMX_GRALLOC_UTILS_SOURCE = 'etc/sq2-qti-system/root/lib64/libgrallocutils.so'
 OMX_GRALLOC_UTILS = 'etc/sq2-hidl/lib64/libgrallocutils.so'
 GRALLOC_LAYOUT_SYMBOL = b'_ZN7gralloc15GetBufferLayoutEP16private_handle_tPjS2_S2_\0'
 
+P010_STAGE = 'bin/sq2-p010-renderer-stage'
+P010_RC = 'etc/sq2-p010-renderer/service.rc'
+P010_SUMS = 'etc/sq2-p010-renderer/SHA256SUMS'
+
 # Quest2Node::getParameter(OMX_IndexParamVideoAndroidRequiresSwRenderer = 0x6f600011):
 #   vaddr 0x51174 (file 0x4d174): mov w9,#0x11; movk w9,#0x6f60,lsl #16
 #   vaddr 0x5126c (file 0x4d26c):
@@ -129,6 +133,22 @@ def mesa_omx(records, bodies, new_record):
             'omx_service_sha256': sha(service),
             'omx_private_libgrallocutils_sha256': sha(utils),
             'hardware_validated': False}
+
+
+def install_p010_stage(records, bodies, new_record):
+    """Install the tracked P010 stage helper/rc (including Surface::disconnect sync)."""
+    if P010_STAGE not in bodies or P010_RC not in bodies:
+        return {'updated': False}
+    root = Path(__file__).resolve().parents[1]
+    stage_bytes = (root / 'probe/test2/sq2-p010-renderer-stage').read_bytes().replace(b'\r\n', b'\n')
+    rc_bytes = (root / 'configs/sq2-p010-renderer.rc').read_bytes().replace(b'\r\n', b'\n')
+    bodies[P010_STAGE] = stage_bytes
+    records[P010_STAGE] = new_record(0o100755)
+    bodies[P010_RC] = rc_bytes
+    records[P010_RC] = new_record(0o100644)
+    if P010_SUMS in bodies:
+        bodies[P010_SUMS] = _rewrite_sums(bodies[P010_SUMS], {'service.rc': rc_bytes})
+    return {'updated': True, 'stage_sha256': sha(stage_bytes), 'rc_sha256': sha(rc_bytes)}
 
 
 def ensure_venus_source_hooks(directory):

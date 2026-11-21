@@ -20,6 +20,21 @@ mount -t overlay overlay -o lowerdir=$stage/lower,upperdir=$stage/upper,workdir=
 cp "$source/libsq2-p010-renderer.so" "$source/libstagefright.so" "$stage/merged/"
 chmod 644 "$stage/merged/libsq2-p010-renderer.so" "$stage/merged/libstagefright.so"
 chown 0:0 "$stage/merged/libsq2-p010-renderer.so" "$stage/merged/libstagefright.so"
+# Keep Surface::mGenerationNumber synchronized with BufferQueueCore across
+# MediaCodec reconnects so OMX PRESET_ANW_BUFFER setOutputSurface() works
+# in ExoPlayer/Media3 apps such as Google Photos.
+if [ -f "$stage/lower/libgui.so" ]; then
+    gui_ctx=$(dd if="$stage/lower/libgui.so" bs=4 skip=292559 count=5 2>/dev/null | od -An -tx1 | tr -d ' \n')
+    if [ "$gui_ctx" = "7f8212397fa212397f6a03b968b20d397fc21239" ]; then
+        cp "$stage/lower/libgui.so" "$stage/merged/libgui.so"
+        printf '\037\040\003\325' | dd of="$stage/merged/libgui.so" bs=4 seek=292561 count=1 conv=notrunc 2>/dev/null
+        gui_after=$(dd if="$stage/merged/libgui.so" bs=4 skip=292559 count=5 2>/dev/null | od -An -tx1 | tr -d ' \n')
+        [ "$gui_after" = "7f8212397fa212391f2003d568b20d397fc21239" ]
+        chmod 644 "$stage/merged/libgui.so"
+        chown 0:0 "$stage/merged/libgui.so"
+        echo SQ2_LIBGUI_GENERATION_PATCHED
+    fi
+fi
 (cd "$stage/merged"; sha256sum -c "$source/LIBRARIES.sha256")
 # post-fs runs with loaded policy, before zygote/media. Match the system inode types.
 # Use the existing system init overlay so this action runs as init, not vendor_init.
