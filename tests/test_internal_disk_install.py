@@ -6,6 +6,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
 
@@ -467,6 +468,125 @@ class InternalDiskInstallTests(unittest.TestCase):
             (app_files / 'disk-request').write_text('disk-poweroff\nnonce-4\n')
             subprocess.run(['sh', str(OTA_BOOT_SCRIPT)], env=env, check=True)
             self.assertTrue((app_files / 'disk-reply').read_text().startswith('nonce-4\nOK\n'))
+
+    def test_disk_poweroff_uses_android_shutdown_and_zygote_env(self):
+        with tempfile.TemporaryDirectory(prefix='spx-disk-poweroff-') as td:
+            root = Path(td)
+            app_files = root / 'root/data/user_de/0/org.surface.advancedcontrol/files'
+            app_files.mkdir(parents=True)
+            esp = root / 'esp'
+            esp.mkdir()
+            etc = root / 'etc'
+            etc.mkdir()
+            run = root / 'run'
+            run.mkdir()
+            mock_bin = root / 'bin'
+            mock_bin.mkdir()
+
+            # Fake zygote64 process so /proc/<pid>/environ contains Android runtime vars
+            zygote_env = os.environ.copy()
+            zygote_env.update({
+                'ANDROID_ROOT': '/system',
+                'ANDROID_DATA': '/data',
+                'BOOTCLASSPATH': '/system/framework/core-oj.jar:/system/framework/framework.jar',
+            })
+            zygote_proc = subprocess.Popen(['sleep', '30'], env=zygote_env)
+            try:
+                calls_log = root / 'calls.log'
+                env_log = root / 'env.log'
+                (mock_bin / 'pidof').write_text(f'#!/bin/sh\nif [ "$1" = "zygote64" ]; then echo {zygote_proc.pid}; fi\n')
+                (mock_bin / 'pidof').chmod(0o755)
+                (mock_bin / 'nsenter').write_text(
+                    '#!/bin/sh\n'
+                    f'printf "%s\\n" "$*" >> "{calls_log}"\n'
+                    f'printf "PATH=%s\\nBOOTCLASSPATH=%s\\nANDROID_ROOT=%s\\nANDROID_DATA=%s\\n" "${{PATH:-}}" "${{BOOTCLASSPATH:-}}" "${{ANDROID_ROOT:-}}" "${{ANDROID_DATA:-}}" > "{env_log}"\n'
+                    'exit 0\n'
+                )
+                (mock_bin / 'nsenter').chmod(0o755)
+                (mock_bin / 'poweroff').write_text(
+                    '#!/bin/sh\n'
+                    f'printf "LINUX_POWEROFF %s\\n" "$*" >> "{calls_log}"\n'
+                    'exit 0\n'
+                )
+                (mock_bin / 'poweroff').chmod(0o755)
+
+                env = os.environ.copy()
+                env.update({
+                    'SPX_OTA_PATH': f'{mock_bin}:/usr/bin:/bin',
+                    'SPX_OTA_BOOT_WAIT': '0',
+                    'SPX_OTA_CLAIM_INTENT': '0',
+                    'SPX_OTA_TEST_USER': '0',
+                    'SPX_OTA_ONCE': '1',
+                    'SPX_OTA_NO_REBOOT': '0',
+                    'SPX_OTA_POWEROFF_DELAY': '0',
+                    'SPX_OTA_ROOT': str(root / 'root'),
+                    'SPX_OTA_ESP': str(esp),
+                    'SPX_OTA_ETC': str(etc),
+                    'SPX_OTA_RUN': str(run),
+                    'SPX_OTA_LOCK_DIR': str(run / 'lock'),
+                    'SPX_OTA_TMP_REQ': str(run / 'req'),
+                    'SPX_OTA_TOOL': str(self.host_tool),
+                    'SPX_OTA_INSTALLER': '/bin/false',
+                })
+
+                (app_files / 'disk-request').write_text('disk-poweroff\nnonce-pw1\n')
+                subprocess.run(['sh', str(OTA_BOOT_SCRIPT)], env=env, check=True)
+                self.assertTrue((app_files / 'disk-reply').read_text().startswith('nonce-pw1\nOK\n'))
+
+                deadline = time.monotonic() + 3.0
+                while time.monotonic() < deadline:
+                    if calls_log.exists() and 'svc power shutdown' in calls_log.read_text():
+                        break
+                    time.sleep(0.05)
+                self.assertTrue(calls_log.exists(), 'Android shutdown command was not invoked')
+                calls = calls_log.read_text()
+                self.assertIn('-t 1 -m -r -- /system/bin/svc power shutdown', calls)
+                self.assertNotIn('LINUX_POWEROFF', calls)
+
+                captured_env = parse_kv(env_log.read_text())
+                self.assertIn('/system/bin', captured_env.get('PATH', '').split(':'))
+                self.assertEqual(captured_env.get('BOOTCLASSPATH'), '/system/framework/core-oj.jar:/system/framework/framework.jar')
+                self.assertEqual(captured_env.get('ANDROID_ROOT'), '/system')
+                self.assertEqual(captured_env.get('ANDROID_DATA'), '/data')
+
+                # Fallback chain when svc fails: must try Android shutdown commands only, never Linux poweroff
+                calls_log.unlink()
+                wrapper = root / 'wrapper.sh'
+                wrapper.write_text(
+                    '#!/bin/sh\n'
+                    f'printf "%s\\n" "$*" >> "{calls_log}"\n'
+                    'case "$*" in\n'
+                    '  "svc power shutdown"|"cmd activity start-activity "*) exit 1 ;;\n'
+                    '  "setprop sys.powerctl shutdown,userrequested") exit 0 ;;\n'
+                    'esac\n'
+                    'exit 1\n'
+                )
+                wrapper.chmod(0o755)
+                env['SPX_OTA_ANDROID_WRAPPER'] = str(wrapper)
+                (app_files / 'disk-request').write_text('disk-poweroff\nnonce-pw2\n')
+                subprocess.run(['sh', str(OTA_BOOT_SCRIPT)], env=env, check=True)
+
+                deadline = time.monotonic() + 3.0
+                while time.monotonic() < deadline:
+                    if calls_log.exists() and 'setprop sys.powerctl shutdown,userrequested' in calls_log.read_text():
+                        break
+                    time.sleep(0.05)
+                fallback_calls = [
+                    line for line in calls_log.read_text().splitlines()
+                    if line != 'getprop ro.build.display.id'
+                ]
+                self.assertEqual(
+                    fallback_calls,
+                    [
+                        'svc power shutdown',
+                        'cmd activity start-activity -a com.android.internal.intent.action.REQUEST_SHUTDOWN -f 0x10000000 --ez android.intent.extra.KEY_CONFIRM false',
+                        'setprop sys.powerctl shutdown,userrequested',
+                    ],
+                )
+                self.assertNotIn('LINUX_POWEROFF', calls_log.read_text())
+            finally:
+                zygote_proc.terminate()
+                zygote_proc.wait(timeout=5)
 
     def test_full_image_ota_installs_internal_installer_and_passes_runtime_policy(self):
         records = {'init': (0o100755,)}

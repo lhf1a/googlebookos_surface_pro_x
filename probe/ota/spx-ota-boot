@@ -95,9 +95,38 @@ display_is_on() {
 android() {
     if [ -n "${SPX_OTA_ANDROID_WRAPPER:-}" ]; then
         "$SPX_OTA_ANDROID_WRAPPER" "$@"
-    else
-        run_with_timeout "${ANDROID_COMMAND_TIMEOUT:-20}" nsenter -t 1 -m -r -- /system/bin/"$@"
+        return $?
     fi
+    (
+        export PATH="/system/bin:/system/xbin:/vendor/bin:/apex/com.android.art/bin:${PATH:-/bin:/sbin}"
+        case "${1:-}" in
+            svc|am|pm|settings|app_process)
+                _aj_pid="$(pidof zygote64 2>/dev/null | awk '{print $1}' || true)"
+                [ -n "$_aj_pid" ] || _aj_pid="$(pidof zygote 2>/dev/null | awk '{print $1}' || true)"
+                if [ -n "$_aj_pid" ] && [ -r "/proc/$_aj_pid/environ" ]; then
+                    _aj_env="$(mktemp "$RUN_DIR/spx-ota-env.XXXXXX" 2>/dev/null || true)"
+                    if [ -n "$_aj_env" ]; then
+                        tr '\000' '\n' < "/proc/$_aj_pid/environ" 2>/dev/null | \
+                            grep -E '^(ANDROID_ROOT|ANDROID_ASSETS|ANDROID_DATA|ANDROID_STORAGE|ANDROID_ART_ROOT|ANDROID_I18N_ROOT|ANDROID_TZDATA_ROOT|BOOTCLASSPATH|DEX2OATBOOTCLASSPATH|SYSTEMSERVERCLASSPATH|STANDALONE_SYSTEMSERVER_JARS)=' > "$_aj_env" 2>/dev/null || true
+                        while IFS= read -r _aj_line; do
+                            [ -n "$_aj_line" ] && export "$_aj_line"
+                        done < "$_aj_env"
+                        rm -f "$_aj_env" 2>/dev/null || true
+                    fi
+                fi
+                ;;
+        esac
+        run_with_timeout "${ANDROID_COMMAND_TIMEOUT:-20}" nsenter -t 1 -m -r -- /system/bin/"$@"
+    )
+}
+
+android_poweroff() {
+    android svc power shutdown >/dev/null 2>&1 && return 0
+    android cmd activity start-activity -a com.android.internal.intent.action.REQUEST_SHUTDOWN -f 0x10000000 --ez android.intent.extra.KEY_CONFIRM false >/dev/null 2>&1 && return 0
+    android setprop sys.powerctl shutdown,userrequested >/dev/null 2>&1 && return 0
+    android setprop sys.powerctl shutdown >/dev/null 2>&1 && return 0
+    android reboot -p >/dev/null 2>&1 && return 0
+    return 1
 }
 
 cleanup() {
@@ -836,9 +865,9 @@ handle_request() {
             send_reply "$_dir" "$_nonce" "OK"
             if [ "$NO_REBOOT" != "1" ]; then
                 (
-                    sleep 1
+                    sleep "${SPX_OTA_POWEROFF_DELAY:-1}"
                     sync 2>/dev/null || true
-                    android svc power reboot >/dev/null 2>&1 || android setprop sys.powerctl reboot >/dev/null 2>&1 || reboot
+                    android svc power reboot >/dev/null 2>&1 || android setprop sys.powerctl reboot >/dev/null 2>&1 || android reboot >/dev/null 2>&1 || reboot
                 ) </dev/null >/dev/null 2>&1 &
             fi
             ;;
@@ -904,9 +933,9 @@ handle_disk_request() {
             send_disk_reply "$_hdr_dir" "$_hdr_nonce" "OK"
             if [ "$NO_REBOOT" != "1" ]; then
                 (
-                    sleep 1
+                    sleep "${SPX_OTA_POWEROFF_DELAY:-1}"
                     sync 2>/dev/null || true
-                    android svc power shutdown >/dev/null 2>&1 || android setprop sys.powerctl shutdown >/dev/null 2>&1 || poweroff -f
+                    android_poweroff || true
                 ) </dev/null >/dev/null 2>&1 &
             fi
             ;;
