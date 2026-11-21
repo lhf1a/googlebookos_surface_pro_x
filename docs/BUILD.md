@@ -184,8 +184,8 @@ Hybrid 整包默认使用 `configs/kernel-6.18-hybrid.config`（内置 `r8152` �
   - **支持两类包**：读取含描述清单的 `.tar.gz` 按清单更新（`super` 无变化且保留数据时可直接在线安全写入 ESP 并提示重启；`super` 有变化或需清数据时自动切换至 initramfs 离线阶段）；直接提供完整镜像 `.img` / `.img.gz` 时解析 GPT 并由 initramfs 早期钩子 `/bin/spx-ota-stage`（配合静态 ARM64 工具 `/bin/spx-ota-tool`）在挂载 `super`/`userdata` 前离线执行全量更新。
   - **所有更新模式均支持手动切换数据策略**：默认保留用户数据（含应用、账户、Wi-Fi、触摸校准、高级设置与双系统 `grub.cfg`）；亦可手动选择 **不保留数据（全新安装）**，经二次确认后在离线阶段清空 `userdata`、`metadata` 与 `misc`（保留 ext4 特性与 `lost+found`）。
 - **从 `v0.7.0` 等老镜像通过 root ADB 一键升级**：
-  - Windows：`scripts/Upgrade-GooglebookViaAdb.ps1`（双击 `scripts/Upgrade-GooglebookViaAdb.cmd` 或传入 `-PackagePath`、可选 `-WipeData`）。
-  - Linux / macOS：`sh scripts/upgrade-googlebook-via-adb.sh -p <升级包> [--wipe-data]`。
+  - Windows：`tools/Upgrade-GooglebookViaAdb.ps1`（双击 `tools/Upgrade-GooglebookViaAdb.cmd` 或传入 `-PackagePath`、可选 `-WipeData`）。
+  - Linux / macOS：`sh tools/upgrade-googlebook-via-adb.sh -p <升级包> [--wipe-data]`。
   - 自动校验包与设备兼容性（拦截在旧布局 `v0.7.0` 上误用不含 `super` 的增量包）、推送校验、备份原 `EFI/SQ2Nat` 并热替换新引导载荷后自动触发两段重启完成离线更新；默认保留用户数据与触摸校准。
 - 当前已在主机完成 `spx-ota-tool` 交叉编译、打包、在线/离线应用、全新安装清数据、Linux `sh` 与 Windows PowerShell ADB 一键脚本及 APK Intent 清单自动化单元测试；尚未在 SQ1/SQ2 实机完成端到端重启升级验收。
 

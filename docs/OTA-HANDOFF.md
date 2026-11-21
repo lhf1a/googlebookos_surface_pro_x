@@ -44,8 +44,8 @@
 - `scripts/full_image.py` & `scripts/build-lts.py`：`build.py full-image` 默认自动生成 `ota/` 产物，也可单独执行 `python3 scripts/build.py ota ...`。
 
 ### 2.4 PC 端 Root ADB 一键升级脚本（跨 v0.7.0 升级）
-- Windows PowerShell：`scripts/Upgrade-GooglebookViaAdb.ps1` + 双击启动器 `scripts/Upgrade-GooglebookViaAdb.cmd`（已同步导出到 `D:\`）
-- Linux POSIX sh：`scripts/upgrade-googlebook-via-adb.sh`（已同步导出到 `D:\`）
+- Windows PowerShell：`tools/Upgrade-GooglebookViaAdb.ps1` + 双击启动器 `tools/Upgrade-GooglebookViaAdb.cmd`（已同步导出到 `D:\`）
+- Linux POSIX sh：`tools/upgrade-googlebook-via-adb.sh`（已同步导出到 `D:\`）
 - 特性：
   - 支持 `.img.gz` / `.img` / `.tar.gz`，自动识别包类型并解析 GPT / manifest
   - 交互/命令行支持保留数据或全新安装（`-WipeData` / `--wipe-data`）

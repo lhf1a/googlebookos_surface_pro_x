@@ -553,7 +553,7 @@ public class OtaJavaTest {
             self.assertGreaterEqual(int(ver_match.group(1)), 3)
 
     def test_linux_adb_upgrade_script_end_to_end(self):
-        script = ROOT / 'scripts/upgrade-googlebook-via-adb.sh'
+        script = ROOT / 'tools/upgrade-googlebook-via-adb.sh'
         subprocess.run(['sh', '-n', str(script)], check=True)
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
@@ -680,7 +680,7 @@ esac
 
     def test_grub_cfg_repair_and_dualboot_preservation(self):
         """Ensure legacy/trial grub.cfg (e.g. SQ2N19 + grubenv) is repaired to SQ2Nat while Windows dual-boot is preserved."""
-        ps1_text = (ROOT / 'scripts/Upgrade-GooglebookViaAdb.ps1').read_text(encoding='utf-8')
+        ps1_text = (ROOT / 'tools/Upgrade-GooglebookViaAdb.ps1').read_text(encoding='utf-8')
         m = re.search(r"(?s)\$deviceHelper = @'\r?\n(.*?)\r?\n'@", ps1_text)
         self.assertIsNotNone(m, 'Missing embedded $deviceHelper in Upgrade-GooglebookViaAdb.ps1')
         helper_src = m.group(1)
@@ -785,8 +785,8 @@ esac
             self.assertIn('AFTER=abcdef0123456789', p5.stdout)
 
     def test_windows_powershell_adb_upgrade_script(self):
-        ps1 = ROOT / 'scripts/Upgrade-GooglebookViaAdb.ps1'
-        cmd = ROOT / 'scripts/Upgrade-GooglebookViaAdb.cmd'
+        ps1 = ROOT / 'tools/Upgrade-GooglebookViaAdb.ps1'
+        cmd = ROOT / 'tools/Upgrade-GooglebookViaAdb.cmd'
         self.assertTrue(ps1.is_file() and cmd.is_file())
         ps_exe = Path('/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe')
         if not ps_exe.is_file():
@@ -875,10 +875,10 @@ esac
             self.assertIn('VERSION=v0.7.6-test\n', updated)
 
     def test_adb_helper_probe_ota_info_fallbacks_and_syntax(self):
-        ps1_text = (ROOT / 'scripts/Upgrade-GooglebookViaAdb.ps1').read_text(encoding='utf-8')
+        ps1_text = (ROOT / 'tools/Upgrade-GooglebookViaAdb.ps1').read_text(encoding='utf-8')
         m_ps1 = re.search(r"(?s)\$deviceHelper = @'\r?\n(.*?)\r?\n'@", ps1_text)
         self.assertIsNotNone(m_ps1)
-        sh_text = (ROOT / 'scripts/upgrade-googlebook-via-adb.sh').read_text(encoding='utf-8')
+        sh_text = (ROOT / 'tools/upgrade-googlebook-via-adb.sh').read_text(encoding='utf-8')
         m_sh = re.search(r"(?s)<<'DEVICE_EOF'\n(.*?)\nDEVICE_EOF", sh_text)
         self.assertIsNotNone(m_sh)
         for label, helper_src in (('ps1', m_ps1.group(1).replace('\r\n', '\n')), ('sh', m_sh.group(1))):

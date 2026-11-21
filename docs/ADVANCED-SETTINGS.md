@@ -124,4 +124,4 @@ Surface Pro X 移植版在 Android 系统内置 **高级设置（`SurfaceAdvance
 3. **完成与首启**：
    - 安装成功后强烈建议直接点击界面的 **立即关机**（不要直接“重启”，避免 UEFI 仍优先从外置 USB 引导）；
    - 待屏幕与电源完全关闭后**拔下 USB 启动盘**，再按电源键开机，即可直接从内置 NVMe 启动 Googlebook OS，并在首次开机时自动将 `userdata` 扩容至整盘剩余空间及运行触控校准向导。
-   - **若希望保留 Windows 同盘双启动**，请勿使用“写入内置硬盘”，改用 Windows 端 `scripts/Install-GooglebookDualBoot.cmd` / `.ps1`。
+   - **若希望保留 Windows 同盘双启动**，请勿使用“写入内置硬盘”，改用 Windows 端 `tools/Install-GooglebookDualBoot.cmd` / `.ps1`。

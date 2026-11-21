@@ -2,7 +2,7 @@
 param([string]$TempDir)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
-. "$repo/scripts/Install-GooglebookDualBoot.ps1"
+. "$repo/tools/Install-GooglebookDualBoot.ps1"
 
 if (-not $TempDir) {
     $TempDir = Join-Path ([IO.Path]::GetTempPath()) ('spx-dualboot-test-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))

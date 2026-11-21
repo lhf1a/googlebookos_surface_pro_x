@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 import hashlib
 
-spec = importlib.util.spec_from_file_location('deploy', Path(__file__).resolve().parents[1]/'scripts/deploy-experimental-usb.py')
+spec = importlib.util.spec_from_file_location('deploy', Path(__file__).resolve().parents[1]/'tools/deploy-experimental-usb.py')
 d = importlib.util.module_from_spec(spec); spec.loader.exec_module(d)
 
 class Preflight(unittest.TestCase):

@@ -10,8 +10,8 @@ from unittest import mock
 R = Path(__file__).resolve().parents[1]
 
 
-def load(name):
-    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), R/'scripts'/(name+'.py'))
+def load(name, folder='scripts'):
+    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), R/folder/(name+'.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -20,7 +20,7 @@ def load(name):
 u = load('sq2-usb-boot-payload')
 c = load('pack-sq2-vulkan')
 v = load('sq2-video-boot-payload')
-deploy = load('deploy-experimental-usb')
+deploy = load('deploy-experimental-usb', 'tools')
 INIT = (b'resource-monitor-start > /logs/resource-monitor.txt\n'
         b'cp /etc/fstab.sq2-native /newroot/debug_ramdisk/fstab.sq2-native\n'
         b'bluetooth-framework-boot > /logs/bluetooth-framework-boot.txt &\n')

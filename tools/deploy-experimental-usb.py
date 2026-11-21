@@ -133,7 +133,7 @@ def verify_usb_bluetooth(manifest, layout, image, required=False):
     if policy.get('schema') != 1 or policy.get('enabled') is not True:
         raise ValueError('Unsupported USB/Bluetooth policy')
     spec = importlib.util.spec_from_file_location('usb_payload',
-        Path(__file__).resolve().with_name('sq2-usb-boot-payload.py'))
+        Path(__file__).resolve().parents[1]/'scripts'/'sq2-usb-boot-payload.py')
     usb = importlib.util.module_from_spec(spec); spec.loader.exec_module(usb)
     esp = next(p for p in layout['partitions'] if p['name'] == 'SQ2PROBE')
     def packed(name):
@@ -148,7 +148,7 @@ def verify_usb_bluetooth(manifest, layout, image, required=False):
         raise ValueError('Packed USB/Bluetooth initramfs hash mismatch')
     import gzip
     c_spec = importlib.util.spec_from_file_location('cpio',
-        Path(__file__).resolve().with_name('pack-sq2-vulkan.py'))
+        Path(__file__).resolve().parents[1]/'scripts'/'pack-sq2-vulkan.py')
     c = importlib.util.module_from_spec(c_spec); c_spec.loader.exec_module(c)
     if usb.verify(c.entries(gzip.decompress(base)), Path(__file__).resolve().parents[1]) != policy.get('source_sha256'):
         raise ValueError('Packed USB/Bluetooth sources differ from policy')
@@ -160,7 +160,7 @@ def verify_gpu_profile(manifest, layout, image):
     if policy is None:  # Legacy images retain their existing checks.
         return
     spec = importlib.util.spec_from_file_location('gpu_payload',
-        Path(__file__).resolve().with_name('sq2-gpu-boot-payload.py'))
+        Path(__file__).resolve().parents[1]/'scripts'/'sq2-gpu-boot-payload.py')
     gpu = importlib.util.module_from_spec(spec); spec.loader.exec_module(gpu)
     esp = next(p for p in layout['partitions'] if p['name'] == 'SQ2PROBE')
     def packed(name):

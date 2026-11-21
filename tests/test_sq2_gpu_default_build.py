@@ -9,8 +9,8 @@ from unittest import mock
 R = Path(__file__).resolve().parents[1]
 
 
-def load(name):
-    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), R/'scripts'/(name+'.py'))
+def load(name, folder='scripts'):
+    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), R/folder/(name+'.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -19,7 +19,7 @@ def load(name):
 g = load('sq2-gpu-boot-payload')
 v = load('sq2-video-boot-payload')
 u = load('sq2-usb-boot-payload')
-deploy = load('deploy-experimental-usb')
+deploy = load('deploy-experimental-usb', 'tools')
 BASE = Path(os.environ.get('SQ2_GPU_BASELINE', R/'out/source-boot'/g.NORMAL))
 RESCUE = Path(os.environ.get('SQ2_GPU_RESCUE', R/'out/source-boot'/g.RESCUE))
 

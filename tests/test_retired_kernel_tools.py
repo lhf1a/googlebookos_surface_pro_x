@@ -67,7 +67,7 @@ class RetiredKernelTools(unittest.TestCase):
 
     def test_deploy_rejects_retired_display_policy_before_device_io(self):
         import importlib.util
-        spec = importlib.util.spec_from_file_location('deploy_retirement_test', ROOT/'scripts/deploy-experimental-usb.py')
+        spec = importlib.util.spec_from_file_location('deploy_retirement_test', ROOT/'tools/deploy-experimental-usb.py')
         deploy = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(deploy)
         deploy.verify_display_profiles({}, {}, Path('unused-image'))

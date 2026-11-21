@@ -4,7 +4,7 @@
 从另一台电脑写盘，完成后安全移除并装回 Surface。
 这不是把系统安装到普通 U 盘，也不是直接写工作站内部 NVMe。
 
-当前入口：`scripts/deploy-experimental-usb.py`，在原生 Linux 或独占透传
+当前入口：`tools/deploy-experimental-usb.py`，在原生 Linux 或独占透传
 USB 转接盒的 Linux 虚拟机运行。普通 WSL 中的 Windows 盘符不是块设备，
 不能当作该脚本的目标。
 

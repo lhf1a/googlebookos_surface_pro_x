@@ -20,7 +20,7 @@ VERSION_OVERRIDE=""
 usage() {
     cat <<'EOF'
 Usage:
-  sh scripts/upgrade-googlebook-via-adb.sh --package <path> [options]
+  sh tools/upgrade-googlebook-via-adb.sh --package <path> [options]
 
 Options:
   -p, --package PATH     Update package (.img.gz, .img, or OTA .tar.gz) [required]
@@ -37,13 +37,13 @@ Options:
 
 Examples:
   # Upgrade v0.7.0 -> latest while keeping all user data & touch calibration:
-  sh scripts/upgrade-googlebook-via-adb.sh -p surface-pro-x-6.18-hybrid-generic.img.gz
+  sh tools/upgrade-googlebook-via-adb.sh -p surface-pro-x-6.18-hybrid-generic.img.gz
 
   # Clean install (wipe user data):
-  sh scripts/upgrade-googlebook-via-adb.sh -p surface-pro-x-6.18-hybrid-generic.img.gz --wipe-data
+  sh tools/upgrade-googlebook-via-adb.sh -p surface-pro-x-6.18-hybrid-generic.img.gz --wipe-data
 
   # Fast incremental update on devices already on 5-partition layout:
-  sh scripts/upgrade-googlebook-via-adb.sh -p surface-pro-x-6.18-hybrid-ota-esp.tar.gz
+  sh tools/upgrade-googlebook-via-adb.sh -p surface-pro-x-6.18-hybrid-ota-esp.tar.gz
 EOF
 }
 

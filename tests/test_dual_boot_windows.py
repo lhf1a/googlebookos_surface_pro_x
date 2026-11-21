@@ -4,8 +4,8 @@ import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-PS1 = ROOT / 'scripts/Install-GooglebookDualBoot.ps1'
-CMD = ROOT / 'scripts/Install-GooglebookDualBoot.cmd'
+PS1 = ROOT / 'tools/Install-GooglebookDualBoot.ps1'
+CMD = ROOT / 'tools/Install-GooglebookDualBoot.cmd'
 PS1_TEST = ROOT / 'tests/Test-GooglebookDualBoot.ps1'
 
 
