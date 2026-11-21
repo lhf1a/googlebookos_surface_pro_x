@@ -181,10 +181,100 @@ int main() {
   std::vector<Field> ev;
   assert(!events(truncPkt, actual, ev));
 
-  // 7. SscAccel compatibility and SscSensor dataType / empty-type guard.
+  // 7. Request packet construction (SUID, non-wakeup rate config, empty-request DISABLE_REQ).
+  Bytes reqPkt;
+  assert(!buildRequestPacket({}, kSscMsgSuidReq, query, kSscDeliveryWakeup, 1, reqPkt));
+
+  assert(buildSuidQuery("accel", query));
+  assert(buildRequestPacket(suidSvc, kSscMsgSuidReq, query, kSscDeliveryWakeup, 0x0102, reqPkt));
+  assert(reqPkt.size() >= 13 && reqPkt[0] == 0 && u16(reqPkt.data() + 1) == 0x0102 &&
+         u16(reqPkt.data() + 3) == 0x20 && u16(reqPkt.data() + 5) == reqPkt.size() - 7);
+  {
+    size_t bodyOff = 7;
+    assert(reqPkt[bodyOff] == 1);
+    uint16_t tlvLen = u16(reqPkt.data() + bodyOff + 1);
+    uint16_t pbLen = u16(reqPkt.data() + bodyOff + 3);
+    assert(tlvLen == pbLen + 2 && bodyOff + 3 + tlvLen + 4 == reqPkt.size());
+    Bytes pb(reqPkt.begin() + bodyOff + 5, reqPkt.begin() + bodyOff + 5 + pbLen);
+    std::vector<Field> reqFields, suspFields, stdReqFields;
+    assert(parse(pb, reqFields));
+    assert(find(reqFields, 1, 2)->bytes == suidSvc);
+    assert(find(reqFields, 2, 5)->value == kSscMsgSuidReq);
+    assert(parse(find(reqFields, 3, 2)->bytes, suspFields));
+    assert(find(suspFields, 2, 0)->value == kSscDeliveryWakeup);
+    assert(parse(find(reqFields, 4, 2)->bytes, stdReqFields));
+    assert(find(stdReqFields, 2, 2)->bytes == query);
+  }
+
+  assert(buildRatePayload(26.0f, ratePayload));
+  assert(buildRequestPacket(accelUid, kSscMsgStdSensorConfig, ratePayload, kSscDeliveryNoWakeup, 7, reqPkt));
+  {
+    uint16_t pbLen = u16(reqPkt.data() + 10);
+    Bytes pb(reqPkt.begin() + 12, reqPkt.begin() + 12 + pbLen);
+    std::vector<Field> reqFields, suspFields, stdReqFields;
+    assert(parse(pb, reqFields));
+    assert(find(reqFields, 1, 2)->bytes == accelUid);
+    assert(find(reqFields, 2, 5)->value == kSscMsgStdSensorConfig);
+    assert(parse(find(reqFields, 3, 2)->bytes, suspFields));
+    assert(find(suspFields, 2, 0)->value == kSscDeliveryNoWakeup);
+    assert(parse(find(reqFields, 4, 2)->bytes, stdReqFields));
+    assert(find(stdReqFields, 2, 2)->bytes == ratePayload);
+  }
+
+  assert(buildRequestPacket(accelUid, kSscMsgClientDisableReq, {}, kSscDeliveryWakeup, 8, reqPkt));
+  {
+    uint16_t pbLen = u16(reqPkt.data() + 10);
+    Bytes pb(reqPkt.begin() + 12, reqPkt.begin() + 12 + pbLen);
+    std::vector<Field> reqFields, suspFields;
+    assert(parse(pb, reqFields));
+    assert(find(reqFields, 1, 2)->bytes == accelUid);
+    assert(find(reqFields, 2, 5)->value == kSscMsgClientDisableReq);
+    assert(parse(find(reqFields, 3, 2)->bytes, suspFields));
+    assert(find(suspFields, 2, 0)->value == kSscDeliveryWakeup);
+    auto stdReq = find(reqFields, 4, 2);
+    assert(stdReq && stdReq->bytes.empty());
+  }
+
+  // 8. QMI client response matching & QRTR peer-down control filtering.
+  Bytes qmiResp{2, 8, 0, 0x20, 0, 7, 0, 2, 4, 0, 0, 0, 0, 0};
+  assert(isQmiClientResponse(qmiResp, 8));
+  assert(!isQmiClientResponse(qmiResp, 9));
+  Bytes qmiWrongMsg = qmiResp;
+  qmiWrongMsg[3] = 0x21;
+  assert(!isQmiClientResponse(qmiWrongMsg, 8));
+  assert(!isQmiClientResponse(accelPkt, 1));
+  Bytes truncResp = qmiResp;
+  truncResp.pop_back();
+  assert(!isQmiClientResponse(truncResp, 8));
+
+  qrtr_ctrl_pkt bye{};
+  bye.cmd = QRTR_TYPE_BYE;
+  bye.client.node = 7;
+  Bytes ctrlPkt(sizeof(bye));
+  std::memcpy(ctrlPkt.data(), &bye, sizeof(bye));
+  assert(isPeerDownCtrl(ctrlPkt, 7, 4001));
+  assert(!isPeerDownCtrl(ctrlPkt, 8, 4001));
+
+  qrtr_ctrl_pkt delSrv{};
+  delSrv.cmd = QRTR_TYPE_DEL_SERVER;
+  delSrv.server.node = 7;
+  delSrv.server.port = 4001;
+  std::memcpy(ctrlPkt.data(), &delSrv, sizeof(delSrv));
+  assert(isPeerDownCtrl(ctrlPkt, 7, 4001));
+  assert(!isPeerDownCtrl(ctrlPkt, 7, 4002));
+  assert(!isPeerDownCtrl(ctrlPkt, 8, 4001));
+
+  delSrv.cmd = QRTR_TYPE_NEW_SERVER;
+  std::memcpy(ctrlPkt.data(), &delSrv, sizeof(delSrv));
+  assert(!isPeerDownCtrl(ctrlPkt, 7, 4001));
+  assert(!isPeerDownCtrl({1, 2, 3}, 7, 4001));
+
+  // 9. SscAccel compatibility and SscSensor dataType / empty-type / unopened disable guards.
   SscAccel compatAccel;
   Acceleration compatSample{};
   assert(compatAccel.dataType() == "accel");
+  assert(!compatAccel.isOpen());
+  assert(!compatAccel.disable(10));
   assert(compatAccel.read(compatSample, 0) == -1);
   SscSensor gyro("gyro");
   SscSensor mag("mag");

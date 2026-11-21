@@ -51,9 +51,15 @@ class SurfaceSensors final:public ISensorsSubHal {
  std::thread workers[kSensorCount];
  bool quitting=false;
  std::string lightPath;
+ std::string slpiPath;
  spx::LuxCalibration calibration;
  std::vector<v2::SensorInfo> sensors;
  bool known(int handle)const{return handle>=1&&handle<=kSensorCount&&state[handle-1].available;}
+ bool slpiAlive()const{
+  if(slpiPath.empty())return false;
+  auto status=textFile(slpiPath+"/state");
+  return status=="attached"||status=="running";
+ }
  void postLocked(int index,const v2::Event* value){
   if(!callback||!state[index].enabled)return;
   std::vector<v2::Event> events;if(value)events.push_back(*value);
@@ -77,7 +83,7 @@ class SurfaceSensors final:public ISensorsSubHal {
   const bool isLight=index==1;
   const SscConfig& cfg=sscConfig(index);
   spx::SscSensor ssc(cfg.dataType);
-  bool connected=false;int64_t configured=0,lastSent=0;
+  bool connected=false,activeStream=false;int64_t configured=0,lastSent=0;
   float lastLight=NAN;uint64_t generation=UINT64_MAX;
   while(true){
    int64_t period;
@@ -85,29 +91,53 @@ class SurfaceSensors final:public ISensorsSubHal {
     std::unique_lock lock(mutex);
     if(quitting)break;
     if(!state[index].enabled){
-     ssc.close();connected=false;lastLight=NAN;lastSent=0;
+     lastLight=NAN;lastSent=0;configured=0;
+     if(!isLight&&activeStream){
+      lock.unlock();
+      if(slpiAlive())connected=ssc.disable(250);
+      else{ssc.close(false);connected=false;}
+      activeStream=false;
+      lock.lock();
+      continue;
+     }
      changed.wait(lock,[&]{return quitting||state[index].enabled;});
      continue;
     }
     if(generation!=state[index].generation){
-     generation=state[index].generation;ssc.close();connected=false;lastLight=NAN;lastSent=0;
+     generation=state[index].generation;configured=0;lastLight=NAN;lastSent=0;
+     if(!isLight&&activeStream){
+      lock.unlock();
+      if(slpiAlive())connected=ssc.disable(250);
+      else{ssc.close(false);connected=false;}
+      activeStream=false;
+      lock.lock();
+      continue;
+     }
     }
     period=state[index].period;
    }
    v2::Event event{};event.sensorHandle=index+1;bool valid=false;
    if(!isLight){
-    if(!connected){connected=ssc.open();configured=0;}
-    if(connected&&configured!=period){
-     connected=ssc.rate(std::clamp(1e9f/period,cfg.minHz,cfg.maxHz));configured=period;
-    }
-    spx::SscSample sample{};
-    int result=connected?ssc.read(sample,100):0;
-    if(result<0)connected=false;
-    if(result>0){
-     if(!lastSent||sample.timestamp-lastSent>=period-1000000){
-      event.sensorType=cfg.type;event.timestamp=sample.timestamp;
-      event.u.vec3={sample.xyz[0],sample.xyz[1],sample.xyz[2],v1::SensorStatus(sample.accuracy)};
-      valid=true;lastSent=sample.timestamp;
+    if(!slpiAlive()){
+     if(connected||ssc.isOpen())ssc.close(false);
+     connected=false;activeStream=false;configured=0;
+    }else{
+     if(!connected){connected=ssc.open();configured=0;activeStream=false;}
+     if(connected&&configured!=period){
+      if(ssc.rate(std::clamp(1e9f/period,cfg.minHz,cfg.maxHz))){configured=period;activeStream=true;}
+      else{ssc.close(slpiAlive());connected=false;activeStream=false;configured=0;}
+     }
+     if(connected){
+      spx::SscSample sample{};
+      int result=ssc.read(sample,100);
+      if(result<0){ssc.close(slpiAlive());connected=false;activeStream=false;configured=0;}
+      if(result>0){
+       if(!lastSent||sample.timestamp-lastSent>=period-1000000){
+        event.sensorType=cfg.type;event.timestamp=sample.timestamp;
+        event.u.vec3={sample.xyz[0],sample.xyz[1],sample.xyz[2],v1::SensorStatus(sample.accuracy)};
+        valid=true;lastSent=sample.timestamp;
+       }
+      }
      }
     }
    }else{
@@ -124,12 +154,12 @@ class SurfaceSensors final:public ISensorsSubHal {
     changed.wait_for(lock,std::chrono::nanoseconds(delay),[&]{return quitting||!state[index].enabled||state[index].generation!=generation;});
    }
   }
+  if(!isLight&&ssc.isOpen())ssc.close(slpiAlive());
  }
  public:
  SurfaceSensors(){
-  auto slpi=findNamed("/sys/class/remoteproc","slpi");
-  auto status=textFile(slpi+"/state");
-  const bool slpiReady=!slpi.empty()&&(status=="attached"||status=="running");
+  slpiPath=findNamed("/sys/class/remoteproc","slpi");
+  const bool slpiReady=slpiAlive();
   state[0].available=slpiReady;
   if(slpiReady){
    // Targeted SUID probe only; never enumerate all sensors (crashes SLPI firmware).

@@ -82,6 +82,32 @@ SLPI 通过 EFI PAS12 启动，Linux 仅接管已成功启动的 DSP，禁止活
 确认正常；四个 DSP attached，原物理声卡保留。早期候选黑屏的具体原因仍未证明，
 不能把修正 QRTR bind 等同于解释所有历史黑屏。
 
+### 2026-11-21：SLPI SSC 停流握手与 QRTR 复用修复
+
+SQ2 息屏停用加速度计（进入 `s2idle` 前）曾触发 `qcom_smd_qrtr: invalid ipcrouter packet`
+并导致 `remoteproc3`（SLPI）永久崩溃（`EX:kernel:0x0:SNS_SEE_P_1:0xc1:PC=0xb0040408`）。
+直接原因为 HAL 在连续流（accel/gyro/mag）活跃期间仅执行原始 `close(fd)`，未先向 SSC
+客户端发送停流请求（`SNS_CLIENT_MSGID_SNS_CLIENT_DISABLE_REQ = 10`）并等待应答。
+
+`probe/sensors/spx-ssc.{h,cpp}` 与 `probe/sensors/spx-sensors-subhal.cpp` 已修复如下：
+
+- **显式停流握手**：新增 `SscSensor::disable(250)`，发送 `kSscMsgClientDisableReq (10)`，
+  在剩余超时期内吸收在途数据并等待匹配的 QMI response（`ctl_flag=2, msg_id=0x20, txn`），
+  随后执行 `drain(15)` 清空残留包；`SscSensor::close(bool quiesce = true)` 仅在 `quiesce && streaming`
+  时先调用 `disable(250)` 再 `closeRaw()`。
+- **空闲 QRTR socket 与 SUID 复用**：`disable()` 成功后保留已打开的 QRTR socket 与已解析 SUID
+  （`isOpen() == true`），避免反复开关传感器时触发 QRTR 客户端连接/断开抖动；仅在显式关闭、
+  `DISABLE_REQ` 失败或收到 `QRTR_TYPE_BYE` / `QRTR_TYPE_DEL_SERVER` 时释放句柄。
+- **非唤醒流与死锁防护**：`SscSensor::rate()` 对连续流下发 `kSscDeliveryNoWakeup (1)`；
+  `SurfaceSensors::work()` 在调用阻塞的 `disable(250)` / `close(...)` 前先解锁 `mutex`，
+  并以 `slpiAlive()` 检查 `/sys/class/remoteproc/<slpi>/state`（`attached` 或 `running`），
+  防止向已崩溃的 SLPI 执行 `sendto()`。`receive()` 与 `drain()` 在 `EINTR` 时按剩余截止时间重试。
+
+本次产出的匹配构件指纹：
+
+- `sensors.spx.so` SHA-256：`1463cb3cef5b9844f6dc0f1b6c98c364b2148e3115b1b4b431269d28dd13c0f5`
+- 实机部署 `initramfs.cpio.gz` SHA-256：`5644bf735c8c71352c6c446181140df6ffaf3b10812d9c82290425855c57718b`
+
 ## 验证
 
 ```sh
@@ -96,3 +122,25 @@ g++ -std=c++17 -fsanitize=address,undefined tests/spx_ssc_test.cpp -o /tmp/spx-s
 `subhal-test LIBRARY [1|2]` 为手动实机加速度/光线事件、flush 和停用测试。
 主线实际安装函数的有效载荷及 DT 已与已验收包比较一致，HAL/三个模块重编逐字一致。
 本次未重新制作整块磁盘镜像，也不改写历史 kernel-baseline 的整机验收声明。
+
+2026-11-21 实机与主机验证：
+
+- **主机单测**：`spx_ssc_test.cpp`（ASan/UBSan，`512`/`513`/`10` 报文编码、`isQmiClientResponse`、
+  `isPeerDownCtrl`、`disable()` 未打开防护）与 `tests/test_spx_slpi.py`、`tests/test_full_image_sensors.py`
+  全数通过。
+- **SQ2 实机冷启动基线**：内核 `6.18.60-sq2-android1`、`sensors.spx.so` 实机 SHA-256 与构建产物一致，
+  `/sys/class/remoteproc/remoteproc3/state == attached`，启动阶段（含 gyro/mag 开关切换）`dmesg`
+  零 `invalid ipcrouter packet`、零 SLPI fatal error。
+- **SQ2 `subhal-test` 压测（15 轮）**：推入 `/data/local/tmp/subhal-test` 后依次对 handle `1`（accel，5 轮）、
+  `3`（gyro，5 轮）、`4`（mag，5 轮）执行 `activate(true) -> flush -> activate(false)/DISABLE_REQ -> initialize()`，
+  结果 `5/5 SUBHAL_ACCEL_PASS`、`5/5 SUBHAL_GYRO_PASS`、`5/5 SUBHAL_MAG_PASS`，清理临时二进制后
+  `remoteproc3 == attached`、`dmesg` 无错误。
+- **SQ2 息屏停流与亮屏恢复（5 轮）**：通过 Android `cmd power set-wakelock acquire PARTIAL_WAKE_LOCK`
+  临时保活后连续执行 5 轮 `input keyevent 223`（SLEEP）/ `224`（WAKEUP）：每轮息屏后
+  `Surface LSM6DSO Accelerometer (0x01000001)` 活跃连接数清零，亮屏后立即恢复为 `connections=2`；
+  加速度计最新事件时间戳由压测前 `1147.027s` 持续推进至 `1188.934s`，`WindowOrientationListener`
+  `mLastFilteredTimestampNanos=1188933632779` 同步刷新，`remoteproc3 == attached` 且 `dmesg` 无
+  `invalid ipcrouter packet` / SLPI crash。
+- **边界说明**：上述 5 轮息屏/亮屏自动化循环持有临时 Android `PARTIAL_WAKE_LOCK` 以避免设备在无 RTC
+  `wakealarm` 的情况下进入深睡，因此实测时 `suspend_stats/success=0`；真机物理合盖/电源键完整进出
+  `s2idle` 及折叠键盘竖屏旋转体验仍需人工手感复核。

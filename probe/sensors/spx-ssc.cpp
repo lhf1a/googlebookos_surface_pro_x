@@ -8,11 +8,17 @@
 #include <unistd.h>
 #include <time.h>
 #include <cmath>
+#include <cerrno>
 #include <cstring>
 #include <algorithm>
 #include <utility>
 namespace spx {
 using Bytes=std::vector<uint8_t>;
+static constexpr uint32_t kSscMsgClientDisableReq=10;
+static constexpr uint32_t kSscMsgSuidReq=512;
+static constexpr uint32_t kSscMsgStdSensorConfig=513;
+static constexpr uint8_t kSscDeliveryWakeup=0;
+static constexpr uint8_t kSscDeliveryNoWakeup=1;
 static uint16_t u16(const uint8_t*p){return p[0]|uint16_t(p[1])<<8;}
 static uint64_t little(const uint8_t*p,size_t n){uint64_t x=0;for(size_t j=0;j<n;j++)x|=uint64_t(p[j])<<(8*j);return x;}
 static void le(Bytes& b,uint64_t v,int n){for(int j=0;j<n;j++)b.push_back(v>>(8*j));}
@@ -98,6 +104,27 @@ static bool buildRatePayload(float hz,Bytes& payload){
  payload={13};le(payload,bits,4);
  return true;
 }
+static bool buildRequestPacket(const Bytes& targetUid,uint32_t msg,const Bytes& data,uint8_t deliveryType,uint16_t txn,Bytes& packet){
+ if(targetUid.empty())return false;
+ Bytes pb=blob(1,targetUid);
+ pb.push_back(0x15);le(pb,msg,4);
+ append(pb,blob(3,{8,1,16,deliveryType}));
+ append(pb,data.empty()?blob(4,{}):blob(4,blob(2,data)));
+ Bytes body{1};le(body,pb.size()+2,2);le(body,pb.size(),2);append(body,pb);append(body,{16,1,0,1});
+ if(body.size()>UINT16_MAX)return false;
+ packet={0};le(packet,txn,2);le(packet,0x20,2);le(packet,body.size(),2);append(packet,body);
+ return true;
+}
+static bool isQmiClientResponse(const Bytes& packet,uint16_t expectedTxn){
+ return packet.size()>=7&&packet[0]==2&&u16(packet.data()+1)==expectedTxn&&u16(packet.data()+3)==0x20&&u16(packet.data()+5)==packet.size()-7;
+}
+static bool isPeerDownCtrl(const Bytes& packet,uint32_t peerNode,uint32_t peerPort){
+ if(packet.size()<sizeof(qrtr_ctrl_pkt))return false;
+ qrtr_ctrl_pkt p{};std::memcpy(&p,packet.data(),sizeof(p));
+ if(p.cmd==QRTR_TYPE_BYE)return p.client.node==peerNode;
+ if(p.cmd==QRTR_TYPE_DEL_SERVER)return p.server.node==peerNode&&p.server.port==peerPort;
+ return false;
+}
 static bool parseSamplePacket(const Bytes& packet,const Bytes& expectedUid,std::vector<SscSample>& out,int64_t& timeOffset,bool& timeSet,int64_t nowNs){
  Bytes origin;std::vector<Field> ev;
  if(!events(packet,origin,ev)||origin!=expectedUid)return false;
@@ -127,21 +154,89 @@ static bool parseSamplePacket(const Bytes& packet,const Bytes& expectedUid,std::
 }
 static int64_t now(){timespec t{};clock_gettime(CLOCK_BOOTTIME,&t);return int64_t(t.tv_sec)*1000000000+t.tv_nsec;}
 SscSensor::SscSensor(std::string dataType):type(std::move(dataType)){}
-void SscSensor::close(){if(fd>=0)::close(fd);fd=-1;uid.clear();pending.clear();timeSet=false;}
+bool SscSensor::isOpen() const{return fd>=0&&!uid.empty();}
+void SscSensor::closeRaw(){
+ if(fd>=0)::close(fd);
+ fd=-1;node=0;port=0;localNode=0;streaming=false;uid.clear();pending.clear();timeSet=false;
+}
+void SscSensor::drain(int quietMs){
+ if(fd<0)return;
+ for(int i=0;i<32;i++){
+  int remaining=quietMs;
+  int64_t deadline=quietMs>0?now()+int64_t(quietMs)*1000000:0;
+  int pr=0;
+  while(true){
+   pollfd p{fd,POLLIN,0};
+   pr=poll(&p,1,remaining);
+   if(pr<0&&errno==EINTR){
+    if(quietMs<=0)continue;
+    int64_t left=(deadline-now()+999999)/1000000;
+    if(left<=0){pr=0;break;}
+    remaining=int(left);
+    continue;
+   }
+   if(pr==1&&(p.revents&(POLLERR|POLLHUP|POLLNVAL))){closeRaw();return;}
+   break;
+  }
+  if(pr!=1)break;
+  uint8_t buf[65536];sockaddr_qrtr from{};socklen_t len=sizeof(from);
+  ssize_t n=recvfrom(fd,buf,sizeof(buf),MSG_DONTWAIT|MSG_TRUNC,reinterpret_cast<sockaddr*>(&from),&len);
+  if(n<=0)break;
+  if(n<=ssize_t(sizeof(buf))&&len==sizeof(from)&&port!=QRTR_PORT_CTRL&&from.sq_node==localNode&&from.sq_port==QRTR_PORT_CTRL){
+   Bytes pkt(buf,buf+n);
+   if(isPeerDownCtrl(pkt,node,port)){closeRaw();return;}
+  }
+ }
+}
+bool SscSensor::disable(int timeoutMs){
+ if(fd<0){streaming=false;pending.clear();timeSet=false;return false;}
+ if(!streaming||uid.empty()){streaming=false;pending.clear();timeSet=false;drain(0);return true;}
+ if(!send(kSscMsgClientDisableReq,{},kSscDeliveryWakeup)){closeRaw();return false;}
+ const uint16_t txn=transaction;
+ bool acked=false;Bytes packet;
+ const int64_t deadline=now()+int64_t(std::max(1,timeoutMs))*1000000;
+ while(now()<deadline&&fd>=0){
+  int waitMs=int(std::min<int64_t>(50,std::max<int64_t>(1,(deadline-now()+999999)/1000000)));
+  if(!receive(packet,waitMs))continue;
+  if(isQmiClientResponse(packet,txn)){acked=true;break;}
+ }
+ streaming=false;pending.clear();timeSet=false;
+ if(acked&&fd>=0){drain(15);return fd>=0&&!uid.empty();}
+ closeRaw();return false;
+}
+void SscSensor::close(bool quiesce){
+ if(fd>=0)drain(0);
+ if(quiesce&&fd>=0&&streaming&&!uid.empty())disable(250);
+ if(fd>=0)drain(0);
+ closeRaw();
+}
 bool SscSensor::receive(Bytes& b,int timeoutMs){
- pollfd p{fd,POLLIN,0};
- if(poll(&p,1,timeoutMs)!=1)return false;
- if(p.revents&(POLLERR|POLLHUP|POLLNVAL)){close();return false;}
- if(!(p.revents&POLLIN))return false;
+ if(fd<0)return false;
+ int64_t deadline=timeoutMs>0?now()+int64_t(timeoutMs)*1000000:0;
+ while(true){
+  int wait=timeoutMs<=0?timeoutMs:int(std::max<int64_t>(1,(deadline-now()+999999)/1000000));
+  pollfd p{fd,POLLIN,0};
+  int pr=poll(&p,1,wait);
+  if(pr<0&&errno==EINTR){if(timeoutMs>0&&now()>=deadline)return false;continue;}
+  if(pr!=1)return false;
+  if(p.revents&(POLLERR|POLLHUP|POLLNVAL)){closeRaw();return false;}
+  if(!(p.revents&POLLIN))return false;
+  break;
+ }
  uint8_t buf[65536];sockaddr_qrtr from{};socklen_t len=sizeof(from);
  ssize_t n=recvfrom(fd,buf,sizeof(buf),MSG_TRUNC,reinterpret_cast<sockaddr*>(&from),&len);
- if(n<=0||n>ssize_t(sizeof(buf))||len!=sizeof(from)||from.sq_node!=node||from.sq_port!=port)return false;
- b.assign(buf,buf+n);return true;
+ if(n<=0||n>ssize_t(sizeof(buf))||len!=sizeof(from))return false;
+ Bytes pkt(buf,buf+n);
+ if(port!=QRTR_PORT_CTRL&&from.sq_node==localNode&&from.sq_port==QRTR_PORT_CTRL){
+  if(isPeerDownCtrl(pkt,node,port))closeRaw();
+  return false;
+ }
+ if(from.sq_node!=node||from.sq_port!=port)return false;
+ b=std::move(pkt);return true;
 }
-bool SscSensor::send(uint32_t msg,const Bytes&data){
- Bytes pb=blob(1,uid);pb.push_back(0x15);le(pb,msg,4);append(pb,blob(3,{8,1,16,0}));append(pb,blob(4,blob(2,data)));
- Bytes body{1};le(body,pb.size()+2,2);le(body,pb.size(),2);append(body,pb);append(body,{16,1,0,1});
- Bytes packet{0};le(packet,++transaction,2);le(packet,0x20,2);le(packet,body.size(),2);append(packet,body);
+bool SscSensor::send(uint32_t msg,const Bytes&data,uint8_t deliveryType){
+ Bytes packet;
+ if(fd<0||!buildRequestPacket(uid,msg,data,deliveryType,++transaction,packet))return false;
  sockaddr_qrtr dst{AF_QIPCRTR,node,port};
  return sendto(fd,packet.data(),packet.size(),0,reinterpret_cast<sockaddr*>(&dst),sizeof(dst))==ssize_t(packet.size());
 }
@@ -152,11 +247,11 @@ SscProbeResult SscSensor::openInternal(int timeoutMs){
  fd=socket(AF_QIPCRTR,SOCK_DGRAM|SOCK_CLOEXEC,0);if(fd<0)return SscProbeResult::Unavailable;
  sockaddr_qrtr local{AF_QIPCRTR,0,0};socklen_t len=sizeof(local);
  // QRTR bind requires the kernel-assigned local node, not node zero.
- if(getsockname(fd,reinterpret_cast<sockaddr*>(&local),&len)||bind(fd,reinterpret_cast<sockaddr*>(&local),len)){close();return SscProbeResult::Unavailable;}
- node=local.sq_node;port=QRTR_PORT_CTRL;
+ if(getsockname(fd,reinterpret_cast<sockaddr*>(&local),&len)||bind(fd,reinterpret_cast<sockaddr*>(&local),len)){closeRaw();return SscProbeResult::Unavailable;}
+ localNode=local.sq_node;node=localNode;port=QRTR_PORT_CTRL;
  sockaddr_qrtr control{AF_QIPCRTR,node,port};
  qrtr_ctrl_pkt lookup{};lookup.cmd=QRTR_TYPE_NEW_LOOKUP;lookup.server.service=400;
- if(sendto(fd,&lookup,sizeof(lookup),0,reinterpret_cast<sockaddr*>(&control),sizeof(control))!=sizeof(lookup)){close();return SscProbeResult::Unavailable;}
+ if(sendto(fd,&lookup,sizeof(lookup),0,reinterpret_cast<sockaddr*>(&control),sizeof(control))!=sizeof(lookup)){closeRaw();return SscProbeResult::Unavailable;}
  Bytes packet;bool found=false;int64_t deadline=now()+int64_t(timeoutMs)*1000000;
  while(now()<deadline){
   int waitMs=int(std::min<int64_t>(200,std::max<int64_t>(1,(deadline-now()+999999)/1000000)));
@@ -166,26 +261,27 @@ SscProbeResult SscSensor::openInternal(int timeoutMs){
    if(p.cmd==QRTR_TYPE_NEW_SERVER&&p.server.service==400&&p.server.port){node=p.server.node;port=p.server.port;found=true;break;}
   }
  }
- if(!found){close();return SscProbeResult::Unavailable;}
+ if(!found){closeRaw();return SscProbeResult::Unavailable;}
  uid=suidServiceUid();
- if(!send(512,query)){close();return SscProbeResult::Unavailable;}
+ if(!send(kSscMsgSuidReq,query,kSscDeliveryWakeup)){closeRaw();return SscProbeResult::Unavailable;}
  deadline=now()+int64_t(timeoutMs)*1000000;
  while(now()<deadline){
   int waitMs=int(std::min<int64_t>(200,std::max<int64_t>(1,(deadline-now()+999999)/1000000)));
   if(!receive(packet,waitMs))continue;
   Bytes resolved;
   SscProbeResult r=parseSuidResponse(packet,uid,type,resolved);
-  if(r==SscProbeResult::Found){uid=std::move(resolved);return SscProbeResult::Found;}
-  if(r==SscProbeResult::Missing){close();return SscProbeResult::Missing;}
+  if(r==SscProbeResult::Found){uid=std::move(resolved);streaming=false;drain(0);return SscProbeResult::Found;}
+  if(r==SscProbeResult::Missing){closeRaw();return SscProbeResult::Missing;}
  }
- close();return SscProbeResult::Unavailable;
+ closeRaw();return SscProbeResult::Unavailable;
 }
 bool SscSensor::open(int timeoutMs){return openInternal(timeoutMs)==SscProbeResult::Found;}
 SscProbeResult SscSensor::probe(int timeoutMs){SscProbeResult r=openInternal(timeoutMs);close();return r;}
 bool SscSensor::rate(float hz){
  Bytes payload;
  if(fd<0||!buildRatePayload(hz,payload))return false;
- return send(513,payload);
+ if(!send(kSscMsgStdSensorConfig,payload,kSscDeliveryNoWakeup))return false;
+ streaming=true;return true;
 }
 int SscSensor::read(SscSample&out,int timeoutMs){
  if(!pending.empty()){out=pending.front();pending.erase(pending.begin());return 1;}

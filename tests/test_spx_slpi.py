@@ -1,5 +1,6 @@
 import ctypes.util
 import importlib.util
+import json
 from pathlib import Path
 import struct
 import subprocess
@@ -352,15 +353,41 @@ std::map<std::string, bool> openOk;
 std::map<std::string, std::array<float, 3>> sampleValues;
 std::map<std::string, int> openCounts;
 std::map<std::string, int> closeCounts;
+std::map<std::string, int> quiesceCloseCounts;
+std::map<std::string, int> disableCounts;
+std::map<std::string, int> disableDelayMs;
+std::atomic<bool> inDisable{false};
 }
 
 namespace spx {
 SscSensor::SscSensor(std::string dataType) : type(std::move(dataType)) {}
-void SscSensor::close() {
+bool SscSensor::isOpen() const { return fd >= 0; }
+bool SscSensor::disable(int) {
+  if (fd < 0) {
+    streaming = false;
+    return false;
+  }
+  int delay = 0;
+  {
+    std::lock_guard lk(mock_ssc::mu);
+    mock_ssc::disableCounts[type]++;
+    delay = mock_ssc::disableDelayMs[type];
+  }
+  if (delay > 0) {
+    mock_ssc::inDisable.store(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+    mock_ssc::inDisable.store(false);
+  }
+  streaming = false;
+  return true;
+}
+void SscSensor::close(bool quiesce) {
   if (fd >= 0) {
     std::lock_guard lk(mock_ssc::mu);
     mock_ssc::closeCounts[type]++;
+    if (quiesce && streaming) mock_ssc::quiesceCloseCounts[type]++;
     fd = -1;
+    streaming = false;
   }
 }
 SscProbeResult SscSensor::probe(int) {
@@ -374,11 +401,16 @@ bool SscSensor::open(int) {
   bool ok = it != mock_ssc::openOk.end() && it->second;
   if (ok) {
     fd = 1;
+    streaming = false;
     mock_ssc::openCounts[type]++;
   }
   return ok;
 }
-bool SscSensor::rate(float hz) { return fd >= 0 && hz > 0.f; }
+bool SscSensor::rate(float hz) {
+  if (fd < 0 || hz <= 0.f) return false;
+  streaming = true;
+  return true;
+}
 int SscSensor::read(SscSample& sample, int) {
   if (fd < 0) return -1;
   std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -429,6 +461,11 @@ int main() {
     mock_ssc::probeResults = {{"gyro", spx::SscProbeResult::Found}, {"mag", spx::SscProbeResult::Found}};
     mock_ssc::openOk = {{"accel", true}, {"gyro", true}, {"mag", true}};
     mock_ssc::sampleValues = {{"accel", {0.f, 0.f, 9.81f}}, {"gyro", {0.1f, -0.2f, 0.3f}}, {"mag", {20.f, -10.f, 45.f}}};
+    mock_ssc::openCounts.clear();
+    mock_ssc::closeCounts.clear();
+    mock_ssc::quiesceCloseCounts.clear();
+    mock_ssc::disableCounts.clear();
+    mock_ssc::disableDelayMs = {{"accel", 80}};
   }
   {
     SurfaceSensors hal;
@@ -456,7 +493,46 @@ int main() {
       assert(std::fabs(cb.last[3].u.vec3.z - 0.3f) < 1e-5f);
       assert(std::fabs(cb.last[4].u.vec3.x - 20.f) < 1e-5f);
     }
-    for (int h : {1, 3, 4}) assert(hal.activate(h, false) == v1::Result::OK);
+
+    // Deactivate accel while slow disable() (80ms) runs: concurrent batch/activate on gyro MUST NOT block!
+    assert(hal.activate(1, false) == v1::Result::OK);
+    for (int i = 0; i < 40 && !mock_ssc::inDisable.load(); i++)
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    assert(mock_ssc::inDisable.load());
+    auto t0 = std::chrono::steady_clock::now();
+    assert(hal.batch(3, 40000000, 0) == v1::Result::OK);
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    assert(elapsedMs < 30);
+
+    for (int h : {3, 4}) assert(hal.activate(h, false) == v1::Result::OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    {
+      std::lock_guard lk(mock_ssc::mu);
+      assert(mock_ssc::disableCounts["accel"] == 1);
+      assert(mock_ssc::disableCounts["gyro"] == 1);
+      assert(mock_ssc::disableCounts["mag"] == 1);
+      assert(mock_ssc::closeCounts["accel"] == 0);
+      assert(mock_ssc::openCounts["accel"] == 1);
+      mock_ssc::disableDelayMs.clear();
+    }
+
+    // Re-activating accel reuses the already-open QRTR connection without reopening/closing.
+    assert(hal.activate(1, true) == v1::Result::OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    assert(hal.activate(1, false) == v1::Result::OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    {
+      std::lock_guard lk(mock_ssc::mu);
+      assert(mock_ssc::openCounts["accel"] == 1);
+      assert(mock_ssc::disableCounts["accel"] == 2);
+      assert(mock_ssc::closeCounts["accel"] == 0);
+    }
+  }
+  {
+    std::lock_guard lk(mock_ssc::mu);
+    assert(mock_ssc::closeCounts["accel"] == 1);
+    assert(mock_ssc::closeCounts["gyro"] == 1);
+    assert(mock_ssc::closeCounts["mag"] == 1);
   }
 
   // Case 2: Graceful degradation when mag SUID is Missing; accel + gyro still advertised and working.
@@ -493,6 +569,46 @@ int main() {
     }
     assert(hal.activate(1, false) == v1::Result::OK);
     assert(hal.activate(4, false) == v1::Result::OK);
+  }
+
+  // Case 4: SLPI crashes mid-run -> worker closes without quiesce send and stops calling open()/rate().
+  {
+    std::lock_guard lk(mock_ssc::mu);
+    mock_ssc::probeResults = {{"gyro", spx::SscProbeResult::Missing}, {"mag", spx::SscProbeResult::Missing}};
+    mock_ssc::openOk = {{"accel", true}};
+    mock_ssc::openCounts.clear();
+    mock_ssc::closeCounts.clear();
+    mock_ssc::quiesceCloseCounts.clear();
+    mock_ssc::disableCounts.clear();
+  }
+  {
+    SurfaceSensors hal;
+    TestCallback cb;
+    assert(hal.initialize(&cb) == v1::Result::OK);
+    assert(hal.activate(1, true) == v1::Result::OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    {
+      std::ofstream st(""" + json.dumps(str(rproc/"state")) + r""");
+      st << "crashed\n";
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    int opensAtCrash = 0;
+    {
+      std::lock_guard lk(mock_ssc::mu);
+      opensAtCrash = mock_ssc::openCounts["accel"];
+      assert(opensAtCrash == 1);
+      assert(mock_ssc::closeCounts["accel"] == 1);
+      assert(mock_ssc::quiesceCloseCounts["accel"] == 0);
+    }
+    assert(hal.activate(1, false) == v1::Result::OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    assert(hal.activate(1, true) == v1::Result::OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    {
+      std::lock_guard lk(mock_ssc::mu);
+      assert(mock_ssc::openCounts["accel"] == opensAtCrash);
+      assert(mock_ssc::disableCounts["accel"] == 0);
+    }
   }
   return 0;
 }
