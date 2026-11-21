@@ -42,10 +42,11 @@
 
 - **统一引导与设备路由**：SQ1 与 SQ2 共用同一套内核、模块与 initramfs。开机由 UEFI 加载定制 GRUB，并根据 SMBIOS 机型自动分发对应的 EL2 启动载荷与设备树。
 - **混合图形与显示栈**：EGL / GLES 与默认桌面由 Mesa Freedreno / Turnip 驱动；Vulkan 通过双 Vulkan 路由器按应用策略在 Turnip 与高通原生 Vulkan 之间切换，并为普通应用启用 `VM_BIND`；显示合成与内存分配由 QTI Display / HWC / SDM 与 Gralloc 协同完成。
-- **多媒体与硬件子系统**：集成 OMX 与 Venus 硬件视频编解码、音频路由、V4L2/CAMSS 与软件 ISP 摄像头、SLPI 传感器、IPTSd 触控与手写笔、双 Type-C 多屏输出以及系统[高级设置](docs/ADVANCED-SETTINGS.md)。
+- **多媒体与硬件子系统**：集成 OMX 与 Venus 硬件视频编解码、音频路由、V4L2/CAMSS 与软件 ISP 摄像头、SLPI 传感器、IPTSd 触控与手写笔、双 Type-C 多屏输出、Wi-Fi 热点、QMI LOC GNSS、霍尔合盖休眠、OV7251 850nm 红外人脸解锁以及系统[高级设置](docs/ADVANCED-SETTINGS.md)。
 
 ### 预构建镜像下载
 
+- **更新日志**：[docs/RELEASE-NOTES.md](docs/RELEASE-NOTES.md) · [GitHub Releases](https://github.com/lhf1a/googlebookos_surface_pro_x/releases)
 - **Google Drive**：[surface_pro_x_gbos_images](https://drive.google.com/drive/folders/1uVAA6UnydSyUHQAO8Y5rTm8SxZ62Zykr)
 - **百度网盘**：https://pan.baidu.com/s/51GjLdmTGir0PelomZvboYw
 
@@ -80,19 +81,20 @@ flowchart LR
 | **音频：扬声器 / 麦克风 / USB-C** | ✅ 可用 | ✅ 可用 |
 | **Root / KernelSU** | ✅ 可用 | ✅ 可用 |
 | **Android 桌面与图形：GLES / Vulkan** | 🟡 部分可用 | 🟡 部分可用 |
-| **视频硬解：Venus / OMX** | ✅ 可用 | ✅ 可用 |
+| **视频编解码：OMX / Venus** | ✅ 可用 | ✅ 可用 |
 | **摄像头：前置 / 后置** | ✅ 可用 | ✅ 可用 |
 | **触控屏与手写笔** | ✅ 可用 | ✅ 可用 |
 | **传感器：自动亮度 / 自动旋转** | ✅ 可用 | ✅ 可用 |
 | **休眠 s2idle 与电源管理** | 🟡 部分可用 | 🟡 部分可用 |
-| **合盖休眠** | ✅ 可用 | ✅ 可用 |
+| **合盖休眠（霍尔 `SW_LID`）** | ✅ 可用 | ✅ 可用 |
 | **LTE 移动数据** | ✅ 可用 | ✅ 可用 |
-| **Wi-Fi / 蓝牙 / SSH** | ✅ 可用 | ✅ 可用 |
+| **Wi-Fi / 热点 / 蓝牙 / SSH** | ✅ 可用 | ✅ 可用 |
+| **GNSS / GPS（QMI LOC AIDL V4）** | 🟡 部分可用（HAL 已就绪，待搜星实测） | 🟡 部分可用（HAL 已就绪，待搜星实测） |
 | **USB 存储 / Type Cover / 物理按键** | ✅ 可用 | ✅ 可用 |
 | **USB-C DP / 原生多屏设置** | ✅ 可用 | ✅ 可用 |
 | **下口 USB ADB** | ✅ 可用 | ✅ 可用 |
 | **高级设置**：[全部功能说明](docs/ADVANCED-SETTINGS.md)（Vulkan、性能模式、触控、调试、霍尔与红外解锁、OTA 与 LiveCD 安装） | ✅ 可用 | ✅ 可用 |
-| **红外人脸解锁（Class 2）** | 🟡 部分可用（HAL 已实现，待真机实测） | 🟡 部分可用（HAL 已实现，待真机实测） |
+| **红外人脸解锁（Class 2，OV7251）** | 🟡 部分可用（待 SQ1 实测） | ✅ 可用 |
 | **短信、休眠到磁盘** | ❌ 不可用 | ❌ 不可用 |
 
 ---
@@ -148,31 +150,25 @@ flowchart LR
 
 #### 方案 C：Linux USB-NVMe 部署脚本
 ```sh
-python3 scripts/deploy-experimental-usb.py --manifest MANIFEST --layout LAYOUT --image IMAGE
+python3 tools/deploy-experimental-usb.py --manifest MANIFEST --layout LAYOUT --image IMAGE
 ```
 
 #### 方案 D：Windows 同盘双启动脚本
-以管理员身份运行 `scripts/Install-GooglebookDualBoot.cmd`，或在管理员 PowerShell 中执行：
+以管理员身份运行 `tools/Install-GooglebookDualBoot.cmd`，或在管理员 PowerShell 中执行：
 
 ```powershell
 # 查看磁盘与双启动状态
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action Status
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\Install-GooglebookDualBoot.ps1 -Action Status
 
 # 本机同盘安装双系统
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action Install -ImagePath D:\surface-pro-x-6.18-hybrid-generic.img.gz -TargetDiskNumber 0 -ShrinkOSVolumeGB 32
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\Install-GooglebookDualBoot.ps1 -Action Install -ImagePath D:\surface-pro-x-6.18-hybrid-generic.img.gz -TargetDiskNumber 0 -ShrinkOSVolumeGB 32
 
 # 切换默认启动系统
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-GooglebookDualBoot.ps1 -Action SwitchDefault -DefaultOS Windows
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\Install-GooglebookDualBoot.ps1 -Action SwitchDefault -DefaultOS Windows
 ```
 
-#### 方案 E：USB LiveCD 模式通过“高级设置”安装到内置硬盘
-先通过 **方案 A（balenaEtcher）** 或 **方案 B（Rufus）** 将镜像写入外接 USB 磁盘，在真机实测确认各功能正常后，直接在运行的 Android 桌面安装至 Surface Pro X 内置 NVMe 硬盘：
-
-1. 从 USB 磁盘启动（关机后按住音量减与电源键）并完成首次触控校准向导。
-2. 建议接通电源，打开 **高级设置 -> 写入内置硬盘**（详见 [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md)）。
-3. 选择目标内置 NVMe 磁盘，确认高风险提示（**会彻底清空内置硬盘包括 Windows 在内的全部分区，且不会迁移当前 USB 盘上的 `userdata`**）并开始安装。
-4. 安装器会自动重建 5 分区 GPT 表、复制 `super` 分区并执行全量 SHA-256 回读校验，同时写入内置独立启动所需的标准 UEFI ESP 文件。
-5. 完成后点击 **立即关机**，待完全断电后**拔出 USB 启动盘**，再开机即可直接从内置 SSD 启动（首次内置开机会自动扩容 `userdata` 并运行触控校准）。
+#### 方案 E：USB LiveCD 模式写入内置硬盘
+先通过方案 A/B 从外接 USB 启动并完成触控校准，接通电源后在 **高级设置 -> 写入内置硬盘**（[ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md)）选中内置 NVMe 并确认不可逆提示（**会清空内置盘全部现有分区含 Windows，且不迁移 USB 盘上的 `userdata`**）；完成 5 分区 GPT 重建、SHA-256 校验与独立 UEFI 写入后点击 **立即关机**，**拔出 USB 盘**再开机即可。
 
 ### 3. 启动与首次开机
 
@@ -182,23 +178,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-Googlebook
 
 ### 4. 已有系统的升级（OTA 与 ADB）
 
-- **设备端 OTA 升级**：打开 **系统设置 -> 系统更新**（或 **高级设置 -> 系统更新**），选择 `.tar.gz` 升级包或 `.img` / `.img.gz` 整盘镜像，可选择 **保留用户数据**（保留 `/data`、触控校准、高级设置与同盘双启动 `grub.cfg`）或 **清除数据并重装**。
-- **PC 端 ADB 一键升级**：Windows 可运行 `scripts/Upgrade-GooglebookViaAdb.cmd` / `.ps1`，Linux / macOS 可运行 `scripts/upgrade-googlebook-via-adb.sh`，详见 [OTA-HANDOFF](docs/OTA-HANDOFF.md)。
+- **设备端 OTA 升级**：打开 **系统设置 -> 系统更新**（或 **高级设置 -> 系统更新**），选择 `.tar.gz` 升级包或 `.img` / `.img.gz` 整盘镜像，可选择 **保留用户数据**（保留 `/data`、触控校准、设置与 `grub.cfg`）或 **清除数据并重装**。
+- **PC 端 ADB 一键升级**：Windows 运行 `tools/Upgrade-GooglebookViaAdb.cmd` / `.ps1`，Linux / macOS 运行 `tools/upgrade-googlebook-via-adb.sh`，详见 [OTA-HANDOFF](docs/OTA-HANDOFF.md)。
 
 ---
 
 ## 调试与开发
 
-系统内置 **高级设置（`SurfaceAdvancedControl.apk`）**，提供免手动 KernelSU 授权的无线调试、initramfs `root` SSH 与系统调优能力。全部六个模块（**Vulkan 配置**、**性能模式**、**触控**、**调试**、**系统更新**、**写入内置硬盘**）完整说明请见 [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md)。
+系统内置 **高级设置（`SurfaceAdvancedControl.apk`）**，提供免手动 KernelSU 授权的调试与硬件调优能力（完整六个模块说明见 [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md)）：
 
-### 使用“高级设置 -> 调试”进行日常开发
-
-1. 在平板打开 **高级设置 -> 调试**，界面顶部会实时显示可用的 **LAN IP** 与虚拟化 **VM IP**。
-2. **网络 ADB（端口 `5555`）**：一键开关 TCP `5555` 网络 ADB，开启状态与防火墙规则会自动跨重启保留；开发机通过 `adb connect <LAN_IP>:5555` 连接（镜像启用 `ro.adb.secure=1`，首次连接需在平板屏幕确认 RSA 授权）。关闭网络 ADB 时，若启用了下口 USB 桥接（`adb-usb-bridge`），系统会自动保留 `tcp:localhost:5555`，不会影响下口有线 USB ADB。
-3. **initramfs `root` SSH（端口 `22`）**：开关 Dropbear SSH 服务（运行在早期 initramfs 根命名空间，即便 Android 桌面卡死仍可登录排障）：
-   - **密码管理**：默认镜像 `root` 密码处于锁定状态，可在应用内设置或清除密码。
-   - **公钥导入与 `ssh-copy-id` 持久化**：可在应用内通过文件或粘贴导入 OpenSSH 公钥 / X.509 PEM 证书；同时 `/root/.ssh` 与 Dropbear 主机密钥已软链接持久化至 `/data/vendor/spx-advanced-control/ssh`，直接在开发机执行 `ssh-copy-id root@<LAN_IP>` 写入的公钥跨重启永久保留。
-4. **下口有线 USB ADB 与 GRUB 救援模式**：使用 **下方** Type-C 接口连接电脑即可有线 `adb devices`（见 [TYPEC](docs/TYPEC.md)）。若系统在启动前异常无法进桌面，可在 GRUB 菜单选择 **救援模式**（`spx-rescue` / `sq2.rescue=1`），使用内置 USB 网卡驱动、`wifi-tui` 配网与端口 `22` SSH 排障（见 [BUILD](docs/BUILD.md#7-边界)）。
+- **IP 展示与网络 ADB（`TCP 5555`）**：实时查看 LAN / VM IP，一键持久化开关网络 ADB（`adb connect <LAN_IP>:5555`，开启 `ro.adb.secure=1` 授权）；关闭时自动保留 `tcp:localhost:5555`，不影响下口有线 `adb-usb-bridge`。
+- **initramfs `root` SSH（`TCP 22`）**：开关早期命名空间 Dropbear SSH（默认锁定 `root` 密码），支持应用内密码/公钥管理及 `/root/.ssh` 软链持久化（开发机可直接 `ssh-copy-id root@<LAN_IP>`）。
+- **下口 USB ADB 与 GRUB 救援模式**：**下方** Type-C 接口支持有线 `adb devices`（[TYPEC](docs/TYPEC.md)）。若系统进桌面异常，可在 GRUB 选择 **救援模式**（`spx-rescue` / `sq2.rescue=1`）启用内置 USB 网卡驱动、`wifi-tui` 配网与端口 `22` SSH（[BUILD](docs/BUILD.md#7-边界)）。
 
 ---
 
@@ -232,9 +223,10 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ├── patches/
 ├── probe/
 ├── reference/
-├── scripts/
+├── scripts/               # 构建流水线与开发脚本
 ├── source-dependencies/
 ├── tests/
+├── tools/                 # 用户侧刷机、双启动与 ADB 升级脚本
 └── upstream/
 ```
 
@@ -243,6 +235,7 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ## 文档索引
 
 ### 构建、依赖与部署
+- [RELEASE-NOTES](docs/RELEASE-NOTES.md) — 版本发布与更新日志（`v0.7.0`–`v0.9.0`）
 - [BUILD](docs/BUILD.md)
 - [STANDARD-BUILD](docs/STANDARD-BUILD.md)
 - [DEPENDENCIES](docs/DEPENDENCIES.md)
