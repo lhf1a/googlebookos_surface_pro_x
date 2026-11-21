@@ -53,12 +53,8 @@ PY
   patch -p1 -d "$SRC" < "$WORK/mapper5.patch"
 fi
 python3 "$ROOT/scripts/patch-mesa-sq2-multiplane.py" "$SRC/src/util/u_gralloc/u_gralloc_vm_mapper5.cpp"
-if [ "${SQ2_TURNIP_LEGACY_3DMARK_SYSMEM:-0}" = "1" ]; then
-  python3 "$ROOT/scripts/patch-sq2-turnip-gmem.py" --apply-legacy-3dmark-sysmem "$SRC"
-else
-  python3 "$ROOT/scripts/patch-sq2-turnip-gmem.py" --revert "$SRC"
-  python3 "$ROOT/scripts/patch-sq2-turnip-gmem.py" --verify-clean "$SRC"
-fi
+python3 "$ROOT/scripts/patch-sq2-turnip-gmem.py" --revert "$SRC"
+python3 "$ROOT/scripts/patch-sq2-turnip-gmem.py" --verify-clean "$SRC"
 cat > "$WORK/turnip-aarch64.cross" <<EOF
 [constants]
 ndk = '$NDK'
@@ -93,8 +89,7 @@ ninja -j "${SQ2_BUILD_JOBS:-8}" -C "$WORK/build-turnip" \
   > "$OUT/build.log" 2>&1 || { tail -70 "$OUT/build.log"; exit 1; }
 "$NDK/bin/llvm-strip" --strip-unneeded -o "$OUT/runtime/vulkan.freedreno.so" \
   "$WORK/build-turnip/src/freedreno/vulkan/libvulkan_freedreno.so"
-if [ "${SQ2_TURNIP_LEGACY_3DMARK_SYSMEM:-0}" != "1" ]; then
-  python3 - "$OUT/runtime/vulkan.freedreno.so" <<'PY'
+python3 - "$OUT/runtime/vulkan.freedreno.so" <<'PY'
 from pathlib import Path
 import sys
 data = Path(sys.argv[1]).read_bytes()
@@ -102,7 +97,6 @@ for marker in (b'com.futuremark.dmandroid.application', b'SQ2 A680.1'):
     if marker in data:
         raise SystemExit(f'Unexpected legacy sysmem marker in clean Turnip: {marker!r}')
 PY
-fi
 DRM=$(find "$WORK/build-turnip/subprojects" -name libdrm.so -type f -print -quit)
 test -n "$DRM"
 "$NDK/bin/llvm-strip" --strip-unneeded -o "$OUT/runtime/libdrm.so" "$DRM"
