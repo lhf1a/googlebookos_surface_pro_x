@@ -109,6 +109,14 @@ class SpxGnssTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, f"Non-zero exit on SIGTERM: {err}")
             self.assertFalse(sock_path.exists(), "Daemon left stale Unix socket behind")
 
+    def test_gnss_hal_extensions_never_return_ok_with_null_binder(self):
+        src = (ROOT / "probe/gnss/spx-gnss-hal.cpp").read_text(encoding="utf-8")
+        self.assertIn("class SpxGnssPsds final : public BnGnssPsds", src)
+        self.assertIn("*out = mPsds;", src)
+        # Android 17 libservices.core-gnss.so crashes in GnssPsdsAidl::setCallback()
+        # if getExtension*() returns ScopedAStatus::ok() with *out = nullptr.
+        self.assertNotIn("*out = nullptr;\n        return ScopedAStatus::ok();", src)
+
 
 if __name__ == "__main__":
     unittest.main()

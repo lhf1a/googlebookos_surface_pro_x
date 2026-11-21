@@ -18,6 +18,7 @@
 #include <aidl/android/hardware/gnss/BnGnssDebug.h>
 #include <aidl/android/hardware/gnss/BnGnssMeasurementInterface.h>
 #include <aidl/android/hardware/gnss/BnGnssPowerIndication.h>
+#include <aidl/android/hardware/gnss/BnGnssPsds.h>
 #include <aidl/android/hardware/gnss/visibility_control/BnGnssVisibilityControl.h>
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
@@ -371,6 +372,25 @@ class SpxGnssVisibilityControl final : public vc::BnGnssVisibilityControl {
     std::shared_ptr<vc::IGnssVisibilityControlCallback> mCb;
 };
 
+class SpxGnssPsds final : public BnGnssPsds {
+  public:
+    ScopedAStatus injectPsdsData(PsdsType, const std::vector<uint8_t> &psdsData) override {
+        if (psdsData.empty()) {
+            return ScopedAStatus::fromServiceSpecificError(IGnss::ERROR_INVALID_ARGUMENT);
+        }
+        return ScopedAStatus::ok();
+    }
+    ScopedAStatus setCallback(const std::shared_ptr<IGnssPsdsCallback> &cb) override {
+        std::lock_guard<std::mutex> lock(mMutex);
+        mCb = cb;
+        return ScopedAStatus::ok();
+    }
+
+  private:
+    std::mutex mMutex;
+    std::shared_ptr<IGnssPsdsCallback> mCb;
+};
+
 struct CachedState {
     std::mutex mutex;
     bool hasInjectedTime = false;
@@ -428,6 +448,7 @@ class SpxGnss final : public BnGnss {
           mAGnssRil(ndk::SharedRefBase::make<SpxAGnssRil>()),
           mAntenna(ndk::SharedRefBase::make<SpxGnssAntennaInfo>()),
           mVisibility(ndk::SharedRefBase::make<SpxGnssVisibilityControl>()),
+          mPsds(ndk::SharedRefBase::make<SpxGnssPsds>()),
           mDebug(ndk::SharedRefBase::make<SpxGnssDebug>(mState)) {}
 
     ~SpxGnss() override { stop(); }
@@ -598,7 +619,7 @@ class SpxGnss final : public BnGnss {
     }
 
     ScopedAStatus getExtensionPsds(std::shared_ptr<IGnssPsds> *out) override {
-        *out = nullptr;
+        *out = mPsds;
         return ScopedAStatus::ok();
     }
     ScopedAStatus getExtensionGnssConfiguration(std::shared_ptr<IGnssConfiguration> *out) override {
@@ -615,16 +636,16 @@ class SpxGnss final : public BnGnss {
     }
     ScopedAStatus getExtensionGnssBatching(std::shared_ptr<IGnssBatching> *out) override {
         *out = nullptr;
-        return ScopedAStatus::ok();
+        return ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
     }
     ScopedAStatus getExtensionGnssGeofence(std::shared_ptr<IGnssGeofence> *out) override {
         *out = nullptr;
-        return ScopedAStatus::ok();
+        return ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
     }
     ScopedAStatus getExtensionGnssNavigationMessage(
         std::shared_ptr<IGnssNavigationMessageInterface> *out) override {
         *out = nullptr;
-        return ScopedAStatus::ok();
+        return ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
     }
     ScopedAStatus getExtensionAGnss(std::shared_ptr<IAGnss> *out) override {
         *out = mAGnss;
@@ -650,7 +671,7 @@ class SpxGnss final : public BnGnss {
     ScopedAStatus getExtensionMeasurementCorrections(
         std::shared_ptr<measurement_corrections::IMeasurementCorrectionsInterface> *out) override {
         *out = nullptr;
-        return ScopedAStatus::ok();
+        return ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
     }
 
   private:
@@ -1042,6 +1063,7 @@ class SpxGnss final : public BnGnss {
     std::shared_ptr<SpxAGnssRil> mAGnssRil;
     std::shared_ptr<SpxGnssAntennaInfo> mAntenna;
     std::shared_ptr<SpxGnssVisibilityControl> mVisibility;
+    std::shared_ptr<SpxGnssPsds> mPsds;
     std::shared_ptr<SpxGnssDebug> mDebug;
 
     mutable std::mutex mCbMutex;
