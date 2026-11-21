@@ -46,7 +46,7 @@ class LidDtbTests(unittest.TestCase):
         self.assertTrue(all(b[k] == v for k, v in a.items()))
 
         self.assertEqual(b["/gpio-keys-lid", "compatible"], b"gpio-keys\0")
-        self.assertEqual(b["/gpio-keys-lid", "label"], b"Lid\0")
+        self.assertEqual(b["/gpio-keys-lid", "label"], b"Lid Switch\0")
         self.assertEqual(b["/gpio-keys-lid", "status"], b"disabled\0")
         self.assertEqual(b["/gpio-keys-lid", "pinctrl-names"], b"default\0")
 
@@ -62,7 +62,7 @@ class LidDtbTests(unittest.TestCase):
         self.assertEqual(b["/soc@0/pinctrl@3100000/lid-default-state", "input-enable"], b"")
 
         sw = "/gpio-keys-lid/switch-lid"
-        self.assertEqual(b[sw, "label"], b"Lid\0")
+        self.assertEqual(b[sw, "label"], b"Lid Switch\0")
         self.assertEqual(b[sw, "gpios"], liddt.cells(tlmm_phandle, 121, 1))
         self.assertEqual(b[sw, "linux,input-type"], liddt.cells(5))
         self.assertEqual(b[sw, "linux,code"], liddt.cells(0))

@@ -1,7 +1,7 @@
 # Surface Pro X (SQ1/SQ2) 霍尔传感器 + OV7251 IR 人脸解锁实施计划
 
 > **适用平台**：Microsoft Surface Pro X (SQ1 / SQ2)，Android 17 (`mica 16471258`) + Linux `6.18.60-sq2-android1` Hybrid (EL2)  
-> **状态**：Phase 1–5 代码与主机验证已实现于分支 `feat/ir-hall-face-unlock`（包含霍尔 `SW_LID` DT 补丁与反折保护内核补丁 `0012`、OV7251 850nm 预处理/加密/活体/识别引擎、`IFace/default` AIDL V4 Class 2 HAL、initramfs 阶段挂载脚本及 `SurfaceAdvancedControl` 控制面板）；Phase 0 / Gate 5 实机端到端验收尚未执行（`hardware_validated = false`，仍需 SQ2 与 SQ1 真机实测确认极性、误识别率与续航功耗）。  
+> **状态**：Phase 1–5 代码已变基合入主线 `origin/main` (`54abdee`) 并实现于分支 `feat/ir-hall-face-unlock`（包含霍尔 `SW_LID` (`"Lid Switch"`) DT 补丁与反折保护内核补丁 `0012`、OV7251 850nm 预处理/加密/活体/识别引擎、`IFace/default` AIDL V4 Class 2 HAL、initramfs 阶段挂载脚本及 `SurfaceAdvancedControl` 控制面板）。SQ2 真机通过 SSH 已完成 Phase 0 极性与 Phase 1–5 系统链路实测（`GPIO 121` 开盖裸电平 `1` 确认 `GPIO_ACTIVE_LOW`、`Lid Switch` 与 `touchpad-inhibitor` 正常绑定、`IFace/default` 运行正常、`spx-face-cli` 与控制面板桥接自检全通、反折态 `folded-back` 下 `effective_lid_closed=false`）；物理合盖 `s2idle` 休眠唤醒、真人人脸录入/解锁/防欺骗、整晚待机功耗及 SQ1 机型实测尚待现场人工完成（全局暂保持 `hardware_validated = false`）。  
 > **核心原则**：不启用 QSEE fTPM、保持 `SPX-PORTABLE-SQ1-SQ2` 单镜像通用性、零常驻功耗回归、`s2idle` 休眠安全优先
 
 ---
@@ -23,14 +23,15 @@
 
 ## 2. 已验证的现状基线（基于 SQ2 真机实测）
 
-以下能力已在真机 `root@10.126.126.3` 上实测确认，构成方案基础：
+以下能力已在真机 `root@10.126.126.3` / `root@10.126.126.5`（`6.18.60-sq2-android1 #1 SMP Sat Nov 21 13:38:34 CST 2026`，Android 17）上实测确认：
 
 | 子系统 | 真机实测状态 | 关键事实 / 证据 |
 | :--- | :--- | :--- |
-| **OV7251 IR 硬件链路** | **已打通（30.0 fps 稳定采帧）** | `ov7251 2-0060` (rev 7 / `1F`) → `csiphy3` → `csid3` → `vfe_lite1_rdi0`（与前/后 RGB 管线独立）；`spx::Capture::openIr(640, 480)` 实测输出 `V4L2_PIX_FMT_Y10` (`0x20303159`)，`stride=1280`，`614,400 B/帧`，帧间隔 `33.32–33.34 ms`，`0x3005=0x08` 850nm STROBE 随流自动开关。传感器物理安装为 **90° 竖屏旋转**。 |
-| **霍尔盖子开关 (`SW_LID`)** | **待实测极性与姿态** | 当前真机 `/proc/bus/input/devices` 仅存在 `Microsoft Surface KIP Tablet Mode Switch`（`SW=2`，仅上报 `SW_TABLET_MODE`），**无 `SW_LID` 上报**。仓库已具备冲突保护脚本 `scripts/prepare-spx-lid-dtb.py`（TLMM GPIO 121，`GPIO_ACTIVE_LOW`，`wakeup-source`）。 |
-| **Android 17 盖子策略** | **框架已就绪** | `config_lidControlsSleep = true` 已开启；系统自带 `touchpad-inhibitor-service` 支持监听 `SW_LID`。 |
-| **Android 17 人脸框架** | **框架与设置 UI 已内置，仅缺 HAL** | `compatibility_matrix.202604.xml` 原生声明支持 `android.hardware.biometrics.face.IFace/default`（AIDL **v3–v5**）；`com.android.settings` 已内置 `FaceSettingsActivity`、`FaceEnroll`、`BiometricEnrollActivity`、`FaceEnrollConfirmation`；`DesktopTrafficLightFaceOverlay` 已启用。当前仅缺少 `IFace/default` HAL 与 `android.hardware.biometrics.face` feature XML。 |
+| **OV7251 IR 硬件链路** | **已打通并完成 90° IR 引擎实测** | `ov7251 2-0060` (rev 7 / `1F`) → `csiphy3` → `csid3` → `vfe_lite1_rdi0`（与前/后 RGB 管线独立，Sensor 物理安装为 90° 旋转）；`/vendor/bin/spx-face-cli --self-test` 通过，`--benchmark-ir 30 --rotation 90` 实测 `detected=28/30`、`live=25/30`、`proc_p50_ms=18.60`、`proc_p95_ms=22.33`、`last_roi_mean=0.1673`（桥接 `--benchmark-ir 5` 实测 `proc_p50_ms=13.71`）。 |
+| **霍尔盖子开关 (`SW_LID`)** | **SQ2 开盖极性与反折态已实测，物理合盖待测** | `/dev/gpiochip3` (`qcom,sc8180x-tlmm`) offset 121 在 SSAM `laptop` 开盖态测得 `flags=0x4 raw_value=1`（确认 `GPIO_ACTIVE_LOW`）；DT `gpio-keys-lid` 注册 `event19` (`Name="Lid Switch"`, `EV=21`, `SW=1`, `switches=0`, `power/wakeup=enabled`, `linux,can-disable`)；SSAM 位于 `/sys/bus/surface_aggregator/devices/01:0e:01:00:01/state`，实测 `laptop` 与 `folded-back`（`raw_sw_tablet_mode=true`）下 `raw_sw_lid_closed=false`、`effective_lid_closed=false`。 |
+| **Android 17 盖子与防误触策略** | **已实测就绪** | `config_lidControlsSleep = true`；`/vendor/bin/hw/touchpad-inhibitor`（UID `system`、SELinux `u:r:touchpad_inhibitor:s0`）仅识别 `"Lid Switch"` 或 `"cros_ec_buttons"`，DT `label` 改为 `"Lid Switch"` 后进程不再 1Hz 报错重试，已稳定持有 `/dev/input/event19` 并阻塞在 `evdev_read`。 |
+| **Android 17 人脸 HAL (`IFace/default`)** | **AIDL V4 HAL 与设置入口已实测通过** | `/logs/face-stage.txt` = `SPX_FACE_HAL_STAGED`；`init.svc.vendor.face-default=running`（`u:r:hal_face_default:s0`，进程同时持有 `event18` 与 `event19`）；`service list` 存在 `android.hardware.biometrics.face.IFace/default`；`pm list features` 包含 `android.hardware.biometrics.face`；`dumpsys face` 列出 `sensorId: 1`（`HAL deaths: 0`）；`dumpsys biometric` 列出 `ID(1), oemStrength: 255 (WEAK), modality 8`；`android.settings.FACE_SETTINGS` 解析至 `com.android.settings.Settings$FaceSettingsActivity`（已加载 `DesktopTrafficLightFaceOverlay`）；`dumpsys media.camera` 正常枚举 2 路 RGB 相机，`dmesg` 无错误。 |
+| **`SurfaceAdvancedControl` 桥接** | **开关与一键自检双向实测通过** | `/vendor/app/SurfaceAdvancedControl/SurfaceAdvancedControl.apk` 哈希匹配；`state` 完整发布 `hall_lid_*` / `ssam_cover_state` / `face_*`；通过 `request`→`reply` 实测 `set-hall-lid 0/1`（切换 `disabled_switches`）、`set-face-unlock 0/1`（切换 `persist.spx.face.enabled`）及 `run-face-self-check` 返回 `OK`（`self_test=pass;ov7251=1;hal_running=1;lid_state=OPEN;ir_bench=pass`）。 |
 | **认证密钥与 Gatekeeper** | **可用（软件后端）** | 系统当前运行 `IKeyMintDevice/default`（软件 KeyMint）、`ISharedSecret/default`、`ISharedSecret/gatekeeper`、`IGatekeeper/default`（`gatekeeper-service.nonsecure`），可参与 `HardwareAuthToken (HAT)` 协商与校验。 |
 
 ---
@@ -246,14 +247,14 @@ sequenceDiagram
 3. **自动化测试与真机验收清单（Gate 5）**
    - **主机单元测试**：DT 冲突守卫、模板加解密/锁定计数器、`SW_LID` 门控状态机、ASan/UBSan 内存安全测试。
    - **真机验收标准**：
-     - [ ] `dumpsys biometric` 与 `dumpsys face` 正常列出 `IFace/default`（`WEAK`）；
-     - [ ] Android `设置 → 安全 → 人脸解锁` 可完整完成录入、删除与锁屏开关配置；
-     - [ ] 连续 20 次“合盖 `s2idle` → 掀盖自动亮屏 → 无感 IR 解锁进桌面”成功率 ≥ 95%，平均开盖到进桌面时间 ≤ 1.5s；
+     - [x] **（SQ2 SSH 自动化实测已通过）** `dumpsys biometric` 与 `dumpsys face` 正常列出 `IFace/default`（`WEAK` / `oemStrength=255`），`spx-face-cli`（90° IR 30 帧基准）、`gpio-keys-lid`（`Lid Switch`、`touchpad-inhibitor` 持有 `event19`）与 `SurfaceAdvancedControl` 桥接全通，且双路 RGB 相机与 `dmesg` 无回归；
+     - [ ] Android `设置 → 安全 → 人脸解锁` 可完整完成真人录入、解锁、删除与锁屏开关配置；
+     - [ ] 连续 20 次“物理合盖 `s2idle` → 掀盖自动亮屏 → 无感 IR 解锁进桌面”成功率 ≥ 95%，平均开盖到进桌面时间 ≤ 1.5s，且 180° 反折磁铁实测不误锁（确认 `0012` 在磁吸触发下同样安全）；
      - [ ] 合盖状态推送通知或插拔电源，850nm 红外灯**绝对不亮**且不累计失败次数；
      - [ ] 手机屏幕显示本人照片、黑夜无光环境、佩戴眼镜分别完成拒绝/通过实测；
-     - [ ] 解锁后立即打开前后 RGB 相机正常出画面，无 `EBUSY` 或黑屏；
+     - [ ] 人脸解锁后立即打开相机应用，前后 RGB 相机实际出画面且无 `EBUSY` 或黑屏；
      - [ ] 息屏 `s2idle` 整晚待机功耗与启用前持平（无唤醒锁泄漏、无红外灯残留）；
-     - [ ] 明确标注测试边界：单台 SQ2 通过后，仍需在 SQ1 机型补测 GPIO 121 极性与 OV7251 方向后再作为 SQ1/SQ2 默认开启特性。
+     - [ ] 明确标注测试边界：当前自动化链路仅在单台 SQ2 验证通过，仍需在 SQ1 机型补测 GPIO 121 极性与 OV7251 方向后再作为 SQ1/SQ2 默认开启特性。
 
 ---
 
@@ -274,7 +275,7 @@ sequenceDiagram
 
 | 阶段 | 路径 | 用途 / 实现说明 |
 | :--- | :--- | :--- |
-| Phase 1 | `scripts/prepare-spx-lid-dtb.py` | GPIO 121 `SW_LID`（支持 `--active-high`、`--debounce-ms`、`linux,can-disable` 与冲突检查） |
+| Phase 1 | `scripts/prepare-spx-lid-dtb.py` | GPIO 121 `SW_LID`（`label = "Lid Switch"` 适配 `touchpad-inhibitor`，支持 `--active-high`、`--debounce-ms`、`linux,can-disable` 与冲突检查） |
 | Phase 1 | `patches/spx-portable-boot/0012-spx-hall-lid-ignore-folded-cover.patch` | 键盘反折（`folded-back` / `folded-canvas` / `book`）时在输入核心抑制 `SW_LID=1` |
 | Phase 1 | `scripts/full_image.py` / `scripts/build-lts.py` | 接入霍尔 DT 与人脸 HAL 可选构建开关（`--without-hall-lid`、`--face-hal`、`--without-face`） |
 | Phase 1 | `tests/test_spx_lid_dtb.py` | DT `debounce-interval`/`linux,can-disable`、极性参数与补丁无模糊应用测试 |
@@ -292,7 +293,8 @@ sequenceDiagram
 
 ---
 
-## 7. 建议的下一步执行顺序
+## 7. 建议的下一步现场验收
 
-1. **立刻收尾当前已验证修复**：提交相机 `mapper.quest2.so` 修复并打一版稳定 OTA（`-j 63`），保证相机基线干净。
-2. **启动 Phase 0 真机摸底（约 10 分钟）**：在 `root@10.126.126.3` 上完成 GPIO 121 四姿态电平测试 + 采集一组 OV7251 样本确认旋转方向与光照表现，锁定 Phase 1/2 的精确硬件参数后再开始写代码。
+1. **物理盖子与触控板抑制实测（SQ2）**：实际合上 Type Cover 验证锁屏、`s2idle` 休眠、触控板 `inhibited=1` 与掀盖秒醒（连续 20 次），并验证 180° 反折磁吸下不误锁。
+2. **真人 IR 人脸录入与解锁（SQ2）**：在 Android `设置 → 安全 → 人脸解锁` 完成真人录入与开盖无感解锁，实测暗光、戴眼镜及手机照片防欺骗拒绝率，并验证解锁后直接开启前/后 RGB 相机与整晚 `s2idle` 待机功耗。
+3. **SQ1 机型跨平台兼容实测**：在 Surface Pro X (SQ1) 上复测 GPIO 121 极性与 OV7251 方向，确认单镜像默认行为对 SQ1/SQ2 均安全。

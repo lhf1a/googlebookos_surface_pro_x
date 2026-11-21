@@ -169,7 +169,7 @@ def prepare(
         "/gpio-keys-lid",
         {
             "compatible": strings("gpio-keys"),
-            "label": strings("Lid"),
+            "label": strings("Lid Switch"),
             "pinctrl-names": strings("default"),
             "pinctrl-0": cells(pin_phandle),
             "status": strings("okay" if enable else "disabled"),
@@ -178,7 +178,7 @@ def prepare(
     add(
         f"{lid_node}/switch-lid",
         {
-            "label": strings("Lid"),
+            "label": strings("Lid Switch"),
             "gpios": cells(tlmm_phandle, TLMM_LID_GPIO, gpio_flags),
             "linux,input-type": cells(EV_SW),
             "linux,code": cells(SW_LID),
@@ -211,13 +211,13 @@ def emit_dts(*, enable=False, active_low=True, debounce_ms=DEFAULT_DEBOUNCE_MS):
 &{{/}} {{
 	gpio-keys-lid {{
 		compatible = "gpio-keys";
-		label = "Lid";
+		label = "Lid Switch";
 		pinctrl-names = "default";
 		pinctrl-0 = <&lid_default>;
 		status = "{status}";
 
 		switch-lid {{
-			label = "Lid";
+			label = "Lid Switch";
 			gpios = <&tlmm {TLMM_LID_GPIO} {gpio_flags}>;
 			linux,input-type = <{EV_SW}>;
 			linux,code = <{SW_LID}>;
