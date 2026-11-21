@@ -39,6 +39,12 @@ cp "$source/android.hardware.biometrics.face.xml" \
     "$vendor/etc/permissions/android.hardware.biometrics.face.xml"
 chmod 644 "$vendor/etc/permissions/android.hardware.biometrics.face.xml"
 
+if [ -f "$source/spx-face-overlay.apk" ]; then
+    mkdir -p "$vendor/overlay"
+    cp "$source/spx-face-overlay.apk" "$vendor/overlay/spx-face-overlay.apk"
+    chmod 644 "$vendor/overlay/spx-face-overlay.apk"
+fi
+
 features=/newroot/system/etc/permissions/features.xml
 if [ -f "$features" ] && grep -q 'android\.hardware\.biometrics\.face' "$features"; then
     staged=/newroot/debug_ramdisk/spx-face-features.xml

@@ -11,6 +11,7 @@ FACE_DIR = ROOT / "probe/face"
 
 HAL_TARGET = "etc/spx-face/android.hardware.biometrics.face-service.default"
 CLI_TARGET = "etc/spx-face/spx-face-cli"
+OVERLAY_TARGET = "etc/spx-face/spx-face-overlay.apk"
 MANIFEST_TARGET = "etc/spx-face/android.hardware.biometrics.face-service.spx.xml"
 PERM_TARGET = "etc/spx-face/android.hardware.biometrics.face.xml"
 RC_TARGET = "etc/spx-face/android.hardware.biometrics.face-service.spx.rc"
@@ -39,6 +40,7 @@ def install_targets() -> dict[str, str]:
     return {
         HAL_TARGET: "hal",
         CLI_TARGET: "cli",
+        OVERLAY_TARGET: "overlay",
         MANIFEST_TARGET: "android.hardware.biometrics.face-service.spx.xml",
         PERM_TARGET: "android.hardware.biometrics.face.xml",
         RC_TARGET: "android.hardware.biometrics.face-service.spx.rc",
@@ -55,30 +57,56 @@ def _hal_builder():
     return mod
 
 
+def _overlay_builder():
+    spec = importlib.util.spec_from_file_location(
+        "build_spx_face_overlay", ROOT / "scripts/build-spx-face-overlay.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def toolchains_available() -> bool:
     return _hal_builder().toolchains_available()
 
 
 def build_default_payload() -> dict[str, bytes]:
     mod = _hal_builder()
+    overlay_mod = _overlay_builder()
     with tempfile.TemporaryDirectory(prefix="spx-face-hal-") as tmp:
-        meta = mod.build_hal(Path(tmp))
-        return {
+        tmp_dir = Path(tmp)
+        meta = mod.build_hal(tmp_dir)
+        payload: dict[str, bytes] = {
             "hal": Path(meta["binary"]).read_bytes(),
             "cli": Path(meta["cli_binary"]).read_bytes(),
         }
+        if overlay_mod.sdk_tools_available():
+            overlay_apk = overlay_mod.build_overlay(tmp_dir, ephemeral_keystore=True)
+            payload["overlay"] = overlay_apk.read_bytes()
+        return payload
 
 
 def load(
     face_hal_path: Path | None = None,
     face_cli_path: Path | None = None,
     compiled_payload: dict[str, bytes] | None = None,
+    overlay_path: Path | None = None,
 ) -> dict[str, bytes] | None:
     if compiled_payload is not None:
         _verify_arm64_elf(compiled_payload["hal"], HAL_TARGET)
         if "cli" in compiled_payload and compiled_payload["cli"] is not None:
             _verify_arm64_elf(compiled_payload["cli"], CLI_TARGET)
-        return dict(compiled_payload)
+        payload = dict(compiled_payload)
+        if "overlay" not in payload or payload["overlay"] is None:
+            overlay_candidate = Path(overlay_path) if overlay_path else None
+            if overlay_candidate is not None and overlay_candidate.is_file():
+                payload["overlay"] = overlay_candidate.read_bytes()
+            elif _overlay_builder().sdk_tools_available():
+                with tempfile.TemporaryDirectory(prefix="spx-face-overlay-") as tmp:
+                    payload["overlay"] = _overlay_builder().build_overlay(
+                        Path(tmp), ephemeral_keystore=True
+                    ).read_bytes()
+        return payload
     if face_hal_path is not None:
         hal_bytes = Path(face_hal_path).read_bytes()
         _verify_arm64_elf(hal_bytes, str(face_hal_path))
@@ -88,6 +116,11 @@ def load(
             cli_bytes = cli_candidate.read_bytes()
             _verify_arm64_elf(cli_bytes, str(cli_candidate))
             payload["cli"] = cli_bytes
+        overlay_candidate = (
+            Path(overlay_path) if overlay_path else Path(face_hal_path).with_name("spx-face-overlay.apk")
+        )
+        if overlay_candidate.is_file():
+            payload["overlay"] = overlay_candidate.read_bytes()
         return payload
     if toolchains_available():
         payload = build_default_payload()
@@ -101,9 +134,11 @@ def install(records, bodies, payload: dict[str, bytes] | bytes, new_record) -> d
     if isinstance(payload, (bytes, bytearray)):
         hal_bytes = bytes(payload)
         cli_bytes = None
+        overlay_bytes = None
     else:
         hal_bytes = payload["hal"]
         cli_bytes = payload.get("cli")
+        overlay_bytes = payload.get("overlay")
 
     _verify_arm64_elf(hal_bytes, HAL_TARGET)
     if cli_bytes is not None:
@@ -120,6 +155,9 @@ def install(records, bodies, payload: dict[str, bytes] | bytes, new_record) -> d
     if cli_bytes is not None:
         bodies[CLI_TARGET] = cli_bytes
         records[CLI_TARGET] = new_record(0o100755)
+    if overlay_bytes is not None:
+        bodies[OVERLAY_TARGET] = bytes(overlay_bytes)
+        records[OVERLAY_TARGET] = new_record(0o100644)
 
     for target, src_name, mode in (
         (MANIFEST_TARGET, "android.hardware.biometrics.face-service.spx.xml", 0o100644),
@@ -136,4 +174,5 @@ def install(records, bodies, payload: dict[str, bytes] | bytes, new_record) -> d
         "security_class": "weak",
         "hal_sha256": _sha256(hal_bytes),
         "cli_sha256": _sha256(cli_bytes) if cli_bytes is not None else None,
+        "overlay_sha256": _sha256(overlay_bytes) if overlay_bytes is not None else None,
     }

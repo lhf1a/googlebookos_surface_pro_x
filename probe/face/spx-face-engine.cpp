@@ -535,20 +535,53 @@ FaceDetection detectFaceNir(const IrFrameStats& frame) {
                     bx + (14 * bw) / 100, by + (22 * bh) / 100, bx + (86 * bw) / 100, by + (42 * bh) / 100);
                 const float cheekBand = ii.rectMean(
                     bx + (16 * bw) / 100, by + (44 * bh) / 100, bx + (84 * bw) / 100, by + (65 * bh) / 100);
-                if (cheekBand <= eyeBand + 2.0f) continue;
+                if (cheekBand <= eyeBand + 3.0f) continue;
 
                 const float leftEye = ii.rectMean(
                     bx + (16 * bw) / 100, by + (22 * bh) / 100, bx + (40 * bw) / 100, by + (42 * bh) / 100);
                 const float rightEye = ii.rectMean(
                     bx + (60 * bw) / 100, by + (22 * bh) / 100, bx + (84 * bw) / 100, by + (42 * bh) / 100);
+                if (cheekBand <= leftEye + 4.0f || cheekBand <= rightEye + 4.0f) continue;
+                if (std::abs(leftEye - rightEye) >= 45.0f) continue;
+
+                const float upperNose = ii.rectMean(
+                    bx + (41 * bw) / 100, by + (22 * bh) / 100, bx + (59 * bw) / 100, by + (42 * bh) / 100);
+                if (upperNose <= leftEye + 2.5f || upperNose <= rightEye + 2.5f) continue;
+
                 const float noseBridge = ii.rectMean(
                     bx + (41 * bw) / 100, by + (24 * bh) / 100, bx + (59 * bw) / 100, by + (56 * bh) / 100);
-                if (noseBridge <= 0.5f * (leftEye + rightEye) + 1.5f) continue;
+                if (noseBridge <= leftEye + 3.0f || noseBridge <= rightEye + 3.0f) continue;
 
                 const float forehead = ii.rectMean(
                     bx + (24 * bw) / 100, by + (6 * bh) / 100, bx + (76 * bw) / 100, by + (20 * bh) / 100);
+                if (forehead <= eyeBand + 2.0f) continue;
+
                 const float mouthBand = ii.rectMean(
                     bx + (26 * bw) / 100, by + (67 * bh) / 100, bx + (74 * bw) / 100, by + (83 * bh) / 100);
+                if (cheekBand <= mouthBand + 2.0f) continue;
+
+                // Reject inverted faces or off-face windows where the forehead band is far
+                // brighter than cheeks or the chin band falls off into empty background.
+                if (cheekBand < forehead - 15.0f) continue;
+
+                const float chinBand = ii.rectMean(
+                    bx + (30 * bw) / 100, by + (84 * bh) / 100, bx + (70 * bw) / 100, by + (96 * bh) / 100);
+                if (chinBand < 0.30f * cheekBand) continue;
+
+                // Require left/right cheek balance (rejects off-center half-face windows) and
+                // darker mouth center than flanking lower cheeks (distinguishes mouth from inverted crown).
+                const float leftCheek = ii.rectMean(
+                    bx + (14 * bw) / 100, by + (44 * bh) / 100, bx + (42 * bw) / 100, by + (65 * bh) / 100);
+                const float rightCheek = ii.rectMean(
+                    bx + (58 * bw) / 100, by + (44 * bh) / 100, bx + (86 * bw) / 100, by + (65 * bh) / 100);
+                if (std::abs(leftCheek - rightCheek) > 42.0f) continue;
+
+                const float mouthCenter = ii.rectMean(
+                    bx + (40 * bw) / 100, by + (67 * bh) / 100, bx + (60 * bw) / 100, by + (83 * bh) / 100);
+                const float mouthFlanks = 0.5f * (
+                    ii.rectMean(bx + (20 * bw) / 100, by + (67 * bh) / 100, bx + (38 * bw) / 100, by + (83 * bh) / 100) +
+                    ii.rectMean(bx + (62 * bw) / 100, by + (67 * bh) / 100, bx + (80 * bw) / 100, by + (83 * bh) / 100));
+                if (mouthCenter >= mouthFlanks - 1.0f) continue;
 
                 // Outer surround contrast under active 850nm illumination.
                 const int pad = std::max(4, bw / 5);
@@ -558,17 +591,22 @@ FaceDetection detectFaceNir(const IrFrameStats& frame) {
                                             ? ii.rectMean(bx + bw, by, std::min<int>(dw, bx + bw + pad), by + bh)
                                             : coreMean;
                 const float surrMean = 0.5f * (leftSurr + rightSurr);
+                if (coreMean < surrMean - 5.0f) continue;
 
                 const float sym = sampleSubblockSymmetry(ii, bx, by, bw, bh);
-                if (sym < 0.28f) continue;
+                if (sym < 0.30f) continue;
 
-                const float haarScore =
+                const float structureScore =
                     (cheekBand - eyeBand) * 1.3f +
                     (noseBridge - 0.5f * (leftEye + rightEye)) * 1.4f +
-                    (forehead - eyeBand) * 0.8f +
-                    (cheekBand - mouthBand) * 0.7f +
+                    (forehead - eyeBand) * 0.9f +
+                    (cheekBand - mouthBand) * 0.8f;
+                if (structureScore < 22.0f) continue;
+
+                const float haarScore =
+                    structureScore +
                     std::clamp(coreMean - surrMean, -15.0f, 45.0f) * 0.6f +
-                    sym * 40.0f;
+                    sym * 30.0f;
 
                 if (haarScore > best.score) {
                     best = {bx, by, bw, bh, haarScore};
@@ -577,7 +615,7 @@ FaceDetection detectFaceNir(const IrFrameStats& frame) {
         }
     }
 
-    if (best.score < 32.0f) {
+    if (best.score < 42.0f) {
         res.quality = FaceQuality::NOT_DETECTED;
         return res;
     }
@@ -1213,7 +1251,7 @@ bool SpxFaceStore::ensureKeyLoadedOrCreated(bool createIfMissing) {
 bool SpxFaceStore::load() {
     enrollments_.clear();
     authenticatorId_ = 0;
-    featureMask_ = 0x03u;
+    featureMask_ = 0x01u;
     failedAttempts_ = 0;
     nextEnrollmentId_ = 1;
 

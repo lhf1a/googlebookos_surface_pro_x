@@ -57,6 +57,8 @@ constexpr int64_t kAuthSessionDeadlineMs = 7000;
 constexpr int64_t kAuthNoFaceTimeoutMs = 4500;
 constexpr int64_t kAuthWatchdogHardMs = 8000;
 constexpr int64_t kEnrollWatchdogHardMs = 45000;
+constexpr int64_t kEnrollWarmupMs = 800;
+constexpr int64_t kEnrollMinSampleIntervalMs = 350;
 constexpr int64_t kChallengeTtlMs = 300000;
 constexpr const char* kOptionalModelPath = "/vendor/etc/spx-face/model.bin";
 
@@ -85,8 +87,9 @@ bool isFaceUnlockEnabled() {
     return getSystemProperty("persist.spx.face.enabled", "1") != "0";
 }
 
-spx::face::Rotation currentSensorRotation() {
+spx::face::Rotation currentSensorRotation(std::string* outStr = nullptr) {
     const std::string val = getSystemProperty("persist.spx.face.rotation", "90");
+    if (outStr) *outStr = val;
     return spx::face::parseRotationDegrees(val.c_str(), spx::face::Rotation::Deg90CW);
 }
 
@@ -142,18 +145,54 @@ private:
 void renderPreviewFrame(ANativeWindow* window,
                         const std::vector<uint8_t>& gray8,
                         unsigned width,
-                        unsigned height) {
+                        unsigned height,
+                        bool& loggedOnce,
+                        bool& lockFailedLogged) {
     if (!window || gray8.empty() || width == 0 || height == 0) return;
     ANativeWindow_Buffer buf{};
-    if (ANativeWindow_lock(window, &buf, nullptr) != 0 || !buf.bits) return;
-    if (buf.width >= static_cast<int32_t>(width) &&
-        buf.height >= static_cast<int32_t>(height) &&
-        (buf.format == WINDOW_FORMAT_RGBA_8888 || buf.format == WINDOW_FORMAT_RGBX_8888)) {
-        spx::face::gray8ToRgba(gray8.data(),
-                               width,
-                               height,
-                               static_cast<uint8_t*>(buf.bits),
-                               static_cast<unsigned>(buf.stride));
+    const int lockRc = ANativeWindow_lock(window, &buf, nullptr);
+    if (lockRc != 0 || !buf.bits) {
+        if (!lockFailedLogged) {
+            __android_log_print(ANDROID_LOG_WARN,
+                                kLogTag,
+                                "preview ANativeWindow_lock failed rc=%d",
+                                lockRc);
+            lockFailedLogged = true;
+        }
+        return;
+    }
+    if (!loggedOnce) {
+        __android_log_print(ANDROID_LOG_INFO,
+                            kLogTag,
+                            "preview locked buf=%dx%d stride=%d fmt=%d src=%ux%u",
+                            buf.width,
+                            buf.height,
+                            buf.stride,
+                            buf.format,
+                            width,
+                            height);
+        loggedOnce = true;
+    }
+    if (buf.width > 0 && buf.height > 0 && buf.stride >= buf.width) {
+        if (buf.format == WINDOW_FORMAT_RGBA_8888 || buf.format == WINDOW_FORMAT_RGBX_8888) {
+            spx::face::renderIrPreviewRgba(gray8.data(),
+                                           width,
+                                           height,
+                                           static_cast<uint8_t*>(buf.bits),
+                                           static_cast<unsigned>(buf.width),
+                                           static_cast<unsigned>(buf.height),
+                                           static_cast<unsigned>(buf.stride),
+                                           true);
+        } else if (buf.format == WINDOW_FORMAT_RGB_565) {
+            spx::face::renderIrPreviewRgb565(gray8.data(),
+                                             width,
+                                             height,
+                                             static_cast<uint16_t*>(buf.bits),
+                                             static_cast<unsigned>(buf.width),
+                                             static_cast<unsigned>(buf.height),
+                                             static_cast<unsigned>(buf.stride),
+                                             true);
+        }
     }
     ANativeWindow_unlockAndPost(window);
 }
@@ -290,18 +329,10 @@ public:
 
     ::ndk::ScopedAStatus onContextChanged(
         const common::OperationContext& in_context) override {
-        const bool foldClosed = (in_context.foldState == common::FoldState::FULLY_CLOSED);
-        const bool displayInactive =
-            (in_context.displayState == common::DisplayState::NO_UI ||
-             in_context.displayState == common::DisplayState::SCREENSAVER ||
-             in_context.displayState == common::DisplayState::AOD);
-        {
-            std::lock_guard<std::mutex> lk(opMu_);
-            latestFoldClosed_ = foldClosed;
-            latestDisplayInactive_ = displayInactive;
-            if ((foldClosed || displayInactive) && activeCancel_) {
-                activeCancel_->store(true);
-            }
+        std::lock_guard<std::mutex> lk(opMu_);
+        syncContextLocked(in_context);
+        if ((latestFoldClosed_ || latestDisplayInactive_) && activeCancel_) {
+            activeCancel_->store(true);
         }
         return ::ndk::ScopedAStatus::ok();
     }
@@ -322,8 +353,9 @@ public:
     ::ndk::ScopedAStatus getFeatures() override {
         enqueue([this] {
             std::vector<Feature> feats;
+            // Android 17 FaceGetFeatureClient allocates int[1] for REQUIRE_ATTENTION only;
+            // advertising additional features grows featureMap to size 2 and crashes system_server.
             if (store_.hasFeatureBit(1u)) feats.push_back(Feature::REQUIRE_ATTENTION);
-            if (store_.hasFeatureBit(2u)) feats.push_back(Feature::REQUIRE_DIVERSE_POSES);
             cb_->onFeaturesRetrieved(feats);
         });
         return ::ndk::ScopedAStatus::ok();
@@ -466,20 +498,22 @@ private:
             hat.mac.data(), hat.mac.size(), hat.challenge, &active);
     }
 
+    void syncContextLocked(const common::OperationContext& ctx) {
+        latestFoldClosed_ = (ctx.foldState == common::FoldState::FULLY_CLOSED);
+        latestDisplayInactive_ =
+            (ctx.displayState == common::DisplayState::NO_UI ||
+             ctx.displayState == common::DisplayState::SCREENSAVER ||
+             ctx.displayState == common::DisplayState::AOD);
+    }
+
     bool shouldGateOperation(const std::optional<common::OperationContext>& ctx) {
         if (!isFaceUnlockEnabled()) return true;
         if (lidMonitor_ && lidMonitor_->isLidClosed()) return true;
         std::lock_guard<std::mutex> lk(opMu_);
-        if (latestFoldClosed_ || latestDisplayInactive_) return true;
         if (ctx.has_value()) {
-            if (ctx->foldState == common::FoldState::FULLY_CLOSED) return true;
-            if (ctx->displayState == common::DisplayState::NO_UI ||
-                ctx->displayState == common::DisplayState::SCREENSAVER ||
-                ctx->displayState == common::DisplayState::AOD) {
-                return true;
-            }
+            syncContextLocked(*ctx);
         }
-        return false;
+        return latestFoldClosed_ || latestDisplayInactive_;
     }
 
     std::shared_ptr<std::atomic<bool>> registerCancelFlag() {
@@ -508,50 +542,79 @@ private:
     ::ndk::ScopedAStatus startEnroll(
         const keymaster::HardwareAuthToken& hat,
         EnrollmentType /*type*/,
-        const std::vector<Feature>& /*features*/,
+        const std::vector<Feature>& features,
         std::shared_ptr<ANativeWindow> previewWindow,
         std::optional<common::OperationContext> ctx,
         std::shared_ptr<common::ICancellationSignal>* _aidl_return) {
         auto flag = registerCancelFlag();
         *_aidl_return = SharedRefBase::make<SpxCancellationSignal>(flag);
+        const bool requireDiversity =
+            std::find(features.begin(), features.end(), Feature::REQUIRE_DIVERSE_POSES) !=
+            features.end();
 
-        enqueue([this, hat, previewWindow = std::move(previewWindow), ctx, flag]() mutable {
+        enqueue([this,
+                 hat,
+                 previewWindow = std::move(previewWindow),
+                 ctx,
+                 flag,
+                 requireDiversity]() mutable {
             if (!model_.loaded) model_.loadFromFile(kOptionalModelPath);
             if (flag->load() || closed_.load() || shouldGateOperation(ctx)) {
+                logWarn("enroll gated or canceled before start");
                 clearCancelFlag(flag);
                 cb_->onError(Error::CANCELED, 0);
                 return;
             }
             pruneExpiredChallenges();
             if (!validateHat(hat)) {
+                logWarn("enroll rejected invalid HAT");
                 clearCancelFlag(flag);
                 cb_->onError(Error::UNABLE_TO_PROCESS, 0);
                 return;
             }
             if (store_.enrollmentCount() >= spx::face::kMaxEnrollmentsPerUser) {
+                logWarn("enroll rejected: no space");
                 clearCancelFlag(flag);
                 cb_->onError(Error::NO_SPACE, 0);
                 return;
             }
 
+            std::string rotStr;
+            const auto rot = currentSensorRotation(&rotStr);
+            __android_log_print(ANDROID_LOG_INFO,
+                                kLogTag,
+                                "enroll start hasPreview=%d rot=%s requireDiversity=%d",
+                                previewWindow ? 1 : 0,
+                                rotStr.c_str(),
+                                requireDiversity ? 1 : 0);
+
             if (previewWindow) {
-                ANativeWindow_setBuffersGeometry(previewWindow.get(),
-                                                 kPreviewWidth,
-                                                 kPreviewHeight,
-                                                 WINDOW_FORMAT_RGBA_8888);
+                const int geomRc = ANativeWindow_setBuffersGeometry(previewWindow.get(),
+                                                                    kPreviewWidth,
+                                                                    kPreviewHeight,
+                                                                    WINDOW_FORMAT_RGBA_8888);
+                if (geomRc != 0) {
+                    __android_log_print(ANDROID_LOG_WARN,
+                                        kLogTag,
+                                        "ANativeWindow_setBuffersGeometry(%dx%d) rc=%d",
+                                        kPreviewWidth,
+                                        kPreviewHeight,
+                                        geomRc);
+                }
             }
 
             std::vector<spx::face::Embedding> samples;
             samples.reserve(spx::face::kSamplesPerEnrollment);
             bool canceledByLidOrUser = false;
             bool timedOut = false;
+            int64_t startMs = bootTimeMs();
+            unsigned frameIdx = 0;
 
             try {
                 auto cap = spx::Capture::openIr(640, 480, 30);
-                const int64_t startMs = bootTimeMs();
-                const auto rot = currentSensorRotation();
+                startMs = bootTimeMs();
                 spx::face::FaceSessionAccumulator acc;
-                acc.reset(1);
+                acc.reset(2);
 
                 // Emergency hard watchdog thread ensures V4L2/850nm strobe closes <= 45s.
                 std::atomic<bool> finished{false};
@@ -568,7 +631,9 @@ private:
 
                 const int32_t prospectiveId =
                     store_.listEnrollmentIds().empty() ? 1 : (store_.listEnrollmentIds().back() + 1);
-                unsigned frameIdx = 0;
+                int64_t lastSampleMs = 0;
+                bool previewLogged = false;
+                bool lockFailedLogged = false;
 
                 while (samples.size() < spx::face::kSamplesPerEnrollment) {
                     if (flag->load() || closed_.load() ||
@@ -592,14 +657,28 @@ private:
                     cap->autoExposure(stats.roiLinearMean);
 
                     if (previewWindow) {
-                        renderPreviewFrame(
-                            previewWindow.get(), stats.gray8, stats.width, stats.height);
+                        renderPreviewFrame(previewWindow.get(),
+                                           stats.gray8,
+                                           stats.width,
+                                           stats.height,
+                                           previewLogged,
+                                           lockFailedLogged);
                     }
 
                     if (frameIdx++ < 2u) {
                         EnrollmentFrame ef{};
                         ef.stage = EnrollmentStage::FIRST_FRAME_RECEIVED;
                         ef.data.acquiredInfo = AcquiredInfo::FIRST_FRAME_RECEIVED;
+                        cb_->onEnrollmentFrame(ef);
+                        continue;
+                    }
+
+                    const int64_t nowMs = bootTimeMs();
+                    if (nowMs - startMs < kEnrollWarmupMs) {
+                        EnrollmentFrame ef{};
+                        ef.stage = EnrollmentStage::WAITING_FOR_CENTERING;
+                        ef.data.acquiredInfo = AcquiredInfo::GOOD;
+                        ef.data.isCancellable = true;
                         cb_->onEnrollmentFrame(ef);
                         continue;
                     }
@@ -631,8 +710,15 @@ private:
                         continue;
                     }
 
+                    if (lastSampleMs != 0 && (nowMs - lastSampleMs) < kEnrollMinSampleIntervalMs) {
+                        ef.stage = EnrollmentStage::HOLD_STILL_IN_CENTER;
+                        ef.data.acquiredInfo = AcquiredInfo::GOOD;
+                        cb_->onEnrollmentFrame(ef);
+                        continue;
+                    }
+
                     // Encourage mild pose diversity on later samples when requested.
-                    if (samples.size() >= 2 && store_.hasFeatureBit(2u)) {
+                    if (samples.size() >= 2 && requireDiversity) {
                         const float maxSim = [&]() {
                             float hi = 0.0f;
                             for (const auto& prev : samples) {
@@ -640,7 +726,7 @@ private:
                             }
                             return hi;
                         }();
-                        if (maxSim > 0.992f && (bootTimeMs() - startMs) < 15000) {
+                        if (maxSim > 0.992f && (nowMs - startMs) < 15000) {
                             ef.stage = (samples.size() < 4)
                                            ? EnrollmentStage::ENROLLING_MOVEMENT_1
                                            : EnrollmentStage::ENROLLING_MOVEMENT_2;
@@ -651,6 +737,7 @@ private:
                     }
 
                     samples.push_back(emb);
+                    lastSampleMs = nowMs;
                     const int32_t remaining =
                         static_cast<int32_t>(spx::face::kSamplesPerEnrollment - samples.size());
                     ef.stage = (remaining == 0) ? EnrollmentStage::ENROLLMENT_FINISHED
@@ -672,20 +759,41 @@ private:
                 return;
             }
 
+            const long long elapsedMs = static_cast<long long>(bootTimeMs() - startMs);
             clearCancelFlag(flag);
             if (canceledByLidOrUser) {
+                __android_log_print(ANDROID_LOG_INFO,
+                                    kLogTag,
+                                    "enroll canceled samples=%zu frames=%u elapsedMs=%lld",
+                                    samples.size(),
+                                    frameIdx,
+                                    elapsedMs);
                 cb_->onError(Error::CANCELED, 0);
                 return;
             }
             if (timedOut || samples.size() < spx::face::kSamplesPerEnrollment) {
+                __android_log_print(ANDROID_LOG_INFO,
+                                    kLogTag,
+                                    "enroll timeout samples=%zu frames=%u elapsedMs=%lld",
+                                    samples.size(),
+                                    frameIdx,
+                                    elapsedMs);
                 cb_->onError(Error::TIMEOUT, 0);
                 return;
             }
             const int32_t storedId = store_.addEnrollment(samples);
             if (storedId <= 0) {
+                logWarn("enroll failed saving template store");
                 cb_->onError(Error::UNABLE_TO_PROCESS, 0);
                 return;
             }
+            __android_log_print(ANDROID_LOG_INFO,
+                                kLogTag,
+                                "enroll done id=%d samples=%zu frames=%u elapsedMs=%lld",
+                                storedId,
+                                samples.size(),
+                                frameIdx,
+                                elapsedMs);
             cb_->onEnrollmentProgress(storedId, 0);
         });
         return ::ndk::ScopedAStatus::ok();
@@ -700,7 +808,16 @@ private:
 
         enqueue([this, operationId, ctx, flag]() {
             if (!model_.loaded) model_.loadFromFile(kOptionalModelPath);
+            const int displayState = ctx.has_value() ? static_cast<int>(ctx->displayState) : -1;
+            const int foldState = ctx.has_value() ? static_cast<int>(ctx->foldState) : -1;
+            __android_log_print(ANDROID_LOG_INFO,
+                                kLogTag,
+                                "auth start enrolled=%zu display=%d fold=%d",
+                                store_.enrollmentCount(),
+                                displayState,
+                                foldState);
             if (flag->load() || closed_.load() || shouldGateOperation(ctx)) {
+                logWarn("auth gated or canceled before camera open");
                 clearCancelFlag(flag);
                 cb_->onError(Error::CANCELED, 0);
                 return;
@@ -708,12 +825,17 @@ private:
 
             const auto lockSt = lockout_.checkState();
             if (lockSt.mode == spx::face::LockoutMode::PERMANENT) {
+                logWarn("auth blocked by permanent lockout");
                 clearCancelFlag(flag);
                 cb_->onLockoutPermanent();
                 cb_->onError(Error::HW_UNAVAILABLE, 0);
                 return;
             }
             if (lockSt.mode == spx::face::LockoutMode::TIMED) {
+                __android_log_print(ANDROID_LOG_WARN,
+                                    kLogTag,
+                                    "auth blocked by timed lockout remainingMs=%lld",
+                                    static_cast<long long>(lockSt.remainingMs));
                 clearCancelFlag(flag);
                 cb_->onLockoutTimed(lockSt.remainingMs);
                 cb_->onError(Error::HW_UNAVAILABLE, 0);
@@ -721,6 +843,7 @@ private:
             }
 
             if (store_.enrollmentCount() == 0) {
+                logWarn("auth aborted: zero enrolled templates");
                 clearCancelFlag(flag);
                 cb_->onError(Error::UNABLE_TO_PROCESS, 0);
                 return;
@@ -730,10 +853,16 @@ private:
             int32_t matchedId = 0;
             bool canceledByLidOrUser = false;
             bool sawFaceOrSpoof = false;
+            int64_t startMs = bootTimeMs();
+            unsigned frameIdx = 0;
+            unsigned detectedFrames = 0;
+            float bestSim = 0.0f;
+            int lastQ = -1;
+            int lastLive = -1;
 
             try {
                 auto cap = spx::Capture::openIr(640, 480, 30);
-                const int64_t startMs = bootTimeMs();
+                startMs = bootTimeMs();
                 const auto rot = currentSensorRotation();
                 spx::face::FaceSessionAccumulator acc;
                 acc.reset(2);
@@ -750,7 +879,6 @@ private:
                     }
                 });
 
-                unsigned frameIdx = 0;
                 unsigned consecutiveMatchedFrames = 0;
                 int32_t lastMatchedId = 0;
 
@@ -787,6 +915,7 @@ private:
                     }
 
                     const auto det = spx::face::detectFaceNir(stats);
+                    lastQ = static_cast<int>(det.quality);
                     if (!det.detected) {
                         consecutiveMatchedFrames = 0;
                         AuthenticationFrame af{};
@@ -796,10 +925,12 @@ private:
                         continue;
                     }
 
+                    ++detectedFrames;
                     sawFaceOrSpoof = true;
                     const auto emb = spx::face::extractEmbedding(stats, det, &model_);
                     const auto live =
                         spx::face::evaluateLiveness(stats, det, emb, &acc, true);
+                    lastLive = static_cast<int>(live.status);
                     if (!live.live) {
                         consecutiveMatchedFrames = 0;
                         if (live.status != spx::face::LivenessStatus::NEED_MORE_FRAMES) {
@@ -818,6 +949,7 @@ private:
                     }
 
                     const auto res = store_.match(emb, spx::face::kDefaultMatchThreshold);
+                    bestSim = std::max(bestSim, res.bestSimilarity);
                     if (res.matched) {
                         if (lastMatchedId == res.enrollmentId) {
                             ++consecutiveMatchedFrames;
@@ -846,12 +978,29 @@ private:
                 return;
             }
 
+            const long long elapsedMs = static_cast<long long>(bootTimeMs() - startMs);
             clearCancelFlag(flag);
             if (canceledByLidOrUser) {
+                __android_log_print(ANDROID_LOG_INFO,
+                                    kLogTag,
+                                    "auth canceled bestSim=%.3f frames=%u detected=%u lastQ=%d lastLive=%d elapsedMs=%lld",
+                                    bestSim,
+                                    frameIdx,
+                                    detectedFrames,
+                                    lastQ,
+                                    lastLive,
+                                    elapsedMs);
                 cb_->onError(Error::CANCELED, 0);
                 return;
             }
             if (matched) {
+                __android_log_print(ANDROID_LOG_INFO,
+                                    kLogTag,
+                                    "auth match id=%d sim=%.3f frames=%u elapsedMs=%lld",
+                                    matchedId,
+                                    bestSim,
+                                    frameIdx,
+                                    elapsedMs);
                 lockout_.reset();
                 store_.setFailedAttempts(0);
 
@@ -880,6 +1029,15 @@ private:
             }
 
             if (sawFaceOrSpoof) {
+                __android_log_print(ANDROID_LOG_INFO,
+                                    kLogTag,
+                                    "auth failed bestSim=%.3f frames=%u detected=%u lastQ=%d lastLive=%d elapsedMs=%lld",
+                                    bestSim,
+                                    frameIdx,
+                                    detectedFrames,
+                                    lastQ,
+                                    lastLive,
+                                    elapsedMs);
                 const auto st = lockout_.addFailedAttempt();
                 store_.setFailedAttempts(st.failedAttempts);
                 cb_->onAuthenticationFailed();
@@ -892,6 +1050,15 @@ private:
             }
 
             // Timeout with no face detected: do not burn lockout attempts.
+            __android_log_print(ANDROID_LOG_INFO,
+                                kLogTag,
+                                "auth timeout bestSim=%.3f frames=%u detected=%u lastQ=%d lastLive=%d elapsedMs=%lld",
+                                bestSim,
+                                frameIdx,
+                                detectedFrames,
+                                lastQ,
+                                lastLive,
+                                elapsedMs);
             cb_->onError(Error::TIMEOUT, 0);
         });
         return ::ndk::ScopedAStatus::ok();

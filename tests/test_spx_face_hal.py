@@ -76,14 +76,47 @@ class FaceHalTests(unittest.TestCase):
             "group system camera input",
             "/data/vendor_de/0/facedata",
             "interface aidl android.hardware.biometrics.face.IFace/default",
+            "restorecon /vendor/overlay/spx-face-overlay.apk",
         ):
             self.assertIn(required, rc_text)
+
+        overlay_manifest = ET.parse(ROOT / "probe/face/overlay/AndroidManifest.xml").getroot()
+        self.assertEqual(overlay_manifest.attrib.get("package"), "org.surface.face.overlay")
+        overlay_tag = overlay_manifest.find("./overlay")
+        self.assertIsNotNone(overlay_tag)
+        android_ns = "{http://schemas.android.com/apk/res/android}"
+        self.assertEqual(overlay_tag.attrib.get(f"{android_ns}targetPackage"), "com.android.settings")
+        self.assertEqual(overlay_tag.attrib.get(f"{android_ns}isStatic"), "true")
+        self.assertEqual(overlay_tag.attrib.get(f"{android_ns}priority"), "999")
+
+        cfg_root = ET.parse(ROOT / "probe/face/overlay/res/values/config.xml").getroot()
+        bools = {el.attrib.get("name"): el.text for el in cfg_root.findall("./bool")}
+        items = {el.attrib.get("name"): el.text for el in cfg_root.findall("./item")}
+        self.assertEqual(bools.get("config_face_settings_should_manage_preview"), "false")
+        self.assertEqual(items.get("face_preview_scale"), "1.0")
+        self.assertEqual(items.get("face_preview_translate_x"), "0.0")
+        self.assertEqual(items.get("face_preview_translate_y"), "0.0")
+
+        stage_text = (ROOT / "probe/face/spx-face-stage").read_text(encoding="utf-8")
+        self.assertIn('"$source/spx-face-overlay.apk"', stage_text)
+        self.assertIn('"$vendor/overlay/spx-face-overlay.apk"', stage_text)
+
+        hal_src = (ROOT / "probe/face/spx-face-hal.cpp").read_text(encoding="utf-8")
+        gf_start = hal_src.index("getFeatures()")
+        gf_end = hal_src.index("setFeature(", gf_start)
+        get_features_body = hal_src[gf_start:gf_end]
+        self.assertIn("Feature::REQUIRE_ATTENTION", get_features_body)
+        self.assertNotIn("Feature::REQUIRE_DIVERSE_POSES", get_features_body)
+
+        sg_start = hal_src.index("shouldGateOperation(")
+        sg_end = hal_src.index("registerCancelFlag(", sg_start)
+        self.assertIn("syncContextLocked(*ctx)", hal_src[sg_start:sg_end])
 
     def test_full_image_face_install_idempotent_and_validates_elf(self):
         elf = bytearray(64)
         elf[:6] = b"\x7fELF\x02\x01"
         elf[18:20] = (183).to_bytes(2, "little")
-        payload = {"hal": bytes(elf) + b"hal-body", "cli": bytes(elf) + b"cli-body"}
+        payload = {"hal": bytes(elf) + b"hal-body", "cli": bytes(elf) + b"cli-body", "overlay": b"APK-TEST"}
 
         bad_elf = bytearray(elf)
         bad_elf[18:20] = (62).to_bytes(2, "little")  # EM_X86_64
@@ -97,8 +130,10 @@ class FaceHalTests(unittest.TestCase):
         self.assertTrue(meta["enabled"])
         self.assertEqual(meta["aidl_version"], 4)
         self.assertEqual(meta["security_class"], "weak")
+        self.assertIsNotNone(meta["overlay_sha256"])
         self.assertEqual(records[face.HAL_TARGET], image.new_record(0o100755))
         self.assertEqual(records[face.CLI_TARGET], image.new_record(0o100755))
+        self.assertEqual(records[face.OVERLAY_TARGET], image.new_record(0o100644))
         self.assertEqual(records[face.STAGE_TARGET], image.new_record(0o100755))
         self.assertEqual(records[face.MANIFEST_TARGET], image.new_record(0o100644))
         self.assertEqual(records[face.PERM_TARGET], image.new_record(0o100644))
@@ -175,6 +210,20 @@ class FaceHalTests(unittest.TestCase):
                 dyn = subprocess.check_output([readelf, "-d", str(hal_bin)], text=True)
                 for lib in ("libbinder_ndk.so", "libnativewindow.so", "liblog.so", "libc.so"):
                     self.assertIn(lib, dyn)
+
+    def test_build_face_overlay_apk_if_sdk_available(self):
+        overlay_builder = _load_module("build_spx_face_overlay", "scripts/build-spx-face-overlay.py")
+        if not overlay_builder.sdk_tools_available():
+            self.skipTest("Android SDK overlay tools unavailable")
+        with tempfile.TemporaryDirectory(prefix="spx-face-overlay-test-") as td:
+            apk = overlay_builder.build_overlay(Path(td), ephemeral_keystore=True)
+            self.assertTrue(apk.is_file())
+            aapt2 = overlay_builder.DEFAULT_SDK / "android-15/aapt2"
+            dumped = subprocess.check_output([str(aapt2), "dump", "resources", str(apk)], text=True)
+            self.assertIn("config_face_settings_should_manage_preview", dumped)
+            self.assertIn("false", dumped)
+            self.assertIn("face_preview_translate_x", dumped)
+            self.assertIn("face_preview_translate_y", dumped)
 
 
 if __name__ == "__main__":

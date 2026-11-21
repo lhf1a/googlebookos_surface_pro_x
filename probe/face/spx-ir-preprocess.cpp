@@ -233,4 +233,111 @@ void gray8ToRgba(const uint8_t* gray,
     }
 }
 
+namespace {
+
+template <typename WriteBlackRow, typename WritePixel>
+void renderIrPreviewCommon(const uint8_t* gray,
+                           unsigned srcW,
+                           unsigned srcH,
+                           unsigned dstW,
+                           unsigned dstH,
+                           unsigned dstStridePixels,
+                           bool mirrorX,
+                           WriteBlackRow&& writeBlackRow,
+                           WritePixel&& writePixel) {
+    if (!gray || srcW == 0 || srcH == 0 || dstW == 0 || dstH == 0 || dstStridePixels < dstW) {
+        return;
+    }
+    for (unsigned y = 0; y < dstH; ++y) {
+        writeBlackRow(y, dstW);
+    }
+
+    const unsigned srcSide = std::min(srcW, srcH);
+    const unsigned srcX0 = (srcW - srcSide) / 2u;
+    const unsigned srcY0 = (srcH - srcSide) / 2u;
+
+    // Align square output at top edge (dstY0=0) so 480x640 FaceEnrollPreviewFragment
+    // scale(1.0, 640/480) maps rows 0..dstSide-1 1:1 into the circular view.
+    const unsigned dstSide = std::min(dstW, dstH);
+    const unsigned dstX0 = (dstW > dstSide) ? (dstW - dstSide) / 2u : 0u;
+    const unsigned dstY0 = 0u;
+
+    for (unsigned dy = 0; dy < dstSide; ++dy) {
+        const unsigned sy = srcY0 + (dy * srcSide) / dstSide;
+        const uint8_t* srow = gray + static_cast<size_t>(sy) * srcW;
+        const unsigned outY = dstY0 + dy;
+        for (unsigned dx = 0; dx < dstSide; ++dx) {
+            const unsigned sxOffset = (dx * srcSide) / dstSide;
+            const unsigned sx = srcX0 + (mirrorX ? (srcSide - 1u - sxOffset) : sxOffset);
+            writePixel(outY, dstX0 + dx, srow[sx]);
+        }
+    }
+}
+
+}  // namespace
+
+void renderIrPreviewRgba(const uint8_t* gray,
+                         unsigned srcW,
+                         unsigned srcH,
+                         uint8_t* dstRgba,
+                         unsigned dstW,
+                         unsigned dstH,
+                         unsigned dstStridePixels,
+                         bool mirrorX) {
+    if (!dstRgba) return;
+    renderIrPreviewCommon(
+        gray,
+        srcW,
+        srcH,
+        dstW,
+        dstH,
+        dstStridePixels,
+        mirrorX,
+        [&](unsigned y, unsigned width) {
+            uint8_t* row = dstRgba + static_cast<size_t>(y) * dstStridePixels * 4u;
+            for (unsigned x = 0; x < width; ++x) {
+                row[x * 4u + 0] = 0u;
+                row[x * 4u + 1] = 0u;
+                row[x * 4u + 2] = 0u;
+                row[x * 4u + 3] = 255u;
+            }
+        },
+        [&](unsigned y, unsigned x, uint8_t g) {
+            uint8_t* px = dstRgba + (static_cast<size_t>(y) * dstStridePixels + x) * 4u;
+            px[0] = g;
+            px[1] = g;
+            px[2] = g;
+            px[3] = 255u;
+        });
+}
+
+void renderIrPreviewRgb565(const uint8_t* gray,
+                           unsigned srcW,
+                           unsigned srcH,
+                           uint16_t* dstRgb565,
+                           unsigned dstW,
+                           unsigned dstH,
+                           unsigned dstStridePixels,
+                           bool mirrorX) {
+    if (!dstRgb565) return;
+    renderIrPreviewCommon(
+        gray,
+        srcW,
+        srcH,
+        dstW,
+        dstH,
+        dstStridePixels,
+        mirrorX,
+        [&](unsigned y, unsigned width) {
+            uint16_t* row = dstRgb565 + static_cast<size_t>(y) * dstStridePixels;
+            std::fill_n(row, width, static_cast<uint16_t>(0u));
+        },
+        [&](unsigned y, unsigned x, uint8_t g) {
+            uint16_t* px = dstRgb565 + static_cast<size_t>(y) * dstStridePixels + x;
+            *px = static_cast<uint16_t>(((static_cast<uint16_t>(g >> 3)) << 11) |
+                                        ((static_cast<uint16_t>(g >> 2)) << 5) |
+                                        static_cast<uint16_t>(g >> 3));
+        });
+}
+
 }  // namespace spx::face

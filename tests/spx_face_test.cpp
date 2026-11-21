@@ -234,6 +234,29 @@ void testIrPreprocess() {
     SPX_ASSERT(rgba[4] == 80 && rgba[7] == 0xFF);
     SPX_ASSERT(rgba[4 * 4 + 0] == 160 && rgba[4 * 4 + 3] == 0xFF);
     SPX_ASSERT(rgba[4 * 4 + 4] == 250 && rgba[4 * 4 + 7] == 0xFF);
+
+    // Portrait 480x640 IR preview rendering from 640x480 landscape source crop, mirrored.
+    std::vector<uint8_t> src640x480(640u * 480u, 15u);
+    src640x480[0u * 640u + 0u] = 99u;      // Outside center crop
+    src640x480[0u * 640u + 80u] = 200u;    // Top-left of center 480x480 crop
+    src640x480[0u * 640u + 559u] = 40u;    // Top-right of center 480x480 crop
+    src640x480[479u * 640u + 80u] = 120u;  // Bottom-left of center 480x480 crop
+
+    std::vector<uint8_t> prevRgba(640u * 512u * 4u, 77u);
+    renderIrPreviewRgba(src640x480.data(), 640u, 480u, prevRgba.data(), 480u, 640u, 512u, true);
+    SPX_ASSERT(prevRgba[0] == 40u && prevRgba[1] == 40u && prevRgba[2] == 40u && prevRgba[3] == 255u);
+    const size_t topRightOff = 479u * 4u;
+    SPX_ASSERT(prevRgba[topRightOff + 0] == 200u && prevRgba[topRightOff + 3] == 255u);
+    const size_t botRightOff = (479u * 512u + 479u) * 4u;
+    SPX_ASSERT(prevRgba[botRightOff + 0] == 120u && prevRgba[botRightOff + 3] == 255u);
+    const size_t padRowOff = (500u * 512u + 10u) * 4u;
+    SPX_ASSERT(prevRgba[padRowOff + 0] == 0u && prevRgba[padRowOff + 3] == 255u);
+
+    std::vector<uint16_t> prev565(640u * 512u, 0xFFFFu);
+    renderIrPreviewRgb565(src640x480.data(), 640u, 480u, prev565.data(), 480u, 640u, 512u, true);
+    SPX_ASSERT(prev565[0] == ((5u << 11) | (10u << 5) | 5u));
+    SPX_ASSERT(prev565[479] == ((25u << 11) | (50u << 5) | 25u));
+    SPX_ASSERT(prev565[500u * 512u + 10u] == 0u);
 }
 
 void testCryptoAndHat() {
@@ -390,6 +413,37 @@ void testEngineAndLiveness() {
     OptionalModelWeights weights;
     SPX_ASSERT(!weights.loadFromFile("/tmp/nonexistent-spx-model-weights.bin"));
     SPX_ASSERT(!weights.loaded);
+
+    // Symmetric non-face patterns and 90°/180° rotated faces must not trigger false detections.
+    std::vector<uint16_t> stripesPx(480u * 640u, 0u);
+    std::vector<uint16_t> vignettePx(480u * 640u, 0u);
+    for (unsigned y = 0; y < 640u; ++y) {
+        const float ny = (static_cast<float>(y) - 320.0f) / 320.0f;
+        const uint16_t sv = static_cast<uint16_t>(180u + ((y / 24u) & 1u) * 320u);
+        for (unsigned x = 0; x < 480u; ++x) {
+            stripesPx[y * 480u + x] = sv;
+            const float nx = (static_cast<float>(x) - 240.0f) / 240.0f;
+            const float r2 = std::min(1.0f, nx * nx + ny * ny);
+            vignettePx[y * 480u + x] = static_cast<uint16_t>(700.0f * (1.0f - 0.7f * r2));
+        }
+    }
+    const auto rawStripes = packY10(stripesPx, 480u, 640u, 960u);
+    const auto stStripes = preprocessIrFrame(
+        rawStripes.data(), rawStripes.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg0);
+    SPX_ASSERT(!detectFaceNir(stStripes).detected);
+
+    const auto rawVig = packY10(vignettePx, 480u, 640u, 960u);
+    const auto stVig = preprocessIrFrame(
+        rawVig.data(), rawVig.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg0);
+    SPX_ASSERT(!detectFaceNir(stVig).detected);
+
+    const auto stRot90 = preprocessIrFrame(
+        rawReal0.data(), rawReal0.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg90CW);
+    SPX_ASSERT(!detectFaceNir(stRot90).detected);
+
+    const auto stRot180 = preprocessIrFrame(
+        rawReal0.data(), rawReal0.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg180);
+    SPX_ASSERT(!detectFaceNir(stRot180).detected);
 }
 
 void testFaceStore() {
@@ -414,6 +468,8 @@ void testFaceStore() {
     {
         SpxFaceStore store0(0, user0Dir);
         SPX_ASSERT(store0.load());
+        SPX_ASSERT(store0.hasFeatureBit(1u));
+        SPX_ASSERT(!store0.hasFeatureBit(2u));
         SPX_ASSERT(store0.enrollmentCount() == 0);
         id1 = store0.addEnrollment({embReal});
         SPX_ASSERT(id1 > 0);

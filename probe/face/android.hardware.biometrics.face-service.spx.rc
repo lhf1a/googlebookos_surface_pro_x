@@ -4,6 +4,7 @@ on post-fs
     restorecon /vendor/etc/vintf/manifest/android.hardware.biometrics.face-service.spx.xml
     restorecon /vendor/etc/init/android.hardware.biometrics.face-service.spx.rc
     restorecon /vendor/etc/permissions/android.hardware.biometrics.face.xml
+    restorecon /vendor/overlay/spx-face-overlay.apk
 
 on post-fs-data
     mkdir /data/vendor_de/0/facedata 0700 system system
