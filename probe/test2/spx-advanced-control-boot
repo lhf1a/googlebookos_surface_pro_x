@@ -1166,9 +1166,13 @@ resolve_face_cli_bin() {
         printf '%s' "$FACE_CLI_BIN"
         return 0
     fi
+    if [ -z "${SPX_AC_ANDROID_WRAPPER:-}" ] && [ -n "$DATA_ROOT" ] && [ "$DATA_ROOT" != "/" ] && [ -x "$DATA_ROOT/vendor/bin/spx-face-cli" ]; then
+        printf '%s' 'android:/vendor/bin/spx-face-cli'
+        return 0
+    fi
     for _cand in \
-        "$DATA_ROOT/vendor/bin/spx-face-cli" \
         /vendor/bin/spx-face-cli \
+        "$DATA_ROOT/vendor/bin/spx-face-cli" \
         /etc/spx-face/spx-face-cli \
         "$DATA_ROOT/etc/spx-face/spx-face-cli"; do
         if [ -x "$_cand" ]; then
@@ -1177,6 +1181,21 @@ resolve_face_cli_bin() {
         fi
     done
     return 1
+}
+
+run_face_cli() {
+    _rfc_timeout="$1"
+    shift
+    _rfc_bin="$(resolve_face_cli_bin 2>/dev/null || true)"
+    [ -n "$_rfc_bin" ] || return 127
+    case "$_rfc_bin" in
+        android:*)
+            run_with_timeout "$_rfc_timeout" nsenter -t 1 -m -r -- "${_rfc_bin#android:}" "$@"
+            ;;
+        *)
+            run_with_timeout "$_rfc_timeout" "$_rfc_bin" "$@"
+            ;;
+    esac
 }
 
 bitmap_has_zero() {
@@ -1275,7 +1294,7 @@ restore_hall_lid_on_boot() {
 }
 
 read_ssam_cover_state() {
-    for _sd in "$SYSFS"/bus/ssam/devices/*; do
+    for _sd in "$SYSFS"/bus/surface_aggregator/devices/* "$SYSFS"/bus/ssam/devices/*; do
         [ -r "$_sd/state" ] || continue
         _st="$(head -n 1 "$_sd/state" 2>/dev/null | tr -d '\r\n ')"
         case "$_st" in
@@ -1371,7 +1390,7 @@ read_hall_and_face_snapshot() {
     _cli_json=""
     _cli_bin="$(resolve_face_cli_bin 2>/dev/null || true)"
     if [ -n "$_cli_bin" ] && { [ -n "$FACE_CLI_BIN" ] || [ "$SYSFS" = "/sys" ]; }; then
-        _cli_json="$(run_with_timeout 5 "$_cli_bin" --status 2>/dev/null | tr -d '\r\n' || true)"
+        _cli_json="$(run_face_cli 5 --status 2>/dev/null | tr -d '\r\n' || true)"
     fi
 
     if [ -n "$_ldir" ] && ! is_hall_lid_cmdline_disabled; then
@@ -2404,7 +2423,7 @@ handle_request() {
                 send_reply "$_dir" "$_nonce" "ERROR" "face_cli_missing"
                 return 0
             fi
-            if ! run_with_timeout 10 "$_cli_bin" --self-test >/dev/null 2>&1; then
+            if ! run_face_cli 10 --self-test >/dev/null 2>&1; then
                 publish_state "$_dir" || true
                 send_reply "$_dir" "$_nonce" "ERROR" "face_self_test_failed"
                 return 0
@@ -2414,7 +2433,7 @@ handle_request() {
             _bench_p50=""
             _bench_mean=""
             if [ "$_face_avail" = "1" ] && [ "$_lid_state" != "CLOSED" ]; then
-                _bjson="$(run_with_timeout 8 "$_cli_bin" --benchmark-ir 5 --rotation "$_face_rot" 2>/dev/null | tr -d '\r\n' || true)"
+                _bjson="$(run_face_cli 8 --benchmark-ir 5 --rotation "$_face_rot" 2>/dev/null | tr -d '\r\n' || true)"
                 _bp="$(json_num_field "$_bjson" "proc_p50_ms")"
                 _bm="$(json_num_field "$_bjson" "last_roi_mean")"
                 if [ -n "$_bp" ]; then

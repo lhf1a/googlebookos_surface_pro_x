@@ -93,7 +93,7 @@ class LidDtbTests(unittest.TestCase):
             liddt.prepare(before, debounce_ms=2000)
 
     def test_folded_cover_kernel_patch_applies_cleanly(self):
-        patch_path = ROOT / "patches/spx-portable-boot/0010-spx-hall-lid-ignore-folded-cover.patch"
+        patch_path = ROOT / "patches/spx-portable-boot/0012-spx-hall-lid-ignore-folded-cover.patch"
         self.assertTrue(patch_path.is_file())
         text = patch_path.read_text()
         for symbol in ("input_spx_set_cover_folded", "input_spx_cover_is_folded", "folded-back", "folded-canvas", "book"):

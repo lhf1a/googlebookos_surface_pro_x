@@ -1335,7 +1335,7 @@ print(f'$6$testsalt${digest}')
             (lid_dir / 'disabled_switches').write_text('\n')
             (lid_dir / 'sw_state').write_text('0\n')
 
-            ssam_dir = sysfs / 'bus/ssam/devices/01:03:00:01:01'
+            ssam_dir = sysfs / 'bus/surface_aggregator/devices/01:0e:01:00:01'
             ssam_dir.mkdir(parents=True, exist_ok=True)
             (ssam_dir / 'state').write_text('laptop\n')
 
@@ -1378,7 +1378,7 @@ if '--self-test' in args:
     print('PASS spx-face-cli --self-test')
 elif '--status' in args:
     sw = (sysfs / 'devices/platform/gpio-keys-lid/sw_state').read_text().strip()
-    ssam = (sysfs / 'bus/ssam/devices/01:03:00:01:01/state').read_text().strip()
+    ssam = (sysfs / 'bus/surface_aggregator/devices/01:0e:01:00:01/state').read_text().strip()
     raw_closed = sw == '1'
     folded = ssam in ('folded-back', 'folded-canvas', 'book')
     print(json.dumps({{

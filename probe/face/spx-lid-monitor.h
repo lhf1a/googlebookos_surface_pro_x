@@ -26,15 +26,17 @@ bool isSsamCoverFolded(const std::string& state);
 // Compute whether the lid is genuinely closed given raw SW_LID and SSAM posture.
 bool evaluateEffectiveLidClosed(bool rawSwLidClosed, const std::string& ssamCoverState);
 
-// Read SSAM tablet switch posture from <ssamDevicesDir>/*/state (e.g. "/sys/bus/ssam/devices").
-std::string readSsamCoverState(const std::string& ssamDevicesDir = "/sys/bus/ssam/devices");
+// Read SSAM tablet switch posture from <ssamDevicesDir>/*/state
+// (defaults to "/sys/bus/surface_aggregator/devices", with "/sys/bus/ssam/devices" fallback).
+std::string readSsamCoverState(
+    const std::string& ssamDevicesDir = "/sys/bus/surface_aggregator/devices");
 
 class SpxLidMonitor {
 public:
     using LidClosedCallback = std::function<void()>;
 
     SpxLidMonitor(std::string inputDir = "/dev/input",
-                  std::string ssamDevicesDir = "/sys/bus/ssam/devices");
+                  std::string ssamDevicesDir = "/sys/bus/surface_aggregator/devices");
     ~SpxLidMonitor();
 
     SpxLidMonitor(const SpxLidMonitor&) = delete;

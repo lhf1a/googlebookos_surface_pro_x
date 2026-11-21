@@ -58,15 +58,15 @@ bool evaluateEffectiveLidClosed(bool rawSwLidClosed, const std::string& ssamCove
     return true;
 }
 
-std::string readSsamCoverState(const std::string& ssamDevicesDir) {
-    DIR* dir = opendir(ssamDevicesDir.c_str());
-    if (!dir) return "unavailable";
-    std::string found = "unavailable";
+static std::string scanSsamDir(const std::string& dirPath) {
+    DIR* dir = opendir(dirPath.c_str());
+    if (!dir) return {};
+    std::string found;
     struct dirent* ent = nullptr;
     while ((ent = readdir(dir)) != nullptr) {
         if (ent->d_name[0] == '.') continue;
         std::string val;
-        if (readSmallFile(ssamDevicesDir + "/" + ent->d_name + "/state", val)) {
+        if (readSmallFile(dirPath + "/" + ent->d_name + "/state", val)) {
             if (val == "laptop" || val == "closed" || val == "disconnected" ||
                 val == "folded-back" || val == "folded-canvas" || val == "book" ||
                 val == "slate" || val == "tablet") {
@@ -77,6 +77,14 @@ std::string readSsamCoverState(const std::string& ssamDevicesDir) {
     }
     closedir(dir);
     return found;
+}
+
+std::string readSsamCoverState(const std::string& ssamDevicesDir) {
+    std::string found = scanSsamDir(ssamDevicesDir);
+    if (found.empty() && ssamDevicesDir == "/sys/bus/surface_aggregator/devices") {
+        found = scanSsamDir("/sys/bus/ssam/devices");
+    }
+    return found.empty() ? "unavailable" : found;
 }
 
 SpxLidMonitor::SpxLidMonitor(std::string inputDir, std::string ssamDevicesDir)

@@ -1,7 +1,7 @@
 # Surface Pro X (SQ1/SQ2) 霍尔传感器 + OV7251 IR 人脸解锁实施计划
 
 > **适用平台**：Microsoft Surface Pro X (SQ1 / SQ2)，Android 17 (`mica 16471258`) + Linux `6.18.60-sq2-android1` Hybrid (EL2)  
-> **状态**：Phase 1–5 代码与主机验证已实现于分支 `feat/ir-hall-face-unlock`（包含霍尔 `SW_LID` DT 补丁与反折保护内核补丁 `0010`、OV7251 850nm 预处理/加密/活体/识别引擎、`IFace/default` AIDL V4 Class 2 HAL、initramfs 阶段挂载脚本及 `SurfaceAdvancedControl` 控制面板）；Phase 0 / Gate 5 实机端到端验收尚未执行（`hardware_validated = false`，仍需 SQ2 与 SQ1 真机实测确认极性、误识别率与续航功耗）。  
+> **状态**：Phase 1–5 代码与主机验证已实现于分支 `feat/ir-hall-face-unlock`（包含霍尔 `SW_LID` DT 补丁与反折保护内核补丁 `0012`、OV7251 850nm 预处理/加密/活体/识别引擎、`IFace/default` AIDL V4 Class 2 HAL、initramfs 阶段挂载脚本及 `SurfaceAdvancedControl` 控制面板）；Phase 0 / Gate 5 实机端到端验收尚未执行（`hardware_validated = false`，仍需 SQ2 与 SQ1 真机实测确认极性、误识别率与续航功耗）。  
 > **核心原则**：不启用 QSEE fTPM、保持 `SPX-PORTABLE-SQ1-SQ2` 单镜像通用性、零常驻功耗回归、`s2idle` 休眠安全优先
 
 ---
@@ -275,7 +275,7 @@ sequenceDiagram
 | 阶段 | 路径 | 用途 / 实现说明 |
 | :--- | :--- | :--- |
 | Phase 1 | `scripts/prepare-spx-lid-dtb.py` | GPIO 121 `SW_LID`（支持 `--active-high`、`--debounce-ms`、`linux,can-disable` 与冲突检查） |
-| Phase 1 | `patches/spx-portable-boot/0010-spx-hall-lid-ignore-folded-cover.patch` | 键盘反折（`folded-back` / `folded-canvas` / `book`）时在输入核心抑制 `SW_LID=1` |
+| Phase 1 | `patches/spx-portable-boot/0012-spx-hall-lid-ignore-folded-cover.patch` | 键盘反折（`folded-back` / `folded-canvas` / `book`）时在输入核心抑制 `SW_LID=1` |
 | Phase 1 | `scripts/full_image.py` / `scripts/build-lts.py` | 接入霍尔 DT 与人脸 HAL 可选构建开关（`--without-hall-lid`、`--face-hal`、`--without-face`） |
 | Phase 1 | `tests/test_spx_lid_dtb.py` | DT `debounce-interval`/`linux,can-disable`、极性参数与补丁无模糊应用测试 |
 | Phase 2 | `probe/face/spx-ir-preprocess.{h,cpp}` | OV7251 `Y10`/`Y10P` 解包、`0/90/180/270` 旋转、ROI 亮度统计与 `gray8ToRgba` |
