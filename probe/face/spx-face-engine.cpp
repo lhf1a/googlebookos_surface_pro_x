@@ -230,6 +230,111 @@ float sampleSubblockSymmetry(const IntegralImage& ii, int bx, int by, int bw, in
     return static_cast<float>(num / denom);
 }
 
+float boxMeanGray(const uint8_t* gray,
+                  unsigned width,
+                  unsigned height,
+                  int x0,
+                  int y0,
+                  int x1,
+                  int y1) {
+    if (width == 0 || height == 0) return 0.0f;
+    if (x1 < 0 || y1 < 0 || x0 >= static_cast<int>(width) || y0 >= static_cast<int>(height)) {
+        return 0.0f;
+    }
+    x0 = std::clamp(x0, 0, static_cast<int>(width) - 1);
+    y0 = std::clamp(y0, 0, static_cast<int>(height) - 1);
+    x1 = std::clamp(x1, 0, static_cast<int>(width) - 1);
+    y1 = std::clamp(y1, 0, static_cast<int>(height) - 1);
+    if (x1 < x0 || y1 < y0) return 0.0f;
+    uint32_t sum = 0;
+    uint32_t count = 0;
+    for (int y = y0; y <= y1; ++y) {
+        const uint8_t* row = gray + static_cast<size_t>(y) * width;
+        for (int x = x0; x <= x1; ++x) {
+            sum += row[x];
+            ++count;
+        }
+    }
+    return count > 0 ? static_cast<float>(sum) / static_cast<float>(count) : 0.0f;
+}
+
+Point2f findWeightedMinPatch(const uint8_t* gray,
+                             unsigned width,
+                             unsigned height,
+                             int x0,
+                             int y0,
+                             int x1,
+                             int y1,
+                             float priorX,
+                             float priorY,
+                             float sigmaScale);
+
+Point2f findEyeWell(const uint8_t* gray,
+                    unsigned width,
+                    unsigned height,
+                    int x0,
+                    int y0,
+                    int x1,
+                    int y1,
+                    float priorX,
+                    float priorY,
+                    float boxW) {
+    if (width < 4 || height < 4) return {priorX, priorY};
+    x0 = std::clamp(x0, 1, static_cast<int>(width) - 2);
+    y0 = std::clamp(y0, 1, static_cast<int>(height) - 2);
+    x1 = std::clamp(x1, x0, static_cast<int>(width) - 2);
+    y1 = std::clamp(y1, y0, static_cast<int>(height) - 2);
+
+    const float sigma = std::max(4.0f, 0.085f * boxW);
+    const int rIn = std::max(1, static_cast<int>(std::lround(0.028f * boxW)));
+    const int rOut = std::max(rIn + 2, static_cast<int>(std::lround(0.085f * boxW)));
+
+    double sumX = 0.0;
+    double sumY = 0.0;
+    double weightSum = 0.0;
+
+    for (int y = y0; y <= y1; ++y) {
+        const float dy = (static_cast<float>(y) - priorY) / sigma;
+        for (int x = x0; x <= x1; ++x) {
+            const float dx = (static_cast<float>(x) - priorX) / sigma;
+            const float spatialPrior = std::exp(-0.5f * (dx * dx + dy * dy));
+            if (spatialPrior < 0.02f) continue;
+
+            const float innerMean =
+                boxMeanGray(gray, width, height, x - rIn, y - rIn, x + rIn, y + rIn);
+            const float leftMean =
+                boxMeanGray(gray, width, height, x - rOut, y - rIn, x - rIn - 1, y + rIn);
+            const float rightMean =
+                boxMeanGray(gray, width, height, x + rIn + 1, y - rIn, x + rOut, y + rIn);
+            const float belowMean =
+                boxMeanGray(gray, width, height, x - rIn, y + rIn + 1, x + rIn, y + rOut);
+
+            const float horizSurr = 0.5f * (leftMean + rightMean);
+            const float minSideSurr = std::min(leftMean, rightMean);
+            const float skinSurr =
+                0.55f * minSideSurr + 0.25f * horizSurr + 0.20f * belowMean;
+            const float wellContrast = std::max(0.0f, skinSurr - innerMean);
+            if (wellContrast <= 0.5f) continue;
+
+            const float w =
+                spatialPrior * wellContrast * wellContrast *
+                (1.0f + std::max(0.0f, 160.0f - innerMean) / 160.0f);
+            sumX += static_cast<double>(x) * w;
+            sumY += static_cast<double>(y) * w;
+            weightSum += w;
+        }
+    }
+
+    if (weightSum > 1e-3) {
+        return {
+            static_cast<float>(sumX / weightSum),
+            static_cast<float>(sumY / weightSum),
+        };
+    }
+    return findWeightedMinPatch(
+        gray, width, height, x0, y0, x1, y1, priorX, priorY, 0.09f * boxW);
+}
+
 Point2f findWeightedMinPatch(const uint8_t* gray,
                              unsigned width,
                              unsigned height,
@@ -485,11 +590,44 @@ FaceDetection detectFaceNir(const IrFrameStats& frame) {
     }
 
     // Downsample 2x when frame >= 320px to keep multi-scale sliding-window scan < 4ms.
+    // Map raw 10-bit upright10 through a gamma-0.5 LUT so distant/dim faces retain midtone
+    // contrast even when background/glare pushes p99 near 1023.
     const unsigned scale = (frame.width >= 320 && frame.height >= 320) ? 2u : 1u;
     const unsigned dw = frame.width / scale;
     const unsigned dh = frame.height / scale;
     std::vector<uint8_t> small(static_cast<size_t>(dw) * dh);
-    if (scale == 2u) {
+    const size_t fullPixels = static_cast<size_t>(frame.width) * frame.height;
+    if (frame.upright10.size() >= fullPixels) {
+        std::array<uint8_t, 1024> sqrtLut{};
+        const uint16_t lo10 = frame.p1;
+        const uint32_t rawSpan10 =
+            (frame.p99 > lo10) ? static_cast<uint32_t>(frame.p99 - lo10) : 0u;
+        const float invSpan10 =
+            1.0f / static_cast<float>(std::max<uint32_t>(64u, rawSpan10));
+        for (unsigned v = 0; v < 1024u; ++v) {
+            const float t = (v <= lo10)
+                                ? 0.0f
+                                : std::min(1.0f, static_cast<float>(v - lo10) * invSpan10);
+            sqrtLut[v] = static_cast<uint8_t>(std::lround(std::sqrt(t) * 255.0f));
+        }
+        if (scale == 2u) {
+            for (unsigned y = 0; y < dh; ++y) {
+                const uint16_t* r0 =
+                    frame.upright10.data() + static_cast<size_t>(y * 2u) * frame.width;
+                const uint16_t* r1 = r0 + frame.width;
+                uint8_t* d = small.data() + static_cast<size_t>(y) * dw;
+                for (unsigned x = 0; x < dw; ++x) {
+                    const unsigned avg =
+                        (r0[x * 2u] + r0[x * 2u + 1u] + r1[x * 2u] + r1[x * 2u + 1u]) >> 2;
+                    d[x] = sqrtLut[std::min(avg, 1023u)];
+                }
+            }
+        } else {
+            for (size_t i = 0; i < small.size(); ++i) {
+                small[i] = sqrtLut[std::min<unsigned>(frame.upright10[i], 1023u)];
+            }
+        }
+    } else if (scale == 2u) {
         for (unsigned y = 0; y < dh; ++y) {
             const uint8_t* r0 = frame.gray8.data() + static_cast<size_t>(y * 2u) * frame.width;
             const uint8_t* r1 = r0 + frame.width;
@@ -508,7 +646,7 @@ FaceDetection detectFaceNir(const IrFrameStats& frame) {
     ii.build(small.data(), dw, dh);
 
     const unsigned minDim = std::min(dw, dh);
-    const int minSize = std::max(28, static_cast<int>(std::lround(minDim * 0.22f)));
+    const int minSize = std::max(20, static_cast<int>(std::lround(minDim * 0.13f)));
     const int maxSize = std::min<int>(minDim - 4, static_cast<int>(std::lround(minDim * 0.88f)));
 
     struct Candidate {
@@ -516,112 +654,155 @@ FaceDetection detectFaceNir(const IrFrameStats& frame) {
         int y = 0;
         int w = 0;
         int h = 0;
-        float score = -1e9f;
+        float rawScore = -1e9f;
+        float rankScore = -1e9f;
     };
     Candidate best;
 
-    for (int bw = minSize; bw <= maxSize; bw = std::max(bw + 4, static_cast<int>(bw * 1.14f))) {
-        const int bh = std::min<int>(dh - 2, static_cast<int>(std::lround(bw * 1.15f)));
-        const int step = std::max(3, bw / 11);
-        for (int by = 1; by + bh < static_cast<int>(dh); by += step) {
-            for (int bx = 1; bx + bw < static_cast<int>(dw); bx += step) {
-                const float coreStd =
-                    ii.rectStdDev(bx + bw / 6, by + bh / 6, bx + (5 * bw) / 6, by + (5 * bh) / 6);
-                if (coreStd < 12.0f) continue;
+    auto evalWindow = [&](int bx, int by, int bw, int bh, float& outRaw, float& outRank) -> bool {
+        if (bx < 1 || by < 1 || bx + bw >= static_cast<int>(dw) ||
+            by + bh >= static_cast<int>(dh)) {
+            return false;
+        }
+        const float coreStd =
+            ii.rectStdDev(bx + bw / 6, by + bh / 6, bx + (5 * bw) / 6, by + (5 * bh) / 6);
+        if (coreStd < 7.0f) return false;
 
-                const float coreMean =
-                    ii.rectMean(bx + bw / 5, by + bh / 5, bx + (4 * bw) / 5, by + (4 * bh) / 5);
-                const float eyeBand = ii.rectMean(
-                    bx + (14 * bw) / 100, by + (22 * bh) / 100, bx + (86 * bw) / 100, by + (42 * bh) / 100);
-                const float cheekBand = ii.rectMean(
-                    bx + (16 * bw) / 100, by + (44 * bh) / 100, bx + (84 * bw) / 100, by + (65 * bh) / 100);
-                if (cheekBand <= eyeBand + 3.0f) continue;
+        const float coreMean =
+            ii.rectMean(bx + bw / 5, by + bh / 5, bx + (4 * bw) / 5, by + (4 * bh) / 5);
+        const float eyeBand = ii.rectMean(
+            bx + (14 * bw) / 100, by + (22 * bh) / 100, bx + (86 * bw) / 100, by + (42 * bh) / 100);
+        const float cheekBand = ii.rectMean(
+            bx + (16 * bw) / 100, by + (44 * bh) / 100, bx + (84 * bw) / 100, by + (65 * bh) / 100);
+        if (cheekBand <= eyeBand + 1.5f) return false;
 
-                const float leftEye = ii.rectMean(
-                    bx + (16 * bw) / 100, by + (22 * bh) / 100, bx + (40 * bw) / 100, by + (42 * bh) / 100);
-                const float rightEye = ii.rectMean(
-                    bx + (60 * bw) / 100, by + (22 * bh) / 100, bx + (84 * bw) / 100, by + (42 * bh) / 100);
-                if (cheekBand <= leftEye + 4.0f || cheekBand <= rightEye + 4.0f) continue;
-                if (std::abs(leftEye - rightEye) >= 45.0f) continue;
+        const float leftEye = ii.rectMean(
+            bx + (16 * bw) / 100, by + (22 * bh) / 100, bx + (40 * bw) / 100, by + (42 * bh) / 100);
+        const float rightEye = ii.rectMean(
+            bx + (60 * bw) / 100, by + (22 * bh) / 100, bx + (84 * bw) / 100, by + (42 * bh) / 100);
+        if (cheekBand <= leftEye + 1.5f || cheekBand <= rightEye + 1.5f) return false;
+        if (std::abs(leftEye - rightEye) >= 58.0f) return false;
 
-                const float upperNose = ii.rectMean(
-                    bx + (41 * bw) / 100, by + (22 * bh) / 100, bx + (59 * bw) / 100, by + (42 * bh) / 100);
-                if (upperNose <= leftEye + 2.5f || upperNose <= rightEye + 2.5f) continue;
+        const float leftCheek = ii.rectMean(
+            bx + (14 * bw) / 100, by + (44 * bh) / 100, bx + (42 * bw) / 100, by + (65 * bh) / 100);
+        const float rightCheek = ii.rectMean(
+            bx + (58 * bw) / 100, by + (44 * bh) / 100, bx + (86 * bw) / 100, by + (65 * bh) / 100);
+        if (leftCheek <= leftEye + 2.0f || rightCheek <= rightEye + 2.0f) return false;
+        if (std::abs(leftCheek - rightCheek) > 58.0f) return false;
 
-                const float noseBridge = ii.rectMean(
-                    bx + (41 * bw) / 100, by + (24 * bh) / 100, bx + (59 * bw) / 100, by + (56 * bh) / 100);
-                if (noseBridge <= leftEye + 3.0f || noseBridge <= rightEye + 3.0f) continue;
+        const float leftBrow = ii.rectMean(
+            bx + (16 * bw) / 100, by + (8 * bh) / 100, bx + (40 * bw) / 100, by + (22 * bh) / 100);
+        const float rightBrow = ii.rectMean(
+            bx + (60 * bw) / 100, by + (8 * bh) / 100, bx + (84 * bw) / 100, by + (22 * bh) / 100);
+        const float forehead = ii.rectMean(
+            bx + (24 * bw) / 100, by + (8 * bh) / 100, bx + (76 * bw) / 100, by + (22 * bh) / 100);
+        const float upperNose = ii.rectMean(
+            bx + (41 * bw) / 100, by + (22 * bh) / 100, bx + (59 * bw) / 100, by + (42 * bh) / 100);
+        const float noseBridge = ii.rectMean(
+            bx + (41 * bw) / 100, by + (24 * bh) / 100, bx + (59 * bw) / 100, by + (56 * bh) / 100);
+        const float mouthBand = ii.rectMean(
+            bx + (26 * bw) / 100, by + (67 * bh) / 100, bx + (74 * bw) / 100, by + (83 * bh) / 100);
+        const float chinBand = ii.rectMean(
+            bx + (30 * bw) / 100, by + (84 * bh) / 100, bx + (70 * bw) / 100, by + (96 * bh) / 100);
+        if (chinBand < 0.25f * cheekBand) return false;
 
-                const float forehead = ii.rectMean(
-                    bx + (24 * bw) / 100, by + (6 * bh) / 100, bx + (76 * bw) / 100, by + (20 * bh) / 100);
-                if (forehead <= eyeBand + 2.0f) continue;
+        const float eyeMean = 0.5f * (leftEye + rightEye);
 
-                const float mouthBand = ii.rectMean(
-                    bx + (26 * bw) / 100, by + (67 * bh) / 100, bx + (74 * bw) / 100, by + (83 * bh) / 100);
-                if (cheekBand <= mouthBand + 2.0f) continue;
+        // Local-minimum eye sockets: brow above each eye and nasal bridge between eyes
+        // must exceed the eye sockets (rejects oval crowns, vignettes, and 90/180 rotations).
+        if (leftBrow <= leftEye + 1.5f || rightBrow <= rightEye + 1.5f) return false;
+        if (upperNose <= leftEye + 1.5f || upperNose <= rightEye + 1.5f) return false;
+        if (noseBridge <= leftEye + 2.0f || noseBridge <= rightEye + 2.0f) return false;
 
-                // Reject inverted faces or off-face windows where the forehead band is far
-                // brighter than cheeks or the chin band falls off into empty background.
-                if (cheekBand < forehead - 15.0f) continue;
+        // Upright vs 180-deg inverted head guard (tolerates bangs & light 850nm lips).
+        const int vPad = std::max(4, bh / 5);
+        const float aboveBox = (by >= 6)
+                                   ? ii.rectMean(bx + (24 * bw) / 100,
+                                                 std::max(0, by - vPad),
+                                                 bx + (76 * bw) / 100,
+                                                 by)
+                                   : forehead;
+        const float belowBox = (by + bh + 6 <= static_cast<int>(dh))
+                                   ? ii.rectMean(bx + (24 * bw) / 100,
+                                                 by + bh,
+                                                 bx + (76 * bw) / 100,
+                                                 std::min<int>(dh, by + bh + vPad))
+                                   : chinBand;
+        if (aboveBox > cheekBand + 8.0f) return false;
+        if (aboveBox > belowBox + 70.0f && aboveBox > cheekBand - 45.0f) return false;
 
-                const float chinBand = ii.rectMean(
-                    bx + (30 * bw) / 100, by + (84 * bh) / 100, bx + (70 * bw) / 100, by + (96 * bh) / 100);
-                if (chinBand < 0.30f * cheekBand) continue;
+        // Outer surround contrast under active 850nm illumination.
+        const int pad = std::max(4, bw / 5);
+        const float leftSurr =
+            (bx >= 6) ? ii.rectMean(std::max(0, bx - pad), by, bx, by + bh) : coreMean;
+        const float rightSurr = (bx + bw + 6 <= static_cast<int>(dw))
+                                    ? ii.rectMean(bx + bw, by, std::min<int>(dw, bx + bw + pad), by + bh)
+                                    : coreMean;
+        const float surrMean = 0.5f * (leftSurr + rightSurr);
+        if (coreMean < std::min(leftSurr, rightSurr) - 10.0f) return false;
 
-                // Require left/right cheek balance (rejects off-center half-face windows) and
-                // darker mouth center than flanking lower cheeks (distinguishes mouth from inverted crown).
-                const float leftCheek = ii.rectMean(
-                    bx + (14 * bw) / 100, by + (44 * bh) / 100, bx + (42 * bw) / 100, by + (65 * bh) / 100);
-                const float rightCheek = ii.rectMean(
-                    bx + (58 * bw) / 100, by + (44 * bh) / 100, bx + (86 * bw) / 100, by + (65 * bh) / 100);
-                if (std::abs(leftCheek - rightCheek) > 42.0f) continue;
+        const float sym = sampleSubblockSymmetry(ii, bx, by, bw, bh);
+        if (sym < 0.28f) return false;
 
-                const float mouthCenter = ii.rectMean(
-                    bx + (40 * bw) / 100, by + (67 * bh) / 100, bx + (60 * bw) / 100, by + (83 * bh) / 100);
-                const float mouthFlanks = 0.5f * (
-                    ii.rectMean(bx + (20 * bw) / 100, by + (67 * bh) / 100, bx + (38 * bw) / 100, by + (83 * bh) / 100) +
-                    ii.rectMean(bx + (62 * bw) / 100, by + (67 * bh) / 100, bx + (80 * bw) / 100, by + (83 * bh) / 100));
-                if (mouthCenter >= mouthFlanks - 1.0f) continue;
+        const float localGain = std::clamp(34.0f / std::max(coreStd, 7.0f), 0.75f, 2.2f);
+        const float structureScore =
+            ((cheekBand - eyeBand) * 1.3f +
+             (noseBridge - eyeMean) * 1.4f +
+             std::max(0.0f, forehead - eyeBand) * 0.7f +
+             std::max(0.0f, cheekBand - mouthBand) * 0.5f) *
+            localGain;
+        if (structureScore < 20.0f) return false;
 
-                // Outer surround contrast under active 850nm illumination.
-                const int pad = std::max(4, bw / 5);
-                const float leftSurr =
-                    (bx >= 6) ? ii.rectMean(std::max(0, bx - pad), by, bx, by + bh) : coreMean;
-                const float rightSurr = (bx + bw + 6 <= static_cast<int>(dw))
-                                            ? ii.rectMean(bx + bw, by, std::min<int>(dw, bx + bw + pad), by + bh)
-                                            : coreMean;
-                const float surrMean = 0.5f * (leftSurr + rightSurr);
-                if (coreMean < surrMean - 5.0f) continue;
+        const float scaleWeight =
+            0.84f + 0.16f * std::min(1.0f, static_cast<float>(bw) /
+                                               (0.30f * static_cast<float>(minDim)));
+        outRaw = structureScore +
+                 std::clamp((coreMean - surrMean) * localGain, -15.0f, 40.0f) * 0.55f +
+                 sym * 30.0f;
+        outRank = outRaw * scaleWeight;
+        return true;
+    };
 
-                const float sym = sampleSubblockSymmetry(ii, bx, by, bw, bh);
-                if (sym < 0.30f) continue;
-
-                const float structureScore =
-                    (cheekBand - eyeBand) * 1.3f +
-                    (noseBridge - 0.5f * (leftEye + rightEye)) * 1.4f +
-                    (forehead - eyeBand) * 0.9f +
-                    (cheekBand - mouthBand) * 0.8f;
-                if (structureScore < 22.0f) continue;
-
-                const float haarScore =
-                    structureScore +
-                    std::clamp(coreMean - surrMean, -15.0f, 45.0f) * 0.6f +
-                    sym * 30.0f;
-
-                if (haarScore > best.score) {
-                    best = {bx, by, bw, bh, haarScore};
+    for (int winW = minSize; winW <= maxSize;
+         winW = std::max(winW + 3, static_cast<int>(winW * 1.12f))) {
+        const int winH = std::min<int>(dh - 2, static_cast<int>(std::lround(winW * 1.15f)));
+        const int step = std::max(3, winW / 12);
+        for (int winY = 1; winY + winH < static_cast<int>(dh); winY += step) {
+            for (int winX = 1; winX + winW < static_cast<int>(dw); winX += step) {
+                float raw = 0.0f;
+                float rank = 0.0f;
+                if (evalWindow(winX, winY, winW, winH, raw, rank) && rank > best.rankScore) {
+                    best = {winX, winY, winW, winH, raw, rank};
                 }
             }
         }
     }
 
-    if (best.score < 42.0f) {
+    if (best.rawScore > 24.0f) {
+        const Candidate seed = best;
+        const int refinePad = std::max(3, seed.w / 12);
+        for (int dwDelta : {-4, -2, 0, 2, 4}) {
+            const int rw = std::clamp(seed.w + dwDelta, minSize, maxSize);
+            const int rh = std::min<int>(dh - 2, static_cast<int>(std::lround(rw * 1.15f)));
+            for (int ry = seed.y - refinePad; ry <= seed.y + refinePad; ++ry) {
+                for (int rx = seed.x - refinePad; rx <= seed.x + refinePad; ++rx) {
+                    float raw = 0.0f;
+                    float rank = 0.0f;
+                    if (evalWindow(rx, ry, rw, rh, raw, rank) && rank > best.rankScore) {
+                        best = {rx, ry, rw, rh, raw, rank};
+                    }
+                }
+            }
+        }
+    }
+
+    if (best.rawScore < 38.0f) {
         res.quality = FaceQuality::NOT_DETECTED;
         return res;
     }
 
     res.detected = true;
-    res.score = best.score;
+    res.score = best.rawScore;
     res.box = {
         static_cast<float>(best.x * scale),
         static_cast<float>(best.y * scale),
@@ -634,26 +815,26 @@ FaceDetection detectFaceNir(const IrFrameStats& frame) {
     const int fw = static_cast<int>(res.box.w);
     const int fh = static_cast<int>(res.box.h);
 
-    res.leftEye = findWeightedMinPatch(frame.gray8.data(),
-                                       frame.width,
-                                       frame.height,
-                                       fx + (fw * 18) / 100,
-                                       fy + (fh * 22) / 100,
-                                       fx + (fw * 42) / 100,
-                                       fy + (fh * 44) / 100,
-                                       res.box.x + 0.30f * res.box.w,
-                                       res.box.y + 0.33f * res.box.h,
-                                       0.09f * res.box.w);
-    res.rightEye = findWeightedMinPatch(frame.gray8.data(),
-                                        frame.width,
-                                        frame.height,
-                                        fx + (fw * 58) / 100,
-                                        fy + (fh * 22) / 100,
-                                        fx + (fw * 82) / 100,
-                                        fy + (fh * 44) / 100,
-                                        res.box.x + 0.70f * res.box.w,
-                                        res.box.y + 0.33f * res.box.h,
-                                        0.09f * res.box.w);
+    res.leftEye = findEyeWell(frame.gray8.data(),
+                              frame.width,
+                              frame.height,
+                              fx + (fw * 16) / 100,
+                              fy + (fh * 22) / 100,
+                              fx + (fw * 41) / 100,
+                              fy + (fh * 45) / 100,
+                              res.box.x + 0.30f * res.box.w,
+                              res.box.y + 0.34f * res.box.h,
+                              res.box.w);
+    res.rightEye = findEyeWell(frame.gray8.data(),
+                               frame.width,
+                               frame.height,
+                               fx + (fw * 59) / 100,
+                               fy + (fh * 22) / 100,
+                               fx + (fw * 84) / 100,
+                               fy + (fh * 45) / 100,
+                               res.box.x + 0.70f * res.box.w,
+                               res.box.y + 0.34f * res.box.h,
+                               res.box.w);
     res.noseTip = findWeightedMaxPatch(frame.gray8.data(),
                                        frame.width,
                                        frame.height,
@@ -699,21 +880,21 @@ FaceDetection detectFaceNir(const IrFrameStats& frame) {
 
     const float cx = res.box.x + 0.5f * res.box.w;
     const float cy = res.box.y + 0.5f * res.box.h;
-    if (res.box.w < 0.23f * frameMinDim) {
+    if (res.box.w < 0.125f * frameMinDim) {
         res.quality = FaceQuality::TOO_FAR;
-    } else if (res.box.w > 0.85f * frameMinDim) {
+    } else if (res.box.w > 0.88f * frameMinDim) {
         res.quality = FaceQuality::TOO_CLOSE;
-    } else if (cx < 0.16f * frame.width) {
+    } else if (cx < 0.12f * frame.width) {
         res.quality = FaceQuality::FACE_TOO_LEFT;
-    } else if (cx > 0.84f * frame.width) {
+    } else if (cx > 0.88f * frame.width) {
         res.quality = FaceQuality::FACE_TOO_RIGHT;
-    } else if (cy < 0.14f * frame.height) {
+    } else if (cy < 0.10f * frame.height) {
         res.quality = FaceQuality::FACE_TOO_HIGH;
-    } else if (cy > 0.86f * frame.height) {
+    } else if (cy > 0.90f * frame.height) {
         res.quality = FaceQuality::FACE_TOO_LOW;
-    } else if (std::abs(res.panDeg) > 30.0f) {
+    } else if (std::abs(res.panDeg) > 35.0f) {
         res.quality = FaceQuality::PAN_TOO_EXTREME;
-    } else if (std::abs(res.tiltDeg) > 25.0f) {
+    } else if (std::abs(res.tiltDeg) > 30.0f) {
         res.quality = FaceQuality::TILT_TOO_EXTREME;
     } else {
         res.quality = FaceQuality::GOOD;
@@ -728,44 +909,19 @@ Embedding extractEmbedding(const IrFrameStats& frame,
     if (!det.detected || frame.gray8.empty()) return emb;
 
     const float scaleRatio = static_cast<float>(kAlignedSize) / 112.0f;
-    const std::array<Point2f, 5> dstPts{{
-        {38.2946f * scaleRatio, 51.6963f * scaleRatio},
-        {73.5318f * scaleRatio, 51.5014f * scaleRatio},
-        {56.0252f * scaleRatio, 71.7366f * scaleRatio},
-        {41.5493f * scaleRatio, 92.3655f * scaleRatio},
-        {70.7299f * scaleRatio, 92.2041f * scaleRatio},
-    }};
-    const std::array<Point2f, 5> srcPts{{
-        det.leftEye, det.rightEye, det.noseTip, det.mouthLeft, det.mouthRight,
-    }};
+    const float dx = det.rightEye.x - det.leftEye.x;
+    const float dy = det.rightEye.y - det.leftEye.y;
+    const float interOcular = std::max(12.0f, std::hypot(dx, dy));
+    const float ang = std::clamp(std::atan2(dy, std::max(8.0f, dx)), -0.35f, 0.35f);
 
-    // Least-squares 4-DOF similarity transform from canonical (112x112) -> source frame.
-    Point2f srcMean{}, dstMean{};
-    for (int i = 0; i < 5; ++i) {
-        srcMean.x += srcPts[i].x;
-        srcMean.y += srcPts[i].y;
-        dstMean.x += dstPts[i].x;
-        dstMean.y += dstPts[i].y;
-    }
-    srcMean.x *= 0.2f;
-    srcMean.y *= 0.2f;
-    dstMean.x *= 0.2f;
-    dstMean.y *= 0.2f;
-
-    double numA = 0.0, numB = 0.0, den = 0.0;
-    for (int i = 0; i < 5; ++i) {
-        const double ux = dstPts[i].x - dstMean.x;
-        const double uy = dstPts[i].y - dstMean.y;
-        const double vx = srcPts[i].x - srcMean.x;
-        const double vy = srcPts[i].y - srcMean.y;
-        den += ux * ux + uy * uy;
-        numA += ux * vx + uy * vy;
-        numB += ux * vy - uy * vx;
-    }
-    const double a = (den > 1e-6) ? (numA / den) : (det.box.w / kAlignedSize);
-    const double b = (den > 1e-6) ? (numB / den) : 0.0;
-    const double tx = srcMean.x - (a * dstMean.x - b * dstMean.y);
-    const double ty = srcMean.y - (b * dstMean.x + a * dstMean.y);
+    const double dstLeftX = 38.2946 * scaleRatio;
+    const double dstLeftY = 51.6963 * scaleRatio;
+    const double dstInterOcular = 35.2372 * scaleRatio;
+    const double scale = static_cast<double>(interOcular) / dstInterOcular;
+    const double a = std::cos(static_cast<double>(ang)) * scale;
+    const double b = std::sin(static_cast<double>(ang)) * scale;
+    const double tx = static_cast<double>(det.leftEye.x) - (a * dstLeftX - b * dstLeftY);
+    const double ty = static_cast<double>(det.leftEye.y) - (b * dstLeftX + a * dstLeftY);
 
     std::array<float, kAlignedSize * kAlignedSize> patch{};
     for (int y = 0; y < kAlignedSize; ++y) {
@@ -1018,27 +1174,27 @@ LivenessReport evaluateLiveness(const IrFrameStats& frame,
         report.status = LivenessStatus::REJECT_SCREEN_EMISSION;
         return report;
     }
-    if (satRatio > 0.30f) {
+    if (satRatio > 0.45f) {
         report.status = LivenessStatus::REJECT_SPECULAR_GLARE;
         return report;
     }
 
-    // Layer 2: 3D Lambertian convexity (inner nose/T-zone vs inner lateral cheeks inside the oval)
-    // plus halftone/paper texture rejection. Avoiding box corners prevents dark background from
-    // deflating rimMean on flat oval cutouts.
+    // Layer 2: 3D Lambertian convexity (center T-zone vs outer lateral cheeks inside the oval)
+    // plus halftone/paper texture rejection. Outer cheek windows [16..28%] and [72..84%] retain
+    // reliable 3D relief even on softer nose bridges at normal laptop viewing distances.
     const unsigned bw = x1 - x0;
     const unsigned bh = y1 - y0;
-    const unsigned cx0 = x0 + (bw * 44u) / 100u;
-    const unsigned cx1 = std::max(cx0 + 1u, x0 + (bw * 56u) / 100u);
+    const unsigned cx0 = x0 + (bw * 42u) / 100u;
+    const unsigned cx1 = std::max(cx0 + 1u, x0 + (bw * 58u) / 100u);
     const unsigned cy0 = y0 + (bh * 40u) / 100u;
-    const unsigned cy1 = std::max(cy0 + 1u, y0 + (bh * 56u) / 100u);
+    const unsigned cy1 = std::max(cy0 + 1u, y0 + (bh * 58u) / 100u);
 
-    const unsigned lc0 = x0 + (bw * 30u) / 100u;
-    const unsigned lc1 = std::max(lc0 + 1u, x0 + (bw * 39u) / 100u);
-    const unsigned rc0 = x0 + (bw * 61u) / 100u;
-    const unsigned rc1 = std::max(rc0 + 1u, x0 + (bw * 70u) / 100u);
+    const unsigned lc0 = x0 + (bw * 16u) / 100u;
+    const unsigned lc1 = std::max(lc0 + 1u, x0 + (bw * 28u) / 100u);
+    const unsigned rc0 = x0 + (bw * 72u) / 100u;
+    const unsigned rc1 = std::max(rc0 + 1u, x0 + (bw * 84u) / 100u);
     const unsigned ky0 = y0 + (bh * 46u) / 100u;
-    const unsigned ky1 = std::max(ky0 + 1u, y0 + (bh * 62u) / 100u);
+    const unsigned ky1 = std::max(ky0 + 1u, y0 + (bh * 64u) / 100u);
 
     uint64_t centerSum = 0, centerCnt = 0;
     uint64_t rimSum = 0, rimCnt = 0;
@@ -1089,11 +1245,11 @@ LivenessReport evaluateLiveness(const IrFrameStats& frame,
     report.halftoneRatio =
         static_cast<float>(lapEnergy) / static_cast<float>(gradEnergy + 1000ull);
 
-    if (report.centerToRimRatio < 1.08f) {
+    if (report.centerToRimRatio < 1.04f) {
         report.status = LivenessStatus::REJECT_FLAT_OR_PRINT;
         return report;
     }
-    if (report.halftoneRatio > 1.25f) {
+    if (report.halftoneRatio > 1.85f) {
         report.status = LivenessStatus::REJECT_HALFTONE_PATTERN;
         return report;
     }

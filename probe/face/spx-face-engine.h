@@ -16,8 +16,8 @@ namespace spx::face {
 inline constexpr size_t kEmbeddingDim = 256;
 inline constexpr size_t kMaxEnrollmentsPerUser = 2;
 inline constexpr size_t kSamplesPerEnrollment = 6;
-inline constexpr float kDefaultMatchThreshold = 0.82f;
-inline constexpr float kDefaultLiveConsistencyThreshold = 0.88f;
+inline constexpr float kDefaultMatchThreshold = 0.74f;
+inline constexpr float kDefaultLiveConsistencyThreshold = 0.72f;
 
 enum class FaceQuality {
     GOOD = 0,

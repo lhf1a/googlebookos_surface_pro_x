@@ -30,6 +30,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -57,8 +58,8 @@ constexpr int64_t kAuthSessionDeadlineMs = 7000;
 constexpr int64_t kAuthNoFaceTimeoutMs = 4500;
 constexpr int64_t kAuthWatchdogHardMs = 8000;
 constexpr int64_t kEnrollWatchdogHardMs = 45000;
-constexpr int64_t kEnrollWarmupMs = 800;
-constexpr int64_t kEnrollMinSampleIntervalMs = 350;
+constexpr int64_t kEnrollWarmupMs = 500;
+constexpr int64_t kEnrollMinSampleIntervalMs = 280;
 constexpr int64_t kChallengeTtlMs = 300000;
 constexpr const char* kOptionalModelPath = "/vendor/etc/spx-face/model.bin";
 
@@ -88,9 +89,17 @@ bool isFaceUnlockEnabled() {
 }
 
 spx::face::Rotation currentSensorRotation(std::string* outStr = nullptr) {
-    const std::string val = getSystemProperty("persist.spx.face.rotation", "90");
+    const std::string val = getSystemProperty("persist.spx.face.rotation", "270");
     if (outStr) *outStr = val;
-    return spx::face::parseRotationDegrees(val.c_str(), spx::face::Rotation::Deg90CW);
+    return spx::face::parseRotationDegrees(val.c_str(), spx::face::Rotation::Deg270CW);
+}
+
+float computeIrAeMetric(const spx::face::IrFrameStats& stats) {
+    float aeMetric = stats.roiLinearMean;
+    if (stats.p99 >= 920u) {
+        aeMetric = std::max(aeMetric, 0.34f + 0.40f * stats.saturatedRatio);
+    }
+    return aeMetric;
 }
 
 AcquiredInfo mapQualityToAcquired(spx::face::FaceQuality q) {
@@ -147,20 +156,26 @@ void renderPreviewFrame(ANativeWindow* window,
                         unsigned width,
                         unsigned height,
                         bool& loggedOnce,
-                        bool& lockFailedLogged) {
-    if (!window || gray8.empty() || width == 0 || height == 0) return;
+                        int& lockFailCount) {
+    if (!window || gray8.empty() || width == 0 || height == 0 || lockFailCount >= 3) return;
     ANativeWindow_Buffer buf{};
     const int lockRc = ANativeWindow_lock(window, &buf, nullptr);
     if (lockRc != 0 || !buf.bits) {
-        if (!lockFailedLogged) {
-            __android_log_print(ANDROID_LOG_WARN,
-                                kLogTag,
-                                "preview ANativeWindow_lock failed rc=%d",
-                                lockRc);
-            lockFailedLogged = true;
+        if (lockRc == -ENODEV) {
+            lockFailCount = 3;
+        } else {
+            ++lockFailCount;
+        }
+        if (lockFailCount >= 3) {
+            __android_log_print(
+                ANDROID_LOG_WARN,
+                kLogTag,
+                "preview ANativeWindow_lock failed rc=%d; disabling preview for session",
+                lockRc);
         }
         return;
     }
+    lockFailCount = 0;
     if (!loggedOnce) {
         __android_log_print(ANDROID_LOG_INFO,
                             kLogTag,
@@ -174,6 +189,7 @@ void renderPreviewFrame(ANativeWindow* window,
         loggedOnce = true;
     }
     if (buf.width > 0 && buf.height > 0 && buf.stride >= buf.width) {
+        constexpr float kPreviewZoom = 1.35f;
         if (buf.format == WINDOW_FORMAT_RGBA_8888 || buf.format == WINDOW_FORMAT_RGBX_8888) {
             spx::face::renderIrPreviewRgba(gray8.data(),
                                            width,
@@ -182,7 +198,8 @@ void renderPreviewFrame(ANativeWindow* window,
                                            static_cast<unsigned>(buf.width),
                                            static_cast<unsigned>(buf.height),
                                            static_cast<unsigned>(buf.stride),
-                                           true);
+                                           true,
+                                           kPreviewZoom);
         } else if (buf.format == WINDOW_FORMAT_RGB_565) {
             spx::face::renderIrPreviewRgb565(gray8.data(),
                                              width,
@@ -191,7 +208,8 @@ void renderPreviewFrame(ANativeWindow* window,
                                              static_cast<unsigned>(buf.width),
                                              static_cast<unsigned>(buf.height),
                                              static_cast<unsigned>(buf.stride),
-                                             true);
+                                             true,
+                                             kPreviewZoom);
         }
     }
     ANativeWindow_unlockAndPost(window);
@@ -632,8 +650,11 @@ private:
                 const int32_t prospectiveId =
                     store_.listEnrollmentIds().empty() ? 1 : (store_.listEnrollmentIds().back() + 1);
                 int64_t lastSampleMs = 0;
+                int64_t lastDiagMs = startMs;
                 bool previewLogged = false;
-                bool lockFailedLogged = false;
+                int lockFailCount = 0;
+                float anchorBoxW = 0.0f;
+                int inconsistentStreak = 0;
 
                 while (samples.size() < spx::face::kSamplesPerEnrollment) {
                     if (flag->load() || closed_.load() ||
@@ -654,7 +675,7 @@ private:
                         frame.stride,
                         frame.pixelFormat ? frame.pixelFormat : spx::face::kPixFmtY10,
                         rot);
-                    cap->autoExposure(stats.roiLinearMean);
+                    cap->autoExposure(computeIrAeMetric(stats));
 
                     if (previewWindow) {
                         renderPreviewFrame(previewWindow.get(),
@@ -662,7 +683,7 @@ private:
                                            stats.width,
                                            stats.height,
                                            previewLogged,
-                                           lockFailedLogged);
+                                           lockFailCount);
                     }
 
                     if (frameIdx++ < 2u) {
@@ -691,7 +712,36 @@ private:
                     ef.data.distance = det.distanceCm;
                     ef.data.isCancellable = true;
 
+                    auto maybeLogDiag = [&](int liveStatus, float c2r, float hf) {
+                        if ((nowMs - lastDiagMs) >= 1000) {
+                            lastDiagMs = nowMs;
+                            const float interOcular =
+                                det.detected ? std::hypot(det.rightEye.x - det.leftEye.x,
+                                                          det.rightEye.y - det.leftEye.y)
+                                             : 0.0f;
+                            __android_log_print(
+                                ANDROID_LOG_INFO,
+                                kLogTag,
+                                "enroll diag frame=%u samples=%zu det=%d q=%d boxW=%.0f io=%.1f "
+                                "score=%.1f live=%d c2r=%.2f hf=%.2f p50=%u p99=%u roi=%.3f",
+                                frameIdx,
+                                samples.size(),
+                                det.detected ? 1 : 0,
+                                static_cast<int>(det.quality),
+                                det.box.w,
+                                interOcular,
+                                det.score,
+                                liveStatus,
+                                c2r,
+                                hf,
+                                stats.p50,
+                                stats.p99,
+                                stats.roiLinearMean);
+                        }
+                    };
+
                     if (!det.detected || det.quality != spx::face::FaceQuality::GOOD) {
+                        maybeLogDiag(-1, 0.0f, 0.0f);
                         ef.stage = EnrollmentStage::WAITING_FOR_CENTERING;
                         cb_->onEnrollmentFrame(ef);
                         continue;
@@ -700,6 +750,9 @@ private:
                     const auto emb = spx::face::extractEmbedding(stats, det, &model_);
                     const auto live =
                         spx::face::evaluateLiveness(stats, det, emb, &acc, true);
+                    maybeLogDiag(static_cast<int>(live.status),
+                                 live.centerToRimRatio,
+                                 live.halftoneRatio);
                     if (!live.live) {
                         ef.data.acquiredInfo =
                             (live.status == spx::face::LivenessStatus::REJECT_MOTION_BLUR)
@@ -717,29 +770,56 @@ private:
                         continue;
                     }
 
-                    // Encourage mild pose diversity on later samples when requested.
-                    if (samples.size() >= 2 && requireDiversity) {
-                        const float maxSim = [&]() {
-                            float hi = 0.0f;
-                            for (const auto& prev : samples) {
-                                hi = std::max(hi, spx::face::cosineSimilarity(prev, emb));
+                    if (!samples.empty()) {
+                        const bool scaleOk =
+                            det.box.w >= 0.72f * anchorBoxW && det.box.w <= 1.38f * anchorBoxW;
+                        const bool simOk =
+                            spx::face::cosineSimilarity(samples.front(), emb) >= 0.65f;
+                        if (!scaleOk || !simOk) {
+                            ++inconsistentStreak;
+                            if (samples.size() == 1 && inconsistentStreak >= 4) {
+                                samples.clear();
+                                anchorBoxW = 0.0f;
+                                inconsistentStreak = 0;
+                            } else {
+                                ef.stage = EnrollmentStage::HOLD_STILL_IN_CENTER;
+                                ef.data.acquiredInfo = AcquiredInfo::GOOD;
+                                cb_->onEnrollmentFrame(ef);
+                                continue;
                             }
-                            return hi;
-                        }();
-                        if (maxSim > 0.992f && (nowMs - startMs) < 15000) {
-                            ef.stage = (samples.size() < 4)
-                                           ? EnrollmentStage::ENROLLING_MOVEMENT_1
-                                           : EnrollmentStage::ENROLLING_MOVEMENT_2;
-                            ef.data.acquiredInfo = AcquiredInfo::TOO_SIMILAR;
-                            cb_->onEnrollmentFrame(ef);
-                            continue;
                         }
+                    }
+                    inconsistentStreak = 0;
+                    if (samples.empty()) {
+                        anchorBoxW = det.box.w;
                     }
 
                     samples.push_back(emb);
                     lastSampleMs = nowMs;
+                    const size_t groupIdx =
+                        std::min(samples.size() - 1u, static_cast<size_t>(5));
                     const int32_t remaining =
                         static_cast<int32_t>(spx::face::kSamplesPerEnrollment - samples.size());
+                    static constexpr int32_t kBucketGroups[6][5] = {
+                        {113, 108, 112, 114, 118},
+                        {103, 107, 109, 117, 0},
+                        {119, 123, 102, 104, 0},
+                        {106, 110, 116, 120, 0},
+                        {122, 124, 101, 105, 0},
+                        {111, 115, 121, 125, 0},
+                    };
+                    for (int32_t code : kBucketGroups[groupIdx]) {
+                        if (code == 0) break;
+                        EnrollmentFrame bf{};
+                        bf.stage = EnrollmentStage::HOLD_STILL_IN_CENTER;
+                        bf.data.acquiredInfo = AcquiredInfo::VENDOR;
+                        bf.data.vendorCode = code;
+                        bf.data.pan = det.panDeg;
+                        bf.data.tilt = det.tiltDeg;
+                        bf.data.distance = det.distanceCm;
+                        bf.data.isCancellable = true;
+                        cb_->onEnrollmentFrame(bf);
+                    }
                     ef.stage = (remaining == 0) ? EnrollmentStage::ENROLLMENT_FINISHED
                                                 : EnrollmentStage::HOLD_STILL_IN_CENTER;
                     cb_->onEnrollmentFrame(ef);
@@ -856,7 +936,9 @@ private:
             int64_t startMs = bootTimeMs();
             unsigned frameIdx = 0;
             unsigned detectedFrames = 0;
+            unsigned livePassFrames = 0;
             float bestSim = 0.0f;
+            float maxDetScore = 0.0f;
             int lastQ = -1;
             int lastLive = -1;
 
@@ -880,7 +962,9 @@ private:
                 });
 
                 unsigned consecutiveMatchedFrames = 0;
+                unsigned missStreak = 0;
                 int32_t lastMatchedId = 0;
+                int64_t lastDiagMs = startMs;
 
                 while (true) {
                     if (flag->load() || closed_.load() ||
@@ -888,7 +972,8 @@ private:
                         canceledByLidOrUser = true;
                         break;
                     }
-                    const int64_t elapsed = bootTimeMs() - startMs;
+                    const int64_t nowMs = bootTimeMs();
+                    const int64_t elapsed = nowMs - startMs;
                     if (elapsed >= kAuthSessionDeadlineMs ||
                         (!sawFaceOrSpoof && elapsed >= kAuthNoFaceTimeoutMs)) {
                         break;
@@ -903,7 +988,7 @@ private:
                         frame.stride,
                         frame.pixelFormat ? frame.pixelFormat : spx::face::kPixFmtY10,
                         rot);
-                    cap->autoExposure(stats.roiLinearMean);
+                    cap->autoExposure(computeIrAeMetric(stats));
 
                     if (frameIdx++ < 2u) {
                         AuthenticationFrame af{};
@@ -916,8 +1001,44 @@ private:
 
                     const auto det = spx::face::detectFaceNir(stats);
                     lastQ = static_cast<int>(det.quality);
+
+                    auto maybeLogAuthDiag = [&](int liveStatus, float c2r, float hf) {
+                        if ((nowMs - lastDiagMs) >= 1000) {
+                            lastDiagMs = nowMs;
+                            const float interOcular =
+                                det.detected ? std::hypot(det.rightEye.x - det.leftEye.x,
+                                                          det.rightEye.y - det.leftEye.y)
+                                             : 0.0f;
+                            __android_log_print(
+                                ANDROID_LOG_INFO,
+                                kLogTag,
+                                "auth diag frame=%u det=%d q=%d boxW=%.0f io=%.1f score=%.1f "
+                                "live=%d c2r=%.2f hf=%.2f bestSim=%.3f p50=%u p99=%u roi=%.3f",
+                                frameIdx,
+                                det.detected ? 1 : 0,
+                                static_cast<int>(det.quality),
+                                det.box.w,
+                                interOcular,
+                                det.score,
+                                liveStatus,
+                                c2r,
+                                hf,
+                                bestSim,
+                                stats.p50,
+                                stats.p99,
+                                stats.roiLinearMean);
+                        }
+                    };
+
                     if (!det.detected) {
-                        consecutiveMatchedFrames = 0;
+                        maybeLogAuthDiag(-1, 0.0f, 0.0f);
+                        ++missStreak;
+                        if (missStreak >= 2u) {
+                            consecutiveMatchedFrames = 0;
+                        }
+                        if (missStreak >= 4u) {
+                            acc.reset(2);
+                        }
                         AuthenticationFrame af{};
                         af.data.acquiredInfo = mapQualityToAcquired(det.quality);
                         af.data.isCancellable = true;
@@ -925,6 +1046,8 @@ private:
                         continue;
                     }
 
+                    missStreak = 0;
+                    maxDetScore = std::max(maxDetScore, det.score);
                     ++detectedFrames;
                     sawFaceOrSpoof = true;
                     const auto emb = spx::face::extractEmbedding(stats, det, &model_);
@@ -932,6 +1055,7 @@ private:
                         spx::face::evaluateLiveness(stats, det, emb, &acc, true);
                     lastLive = static_cast<int>(live.status);
                     if (!live.live) {
+                        maybeLogAuthDiag(lastLive, live.centerToRimRatio, live.halftoneRatio);
                         consecutiveMatchedFrames = 0;
                         if (live.status != spx::face::LivenessStatus::NEED_MORE_FRAMES) {
                             AuthenticationFrame af{};
@@ -948,8 +1072,10 @@ private:
                         continue;
                     }
 
+                    ++livePassFrames;
                     const auto res = store_.match(emb, spx::face::kDefaultMatchThreshold);
                     bestSim = std::max(bestSim, res.bestSimilarity);
+                    maybeLogAuthDiag(lastLive, live.centerToRimRatio, live.halftoneRatio);
                     if (res.matched) {
                         if (lastMatchedId == res.enrollmentId) {
                             ++consecutiveMatchedFrames;
@@ -957,7 +1083,8 @@ private:
                             lastMatchedId = res.enrollmentId;
                             consecutiveMatchedFrames = 1;
                         }
-                        if (consecutiveMatchedFrames >= 2u) {
+                        if (res.bestSimilarity >= spx::face::kDefaultMatchThreshold + 0.06f ||
+                            consecutiveMatchedFrames >= 2u) {
                             matched = true;
                             matchedId = res.enrollmentId;
                             break;
@@ -981,15 +1108,19 @@ private:
             const long long elapsedMs = static_cast<long long>(bootTimeMs() - startMs);
             clearCancelFlag(flag);
             if (canceledByLidOrUser) {
-                __android_log_print(ANDROID_LOG_INFO,
-                                    kLogTag,
-                                    "auth canceled bestSim=%.3f frames=%u detected=%u lastQ=%d lastLive=%d elapsedMs=%lld",
-                                    bestSim,
-                                    frameIdx,
-                                    detectedFrames,
-                                    lastQ,
-                                    lastLive,
-                                    elapsedMs);
+                __android_log_print(
+                    ANDROID_LOG_INFO,
+                    kLogTag,
+                    "auth canceled bestSim=%.3f frames=%u detected=%u livePass=%u "
+                    "maxScore=%.1f lastQ=%d lastLive=%d elapsedMs=%lld",
+                    bestSim,
+                    frameIdx,
+                    detectedFrames,
+                    livePassFrames,
+                    maxDetScore,
+                    lastQ,
+                    lastLive,
+                    elapsedMs);
                 cb_->onError(Error::CANCELED, 0);
                 return;
             }
@@ -1029,15 +1160,19 @@ private:
             }
 
             if (sawFaceOrSpoof) {
-                __android_log_print(ANDROID_LOG_INFO,
-                                    kLogTag,
-                                    "auth failed bestSim=%.3f frames=%u detected=%u lastQ=%d lastLive=%d elapsedMs=%lld",
-                                    bestSim,
-                                    frameIdx,
-                                    detectedFrames,
-                                    lastQ,
-                                    lastLive,
-                                    elapsedMs);
+                __android_log_print(
+                    ANDROID_LOG_INFO,
+                    kLogTag,
+                    "auth failed bestSim=%.3f frames=%u detected=%u livePass=%u "
+                    "maxScore=%.1f lastQ=%d lastLive=%d elapsedMs=%lld",
+                    bestSim,
+                    frameIdx,
+                    detectedFrames,
+                    livePassFrames,
+                    maxDetScore,
+                    lastQ,
+                    lastLive,
+                    elapsedMs);
                 const auto st = lockout_.addFailedAttempt();
                 store_.setFailedAttempts(st.failedAttempts);
                 cb_->onAuthenticationFailed();

@@ -200,8 +200,17 @@ int runBenchmarkIr(unsigned targetFrames, spx::face::Rotation rot) {
     std::vector<double> procMs;
     procMs.reserve(targetFrames);
     unsigned detectedCount = 0;
+    unsigned goodCount = 0;
     unsigned liveCount = 0;
     float lastRoiMean = 0.0f;
+    int lastQ = -1;
+    int lastLive = -1;
+    float lastBoxW = 0.0f;
+    float lastScore = 0.0f;
+    float lastC2R = 0.0f;
+    float lastHalftone = 0.0f;
+    uint16_t lastP50 = 0;
+    uint16_t lastP99 = 0;
 
     try {
         auto cap = spx::Capture::openIr(640, 480, 30);
@@ -231,15 +240,30 @@ int runBenchmarkIr(unsigned targetFrames, spx::face::Rotation rot) {
                                                             frame.pixelFormat ? frame.pixelFormat
                                                                               : spx::face::kPixFmtY10,
                                                             rot);
-            cap->autoExposure(stats.roiLinearMean);
+            float aeMetric = stats.roiLinearMean;
+            if (stats.p99 >= 920u) {
+                aeMetric = std::max(aeMetric, 0.34f + 0.40f * stats.saturatedRatio);
+            }
+            cap->autoExposure(aeMetric);
             lastRoiMean = stats.roiLinearMean;
+            lastP50 = stats.p50;
+            lastP99 = stats.p99;
 
             if (i >= 2) {
                 const auto det = spx::face::detectFaceNir(stats);
+                lastQ = static_cast<int>(det.quality);
+                lastBoxW = det.box.w;
+                lastScore = det.score;
                 if (det.detected) {
                     ++detectedCount;
+                    if (det.quality == spx::face::FaceQuality::GOOD) {
+                        ++goodCount;
+                    }
                     const auto emb = spx::face::extractEmbedding(stats, det);
                     const auto live = spx::face::evaluateLiveness(stats, det, emb, &acc, true);
+                    lastLive = static_cast<int>(live.status);
+                    lastC2R = live.centerToRimRatio;
+                    lastHalftone = live.halftoneRatio;
                     if (live.live) ++liveCount;
                 }
             }
@@ -258,21 +282,32 @@ int runBenchmarkIr(unsigned targetFrames, spx::face::Rotation rot) {
     const double p50 = procMs[procMs.size() / 2];
     const double p95 = procMs[(procMs.size() * 95) / 100];
     std::printf(
-        "{\"frames\":%zu,\"detected\":%u,\"live\":%u,"
-        "\"proc_p50_ms\":%.2f,\"proc_p95_ms\":%.2f,\"last_roi_mean\":%.4f}\n",
+        "{\"frames\":%zu,\"detected\":%u,\"good\":%u,\"live\":%u,"
+        "\"proc_p50_ms\":%.2f,\"proc_p95_ms\":%.2f,\"last_roi_mean\":%.4f,"
+        "\"last_q\":%d,\"last_live\":%d,\"last_box_w\":%.1f,\"last_score\":%.1f,"
+        "\"last_c2r\":%.3f,\"last_halftone\":%.3f,\"last_p50\":%u,\"last_p99\":%u}\n",
         procMs.size(),
         detectedCount,
+        goodCount,
         liveCount,
         p50,
         p95,
-        lastRoiMean);
+        lastRoiMean,
+        lastQ,
+        lastLive,
+        lastBoxW,
+        lastScore,
+        lastC2R,
+        lastHalftone,
+        static_cast<unsigned>(lastP50),
+        static_cast<unsigned>(lastP99));
     return 0;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    spx::face::Rotation rot = spx::face::Rotation::Deg90CW;
+    spx::face::Rotation rot = spx::face::Rotation::Deg270CW;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--rotation") == 0 && i + 1 < argc) {
             rot = spx::face::parseRotationDegrees(argv[++i]);

@@ -243,6 +243,7 @@ void renderIrPreviewCommon(const uint8_t* gray,
                            unsigned dstH,
                            unsigned dstStridePixels,
                            bool mirrorX,
+                           float zoom,
                            WriteBlackRow&& writeBlackRow,
                            WritePixel&& writePixel) {
     if (!gray || srcW == 0 || srcH == 0 || dstW == 0 || dstH == 0 || dstStridePixels < dstW) {
@@ -253,8 +254,11 @@ void renderIrPreviewCommon(const uint8_t* gray,
     }
 
     const unsigned srcSide = std::min(srcW, srcH);
-    const unsigned srcX0 = (srcW - srcSide) / 2u;
-    const unsigned srcY0 = (srcH - srcSide) / 2u;
+    const float z = std::clamp(zoom, 1.0f, 3.0f);
+    const unsigned cropSide =
+        std::max(1u, static_cast<unsigned>(std::lround(static_cast<float>(srcSide) / z)));
+    const unsigned srcX0 = (srcW - cropSide) / 2u;
+    const unsigned srcY0 = (srcH - cropSide) / 2u;
 
     // Align square output at top edge (dstY0=0) so 480x640 FaceEnrollPreviewFragment
     // scale(1.0, 640/480) maps rows 0..dstSide-1 1:1 into the circular view.
@@ -263,12 +267,12 @@ void renderIrPreviewCommon(const uint8_t* gray,
     const unsigned dstY0 = 0u;
 
     for (unsigned dy = 0; dy < dstSide; ++dy) {
-        const unsigned sy = srcY0 + (dy * srcSide) / dstSide;
+        const unsigned sy = srcY0 + (dy * cropSide) / dstSide;
         const uint8_t* srow = gray + static_cast<size_t>(sy) * srcW;
         const unsigned outY = dstY0 + dy;
         for (unsigned dx = 0; dx < dstSide; ++dx) {
-            const unsigned sxOffset = (dx * srcSide) / dstSide;
-            const unsigned sx = srcX0 + (mirrorX ? (srcSide - 1u - sxOffset) : sxOffset);
+            const unsigned sxOffset = (dx * cropSide) / dstSide;
+            const unsigned sx = srcX0 + (mirrorX ? (cropSide - 1u - sxOffset) : sxOffset);
             writePixel(outY, dstX0 + dx, srow[sx]);
         }
     }
@@ -283,7 +287,8 @@ void renderIrPreviewRgba(const uint8_t* gray,
                          unsigned dstW,
                          unsigned dstH,
                          unsigned dstStridePixels,
-                         bool mirrorX) {
+                         bool mirrorX,
+                         float zoom) {
     if (!dstRgba) return;
     renderIrPreviewCommon(
         gray,
@@ -293,6 +298,7 @@ void renderIrPreviewRgba(const uint8_t* gray,
         dstH,
         dstStridePixels,
         mirrorX,
+        zoom,
         [&](unsigned y, unsigned width) {
             uint8_t* row = dstRgba + static_cast<size_t>(y) * dstStridePixels * 4u;
             for (unsigned x = 0; x < width; ++x) {
@@ -318,7 +324,8 @@ void renderIrPreviewRgb565(const uint8_t* gray,
                            unsigned dstW,
                            unsigned dstH,
                            unsigned dstStridePixels,
-                           bool mirrorX) {
+                           bool mirrorX,
+                           float zoom) {
     if (!dstRgb565) return;
     renderIrPreviewCommon(
         gray,
@@ -328,6 +335,7 @@ void renderIrPreviewRgb565(const uint8_t* gray,
         dstH,
         dstStridePixels,
         mirrorX,
+        zoom,
         [&](unsigned y, unsigned width) {
             uint16_t* row = dstRgb565 + static_cast<size_t>(y) * dstStridePixels;
             std::fill_n(row, width, static_cast<uint16_t>(0u));

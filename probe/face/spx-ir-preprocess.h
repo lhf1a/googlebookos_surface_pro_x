@@ -50,7 +50,7 @@ void gray8ToRgba(const uint8_t* gray,
                  uint8_t* dstRgba,
                  unsigned dstStridePixels);
 
-// Render centered, optionally horizontally mirrored IR preview scaled into RGBA8888 buffer.
+// Render centered, optionally zoomed and horizontally mirrored IR preview scaled into RGBA8888 buffer.
 void renderIrPreviewRgba(const uint8_t* gray,
                          unsigned srcW,
                          unsigned srcH,
@@ -58,9 +58,10 @@ void renderIrPreviewRgba(const uint8_t* gray,
                          unsigned dstW,
                          unsigned dstH,
                          unsigned dstStridePixels,
-                         bool mirrorX = true);
+                         bool mirrorX = true,
+                         float zoom = 1.0f);
 
-// Render centered, optionally horizontally mirrored IR preview scaled into RGB565 buffer.
+// Render centered, optionally zoomed and horizontally mirrored IR preview scaled into RGB565 buffer.
 void renderIrPreviewRgb565(const uint8_t* gray,
                            unsigned srcW,
                            unsigned srcH,
@@ -68,6 +69,7 @@ void renderIrPreviewRgb565(const uint8_t* gray,
                            unsigned dstW,
                            unsigned dstH,
                            unsigned dstStridePixels,
-                           bool mirrorX = true);
+                           bool mirrorX = true,
+                           float zoom = 1.0f);
 
 }  // namespace spx::face

@@ -98,6 +98,7 @@ enum class SyntheticFaceVariant {
     ScreenSpoof,
     FlatPrint,
     DistinctPerson,
+    SmallSoft850Nir65Cm,
 };
 
 std::vector<uint8_t> makeSyntheticFaceY10(unsigned w,
@@ -108,8 +109,12 @@ std::vector<uint8_t> makeSyntheticFaceY10(unsigned w,
     std::vector<uint16_t> px(static_cast<size_t>(w) * h, 0);
     const float cx = w * 0.50f + dxShiftPx;
     const float cy = h * 0.48f;
-    const float rx = (variant == SyntheticFaceVariant::DistinctPerson) ? w * 0.27f : w * 0.24f;
-    const float ry = (variant == SyntheticFaceVariant::DistinctPerson) ? h * 0.25f : h * 0.28f;
+    float rx = (variant == SyntheticFaceVariant::DistinctPerson) ? w * 0.27f : w * 0.24f;
+    float ry = (variant == SyntheticFaceVariant::DistinctPerson) ? h * 0.25f : h * 0.28f;
+    if (variant == SyntheticFaceVariant::SmallSoft850Nir65Cm) {
+        rx = w * 0.11f;
+        ry = h * 0.13f;
+    }
 
     for (unsigned y = 0; y < h; ++y) {
         for (unsigned x = 0; x < w; ++x) {
@@ -139,14 +144,15 @@ std::vector<uint8_t> makeSyntheticFaceY10(unsigned w,
                         val *= (variant == SyntheticFaceVariant::DistinctPerson) ? 0.25f : 0.42f;
                     }
                     const float nose = (dx * dx) / 0.028f + (dy - 0.04f) * (dy - 0.04f) / 0.09f;
-                    if (nose < 1.0f && variant != SyntheticFaceVariant::FlatPrint) {
+                    if (nose < 1.0f && variant != SyntheticFaceVariant::FlatPrint &&
+                        variant != SyntheticFaceVariant::SmallSoft850Nir65Cm) {
                         val += (variant == SyntheticFaceVariant::DistinctPerson)
                                    ? 200.0f * (1.0f - nose)
                                    : 140.0f * (1.0f - nose);
                     }
                     const float mouth = (dx * dx) / 0.14f + (dy - 0.48f) * (dy - 0.48f) / 0.015f;
                     if (mouth < 1.0f) {
-                        val *= 0.48f;
+                        val *= (variant == SyntheticFaceVariant::SmallSoft850Nir65Cm) ? 0.92f : 0.48f;
                     }
                     if (variant == SyntheticFaceVariant::DistinctPerson) {
                         // Prominent glasses/brow frame + high cheekbones + beard/chin gradient
@@ -257,6 +263,18 @@ void testIrPreprocess() {
     SPX_ASSERT(prev565[0] == ((5u << 11) | (10u << 5) | 5u));
     SPX_ASSERT(prev565[479] == ((25u << 11) | (50u << 5) | 25u));
     SPX_ASSERT(prev565[500u * 512u + 10u] == 0u);
+
+    // Zoomed 1.35x center crop (cropSide=356, srcX0=142, srcY0=62) in 480x640 RGBA preview.
+    src640x480[62u * 640u + 497u] = 177u;  // top-left after mirrorX
+    src640x480[62u * 640u + 142u] = 211u;  // top-right after mirrorX
+    src640x480[417u * 640u + 142u] = 155u; // bottom-right after mirrorX
+    std::vector<uint8_t> prevZoomRgba(640u * 512u * 4u, 77u);
+    renderIrPreviewRgba(
+        src640x480.data(), 640u, 480u, prevZoomRgba.data(), 480u, 640u, 512u, true, 1.35f);
+    SPX_ASSERT(prevZoomRgba[0] == 177u && prevZoomRgba[3] == 255u);
+    SPX_ASSERT(prevZoomRgba[topRightOff + 0] == 211u && prevZoomRgba[topRightOff + 3] == 255u);
+    SPX_ASSERT(prevZoomRgba[botRightOff + 0] == 155u && prevZoomRgba[botRightOff + 3] == 255u);
+    SPX_ASSERT(prevZoomRgba[padRowOff + 0] == 0u && prevZoomRgba[padRowOff + 3] == 255u);
 }
 
 void testCryptoAndHat() {
@@ -444,6 +462,176 @@ void testEngineAndLiveness() {
     const auto stRot180 = preprocessIrFrame(
         rawReal0.data(), rawReal0.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg180);
     SPX_ASSERT(!detectFaceNir(stRot180).detected);
+
+    // Realistic 850nm NIR face at ~65cm distance with soft lip contrast & flat nose bridge.
+    const auto rawNir65 = makeSyntheticFaceY10(
+        480, 640, SyntheticFaceVariant::SmallSoft850Nir65Cm, 0.0f, 1);
+    const auto stNir65 = preprocessIrFrame(
+        rawNir65.data(), rawNir65.size(), 480, 640, 960, kPixFmtY10, Rotation::Deg0);
+    const auto detNir65 = detectFaceNir(stNir65);
+    SPX_ASSERT(detNir65.detected);
+    SPX_ASSERT(detNir65.quality == FaceQuality::GOOD);
+    const auto embNir65 = extractEmbedding(stNir65, detNir65);
+    const auto liveNir65 = evaluateLiveness(stNir65, detNir65, embNir65, nullptr, false);
+    SPX_ASSERT(liveNir65.live);
+    SPX_ASSERT(liveNir65.status == LivenessStatus::PASS);
+
+    // 2-eye alignment & scale/exposure invariance across shift (+10px), gain (0.6x/1.4x),
+    // while keeping a distinct synthetic identity well separated.
+    auto scaleY10 = [](const std::vector<uint8_t>& src, float gain) {
+        std::vector<uint8_t> out(src.size());
+        for (size_t i = 0; i + 1 < src.size(); i += 2) {
+            const uint16_t v = static_cast<uint16_t>(src[i]) |
+                               (static_cast<uint16_t>(src[i + 1]) << 8);
+            const uint16_t scaled = static_cast<uint16_t>(
+                std::clamp(static_cast<int>(std::lround(v * gain)), 0, 1023));
+            out[i] = static_cast<uint8_t>(scaled & 0xffu);
+            out[i + 1] = static_cast<uint8_t>((scaled >> 8) & 0x03u);
+        }
+        return out;
+    };
+
+    const auto rawBase = makeSyntheticFaceY10(
+        480, 640, SyntheticFaceVariant::Normal3D, 0.0f, 0);
+    const auto stBase = preprocessIrFrame(
+        rawBase.data(), rawBase.size(), 480, 640, 960, kPixFmtY10, Rotation::Deg0);
+    const auto detBase = detectFaceNir(stBase);
+    SPX_ASSERT(detBase.detected);
+    const auto embBase = extractEmbedding(stBase, detBase);
+
+    const auto rawShift = makeSyntheticFaceY10(
+        480, 640, SyntheticFaceVariant::Normal3D, 10.0f, 1);
+    const auto stShift = preprocessIrFrame(
+        rawShift.data(), rawShift.size(), 480, 640, 960, kPixFmtY10, Rotation::Deg0);
+    const auto detShift = detectFaceNir(stShift);
+    SPX_ASSERT(detShift.detected);
+    const auto embShift = extractEmbedding(stShift, detShift);
+    SPX_ASSERT(cosineSimilarity(embBase, embShift) >= kDefaultMatchThreshold);
+
+    const auto rawDark = scaleY10(rawBase, 0.6f);
+    const auto stDark = preprocessIrFrame(
+        rawDark.data(), rawDark.size(), 480, 640, 960, kPixFmtY10, Rotation::Deg0);
+    const auto detDark = detectFaceNir(stDark);
+    SPX_ASSERT(detDark.detected);
+    const auto embDark = extractEmbedding(stDark, detDark);
+    SPX_ASSERT(cosineSimilarity(embBase, embDark) >= kDefaultMatchThreshold);
+
+    const auto rawBright = scaleY10(rawShift, 1.4f);
+    const auto stBright = preprocessIrFrame(
+        rawBright.data(), rawBright.size(), 480, 640, 960, kPixFmtY10, Rotation::Deg0);
+    const auto detBright = detectFaceNir(stBright);
+    SPX_ASSERT(detBright.detected);
+    const auto embBright = extractEmbedding(stBright, detBright);
+    SPX_ASSERT(cosineSimilarity(embBase, embBright) >= kDefaultMatchThreshold);
+
+    const auto rawDistinct = makeSyntheticFaceY10(
+        480, 640, SyntheticFaceVariant::DistinctPerson, 0.0f, 0);
+    const auto stDistinct = preprocessIrFrame(
+        rawDistinct.data(), rawDistinct.size(), 480, 640, 960, kPixFmtY10, Rotation::Deg0);
+    const auto detDistinct = detectFaceNir(stDistinct);
+    SPX_ASSERT(detDistinct.detected);
+    const auto embDistinct = extractEmbedding(stDistinct, detDistinct);
+    SPX_ASSERT(cosineSimilarity(embBase, embDistinct) < kDefaultMatchThreshold);
+
+    // Distant ~75cm NIR face (boxW ~ 72px) with a bright background specular corner (p99 ~ 930)
+    // crushing linear 8-bit face contrast.
+    auto makeDistantGlareFaceY10 = [](float dxShiftPx, int noisePhase) {
+        constexpr unsigned kW = 480u;
+        constexpr unsigned kH = 640u;
+        std::vector<uint16_t> px(static_cast<size_t>(kW) * kH, 24u);
+        const float cx = kW * 0.50f + dxShiftPx;
+        const float cy = kH * 0.48f;
+        const float rx = kW * 0.075f;  // diameter ~ 72px (~15% of 480px minDim)
+        const float ry = kH * 0.090f;
+        for (unsigned y = 0; y < kH; ++y) {
+            for (unsigned x = 0; x < kW; ++x) {
+                if (x >= 72u && x < 145u && y >= 76u && y < 125u) {
+                    px[static_cast<size_t>(y) * kW + x] = 930u;
+                    continue;
+                }
+                const float dx = (static_cast<float>(x) - cx) / rx;
+                const float dy = (static_cast<float>(y) - cy) / ry;
+                const float r2 = dx * dx + dy * dy;
+                float val = 24.0f;
+                if (r2 <= 1.0f) {
+                    const float z = std::sqrt(std::max(0.0f, 1.0f - r2));
+                    val = 150.0f + 170.0f * z;
+                    const float le = (dx + 0.38f) * (dx + 0.38f) / 0.04f +
+                                     (dy + 0.26f) * (dy + 0.26f) / 0.028f;
+                    const float re = (dx - 0.38f) * (dx - 0.38f) / 0.04f +
+                                     (dy + 0.26f) * (dy + 0.26f) / 0.028f;
+                    if (le < 1.0f || re < 1.0f) {
+                        val *= 0.42f;
+                    }
+                    const float mouth = (dx * dx) / 0.14f + (dy - 0.48f) * (dy - 0.48f) / 0.015f;
+                    if (mouth < 1.0f) {
+                        val *= 0.90f;
+                    }
+                }
+                const int tex = static_cast<int>(((x * 7u + y * 13u) & 7u));
+                const int temporal = (noisePhase != 0 && r2 <= 1.0f)
+                                         ? (static_cast<int>(((x + y + noisePhase * 3u) % 9u)) * 3 - 12)
+                                         : 0;
+                px[static_cast<size_t>(y) * kW + x] = static_cast<uint16_t>(
+                    std::clamp(std::lround(val + tex + temporal), 0L, 1023L));
+            }
+        }
+        return packY10(px, kW, kH, kW * 2u);
+    };
+
+    const auto rawDist0 = makeDistantGlareFaceY10(0.0f, 0);
+    const auto stDist0 = preprocessIrFrame(
+        rawDist0.data(), rawDist0.size(), 480, 640, 960, kPixFmtY10, Rotation::Deg0);
+    SPX_ASSERT(stDist0.p99 >= 900u && stDist0.p50 < 100u);
+    const auto detDist0 = detectFaceNir(stDist0);
+    SPX_ASSERT(detDist0.detected);
+    SPX_ASSERT(detDist0.quality == FaceQuality::GOOD);
+    const auto embDist0 = extractEmbedding(stDist0, detDist0);
+
+    const auto rawDist1 = makeDistantGlareFaceY10(6.0f, 1);
+    const auto stDist1 = preprocessIrFrame(
+        rawDist1.data(), rawDist1.size(), 480, 640, 960, kPixFmtY10, Rotation::Deg0);
+    const auto detDist1 = detectFaceNir(stDist1);
+    SPX_ASSERT(detDist1.detected);
+    SPX_ASSERT(detDist1.quality == FaceQuality::GOOD);
+    const auto embDist1 = extractEmbedding(stDist1, detDist1);
+    SPX_ASSERT(cosineSimilarity(embDist0, embDist1) >= kDefaultMatchThreshold);
+
+    FaceSessionAccumulator accDist;
+    accDist.reset(2);
+    SPX_ASSERT(evaluateLiveness(stDist0, detDist0, embDist0, &accDist, true).status ==
+               LivenessStatus::NEED_MORE_FRAMES);
+    const auto liveDist1 = evaluateLiveness(stDist1, detDist1, embDist1, &accDist, true);
+    SPX_ASSERT(liveDist1.live);
+    SPX_ASSERT(liveDist1.status == LivenessStatus::PASS);
+
+    // Dark bangs covering forehead + left-to-right off-axis IR gradient (0.85x..1.15x).
+    std::vector<uint8_t> rawBangs = rawBase;
+    for (unsigned y = 0; y < 640u; ++y) {
+        const float fdy = (static_cast<float>(y) - 640.0f * 0.48f) / (640.0f * 0.28f);
+        for (unsigned x = 0; x < 480u; ++x) {
+            const size_t off = (static_cast<size_t>(y) * 480u + x) * 2u;
+            uint16_t v = static_cast<uint16_t>(rawBangs[off]) |
+                         (static_cast<uint16_t>(rawBangs[off + 1]) << 8);
+            const float fdx = (static_cast<float>(x) - 480.0f * 0.50f) / (480.0f * 0.24f);
+            if (fdx * fdx + fdy * fdy <= 1.0f && fdy < -0.42f) {
+                v = 45u;
+            }
+            const float shade = 0.85f + 0.30f * (static_cast<float>(x) / 480.0f);
+            const uint16_t sv = static_cast<uint16_t>(
+                std::clamp(static_cast<int>(std::lround(v * shade)), 0, 1023));
+            rawBangs[off] = static_cast<uint8_t>(sv & 0xffu);
+            rawBangs[off + 1] = static_cast<uint8_t>((sv >> 8) & 0x03u);
+        }
+    }
+    const auto stBangs = preprocessIrFrame(
+        rawBangs.data(), rawBangs.size(), 480, 640, 960, kPixFmtY10, Rotation::Deg0);
+    const auto detBangs = detectFaceNir(stBangs);
+    SPX_ASSERT(detBangs.detected);
+    SPX_ASSERT(detBangs.quality == FaceQuality::GOOD);
+    const auto embBangs = extractEmbedding(stBangs, detBangs);
+    const auto liveBangs = evaluateLiveness(stBangs, detBangs, embBangs, nullptr, false);
+    SPX_ASSERT(liveBangs.live);
 }
 
 void testFaceStore() {
