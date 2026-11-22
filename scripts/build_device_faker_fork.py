@@ -124,6 +124,17 @@ def build_from_source(source_dir, out_zip=DEFAULT_OUT_ZIP, kernel_dir=None, cros
     kdir = kernel_dir or env.get('DF_KERNEL_DIR') or env.get('KDIR')
     if kdir and Path(kdir).is_dir():
         env['DF_KERNEL_DIR'] = str(Path(kdir).resolve())
+        lkm_dir = source_dir / 'lkm'
+        if (lkm_dir / 'Makefile').is_file():
+            for artifact in lkm_dir.iterdir():
+                if not artifact.is_file():
+                    continue
+                name = artifact.name
+                if (
+                    name in ('Module.symvers', 'modules.order')
+                    or name.endswith(('.ko', '.o', '.mod', '.mod.c', '.cmd'))
+                ):
+                    artifact.unlink()
     if cross_compile:
         env['CROSS_COMPILE'] = str(cross_compile)
     subprocess.run(

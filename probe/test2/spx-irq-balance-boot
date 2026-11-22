@@ -1,0 +1,61 @@
+#!/bin/busybox sh
+# Balance high-rate peripheral GICv3 SPI IRQs off cpu0 across small cores cpu0..cpu3 once per boot.
+# Matches IRQs dynamically by action name so mappings stay portable across SQ1 and SQ2.
+set -eu
+export PATH="${SQ2_TEST_PATH:-/bin:/sbin}"
+grep -qE 'sq2.rescue=1' "${SQ2_CMDLINE:-/proc/cmdline}" 2>/dev/null && exit 0
+lock_dir="${SQ2_IRQ_BALANCE_LOCK:-/run/spx-irq-balance-lock}"
+mkdir "$lock_dir" 2>/dev/null || exit 0
+trap 'rmdir "$lock_dir"' EXIT
+android() { timeout 120 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+for n in $(seq 1 "${SQ2_BOOT_POLL_RETRIES:-300}"); do
+    [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = 1 ] && break
+    sleep "${SQ2_BOOT_POLL_SLEEP:-1}"
+done
+[ "$(android getprop sys.boot_completed 2>/dev/null || true)" = 1 ] || exit 1
+sys_cpu="${SQ2_SYS_CPU_DIR:-/sys/devices/system/cpu}"
+[ -d "$sys_cpu/cpu3" ] || exit 0
+sys_irq="${SQ2_SYS_IRQ_DIR:-/sys/kernel/irq}"
+proc_irq="${SQ2_PROC_IRQ_DIR:-/proc/irq}"
+[ -d "$sys_irq" ] || exit 0
+
+balance_once() {
+    for d in "$sys_irq"/*; do
+        [ -d "$d" ] || continue
+        irq="${d##*/}"
+        case "$irq" in ''|*[!0-9]*) continue;; esac
+        chip=$(tr -d '\r\n' < "$d/chip_name" 2>/dev/null || true)
+        [ "$chip" = GICv3 ] || continue
+        action=$(tr -d '\r\n' < "$d/actions" 2>/dev/null || true)
+        [ -n "$action" ] || continue
+        target_cpu=
+        case "$action" in
+            884000.spi)
+                target_cpu=1
+                ;;
+            WLAN_CE_*|xhci-hcd:*|dwc3)
+                target_cpu=2
+                ;;
+            glink-smem|888000.i2c|gpu-irq|qcom_geni_serial_uart*|bam_dma|slim-ngd|acb3000.isp_*|ac4a000.cci|venus|sq2-venus-owner)
+                target_cpu=3
+                ;;
+        esac
+        [ -n "$target_cpu" ] || continue
+        aff_file="$proc_irq/$irq/smp_affinity_list"
+        [ -e "$aff_file" ] || continue
+        cur=$(tr -d '\r\n' < "$aff_file" 2>/dev/null || true)
+        [ "$cur" = "$target_cpu" ] && continue
+        if printf '%s\n' "$target_cpu" > "$aff_file" 2>/dev/null; then
+            echo "IRQ_BALANCED:${irq}:${action}:cpu${target_cpu}"
+        else
+            echo "IRQ_BALANCE_SKIPPED:${irq}:${action}:cpu${target_cpu}"
+        fi
+    done
+}
+
+balance_once
+settle="${SQ2_IRQ_BALANCE_SETTLE_SLEEP:-15}"
+if [ "$settle" != 0 ]; then
+    sleep "$settle"
+    balance_once
+fi

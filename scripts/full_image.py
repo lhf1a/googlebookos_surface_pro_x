@@ -758,6 +758,21 @@ def install_default_wallpaper(private, records, bodies):
 
 
 KSU_MODULES_HOOK = b'    sq2-ksu-modules-boot > /logs/sq2-ksu-modules-boot.txt 2>&1 &\n'
+IRQ_BALANCE_HOOK = b'    spx-irq-balance-boot > /logs/spx-irq-balance.txt 2>&1 &\n'
+
+
+def install_irq_balance(records, bodies):
+    """Install portable one-shot GICv3 peripheral IRQ affinity helper into initramfs."""
+    init = bodies['init']
+    require(init.count(ANCHOR) == 1 and init.count(IRQ_BALANCE_HOOK) <= 1,
+            'Unknown IRQ balance boot handoff')
+    if IRQ_BALANCE_HOOK not in init:
+        init = init.replace(ANCHOR, IRQ_BALANCE_HOOK + ANCHOR)
+    bodies['init'] = init
+    helper = (ROOT / 'probe/test2/spx-irq-balance-boot').read_bytes().replace(b'\r\n', b'\n')
+    subprocess.run(['sh', '-n'], input=helper, check=True, capture_output=True)
+    bodies['bin/spx-irq-balance-boot'] = helper
+    records['bin/spx-irq-balance-boot'] = new_record(0o100755)
 
 
 def install_ksu_userspace(records, bodies, ksu_userspace):
@@ -877,6 +892,7 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
     records['bin/apply-single-user'] = new_record(0o100755)
     bodies['bin/apply-device-info'] = (ROOT/'probe/test2/apply-device-info').read_bytes().replace(b'\r\n', b'\n')
     records['bin/apply-device-info'] = new_record(0o100755)
+    install_irq_balance(records, bodies)
     # Take the current committed helper, while the accepted cumulative IPTSd
     # binary remains the fixed private runtime input (not the old touch cache).
     bodies['bin/touch-calibration-boot'] = (ROOT/'probe/test2/touch-calibration-boot').read_bytes().replace(b'\r\n',b'\n')

@@ -49,6 +49,9 @@ done
 read_vc() {
     sed -n 's/^versionCode=//p' "$1" 2>/dev/null | tr -d '\r' | head -n 1
 }
+read_ko_vermagic() {
+    LC_ALL=C tr '\0' '\n' | LC_ALL=C sed -n 's/^vermagic=//p' | head -n 1
+}
 is_uint() {
     case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac
 }
@@ -76,6 +79,25 @@ for zip in "$mod_dir"/*.zip; do
         else
             action=UPGRADED
         fi
+    fi
+    if [ "$need_install" = 0 ]; then
+        target_dir="$data/adb/modules/$mod_id"
+        if [ -d "$data/adb/modules_update/$mod_id" ]; then
+            target_dir="$data/adb/modules_update/$mod_id"
+        fi
+        for ko_rel in $(unzip -l "$zip" 2>/dev/null | sed -n 's|.*[[:space:]]\(lkm/[^[:space:]/]*\.ko\)$|\1|p'); do
+            bundled_vm=$(unzip -p "$zip" "$ko_rel" 2>/dev/null | read_ko_vermagic || true)
+            [ -n "$bundled_vm" ] || continue
+            installed_vm=
+            if [ -f "$target_dir/$ko_rel" ]; then
+                installed_vm=$(read_ko_vermagic < "$target_dir/$ko_rel" || true)
+            fi
+            if [ "$bundled_vm" != "$installed_vm" ]; then
+                need_install=1
+                action=REINSTALLED_ABI
+                break
+            fi
+        done
     fi
     if [ "$need_install" = 0 ]; then
         rm -f "$data/adb/modules/$mod_id/disable" "$data/adb/modules_update/$mod_id/disable" 2>/dev/null || true

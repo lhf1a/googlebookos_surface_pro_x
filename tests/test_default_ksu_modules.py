@@ -315,6 +315,89 @@ exit 1
             res2 = subprocess.run(['sh', str(script)], env=env, capture_output=True, text=True, check=True)
             self.assertEqual(res2.stdout.strip(), '')
 
+    def test_sq2_ksu_modules_boot_reinstalls_on_lkm_vermagic_mismatch(self):
+        script = ROOT / 'probe' / 'test2' / 'sq2-ksu-modules-boot'
+        subprocess.run(['sh', '-n', str(script)], check=True)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mock_bin = root / 'mockbin'
+            mock_bin.mkdir()
+            log_file = root / 'ksud.log'
+            nsenter_mock = mock_bin / 'nsenter'
+            nsenter_mock.write_text(
+                f"""#!/bin/sh
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --) shift; break;;
+        *) shift;;
+    esac
+done
+if [ "$1" = /system/bin/getprop ] && [ "$2" = sys.boot_completed ]; then
+    echo 1
+    exit 0
+fi
+if [ "$1" = /data/adb/ksud ] && [ "$2" = module ] && [ "$3" = install ]; then
+    mod_id=$(unzip -p "{root}/data/local/tmp/sq2-ksu-module.zip" module.prop | sed -n 's/^id=//p' | head -n 1)
+    echo "INSTALL:$mod_id" >> "{log_file}"
+    mkdir -p "{root}/data/adb/modules_update/$mod_id/lkm"
+    unzip -p "{root}/data/local/tmp/sq2-ksu-module.zip" module.prop > "{root}/data/adb/modules_update/$mod_id/module.prop"
+    unzip -p "{root}/data/local/tmp/sq2-ksu-module.zip" lkm/df_gpu_vfs.ko > "{root}/data/adb/modules_update/$mod_id/lkm/df_gpu_vfs.ko"
+    exit 0
+fi
+exit 1
+"""
+            )
+            nsenter_mock.chmod(0o755)
+            for tool in ('grep', 'mkdir', 'rmdir', 'seq', 'sleep', 'timeout', 'test', 'unzip', 'sed', 'tr', 'head', 'cp', 'rm', 'cat', 'touch'):
+                for cand in (Path('/bin') / tool, Path('/usr/bin') / tool):
+                    if cand.exists():
+                        (mock_bin / tool).symlink_to(cand)
+                        break
+
+            cmdline = root / 'cmdline'
+            cmdline.write_text('root=/dev/ram0\n')
+            mod_dir = root / 'etc' / 'sq2-ksu-modules'
+            mod_dir.mkdir(parents=True)
+            df_zip = make_zip({
+                'module.prop': b'id=device_faker\nname=Device Faker GFX\nversion=v1.7.0\nversionCode=20261119\n',
+                'customize.sh': b'#!/system/bin/sh\n',
+                'uninstall.sh': b'#!/system/bin/sh\n',
+                'zygisk/arm64-v8a.so': make_aarch64_elf(),
+                'lkm/df_gpu_vfs.ko': make_aarch64_elf() + b'\x00vermagic=6.18.60-sq2-android1 SMP preempt mod_unload aarch64\x00',
+            })
+            (mod_dir / '30-device_faker.zip').write_bytes(df_zip)
+
+            data_dir = root / 'data'
+            installed_lkm = data_dir / 'adb' / 'modules' / 'device_faker' / 'lkm'
+            installed_lkm.mkdir(parents=True)
+            (installed_lkm.parent / 'module.prop').write_text('id=device_faker\nversionCode=20261119\n')
+            (installed_lkm / 'df_gpu_vfs.ko').write_bytes(
+                make_aarch64_elf() + b'\x00vermagic=6.18.60-sq2-android1 SMP mod_unload aarch64\x00'
+            )
+            ksud = data_dir / 'adb' / 'ksud'
+            ksud.write_text('#!/bin/sh\n')
+            ksud.chmod(0o755)
+
+            env = dict(
+                os.environ,
+                SQ2_TEST_PATH=f'{mock_bin}:/bin:/usr/bin',
+                SQ2_CMDLINE=str(cmdline),
+                SQ2_KSU_MODULES_LOCK=str(root / 'lock'),
+                SQ2_KSU_MODULES_DIR=str(mod_dir),
+                SQ2_DATA_DIR=str(data_dir),
+                SQ2_KSU_EXPECTED_VERSION_FILE=str(root / 'nonexistent-expected-ver'),
+                SQ2_BOOT_POLL_RETRIES='2',
+                SQ2_BOOT_POLL_SLEEP='0',
+                SQ2_KSUD_POLL_RETRIES='2',
+                SQ2_KSUD_POLL_SLEEP='0',
+            )
+            res = subprocess.run(['sh', str(script)], env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(log_file.read_text().strip().splitlines(), ['INSTALL:device_faker'])
+            self.assertEqual(res.stdout.strip().splitlines(), ['KSU_MODULE_REINSTALLED_ABI:device_faker'])
+
+            res2 = subprocess.run(['sh', str(script)], env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(res2.stdout.strip(), '')
+
     def test_build_lts_full_image_cli_exposes_default_ksu_module_flags(self):
         res = subprocess.run(
             [sys.executable, str(ROOT / 'scripts/build-lts.py'), 'full-image', '--help'],

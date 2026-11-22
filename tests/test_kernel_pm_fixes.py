@@ -522,6 +522,34 @@ class Sc8180xS2idleStabilityFixTests(unittest.TestCase):
         self.assertNotIn("# CONFIG_QCOM_STATS is not set\n", text)
         self.assertIn("CONFIG_QCOM_STATS=y\n", text)
 
+    def test_hybrid_kernel_config_enables_mobile_perf_options(self):
+        text = (ROOT / "configs/kernel-6.18-hybrid.config").read_text()
+        expected = (
+            "CONFIG_UCLAMP_TASK=y\n",
+            "CONFIG_UCLAMP_BUCKETS_COUNT=20\n",
+            "CONFIG_UCLAMP_TASK_GROUP=y\n",
+            "CONFIG_PREEMPT=y\n",
+            "CONFIG_PREEMPTION=y\n",
+            "CONFIG_PREEMPT_COUNT=y\n",
+            "CONFIG_NO_HZ_IDLE=y\n",
+            "CONFIG_HZ_250=y\n",
+            "CONFIG_HZ=250\n",
+            "CONFIG_TICK_CPU_ACCOUNTING=y\n",
+            "CONFIG_CPU_IDLE_GOV_TEO=y\n",
+            "# CONFIG_CPU_IDLE_GOV_MENU is not set\n",
+            "CONFIG_QCOM_ICC_BWMON=y\n",
+        )
+        forbidden = (
+            "CONFIG_PREEMPT_VOLUNTARY=y\n",
+            "CONFIG_NO_HZ_FULL=y\n",
+            "CONFIG_HZ_100=y\n",
+            "CONFIG_VIRT_CPU_ACCOUNTING_GEN=y\n",
+        )
+        for line in expected:
+            self.assertIn(line, text)
+        for line in forbidden:
+            self.assertNotIn(line, text)
+
 
 class CamssBalancedStreamUnwindTests(unittest.TestCase):
     @unittest.skipUnless(KSRC.is_dir(), "requires local 6.18 reference kernel source")
