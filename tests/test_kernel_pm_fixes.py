@@ -21,6 +21,10 @@ KERNEL_PM_PATCHES = (
     "patches/spx-portable-boot/0005-spx-wcd934x-disable-port-int-on-stop.patch",
     "patches/spx-portable-boot/0006-spx-r8152-freezable-fw-work.patch",
     "patches/spx-portable-boot/0007-spx-timerfd-freezable-resume-work.patch",
+    "patches/spx-portable-boot/0013-interconnect-qcom-sc8180x-mm0-keepalive.patch",
+    "patches/spx-portable-boot/0014-clk-qcom-gcc-sc8180x-enable-rpm.patch",
+    "patches/spx-portable-boot/0015-usb-typec-ucsi-cancel-resume-work-on-suspend.patch",
+    "patches/spx-portable-boot/0016-arm64-dts-qcom-sc8180x-spmi-pdc-wake.patch",
 )
 CAMSS_UNWIND_PATCH = "patches/camera/0007-camss-balanced-s-stream-unwind.patch"
 DPU_VSYNC_DEDUP_PATCH = "patches/sm8350-dpu-vsync-dedup.patch"
@@ -454,6 +458,69 @@ class ZramConfigTests(unittest.TestCase):
             "CONFIG_ZRAM_MULTI_COMP=y",
         ):
             self.assertIn(opt + "\n", text)
+
+
+class Sc8180xS2idleStabilityFixTests(unittest.TestCase):
+    @unittest.skipUnless(KSRC.is_dir(), "requires local 6.18 reference kernel source")
+    def test_sc8180x_mm0_keepalive_patch(self):
+        patched = apply_patch_to_temp_file(
+            "drivers/interconnect/qcom/sc8180x.c",
+            "patches/spx-portable-boot/0013-interconnect-qcom-sc8180x-mm0-keepalive.patch",
+        )
+        m = re.search(r"static struct qcom_icc_bcm bcm_mm0 = \{.*?\n\};", patched, re.S)
+        self.assertIsNotNone(m)
+        self.assertIn(".keepalive = true,", m.group(0))
+
+    @unittest.skipUnless(KSRC.is_dir(), "requires local 6.18 reference kernel source")
+    def test_gcc_sc8180x_enable_rpm_patch(self):
+        patched = apply_patch_to_temp_file(
+            "drivers/clk/qcom/gcc-sc8180x.c",
+            "patches/spx-portable-boot/0014-clk-qcom-gcc-sc8180x-enable-rpm.patch",
+        )
+        m = re.search(r"static const struct qcom_cc_desc gcc_sc8180x_desc = \{.*?\n\};", patched, re.S)
+        self.assertIsNotNone(m)
+        self.assertIn(".use_rpm = true,", m.group(0))
+
+    @unittest.skipUnless(KSRC.is_dir(), "requires local 6.18 reference kernel source")
+    def test_ucsi_suspend_cancels_resume_work_before_connectors(self):
+        patched = apply_patch_to_temp_file(
+            "drivers/usb/typec/ucsi/ucsi.c",
+            "patches/spx-portable-boot/0015-usb-typec-ucsi-cancel-resume-work-on-suspend.patch",
+        )
+        m = re.search(r"int ucsi_suspend\(struct ucsi \*ucsi\).*?\n\}", patched, re.S)
+        self.assertIsNotNone(m)
+        body = m.group(0)
+        idx_delay = body.index("cancel_delayed_work_sync(&ucsi->work);")
+        idx_resume = body.index("cancel_work_sync(&ucsi->resume_work);")
+        idx_conn = body.index("if (!ucsi->connector)")
+        self.assertLess(idx_delay, idx_resume)
+        self.assertLess(idx_resume, idx_conn)
+
+    def test_ucsi_surface_hid_cancels_notify_work_before_and_after_ucsi_suspend(self):
+        src = (ROOT / "probe/typec/ucsi_surface_hid.c").read_text()
+        fn = extract_c_function(src, "surface_ucsi_hid_suspend")
+        first_cancel = fn.index("cancel_work_sync(&ush->notify_work);")
+        call_suspend = fn.index("ucsi_suspend(ush->ucsi);")
+        second_cancel = fn.index("cancel_work_sync(&ush->notify_work);", call_suspend)
+        self.assertLess(first_cancel, call_suspend)
+        self.assertLess(call_suspend, second_cancel)
+
+    @unittest.skipUnless(KSRC.is_dir(), "requires local 6.18 reference kernel source")
+    def test_sc8180x_dtsi_routes_spmi_periph_irq_via_pdc(self):
+        patched = apply_patch_to_temp_file(
+            "arch/arm64/boot/dts/qcom/sc8180x.dtsi",
+            "patches/spx-portable-boot/0016-arm64-dts-qcom-sc8180x-spmi-pdc-wake.patch",
+        )
+        m = re.search(r"spmi_bus:\s*spmi@c440000\s*\{.*?\n\t\t\};", patched, re.S)
+        self.assertIsNotNone(m)
+        node = m.group(0)
+        self.assertIn("interrupts-extended = <&pdc 1 IRQ_TYPE_LEVEL_HIGH>;", node)
+        self.assertNotIn("interrupts = <GIC_SPI 481", node)
+
+    def test_hybrid_kernel_config_enables_qcom_stats(self):
+        text = (ROOT / "configs/kernel-6.18-hybrid.config").read_text()
+        self.assertNotIn("# CONFIG_QCOM_STATS is not set\n", text)
+        self.assertIn("CONFIG_QCOM_STATS=y\n", text)
 
 
 class CamssBalancedStreamUnwindTests(unittest.TestCase):

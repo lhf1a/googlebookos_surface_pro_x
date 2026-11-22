@@ -385,6 +385,9 @@ static int surface_ucsi_hid_suspend(struct hid_device *hdev,
 	struct surface_ucsi_hid *ush = hid_get_drvdata(hdev);
 	int ret;
 
+	/* Stop pending HID event work before quiescing UCSI, then drain any
+	 * queued work that raced before UCSI suspend completed. */
+	cancel_work_sync(&ush->notify_work);
 	ret = ucsi_suspend(ush->ucsi);
 	cancel_work_sync(&ush->notify_work);
 	return ret;

@@ -49,3 +49,18 @@ python3 scripts/build.py full --private-root /ABS/PRIVATE/build-inputs --output 
 
 完整磁盘镜像没有随本次修复重新构建；新 source 构建也不自动继承整机硬件验收。
 正常入口保留原已验收候选字节（含只读诊断日志/采集器），公共默认构建不安装实验采集器。
+
+## 2026-11-22 SC8180X s2idle 睡死与唤醒路由修复
+
+### 补充修复内容
+
+- **AOSS/RPMh 防死锁**：[0013-interconnect-qcom-sc8180x-mm0-keepalive.patch](../patches/spx-portable-boot/0013-interconnect-qcom-sc8180x-mm0-keepalive.patch) 为 `bcm_mm0` 增加 `.keepalive = true`，避免显示/视频子系统在 `s2idle` 撤票时触发 AOSS 无响应死锁。
+- **GCC CX 域保护**：[0014-clk-qcom-gcc-sc8180x-enable-rpm.patch](../patches/spx-portable-boot/0014-clk-qcom-gcc-sc8180x-enable-rpm.patch) 为 `gcc_sc8180x_desc` 启用 `.use_rpm = true`，防止 CX 电源域在 GCC 活跃期间意外掉电。
+- **电源键 PDC 唤醒路由**：[prepare-spx-spmi-pdc-dtb.py](../scripts/prepare-spx-spmi-pdc-dtb.py) 与 [0016-arm64-dts-qcom-sc8180x-spmi-pdc-wake.patch](../patches/spx-portable-boot/0016-arm64-dts-qcom-sc8180x-spmi-pdc-wake.patch) 将 `spmi@c440000` 由直连 `GIC_SPI 481` 切换为 `interrupts-extended = <&pdc 1 IRQ_TYPE_LEVEL_HIGH>`，使 `pm8941_pwrkey` 经 PDC pin 1 参与 APSS 唤醒。
+- **UCSI 休眠工作队列竞态修复**：[0015-usb-typec-ucsi-cancel-resume-work-on-suspend.patch](../patches/spx-portable-boot/0015-usb-typec-ucsi-cancel-resume-work-on-suspend.patch) 在 `ucsi_suspend()` 同步取消 `resume_work`，[ucsi_surface_hid.c](../probe/typec/ucsi_surface_hid.c) 在 `ucsi_suspend()` 前后取消 `notify_work`。
+- **按需观测**：[kernel-6.18-hybrid.config](../configs/kernel-6.18-hybrid.config) 开启 `CONFIG_QCOM_STATS=y`（无常驻后台进程）。
+
+### 补充实测与边界
+
+- **单台 SQ2 实测（ESP 源码构建更新）**：`IRQ 127` 由 `GICv3 hwirq=513` 切换为 `chip=PDC hwirq=1 type=level`；拔电 `s2idle` 跨约 38 分钟（9 次真实睡眠，累计 `success=11`、`fail=0`）后成功唤醒，Venus `stops=11/starts=11`、`error=0`，`spi0.0` `bus_error_count=0`，`modem`/`cdsp`/`adsp`/`slpi` 保持 `attached`（`slpi` 累计睡眠约 3257.8s）。
+- **尚未验证项**：过夜/多小时长时待机与功耗（实测仍可见 `BAT1` 触发 `ssam_wakeup` 与 `qcom_stats` 中 `aosd`/`cxsd`/`ddr` 计数仍为 `0`），以及 **SQ1** 实机硬件验证。

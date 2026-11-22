@@ -1,0 +1,10 @@
+--- a/drivers/clk/qcom/gcc-sc8180x.c
++++ b/drivers/clk/qcom/gcc-sc8180x.c
+@@ -4692,6 +4692,7 @@
+ 	.num_resets = ARRAY_SIZE(gcc_sc8180x_resets),
+ 	.gdscs = gcc_sc8180x_gdscs,
+ 	.num_gdscs = ARRAY_SIZE(gcc_sc8180x_gdscs),
++	.use_rpm = true,
+ };
+ 
+ static const struct of_device_id gcc_sc8180x_match_table[] = {

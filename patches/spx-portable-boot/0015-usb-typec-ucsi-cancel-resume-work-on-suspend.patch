@@ -1,0 +1,10 @@
+--- a/drivers/usb/typec/ucsi/ucsi.c
++++ b/drivers/usb/typec/ucsi/ucsi.c
+@@ -2106,6 +2106,7 @@
+ 	 * EC is stopped for suspend; state is re-read on resume.
+ 	 */
+ 	cancel_delayed_work_sync(&ucsi->work);
++	cancel_work_sync(&ucsi->resume_work);
+ 
+ 	if (!ucsi->connector)
+ 		return 0;

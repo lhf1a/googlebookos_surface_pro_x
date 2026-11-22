@@ -1242,6 +1242,7 @@ def build(args, compile_kernel):
     dt=bundle/'android-el2.dtb'
     dt.write_bytes(typec_dtb(dt.read_bytes()))
     dt.write_bytes(module('spx_backlight_dt', 'prepare-spx-backlight-dtb.py').prepare(dt.read_bytes()))
+    dt.write_bytes(module('spx_spmi_pdc_dt', 'prepare-spx-spmi-pdc-dtb.py').prepare(dt.read_bytes()))
     lid_dt = module('spx_lid_dt', 'prepare-spx-lid-dtb.py')
     hall_lid_enabled = bool(
         (args.kernel_mode == 'source' or getattr(args, 'enable_hall_lid', False))

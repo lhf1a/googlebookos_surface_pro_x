@@ -1,0 +1,10 @@
+--- a/drivers/interconnect/qcom/sc8180x.c
++++ b/drivers/interconnect/qcom/sc8180x.c
+@@ -1366,6 +1366,7 @@
+ 
+ static struct qcom_icc_bcm bcm_mm0 = {
+ 	.name = "MM0",
++	.keepalive = true,
+ 	.num_nodes = 1,
+ 	.nodes = { &slv_qns_mem_noc_hf }
+ };
