@@ -729,6 +729,70 @@ static void test_qmi_loc_control_and_sv_extensions(void)
 	assert(sv_info.svs[0].system == SPX_QMI_LOC_SYSTEM_GPS);
 	assert(sv_info.svs[0].sv_id == 12u);
 	assert(sv_info.svs[0].snr_dbhz > 34.0f && sv_info.svs[0].snr_dbhz < 35.0f);
+
+	/* Multi-SV packet matching live SQ2 MPSS: GLONASS(5), BDS(6), QZSS(7), SBAS(3). */
+	uint8_t multi_sv[7u + 4u + 4u + 4u * 28u];
+	memset(multi_sv, 0, sizeof(multi_sv));
+	multi_sv[0] = 0x04;
+	multi_sv[3] = 0x25;
+	multi_sv[5] = (uint8_t)(sizeof(multi_sv) - 7u);
+	multi_sv[7] = 0x01; multi_sv[8] = 0x01; multi_sv[10] = 0x00;
+	multi_sv[11] = 0x10; multi_sv[12] = (uint8_t)(1u + 4u * 28u); multi_sv[14] = 4u;
+	const uint32_t systems[4] = {
+		SPX_QMI_LOC_SYSTEM_GLONASS,
+		SPX_QMI_LOC_SYSTEM_BDS,
+		SPX_QMI_LOC_SYSTEM_QZSS,
+		SPX_QMI_LOC_SYSTEM_SBAS,
+	};
+	const uint16_t ids[4] = {4u, 205u, 195u, 42u};
+	const float snrs[4] = {31.7f, 29.0f, 28.4f, 26.5f};
+	for (uint8_t i = 0; i < 4u; i++) {
+		uint8_t *se = &multi_sv[15u + i * 28u];
+		se[0] = 0x9B;
+		se[4] = (uint8_t)systems[i];
+		se[8] = (uint8_t)(ids[i] & 0xFFu);
+		se[9] = (uint8_t)(ids[i] >> 8);
+		se[11] = SPX_QMI_LOC_SV_STATUS_TRACKING;
+		memcpy(se + 24, &snrs[i], 4);
+	}
+	assert(spx_qmi_loc_decode_sv_info_ind(multi_sv, sizeof(multi_sv),
+					      &sv_info) == 0);
+	assert(sv_info.count == 4u);
+	assert(sv_info.svs[0].system == SPX_QMI_LOC_SYSTEM_GLONASS &&
+	       sv_info.svs[0].sv_id == 4u);
+	assert(sv_info.svs[1].system == SPX_QMI_LOC_SYSTEM_BDS &&
+	       sv_info.svs[1].sv_id == 205u);
+	assert(sv_info.svs[2].system == SPX_QMI_LOC_SYSTEM_QZSS &&
+	       sv_info.svs[2].sv_id == 195u);
+	assert(sv_info.svs[3].system == SPX_QMI_LOC_SYSTEM_SBAS &&
+	       sv_info.svs[3].sv_id == 42u);
+
+	/* XTRA3 part encoder (0x00A7) and validity indication decoder (0x0037). */
+	uint8_t xtra_req[256];
+	const uint8_t chunk_payload[4] = {0x01u, 0x32u, 0x08u, 0x0Au};
+	size_t xlen = spx_qmi_loc_encode_inject_xtra_part(
+		xtra_req, sizeof(xtra_req), 9u, SPX_QMI_LOC_INJECT_XTRA_DATA,
+		49635u, 49u, 1u, chunk_payload, sizeof(chunk_payload));
+	assert(xlen == SPX_QMI_HEADER_LEN + 7u + 5u + 5u + 9u);
+	assert(xtra_req[0] == SPX_QMI_FLAG_REQUEST);
+	assert(xtra_req[3] == 0xA7u && xtra_req[4] == 0x00u);
+	assert(spx_qmi_loc_encode_inject_xtra_part(
+		       xtra_req, sizeof(xtra_req), 9u,
+		       SPX_QMI_LOC_INJECT_XTRA_DATA, 49635u, 49u, 0u,
+		       chunk_payload, sizeof(chunk_payload)) == 0);
+
+	/* Exact live SQ2 MPSS 0x0037 validity indication: start=1795446000, dur=168h. */
+	const uint8_t val_ind[] = {
+		0x04, 0x01, 0x00, 0x37, 0x00, 20u, 0x00,
+		0x01, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x10, 0x0A, 0x00, 0xF0, 0x54, 0x04, 0x6B, 0x00, 0x00, 0x00, 0x00, 0xA8, 0x00
+	};
+	uint32_t vst = 99u;
+	uint64_t vstart = 0u;
+	uint16_t vdur = 0u;
+	assert(spx_qmi_loc_decode_xtra_validity_ind(val_ind, sizeof(val_ind),
+						    &vst, &vstart, &vdur) == 0);
+	assert(vst == 0u && vstart == 1795446000ULL && vdur == 168u);
 }
 
 int main(void)

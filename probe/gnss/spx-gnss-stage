@@ -44,4 +44,20 @@ if [ -f "$features" ] && grep -q 'android\.hardware\.location\.gps' "$features";
     mount --bind "$staged" "$features"
 fi
 
+gps_debug=/newroot/system/etc/gps_debug.conf
+if [ -f "$gps_debug" ] && ! grep -q ^LONGTERM_PSDS_SERVER_1= "$gps_debug"; then
+    staged_gps=/newroot/debug_ramdisk/spx-gnss-gps_debug.conf
+    cp "$gps_debug" "$staged_gps"
+    cat >> "$staged_gps" <<CONF
+
+# Surface Pro X SC8180X MPSS XTRA3 (PSDS long-term predicted orbits)
+LONGTERM_PSDS_SERVER_1=https://path1.xtracloud.net/xtra3grcej.bin
+LONGTERM_PSDS_SERVER_2=https://path2.xtracloud.net/xtra3grcej.bin
+LONGTERM_PSDS_SERVER_3=https://path3.xtracloud.net/xtra3grcej.bin
+ENABLE_PSDS_PERIODIC_DOWNLOAD=true
+CONF
+    chmod 644 "$staged_gps"
+    mount --bind "$staged_gps" "$gps_debug"
+fi
+
 echo SPX_GNSS_HAL_STAGED

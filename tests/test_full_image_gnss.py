@@ -34,6 +34,7 @@ class FullImageGnssTests(unittest.TestCase):
         self.assertIn("android.hardware.location.gps", text)
         self.assertIn("mount --bind", text)
         self.assertIn("android.hardware.gnss-service.example", text)
+        self.assertIn("LONGTERM_PSDS_SERVER_1=", text)
 
         manifest = (ROOT / "probe/gnss/android.hardware.gnss-service.spx.xml").read_text()
         self.assertIn("android.hardware.gnss", manifest)

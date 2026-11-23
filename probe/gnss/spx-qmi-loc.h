@@ -28,22 +28,30 @@ extern "C" {
 #define SPX_QMI_LOC_EVENT_POSITION_REPORT_IND  0x0024u
 #define SPX_QMI_LOC_EVENT_GNSS_SV_INFO_IND     0x0025u
 #define SPX_QMI_LOC_EVENT_NMEA_IND             0x0026u
-#define SPX_QMI_LOC_EVENT_INJECT_TIME_REQ_IND  0x0028u
-#define SPX_QMI_LOC_EVENT_ENGINE_STATE_IND     0x002Bu
-#define SPX_QMI_LOC_INJECT_UTC_TIME            0x0038u
+#define SPX_QMI_LOC_EVENT_INJECT_TIME_REQ_IND             0x0028u
+#define SPX_QMI_LOC_EVENT_INJECT_PREDICTED_ORBITS_REQ_IND 0x0029u
+#define SPX_QMI_LOC_EVENT_ENGINE_STATE_IND                0x002Bu
+#define SPX_QMI_LOC_INJECT_PREDICTED_ORBITS_DATA          0x0035u
+#define SPX_QMI_LOC_GET_PREDICTED_ORBITS_DATA_SOURCE      0x0036u
+#define SPX_QMI_LOC_GET_PREDICTED_ORBITS_DATA_VALIDITY    0x0037u
+#define SPX_QMI_LOC_INJECT_UTC_TIME                       0x0038u
 #define SPX_QMI_LOC_INJECT_POSITION            0x0039u
 #define SPX_QMI_LOC_SET_ENGINE_LOCK            0x003Au
 #define SPX_QMI_LOC_GET_ENGINE_LOCK            0x003Bu
 #define SPX_QMI_LOC_SET_NMEA_TYPES             0x003Eu
 #define SPX_QMI_LOC_DELETE_ASSISTANCE_DATA     0x0044u
 #define SPX_QMI_LOC_SET_OPERATION_MODE         0x004Au
+#define SPX_QMI_LOC_INJECT_XTRA_DATA           0x00A7u
+
+#define SPX_QMI_LOC_MAX_XTRA_PART_LEN          1024u
 
 /* QmiLocEventRegistrationFlag (64-bit mask, TLV 0x01 in 0x0021). */
 #define SPX_QMI_LOC_EVENT_POSITION_REPORT   (1ULL << 0)
 #define SPX_QMI_LOC_EVENT_GNSS_SV_INFO      (1ULL << 1)
 #define SPX_QMI_LOC_EVENT_NMEA              (1ULL << 2)
-#define SPX_QMI_LOC_EVENT_INJECT_TIME_REQ   (1ULL << 4)
-#define SPX_QMI_LOC_EVENT_ENGINE_STATE      (1ULL << 7)
+#define SPX_QMI_LOC_EVENT_INJECT_TIME_REQ             (1ULL << 4)
+#define SPX_QMI_LOC_EVENT_INJECT_PREDICTED_ORBITS_REQ (1ULL << 5)
+#define SPX_QMI_LOC_EVENT_ENGINE_STATE                (1ULL << 7)
 #define SPX_QMI_LOC_EVENT_FIX_SESSION_STATE (1ULL << 8)
 
 /* QmiLocNmeaType (32-bit mask, TLV 0x01 in 0x003E). */
@@ -55,17 +63,21 @@ extern "C" {
 #define SPX_QMI_LOC_NMEA_GLGSV   (1u << 7)
 #define SPX_QMI_LOC_NMEA_GNGSA   (1u << 8)
 #define SPX_QMI_LOC_NMEA_GAGSV   (1u << 11)
+#define SPX_QMI_LOC_NMEA_PQGSA   (1u << 15)
+#define SPX_QMI_LOC_NMEA_PQGSV   (1u << 16)
 #define SPX_QMI_LOC_NMEA_GNGGA   (1u << 19)
 #define SPX_QMI_LOC_NMEA_GNRMC   (1u << 20)
 #define SPX_QMI_LOC_NMEA_GBGSV   (1u << 25)
+#define SPX_QMI_LOC_NMEA_GQGSV   (1u << 28)
 #define SPX_QMI_LOC_NMEA_DEFAULT \
 	(SPX_QMI_LOC_NMEA_GGA | SPX_QMI_LOC_NMEA_RMC | SPX_QMI_LOC_NMEA_GSV | \
 	 SPX_QMI_LOC_NMEA_GSA | SPX_QMI_LOC_NMEA_VTG)
 #define SPX_QMI_LOC_NMEA_EXTENDED \
 	(SPX_QMI_LOC_NMEA_DEFAULT | SPX_QMI_LOC_NMEA_GLGSV | \
 	 SPX_QMI_LOC_NMEA_GNGSA | SPX_QMI_LOC_NMEA_GAGSV | \
+	 SPX_QMI_LOC_NMEA_PQGSA | SPX_QMI_LOC_NMEA_PQGSV | \
 	 SPX_QMI_LOC_NMEA_GNGGA | SPX_QMI_LOC_NMEA_GNRMC | \
-	 SPX_QMI_LOC_NMEA_GBGSV)
+	 SPX_QMI_LOC_NMEA_GBGSV | SPX_QMI_LOC_NMEA_GQGSV)
 
 /* QmiLocLockType (uint32, TLV 0x01 in 0x003A). */
 #define SPX_QMI_LOC_LOCK_NONE 1u
@@ -88,12 +100,15 @@ extern "C" {
 #define SPX_QMI_LOC_TECH_REF_LOC   (1u << 4)
 #define SPX_QMI_LOC_TECH_INJECTED  (1u << 5)
 
-/* QmiLocSystem (uint32, in 0x0025 SV Info). */
+/* QmiLocSystem (uint32, in 0x0025 SV Info; qmiLocSvSystemEnumT_v02). */
 #define SPX_QMI_LOC_SYSTEM_GPS     1u
 #define SPX_QMI_LOC_SYSTEM_GALILEO 2u
 #define SPX_QMI_LOC_SYSTEM_SBAS    3u
 #define SPX_QMI_LOC_SYSTEM_COMPASS 4u
 #define SPX_QMI_LOC_SYSTEM_GLONASS 5u
+#define SPX_QMI_LOC_SYSTEM_BDS     6u
+#define SPX_QMI_LOC_SYSTEM_QZSS    7u
+#define SPX_QMI_LOC_SYSTEM_NAVIC   8u
 
 /* QmiLocSatelliteValidInformation bitmask (in 0x0025 SV Info). */
 #define SPX_QMI_LOC_SV_VALID_SYSTEM      (1u << 0)
@@ -266,6 +281,13 @@ size_t spx_qmi_loc_encode_inject_position(uint8_t *buf, size_t cap,
 					  float hor_unc_circular);
 size_t spx_qmi_loc_encode_delete_all_aiding(uint8_t *buf, size_t cap,
 					    uint16_t txn);
+size_t spx_qmi_loc_encode_inject_xtra_part(uint8_t *buf, size_t cap,
+					   uint16_t txn, uint16_t msg_id,
+					   uint32_t total_size,
+					   uint16_t total_parts,
+					   uint16_t part_num,
+					   const uint8_t *part_data,
+					   uint16_t part_len);
 
 /* Pure QMI LOC wire decoders.
  * spx_qmi_loc_decode_response returns:
@@ -299,6 +321,14 @@ int spx_qmi_loc_decode_position_ind(const uint8_t *buf, size_t len,
  */
 int spx_qmi_loc_decode_sv_info_ind(const uint8_t *buf, size_t len,
 				   struct spx_qmi_loc_sv_info *out);
+
+/* Decodes QMI_LOC_GET_PREDICTED_ORBITS_DATA_VALIDITY_IND (0x0037).
+ * Returns 0 on success, -1 on malformed/invalid packet.
+ */
+int spx_qmi_loc_decode_xtra_validity_ind(const uint8_t *buf, size_t len,
+					 uint32_t *status_out,
+					 uint64_t *start_utc_sec_out,
+					 uint16_t *duration_hours_out);
 
 /* Pure QRTR control packet helpers (host-testable without AF_QIPCRTR). */
 size_t spx_qrtr_encode_new_lookup(uint8_t *buf, size_t cap, uint32_t service);
@@ -342,6 +372,14 @@ int spx_qmi_loc_inject_position(struct spx_qmi_loc_client *client,
 int spx_qmi_loc_delete_all_aiding(struct spx_qmi_loc_client *client,
 				  int timeout_ms,
 				  struct spx_qmi_result *qmi_res);
+int spx_qmi_loc_get_xtra_validity(struct spx_qmi_loc_client *client,
+				  int timeout_ms, uint64_t *start_utc_sec_out,
+				  uint16_t *duration_hours_out,
+				  struct spx_qmi_result *qmi_res);
+int spx_qmi_loc_inject_xtra_data(struct spx_qmi_loc_client *client,
+				 const uint8_t *data, size_t data_len,
+				 int timeout_ms,
+				 struct spx_qmi_result *qmi_res);
 
 /* Receives one non-blocking/ready datagram on client->fd.
  * Returns:

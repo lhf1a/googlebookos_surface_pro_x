@@ -117,6 +117,18 @@ class SpxGnssTests(unittest.TestCase):
         # if getExtension*() returns ScopedAStatus::ok() with *out = nullptr.
         self.assertNotIn("*out = nullptr;\n        return ScopedAStatus::ok();", src)
 
+    def test_gnss_hal_maps_bds_qzss_and_sbas_capabilities(self):
+        src = (ROOT / "probe/gnss/spx-gnss-hal.cpp").read_text(encoding="utf-8")
+        self.assertIn("case SPX_QMI_LOC_SYSTEM_BDS:", src)
+        self.assertIn("case SPX_QMI_LOC_SYSTEM_QZSS:", src)
+        self.assertIn("{GnssConstellationType::SBAS, 1575420000.0, GnssSignalType::CODE_TYPE_C}", src)
+        self.assertIn("{GnssConstellationType::QZSS, 1575420000.0, GnssSignalType::CODE_TYPE_C}", src)
+        self.assertIn("normalizeSvId(", src)
+        self.assertIn("spx_qmi_loc_inject_xtra_data(", src)
+        self.assertIn("downloadRequestCb(", src)
+        self.assertIn("classifyQmiUsedSvId(", src)
+        self.assertIn("kMaxAcceptableInProgressHorUncM = 500.0f;", src)
+
 
 if __name__ == "__main__":
     unittest.main()

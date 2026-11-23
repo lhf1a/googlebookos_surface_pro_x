@@ -330,6 +330,55 @@ size_t spx_qmi_loc_encode_delete_all_aiding(uint8_t *buf, size_t cap,
 	return pos;
 }
 
+size_t spx_qmi_loc_encode_inject_xtra_part(uint8_t *buf, size_t cap,
+					   uint16_t txn, uint16_t msg_id,
+					   uint32_t total_size,
+					   uint16_t total_parts,
+					   uint16_t part_num,
+					   const uint8_t *part_data,
+					   uint16_t part_len)
+{
+	uint8_t u32_buf[4];
+	uint8_t u16_buf[2];
+	uint8_t data_tlv[2u + SPX_QMI_LOC_MAX_XTRA_PART_LEN];
+	size_t pos = SPX_QMI_HEADER_LEN;
+
+	if (!buf || !part_data || txn == 0 || total_size == 0 ||
+	    total_parts == 0 || part_num == 0 || part_num > total_parts ||
+	    part_len == 0 || part_len > SPX_QMI_LOC_MAX_XTRA_PART_LEN)
+		return 0;
+
+	/* TLV 0x01: totalSize (uint32). */
+	put_le32(u32_buf, total_size);
+	pos = append_tlv(buf, cap, pos, 0x01u, u32_buf, 4u);
+	if (pos == 0)
+		return 0;
+
+	/* TLV 0x02: totalParts (uint16). */
+	put_le16(u16_buf, total_parts);
+	pos = append_tlv(buf, cap, pos, 0x02u, u16_buf, 2u);
+	if (pos == 0)
+		return 0;
+
+	/* TLV 0x03: partNum (uint16, 1-based). */
+	put_le16(u16_buf, part_num);
+	pos = append_tlv(buf, cap, pos, 0x03u, u16_buf, 2u);
+	if (pos == 0)
+		return 0;
+
+	/* TLV 0x04: partData (uint16 length prefix + raw chunk bytes). */
+	put_le16(data_tlv, part_len);
+	memcpy(data_tlv + 2u, part_data, part_len);
+	pos = append_tlv(buf, cap, pos, 0x04u, data_tlv,
+			 (uint16_t)(2u + part_len));
+	if (pos == 0)
+		return 0;
+
+	write_qmi_header(buf, SPX_QMI_FLAG_REQUEST, txn, msg_id,
+			 (uint16_t)(pos - SPX_QMI_HEADER_LEN));
+	return pos;
+}
+
 int spx_qmi_loc_decode_response(const uint8_t *buf, size_t len,
 				uint16_t expected_txn, uint16_t expected_msg,
 				struct spx_qmi_result *out)
@@ -766,6 +815,66 @@ int spx_qmi_loc_decode_sv_info_ind(const uint8_t *buf, size_t len,
 	return 0;
 }
 
+int spx_qmi_loc_decode_xtra_validity_ind(const uint8_t *buf, size_t len,
+					 uint32_t *status_out,
+					 uint64_t *start_utc_sec_out,
+					 uint16_t *duration_hours_out)
+{
+	uint8_t seen[256] = {0};
+	bool has_status = false;
+	uint32_t status = 0;
+	uint64_t start_utc = 0;
+	uint16_t dur_hours = 0;
+	size_t pos;
+
+	if (!buf || len < SPX_QMI_HEADER_LEN)
+		return -1;
+	if (buf[0] != SPX_QMI_FLAG_INDICATION ||
+	    get_le16(buf + 3) !=
+		    SPX_QMI_LOC_GET_PREDICTED_ORBITS_DATA_VALIDITY ||
+	    get_le16(buf + 5) != len - SPX_QMI_HEADER_LEN)
+		return -1;
+
+	for (pos = SPX_QMI_HEADER_LEN; pos < len;) {
+		uint8_t type;
+		uint16_t tlen;
+		const uint8_t *v;
+
+		if (len - pos < 3u)
+			return -1;
+		type = buf[pos];
+		tlen = get_le16(buf + pos + 1);
+		pos += 3u;
+		if (tlen > len - pos || seen[type])
+			return -1;
+		seen[type] = 1;
+		v = buf + pos;
+
+		if (type == 0x01u) {
+			if (tlen != 4u)
+				return -1;
+			status = get_le32(v);
+			has_status = true;
+		} else if (type == 0x10u) {
+			if (tlen != 10u)
+				return -1;
+			start_utc = get_le64(v);
+			dur_hours = get_le16(v + 8u);
+		}
+		pos += tlen;
+	}
+
+	if (!has_status)
+		return -1;
+	if (status_out)
+		*status_out = status;
+	if (start_utc_sec_out)
+		*start_utc_sec_out = start_utc;
+	if (duration_hours_out)
+		*duration_hours_out = dur_hours;
+	return 0;
+}
+
 /* QRTR control packet helpers (little-endian struct qrtr_ctrl_pkt: 20 bytes). */
 size_t spx_qrtr_encode_new_lookup(uint8_t *buf, size_t cap, uint32_t service)
 {
@@ -1039,6 +1148,118 @@ static int qmi_exchange(struct spx_qmi_loc_client *client, const uint8_t *req,
 	}
 }
 
+static int qmi_exchange_with_ind(struct spx_qmi_loc_client *client,
+				 const uint8_t *req, size_t req_len,
+				 uint16_t txn, uint16_t msg, int timeout_ms,
+				 struct spx_qmi_result *qmi_res,
+				 uint8_t *ind_buf, size_t ind_cap,
+				 size_t *ind_len_out)
+{
+	struct sockaddr_qrtr dst;
+	int64_t deadline;
+	bool got_resp = false;
+
+	if (ind_len_out)
+		*ind_len_out = 0;
+	if (!client || !client->connected || client->fd < 0 || !req ||
+	    req_len < SPX_QMI_HEADER_LEN)
+		return -1;
+	if (timeout_ms <= 0)
+		timeout_ms = 5000;
+
+	memset(&dst, 0, sizeof(dst));
+	dst.sq_family = AF_QIPCRTR;
+	dst.sq_node = client->service_node;
+	dst.sq_port = client->service_port;
+
+	if (sendto(client->fd, req, req_len, 0, (const struct sockaddr *)&dst,
+		   sizeof(dst)) != (ssize_t)req_len)
+		return -1;
+
+	deadline = mono_ms();
+	if (deadline < 0)
+		return -1;
+	deadline += timeout_ms;
+
+	for (;;) {
+		int64_t now = mono_ms();
+		int64_t rem = deadline - now;
+		struct pollfd pfd;
+		int rc;
+		uint8_t rx[4096];
+		struct sockaddr_qrtr from;
+		socklen_t from_len = sizeof(from);
+		ssize_t n;
+
+		if (now < 0 || rem <= 0)
+			return -1;
+		pfd.fd = client->fd;
+		pfd.events = POLLIN;
+		pfd.revents = 0;
+		rc = poll(&pfd, 1, rem > 60000 ? 60000 : (int)rem);
+		if (rc < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (rc == 0)
+			return -1;
+		if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+			return -1;
+
+		memset(&from, 0, sizeof(from));
+		n = recvfrom(client->fd, rx, sizeof(rx), MSG_TRUNC,
+			     (struct sockaddr *)&from, &from_len);
+		if (n < 0) {
+			if (errno == EINTR || errno == EAGAIN)
+				continue;
+			return -1;
+		}
+		if ((size_t)n > sizeof(rx) || from_len != sizeof(from) ||
+		    from.sq_family != AF_QIPCRTR)
+			continue;
+
+		if (from.sq_port == QRTR_PORT_CTRL) {
+			struct spx_qrtr_service_info info;
+			if (spx_qrtr_decode_ctrl_pkt(rx, (size_t)n, &info) == 0 &&
+			    spx_qrtr_match_del_server(&info, SPX_QMI_SERVICE_LOC,
+						      client->service_node,
+						      client->service_port)) {
+				client->connected = false;
+				return -1;
+			}
+			continue;
+		}
+
+		if (from.sq_node != client->service_node ||
+		    from.sq_port != client->service_port ||
+		    (size_t)n < SPX_QMI_HEADER_LEN)
+			continue;
+
+		if (!got_resp && rx[0] == SPX_QMI_FLAG_RESPONSE &&
+		    get_le16(rx + 1) == txn && get_le16(rx + 3) == msg) {
+			int r = spx_qmi_loc_decode_response(rx, (size_t)n, txn,
+							    msg, qmi_res);
+			if (r != 0)
+				return r;
+			got_resp = true;
+			continue;
+		}
+
+		if (got_resp && rx[0] == SPX_QMI_FLAG_INDICATION &&
+		    get_le16(rx + 3) == msg) {
+			if (ind_buf && ind_cap >= (size_t)n) {
+				memcpy(ind_buf, rx, (size_t)n);
+				if (ind_len_out)
+					*ind_len_out = (size_t)n;
+			} else if (ind_buf) {
+				return -1;
+			}
+			return 0;
+		}
+	}
+}
+
 int spx_qmi_loc_set_nmea_types(struct spx_qmi_loc_client *client,
 			       uint32_t nmea_mask, int timeout_ms,
 			       struct spx_qmi_result *qmi_res)
@@ -1166,8 +1387,21 @@ int spx_qmi_loc_inject_utc_time(struct spx_qmi_loc_client *client,
 						 uncertainty_ms, time_source);
 	if (len == 0)
 		return -1;
-	return qmi_exchange(client, req, len, txn, SPX_QMI_LOC_INJECT_UTC_TIME,
-			    timeout_ms, qmi_res);
+	{
+		uint8_t ind[128];
+		size_t ind_len = 0;
+		uint32_t st = 1;
+		int r = qmi_exchange_with_ind(client, req, len, txn,
+					      SPX_QMI_LOC_INJECT_UTC_TIME,
+					      timeout_ms, qmi_res, ind,
+					      sizeof(ind), &ind_len);
+		if (r != 0)
+			return r;
+		if (spx_qmi_loc_decode_indication_status(
+			    ind, ind_len, SPX_QMI_LOC_INJECT_UTC_TIME, &st) != 0)
+			return -1;
+		return st == 0 ? 0 : 1;
+	}
 }
 
 int spx_qmi_loc_inject_position(struct spx_qmi_loc_client *client,
@@ -1208,6 +1442,107 @@ int spx_qmi_loc_delete_all_aiding(struct spx_qmi_loc_client *client,
 	return qmi_exchange(client, req, len, txn,
 			    SPX_QMI_LOC_DELETE_ASSISTANCE_DATA, timeout_ms,
 			    qmi_res);
+}
+
+int spx_qmi_loc_get_xtra_validity(struct spx_qmi_loc_client *client,
+				  int timeout_ms, uint64_t *start_utc_sec_out,
+				  uint16_t *duration_hours_out,
+				  struct spx_qmi_result *qmi_res)
+{
+	uint8_t req[SPX_QMI_HEADER_LEN];
+	uint8_t ind[256];
+	size_t ind_len = 0;
+	uint16_t txn;
+	uint32_t st = 1;
+	int r;
+
+	if (start_utc_sec_out)
+		*start_utc_sec_out = 0;
+	if (duration_hours_out)
+		*duration_hours_out = 0;
+	if (!client || !client->connected)
+		return -1;
+
+	txn = alloc_txn(client);
+	write_qmi_header(req, SPX_QMI_FLAG_REQUEST, txn,
+			 SPX_QMI_LOC_GET_PREDICTED_ORBITS_DATA_VALIDITY, 0u);
+	r = qmi_exchange_with_ind(
+		client, req, sizeof(req), txn,
+		SPX_QMI_LOC_GET_PREDICTED_ORBITS_DATA_VALIDITY, timeout_ms,
+		qmi_res, ind, sizeof(ind), &ind_len);
+	if (r != 0)
+		return r;
+	if (spx_qmi_loc_decode_xtra_validity_ind(ind, ind_len, &st,
+						 start_utc_sec_out,
+						 duration_hours_out) != 0)
+		return -1;
+	return st == 0 ? 0 : 1;
+}
+
+static int inject_xtra_with_msg_id(struct spx_qmi_loc_client *client,
+				   uint16_t msg_id, const uint8_t *data,
+				   size_t data_len, int timeout_ms,
+				   struct spx_qmi_result *qmi_res)
+{
+	const size_t chunk = SPX_QMI_LOC_MAX_XTRA_PART_LEN;
+	size_t total_parts_sz;
+	uint16_t total_parts;
+
+	if (!client || !client->connected || !data || data_len == 0 ||
+	    data_len > 512u * 1024u)
+		return -1;
+	total_parts_sz = (data_len + chunk - 1u) / chunk;
+	if (total_parts_sz == 0 || total_parts_sz > 65535u)
+		return -1;
+	total_parts = (uint16_t)total_parts_sz;
+
+	for (uint16_t part = 1u; part <= total_parts; part++) {
+		uint8_t req[1280];
+		uint8_t ind[128];
+		size_t ind_len = 0;
+		size_t off = (size_t)(part - 1u) * chunk;
+		uint16_t plen = (uint16_t)((data_len - off > chunk)
+						   ? chunk
+						   : (data_len - off));
+		uint16_t txn = alloc_txn(client);
+		size_t len = spx_qmi_loc_encode_inject_xtra_part(
+			req, sizeof(req), txn, msg_id, (uint32_t)data_len,
+			total_parts, part, data + off, plen);
+		uint32_t st = 1;
+		int r;
+
+		if (len == 0)
+			return -1;
+		r = qmi_exchange_with_ind(client, req, len, txn, msg_id,
+					  timeout_ms, qmi_res, ind, sizeof(ind),
+					  &ind_len);
+		if (r != 0)
+			return r;
+		if (spx_qmi_loc_decode_indication_status(ind, ind_len, msg_id,
+							 &st) != 0)
+			return -1;
+		if (st != 0)
+			return 1;
+	}
+	return 0;
+}
+
+int spx_qmi_loc_inject_xtra_data(struct spx_qmi_loc_client *client,
+				 const uint8_t *data, size_t data_len,
+				 int timeout_ms,
+				 struct spx_qmi_result *qmi_res)
+{
+	struct spx_qmi_result local_res = {0, 0};
+	struct spx_qmi_result *res_ptr = qmi_res ? qmi_res : &local_res;
+	int r = inject_xtra_with_msg_id(client, SPX_QMI_LOC_INJECT_XTRA_DATA,
+					data, data_len, timeout_ms, res_ptr);
+	if (r == 1 && res_ptr->error == 0x005Eu) {
+		/* Fallback for legacy modems that only support 0x0035. */
+		r = inject_xtra_with_msg_id(
+			client, SPX_QMI_LOC_INJECT_PREDICTED_ORBITS_DATA, data,
+			data_len, timeout_ms, res_ptr);
+	}
+	return r;
 }
 
 int spx_qmi_loc_recv(struct spx_qmi_loc_client *client, uint8_t *buf,

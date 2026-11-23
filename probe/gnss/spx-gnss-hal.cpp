@@ -30,7 +30,10 @@
 #include <cmath>
 #include <cstring>
 #include <ctime>
+#include <functional>
+#include <map>
 #include <memory>
+#include <utility>
 #include <mutex>
 #include <poll.h>
 #include <set>
@@ -49,7 +52,7 @@ namespace vc = ::aidl::android::hardware::gnss::visibility_control;
 constexpr const char *kLogTag = "SpxGnssHal";
 constexpr int kQmiTimeoutMs = 3000;
 constexpr int kReconnectDelayMs = 2000;
-constexpr float kMaxAcceptableInProgressHorUncM = 50000.0f;
+constexpr float kMaxAcceptableInProgressHorUncM = 500.0f;
 constexpr float kDefaultHorUncM = 25.0f;
 
 static void logInfo(const char *msg) {
@@ -81,9 +84,14 @@ static GnssConstellationType mapQmiSystem(uint32_t sys) {
     case SPX_QMI_LOC_SYSTEM_GLONASS:
         return GnssConstellationType::GLONASS;
     case SPX_QMI_LOC_SYSTEM_COMPASS:
+    case SPX_QMI_LOC_SYSTEM_BDS:
         return GnssConstellationType::BEIDOU;
     case SPX_QMI_LOC_SYSTEM_GALILEO:
         return GnssConstellationType::GALILEO;
+    case SPX_QMI_LOC_SYSTEM_QZSS:
+        return GnssConstellationType::QZSS;
+    case SPX_QMI_LOC_SYSTEM_NAVIC:
+        return GnssConstellationType::IRNSS;
     default:
         return GnssConstellationType::UNKNOWN;
     }
@@ -106,6 +114,102 @@ static GnssConstellationType mapNmeaTalker(enum spx_nmea_talker talker) {
     }
 }
 
+static GnssConstellationType mapNmeaConstellation(enum spx_nmea_talker talker, uint16_t prn) {
+    if (talker == SPX_NMEA_TALKER_GP) {
+        if ((prn >= 33u && prn <= 64u) || (prn >= 120u && prn <= 158u) ||
+            (prn >= 183u && prn <= 191u)) {
+            return GnssConstellationType::SBAS;
+        }
+        if (prn >= 193u && prn <= 200u) {
+            return GnssConstellationType::QZSS;
+        }
+    }
+    return mapNmeaTalker(talker);
+}
+
+static int32_t normalizeSvId(GnssConstellationType c, uint16_t rawId) {
+    switch (c) {
+    case GnssConstellationType::SBAS:
+        if (rawId >= 33u && rawId <= 64u) {
+            return static_cast<int32_t>(rawId + 87u);
+        }
+        return static_cast<int32_t>(rawId);
+    case GnssConstellationType::GLONASS:
+        if (rawId >= 65u && rawId <= 96u) {
+            return static_cast<int32_t>(rawId - 64u);
+        }
+        return static_cast<int32_t>(rawId);
+    case GnssConstellationType::BEIDOU:
+        if (rawId >= 201u && rawId <= 263u) {
+            return static_cast<int32_t>(rawId - 200u);
+        }
+        return static_cast<int32_t>(rawId);
+    case GnssConstellationType::GALILEO:
+        if (rawId >= 301u && rawId <= 336u) {
+            return static_cast<int32_t>(rawId - 300u);
+        }
+        return static_cast<int32_t>(rawId);
+    default:
+        return static_cast<int32_t>(rawId);
+    }
+}
+
+using SvKey = std::pair<GnssConstellationType, int32_t>;
+
+/* Maps Qualcomm QMI LOC 0x0024 TLV 0x2C globally unique SV IDs into
+ * Android (GnssConstellationType, normalizedSvid) pairs.
+ */
+static SvKey classifyQmiUsedSvId(uint16_t rawId) {
+    if (rawId >= 1u && rawId <= 32u) {
+        return {GnssConstellationType::GPS, static_cast<int32_t>(rawId)};
+    }
+    if (rawId >= 33u && rawId <= 64u) {
+        return {GnssConstellationType::SBAS, static_cast<int32_t>(rawId + 87u)};
+    }
+    if (rawId >= 65u && rawId <= 96u) {
+        return {GnssConstellationType::GLONASS, static_cast<int32_t>(rawId - 64u)};
+    }
+    if ((rawId >= 120u && rawId <= 158u) || (rawId >= 183u && rawId <= 191u)) {
+        return {GnssConstellationType::SBAS, static_cast<int32_t>(rawId)};
+    }
+    if (rawId >= 193u && rawId <= 200u) {
+        return {GnssConstellationType::QZSS, static_cast<int32_t>(rawId)};
+    }
+    if (rawId >= 201u && rawId <= 263u) {
+        return {GnssConstellationType::BEIDOU, static_cast<int32_t>(rawId - 200u)};
+    }
+    if (rawId >= 301u && rawId <= 336u) {
+        return {GnssConstellationType::GALILEO, static_cast<int32_t>(rawId - 300u)};
+    }
+    return {GnssConstellationType::UNKNOWN, static_cast<int32_t>(rawId)};
+}
+
+/* Maps NMEA-0183 v4.11 GSA system ID field (or talker fallback) to constellation. */
+static GnssConstellationType mapGsaConstellation(const spx_nmea_sentence &parsed, uint16_t rawId) {
+    if (parsed.u.gsa.has_system_id) {
+        switch (parsed.u.gsa.system_id) {
+        case 1u:
+            return mapNmeaConstellation(SPX_NMEA_TALKER_GP, rawId);
+        case 2u:
+            return GnssConstellationType::GLONASS;
+        case 3u:
+            return GnssConstellationType::GALILEO;
+        case 4u:
+            return GnssConstellationType::BEIDOU;
+        case 5u:
+            return GnssConstellationType::QZSS;
+        case 6u:
+            return GnssConstellationType::IRNSS;
+        default:
+            break;
+        }
+    }
+    if (parsed.talker == SPX_NMEA_TALKER_GN) {
+        return classifyQmiUsedSvId(rawId).first;
+    }
+    return mapNmeaConstellation(parsed.talker, rawId);
+}
+
 static float carrierFrequencyForConstellation(GnssConstellationType c) {
     switch (c) {
     case GnssConstellationType::GPS:
@@ -117,6 +221,8 @@ static float carrierFrequencyForConstellation(GnssConstellationType c) {
         return 1602000000.0f;
     case GnssConstellationType::BEIDOU:
         return 1561098000.0f;
+    case GnssConstellationType::IRNSS:
+        return 1176450000.0f;
     default:
         return 0.0f;
     }
@@ -150,12 +256,11 @@ static bool positionShouldReport(const spx_qmi_loc_position &pos, GnssLocation *
     bool isSuccess = (pos.session_status == SPX_QMI_LOC_SESSION_SUCCESS);
     bool isInProgressSat =
         (pos.session_status == SPX_QMI_LOC_SESSION_IN_PROGRESS) &&
-        (pos.sats_used_count > 0 ||
-         (pos.has_technology && (pos.technology & SPX_QMI_LOC_TECH_SATELLITE) != 0));
+        pos.sats_used_count >= 4 &&
+        hasHorUnc && horUnc <= kMaxAcceptableInProgressHorUncM &&
+        (!pos.has_technology || (pos.technology & SPX_QMI_LOC_TECH_SATELLITE) != 0);
 
     if (!isSuccess && !isInProgressSat)
-        return false;
-    if (!isSuccess && hasHorUnc && horUnc > kMaxAcceptableInProgressHorUncM)
         return false;
 
     GnssLocation loc{};
@@ -374,12 +479,48 @@ class SpxGnssVisibilityControl final : public vc::BnGnssVisibilityControl {
 
 class SpxGnssPsds final : public BnGnssPsds {
   public:
-    ScopedAStatus injectPsdsData(PsdsType, const std::vector<uint8_t> &psdsData) override {
-        if (psdsData.empty()) {
+    using InjectHandler = std::function<bool(PsdsType, const std::vector<uint8_t> &)>;
+
+    void setInjectHandler(InjectHandler handler) {
+        std::lock_guard<std::mutex> lock(mMutex);
+        mInjectHandler = std::move(handler);
+    }
+
+    void requestDownload(PsdsType type) {
+        std::shared_ptr<IGnssPsdsCallback> cb;
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            int64_t nowNs = bootTimeNs();
+            constexpr int64_t kMinIntervalNs = 600LL * 1000000000LL;
+            if (mLastReqNs > 0 && (nowNs - mLastReqNs) < kMinIntervalNs) {
+                return;
+            }
+            mLastReqNs = nowNs;
+            cb = mCb;
+        }
+        if (cb) {
+            __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                                "Requesting PSDS/XTRA download (type=%d)",
+                                static_cast<int>(type));
+            cb->downloadRequestCb(type);
+        }
+    }
+
+    ScopedAStatus injectPsdsData(PsdsType psdsType, const std::vector<uint8_t> &psdsData) override {
+        if (psdsData.empty() || psdsData.size() > 512u * 1024u) {
             return ScopedAStatus::fromServiceSpecificError(IGnss::ERROR_INVALID_ARGUMENT);
+        }
+        InjectHandler handler;
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            handler = mInjectHandler;
+        }
+        if (handler && !handler(psdsType, psdsData)) {
+            return ScopedAStatus::fromServiceSpecificError(IGnss::ERROR_GENERIC);
         }
         return ScopedAStatus::ok();
     }
+
     ScopedAStatus setCallback(const std::shared_ptr<IGnssPsdsCallback> &cb) override {
         std::lock_guard<std::mutex> lock(mMutex);
         mCb = cb;
@@ -389,6 +530,8 @@ class SpxGnssPsds final : public BnGnssPsds {
   private:
     std::mutex mMutex;
     std::shared_ptr<IGnssPsdsCallback> mCb;
+    InjectHandler mInjectHandler;
+    int64_t mLastReqNs = 0;
 };
 
 struct CachedState {
@@ -405,6 +548,9 @@ struct CachedState {
 
     bool pendingDeleteAiding = false;
     bool pendingReconfigMode = false;
+
+    bool hasPendingPsds = false;
+    std::vector<uint8_t> pendingPsdsData;
 
     bool hasLastFix = false;
     GnssLocation lastFix{};
@@ -449,7 +595,11 @@ class SpxGnss final : public BnGnss {
           mAntenna(ndk::SharedRefBase::make<SpxGnssAntennaInfo>()),
           mVisibility(ndk::SharedRefBase::make<SpxGnssVisibilityControl>()),
           mPsds(ndk::SharedRefBase::make<SpxGnssPsds>()),
-          mDebug(ndk::SharedRefBase::make<SpxGnssDebug>(mState)) {}
+          mDebug(ndk::SharedRefBase::make<SpxGnssDebug>(mState)) {
+        mPsds->setInjectHandler([this](PsdsType, const std::vector<uint8_t> &data) {
+            return handlePsdsInjection(data);
+        });
+    }
 
     ~SpxGnss() override { stop(); }
 
@@ -474,7 +624,9 @@ class SpxGnss final : public BnGnss {
 
         std::vector<GnssSignalType> signals = {
             {GnssConstellationType::GPS, 1575420000.0, GnssSignalType::CODE_TYPE_C},
+            {GnssConstellationType::SBAS, 1575420000.0, GnssSignalType::CODE_TYPE_C},
             {GnssConstellationType::GLONASS, 1602000000.0, GnssSignalType::CODE_TYPE_C},
+            {GnssConstellationType::QZSS, 1575420000.0, GnssSignalType::CODE_TYPE_C},
             {GnssConstellationType::GALILEO, 1575420000.0, GnssSignalType::CODE_TYPE_C},
             {GnssConstellationType::BEIDOU, 1561098000.0, GnssSignalType::CODE_TYPE_D},
         };
@@ -572,6 +724,7 @@ class SpxGnss final : public BnGnss {
         if (aidingDataFlags != static_cast<GnssAidingData>(0)) {
             std::lock_guard<std::mutex> lock(mState->mutex);
             mState->pendingDeleteAiding = true;
+            mState->hasLastFix = false;
         }
         wakeWorker();
         return ScopedAStatus::ok();
@@ -723,6 +876,7 @@ class SpxGnss final : public BnGnss {
                                      SPX_QMI_LOC_EVENT_GNSS_SV_INFO |
                                      SPX_QMI_LOC_EVENT_NMEA |
                                      SPX_QMI_LOC_EVENT_INJECT_TIME_REQ |
+                                     SPX_QMI_LOC_EVENT_INJECT_PREDICTED_ORBITS_REQ |
                                      SPX_QMI_LOC_EVENT_ENGINE_STATE;
         if (spx_qmi_loc_reg_events(loc, kEvents, kQmiTimeoutMs, &res) != 0) {
             __android_log_print(ANDROID_LOG_WARN, kLogTag,
@@ -732,7 +886,47 @@ class SpxGnss final : public BnGnss {
             return false;
         }
 
-        flushPendingInjections(loc, sessionId);
+        {
+            bool hadInjectedTime = false;
+            bool hadInjectedPos = false;
+            bool hasCachedFix = false;
+            double cachedLat = 0.0;
+            double cachedLon = 0.0;
+            {
+                std::lock_guard<std::mutex> lock(mState->mutex);
+                hadInjectedTime = mState->hasInjectedTime;
+                hadInjectedPos = mState->hasInjectedPos;
+                if (mState->hasLastFix && mState->lastFix.horizontalAccuracyMeters <= 100.0) {
+                    hasCachedFix = true;
+                    cachedLat = mState->lastFix.latitudeDegrees;
+                    cachedLon = mState->lastFix.longitudeDegrees;
+                }
+            }
+            flushPendingInjections(loc, sessionId);
+            int64_t nowMs = wallTimeMs();
+            if (!hadInjectedTime && nowMs > 1700000000000LL) {
+                (void)spx_qmi_loc_inject_utc_time(loc, static_cast<uint64_t>(nowMs), 1000u,
+                                                  2 /* NETWORK */, kQmiTimeoutMs, &res);
+            }
+            if (!hadInjectedPos && hasCachedFix) {
+                (void)spx_qmi_loc_inject_position(loc, cachedLat, cachedLon, 25000.0f,
+                                                  kQmiTimeoutMs, &res);
+            }
+        }
+
+        {
+            uint64_t xtraStart = 0;
+            uint16_t xtraHours = 0;
+            if (spx_qmi_loc_get_xtra_validity(loc, kQmiTimeoutMs, &xtraStart, &xtraHours, &res) ==
+                0) {
+                __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                                    "QMI LOC XTRA validity: start=%" PRIu64 " duration=%uh",
+                                    xtraStart, unsigned(xtraHours));
+                if (xtraHours < 24u) {
+                    mPsds->requestDownload(PsdsType::LONG_TERM);
+                }
+            }
+        }
 
         spx_qmi_loc_start_params sp{};
         sp.session_id = sessionId;
@@ -770,12 +964,68 @@ class SpxGnss final : public BnGnss {
         }
     }
 
+    bool injectPsdsIntoClient(spx_qmi_loc_client *loc, const std::vector<uint8_t> &data) {
+        spx_qmi_result res{};
+        int64_t nowMs = wallTimeMs();
+        if (nowMs > 1700000000000LL) {
+            (void)spx_qmi_loc_inject_utc_time(loc, static_cast<uint64_t>(nowMs), 1000u,
+                                              2 /* NETWORK */, kQmiTimeoutMs, &res);
+        }
+        int r = spx_qmi_loc_inject_xtra_data(loc, data.data(), data.size(), kQmiTimeoutMs, &res);
+        if (r != 0) {
+            __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                                "XTRA/PSDS injection failed (%zu bytes, rc=%d res=%u err=%u)",
+                                data.size(), r, res.result, res.error);
+            return false;
+        }
+        uint64_t startUtc = 0;
+        uint16_t durHours = 0;
+        (void)spx_qmi_loc_get_xtra_validity(loc, kQmiTimeoutMs, &startUtc, &durHours, &res);
+        __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                            "Injected XTRA/PSDS data (%zu bytes, valid=%uh)",
+                            data.size(), unsigned(durHours));
+        return true;
+    }
+
+    bool handlePsdsInjection(const std::vector<uint8_t> &data) {
+        if (mRunning.load()) {
+            {
+                std::lock_guard<std::mutex> lock(mState->mutex);
+                mState->pendingPsdsData = data;
+                mState->hasPendingPsds = true;
+            }
+            wakeWorker();
+            return true;
+        }
+        /* Session idle: inject on a short-lived QRTR socket and close immediately (s2idle-safe). */
+        std::lock_guard<std::mutex> lock(mSessionMutex);
+        if (mRunning.load()) {
+            {
+                std::lock_guard<std::mutex> slock(mState->mutex);
+                mState->pendingPsdsData = data;
+                mState->hasPendingPsds = true;
+            }
+            wakeWorker();
+            return true;
+        }
+        spx_qmi_loc_client loc{};
+        spx_qmi_loc_client_init(&loc);
+        if (spx_qmi_loc_open(&loc, kQmiTimeoutMs) != 0) {
+            logWarn("QRTR lookup for idle XTRA/PSDS injection failed");
+            return false;
+        }
+        bool ok = injectPsdsIntoClient(&loc, data);
+        spx_qmi_loc_close(&loc);
+        return ok;
+    }
+
     bool flushPendingInjections(spx_qmi_loc_client *loc, uint8_t sessionId) {
-        bool doTime = false, doPos = false, doDel = false, doReconf = false;
+        bool doTime = false, doPos = false, doDel = false, doReconf = false, doPsds = false;
         int64_t timeMs = 0;
         int32_t uncMs = 0;
         double lat = 0.0, lon = 0.0;
         float horUnc = 0.0f;
+        std::vector<uint8_t> psdsData;
         {
             std::lock_guard<std::mutex> lock(mState->mutex);
             if (mState->hasInjectedTime) {
@@ -795,6 +1045,12 @@ class SpxGnss final : public BnGnss {
                 doDel = true;
                 mState->pendingDeleteAiding = false;
             }
+            if (mState->hasPendingPsds) {
+                doPsds = true;
+                psdsData = std::move(mState->pendingPsdsData);
+                mState->pendingPsdsData.clear();
+                mState->hasPendingPsds = false;
+            }
             if (mState->pendingReconfigMode) {
                 doReconf = true;
                 mState->pendingReconfigMode = false;
@@ -810,10 +1066,16 @@ class SpxGnss final : public BnGnss {
         if (doTime) {
             (void)spx_qmi_loc_inject_utc_time(loc, static_cast<uint64_t>(timeMs),
                                               static_cast<uint32_t>(std::max(1, uncMs)),
-                                              1 /* AP */, kQmiTimeoutMs, &res);
+                                              2 /* NETWORK */, kQmiTimeoutMs, &res);
         }
         if (doPos) {
             (void)spx_qmi_loc_inject_position(loc, lat, lon, horUnc, kQmiTimeoutMs, &res);
+        }
+        if (doPsds && !psdsData.empty()) {
+            if (injectPsdsIntoClient(loc, psdsData)) {
+                /* Restart active tracking session so MPSS applies fresh XTRA3 orbits immediately. */
+                doReconf = true;
+            }
         }
         if (doReconf) {
             (void)spx_qmi_loc_stop(loc, sessionId, kQmiTimeoutMs, &res);
@@ -834,7 +1096,7 @@ class SpxGnss final : public BnGnss {
     }
 
     void handleSvInfo(const uint8_t *pkt, size_t len, const spx_gnss_fix &nmeaFix,
-                      const std::set<uint16_t> &usedSet) {
+                      const std::set<SvKey> &usedSvs) {
         if (!mSvStatusActive.load())
             return;
         auto cb = getCallback();
@@ -855,14 +1117,21 @@ class SpxGnss final : public BnGnss {
                                             ? mapQmiSystem(src.system)
                                             : GnssConstellationType::GPS;
             IGnssCallback::GnssSvInfo dst{};
-            dst.svid = static_cast<int32_t>(src.sv_id);
+            dst.svid = normalizeSvId(c, src.sv_id);
             dst.constellation = c;
-            dst.cN0Dbhz = (src.valid_mask & SPX_QMI_LOC_SV_VALID_SNR) ? src.snr_dbhz : 0.0f;
+            dst.cN0Dbhz = ((src.valid_mask & SPX_QMI_LOC_SV_VALID_SNR) &&
+                           std::isfinite(src.snr_dbhz))
+                              ? src.snr_dbhz
+                              : 0.0f;
             dst.basebandCN0DbHz = dst.cN0Dbhz;
-            dst.elevationDegrees =
-                (src.valid_mask & SPX_QMI_LOC_SV_VALID_ELEVATION) ? src.elevation_deg : 0.0f;
-            dst.azimuthDegrees =
-                (src.valid_mask & SPX_QMI_LOC_SV_VALID_AZIMUTH) ? src.azimuth_deg : 0.0f;
+            dst.elevationDegrees = ((src.valid_mask & SPX_QMI_LOC_SV_VALID_ELEVATION) &&
+                                    std::isfinite(src.elevation_deg))
+                                       ? src.elevation_deg
+                                       : 0.0f;
+            dst.azimuthDegrees = ((src.valid_mask & SPX_QMI_LOC_SV_VALID_AZIMUTH) &&
+                                  std::isfinite(src.azimuth_deg))
+                                     ? src.azimuth_deg
+                                     : 0.0f;
             float freq = carrierFrequencyForConstellation(c);
             dst.carrierFrequencyHz = static_cast<int64_t>(freq);
 
@@ -876,7 +1145,7 @@ class SpxGnss final : public BnGnss {
             if ((src.nav_data_mask & 0x02u) != 0) {
                 flags |= static_cast<int32_t>(IGnssCallback::GnssSvFlags::HAS_ALMANAC_DATA);
             }
-            if (usedSet.count(src.sv_id) && !mConfig->isBlocklisted(c, dst.svid)) {
+            if (usedSvs.count({c, dst.svid}) != 0 && !mConfig->isBlocklisted(c, dst.svid)) {
                 flags |= static_cast<int32_t>(IGnssCallback::GnssSvFlags::USED_IN_FIX);
             }
             dst.svFlag = flags;
@@ -887,9 +1156,9 @@ class SpxGnss final : public BnGnss {
             out.reserve(nmeaFix.sv_count);
             for (uint8_t i = 0; i < nmeaFix.sv_count; ++i) {
                 const auto &sv = nmeaFix.svs[i];
-                GnssConstellationType c = mapNmeaTalker(sv.constellation);
+                GnssConstellationType c = mapNmeaConstellation(sv.constellation, sv.prn);
                 IGnssCallback::GnssSvInfo dst{};
-                dst.svid = sv.prn;
+                dst.svid = normalizeSvId(c, sv.prn);
                 dst.constellation = c;
                 dst.cN0Dbhz = sv.has_snr ? static_cast<float>(sv.snr_dbhz) : 0.0f;
                 dst.basebandCN0DbHz = dst.cN0Dbhz;
@@ -902,7 +1171,8 @@ class SpxGnss final : public BnGnss {
                                     ? static_cast<int32_t>(
                                           IGnssCallback::GnssSvFlags::HAS_CARRIER_FREQUENCY)
                                     : 0;
-                if (usedSet.count(sv.prn) && !mConfig->isBlocklisted(c, dst.svid)) {
+                if (usedSvs.count({c, dst.svid}) != 0 &&
+                    !mConfig->isBlocklisted(c, dst.svid)) {
                     flags |= static_cast<int32_t>(IGnssCallback::GnssSvFlags::USED_IN_FIX);
                 }
                 dst.svFlag = flags;
@@ -918,7 +1188,9 @@ class SpxGnss final : public BnGnss {
         spx_qmi_loc_client_init(&loc);
         spx_gnss_fix fix{};
         spx_gnss_fix_init(&fix);
-        std::set<uint16_t> usedSvIds;
+        std::set<SvKey> posUsedSvs;
+        bool hasPosUsedSvs = false;
+        std::map<uint8_t, std::set<SvKey>> gsaUsedBySystem;
         constexpr uint8_t kSessionId = 1;
         bool sessionOpen = startQmiSession(&loc, kSessionId);
         bool unlockedOnce = false;
@@ -991,10 +1263,18 @@ class SpxGnss final : public BnGnss {
                             if (spx_nmea_parse(nmea, nlen, &parsed) == 0) {
                                 spx_gnss_fix_apply_nmea(&fix, &parsed);
                                 if (parsed.type == SPX_NMEA_GSA) {
-                                    usedSvIds.clear();
+                                    uint8_t sysKey =
+                                        parsed.u.gsa.has_system_id
+                                            ? parsed.u.gsa.system_id
+                                            : static_cast<uint8_t>(0x80u + parsed.talker);
+                                    auto &bucket = gsaUsedBySystem[sysKey];
+                                    bucket.clear();
                                     for (uint8_t i = 0; i < parsed.u.gsa.sv_count; ++i) {
-                                        if (parsed.u.gsa.sv_ids[i] > 0) {
-                                            usedSvIds.insert(parsed.u.gsa.sv_ids[i]);
+                                        uint16_t raw = parsed.u.gsa.sv_ids[i];
+                                        if (raw > 0) {
+                                            GnssConstellationType gc =
+                                                mapGsaConstellation(parsed, raw);
+                                            bucket.insert({gc, normalizeSvId(gc, raw)});
                                         }
                                     }
                                 }
@@ -1006,18 +1286,33 @@ class SpxGnss final : public BnGnss {
                             }
                         }
                     } else if (mid == SPX_QMI_LOC_EVENT_GNSS_SV_INFO_IND) {
-                        handleSvInfo(rx, len, fix, usedSvIds);
+                        if (hasPosUsedSvs) {
+                            handleSvInfo(rx, len, fix, posUsedSvs);
+                        } else {
+                            std::set<SvKey> mergedGsa;
+                            for (const auto &kv : gsaUsedBySystem) {
+                                mergedGsa.insert(kv.second.begin(), kv.second.end());
+                            }
+                            handleSvInfo(rx, len, fix, mergedGsa);
+                        }
                     } else if (mid == SPX_QMI_LOC_EVENT_POSITION_REPORT_IND) {
                         spx_qmi_loc_position pos{};
                         if (spx_qmi_loc_decode_position_ind(rx, len, &pos) == 0) {
                             spx_gnss_fix_apply_position(&fix, &pos);
                             if (pos.has_sats_used) {
-                                usedSvIds.clear();
+                                posUsedSvs.clear();
                                 for (uint8_t i = 0; i < pos.sats_used_count; ++i) {
                                     if (pos.sats_used[i] > 0) {
-                                        usedSvIds.insert(pos.sats_used[i]);
+                                        SvKey key = classifyQmiUsedSvId(pos.sats_used[i]);
+                                        if (key.first != GnssConstellationType::UNKNOWN) {
+                                            posUsedSvs.insert(key);
+                                        }
                                     }
                                 }
+                                hasPosUsedSvs = true;
+                            } else if (pos.session_status != SPX_QMI_LOC_SESSION_SUCCESS) {
+                                posUsedSvs.clear();
+                                hasPosUsedSvs = false;
                             }
                             if ((pos.session_status == SPX_QMI_LOC_SESSION_ENGINE_LOCKED ||
                                  pos.session_status == SPX_QMI_LOC_SESSION_PHONE_OFFLINE) &&
@@ -1043,6 +1338,8 @@ class SpxGnss final : public BnGnss {
                         if (auto cb = getCallback()) {
                             cb->gnssRequestTimeCb();
                         }
+                    } else if (mid == SPX_QMI_LOC_EVENT_INJECT_PREDICTED_ORBITS_REQ_IND) {
+                        mPsds->requestDownload(PsdsType::LONG_TERM);
                     }
                 }
             }
@@ -1122,9 +1419,56 @@ static int runSelfTest() {
     }
 
     if (mapQmiSystem(SPX_QMI_LOC_SYSTEM_COMPASS) != GnssConstellationType::BEIDOU ||
+        mapQmiSystem(SPX_QMI_LOC_SYSTEM_BDS) != GnssConstellationType::BEIDOU ||
+        mapQmiSystem(SPX_QMI_LOC_SYSTEM_QZSS) != GnssConstellationType::QZSS ||
+        mapQmiSystem(SPX_QMI_LOC_SYSTEM_SBAS) != GnssConstellationType::SBAS ||
         mapQmiSystem(SPX_QMI_LOC_SYSTEM_GLONASS) != GnssConstellationType::GLONASS ||
-        mapNmeaTalker(SPX_NMEA_TALKER_GA) != GnssConstellationType::GALILEO) {
+        mapQmiSystem(SPX_QMI_LOC_SYSTEM_NAVIC) != GnssConstellationType::IRNSS ||
+        mapNmeaTalker(SPX_NMEA_TALKER_GA) != GnssConstellationType::GALILEO ||
+        mapNmeaConstellation(SPX_NMEA_TALKER_GP, 42) != GnssConstellationType::SBAS ||
+        mapNmeaConstellation(SPX_NMEA_TALKER_GP, 137) != GnssConstellationType::SBAS ||
+        mapNmeaConstellation(SPX_NMEA_TALKER_GP, 195) != GnssConstellationType::QZSS) {
         fprintf(stderr, "FAIL: constellation mapping mismatch\n");
+        return 1;
+    }
+
+    if (normalizeSvId(GnssConstellationType::SBAS, 33) != 120 ||
+        normalizeSvId(GnssConstellationType::SBAS, 129) != 129 ||
+        normalizeSvId(GnssConstellationType::GLONASS, 4) != 4 ||
+        normalizeSvId(GnssConstellationType::GLONASS, 68) != 4 ||
+        normalizeSvId(GnssConstellationType::BEIDOU, 205) != 5 ||
+        normalizeSvId(GnssConstellationType::BEIDOU, 5) != 5 ||
+        normalizeSvId(GnssConstellationType::GALILEO, 311) != 11 ||
+        normalizeSvId(GnssConstellationType::QZSS, 195) != 195) {
+        fprintf(stderr, "FAIL: svid normalization mismatch\n");
+        return 1;
+    }
+
+    /* Reject coarse 10 km IN_PROGRESS convergence report (e.g. initial window lock). */
+    spx_qmi_loc_position coarseSat{};
+    coarseSat.session_status = SPX_QMI_LOC_SESSION_IN_PROGRESS;
+    coarseSat.has_lat = true;
+    coarseSat.latitude = 31.38;
+    coarseSat.has_lon = true;
+    coarseSat.longitude = 121.53;
+    coarseSat.has_hor_unc_circular = true;
+    coarseSat.hor_unc_circular = 10000.0f;
+    coarseSat.has_technology = true;
+    coarseSat.technology = SPX_QMI_LOC_TECH_SATELLITE;
+    coarseSat.sats_used_count = 6;
+    if (positionShouldReport(coarseSat, &out)) {
+        fprintf(stderr, "FAIL: 10km coarse IN_PROGRESS report should be filtered\n");
+        return 1;
+    }
+
+    /* Verify live 5-constellation 0x0024 TLV 0x2C classification without cross-constellation collision. */
+    if (classifyQmiUsedSvId(6) != SvKey{GnssConstellationType::GPS, 6} ||
+        classifyQmiUsedSvId(69) != SvKey{GnssConstellationType::GLONASS, 5} ||
+        classifyQmiUsedSvId(42) != SvKey{GnssConstellationType::SBAS, 129} ||
+        classifyQmiUsedSvId(195) != SvKey{GnssConstellationType::QZSS, 195} ||
+        classifyQmiUsedSvId(212) != SvKey{GnssConstellationType::BEIDOU, 12} ||
+        classifyQmiUsedSvId(336) != SvKey{GnssConstellationType::GALILEO, 36}) {
+        fprintf(stderr, "FAIL: classifyQmiUsedSvId mismatch\n");
         return 1;
     }
 
