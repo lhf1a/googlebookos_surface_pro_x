@@ -234,7 +234,7 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ## 文档索引
 
 ### 构建、依赖与部署
-- [RELEASE-NOTES](docs/RELEASE-NOTES.zh-CN.md) — 版本发布与更新日志（`v0.7.0`–`v0.9.0`）
+- [RELEASE-NOTES](docs/RELEASE-NOTES.zh-CN.md) — 版本发布与更新日志（`v0.7.0`–`v0.9.3`）
 - [BUILD](docs/BUILD.zh-CN.md)
 - [STANDARD-BUILD](docs/STANDARD-BUILD.zh-CN.md)
 - [DEPENDENCIES](docs/DEPENDENCIES.zh-CN.md)

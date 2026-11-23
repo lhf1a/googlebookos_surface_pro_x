@@ -4,6 +4,17 @@
 
 ---
 
+## v0.9.3 (2026-11-24)
+
+- **GNSS / GPS XTRA3 PSDS 注入与 5 星座定位收敛修复**：新增 QMI LOC `0x00A7` XTRA3 PSDS 分片注入（`xtra3grcej.bin`，结合 `0x0038` UTC 注入与 `0x0037` 168 小时有效性校验）及 `/system/etc/gps_debug.conf` 高通 XTRA3 服务器挂载；补全 5 星座映射（GPS、GLONASS、Galileo、北斗 `system=6`、QZSS `system=7` 及 SBAS/NavIC）与 6 种信号类型，按 `(constellation, svid)` 准确追踪 `USED_IN_FIX`，并将 `IN_PROGRESS` 水平误差门槛收紧至 `<= 500 m` 且 `>= 4` 颗卫星。
+- **下口 USB-C 自动角色切换与外接 DP `s2idle` 唤醒修复**：下口 USB-C 默认改为 `auto` 自动模式，新增事件驱动 `spx-lower-usb-watch`、**高级设置** 模式切换（自动 / 主机 / ADB）以及 `spx-typec` 角色串行化、`-ETIMEDOUT` 重试与 KMS 前 QMP mux 同步；通过 `patches/spx-dp-s2idle.patch` 保持链路/像素时钟并延迟 HPD 重训修复外接 DP 休眠唤醒卡顿；补全 `SurfaceDisplaySettings` 中英本地化，并将构建脚本默认并行度调整为 `max(1, nproc - 1)`。
+- **SC8180X `s2idle` 防卡死与调度/中断性能优化**：合入 `0013`–`0016` 内核补丁（`mm0` 保活、GCC RPM、UCSI 休眠取消恢复队列、SPMI PDC 唤醒设备树补丁）；启用 `CONFIG_PREEMPT`、`CONFIG_NO_HZ_IDLE`、`CONFIG_HZ_250`、`CONFIG_UCLAMP_TASK`、`CONFIG_CPU_IDLE_GOV_TEO` 与 `CONFIG_QCOM_ICC_BWMON`；新增 `spx-irq-balance-boot` 将高频 GICv3 外设中断均衡分散至小核 `cpu1..cpu3`，并增强 `device_faker` LKM 跨内核 `vermagic` ABI 自动重载。
+- **850nm 红外人脸实时预览录入 UI 与多方向解锁**：新增 Settings RRO `face_enrolling` 布局（`org.surface.face.overlay` v2），支持实时红外预览环、双语提示及保存 v3 模板前静默复验；新增基于重力传感器的 `SpxOrientationMonitor` 与多方向回退匹配（单次录入支持横屏 `0°`、音量键朝上竖屏 `270°` 与电源键朝上竖屏 `90°` 解锁），并升级侧边偏航与定向补光下的 NIR 检测、活体与对齐逻辑。
+- **AVF 虚拟机宿主 VPN 共享与 OTA 保留数据 APK 缓存刷新**：新增空闲零开销 `NETLINK_ROUTE` 监听器（`spx-avf-vpn-watch`）与通用路由同步脚本（`spx-avf-vpn-reconcile`，支持 BusyBox awk DNS 解析、清理残留 `tc` 卸载并提升回包路由优先级），在 **高级设置** 中按需开关（默认关闭）；消除 `/vendor/app` 与 `/vendor/overlay` 打包时的 `1970-01-01` 时间戳，并在在线/离线保留数据 OTA 后自动清理 `/data/system/package_cache` 与过期 vendor `dalvik-cache`。
+- **双语文档完善与仓库精简**：补全 `docs/` 下全部文档的 EN / ZH-CN 双语版本、修正 README 链接，并移除归档的 `reference/` 二进制文件。
+
+---
+
 ## v0.9.0 (2026-11-21)
 
 - **OV7251 850nm 红外人脸解锁（Class 2）与霍尔合盖休眠（`SW_LID`）**：新增 `IFace` AIDL V4 HAL（`android.hardware.biometrics.face-service.default`）及红外预览浮层（`spx-face-overlay.apk`），支持正脸录入与锁屏快速匹配；集成 TLMM GPIO 121 硬件霍尔 `SW_LID`（标记为 `Lid Switch` 适配 `touchpad-inhibitor`），联动 Type Cover 状态控制合盖休眠。

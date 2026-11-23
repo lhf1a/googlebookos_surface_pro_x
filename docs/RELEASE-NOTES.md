@@ -4,6 +4,17 @@ Prebuilt disk images (`*.img.gz`), ESP OTA packages (`*-ota-esp-*.tar.gz`), and 
 
 ---
 
+## v0.9.3 (2026-11-24)
+
+- **GNSS / GPS XTRA3 PSDS Injection & 5-Constellation Convergence**: Added QMI LOC `0x00A7` XTRA3 PSDS chunk injection (`xtra3grcej.bin`, 168h validity via `0x0037` + UTC injection via `0x0038`) and Qualcomm XTRA3 server config bind-mount; mapped all 5 constellations (GPS, GLONASS, Galileo, BeiDou `system=6`, QZSS `system=7`, plus SBAS/NavIC) across 6 signal types, tracked `USED_IN_FIX` per `(constellation, svid)`, and tightened `IN_PROGRESS` horizontal uncertainty filtering to `<= 500 m` with `>= 4` SVs.
+- **Auto Lower USB-C Role Switching & External DP `s2idle` Resume**: Set lower USB-C default to `auto` with event-driven `spx-lower-usb-watch` (automatic host/ADB gadget switching), Advanced Settings controls (`Auto` / `Host` / `ADB`), and `spx-typec` role serialization / `-ETIMEDOUT` retry / pre-KMS QMP mux sync; fixed external DisplayPort post-`s2idle` resume stalls in `patches/spx-dp-s2idle.patch` with deferred HPD retraining; localized `SurfaceDisplaySettings` (EN/ZH) and defaulted build parallelism to `max(1, nproc - 1)`.
+- **SC8180X `s2idle` Hang Prevention & Scheduler/IRQ Performance**: Added kernel patches `0013`–`0016` (`mm0` keepalive, GCC RPM, UCSI suspend work cancel, SPMI PDC wake DT patching); enabled `CONFIG_PREEMPT`, `CONFIG_NO_HZ_IDLE`, `CONFIG_HZ_250`, `CONFIG_UCLAMP_TASK`, `CONFIG_CPU_IDLE_GOV_TEO`, and `CONFIG_QCOM_ICC_BWMON`; added portable `spx-irq-balance-boot` spreading high-rate GICv3 IRQs across little cores `cpu1..cpu3` and `vermagic` ABI detection for bundled `device_faker` LKM across kernel upgrades.
+- **IR Face Unlock Live Enroll UI & Multi-Orientation Unlock**: Added Settings RRO `face_enrolling` layout (`org.surface.face.overlay` v2) with live IR preview ring, bilingual copy, and silent post-collection template verification; added gravity-backed `SpxOrientationMonitor` + multi-orientation fallback (single enrollment unlocks across Landscape `0°`, Volume-at-TOP `270°`, and Power-at-TOP `90°`) with improved side-bezel yaw/lighting NIR detection and liveness checks.
+- **AVF VM Host VPN Sharing & OTA Keep-Data APK Cache Refresh**: Added zero-idle-overhead `NETLINK_ROUTE` watcher (`spx-avf-vpn-watch`) and generic reconciler (`spx-avf-vpn-reconcile`) to route AVF VM traffic through any active host VPN (default off in Advanced Settings, with BusyBox awk DNS parsing, stale `tc` offload detach, and high-priority return rules); avoided `1970-01-01` APK staging timestamps and cleared `/data/system/package_cache` + stale vendor APK/overlay `dalvik-cache` on both online and offline keep-data OTA updates.
+- **Bilingual Docs & Repo Cleanup**: Completed full EN / ZH-CN documentation under `docs/`, fixed README links, and removed archived `reference/` binaries.
+
+---
+
 ## v0.9.0 (2026-11-21)
 
 - **OV7251 850nm IR Face Unlock (Class 2) & Hardware Hall `SW_LID`**: Added `IFace` AIDL V4 HAL (`android.hardware.biometrics.face-service.default`) with HAL-side IR preview overlay (`spx-face-overlay.apk`) for frontal capture and fast lock-screen matching; wired TLMM GPIO 121 Hall `SW_LID` (`Lid Switch` for `touchpad-inhibitor`) alongside Type Cover state.
