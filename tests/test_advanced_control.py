@@ -1665,6 +1665,7 @@ else:
                     assert(spx_is_vpn_iface("wlan0") == 0);
                     assert(spx_is_vpn_iface("avf_tap_fixed") == 0);
 
+                    assert(spx_is_owned_rule_priority(11900) == 1);
                     assert(spx_is_owned_rule_priority(12100) == 1);
                     assert(spx_is_owned_rule_priority(12400) == 1);
                     assert(spx_is_owned_rule_priority(12500) == 1);
@@ -1679,6 +1680,7 @@ else:
                     assert(spx_nlmsg_is_relevant(make_addr_msg(buf, RTM_DELADDR, 30), mock_idx_to_name) == 0);
                     assert(spx_nlmsg_is_relevant(make_addr_msg(buf, RTM_DELADDR, 99), mock_idx_to_name) == 1);
 
+                    assert(spx_nlmsg_is_relevant(make_rule_msg(buf, RTM_NEWRULE, 11900), mock_idx_to_name) == 0);
                     assert(spx_nlmsg_is_relevant(make_rule_msg(buf, RTM_NEWRULE, 12100), mock_idx_to_name) == 0);
                     assert(spx_nlmsg_is_relevant(make_rule_msg(buf, RTM_DELRULE, 12400), mock_idx_to_name) == 0);
                     assert(spx_nlmsg_is_relevant(make_rule_msg(buf, RTM_NEWRULE, 12500), mock_idx_to_name) == 0);
@@ -1847,6 +1849,17 @@ elif args[:3] == ['settings', 'put', 'global'] and len(args) == 5:
 elif args == ['settings', 'delete', 'global', 'tether_offload_disabled']:
     st['tether_offload_disabled'] = None
     save()
+elif args[:4] == ['tc', 'filter', 'show', 'dev'] and len(args) == 6 and args[5] == 'ingress':
+    dev = args[4]
+    for line in st.get('tc_ingress', {{}}).get(dev, []):
+        print(line)
+elif args[:4] == ['tc', 'filter', 'del', 'dev'] and len(args) == 10 and args[5] == 'ingress' and args[6] == 'pref' and args[8] == 'protocol':
+    dev, pref, proto = args[4], args[7], args[9]
+    filters = st.get('tc_ingress', {{}}).get(dev, [])
+    st.setdefault('tc_ingress', {{}})[dev] = [
+        l for l in filters if not (f'protocol {{proto}} ' in l and f'pref {{pref}} ' in l)
+    ]
+    save()
 elif args[0] in ('iptables', 'ip6tables'):
     tool = args[0]
     rest = [a for a in args[1:] if a != '-w']
@@ -1887,185 +1900,218 @@ else:
                     nat['oem_nat_pre'] = []
                 return {'filter': {'oem_fwd': []}, 'nat': nat, 'mangle': {'FORWARD': []}}
 
-            def run_rec(cmd='apply'):
-                env = dict(
-                    os.environ,
-                    SPX_AVF_VPN_ANDROID_WRAPPER=str(wrapper),
-                    SPX_AVF_VPN_RUN=str(run_dir),
-                    SPX_AVF_VPN_PROC_SYS_NET=str(proc_net),
-                    SPX_AVF_VPN_STATE_FILE=str(state_file),
-                )
-                res = subprocess.run(['sh', str(reconcile), cmd], env=env, text=True, capture_output=True)
-                self.assertEqual(res.returncode, 0, res.stderr)
-                parsed = {}
-                for line in state_file.read_text().splitlines():
-                    if '=' in line:
-                        k, v = line.split('=', 1)
-                        parsed[k] = v
-                return parsed, json.loads(net_state_file.read_text())
+            shell_variants = [('sh', 'sh', None)]
+            busybox = shutil.which('busybox')
+            if busybox:
+                bb_bin = work / 'bb_bin'
+                bb_bin.mkdir()
+                for tool in ('awk', 'sed', 'grep', 'tr', 'head', 'tail', 'cut', 'mkdir', 'rm', 'mv', 'chmod'):
+                    (bb_bin / tool).symlink_to(busybox)
+                shell_variants.append(('busybox', busybox, str(bb_bin)))
 
-            # 1. Global IPv4 VPN with DNS (e.g. corporate or Fake-IP), placeholder fd00::1/128, offload null -> 1
-            base_state = {
-                'tether_offload_disabled': None,
-                'links': [
-                    '2: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP',
-                    '5: avf_tap_fixed: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP',
-                    '6: tun0: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1300 state UNKNOWN',
-                ],
-                'addrs4': [
-                    '2: wlan0    inet 172.20.10.5/28 scope global wlan0',
-                    '5: avf_tap_fixed    inet 192.168.0.1/24 scope global avf_tap_fixed',
-                    '6: tun0    inet 10.126.126.3/24 scope global tun0',
-                ],
-                'addrs6': [],
-                'rules4': [
-                    '13000: from all fwmark 0x0/0x20000 iif lo uidrange 0-99999 lookup tun0',
-                    '18000: from all iif avf_tap_fixed lookup wlan0',
-                ],
-                'rules6': [],
-                'routes4_dev': {'avf_tap_fixed': ['192.168.0.0/24 proto kernel scope link src 192.168.0.1']},
-                'routes4_tables': {'tun0': ['0.0.0.0/1 dev tun0 scope link', '128.0.0.0/1 dev tun0 scope link']},
-                'routes6_tables': {'tun0': ['fd00::1 dev tun0 table tun0 proto static metric 1024']},
-                'routes6_dev': {},
-                'dnsresolver': textwrap.dedent('''\
-                    NetId: 101
-                      DNS servers: # IP
-                        10.20.0.2 (1, 1, 0)
-                      Interface names: [tun0]
-                    NetId: 100
-                      DNS servers: # IP
-                        172.20.10.1 (1, 1, 0)
-                      Interface names: [wlan0]
-                '''),
-                'connectivity': '',
-                'iptables': empty_tables(True),
-                'ip6tables': empty_tables(False),
-            }
-            net_state_file.write_text(json.dumps(base_state))
-            parsed, st = run_rec('apply')
-            self.assertEqual(parsed['active'], '1')
-            self.assertEqual(parsed['vpn_if'], 'tun0')
-            self.assertEqual(parsed['vpn_dns'], '10.20.0.2')
-            self.assertEqual(parsed['vpn_v4_global'], '1')
-            self.assertEqual(parsed['vpn_has_v6'], '0')
-            self.assertEqual(st['tether_offload_disabled'], '1')
-            self.assertEqual((proc_net / 'ipv4/ip_forward').read_text().strip(), '1')
-            self.assertEqual((proc_net / 'ipv4/conf/tun0/rp_filter').read_text().strip(), '0')
-            self.assertEqual((proc_net / 'ipv4/conf/avf_tap_fixed/rp_filter').read_text().strip(), '0')
-            self.assertTrue(any('12500' in r and 'iif avf_tap_fixed lookup tun0' in r for r in st['rules4']))
-            self.assertEqual(len(st['iptables']['filter']['oem_fwd']), 2)
-            self.assertEqual(len(st['iptables']['nat']['POSTROUTING']), 1)
-            self.assertEqual(len(st['iptables']['nat']['oem_nat_pre']), 2)
-            self.assertIn('10.20.0.2:53', st['iptables']['nat']['oem_nat_pre'][0])
-            self.assertEqual(len(st['iptables']['mangle']['FORWARD']), 2)
-            self.assertEqual(len(st['ip6tables']['filter']['oem_fwd']), 1)
-            self.assertIn('REJECT', st['ip6tables']['filter']['oem_fwd'][0])
+            for variant_name, shell_exe, extra_bin in shell_variants:
+                with self.subTest(shell=variant_name):
+                    (run_dir / 'spx-avf-vpn.offload_prev').unlink(missing_ok=True)
+                    state_file.unlink(missing_ok=True)
 
-            # 1b. Repeated apply is idempotent (no duplicated rules)
-            parsed2, st2 = run_rec('apply')
-            self.assertEqual(parsed2, parsed)
-            self.assertEqual(len(st2['iptables']['filter']['oem_fwd']), 2)
-            self.assertEqual(len(st2['iptables']['nat']['oem_nat_pre']), 2)
-            self.assertEqual(len(st2['ip6tables']['filter']['oem_fwd']), 1)
+                    def run_rec(cmd='apply'):
+                        base_path = '/bin:/usr/bin'
+                        env_path = f'{extra_bin}:{base_path}' if extra_bin else os.environ.get('PATH', base_path)
+                        env = dict(
+                            os.environ,
+                            PATH=env_path,
+                            SPX_AVF_VPN_ANDROID_WRAPPER=str(wrapper),
+                            SPX_AVF_VPN_RUN=str(run_dir),
+                            SPX_AVF_VPN_PROC_SYS_NET=str(proc_net),
+                            SPX_AVF_VPN_STATE_FILE=str(state_file),
+                        )
+                        cmd_argv = [shell_exe, 'sh', str(reconcile), cmd] if shell_exe == busybox else [shell_exe, str(reconcile), cmd]
+                        res = subprocess.run(cmd_argv, env=env, text=True, capture_output=True)
+                        self.assertEqual(res.returncode, 0, res.stderr)
+                        parsed = {}
+                        for line in state_file.read_text().splitlines():
+                            if '=' in line:
+                                k, v = line.split('=', 1)
+                                parsed[k] = v
+                        return parsed, json.loads(net_state_file.read_text())
 
-            # 2. Split-tunnel wg0 in numeric table 51820 with NO DNS: no DNAT, no IPv6 REJECT
-            split_state = {
-                'tether_offload_disabled': None,
-                'links': [
-                    '5: avf_tap_fixed: <BROADCAST,MULTICAST,UP,LOWER_UP> state UP',
-                    '7: wg0: <POINTOPOINT,NOARP,UP> state UNKNOWN',
-                ],
-                'addrs4': [
-                    '5: avf_tap_fixed    inet 192.168.0.1/24 scope global avf_tap_fixed',
-                    '7: wg0    inet 10.99.0.2/24 scope global wg0',
-                ],
-                'addrs6': [],
-                'rules4': ['13000: from all uidrange 0-99999 lookup 51820'],
-                'rules6': [],
-                'routes4_dev': {'avf_tap_fixed': ['192.168.0.0/24 proto kernel scope link src 192.168.0.1']},
-                'routes4_tables': {'51820': ['10.99.0.0/16 dev wg0 scope link']},
-                'routes6_tables': {'51820': []},
-                'routes6_dev': {},
-                'dnsresolver': 'NetId: 102\n  No DNS servers defined\n  Interface names: [wg0]\n',
-                'connectivity': '',
-                'iptables': empty_tables(True),
-                'ip6tables': empty_tables(False),
-            }
-            (run_dir / 'spx-avf-vpn.offload_prev').unlink(missing_ok=True)
-            net_state_file.write_text(json.dumps(split_state))
-            parsed, st = run_rec('apply')
-            self.assertEqual(parsed['active'], '1')
-            self.assertEqual(parsed['vpn_if'], 'wg0')
-            self.assertEqual(parsed['vpn_table'], '51820')
-            self.assertEqual(parsed['vpn_dns'], '')
-            self.assertEqual(parsed['vpn_v4_global'], '0')
-            self.assertEqual(st['iptables']['nat']['oem_nat_pre'], [])
-            self.assertEqual(st['ip6tables']['filter']['oem_fwd'], [])
+                    # 1. Global IPv4 VPN with DNS, placeholder fd00::1/128, stale 12100 rule, and stale tc tether offload BPF filters
+                    base_state = {
+                        'tether_offload_disabled': None,
+                        'links': [
+                            '2: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP',
+                            '5: avf_tap_fixed: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP',
+                            '6: tun0: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1300 state UNKNOWN',
+                        ],
+                        'addrs4': [
+                            '2: wlan0    inet 172.20.10.5/28 scope global wlan0',
+                            '5: avf_tap_fixed    inet 192.168.0.1/24 scope global avf_tap_fixed',
+                            '6: tun0    inet 10.126.126.3/24 scope global tun0',
+                        ],
+                        'addrs6': [],
+                        'rules4': [
+                            '12100: from all to 192.168.0.0/24 iif tun0 lookup main',
+                            '13000: from all fwmark 0x0/0x20000 iif lo uidrange 0-99999 lookup tun0',
+                            '18000: from all iif avf_tap_fixed lookup wlan0',
+                        ],
+                        'rules6': [],
+                        'tc_ingress': {
+                            'avf_tap_fixed': [
+                                'filter protocol ipv6 pref 2 bpf chain 0 handle 0x1 prog_offload_schedcls_tether_upstream6_ether:[*fsobj] direct-action',
+                                'filter protocol ip pref 3 bpf chain 0 handle 0x1 prog_offload_schedcls_tether_upstream4_ether:[*fsobj] direct-action',
+                                'filter protocol ip pref 9 bpf chain 0 handle 0x1 custom_filter direct-action',
+                            ],
+                        },
+                        'routes4_dev': {'avf_tap_fixed': ['192.168.0.0/24 proto kernel scope link src 192.168.0.1']},
+                        'routes4_tables': {'tun0': ['0.0.0.0/1 dev tun0 scope link', '128.0.0.0/1 dev tun0 scope link']},
+                        'routes6_tables': {'tun0': ['fd00::1 dev tun0 table tun0 proto static metric 1024']},
+                        'routes6_dev': {},
+                        'dnsresolver': textwrap.dedent('''\
+                            NetId: 101
+                              DNS servers: # IP
+                                10.20.0.2 (1, 1, 0)
+                              Interface names: [tun0]
+                            NetId: 100
+                              DNS servers: # IP
+                                172.20.10.1 (1, 1, 0)
+                              Interface names: [wlan0]
+                        '''),
+                        'connectivity': '',
+                        'iptables': empty_tables(True),
+                        'ip6tables': empty_tables(False),
+                    }
+                    net_state_file.write_text(json.dumps(base_state))
+                    parsed, st = run_rec('apply')
+                    self.assertEqual(parsed['active'], '1')
+                    self.assertEqual(parsed['vpn_if'], 'tun0')
+                    self.assertEqual(parsed['vpn_dns'], '10.20.0.2')
+                    self.assertEqual(parsed['vpn_v4_global'], '1')
+                    self.assertEqual(parsed['vpn_has_v6'], '0')
+                    self.assertEqual(st['tether_offload_disabled'], '1')
+                    self.assertEqual((proc_net / 'ipv4/ip_forward').read_text().strip(), '1')
+                    self.assertEqual((proc_net / 'ipv4/conf/tun0/rp_filter').read_text().strip(), '0')
+                    self.assertEqual((proc_net / 'ipv4/conf/avf_tap_fixed/rp_filter').read_text().strip(), '0')
+                    self.assertEqual(
+                        st['tc_ingress']['avf_tap_fixed'],
+                        ['filter protocol ip pref 9 bpf chain 0 handle 0x1 custom_filter direct-action'],
+                    )
+                    self.assertFalse(any('12100' in r for r in st['rules4']))
+                    self.assertTrue(any('11900' in r and 'iif tun0 to 192.168.0.0/24 lookup main' in r for r in st['rules4']))
+                    self.assertTrue(any('12500' in r and 'iif avf_tap_fixed lookup tun0' in r for r in st['rules4']))
+                    self.assertEqual(len(st['iptables']['filter']['oem_fwd']), 2)
+                    self.assertEqual(len(st['iptables']['nat']['POSTROUTING']), 1)
+                    self.assertEqual(len(st['iptables']['nat']['oem_nat_pre']), 2)
+                    self.assertIn('10.20.0.2:53', st['iptables']['nat']['oem_nat_pre'][0])
+                    self.assertEqual(len(st['iptables']['mangle']['FORWARD']), 2)
+                    self.assertEqual(len(st['ip6tables']['filter']['oem_fwd']), 1)
+                    self.assertIn('REJECT', st['ip6tables']['filter']['oem_fwd'][0])
 
-            # 3. Non-tun0 dual-stack VPN (ipsec0 via connectivity) + DNS fallback + IPv6 forwarding
-            dual_state = {
-                'tether_offload_disabled': '0',
-                'links': [
-                    '2: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> state UP',
-                    '5: vmnic0: <BROADCAST,MULTICAST,UP> state UP',
-                    '8: ipsec0: <POINTOPOINT,NOARP,UP> state UNKNOWN',
-                ],
-                'addrs4': [
-                    '2: wlan0    inet 172.20.10.5/28 scope global wlan0',
-                    '5: vmnic0    inet 192.168.10.1/24 scope global vmnic0',
-                    '8: ipsec0    inet 172.16.0.10/24 scope global ipsec0',
-                ],
-                'addrs6': ['5: vmnic0    inet6 fd12:3456::1/64 scope global'],
-                'rules4': [],
-                'rules6': [],
-                'routes4_dev': {'vmnic0': ['192.168.10.0/24 proto kernel scope link src 192.168.10.1']},
-                'routes4_tables': {'ipsec0': ['default dev ipsec0 scope link']},
-                'routes6_tables': {'ipsec0': ['default dev ipsec0 metric 1024']},
-                'routes6_dev': {'vmnic0': ['fd12:3456::/64 proto kernel metric 256']},
-                'dnsresolver': '',
-                'connectivity': '\n'.join([
-                    '  NetworkAgentInfo{network{100} ni{WIFI CONNECTED} lp{{InterfaceName: wlan0 DnsAddresses: [ /172.20.10.1 ]}} nc{[ Transports: WIFI Capabilities: INTERNET&NOT_VPN ]} factorySerialNumber=6}',
-                    '  NetworkAgentInfo{network{105} ni{VPN CONNECTED} lp{{InterfaceName: ipsec0 DnsAddresses: [ /172.16.0.10,/172.16.0.53 ]}} nc{[ Transports: VPN ]} factorySerialNumber=9}',
-                ]),
-                'iptables': empty_tables(True),
-                'ip6tables': empty_tables(False),
-            }
-            (run_dir / 'spx-avf-vpn.offload_prev').unlink(missing_ok=True)
-            net_state_file.write_text(json.dumps(dual_state))
-            parsed, st = run_rec('apply')
-            self.assertEqual(parsed['active'], '1')
-            self.assertEqual(parsed['vpn_if'], 'ipsec0')
-            self.assertEqual(parsed['vpn_dns'], '172.16.0.53')
-            self.assertEqual(parsed['vpn_has_v6'], '1')
-            self.assertEqual((proc_net / 'ipv6/conf/all/forwarding').read_text().strip(), '1')
-            self.assertEqual(len(st['rules6']), 3)
-            self.assertEqual(len(st['ip6tables']['filter']['oem_fwd']), 2)
-            self.assertEqual(len(st['ip6tables']['nat']['POSTROUTING']), 1)
-            self.assertEqual(len(st['ip6tables']['mangle']['FORWARD']), 2)
+                    # 1b. Repeated apply is idempotent (no duplicated rules)
+                    parsed2, st2 = run_rec('apply')
+                    self.assertEqual(parsed2, parsed)
+                    self.assertEqual(len(st2['iptables']['filter']['oem_fwd']), 2)
+                    self.assertEqual(len(st2['iptables']['nat']['oem_nat_pre']), 2)
+                    self.assertEqual(len(st2['ip6tables']['filter']['oem_fwd']), 1)
 
-            # 4. Run off -> clears all v4/v6 rules and restores pre-existing tether_offload_disabled='0'
-            parsed, st = run_rec('off')
-            self.assertEqual(parsed['active'], '0')
-            self.assertEqual(parsed['mode'], 'disabled')
-            self.assertEqual(st['tether_offload_disabled'], '0')
-            self.assertEqual(st['rules4'], [])
-            self.assertEqual(st['rules6'], [])
-            self.assertEqual(st['iptables'], empty_tables(True))
-            self.assertEqual(st['ip6tables'], empty_tables(False))
+                    # 2. Split-tunnel wg0 in numeric table 51820 with NO DNS: no DNAT, no IPv6 REJECT
+                    split_state = {
+                        'tether_offload_disabled': None,
+                        'links': [
+                            '5: avf_tap_fixed: <BROADCAST,MULTICAST,UP,LOWER_UP> state UP',
+                            '7: wg0: <POINTOPOINT,NOARP,UP> state UNKNOWN',
+                        ],
+                        'addrs4': [
+                            '5: avf_tap_fixed    inet 192.168.0.1/24 scope global avf_tap_fixed',
+                            '7: wg0    inet 10.99.0.2/24 scope global wg0',
+                        ],
+                        'addrs6': [],
+                        'rules4': ['13000: from all uidrange 0-99999 lookup 51820'],
+                        'rules6': [],
+                        'routes4_dev': {'avf_tap_fixed': ['192.168.0.0/24 proto kernel scope link src 192.168.0.1']},
+                        'routes4_tables': {'51820': ['10.99.0.0/16 dev wg0 scope link']},
+                        'routes6_tables': {'51820': []},
+                        'routes6_dev': {},
+                        'dnsresolver': 'NetId: 102\n  No DNS servers defined\n  Interface names: [wg0]\n',
+                        'connectivity': '',
+                        'iptables': empty_tables(True),
+                        'ip6tables': empty_tables(False),
+                    }
+                    (run_dir / 'spx-avf-vpn.offload_prev').unlink(missing_ok=True)
+                    net_state_file.write_text(json.dumps(split_state))
+                    parsed, st = run_rec('apply')
+                    self.assertEqual(parsed['active'], '1')
+                    self.assertEqual(parsed['vpn_if'], 'wg0')
+                    self.assertEqual(parsed['vpn_table'], '51820')
+                    self.assertEqual(parsed['vpn_dns'], '')
+                    self.assertEqual(parsed['vpn_v4_global'], '0')
+                    self.assertEqual(st['iptables']['nat']['oem_nat_pre'], [])
+                    self.assertEqual(st['ip6tables']['filter']['oem_fwd'], [])
 
-            # 5. VPN disconnects while offload was originally null -> apply restores null & enters waiting
-            net_state_file.write_text(json.dumps(base_state))
-            run_rec('apply')
-            base_state_no_vpn = dict(base_state)
-            base_state_no_vpn['links'] = base_state['links'][:2]
-            base_state_no_vpn['rules4'] = ['18000: from all iif avf_tap_fixed lookup wlan0']
-            base_state_no_vpn['tether_offload_disabled'] = '1'
-            net_state_file.write_text(json.dumps(base_state_no_vpn))
-            parsed, st = run_rec('apply')
-            self.assertEqual(parsed['active'], '0')
-            self.assertEqual(parsed['mode'], 'waiting')
-            self.assertIsNone(st['tether_offload_disabled'])
-            self.assertEqual(st['rules4'], ['18000: from all iif avf_tap_fixed lookup wlan0'])
+                    # 3. Non-tun0 dual-stack VPN (ipsec0 via connectivity) + DNS fallback + IPv6 forwarding
+                    dual_state = {
+                        'tether_offload_disabled': '0',
+                        'links': [
+                            '2: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> state UP',
+                            '5: vmnic0: <BROADCAST,MULTICAST,UP> state UP',
+                            '8: ipsec0: <POINTOPOINT,NOARP,UP> state UNKNOWN',
+                        ],
+                        'addrs4': [
+                            '2: wlan0    inet 172.20.10.5/28 scope global wlan0',
+                            '5: vmnic0    inet 192.168.10.1/24 scope global vmnic0',
+                            '8: ipsec0    inet 172.16.0.10/24 scope global ipsec0',
+                        ],
+                        'addrs6': ['5: vmnic0    inet6 fd12:3456::1/64 scope global'],
+                        'rules4': [],
+                        'rules6': [],
+                        'routes4_dev': {'vmnic0': ['192.168.10.0/24 proto kernel scope link src 192.168.10.1']},
+                        'routes4_tables': {'ipsec0': ['default dev ipsec0 scope link']},
+                        'routes6_tables': {'ipsec0': ['default dev ipsec0 metric 1024']},
+                        'routes6_dev': {'vmnic0': ['fd12:3456::/64 proto kernel metric 256']},
+                        'dnsresolver': '',
+                        'connectivity': '\n'.join([
+                            '  NetworkAgentInfo{network{100} ni{WIFI CONNECTED} lp{{InterfaceName: wlan0 DnsAddresses: [ /172.20.10.1 ]}} nc{[ Transports: WIFI Capabilities: INTERNET&NOT_VPN ]} factorySerialNumber=6}',
+                            '  NetworkAgentInfo{network{105} ni{VPN CONNECTED} lp{{InterfaceName: ipsec0 DnsAddresses: [ /172.16.0.10,/172.16.0.53 ]}} nc{[ Transports: VPN ]} factorySerialNumber=9}',
+                        ]),
+                        'iptables': empty_tables(True),
+                        'ip6tables': empty_tables(False),
+                    }
+                    (run_dir / 'spx-avf-vpn.offload_prev').unlink(missing_ok=True)
+                    net_state_file.write_text(json.dumps(dual_state))
+                    parsed, st = run_rec('apply')
+                    self.assertEqual(parsed['active'], '1')
+                    self.assertEqual(parsed['vpn_if'], 'ipsec0')
+                    self.assertEqual(parsed['vpn_dns'], '172.16.0.53')
+                    self.assertEqual(parsed['vpn_has_v6'], '1')
+                    self.assertEqual((proc_net / 'ipv6/conf/all/forwarding').read_text().strip(), '1')
+                    self.assertEqual(len(st['rules6']), 3)
+                    self.assertTrue(any('11900' in r and 'iif ipsec0 to fd12:3456::/64 lookup main' in r for r in st['rules6']))
+                    self.assertEqual(len(st['ip6tables']['filter']['oem_fwd']), 2)
+                    self.assertEqual(len(st['ip6tables']['nat']['POSTROUTING']), 1)
+                    self.assertEqual(len(st['ip6tables']['mangle']['FORWARD']), 2)
+
+                    # 4. Run off -> clears all v4/v6 rules and restores pre-existing tether_offload_disabled='0'
+                    parsed, st = run_rec('off')
+                    self.assertEqual(parsed['active'], '0')
+                    self.assertEqual(parsed['mode'], 'disabled')
+                    self.assertEqual(st['tether_offload_disabled'], '0')
+                    self.assertEqual(st['rules4'], [])
+                    self.assertEqual(st['rules6'], [])
+                    self.assertEqual(st['iptables'], empty_tables(True))
+                    self.assertEqual(st['ip6tables'], empty_tables(False))
+
+                    # 5. VPN disconnects while offload was originally null -> apply restores null & enters waiting
+                    net_state_file.write_text(json.dumps(base_state))
+                    run_rec('apply')
+                    base_state_no_vpn = dict(base_state)
+                    base_state_no_vpn['links'] = base_state['links'][:2]
+                    base_state_no_vpn['rules4'] = ['18000: from all iif avf_tap_fixed lookup wlan0']
+                    base_state_no_vpn['tether_offload_disabled'] = '1'
+                    net_state_file.write_text(json.dumps(base_state_no_vpn))
+                    parsed, st = run_rec('apply')
+                    self.assertEqual(parsed['active'], '0')
+                    self.assertEqual(parsed['mode'], 'waiting')
+                    self.assertIsNone(st['tether_offload_disabled'])
+                    self.assertEqual(st['rules4'], ['18000: from all iif avf_tap_fixed lookup wlan0'])
 
     def test_bridge_daemon_avf_vpn_share_lifecycle(self):
         bridge = ROOT / 'probe/test2/spx-advanced-control-boot'

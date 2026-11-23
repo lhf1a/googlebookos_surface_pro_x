@@ -143,7 +143,7 @@ del_tagged_chain_rules() {
 }
 
 cleanup_rules() {
-    for _prio in 12100 12400 12500; do
+    for _prio in 11900 12100 12400 12500; do
         _cg=0
         while [ "$_cg" -lt 32 ] && android ip -4 rule del pref "$_prio" >/dev/null 2>&1; do
             _cg=$((_cg + 1))
@@ -187,6 +187,30 @@ enable_offload_bypass() {
     if [ "$_eo_cur" != "1" ]; then
         android settings put global tether_offload_disabled 1 >/dev/null 2>&1 || true
     fi
+}
+
+detach_vm_tether_offload_bpf() {
+    _dv_if="$1"
+    _dv_tc="$(android tc filter show dev "$_dv_if" ingress 2>/dev/null || true)"
+    [ -n "$_dv_tc" ] || return 0
+    _dv_targets="$(printf '%s\n' "$_dv_tc" | awk '
+    /tether_upstream/ {
+        proto = ""; pref = ""
+        for (i = 1; i <= NF; i++) {
+            if ($i == "protocol" && i + 1 <= NF) proto = $(i + 1)
+            if ($i == "pref" && i + 1 <= NF) pref = $(i + 1)
+        }
+        if (proto != "" && pref ~ /^[0-9]+$/ && !seen[proto ":" pref]++) {
+            print proto " " pref
+        }
+    }
+    ')"
+    while read -r _tc_proto _tc_pref; do
+        [ -n "$_tc_proto" ] && [ -n "$_tc_pref" ] || continue
+        android tc filter del dev "$_dv_if" ingress pref "$_tc_pref" protocol "$_tc_proto" >/dev/null 2>&1 || true
+    done <<EOF
+$_dv_targets
+EOF
 }
 
 is_vm_iface() {
@@ -405,7 +429,7 @@ extract_vpn_dns4() {
             in_dns = 0
             s = $0
             sub(/^  Interface names:[[:space:]]*/, "", s)
-            gsub(/[\[\],]/, " ", s)
+            gsub(/[][,]/, " ", s)
             if (index(" " s " ", " " tif " ") > 0) match_if = 1
             next
         }
@@ -433,7 +457,7 @@ extract_vpn_dns4() {
                 sub(/^InterfaceName:[[:space:]]*/, "", s)
                 if (s == tif) has_if = 1
             }
-            if (match($0, /DnsAddresses:[[:space:]]*\[[^\]]*\]/)) {
+            if (match($0, /DnsAddresses:[[:space:]]*\[[^]]*\]/)) {
                 addrs = substr($0, RSTART, RLENGTH)
             }
             if (/factorySerialNumber=/ || /NetworkAgentInfo\{.*\}[[:space:]]*$/) {
@@ -565,8 +589,9 @@ EOF
         _vm_sub="${_rest#*|}"
 
         [ -w "$PROC_SYS_NET/ipv4/conf/${_vm_if}/rp_filter" ] && printf '0\n' > "$PROC_SYS_NET/ipv4/conf/${_vm_if}/rp_filter" 2>/dev/null || true
+        detach_vm_tether_offload_bpf "$_vm_if"
 
-        android ip -4 rule add pref 12100 iif "$VPN_IF" to "$_vm_sub" lookup main >/dev/null 2>&1 || true
+        android ip -4 rule add pref 11900 iif "$VPN_IF" to "$_vm_sub" lookup main >/dev/null 2>&1 || true
         android ip -4 rule add pref 12400 iif "$_vm_if" to "$_vm_sub" lookup main >/dev/null 2>&1 || true
         android ip -4 rule add pref 12500 iif "$_vm_if" lookup "$VPN_TABLE" >/dev/null 2>&1 || true
 
@@ -584,7 +609,7 @@ EOF
             android ip6tables -w -I oem_fwd 2 -i "$VPN_IF" -o "$_vm_if" -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment avf_vpn_fwd -j ACCEPT >/dev/null 2>&1 || true
             _vm_subs6="$(android ip -6 route show dev "$_vm_if" 2>/dev/null | awk '$1 ~ /\// && $1 !~ /^fe80:/ && $1 !~ /^ff00:/ && !seen[$1]++ { print $1 }' || true)"
             for _sub6 in $_vm_subs6; do
-                android ip -6 rule add pref 12100 iif "$VPN_IF" to "$_sub6" lookup main >/dev/null 2>&1 || true
+                android ip -6 rule add pref 11900 iif "$VPN_IF" to "$_sub6" lookup main >/dev/null 2>&1 || true
                 android ip -6 rule add pref 12400 iif "$_vm_if" to "$_sub6" lookup main >/dev/null 2>&1 || true
                 android ip -6 rule add pref 12500 iif "$_vm_if" lookup "$VPN_TABLE" >/dev/null 2>&1 || true
                 android ip6tables -w -t nat -I POSTROUTING 1 -s "$_sub6" -o "$VPN_IF" -m comment --comment avf_vpn_fwd -j MASQUERADE >/dev/null 2>&1 || true

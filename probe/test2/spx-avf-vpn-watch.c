@@ -56,7 +56,7 @@ static int spx_is_vpn_iface(const char *name) {
 }
 
 static int spx_is_owned_rule_priority(uint32_t prio) {
-    return prio == 12100U || prio == 12400U || prio == 12500U;
+    return prio == 11900U || prio == 12100U || prio == 12400U || prio == 12500U;
 }
 
 static int spx_iface_interesting(const char *name) {
