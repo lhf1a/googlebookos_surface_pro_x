@@ -1,300 +1,144 @@
-# Surface Pro X (SQ1/SQ2) 霍尔传感器 + OV7251 IR 人脸解锁实施计划
+# Surface Pro X (SQ1/SQ2) Hall Sensor + OV7251 IR Face Unlock
 
-> **适用平台**：Microsoft Surface Pro X (SQ1 / SQ2)，Android 17 (`mica 16471258`) + Linux `6.18.60-sq2-android1` Hybrid (EL2)  
-> **状态**：Phase 1–5 代码已变基合入主线 `origin/main` (`54abdee`) 并实现于分支 `feat/ir-hall-face-unlock`（包含霍尔 `SW_LID` (`"Lid Switch"`) DT 补丁与反折保护内核补丁 `0012`、OV7251 850nm 预处理/加密/活体/识别引擎、`IFace/default` AIDL V4 Class 2 HAL、initramfs 阶段挂载脚本及 `SurfaceAdvancedControl` 控制面板）。SQ2 真机通过 SSH 已完成 Phase 0 极性与 Phase 1–5 系统链路实测（`GPIO 121` 开盖裸电平 `1` 确认 `GPIO_ACTIVE_LOW`、`Lid Switch` 与 `touchpad-inhibitor` 正常绑定、`IFace/default` 运行正常、`spx-face-cli` 与控制面板桥接自检全通、反折态 `folded-back` 下 `effective_lid_closed=false`）；物理合盖 `s2idle` 休眠唤醒、真人人脸录入/解锁/防欺骗、整晚待机功耗及 SQ1 机型实测尚待现场人工完成（全局暂保持 `hardware_validated = false`）。  
-> **核心原则**：不启用 QSEE fTPM、保持 `SPX-PORTABLE-SQ1-SQ2` 单镜像通用性、零常驻功耗回归、`s2idle` 休眠安全优先
-
----
-
-## 1. 目标与边界
-
-### 1.1 目标体验
-在 Surface Pro X 上构建一套原生接入 Android 17 生物识别框架、**不依赖 TPM** 的“开盖即解锁”闭环：
-1. **掀盖秒醒**：通过主板硬件霍尔传感器（TLMM GPIO 121，`SW_LID` + `wakeup-source`）直接以硬件中断唤醒 `s2idle` 休眠并亮屏进入锁屏界面，无需按电源键。
-2. **无感 IR 识别**：锁屏亮起瞬间自动触发 `android.hardware.biometrics.face.IFace` HAL，拉起前置 OV7251 红外摄像头与 850nm 红外补光灯，在 0.5–1.0 秒内完成人脸比对并直接进入桌面。
-3. **合盖即锁与防误触**：合上磁吸键盘/保护套触发 `SW_LID=1` 后立即中止任何 IR 采帧、关闭 850nm 红外灯、锁屏并进入 `s2idle`，同时杜绝合盖状态下的误唤醒、误扫黑屏与连续失败锁定。
-
-### 1.2 明确边界与非目标
-- **不启用 QSEE fTPM**：避免误触发 donor 镜像里的 ChromebookOS `gscutil`/`check_tpm_clear`、避免污染同机 Windows BitLocker/Windows Hello 的共享 fTPM 状态、避免引入 EL2 (`slbounce`) 下未验证的 QSEECOM SHM Bridge SMC 风险。
-- **诚实的安全分级（Class 2 / Weak）**：人脸特征提取与比对运行在 Linux/Android 用户态而非签名锁死的 TrustZone TA 中，按 Android Biometrics CDD 定义应声明为 **Class 2 (`WEAK`)**（支持锁屏解锁与普通便捷认证，**不宣称**满足 Class 3 `STRONG` 硬件隔离支付/KeyMint 密钥解锁要求）。
-- **单镜像通用性 (`SPX-PORTABLE-SQ1-SQ2`)**：禁止硬编码 `/dev/videoN`、`/dev/input/eventN` 或单机序列号；所有设备节点通过 sysfs/media/evdev 能力动态发现，缺失任一硬件时自动降级且不影响正常开机与密码解锁。
+> **Target Platform**: Microsoft Surface Pro X (SQ1 / SQ2), Android 17 (`mica 16471258`) + Linux `6.18.60-sq2-android1` Hybrid (EL2)  
+> **Core Principles**: No QSEE fTPM, `SPX-PORTABLE-SQ1-SQ2` single-image portability, zero resident power regression, and `s2idle` suspend safety.
 
 ---
 
-## 2. 已验证的现状基线（基于 SQ2 真机实测）
+## 1. Goals and Boundaries
 
-以下能力已在真机 `root@10.126.126.3` / `root@10.126.126.5`（`6.18.60-sq2-android1 #1 SMP Sat Nov 21 13:38:34 CST 2026`，Android 17）上实测确认：
-
-| 子系统 | 真机实测状态 | 关键事实 / 证据 |
-| :--- | :--- | :--- |
-| **OV7251 IR 硬件链路** | **已打通并完成 90° IR 引擎实测** | `ov7251 2-0060` (rev 7 / `1F`) → `csiphy3` → `csid3` → `vfe_lite1_rdi0`（与前/后 RGB 管线独立，Sensor 物理安装为 90° 旋转）；`/vendor/bin/spx-face-cli --self-test` 通过，`--benchmark-ir 30 --rotation 90` 实测 `detected=28/30`、`live=25/30`、`proc_p50_ms=18.60`、`proc_p95_ms=22.33`、`last_roi_mean=0.1673`（桥接 `--benchmark-ir 5` 实测 `proc_p50_ms=13.71`）。 |
-| **霍尔盖子开关 (`SW_LID`)** | **SQ2 开盖极性与反折态已实测，物理合盖待测** | `/dev/gpiochip3` (`qcom,sc8180x-tlmm`) offset 121 在 SSAM `laptop` 开盖态测得 `flags=0x4 raw_value=1`（确认 `GPIO_ACTIVE_LOW`）；DT `gpio-keys-lid` 注册 `event19` (`Name="Lid Switch"`, `EV=21`, `SW=1`, `switches=0`, `power/wakeup=enabled`, `linux,can-disable`)；SSAM 位于 `/sys/bus/surface_aggregator/devices/01:0e:01:00:01/state`，实测 `laptop` 与 `folded-back`（`raw_sw_tablet_mode=true`）下 `raw_sw_lid_closed=false`、`effective_lid_closed=false`。 |
-| **Android 17 盖子与防误触策略** | **已实测就绪** | `config_lidControlsSleep = true`；`/vendor/bin/hw/touchpad-inhibitor`（UID `system`、SELinux `u:r:touchpad_inhibitor:s0`）仅识别 `"Lid Switch"` 或 `"cros_ec_buttons"`，DT `label` 改为 `"Lid Switch"` 后进程不再 1Hz 报错重试，已稳定持有 `/dev/input/event19` 并阻塞在 `evdev_read`。 |
-| **Android 17 人脸 HAL (`IFace/default`)** | **AIDL V4 HAL 与设置入口已实测通过** | `/logs/face-stage.txt` = `SPX_FACE_HAL_STAGED`；`init.svc.vendor.face-default=running`（`u:r:hal_face_default:s0`，进程同时持有 `event18` 与 `event19`）；`service list` 存在 `android.hardware.biometrics.face.IFace/default`；`pm list features` 包含 `android.hardware.biometrics.face`；`dumpsys face` 列出 `sensorId: 1`（`HAL deaths: 0`）；`dumpsys biometric` 列出 `ID(1), oemStrength: 255 (WEAK), modality 8`；`android.settings.FACE_SETTINGS` 解析至 `com.android.settings.Settings$FaceSettingsActivity`（已加载 `DesktopTrafficLightFaceOverlay`）；`dumpsys media.camera` 正常枚举 2 路 RGB 相机，`dmesg` 无错误。 |
-| **`SurfaceAdvancedControl` 桥接** | **开关与一键自检双向实测通过** | `/vendor/app/SurfaceAdvancedControl/SurfaceAdvancedControl.apk` 哈希匹配；`state` 完整发布 `hall_lid_*` / `ssam_cover_state` / `face_*`；通过 `request`→`reply` 实测 `set-hall-lid 0/1`（切换 `disabled_switches`）、`set-face-unlock 0/1`（切换 `persist.spx.face.enabled`）及 `run-face-self-check` 返回 `OK`（`self_test=pass;ov7251=1;hal_running=1;lid_state=OPEN;ir_bench=pass`）。 |
-| **认证密钥与 Gatekeeper** | **可用（软件后端）** | 系统当前运行 `IKeyMintDevice/default`（软件 KeyMint）、`ISharedSecret/default`、`ISharedSecret/gatekeeper`、`IGatekeeper/default`（`gatekeeper-service.nonsecure`），可参与 `HardwareAuthToken (HAT)` 协商与校验。 |
+- **Instant Wake on Lid Open**: Motherboard Hall sensor (`TLMM GPIO 121`, `SW_LID` + `wakeup-source`) wakes `s2idle` via hardware IRQ and turns on the screen to Keyguard.
+- **Seamless IR Recognition**: Keyguard triggers `android.hardware.biometrics.face.IFace/default`, bringing up the front `OV7251` IR sensor and 850nm illuminator to unlock directly to the home screen.
+- **Lock on Lid Close & Anti-False-Trigger**: Closing the cover triggers `SW_LID=1`, immediately aborting IR capture, turning off the 850nm illuminator, locking the screen, and entering `s2idle`.
+- **No QSEE fTPM**: Avoids triggering donor `gscutil`/`check_tpm_clear`, polluting Windows BitLocker/Windows Hello shared fTPM state, or introducing unverified QSEECOM SHM Bridge SMC calls under EL2.
+- **Class 2 (`WEAK`) Biometric**: Feature extraction and matching run in userspace rather than a TrustZone TA, declared as Android Biometrics Class 2 (`WEAK`).
+- **Single-Image Portability**: No hardcoded `/dev/videoN`, `/dev/input/eventN`, or unit serial numbers; all nodes are discovered dynamically via sysfs/media/evdev.
 
 ---
 
-## 3. 整体架构与联动状态机
+## 2. Architecture and State Machine
 
-### 3.1 分层架构
+### 2.1 Layered Architecture
 
 ```mermaid
 flowchart TD
-    subgraph HW["硬件层 (SQ1 / SQ2)"]
-        HALL["主板霍尔传感器<br/>TLMM GPIO 121 (wakeup-source)"]
-        IR["OV7251 前置 IR 传感器<br/>+ 850nm STROBE 补光灯"]
-        KIP["SSAM Type Cover<br/>SW_TABLET_MODE (平板模式)"]
+    subgraph HW["Hardware Layer (SQ1 / SQ2)"]
+        HALL["Motherboard Hall Sensor<br/>TLMM GPIO 121 (wakeup-source)"]
+        IR["OV7251 Front IR Sensor<br/>+ 850nm STROBE Illuminator"]
+        KIP["SSAM Type Cover<br/>SW_TABLET_MODE"]
     end
 
-    subgraph KERNEL["Linux 6.18.60 内核层"]
+    subgraph KERNEL["Linux 6.18.60 Kernel Layer"]
         GKEY["gpio-keys-lid<br/>EV_SW / SW_LID"]
         CAMSS["qcom-camss + ov7251<br/>csiphy3 -> csid3 -> vfe_lite1_rdi0 (Y10)"]
         SSAM["surface_aggregator_tabletsw<br/>EV_SW / SW_TABLET_MODE"]
     end
 
-    subgraph NATIVE["Vendor / 原生服务层"]
-        HAL["spx-face-hal (AIDL IFace v4/v5)<br/>ISession + 锁屏超时看门狗"]
-        LIDMON["Lid 状态守卫<br/>(监听 SW_LID / SW_TABLET_MODE)"]
-        CAP["spx::Capture::openIr()<br/>640x480 Y10 + 90度旋转 + Y8 归一化"]
-        ENG["轻量 IR 识别与活体引擎<br/>(检测 + 抗欺骗 + 特征比对)"]
-        STORE["模板存储<br/>/data/vendor_de/0/spx_face/<br/>(加密模板 + 锁定计数)"]
+    subgraph NATIVE["Vendor / Native Service Layer"]
+        HAL["spx-face-hal (AIDL IFace v4)<br/>ISession + Watchdog"]
+        LIDMON["Lid State Guard<br/>SW_LID / SW_TABLET_MODE"]
+        CAP["spx::Capture::openIr()<br/>640x480 Y10 + 90-deg Rotation + Y8 Norm"]
+        ENG["IR Recognition & Liveness Engine"]
+        STORE["Template Store<br/>/data/vendor_de/<userId>/facedata/"]
     end
 
-    subgraph ANDROID["Android 17 框架与 UI 层"]
-        INP["InputManager / PowerManager<br/>(config_lidControlsSleep=true)"]
+    subgraph ANDROID["Android 17 Framework & UI Layer"]
+        INP["InputManager / PowerManager<br/>config_lidControlsSleep=true"]
         KEYG["SystemUI Keyguard / BiometricService<br/>FaceService"]
-        SET["Settings FaceEnroll / FaceSettings<br/>+ SurfaceAdvancedControl 开关"]
+        SET["Settings FaceEnroll / FaceSettings<br/>SurfaceAdvancedControl"]
         AUTH["Gatekeeper / ISharedSecret<br/>HardwareAuthToken (HAT)"]
     end
 
     HALL --> GKEY --> INP
     KIP --> SSAM --> INP
-    GKEY -. "只读事件订阅" .-> LIDMON
-    SSAM -. "平板反折防误触" .-> LIDMON
+    GKEY -. "Read-only subscription" .-> LIDMON
+    SSAM -. "Folded-back guard" .-> LIDMON
 
     IR --> CAMSS --> CAP --> ENG --> HAL
     LIDMON --> HAL
     STORE <--> HAL
     AUTH <--> HAL
 
-    INP -->|"SW_LID=0 亮屏唤醒"| KEYG
-    INP -->|"SW_LID=1 熄屏上锁"| KEYG
+    INP -->|"SW_LID=0 Wake Screen"| KEYG
+    INP -->|"SW_LID=1 Sleep & Lock"| KEYG
     KEYG <-->|"IFace / ISession"| HAL
     SET <-->|"enroll / remove"| HAL
 ```
 
-### 3.2 开盖无感解锁与合盖安全中止时序
+### 2.2 Open-Lid Unlock and Close-Lid Abort Sequence
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant User as 用户 / 磁吸盖
-    participant Hall as GPIO 121 霍尔中断
-    participant PM as Android PowerManager / Keyguard
+    participant User as User / Cover
+    participant Hall as GPIO 121 Hall IRQ
+    participant PM as PowerManager / Keyguard
     participant HAL as spx-face-hal (IFace)
     participant IR as OV7251 + 850nm STROBE
 
-    Note over User,IR: 整机处于 s2idle 深度休眠，OV7251 与红外灯完全断电
-    User->>Hall: 掀开磁吸键盘 / 保护套
-    Hall->>PM: IRQ 唤醒 SoC，上报 SW_LID=0 (LID_OPEN)
-    PM->>PM: 点亮屏幕，进入 Keyguard 锁屏界面
+    Note over User,IR: s2idle deep sleep; OV7251 and IR illuminator powered off
+    User->>Hall: Opens cover
+    Hall->>PM: IRQ wakes SoC, reports SW_LID=0
+    PM->>PM: Turns on screen, enters Keyguard
     PM->>HAL: createSession() + authenticate(operationId)
-    HAL->>HAL: 校验 SW_LID == 0 且未处于 Lockout
-    HAL->>IR: openIr(640x480) + 启动 850nm STROBE + 8s 硬看门狗
-    loop 最多 30fps（目标 3~10 帧内完成）
-        IR-->>HAL: Y10 原始帧
-        HAL->>HAL: 90° 旋转 → Y8 归一化 → 活体检测 → 人脸检测与特征比对
+    HAL->>HAL: Verifies SW_LID == 0 and not locked out
+    HAL->>IR: openIr(640x480) + 850nm STROBE + 8s watchdog
+    loop Up to 30fps
+        IR-->>HAL: Y10 raw frame
+        HAL->>HAL: 90° rotate -> Y8 norm -> liveness -> face match
     end
-    alt 匹配通过
-        HAL->>IR: 立即 stopStream() 关闭传感器与 850nm 红外灯
+    alt Match succeeds
+        HAL->>IR: stopStream() shuts down sensor & 850nm STROBE
         HAL->>PM: onAuthenticationSucceeded(enrollmentId, HAT)
-        PM-->>User: 解锁直达桌面（全流程约 0.6~1.0s）
-    else 合盖打断 (SW_LID=1) 或超时
-        User->>Hall: 合上磁吸盖
-        Hall->>HAL: 收到 SW_LID=1
-        HAL->>IR: 立即中止采帧并关闭 850nm 红外灯
-        HAL->>PM: onError(CANCELED) / PowerManager 熄屏进入 s2idle
+        PM-->>User: Unlocks to home screen
+    else Lid closed (SW_LID=1) or timeout
+        User->>Hall: Closes cover
+        Hall->>HAL: Receives SW_LID=1
+        HAL->>IR: Aborts capture & shuts off 850nm STROBE
+        HAL->>PM: onError(CANCELED) / PowerManager enters s2idle
     end
 ```
 
 ---
 
-## 4. 分阶段实施路线图
+## 3. Subsystem Design
 
-### Phase 0：前置基线与真机霍尔硬件摸底（预计 0.5 天）
+### 3.1 Hall Sensor (`SW_LID`) & Folded-Back Protection
+- `scripts/prepare-spx-lid-dtb.py` configures `TLMM GPIO 121` (`GPIO_ACTIVE_LOW`, `wakeup-source`, `linux,can-disable`) with `label = "Lid Switch"` so `/vendor/bin/hw/touchpad-inhibitor` binds to it directly.
+- System-wide `SW_LID` remains mutually exclusive with `scripts/patch-sq2-lid.py` (SSAM `SW_LID`), while `scripts/patch-spx-unknown-lid.py` protects cold-boot unknown lid states.
+- Kernel patch `0012-spx-hall-lid-ignore-folded-cover.patch` suppresses `SW_LID=1` in the input core when the keyboard is folded back (`folded-back`, `folded-canvas`, or `book`).
 
-> **目标**：消除已知阻塞项，并拿到 GPIO 121 在真实物理姿态下的实测数据，避免拍脑袋改 DT。
+### 3.2 OV7251 IR Pipeline & Engine
+- **Hardware path**: `ov7251 2-0060` → `csiphy3` → `csid3` → `vfe_lite1_rdi0` (`640×480` `V4L2_PIX_FMT_Y10`), independent of front/rear RGB cameras (`vfe0`/`vfe1`).
+- **Preprocessing (`probe/face/spx-ir-preprocess.{h,cpp}`)**: Unpacks `Y10`/`Y10P`, rotates `0/90/180/270` degrees, computes ROI brightness statistics, and normalizes to 8-bit grayscale / RGBA preview.
+- **Engine (`probe/face/spx-face-engine.{h,cpp}`)**: Active 850nm NIR detection, 3-layer liveness anti-spoofing, 256-D normalized embedding matching, and lockout state machine (5 consecutive failures → 30s lockout; 20 failures → permanent lockout requiring PIN).
+- **Encrypted Storage (`probe/face/spx-face-crypto.{h,cpp}`)**: Templates are encrypted with SHA-256 / HMAC-SHA256 / HKDF-SHA256 / ChaCha20 and stored under `/data/vendor_de/<userId>/facedata/` (mode `0700`); raw face images are never saved.
 
-1. **合入并发布相机 `mapper.quest2.so` 修复**
-   - 提交已修复的 `scripts/full_image_camera.py` 与 `tests/test_full_image_camera.py`，确保基础相机栈 100% 稳定。
-2. **真机只读摸底 TLMM GPIO 121 电平与姿态**
-   - 在 SQ2 上检查 TLMM GPIO 121 在以下 4 种姿态下的实际电平与极性：
-     - 姿态 A：无盖 / 开盖正常使用；
-     - 姿态 B：原装 Type Cover 正面合盖；
-     - 姿态 C：原装 Type Cover **反折 180° 至机身背面（平板模式）**；
-     - 姿态 D：第三方磁铁靠近霍尔传感区。
-   - **关键决策门（Gate 0）**：
-     - 若 **姿态 C（键盘反折背面）不会触发 GPIO 121**：可直接将 `gpio-keys-lid` 作为标准 `SW_LID` 启用；
-     - 若 **姿态 C 会误吸附触发 GPIO 121**：必须增加平板模式互斥策略（见 Phase 1.2），绝不能在平板模式下误黑屏。
-3. **验证 OV7251 光学与画质特征**
-   - 离线抓取暗光、室内日光、逆光、戴眼镜、不同距离（30–70 cm）各 20 帧 `Y10` 样本（测试后立即清理设备临时文件），确认 850nm STROBE 在全黑环境与强光环境下的有效信噪比与曝光范围。
+### 3.3 Android 17 `IFace` AIDL HAL & Safety Watchdogs
+- **AIDL HAL (`probe/face/spx-face-hal.cpp`)**: Implements `android.hardware.biometrics.face.IFace/default` (AIDL V4, `SensorStrength::WEAK`, `FaceSensorType::IR`, `supportsSelfIllumination = true`, `halControlsPreview = true`).
+- **HAT Verification**: Integrates with `ISharedSecret` and `Gatekeeper` (`gatekeeper-service.nonsecure`) to verify 37-byte `hw_auth_token_t` on `enroll()` and `resetLockout()`, and issue HATs on authentication.
+- **Lid Gating & Watchdog**: `spx-lid-monitor` polls `SW_LID` and SSAM posture read-only, immediately aborting capture and rejecting new `authenticate()` requests when `SW_LID == 1`. Hard watchdogs cap `authenticate()` at **6–8s** and `enroll()` at **45s**, forcing V4L2 `close()` and `ov7251_s_stream(0)` power-off; the kernel V4L2 `release` path also cuts power if the process exits unexpectedly.
 
----
-
-### Phase 1：霍尔传感器 `SW_LID` 接入与防误触机制（预计 1–2 天）
-
-> **目标**：先独立交付“开盖秒亮屏、合盖即锁屏休眠”的稳定体验，确保 `s2idle` 与平板模式零回归。
-
-1. **DT 集成与单一 `SW_LID` 约束**
-   - 将 `scripts/prepare-spx-lid-dtb.py` 接入镜像 DT 构建流程（按实测极性配置 `GPIO_ACTIVE_LOW` / `EV_ACT_DEASSERTED` 与 `wakeup-source`）。
-   - 保持与 `scripts/patch-sq2-lid.py`（SSAM `SW_LID`）严格互斥，全系统只允许存在 **唯一** `SW_LID` 输入源，保留 `scripts/patch-spx-unknown-lid.py` 对无霍尔设备/冷启动未知态的保护。
-2. **键盘反折防误触（按 Gate 0 实测按需启用）**
-   - 如果真机实测确认键盘反折会吸住霍尔传感器：
-     - 方案 1（内核层）：在 `surface_aggregator_tabletsw` 或轻量霍尔过滤驱动中，当 `SW_TABLET_MODE == 1` 且处于 `folded` 状态时屏蔽 `SW_LID=1` 上报；
-     - 方案 2（默认安全）：在 `SurfaceAdvancedControl` 中提供“霍尔开盖唤醒/合盖休眠”开关（默认按机型实测结果决定，写到持久化配置并在启动时控制 `wakeup` 使能与事件路由）。
-3. **功耗与休眠回归验证（Gate 1）**
-   - 连续 20 次“合盖 → `s2idle` 休眠 30s → 开盖唤醒”无死机、无丢唤醒、无误唤醒；
-   - 验证 `/sys/devices/platform/gpio-keys-lid/power/wakeup` 可控，`dmesg` 无中断风暴；
-   - 验证 `touchpad-inhibitor-service` 在合盖时正确抑制触控板，开盖后立即恢复。
+### 3.4 Packaging & `SurfaceAdvancedControl` Bridge
+- `probe/face/spx-face-stage` detects `ov7251` at boot and mounts the HAL, `spx-face-cli`, VINTF manifest, `android.hardware.biometrics.face` permission XML, and `.rc` service into `/vendor`.
+- `scripts/full_image_face.py` packages and validates ELF64 AArch64 binaries and injects the initramfs hook (build flags: `--without-hall-lid`, `--face-hal`, `--without-face`).
+- `SurfaceAdvancedControl` exposes `set-hall-lid 0/1`, `set-face-unlock 0/1`, and `run-face-self-check` over the `request`→`reply` bridge.
 
 ---
 
-### Phase 2：OV7251 IR 图像前处理与本地识别/活体引擎（预计 3–5 天）
+## 4. Implementation File Inventory
 
-> **目标**：先在独立 CLI 原型上把识别速度、准确率和抗照片欺骗做到达标，再封装进 Android HAL。
-
-1. **IR 采帧与前处理管线（复用 `probe/camera/spx-capture.cpp`）**
-   - 输入：`spx::Capture::openIr(640, 480)` 输出的 `V4L2_PIX_FMT_Y10`（16-bit LE 中有效 10-bit）。
-   - 处理链路（纯 C++ / ARM64 NEON 优化）：
-     1. **90° 顺/逆时针旋转**（根据 Phase 0 实测样本确定精确方向，输出 `480×640` 正立灰度图）；
-     2. **10-bit → 8-bit 稳健映射**：跳过前 2 帧自动曝光稳定期，按 1%–99% 分位数线性拉伸或轻量化直方图均衡（避免过曝白斑与暗部死黑）；
-     3. **复用自动曝光**：调用 `spx::Capture::autoExposure()` 根据人脸 ROI 区域均值动态收敛曝光/增益，确保 30–70 cm 内人脸亮度稳定。
-2. **模型选型（轻量、离线、ARM64 CPU 高速推理）**
-   - **推理运行时**：静态链接或 vendor 私有库方式打包 **ncnn**（体积小、ARM64 NEON 极快、零 Java/GPU 驱动耦合，不占用 Adreno 上下文）或轻量 ONNX Runtime ARM64。
-   - **人脸检测 + 5 关键点对齐**：`YuNet`（~230 KB）或 `SCRFD-500M`（~2.5 MB），单帧 ARM64 NEON 耗时 `< 15 ms`。
-   - **人脸特征提取（Embedding）**：`MobileFaceNet` / `GhostFaceNet`（INT8/FP16，~2–5 MB，128D 或 512D 归一化向量），针对 850nm 近红外灰度输入做三通道复制（`Y,Y,Y`）并验证跨光照余弦相似度分布。
-   - **基础 IR 活体与防照片欺骗（Anti-Spoofing）**：
-     - **天然 850nm 物理屏障**：手机/平板 LCD/OLED 屏幕几乎不发射 850nm 红外光，普通亮屏照片在 OV7251 下接近纯黑，直接天然免疫大部分屏幕翻拍；
-     - **主动补光差分 / 反射特征检测**：针对纸质打印照片攻击，结合人脸 ROI 亮度分布方差、高频纹理/莫尔纹指标，以及 **STROBE 开/关或连续 3 帧微动/深度反射一致性** 校验（可选二期增强：单帧开 STROBE 与单帧关 STROBE 做主动红外差分图，真实皮肤与纸张在 850nm 下的反射梯度和阴影差异显著）。
-3. **性能与精度门槛（Gate 2）**
-   - 冷启动采帧到输出匹配结果：目标 **≤ 800 ms**（峰值 ≤ 1200 ms）；
-   - 内存常驻：空闲态 **< 5 MB**（模型与推理上下文按需加载或休眠时卸载，不常驻大内存）；
-   - 实测通过率：本人正脸/微侧脸/暗光/正常光/戴眼镜 ≥ 95%，手机屏幕照片与普通打印照片拒绝率 ≥ 99%。
-
----
-
-### Phase 3：Android 17 `IFace` AIDL HAL 与认证绑定（预计 4–6 天）
-
-> **目标**：让 Android 17 系统设置、锁屏 Keyguard 与 `BiometricPrompt` 原生识别并使用该 IR 人脸解锁。
-
-1. **AIDL 接口实现 (`android.hardware.biometrics.face.IFace/default`)**
-   - 目标版本：对齐真机 `compatibility_matrix.202604.xml` 的 **AIDL V4 或 V5**（`IFace` + `ISession` + `ISessionCallback`）。
-   - `SensorProps` 关键声明：
-     - `sensorStrength = SensorStrength::WEAK`（Class 2，诚实合规，允许锁屏解锁且避免欺骗安全审计）；
-     - `sensorType = FaceSensorType::IR`；
-     - `supportsSelfIllumination = true`（具备 850nm 红外补光，暗光可用）；
-     - `halControlsPreview = true`（支持 Settings 录入界面通过 `NativeHandle`/Surface 实时显示正立 IR 灰度预览，或纯进度反馈）。
-   - 核心方法实现：
-     - `generateChallenge()` / `revokeChallenge()`：管理 64-bit 随机 challenge；
-     - `enroll(hat, enrollmentType, features, previewSurface)`：校验来自 Gatekeeper 的 `HardwareAuthToken`（防未验证锁屏密码直接录入），采集多角度（正脸 + 轻微左右上下）5–8 个模板嵌入向量并持久化；
-     - `authenticate(operationId)`：触发 Phase 2 管线，输出 `onAuthenticationFrame` 引导提示（太近/太远/偏左/偏右/光线不足）与最终结果；
-     - `enumerateEnrollments()` / `removeEnrollments()` / `getAuthenticatorId()` / `invalidateAuthenticatorId()`；
-     - `resetLockout(hat)` 与标准 Android **5 次连续失败锁定 30 秒 / 20 次永久锁定需输 PIN** 状态机。
-2. **与现有 `ISharedSecret` / `Gatekeeper` 签发 `HardwareAuthToken (HAT)`**
-   - 在启动时加入 AOSP `ISharedSecret` 协商流程（与 `sq2-software-keymint` 和 `gatekeeper-service.nonsecure` 共用同一套 shared secret），或按 Android Class 2 / 现有非安全 Gatekeeper 约定生成合法 `HAT`（带 `challenge`、`userId`、`authenticatorId`、`authenticatorType=FACE`、`timestamp`、HMAC-SHA256 `mac`），确保 `Keyguard` 与 `Settings` 验签通过。
-3. **模板安全存储**
-   - 存放路径：`/data/vendor_de/0/spx_face/`（权限 `0700`，仅 HAL 专用 UID/SELinux 域可访问），**绝不保存原始人脸图像**，仅保存归一化特征向量与元数据。
-   - 绑定 `userId` 和随机 `authenticatorId`；用户删除录入或清除锁屏密码时同步安全擦除模板文件。
-4. **VINTF、Feature XML 与 SELinux 集成**
-   - 新增 `/vendor/etc/vintf/manifest/spx-android.hardware.biometrics.face.xml`（注册 `android.hardware.biometrics.face.IFace/default`）；
-   - 新增 `/vendor/etc/permissions/android.hardware.biometrics.face.xml`（声明 `android.hardware.biometrics.face` feature，激活 `Settings$FaceSettingsActivity` 入口）；
-   - 新增 `/vendor/etc/init/spx-face-hal.rc`（独立服务，按需运行并限制资源与权限）；
-   - 补齐 SELinux 规则（允许访问 `/dev/media*`、`/dev/video*`、`/dev/v4l-subdev*`、`/dev/input/event*` 只读、`ISharedSecret` binder、`/data/vendor_de/0/spx_face`）。
-
----
-
-### Phase 4：霍尔 × IR 深度协同与电源/眼安全加固（预计 1–2 天）
-
-> **目标**：把两个独立能力打磨成可靠、省电、绝对安全的产品级联动体验。
-
-1. **HAL 内建 `SW_LID` 实时门控（核心协同）**
-   - `spx-face-hal` 启动轻量 `poll()` 线程动态发现并只读监听 `SW_LID` evdev 设备：
-     - 当 `SW_LID == 1`（合盖）时：
-       - 若正在 `authenticate()` 或 `enroll()`，**立即中止采帧、关闭 OV7251 与 850nm STROBE**，回调 `Error::CANCELED`；
-       - 若收到新的 `authenticate()` 请求，直接静默拒绝/取消，**不点亮红外灯，也不消耗失败重试次数**。
-     - 当 `SW_LID == 0`（开盖）时：允许正常响应 Keyguard 的自动人脸认证请求。
-2. **850nm 红外灯硬看门狗与零常驻功耗保证**
-   - 任何单次 `authenticate()` 最长持续 **6–8 秒**，`enroll()` 最长 **45 秒**；超时后看门狗强制 `close()` V4L2 句柄，确保 `ov7251_s_stream(0)` 必然执行、850nm STROBE 与模拟/数字供电（`vdddo`/`vddd`/`vdda`）彻底断电。
-   - 进程崩溃兜底：内核 V4L2 `release` 路径在文件描述符关闭时自动停流断电，防止用户态异常导致红外灯常亮发热或眼部安全隐患。
-3. **与前置/后置 RGB 相机的并发仲裁**
-   - 硬件上 OV7251 走独立的 `csiphy3`/`csid3`/`vfe_lite1_rdi0`，与 `ov5693` (`vfe0`) / `ov13858` (`vfe1`) 互不抢占 VFE；
-   - 仍需在 `spx-camera-provider` 与 `spx-face-hal` 之间做轻量互斥或共享 CCI/media 拓扑检查，确保锁屏解锁瞬间快速打开相机 App 时不会出现 `/dev/media0` link 竞争或 `EBUSY`。
-
----
-
-### Phase 5：打包集成、控制面板开关与验收体系（预计 2 天）
-
-1. **构建与打包集成**
-   - 新增 `scripts/full_image_face.py`（或扩展 `scripts/full_image_camera.py`），遵循 schema 校验与 `install_targets()` 严格路径映射；
-   - 新增 `probe/face/spx-face-stage` 在启动阶段将 HAL 二进制、模型权重、VINTF XML、feature XML 和 `.rc` 挂载到 `/vendor` overlay。
-2. **用户可控开关（`SurfaceAdvancedControl`）**
-   - 在现有 `SurfaceAdvancedControl` 应用里提供清晰开关与状态诊断页：
-     - 霍尔开盖唤醒 / 合盖锁屏开关 + 实时状态显示（`OPEN / CLOSED` + `TABLET_MODE`）；
-     - IR 人脸解锁总开关（禁用时直接停用 HAL 采帧）；
-     - 一键自检（IR 帧率、霍尔事件、硬件温度/电源状态）。
-3. **自动化测试与真机验收清单（Gate 5）**
-   - **主机单元测试**：DT 冲突守卫、模板加解密/锁定计数器、`SW_LID` 门控状态机、ASan/UBSan 内存安全测试。
-   - **真机验收标准**：
-     - [x] **（SQ2 SSH 自动化实测已通过）** `dumpsys biometric` 与 `dumpsys face` 正常列出 `IFace/default`（`WEAK` / `oemStrength=255`），`spx-face-cli`（90° IR 30 帧基准）、`gpio-keys-lid`（`Lid Switch`、`touchpad-inhibitor` 持有 `event19`）与 `SurfaceAdvancedControl` 桥接全通，且双路 RGB 相机与 `dmesg` 无回归；
-     - [ ] Android `设置 → 安全 → 人脸解锁` 可完整完成真人录入、解锁、删除与锁屏开关配置；
-     - [ ] 连续 20 次“物理合盖 `s2idle` → 掀盖自动亮屏 → 无感 IR 解锁进桌面”成功率 ≥ 95%，平均开盖到进桌面时间 ≤ 1.5s，且 180° 反折磁铁实测不误锁（确认 `0012` 在磁吸触发下同样安全）；
-     - [ ] 合盖状态推送通知或插拔电源，850nm 红外灯**绝对不亮**且不累计失败次数；
-     - [ ] 手机屏幕显示本人照片、黑夜无光环境、佩戴眼镜分别完成拒绝/通过实测；
-     - [ ] 人脸解锁后立即打开相机应用，前后 RGB 相机实际出画面且无 `EBUSY` 或黑屏；
-     - [ ] 息屏 `s2idle` 整晚待机功耗与启用前持平（无唤醒锁泄漏、无红外灯残留）；
-     - [ ] 明确标注测试边界：当前自动化链路仅在单台 SQ2 验证通过，仍需在 SQ1 机型补测 GPIO 121 极性与 OV7251 方向后再作为 SQ1/SQ2 默认开启特性。
-
----
-
-## 5. 主要风险与缓解措施
-
-| 风险项 | 影响 | 缓解方案 |
+| Component | Path | Purpose |
 | :--- | :--- | :--- |
-| **键盘反折平板模式误吸霍尔传感器** | 平板模式使用中突然黑屏锁屏 | Phase 0 先真机实测姿态 C；若存在误吸，联动 `SW_TABLET_MODE` 抑制 `SW_LID=1` 或默认提供手动开关。 |
-| **850nm 红外灯异常常亮** | 耗电、发热、眼部舒适度风险 | 内核 `s_stream(0)` 断电 + HAL 6–8s 硬超时看门狗 + `SW_LID=1` 强制停流 + 进程退出 FD 自动释放。 |
-| **Android 17 `IFace` AIDL 版本或 `HAT` 校验不兼容** | `FaceService` 绑定失败或录入后解锁被拒 | 直接从系统镜像提取/对齐 `compatibility_matrix.202604.xml` 对应 AIDL 接口（v3–v5），优先在真机做最小 stub 联调通过后再接推理引擎。 |
-| **强阳光下 850nm 过曝导致识别失败** | 室外解锁率下降 | 复用 `spx::Capture::autoExposure()` 按人脸 ROI 实时压低曝光与模拟增益；连续 2 秒低质量帧及时回调提示并允许快速回退 PIN。 |
-| **与 `spx-camera-provider` 竞争 `/dev/media0`** | 解锁瞬间开相机报 `EBUSY` | OV7251 固定绑定 `csiphy3`/`vfe_lite1_rdi0`（不触碰 RGB 链路），仅对 `MEDIA_IOC_SETUP_LINK` 做文件锁串行化，不执行全局 `media` reset。 |
-| **模型体积膨胀 OTA 包** | initramfs/OTA 过大 | 选用 INT8 量化轻量模型（检测 + 识别总计控制在 **3–6 MB** 内），不把重型 Python/OpenCV 运行时带进 initramfs。 |
-
----
-
-## 6. 已实现的新增与修改文件清单
-
-| 阶段 | 路径 | 用途 / 实现说明 |
-| :--- | :--- | :--- |
-| Phase 1 | `scripts/prepare-spx-lid-dtb.py` | GPIO 121 `SW_LID`（`label = "Lid Switch"` 适配 `touchpad-inhibitor`，支持 `--active-high`、`--debounce-ms`、`linux,can-disable` 与冲突检查） |
-| Phase 1 | `patches/spx-portable-boot/0012-spx-hall-lid-ignore-folded-cover.patch` | 键盘反折（`folded-back` / `folded-canvas` / `book`）时在输入核心抑制 `SW_LID=1` |
-| Phase 1 | `scripts/full_image.py` / `scripts/build-lts.py` | 接入霍尔 DT 与人脸 HAL 可选构建开关（`--without-hall-lid`、`--face-hal`、`--without-face`） |
-| Phase 1 | `tests/test_spx_lid_dtb.py` | DT `debounce-interval`/`linux,can-disable`、极性参数与补丁无模糊应用测试 |
-| Phase 2 | `probe/face/spx-ir-preprocess.{h,cpp}` | OV7251 `Y10`/`Y10P` 解包、`0/90/180/270` 旋转、ROI 亮度统计与 `gray8ToRgba` |
-| Phase 2 | `probe/face/spx-face-crypto.{h,cpp}` | SHA-256 / HMAC-SHA256 / HKDF-SHA256 / ChaCha20 与 37B `hw_auth_token_t` 校验封装 |
-| Phase 2 | `probe/face/spx-face-engine.{h,cpp}` | 主动 850nm 近红外检测、三层活体防伪、256-D 归一化嵌入、`/data/vendor_de/<userId>/facedata/` 加密存储与锁定计数 |
-| Phase 2 | `probe/face/spx-lid-monitor.{h,cpp}` | 动态 `EV_SW` (`SW_LID`) `poll()` + SSAM posture 只读监听与瞬间中止回调 |
-| Phase 2 | `probe/face/spx-face-cli.cpp` | 主机/真机自检（`--self-test`）、状态查询（`--status`）与 IR 基准工具（`--benchmark-ir`） |
-| Phase 3–4 | `probe/face/spx-face-hal.cpp` | `android.hardware.biometrics.face.IFace/default`（AIDL V4，Class 2 `WEAK`）HAL + `SW_LID` 门控 + 8s/45s 看门狗 |
-| Phase 3–4 | `probe/face/spx-face-stage` + `.xml` + `.rc` | 启动阶段按 `ov7251` 存在动态挂载 HAL、CLI、VINTF/权限 XML（剥离 `unavailable-feature`）与 `.rc` |
-| Phase 5 | `scripts/build-spx-face-aidl.py` / `scripts/build-spx-face-hal.py` | AIDL V4 NDK 存根归档、ARM64 NDK 编译与 `--run-host-tests` |
-| Phase 5 | `scripts/full_image_face.py` | 全镜像打包、ELF64 AArch64 校验与 initramfs hook 注入 |
-| Phase 5 | `probe/test2/spx-advanced-control-boot` & `probe/advanced-control/*.java` | `SurfaceAdvancedControl`「霍尔与红外解锁」页面：开盖开关、姿态监测、人脸开关、旋转角与一键自检 |
-| Phase 5 | `tests/spx_face_test.cpp` / `tests/test_spx_face_hal.py` / `tests/test_advanced_control.py` | 主机 ASan/UBSan 单元测试、APK 编译及桥接状态机验证 |
-
----
-
-## 7. 建议的下一步现场验收
-
-1. **物理盖子与触控板抑制实测（SQ2）**：实际合上 Type Cover 验证锁屏、`s2idle` 休眠、触控板 `inhibited=1` 与掀盖秒醒（连续 20 次），并验证 180° 反折磁吸下不误锁。
-2. **真人 IR 人脸录入与解锁（SQ2）**：在 Android `设置 → 安全 → 人脸解锁` 完成真人录入与开盖无感解锁，实测暗光、戴眼镜及手机照片防欺骗拒绝率，并验证解锁后直接开启前/后 RGB 相机与整晚 `s2idle` 待机功耗。
-3. **SQ1 机型跨平台兼容实测**：在 Surface Pro X (SQ1) 上复测 GPIO 121 极性与 OV7251 方向，确认单镜像默认行为对 SQ1/SQ2 均安全。
+| Hall DT | `scripts/prepare-spx-lid-dtb.py` | GPIO 121 `SW_LID` (`"Lid Switch"`, `--active-high`, `--debounce-ms`, `linux,can-disable`, conflict guard) |
+| Folded-back patch | `patches/spx-portable-boot/0012-spx-hall-lid-ignore-folded-cover.patch` | Suppresses `SW_LID=1` in input core when cover is folded back |
+| Build integration | `scripts/full_image.py`, `scripts/build-lts.py`, `scripts/full_image_face.py` | Hall DT and Face HAL build switches, ELF64 validation, initramfs hook |
+| AIDL & HAL build | `scripts/build-spx-face-aidl.py`, `scripts/build-spx-face-hal.py` | AIDL V4 NDK stubs, ARM64 NDK build, `--run-host-tests` |
+| IR preprocessing | `probe/face/spx-ir-preprocess.{h,cpp}` | `Y10`/`Y10P` unpacking, `0/90/180/270` rotation, ROI stats, `gray8ToRgba` |
+| Crypto | `probe/face/spx-face-crypto.{h,cpp}` | SHA-256 / HMAC-SHA256 / HKDF-SHA256 / ChaCha20, 37B `hw_auth_token_t` |
+| Face engine | `probe/face/spx-face-engine.{h,cpp}` | 850nm NIR detection, 3-layer liveness, 256-D embedding, encrypted template store, lockout |
+| Lid monitor | `probe/face/spx-lid-monitor.{h,cpp}` | `EV_SW` (`SW_LID`) `poll()` + SSAM posture monitoring and abort callback |
+| CLI & HAL | `probe/face/spx-face-cli.cpp`, `probe/face/spx-face-hal.cpp` | `--self-test`, `--status`, `--benchmark-ir`, AIDL V4 `IFace/default` HAL |
+| Stage & manifests | `probe/face/spx-face-stage`, `.xml`, `.rc` | Boot-stage `/vendor` overlay mounting based on `ov7251` presence |
+| Control panel | `probe/test2/spx-advanced-control-boot`, `probe/advanced-control/*.java` | `SurfaceAdvancedControl` Hall & IR Unlock UI and bridge |
+| Tests | `tests/test_spx_lid_dtb.py`, `tests/spx_face_test.cpp`, `tests/test_spx_face_hal.py`, `tests/test_advanced_control.py` | DT checks, ASan/UBSan host tests, APK build, bridge state-machine tests |

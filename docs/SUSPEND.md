@@ -1,35 +1,20 @@
-# 休眠（s2idle）
+# Suspend (s2idle)
 
-默认构建已接入 SQ2 s2idle 修复，主机与 SQ2 实机各一次验证；不是零中止、Windows
-Modern Standby 认证、长时功耗或 SQ1 验收。
+## Fixes
 
-## 修复内容
+- **Android wakelock**: Reduced the charging screen-off `WakeLock.acquire(J)` in `DesktopPowerService$screenStateReceiver$1::onReceive` from `1585000` ms to `1000` ms via the DEX parser.
+- **Venus no-TZ suspend**: Preserved the firmware transport device and IOMMU domain across PM cycles; `venus_sq2_pm_stop()` calls `venus_hfi_prepare_system_stop()` before disabling IRQs, resetting the CPU, and unmapping, reusing the V4 `idle` / `PC_PREP` / `PC_READY` handshake. Non-SQ2 full suspend continues using `venus_power_off()`.
+- **AOSS/RPMh deadlock prevention**: [0013-interconnect-qcom-sc8180x-mm0-keepalive.patch](../patches/spx-portable-boot/0013-interconnect-qcom-sc8180x-mm0-keepalive.patch) adds `.keepalive = true` to `bcm_mm0` to prevent AOSS deadlocks when display/video withdraw votes during `s2idle`.
+- **GCC CX domain protection**: [0014-clk-qcom-gcc-sc8180x-enable-rpm.patch](../patches/spx-portable-boot/0014-clk-qcom-gcc-sc8180x-enable-rpm.patch) enables `.use_rpm = true` on `gcc_sc8180x_desc` to prevent the CX power domain from powering down while GCC is active.
+- **Power button PDC wake routing**: [prepare-spx-spmi-pdc-dtb.py](../scripts/prepare-spx-spmi-pdc-dtb.py) and [0016-arm64-dts-qcom-sc8180x-spmi-pdc-wake.patch](../patches/spx-portable-boot/0016-arm64-dts-qcom-sc8180x-spmi-pdc-wake.patch) switch `spmi@c440000` to `interrupts-extended = <&pdc 1 IRQ_TYPE_LEVEL_HIGH>`, allowing `pm8941_pwrkey` to wake APSS via PDC pin 1.
+- **UCSI suspend workqueue race fix**: [0015-usb-typec-ucsi-cancel-resume-work-on-suspend.patch](../patches/spx-portable-boot/0015-usb-typec-ucsi-cancel-resume-work-on-suspend.patch) synchronously cancels `resume_work` in `ucsi_suspend()`, and [ucsi_surface_hid.c](../probe/typec/ucsi_surface_hid.c) cancels `notify_work` before and after `ucsi_suspend()`.
+- **On-demand stats**: [kernel-6.18-hybrid.config](../configs/kernel-6.18-hybrid.config) enables `CONFIG_QCOM_STATS=y`.
 
-- Android `DesktopPowerService$screenStateReceiver$1::onReceive` 的充电息屏
-  `WakeLock.acquire(J)` 从 1585000 ms 缩短为 1000 ms；用现有 DEX 解析器定位并更新校验，
-  不清除应用锁、不改凭据、不伪造电池状态。
-- Venus no-TZ 固件传输设备与 IOMMU domain 跨 PM 周期保留；固件 CPU 仍按原语义停止，
-  映射仍解除，错误仍传播。只保留设备不能解决恢复超时。
-- `venus_sq2_pm_stop()` 在关闭 IRQ、复位 CPU、解除映射前调用
-  `venus_hfi_prepare_system_stop()`，复用 V4 idle / PC_PREP / PC_READY 握手。
-  非 SQ2 完整 suspend 继续执行原 `venus_power_off()`，不放宽超时、不清除终态错误。
+## Build Integration
 
-## 实测范围
+`build.py full` defaults to `--kernel-mode source`, invoking `full_image_video.ensure_venus_source_hooks()` on the external Venus build copy to apply patches and compile without modifying original input sources.
 
-SQ2 同一次启动：`success=4`，Venus `stops=5/starts=5`、`error=0`、`failed_resume=0`；
-四段 machine_suspend 为 0.009790、0.058555、0.067198、59.199252 秒，完整轨迹
-31819/31819 条无丢失；用户确认显示、触摸、播放、声音和拖动正常。
-
-仍有 timerfd 提前唤醒与 freezer 中止，不能称零中止或长时功耗已验收；
-用户播放确认不等于独立逐帧硬解像素验证。
-
-## 构建接入
-
-`build.py full` 默认 `--kernel-mode source`，在 external Venus 构建副本上调用
-`full_image_video.ensure_venus_source_hooks()`，应用两份 s2idle 补丁后实际编译；
-原始输入源码不修改，重复调用幂等，未知源拒绝。
-
-Android JAR 不进 Git，由同一 Android system 镜像提供：
+Android JARs are not committed to Git and must be supplied from the same Android system image:
 
 ```sh
 python3 scripts/full_image_suspend.py \
@@ -38,29 +23,6 @@ python3 scripts/full_image_suspend.py \
 python3 scripts/build.py full --private-root /ABS/PRIVATE/build-inputs --output /ABS/OUTPUT
 ```
 
-`--kernel-mode prebuilt` 必须另提供与所选 Image 匹配的修复模块（增加
-`--venus-core ... --image ...`）；manifest 绑定两者 SHA256，缺失/不匹配报错，
-不能只改 vermagic 假称匹配。source 模式只选本次新编译的 Venus core，替换所有有效副本。
+With `--kernel-mode prebuilt`, a patched module matching the selected `Image` must be supplied via `--venus-core ... --image ...`; the manifest binds both SHA256 hashes and errors on missing or mismatched inputs.
 
-新 helper 只做一次性迁移：`screen_off_timeout=2147483647 → 60000`、
-`stay_on_while_plugged_in=15 → 0`；已有其他用户选择不改，写完成标记后不重复重置。
-
-## 边界
-
-完整磁盘镜像没有随本次修复重新构建；新 source 构建也不自动继承整机硬件验收。
-正常入口保留原已验收候选字节（含只读诊断日志/采集器），公共默认构建不安装实验采集器。
-
-## 2026-11-22 SC8180X s2idle 睡死与唤醒路由修复
-
-### 补充修复内容
-
-- **AOSS/RPMh 防死锁**：[0013-interconnect-qcom-sc8180x-mm0-keepalive.patch](../patches/spx-portable-boot/0013-interconnect-qcom-sc8180x-mm0-keepalive.patch) 为 `bcm_mm0` 增加 `.keepalive = true`，避免显示/视频子系统在 `s2idle` 撤票时触发 AOSS 无响应死锁。
-- **GCC CX 域保护**：[0014-clk-qcom-gcc-sc8180x-enable-rpm.patch](../patches/spx-portable-boot/0014-clk-qcom-gcc-sc8180x-enable-rpm.patch) 为 `gcc_sc8180x_desc` 启用 `.use_rpm = true`，防止 CX 电源域在 GCC 活跃期间意外掉电。
-- **电源键 PDC 唤醒路由**：[prepare-spx-spmi-pdc-dtb.py](../scripts/prepare-spx-spmi-pdc-dtb.py) 与 [0016-arm64-dts-qcom-sc8180x-spmi-pdc-wake.patch](../patches/spx-portable-boot/0016-arm64-dts-qcom-sc8180x-spmi-pdc-wake.patch) 将 `spmi@c440000` 由直连 `GIC_SPI 481` 切换为 `interrupts-extended = <&pdc 1 IRQ_TYPE_LEVEL_HIGH>`，使 `pm8941_pwrkey` 经 PDC pin 1 参与 APSS 唤醒。
-- **UCSI 休眠工作队列竞态修复**：[0015-usb-typec-ucsi-cancel-resume-work-on-suspend.patch](../patches/spx-portable-boot/0015-usb-typec-ucsi-cancel-resume-work-on-suspend.patch) 在 `ucsi_suspend()` 同步取消 `resume_work`，[ucsi_surface_hid.c](../probe/typec/ucsi_surface_hid.c) 在 `ucsi_suspend()` 前后取消 `notify_work`。
-- **按需观测**：[kernel-6.18-hybrid.config](../configs/kernel-6.18-hybrid.config) 开启 `CONFIG_QCOM_STATS=y`（无常驻后台进程）。
-
-### 补充实测与边界
-
-- **单台 SQ2 实测（ESP 源码构建更新）**：`IRQ 127` 由 `GICv3 hwirq=513` 切换为 `chip=PDC hwirq=1 type=level`；拔电 `s2idle` 跨约 38 分钟（9 次真实睡眠，累计 `success=11`、`fail=0`）后成功唤醒，Venus `stops=11/starts=11`、`error=0`，`spi0.0` `bus_error_count=0`，`modem`/`cdsp`/`adsp`/`slpi` 保持 `attached`（`slpi` 累计睡眠约 3257.8s）。
-- **尚未验证项**：过夜/多小时长时待机与功耗（实测仍可见 `BAT1` 触发 `ssam_wakeup` 与 `qcom_stats` 中 `aosd`/`cxsd`/`ddr` 计数仍为 `0`），以及 **SQ1** 实机硬件验证。
+The first-boot helper performs a one-time migration (`screen_off_timeout=2147483647 → 60000`, `stay_on_while_plugged_in=15 → 0`) and writes a completion marker so existing user settings are not reset again.

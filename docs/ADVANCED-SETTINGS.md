@@ -1,127 +1,108 @@
-# 高级设置与设备端管理（Surface Advanced Settings）
+# Surface Advanced Settings and On-Device Management
 
-> 相关文档：[README（中文）](../README.zh-CN.md) · [README (EN)](../README.md) · [霍尔 + IR 人脸解锁方案](IR-HALL-FACE-UNLOCK-PLAN.md) · [系统更新（OTA）与刷机移交说明](OTA-HANDOFF.md) · [触控校准](TOUCH-CALIBRATION.md) · [Type-C 与 USB 调试](TYPEC.md)
+> Related docs: [README (EN)](../README.md) · [README (中文)](../README.zh-CN.md) · [Hall + IR Face Unlock Plan](IR-HALL-FACE-UNLOCK-PLAN.md) · [System Update (OTA) & Flashing Handoff](OTA-HANDOFF.md) · [Touch Calibration](TOUCH-CALIBRATION.md) · [Type-C & USB Debugging](TYPEC.md)
 
-Surface Pro X 移植版在 Android 系统内置 **高级设置（`SurfaceAdvancedControl.apk`，包名 `org.surface.advancedcontrol`）**，提供从日常性能/图形调优、触控校准备份、无线 ADB / root SSH 开发调试，到本机 OTA 升级及 USB LiveCD 一键安装至内置 NVMe 硬盘的一站式图形化管理能力。
-
----
-
-## 1. 整体架构与安全设计
-
-- **界面与本地化**：采用 Material 3 / Material You 风格设计，支持系统浅色 / 深色主题、动态取色及中英双语自动切换（非中文系统默认显示英文）。
-- **无人工授权提权的 Root 桥接**：应用本身仅运行于普通系统应用权限，无需用户手动向 KernelSU 授权。所有特权操作均通过内置于 initramfs root 上下文的守护脚本转发执行：
-  - `/bin/spx-advanced-control-boot`：负责 Vulkan 策略、CPU 调速器、触控停用/防误触/校准、霍尔传感器与 OV7251 红外人脸解锁开关、网络 ADB 与 Dropbear SSH。
-  - `/bin/spx-ota-boot`、`spx-ota-stage`、`/bin/spx-internal-install`、`/bin/spx-ota-tool`：负责 OTA 校验/暂存升级以及 USB LiveCD 到内置硬盘的全盘写入。
-- **结构化数据边界**：应用与 root 桥接脚本之间仅通过带随机 nonce 的结构化请求交互（`/run/spx-advanced-control-request`、`/run/spx-ota-boot-request`），严格校验包名、调速器名、公钥格式、块设备路径与文件大小上限，不拼接或 `eval` 任何不可信命令字符串。
-- **配置持久化与救援保护**：配置保存于 `/data/vendor/spx-advanced-control` 与 `/data/vendor/sq2-touch-calibration`，每次正常开机由桥接服务自动恢复；若从 GRUB 进入救援模式（`sq2.rescue=1`）或显式传入 `sq2.cpufreq=0`，将按策略跳过调试/停用触控/调速器恢复，避免影响救援排查。
+The Surface Pro X port includes **Advanced Settings (`SurfaceAdvancedControl.apk`, `org.surface.advancedcontrol`)**, providing unified graphical management for performance/graphics tuning, touch calibration, wireless ADB / root SSH debugging, on-device OTA updates, and USB LiveCD installation to the internal NVMe drive.
 
 ---
 
-## 2. 主页功能模块总览
+## 1. Architecture and Security Design
 
-高级设置主页包含七个一级卡片入口：
+- **UI & Localization**: Built with Material 3 / Material You styling, supporting light/dark themes, dynamic color, and automatic Chinese/English switching (defaulting to English on non-Chinese locales).
+- **Root Bridge**: The app runs with normal system app privileges and requires no manual KernelSU grant. Privileged operations are forwarded to initramfs root daemon scripts:
+  - `/bin/spx-advanced-control-boot`: Handles Vulkan policies, CPU governors, touchscreen disable/ghost-touch/calibration, Hall sensor and OV7251 IR face unlock toggles, network ADB, and Dropbear SSH.
+  - `/bin/spx-ota-boot`, `spx-ota-stage`, `/bin/spx-internal-install`, `/bin/spx-ota-tool`: Handle OTA verification/staged updates and full-disk installation from USB LiveCD to the internal drive.
+- **Structured Request Boundary**: The app and bridge scripts communicate via nonce-tagged request files (`/run/spx-advanced-control-request`, `spx-ota-boot-request`), strictly validating package names, governor names, public key formats, block device paths, and file size limits without concatenating or `eval`-ing untrusted command strings.
+- **Persistence & Rescue Protection**: Settings are stored under `/data/vendor/spx-advanced-control` and `/data/vendor/sq2-touch-calibration` and automatically restored on normal boot; in Rescue Mode `sq2.rescue=1` or with `sq2.cpufreq=0`, debugging, touch-disable, and governor restoration are skipped.
 
-| 模块 | 英文名称 | 核心用途 |
+---
+
+## 2. Home Screen Module Overview
+
+| Module | Chinese Name | Core Purpose |
 | :--- | :--- | :--- |
-| **Vulkan 配置** | Vulkan Configuration | 全局与分应用切换 Mesa Turnip / 高通 QTI Vulkan 驱动 |
-| **性能模式** | Performance Mode | 实时切换并持久化全核 cpufreq 调度策略 |
-| **触控** | Touch | 停用触控屏、切换防误触补丁、查看状态及导入/导出/重校准 |
-| **调试** | Debugging | 开关网络 ADB（5555）、initramfs `root` SSH（22）、管理密码与公钥 |
-| **霍尔与红外解锁** | Lid & IR Face Unlock | 开关霍尔开盖唤醒、监测键盘姿态、控制 OV7251 IR 人脸解锁（Class 2 / WEAK）及自检 |
-| **系统更新** | System update | 选择本地 `.tar.gz` / `.img` / `.img.gz` 进行无损或清空数据的系统升级 |
-| **写入内置硬盘** | Install to Internal Disk | 从 USB LiveCD 启动后，将系统完整写入 Surface Pro X 内置 NVMe SSD |
+| **Vulkan Configuration** | Vulkan 配置 | Global and per-app switching between Mesa Turnip / Qualcomm QTI Vulkan drivers |
+| **Performance Mode** | 性能模式 | Real-time switching and persistence of all-core cpufreq governors |
+| **Touch** | 触控 | Disable touchscreen, toggle ghost-touch patch, view status, and import/export/recalibrate |
+| **Debugging** | 调试 | Toggle network ADB (`5555`), initramfs `root` SSH (`22`), manage passwords and public keys |
+| **Lid & IR Face Unlock** | 霍尔与红外解锁 | Toggle Hall lid wake, monitor keyboard posture, control OV7251 IR face unlock (Class 2 / WEAK) and self-test |
+| **System update** | 系统更新 | Select local `.tar.gz` / `.img` / `.img.gz` for data-preserving or clean-wipe system upgrades |
+| **Install to Internal Disk** | 写入内置硬盘 | Install the OS from a running USB LiveCD to the internal NVMe SSD |
 
 ---
 
-## 3. 各模块详细说明
+## 3. Module Details
 
-### 3.1 Vulkan 配置（Vulkan Configuration）
+### 3.1 Vulkan Configuration
 
-- **全局默认驱动**：可在 **自动策略（Auto Policy）**、**MESA (Turnip)** 与 **Qcom (QTI)** 间切换全局默认行为。
-  - 当全局切换为 **Qcom (QTI)** 时，系统仍强制保护系统 UID（`< 10000`）及 `com.android.systemui` 使用 Mesa Turnip，防止桌面与系统 UI 异常。
-- **分应用覆盖与置顶**：按应用列表可单独指定每个软件使用 默认策略 / Mesa Turnip / QTI Vulkan，所有已手工覆盖的应用会自动置顶显示。
-- **生效方式**：提供 **保存**（下次启动该应用生效）与 **保存并停止应用**（写入策略并立即强停目标应用以便即刻重载驱动）。普通应用默认已配合开启 QCOM `VM_BIND` 缓存提交路径。
+- **Global Default Driver**: Switch between **Auto Policy**, **MESA (Turnip)**, and **Qcom (QTI)**. When set to **Qcom (QTI)**, system UIDs (`< 10000`) and `com.android.systemui` remain forced onto Mesa Turnip to prevent launcher and system UI anomalies.
+- **Per-App Overrides & Pinning**: Assign Default Policy / Mesa Turnip / QTI Vulkan per app; manually overridden apps are pinned to the top.
+- **Applying Changes**: Provides **Save** (next launch) and **Save & Force Stop** (immediately stops the target app to reload the driver). Regular apps use the QCOM `VM_BIND` cached submission path by default.
 
-### 3.2 性能模式（Performance Mode）
+### 3.2 Performance Mode
 
-- **动态能力发现**：桥接脚本实时遍历 `/sys/devices/system/cpu/cpufreq/policy*/scaling_available_governors`，列出当前内核全部 CPU 簇共同支持的调度器（例如 `schedutil`、`performance`、`ondemand`、`conservative`、`powersave`、`userspace` 等）。
-- **即时生效与跨重启保留**：选中后立即写入全部 CPU 簇，并将策略记录到 `/data/vendor/spx-advanced-control/cpu_governor`，后续每次正常启动自动恢复；需要恢复系统默认行为时，点击 **恢复默认** 即可。
+- **Dynamic Discovery**: Enumerates `/sys/devices/system/cpu/cpufreq/policy*/scaling_available_governors` to list governors commonly supported across all CPU clusters (e.g., `schedutil`, `performance`, `ondemand`, `conservative`, `powersave`, `userspace`).
+- **Immediate Effect & Persistence**: Applies immediately to all clusters and persists to `/data/vendor/spx-advanced-control/cpu_governor`, restoring automatically on boot. Tap **Restore Default** to revert.
 
-### 3.3 触控（Touch）
+### 3.3 Touch
 
-- **停用触控屏（Disable Touchscreen）**：提供二次确认对话框；确认后立即停止 `iptsd` 服务并持久化停用标志，在桌面外接键鼠使用或屏幕物理故障排查误触时非常实用（可在高级设置中重新开启；救援模式下自动忽略此停用状态）。
-- **防误触补丁（Ghost-Touch Patch）**：切换噪声过滤补丁的启用/停用状态（通过 `.noise.disabled` 标志控制，切换时保留已采集的噪声校准样本不删除）。
-- **实时校准摘要**：展示当前生效的 `SPXNOISE1` / `SPXNOISE2` / `SPXNOISE3` / `SPXTAP1` 参数状态、`ContactSizeMax`、`iptsd` 运行状态及触控硬件 ID。
-- **校准与备份恢复**：
-  - **重新校准**：直接拉起系统统一触控校准向导（`org.surface.touchcalibration.unified`）。
-  - **导出校准**：将当前完整触控与防误触配置文件打包导出为 `.spkcal` 备份，方便跨安装迁移。
-  - **导入校准**：支持读取 `.spkcal`、`.profile` 与 `.noise` 文件（单文件大小上限 `132096` 字节），导入后自动验证并重载 `iptsd`。
-  - **清除校准**：清空已保存的校准及噪声样本以重新初始化。
+- **Disable Touchscreen**: After confirmation, stops `iptsd` and persists the disabled flag; can be re-enabled in Advanced Settings (automatically ignored in Rescue Mode).
+- **Ghost-Touch Patch**: Toggles the noise-filtering patch via `.noise.disabled` while preserving collected noise calibration samples.
+- **Live Calibration Summary**: Displays active `SPXNOISE1` / `SPXNOISE2` / `SPXNOISE3` / `SPXTAP1` status, `ContactSizeMax`, `iptsd` running state, and touch hardware ID.
+- **Calibration & Backup/Restore**:
+  - **Recalibrate**: Launches `org.surface.touchcalibration.unified`.
+  - **Export Calibration**: Exports current touch and ghost-touch configuration into a `.spkcal` file.
+  - **Import Calibration**: Reads `.spkcal`, `.profile`, and `.noise` files (max `132096` bytes per file), validates, and reloads `iptsd`.
+  - **Clear Calibration**: Clears saved calibration and noise samples.
 
-### 3.4 调试（Debugging）
+### 3.4 Debugging
 
-#### 实时调试地址展示
-界面顶部会展示通过系统网口扫描到的当前可用调试地址，并自动过滤 `lo`、`rmnet*`、`tun*` 等无关接口：
-- **LAN IP**：物理 USB 网卡或 Wi-Fi 分配的局域网 IPv4 地址，可用于同一局域网电脑执行 `adb connect` 或 `ssh`。
-- **VM IP**：Linux 虚拟化网桥（`avf_tap*`、`vmnic*`、`crosvm*`）地址。
+#### Live Debug Addresses
+Scans network interfaces, filtering out `lo`, `rmnet*`, `tun*`, etc.:
+- **LAN IP**: LAN IPv4 address on a physical USB NIC or Wi-Fi.
+- **VM IP**: Linux virtualization bridge (`avf_tap*`, `vmnic*`, `crosvm*`) addresses.
 
-#### 网络 ADB（端口 `5555`）
-- 一键开启或关闭 TCP `5555` 端口网络 ADB，持久化至 `/data/vendor/spx-advanced-control/adb_tcp_enabled`，同时自动配置系统防火墙放行或收紧 `5555` 入站规则。
-- 在开发机端连接（首次连接仍需在平板屏幕确认 RSA 授权，因镜像启用了 `ro.adb.secure=1`）：
+#### Network ADB (Port `5555`)
+- One-tap toggle for TCP `5555` network ADB, persisted to `/data/vendor/spx-advanced-control/adb_tcp_enabled` with automatic firewall updates.
+- With `ro.adb.secure=1` enabled, first connection requires RSA authorization on the tablet screen:
   ```sh
   adb connect <LAN_IP>:5555
   ```
-- **与下口 USB-C ADB 共存**：Surface Pro X 下方 USB-C 口接入电脑时通过 `/vendor/bin/adb-usb-bridge` 转发本地环回 ADB。关闭“网络 ADB”时，桥接脚本会自动检测 `adb-usb-bridge` 并仅将 `service.adb.listen_addrs` 收窄为 `tcp:localhost:5555`，确保在封闭局域网网络 ADB 的同时不影响下口 USB ADB 连接。
+- **Lower-Port USB-C ADB Coexistence**: Lower-port USB-C forwards loopback ADB via `/vendor/bin/adb-usb-bridge`. When Network ADB is turned off, the bridge script narrows `service.adb.listen_addrs` to `tcp:localhost:5555` so lower-port USB ADB continues working.
 
-#### SSH 服务（initramfs `root`，端口 `22`）
-- 管理运行在 initramfs 根命名空间下的轻量 BusyBox **Dropbear** SSH 服务（端口 `22`），即使 Android 用户态或图形桌面卡死仍可登录内核/initramfs 排障。
-- **持久化开机自启**：开关状态与防火墙放行规则自动跨重启保留。
-- **密码认证管理**：默认出厂镜像 `/etc/shadow` 内 `root` 密码为锁定状态（`!`）；可在应用内点击 **修改密码**（哈希存储为 SHA-512，不保存明文）或 **清除密码**（恢复锁定并仅允许公钥登录）。
-- **公钥管理与 `ssh-copy-id` 自动持久化**：
-  - 应用内支持 **导入公钥 / 证书**：可从文件选择或直接粘贴 OpenSSH 公钥（`ssh-ed25519`、`ssh-rsa`、`ecdsa-sha2-nistp256/384/521`、`sk-ssh-ed25519@openssh.com`、`sk-ecdsa-sha2-nistp256@openssh.com`，单次限制 `65536` 字节）及 X.509/PEM 证书，自动校验去重并持久化。
-  - 外部 `ssh-copy-id` 兼容：`/root/.ssh` 在系统启动及启用 SSH 时自动软链接到持久化目录 `/data/vendor/spx-advanced-control/ssh/root_ssh`，Dropbear 的 Ed25519 主机私钥亦持久化保存于 `/data/vendor/spx-advanced-control/ssh/dropbear_ed25519_host_key`。因此直接在电脑执行：
-    ```sh
-    ssh-copy-id root@<LAN_IP>
-    ```
-    写入的公钥与服务端主机指纹在重启后依然全部有效。
-  - **清除密钥**：一键移除全部已授权 `authorized_keys`。
+#### SSH Service (initramfs `root`, Port `22`)
+- Manages the BusyBox **Dropbear** SSH service in the initramfs root namespace, remaining accessible even if Android UI freezes. Toggle state and firewall rules persist across reboots.
+- **Password Management**: Default images lock `root` in `/etc/shadow` (`!`); **Change Password** stores a SHA-512 hash, and **Clear Password** re-locks password login to public keys only.
+- **Public Key Management & `ssh-copy-id`**:
+  - **Import Public Key / Certificate**: Pick a file or paste OpenSSH public keys (`ssh-ed25519`, `ssh-rsa`, `ecdsa-sha2-nistp256/384/521`, `sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openssh.com`, max `65536` bytes) or X.509/PEM certificates.
+  - `/root/.ssh` symlinks to `/data/vendor/spx-advanced-control/ssh/root_ssh` and Dropbear's Ed25519 host key is stored at `/data/vendor/spx-advanced-control/ssh/dropbear_ed25519_host_key`, so `ssh-copy-id root@<LAN_IP>` persists across reboots.
+  - **Clear Keys**: Removes all authorized `authorized_keys`.
 
-> 提示：若在 Android 启动前即发生故障（无法进入桌面），可在 GRUB 启动菜单选择救援模式，参见 [BUILD — 第 7 节（救援模式与边界）](BUILD.md#7-边界)。
+> For pre-Android boot failures, select Rescue Mode in GRUB; see [BUILD — Section 7](BUILD.md#7-boundaries).
 
-### 3.5 霍尔与红外解锁（Lid & IR Face Unlock）
+### 3.5 Lid & IR Face Unlock
 
-详见架构设计文档：[霍尔传感器 + OV7251 IR 人脸解锁实施计划](IR-HALL-FACE-UNLOCK-PLAN.md)。
+See [Hall Sensor + OV7251 IR Face Unlock Implementation Plan](IR-HALL-FACE-UNLOCK-PLAN.md).
 
-- **霍尔开盖唤醒与合盖休眠（`SW_LID`）**：
-  - 通过动态发现 `/sys/devices/platform/gpio-keys-lid`（或对应 `gpio-keys` `switches` 含 `0` 的节点）读写 `disabled_switches`，可在不停用内核其他按键的前提下关闭或恢复 `SW_LID`（使用第三方强磁皮套误触发休眠时尤其实用，配置持久化于 `/data/vendor/spx-advanced-control/hall_lid_enabled`）。
-  - 若在内核命令行传入 `spx.hall_lid=0`（或以救援模式 `sq2.rescue=1` 启动），桥接服务将按命令行强制禁用 `SW_LID` 并阻止界面开启。
-  - **实时状态与反折保护**：同页实时展示 `OPEN` / `CLOSED` / `FOLDED_IGNORED` / `DISABLED` 以及 SSAM 键盘姿态（`laptop` / `closed` / `folded-back` / `folded-canvas` / `book` / `disconnected`）；当键盘反折至机身背面时，内核与 HAL 协同屏蔽误吸触发。
-- **OV7251 850nm 红外人脸解锁（Class 2 / `WEAK`）**：
-  - 当系统启动检测到 `ov7251` I2C 传感器且未通过 `spx.face=0` / `sq2.camera=0` 禁用时，`/bin/spx-face-stage` 自动挂载 `android.hardware.biometrics.face.IFace/default`（AIDL V4，`WEAK`）。
-  - **总开关与旋转角**：支持即时切换 `persist.spx.face.enabled`（禁用后 HAL 在打开相机前即拒绝认证/录入，保证 850nm 红外补光灯零点亮），以及按需调节 OV7251 传感器顺时针旋转角度（`0°` / `90°` / `180°` / `270°`，默认 `90°`，写入 `persist.spx.face.rotation`），两项配置均持久保存并在开机恢复。
-  - **快捷跳转与一键自检**：提供 **打开系统人脸解锁设置**（优先尝试 `android.settings.FACE_SETTINGS`，不可用时回退安全设置），以及通过 `spx-face-cli`（`--self-test`、`--status` 与开盖态 `--benchmark-ir 5`）一键核验 HMAC/HAT 密码原语、活体引擎、霍尔开关与 OV7251 预处理延迟的诊断按钮。
+- **Hall Switch (`SW_LID`)**:
+  - Dynamically discovers `/sys/devices/platform/gpio-keys-lid` (or the `gpio-keys` node whose `switches` contains `0`) and reads/writes `disabled_switches`, persisted to `/data/vendor/spx-advanced-control/hall_lid_enabled`.
+  - Enforces disabling `SW_LID` when `spx.hall_lid=0` or `sq2.rescue=1` is set.
+  - **Live State & Fold-Back Protection**: Shows `OPEN` / `CLOSED` / `FOLDED_IGNORED` / `DISABLED` and SSAM keyboard posture (`laptop` / `closed` / `folded-back` / `folded-canvas` / `book` / `disconnected`), suppressing false lid triggers when folded behind the tablet.
+- **OV7251 850nm IR Face Unlock (Class 2 / `WEAK`)**:
+  - When `ov7251` is detected at boot and neither `spx.face=0` nor `sq2.camera=0` is set, `/bin/spx-face-stage` registers `android.hardware.biometrics.face.IFace/default`.
+  - Supports toggling `persist.spx.face.enabled` (when disabled, the HAL rejects auth/enrollment before opening the camera so the IR floodlight never illuminates) and clockwise sensor rotation `persist.spx.face.rotation` (`0°` / `90°` / `180°` / `270°`, default `90°`).
+  - Provides **Open System Face Unlock Settings** and a one-tap diagnostic self-test via `spx-face-cli` (`--self-test`, `--status`, `--benchmark-ir 5`).
 
-### 3.6 系统更新（System update）
+### 3.6 System update
 
-- 同时接入 Android 系统设置中的 **系统更新** 入口（`android.settings.SYSTEM_UPDATE_SETTINGS`）与高级设置主页。
-- 支持选择本机存储上的升级包（`.tar.gz`）或完整压缩/原始镜像（`.img.gz` / `.img`）：
-  - **保留用户数据（默认）**：保留 `/data`（应用、登录态、触控校准、高级设置 SSH/调试/调速器配置等）及 Windows 同盘双启动 `grub.cfg` 菜单与 ESP 保留文件。
-  - **清除数据并重装**：重新格式化 `userdata` 与 `metadata`（仅保留新系统基础分区状态）。
-- 支持两种底层写入通道：纯 ESP 更新可在必要校验后快速写入并重启；涉及 `super` 或完整镜像升级时，会通过 `/bin/spx-ota-stage` 写入 `SQ2PROBE` 与启动阶段标识，在重启早期 initramfs（Android 挂载 `super` 前）安全完成全量更新与 SHA-256 校验。完整用法与 PC 端一步脚本见 [OTA-HANDOFF](OTA-HANDOFF.md)。
+- Wired into Android's **System update** entry (`android.settings.SYSTEM_UPDATE_SETTINGS`) and the Advanced Settings home screen.
+- Supports `.tar.gz` update archives and `.img.gz` / `.img` full images, with **Keep user data (Default)** (preserving `/data` and Windows dual-boot `grub.cfg`) or **Wipe data and clean install** (reformatting `userdata` and `metadata`).
+- ESP-only updates write online and prompt to reboot; updates touching `super` or full images stage via `/bin/spx-ota-stage` and execute offline with SHA-256 verification in early initramfs. See [OTA-HANDOFF](OTA-HANDOFF.md).
 
-### 3.7 写入内置硬盘（Install to Internal Disk，LiveCD 模式）
+### 3.7 Install to Internal Disk (LiveCD Mode)
 
-当你先将 Googlebook OS 刷入外接 USB SSD / U 盘试用（LiveCD 模式），确认硬件与使用习惯均符合预期后，可直接在运行中的 USB Android 桌面使用该功能将系统安装到 Surface Pro X 内置 NVMe 硬盘：
+When booted from external USB, install directly to the internal NVMe drive:
 
-1. **适用前提与准入校验**（由 `/bin/spx-internal-install` 自动检测）：
-   - 当前系统确实是从 USB 设备启动（`BOOT_TRANSPORT=usb`）；
-   - 当前磁盘及镜像为标准 5 分区兼容布局（`super`、`metadata`、`misc`、`SQ2PROBE`、`userdata`）且源 ESP 文件完整；
-   - 本机存在容量满足最小布局要求（含 ESP、5 个分区及最小 `userdata`）的**非 USB 内部块设备**（如 `/dev/nvme0n1`）。
-2. **操作步骤与安全确认**：
-   - 进入 **高级设置 -> 写入内置硬盘**，确认检查通过且建议已接入 Surface 原装充电器 / AC 电源；
-   - 选择目标内置 NVMe 磁盘，勾选高风险不可逆确认（告知**将彻底抹除目标内置硬盘全部现有分区与数据，包括 Windows 及其全部个人文件**，且**不会迁移当前 USB 启动盘上的 `userdata`**）；
-   - 开始安装后，进度条依次经过：**清理残留挂载 -> 重建内置硬盘 5 分区 GPT 表 -> 写入 ESP（采用通用内置独立启动 `grub.cfg`）-> 复制 `super` 并逐字节回读校验 SHA-256 -> 初始化 `metadata`/`misc`/`SQ2PROBE`/`userdata`**。
-3. **完成与首启**：
-   - 安装成功后强烈建议直接点击界面的 **立即关机**（不要直接“重启”，避免 UEFI 仍优先从外置 USB 引导）；
-   - 待屏幕与电源完全关闭后**拔下 USB 启动盘**，再按电源键开机，即可直接从内置 NVMe 启动 Googlebook OS，并在首次开机时自动将 `userdata` 扩容至整盘剩余空间及运行触控校准向导。
-   - **若希望保留 Windows 同盘双启动**，请勿使用“写入内置硬盘”，改用 Windows 端 `tools/Install-GooglebookDualBoot.cmd` / `.ps1`。
+1. **Prerequisites** (checked by `/bin/spx-internal-install`): Booted from USB (`BOOT_TRANSPORT=usb`), standard 5-partition source layout with intact ESP, and an internal non-USB block device (e.g., `/dev/nvme0n1`) meeting minimum capacity.
+2. **Confirmation & Write**: Connect AC power, select the target internal disk, and confirm irreversible erasure (all existing partitions/data on the internal disk will be erased, and USB `userdata` is not migrated). Installation runs: unmount residuals -> rebuild 5-partition GPT -> write standalone ESP -> copy `super` with SHA-256 readback -> initialize `metadata`/`misc`/`SQ2PROBE`/`userdata`.
+3. **Completion & First Boot**: Tap **Power off now**, unplug the USB drive after complete power-off, and power on to boot from internal NVMe (auto-expanding `userdata` on first boot). To keep Windows same-disk dual-boot, use `tools/Install-GooglebookDualBoot.cmd` / `.ps1` on Windows instead.

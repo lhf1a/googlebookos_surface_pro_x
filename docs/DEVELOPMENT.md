@@ -1,54 +1,33 @@
-# 通用交付规则（PORT 契约）
+# Generic Delivery Rules (PORT Contract)
 
-适用于构建、启动和镜像交付。来源与优先级见根 `AGENTS.md`；构建入口见 [BUILD](BUILD.md)。
+Applies to build, boot, and image delivery. See root `AGENTS.md` for authority and priority; see [BUILD](BUILD.md) for build entrypoints.
 
-## PORT-01：同一份镜像，任意 SQ1/SQ2
+## PORT-01: One Image, Any SQ1/SQ2
 
-交付目标是同一份标准镜像可在任意 SQ1 或 SQ2 上运行，不允许按机器重编、改代码或替换设备专属启动包。
-机型差异由 SMBIOS/SoC、硬件能力和运行时资源发现处理，不靠预生成的单机镜像或白名单。
+A single standard image should run on any SQ1 or SQ2 without per-machine rebuilds, code edits, or device-specific boot bundle swaps. Model differences are handled via SMBIOS/SoC, hardware capabilities, and runtime resource discovery.
 
-## PORT-02：禁止单机准入
+## PORT-02: No Single-Device Gating
 
-不得以序列号、NVMe 型号/序列、MAC、IP/SSH 地址、SSH 主机指纹、原盘 UUID/ESP 标记、
-Android 用户编号或历史采集 SHA 作为通用构建或正常启动的准入条件。
-日志和实验对象可以记录这些值，但它们不是产品运行条件。
+Serial numbers, NVMe model/serial, MAC, IP/SSH addresses, SSH host fingerprints, original disk UUID/ESP markers, Android user IDs, or historically captured SHAs must never gate generic builds or normal boot.
 
-## PORT-03：按运行时硬件事实适配
+## PORT-03: Adapt to Runtime Hardware Facts
 
-SQ1/SQ2 差异通过型号/SoC、硬件能力与运行时资源发现处理；不得固定一次启动的 phandle、
-eventN、cardN、节点编号或调试主机路径。硬件类别/版本 quirk 必须有硬件依据，
-不把某台机器的触摸测量结果推广到所有设备。
+Never hardcode one-boot phandles, `eventN`, `cardN`, node numbers, or debug host paths. Hardware class/revision quirks must have a hardware basis rather than generalizing one unit's measurements to all devices.
 
-## PORT-04：镜像与本机状态分离
+## PORT-04: Separate Image and Local Device State
 
-通用镜像不得复制调试机的密码/shadow、SSH 私钥/主机身份、Wi-Fi 凭据、IMEI/NV/FSG 校准、
-用户数据或触摸校准到其他机器。设备唯一数据应由目标自身的存储或本机首次配置提供，
-不得把替换私有文件重新打包当作跨设备启动前提。显式实验室私有包必须单独标记，
-不能称为通用交付。
+Generic images must not copy a debug machine's password/shadow, SSH private keys/host identity, Wi-Fi credentials, IMEI/NV/FSG calibration, userdata, or touch calibration onto other machines. Device-unique data comes from the target's own storage or local first-time setup; lab private bundles must be labeled separately.
 
-## PORT-05：不撤销安全保护
+## PORT-05: Preserve Safety Guards
 
-模块/固件 ABI、构建产物完整性、真实硬件兼容性、SMMU/资源边界、screen_only/nohibernate、
-不可重复启动固件等保护保留。写盘前仍需动态识别本次目标盘/ESP/根源并防误写；
-禁止单机白名单不等于允许盲写、清空 userdata 或热重置提供者。
+Module/firmware ABI, artifact integrity, real hardware compatibility, SMMU/resource boundaries, `screen_only`/`nohibernate`, and non-re-bootable firmware protections remain enforced. Disk writes must dynamically identify the target disk/ESP/root source to prevent mis-writes.
 
-## PORT-06：跨设备验收，诚实标界
+## PORT-06: Cross-Device Acceptance
 
-同一产物需覆盖 SQ1/SQ2、默认/回退入口，以及不同设备身份、容量和枚举资源的回归；
-旧数据升级不得破坏凭据和用户设置。单台样机通过只证明该次观测，不能声称所有设备已实测。
-现存单机假设和私有包列为待整改；未测修订或功能在文档中明确标注，不因修改规范就宣称已通用。
+A single artifact must cover SQ1/SQ2, default/fallback entries, and regressions across varying identities, capacities, and enumerated resources; upgrades over existing data must preserve credentials and user settings. Untested revisions or features are labeled honestly in documentation.
 
-## 验证与证据
+## Verification & Environment
 
-- 构建和启动只保留真实失败传播、ABI/格式/路径/磁盘唯一性约束；不新增内容哈希、
-  次数、时长或异常区域大小的产品门槛。
-- 主机测试覆盖补丁幂等、回滚/重应用、清单拒绝和错误路径；主机通过不等于硬件验收。
-- 设备结论记录观测条件、单次/多次、是否重启、是否用户确认；不把单次样机结果外推到全体。
-- 证据、原始日志和含身份产物留在 ignored 的 `out/`、`private/`，不进 Git。
-
-## 环境
-
-- 构建主机为 Ubuntu 24.04 WSL，项目位于 `F:\WSL\SPX-Workspace\chromebookOS-workspace.vhdx`
-  挂载的 `/mnt/spx-workspace/chromebookOS`；Windows 侧只放启动器。
-- 源码构建必须在 Linux 文件系统工作目录执行，避免 NTFS/9p 上的大量小文件。
-- 私有输入根默认 `private/build-inputs/`，可用 `--private-root` 整体重定位。
+- Builds and boot enforce real failure propagation and ABI/format/path/disk-uniqueness constraints; evidence, raw logs, and identity-bearing artifacts stay in ignored `out/` and `private/`.
+- Build host is Ubuntu 24.04 WSL with the project mounted at `/mnt/spx-workspace/chromebookOS` from `F:\WSL\SPX-Workspace\chromebookOS-workspace.vhdx`; only launchers reside on Windows.
+- Source builds must run on a Linux filesystem to avoid small-file overhead over NTFS/9p; private inputs root defaults to `private/build-inputs/` and is relocatable via `--private-root`.

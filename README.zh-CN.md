@@ -42,11 +42,11 @@
 
 - **统一引导与设备路由**：SQ1 与 SQ2 共用同一套内核、模块与 initramfs。开机由 UEFI 加载定制 GRUB，并根据 SMBIOS 机型自动分发对应的 EL2 启动载荷与设备树。
 - **混合图形与显示栈**：EGL / GLES 与默认桌面由 Mesa Freedreno / Turnip 驱动；Vulkan 通过双 Vulkan 路由器按应用策略在 Turnip 与高通原生 Vulkan 之间切换，并为普通应用启用 `VM_BIND`；显示合成与内存分配由 QTI Display / HWC / SDM 与 Gralloc 协同完成。
-- **多媒体与硬件子系统**：集成 OMX 与 Venus 硬件视频编解码、音频路由、V4L2/CAMSS 与软件 ISP 摄像头、SLPI 传感器、IPTSd 触控与手写笔、双 Type-C 多屏输出、Wi-Fi 热点、QMI LOC GNSS、霍尔合盖休眠、OV7251 850nm 红外人脸解锁以及系统[高级设置](docs/ADVANCED-SETTINGS.md)。
+- **多媒体与硬件子系统**：集成 OMX 与 Venus 硬件视频编解码、音频路由、V4L2/CAMSS 与软件 ISP 摄像头、SLPI 传感器、IPTSd 触控与手写笔、双 Type-C 多屏输出、Wi-Fi 热点、QMI LOC GNSS、霍尔合盖休眠、OV7251 850nm 红外人脸解锁以及系统[高级设置](docs/ADVANCED-SETTINGS.zh-CN.md)。
 
 ### 预构建镜像下载
 
-- **更新日志**：[docs/RELEASE-NOTES.md](docs/RELEASE-NOTES.md) · [GitHub Releases](https://github.com/lhf1a/googlebookos_surface_pro_x/releases)
+- **更新日志**：[docs/RELEASE-NOTES.zh-CN.md](docs/RELEASE-NOTES.zh-CN.md) · [GitHub Releases](https://github.com/lhf1a/googlebookos_surface_pro_x/releases)
 - **Google Drive**：[surface_pro_x_gbos_images](https://drive.google.com/drive/folders/1uVAA6UnydSyUHQAO8Y5rTm8SxZ62Zykr)
 - **百度网盘**：https://pan.baidu.com/s/51GjLdmTGir0PelomZvboYw
 
@@ -89,12 +89,12 @@ flowchart LR
 | **合盖休眠（霍尔 `SW_LID`）** | ✅ 可用 | ✅ 可用 |
 | **LTE 移动数据** | ✅ 可用 | ✅ 可用 |
 | **Wi-Fi / 热点 / 蓝牙 / SSH** | ✅ 可用 | ✅ 可用 |
-| **GNSS / GPS（QMI LOC AIDL V4）** | 🟡 部分可用（HAL 已就绪，待搜星实测） | 🟡 部分可用（HAL 已就绪，待搜星实测） |
+| **GNSS / GPS（QMI LOC AIDL V4）** | 🟡 部分可用 | 🟡 部分可用 |
 | **USB 存储 / Type Cover / 物理按键** | ✅ 可用 | ✅ 可用 |
 | **USB-C DP / 原生多屏设置** | ✅ 可用 | ✅ 可用 |
 | **下口 USB ADB** | ✅ 可用 | ✅ 可用 |
-| **高级设置**：[全部功能说明](docs/ADVANCED-SETTINGS.md)（Vulkan、性能模式、触控、调试、霍尔与红外解锁、OTA 与 LiveCD 安装） | ✅ 可用 | ✅ 可用 |
-| **红外人脸解锁（Class 2，OV7251）** | 🟡 部分可用（待 SQ1 实测） | ✅ 可用 |
+| **高级设置**（[功能说明](docs/ADVANCED-SETTINGS.zh-CN.md)） | ✅ 可用 | ✅ 可用 |
+| **红外人脸解锁（Class 2，OV7251）** | 🟡 部分可用 | ✅ 可用 |
 | **短信、休眠到磁盘** | ❌ 不可用 | ❌ 不可用 |
 
 ---
@@ -168,7 +168,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\Install-GooglebookDu
 ```
 
 #### 方案 E：USB LiveCD 模式写入内置硬盘
-先通过方案 A/B 从外接 USB 启动并完成触控校准，接通电源后在 **高级设置 -> 写入内置硬盘**（[ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md)）选中内置 NVMe 并确认不可逆提示（**会清空内置盘全部现有分区含 Windows，且不迁移 USB 盘上的 `userdata`**）；完成 5 分区 GPT 重建、SHA-256 校验与独立 UEFI 写入后点击 **立即关机**，**拔出 USB 盘**再开机即可。
+从外接 USB 启动并完成触控校准后，接通电源并在 **高级设置 -> 写入内置硬盘**（[ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.zh-CN.md)）中选中内置 NVMe。确认操作——此操作会清空内置盘全部现有分区含 Windows，且不迁移 USB 盘上的 `userdata`——待 5 分区 GPT 重建、SHA-256 校验与独立 UEFI 写入完成后点击 **立即关机**，**拔出 USB 盘**再开机即可。
 
 ### 3. 启动与首次开机
 
@@ -179,17 +179,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\Install-GooglebookDu
 ### 4. 已有系统的升级（OTA 与 ADB）
 
 - **设备端 OTA 升级**：打开 **系统设置 -> 系统更新**（或 **高级设置 -> 系统更新**），选择 `.tar.gz` 升级包或 `.img` / `.img.gz` 整盘镜像，可选择 **保留用户数据**（保留 `/data`、触控校准、设置与 `grub.cfg`）或 **清除数据并重装**。
-- **PC 端 ADB 一键升级**：Windows 运行 `tools/Upgrade-GooglebookViaAdb.cmd` / `.ps1`，Linux / macOS 运行 `tools/upgrade-googlebook-via-adb.sh`，详见 [OTA-HANDOFF](docs/OTA-HANDOFF.md)。
+- **PC 端 ADB 一键升级**：Windows 运行 `tools/Upgrade-GooglebookViaAdb.cmd` / `.ps1`，Linux / macOS 运行 `tools/upgrade-googlebook-via-adb.sh`，详见 [OTA-HANDOFF](docs/OTA-HANDOFF.zh-CN.md)。
 
 ---
 
 ## 调试与开发
 
-系统内置 **高级设置（`SurfaceAdvancedControl.apk`）**，提供免手动 KernelSU 授权的调试与硬件调优能力（完整六个模块说明见 [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md)）：
+系统内置 **高级设置**（`SurfaceAdvancedControl.apk`），提供免手动 KernelSU 授权的调试与硬件调优能力（详见 [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.zh-CN.md)）：
 
 - **IP 展示与网络 ADB（`TCP 5555`）**：实时查看 LAN / VM IP，一键持久化开关网络 ADB（`adb connect <LAN_IP>:5555`，开启 `ro.adb.secure=1` 授权）；关闭时自动保留 `tcp:localhost:5555`，不影响下口有线 `adb-usb-bridge`。
 - **initramfs `root` SSH（`TCP 22`）**：开关早期命名空间 Dropbear SSH（默认锁定 `root` 密码），支持应用内密码/公钥管理及 `/root/.ssh` 软链持久化（开发机可直接 `ssh-copy-id root@<LAN_IP>`）。
-- **下口 USB ADB 与 GRUB 救援模式**：**下方** Type-C 接口支持有线 `adb devices`（[TYPEC](docs/TYPEC.md)）。若系统进桌面异常，可在 GRUB 选择 **救援模式**（`spx-rescue` / `sq2.rescue=1`）启用内置 USB 网卡驱动、`wifi-tui` 配网与端口 `22` SSH（[BUILD](docs/BUILD.md#7-边界)）。
+- **下口 USB ADB 与 GRUB 救援模式**：**下方** Type-C 接口支持有线 `adb devices`（[TYPEC](docs/TYPEC.zh-CN.md)）。若系统进桌面异常，可在 GRUB 选择 **救援模式**（`spx-rescue` / `sq2.rescue=1`）启用内置 USB 网卡驱动、`wifi-tui` 配网与端口 `22` SSH（[BUILD](docs/BUILD.zh-CN.md#7-边界)）。
 
 ---
 
@@ -235,38 +235,38 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ## 文档索引
 
 ### 构建、依赖与部署
-- [RELEASE-NOTES](docs/RELEASE-NOTES.md) — 版本发布与更新日志（`v0.7.0`–`v0.9.0`）
-- [BUILD](docs/BUILD.md)
-- [STANDARD-BUILD](docs/STANDARD-BUILD.md)
-- [DEPENDENCIES](docs/DEPENDENCIES.md)
-- [IMAGE](docs/IMAGE.md)
-- [DEVELOPMENT](docs/DEVELOPMENT.md)
-- [PROVENANCE](docs/PROVENANCE.md)
-- [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md) — **高级设置**全部功能说明（Vulkan、性能模式、触控、调试、霍尔与红外解锁、系统更新、LiveCD 写入内置硬盘）
-- [OTA-HANDOFF](docs/OTA-HANDOFF.md) — 设备端 OTA 与 PC ADB 一键升级指南
-- [USB-NVME-DEPLOY](docs/USB-NVME-DEPLOY.md)
-- [TODO](docs/TODO.md)
+- [RELEASE-NOTES](docs/RELEASE-NOTES.zh-CN.md) — 版本发布与更新日志（`v0.7.0`–`v0.9.0`）
+- [BUILD](docs/BUILD.zh-CN.md)
+- [STANDARD-BUILD](docs/STANDARD-BUILD.zh-CN.md)
+- [DEPENDENCIES](docs/DEPENDENCIES.zh-CN.md)
+- [IMAGE](docs/IMAGE.zh-CN.md)
+- [DEVELOPMENT](docs/DEVELOPMENT.zh-CN.md)
+- [PROVENANCE](docs/PROVENANCE.zh-CN.md)
+- [ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.zh-CN.md) — **高级设置**全部功能说明（Vulkan、性能模式、触控、调试、霍尔与红外解锁、系统更新、LiveCD 写入内置硬盘）
+- [OTA-HANDOFF](docs/OTA-HANDOFF.zh-CN.md) — 设备端 OTA 与 PC ADB 一键升级指南
+- [USB-NVME-DEPLOY](docs/USB-NVME-DEPLOY.zh-CN.md)
+- [TODO](docs/TODO.zh-CN.md)
 
 ### 子系统与硬件适配
-- [UNIFIED-SQ1-SQ2](docs/UNIFIED-SQ1-SQ2.md)
-- [CAMERA-BUILD](docs/CAMERA-BUILD.md)
-- [IR-HALL-FACE-UNLOCK-PLAN](docs/IR-HALL-FACE-UNLOCK-PLAN.md)
-- [SENSORS](docs/SENSORS.md)
-- [TOUCH-CALIBRATION](docs/TOUCH-CALIBRATION.md)
-- [TOUCH-DEVICE-COMPAT](docs/TOUCH-DEVICE-COMPAT.md)
-- [WILD-LIFE](docs/WILD-LIFE.md)
-- [VIDEO-CAPABILITY-ALIGNMENT](docs/VIDEO-CAPABILITY-ALIGNMENT.md)
-- [SPEAKER-LOUDNESS](docs/SPEAKER-LOUDNESS.md)
-- [MICROPHONE](docs/MICROPHONE.md)
-- [LTE-PRODUCT](docs/LTE-PRODUCT.md)
-- [USB-FUNCTIONS](docs/USB-FUNCTIONS.md)
-- [TYPEC](docs/TYPEC.md)
-- [BLUETOOTH-INPUT](docs/BLUETOOTH-INPUT.md)
-- [SUSPEND](docs/SUSPEND.md)
-- [UNRESTRICTED-POWER](docs/UNRESTRICTED-POWER.md)
-- [ROOT-MANAGEMENT](docs/ROOT-MANAGEMENT.md)
-- [DEFAULT-DISPLAY-DENSITY](docs/DEFAULT-DISPLAY-DENSITY.md)
-- [PAGE-MODE-NOTIFICATION](docs/PAGE-MODE-NOTIFICATION.md)
+- [UNIFIED-SQ1-SQ2](docs/UNIFIED-SQ1-SQ2.zh-CN.md)
+- [CAMERA-BUILD](docs/CAMERA-BUILD.zh-CN.md)
+- [IR-HALL-FACE-UNLOCK-PLAN](docs/IR-HALL-FACE-UNLOCK-PLAN.zh-CN.md)
+- [SENSORS](docs/SENSORS.zh-CN.md)
+- [TOUCH-CALIBRATION](docs/TOUCH-CALIBRATION.zh-CN.md)
+- [TOUCH-DEVICE-COMPAT](docs/TOUCH-DEVICE-COMPAT.zh-CN.md)
+- [WILD-LIFE](docs/WILD-LIFE.zh-CN.md)
+- [VIDEO-CAPABILITY-ALIGNMENT](docs/VIDEO-CAPABILITY-ALIGNMENT.zh-CN.md)
+- [SPEAKER-LOUDNESS](docs/SPEAKER-LOUDNESS.zh-CN.md)
+- [MICROPHONE](docs/MICROPHONE.zh-CN.md)
+- [LTE-PRODUCT](docs/LTE-PRODUCT.zh-CN.md)
+- [USB-FUNCTIONS](docs/USB-FUNCTIONS.zh-CN.md)
+- [TYPEC](docs/TYPEC.zh-CN.md)
+- [BLUETOOTH-INPUT](docs/BLUETOOTH-INPUT.zh-CN.md)
+- [SUSPEND](docs/SUSPEND.zh-CN.md)
+- [UNRESTRICTED-POWER](docs/UNRESTRICTED-POWER.zh-CN.md)
+- [ROOT-MANAGEMENT](docs/ROOT-MANAGEMENT.zh-CN.md)
+- [DEFAULT-DISPLAY-DENSITY](docs/DEFAULT-DISPLAY-DENSITY.zh-CN.md)
+- [PAGE-MODE-NOTIFICATION](docs/PAGE-MODE-NOTIFICATION.zh-CN.md)
 - [外部内核模块归档](source-dependencies/kernel-6.18/README.md)
 
 ---
@@ -275,4 +275,3 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 
 - 衷心感谢 **linux-surface**、**Mesa Freedreno / Turnip**、**AOSP / Googlebook**、**Cuttlefish**、**QTI CAF** 与 **KernelSU Next** 等上游开源项目与社区开发者的贡献；本项目基于上述成果构建，各组件版权与许可归原著作权人所有。
 - **开源协议**：采用分目录 / SPDX 多协议模式，上游及已标注文件保留原协议，本仓未另行标注的原创脚本与工具默认采用 MIT 协议，详见 [LICENSE](LICENSE)。
-- 刷写存储设备存在数据丢失风险，请在操作前备份重要数据。

@@ -1,13 +1,5 @@
-# 默认界面密度
+# Default Display Density
 
-默认构建通过 `apply-device-info` 在 Android init 读取属性之前设置
-`ro.sf.lcd_density=320`，覆盖底包中的旧默认密度。标准入口 `scripts/build.py`
-和统一机型后端都会刷新实际 initramfs 中的助手，不依赖冻结底包的旧版本。
-`--dpi 360` 等参数可自定义；助手也接受第二参数。分辨率和刷新率不变。
+The default build sets `ro.sf.lcd_density=320` via `apply-device-info` before Android `init` reads properties, overriding the legacy default density in the base package. Both `scripts/build.py` and the unified machine backend refresh the helper in the active initramfs. Options such as `--dpi 360` customize the value while keeping resolution and refresh rate unchanged.
 
-已有 userdata 中通过显示设置或 `wm density` 保存的密度优先，不在每次启动时
-强制覆盖用户选择。可用 `wm density reset` 回到构建默认值。
-
-2026-10-31：SQ1 2880×1920 设备在线设置 300 DPI 后读回确认生效。
-这是历史 300 DPI 观察，不是当前 320 默认值的实机验收。2026-11-03 更新仅做
-离线助手执行、组包和有效条目审计；没有改设备的当前密度或重启设备。
+Any density saved in existing `userdata` via Display settings or `wm density` takes precedence and is not overwritten on boot; run `wm density reset` to return to the build default.

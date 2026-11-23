@@ -1,26 +1,22 @@
-# 4 KB 页面通用模式通知
+# 4 KB Page-Agnostic Mode Notification
 
-用户要求永久关闭 Settings 的“正在使用 4KB 页面通用模式”通知。
-只禁用 `com.android.settings/.development.PageAgnosticNotificationService`，
-不修改内核页大小、应用16KB兼容模式或Settings其它通知。
+This mechanism permanently disables Settings' "Using 4KB page-agnostic mode" notification by disabling only `com.android.settings/.development.PageAgnosticNotificationService`, without altering the kernel page size, app 16KB compatibility mode, or other Settings notifications.
 
-`page-mode-notification-setup` 在首次 Android 启动完成后，对当前已存在的
-所有用户执行 `pm disable`。全部成功后原子写入
-`/data/vendor/sq2-page-mode-notification/done-v1`；后续启动只检查标记，
-不再次禁用组件。禁用状态由PackageManager持久保存。失败不写完成标记，
-下次启动重试；以后新增用户不自动处理。
+## Implementation Flow
 
-助手接入正常init和源码/内部SSD/电源连接打包流程。不会force-stop Settings，
-也不会循环取消通知。首次执行前已经发布的通知可能保留至下次启动。
+`page-mode-notification-setup` is wired into normal `init` and the source/internal-SSD/power-connected packaging flows:
 
-2026-10-31现机已手动禁用用户0和10的组件，并清除了当时通知；
-dumpsys确认对应NotificationRecord消失。本仓库一次性启动路径尚未实机重启验证。
+1. After the first Android boot completes, it runs `pm disable` for all currently existing users.
+2. Once all succeed, it atomically writes `/data/vendor/sq2-page-mode-notification/done-v1`, with the disabled state persisted by PackageManager; on failure, the marker is omitted so the next boot retries.
+3. Subsequent boots only check the marker file and do not re-disable the component.
 
-恢复时对相应用户执行：
+## Restore
+
+Run the following commands for the target users:
 
 ```sh
 pm default-state --user 0 com.android.settings/.development.PageAgnosticNotificationService
 pm default-state --user 10 com.android.settings/.development.PageAgnosticNotificationService
 ```
 
-保留完成标记可防止下次启动重新禁用；删除标记则允许再次初始化。
+Keeping the completion marker prevents re-disabling on the next boot; deleting the marker allows initialization to run again.

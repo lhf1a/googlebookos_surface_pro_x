@@ -1,106 +1,92 @@
-# Hybrid 标准构建流程与产物
+# Hybrid Standard Build Flow and Artifacts
 
-更新：2026-11-16。唯一默认 Hybrid 构建、Windows 依赖准备和无个人凭据整盘装配。
+Default Hybrid build, Windows dependency preparation, and credential-free full-disk assembly.
 
-## 1. 唯一产品线
+## 1. Sole Product Line
 
-- 标准入口：`python3 scripts/build.py`，无子命令默认 `full-image`。
-- 图形仅允许 `hybrid`：Mesa GLES/Turnip + QTI gralloc/mapper5/HWC；保留现有双 Vulkan 选择策略。
-- SQ1/SQ2共用 Linux 6.18.60 Image、配套模块和initramfs；SMBIOS路由选择机型DT频率配置。
-- 摄像头、自动亮度、自动旋转和当前触控向导为整包必需能力。
-- `compile`是内核组件构建；`verify/package`是历史固定包核验/复制，不是另一条整机产品线。
-- `--esp-only`仅输出启动分区内容，不能当完整磁盘镜像。
-- 通用交付规则（任意 SQ1/SQ2、禁止单机准入、镜像与本机状态分离）见 [DEVELOPMENT](DEVELOPMENT.md)。
+- Standard entrypoint: `python3 scripts/build.py`; omitting the subcommand defaults to `full-image`.
+- Graphics only allows `hybrid`: Mesa GLES/Turnip + QTI gralloc/mapper5/HWC, preserving the dual Vulkan selection policy.
+- SQ1/SQ2 share the Linux 6.18.60 Image, matching modules, and initramfs; SMBIOS routing selects the device DT frequency configuration.
+- Camera, auto-brightness, auto-rotation, and the touch wizard are required capabilities.
+- `compile` builds kernel components; `verify/package` verifies/copies the legacy pinned package; `--esp-only` outputs only the boot partition.
+- General delivery rules are in [DEVELOPMENT](DEVELOPMENT.md).
 
-## 2. 构建顺序
+## 2. Build Order
 
-依赖来源、原 Windows 只读提取、统一下载打包与 Linux 导入见 [DEPENDENCIES](DEPENDENCIES.md)。
-`Prepare-HybridDependencies.ps1` 生成原始依赖包；尚未闭合的 prepared source/Android-QTI 转换步骤明确记为 unresolved，不能把采集完成当作完整镜像构建完成。
+Dependency sources, read-only Windows extraction, unified download packaging, and Linux import are in [DEPENDENCIES](DEPENDENCIES.md).
 
 ```text
-共用平台依赖 + 匹配6.18内核构建树
- ├─ 摄像头源码 → 驱动/AIDL/Camera HAL/ISP/mapper/allocator → camera/CAMERA.json
- └─ 传感器源码 + 共用OEM资料 → 模块/SubHal/overlay/RPC/SLPI EFI → sensors/sensors-bundle.json
+Shared platform dependencies + matching 6.18 kernel build tree
+ ├─ Camera source → driver/AIDL/Camera HAL/ISP/mapper/allocator → camera/CAMERA.json
+ └─ Sensor source + shared OEM assets → modules/SubHal/overlay/RPC/SLPI EFI → sensors/sensors-bundle.json
                                    ↓
-full-image：准备内核源码 → 显示/A6xx补丁 → Image/modules/DTB → 外部模块/depmod
+full-image: prepare kernel source → display/A6xx patches → Image/modules/DTB → out-of-tree modules/depmod
                                    ↓
-匹配内核重编模块（或显式复用已完成组件）→ Hybrid图形集成 → 构建/校验复用触控向导 → 安装camera/sensors
+Rebuild matching modules (or explicitly reuse completed components) → Hybrid graphics integration → build/verify/reuse touch wizard → install camera/sensors
                                    ↓
-Venus休眠握手模块 + desktop-services.jar补丁 + 一次性休眠设置迁移
+Venus suspend handshake module + desktop-services.jar patch + one-time suspend settings migration
                                    ↓
-清理个人凭据/自动跳过首次设置 → 重建initramfs → 配对EFI/SLPI固件/机型DT
+Strip personal credentials / skip first-time setup → rebuild initramfs → pair EFI/SLPI firmware/device DT
                                    ↓
-模板系统分区 + 新userdata/metadata → GPT/ESP/文件系统读回 → IMG/IMG.GZ/清单
+Template system partitions + fresh userdata/metadata → GPT/ESP/filesystem readback → IMG/IMG.GZ/manifests
 ```
 
-摄像头和传感器包目前在完整内核构建**之前**加载：需要先准备它们，不能假定full-image会自动从零引导这些依赖。
-摄像头新源码入口不依赖Surface在线、旧camera运行包或Windows摄像头驱动。
-传感器的SLPI固件、型号配置、默认光学校准由SQ1/SQ2共用，准备一次即可；不要求逐机采集。
+Camera and sensor bundles must be prepared before the full kernel build. Sensor SLPI firmware, model configs, and default optical calibration are shared between SQ1/SQ2 and prepared once.
 
-## 3. 输入及当前状态
+## 3. Input Inventory
 
-| 输入 | 作用 | 本机状态 |
-| --- | --- | --- |
-| `private/build-inputs/template.img` | 原20 GiB布局和Android系统分区 | 已有 |
-| `kernel-6.18/source/SOURCE.json`、`source.tar.gz` | 内核/外部模块源码 | 已有 |
-| `kernel-6.18/toolchain.tar.gz`、`board.dts` | ARM64工具链、DT源码 | 已有 |
-| `full-image-runtime/records.json`、`files/` | Mesa/QTI/音视频等共用输入 | 已有；实际镜像通过复用清单换入新编译干净 Mesa/Turnip |
-| `camera/CAMERA.json`及13个ELF | 前后摄模块、provider、mapper/allocator | 已从源码生成并装入完整镜像 |
-| `sensors/sensors-bundle.json`及对应文件 | ALS/加速度/SLPI/RPC/配置 | 模块/HAL/overlay/RPC/EFI 与型号资料已装配 |
-| `suspend/desktop-services.jar` | 构建时修改 AC 息屏等待至 1000ms | 默认必需；取同一 Android system 的原 JAR，不从 Git 获取 |
-| Android平台接口、生成头、链接库、NDK/SDK | camera/sensor/触控用户态构建 | 按本机路径配置并逐项检查，不能用示例路径代替 |
+| Input | Purpose |
+| --- | --- |
+| `private/build-inputs/template.img` | Original 20 GiB layout and Android system partitions |
+| `kernel-6.18/source/SOURCE.json`, `source.tar.gz` | Kernel / out-of-tree module source |
+| `kernel-6.18/toolchain.tar.gz`, `board.dts` | ARM64 toolchain, DT source |
+| `full-image-runtime/records.json`, `files/` | Shared Mesa/QTI/audio-video inputs |
+| `camera/CAMERA.json` and ELFs | Front/rear camera modules, provider, mapper/allocator |
+| `sensors/sensors-bundle.json` and files | ALS/accelerometer/SLPI/RPC/configs |
+| `suspend/desktop-services.jar` | Patched at build time for 1000ms AC screen-off timeout; taken from same Android system |
+| Android platform interfaces, generated headers, link libs, NDK/SDK | Camera/sensor/touch userspace builds |
 
-摄像头配置模板：`configs/camera-build.example.json`；完整字段与ABI要求见 [CAMERA-BUILD](CAMERA-BUILD.md)。
-传感器命令与共用输入见 [SENSORS](SENSORS.md)。两个Git子模块按主线固定提交拉取；它们不代替上述平台依赖。
+Camera config template: `configs/camera-build.example.json`; fields and ABI requirements are in [CAMERA-BUILD](CAMERA-BUILD.md). Sensor commands and shared inputs are in [SENSORS](SENSORS.md).
 
-## 4. 执行入口
+## 4. Execution Entrypoints
 
-先创建填写真实路径的 `private/camera-build.json`，准备与6.18匹配的kernel_source/kernel_build及平台依赖：
+Prepare `private/camera-build.json`, `kernel_source`/`kernel_build` matching 6.18, and platform dependencies:
 
 ```sh
 python3 scripts/build-spx-camera-bundle.py --inputs private/camera-build.json --output out/camera-from-source
 python3 scripts/build.py --camera-inputs out/camera-from-source/camera --sensor-inputs private/build-inputs/sensors --output FRESH_LINUX_OUTPUT --jobs 8
 ```
 
-第二条默认source内核与hybrid；output必须是全新目录，源码构建输出使用Linux文件系统。
-传感器包先用 `build-spx-sensor-bundle.py` 生成；参数见SENSORS。缺输入时修复输入，不跳过组件。
+Generate the sensor bundle first with `build-spx-sensor-bundle.py`. `output` must be a fresh directory on a Linux filesystem.
 
-已完成组件使用 `full_image_reuse.py` 生成显式哈希清单，再执行 `python3 scripts/build.py --reuse-components REUSE.json --private-root PREPARED_INPUTS --output FRESH_LINUX_OUTPUT`。
-此路径复用 Image/全部模块、camera、sensors、Mesa 和 glue，不再重编它们；详见 [DEPENDENCIES](DEPENDENCIES.md)。
+To reuse completed components, generate an explicit hash manifest with `full_image_reuse.py`, then run:
 
-若原复用包尚未包含最新 Venus 休眠修复，先执行 `rebuild-hybrid-venus.py`，不能直接沿用旧模块：
+```sh
+python3 scripts/build.py --reuse-components REUSE.json --private-root PREPARED_INPUTS --output FRESH_LINUX_OUTPUT
+```
+
+When only Venus needs refreshing, run `rebuild-hybrid-venus.py` first:
 
 ```sh
 python3 scripts/rebuild-hybrid-venus.py --reuse-components PREVIOUS_REUSE.json --kernel-build MATCHED_KOUT --source PREVIOUS_VENUS_SOURCE --output FRESH_VENUS_OUTPUT
 python3 scripts/build.py --reuse-components FRESH_VENUS_OUTPUT/REUSE.json --private-root PREPARED_INPUTS --output FRESH_IMAGE_OUTPUT
 ```
 
-脚本核对 Image、配置及符号表后只重编 Venus；保留完整模块 stage。无受影响源码变化时，可用 `full_image_reuse.py --assembled-runtime PREVIOUS_INITRAMFS` 显式复用已编译小型 helper，不复制旧 init 或个人状态。
+When no affected source has changed, `full_image_reuse.py --assembled-runtime PREVIOUS_INITRAMFS` can explicitly reuse compiled small helpers.
 
-## 5. 产物层级
+## 5. Artifact Hierarchy and First-Boot Cleanup
 
-| 路径（相对OUTPUT） | 含义 |
+| Path (relative to OUTPUT) | Meaning |
 | --- | --- |
-| `kernel-build/`、`kernel-export/` | 内核构建树、Image、模块stage、DTB与命令记录 |
-| `camera-sensors/`、`camera-camss/`、传感器模块目录 | 本轮匹配内核的组件输出 |
-| `paired/EFI/SQ2Nat/` | 首轮配对启动包；不是最终整盘交付目录 |
-| `paired/EFI/SQ2Nat/PRIVACY.json` | 去除身份与默认跳过初始设置的处理记录 |
-| `disk/work/esp-tree/` | 存储适配、正常/救援入口和SQ1/SQ2路由后的ESP树；具体工作目录以构建清单为准 |
-| `disk/surface-pro-x-6.18-hybrid-generic.img` | 完整稀疏磁盘镜像 |
-| `disk/surface-pro-x-6.18-hybrid-generic.img.gz` | 压缩整盘镜像 |
-| `disk/IMAGE-MANIFEST.json`、`disk/LAYOUT.json` | 镜像结果与分区布局 |
-| `FULL-IMAGE.json`、`BUILD-COMMANDS.json` | 全流程结果、命令及日志位置 |
+| `kernel-build/`, `kernel-export/` | Kernel build tree, Image, module stage, DTB, and command records |
+| `camera-sensors/`, `camera-camss/`, sensor module dir | Component outputs matching this kernel build |
+| `paired/EFI/SQ2Nat/` | First-pass paired boot bundle |
+| `paired/EFI/SQ2Nat/PRIVACY.json` | Identity stripping and default first-time setup skip record |
+| `disk/work/esp-tree/` | ESP tree after storage adaptation, normal/rescue entries, and SQ1/SQ2 routing |
+| `disk/surface-pro-x-6.18-hybrid-generic.img(.gz)` | Full sparse disk image and compressed image |
+| `disk/IMAGE-MANIFEST.json`, `disk/LAYOUT.json` | Image result and partition layout |
+| `FULL-IMAGE.json`, `BUILD-COMMANDS.json` | End-to-end result, commands, and log locations |
 
-个人SSH/Wi-Fi/密码与旧setup跳过脚本在最终组件安装后清除；不复制旧userdata/metadata、persist、FRP及原始转储。
-默认通过 `surface-first-boot` 设置用户 0 的 `device_provisioned=1` / `user_setup_complete=1`，停用已安装的初始设置向导并进入桌面；不修改联网探测策略，不预置账户/Wi-Fi/SSH 凭据。成功后写入 userdata 标记，后续启动不重复执行。闭源平台库/固件仍须按其许可分发。
+Personal SSH/Wi-Fi/passwords and legacy setup-skip scripts are stripped after final component installation; old userdata/metadata, persist, FRP, and raw dumps are not copied. `surface-first-boot` sets `device_provisioned=1` / `user_setup_complete=1` for user 0 and writes a userdata marker; `PRIVACY.json` records `first_setup_preserved=false` and `first_setup_skipped=true`.
 
-## 6. 当前真实产物
-
-当前完整成品在 `/mnt/spx-workspace/chromebookOS/out/hybrid-current-20261116/image/disk/`：
-原始 20 GiB，压缩 8,199,981,130 字节。包含默认跳过初始设置、最新双语触摸校准和匹配的休眠修复；
-GPT/ESP/完整 gzip/匿名身份检查通过，未真机启动。文件哈希、复用方式和验证范围见
-[IMAGE](IMAGE.md)。旧 `hybrid-assembly`、`hybrid-sleep` 整盘及旧 release 压缩成品已按要求清理，模板和组件保留。
-
-初始设置默认策略更新只对使用当前源码重新装配的产物生效；此前已经生成的镜像不会自动改变。`PRIVACY.json` 应记录 `first_setup_preserved=false`、`first_setup_skipped=true`。
-
-触摸校准向导使用当前 `probe/touch-calibration/` 源码构建（含最新中英双语界面）。使用组件复用清单时，若仅向导 Java/Manifest 变化，旧 APK 自动失效并重编，图形适配库与 userdata 扩容工具继续复用；不将旧 APK 当作最新产物。
+The touch calibration wizard is built from `probe/touch-calibration/`; during reuse builds, if only wizard Java/Manifest files change, the old APK is invalidated and rebuilt. See [IMAGE](IMAGE.md) for current artifact details and boundaries.

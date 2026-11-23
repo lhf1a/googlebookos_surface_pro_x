@@ -89,12 +89,12 @@ Legend: `✅ Available` · `🟡 Partially Available` · `❌ Unavailable`
 | **Lid Sleep (Hall `SW_LID`)** | ✅ Available | ✅ Available |
 | **LTE Mobile Data** | ✅ Available | ✅ Available |
 | **Wi-Fi / Hotspot / Bluetooth / SSH** | ✅ Available | ✅ Available |
-| **GNSS / GPS (QMI LOC AIDL V4)** | 🟡 Partially Available (HAL Active, Pending Fix Test) | 🟡 Partially Available (HAL Active, Pending Fix Test) |
+| **GNSS / GPS (QMI LOC AIDL V4)** | 🟡 Partially Available | 🟡 Partially Available |
 | **USB Storage / Type Cover / Buttons** | ✅ Available | ✅ Available |
 | **USB-C DP / Native Multi-Display Settings** | ✅ Available | ✅ Available |
 | **Lower-Port USB ADB** | ✅ Available | ✅ Available |
-| **Advanced Settings**: [Full Feature Guide](docs/ADVANCED-SETTINGS.md) (Vulkan, Performance, Touch, Debugging, Lid & IR Face Unlock, OTA & LiveCD Install) | ✅ Available | ✅ Available |
-| **IR Face Unlock (Class 2, OV7251)** | 🟡 Partially Available (Pending SQ1 Test) | ✅ Available |
+| **Advanced Settings** ([Feature Guide](docs/ADVANCED-SETTINGS.md)) | ✅ Available | ✅ Available |
+| **IR Face Unlock (Class 2, OV7251)** | 🟡 Partially Available | ✅ Available |
 | **SMS, Hibernate** | ❌ Unavailable | ❌ Unavailable |
 
 ---
@@ -168,7 +168,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\Install-GooglebookDu
 ```
 
 #### Option E: LiveCD USB Boot -> Install to Internal NVMe SSD
-Boot from USB (Option A or B), complete Touch Calibration, connect AC power, and open **Advanced Settings -> Install to Internal Disk** ([ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md)). Confirm the target NVMe disk (**erases all internal partitions including Windows; USB `userdata` is not migrated**), wait for the 5-partition GPT + SHA-256 copy + UEFI setup, tap **Shut down now**, **unplug the USB drive**, and power on.
+Boot from USB, complete Touch Calibration, connect AC power, and open **Advanced Settings -> Install to Internal Disk** ([ADVANCED-SETTINGS](docs/ADVANCED-SETTINGS.md)). Confirm the target NVMe disk—this erases all internal partitions including Windows and does not migrate USB `userdata`—wait for the 5-partition GPT copy, SHA-256 verification, and UEFI setup, then tap **Shut down now**, **unplug the USB drive**, and power on.
 
 ### 3. Booting & First-Boot Setup
 
@@ -189,7 +189,7 @@ Boot from USB (Option A or B), complete Touch Calibration, connect AC power, and
 
 - **Live IPs & Network ADB (`TCP 5555`)**: Shows LAN / VM IPs and toggles persistent TCP `5555` (`adb connect <LAN_IP>:5555`, RSA-authenticated via `ro.adb.secure=1`), while keeping `tcp:localhost:5555` active for lower-port `adb-usb-bridge`.
 - **Initramfs `root` SSH (`TCP 22`)**: Toggles early-boot Dropbear SSH (`root` password locked by default) with in-app password/key management plus `/root/.ssh` symlink persistence so `ssh-copy-id root@<LAN_IP>` survives reboots.
-- **Lower-Port USB ADB & GRUB Rescue Mode**: Lower Type-C port supports wired `adb devices` ([TYPEC](docs/TYPEC.md)). For pre-Android recovery, select **Rescue Mode** (`spx-rescue` / `sq2.rescue=1`) in GRUB for port `22` SSH, USB Ethernet drivers, and `wifi-tui` ([BUILD](docs/BUILD.md#7-边界)).
+- **Lower-Port USB ADB & GRUB Rescue Mode**: Lower Type-C port supports wired `adb devices` ([TYPEC](docs/TYPEC.md)). For pre-Android recovery, select **Rescue Mode** (`spx-rescue` / `sq2.rescue=1`) in GRUB for port `22` SSH, USB Ethernet drivers, and `wifi-tui` ([BUILD](docs/BUILD.md#7-boundaries)).
 
 ---
 
@@ -275,4 +275,3 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 
 - Sincere thanks to the upstream open-source projects and community contributors behind **linux-surface**, **Mesa Freedreno / Turnip**, **AOSP / Googlebook**, **Cuttlefish**, **QTI CAF**, and **KernelSU Next**, on whose work this port is built. Licenses remain with their respective authors.
 - **License**: Multi-licensed per directory and file SPDX headers; upstream and annotated files retain their original licenses, and unannotated original scripts and tooling default to the MIT License. See [LICENSE](LICENSE).
-- Flashing storage devices carries data-loss risk; back up important data before testing.

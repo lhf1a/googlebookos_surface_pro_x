@@ -1,49 +1,46 @@
-# 待办
+# TODO
 
-只列未完成和未验收事项。已完成内容见对应功能文档，历史过程见 `git log`。
+Lists only unfinished and unverified items. See the corresponding feature docs for completed items and `git log` for history.
 
-## P0：任意 SQ1/SQ2 通用交付整改
+## P0: Generic SQ1/SQ2 Delivery Remediation
 
-规则：[DEVELOPMENT](DEVELOPMENT.md)，根 `AGENTS.md` 的 `SPX-PORTABLE-SQ1-SQ2`。
-以下为待审计/整改/验收项，不是已实现或已实测声明。
+Rules: [DEVELOPMENT](DEVELOPMENT.md), and `SPX-PORTABLE-SQ1-SQ2` in root `AGENTS.md`.
 
-- 审计标准构建、有效 initramfs、EFI/DT 与运行时 helper，移除序列号、固定原盘 UUID/ESP 标记、地址、用户编号及一次枚举值的单机准入/资源假设；不要只改文案。
-- 分离 runtime/donor 中的实验室 SSH 私钥/主机身份、密码/shadow、Wi-Fi 保存状态及目标唯一数据；普通通用镜像不得继承它们。
-- 存储/ESP/用户/音频/触摸资源改为动态发现；写盘身份核对继续用本次现场信息，不能取消防误写与硬件资源边界。
-- 同一产物完成 SQ1/SQ2 × 默认/回退入口的代表性跨设备回归，覆盖不同身份、容量和合法资源编号，以及旧数据升级。
-- 抽查其余固定设备路径、phandle、event/card 编号和单机假设；未完成前不得宣称镜像已完全通用。
+- Audit standard builds, active initramfs, EFI/DT, and runtime helpers to remove single-device admission/resource assumptions on serial numbers, fixed source disk UUID/ESP markers, addresses, user IDs, and one-time enumerated values.
+- Separate lab SSH private keys/host identities, passwords/shadow, saved Wi-Fi state, and target-unique data from runtime/donor so generic images do not inherit them.
+- Switch storage/ESP/user/audio/touch resources to dynamic discovery while keeping live target verification and write-safety guards for disk writes.
+- Complete representative cross-device regression on a single artifact across SQ1/SQ2 × default/fallback entries, covering different identities, capacities, valid resource numbers, and upgrades over existing data.
+- Spot-check remaining hardcoded device paths, phandles, event/card numbers, and single-device assumptions.
 
-## 交付验收
+## Delivery Acceptance
 
-- [ ] 当前 Hybrid 整盘在 SQ1 与 SQ2 上分别全新启动一次（各自全新 userdata），记录 boot ID、首启策略与桌面结果。
-- [ ] 旧数据升级路径：保留用户凭据、Wi-Fi 和桌面选择，不重复覆盖设置。
-- [ ] SQ1 长时间运行与休眠/唤醒；SQ2 长时功耗与多次循环唤醒。
-- [ ] 公开镜像的匿名性复核（无 SSH/Wi-Fi/账户/FSG/NV 残留）。
+- [ ] Fresh boot the current Hybrid full image on SQ1 and SQ2 (each with fresh userdata), recording boot ID, first-boot policy, and launcher result.
+- [ ] Upgrade path over existing data: preserve user credentials, Wi-Fi, and launcher selection without re-overwriting settings.
+- [ ] SQ1 long-duration run and suspend/resume; SQ2 long-term power consumption and multi-cycle resume.
+- [ ] Anonymity review of public images (no SSH/Wi-Fi/account/FSG/NV residuals).
 
-## 摄像头
+## Camera
 
-- [x] 前后摄 V4L2、软件 ISP、Camera2/HAL 与原生 JPEG。
-- [x] 双路 480p/720p/1080p H.264/AAC，真实文件完整解码。
-- [ ] IR 取图与 Hello 认证；目前仅芯片 ID 通过。
-- 已知限制只登记：CCI 偶发打开/切换超时；高清软件 ISP 帧率低；画质/曝光和后摄 AF 待改进。
+- [ ] IR capture and Hello authentication.
+- Known limitations: occasional CCI open/switch timeout; low HD software ISP framerate; image quality/exposure and rear AF need improvement.
 
-## 传感器
+## Sensors
 
-- [ ] SQ1 自动亮度/旋转实机验收（SQ2 已通过）。
-- [ ] 长期休眠后的传感器恢复。
+- [ ] SQ1 auto-brightness/auto-rotation on-device acceptance.
+- [ ] Sensor recovery after long-term suspend.
 
 ## LTE
 
-- [ ] SQ2 新采集入口与完整新镜像双机全新启动验收。
-- [ ] 保留本机 FSG/UUID 缓存复用路径；不内嵌单机校准。
+- [ ] SQ2 new collection entrypoint and full new image fresh-boot acceptance on both devices.
+- [ ] Preserve local FSG/UUID cache reuse path without embedding single-device calibration.
 
-## 图形与视频
+## Graphics & Video
 
-- [ ] Wild Life GMEM 根因（当前只有限定 A680.1 + 3DMark 的 sysmem 兼容绕过）。
-- [ ] 内屏 HDR（当前仅 SDR，Main10 过滤）。
-- [ ] 高清软件 ISP 与视频并发时的帧率/功耗。
+- [ ] Wild Life GMEM root cause (currently a sysmem compatibility workaround scoped to A680.1 + 3DMark).
+- [ ] Internal panel HDR (currently SDR only, Main10 filtered).
+- [ ] Framerate/power under concurrent HD software ISP and video.
 
-## 电源
+## Power
 
-- [ ] s2idle 循环中仍有 timerfd 提前唤醒与 freezer 中止；不称零中止或 Modern Standby 认证。
-- [ ] 长时功耗与电池曲线测量。
+- [ ] Investigate premature `timerfd` wakeups and freezer aborts in `s2idle` loops.
+- [ ] Long-term power and battery curve measurements.
