@@ -54,6 +54,10 @@ final class BridgeClient {
         String sshPort = "22";
         boolean sshPasswordSet;
         int sshKeyCount;
+        boolean avfVpnAvailable;
+        boolean avfVpnEnabled;
+        boolean avfVpnRunning;
+        boolean avfVpnActive;
         String debugVmIp = "";
         String debugLanIps = "";
         boolean hallLidAvailable;
@@ -209,6 +213,12 @@ final class BridgeClient {
         return loadState(false);
     }
 
+    BridgeState setAvfVpnShare(boolean enabled) throws Exception {
+        String nonce = newNonce();
+        sendRequest(DriverPolicy.avfVpnShareRequest(nonce, enabled), 15000);
+        return loadState(false);
+    }
+
     BridgeState setSshPassword(String password) throws Exception {
         String nonce = newNonce();
         sendRequest(DriverPolicy.sshPasswordRequest(nonce, password), 15000);
@@ -340,6 +350,10 @@ final class BridgeClient {
         } catch (NumberFormatException e) {
             state.sshKeyCount = 0;
         }
+        state.avfVpnAvailable = "1".equals(map.get("avf_vpn_available"));
+        state.avfVpnEnabled = "1".equals(map.get("avf_vpn_enabled"));
+        state.avfVpnRunning = "1".equals(map.get("avf_vpn_running"));
+        state.avfVpnActive = "1".equals(map.get("avf_vpn_active"));
         state.debugVmIp = map.getOrDefault("debug_vm_ip", "");
         state.debugLanIps = map.getOrDefault("debug_lan_ips", "");
         state.hallLidAvailable = "1".equals(map.get("hall_lid_available"));

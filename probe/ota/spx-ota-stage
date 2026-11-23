@@ -22,10 +22,42 @@ DATA_DIR_OVERRIDE="${SPX_OTA_DATA_DIR:-}"
 META_DIR_OVERRIDE="${SPX_OTA_META_DIR:-}"
 ESP_SRC_OVERRIDE="${SPX_OTA_ESP_SRC_DIR:-}"
 
+refresh_android_package_caches() {
+    _root="$1"
+    [ -n "$_root" ] && [ -d "$_root" ] && [ ! -L "$_root" ] || return 0
+    _pcache="$_root/system/package_cache"
+    if [ -d "$_pcache" ] && [ ! -L "$_pcache" ]; then
+        find "$_pcache" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+    fi
+    for _dc in "$_root/dalvik-cache" "$_root/misc/apexdata/com.android.art/dalvik-cache"; do
+        [ -d "$_dc" ] && [ ! -L "$_dc" ] || continue
+        for _isa in "$_dc"/*; do
+            [ -d "$_isa" ] && [ ! -L "$_isa" ] || continue
+            for _f in "$_isa"/vendor@app@* "$_isa"/vendor@overlay@*; do
+                [ -e "$_f" ] || [ -L "$_f" ] || continue
+                rm -rf "$_f" 2>/dev/null || true
+            done
+        done
+    done
+    sync 2>/dev/null || true
+}
+
 if [ ! -f "$PENDING_FILE" ]; then
     # Online ESP-only OTA writes STATUS=APPLIED_PENDING_REBOOT before rebooting.
     # Reaching early boot in the new initramfs means the reboot has completed.
     if [ -f "$RESULT_FILE" ] && [ ! -L "$RESULT_FILE" ] && grep -qx 'STATUS=APPLIED_PENDING_REBOOT' "$RESULT_FILE" 2>/dev/null; then
+        if [ -n "$DATA_DIR_OVERRIDE" ]; then
+            refresh_android_package_caches "$DATA_DIR_OVERRIDE"
+            printf 'SPX_OTA: Online OTA reboot completed; refreshed Android package_cache and vendor APK dalvik-cache.\n'
+        elif [ -b "$DATA_DEV" ]; then
+            mkdir -p "$RUN_DIR/data" 2>/dev/null || true
+            if mount -t ext4 -o rw "$DATA_DEV" "$RUN_DIR/data" 2>/dev/null; then
+                refresh_android_package_caches "$RUN_DIR/data"
+                umount "$RUN_DIR/data" 2>/dev/null || true
+                rmdir "$RUN_DIR/data" 2>/dev/null || true
+                printf 'SPX_OTA: Online OTA reboot completed; refreshed Android package_cache and vendor APK dalvik-cache.\n'
+            fi
+        fi
         _tmp_res="$RESULT_FILE.tmp"
         if sed 's/^STATUS=APPLIED_PENDING_REBOOT$/STATUS=OK/' "$RESULT_FILE" > "$_tmp_res" 2>/dev/null; then
             sync 2>/dev/null || true
@@ -506,6 +538,8 @@ else
             rm -f "$PKG_PATH" 2>/dev/null || true
             ;;
     esac
+    log "Refreshing Android package_cache and vendor APK dalvik-cache..."
+    refresh_android_package_caches "$DATA_ROOT"
     if [ "$DATA_MOUNTED" = 1 ]; then
         sync 2>/dev/null || true
         umount "$RUN_DIR/data" || true

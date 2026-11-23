@@ -15,8 +15,8 @@
 - **禁止单机准入。** 不得以某台机器的序列号、NVMe 型号/序列、MAC、IP/SSH 地址、SSH 主机指纹、原盘 UUID/ESP 标记、Android 用户编号或历史采集 SHA 作为通用构建/正常启动的准入条件。日志和实验对象可以记录这些值，但它们不是产品运行条件。
 - **按运行时硬件事实适配。** SQ1/SQ2 差异通过型号/SoC、硬件能力与运行时资源发现处理；不得固定一次启动的 phandle、eventN、cardN、节点编号或调试主机路径。硬件类别/版本 quirk 必须有硬件依据，不把某台机器的触摸测量结果推广到所有设备。
 - **镜像与本机状态分离。** 通用镜像不得复制调试机的密码/shadow、SSH 私钥/主机身份、Wi-Fi 凭据、IMEI/NV/FSG 校准、用户数据或触摸校准到其他机器。设备唯一数据应由目标设备自己的存储或本机首次配置提供；显式实验室私有包必须单独标记，不能称为通用交付。
-- **不撤销安全保护。** 模块/固件 ABI、构建产物完整性、真实硬件兼容性、SMMU/资源边界、screen_only/nohibernate、不可重复启动固件等保护保留。写盘前仍需动态识别本次目标盘/ESP/根源并防止误写；禁止单机白名单不等于允许盲写、清空 userdata 或热重置提供者。
-- **跨设备验收，诚实标界。** 同一产物覆盖 SQ1/SQ2、默认/回退入口以及不同设备身份、容量和枚举资源的回归；旧数据升级不得破坏凭据/用户设置。单台样机通过只证明该次观测，不能声称所有设备已实测；未测内容明确标注。
+- **不撤销安全保护。** 模块/固件 ABI、构建产物完整性、真实硬件兼容性、SMMU/资源边界、screen_only/nohibernate、不可重复启动固件等保护保留。写盘前仍需动态识别本次目标盘/ESP/根源并防止误写。
+- **跨设备验收，诚实标界。** 同一产物覆盖 SQ1/SQ2、默认/回退入口以及不同设备身份、容量和枚举资源的回归；旧数据升级不得破坏凭据/用户设置。
 
 ## 构建
 
@@ -24,26 +24,24 @@
 - 不在构建或启动中新增按内容哈希、次数、时长或异常区域大小的产品门槛；保留 ABI/格式/路径/磁盘唯一性检查与真实命令失败传播。
 - 源码模式必须实际重编受影响的 Image/模块；prebuilt 只允许与所选 Image 明确配对的模块，不靠改版本号冒充匹配。
 - 不把未构建、未启动或未复测的候选写成已验收；构建成功不等于硬件验收。
+- **统一构建证书，派生目录前先核对既有 keychain**：所有内置/自研应用与 RRO overlay——包括高级设置（`SurfaceAdvancedControl`）、触摸校验向导（`wizard.apk`）、显示设置（`SurfaceDisplaySettings`）、全部 RRO overlay，以及**后续所有可能加入的新应用/APK**（`private/advanced-control/signing.keystore`、`private/touch-calibration/signing.keystore`、`private/systemui-overlay/signing.keystore`、`private/spx-sensors/overlay.keystore`、`private/sq2-radio/local.keystore`、`private/spx-face/overlay.keystore` 及新增应用的 `private/**/*.keystore`）——必须全仓统一使用同一套既有构建证书，防止签名漂移导致保留数据 OTA 或覆盖安装失败。派生新的工作目录 / `git worktree` / 构建目录前，必须先检查已有工作目录中的 `private/**/*.keystore`，直接复用或通过对应的 `SPX_*_KEYSTORE` / `SQ2_*_KEYSTORE` 环境变量指向既有证书；禁止在未核对既有证书时放任脚本调用 `keytool -genkeypair` 生成新证书。
+- **`versionCode` 变更时机与新应用打包约定**：该约束适用于全部内置/自研应用（高级设置、触摸校验向导、显示设置、RRO overlay 及后续所有新增应用/APK）——仅在构建预发布新版本、准备 GitHub Release 或用户特别声明时递增 `versionCode`；日常开发与修复提交保持当前 `versionCode` 不变，对应单测仅校验下界（如 `>= N`）而非写死单一数值；且任何新加入并拷贝到 `/vendor/app/`、`/vendor/overlay/` 或经 `pm install` 安装的 APK 均须避免保留 cpio `1970-01-01` 时间戳，确保持久 OTA 后新 Manifest、签名与 DEX 缓存可靠刷新。
 
 ## 调试纪律
 
 - 每次硬件实验只改一个变量，先写假设、判据和停止条件；连续两次没有区分证据就换方向，而不是继续堆同一条路径。
-- 先核对实际打包/运行时文件、固件、DT、模块依赖加载顺序和原始错误，再改子系统；功能通过不等于根因确认。
+- 先核对实际打包/运行时文件、固件、DT、模块依赖加载顺序和原始错误，再改子系统。
 - 临时探针、trace 和采集器在结论后移除；正常启动路径不常驻诊断工具、持续日志或第二个 bearer owner。
-- 如实报告边界：单机通过只证明该次观测，不代表 SQ1/SQ2 全体、长期功耗或休眠验收。
+- 如实报告边界：不代表 SQ1/SQ2 全体、长期功耗或休眠验收。
 
 ## 电源、休眠与显示
 
-- 默认 `--suspend-policy unrestricted`（`suspend.screen_only=0`），不恢复 owner/trial/admission 门槛；保留 nohibernate、凭据、温控和 SPI PM 恢复。
-- 正常 EL2 不自动打开 Terminal/KVM witness，不跑诊断 Wi-Fi 或连续日志；SSH 在 Android 启动后异步启动（`sq2.ssh=0` 关闭）。
-- 保留已验收的 Mesa 回退入口和双入口载荷；GPU 默认 661/416，700/432 只作显式实验档。
-- 已验收的音频、触摸、显示和视频补丁保持；新改动不得用热换活跃提供者代替完整启动验证。
+- 增加内核驱动桥/模块/硬件驱动后，需要测试S2idle下的正常休眠与唤醒。
 
 ## 设备与凭据
 
 - 写盘前动态确认目标盘、ESP 标记、UUID 和 root 来源；不碰工作站系统盘，不盲删、不格式化。
-- 不例行卸载在用的 QCA 蓝牙传输模块；蓝牙只在 Android 启动完成后初始化，并保留用户持久选择。
-- 实验室 SSH 身份、密码/shadow、Wi-Fi、FSG/NV 校准只留在 `private/`；含身份镜像不得作为匿名公共镜像发布。
+- 实验室 SSH 身份、密码/shadow、Wi-Fi、FSG/NV 校准及本地签名证书（`private/**/*.keystore`）只留在 `private/` 且不进 Git；含身份镜像不得作为匿名公共镜像发布。
 
 ## 文档
 

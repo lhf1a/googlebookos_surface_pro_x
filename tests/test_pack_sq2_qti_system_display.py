@@ -3,6 +3,9 @@ from pathlib import Path
 import gzip
 import hashlib
 import importlib.util
+import os
+import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -205,6 +208,77 @@ class SystemDisplayPack(unittest.TestCase):
             for name in ("kernel", "etc/shadow", "bin/dropbear"):
                 self.assertEqual(before[name], after[name], name)
             self.assertEqual(after["etc/shadow"][1][1], 0o100600)
+
+    def test_vendor_apk_and_overlay_do_not_keep_1970_mtime(self):
+        apk_files = {
+            "app/SurfaceAdvancedControl/SurfaceAdvancedControl.apk": b"PK\x03\x04adv-control-apk",
+            "overlay/spx-systemui-overlay.apk": b"PK\x03\x04sysui-overlay-apk",
+        }
+
+        def stage_with_apks(temp):
+            source, vendor, runner, files = self.fixture(temp)
+            all_files = dict(files, **apk_files)
+            for rel, data in apk_files.items():
+                p = source / "root" / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(data)
+            sums = "".join(sha(data) + "  root/" + name + "\n" for name, data in all_files.items())
+            hidl_sums = "".join(
+                sha((source / "hidl-support" / p.name).read_bytes()) + "  hidl-support/" + p.name + "\n"
+                for p in sorted((source / "hidl-support").iterdir())
+            )
+            (source / "SHA256SUMS").write_text(sums + hidl_sums)
+            (source / "INSTALLED_SHA256SUMS").write_text(sums.replace("  root/", "  "))
+            (source / "INSTALL_FILES").write_text("\n".join(all_files) + "\n")
+            for p in (source / "root").rglob("*"):
+                if p.is_file():
+                    os.utime(p, (0, 0))
+            return source, vendor, runner
+
+        for unset_rtc in (False, True):
+            with self.subTest(shell="sh", unset_rtc=unset_rtc), tempfile.TemporaryDirectory() as directory:
+                temp = Path(directory)
+                _, vendor, runner = stage_with_apks(temp)
+                if unset_rtc:
+                    mock_date = temp / "mockbin/date"
+                    mock_date.write_text("#!/bin/sh\necho 0\n")
+                    mock_date.chmod(0o755)
+                result = subprocess.run(["sh", str(runner)], text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                for rel, expected_data in apk_files.items():
+                    dst = vendor / rel
+                    self.assertEqual(dst.read_bytes(), expected_data)
+                    st = dst.stat()
+                    self.assertEqual(stat.S_IMODE(st.st_mode), 0o644)
+                    self.assertGreaterEqual(st.st_mtime, 1577836800, f"{rel} kept 1970/old mtime: {st.st_mtime}")
+                    if unset_rtc:
+                        self.assertGreaterEqual(dst.parent.stat().st_mtime, 1577836800)
+                # Non-APK binaries/libraries retain cp -p preserved epoch mtime.
+                self.assertEqual((vendor / "lib64/libgsl.so").stat().st_mtime, 0)
+
+        busybox = shutil.which("busybox")
+        if busybox:
+            # Verify the APK copy/touch-t loop directly under BusyBox without standalone mount applet interference.
+            stage_text = pack.stage_script()
+            start = stage_text.index("while IFS= read -r name; do\n")
+            end = stage_text.index('done < "$source/INSTALL_FILES"\n', start) + len('done < "$source/INSTALL_FILES"\n')
+            loop_body = stage_text[start:end]
+            for unset_rtc in (False, True):
+                with self.subTest(shell="busybox", unset_rtc=unset_rtc), tempfile.TemporaryDirectory() as directory:
+                    temp = Path(directory)
+                    source, vendor, _ = stage_with_apks(temp)
+                    wrapper = temp / "bb-loop.sh"
+                    date_stub = "date() { echo 0; }\n" if unset_rtc else ""
+                    wrapper.write_text(f"set -eu\nsource={source}\nvendor={vendor}\n{date_stub}{loop_body}")
+                    res = subprocess.run([busybox, "sh", str(wrapper)], text=True, capture_output=True)
+                    self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+                    for rel, expected_data in apk_files.items():
+                        dst = vendor / rel
+                        self.assertEqual(dst.read_bytes(), expected_data)
+                        st = dst.stat()
+                        self.assertEqual(stat.S_IMODE(st.st_mode), 0o644)
+                        self.assertGreaterEqual(st.st_mtime, 1577836800, f"{rel} busybox mtime={st.st_mtime}")
+                    self.assertEqual((vendor / "lib64/libgsl.so").stat().st_mtime, 0)
 
 
 if __name__ == "__main__":

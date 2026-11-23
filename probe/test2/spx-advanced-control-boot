@@ -28,6 +28,10 @@ DROPBEAR_BIN="${SPX_AC_DROPBEAR_BIN:-dropbear}"
 DROPBEARKEY_BIN="${SPX_AC_DROPBEARKEY_BIN:-dropbearkey}"
 MKPASSWD_BIN="${SPX_AC_MKPASSWD_BIN:-mkpasswd}"
 IP_BIN="${SPX_AC_IP_BIN:-ip}"
+AVF_VPN_WATCH_BIN="${SPX_AC_AVF_VPN_WATCH_BIN:-/bin/spx-avf-vpn-watch}"
+AVF_VPN_RECONCILE_BIN="${SPX_AC_AVF_VPN_RECONCILE_BIN:-/bin/spx-avf-vpn-reconcile}"
+AVF_VPN_PIDFILE="$RUN_DIR/spx-avf-vpn-watch.pid"
+AVF_VPN_STATE_FILE="$RUN_DIR/spx-avf-vpn.state"
 ADB_TCP_PORT="5555"
 SSH_PORT="22"
 
@@ -1115,6 +1119,100 @@ ssh_stop_now() {
     return 0
 }
 
+read_saved_avf_vpn_share() {
+    _f="$STORE/avf_vpn_share_enabled"
+    if [ -f "$_f" ] && [ ! -L "$_f" ]; then
+        _v="$(head -n 1 "$_f" 2>/dev/null | tr -d '\r\n ')"
+        if [ "$_v" = "1" ]; then
+            printf '1'
+            return 0
+        fi
+    fi
+    printf '0'
+}
+
+is_avf_vpn_watch_running() {
+    _pidfile="$AVF_VPN_PIDFILE"
+    [ -r "$_pidfile" ] || return 1
+    _vpid="$(head -n 1 "$_pidfile" 2>/dev/null | tr -d '\r\n ')"
+    case "$_vpid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$_vpid" -gt 1 ] || return 1
+    kill -0 "$_vpid" 2>/dev/null || return 1
+    if [ -r "/proc/$_vpid/cmdline" ]; then
+        _vcmd="$(tr '\000' ' ' < "/proc/$_vpid/cmdline" 2>/dev/null || true)"
+        _vbase="$(basename "$AVF_VPN_WATCH_BIN")"
+        case "$_vcmd" in
+            *spx-avf-vpn-watch*|*"$_vbase"*) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    return 0
+}
+
+read_avf_vpn_active() {
+    is_avf_vpn_watch_running || { printf '0'; return 0; }
+    if [ -r "$AVF_VPN_STATE_FILE" ] && [ ! -L "$AVF_VPN_STATE_FILE" ]; then
+        _va="$(sed -n 's/^active=//p' "$AVF_VPN_STATE_FILE" 2>/dev/null | head -n 1 | tr -d '\r\n ')"
+        if [ "$_va" = "1" ]; then
+            printf '1'
+            return 0
+        fi
+    fi
+    printf '0'
+}
+
+avf_vpn_start_now() {
+    [ -x "$AVF_VPN_WATCH_BIN" ] && [ -x "$AVF_VPN_RECONCILE_BIN" ] || return 1
+    mkdir -p "$RUN_DIR" "$LOGS_DIR"
+    if ! is_avf_vpn_watch_running; then
+        rm -f "$AVF_VPN_PIDFILE" 2>/dev/null || true
+        SPX_AVF_VPN_RUN="$RUN_DIR" \
+        SPX_AVF_VPN_STATE_FILE="$AVF_VPN_STATE_FILE" \
+        SPX_AVF_VPN_ANDROID_WRAPPER="${SPX_AVF_VPN_ANDROID_WRAPPER:-${SPX_AC_ANDROID_WRAPPER:-}}" \
+        "$AVF_VPN_WATCH_BIN" --reconcile "$AVF_VPN_RECONCILE_BIN" --pidfile "$AVF_VPN_PIDFILE" >> "$LOGS_DIR/spx-avf-vpn.txt" 2>&1 </dev/null &
+        _i=0
+        while [ "$_i" -lt 15 ]; do
+            is_avf_vpn_watch_running && break
+            sleep 0.1
+            _i=$((_i + 1))
+        done
+    fi
+    is_avf_vpn_watch_running || return 1
+    return 0
+}
+
+avf_vpn_stop_now() {
+    _pidfile="$AVF_VPN_PIDFILE"
+    if [ -r "$_pidfile" ]; then
+        _vpid="$(head -n 1 "$_pidfile" 2>/dev/null | tr -d '\r\n ')"
+        case "$_vpid" in
+            ''|*[!0-9]*) ;;
+            *)
+                if [ "$_vpid" -gt 1 ] && kill -0 "$_vpid" 2>/dev/null; then
+                    kill "$_vpid" 2>/dev/null || true
+                    _i=0
+                    while [ "$_i" -lt 20 ]; do
+                        kill -0 "$_vpid" 2>/dev/null || break
+                        sleep 0.1
+                        _i=$((_i + 1))
+                    done
+                    kill -9 "$_vpid" 2>/dev/null || true
+                fi
+                ;;
+        esac
+    fi
+    rm -f "$_pidfile" 2>/dev/null || true
+    if [ -x "$AVF_VPN_RECONCILE_BIN" ]; then
+        SPX_AVF_VPN_RUN="$RUN_DIR" \
+        SPX_AVF_VPN_STATE_FILE="$AVF_VPN_STATE_FILE" \
+        SPX_AVF_VPN_ANDROID_WRAPPER="${SPX_AVF_VPN_ANDROID_WRAPPER:-${SPX_AC_ANDROID_WRAPPER:-}}" \
+        "$AVF_VPN_RECONCILE_BIN" off >/dev/null 2>&1 || true
+    fi
+    return 0
+}
+
 restore_debug_settings_on_boot() {
     if is_rescue_boot; then
         echo 'SPX_AC_BOOT_DEBUG_RESTORE_SKIPPED rescue'
@@ -1141,6 +1239,13 @@ restore_debug_settings_on_boot() {
     elif [ "$_ssh_saved" = "0" ]; then
         ssh_stop_now
         echo 'SPX_AC_BOOT_SSH_STOPPED 0'
+    fi
+    if [ "$(read_saved_avf_vpn_share)" = "1" ]; then
+        if avf_vpn_start_now; then
+            echo 'SPX_AC_BOOT_AVF_VPN_RESTORED 1'
+        else
+            echo 'SPX_AC_BOOT_AVF_VPN_RESTORE_FAILED'
+        fi
     fi
 }
 
@@ -1602,6 +1707,14 @@ publish_state() {
     _ssh_pw_set=0
     is_ssh_password_set && _ssh_pw_set=1
     _ssh_keys="$(count_ssh_authorized_keys)"
+    _avf_vpn_avail=0
+    if [ -x "$AVF_VPN_WATCH_BIN" ] && [ -x "$AVF_VPN_RECONCILE_BIN" ]; then
+        _avf_vpn_avail=1
+    fi
+    _avf_vpn_saved="$(read_saved_avf_vpn_share)"
+    _avf_vpn_run=0
+    is_avf_vpn_watch_running && _avf_vpn_run=1
+    _avf_vpn_active="$(read_avf_vpn_active)"
     read_hall_and_face_snapshot
 
     _body="bridge_version=1
@@ -1638,6 +1751,10 @@ ssh_running=$_ssh_run
 ssh_port=$SSH_PORT
 ssh_password_set=$_ssh_pw_set
 ssh_key_count=$_ssh_keys
+avf_vpn_available=$_avf_vpn_avail
+avf_vpn_enabled=$_avf_vpn_saved
+avf_vpn_running=$_avf_vpn_run
+avf_vpn_active=$_avf_vpn_active
 debug_vm_ip=$DEBUG_VM_IP
 debug_lan_ips=$DEBUG_LAN_IPS
 hall_lid_available=$_lid_avail
@@ -2220,6 +2337,29 @@ handle_request() {
                 ssh_stop_now || true
             fi
             write_atomic_file "$SSH_STORE/enabled" 600 "$(printf '%s\n' "$_enable")" || {
+                send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
+                return 0
+            }
+            sync 2>/dev/null || true
+            publish_state "$_dir" || true
+            send_reply "$_dir" "$_nonce" "OK"
+            ;;
+        set-avf-vpn-share)
+            _enable="$(sed -n '3p' "$TMP_REQ" | tr -d '\r')"
+            if ! validate_bool "$_enable"; then
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_arguments"
+                return 0
+            fi
+            if [ "$_enable" = "1" ]; then
+                if ! avf_vpn_start_now; then
+                    publish_state "$_dir" || true
+                    send_reply "$_dir" "$_nonce" "ERROR" "avf_vpn_start_failed"
+                    return 0
+                fi
+            else
+                avf_vpn_stop_now || true
+            fi
+            write_atomic_file "$STORE/avf_vpn_share_enabled" 600 "$(printf '%s\n' "$_enable")" || {
                 send_reply "$_dir" "$_nonce" "ERROR" "persist_failed"
                 return 0
             }

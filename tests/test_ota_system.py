@@ -355,6 +355,15 @@ class OtaSystemTests(unittest.TestCase):
                 (data_dir / 'vendor/sq2-touch-calibration/dev.profile').write_text('CALIB=KEEP\n')
                 (data_dir / '.hidden-dotfile').write_text('secret\n')
                 (data_dir / 'ota').mkdir()
+                (data_dir / 'system/package_cache/1').mkdir(parents=True)
+                (data_dir / 'system/package_cache/1/SurfaceAdvancedControl-abc123').write_text('stale-pkg-cache\n')
+                (data_dir / 'system/packages.xml').write_text('<packages/>\n')
+                (data_dir / 'dalvik-cache/arm64').mkdir(parents=True)
+                (data_dir / 'dalvik-cache/arm64/vendor@app@SurfaceAdvancedControl@SurfaceAdvancedControl.apk@classes.dex').write_text('stale-dex\n')
+                (data_dir / 'dalvik-cache/arm64/vendor@overlay@spx-systemui-overlay.apk@classes.vdex').write_text('stale-vdex\n')
+                (data_dir / 'dalvik-cache/arm64/system@framework@boot.art').write_text('keep-boot-art\n')
+                (data_dir / 'misc/apexdata/com.android.art/dalvik-cache/arm64').mkdir(parents=True)
+                (data_dir / 'misc/apexdata/com.android.art/dalvik-cache/arm64/vendor@app@SurfaceAdvancedControl@SurfaceAdvancedControl.apk@classes.odex').write_text('stale-odex\n')
 
                 meta_dir = td / 'metadata'
                 (meta_dir / 'lost+found').mkdir(parents=True)
@@ -399,6 +408,13 @@ class OtaSystemTests(unittest.TestCase):
                     self.assertEqual((esp_dir / 'EFI/BOOT/grub.cfg').read_text(), orig_grub)
                     self.assertEqual((data_dir / 'vendor/sq2-touch-calibration/dev.profile').read_text(), 'CALIB=KEEP\n')
                     self.assertFalse((data_dir / 'ota/pending.pkg').exists())
+                    self.assertTrue((data_dir / 'system/package_cache').is_dir())
+                    self.assertEqual(list((data_dir / 'system/package_cache').iterdir()), [])
+                    self.assertFalse((data_dir / 'dalvik-cache/arm64/vendor@app@SurfaceAdvancedControl@SurfaceAdvancedControl.apk@classes.dex').exists())
+                    self.assertFalse((data_dir / 'dalvik-cache/arm64/vendor@overlay@spx-systemui-overlay.apk@classes.vdex').exists())
+                    self.assertFalse((data_dir / 'misc/apexdata/com.android.art/dalvik-cache/arm64/vendor@app@SurfaceAdvancedControl@SurfaceAdvancedControl.apk@classes.odex').exists())
+                    self.assertEqual((data_dir / 'system/packages.xml').read_text(), '<packages/>\n')
+                    self.assertEqual((data_dir / 'dalvik-cache/arm64/system@framework@boot.art').read_text(), 'keep-boot-art\n')
                     self.assertIn('STATUS=OK', (esp_dir / 'SPX-OTA-RESULT.txt').read_text())
 
                 elif scenario == 'full_img_gz_wipe':
@@ -436,8 +452,9 @@ class OtaSystemTests(unittest.TestCase):
                     self.assertFalse((esp_dir / 'SPX-OTA-INPROGRESS').exists())
                     self.assertIn('STATUS=ERROR', (esp_dir / 'SPX-OTA-RESULT.txt').read_text())
                     self.assertIn('ERROR=package_sha256_mismatch', (esp_dir / 'SPX-OTA-RESULT.txt').read_text())
-                    # Touch calibration untouched on error!
+                    # Touch calibration and package_cache untouched on error!
                     self.assertTrue((data_dir / 'vendor/sq2-touch-calibration/dev.profile').is_file())
+                    self.assertTrue((data_dir / 'system/package_cache/1/SurfaceAdvancedControl-abc123').is_file())
 
     def test_full_image_ota_initramfs_install_and_arm64_build(self):
         arm64_tool = fi_ota.build_ota_tool_bytes()
@@ -873,6 +890,61 @@ esac
             self.assertIn('STATUS=OK\n', updated)
             self.assertNotIn('APPLIED_PENDING_REBOOT', updated)
             self.assertIn('VERSION=v0.7.6-test\n', updated)
+
+    def test_ota_stage_online_pending_reboot_refreshes_package_and_vendor_dex_cache(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            esp_dir = td / 'esp'
+            esp_dir.mkdir(parents=True)
+            res_file = esp_dir / 'SPX-OTA-RESULT.txt'
+            res_file.write_text(
+                'STATUS=APPLIED_PENDING_REBOOT\n'
+                'VERSION=v0.9.1-test\n'
+                'PACKAGE_KIND=manifest\n'
+                'APPLY_SUPER=0\n'
+                'WIPE_DATA=0\n'
+                'ERROR=\n',
+                encoding='utf-8',
+            )
+            data_dir = td / 'userdata'
+            (data_dir / 'vendor/sq2-touch-calibration').mkdir(parents=True)
+            (data_dir / 'vendor/sq2-touch-calibration/dev.profile').write_text('CALIB=KEEP\n')
+            (data_dir / 'system/package_cache/1').mkdir(parents=True)
+            (data_dir / 'system/package_cache/1/SurfaceAdvancedControl-abc123').write_text('stale-pkg-cache\n')
+            (data_dir / 'system/packages.xml').write_text('<packages/>\n')
+            (data_dir / 'dalvik-cache/arm64').mkdir(parents=True)
+            (data_dir / 'dalvik-cache/arm64/vendor@app@SurfaceAdvancedControl@SurfaceAdvancedControl.apk@classes.dex').write_text('stale-dex\n')
+            (data_dir / 'dalvik-cache/arm64/vendor@overlay@spx-systemui-overlay.apk@classes.vdex').write_text('stale-vdex\n')
+            (data_dir / 'dalvik-cache/arm64/system@framework@boot.art').write_text('keep-boot-art\n')
+            (data_dir / 'misc/apexdata/com.android.art/dalvik-cache/arm64').mkdir(parents=True)
+            (data_dir / 'misc/apexdata/com.android.art/dalvik-cache/arm64/vendor@app@SurfaceAdvancedControl@SurfaceAdvancedControl.apk@classes.odex').write_text('stale-odex\n')
+
+            env = dict(
+                os.environ,
+                SPX_OTA_ESP=str(esp_dir),
+                SPX_OTA_RUN=str(td / 'run'),
+                SPX_OTA_DATA_DIR=str(data_dir),
+            )
+            p = subprocess.run(['sh', str(ROOT / 'probe/ota/spx-ota-stage')], env=env, text=True, capture_output=True)
+            self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
+            updated = res_file.read_text(encoding='utf-8')
+            self.assertIn('STATUS=OK\n', updated)
+            self.assertNotIn('APPLIED_PENDING_REBOOT', updated)
+            self.assertTrue((data_dir / 'system/package_cache').is_dir())
+            self.assertEqual(list((data_dir / 'system/package_cache').iterdir()), [])
+            self.assertFalse((data_dir / 'dalvik-cache/arm64/vendor@app@SurfaceAdvancedControl@SurfaceAdvancedControl.apk@classes.dex').exists())
+            self.assertFalse((data_dir / 'dalvik-cache/arm64/vendor@overlay@spx-systemui-overlay.apk@classes.vdex').exists())
+            self.assertFalse((data_dir / 'misc/apexdata/com.android.art/dalvik-cache/arm64/vendor@app@SurfaceAdvancedControl@SurfaceAdvancedControl.apk@classes.odex').exists())
+            self.assertEqual((data_dir / 'system/packages.xml').read_text(), '<packages/>\n')
+            self.assertEqual((data_dir / 'dalvik-cache/arm64/system@framework@boot.art').read_text(), 'keep-boot-art\n')
+            self.assertEqual((data_dir / 'vendor/sq2-touch-calibration/dev.profile').read_text(), 'CALIB=KEEP\n')
+
+            # Normal boots (STATUS=OK already) must NOT purge package_cache.
+            sentinel = data_dir / 'system/package_cache/keep-on-normal-boot'
+            sentinel.write_text('keep\n')
+            p2 = subprocess.run(['sh', str(ROOT / 'probe/ota/spx-ota-stage')], env=env, text=True, capture_output=True)
+            self.assertEqual(p2.returncode, 0, p2.stderr + p2.stdout)
+            self.assertTrue(sentinel.is_file())
 
     def test_adb_helper_probe_ota_info_fallbacks_and_syntax(self):
         ps1_text = (ROOT / 'tools/Upgrade-GooglebookViaAdb.ps1').read_text(encoding='utf-8')

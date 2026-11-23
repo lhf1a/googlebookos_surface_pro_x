@@ -583,6 +583,13 @@ public final class MainActivity extends Activity {
         }, str::debugErrorMessage);
     }
 
+    private void saveAvfVpnShare(boolean enabled) {
+        runBridgeCall("advanced-control-avf-vpn", () -> {
+            bridgeState = bridge.setAvfVpnShare(enabled);
+            return str.debugVmVpnSavedMessage(enabled);
+        }, str::debugErrorMessage);
+    }
+
     private void saveSshPassword(String password) {
         runBridgeCall("advanced-control-ssh-password", () -> {
             bridgeState = bridge.setSshPassword(password);
@@ -1042,7 +1049,8 @@ public final class MainActivity extends Activity {
                 : str.debugHomeSubtitle(
                         bridgeState.adbTcpEnabled || bridgeState.adbTcpActive,
                         bridgeState.sshRunning,
-                        bridgeState.sshKeyCount);
+                        bridgeState.sshKeyCount,
+                        bridgeState.avfVpnEnabled || bridgeState.avfVpnRunning);
         View debugRow = buildCategoryRow(
                 SettingsTheme.ICON_DEBUG,
                 theme.debugBadgeBg,
@@ -1856,7 +1864,25 @@ public final class MainActivity extends Activity {
                 canSsh && bridgeState.sshKeyCount > 0,
                 this::confirmClearSshKeys));
 
-        container.addView(sshActions);
+        container.addView(sshActions, marginBottom(16));
+
+        TextView vmHeader = new TextView(this);
+        vmHeader.setText(str.debugVmVpnSection());
+        vmHeader.setTextColor(theme.primary);
+        vmHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        vmHeader.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        vmHeader.setPadding(theme.dp(8), theme.dp(2), theme.dp(8), theme.dp(8));
+        container.addView(vmHeader);
+
+        boolean vmVpnOn = bridgeState.avfVpnEnabled || bridgeState.avfVpnRunning;
+        container.addView(buildToggleCard(
+                str.debugVmVpnTitle(),
+                str.debugVmVpnBadge(bridgeState.avfVpnAvailable, vmVpnOn, bridgeState.avfVpnActive),
+                vmVpnOn,
+                "",
+                vmVpnOn,
+                canBridge && bridgeState.avfVpnAvailable,
+                () -> saveAvfVpnShare(!vmVpnOn)));
 
         scroll.addView(container);
         return scroll;
@@ -2035,14 +2061,16 @@ public final class MainActivity extends Activity {
         topRow.addView(sw, swLp);
         card.addView(topRow);
 
-        TextView desc = new TextView(this);
-        desc.setText(descText);
-        desc.setTextColor(theme.textSecondary);
-        desc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
-        desc.setLineSpacing(theme.dp(2), 1.0f);
-        LinearLayout.LayoutParams descLp = new LinearLayout.LayoutParams(-1, -2);
-        descLp.topMargin = theme.dp(8);
-        card.addView(desc, descLp);
+        if (descText != null && !descText.isEmpty()) {
+            TextView desc = new TextView(this);
+            desc.setText(descText);
+            desc.setTextColor(theme.textSecondary);
+            desc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+            desc.setLineSpacing(theme.dp(2), 1.0f);
+            LinearLayout.LayoutParams descLp = new LinearLayout.LayoutParams(-1, -2);
+            descLp.topMargin = theme.dp(8);
+            card.addView(desc, descLp);
+        }
 
         if (enabled) {
             card.setOnClickListener(v -> onClick.run());

@@ -274,6 +274,10 @@ public final class DriverPolicy {
         return "set-ssh-enabled\n" + normalizeNonce(nonce) + "\n" + (enabled ? "1" : "0") + "\n";
     }
 
+    public static String avfVpnShareRequest(String nonce, boolean enabled) {
+        return "set-avf-vpn-share\n" + normalizeNonce(nonce) + "\n" + (enabled ? "1" : "0") + "\n";
+    }
+
     public static String sshPasswordRequest(String nonce, String password) {
         if (password == null) {
             throw new IllegalArgumentException("invalid_password");

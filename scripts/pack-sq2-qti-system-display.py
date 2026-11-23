@@ -188,7 +188,28 @@ while IFS= read -r name; do
     test ! -d "$target"
     mkdir -p "${target%/*}"
     rm -f "$target"
-    cp -p "$source/root/$name" "$target"
+    case "$name" in
+        *.apk)
+            cp "$source/root/$name" "$target"
+            chmod 644 "$target"
+            now_epoch=$(date +%s 2>/dev/null || echo 0)
+            case "$now_epoch" in ''|*[!0-9]*) now_epoch=0 ;; esac
+            if [ "$now_epoch" -lt 1577836800 ]; then
+                apk_stamp=""
+                if [ -r /etc/spx-ota-info ]; then
+                    apk_bdate=$(awk -F '=' '$1 == "SPX_OTA_BUILD_DATE" { gsub(/[^0-9]/, "", $2); print $2; exit }' /etc/spx-ota-info 2>/dev/null || true)
+                    case "$apk_bdate" in
+                        [0-9][0-9][0-9][0-9][0-9][0-9]) apk_stamp="20${apk_bdate}0000" ;;
+                        20[0-9][0-9][0-9][0-9][0-9][0-9]*) apk_stamp="$(printf '%s' "$apk_bdate" | cut -c1-8)0000" ;;
+                    esac
+                fi
+                touch -t "${apk_stamp:-202601010000}" "$target" "${target%/*}" 2>/dev/null || true
+            fi
+            ;;
+        *)
+            cp -p "$source/root/$name" "$target"
+            ;;
+    esac
 done < "$source/INSTALL_FILES"
 while read -r name destination; do
     test -n "$name" && test -n "$destination"

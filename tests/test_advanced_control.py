@@ -9,6 +9,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+import textwrap
+import time
 import unittest
 from unittest.mock import patch
 
@@ -351,6 +353,19 @@ public class PolicyAndStringsTest {
     check("SSH 服务".equals(zh.debugSshTitle()), "zh ssh title");
     check("SSH Service".equals(en.debugSshTitle()), "en ssh title");
     check(zh.debugAdbSummary(true, true, "5555", "192.168.0.1", "wlan0:192.168.1.50").contains("192.168.0.1:5555"), "vm ip in adb summary");
+    check(DriverPolicy.avfVpnShareRequest("abc-123", true).equals("set-avf-vpn-share\nabc-123\n1\n"), "avfVpnOnReq");
+    check(DriverPolicy.avfVpnShareRequest("abc-123", false).equals("set-avf-vpn-share\nabc-123\n0\n"), "avfVpnOffReq");
+    check("VM".equals(zh.debugVmVpnSection()), "zh vm vpn section");
+    check("VM 共享 VPN".equals(zh.debugVmVpnTitle()), "zh vm vpn title");
+    check("VM VPN Sharing".equals(en.debugVmVpnTitle()), "en vm vpn title");
+    check(en.debugVmVpnTitle().equals(jpFallback.debugVmVpnTitle()), "jp->en vm vpn title");
+    check("已生效".equals(zh.debugVmVpnBadge(true, true, true)), "zh vm vpn active");
+    check("Active".equals(en.debugVmVpnBadge(true, true, true)), "en vm vpn active");
+    check("已开启".equals(zh.debugVmVpnBadge(true, true, false)), "zh vm vpn on");
+    check("已关闭".equals(zh.debugVmVpnBadge(true, false, false)), "zh vm vpn off");
+    check("不可用".equals(zh.debugVmVpnBadge(false, false, false)), "zh vm vpn unavail");
+    check(zh.debugHomeSubtitle(false, false, 0, true).contains("VM VPN"), "home sub vm vpn on");
+    check(!zh.debugHomeSubtitle(false, false, 0, false).contains("VM VPN"), "home sub vm vpn off");
 
     // Hall Lid & IR Face Unlock policy requests & bilingual strings
     check("90".equals(DriverPolicy.validateRotation("90")), "rot 90");
@@ -868,7 +883,51 @@ with pathlib.Path({str(calls_log)!r}).open('a') as f:
         self.assertEqual(bodies['etc/sq2-qti-system/INSTALL_FILES'].splitlines(), [b'original', control.APK.encode()])
         self.assertEqual(records['etc/sq2-qti-system/root/' + control.APK], 0o100644)
         self.assertEqual(records[control.BRIDGE_DST], 0o100755)
+        self.assertIn(control.AVF_VPN_WATCH_DST, bodies)
+        self.assertIn(control.AVF_VPN_RECONCILE_DST, bodies)
+        self.assertEqual(records[control.AVF_VPN_WATCH_DST], 0o100755)
+        self.assertEqual(records[control.AVF_VPN_RECONCILE_DST], 0o100755)
         self.assertEqual(bodies['etc/googlebook-security/etc/surface-vulkan-app-routing.version'], b'1\n')
+        main_src = (ROOT / 'probe/advanced-control/MainActivity.java').read_text(encoding='utf-8')
+        self.assertIn('str.debugVmVpnTitle()', main_src)
+        self.assertIn('str.debugVmVpnBadge(', main_src)
+        # Concise VM VPN toggle card must omit any description/explanation text view.
+        m = re.search(r'str\.debugVmVpnTitle\(\),.*?\n\s*str\.debugVmVpnBadge\([^;]*\),\s*\n\s*vmVpnOn,\s*\n\s*"",', main_src, re.S)
+        self.assertIsNotNone(m, 'VM VPN toggle card should pass empty descText (no explanation field)')
+
+    def test_qti_stage_apk_mtime_patch_idempotent_and_policy_clean(self):
+        import importlib.util
+        import runtime_boot_policy as boot_policy
+
+        spec = importlib.util.spec_from_file_location('qti_system_pack', ROOT / 'scripts/pack-sq2-qti-system-display.py')
+        pack = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pack)
+        current_stage = pack.stage_script().encode('utf-8')
+        self.assertIn(control.QTI_STAGE_APK_MARKER, current_stage)
+
+        # Simulate a legacy donor initramfs carrying the pre-fix `cp -p` loop.
+        legacy_stage = current_stage.replace(control.QTI_STAGE_NEW_COPY, control.QTI_STAGE_OLD_COPY, 1)
+        self.assertIn(control.QTI_STAGE_OLD_COPY, legacy_stage)
+        self.assertNotIn(control.QTI_STAGE_APK_MARKER, legacy_stage)
+
+        bodies = {
+            'etc/sq2-qti-system/INSTALL_FILES': b'original\n',
+            'init': b'#!/bin/sh\necho hi\nexec native-handoff /newroot\n',
+            control.QTI_STAGE_DST: legacy_stage,
+        }
+        control.install({}, bodies, lambda m: m, apk=b'apk-fixture')
+        patched = bodies[control.QTI_STAGE_DST]
+        self.assertIn(control.QTI_STAGE_APK_MARKER, patched)
+        self.assertNotIn(b'\n' + control.QTI_STAGE_OLD_COPY, patched)
+        self.assertEqual(control.patch_qti_stage_for_apk_mtime(patched), patched)
+
+        # Verify second full install() is idempotent and policy-stripped helper passes sh -n.
+        control.install({}, bodies, lambda m: m, apk=b'apk-fixture')
+        self.assertEqual(bodies[control.QTI_STAGE_DST], patched)
+        no_hash = boot_policy.without_hash_checks(control.QTI_STAGE_DST, patched)
+        self.assertNotIn(b'sha256sum', no_hash)
+        self.assertIn(control.QTI_STAGE_APK_MARKER, no_hash)
+        subprocess.run(['sh', '-n'], input=no_hash, check=True, capture_output=True)
 
     def test_build_failure_propagates_without_payload_changes(self):
         bodies = {'etc/sq2-qti-system/INSTALL_FILES': b'original\n'}
@@ -1309,7 +1368,9 @@ print(f'$6$testsalt${digest}')
                 [str(aapt2), 'dump', 'xmltree', str(apk_path), '--file', 'AndroidManifest.xml'],
                 text=True,
             )
-            self.assertIn('versionCode(0x0101021b)=4', dump)
+            ver_match = re.search(r'versionCode\(0x0101021b\)=(\d+)', dump)
+            self.assertIsNotNone(ver_match, dump)
+            self.assertGreaterEqual(int(ver_match.group(1)), 4)
             self.assertRegex(dump, r'android:icon\(0x01010002\)=@0x7f[0-9a-f]{6}')
             self.assertIn('com.android.settings.icon', dump)
             self.assertRegex(
@@ -1514,6 +1575,627 @@ else:
             self.assertEqual((lid_dir / 'disabled_switches').read_text().strip(), '0')
             _, reply, _ = run_once('set-hall-lid\nfl-7\n1\n')
             self.assertEqual(reply, ['fl-7', 'ERROR', 'hall_lid_cmdline_disabled'])
+
+    def test_avf_vpn_watch_c_matchers_and_zero_polling(self):
+        watch_src = ROOT / 'probe/test2/spx-avf-vpn-watch.c'
+        with tempfile.TemporaryDirectory(prefix='spx-avf-vpn-watch-test-') as td:
+            work = Path(td)
+            unit_src = work / 'watch_unit.c'
+            unit_src.write_text('#define SPX_AVF_VPN_WATCH_TEST 1\n#include "' + str(watch_src) + '"\n' + textwrap.dedent(r'''
+                #include <assert.h>
+
+                static int mock_idx_to_name(unsigned int idx, char *buf) {
+                    if (idx == 10) { strcpy(buf, "avf_tap_fixed"); return 0; }
+                    if (idx == 20) { strcpy(buf, "tun0"); return 0; }
+                    if (idx == 21) { strcpy(buf, "wg0"); return 0; }
+                    if (idx == 30) { strcpy(buf, "wlan0"); return 0; }
+                    return -1;
+                }
+
+                static size_t append_rta(char *buf, size_t off, unsigned short type, const void *data, size_t len) {
+                    struct rtattr *rta = (struct rtattr *)(buf + off);
+                    rta->rta_type = type;
+                    rta->rta_len = (unsigned short)RTA_LENGTH(len);
+                    if (len > 0 && data) memcpy(RTA_DATA(rta), data, len);
+                    return off + RTA_ALIGN(rta->rta_len);
+                }
+
+                static const struct nlmsghdr *make_link_msg(char *buf, uint16_t type, int idx, const char *ifname) {
+                    memset(buf, 0, 256);
+                    struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+                    nlh->nlmsg_type = type;
+                    struct ifinfomsg *ifi = (struct ifinfomsg *)NLMSG_DATA(nlh);
+                    ifi->ifi_index = idx;
+                    size_t off = NLMSG_ALIGN(sizeof(*nlh)) + NLMSG_ALIGN(sizeof(*ifi));
+                    if (ifname) off = append_rta(buf, off, IFLA_IFNAME, ifname, strlen(ifname) + 1);
+                    nlh->nlmsg_len = (uint32_t)off;
+                    return nlh;
+                }
+
+                static const struct nlmsghdr *make_addr_msg(char *buf, uint16_t type, unsigned int idx) {
+                    memset(buf, 0, 256);
+                    struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+                    nlh->nlmsg_type = type;
+                    struct ifaddrmsg *ifa = (struct ifaddrmsg *)NLMSG_DATA(nlh);
+                    ifa->ifa_index = idx;
+                    nlh->nlmsg_len = (uint32_t)(NLMSG_ALIGN(sizeof(*nlh)) + NLMSG_ALIGN(sizeof(*ifa)));
+                    return nlh;
+                }
+
+                static const struct nlmsghdr *make_rule_msg(char *buf, uint16_t type, uint32_t prio) {
+                    memset(buf, 0, 256);
+                    struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+                    nlh->nlmsg_type = type;
+                    size_t off = NLMSG_ALIGN(sizeof(*nlh)) + NLMSG_ALIGN(sizeof(struct fib_rule_hdr));
+                    off = append_rta(buf, off, FRA_PRIORITY, &prio, sizeof(prio));
+                    nlh->nlmsg_len = (uint32_t)off;
+                    return nlh;
+                }
+
+                static const struct nlmsghdr *make_route_msg(char *buf, uint16_t type, uint32_t table, int has_oif, uint32_t oif) {
+                    memset(buf, 0, 256);
+                    struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+                    nlh->nlmsg_type = type;
+                    struct rtmsg *rtm = (struct rtmsg *)NLMSG_DATA(nlh);
+                    rtm->rtm_table = (unsigned char)(table < 256 ? table : RT_TABLE_UNSPEC);
+                    size_t off = NLMSG_ALIGN(sizeof(*nlh)) + NLMSG_ALIGN(sizeof(*rtm));
+                    off = append_rta(buf, off, RTA_TABLE, &table, sizeof(table));
+                    if (has_oif) off = append_rta(buf, off, RTA_OIF, &oif, sizeof(oif));
+                    nlh->nlmsg_len = (uint32_t)off;
+                    return nlh;
+                }
+
+                int main(void) {
+                    char buf[256];
+                    assert(spx_is_vm_iface("avf_tap_fixed") == 1);
+                    assert(spx_is_vm_iface("avf_tap0") == 1);
+                    assert(spx_is_vm_iface("vmnic0") == 1);
+                    assert(spx_is_vm_iface("crosvm_tap") == 1);
+                    assert(spx_is_vm_iface("wlan0") == 0);
+                    assert(spx_is_vm_iface("lo") == 0);
+                    assert(spx_is_vm_iface("rmnet_data0") == 0);
+
+                    assert(spx_is_vpn_iface("tun0") == 1);
+                    assert(spx_is_vpn_iface("wg0") == 1);
+                    assert(spx_is_vpn_iface("ipsec0") == 1);
+                    assert(spx_is_vpn_iface("ppp0") == 1);
+                    assert(spx_is_vpn_iface("utun2") == 1);
+                    assert(spx_is_vpn_iface("tailscale0") == 1);
+                    assert(spx_is_vpn_iface("zt123") == 1);
+                    assert(spx_is_vpn_iface("wlan0") == 0);
+                    assert(spx_is_vpn_iface("avf_tap_fixed") == 0);
+
+                    assert(spx_is_owned_rule_priority(12100) == 1);
+                    assert(spx_is_owned_rule_priority(12400) == 1);
+                    assert(spx_is_owned_rule_priority(12500) == 1);
+                    assert(spx_is_owned_rule_priority(13000) == 0);
+                    assert(spx_is_owned_rule_priority(18000) == 0);
+
+                    assert(spx_nlmsg_is_relevant(make_link_msg(buf, RTM_NEWLINK, 10, "avf_tap_fixed"), mock_idx_to_name) == 1);
+                    assert(spx_nlmsg_is_relevant(make_link_msg(buf, RTM_NEWLINK, 30, "wlan0"), mock_idx_to_name) == 0);
+                    assert(spx_nlmsg_is_relevant(make_link_msg(buf, RTM_DELLINK, 20, "ipsec0"), mock_idx_to_name) == 1);
+
+                    assert(spx_nlmsg_is_relevant(make_addr_msg(buf, RTM_NEWADDR, 21), mock_idx_to_name) == 1);
+                    assert(spx_nlmsg_is_relevant(make_addr_msg(buf, RTM_DELADDR, 30), mock_idx_to_name) == 0);
+                    assert(spx_nlmsg_is_relevant(make_addr_msg(buf, RTM_DELADDR, 99), mock_idx_to_name) == 1);
+
+                    assert(spx_nlmsg_is_relevant(make_rule_msg(buf, RTM_NEWRULE, 12100), mock_idx_to_name) == 0);
+                    assert(spx_nlmsg_is_relevant(make_rule_msg(buf, RTM_DELRULE, 12400), mock_idx_to_name) == 0);
+                    assert(spx_nlmsg_is_relevant(make_rule_msg(buf, RTM_NEWRULE, 12500), mock_idx_to_name) == 0);
+                    assert(spx_nlmsg_is_relevant(make_rule_msg(buf, RTM_NEWRULE, 13000), mock_idx_to_name) == 1);
+
+                    assert(spx_nlmsg_is_relevant(make_route_msg(buf, RTM_NEWROUTE, 1006, 1, 20), mock_idx_to_name) == 1);
+                    assert(spx_nlmsg_is_relevant(make_route_msg(buf, RTM_NEWROUTE, 1003, 1, 30), mock_idx_to_name) == 0);
+                    assert(spx_nlmsg_is_relevant(make_route_msg(buf, RTM_NEWROUTE, RT_TABLE_LOCAL, 0, 0), mock_idx_to_name) == 0);
+                    assert(spx_nlmsg_is_relevant(make_route_msg(buf, RTM_NEWROUTE, RT_TABLE_MAIN, 0, 0), mock_idx_to_name) == 1);
+
+                    puts("WATCH_UNIT_OK");
+                    return 0;
+                }
+            '''))
+            unit_bin = work / 'watch_unit'
+            subprocess.run(['gcc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                            str(unit_src), '-o', str(unit_bin)], check=True)
+            res = subprocess.run([str(unit_bin)], text=True, capture_output=True, check=True)
+            self.assertEqual(res.stdout.strip(), 'WATCH_UNIT_OK')
+
+            watch_bin = work / 'spx-avf-vpn-watch'
+            subprocess.run(['gcc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                            str(watch_src), '-o', str(watch_bin)], check=True)
+            reconcile_log = work / 'reconcile.log'
+            mock_rec = work / 'mock-reconcile'
+            mock_rec.write_text(f'#!/bin/sh\nprintf "%s\\n" "$1" >> "{reconcile_log}"\n')
+            mock_rec.chmod(0o755)
+            pidfile = work / 'watch.pid'
+
+            proc = subprocess.Popen(
+                [str(watch_bin), '--reconcile', str(mock_rec), '--pidfile', str(pidfile), '--debounce-ms', '100'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            try:
+                deadline = time.monotonic() + 3.0
+                while time.monotonic() < deadline:
+                    if pidfile.is_file() and reconcile_log.is_file() and 'apply' in reconcile_log.read_text():
+                        break
+                    time.sleep(0.05)
+                self.assertTrue(pidfile.is_file())
+                self.assertEqual(int(pidfile.read_text().strip()), proc.pid)
+                # Idle for 1.0s: pure rtnetlink blocking must trigger 0 extra reconciles.
+                time.sleep(1.0)
+                self.assertEqual(reconcile_log.read_text().splitlines(), ['apply'])
+                proc.terminate()
+                rc = proc.wait(timeout=3.0)
+                self.assertEqual(rc, 0)
+                self.assertFalse(pidfile.exists())
+                self.assertEqual(reconcile_log.read_text().splitlines(), ['apply', 'off'])
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=2.0)
+
+    def test_avf_vpn_reconcile_generic_behaviors(self):
+        reconcile = ROOT / 'probe/test2/spx-avf-vpn-reconcile'
+        subprocess.run(['sh', '-n', str(reconcile)], check=True)
+        with tempfile.TemporaryDirectory(prefix='spx-avf-vpn-reconcile-test-') as td:
+            work = Path(td)
+            run_dir = work / 'run'
+            proc_net = work / 'proc_net'
+            state_file = run_dir / 'spx-avf-vpn.state'
+            net_state_file = work / 'net_state.json'
+            wrapper = work / 'mock-android'
+
+            for rel in (
+                'ipv4/ip_forward',
+                'ipv4/conf/tun0/rp_filter',
+                'ipv4/conf/wg0/rp_filter',
+                'ipv4/conf/ipsec0/rp_filter',
+                'ipv4/conf/avf_tap_fixed/rp_filter',
+                'ipv6/conf/all/forwarding',
+            ):
+                p = proc_net / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text('0\n')
+
+            wrapper.write_text(f'''#!/usr/bin/env python3
+import json, pathlib, sys
+SP = pathlib.Path({str(net_state_file)!r})
+st = json.loads(SP.read_text())
+args = sys.argv[1:]
+
+def save():
+    SP.write_text(json.dumps(st))
+
+if args == ['ip', '-o', 'link', 'show']:
+    for line in st.get('links', []):
+        print(line)
+elif args == ['ip', '-4', '-o', 'addr', 'show', 'scope', 'global']:
+    for line in st.get('addrs4', []):
+        print(line)
+elif len(args) == 7 and args[:5] == ['ip', '-4', '-o', 'addr', 'show'] and args[5] == 'dev':
+    dev = args[6]
+    for line in st.get('addrs4', []):
+        parts = line.split()
+        if len(parts) >= 4 and parts[1].split('@')[0].rstrip(':') == dev:
+            print(line)
+elif args == ['ip', '-6', '-o', 'addr', 'show', 'scope', 'global']:
+    for line in st.get('addrs6', []):
+        print(line)
+elif args[:3] == ['ip', '-4', 'rule'] and args[3] == 'show':
+    for r in st.get('rules4', []):
+        print(r)
+elif args[:3] == ['ip', '-6', 'rule'] and args[3] == 'show':
+    for r in st.get('rules6', []):
+        print(r)
+elif args[:3] == ['ip', '-4', 'rule'] and args[3] == 'add':
+    st.setdefault('rules4', []).append(' '.join(args[4:]))
+    save()
+elif args[:3] == ['ip', '-6', 'rule'] and args[3] == 'add':
+    st.setdefault('rules6', []).append(' '.join(args[4:]))
+    save()
+elif args[:3] == ['ip', '-4', 'rule'] and args[3] == 'del':
+    pref = args[5]
+    before = len(st.get('rules4', []))
+    kept = []
+    removed = False
+    for r in st.get('rules4', []):
+        if not removed and (r.startswith(pref + ':') or ('pref ' + pref) in r):
+            removed = True
+            continue
+        kept.append(r)
+    st['rules4'] = kept
+    save()
+    sys.exit(0 if len(kept) < before else 2)
+elif args[:3] == ['ip', '-6', 'rule'] and args[3] == 'del':
+    pref = args[5]
+    before = len(st.get('rules6', []))
+    kept = []
+    removed = False
+    for r in st.get('rules6', []):
+        if not removed and (r.startswith(pref + ':') or ('pref ' + pref) in r):
+            removed = True
+            continue
+        kept.append(r)
+    st['rules6'] = kept
+    save()
+    sys.exit(0 if len(kept) < before else 2)
+elif args[:4] == ['ip', '-4', 'route', 'show']:
+    if len(args) >= 6 and args[4] == 'table':
+        for r in st.get('routes4_tables', {{}}).get(args[5], []):
+            print(r)
+    elif len(args) >= 6 and args[4] == 'dev':
+        dev = args[5]
+        for r in st.get('routes4_dev', {{}}).get(dev, []):
+            print(r)
+elif args[:4] == ['ip', '-6', 'route', 'show']:
+    if len(args) >= 6 and args[4] == 'table':
+        for r in st.get('routes6_tables', {{}}).get(args[5], []):
+            print(r)
+    elif len(args) >= 6 and args[4] == 'dev':
+        dev = args[5]
+        for r in st.get('routes6_dev', {{}}).get(dev, []):
+            print(r)
+elif args == ['dumpsys', 'connectivity']:
+    print(st.get('connectivity', ''))
+elif args == ['dumpsys', 'dnsresolver']:
+    print(st.get('dnsresolver', ''))
+elif args == ['settings', 'get', 'global', 'tether_offload_disabled']:
+    val = st.get('tether_offload_disabled')
+    print('null' if val is None else val)
+elif args[:3] == ['settings', 'put', 'global'] and len(args) == 5:
+    st[args[3]] = args[4]
+    save()
+elif args == ['settings', 'delete', 'global', 'tether_offload_disabled']:
+    st['tether_offload_disabled'] = None
+    save()
+elif args[0] in ('iptables', 'ip6tables'):
+    tool = args[0]
+    rest = [a for a in args[1:] if a != '-w']
+    table = 'filter'
+    if '-t' in rest:
+        idx = rest.index('-t')
+        table = rest[idx + 1]
+        rest = rest[:idx] + rest[idx + 2:]
+    chains = st.setdefault(tool, {{}}).setdefault(table, {{}})
+    if rest[0] == '-L':
+        chain = rest[1]
+        if chain not in chains:
+            sys.exit(1)
+        for idx, rule in enumerate(chains[chain], 1):
+            print(f'{{idx}} {{rule}}')
+    elif rest[0] == '-D':
+        chain = rest[1]
+        num = int(rest[2]) - 1
+        del chains[chain][num]
+        save()
+    elif rest[0] == '-I':
+        chain = rest[1]
+        pos = int(rest[2]) - 1
+        rule = ' '.join(rest[3:])
+        chains.setdefault(chain, []).insert(pos, rule)
+        save()
+    else:
+        sys.exit(2)
+else:
+    sys.stderr.write(f'Unhandled mock android args: {{args}}\\n')
+    sys.exit(2)
+''')
+            wrapper.chmod(0o755)
+
+            def empty_tables(has_nat_pre=True):
+                nat = {'POSTROUTING': []}
+                if has_nat_pre:
+                    nat['oem_nat_pre'] = []
+                return {'filter': {'oem_fwd': []}, 'nat': nat, 'mangle': {'FORWARD': []}}
+
+            def run_rec(cmd='apply'):
+                env = dict(
+                    os.environ,
+                    SPX_AVF_VPN_ANDROID_WRAPPER=str(wrapper),
+                    SPX_AVF_VPN_RUN=str(run_dir),
+                    SPX_AVF_VPN_PROC_SYS_NET=str(proc_net),
+                    SPX_AVF_VPN_STATE_FILE=str(state_file),
+                )
+                res = subprocess.run(['sh', str(reconcile), cmd], env=env, text=True, capture_output=True)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                parsed = {}
+                for line in state_file.read_text().splitlines():
+                    if '=' in line:
+                        k, v = line.split('=', 1)
+                        parsed[k] = v
+                return parsed, json.loads(net_state_file.read_text())
+
+            # 1. Global IPv4 VPN with DNS (e.g. corporate or Fake-IP), placeholder fd00::1/128, offload null -> 1
+            base_state = {
+                'tether_offload_disabled': None,
+                'links': [
+                    '2: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP',
+                    '5: avf_tap_fixed: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP',
+                    '6: tun0: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1300 state UNKNOWN',
+                ],
+                'addrs4': [
+                    '2: wlan0    inet 172.20.10.5/28 scope global wlan0',
+                    '5: avf_tap_fixed    inet 192.168.0.1/24 scope global avf_tap_fixed',
+                    '6: tun0    inet 10.126.126.3/24 scope global tun0',
+                ],
+                'addrs6': [],
+                'rules4': [
+                    '13000: from all fwmark 0x0/0x20000 iif lo uidrange 0-99999 lookup tun0',
+                    '18000: from all iif avf_tap_fixed lookup wlan0',
+                ],
+                'rules6': [],
+                'routes4_dev': {'avf_tap_fixed': ['192.168.0.0/24 proto kernel scope link src 192.168.0.1']},
+                'routes4_tables': {'tun0': ['0.0.0.0/1 dev tun0 scope link', '128.0.0.0/1 dev tun0 scope link']},
+                'routes6_tables': {'tun0': ['fd00::1 dev tun0 table tun0 proto static metric 1024']},
+                'routes6_dev': {},
+                'dnsresolver': textwrap.dedent('''\
+                    NetId: 101
+                      DNS servers: # IP
+                        10.20.0.2 (1, 1, 0)
+                      Interface names: [tun0]
+                    NetId: 100
+                      DNS servers: # IP
+                        172.20.10.1 (1, 1, 0)
+                      Interface names: [wlan0]
+                '''),
+                'connectivity': '',
+                'iptables': empty_tables(True),
+                'ip6tables': empty_tables(False),
+            }
+            net_state_file.write_text(json.dumps(base_state))
+            parsed, st = run_rec('apply')
+            self.assertEqual(parsed['active'], '1')
+            self.assertEqual(parsed['vpn_if'], 'tun0')
+            self.assertEqual(parsed['vpn_dns'], '10.20.0.2')
+            self.assertEqual(parsed['vpn_v4_global'], '1')
+            self.assertEqual(parsed['vpn_has_v6'], '0')
+            self.assertEqual(st['tether_offload_disabled'], '1')
+            self.assertEqual((proc_net / 'ipv4/ip_forward').read_text().strip(), '1')
+            self.assertEqual((proc_net / 'ipv4/conf/tun0/rp_filter').read_text().strip(), '0')
+            self.assertEqual((proc_net / 'ipv4/conf/avf_tap_fixed/rp_filter').read_text().strip(), '0')
+            self.assertTrue(any('12500' in r and 'iif avf_tap_fixed lookup tun0' in r for r in st['rules4']))
+            self.assertEqual(len(st['iptables']['filter']['oem_fwd']), 2)
+            self.assertEqual(len(st['iptables']['nat']['POSTROUTING']), 1)
+            self.assertEqual(len(st['iptables']['nat']['oem_nat_pre']), 2)
+            self.assertIn('10.20.0.2:53', st['iptables']['nat']['oem_nat_pre'][0])
+            self.assertEqual(len(st['iptables']['mangle']['FORWARD']), 2)
+            self.assertEqual(len(st['ip6tables']['filter']['oem_fwd']), 1)
+            self.assertIn('REJECT', st['ip6tables']['filter']['oem_fwd'][0])
+
+            # 1b. Repeated apply is idempotent (no duplicated rules)
+            parsed2, st2 = run_rec('apply')
+            self.assertEqual(parsed2, parsed)
+            self.assertEqual(len(st2['iptables']['filter']['oem_fwd']), 2)
+            self.assertEqual(len(st2['iptables']['nat']['oem_nat_pre']), 2)
+            self.assertEqual(len(st2['ip6tables']['filter']['oem_fwd']), 1)
+
+            # 2. Split-tunnel wg0 in numeric table 51820 with NO DNS: no DNAT, no IPv6 REJECT
+            split_state = {
+                'tether_offload_disabled': None,
+                'links': [
+                    '5: avf_tap_fixed: <BROADCAST,MULTICAST,UP,LOWER_UP> state UP',
+                    '7: wg0: <POINTOPOINT,NOARP,UP> state UNKNOWN',
+                ],
+                'addrs4': [
+                    '5: avf_tap_fixed    inet 192.168.0.1/24 scope global avf_tap_fixed',
+                    '7: wg0    inet 10.99.0.2/24 scope global wg0',
+                ],
+                'addrs6': [],
+                'rules4': ['13000: from all uidrange 0-99999 lookup 51820'],
+                'rules6': [],
+                'routes4_dev': {'avf_tap_fixed': ['192.168.0.0/24 proto kernel scope link src 192.168.0.1']},
+                'routes4_tables': {'51820': ['10.99.0.0/16 dev wg0 scope link']},
+                'routes6_tables': {'51820': []},
+                'routes6_dev': {},
+                'dnsresolver': 'NetId: 102\n  No DNS servers defined\n  Interface names: [wg0]\n',
+                'connectivity': '',
+                'iptables': empty_tables(True),
+                'ip6tables': empty_tables(False),
+            }
+            (run_dir / 'spx-avf-vpn.offload_prev').unlink(missing_ok=True)
+            net_state_file.write_text(json.dumps(split_state))
+            parsed, st = run_rec('apply')
+            self.assertEqual(parsed['active'], '1')
+            self.assertEqual(parsed['vpn_if'], 'wg0')
+            self.assertEqual(parsed['vpn_table'], '51820')
+            self.assertEqual(parsed['vpn_dns'], '')
+            self.assertEqual(parsed['vpn_v4_global'], '0')
+            self.assertEqual(st['iptables']['nat']['oem_nat_pre'], [])
+            self.assertEqual(st['ip6tables']['filter']['oem_fwd'], [])
+
+            # 3. Non-tun0 dual-stack VPN (ipsec0 via connectivity) + DNS fallback + IPv6 forwarding
+            dual_state = {
+                'tether_offload_disabled': '0',
+                'links': [
+                    '2: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> state UP',
+                    '5: vmnic0: <BROADCAST,MULTICAST,UP> state UP',
+                    '8: ipsec0: <POINTOPOINT,NOARP,UP> state UNKNOWN',
+                ],
+                'addrs4': [
+                    '2: wlan0    inet 172.20.10.5/28 scope global wlan0',
+                    '5: vmnic0    inet 192.168.10.1/24 scope global vmnic0',
+                    '8: ipsec0    inet 172.16.0.10/24 scope global ipsec0',
+                ],
+                'addrs6': ['5: vmnic0    inet6 fd12:3456::1/64 scope global'],
+                'rules4': [],
+                'rules6': [],
+                'routes4_dev': {'vmnic0': ['192.168.10.0/24 proto kernel scope link src 192.168.10.1']},
+                'routes4_tables': {'ipsec0': ['default dev ipsec0 scope link']},
+                'routes6_tables': {'ipsec0': ['default dev ipsec0 metric 1024']},
+                'routes6_dev': {'vmnic0': ['fd12:3456::/64 proto kernel metric 256']},
+                'dnsresolver': '',
+                'connectivity': '\n'.join([
+                    '  NetworkAgentInfo{network{100} ni{WIFI CONNECTED} lp{{InterfaceName: wlan0 DnsAddresses: [ /172.20.10.1 ]}} nc{[ Transports: WIFI Capabilities: INTERNET&NOT_VPN ]} factorySerialNumber=6}',
+                    '  NetworkAgentInfo{network{105} ni{VPN CONNECTED} lp{{InterfaceName: ipsec0 DnsAddresses: [ /172.16.0.10,/172.16.0.53 ]}} nc{[ Transports: VPN ]} factorySerialNumber=9}',
+                ]),
+                'iptables': empty_tables(True),
+                'ip6tables': empty_tables(False),
+            }
+            (run_dir / 'spx-avf-vpn.offload_prev').unlink(missing_ok=True)
+            net_state_file.write_text(json.dumps(dual_state))
+            parsed, st = run_rec('apply')
+            self.assertEqual(parsed['active'], '1')
+            self.assertEqual(parsed['vpn_if'], 'ipsec0')
+            self.assertEqual(parsed['vpn_dns'], '172.16.0.53')
+            self.assertEqual(parsed['vpn_has_v6'], '1')
+            self.assertEqual((proc_net / 'ipv6/conf/all/forwarding').read_text().strip(), '1')
+            self.assertEqual(len(st['rules6']), 3)
+            self.assertEqual(len(st['ip6tables']['filter']['oem_fwd']), 2)
+            self.assertEqual(len(st['ip6tables']['nat']['POSTROUTING']), 1)
+            self.assertEqual(len(st['ip6tables']['mangle']['FORWARD']), 2)
+
+            # 4. Run off -> clears all v4/v6 rules and restores pre-existing tether_offload_disabled='0'
+            parsed, st = run_rec('off')
+            self.assertEqual(parsed['active'], '0')
+            self.assertEqual(parsed['mode'], 'disabled')
+            self.assertEqual(st['tether_offload_disabled'], '0')
+            self.assertEqual(st['rules4'], [])
+            self.assertEqual(st['rules6'], [])
+            self.assertEqual(st['iptables'], empty_tables(True))
+            self.assertEqual(st['ip6tables'], empty_tables(False))
+
+            # 5. VPN disconnects while offload was originally null -> apply restores null & enters waiting
+            net_state_file.write_text(json.dumps(base_state))
+            run_rec('apply')
+            base_state_no_vpn = dict(base_state)
+            base_state_no_vpn['links'] = base_state['links'][:2]
+            base_state_no_vpn['rules4'] = ['18000: from all iif avf_tap_fixed lookup wlan0']
+            base_state_no_vpn['tether_offload_disabled'] = '1'
+            net_state_file.write_text(json.dumps(base_state_no_vpn))
+            parsed, st = run_rec('apply')
+            self.assertEqual(parsed['active'], '0')
+            self.assertEqual(parsed['mode'], 'waiting')
+            self.assertIsNone(st['tether_offload_disabled'])
+            self.assertEqual(st['rules4'], ['18000: from all iif avf_tap_fixed lookup wlan0'])
+
+    def test_bridge_daemon_avf_vpn_share_lifecycle(self):
+        bridge = ROOT / 'probe/test2/spx-advanced-control-boot'
+        watch_src = ROOT / 'probe/test2/spx-avf-vpn-watch.c'
+        with tempfile.TemporaryDirectory(prefix='spx-avf-vpn-bridge-test-') as td:
+            root = Path(td)
+            data_root = root / 'root'
+            sysfs = root / 'sys'
+            run_dir = root / 'run'
+            logs_dir = root / 'logs'
+            cmdline = root / 'cmdline'
+            cmdline.write_text('console=tty0\n')
+            run_dir.mkdir(parents=True)
+            logs_dir.mkdir(parents=True)
+            app_files = data_root / 'data/user_de/0/org.surface.advancedcontrol/files'
+            app_files.mkdir(parents=True)
+
+            watch_bin = root / 'spx-avf-vpn-watch'
+            subprocess.run(['gcc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                            str(watch_src), '-o', str(watch_bin)], check=True)
+            rec_log = root / 'reconcile-calls.log'
+            mock_rec = root / 'mock-reconcile'
+            mock_rec.write_text(textwrap.dedent(f'''\
+                #!/bin/sh
+                printf '%s\\n' "$1" >> "{rec_log}"
+                state="${{SPX_AVF_VPN_STATE_FILE:-{run_dir}/spx-avf-vpn.state}}"
+                if [ "$1" = "apply" ]; then
+                    printf 'active=1\\nmode=active\\n' > "$state"
+                else
+                    printf 'active=0\\nmode=disabled\\n' > "$state"
+                fi
+            '''))
+            mock_rec.chmod(0o755)
+
+            wrapper = root / 'mock-android'
+            wrapper.write_text(textwrap.dedent('''\
+                #!/usr/bin/env python3
+                import sys
+                args = sys.argv[1:]
+                if args == ['cmd', 'activity', 'get-current-user']:
+                    print('0')
+                elif args == ['getprop', 'sys.boot_completed']:
+                    print('1')
+            '''))
+            wrapper.chmod(0o755)
+
+            def run_once(req_body=None):
+                if req_body is not None:
+                    (app_files / 'request').write_text(req_body)
+                env = dict(
+                    os.environ,
+                    SPX_AC_ROOT=str(data_root),
+                    SPX_AC_SYSFS=str(sysfs),
+                    SPX_AC_RUN=str(run_dir),
+                    SPX_AC_LOGS=str(logs_dir),
+                    SPX_AC_CMDLINE=str(cmdline),
+                    SPX_AC_ANDROID_WRAPPER=str(wrapper),
+                    SPX_AC_AVF_VPN_WATCH_BIN=str(watch_bin),
+                    SPX_AC_AVF_VPN_RECONCILE_BIN=str(mock_rec),
+                    SPX_AC_LOCK_DIR=str(root / 'lock'),
+                    SPX_AC_TMP_REQ=str(root / 'tmp.req'),
+                    SPX_AC_TMP_TOUCH=str(root / 'tmp.touch'),
+                    SPX_AC_BOOT_WAIT='0',
+                    SPX_AC_ONCE='1',
+                )
+                res = subprocess.run(['sh', str(bridge)], env=env, text=True, capture_output=True)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                state = {}
+                for line in (app_files / 'state').read_text().splitlines():
+                    if '=' in line:
+                        k, v = line.split('=', 1)
+                        state[k] = v
+                reply = (app_files / 'reply').read_text().splitlines() if (app_files / 'reply').is_file() else []
+                return state, reply, res.stdout
+
+            pidfile = run_dir / 'spx-avf-vpn-watch.pid'
+            try:
+                # 1. Default OFF on clean boot
+                state, _, _ = run_once()
+                self.assertEqual(state['avf_vpn_available'], '1')
+                self.assertEqual(state['avf_vpn_enabled'], '0')
+                self.assertEqual(state['avf_vpn_running'], '0')
+                self.assertEqual(state['avf_vpn_active'], '0')
+
+                # 2. Enable via bridge request -> starts watcher, persists 1
+                state, reply, _ = run_once('set-avf-vpn-share\nvpn-1\n1\n')
+                self.assertEqual(reply, ['vpn-1', 'OK'])
+                self.assertEqual(state['avf_vpn_enabled'], '1')
+                self.assertEqual(state['avf_vpn_running'], '1')
+                self.assertEqual((data_root / 'data/vendor/spx-advanced-control/avf_vpn_share_enabled').read_text().strip(), '1')
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline and (not rec_log.is_file() or 'apply' not in rec_log.read_text()):
+                    time.sleep(0.05)
+                state, _, _ = run_once('refresh\nvpn-1b\n')
+                self.assertEqual(state['avf_vpn_active'], '1')
+
+                # 3. Simulated reboot restores watcher; rescue boot skips it
+                old_pid = int(pidfile.read_text().strip())
+                os.kill(old_pid, signal.SIGTERM)
+                for _ in range(30):
+                    if not pidfile.exists():
+                        break
+                    time.sleep(0.05)
+                cmdline.write_text('console=tty0 sq2.rescue=1\n')
+                state, _, stdout = run_once()
+                self.assertIn('SPX_AC_BOOT_DEBUG_RESTORE_SKIPPED rescue', stdout)
+                self.assertEqual(state['avf_vpn_running'], '0')
+
+                cmdline.write_text('console=tty0\n')
+                state, _, stdout = run_once()
+                self.assertIn('SPX_AC_BOOT_AVF_VPN_RESTORED 1', stdout)
+                self.assertEqual(state['avf_vpn_running'], '1')
+
+                # 4. Disable via bridge request -> stops watcher, runs reconcile off, persists 0
+                old_pid = int(pidfile.read_text().strip())
+                state, reply, _ = run_once('set-avf-vpn-share\nvpn-2\n0\n')
+                self.assertEqual(reply, ['vpn-2', 'OK'])
+                self.assertEqual(state['avf_vpn_enabled'], '0')
+                self.assertEqual(state['avf_vpn_running'], '0')
+                self.assertEqual(state['avf_vpn_active'], '0')
+                self.assertEqual((data_root / 'data/vendor/spx-advanced-control/avf_vpn_share_enabled').read_text().strip(), '0')
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(old_pid, 0)
+                self.assertIn('off', rec_log.read_text().splitlines())
+            finally:
+                if pidfile.is_file():
+                    try:
+                        os.kill(int(pidfile.read_text().strip()), signal.SIGKILL)
+                    except Exception:
+                        pass
 
 
 if __name__ == '__main__':

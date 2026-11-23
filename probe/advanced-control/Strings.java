@@ -616,6 +616,11 @@ public final class Strings {
         return adbText + " · " + sshText;
     }
 
+    public String debugHomeSubtitle(boolean adbOn, boolean sshRunning, int keyCount, boolean vmVpnEnabled) {
+        String base = debugHomeSubtitle(adbOn, sshRunning, keyCount);
+        return vmVpnEnabled ? base + " · VM VPN" : base;
+    }
+
     public String debugAdbSection() {
         return "ADB";
     }
@@ -788,6 +793,30 @@ public final class Strings {
         return t("已清除 SSH 密钥", "SSH keys cleared");
     }
 
+    public String debugVmVpnSection() {
+        return "VM";
+    }
+
+    public String debugVmVpnTitle() {
+        return t("VM 共享 VPN", "VM VPN Sharing");
+    }
+
+    public String debugVmVpnBadge(boolean available, boolean enabled, boolean active) {
+        if (!available) {
+            return t("不可用", "Unavailable");
+        }
+        if (!enabled) {
+            return t("已关闭", "Off");
+        }
+        return active ? t("已生效", "Active") : t("已开启", "On");
+    }
+
+    public String debugVmVpnSavedMessage(boolean enabled) {
+        return enabled
+                ? t("VM 共享 VPN 已开启", "VM VPN sharing enabled")
+                : t("VM 共享 VPN 已关闭", "VM VPN sharing disabled");
+    }
+
     public String debugErrorMessage(String code) {
         if ("invalid_ssh_key".equals(code)) {
             return t("无效的公钥或证书格式", "Invalid key or certificate format");
@@ -800,6 +829,9 @@ public final class Strings {
         }
         if ("ssh_start_failed".equals(code)) {
             return t("启动 SSH 服务失败", "Failed to start SSH service");
+        }
+        if ("avf_vpn_start_failed".equals(code)) {
+            return t("启动 VM VPN 共享失败", "Failed to start VM VPN sharing");
         }
         if ("mkpasswd_failed".equals(code)) {
             return t("密码加密失败", "Password hashing failed");

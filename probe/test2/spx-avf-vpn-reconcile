@@ -1,0 +1,631 @@
+#!/bin/sh
+# Generic, zero-hardcoding AVF VM <-> host VPN forwarding reconciler.
+# Supports any Android VpnService (global, split-tunnel, Fake-IP), system IKEv2/IPsec,
+# and kernel VPN interfaces without polling or app-specific special cases.
+set -eu
+
+export PATH="${SPX_AVF_VPN_PATH:-/bin:/sbin:/usr/bin:/usr/sbin:${PATH:-}}"
+
+RUN_DIR="${SPX_AVF_VPN_RUN:-/run}"
+PROC_SYS_NET="${SPX_AVF_VPN_PROC_SYS_NET:-/proc/sys/net}"
+STATE_FILE="${SPX_AVF_VPN_STATE_FILE:-$RUN_DIR/spx-avf-vpn.state}"
+OFFLOAD_MARKER="${SPX_AVF_VPN_OFFLOAD_MARKER:-$RUN_DIR/spx-avf-vpn.offload_prev}"
+LOCK_DIR="${SPX_AVF_VPN_LOCK_DIR:-$RUN_DIR/spx-avf-vpn-reconcile.lock}"
+
+run_with_timeout() {
+    _rwt_sec=$1
+    shift
+    "$@" &
+    _rwt_cmd=$!
+    (
+        trap - EXIT
+        _rwt_armed=1
+        trap 'if [ "$_rwt_armed" = 1 ] && [ -n "${!:-}" ] && [ "$!" != "$_rwt_cmd" ]; then kill "$!" 2>/dev/null || true; wait "$!" 2>/dev/null || true; fi; exit 0' TERM INT
+        sleep "$_rwt_sec" </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -TERM "$_rwt_cmd" 2>/dev/null || true
+        _rwt_armed=1
+        sleep 1 </dev/null >/dev/null 2>&1 &
+        wait "$!" 2>/dev/null || exit 0
+        _rwt_armed=0
+        kill -KILL "$_rwt_cmd" 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    _rwt_wd=$!
+    _rwt_rc=0
+    wait "$_rwt_cmd" 2>/dev/null || _rwt_rc=$?
+    kill -TERM "$_rwt_wd" 2>/dev/null || true
+    _rwt_try=0
+    while [ "$_rwt_try" -lt 20 ]; do
+        _rwt_st=
+        [ -r "/proc/$_rwt_wd/stat" ] || break
+        { read -r _rwt_st < "/proc/$_rwt_wd/stat"; } 2>/dev/null || break
+        case "$_rwt_st" in
+            *') Z '*|*') X '*) break ;;
+        esac
+        kill -TERM "$_rwt_wd" 2>/dev/null || break
+        sleep 0.05 2>/dev/null || break
+        _rwt_try=$((_rwt_try + 1))
+    done
+    wait "$_rwt_wd" 2>/dev/null || true
+    return "$_rwt_rc"
+}
+
+android() {
+    if [ -n "${SPX_AVF_VPN_ANDROID_WRAPPER:-}" ]; then
+        "$SPX_AVF_VPN_ANDROID_WRAPPER" "$@"
+    else
+        run_with_timeout "${ANDROID_COMMAND_TIMEOUT:-10}" nsenter -t 1 -m -r -- /system/bin/"$@"
+    fi
+}
+
+LOCK_HELD=0
+acquire_lock() {
+    mkdir -p "$RUN_DIR"
+    _tries=0
+    while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+        if [ -r "$LOCK_DIR/pid" ]; then
+            _owner="$(head -n 1 "$LOCK_DIR/pid" 2>/dev/null | tr -d '\r\n ' || true)"
+            case "$_owner" in
+                ''|*[!0-9]*)
+                    rm -f "$LOCK_DIR/pid" 2>/dev/null || true
+                    rmdir "$LOCK_DIR" 2>/dev/null || true
+                    continue
+                    ;;
+                *)
+                    if ! kill -0 "$_owner" 2>/dev/null; then
+                        rm -f "$LOCK_DIR/pid" 2>/dev/null || true
+                        rmdir "$LOCK_DIR" 2>/dev/null || true
+                        continue
+                    fi
+                    ;;
+            esac
+        fi
+        _tries=$((_tries + 1))
+        if [ "$_tries" -ge 50 ]; then
+            return 1
+        fi
+        sleep 0.1 2>/dev/null || sleep 1
+    done
+    printf '%s\n' "$$" > "$LOCK_DIR/pid" 2>/dev/null || true
+    LOCK_HELD=1
+    return 0
+}
+
+release_lock() {
+    if [ "$LOCK_HELD" = "1" ]; then
+        rm -f "$LOCK_DIR/pid" 2>/dev/null || true
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        LOCK_HELD=0
+    fi
+}
+
+trap release_lock EXIT
+trap 'release_lock; exit 0' INT TERM
+
+write_state() {
+    _ws_active="$1"
+    _ws_mode="$2"
+    _ws_vm_ifs="${3:-}"
+    _ws_vpn_if="${4:-}"
+    _ws_vpn_tbl="${5:-}"
+    _ws_vpn_dns="${6:-}"
+    _ws_v4_global="${7:-0}"
+    _ws_has_v6="${8:-0}"
+    mkdir -p "$RUN_DIR"
+    _ws_tmp="${STATE_FILE}.tmp.$$"
+    cat > "$_ws_tmp" <<EOF
+active=$_ws_active
+mode=$_ws_mode
+vm_ifs=$_ws_vm_ifs
+vpn_if=$_ws_vpn_if
+vpn_table=$_ws_vpn_tbl
+vpn_dns=$_ws_vpn_dns
+vpn_v4_global=$_ws_v4_global
+vpn_has_v6=$_ws_has_v6
+EOF
+    chmod 644 "$_ws_tmp" 2>/dev/null || true
+    mv -f "$_ws_tmp" "$STATE_FILE"
+}
+
+del_tagged_chain_rules() {
+    _dt_tool="$1"
+    _dt_table="$2"
+    _dt_chain="$3"
+    _dt_guard=0
+    while [ "$_dt_guard" -lt 128 ]; do
+        _dt_num="$(android "$_dt_tool" -w -t "$_dt_table" -L "$_dt_chain" --line-numbers -n 2>/dev/null | \
+            awk '/avf_vpn_fwd/ && $1 ~ /^[0-9]+$/ { print $1; exit }' || true)"
+        [ -n "$_dt_num" ] || break
+        android "$_dt_tool" -w -t "$_dt_table" -D "$_dt_chain" "$_dt_num" >/dev/null 2>&1 || break
+        _dt_guard=$((_dt_guard + 1))
+    done
+}
+
+cleanup_rules() {
+    for _prio in 12100 12400 12500; do
+        _cg=0
+        while [ "$_cg" -lt 32 ] && android ip -4 rule del pref "$_prio" >/dev/null 2>&1; do
+            _cg=$((_cg + 1))
+        done
+        _cg=0
+        while [ "$_cg" -lt 32 ] && android ip -6 rule del pref "$_prio" >/dev/null 2>&1; do
+            _cg=$((_cg + 1))
+        done
+    done
+    for _tool in iptables ip6tables; do
+        del_tagged_chain_rules "$_tool" filter oem_fwd
+        del_tagged_chain_rules "$_tool" nat POSTROUTING
+        del_tagged_chain_rules "$_tool" nat oem_nat_pre
+        del_tagged_chain_rules "$_tool" mangle FORWARD
+    done
+}
+
+restore_offload() {
+    if [ -f "$OFFLOAD_MARKER" ] && [ ! -L "$OFFLOAD_MARKER" ]; then
+        _ro_prev="$(head -n 1 "$OFFLOAD_MARKER" 2>/dev/null | tr -d '\r\n ' || true)"
+        if [ -z "$_ro_prev" ] || [ "$_ro_prev" = "null" ]; then
+            android settings delete global tether_offload_disabled >/dev/null 2>&1 || true
+        else
+            android settings put global tether_offload_disabled "$_ro_prev" >/dev/null 2>&1 || true
+        fi
+        rm -f "$OFFLOAD_MARKER" 2>/dev/null || true
+    fi
+}
+
+enable_offload_bypass() {
+    if [ ! -f "$OFFLOAD_MARKER" ]; then
+        _eo_cur="$(android settings get global tether_offload_disabled 2>/dev/null | tr -d '\r\n ' || true)"
+        [ -n "$_eo_cur" ] || _eo_cur="null"
+        _eo_tmp="${OFFLOAD_MARKER}.tmp.$$"
+        printf '%s\n' "$_eo_cur" > "$_eo_tmp"
+        chmod 644 "$_eo_tmp" 2>/dev/null || true
+        mv -f "$_eo_tmp" "$OFFLOAD_MARKER"
+    else
+        _eo_cur="$(android settings get global tether_offload_disabled 2>/dev/null | tr -d '\r\n ' || true)"
+    fi
+    if [ "$_eo_cur" != "1" ]; then
+        android settings put global tether_offload_disabled 1 >/dev/null 2>&1 || true
+    fi
+}
+
+is_vm_iface() {
+    case "$1" in
+        avf_tap*|vmnic*|crosvm*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_vpn_iface_name() {
+    case "$1" in
+        tun*|wg*|ipsec*|ppp*|utun*|tailscale*|zt*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_ignored_rule_table() {
+    case "$1" in
+        ''|local|main|default|local_network|unspec|lo|dummy*|\
+        wlan*|eth*|en*|usb*|ncm*|rmnet*|ccmni*|ap*|softap*|p2p*|bt-pan|\
+        avf_tap*|vmnic*|crosvm*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+link_is_up() {
+    _liu_links="$1"
+    _liu_if="$2"
+    printf '%s\n' "$_liu_links" | awk -v target="$_liu_if" '
+    {
+        ifname = $2
+        sub(/@.*/, "", ifname)
+        sub(/:$/, "", ifname)
+        if (ifname == target && match($0, /<[^>]*>/)) {
+            flags = substr($0, RSTART, RLENGTH)
+            if (flags ~ /[<,]UP[,>]/) {
+                found = 1
+                exit
+            }
+        }
+    }
+    END { exit(found ? 0 : 1) }
+    '
+}
+
+resolve_table_for_iface() {
+    _rt_iface="$1"
+    _rt_rules="$2"
+    _rt_out="$(android ip -4 route show table "$_rt_iface" 2>/dev/null || true)"
+    if [ -n "$_rt_out" ]; then
+        printf '%s' "$_rt_iface"
+        return 0
+    fi
+    _rt_cands="$(printf '%s\n' "$_rt_rules" | awk '
+    {
+        for (i = 1; i <= NF; i++) {
+            if ($i == "lookup" && i + 1 <= NF) {
+                t = $(i + 1)
+                if (t != "local" && t != "main" && t != "default" && t != "local_network" && t != "unspec" && !seen[t]++) {
+                    print t
+                }
+            }
+        }
+    }
+    ')"
+    for _rt_tbl in $_rt_cands; do
+        _rt_out="$(android ip -4 route show table "$_rt_tbl" 2>/dev/null || true)"
+        if printf '%s\n' "$_rt_out" | awk -v dev="$_rt_iface" '{
+            for (i = 1; i <= NF; i++) if ($i == "dev" && $(i + 1) == dev) { ok = 1; exit }
+        } END { exit(ok ? 0 : 1) }'; then
+            printf '%s' "$_rt_tbl"
+            return 0
+        fi
+    done
+    _rt_main="$(android ip -4 route show dev "$_rt_iface" table main 2>/dev/null || true)"
+    if [ -n "$_rt_main" ]; then
+        printf '%s' "main"
+        return 0
+    fi
+    return 1
+}
+
+discover_vpn() {
+    _dv_links="$1"
+    _dv_rules="$2"
+    _dv_conn="$3"
+    VPN_IF=""
+    VPN_TABLE=""
+
+    # 1. Android netd / ip-rule uidrange lookup table (covers VpnService + system IKEv2/IPsec).
+    _dv_rule_tables="$(printf '%s\n' "$_dv_rules" | awk '
+    /uidrange/ {
+        for (i = 1; i <= NF; i++) {
+            if ($i == "lookup" && i + 1 <= NF) {
+                t = $(i + 1)
+                if (!seen[t]++) print t
+            }
+        }
+    }
+    ')"
+    for _dv_tbl in $_dv_rule_tables; do
+        is_ignored_rule_table "$_dv_tbl" && continue
+        _dv_routes="$(android ip -4 route show table "$_dv_tbl" 2>/dev/null || true)"
+        [ -n "$_dv_routes" ] || continue
+        _dv_if=""
+        if ! is_ignored_rule_table "$_dv_tbl" && link_is_up "$_dv_links" "$_dv_tbl"; then
+            _dv_if="$_dv_tbl"
+        else
+            _dv_dev="$(printf '%s\n' "$_dv_routes" | awk '{
+                for (i = 1; i <= NF; i++) if ($i == "dev" && i + 1 <= NF) { print $(i + 1); exit }
+            }')"
+            if [ -n "$_dv_dev" ] && link_is_up "$_dv_links" "$_dv_dev"; then
+                _dv_if="$_dv_dev"
+            fi
+        fi
+        if [ -n "$_dv_if" ]; then
+            VPN_IF="$_dv_if"
+            VPN_TABLE="$_dv_tbl"
+            return 0
+        fi
+    done
+
+    # 2. ConnectivityService NetworkAgentInfo with VPN transport.
+    if [ -n "$_dv_conn" ]; then
+        _dv_conn_ifs="$(printf '%s\n' "$_dv_conn" | awk '
+        /NetworkAgentInfo\{/ {
+            in_nai = 1
+            is_vpn = 0
+            disc = 0
+            ifname = ""
+        }
+        in_nai {
+            if (/ni\{[^}]*DISCONNECTED/) disc = 1
+            if (match($0, /Transports:[[:space:]]*[^[:space:]]+/)) {
+                tr = substr($0, RSTART, RLENGTH)
+                sub(/^Transports:[[:space:]]*/, "", tr)
+                if (index("|" tr "|", "|VPN|") > 0) is_vpn = 1
+            }
+            if (match($0, /InterfaceName:[[:space:]]*[A-Za-z0-9_.:-]+/)) {
+                s = substr($0, RSTART, RLENGTH)
+                sub(/^InterfaceName:[[:space:]]*/, "", s)
+                ifname = s
+            }
+            if (/factorySerialNumber=/ || /NetworkAgentInfo\{.*\}[[:space:]]*$/) {
+                if (is_vpn && !disc && ifname != "" && !seen[ifname]++) {
+                    print ifname
+                }
+                in_nai = 0
+            }
+        }
+        ')"
+        for _dv_if in $_dv_conn_ifs; do
+            link_is_up "$_dv_links" "$_dv_if" || continue
+            _dv_tbl="$(resolve_table_for_iface "$_dv_if" "$_dv_rules" || true)"
+            if [ -n "$_dv_tbl" ]; then
+                VPN_IF="$_dv_if"
+                VPN_TABLE="$_dv_tbl"
+                return 0
+            fi
+        done
+    fi
+
+    # 3. Root / kernel VPN interfaces (tun*, wg*, ipsec*, ppp*, utun*, tailscale*, zt*).
+    _dv_link_ifs="$(printf '%s\n' "$_dv_links" | awk '
+    {
+        ifname = $2
+        sub(/@.*/, "", ifname)
+        sub(/:$/, "", ifname)
+        if (match($0, /<[^>]*>/)) {
+            flags = substr($0, RSTART, RLENGTH)
+            if (flags ~ /[<,]UP[,>]/ && !seen[ifname]++) print ifname
+        }
+    }
+    ')"
+    for _dv_if in $_dv_link_ifs; do
+        is_vpn_iface_name "$_dv_if" || continue
+        _dv_tbl="$(resolve_table_for_iface "$_dv_if" "$_dv_rules" || true)"
+        if [ -n "$_dv_tbl" ]; then
+            VPN_IF="$_dv_if"
+            VPN_TABLE="$_dv_tbl"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+extract_vpn_dns4() {
+    _ed_if="$1"
+    _ed_local_v4="$2"
+    _ed_conn="$3"
+    _ed_dns_dump="$(android dumpsys dnsresolver 2>/dev/null || true)"
+    _ed_ip=""
+
+    if [ -n "$_ed_dns_dump" ]; then
+        _ed_ip="$(printf '%s\n' "$_ed_dns_dump" | awk -v tif="$_ed_if" -v loc="$_ed_local_v4" '
+        function flush_blk(   i) {
+            if (done) return
+            if (match_if) {
+                for (i = 1; i <= n; i++) {
+                    if (dns[i] != loc && dns[i] !~ /^127\./) {
+                        print dns[i]
+                        done = 1
+                        exit
+                    }
+                }
+            }
+        }
+        /^NetId:/ { flush_blk(); in_dns = 0; match_if = 0; n = 0; next }
+        /^  DNS servers:/ { in_dns = 1; next }
+        /^  Interface names:/ {
+            in_dns = 0
+            s = $0
+            sub(/^  Interface names:[[:space:]]*/, "", s)
+            gsub(/[\[\],]/, " ", s)
+            if (index(" " s " ", " " tif " ") > 0) match_if = 1
+            next
+        }
+        /^  [A-Za-z]/ { in_dns = 0; next }
+        in_dns && /^    [^ ]/ {
+            ip = $1
+            if (ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+                dns[++n] = ip
+            }
+        }
+        END { flush_blk() }
+        ')"
+    fi
+
+    if [ -z "$_ed_ip" ] && [ -n "$_ed_conn" ]; then
+        _ed_ip="$(printf '%s\n' "$_ed_conn" | awk -v tif="$_ed_if" -v loc="$_ed_local_v4" '
+        /NetworkAgentInfo\{/ {
+            in_nai = 1
+            has_if = 0
+            addrs = ""
+        }
+        in_nai {
+            if (match($0, /InterfaceName:[[:space:]]*[A-Za-z0-9_.:-]+/)) {
+                s = substr($0, RSTART, RLENGTH)
+                sub(/^InterfaceName:[[:space:]]*/, "", s)
+                if (s == tif) has_if = 1
+            }
+            if (match($0, /DnsAddresses:[[:space:]]*\[[^\]]*\]/)) {
+                addrs = substr($0, RSTART, RLENGTH)
+            }
+            if (/factorySerialNumber=/ || /NetworkAgentInfo\{.*\}[[:space:]]*$/) {
+                if (has_if && addrs != "") {
+                    gsub(/^DnsAddresses:[[:space:]]*\[/, "", addrs)
+                    gsub(/\]$/, "", addrs)
+                    n = split(addrs, arr, /[[:space:],]+/)
+                    for (i = 1; i <= n; i++) {
+                        tok = arr[i]
+                        sub(/^\//, "", tok)
+                        if (tok ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && tok != loc && tok !~ /^127\./) {
+                            print tok
+                            exit
+                        }
+                    }
+                }
+                in_nai = 0
+            }
+        }
+        ')"
+    fi
+
+    printf '%s' "$_ed_ip"
+}
+
+apply_reconcile() {
+    _links="$(android ip -o link show 2>/dev/null || true)"
+    _addrs4="$(android ip -4 -o addr show scope global 2>/dev/null || true)"
+    _rules4="$(android ip -4 rule show 2>/dev/null || true)"
+    _conn=""
+
+    _vm_entries=""
+    _vm_ifs=""
+    while IFS= read -r _line; do
+        [ -n "$_line" ] || continue
+        set -f
+        # shellcheck disable=SC2086
+        set -- $_line
+        set +f
+        _if="${2:-}"
+        _fam="${3:-}"
+        _cidr="${4:-}"
+        [ "$_fam" = "inet" ] || continue
+        _if="${_if%%@*}"
+        _if="${_if%:}"
+        is_vm_iface "$_if" || continue
+        _gw="${_cidr%%/*}"
+        case "$_gw" in ''|*[!0-9.]*) continue ;; esac
+        _sub="$(android ip -4 route show dev "$_if" scope link 2>/dev/null | \
+            awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/ { print $1; exit }' || true)"
+        [ -n "$_sub" ] || continue
+        case " $_vm_ifs " in *" $_if "*) continue ;; esac
+        _vm_ifs="${_vm_ifs:+$_vm_ifs }$_if"
+        _vm_entries="${_vm_entries}${_if}|${_gw}|${_sub}
+"
+    done <<EOF
+$_addrs4
+EOF
+
+    if [ -z "$_vm_entries" ]; then
+        cleanup_rules
+        restore_offload
+        write_state 0 "waiting" "" "" "" "" 0 0
+        return 0
+    fi
+
+    _conn="$(android dumpsys connectivity 2>/dev/null || true)"
+    if ! discover_vpn "$_links" "$_rules4" "$_conn"; then
+        cleanup_rules
+        restore_offload
+        write_state 0 "waiting" "$_vm_ifs" "" "" "" 0 0
+        return 0
+    fi
+
+    _vpn_routes4="$(android ip -4 route show table "$VPN_TABLE" 2>/dev/null || true)"
+    if [ "$VPN_TABLE" = "main" ]; then
+        _vpn_routes4="$(printf '%s\n' "$_vpn_routes4" | awk -v dev="$VPN_IF" '{
+            for (i = 1; i <= NF; i++) if ($i == "dev" && $(i + 1) == dev) { print; break }
+        }')"
+    fi
+    if [ -z "$_vpn_routes4" ]; then
+        cleanup_rules
+        restore_offload
+        write_state 0 "waiting" "$_vm_ifs" "$VPN_IF" "$VPN_TABLE" "" 0 0
+        return 0
+    fi
+
+    _vpn_v4_global="$(printf '%s\n' "$_vpn_routes4" | awk '
+    $1 == "default" || $1 == "0.0.0.0/0" { def = 1 }
+    $1 == "0.0.0.0/1" { lo = 1 }
+    $1 == "128.0.0.0/1" { hi = 1 }
+    END { print ((def || (lo && hi)) ? 1 : 0) }
+    ')"
+
+    _vpn_routes6="$(android ip -6 route show table "$VPN_TABLE" 2>/dev/null || true)"
+    if [ "$VPN_TABLE" = "main" ]; then
+        _vpn_routes6="$(printf '%s\n' "$_vpn_routes6" | awk -v dev="$VPN_IF" '{
+            for (i = 1; i <= NF; i++) if ($i == "dev" && $(i + 1) == dev) { print; break }
+        }')"
+    fi
+    # Require a default or non-link-local/multicast prefix route (ignore single /128 placeholders like fd00::1).
+    _vpn_has_v6="$(printf '%s\n' "$_vpn_routes6" | awk '
+    $1 == "default" || $1 == "::/0" || $1 == "::/1" || $1 == "8000::/1" { g = 1 }
+    $1 ~ /\// && $1 !~ /^fe80:/ && $1 !~ /^ff00:/ {
+        split($1, p, "/")
+        if ((p[2] + 0) < 128) g = 1
+    }
+    END { print (g ? 1 : 0) }
+    ')"
+
+    _vpn_local_v4="$(android ip -4 -o addr show dev "$VPN_IF" 2>/dev/null | \
+        awk '$3 == "inet" { ip = $4; sub(/\/.*/, "", ip); if (ip !~ /^127\./) { print ip; exit } }' || true)"
+    _vpn_dns4="$(extract_vpn_dns4 "$VPN_IF" "$_vpn_local_v4" "$_conn")"
+
+    enable_offload_bypass
+    [ -w "$PROC_SYS_NET/ipv4/ip_forward" ] && printf '1\n' > "$PROC_SYS_NET/ipv4/ip_forward" 2>/dev/null || true
+    [ -w "$PROC_SYS_NET/ipv4/conf/${VPN_IF}/rp_filter" ] && printf '0\n' > "$PROC_SYS_NET/ipv4/conf/${VPN_IF}/rp_filter" 2>/dev/null || true
+    if [ "$_vpn_has_v6" = "1" ]; then
+        [ -w "$PROC_SYS_NET/ipv6/conf/all/forwarding" ] && printf '1\n' > "$PROC_SYS_NET/ipv6/conf/all/forwarding" 2>/dev/null || true
+    fi
+
+    cleanup_rules
+
+    while IFS= read -r _entry; do
+        [ -n "$_entry" ] || continue
+        _vm_if="${_entry%%|*}"
+        _rest="${_entry#*|}"
+        _vm_gw="${_rest%%|*}"
+        _vm_sub="${_rest#*|}"
+
+        [ -w "$PROC_SYS_NET/ipv4/conf/${_vm_if}/rp_filter" ] && printf '0\n' > "$PROC_SYS_NET/ipv4/conf/${_vm_if}/rp_filter" 2>/dev/null || true
+
+        android ip -4 rule add pref 12100 iif "$VPN_IF" to "$_vm_sub" lookup main >/dev/null 2>&1 || true
+        android ip -4 rule add pref 12400 iif "$_vm_if" to "$_vm_sub" lookup main >/dev/null 2>&1 || true
+        android ip -4 rule add pref 12500 iif "$_vm_if" lookup "$VPN_TABLE" >/dev/null 2>&1 || true
+
+        android iptables -w -I oem_fwd 1 -i "$_vm_if" -o "$VPN_IF" -m comment --comment avf_vpn_fwd -j ACCEPT >/dev/null 2>&1 || true
+        android iptables -w -I oem_fwd 2 -i "$VPN_IF" -o "$_vm_if" -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment avf_vpn_fwd -j ACCEPT >/dev/null 2>&1 || true
+        android iptables -w -t nat -I POSTROUTING 1 -s "$_vm_sub" -o "$VPN_IF" -m comment --comment avf_vpn_fwd -j MASQUERADE >/dev/null 2>&1 || true
+
+        if [ -n "$_vpn_dns4" ]; then
+            android iptables -w -t nat -I oem_nat_pre 1 -i "$_vm_if" -d "$_vm_gw" -p udp --dport 53 -m comment --comment avf_vpn_fwd -j DNAT --to-destination "${_vpn_dns4}:53" >/dev/null 2>&1 || true
+            android iptables -w -t nat -I oem_nat_pre 2 -i "$_vm_if" -d "$_vm_gw" -p tcp --dport 53 -m comment --comment avf_vpn_fwd -j DNAT --to-destination "${_vpn_dns4}:53" >/dev/null 2>&1 || true
+        fi
+
+        if [ "$_vpn_has_v6" = "1" ]; then
+            android ip6tables -w -I oem_fwd 1 -i "$_vm_if" -o "$VPN_IF" -m comment --comment avf_vpn_fwd -j ACCEPT >/dev/null 2>&1 || true
+            android ip6tables -w -I oem_fwd 2 -i "$VPN_IF" -o "$_vm_if" -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment avf_vpn_fwd -j ACCEPT >/dev/null 2>&1 || true
+            _vm_subs6="$(android ip -6 route show dev "$_vm_if" 2>/dev/null | awk '$1 ~ /\// && $1 !~ /^fe80:/ && $1 !~ /^ff00:/ && !seen[$1]++ { print $1 }' || true)"
+            for _sub6 in $_vm_subs6; do
+                android ip -6 rule add pref 12100 iif "$VPN_IF" to "$_sub6" lookup main >/dev/null 2>&1 || true
+                android ip -6 rule add pref 12400 iif "$_vm_if" to "$_sub6" lookup main >/dev/null 2>&1 || true
+                android ip -6 rule add pref 12500 iif "$_vm_if" lookup "$VPN_TABLE" >/dev/null 2>&1 || true
+                android ip6tables -w -t nat -I POSTROUTING 1 -s "$_sub6" -o "$VPN_IF" -m comment --comment avf_vpn_fwd -j MASQUERADE >/dev/null 2>&1 || true
+            done
+        elif [ "$_vpn_v4_global" = "1" ]; then
+            android ip6tables -w -I oem_fwd 1 -i "$_vm_if" -m comment --comment avf_vpn_fwd -j REJECT --reject-with icmp6-adm-prohibited >/dev/null 2>&1 || true
+        fi
+    done <<EOF
+$_vm_entries
+EOF
+
+    android iptables -w -t mangle -I FORWARD 1 -o "$VPN_IF" -p tcp --tcp-flags SYN,RST SYN -m comment --comment avf_vpn_fwd -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || true
+    android iptables -w -t mangle -I FORWARD 2 -i "$VPN_IF" -p tcp --tcp-flags SYN,RST SYN -m comment --comment avf_vpn_fwd -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || true
+    if [ "$_vpn_has_v6" = "1" ]; then
+        android ip6tables -w -t mangle -I FORWARD 1 -o "$VPN_IF" -p tcp --tcp-flags SYN,RST SYN -m comment --comment avf_vpn_fwd -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || true
+        android ip6tables -w -t mangle -I FORWARD 2 -i "$VPN_IF" -p tcp --tcp-flags SYN,RST SYN -m comment --comment avf_vpn_fwd -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || true
+    fi
+
+    write_state 1 "active" "$_vm_ifs" "$VPN_IF" "$VPN_TABLE" "$_vpn_dns4" "$_vpn_v4_global" "$_vpn_has_v6"
+}
+
+case "${1:-apply}" in
+    apply)
+        acquire_lock || exit 0
+        apply_reconcile
+        ;;
+    off)
+        acquire_lock || exit 0
+        cleanup_rules
+        restore_offload
+        write_state 0 "disabled" "" "" "" "" 0 0
+        ;;
+    status)
+        if [ -r "$STATE_FILE" ]; then
+            cat "$STATE_FILE"
+        else
+            printf 'active=0\nmode=stopped\n'
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {apply|off|status}" >&2
+        exit 64
+        ;;
+esac
