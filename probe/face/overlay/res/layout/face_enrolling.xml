@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.setupdesign.GlifLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@id/setup_wizard_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <LinearLayout
+        android:orientation="vertical"
+        android:gravity="center"
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:padding="16dp"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+        <com.google.android.settings.biometrics.face.SquareFrameLayout
+            android:id="@id/square_frame_layout"
+            android:layout_width="340dp"
+            android:layout_height="340dp"
+            android:layout_gravity="center">
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
+                <FrameLayout
+                    android:background="@drawable/spx_face_preview_bg"
+                    android:clipToOutline="true"
+                    android:outlineProvider="background"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent">
+                    <com.google.android.settings.biometrics.face.SquareTextureView
+                        android:id="@id/texture_view"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="@null" />
+                    <View
+                        android:background="@drawable/spx_face_preview_border"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent" />
+                </FrameLayout>
+                <ImageView
+                    android:id="@id/circle_view"
+                    android:visibility="invisible"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+                <ImageView
+                    android:id="@id/face_smiley"
+                    android:visibility="invisible"
+                    android:alpha="0"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+                <ImageView
+                    android:id="@id/distance_indicator_view"
+                    android:visibility="invisible"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+            </FrameLayout>
+            <ImageView
+                android:id="@id/indicator_view"
+                android:visibility="invisible"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+        </com.google.android.settings.biometrics.face.SquareFrameLayout>
+        <TextView
+            android:id="@id/error_text"
+            android:visibility="invisible"
+            android:gravity="center"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="16dp"
+            android:lines="2"
+            android:ellipsize="end"
+            android:textSize="15sp"
+            android:accessibilityLiveRegion="polite"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+    </LinearLayout>
+</com.google.android.setupdesign.GlifLayout>

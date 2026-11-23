@@ -13,6 +13,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <limits>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -275,6 +276,84 @@ void testIrPreprocess() {
     SPX_ASSERT(prevZoomRgba[topRightOff + 0] == 211u && prevZoomRgba[topRightOff + 3] == 255u);
     SPX_ASSERT(prevZoomRgba[botRightOff + 0] == 155u && prevZoomRgba[botRightOff + 3] == 255u);
     SPX_ASSERT(prevZoomRgba[padRowOff + 0] == 0u && prevZoomRgba[padRowOff + 3] == 255u);
+
+    // Enrollment progress bar color & overlay rendering in RGBA8888 and RGB565.
+    const auto cProg0 = enrollProgressFillColor(0.0f);
+    const auto cProgHalf = enrollProgressFillColor(0.5f);
+    const auto cProgDone = enrollProgressFillColor(1.0f);
+    const auto cProgClamp = enrollProgressFillColor(1.5f);
+    SPX_ASSERT(cProg0.b > cProg0.r && cProg0.b > cProg0.g);
+    SPX_ASSERT(cProgHalf.b > cProgHalf.r && cProgHalf.b > cProgHalf.g);
+    SPX_ASSERT(cProgDone.g > cProgDone.r && cProgDone.g > cProgDone.b);
+    SPX_ASSERT(cProgDone.r == cProgClamp.r && cProgDone.g == cProgClamp.g &&
+               cProgDone.b == cProgClamp.b);
+
+    std::vector<uint8_t> grayMid(640u * 480u, 128u);
+    std::vector<uint8_t> barLegacy(640u * 512u * 4u, 0u);
+    renderIrPreviewRgba(
+        grayMid.data(), 640u, 480u, barLegacy.data(), 480u, 640u, 512u, true, 1.0f, -1.0f);
+    const size_t scrimSampleOff = (447u * 512u + 20u) * 4u;
+    const size_t barLeftOff = (447u * 512u + 120u) * 4u;
+    const size_t barRightOff = (447u * 512u + 340u) * 4u;
+    const size_t centerOff = (240u * 512u + 240u) * 4u;
+    SPX_ASSERT(barLegacy[scrimSampleOff + 0] == 128u && barLegacy[scrimSampleOff + 1] == 128u &&
+               barLegacy[scrimSampleOff + 2] == 128u);
+    SPX_ASSERT(barLegacy[barLeftOff + 0] == 128u && barLegacy[barRightOff + 0] == 128u);
+
+    std::vector<uint8_t> barRgba0(640u * 512u * 4u, 0u);
+    renderIrPreviewRgba(
+        grayMid.data(), 640u, 480u, barRgba0.data(), 480u, 640u, 512u, true, 1.0f, 0.0f);
+    SPX_ASSERT(barRgba0[centerOff + 0] == 128u && barRgba0[centerOff + 1] == 128u &&
+               barRgba0[centerOff + 2] == 128u);
+    SPX_ASSERT(barRgba0[scrimSampleOff + 0] < 128u);
+    SPX_ASSERT(barRgba0[barLeftOff + 0] == barRgba0[barLeftOff + 1] &&
+               barRgba0[barLeftOff + 1] == barRgba0[barLeftOff + 2]);
+    SPX_ASSERT(barRgba0[barLeftOff + 0] > barRgba0[scrimSampleOff + 0]);
+
+    std::vector<uint8_t> barRgbaHalf(640u * 512u * 4u, 0u);
+    renderIrPreviewRgba(
+        grayMid.data(), 640u, 480u, barRgbaHalf.data(), 480u, 640u, 512u, true, 1.0f, 0.5f);
+    SPX_ASSERT(barRgbaHalf[barLeftOff + 2] > barRgbaHalf[barLeftOff + 0] + 80u);
+    SPX_ASSERT(barRgbaHalf[barRightOff + 0] == barRgbaHalf[barRightOff + 1] &&
+               barRgbaHalf[barRightOff + 1] == barRgbaHalf[barRightOff + 2]);
+    SPX_ASSERT(barRgbaHalf[barRightOff + 0] > barRgbaHalf[scrimSampleOff + 0]);
+    SPX_ASSERT(barRgbaHalf[padRowOff + 0] == 0u && barRgbaHalf[padRowOff + 1] == 0u &&
+               barRgbaHalf[padRowOff + 2] == 0u && barRgbaHalf[padRowOff + 3] == 255u);
+
+    std::vector<uint8_t> barRgbaDone(640u * 512u * 4u, 0u);
+    renderIrPreviewRgba(
+        grayMid.data(), 640u, 480u, barRgbaDone.data(), 480u, 640u, 512u, true, 1.0f, 1.0f);
+    SPX_ASSERT(barRgbaDone[barLeftOff + 1] > barRgbaDone[barLeftOff + 0] + 80u);
+    SPX_ASSERT(barRgbaDone[barRightOff + 1] > barRgbaDone[barRightOff + 0] + 80u);
+
+    auto to565 = [](Rgb8 c) -> uint16_t {
+        return static_cast<uint16_t>(((static_cast<uint16_t>(c.r >> 3)) << 11) |
+                                     ((static_cast<uint16_t>(c.g >> 2)) << 5) |
+                                     static_cast<uint16_t>(c.b >> 3));
+    };
+    std::vector<uint16_t> bar565(640u * 512u, 0xFFFFu);
+    renderIrPreviewRgb565(
+        grayMid.data(), 640u, 480u, bar565.data(), 480u, 640u, 512u, true, 1.0f, 1.0f);
+    SPX_ASSERT(bar565[447u * 512u + 120u] == to565(cProgDone));
+    SPX_ASSERT(bar565[447u * 512u + 340u] == to565(cProgDone));
+    SPX_ASSERT(bar565[500u * 512u + 10u] == 0u);
+
+    // Same progress bar contract when source buffer is already 480x640 (e.g. rotated portrait/inverted).
+    std::vector<uint8_t> grayMidPort(480u * 640u, 128u);
+    std::vector<uint8_t> barPortRgba(640u * 512u * 4u, 0u);
+    renderIrPreviewRgba(
+        grayMidPort.data(), 480u, 640u, barPortRgba.data(), 480u, 640u, 512u, true, 1.0f, 0.5f);
+    SPX_ASSERT(barPortRgba[centerOff + 0] == 128u && barPortRgba[centerOff + 3] == 255u);
+    SPX_ASSERT(barPortRgba[scrimSampleOff + 0] < 128u);
+    SPX_ASSERT(barPortRgba[barLeftOff + 2] > barPortRgba[barLeftOff + 0] + 80u);
+    SPX_ASSERT(barPortRgba[padRowOff + 0] == 0u && barPortRgba[padRowOff + 3] == 255u);
+
+    std::vector<uint16_t> barPort565(640u * 512u, 0xFFFFu);
+    renderIrPreviewRgb565(
+        grayMidPort.data(), 480u, 640u, barPort565.data(), 480u, 640u, 512u, true, 1.0f, 1.0f);
+    SPX_ASSERT(barPort565[447u * 512u + 120u] == to565(cProgDone));
+    SPX_ASSERT(barPort565[447u * 512u + 340u] == to565(cProgDone));
+    SPX_ASSERT(barPort565[500u * 512u + 10u] == 0u);
 }
 
 void testCryptoAndHat() {
@@ -723,6 +802,59 @@ void testFaceStore() {
         SpxFaceStore clean(0, user0Dir);
         SPX_ASSERT(clean.load());
         SPX_ASSERT(clean.enrollmentCount() == 0);
+
+        // Construct a valid-MAC v1 blob -> load() must reject stale kStoreVersion=1 templates
+        SPX_ASSERT(clean.addEnrollment({embReal}) > 0);
+        auto readFileBytes = [](const std::string& p) {
+            int rfd = open(p.c_str(), O_RDONLY);
+            SPX_ASSERT(rfd >= 0);
+            struct stat fst{};
+            SPX_ASSERT(fstat(rfd, &fst) == 0 && fst.st_size > 0);
+            std::vector<uint8_t> out(static_cast<size_t>(fst.st_size));
+            size_t off = 0;
+            while (off < out.size()) {
+                ssize_t n = read(rfd, out.data() + off, out.size() - off);
+                SPX_ASSERT(n > 0);
+                off += static_cast<size_t>(n);
+            }
+            close(rfd);
+            return out;
+        };
+        const auto masterKey = readFileBytes(user0Dir + "/spx_face_key_v1.bin");
+        SPX_ASSERT(masterKey.size() == 32u);
+        auto v3Blob = readFileBytes(dataFile);
+        SPX_ASSERT(v3Blob.size() >= 84u);
+        SPX_ASSERT(v3Blob[8] == 3u && v3Blob[9] == 0u && v3Blob[10] == 0u && v3Blob[11] == 0u);
+        const size_t bodyEnd = v3Blob.size() - 32u;
+        const auto macKey = hkdfSha256(nullptr, 0, masterKey.data(), masterKey.size(),
+                                       reinterpret_cast<const uint8_t*>("spx_face_mac_v1"), 15);
+        for (uint8_t staleVer : {uint8_t{2u}, uint8_t{1u}}) {
+            v3Blob[8] = staleVer;  // downgrade version header while keeping valid MAC
+            const auto newMac = hmacSha256(macKey.data(), macKey.size(), v3Blob.data(), bodyEnd);
+            std::memcpy(v3Blob.data() + bodyEnd, newMac.data(), 32u);
+            {
+                int wfd = open(dataFile.c_str(), O_WRONLY | O_TRUNC);
+                SPX_ASSERT(wfd >= 0);
+                size_t off = 0;
+                while (off < v3Blob.size()) {
+                    ssize_t n = write(wfd, v3Blob.data() + off, v3Blob.size() - off);
+                    SPX_ASSERT(n > 0);
+                    off += static_cast<size_t>(n);
+                }
+                close(wfd);
+            }
+            SpxFaceStore staleStore(0, user0Dir);
+            SPX_ASSERT(!staleStore.load());
+        }
+        SpxFaceStore wipeTarget(0, user0Dir);
+        wipeTarget.wipeAll();
+
+        SpxFaceStore rebuilt(0, user0Dir);
+        SPX_ASSERT(rebuilt.load());
+        SPX_ASSERT(rebuilt.addEnrollment({embReal}) > 0);
+        SpxFaceStore reloaded(0, user0Dir);
+        SPX_ASSERT(reloaded.load());
+        SPX_ASSERT(reloaded.enrollmentCount() == 1);
     }
 
     removeTree(root);
@@ -765,6 +897,250 @@ void testLockoutTracker() {
     tracker.reset();
     SPX_ASSERT(tracker.failedAttempts() == 0);
     SPX_ASSERT(tracker.checkState().mode == LockoutMode::NONE);
+}
+
+void testMultiOrientationSupport() {
+    using namespace spx::face;
+
+    // 1. rotationToDegrees, composeRotation, and bit-for-bit rotateIrFrameStats across all 16 pairs.
+    static constexpr std::array<Rotation, 4> kRots{
+        Rotation::Deg0,
+        Rotation::Deg90CW,
+        Rotation::Deg180,
+        Rotation::Deg270CW,
+    };
+    constexpr unsigned kW = 8;
+    constexpr unsigned kH = 4;
+    std::vector<uint16_t> rampPx(kW * kH);
+    for (unsigned y = 0; y < kH; ++y) {
+        for (unsigned x = 0; x < kW; ++x) {
+            rampPx[y * kW + x] = static_cast<uint16_t>(40u + y * 130u + x * 29u);
+        }
+    }
+    const auto rampRaw = packY10(rampPx, kW, kH, kW * 2u);
+
+    for (Rotation base : kRots) {
+        const auto baseStats =
+            preprocessIrFrame(rampRaw.data(), rampRaw.size(), kW, kH, kW * 2u, kPixFmtY10, base);
+        for (Rotation delta : kRots) {
+            const int expectedDeg = (rotationToDegrees(base) + rotationToDegrees(delta)) % 360;
+            const Rotation composed = composeRotation(base, delta);
+            SPX_ASSERT(rotationToDegrees(composed) == expectedDeg);
+
+            const auto rotStats = rotateIrFrameStats(baseStats, delta);
+            const auto direct = preprocessIrFrame(
+                rampRaw.data(), rampRaw.size(), kW, kH, kW * 2u, kPixFmtY10, composed);
+            SPX_ASSERT(rotStats.width == direct.width);
+            SPX_ASSERT(rotStats.height == direct.height);
+            SPX_ASSERT(rotStats.upright10 == direct.upright10);
+            if (delta == Rotation::Deg0) {
+                SPX_ASSERT(rotStats.gray8 == direct.gray8);
+            }
+            const auto roundTrip = rotateIrFrameStats(rotStats, [&] {
+                switch (delta) {
+                case Rotation::Deg0:
+                    return Rotation::Deg0;
+                case Rotation::Deg90CW:
+                    return Rotation::Deg270CW;
+                case Rotation::Deg180:
+                    return Rotation::Deg180;
+                case Rotation::Deg270CW:
+                    return Rotation::Deg90CW;
+                }
+                return Rotation::Deg0;
+            }());
+            SPX_ASSERT(roundTrip.width == baseStats.width && roundTrip.height == baseStats.height);
+            SPX_ASSERT(roundTrip.upright10 == baseStats.upright10);
+            SPX_ASSERT(roundTrip.gray8 == baseStats.gray8);
+            SPX_ASSERT(rotStats.p1 == baseStats.p1 && rotStats.p50 == baseStats.p50 &&
+                       rotStats.p99 == baseStats.p99);
+            SPX_ASSERT(std::abs(rotStats.roiLinearMean - baseStats.roiLinearMean) < 1e-6f);
+            SPX_ASSERT(std::abs(rotStats.darkRatio - baseStats.darkRatio) < 1e-6f);
+            SPX_ASSERT(std::abs(rotStats.saturatedRatio - baseStats.saturatedRatio) < 1e-6f);
+        }
+    }
+
+    // 2. Helper to rotate packed Y10 frames so we can simulate holding the device in all 4 angles.
+    auto rotateRawY10Cw = [](const std::vector<uint8_t>& srcRaw,
+                             unsigned srcW,
+                             unsigned srcH,
+                             Rotation rot,
+                             unsigned& outW,
+                             unsigned& outH) -> std::vector<uint8_t> {
+        const auto st = preprocessIrFrame(
+            srcRaw.data(), srcRaw.size(), srcW, srcH, srcW * 2u, kPixFmtY10, rot);
+        outW = st.width;
+        outH = st.height;
+        return packY10(st.upright10, outW, outH, outW * 2u);
+    };
+    auto inverseCw = [](Rotation rot) -> Rotation {
+        switch (rot) {
+        case Rotation::Deg0:
+            return Rotation::Deg0;
+        case Rotation::Deg90CW:
+            return Rotation::Deg270CW;
+        case Rotation::Deg180:
+            return Rotation::Deg180;
+        case Rotation::Deg270CW:
+            return Rotation::Deg90CW;
+        }
+        return Rotation::Deg0;
+    };
+
+    const auto uprightFace =
+        makeSyntheticFaceY10(480u, 640u, SyntheticFaceVariant::Normal3D, 0.0f, 0);
+
+    // Enroll at Deg270CW (device normal landscape posture).
+    const std::string storeRoot = makeTempDir("spx-face-4rot-");
+    SpxFaceStore store(0, storeRoot + "/u0");
+    SPX_ASSERT(store.load());
+    {
+        unsigned rw = 0, rh = 0;
+        const auto raw270 = rotateRawY10Cw(uprightFace, 480u, 640u, Rotation::Deg90CW, rw, rh);
+        SPX_ASSERT(rw == 640u && rh == 480u);
+        const auto stEnr = preprocessIrFrame(
+            raw270.data(), raw270.size(), rw, rh, rw * 2u, kPixFmtY10, Rotation::Deg270CW);
+        const auto detEnr = detectFaceNir(stEnr);
+        SPX_ASSERT(detEnr.detected && detEnr.quality == FaceQuality::GOOD);
+        const auto embEnr = extractEmbedding(stEnr, detEnr);
+        SPX_ASSERT(store.addEnrollment({embEnr}) > 0);
+    }
+
+    // Authenticate from Deg270CW starting posture across all 4 physical holding orientations.
+    for (Rotation expectedRot : kRots) {
+        unsigned rw = 0, rh = 0;
+        const auto sensorRaw =
+            rotateRawY10Cw(uprightFace, 480u, 640u, inverseCw(expectedRot), rw, rh);
+        const auto baseStats = preprocessIrFrame(
+            sensorRaw.data(), sensorRaw.size(), rw, rh, rw * 2u, kPixFmtY10, Rotation::Deg270CW);
+        const auto mo = detectFaceNirMultiOrientation(
+            baseStats, Rotation::Deg270CW, true, false);
+        SPX_ASSERT(mo.detection.detected);
+        SPX_ASSERT(mo.rotation == expectedRot);
+        SPX_ASSERT(mo.usedRotatedStats == (expectedRot != Rotation::Deg270CW));
+
+        const auto& useStats = mo.usedRotatedStats ? mo.rotatedStats : baseStats;
+        const auto embProbe = extractEmbedding(useStats, mo.detection);
+        const auto m = store.match(embProbe, kDefaultMatchThreshold);
+        SPX_ASSERT(m.matched);
+        SPX_ASSERT(m.bestSimilarity >= kDefaultMatchThreshold);
+
+        if (expectedRot != Rotation::Deg270CW) {
+            const auto disabledMo = detectFaceNirMultiOrientation(
+                baseStats, Rotation::Deg270CW, false, false);
+            SPX_ASSERT(!disabledMo.detection.detected);
+            SPX_ASSERT(disabledMo.rotation == Rotation::Deg270CW);
+            SPX_ASSERT(!disabledMo.usedRotatedStats);
+        }
+    }
+
+    // 3. TOO_DARK / TOO_BRIGHT short-circuits without searching alternate orientations.
+    {
+        std::vector<uint16_t> darkPx(64u * 64u, 5u);
+        const auto darkRaw = packY10(darkPx, 64u, 64u, 128u);
+        const auto darkStats = preprocessIrFrame(
+            darkRaw.data(), darkRaw.size(), 64u, 64u, 128u, kPixFmtY10, Rotation::Deg270CW);
+        const auto moDark = detectFaceNirMultiOrientation(
+            darkStats, Rotation::Deg270CW, true, true);
+        SPX_ASSERT(!moDark.detection.detected);
+        SPX_ASSERT(moDark.detection.quality == FaceQuality::TOO_DARK);
+        SPX_ASSERT(moDark.rotation == Rotation::Deg270CW);
+        SPX_ASSERT(!moDark.usedRotatedStats);
+
+        std::vector<uint16_t> brightPx(64u * 64u, 1020u);
+        const auto brightRaw = packY10(brightPx, 64u, 64u, 128u);
+        const auto brightStats = preprocessIrFrame(
+            brightRaw.data(), brightRaw.size(), 64u, 64u, 128u, kPixFmtY10, Rotation::Deg270CW);
+        const auto moBright = detectFaceNirMultiOrientation(
+            brightStats, Rotation::Deg270CW, true, true);
+        SPX_ASSERT(!moBright.detection.detected);
+        SPX_ASSERT(moBright.detection.quality == FaceQuality::TOO_BRIGHT);
+        SPX_ASSERT(moBright.rotation == Rotation::Deg270CW);
+        SPX_ASSERT(!moBright.usedRotatedStats);
+    }
+
+    // 4. probeAlternateOrientationMatch recovers true matching orientation after low baseSimilarity.
+    {
+        unsigned rw = 0, rh = 0;
+        const auto raw90 =
+            rotateRawY10Cw(uprightFace, 480u, 640u, Rotation::Deg270CW, rw, rh);
+        const auto wrongBaseStats = preprocessIrFrame(
+            raw90.data(), raw90.size(), rw, rh, rw * 2u, kPixFmtY10, Rotation::Deg270CW);
+        const auto hint = probeAlternateOrientationMatch(
+            wrongBaseStats, Rotation::Deg270CW, 0.25f, store, nullptr, kDefaultMatchThreshold);
+        SPX_ASSERT(hint.shouldSwitch);
+        SPX_ASSERT(hint.rotation == Rotation::Deg90CW);
+        SPX_ASSERT(hint.bestSimilarity >= kDefaultMatchThreshold);
+        SPX_ASSERT(hint.detScore >= 42.0f);
+
+        // Distinct unrelated face already upright at Deg270CW OR rotated (even with baseSimilarity = 0.0f
+        // due to transient liveness rejection) must NOT trigger a spurious orientation switch.
+        const auto distinctFace =
+            makeSyntheticFaceY10(480u, 640u, SyntheticFaceVariant::DistinctPerson, 0.0f, 0);
+        const auto distinctRaw270 =
+            rotateRawY10Cw(distinctFace, 480u, 640u, Rotation::Deg90CW, rw, rh);
+        const auto distinctBase = preprocessIrFrame(
+            distinctRaw270.data(), distinctRaw270.size(), rw, rh, rw * 2u, kPixFmtY10, Rotation::Deg270CW);
+        const auto distinctDet = detectFaceNir(distinctBase);
+        SPX_ASSERT(distinctDet.detected);
+        const float distinctSim =
+            store.match(extractEmbedding(distinctBase, distinctDet), kDefaultMatchThreshold).bestSimilarity;
+        SPX_ASSERT(distinctSim < kDefaultMatchThreshold);
+        const auto noHint = probeAlternateOrientationMatch(
+            distinctBase, Rotation::Deg270CW, distinctSim, store, nullptr, kDefaultMatchThreshold);
+        SPX_ASSERT(!noHint.shouldSwitch);
+
+        const auto distinctRotatedStats = preprocessIrFrame(
+            distinctRaw270.data(), distinctRaw270.size(), rw, rh, rw * 2u, kPixFmtY10, Rotation::Deg0);
+        const auto noHintZeroBase = probeAlternateOrientationMatch(
+            distinctRotatedStats, Rotation::Deg0, 0.0f, store, nullptr, kDefaultMatchThreshold);
+        SPX_ASSERT(!noHintZeroBase.shouldSwitch);
+    }
+
+    // 5. classifyGravityOrientation across all 4 postures, flat desk, hysteresis deadband, and non-finite inputs.
+    {
+        Rotation out = Rotation::Deg180;
+        // Live SPX landscape kickstand sample: (0.16, 8.53, 4.92) -> Deg0 -> 270 + 0 = 270.
+        SPX_ASSERT(classifyGravityOrientation(0.16f, 8.53f, 4.92f, false, Rotation::Deg0, out));
+        SPX_ASSERT(out == Rotation::Deg0);
+        SPX_ASSERT(composeRotation(Rotation::Deg270CW, out) == Rotation::Deg270CW);
+
+        // Portrait camera-left: ax > 0 dominant -> Deg90CW -> 270 + 90 = 0.
+        SPX_ASSERT(classifyGravityOrientation(9.2f, 0.3f, 2.5f, true, Rotation::Deg0, out));
+        SPX_ASSERT(out == Rotation::Deg90CW);
+        SPX_ASSERT(composeRotation(Rotation::Deg270CW, out) == Rotation::Deg0);
+
+        // Upside-down landscape: ay < 0 dominant -> Deg180 -> 270 + 180 = 90.
+        SPX_ASSERT(classifyGravityOrientation(-0.2f, -9.5f, 1.5f, true, Rotation::Deg90CW, out));
+        SPX_ASSERT(out == Rotation::Deg180);
+        SPX_ASSERT(composeRotation(Rotation::Deg270CW, out) == Rotation::Deg90CW);
+
+        // Portrait camera-right: ax < 0 dominant -> Deg270CW -> 270 + 270 = 180.
+        SPX_ASSERT(classifyGravityOrientation(-9.1f, -0.4f, 2.0f, true, Rotation::Deg180, out));
+        SPX_ASSERT(out == Rotation::Deg270CW);
+        SPX_ASSERT(composeRotation(Rotation::Deg270CW, out) == Rotation::Deg180);
+
+        // Flat on desk: hypot(ax, ay) < 2.8 returns false without prev, preserves prev when available.
+        out = Rotation::Deg0;
+        SPX_ASSERT(!classifyGravityOrientation(0.3f, 0.4f, 9.75f, false, Rotation::Deg90CW, out));
+        SPX_ASSERT(classifyGravityOrientation(0.3f, 0.4f, 9.75f, true, Rotation::Deg90CW, out));
+        SPX_ASSERT(out == Rotation::Deg90CW);
+
+        // Diagonal hysteresis deadband (7.0 < 1.35 * 6.5) preserves Deg90CW, then (4.0, 8.8) switches to Deg0.
+        SPX_ASSERT(classifyGravityOrientation(6.5f, 7.0f, 1.0f, true, Rotation::Deg90CW, out));
+        SPX_ASSERT(out == Rotation::Deg90CW);
+        SPX_ASSERT(classifyGravityOrientation(4.0f, 8.8f, 1.0f, true, Rotation::Deg90CW, out));
+        SPX_ASSERT(out == Rotation::Deg0);
+
+        // Non-finite inputs handled safely.
+        const float qnan = std::numeric_limits<float>::quiet_NaN();
+        const float pinf = std::numeric_limits<float>::infinity();
+        SPX_ASSERT(!classifyGravityOrientation(qnan, 0.0f, 9.8f, false, Rotation::Deg0, out));
+        SPX_ASSERT(classifyGravityOrientation(pinf, 8.0f, 0.0f, true, Rotation::Deg180, out));
+        SPX_ASSERT(out == Rotation::Deg180);
+    }
+
+    removeTree(storeRoot);
 }
 
 void testLidMonitor() {
@@ -811,6 +1187,525 @@ void testLidMonitor() {
     removeTree(tmpDir);
 }
 
+void testCrossOrientationRobustness() {
+    using namespace spx::face;
+    constexpr float kPi = 3.14159265358979323846f;
+
+    struct Face3DParams {
+        float eyeSep = 0.38f;
+        float eyeY = -0.26f;
+        float noseW = 0.028f;
+        float noseBoost = 140.0f;
+        float mouthY = 0.48f;
+        float mouthW = 0.14f;
+        float aspectX = 0.24f;
+        float aspectY = 0.28f;
+        bool glasses = false;
+        bool beard = false;
+        int texSeed = 0;
+    };
+
+    auto renderFace3D = [&](unsigned w,
+                            unsigned h,
+                            const Face3DParams& p,
+                            float lx,
+                            float ly,
+                            float lz,
+                            float yawDeg,
+                            float pitchDeg,
+                            float scaleMul,
+                            bool flatPrint,
+                            float flatTiltDeg = 0.0f) {
+        std::vector<uint16_t> px(static_cast<size_t>(w) * h, 28u);
+        const float cx = static_cast<float>(w) * 0.50f;
+        const float cy = static_cast<float>(h) * 0.48f;
+        const float minDim = static_cast<float>(std::min(w, h));
+        const float rx = minDim * p.aspectX * scaleMul;
+        const float ry = minDim * p.aspectY * scaleMul;
+        const float ln = std::sqrt(lx * lx + ly * ly + lz * lz);
+        lx /= ln;
+        ly /= ln;
+        lz /= ln;
+        const float yaw = yawDeg * kPi / 180.0f;
+        const float pitch = pitchDeg * kPi / 180.0f;
+        const float flatTilt = flatTiltDeg * kPi / 180.0f;
+        const float cyaw = std::cos(yaw), syaw = std::sin(yaw);
+        const float cpitch = std::cos(pitch), spitch = std::sin(pitch);
+
+        for (unsigned y = 0; y < h; ++y) {
+            for (unsigned x = 0; x < w; ++x) {
+                const float dx = (static_cast<float>(x) - cx) / rx;
+                const float dy = (static_cast<float>(y) - cy) / ry;
+                const float r2 = dx * dx + dy * dy;
+                float val = 28.0f;
+                if (r2 <= 1.0f) {
+                    float fx = dx;
+                    float fy = dy;
+                    float ndotl = 0.9f;
+                    float noseR2 = 2.0f;
+                    if (flatPrint) {
+                        const float zdist = 40.0f + dx * 9.0f * std::sin(flatTilt);
+                        const float fnx = std::sin(flatTilt);
+                        const float fnz = std::cos(flatTilt);
+                        const float dot = std::max(0.1f, fnx * lx + fnz * lz);
+                        ndotl = dot * (40.0f * 40.0f) / (zdist * zdist);
+                    } else {
+                        const float z = std::sqrt(std::max(0.0f, 1.0f - r2));
+                        fx = dx * cyaw + z * syaw;
+                        const float fz1 = -dx * syaw + z * cyaw;
+                        fy = dy * cpitch - fz1 * spitch;
+                        float nx = dx, ny = dy, nz = z;
+                        noseR2 = (fx * fx) / p.noseW + (fy - 0.04f) * (fy - 0.04f) / 0.09f;
+                        if (noseR2 < 1.0f) {
+                            const float bump = 1.0f - noseR2;
+                            nx += fx * 1.4f * bump;
+                            nz += 0.6f * bump;
+                        }
+                        const float nl = std::sqrt(nx * nx + ny * ny + nz * nz) + 1e-6f;
+                        nx /= nl;
+                        ny /= nl;
+                        nz /= nl;
+                        ndotl = std::max(0.08f, nx * lx + ny * ly + nz * lz);
+                    }
+
+                    float alb = 0.72f;
+                    const float le = (fx + p.eyeSep) * (fx + p.eyeSep) / 0.04f +
+                                     (fy - p.eyeY) * (fy - p.eyeY) / 0.028f;
+                    const float re = (fx - p.eyeSep) * (fx - p.eyeSep) / 0.04f +
+                                     (fy - p.eyeY) * (fy - p.eyeY) / 0.028f;
+                    if (le < 1.0f || re < 1.0f) alb *= 0.42f;
+                    if (!flatPrint && noseR2 < 1.0f) {
+                        alb += (p.noseBoost / 600.0f) * (1.0f - noseR2);
+                    }
+                    const float mouth =
+                        (fx * fx) / p.mouthW + (fy - p.mouthY) * (fy - p.mouthY) / 0.015f;
+                    if (mouth < 1.0f) alb *= 0.55f;
+                    if (p.glasses) {
+                        const float brow =
+                            (fy + 0.39f) * (fy + 0.39f) / 0.008f + (fx * fx) / 0.48f;
+                        if (brow < 1.0f) alb *= 0.45f;
+                    }
+                    if (p.beard && fy > 0.52f) alb *= 0.58f;
+                    if (p.texSeed == 1) {
+                        alb += 0.14f * std::cos(fx * 22.0f + fy * 9.0f) +
+                               0.08f * std::sin(fy * 26.0f);
+                    } else if (p.texSeed == 2) {
+                        alb += 0.10f * std::sin(fx * 16.0f - fy * 14.0f);
+                    } else if (p.texSeed == 3) {
+                        alb += 0.09f * std::cos(fx * 12.0f) * std::cos(fy * 18.0f);
+                    } else if (p.texSeed == 4) {
+                        alb += 0.11f * std::sin(fx * 19.0f) * std::cos(fy * 15.0f);
+                    }
+                    float shMul = 1.0f;
+                    if (!flatPrint) {
+                        const float shX = fx - (-lx * 0.18f);
+                        const float shY = fy - (-ly * 0.14f);
+                        const float nSh =
+                            (shX * shX) / 0.032f + (shY - 0.04f) * (shY - 0.04f) / 0.08f;
+                        if (nSh < 1.0f && noseR2 >= 0.7f) {
+                            shMul = 1.0f - 0.35f * (1.0f - nSh);
+                        }
+                    }
+                    val = 80.0f + 680.0f * alb * ndotl * shMul;
+                }
+                const int tex = static_cast<int>(((x * 7u + y * 13u) & 7u));
+                px[static_cast<size_t>(y) * w + x] =
+                    static_cast<uint16_t>(std::clamp(std::lround(val + tex), 0L, 1023L));
+            }
+        }
+        return packY10(px, w, h, w * 2u);
+    };
+
+    const Face3DParams owner{};
+    const std::string storeRoot = makeTempDir("spx-face-xorient-");
+    SpxFaceStore store(0, storeRoot + "/u0");
+    SPX_ASSERT(store.load());
+
+    // Enroll once in landscape posture (480x640 upright, horizontal LED offset lx=+0.25).
+    {
+        const auto rawLand = renderFace3D(480u, 640u, owner, 0.25f, 0.0f, 0.95f, 0.0f, 0.0f, 1.0f, false);
+        const auto stLand = preprocessIrFrame(
+            rawLand.data(), rawLand.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg0);
+        const auto detLand = detectFaceNir(stLand);
+        SPX_ASSERT(detLand.detected && detLand.quality == FaceQuality::GOOD);
+        const auto embLand = extractEmbedding(stLand, detLand);
+        SPX_ASSERT(store.addEnrollment({embLand}) > 0);
+    }
+
+    auto verifyCrossGenuine = [&](unsigned w,
+                                  unsigned h,
+                                  float lx,
+                                  float ly,
+                                  float yawDeg,
+                                  float pitchDeg,
+                                  float scaleMul) {
+        const auto raw =
+            renderFace3D(w, h, owner, lx, ly, 0.95f, yawDeg, pitchDeg, scaleMul, false);
+        const auto st = preprocessIrFrame(
+            raw.data(), raw.size(), w, h, w * 2u, kPixFmtY10, Rotation::Deg0);
+        const auto det = detectFaceNir(st);
+        SPX_ASSERT(det.detected);
+        const auto baseEmb = extractEmbedding(st, det);
+        const auto refined = matchWithAlignmentRefinement(
+            st, det, baseEmb, store, nullptr, kDefaultMatchThreshold);
+        SPX_ASSERT(refined.match.matched);
+        SPX_ASSERT(refined.match.bestSimilarity >= kDefaultMatchThreshold);
+    };
+
+    // Portrait with vertical LED parallax + side-bezel camera yaw & distance shifts
+    // (both ROTATION_90 power-at-top and ROTATION_270 volume-keys-at-top).
+    verifyCrossGenuine(640u, 480u, 0.0f, -0.25f, 10.0f, 0.0f, 1.00f);
+    verifyCrossGenuine(640u, 480u, 0.0f, -0.25f, 14.0f, 0.0f, 1.00f);
+    verifyCrossGenuine(640u, 480u, 0.0f, -0.25f, 10.0f, 6.0f, 1.00f);
+    verifyCrossGenuine(640u, 480u, -0.25f, 0.25f, -14.0f, -4.0f, 0.85f);
+    verifyCrossGenuine(640u, 480u, -0.35f, 0.25f, -12.0f, 0.0f, 0.78f);
+    verifyCrossGenuine(640u, 480u, -0.35f, 0.35f, -16.0f, 0.0f, 0.90f);
+    verifyCrossGenuine(480u, 640u, -0.25f, 0.0f, 0.0f, 8.0f, 1.00f);
+    verifyCrossGenuine(640u, 480u, 0.0f, -0.25f, 8.0f, 2.0f, 0.92f);
+    // Power-at-TOP (ROTATION_90, rot=0): IR LED sits below OV7251 on the left bezel
+    // (bottom-left under-lighting ly > 0 + positive side-bezel yaw +14..+20 deg).
+    verifyCrossGenuine(640u, 480u, 0.0f, 0.30f, 14.0f, 0.0f, 1.00f);
+    verifyCrossGenuine(640u, 480u, 0.0f, 0.35f, 16.0f, 0.0f, 1.00f);
+    verifyCrossGenuine(640u, 480u, 0.35f, 0.30f, 14.0f, 0.0f, 0.95f);
+    verifyCrossGenuine(640u, 480u, 0.0f, 0.25f, 20.0f, 0.0f, 1.00f);
+    verifyCrossGenuine(640u, 480u, -0.75f, 0.35f, 16.0f, 0.0f, 0.95f);
+
+    // 4 distinct synthetic impostors under the EXACT same landscape pose & lighting must be rejected.
+    Face3DParams impB;
+    impB.eyeSep = 0.44f;
+    impB.aspectX = 0.27f;
+    impB.aspectY = 0.25f;
+    impB.glasses = true;
+    impB.beard = true;
+    impB.texSeed = 1;
+
+    Face3DParams impC;
+    impC.eyeSep = 0.34f;
+    impC.eyeY = -0.22f;
+    impC.mouthY = 0.44f;
+    impC.aspectX = 0.22f;
+    impC.aspectY = 0.30f;
+    impC.texSeed = 2;
+
+    Face3DParams impD;
+    impD.eyeSep = 0.43f;
+    impD.eyeY = -0.30f;
+    impD.mouthY = 0.55f;
+    impD.noseW = 0.055f;
+    impD.mouthW = 0.22f;
+    impD.aspectX = 0.26f;
+    impD.aspectY = 0.25f;
+    impD.texSeed = 3;
+
+    Face3DParams impF;
+    impF.eyeSep = 0.34f;
+    impF.eyeY = -0.21f;
+    impF.mouthY = 0.56f;
+    impF.noseBoost = 30.0f;
+    impF.mouthW = 0.22f;
+    impF.aspectX = 0.22f;
+    impF.aspectY = 0.31f;
+    impF.beard = true;
+    impF.texSeed = 4;
+
+    struct ImpostorPose {
+        float lx;
+        float ly;
+        float yaw;
+    };
+    const std::array<ImpostorPose, 3> impPoses{{
+        {0.25f, 0.0f, 0.0f},
+        {0.0f, 0.35f, 16.0f},
+        {-0.35f, 0.35f, -16.0f},
+    }};
+    for (const auto& imp : {impB, impC, impD, impF}) {
+        for (size_t pIdx = 0; pIdx < impPoses.size(); ++pIdx) {
+            const auto& pose = impPoses[pIdx];
+            const auto raw = renderFace3D(
+                480u, 640u, imp, pose.lx, pose.ly, 0.95f, pose.yaw, 0.0f, 1.0f, false);
+            const auto st = preprocessIrFrame(
+                raw.data(), raw.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg0);
+            const auto det = detectFaceNir(st);
+            if (pIdx == 0) {
+                SPX_ASSERT(det.detected);
+            }
+            if (!det.detected) continue;
+            const auto baseEmb = extractEmbedding(st, det);
+            const auto refined = matchWithAlignmentRefinement(
+                st, det, baseEmb, store, nullptr, kDefaultMatchThreshold);
+            SPX_ASSERT(!refined.match.matched);
+            SPX_ASSERT(refined.match.bestSimilarity < kDefaultMatchThreshold - 0.08f);
+        }
+    }
+
+    // Small noisy glare + inner-canthus + eyebrow stability regression test (prevents 02:16 io collapse).
+    {
+        auto renderSmallNoisyCanthusGlare = [&](float yawDeg,
+                                                float pitchDeg,
+                                                float scaleMul,
+                                                int seed) {
+            constexpr unsigned kW = 480u;
+            constexpr unsigned kH = 640u;
+            std::vector<uint16_t> px(static_cast<size_t>(kW) * kH, 42u);
+            for (unsigned y = 20u; y < 140u; ++y) {
+                for (unsigned x = 20u; x < 150u; ++x) {
+                    px[static_cast<size_t>(y) * kW + x] = 760u;
+                }
+            }
+            const float cx = static_cast<float>(kW) * 0.50f + ((seed % 3) - 1) * 0.6f;
+            const float cy = static_cast<float>(kH) * 0.48f + (((seed / 3) % 3) - 1) * 0.6f;
+            const float rx = static_cast<float>(kW) * owner.aspectX * scaleMul;
+            const float ry = static_cast<float>(kW) * owner.aspectY * scaleMul;
+            const float lx = 0.24f, ly = 0.02f, lz = 0.95f;
+            const float ln = std::sqrt(lx * lx + ly * ly + lz * lz);
+            const float nlx = lx / ln, nly = ly / ln, nlz = lz / ln;
+            const float yaw = yawDeg * kPi / 180.0f;
+            const float pitch = pitchDeg * kPi / 180.0f;
+            const float cyaw = std::cos(yaw), syaw = std::sin(yaw);
+            const float cpitch = std::cos(pitch), spitch = std::sin(pitch);
+
+            for (unsigned y = 0; y < kH; ++y) {
+                for (unsigned x = 0; x < kW; ++x) {
+                    const float dx = (static_cast<float>(x) - cx) / rx;
+                    const float dy = (static_cast<float>(y) - cy) / ry;
+                    const float r2 = dx * dx + dy * dy;
+                    float val = static_cast<float>(px[static_cast<size_t>(y) * kW + x]);
+                    if (r2 <= 1.0f) {
+                        const float z = std::sqrt(std::max(0.0f, 1.0f - r2));
+                        const float fx = dx * cyaw + z * syaw;
+                        const float fz1 = -dx * syaw + z * cyaw;
+                        const float fy = dy * cpitch - fz1 * spitch;
+                        float nx = dx, ny = dy, nz = z;
+                        const float noseR2 = (fx * fx) / owner.noseW +
+                                             (fy - 0.04f) * (fy - 0.04f) / 0.09f;
+                        if (noseR2 < 1.0f) {
+                            const float bump = 1.0f - noseR2;
+                            nx += fx * 1.4f * bump;
+                            nz += 0.6f * bump;
+                        }
+                        const float nl = std::sqrt(nx * nx + ny * ny + nz * nz) + 1e-6f;
+                        const float ndotl =
+                            std::max(0.10f, (nx / nl) * nlx + (ny / nl) * nly + (nz / nl) * nlz);
+                        float alb = 0.72f;
+                        const float le = (fx + owner.eyeSep) * (fx + owner.eyeSep) / 0.04f +
+                                         (fy - owner.eyeY) * (fy - owner.eyeY) / 0.028f;
+                        const float re = (fx - owner.eyeSep) * (fx - owner.eyeSep) / 0.04f +
+                                         (fy - owner.eyeY) * (fy - owner.eyeY) / 0.028f;
+                        if (le < 1.0f || re < 1.0f) alb *= 0.42f;
+                        // Dark inner-canthus shadow beside nasal bridge
+                        const float lic = (fx + 0.19f) * (fx + 0.19f) / 0.011f +
+                                          (fy - (owner.eyeY + 0.02f)) * (fy - (owner.eyeY + 0.02f)) / 0.016f;
+                        const float ric = (fx - 0.19f) * (fx - 0.19f) / 0.011f +
+                                          (fy - (owner.eyeY + 0.02f)) * (fy - (owner.eyeY + 0.02f)) / 0.016f;
+                        if (lic < 1.0f || ric < 1.0f) alb *= 0.34f;
+                        // Dark eyebrows above eye sockets
+                        const float lb = (fx + owner.eyeSep) * (fx + owner.eyeSep) / 0.055f +
+                                         (fy - (owner.eyeY - 0.15f)) * (fy - (owner.eyeY - 0.15f)) / 0.008f;
+                        const float rb = (fx - owner.eyeSep) * (fx - owner.eyeSep) / 0.055f +
+                                         (fy - (owner.eyeY - 0.15f)) * (fy - (owner.eyeY - 0.15f)) / 0.008f;
+                        if (lb < 1.0f || rb < 1.0f) alb *= 0.50f;
+                        if (noseR2 < 1.0f) {
+                            alb += (owner.noseBoost / 600.0f) * (1.0f - noseR2);
+                        }
+                        const float mouth = (fx * fx) / owner.mouthW +
+                                            (fy - owner.mouthY) * (fy - owner.mouthY) / 0.015f;
+                        if (mouth < 1.0f) alb *= 0.55f;
+                        val = 55.0f + 360.0f * alb * ndotl;
+                    }
+                    const uint32_t hsh = (x * 73856093u) ^ (y * 19349663u) ^
+                                         (static_cast<uint32_t>(seed) * 83492791u);
+                    const float noise = ((static_cast<float>(hsh & 255u) / 127.5f) - 1.0f) * 16.0f;
+                    px[static_cast<size_t>(y) * kW + x] =
+                        static_cast<uint16_t>(std::clamp(std::lround(val + noise), 0L, 1023L));
+                }
+            }
+            const auto raw = packY10(px, kW, kH, kW * 2u);
+            return preprocessIrFrame(raw.data(), raw.size(), kW, kH, kW * 2u, kPixFmtY10, Rotation::Deg0);
+        };
+
+        std::vector<Embedding> smallCandidates;
+        for (int i = 0; i < 6; ++i) {
+            const auto st = renderSmallNoisyCanthusGlare(
+                (i % 3 - 1) * 1.5f, (i % 2) * 1.5f, 0.30f + (i % 2) * 0.01f, 100 + i);
+            const auto det = detectFaceNir(st);
+            SPX_ASSERT(det.detected && det.quality == FaceQuality::GOOD);
+            const float io = std::hypot(det.rightEye.x - det.leftEye.x, det.rightEye.y - det.leftEye.y);
+            SPX_ASSERT(io / det.box.w >= 0.30f);
+            smallCandidates.push_back(extractEmbedding(st, det));
+        }
+        for (int i = 0; i < 10; ++i) {
+            const auto st = renderSmallNoisyCanthusGlare(
+                static_cast<float>((i % 5) - 2) * 2.5f,
+                static_cast<float>((i % 3) - 1) * 2.5f,
+                0.295f + static_cast<float>(i % 3) * 0.015f,
+                200 + i);
+            const auto det = detectFaceNir(st);
+            SPX_ASSERT(det.detected);
+            const float io = std::hypot(det.rightEye.x - det.leftEye.x, det.rightEye.y - det.leftEye.y);
+            SPX_ASSERT(io / det.box.w >= 0.30f);
+            const auto probeEmb = extractEmbedding(st, det);
+            const auto verified = matchCandidatesWithAlignmentRefinement(
+                st, det, probeEmb, smallCandidates, nullptr, kDefaultMatchThreshold);
+            SPX_ASSERT(verified.match.matched);
+            SPX_ASSERT(verified.match.bestSimilarity >= kDefaultMatchThreshold);
+        }
+        const auto rawImpB = renderFace3D(480u, 640u, impB, 0.25f, 0.0f, 0.95f, 0.0f, 0.0f, 1.0f, false);
+        const auto stImpB = preprocessIrFrame(
+            rawImpB.data(), rawImpB.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg0);
+        const auto detImpB = detectFaceNir(stImpB);
+        SPX_ASSERT(detImpB.detected);
+        const auto impBCheck = matchCandidatesWithAlignmentRefinement(
+            stImpB, detImpB, extractEmbedding(stImpB, detImpB), smallCandidates, nullptr, kDefaultMatchThreshold);
+        SPX_ASSERT(!impBCheck.match.matched);
+    }
+
+    // Liveness: strong side-lit 3D faces (including glasses/nose-bridge shadow where classic
+    // nose-to-mid-cheek drops < 0.90) pass via lateral ellipsoid convexity, while 0°/30°/45°
+    // flat prints still reject with REJECT_FLAT_OR_PRINT.
+    for (float lx : {0.45f, 0.75f, -0.75f}) {
+        const auto raw3d = renderFace3D(480u, 640u, owner, lx, 0.0f, 0.85f, 0.0f, 0.0f, 1.0f, false);
+        const auto st3d = preprocessIrFrame(
+            raw3d.data(), raw3d.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg0);
+        const auto det3d = detectFaceNir(st3d);
+        SPX_ASSERT(det3d.detected);
+        const auto live3d = evaluateLiveness(st3d, det3d, Embedding{}, nullptr, false);
+        SPX_ASSERT(live3d.live);
+        SPX_ASSERT(live3d.centerToRimRatio >= 1.04f);
+
+        // Darken narrow nasal bridge [42..58%]x[40..58%] to simulate side-bezel Portrait shadow
+        // or glasses nose-pad occlusion (like live 10:47/10:48 c2r=0.79..0.89).
+        IrFrameStats shadowed = st3d;
+        const unsigned sx0 = static_cast<unsigned>(det3d.box.x + 0.42f * det3d.box.w);
+        const unsigned sx1 = static_cast<unsigned>(det3d.box.x + 0.58f * det3d.box.w);
+        const unsigned sy0 = static_cast<unsigned>(det3d.box.y + 0.40f * det3d.box.h);
+        const unsigned sy1 = static_cast<unsigned>(det3d.box.y + 0.58f * det3d.box.h);
+        for (unsigned y = sy0; y < sy1 && y < shadowed.height; ++y) {
+            for (unsigned x = sx0; x < sx1 && x < shadowed.width; ++x) {
+                shadowed.upright10[static_cast<size_t>(y) * shadowed.width + x] =
+                    static_cast<uint16_t>(
+                        shadowed.upright10[static_cast<size_t>(y) * shadowed.width + x] * 65u / 100u);
+            }
+        }
+        const auto liveShadow = evaluateLiveness(shadowed, det3d, Embedding{}, nullptr, false);
+        SPX_ASSERT(liveShadow.live);
+        SPX_ASSERT(liveShadow.centerToRimRatio >= 1.04f);
+    }
+    for (float tilt : {0.0f, 30.0f, 45.0f}) {
+        const auto rawFlat = renderFace3D(480u, 640u, owner, 0.45f, 0.0f, 0.85f, 0.0f, 0.0f, 1.0f, true, tilt);
+        const auto stFlat = preprocessIrFrame(
+            rawFlat.data(), rawFlat.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg0);
+        const auto detFlat = detectFaceNir(stFlat);
+        SPX_ASSERT(detFlat.detected);
+        const auto liveFlat = evaluateLiveness(stFlat, detFlat, Embedding{}, nullptr, false);
+        SPX_ASSERT(!liveFlat.live);
+        SPX_ASSERT(liveFlat.status == LivenessStatus::REJECT_FLAT_OR_PRINT);
+    }
+
+    // Multi-candidate scale-aware NMS: a competing high-contrast small background face-like
+    // distractor must not hide the real owner's face from detectFaceCandidatesNir().
+    {
+        auto rawClutter = renderFace3D(480u, 640u, owner, 0.25f, 0.0f, 0.95f, 0.0f, 0.0f, 0.82f, false);
+        // Inject a high-contrast small distractor (boxW ~ 96px) in upper-left corner.
+        const unsigned dx0 = 24u, dy0 = 36u, dw = 96u, dh = 110u;
+        for (unsigned y = 0; y < dh; ++y) {
+            for (unsigned x = 0; x < dw; ++x) {
+                const float nx = (static_cast<float>(x) / static_cast<float>(dw)) * 2.0f - 1.0f;
+                const float ny = (static_cast<float>(y) / static_cast<float>(dh)) * 2.0f - 1.0f;
+                if (nx * nx + ny * ny > 1.0f) continue;
+                uint16_t v = 720u;
+                const bool inLeftEye = (x >= 16u && x < 38u && y >= 24u && y < 46u);
+                const bool inRightEye = (x >= 58u && x < 80u && y >= 24u && y < 46u);
+                const bool inMouth = (x >= 26u && x < 70u && y >= 74u && y < 90u);
+                if (inLeftEye || inRightEye) v = 40u;
+                else if (inMouth) v = 120u;
+                const size_t idx = (static_cast<size_t>(dy0 + y) * 480u + (dx0 + x)) * 2u;
+                rawClutter[idx] = static_cast<uint8_t>(v & 0xFFu);
+                rawClutter[idx + 1] = static_cast<uint8_t>((v >> 8) & 0x03u);
+            }
+        }
+        const auto stClutter = preprocessIrFrame(
+            rawClutter.data(), rawClutter.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg0);
+        const auto cands = detectFaceCandidatesNir(stClutter, 4u);
+        SPX_ASSERT(cands.size() >= 2u);
+        bool matchedRealOwner = false;
+        for (const auto& c : cands) {
+            const auto emb = extractEmbedding(stClutter, c);
+            const auto live = evaluateLiveness(stClutter, c, emb, nullptr, false);
+            if (!live.live) continue;
+            const auto res = matchWithAlignmentRefinement(
+                stClutter, c, emb, store, nullptr, kDefaultMatchThreshold);
+            if (res.match.matched) {
+                matchedRealOwner = true;
+                break;
+            }
+        }
+        SPX_ASSERT(matchedRealOwner);
+    }
+
+    // Multi-candidate scale quota (Power-at-TOP 640x480 regression): 4 high-contrast tiny 64px
+    // background specks must NOT crowd out a real 160px bottom-left-lit yawed owner face.
+    {
+        auto rawSpecks =
+            renderFace3D(640u, 480u, owner, 0.0f, 0.35f, 0.95f, 16.0f, 0.0f, 0.85f, false);
+        const std::array<std::pair<unsigned, unsigned>, 4> speckPos{{
+            {20u, 20u},
+            {540u, 20u},
+            {20u, 370u},
+            {540u, 370u},
+        }};
+        const unsigned sw = 64u, sh = 74u;
+        for (const auto& [sx0, sy0] : speckPos) {
+            for (unsigned y = 0; y < sh; ++y) {
+                for (unsigned x = 0; x < sw; ++x) {
+                    const float nx = (static_cast<float>(x) / static_cast<float>(sw)) * 2.0f - 1.0f;
+                    const float ny = (static_cast<float>(y) / static_cast<float>(sh)) * 2.0f - 1.0f;
+                    if (nx * nx + ny * ny > 1.0f) continue;
+                    uint16_t v = 760u;
+                    const bool inLeftEye = (x >= 11u && x < 25u && y >= 17u && y < 31u);
+                    const bool inRightEye = (x >= 39u && x < 53u && y >= 17u && y < 31u);
+                    const bool inMouth = (x >= 18u && x < 46u && y >= 50u && y < 61u);
+                    if (inLeftEye || inRightEye) v = 35u;
+                    else if (inMouth) v = 110u;
+                    const size_t idx = (static_cast<size_t>(sy0 + y) * 640u + (sx0 + x)) * 2u;
+                    rawSpecks[idx] = static_cast<uint8_t>(v & 0xFFu);
+                    rawSpecks[idx + 1] = static_cast<uint8_t>((v >> 8) & 0x03u);
+                }
+            }
+        }
+        const auto stSpecks = preprocessIrFrame(
+            rawSpecks.data(), rawSpecks.size(), 640u, 480u, 1280u, kPixFmtY10, Rotation::Deg0);
+        const auto cands = detectFaceCandidatesNir(stSpecks, 6u);
+        SPX_ASSERT(cands.size() >= 4u);
+        bool matchedRealOwner = false;
+        for (const auto& c : cands) {
+            if (c.box.w < 106.0f) continue;
+            const auto emb = extractEmbedding(stSpecks, c);
+            const auto live = evaluateLiveness(stSpecks, c, emb, nullptr, false);
+            if (!live.live) continue;
+            const auto res = matchWithAlignmentRefinement(
+                stSpecks, c, emb, store, nullptr, kDefaultMatchThreshold);
+            if (res.match.matched) {
+                matchedRealOwner = true;
+                break;
+            }
+        }
+        SPX_ASSERT(matchedRealOwner);
+    }
+
+    // probeAlternateOrientationMatch must reject non-live flat print switches even if rotated.
+    {
+        const auto rawFlatRot =
+            renderFace3D(480u, 640u, owner, 0.25f, 0.0f, 0.95f, 0.0f, 0.0f, 1.0f, true, 0.0f);
+        const auto stFlatRot = preprocessIrFrame(
+            rawFlatRot.data(), rawFlatRot.size(), 480u, 640u, 960u, kPixFmtY10, Rotation::Deg90CW);
+        const auto hint = probeAlternateOrientationMatch(
+            stFlatRot, Rotation::Deg270CW, 0.0f, store, nullptr, kDefaultMatchThreshold, false);
+        SPX_ASSERT(!hint.shouldSwitch);
+    }
+
+    removeTree(storeRoot);
+}
+
 }  // namespace
 
 int main() {
@@ -819,7 +1714,9 @@ int main() {
     testEngineAndLiveness();
     testFaceStore();
     testLockoutTracker();
+    testMultiOrientationSupport();
     testLidMonitor();
+    testCrossOrientationRobustness();
     std::puts("PASS spx_face_test (ASan/UBSan)");
     return 0;
 }

@@ -619,13 +619,6 @@ public final class MainActivity extends Activity {
         }, str::faceErrorMessage);
     }
 
-    private void saveFaceRotation(String rotation) {
-        runBridgeCall("advanced-control-face-rot", () -> {
-            bridgeState = bridge.setFaceRotation(rotation);
-            return str.faceRotationSavedMessage(rotation);
-        }, str::faceErrorMessage);
-    }
-
     private void runFaceSelfCheck() {
         runBridgeCall("advanced-control-face-check", () -> {
             BridgeClient.FaceSelfCheckResult res = bridge.runFaceSelfCheck();
@@ -1070,8 +1063,7 @@ public final class MainActivity extends Activity {
                         bridgeState.hallLidAvailable,
                         bridgeState.hallLidEnabled,
                         bridgeState.faceIrAvailable,
-                        bridgeState.faceUnlockEnabled,
-                        bridgeState.faceIrRotation);
+                        bridgeState.faceUnlockEnabled);
         View faceLidRow = buildCategoryRow(
                 SettingsTheme.ICON_FACE,
                 theme.faceBadgeBg,
@@ -1946,54 +1938,13 @@ public final class MainActivity extends Activity {
         LinearLayout faceActions = new LinearLayout(this);
         faceActions.setOrientation(LinearLayout.VERTICAL);
 
-        // Sensor rotation selector card
-        LinearLayout rotCard = new LinearLayout(this);
-        rotCard.setOrientation(LinearLayout.VERTICAL);
-        rotCard.setBackground(theme.cardItemBackground(22f, 4f, theme.card));
-        rotCard.setPadding(theme.dp(18), theme.dp(14), theme.dp(18), theme.dp(14));
-
-        TextView rotTitle = new TextView(this);
-        rotTitle.setText(str.faceRotationTitle());
-        rotTitle.setTextColor(theme.textPrimary);
-        rotTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        rotTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        rotCard.addView(rotTitle);
-
-        TextView rotSummary = new TextView(this);
-        rotSummary.setText(str.faceRotationSummary(bridgeState.faceIrRotation));
-        rotSummary.setTextColor(theme.textSecondary);
-        rotSummary.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        LinearLayout.LayoutParams rotSumLp = new LinearLayout.LayoutParams(-1, -2);
-        rotSumLp.topMargin = theme.dp(3);
-        rotSumLp.bottomMargin = theme.dp(10);
-        rotCard.addView(rotSummary, rotSumLp);
-
-        LinearLayout segRow = new LinearLayout(this);
-        segRow.setOrientation(LinearLayout.HORIZONTAL);
-        segRow.setBackground(theme.roundedRect(theme.cardAlt, 999));
-        segRow.setPadding(theme.dp(4), theme.dp(4), theme.dp(4), theme.dp(4));
-        for (String deg : DriverPolicy.FACE_ROTATIONS) {
-            boolean selected = deg.equals(bridgeState.faceIrRotation);
-            View seg = buildSegmentButton(
-                    str.faceRotationLabel(deg),
-                    selected,
-                    canFace,
-                    () -> saveFaceRotation(deg));
-            segRow.addView(seg, new LinearLayout.LayoutParams(0, -2, 1f));
-        }
-        rotCard.addView(segRow);
-        faceActions.addView(rotCard);
-
-        View fGap1 = new View(this);
-        faceActions.addView(fGap1, new LinearLayout.LayoutParams(-1, theme.dp(2)));
-
         faceActions.addView(buildCategoryRow(
                 SettingsTheme.ICON_FACE,
                 theme.faceBadgeBg,
                 theme.faceBadgeFg,
                 str.faceSystemSettingsTitle(),
                 str.faceSystemSettingsSummary(),
-                4f,
+                22f,
                 4f,
                 bridgeState.faceIrAvailable,
                 this::openSystemFaceSettings));

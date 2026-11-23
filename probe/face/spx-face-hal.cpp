@@ -15,6 +15,7 @@
 #include "spx-face-engine.h"
 #include "spx-ir-preprocess.h"
 #include "spx-lid-monitor.h"
+#include "spx-orientation-monitor.h"
 
 #include <aidl/android/hardware/biometrics/common/BnCancellationSignal.h>
 #include <aidl/android/hardware/biometrics/common/DisplayState.h>
@@ -42,6 +43,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -86,6 +88,10 @@ std::string getSystemProperty(const char* name, const char* fallback) {
 
 bool isFaceUnlockEnabled() {
     return getSystemProperty("persist.spx.face.enabled", "1") != "0";
+}
+
+bool isMultiOrientationEnabled() {
+    return getSystemProperty("persist.spx.face.multi_orientation", "1") != "0";
 }
 
 spx::face::Rotation currentSensorRotation(std::string* outStr = nullptr) {
@@ -155,6 +161,7 @@ void renderPreviewFrame(ANativeWindow* window,
                         const std::vector<uint8_t>& gray8,
                         unsigned width,
                         unsigned height,
+                        float enrollProgress,
                         bool& loggedOnce,
                         int& lockFailCount) {
     if (!window || gray8.empty() || width == 0 || height == 0 || lockFailCount >= 3) return;
@@ -199,7 +206,8 @@ void renderPreviewFrame(ANativeWindow* window,
                                            static_cast<unsigned>(buf.height),
                                            static_cast<unsigned>(buf.stride),
                                            true,
-                                           kPreviewZoom);
+                                           kPreviewZoom,
+                                           enrollProgress);
         } else if (buf.format == WINDOW_FORMAT_RGB_565) {
             spx::face::renderIrPreviewRgb565(gray8.data(),
                                              width,
@@ -209,7 +217,8 @@ void renderPreviewFrame(ANativeWindow* window,
                                              static_cast<unsigned>(buf.height),
                                              static_cast<unsigned>(buf.stride),
                                              true,
-                                             kPreviewZoom);
+                                             kPreviewZoom,
+                                             enrollProgress);
         }
     }
     ANativeWindow_unlockAndPost(window);
@@ -220,10 +229,12 @@ class SpxSession final : public BnSession,
 public:
     SpxSession(int32_t userId,
                std::shared_ptr<ISessionCallback> cb,
-               std::shared_ptr<spx::face::SpxLidMonitor> lidMonitor)
+               std::shared_ptr<spx::face::SpxLidMonitor> lidMonitor,
+               std::shared_ptr<spx::face::SpxOrientationMonitor> orientationMonitor)
         : userId_(userId),
           cb_(std::move(cb)),
           lidMonitor_(std::move(lidMonitor)),
+          orientationMonitor_(std::move(orientationMonitor)),
           store_(userId) {
         if (!store_.load()) {
             logWarn("Failed loading face store; continuing with empty template set");
@@ -534,6 +545,30 @@ private:
         return latestFoldClosed_ || latestDisplayInactive_;
     }
 
+    spx::face::Rotation preferredFallbackRotation(std::string* outPropStr = nullptr) {
+        const auto propRot = currentSensorRotation(outPropStr);
+        const int propDeg = spx::face::rotationToDegrees(propRot);
+        const int prevPropDeg = lastPropRotationDeg_.exchange(propDeg);
+        if (prevPropDeg != propDeg) {
+            lastMatchedRotationDeg_.store(-1);
+        }
+        if (!isMultiOrientationEnabled()) {
+            return propRot;
+        }
+        switch (lastMatchedRotationDeg_.load()) {
+        case 0:
+            return spx::face::Rotation::Deg0;
+        case 90:
+            return spx::face::Rotation::Deg90CW;
+        case 180:
+            return spx::face::Rotation::Deg180;
+        case 270:
+            return spx::face::Rotation::Deg270CW;
+        default:
+            return propRot;
+        }
+    }
+
     std::shared_ptr<std::atomic<bool>> registerCancelFlag() {
         auto flag = std::make_shared<std::atomic<bool>>(false);
         std::lock_guard<std::mutex> lk(opMu_);
@@ -598,13 +633,9 @@ private:
             }
 
             std::string rotStr;
-            const auto rot = currentSensorRotation(&rotStr);
-            __android_log_print(ANDROID_LOG_INFO,
-                                kLogTag,
-                                "enroll start hasPreview=%d rot=%s requireDiversity=%d",
-                                previewWindow ? 1 : 0,
-                                rotStr.c_str(),
-                                requireDiversity ? 1 : 0);
+            const auto baseRot = currentSensorRotation(&rotStr);
+            auto activeRot = baseRot;
+            const bool multiOrient = isMultiOrientationEnabled();
 
             if (previewWindow) {
                 const int geomRc = ANativeWindow_setBuffersGeometry(previewWindow.get(),
@@ -625,14 +656,56 @@ private:
             samples.reserve(spx::face::kSamplesPerEnrollment);
             bool canceledByLidOrUser = false;
             bool timedOut = false;
+            bool verified = false;
+            float verifyBestSim = 0.0f;
+            unsigned verifyRetryCount = 0;
+            bool previewLogged = false;
+            int lockFailCount = 0;
+            std::vector<uint8_t> lastVerifiedGray;
+            unsigned lastVerifiedW = 0;
+            unsigned lastVerifiedH = 0;
+            float lastVerifiedPan = 0.0f;
+            float lastVerifiedTilt = 0.0f;
+            float lastVerifiedDist = 0.0f;
             int64_t startMs = bootTimeMs();
             unsigned frameIdx = 0;
+
+            const int64_t orientAcquireMs = bootTimeMs();
+            spx::face::SpxOrientationMonitor::ScopedSession orientSession(
+                multiOrient ? orientationMonitor_.get() : nullptr);
 
             try {
                 auto cap = spx::Capture::openIr(640, 480, 30);
                 startMs = bootTimeMs();
+                if (multiOrient && orientationMonitor_) {
+                    orientationMonitor_->waitForFreshSample(orientAcquireMs - 50, 25);
+                }
+                const auto initSnap = (multiOrient && orientationMonitor_)
+                                          ? orientationMonitor_->snapshot()
+                                          : spx::face::OrientationSnapshot{};
+                if (multiOrient && initSnap.valid) {
+                    activeRot = spx::face::composeRotation(baseRot, initSnap.delta);
+                }
+                __android_log_print(
+                    ANDROID_LOG_INFO,
+                    kLogTag,
+                    "enroll start hasPreview=%d propRot=%s activeRot=%d multiOrient=%d "
+                    "gravity=%d gravDelta=%d ax=%.2f ay=%.2f az=%.2f requireDiversity=%d",
+                    previewWindow ? 1 : 0,
+                    rotStr.c_str(),
+                    spx::face::rotationToDegrees(activeRot),
+                    multiOrient ? 1 : 0,
+                    initSnap.valid ? 1 : 0,
+                    spx::face::rotationToDegrees(initSnap.delta),
+                    initSnap.ax,
+                    initSnap.ay,
+                    initSnap.az,
+                    requireDiversity ? 1 : 0);
+
                 spx::face::FaceSessionAccumulator acc;
                 acc.reset(2);
+                spx::face::FaceSessionAccumulator verifyAcc;
+                verifyAcc.reset(2);
 
                 // Emergency hard watchdog thread ensures V4L2/850nm strobe closes <= 45s.
                 std::atomic<bool> finished{false};
@@ -647,16 +720,25 @@ private:
                     }
                 });
 
+                enum class EnrollPhase { COLLECTING, VERIFYING };
+                EnrollPhase phase = EnrollPhase::COLLECTING;
+                constexpr int64_t kEnrollVerifyBudgetMs = 3500;
+                constexpr int64_t kEnrollVerifyMinGapMs = 120;
                 const int32_t prospectiveId =
                     store_.listEnrollmentIds().empty() ? 1 : (store_.listEnrollmentIds().back() + 1);
                 int64_t lastSampleMs = 0;
                 int64_t lastDiagMs = startMs;
-                bool previewLogged = false;
-                int lockFailCount = 0;
                 float anchorBoxW = 0.0f;
                 int inconsistentStreak = 0;
+                float displayedProgress = 0.0f;
+                size_t maxReportedSamples = 0;
+                int64_t verifyStartMs = 0;
+                unsigned verifyFrames = 0;
+                unsigned verifyLivePass = 0;
+                unsigned verifyConsecMatched = 0;
+                bool verifyUsedRefinement = false;
 
-                while (samples.size() < spx::face::kSamplesPerEnrollment) {
+                while (!verified) {
                     if (flag->load() || closed_.load() ||
                         (lidMonitor_ && lidMonitor_->isLidClosed())) {
                         canceledByLidOrUser = true;
@@ -667,26 +749,52 @@ private:
                         break;
                     }
                     auto frame = cap->next(250);
-                    const auto stats = spx::face::preprocessIrFrame(
+                    if (multiOrient && orientationMonitor_) {
+                        const auto curSnap = orientationMonitor_->snapshot();
+                        if (curSnap.valid) {
+                            const auto desiredRot =
+                                spx::face::composeRotation(baseRot, curSnap.delta);
+                            if (desiredRot != activeRot) {
+                                const int oldDeg = spx::face::rotationToDegrees(activeRot);
+                                const int newDeg = spx::face::rotationToDegrees(desiredRot);
+                                __android_log_print(
+                                    ANDROID_LOG_INFO,
+                                    kLogTag,
+                                    "enroll gravity orientation switched %d -> %d "
+                                    "(ax=%.2f ay=%.2f az=%.2f)",
+                                    oldDeg,
+                                    newDeg,
+                                    curSnap.ax,
+                                    curSnap.ay,
+                                    curSnap.az);
+                                activeRot = desiredRot;
+                                acc.reset(2);
+                                verifyAcc.reset(2);
+                                verifyConsecMatched = 0;
+                            }
+                        }
+                    }
+
+                    const auto baseStats = spx::face::preprocessIrFrame(
                         frame.raw10.data(),
                         frame.raw10.size(),
                         frame.width,
                         frame.height,
                         frame.stride,
                         frame.pixelFormat ? frame.pixelFormat : spx::face::kPixFmtY10,
-                        rot);
-                    cap->autoExposure(computeIrAeMetric(stats));
-
-                    if (previewWindow) {
-                        renderPreviewFrame(previewWindow.get(),
-                                           stats.gray8,
-                                           stats.width,
-                                           stats.height,
-                                           previewLogged,
-                                           lockFailCount);
-                    }
+                        activeRot);
+                    cap->autoExposure(computeIrAeMetric(baseStats));
 
                     if (frameIdx++ < 2u) {
+                        if (previewWindow) {
+                            renderPreviewFrame(previewWindow.get(),
+                                               baseStats.gray8,
+                                               baseStats.width,
+                                               baseStats.height,
+                                               0.0f,
+                                               previewLogged,
+                                               lockFailCount);
+                        }
                         EnrollmentFrame ef{};
                         ef.stage = EnrollmentStage::FIRST_FRAME_RECEIVED;
                         ef.data.acquiredInfo = AcquiredInfo::FIRST_FRAME_RECEIVED;
@@ -696,6 +804,15 @@ private:
 
                     const int64_t nowMs = bootTimeMs();
                     if (nowMs - startMs < kEnrollWarmupMs) {
+                        if (previewWindow) {
+                            renderPreviewFrame(previewWindow.get(),
+                                               baseStats.gray8,
+                                               baseStats.width,
+                                               baseStats.height,
+                                               0.0f,
+                                               previewLogged,
+                                               lockFailCount);
+                        }
                         EnrollmentFrame ef{};
                         ef.stage = EnrollmentStage::WAITING_FOR_CENTERING;
                         ef.data.acquiredInfo = AcquiredInfo::GOOD;
@@ -704,7 +821,91 @@ private:
                         continue;
                     }
 
-                    const auto det = spx::face::detectFaceNir(stats);
+                    const spx::face::IrFrameStats* useStats = &baseStats;
+                    spx::face::FaceQuality emptyQuality = spx::face::FaceQuality::NOT_DETECTED;
+                    const auto cands =
+                        spx::face::detectFaceCandidatesNir(baseStats, 6u, &emptyQuality);
+                    spx::face::FaceDetection det{};
+                    det.quality = emptyQuality;
+                    spx::face::Embedding chosenEmb{};
+                    bool hasChosenEmb = false;
+                    if (!cands.empty()) {
+                        const float frameMinDim =
+                            static_cast<float>(std::min(useStats->width, useStats->height));
+                        bool bestHasValue = false;
+                        bool bestGoodQ = false;
+                        bool bestLive = false;
+                        bool bestScale = false;
+                        float bestSimScore = -1.0f;
+                        float bestDetScore = -1e9f;
+                        for (const auto& c : cands) {
+                            const auto cEmb = spx::face::extractEmbedding(*useStats, c, &model_);
+                            const auto cLive =
+                                spx::face::evaluateLiveness(*useStats, c, cEmb, nullptr, false);
+                            const bool cGoodQ = (c.quality == spx::face::FaceQuality::GOOD);
+                            const bool cGoodScale =
+                                samples.empty()
+                                    ? (c.box.w >= 0.18f * frameMinDim &&
+                                       c.box.w <= 0.62f * frameMinDim)
+                                    : (c.box.w >= 0.72f * anchorBoxW &&
+                                       c.box.w <= 1.38f * anchorBoxW);
+                            const float cSim =
+                                samples.empty()
+                                    ? 0.0f
+                                    : spx::face::matchEmbeddings(
+                                          samples, cEmb, spx::face::kDefaultMatchThreshold)
+                                          .bestSimilarity;
+                            bool better = !bestHasValue;
+                            if (!better) {
+                                if (cGoodQ != bestGoodQ) {
+                                    better = cGoodQ;
+                                } else if (cLive.live != bestLive) {
+                                    better = cLive.live;
+                                } else if (cGoodScale != bestScale) {
+                                    better = cGoodScale;
+                                } else if (!samples.empty() &&
+                                           std::fabs(cSim - bestSimScore) > 0.01f) {
+                                    better = cSim > bestSimScore;
+                                } else {
+                                    better = c.score > bestDetScore;
+                                }
+                            }
+                            if (better) {
+                                bestHasValue = true;
+                                bestGoodQ = cGoodQ;
+                                bestLive = cLive.live;
+                                bestScale = cGoodScale;
+                                bestSimScore = cSim;
+                                bestDetScore = c.score;
+                                det = c;
+                                chosenEmb = cEmb;
+                                hasChosenEmb = true;
+                            }
+                        }
+                    }
+
+                    float targetProgress = 0.0f;
+                    if (phase == EnrollPhase::COLLECTING) {
+                        targetProgress =
+                            (static_cast<float>(samples.size()) /
+                             static_cast<float>(spx::face::kSamplesPerEnrollment)) *
+                            0.85f;
+                    } else {
+                        const float vFrac = std::clamp(
+                            static_cast<float>(nowMs - verifyStartMs) / 1500.0f, 0.0f, 1.0f);
+                        targetProgress = 0.85f + 0.09f * vFrac;
+                    }
+                    displayedProgress += (targetProgress - displayedProgress) * 0.35f;
+                    if (previewWindow) {
+                        renderPreviewFrame(previewWindow.get(),
+                                           useStats->gray8,
+                                           useStats->width,
+                                           useStats->height,
+                                           displayedProgress,
+                                           previewLogged,
+                                           lockFailCount);
+                    }
+
                     EnrollmentFrame ef{};
                     ef.data.acquiredInfo = mapQualityToAcquired(det.quality);
                     ef.data.pan = det.panDeg;
@@ -722,34 +923,146 @@ private:
                             __android_log_print(
                                 ANDROID_LOG_INFO,
                                 kLogTag,
-                                "enroll diag frame=%u samples=%zu det=%d q=%d boxW=%.0f io=%.1f "
-                                "score=%.1f live=%d c2r=%.2f hf=%.2f p50=%u p99=%u roi=%.3f",
+                                "enroll diag frame=%u phase=%d samples=%zu rot=%d det=%d "
+                                "nCands=%zu q=%d box=(%.0f,%.0f,%.0f) io=%.1f score=%.1f live=%d "
+                                "c2r=%.2f hf=%.2f verifySim=%.3f p50=%u p99=%u roi=%.3f",
                                 frameIdx,
+                                phase == EnrollPhase::VERIFYING ? 1 : 0,
                                 samples.size(),
+                                spx::face::rotationToDegrees(activeRot),
                                 det.detected ? 1 : 0,
+                                cands.size(),
                                 static_cast<int>(det.quality),
+                                det.box.x,
+                                det.box.y,
                                 det.box.w,
                                 interOcular,
                                 det.score,
                                 liveStatus,
                                 c2r,
                                 hf,
-                                stats.p50,
-                                stats.p99,
-                                stats.roiLinearMean);
+                                verifyBestSim,
+                                useStats->p50,
+                                useStats->p99,
+                                useStats->roiLinearMean);
                         }
                     };
 
+                    if (phase == EnrollPhase::VERIFYING) {
+                        if (!det.detected || det.quality != spx::face::FaceQuality::GOOD) {
+                            maybeLogDiag(-1, 0.0f, 0.0f);
+                            verifyConsecMatched = 0;
+                            ef.stage = EnrollmentStage::HOLD_STILL_IN_CENTER;
+                            cb_->onEnrollmentFrame(ef);
+                        } else {
+                            const auto& emb =
+                                hasChosenEmb ? chosenEmb
+                                             : spx::face::extractEmbedding(*useStats, det, &model_);
+                            const auto live =
+                                spx::face::evaluateLiveness(*useStats, det, emb, &verifyAcc, true);
+                            ++verifyFrames;
+                            maybeLogDiag(static_cast<int>(live.status),
+                                         live.centerToRimRatio,
+                                         live.halftoneRatio);
+                            if (!live.live) {
+                                verifyConsecMatched = 0;
+                                ef.data.acquiredInfo =
+                                    (live.status == spx::face::LivenessStatus::NEED_MORE_FRAMES)
+                                        ? AcquiredInfo::GOOD
+                                        : ((live.status ==
+                                            spx::face::LivenessStatus::REJECT_MOTION_BLUR)
+                                               ? AcquiredInfo::TOO_MUCH_MOTION
+                                               : AcquiredInfo::INSUFFICIENT);
+                                ef.stage = EnrollmentStage::HOLD_STILL_IN_CENTER;
+                                cb_->onEnrollmentFrame(ef);
+                            } else {
+                                ++verifyLivePass;
+                                if ((nowMs - verifyStartMs) >= kEnrollVerifyMinGapMs) {
+                                    const auto refined =
+                                        spx::face::matchCandidatesWithAlignmentRefinement(
+                                            *useStats,
+                                            det,
+                                            emb,
+                                            samples,
+                                            &model_,
+                                            spx::face::kDefaultMatchThreshold);
+                                    verifyBestSim =
+                                        std::max(verifyBestSim, refined.match.bestSimilarity);
+                                    if (refined.match.matched) {
+                                        ++verifyConsecMatched;
+                                        if ((!refined.usedRefinement &&
+                                             refined.match.bestSimilarity >=
+                                                 spx::face::kDefaultMatchThreshold + 0.06f) ||
+                                            verifyConsecMatched >= 2u) {
+                                            verified = true;
+                                            verifyUsedRefinement = refined.usedRefinement;
+                                            lastVerifiedGray = useStats->gray8;
+                                            lastVerifiedW = useStats->width;
+                                            lastVerifiedH = useStats->height;
+                                            lastVerifiedPan = det.panDeg;
+                                            lastVerifiedTilt = det.tiltDeg;
+                                            lastVerifiedDist = det.distanceCm;
+                                            __android_log_print(
+                                                ANDROID_LOG_INFO,
+                                                kLogTag,
+                                                "enroll verify pass rot=%d sim=%.3f usedRef=%d "
+                                                "frames=%u livePass=%u retry=%u elapsedMs=%lld",
+                                                spx::face::rotationToDegrees(activeRot),
+                                                refined.match.bestSimilarity,
+                                                verifyUsedRefinement ? 1 : 0,
+                                                verifyFrames,
+                                                verifyLivePass,
+                                                verifyRetryCount,
+                                                static_cast<long long>(nowMs - startMs));
+                                            break;
+                                        }
+                                    } else {
+                                        verifyConsecMatched = 0;
+                                    }
+                                }
+                                ef.stage = EnrollmentStage::HOLD_STILL_IN_CENTER;
+                                ef.data.acquiredInfo = AcquiredInfo::GOOD;
+                                cb_->onEnrollmentFrame(ef);
+                            }
+                        }
+
+                        if (!verified && (nowMs - verifyStartMs) >= kEnrollVerifyBudgetMs) {
+                            __android_log_print(
+                                ANDROID_LOG_WARN,
+                                kLogTag,
+                                "enroll verify failed retry=%u rot=%d bestSim=%.3f frames=%u "
+                                "livePass=%u - silently re-collecting",
+                                verifyRetryCount,
+                                spx::face::rotationToDegrees(activeRot),
+                                verifyBestSim,
+                                verifyFrames,
+                                verifyLivePass);
+                            samples.clear();
+                            anchorBoxW = 0.0f;
+                            inconsistentStreak = 0;
+                            lastSampleMs = 0;
+                            acc.reset(2);
+                            verifyAcc.reset(2);
+                            phase = EnrollPhase::COLLECTING;
+                            ++verifyRetryCount;
+                            displayedProgress = std::min(displayedProgress, 0.55f);
+                        }
+                        continue;
+                    }
+
                     if (!det.detected || det.quality != spx::face::FaceQuality::GOOD) {
                         maybeLogDiag(-1, 0.0f, 0.0f);
-                        ef.stage = EnrollmentStage::WAITING_FOR_CENTERING;
+                        ef.stage = (maxReportedSamples > 0) ? EnrollmentStage::HOLD_STILL_IN_CENTER
+                                                          : EnrollmentStage::WAITING_FOR_CENTERING;
                         cb_->onEnrollmentFrame(ef);
                         continue;
                     }
 
-                    const auto emb = spx::face::extractEmbedding(stats, det, &model_);
+                    const auto& emb =
+                        hasChosenEmb ? chosenEmb
+                                     : spx::face::extractEmbedding(*useStats, det, &model_);
                     const auto live =
-                        spx::face::evaluateLiveness(stats, det, emb, &acc, true);
+                        spx::face::evaluateLiveness(*useStats, det, emb, &acc, true);
                     maybeLogDiag(static_cast<int>(live.status),
                                  live.centerToRimRatio,
                                  live.halftoneRatio);
@@ -774,7 +1087,7 @@ private:
                         const bool scaleOk =
                             det.box.w >= 0.72f * anchorBoxW && det.box.w <= 1.38f * anchorBoxW;
                         const bool simOk =
-                            spx::face::cosineSimilarity(samples.front(), emb) >= 0.65f;
+                            spx::face::cosineSimilarity(samples.front(), emb) >= 0.70f;
                         if (!scaleOk || !simOk) {
                             ++inconsistentStreak;
                             if (samples.size() == 1 && inconsistentStreak >= 4) {
@@ -796,10 +1109,7 @@ private:
 
                     samples.push_back(emb);
                     lastSampleMs = nowMs;
-                    const size_t groupIdx =
-                        std::min(samples.size() - 1u, static_cast<size_t>(5));
-                    const int32_t remaining =
-                        static_cast<int32_t>(spx::face::kSamplesPerEnrollment - samples.size());
+
                     static constexpr int32_t kBucketGroups[6][5] = {
                         {113, 108, 112, 114, 118},
                         {103, 107, 109, 117, 0},
@@ -808,23 +1118,48 @@ private:
                         {122, 124, 101, 105, 0},
                         {111, 115, 121, 125, 0},
                     };
-                    for (int32_t code : kBucketGroups[groupIdx]) {
-                        if (code == 0) break;
-                        EnrollmentFrame bf{};
-                        bf.stage = EnrollmentStage::HOLD_STILL_IN_CENTER;
-                        bf.data.acquiredInfo = AcquiredInfo::VENDOR;
-                        bf.data.vendorCode = code;
-                        bf.data.pan = det.panDeg;
-                        bf.data.tilt = det.tiltDeg;
-                        bf.data.distance = det.distanceCm;
-                        bf.data.isCancellable = true;
-                        cb_->onEnrollmentFrame(bf);
-                    }
-                    ef.stage = (remaining == 0) ? EnrollmentStage::ENROLLMENT_FINISHED
-                                                : EnrollmentStage::HOLD_STILL_IN_CENTER;
-                    cb_->onEnrollmentFrame(ef);
-                    if (remaining > 0) {
-                        cb_->onEnrollmentProgress(prospectiveId, remaining);
+                    if (samples.size() < spx::face::kSamplesPerEnrollment) {
+                        const size_t groupIdx = samples.size() - 1u;
+                        const int32_t remaining =
+                            static_cast<int32_t>(spx::face::kSamplesPerEnrollment - samples.size());
+                        if (samples.size() > maxReportedSamples) {
+                            maxReportedSamples = samples.size();
+                            for (int32_t code : kBucketGroups[groupIdx]) {
+                                if (code == 0) break;
+                                EnrollmentFrame bf{};
+                                bf.stage = EnrollmentStage::HOLD_STILL_IN_CENTER;
+                                bf.data.acquiredInfo = AcquiredInfo::VENDOR;
+                                bf.data.vendorCode = code;
+                                bf.data.pan = det.panDeg;
+                                bf.data.tilt = det.tiltDeg;
+                                bf.data.distance = det.distanceCm;
+                                bf.data.isCancellable = true;
+                                cb_->onEnrollmentFrame(bf);
+                            }
+                            cb_->onEnrollmentProgress(prospectiveId, remaining);
+                        }
+                        ef.stage = EnrollmentStage::HOLD_STILL_IN_CENTER;
+                        cb_->onEnrollmentFrame(ef);
+                    } else {
+                        ef.stage = EnrollmentStage::HOLD_STILL_IN_CENTER;
+                        ef.data.acquiredInfo = AcquiredInfo::GOOD;
+                        cb_->onEnrollmentFrame(ef);
+                        phase = EnrollPhase::VERIFYING;
+                        verifyStartMs = nowMs;
+                        verifyAcc.reset(2);
+                        verifyFrames = 0;
+                        verifyLivePass = 0;
+                        verifyConsecMatched = 0;
+                        verifyBestSim = 0.0f;
+                        verifyUsedRefinement = false;
+                        __android_log_print(
+                            ANDROID_LOG_INFO,
+                            kLogTag,
+                            "enroll verify start samples=%zu rot=%d anchorBoxW=%.0f retry=%u",
+                            samples.size(),
+                            spx::face::rotationToDegrees(activeRot),
+                            anchorBoxW,
+                            verifyRetryCount);
                     }
                 }
 
@@ -832,7 +1167,9 @@ private:
                 watchdog.join();
                 // Explicitly close OV7251 & 850nm STROBE before committing/final callback.
                 cap.reset();
+                orientSession.release();
             } catch (const std::exception& ex) {
+                orientSession.release();
                 logWarn(ex.what());
                 clearCancelFlag(flag);
                 cb_->onError(Error::HW_UNAVAILABLE, 0);
@@ -851,13 +1188,18 @@ private:
                 cb_->onError(Error::CANCELED, 0);
                 return;
             }
-            if (timedOut || samples.size() < spx::face::kSamplesPerEnrollment) {
-                __android_log_print(ANDROID_LOG_INFO,
-                                    kLogTag,
-                                    "enroll timeout samples=%zu frames=%u elapsedMs=%lld",
-                                    samples.size(),
-                                    frameIdx,
-                                    elapsedMs);
+            if (timedOut || !verified || samples.size() < spx::face::kSamplesPerEnrollment) {
+                __android_log_print(
+                    ANDROID_LOG_INFO,
+                    kLogTag,
+                    "enroll timeout samples=%zu verified=%d verifySim=%.3f retries=%u "
+                    "frames=%u elapsedMs=%lld",
+                    samples.size(),
+                    verified ? 1 : 0,
+                    verifyBestSim,
+                    verifyRetryCount,
+                    frameIdx,
+                    elapsedMs);
                 cb_->onError(Error::TIMEOUT, 0);
                 return;
             }
@@ -867,13 +1209,50 @@ private:
                 cb_->onError(Error::UNABLE_TO_PROCESS, 0);
                 return;
             }
-            __android_log_print(ANDROID_LOG_INFO,
-                                kLogTag,
-                                "enroll done id=%d samples=%zu frames=%u elapsedMs=%lld",
-                                storedId,
-                                samples.size(),
-                                frameIdx,
-                                elapsedMs);
+            if (previewWindow && !lastVerifiedGray.empty()) {
+                renderPreviewFrame(previewWindow.get(),
+                                   lastVerifiedGray,
+                                   lastVerifiedW,
+                                   lastVerifiedH,
+                                   1.0f,
+                                   previewLogged,
+                                   lockFailCount);
+            }
+            static constexpr int32_t kFinalBuckets[5] = {111, 115, 121, 125, 0};
+            for (int32_t code : kFinalBuckets) {
+                if (code == 0) break;
+                EnrollmentFrame bf{};
+                bf.stage = EnrollmentStage::HOLD_STILL_IN_CENTER;
+                bf.data.acquiredInfo = AcquiredInfo::VENDOR;
+                bf.data.vendorCode = code;
+                bf.data.pan = lastVerifiedPan;
+                bf.data.tilt = lastVerifiedTilt;
+                bf.data.distance = lastVerifiedDist;
+                bf.data.isCancellable = true;
+                cb_->onEnrollmentFrame(bf);
+            }
+            EnrollmentFrame doneEf{};
+            doneEf.stage = EnrollmentStage::ENROLLMENT_FINISHED;
+            doneEf.data.acquiredInfo = AcquiredInfo::GOOD;
+            doneEf.data.pan = lastVerifiedPan;
+            doneEf.data.tilt = lastVerifiedTilt;
+            doneEf.data.distance = lastVerifiedDist;
+            doneEf.data.isCancellable = true;
+            cb_->onEnrollmentFrame(doneEf);
+
+            lastMatchedRotationDeg_.store(spx::face::rotationToDegrees(activeRot));
+            __android_log_print(
+                ANDROID_LOG_INFO,
+                kLogTag,
+                "enroll done id=%d rot=%d samples=%zu verifySim=%.3f retries=%u "
+                "frames=%u elapsedMs=%lld",
+                storedId,
+                spx::face::rotationToDegrees(activeRot),
+                samples.size(),
+                verifyBestSim,
+                verifyRetryCount,
+                frameIdx,
+                elapsedMs);
             cb_->onEnrollmentProgress(storedId, 0);
         });
         return ::ndk::ScopedAStatus::ok();
@@ -942,10 +1321,41 @@ private:
             int lastQ = -1;
             int lastLive = -1;
 
+            std::string rotStr;
+            const auto baseRot = currentSensorRotation(&rotStr);
+            const auto fallbackRot = preferredFallbackRotation();
+            const bool multiOrient = isMultiOrientationEnabled();
+            auto activeRot = fallbackRot;
+            const int64_t orientAcquireMs = bootTimeMs();
+            spx::face::SpxOrientationMonitor::ScopedSession orientSession(
+                multiOrient ? orientationMonitor_.get() : nullptr);
+
             try {
                 auto cap = spx::Capture::openIr(640, 480, 30);
                 startMs = bootTimeMs();
-                const auto rot = currentSensorRotation();
+                if (multiOrient && orientationMonitor_) {
+                    orientationMonitor_->waitForFreshSample(orientAcquireMs - 50, 25);
+                }
+                const auto initSnap = (multiOrient && orientationMonitor_)
+                                          ? orientationMonitor_->snapshot()
+                                          : spx::face::OrientationSnapshot{};
+                if (multiOrient && initSnap.valid) {
+                    activeRot = spx::face::composeRotation(baseRot, initSnap.delta);
+                }
+                __android_log_print(
+                    ANDROID_LOG_INFO,
+                    kLogTag,
+                    "auth sensor activeRot=%d propRot=%s multiOrient=%d gravity=%d "
+                    "gravDelta=%d ax=%.2f ay=%.2f az=%.2f",
+                    spx::face::rotationToDegrees(activeRot),
+                    rotStr.c_str(),
+                    multiOrient ? 1 : 0,
+                    initSnap.valid ? 1 : 0,
+                    spx::face::rotationToDegrees(initSnap.delta),
+                    initSnap.ax,
+                    initSnap.ay,
+                    initSnap.az);
+
                 spx::face::FaceSessionAccumulator acc;
                 acc.reset(2);
 
@@ -963,8 +1373,17 @@ private:
 
                 unsigned consecutiveMatchedFrames = 0;
                 unsigned missStreak = 0;
+                unsigned nonMatchStreak = 0;
                 int32_t lastMatchedId = 0;
                 int64_t lastDiagMs = startMs;
+                bool usedFallbackOverride = false;
+                int64_t lastSwitchMs = 0;
+                constexpr int64_t kAuthOrientationSwitchCooldownMs = 600;
+                const float minSwitchSim =
+                    std::max(0.62f, spx::face::kDefaultMatchThreshold - 0.06f);
+                std::optional<spx::face::Rotation> lastGravDelta =
+                    initSnap.valid ? std::optional<spx::face::Rotation>(initSnap.delta)
+                                   : std::nullopt;
 
                 while (true) {
                     if (flag->load() || closed_.load() ||
@@ -980,15 +1399,46 @@ private:
                     }
 
                     auto frame = cap->next(250);
-                    const auto stats = spx::face::preprocessIrFrame(
+                    if (multiOrient && orientationMonitor_) {
+                        const auto curSnap = orientationMonitor_->snapshot();
+                        if (curSnap.valid &&
+                            (!lastGravDelta.has_value() || *lastGravDelta != curSnap.delta)) {
+                            lastGravDelta = curSnap.delta;
+                            usedFallbackOverride = false;
+                            const auto desiredRot =
+                                spx::face::composeRotation(baseRot, curSnap.delta);
+                            if (desiredRot != activeRot) {
+                                const int oldDeg = spx::face::rotationToDegrees(activeRot);
+                                const int newDeg = spx::face::rotationToDegrees(desiredRot);
+                                __android_log_print(
+                                    ANDROID_LOG_INFO,
+                                    kLogTag,
+                                    "auth gravity orientation switched %d -> %d "
+                                    "(ax=%.2f ay=%.2f az=%.2f)",
+                                    oldDeg,
+                                    newDeg,
+                                    curSnap.ax,
+                                    curSnap.ay,
+                                    curSnap.az);
+                                activeRot = desiredRot;
+                                lastSwitchMs = bootTimeMs();
+                                acc.reset(2);
+                                consecutiveMatchedFrames = 0;
+                                missStreak = 0;
+                                nonMatchStreak = 0;
+                            }
+                        }
+                    }
+
+                    const auto baseStats = spx::face::preprocessIrFrame(
                         frame.raw10.data(),
                         frame.raw10.size(),
                         frame.width,
                         frame.height,
                         frame.stride,
                         frame.pixelFormat ? frame.pixelFormat : spx::face::kPixFmtY10,
-                        rot);
-                    cap->autoExposure(computeIrAeMetric(stats));
+                        activeRot);
+                    cap->autoExposure(computeIrAeMetric(baseStats));
 
                     if (frameIdx++ < 2u) {
                         AuthenticationFrame af{};
@@ -999,45 +1449,234 @@ private:
                         continue;
                     }
 
-                    const auto det = spx::face::detectFaceNir(stats);
+                    const auto* useStats = &baseStats;
+                    spx::face::FaceQuality emptyQuality = spx::face::FaceQuality::NOT_DETECTED;
+                    const auto cands =
+                        spx::face::detectFaceCandidatesNir(baseStats, 6u, &emptyQuality);
+                    spx::face::FaceDetection det{};
+                    det.quality = emptyQuality;
+                    spx::face::Embedding chosenEmb{};
+                    spx::face::RefinedMatchResult chosenRefined{};
+                    float chosenBaseSim = 0.0f;
+                    bool hasChosenEmb = false;
+                    bool hasChosenRefined = false;
+                    size_t chosenIdx = 0;
+                    int c0LiveStatus = -1;
+                    float c0C2r = 0.0f;
+                    float c0Sim = 0.0f;
+                    if (!cands.empty()) {
+                        const float frameMinDim =
+                            static_cast<float>(std::min(useStats->width, useStats->height));
+                        bool bestHasValue = false;
+                        bool bestStaticLive = false;
+                        bool bestGoodQ = false;
+                        bool bestGoodScale = false;
+                        float bestCandSim = -1.0f;
+                        float bestCandScore = -1e9f;
+                        for (size_t idx = 0; idx < cands.size(); ++idx) {
+                            const auto& c = cands[idx];
+                            const auto cEmb = spx::face::extractEmbedding(*useStats, c, &model_);
+                            const auto cLive =
+                                spx::face::evaluateLiveness(*useStats, c, cEmb, nullptr, false);
+                            const auto cBaseMatch =
+                                store_.match(cEmb, spx::face::kDefaultMatchThreshold);
+                            spx::face::RefinedMatchResult cRefined{cBaseMatch, false};
+                            if (cLive.live && !cBaseMatch.matched &&
+                                cBaseMatch.bestSimilarity >= 0.36f) {
+                                cRefined = spx::face::matchWithAlignmentRefinement(
+                                    *useStats,
+                                    c,
+                                    cEmb,
+                                    store_,
+                                    &model_,
+                                    spx::face::kDefaultMatchThreshold);
+                            }
+                            const float cSim = cRefined.match.bestSimilarity;
+                            if (idx == 0) {
+                                c0LiveStatus = static_cast<int>(cLive.status);
+                                c0C2r = cLive.centerToRimRatio;
+                                c0Sim = cSim;
+                            }
+                            const bool cGoodQ = (c.quality == spx::face::FaceQuality::GOOD);
+                            const bool cGoodScale = (c.box.w >= 0.20f * frameMinDim);
+                            bool better = !bestHasValue;
+                            if (!better) {
+                                if (cLive.live != bestStaticLive) {
+                                    better = cLive.live;
+                                } else if (std::fabs(cSim - bestCandSim) > 0.03f) {
+                                    better = cSim > bestCandSim;
+                                } else if (cGoodQ != bestGoodQ) {
+                                    better = cGoodQ;
+                                } else if (cGoodScale != bestGoodScale) {
+                                    better = cGoodScale;
+                                } else {
+                                    better = c.score > bestCandScore;
+                                }
+                            }
+                            if (better) {
+                                bestHasValue = true;
+                                bestStaticLive = cLive.live;
+                                bestGoodQ = cGoodQ;
+                                bestGoodScale = cGoodScale;
+                                bestCandSim = cSim;
+                                bestCandScore = c.score;
+                                det = c;
+                                chosenEmb = cEmb;
+                                chosenRefined = cRefined;
+                                chosenBaseSim = cSim;
+                                chosenIdx = idx;
+                                hasChosenEmb = true;
+                                hasChosenRefined = cLive.live;
+                            }
+                        }
+                    }
                     lastQ = static_cast<int>(det.quality);
 
-                    auto maybeLogAuthDiag = [&](int liveStatus, float c2r, float hf) {
+                    auto maybeLogAuthDiag = [&](int liveStatus,
+                                                float c2r,
+                                                float hf,
+                                                float curSimVal) {
                         if ((nowMs - lastDiagMs) >= 1000) {
                             lastDiagMs = nowMs;
                             const float interOcular =
                                 det.detected ? std::hypot(det.rightEye.x - det.leftEye.x,
                                                           det.rightEye.y - det.leftEye.y)
                                              : 0.0f;
-                            __android_log_print(
-                                ANDROID_LOG_INFO,
-                                kLogTag,
-                                "auth diag frame=%u det=%d q=%d boxW=%.0f io=%.1f score=%.1f "
-                                "live=%d c2r=%.2f hf=%.2f bestSim=%.3f p50=%u p99=%u roi=%.3f",
-                                frameIdx,
-                                det.detected ? 1 : 0,
-                                static_cast<int>(det.quality),
-                                det.box.w,
-                                interOcular,
-                                det.score,
-                                liveStatus,
-                                c2r,
-                                hf,
-                                bestSim,
-                                stats.p50,
-                                stats.p99,
-                                stats.roiLinearMean);
+                            if (chosenIdx != 0 && !cands.empty()) {
+                                __android_log_print(
+                                    ANDROID_LOG_INFO,
+                                    kLogTag,
+                                    "auth diag frame=%u rot=%d det=%d nCands=%zu idx=%zu q=%d "
+                                    "box=(%.0f,%.0f,%.0f) io=%.1f score=%.1f live=%d c2r=%.2f "
+                                    "hf=%.2f curSim=%.3f bestSim=%.3f p50=%u p99=%u roi=%.3f "
+                                    "c0=(w=%.0f sc=%.0f live=%d c2r=%.2f sim=%.3f)",
+                                    frameIdx,
+                                    spx::face::rotationToDegrees(activeRot),
+                                    det.detected ? 1 : 0,
+                                    cands.size(),
+                                    chosenIdx,
+                                    static_cast<int>(det.quality),
+                                    det.box.x,
+                                    det.box.y,
+                                    det.box.w,
+                                    interOcular,
+                                    det.score,
+                                    liveStatus,
+                                    c2r,
+                                    hf,
+                                    curSimVal,
+                                    bestSim,
+                                    useStats->p50,
+                                    useStats->p99,
+                                    useStats->roiLinearMean,
+                                    cands[0].box.w,
+                                    cands[0].score,
+                                    c0LiveStatus,
+                                    c0C2r,
+                                    c0Sim);
+                            } else {
+                                __android_log_print(
+                                    ANDROID_LOG_INFO,
+                                    kLogTag,
+                                    "auth diag frame=%u rot=%d det=%d nCands=%zu q=%d "
+                                    "box=(%.0f,%.0f,%.0f) io=%.1f score=%.1f live=%d c2r=%.2f "
+                                    "hf=%.2f curSim=%.3f bestSim=%.3f p50=%u p99=%u roi=%.3f",
+                                    frameIdx,
+                                    spx::face::rotationToDegrees(activeRot),
+                                    det.detected ? 1 : 0,
+                                    cands.size(),
+                                    static_cast<int>(det.quality),
+                                    det.box.x,
+                                    det.box.y,
+                                    det.box.w,
+                                    interOcular,
+                                    det.score,
+                                    liveStatus,
+                                    c2r,
+                                    hf,
+                                    curSimVal,
+                                    bestSim,
+                                    useStats->p50,
+                                    useStats->p99,
+                                    useStats->roiLinearMean);
+                            }
                         }
                     };
 
+                    auto tryFallbackOrientationSwitch = [&](float baseSim,
+                                                            bool allowWhenNoFace) -> bool {
+                        if (!multiOrient) return false;
+                        const int64_t checkMs = bootTimeMs();
+                        if (lastSwitchMs != 0 &&
+                            (checkMs - lastSwitchMs) < kAuthOrientationSwitchCooldownMs) {
+                            return false;
+                        }
+                        if (baseSim >= minSwitchSim) {
+                            return false;
+                        }
+                        const unsigned streak = allowWhenNoFace ? missStreak : nonMatchStreak;
+                        if (!(streak == 2u || (streak > 2u && (streak % 4u) == 0u))) {
+                            return false;
+                        }
+                        bool gravityConfident = false;
+                        if (orientationMonitor_) {
+                            const auto gs = orientationMonitor_->snapshot();
+                            if (gs.valid) {
+                                const float axAbs = std::fabs(gs.ax);
+                                const float ayAbs = std::fabs(gs.ay);
+                                const float dom = std::max(axAbs, ayAbs);
+                                const float minor = std::min(axAbs, ayAbs);
+                                gravityConfident = (dom >= 6.5f && minor <= 2.8f);
+                            }
+                        }
+                        const auto hint = spx::face::probeAlternateOrientationMatch(
+                            baseStats,
+                            activeRot,
+                            baseSim,
+                            store_,
+                            &model_,
+                            spx::face::kDefaultMatchThreshold,
+                            gravityConfident);
+                        if (!hint.shouldSwitch) {
+                            return false;
+                        }
+                        const int oldDeg = spx::face::rotationToDegrees(activeRot);
+                        const int newDeg = spx::face::rotationToDegrees(hint.rotation);
+                        __android_log_print(
+                            ANDROID_LOG_INFO,
+                            kLogTag,
+                            "auth match-probe orientation switched %d -> %d "
+                            "(sim=%.3f baseSim=%.3f score=%.1f gravConf=%d prevOverride=%d)",
+                            oldDeg,
+                            newDeg,
+                            hint.bestSimilarity,
+                            baseSim,
+                            hint.detScore,
+                            gravityConfident ? 1 : 0,
+                            usedFallbackOverride ? 1 : 0);
+                        activeRot = hint.rotation;
+                        usedFallbackOverride = true;
+                        lastSwitchMs = checkMs;
+                        acc.reset(2);
+                        consecutiveMatchedFrames = 0;
+                        missStreak = 0;
+                        nonMatchStreak = 0;
+                        return true;
+                    };
+
                     if (!det.detected) {
-                        maybeLogAuthDiag(-1, 0.0f, 0.0f);
+                        maybeLogAuthDiag(-1, 0.0f, 0.0f, 0.0f);
                         ++missStreak;
                         if (missStreak >= 2u) {
                             consecutiveMatchedFrames = 0;
                         }
                         if (missStreak >= 4u) {
                             acc.reset(2);
+                        }
+                        if (det.quality != spx::face::FaceQuality::TOO_DARK &&
+                            det.quality != spx::face::FaceQuality::TOO_BRIGHT &&
+                            tryFallbackOrientationSwitch(0.0f, true)) {
+                            continue;
                         }
                         AuthenticationFrame af{};
                         af.data.acquiredInfo = mapQualityToAcquired(det.quality);
@@ -1050,14 +1689,26 @@ private:
                     maxDetScore = std::max(maxDetScore, det.score);
                     ++detectedFrames;
                     sawFaceOrSpoof = true;
-                    const auto emb = spx::face::extractEmbedding(stats, det, &model_);
+                    const auto& emb =
+                        hasChosenEmb ? chosenEmb
+                                     : spx::face::extractEmbedding(*useStats, det, &model_);
                     const auto live =
-                        spx::face::evaluateLiveness(stats, det, emb, &acc, true);
+                        spx::face::evaluateLiveness(*useStats, det, emb, &acc, true);
                     lastLive = static_cast<int>(live.status);
                     if (!live.live) {
-                        maybeLogAuthDiag(lastLive, live.centerToRimRatio, live.halftoneRatio);
+                        maybeLogAuthDiag(
+                            lastLive, live.centerToRimRatio, live.halftoneRatio, chosenBaseSim);
                         consecutiveMatchedFrames = 0;
                         if (live.status != spx::face::LivenessStatus::NEED_MORE_FRAMES) {
+                            const float curSim = chosenBaseSim;
+                            if (curSim < minSwitchSim) {
+                                ++nonMatchStreak;
+                                if (tryFallbackOrientationSwitch(curSim, false)) {
+                                    continue;
+                                }
+                            } else {
+                                nonMatchStreak = 0;
+                            }
                             AuthenticationFrame af{};
                             af.data.acquiredInfo =
                                 (live.status == spx::face::LivenessStatus::REJECT_MOTION_BLUR)
@@ -1073,17 +1724,30 @@ private:
                     }
 
                     ++livePassFrames;
-                    const auto res = store_.match(emb, spx::face::kDefaultMatchThreshold);
+                    const auto refined =
+                        hasChosenRefined
+                            ? chosenRefined
+                            : spx::face::matchWithAlignmentRefinement(
+                                  *useStats,
+                                  det,
+                                  emb,
+                                  store_,
+                                  &model_,
+                                  spx::face::kDefaultMatchThreshold);
+                    const auto& res = refined.match;
                     bestSim = std::max(bestSim, res.bestSimilarity);
-                    maybeLogAuthDiag(lastLive, live.centerToRimRatio, live.halftoneRatio);
+                    maybeLogAuthDiag(
+                        lastLive, live.centerToRimRatio, live.halftoneRatio, res.bestSimilarity);
                     if (res.matched) {
+                        nonMatchStreak = 0;
                         if (lastMatchedId == res.enrollmentId) {
                             ++consecutiveMatchedFrames;
                         } else {
                             lastMatchedId = res.enrollmentId;
                             consecutiveMatchedFrames = 1;
                         }
-                        if (res.bestSimilarity >= spx::face::kDefaultMatchThreshold + 0.06f ||
+                        if ((!refined.usedRefinement &&
+                             res.bestSimilarity >= spx::face::kDefaultMatchThreshold + 0.06f) ||
                             consecutiveMatchedFrames >= 2u) {
                             matched = true;
                             matchedId = res.enrollmentId;
@@ -1091,6 +1755,10 @@ private:
                         }
                     } else {
                         consecutiveMatchedFrames = 0;
+                        ++nonMatchStreak;
+                        if (tryFallbackOrientationSwitch(res.bestSimilarity, false)) {
+                            continue;
+                        }
                     }
                 }
 
@@ -1098,7 +1766,9 @@ private:
                 watchdog.join();
                 // Always stop OV7251 & 850nm STROBE before dispatching unlock/failure.
                 cap.reset();
+                orientSession.release();
             } catch (const std::exception& ex) {
+                orientSession.release();
                 logWarn(ex.what());
                 clearCancelFlag(flag);
                 cb_->onError(Error::HW_UNAVAILABLE, 0);
@@ -1107,12 +1777,14 @@ private:
 
             const long long elapsedMs = static_cast<long long>(bootTimeMs() - startMs);
             clearCancelFlag(flag);
+            const int finalRotDeg = spx::face::rotationToDegrees(activeRot);
             if (canceledByLidOrUser) {
                 __android_log_print(
                     ANDROID_LOG_INFO,
                     kLogTag,
-                    "auth canceled bestSim=%.3f frames=%u detected=%u livePass=%u "
+                    "auth canceled rot=%d bestSim=%.3f frames=%u detected=%u livePass=%u "
                     "maxScore=%.1f lastQ=%d lastLive=%d elapsedMs=%lld",
+                    finalRotDeg,
                     bestSim,
                     frameIdx,
                     detectedFrames,
@@ -1125,9 +1797,11 @@ private:
                 return;
             }
             if (matched) {
+                lastMatchedRotationDeg_.store(finalRotDeg);
                 __android_log_print(ANDROID_LOG_INFO,
                                     kLogTag,
-                                    "auth match id=%d sim=%.3f frames=%u elapsedMs=%lld",
+                                    "auth match rot=%d id=%d sim=%.3f frames=%u elapsedMs=%lld",
+                                    finalRotDeg,
                                     matchedId,
                                     bestSim,
                                     frameIdx,
@@ -1163,8 +1837,9 @@ private:
                 __android_log_print(
                     ANDROID_LOG_INFO,
                     kLogTag,
-                    "auth failed bestSim=%.3f frames=%u detected=%u livePass=%u "
+                    "auth failed rot=%d bestSim=%.3f frames=%u detected=%u livePass=%u "
                     "maxScore=%.1f lastQ=%d lastLive=%d elapsedMs=%lld",
+                    finalRotDeg,
                     bestSim,
                     frameIdx,
                     detectedFrames,
@@ -1185,15 +1860,17 @@ private:
             }
 
             // Timeout with no face detected: do not burn lockout attempts.
-            __android_log_print(ANDROID_LOG_INFO,
-                                kLogTag,
-                                "auth timeout bestSim=%.3f frames=%u detected=%u lastQ=%d lastLive=%d elapsedMs=%lld",
-                                bestSim,
-                                frameIdx,
-                                detectedFrames,
-                                lastQ,
-                                lastLive,
-                                elapsedMs);
+            __android_log_print(
+                ANDROID_LOG_INFO,
+                kLogTag,
+                "auth timeout rot=%d bestSim=%.3f frames=%u detected=%u lastQ=%d lastLive=%d elapsedMs=%lld",
+                finalRotDeg,
+                bestSim,
+                frameIdx,
+                detectedFrames,
+                lastQ,
+                lastLive,
+                elapsedMs);
             cb_->onError(Error::TIMEOUT, 0);
         });
         return ::ndk::ScopedAStatus::ok();
@@ -1202,6 +1879,7 @@ private:
     int32_t userId_;
     std::shared_ptr<ISessionCallback> cb_;
     std::shared_ptr<spx::face::SpxLidMonitor> lidMonitor_;
+    std::shared_ptr<spx::face::SpxOrientationMonitor> orientationMonitor_;
     spx::face::SpxFaceStore store_;
     spx::face::SpxLockoutTracker lockout_;
     spx::face::OptionalModelWeights model_;
@@ -1212,6 +1890,8 @@ private:
     std::shared_ptr<std::atomic<bool>> activeCancel_;
     bool latestFoldClosed_ = false;
     bool latestDisplayInactive_ = false;
+    std::atomic<int> lastMatchedRotationDeg_{-1};
+    std::atomic<int> lastPropRotationDeg_{-1};
 
     std::mutex queueMu_;
     std::condition_variable queueCv_;
@@ -1225,7 +1905,9 @@ private:
 
 class SpxFace final : public BnFace {
 public:
-    SpxFace() : lidMonitor_(std::make_shared<spx::face::SpxLidMonitor>()) {
+    SpxFace()
+        : lidMonitor_(std::make_shared<spx::face::SpxLidMonitor>()),
+          orientationMonitor_(std::make_shared<spx::face::SpxOrientationMonitor>()) {
         lidMonitor_->start();
     }
 
@@ -1295,7 +1977,8 @@ public:
         if (old) {
             old->close();
         }
-        created = ndk::SharedRefBase::make<SpxSession>(in_userId, in_cb, lidMonitor_);
+        created = ndk::SharedRefBase::make<SpxSession>(
+            in_userId, in_cb, lidMonitor_, orientationMonitor_);
         created->attachClientDeathRecipient();
         {
             std::lock_guard<std::mutex> lk(mu_);
@@ -1308,6 +1991,7 @@ public:
 private:
     std::mutex mu_;
     std::shared_ptr<spx::face::SpxLidMonitor> lidMonitor_;
+    std::shared_ptr<spx::face::SpxOrientationMonitor> orientationMonitor_;
     std::weak_ptr<SpxSession> activeSession_;
 };
 
@@ -1328,7 +2012,7 @@ int main(int argc, char** argv) {
         return aidl::android::hardware::biometrics::face::runSelfTest();
     }
 
-    ABinderProcess_setThreadPoolMaxThreadCount(2);
+    ABinderProcess_setThreadPoolMaxThreadCount(4);
     ABinderProcess_startThreadPool();
 
     auto face = ndk::SharedRefBase::make<aidl::android::hardware::biometrics::face::SpxFace>();

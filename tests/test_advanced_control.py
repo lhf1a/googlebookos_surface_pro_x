@@ -376,7 +376,8 @@ public class PolicyAndStringsTest {
     check(en.faceLidTitle().equals(jpFallback.faceLidTitle()), "jp->en faceLid title");
     check("红外人脸解锁".equals(zh.faceUnlockTitle()), "zh faceUnlock title");
     check("IR Face Unlock".equals(en.faceUnlockTitle()), "en faceUnlock title");
-    check(en.faceLidHomeSubtitle(true, true, true, true, "90").contains("90°"), "en faceLid home sub");
+    check(en.faceLidHomeSubtitle(true, true, true, true).contains("IR face on") && !en.faceLidHomeSubtitle(true, true, true, true).contains("90°"), "en faceLid home sub");
+    check(zh.faceLidHomeSubtitle(true, true, true, true).contains("人脸解锁开"), "zh faceLid home sub");
     check(zh.faceSelfCheckResultMessage("self_test=pass;ov7251=1;ir_bench=pass;proc_p50_ms=3.1;lid_state=OPEN;ssam=laptop").contains("3.1"), "zh self check msg");
 
     System.out.println("DRIVER_POLICY_AND_I18N_OK");
@@ -1434,7 +1435,11 @@ else:
             self.assertEqual(state['face_ir_available'], '1')
             self.assertEqual(state['face_unlock_enabled'], '1')
             self.assertEqual(state['face_hal_running'], '1')
-            self.assertEqual(state['face_ir_rotation'], '90')
+            self.assertEqual(state['face_ir_rotation'], '270')
+
+            main_activity = (ROOT / 'probe/advanced-control/MainActivity.java').read_text(encoding='utf-8')
+            self.assertNotIn('faceRotationTitle', main_activity)
+            self.assertNotIn('saveFaceRotation', main_activity)
 
             # 2. Folded-back masking vs true closed (both CLI + pure-shell fallback)
             (lid_dir / 'sw_state').write_text('1\n')

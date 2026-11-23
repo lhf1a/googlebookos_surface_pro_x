@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item type="id" name="setup_wizard_layout" />
+    <item type="id" name="square_frame_layout" />
+    <item type="id" name="texture_view" />
+    <item type="id" name="circle_view" />
+    <item type="id" name="face_smiley" />
+    <item type="id" name="distance_indicator_view" />
+    <item type="id" name="indicator_view" />
+    <item type="id" name="error_text" />
+</resources>

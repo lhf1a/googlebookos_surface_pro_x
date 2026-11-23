@@ -49,6 +49,67 @@ inline uint16_t percentileFromHist(const std::array<uint32_t, 1024>& hist,
     return 1023u;
 }
 
+inline uint8_t clampByte(float v) {
+    return static_cast<uint8_t>(std::clamp(std::lround(v), 0L, 255L));
+}
+
+inline float capsuleCoverage(float px, float py, float x0, float y0, float x1, float y1) {
+    const float h = y1 - y0;
+    const float w = x1 - x0;
+    if (h <= 0.0f || w <= 0.0f) return 0.0f;
+    const float r = 0.5f * h;
+    const float cx0 = std::min(0.5f * (x0 + x1), x0 + r);
+    const float cx1 = std::max(0.5f * (x0 + x1), x1 - r);
+    const float cy = 0.5f * (y0 + y1);
+    const float cx = std::clamp(px, cx0, cx1);
+    const float dx = px - cx;
+    const float dy = py - cy;
+    const float dist = std::hypot(dx, dy) - r;
+    return std::clamp(0.5f - dist, 0.0f, 1.0f);
+}
+
+template <typename T>
+void rotateBufferCw(const T* src,
+                    unsigned srcWidth,
+                    unsigned srcHeight,
+                    Rotation rot,
+                    std::vector<T>& dst) {
+    const bool swapAxes = (rot == Rotation::Deg90CW || rot == Rotation::Deg270CW);
+    const unsigned dstW = swapAxes ? srcHeight : srcWidth;
+    const unsigned dstH = swapAxes ? srcWidth : srcHeight;
+    dst.resize(static_cast<size_t>(dstW) * dstH);
+
+    if (rot == Rotation::Deg0) {
+        std::copy_n(src, static_cast<size_t>(srcWidth) * srcHeight, dst.begin());
+    } else if (rot == Rotation::Deg180) {
+        for (unsigned y = 0; y < srcHeight; ++y) {
+            const T* srow = src + static_cast<size_t>(y) * srcWidth;
+            T* drow = dst.data() + static_cast<size_t>(srcHeight - 1u - y) * srcWidth;
+            for (unsigned x = 0; x < srcWidth; ++x) {
+                drow[srcWidth - 1u - x] = srow[x];
+            }
+        }
+    } else if (rot == Rotation::Deg90CW) {
+        for (unsigned y = 0; y < srcHeight; ++y) {
+            const T* srow = src + static_cast<size_t>(y) * srcWidth;
+            const unsigned dx = srcHeight - 1u - y;
+            for (unsigned x = 0; x < srcWidth; ++x) {
+                dst[static_cast<size_t>(x) * dstW + dx] = srow[x];
+            }
+        }
+    } else {
+        // Rotation::Deg270CW
+        for (unsigned y = 0; y < srcHeight; ++y) {
+            const T* srow = src + static_cast<size_t>(y) * srcWidth;
+            const unsigned dx = y;
+            for (unsigned x = 0; x < srcWidth; ++x) {
+                const unsigned dy = srcWidth - 1u - x;
+                dst[static_cast<size_t>(dy) * dstW + dx] = srow[x];
+            }
+        }
+    }
+}
+
 }  // namespace
 
 Rotation parseRotationDegrees(const char* text, Rotation fallback) {
@@ -58,6 +119,109 @@ Rotation parseRotationDegrees(const char* text, Rotation fallback) {
     if (std::strcmp(text, "180") == 0) return Rotation::Deg180;
     if (std::strcmp(text, "270") == 0) return Rotation::Deg270CW;
     return fallback;
+}
+
+int rotationToDegrees(Rotation rot) {
+    switch (rot) {
+    case Rotation::Deg0:
+        return 0;
+    case Rotation::Deg90CW:
+        return 90;
+    case Rotation::Deg180:
+        return 180;
+    case Rotation::Deg270CW:
+        return 270;
+    }
+    return 0;
+}
+
+Rotation composeRotation(Rotation base, Rotation deltaCw) {
+    const int deg = (rotationToDegrees(base) + rotationToDegrees(deltaCw)) % 360;
+    switch (deg) {
+    case 0:
+        return Rotation::Deg0;
+    case 90:
+        return Rotation::Deg90CW;
+    case 180:
+        return Rotation::Deg180;
+    case 270:
+        return Rotation::Deg270CW;
+    }
+    return Rotation::Deg0;
+}
+
+IrFrameStats rotateIrFrameStats(const IrFrameStats& src, Rotation deltaCw) {
+    if (deltaCw == Rotation::Deg0 || src.width == 0 || src.height == 0) {
+        return src;
+    }
+    IrFrameStats out;
+    const bool swapAxes = (deltaCw == Rotation::Deg90CW || deltaCw == Rotation::Deg270CW);
+    out.width = swapAxes ? src.height : src.width;
+    out.height = swapAxes ? src.width : src.height;
+    out.p1 = src.p1;
+    out.p50 = src.p50;
+    out.p99 = src.p99;
+    out.roiLinearMean = src.roiLinearMean;
+    out.darkRatio = src.darkRatio;
+    out.saturatedRatio = src.saturatedRatio;
+
+    const size_t nSrc = static_cast<size_t>(src.width) * src.height;
+    if (src.upright10.size() == nSrc) {
+        rotateBufferCw(src.upright10.data(), src.width, src.height, deltaCw, out.upright10);
+    }
+    if (src.gray8.size() == nSrc) {
+        rotateBufferCw(src.gray8.data(), src.width, src.height, deltaCw, out.gray8);
+    }
+    return out;
+}
+
+bool classifyGravityOrientation(float ax,
+                                float ay,
+                                float az,
+                                bool hasPrevDelta,
+                                Rotation prevDelta,
+                                Rotation& outDelta) {
+    if (!std::isfinite(ax) || !std::isfinite(ay) || !std::isfinite(az)) {
+        if (hasPrevDelta) {
+            outDelta = prevDelta;
+            return true;
+        }
+        return false;
+    }
+
+    const float horiz = std::hypot(ax, ay);
+    if (horiz < 2.8f) {
+        if (hasPrevDelta) {
+            outDelta = prevDelta;
+            return true;
+        }
+        return false;
+    }
+
+    const float absX = std::fabs(ax);
+    const float absY = std::fabs(ay);
+    const float ratio = hasPrevDelta ? 1.35f : 1.0f;
+
+    if (absY >= ratio * absX) {
+        outDelta = (ay >= 0.0f) ? Rotation::Deg0 : Rotation::Deg180;
+        return true;
+    }
+    if (absX >= ratio * absY) {
+        outDelta = (ax >= 0.0f) ? Rotation::Deg90CW : Rotation::Deg270CW;
+        return true;
+    }
+
+    // Inside diagonal hysteresis deadband with an active prior orientation.
+    outDelta = prevDelta;
+    return true;
+}
+
+Rgb8 enrollProgressFillColor(float progress) {
+    const float p = std::clamp(progress, 0.0f, 1.0f);
+    if (p >= 0.995f) {
+        return {52u, 168u, 83u};
+    }
+    return {66u, 133u, 244u};
 }
 
 IrFrameStats preprocessIrFrame(const uint8_t* raw,
@@ -106,40 +270,8 @@ IrFrameStats preprocessIrFrame(const uint8_t* raw,
     out.width = swapAxes ? srcHeight : srcWidth;
     out.height = swapAxes ? srcWidth : srcHeight;
     const size_t nPixels = static_cast<size_t>(out.width) * out.height;
-    out.upright10.resize(nPixels);
+    rotateBufferCw(unpacked.data(), srcWidth, srcHeight, rot, out.upright10);
     out.gray8.resize(nPixels);
-
-    if (rot == Rotation::Deg0) {
-        std::copy(unpacked.begin(), unpacked.end(), out.upright10.begin());
-    } else if (rot == Rotation::Deg180) {
-        for (unsigned y = 0; y < srcHeight; ++y) {
-            const uint16_t* srow = unpacked.data() + static_cast<size_t>(y) * srcWidth;
-            uint16_t* drow = out.upright10.data() + static_cast<size_t>(srcHeight - 1u - y) * srcWidth;
-            for (unsigned x = 0; x < srcWidth; ++x) {
-                drow[srcWidth - 1u - x] = srow[x];
-            }
-        }
-    } else if (rot == Rotation::Deg90CW) {
-        const unsigned dstW = out.width;
-        for (unsigned y = 0; y < srcHeight; ++y) {
-            const uint16_t* srow = unpacked.data() + static_cast<size_t>(y) * srcWidth;
-            const unsigned dx = srcHeight - 1u - y;
-            for (unsigned x = 0; x < srcWidth; ++x) {
-                out.upright10[static_cast<size_t>(x) * dstW + dx] = srow[x];
-            }
-        }
-    } else {
-        // Rotation::Deg270CW
-        const unsigned dstW = out.width;
-        for (unsigned y = 0; y < srcHeight; ++y) {
-            const uint16_t* srow = unpacked.data() + static_cast<size_t>(y) * srcWidth;
-            const unsigned dx = y;
-            for (unsigned x = 0; x < srcWidth; ++x) {
-                const unsigned dy = srcWidth - 1u - x;
-                out.upright10[static_cast<size_t>(dy) * dstW + dx] = srow[x];
-            }
-        }
-    }
 
     const unsigned roiX0 = (out.width * 15u) / 100u;
     const unsigned roiX1 = std::max(roiX0 + 1u, (out.width * 85u) / 100u);
@@ -235,7 +367,7 @@ void gray8ToRgba(const uint8_t* gray,
 
 namespace {
 
-template <typename WriteBlackRow, typename WritePixel>
+template <typename WriteBlackRow, typename WriteRgbPixel>
 void renderIrPreviewCommon(const uint8_t* gray,
                            unsigned srcW,
                            unsigned srcH,
@@ -244,8 +376,9 @@ void renderIrPreviewCommon(const uint8_t* gray,
                            unsigned dstStridePixels,
                            bool mirrorX,
                            float zoom,
+                           float enrollProgress,
                            WriteBlackRow&& writeBlackRow,
-                           WritePixel&& writePixel) {
+                           WriteRgbPixel&& writeRgbPixel) {
     if (!gray || srcW == 0 || srcH == 0 || dstW == 0 || dstH == 0 || dstStridePixels < dstW) {
         return;
     }
@@ -261,19 +394,80 @@ void renderIrPreviewCommon(const uint8_t* gray,
     const unsigned srcY0 = (srcH - cropSide) / 2u;
 
     // Align square output at top edge (dstY0=0) so 480x640 FaceEnrollPreviewFragment
-    // scale(1.0, 640/480) maps rows 0..dstSide-1 1:1 into the circular view.
+    // scale(1.0, 640/480) maps rows 0..dstSide-1 1:1 into the square view.
     const unsigned dstSide = std::min(dstW, dstH);
     const unsigned dstX0 = (dstW > dstSide) ? (dstW - dstSide) / 2u : 0u;
     const unsigned dstY0 = 0u;
+
+    const bool drawProgress = (enrollProgress >= 0.0f);
+    const float p = drawProgress ? std::clamp(enrollProgress, 0.0f, 1.0f) : 0.0f;
+    const unsigned scrimH = drawProgress ? std::min(dstSide, std::max(40u, dstSide / 7u)) : 0u;
+    const unsigned scrimY0 = dstSide - scrimH;
+    const unsigned barW = drawProgress ? std::min(dstSide, std::max(32u, (dstSide * 72u) / 100u)) : 0u;
+    const unsigned barH = drawProgress ? std::min(dstSide, std::max(8u, dstSide / 34u)) : 0u;
+    const unsigned barX0 = (dstSide - barW) / 2u;
+    const unsigned barBottomMargin = drawProgress ? std::max(14u, dstSide / 18u) : 0u;
+    const unsigned barY0 =
+        (dstSide > barH + barBottomMargin) ? (dstSide - barBottomMargin - barH) : 0u;
+    const float barXf0 = static_cast<float>(barX0);
+    const float barYf0 = static_cast<float>(barY0);
+    const float barYf1 = static_cast<float>(barY0 + barH);
+    const float fillW = drawProgress
+                            ? std::min(static_cast<float>(barW),
+                                       std::max(static_cast<float>(barH), p * static_cast<float>(barW)))
+                            : 0.0f;
+    const Rgb8 fillCol = drawProgress ? enrollProgressFillColor(p) : Rgb8{};
 
     for (unsigned dy = 0; dy < dstSide; ++dy) {
         const unsigned sy = srcY0 + (dy * cropSide) / dstSide;
         const uint8_t* srow = gray + static_cast<size_t>(sy) * srcW;
         const unsigned outY = dstY0 + dy;
+        const float scrimAlpha =
+            (drawProgress && dy >= scrimY0)
+                ? (0.58f * ((scrimH > 1u)
+                                ? (static_cast<float>(dy - scrimY0) / static_cast<float>(scrimH - 1u))
+                                : 1.0f))
+                : 0.0f;
+        const bool inBarY = drawProgress && (dy + 1u >= barY0) && (dy <= barY0 + barH);
         for (unsigned dx = 0; dx < dstSide; ++dx) {
             const unsigned sxOffset = (dx * cropSide) / dstSide;
             const unsigned sx = srcX0 + (mirrorX ? (cropSide - 1u - sxOffset) : sxOffset);
-            writePixel(outY, dstX0 + dx, srow[sx]);
+            const uint8_t g = srow[sx];
+            if (!drawProgress || (scrimAlpha <= 0.0f && !inBarY)) {
+                writeRgbPixel(outY, dstX0 + dx, g, g, g);
+                continue;
+            }
+            float fr = static_cast<float>(g);
+            float fg = fr;
+            float fb = fr;
+            if (scrimAlpha > 0.0f) {
+                constexpr float kScrimGray = 16.0f;
+                fr = fr * (1.0f - scrimAlpha) + kScrimGray * scrimAlpha;
+                fg = fr;
+                fb = fr;
+            }
+            if (inBarY) {
+                const float px = static_cast<float>(dx) + 0.5f;
+                const float py = static_cast<float>(dy) + 0.5f;
+                const float trackCov =
+                    capsuleCoverage(px, py, barXf0, barYf0, barXf0 + static_cast<float>(barW), barYf1);
+                if (trackCov > 0.0f) {
+                    const float ta = 0.30f * trackCov;
+                    fr = fr * (1.0f - ta) + 255.0f * ta;
+                    fg = fg * (1.0f - ta) + 255.0f * ta;
+                    fb = fb * (1.0f - ta) + 255.0f * ta;
+                    if (p > 0.001f) {
+                        const float fillCov = std::min(
+                            trackCov, capsuleCoverage(px, py, barXf0, barYf0, barXf0 + fillW, barYf1));
+                        if (fillCov > 0.0f) {
+                            fr = fr * (1.0f - fillCov) + static_cast<float>(fillCol.r) * fillCov;
+                            fg = fg * (1.0f - fillCov) + static_cast<float>(fillCol.g) * fillCov;
+                            fb = fb * (1.0f - fillCov) + static_cast<float>(fillCol.b) * fillCov;
+                        }
+                    }
+                }
+            }
+            writeRgbPixel(outY, dstX0 + dx, clampByte(fr), clampByte(fg), clampByte(fb));
         }
     }
 }
@@ -288,7 +482,8 @@ void renderIrPreviewRgba(const uint8_t* gray,
                          unsigned dstH,
                          unsigned dstStridePixels,
                          bool mirrorX,
-                         float zoom) {
+                         float zoom,
+                         float enrollProgress) {
     if (!dstRgba) return;
     renderIrPreviewCommon(
         gray,
@@ -299,6 +494,7 @@ void renderIrPreviewRgba(const uint8_t* gray,
         dstStridePixels,
         mirrorX,
         zoom,
+        enrollProgress,
         [&](unsigned y, unsigned width) {
             uint8_t* row = dstRgba + static_cast<size_t>(y) * dstStridePixels * 4u;
             for (unsigned x = 0; x < width; ++x) {
@@ -308,11 +504,11 @@ void renderIrPreviewRgba(const uint8_t* gray,
                 row[x * 4u + 3] = 255u;
             }
         },
-        [&](unsigned y, unsigned x, uint8_t g) {
+        [&](unsigned y, unsigned x, uint8_t r, uint8_t g, uint8_t b) {
             uint8_t* px = dstRgba + (static_cast<size_t>(y) * dstStridePixels + x) * 4u;
-            px[0] = g;
+            px[0] = r;
             px[1] = g;
-            px[2] = g;
+            px[2] = b;
             px[3] = 255u;
         });
 }
@@ -325,7 +521,8 @@ void renderIrPreviewRgb565(const uint8_t* gray,
                            unsigned dstH,
                            unsigned dstStridePixels,
                            bool mirrorX,
-                           float zoom) {
+                           float zoom,
+                           float enrollProgress) {
     if (!dstRgb565) return;
     renderIrPreviewCommon(
         gray,
@@ -336,15 +533,16 @@ void renderIrPreviewRgb565(const uint8_t* gray,
         dstStridePixels,
         mirrorX,
         zoom,
+        enrollProgress,
         [&](unsigned y, unsigned width) {
             uint16_t* row = dstRgb565 + static_cast<size_t>(y) * dstStridePixels;
             std::fill_n(row, width, static_cast<uint16_t>(0u));
         },
-        [&](unsigned y, unsigned x, uint8_t g) {
+        [&](unsigned y, unsigned x, uint8_t r, uint8_t g, uint8_t b) {
             uint16_t* px = dstRgb565 + static_cast<size_t>(y) * dstStridePixels + x;
-            *px = static_cast<uint16_t>(((static_cast<uint16_t>(g >> 3)) << 11) |
+            *px = static_cast<uint16_t>(((static_cast<uint16_t>(r >> 3)) << 11) |
                                         ((static_cast<uint16_t>(g >> 2)) << 5) |
-                                        static_cast<uint16_t>(g >> 3));
+                                        static_cast<uint16_t>(b >> 3));
         });
 }
 

@@ -88,6 +88,66 @@ class FaceHalTests(unittest.TestCase):
         self.assertEqual(overlay_tag.attrib.get(f"{android_ns}targetPackage"), "com.android.settings")
         self.assertEqual(overlay_tag.attrib.get(f"{android_ns}isStatic"), "true")
         self.assertEqual(overlay_tag.attrib.get(f"{android_ns}priority"), "999")
+        self.assertEqual(overlay_tag.attrib.get(f"{android_ns}resourcesMap"), "@xml/overlays")
+
+        overlays_xml = ET.parse(ROOT / "probe/face/overlay/res/xml/overlays.xml").getroot()
+        overlay_targets = {el.attrib.get("target"): el.attrib.get("value") for el in overlays_xml.findall("./item")}
+        self.assertEqual(overlay_targets.get("bool/config_face_settings_should_manage_preview"),
+                         "@bool/config_face_settings_should_manage_preview")
+        self.assertEqual(overlay_targets.get("dimen/face_preview_scale"), "@dimen/face_preview_scale")
+        self.assertEqual(overlay_targets.get("dimen/face_preview_translate_x"), "@dimen/face_preview_translate_x")
+        self.assertEqual(overlay_targets.get("dimen/face_preview_translate_y"), "@dimen/face_preview_translate_y")
+        self.assertEqual(overlay_targets.get("layout/face_enrolling"), "@layout/face_enrolling")
+        for req_str in (
+            "face_enrolling_title",
+            "face_enrolling_center_head",
+            "face_enrolling_description",
+            "face_enrolling_turn_head_to_arrow",
+            "face_enrolling_turned_too_far",
+        ):
+            self.assertEqual(overlay_targets.get(f"string/{req_str}"), f"@string/{req_str}")
+        for req_id in (
+            "setup_wizard_layout",
+            "square_frame_layout",
+            "texture_view",
+            "circle_view",
+            "face_smiley",
+            "distance_indicator_view",
+            "indicator_view",
+            "error_text",
+        ):
+            self.assertEqual(overlay_targets.get(f"id/{req_id}"), f"@id/{req_id}")
+        for private_res in ("drawable/spx_face_preview_bg", "drawable/spx_face_preview_border"):
+            self.assertNotIn(private_res, overlay_targets)
+
+        layout_root = ET.parse(ROOT / "probe/face/overlay/res/layout/face_enrolling.xml").getroot()
+        views_by_id = {}
+        rounded_container = None
+        for el in layout_root.iter():
+            vid = el.attrib.get(f"{android_ns}id")
+            if vid:
+                views_by_id[vid] = el
+            if el.attrib.get(f"{android_ns}clipToOutline") == "true":
+                rounded_container = el
+        self.assertIsNotNone(rounded_container)
+        self.assertEqual(rounded_container.attrib.get(f"{android_ns}background"), "@drawable/spx_face_preview_bg")
+        self.assertTrue(any(
+            child.attrib.get(f"{android_ns}id") == "@id/texture_view"
+            and child.attrib.get(f"{android_ns}visibility") not in ("invisible", "gone")
+            for child in rounded_container
+        ))
+        self.assertTrue(any(
+            child.attrib.get(f"{android_ns}background") == "@drawable/spx_face_preview_border"
+            for child in rounded_container
+        ))
+        for hidden_id in (
+            "@id/circle_view",
+            "@id/face_smiley",
+            "@id/distance_indicator_view",
+            "@id/indicator_view",
+        ):
+            self.assertIn(hidden_id, views_by_id)
+            self.assertEqual(views_by_id[hidden_id].attrib.get(f"{android_ns}visibility"), "invisible")
 
         cfg_root = ET.parse(ROOT / "probe/face/overlay/res/values/config.xml").getroot()
         bools = {el.attrib.get("name"): el.text for el in cfg_root.findall("./bool")}
@@ -224,6 +284,13 @@ class FaceHalTests(unittest.TestCase):
             self.assertIn("false", dumped)
             self.assertIn("face_preview_translate_x", dumped)
             self.assertIn("face_preview_translate_y", dumped)
+            self.assertIn("layout/face_enrolling", dumped)
+            self.assertIn("drawable/spx_face_preview_bg", dumped)
+            self.assertIn("drawable/spx_face_preview_border", dumped)
+            self.assertIn("xml/overlays", dumped)
+            self.assertIn("id/texture_view", dumped)
+            self.assertIn("string/face_enrolling_title", dumped)
+            self.assertIn("string/face_enrolling_turn_head_to_arrow", dumped)
 
 
 if __name__ == "__main__":

@@ -19,12 +19,12 @@ public final class DiskInstallStrings {
     }
 
     public String homeSubtitle() {
-        return t("从 USB 启动时将当前系统全新安装到内置硬盘", "Clean-install running USB system to internal SSD");
+        return t("从 U 盘启动时全新安装到内置硬盘", "Clean-install running USB system to SSD");
     }
 
     public String pageSubtitle() {
-        return t("将当前 USB 启动的系统与引导载荷全新写入内置硬盘，不保留原内置硬盘数据，也不迁移 U 盘用户数据。",
-                "Clean-install the running USB system and bootloader onto the internal disk without preserving existing internal data or migrating USB userdata.");
+        return t("将当前 U 盘系统全新写入内置硬盘；会清空内置硬盘且不迁移 U 盘数据。",
+                "Clean-install the running USB system to internal disk; erases internal data and does not migrate USB data.");
     }
 
     public String backDesc() {
@@ -40,8 +40,7 @@ public final class DiskInstallStrings {
     }
 
     public String bridgeMissingBanner() {
-        return t("未检测到系统安装桥接服务，当前仅可查看状态。",
-                "System installer bridge service not detected.");
+        return t("安装服务未就绪（只读）", "Installer bridge unavailable");
     }
 
     public String loadingStatus() {
@@ -69,31 +68,26 @@ public final class DiskInstallStrings {
 
     public String ineligibleBanner(String reason) {
         if ("not_usb_boot".equals(reason)) {
-            return t("当前系统不是从 USB 启动，已禁用写入内置硬盘以防止覆盖正在运行的系统盘。",
-                    "System is not booted from USB. Internal disk installation is disabled to prevent overwriting the active system disk.");
+            return t("当前非 U 盘启动，已禁用写入内置硬盘。",
+                    "Not booted from USB; internal disk install disabled.");
         }
         if ("no_internal_disk".equals(reason)) {
-            return t("未检测到可用的内置非 USB 硬盘。",
-                    "No eligible internal non-USB disk was detected.");
+            return t("未检测到可用的内置硬盘。", "No eligible internal disk detected.");
         }
         if ("internal_disk_too_small".equals(reason)) {
-            return t("内置硬盘容量不足，无法容纳系统与用户数据分区。",
-                    "Internal disk is too small for the system and fresh userdata partitions.");
+            return t("内置硬盘容量不足。", "Internal disk too small.");
         }
         if ("unsupported_source_layout".equals(reason)) {
-            return t("当前启动盘不是标准 5 分区通用布局，请先使用最新 5 分区镜像启动后再安装。",
-                    "Current boot disk does not use the standard 5-partition universal layout.");
+            return t("当前启动盘不是标准 5 分区布局。", "Boot disk does not use the 5-partition layout.");
         }
         if ("source_esp_incomplete".equals(reason)) {
-            return t("当前启动 ESP 缺少必要引导文件，无法复制到内置硬盘。",
-                    "Current boot ESP is missing required boot files.");
+            return t("启动 ESP 缺少必要引导文件。", "Boot ESP is missing required boot files.");
         }
         if ("installer_missing".equals(reason)) {
-            return t("当前镜像未包含内置硬盘安装组件。",
-                    "This image does not include the internal-disk installer component.");
+            return t("当前镜像未包含内置硬盘安装组件。", "Internal disk installer component missing.");
         }
-        return t("当前环境不满足写入内置硬盘条件：" + reason,
-                "Current environment is not eligible for internal disk installation: " + reason);
+        return t("暂不支持写入内置硬盘：" + reason,
+                "Internal disk installation unavailable: " + reason);
     }
 
     public String targetSection() {
@@ -116,23 +110,21 @@ public final class DiskInstallStrings {
 
     public String planDetails(long superBytes, long espBytes, long targetBytes) {
         long estData = Math.max(0L, targetBytes - superBytes - espBytes - (70L * 1024L * 1024L));
-        return t("• 重建 5 分区 GPT（super " + DiskInstallPolicy.formatBytes(superBytes)
-                        + "、metadata 64 MiB、misc 4 MiB、SQ2PROBE " + DiskInstallPolicy.formatBytes(espBytes)
-                        + "、全新 userdata 约 " + DiskInstallPolicy.formatBytes(estData) + "）\n"
-                        + "• 原样复制当前系统的 super 分区与完整 SHA-256 读回校验\n"
-                        + "• 写入标准 UEFI 引导（\\EFI\\BOOT\\BOOTAA64.EFI + GRUB 菜单 + 内核与固件）\n"
-                        + "• 不保留原内置硬盘上的任何系统或文件，也不迁移当前 USB 盘的用户数据",
-                "• Create fresh 5-partition GPT (super " + DiskInstallPolicy.formatBytes(superBytes)
-                        + ", metadata 64 MiB, misc 4 MiB, SQ2PROBE " + DiskInstallPolicy.formatBytes(espBytes)
-                        + ", fresh userdata ~" + DiskInstallPolicy.formatBytes(estData) + ")\n"
-                        + "• Copy running super partition with full SHA-256 readback verification\n"
-                        + "• Install standard UEFI boot (\\EFI\\BOOT\\BOOTAA64.EFI + GRUB + kernel & firmware)\n"
-                        + "• Existing internal disk data is erased and USB userdata is NOT migrated");
+        return t("• 新建 5 分区（super " + DiskInstallPolicy.formatBytes(superBytes)
+                        + "、ESP " + DiskInstallPolicy.formatBytes(espBytes)
+                        + "、userdata 约 " + DiskInstallPolicy.formatBytes(estData) + "）\n"
+                        + "• 复制 super 并作 SHA-256 校验，写入 UEFI 引导\n"
+                        + "• 会清空原内置硬盘，且不迁移 U 盘数据",
+                "• Fresh 5-partition GPT (super " + DiskInstallPolicy.formatBytes(superBytes)
+                        + ", ESP " + DiskInstallPolicy.formatBytes(espBytes)
+                        + ", userdata ~" + DiskInstallPolicy.formatBytes(estData) + ")\n"
+                        + "• Copy & SHA-256 verify super, install UEFI boot\n"
+                        + "• Erases internal disk; USB data is not migrated");
     }
 
     public String batteryWarning(int levelPct) {
-        return t("当前电量偏低（" + levelPct + "% 且未充电），写入过程需要数分钟，建议接通电源后再操作。",
-                "Battery is low (" + levelPct + "% and not charging). Connect AC power before installing.");
+        return t("当前电量较低（" + levelPct + "% 未充电），建议接通电源。",
+                "Battery low (" + levelPct + "%, not charging). Connect power.");
     }
 
     public String dangerTitle() {
@@ -140,13 +132,13 @@ public final class DiskInstallStrings {
     }
 
     public String dangerBody() {
-        return t("此操作会彻底抹除所选内置硬盘上的全部分区与数据（包括原有的 Windows 或其他系统），且无法恢复。当前 USB 盘上的应用、账户与文件不会被迁移，内置硬盘将作为全新系统启动。",
-                "This permanently erases all partitions and data on the selected internal disk (including Windows or any other OS). Apps, accounts, and files on your USB drive will NOT be copied.");
+        return t("将永久清空所选内置硬盘上的全部分区与系统，且不迁移当前 U 盘数据。",
+                "Permanently erases all partitions and data on the selected disk. USB drive data is not migrated.");
     }
 
     public String acknowledgeCheckbox() {
-        return t("我已知晓：将彻底清空所选内置硬盘的全部数据，并以全新系统安装",
-                "I understand all data on the selected internal disk will be permanently erased for a fresh install");
+        return t("我已确认清空所选内置硬盘并全新安装",
+                "I confirm erasing the selected internal disk for a fresh install");
     }
 
     public String startInstallButton() {
@@ -280,7 +272,7 @@ public final class DiskInstallStrings {
     }
 
     public String footer() {
-        return t("提示：写入过程仅操作您选中的内置非 USB 硬盘，不会修改当前 USB 启动盘中的数据。",
-                "Note: Only the selected internal non-USB disk is modified; your USB boot drive remains untouched.");
+        return t("仅写入所选内置硬盘，不修改当前 U 盘。",
+                "Only modifies the selected internal disk; USB boot drive is untouched.");
     }
 }

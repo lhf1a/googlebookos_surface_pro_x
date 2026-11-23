@@ -63,7 +63,7 @@ final class BridgeClient {
         boolean faceIrAvailable;
         boolean faceUnlockEnabled = true;
         boolean faceHalRunning;
-        String faceIrRotation = "90";
+        String faceIrRotation = "270";
     }
 
     static final class TouchImportResult {
@@ -352,8 +352,8 @@ final class BridgeClient {
         String faceEn = map.get("face_unlock_enabled");
         state.faceUnlockEnabled = faceEn == null ? state.faceIrAvailable : "1".equals(faceEn);
         state.faceHalRunning = "1".equals(map.get("face_hal_running"));
-        String rot = map.getOrDefault("face_ir_rotation", "90");
-        state.faceIrRotation = DriverPolicy.isValidRotation(rot) ? rot : "90";
+        String rot = map.getOrDefault("face_ir_rotation", "270");
+        state.faceIrRotation = DriverPolicy.isValidRotation(rot) ? rot : "270";
     }
 
     static final class FaceSelfCheckResult {
@@ -373,11 +373,6 @@ final class BridgeClient {
 
     BridgeState setFaceUnlock(boolean enabled) throws Exception {
         sendRequest(DriverPolicy.setFaceUnlockRequest(newNonce(), enabled), 15000);
-        return loadState(false);
-    }
-
-    BridgeState setFaceRotation(String rotation) throws Exception {
-        sendRequest(DriverPolicy.setFaceRotationRequest(newNonce(), rotation), 15000);
         return loadState(false);
     }
 

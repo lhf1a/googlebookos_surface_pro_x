@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<overlay>
+    <item target="bool/config_face_settings_should_manage_preview" value="@bool/config_face_settings_should_manage_preview" />
+    <item target="dimen/face_preview_scale" value="@dimen/face_preview_scale" />
+    <item target="dimen/face_preview_translate_x" value="@dimen/face_preview_translate_x" />
+    <item target="dimen/face_preview_translate_y" value="@dimen/face_preview_translate_y" />
+    <item target="string/face_enrolling_title" value="@string/face_enrolling_title" />
+    <item target="string/face_enrolling_center_head" value="@string/face_enrolling_center_head" />
+    <item target="string/face_enrolling_description" value="@string/face_enrolling_description" />
+    <item target="string/face_enrolling_turn_head_to_arrow" value="@string/face_enrolling_turn_head_to_arrow" />
+    <item target="string/face_enrolling_turned_too_far" value="@string/face_enrolling_turned_too_far" />
+    <item target="layout/face_enrolling" value="@layout/face_enrolling" />
+    <item target="id/setup_wizard_layout" value="@id/setup_wizard_layout" />
+    <item target="id/square_frame_layout" value="@id/square_frame_layout" />
+    <item target="id/texture_view" value="@id/texture_view" />
+    <item target="id/circle_view" value="@id/circle_view" />
+    <item target="id/face_smiley" value="@id/face_smiley" />
+    <item target="id/distance_indicator_view" value="@id/distance_indicator_view" />
+    <item target="id/indicator_view" value="@id/indicator_view" />
+    <item target="id/error_text" value="@id/error_text" />
+</overlay>

@@ -164,6 +164,7 @@ def build_hal(
             "-I" + str(binder_headers.resolve() / "include_cpp"),
             "-I" + str(binder_headers.resolve() / "include_platform"),
             str(FACE_DIR / "spx-face-hal.cpp"),
+            str(FACE_DIR / "spx-orientation-monitor.cpp"),
             *core_objs,
             str(archive),
             str(binder_lib.resolve()),

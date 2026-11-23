@@ -1452,7 +1452,7 @@ read_hall_and_face_snapshot() {
     _face_rot="$(android getprop persist.spx.face.rotation 2>/dev/null | tr -d '\r\n ' || true)"
     if ! validate_rotation "$_face_rot"; then
         _face_rot="$(read_saved_face_rotation)"
-        validate_rotation "$_face_rot" || _face_rot="90"
+        validate_rotation "$_face_rot" || _face_rot="270"
     fi
     _face_hal_running="$(read_face_hal_running)"
 }

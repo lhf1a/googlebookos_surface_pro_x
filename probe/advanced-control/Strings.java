@@ -24,7 +24,7 @@ public final class Strings {
     }
 
     public String homeSubtitle() {
-        return t("Vulkan、性能、触摸、调试与更新", "Vulkan, performance, touch, debugging & updates");
+        return t("图形、性能、触摸、调试、人脸与系统", "Graphics, performance, touch, debug, face & system");
     }
 
     public String vulkanTitle() {
@@ -337,10 +337,10 @@ public final class Strings {
 
     public String touchDisableDescription(boolean disabled) {
         return disabled
-                ? t("触摸屏输入已停用，休眠唤醒与重启后保持禁用；键鼠与触控板不受影响",
-                    "Touchscreen input is off and stays disabled across sleep and reboots. Keyboard, mouse, and touchpad still work.")
-                : t("关闭屏幕触控输入（适合外接键鼠或屏幕触控故障时使用）",
-                    "Turn off touchscreen input (useful with external keyboard/mouse or a faulty digitizer).");
+                ? t("已停用触控（重启后保持），键鼠正常",
+                    "Touch off (persists after reboot); keyboard & mouse still work")
+                : t("停用屏幕触控（适合外接键鼠或触控异常时）",
+                    "Turn off touchscreen (for external input or faulty digitizer)");
     }
 
     public String touchDisableDialogTitle() {
@@ -348,8 +348,8 @@ public final class Strings {
     }
 
     public String touchDisableDialogMessage() {
-        return t("禁用后屏幕将立即停止响应触控输入，且在休眠唤醒或重启后保持禁用。\n\n请确认已连接 Type Cover、外接键鼠，或可通过 ADB 恢复启用。",
-                 "Touchscreen input will stop immediately and remain disabled across sleep and reboots.\n\nMake sure a Type Cover, external keyboard/mouse, or ADB is available to re-enable it.");
+        return t("禁用后立即停用触控，重启后保持。\n\n请确认已有键盘、鼠标或 ADB 可恢复。",
+                 "Touch stops immediately and stays off after reboot.\n\nEnsure a keyboard, mouse, or ADB is available to re-enable.");
     }
 
     public String touchDisableConfirm() {
@@ -1093,28 +1093,26 @@ public final class Strings {
     }
 
     public String faceLidHomeSubtitle(boolean lidAvailable, boolean lidEnabled,
-                                        boolean faceAvailable, boolean faceEnabled,
-                                        String faceRotation) {
+                                        boolean faceAvailable, boolean faceEnabled) {
         String lidPart = !lidAvailable
-                ? t("未检测到霍尔传感器", "No Hall lid")
+                ? t("霍尔不可用", "No Hall lid")
                 : (lidEnabled
                         ? t("开盖唤醒开", "Hall lid on")
                         : t("开盖唤醒关", "Hall lid off"));
-        String rot = (faceRotation == null || faceRotation.isEmpty()) ? "90" : faceRotation;
         String facePart = !faceAvailable
-                ? t("未检测到红外相机", "No IR camera")
+                ? t("红外不可用", "No IR camera")
                 : (faceEnabled
-                        ? t("IR 人脸开（" + rot + "°）", "IR face on (" + rot + "°)")
-                        : t("IR 人脸关", "IR face off"));
+                        ? t("人脸解锁开", "IR face on")
+                        : t("人脸解锁关", "IR face off"));
         return lidPart + " · " + facePart;
     }
 
     public String faceLidSection() {
-        return t("霍尔开盖与合盖传感器", "Hall Lid Sensor");
+        return t("霍尔开关", "Hall Lid");
     }
 
     public String faceLidToggleTitle() {
-        return t("霍尔开盖唤醒与合盖休眠", "Hall lid wake & sleep");
+        return t("合盖休眠与开盖唤醒", "Lid sleep & wake");
     }
 
     public String faceLidBadge(boolean lidAvailable, boolean lidEnabled) {
@@ -1126,64 +1124,62 @@ public final class Strings {
 
     public String faceLidSummary(boolean lidAvailable, boolean lidEnabled) {
         if (!lidAvailable) {
-            return t("当前设备树或内核命令行未启用 gpio-keys-lid（或设置了 spx.hall_lid=0）",
-                    "gpio-keys-lid is not present or disabled via spx.hall_lid=0");
+            return t("未检测到霍尔传感器", "Hall sensor unavailable");
         }
         if (lidEnabled) {
-            return t("合盖自动熄屏休眠（s2idle），掀盖自动唤醒；反折键盘垫背时自动屏蔽误触发",
-                    "Sleeps on cover close and wakes on open; suppresses false triggers when folded back");
+            return t("合盖休眠、开盖唤醒，反折键盘时自动屏蔽",
+                    "Sleep on close, wake on open; ignored when folded back");
         }
-        return t("已通过内核开关禁用 SW_LID 事件（第三方磁吸皮套误触发时可关闭，设置持久保存）",
-                "SW_LID events are disabled (use if a folio case causes false triggers; persisted)");
+        return t("已关闭合盖检测（可避免磁吸皮套误触发）",
+                "Lid detection off (avoids magnetic case false triggers)");
     }
 
     public String faceLidStateFieldLabel() {
-        return t("当前霍尔开关状态", "Live Hall switch state");
+        return t("霍尔状态", "Lid state");
     }
 
     public String faceLidStateLabel(String lidState) {
         if ("OPEN".equals(lidState)) {
-            return t("OPEN（已掀盖 / 允许红外认证）", "OPEN (screen uncovered · IR allowed)");
+            return t("已开盖", "Open");
         }
         if ("CLOSED".equals(lidState)) {
-            return t("CLOSED（已合盖 · 强制锁定红外）", "CLOSED (cover closed · IR locked out)");
+            return t("已合盖", "Closed");
         }
         if ("FOLDED_IGNORED".equals(lidState)) {
-            return t("OPEN（反折键盘保护 · 已屏蔽误吸）", "OPEN (folded-back cover masked)");
+            return t("已开盖（键盘反折屏蔽）", "Open (folded back)");
         }
         if ("DISABLED".equals(lidState)) {
-            return t("DISABLED（已被用户关闭）", "DISABLED (switched off)");
+            return t("已关闭", "Disabled");
         }
-        return t("UNAVAILABLE（未检测到）", "UNAVAILABLE");
+        return t("不可用", "Unavailable");
     }
 
     public String ssamCoverPostureFieldLabel() {
-        return t("Type Cover 姿态（SSAM）", "Type Cover posture (SSAM)");
+        return t("键盘盖状态", "Type Cover");
     }
 
     public String ssamCoverStateLabel(String coverState) {
         if ("folded-back".equals(coverState) || "folded-canvas".equals(coverState)
                 || "book".equals(coverState)) {
-            return coverState + t("（反折状态，已屏蔽 SW_LID）", " (folded behind · SW_LID masked)");
+            return t("反折", "Folded back");
         }
         if ("closed".equals(coverState)) {
-            return t("closed（键盘合盖）", "closed");
+            return t("已合盖", "Closed");
         }
         if ("laptop".equals(coverState)) {
-            return t("laptop（笔记本打开姿态）", "laptop");
+            return t("正常打开", "Open (laptop)");
         }
         if ("disconnected".equals(coverState)) {
-            return t("disconnected（未连接磁吸键盘）", "disconnected");
+            return t("未连接", "Disconnected");
         }
         if (coverState == null || coverState.isEmpty() || "unavailable".equals(coverState)) {
-            return t("unavailable（未检测到 SSAM 键盘开关）", "unavailable");
+            return t("未检测到", "Unavailable");
         }
         return coverState;
     }
 
     public String faceUnlockSection() {
-        return t("OV7251 850nm 红外人脸解锁（Class 2 / WEAK）",
-                "OV7251 850nm IR Face Unlock (Class 2 / WEAK)");
+        return t("红外人脸解锁", "IR Face Unlock");
     }
 
     public String faceUnlockTitle() {
@@ -1199,114 +1195,84 @@ public final class Strings {
 
     public String faceUnlockSummary(boolean faceAvailable, boolean faceEnabled) {
         if (!faceAvailable) {
-            return t("未检测到 ov7251 红外传感器（或内核参数禁用了相机）",
-                    "OV7251 IR sensor not detected or disabled via cmdline");
+            return t("未检测到红外相机", "IR camera unavailable");
         }
         if (faceEnabled) {
-            return t("仅在开盖且发起系统认证时瞬时点亮 850nm 红外灯，无后台常驻取流，特征仅本地加密存储",
-                    "Active 850nm IR runs only on demand while uncovered; embeddings stay encrypted locally");
+            return t("认证时按需开启，支持四向识别，数据本地加密",
+                    "On-demand only, 4-way orientation, encrypted locally");
         }
-        return t("已软禁用 HAL 采帧（OV7251 与 850nm 红外灯不会响应人脸解锁或录入请求）",
-                "HAL capture is disabled (OV7251 & 850nm IR remain powered off)");
-    }
-
-    public String faceRotationTitle() {
-        return t("红外传感器旋转角度", "IR Sensor Rotation");
-    }
-
-    public String faceRotationSummary(String rot) {
-        return t("当前：顺时针 " + rot + "°（persist.spx.face.rotation，OV7251 默认 90° 竖屏转正）",
-                "Current: " + rot + "° CW (persist.spx.face.rotation; OV7251 defaults to 90°)");
-    }
-
-    public String faceRotationLabel(String rot) {
-        return rot + "°";
+        return t("已停用，红外相机不会响应认证", "Disabled; IR camera will not activate");
     }
 
     public String faceSystemSettingsTitle() {
-        return t("打开系统人脸解锁设置", "Open System Face Settings");
+        return t("系统人脸设置", "System Face Settings");
     }
 
     public String faceSystemSettingsSummary() {
-        return t("跳转 Android 设置 → 安全与隐私，进行人脸录入、删除与锁屏选项管理",
-                "Open Android Settings to enroll, manage, or delete face templates");
+        return t("录入、管理或删除人脸数据", "Enroll, manage, or delete face data");
     }
 
     public String faceSystemSettingsUnavailable() {
-        return t("无法打开系统人脸设置界面", "System Face Settings activity unavailable");
+        return t("无法打开系统人脸设置", "System Face Settings unavailable");
     }
 
     public String faceHalStatusLabel() {
-        return t("Android IFace V4 HAL 服务状态", "IFace V4 HAL Service");
+        return t("人脸服务", "Face service");
     }
 
     public String faceHalStatusValue(boolean running, boolean avail) {
         if (!avail) {
-            return t("未挂载（无 OV7251 硬件）", "Not staged (no OV7251 sensor)");
+            return t("不可用", "Unavailable");
         }
-        return running
-                ? t("运行中（vendor.face-default · Class 2 WEAK）", "Running (vendor.face-default · Class 2 WEAK)")
-                : t("已就绪/等待按需启动（vendor.face-default）", "Stopped / idle (vendor.face-default)");
+        return running ? t("运行中", "Running") : t("待机中", "Idle");
     }
 
     public String faceSelfCheckTitle() {
-        return t("一键自检（算法 / 霍尔 / 红外帧率）", "Run One-Click Self-Check");
+        return t("一键自检", "Run Self-Check");
     }
 
     public String faceSelfCheckSummary() {
-        return t("校验 HMAC/HAT 密码原语、反欺骗引擎、霍尔开关与 OV7251 红外管线",
-                "Verify HMAC/HAT crypto, liveness engine, Hall lid state & OV7251 IR pipeline");
+        return t("检测红外相机、霍尔开关与识别引擎", "Check IR camera, Hall lid & face engine");
     }
 
     public String faceSelfCheckResultMessage(String summary) {
         Map<String, String> m = DriverPolicy.parseSelfCheckSummary(summary);
         String st = m.getOrDefault("self_test", "unknown");
         String lid = m.getOrDefault("lid_state", "UNAVAILABLE");
-        String ssam = m.getOrDefault("ssam", "unavailable");
-        String ov = "1".equals(m.get("ov7251")) ? t("存在", "present") : t("未检测到", "absent");
         String bench = m.getOrDefault("ir_bench", "skip");
         String p50 = m.getOrDefault("proc_p50_ms", "na");
         if ("pass".equals(bench)) {
-            return t("自检通过：引擎 " + st + " · OV7251 " + ov + " · 预处理延迟 P50 " + p50
-                            + " ms · 霍尔 " + lid + " · SSAM " + ssam,
-                    "Self-check passed: engine=" + st + ", ov7251=" + ov
-                            + ", IR P50=" + p50 + "ms, lid=" + lid + ", ssam=" + ssam);
+            return t("自检通过 · 延迟 " + p50 + " ms · 霍尔 " + lid,
+                    "Self-check passed · " + p50 + " ms · Lid " + lid);
         }
-        return t("自检完成：引擎 " + st + " · OV7251 " + ov + " · 红外基准 " + bench
-                        + " · 霍尔 " + lid + " · SSAM " + ssam,
-                "Self-check complete: engine=" + st + ", ov7251=" + ov
-                        + ", IR bench=" + bench + ", lid=" + lid + ", ssam=" + ssam);
+        return t("自检完成（" + st + " / " + bench + "）· 霍尔 " + lid,
+                "Self-check done (" + st + " / " + bench + ") · Lid " + lid);
     }
 
     public String faceHallSavedMessage(boolean enabled) {
         return enabled
-                ? t("已开启霍尔开盖唤醒与合盖休眠", "Hall lid wake & sleep enabled")
-                : t("已关闭霍尔合盖传感器开关", "Hall lid sensor disabled");
+                ? t("已开启合盖休眠与开盖唤醒", "Lid sleep & wake enabled")
+                : t("已关闭合盖检测", "Lid detection disabled");
     }
 
     public String faceUnlockSavedMessage(boolean enabled) {
         return enabled
                 ? t("已开启红外人脸解锁", "IR Face Unlock enabled")
-                : t("已关闭红外人脸解锁（850nm 红外灯已停用）", "IR Face Unlock disabled (850nm IR off)");
-    }
-
-    public String faceRotationSavedMessage(String rot) {
-        return t("已保存红外传感器旋转角度：" + rot + "°", "Saved IR sensor rotation: " + rot + "°");
+                : t("已关闭红外人脸解锁", "IR Face Unlock disabled");
     }
 
     public String faceErrorMessage(String code) {
         if ("hall_lid_cmdline_disabled".equals(code)) {
-            return t("内核启动参数 spx.hall_lid=0 已强制禁用霍尔开关",
-                    "Hall lid is forced off by kernel cmdline spx.hall_lid=0");
+            return t("启动参数已禁用霍尔开关", "Hall lid disabled by kernel cmdline");
         }
         if ("hall_lid_unavailable".equals(code)) {
-            return t("未找到霍尔开关 sysfs 控制节点", "Hall lid sysfs node unavailable");
+            return t("霍尔开关不可用", "Hall lid unavailable");
         }
         if ("invalid_rotation".equals(code)) {
             return t("无效旋转角度", "Invalid rotation value");
         }
         if ("face_cli_missing".equals(code)) {
-            return t("未找到 spx-face-cli 自检工具", "spx-face-cli tool not installed");
+            return t("缺少自检工具", "spx-face-cli not installed");
         }
         if ("face_self_test_failed".equals(code)) {
             return t("自检失败，请查看系统日志", "Face self-test failed");

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="face_enrolling_title">请正视摄像头</string>
+    <string name="face_enrolling_center_head">请将人脸保持在方框内</string>
+    <string name="face_enrolling_description">请正视摄像头，等待进度条完成。</string>
+    <string name="face_enrolling_turn_head_to_arrow">请正视摄像头并保持不动</string>
+    <string name="face_enrolling_turned_too_far">请正对摄像头</string>
+</resources>

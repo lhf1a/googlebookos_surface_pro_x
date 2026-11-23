@@ -38,9 +38,13 @@ DEFAULT_BINDER_HEADERS = Path(
 )
 
 FACE_REVISION = "1a56e38edc2f2f6189ef405ee1edce554e15cbc0"
+ROOT = Path(__file__).resolve().parents[1]
+LOCAL_SENSOR_AIDL_DIR = ROOT / "probe/face/aidl/android.frameworks.sensorservice/1"
 INTERFACES = (
     ("common/aidl/aidl_api/android.hardware.common/2", "2"),
+    ("common/fmq/aidl/aidl_api/android.hardware.common.fmq/1", "1"),
     ("keymaster/aidl/aidl_api/android.hardware.keymaster/4", "4"),
+    ("sensors/aidl/aidl_api/android.hardware.sensors/2", "2"),
     ("biometrics/common/aidl/aidl_api/android.hardware.biometrics.common/4", "4"),
     ("biometrics/face/aidl/aidl_api/android.hardware.biometrics.face/4", "4"),
 )
@@ -100,6 +104,8 @@ def build_aidl(
     out = out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     api_dirs = extract_aidl_apis(interfaces.resolve(), out)
+    if LOCAL_SENSOR_AIDL_DIR.is_dir():
+        api_dirs = [*api_dirs, (LOCAL_SENSOR_AIDL_DIR.resolve(), "1")]
     include_flags = [f"-I{d}" for d, _ in api_dirs] + [f"-I{gui_aidl.resolve()}"]
 
     src_dir = out / "src"

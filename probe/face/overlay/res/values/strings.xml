@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="face_enrolling_title">Look directly at the camera</string>
+    <string name="face_enrolling_center_head">Keep your face inside the frame</string>
+    <string name="face_enrolling_description">Look at the camera until the progress bar completes.</string>
+    <string name="face_enrolling_turn_head_to_arrow">Keep looking straight at the camera</string>
+    <string name="face_enrolling_turned_too_far">Face the camera directly</string>
+</resources>

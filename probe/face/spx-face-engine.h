@@ -108,7 +108,23 @@ struct FaceSessionAccumulator {
     void reset(unsigned requiredConsecutiveFrames = 2);
 };
 
+struct MultiOrientationResult {
+    FaceDetection detection{};
+    Rotation rotation = Rotation::Deg0;
+    bool usedRotatedStats = false;
+    IrFrameStats rotatedStats{};
+};
+
 FaceDetection detectFaceNir(const IrFrameStats& frame);
+
+std::vector<FaceDetection> detectFaceCandidatesNir(const IrFrameStats& frame,
+                                                   size_t maxCandidates = 4,
+                                                   FaceQuality* outEmptyQuality = nullptr);
+
+MultiOrientationResult detectFaceNirMultiOrientation(const IrFrameStats& baseStats,
+                                                     Rotation baseRotation,
+                                                     bool allowFallback = true,
+                                                     bool forceCompareAll = false);
 
 Embedding extractEmbedding(const IrFrameStats& frame,
                            const FaceDetection& det,
@@ -213,5 +229,46 @@ private:
     int32_t nextEnrollmentId_ = 1;
     std::vector<EnrollmentRecord> enrollments_;
 };
+
+struct RefinedMatchResult {
+    MatchResult match{};
+    bool usedRefinement = false;
+};
+
+MatchResult matchEmbeddings(const std::vector<Embedding>& candidates,
+                            const Embedding& probe,
+                            float threshold = kDefaultMatchThreshold);
+
+RefinedMatchResult matchWithAlignmentRefinement(
+    const IrFrameStats& frame,
+    const FaceDetection& det,
+    const Embedding& baseEmb,
+    const SpxFaceStore& store,
+    const OptionalModelWeights* model = nullptr,
+    float threshold = kDefaultMatchThreshold);
+
+RefinedMatchResult matchCandidatesWithAlignmentRefinement(
+    const IrFrameStats& frame,
+    const FaceDetection& det,
+    const Embedding& baseEmb,
+    const std::vector<Embedding>& candidates,
+    const OptionalModelWeights* model = nullptr,
+    float threshold = kDefaultMatchThreshold);
+
+struct OrientationSwitchHint {
+    bool shouldSwitch = false;
+    Rotation rotation = Rotation::Deg0;
+    float bestSimilarity = 0.0f;
+    float detScore = 0.0f;
+};
+
+OrientationSwitchHint probeAlternateOrientationMatch(
+    const IrFrameStats& baseStats,
+    Rotation baseRotation,
+    float baseSimilarity,
+    const SpxFaceStore& store,
+    const OptionalModelWeights* model = nullptr,
+    float matchThreshold = kDefaultMatchThreshold,
+    bool requireFullMatch = false);
 
 }  // namespace spx::face
