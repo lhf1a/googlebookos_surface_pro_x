@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">屏幕排列与镜像</string>
+    <string name="settings_title">屏幕排列与镜像</string>
+    <string name="settings_summary">使用系统原生多屏排列、镜像/扩展和分辨率设置</string>
+</resources>

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -713,6 +714,148 @@ class S2IdleHygieneTests(unittest.TestCase):
                     self.assertIn('/system/bin/setprop sys.usb.configfs 1', calls)
                     self.assertNotIn('/system/bin/setprop ctl.start vendor.usb-hal', calls)
 
+    def test_spx_lower_usb_auto_boot_and_mode_lifecycle(self):
+        with tempfile.TemporaryDirectory(prefix='spx-lower-usb-auto-') as td:
+            td_p = Path(td)
+            root = td_p / 'root'
+            sysfs = td_p / 'sys'
+            run_dir = td_p / 'run'
+            logs_dir = td_p / 'logs'
+            run_dir.mkdir(parents=True)
+            logs_dir.mkdir(parents=True)
+
+            watch_bin = td_p / 'spx-lower-usb-watch'
+            subprocess.run([
+                'gcc', '-std=c11', '-Os', '-Wall', '-Wextra', '-Werror',
+                str(ROOT / 'probe/test2/spx-lower-usb-watch.c'), '-o', str(watch_bin),
+            ], check=True)
+            lower_usb = td_p / 'spx-lower-usb'
+            shutil.copy2(ROOT / 'probe/test2/spx-lower-usb', lower_usb)
+            lower_usb.chmod(0o755)
+
+            # Synthetic sysfs: surface-typec, UDC symlink, DT node, and UCSI port0
+            typec_dev = sysfs / 'bus/platform/devices/surface-typec'
+            role = _write(typec_dev / 'lower_data_role', 'host\n')
+            auto_dp = _write(typec_dev / 'lower_auto_dp', '0\n')
+            dp_state = _write(typec_dev / 'lower_dp_state', 'none\n')
+            storage = _write(typec_dev / 'storage_ports', '0\n')
+            (sysfs / 'firmware/devicetree/base/soc@0/usb@a6f8800/usb@a600000').mkdir(parents=True)
+            udc_real = sysfs / 'devices/platform/soc@0/a6f8800.usb/a600000.usb/udc/a600000.usb'
+            _write(udc_real / 'state', 'not attached\n')
+            (sysfs / 'class/udc').mkdir(parents=True)
+            (sysfs / 'class/udc/a600000.usb').symlink_to('../../devices/platform/soc@0/a6f8800.usb/a600000.usb/udc/a600000.usb')
+            ucsi_p0 = sysfs / 'devices/platform/spx-ucsi-transport/0019:045E:0922.0001/typec/port0'
+            ucsi_p0.mkdir(parents=True)
+            (sysfs / 'class/typec').mkdir(parents=True)
+            (sysfs / 'class/typec/port0').symlink_to('../../devices/platform/spx-ucsi-transport/0019:045E:0922.0001/typec/port0')
+
+            # Synthetic Android gadget + props wrapper
+            gadget = root / 'config/usb_gadget/g1'
+            _write(gadget / 'UDC', '')
+            (gadget / 'functions/ffs.adb').mkdir(parents=True)
+            (gadget / 'configs/b.1').mkdir(parents=True)
+            vintf = _write(root / 'vendor/etc/vintf/manifest/android.hardware.usb-service.qti.xml', '<manifest version="9.0" type="device"/>\n')
+            props_file = td_p / 'props.txt'
+            props_file.write_text('sys.usb.config=none\nsys.usb.state=none\nro.adb.secure=1\ninit.svc.vendor.usb-hal=stopped\n')
+            calls_log = td_p / 'android-calls.log'
+            wrapper = _write(td_p / 'mock-android', textwrap.dedent(f"""\
+                #!/usr/bin/env python3
+                from pathlib import Path
+                import sys
+                props_p = Path({str(props_file)!r})
+                udc_p = Path({str(gadget / 'UDC')!r})
+                log_p = Path({str(calls_log)!r})
+                args = sys.argv[1:]
+                with log_p.open('a') as f:
+                    f.write(' '.join(args) + '\\n')
+                props = dict(line.split('=', 1) for line in props_p.read_text().splitlines() if '=' in line)
+                if len(args) >= 2 and args[0] == '/system/bin/getprop':
+                    print(props.get(args[1], ''))
+                elif len(args) >= 3 and args[0] == '/system/bin/setprop':
+                    k, v = args[1], args[2]
+                    props[k] = v
+                    if k == 'sys.usb.config' and v in ('none', 'adb'):
+                        props['sys.usb.state'] = v
+                        if v == 'adb':
+                            udc_p.write_text(props.get('sys.usb.controller', '') + '\\n')
+                        else:
+                            udc_p.write_text('')
+                    props_p.write_text(''.join(f'{{kk}}={{vv}}\\n' for kk, vv in props.items()))
+            """), 0o755)
+
+            env = os.environ.copy()
+            env.update({
+                'SPX_LOWER_USB_ROOT': str(root),
+                'SPX_LOWER_USB_SYSFS': str(sysfs),
+                'SPX_LOWER_USB_RUN': str(run_dir),
+                'SPX_LOWER_USB_LOGS': str(logs_dir),
+                'SPX_LOWER_USB_ROLE': str(role),
+                'SPX_LOWER_USB_AUTO_DP': str(auto_dp),
+                'SPX_LOWER_USB_DP_STATE': str(dp_state),
+                'SPX_LOWER_USB_STORAGE': str(storage),
+                'SPX_LOWER_USB_WATCH_BIN': str(watch_bin),
+                'SPX_LOWER_USB_ANDROID_WRAPPER': str(wrapper),
+                'SPX_USB_VINTF': str(vintf),
+            })
+            pidfile = run_dir / 'spx-lower-usb-watch.pid'
+            try:
+                # 1. boot without saved lower-mode defaults to auto, binds ADB, and starts watcher
+                res = subprocess.run([str(lower_usb), 'boot'], env=env, text=True, capture_output=True, check=True)
+                self.assertIn('LOWER_USB_MODE=auto', res.stdout)
+                self.assertIn('mode=auto', res.stdout)
+                self.assertIn('watch=running', res.stdout)
+                self.assertEqual(role.read_text().strip(), 'device')
+                self.assertEqual(auto_dp.read_text().strip(), '1')
+                self.assertEqual((gadget / 'UDC').read_text().strip(), 'a600000.usb')
+                self.assertTrue(pidfile.is_file())
+                wpid = int(pidfile.read_text().strip())
+                os.kill(wpid, 0)
+
+                # 2. adb --save while already bound uses idempotent fast-path (no UDC clear), stops watcher
+                calls_log.write_text('')
+                res = subprocess.run([str(lower_usb), 'adb', '--save'], env=env, text=True, capture_output=True, check=True)
+                self.assertIn('LOWER_USB_MODE=adb', res.stdout)
+                self.assertIn('watch=stopped', res.stdout)
+                self.assertEqual(auto_dp.read_text().strip(), '0')
+                self.assertEqual((root / 'data/vendor/surface-usb/lower-mode').read_text().strip(), 'adb')
+                self.assertNotIn('sys.usb.config none', calls_log.read_text())
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(wpid, 0)
+
+                # 3. host --save sets host and persists; boot preserves saved host
+                res = subprocess.run([str(lower_usb), 'host', '--save'], env=env, text=True, capture_output=True, check=True)
+                self.assertIn('LOWER_USB_MODE=host', res.stdout)
+                self.assertEqual(role.read_text().strip(), 'host')
+                self.assertEqual((root / 'data/vendor/surface-usb/lower-mode').read_text().strip(), 'host')
+                res = subprocess.run([str(lower_usb), 'boot'], env=env, text=True, capture_output=True, check=True)
+                self.assertEqual(role.read_text().strip(), 'host')
+                self.assertFalse(pidfile.exists())
+
+                # 4. auto --save restores auto mode and watcher
+                res = subprocess.run([str(lower_usb), 'auto', '--save'], env=env, text=True, capture_output=True, check=True)
+                self.assertIn('LOWER_USB_MODE=auto', res.stdout)
+                self.assertEqual(role.read_text().strip(), 'device')
+                self.assertEqual(auto_dp.read_text().strip(), '1')
+                self.assertEqual((root / 'data/vendor/surface-usb/lower-mode').read_text().strip(), 'auto')
+                self.assertTrue(pidfile.is_file())
+
+                # 5. boot storage lock rejects adb and keeps host in auto without starting watcher
+                storage.write_text('1\n')
+                res_bad = subprocess.run([str(lower_usb), 'adb'], env=env, text=True, capture_output=True)
+                self.assertNotEqual(res_bad.returncode, 0)
+                self.assertIn('boot storage', res_bad.stderr)
+                res_auto = subprocess.run([str(lower_usb), 'auto'], env=env, text=True, capture_output=True, check=True)
+                self.assertEqual(role.read_text().strip(), 'host')
+                self.assertEqual(auto_dp.read_text().strip(), '0')
+                self.assertIn('boot_storage_locked=1', res_auto.stdout)
+                self.assertIn('watch=stopped', res_auto.stdout)
+            finally:
+                if pidfile.is_file():
+                    try:
+                        os.kill(int(pidfile.read_text().strip()), signal.SIGKILL)
+                    except Exception:
+                        pass
+
     def test_disk_image_wires_service_hygiene_and_rtl_nic(self):
         init_src = (ROOT / 'probe/test2/init-googlebook-native').read_bytes().replace(b'\r\n', b'\n')
         init_src = init_src.replace(ANCHOR, HOOK + ANCHOR, 1)
@@ -742,6 +885,8 @@ class S2IdleHygieneTests(unittest.TestCase):
         self.assertIn('bin/spx-oem-cleanup-boot', after)
         self.assertIn('bin/lab-input-posture', after)
         self.assertIn('bin/spx-lower-usb', after)
+        self.assertIn('bin/spx-lower-usb-watch', after)
+        self.assertEqual(after['bin/spx-lower-usb-watch'][1][:6], b'\x7fELF\x02\x01')
         self.assertIn('bin/prepare-native-gpu', after)
 
         patched_init = after['init'][1]
@@ -932,6 +1077,7 @@ class S2IdleHygieneTests(unittest.TestCase):
             'probe/test2/lab-input-posture',
             'probe/test2/touch-resume-watch',
             'probe/test2/spx-lower-usb',
+            'probe/test2/spx-lower-usb-watch.c',
             'probe/test2/spx-advanced-control-boot',
             'probe/ota/spx-ota-boot',
             'probe/test2/touch-calibration-boot',

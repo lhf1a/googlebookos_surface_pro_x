@@ -395,6 +395,38 @@ public class PolicyAndStringsTest {
     check(zh.faceLidHomeSubtitle(true, true, true, true).contains("人脸解锁开"), "zh faceLid home sub");
     check(zh.faceSelfCheckResultMessage("self_test=pass;ov7251=1;ir_bench=pass;proc_p50_ms=3.1;lid_state=OPEN;ssam=laptop").contains("3.1"), "zh self check msg");
 
+    // Lower USB-C mode policy & bilingual strings
+    for (String m : new String[]{"auto", "adb", "host"}) {
+      check(m.equals(DriverPolicy.normalizeLowerUsbMode(m)), "normalizeLowerUsbMode " + m);
+    }
+    for (String badMode : new String[]{"", "usb", "auto\n", null}) {
+      try { DriverPolicy.normalizeLowerUsbMode(badMode); throw new AssertionError("badMode: " + badMode); }
+      catch (IllegalArgumentException expected) {}
+    }
+    check(DriverPolicy.lowerUsbModeRequest("abc-123", "auto").equals("set-lower-usb-mode\nabc-123\nauto\n"), "lowerUsbAutoReq");
+    check(DriverPolicy.lowerUsbModeRequest("abc-123", "adb").equals("set-lower-usb-mode\nabc-123\nadb\n"), "lowerUsbAdbReq");
+    check(DriverPolicy.lowerUsbModeRequest("abc-123", "host").equals("set-lower-usb-mode\nabc-123\nhost\n"), "lowerUsbHostReq");
+    check("下口 USB-C".equals(zh.debugLowerUsbSection()), "zh lower usb section");
+    check("Lower USB-C".equals(en.debugLowerUsbSection()), "en lower usb section");
+    check("自动".equals(zh.debugLowerUsbModeAuto()) && "Auto".equals(en.debugLowerUsbModeAuto()), "lower usb auto label");
+    check("仅 ADB".equals(zh.debugLowerUsbModeAdb()) && "ADB Only".equals(en.debugLowerUsbModeAdb()), "lower usb adb label");
+    check("仅主机".equals(zh.debugLowerUsbModeHost()) && "Host Only".equals(en.debugLowerUsbModeHost()), "lower usb host label");
+    check("不可用".equals(zh.debugLowerUsbBadge(false, false, "", "none")), "zh lower usb unavail badge");
+    check("启动盘锁定".equals(zh.debugLowerUsbBadge(true, true, "host", "none")), "zh lower usb boot locked badge");
+    check("DP 输出中".equals(zh.debugLowerUsbBadge(true, false, "host", "active")), "zh lower usb dp active badge");
+    check("待切 DP".equals(zh.debugLowerUsbBadge(true, false, "device", "pending")), "zh lower usb dp pending badge");
+    check("主机模式".equals(zh.debugLowerUsbBadge(true, false, "host", "none")), "zh lower usb host badge");
+    check("ADB 就绪".equals(zh.debugLowerUsbBadge(true, false, "device", "none")), "zh lower usb adb badge");
+    check("DP Active".equals(en.debugLowerUsbBadge(true, false, "host", "active")), "en lower usb dp active badge");
+    check(zh.debugLowerUsbSummary(true, "auto", "device", "none", false, true).contains("监听中"), "zh lower usb auto summary");
+    check(en.debugLowerUsbSummary(true, "host", "host", "none", false, false).contains("Host"), "en lower usb host summary");
+    check(zh.debugLowerUsbSavedMessage("auto").contains("自动"), "zh lower usb saved auto");
+    check(en.debugLowerUsbSavedMessage("adb").contains("ADB"), "en lower usb saved adb");
+    check(zh.debugErrorMessage("lower_usb_busy").contains("断开"), "zh lower usb busy err");
+    check(en.debugErrorMessage("lower_usb_boot_locked").contains("boot disk"), "en lower usb boot locked err");
+    check(zh.debugErrorMessage("lower_usb_unavailable").contains("不可用"), "zh lower usb unavail err");
+    check(en.debugErrorMessage("lower_usb_failed").contains("Lower USB-C"), "en lower usb failed err");
+
     System.out.println("DRIVER_POLICY_AND_I18N_OK");
   }
 }
@@ -2242,6 +2274,135 @@ else:
                         os.kill(int(pidfile.read_text().strip()), signal.SIGKILL)
                     except Exception:
                         pass
+
+    def test_bridge_daemon_lower_usb_mode_flow(self):
+        bridge = ROOT / 'probe/test2/spx-advanced-control-boot'
+        with tempfile.TemporaryDirectory(prefix='spx-lower-usb-bridge-test-') as td:
+            root = Path(td)
+            data_root = root / 'root'
+            sysfs = root / 'sys'
+            run_dir = root / 'run'
+            logs_dir = root / 'logs'
+            cmdline = root / 'cmdline'
+            cmdline.write_text('console=tty0\n')
+            run_dir.mkdir(parents=True)
+            logs_dir.mkdir(parents=True)
+            app_files = data_root / 'data/user_de/0/org.surface.advancedcontrol/files'
+            app_files.mkdir(parents=True)
+
+            typec_dev = sysfs / 'bus/platform/devices/surface-typec'
+            typec_dev.mkdir(parents=True)
+            role_node = typec_dev / 'lower_data_role'
+            dp_node = typec_dev / 'lower_dp_state'
+            storage_node = typec_dev / 'storage_ports'
+            auto_dp_node = typec_dev / 'lower_auto_dp'
+            role_node.write_text('device\n')
+            dp_node.write_text('none\n')
+            storage_node.write_text('0\n')
+            auto_dp_node.write_text('1\n')
+
+            mock_lower_usb = root / 'mock-spx-lower-usb'
+            busy_flag = root / 'busy.flag'
+            mock_lower_usb.write_text(textwrap.dedent(f'''\
+                #!/bin/sh
+                set -eu
+                mode="$1"
+                if [ -f "{busy_flag}" ] && [ "$mode" = "adb" ]; then
+                    echo "Disconnect lower-port USB peripherals before changing role" >&2
+                    exit 1
+                fi
+                state_dir="${{SPX_LOWER_USB_ROOT}}/data/vendor/surface-usb"
+                mkdir -p "$state_dir"
+                if [ "$mode" = "host" ]; then
+                    printf 'host\\n' > "{role_node}"
+                    printf '0\\n' > "{auto_dp_node}"
+                elif [ "$mode" = "adb" ]; then
+                    printf 'device\\n' > "{role_node}"
+                    printf '0\\n' > "{auto_dp_node}"
+                elif [ "$mode" = "auto" ]; then
+                    printf 'device\\n' > "{role_node}"
+                    printf '1\\n' > "{auto_dp_node}"
+                fi
+                if [ "${{2:-}}" = "--save" ]; then
+                    printf '%s\\n' "$mode" > "$state_dir/lower-mode"
+                fi
+            '''))
+            mock_lower_usb.chmod(0o755)
+
+            wrapper = root / 'mock-android'
+            wrapper.write_text(textwrap.dedent('''\
+                #!/usr/bin/env python3
+                import sys
+                args = sys.argv[1:]
+                if args == ['cmd', 'activity', 'get-current-user']:
+                    print('0')
+                elif args == ['getprop', 'sys.boot_completed']:
+                    print('1')
+            '''))
+            wrapper.chmod(0o755)
+
+            def run_once(req_body=None, lower_bin=None):
+                if req_body is not None:
+                    (app_files / 'request').write_text(req_body)
+                env = dict(
+                    os.environ,
+                    SPX_AC_ROOT=str(data_root),
+                    SPX_AC_SYSFS=str(sysfs),
+                    SPX_AC_RUN=str(run_dir),
+                    SPX_AC_LOGS=str(logs_dir),
+                    SPX_AC_CMDLINE=str(cmdline),
+                    SPX_AC_ANDROID_WRAPPER=str(wrapper),
+                    SPX_AC_LOWER_USB_BIN=str(lower_bin if lower_bin is not None else mock_lower_usb),
+                    SPX_AC_LOCK_DIR=str(root / 'lock'),
+                    SPX_AC_TMP_REQ=str(root / 'tmp.req'),
+                    SPX_AC_TMP_TOUCH=str(root / 'tmp.touch'),
+                    SPX_AC_BOOT_WAIT='0',
+                    SPX_AC_ONCE='1',
+                )
+                res = subprocess.run(['sh', str(bridge)], env=env, text=True, capture_output=True)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                state = {}
+                for line in (app_files / 'state').read_text().splitlines():
+                    if '=' in line:
+                        k, v = line.split('=', 1)
+                        state[k] = v
+                reply = (app_files / 'reply').read_text().splitlines() if (app_files / 'reply').is_file() else []
+                return state, reply
+
+            # 1. Default snapshot
+            state, _ = run_once()
+            self.assertEqual(state['lower_usb_available'], '1')
+            self.assertEqual(state['lower_usb_mode'], 'auto')
+            self.assertEqual(state['lower_usb_role'], 'device')
+            self.assertEqual(state['lower_usb_dp_state'], 'none')
+            self.assertEqual(state['lower_usb_boot_locked'], '0')
+
+            # 2. Switch to host, adb, and back to auto
+            for target_mode, expected_role in (('host', 'host'), ('adb', 'device'), ('auto', 'device')):
+                state, reply = run_once(f'set-lower-usb-mode\nlu-{target_mode}\n{target_mode}\n')
+                self.assertEqual(reply, [f'lu-{target_mode}', 'OK'])
+                self.assertEqual(state['lower_usb_mode'], target_mode)
+                self.assertEqual(state['lower_usb_role'], expected_role)
+                self.assertEqual((data_root / 'data/vendor/surface-usb/lower-mode').read_text().strip(), target_mode)
+
+            # 3. Error mapping: busy peripheral -> lower_usb_busy; boot lock -> lower_usb_boot_locked; invalid -> invalid_arguments
+            busy_flag.write_text('1\n')
+            _, reply = run_once('set-lower-usb-mode\nlu-busy\nadb\n')
+            self.assertEqual(reply, ['lu-busy', 'ERROR', 'lower_usb_busy'])
+            busy_flag.unlink()
+
+            storage_node.write_text('1\n')
+            state, reply = run_once('set-lower-usb-mode\nlu-lock\nadb\n')
+            self.assertEqual(reply, ['lu-lock', 'ERROR', 'lower_usb_boot_locked'])
+            self.assertEqual(state['lower_usb_boot_locked'], '1')
+            storage_node.write_text('0\n')
+
+            _, reply = run_once('set-lower-usb-mode\nlu-bad\nbogus\n')
+            self.assertEqual(reply, ['lu-bad', 'ERROR', 'invalid_arguments'])
+
+            state, reply = run_once('set-lower-usb-mode\nlu-miss\nhost\n', lower_bin=root / 'missing-bin')
+            self.assertEqual(reply, ['lu-miss', 'ERROR', 'lower_usb_unavailable'])
+            self.assertEqual(state['lower_usb_available'], '0')
 
 
 if __name__ == '__main__':

@@ -85,7 +85,9 @@ if [ ! -f "$WORK/build-turnip/build.ninja" ]; then
     -Degl=disabled -Dgles1=disabled -Dgles2=disabled -Dopengl=false \
     > "$OUT/configure.log" 2>&1 || { tail -70 "$OUT/configure.log"; exit 1; }
 fi
-ninja -j "${SQ2_BUILD_JOBS:-8}" -C "$WORK/build-turnip" \
+DEFAULT_JOBS=$(( $(nproc 2>/dev/null || echo 2) - 1 ))
+[ "$DEFAULT_JOBS" -lt 1 ] && DEFAULT_JOBS=1
+ninja -j "${SQ2_BUILD_JOBS:-$DEFAULT_JOBS}" -C "$WORK/build-turnip" \
   > "$OUT/build.log" 2>&1 || { tail -70 "$OUT/build.log"; exit 1; }
 "$NDK/bin/llvm-strip" --strip-unneeded -o "$OUT/runtime/vulkan.freedreno.so" \
   "$WORK/build-turnip/src/freedreno/vulkan/libvulkan_freedreno.so"

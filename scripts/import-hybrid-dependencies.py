@@ -199,7 +199,7 @@ def main():
     p.add_argument('--private-root', type=Path)
     p.add_argument('--build', action='store_true')
     p.add_argument('--build-output', type=Path)
-    p.add_argument('--jobs', type=int, default=8)
+    p.add_argument('--jobs', type=int, default=max(1, (os.cpu_count() or 2) - 1))
     p.add_argument('--bootstrap-work', type=Path, help='fresh Linux work directory for offline source/extraction/build stages')
     p.add_argument('--bootstrap-stage', choices=('sources','toolchains','kernel','quest','android','platform','all'), default='all')
     a = p.parse_args()

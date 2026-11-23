@@ -394,7 +394,11 @@ fi
     if 'bin/apply-device-info' in before:
         delta['bin/apply-device-info'] = (0o100755, boot_helper('apply-device-info'))
     if 'bin/spx-lower-usb' in before:
+        from full_image_typec import build_lower_usb_watch
         delta['bin/spx-lower-usb'] = (0o100755, boot_helper('spx-lower-usb'))
+        if 'bin/spx-lower-usb-boot' in before:
+            delta['bin/spx-lower-usb-boot'] = (0o100755, boot_helper('spx-lower-usb-boot'))
+        delta['bin/spx-lower-usb-watch'] = (0o100755, build_lower_usb_watch())
     delta.update(early_hidl_bootstrap(before))
     from runtime_boot_policy import apply
     runtime_bodies = {name: body for name, (_,body) in before.items()}

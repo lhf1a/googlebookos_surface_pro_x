@@ -116,27 +116,33 @@ class DpS2idleFixes(unittest.TestCase):
             "mutex_lock(&aux->mutex);",
         ):
             self.assertIn(snippet, text)
-        # dp_ctrl.c fixes: phy_power_on check, aux_reconfig after phy_init,
-        # D0 wake + link_retrain failure check + full clock/phy unwind
+        # dp_ctrl.h + dp_ctrl.c fixes: phy_power_on check, aux_reconfig after phy_init,
+        # D0 wake + deferred active-link retrain + full clock/phy unwind
         for snippet in (
+            "bool link_needs_retrain;",
+            "int msm_dp_ctrl_retrain_active_link(struct msm_dp_ctrl *msm_dp_ctrl);",
             "ret = phy_power_on(phy);",
             "msm_dp_aux_reconfig(ctrl->aux);",
             "ret = msm_dp_link_psm_config(ctrl->link, &ctrl->panel->link_info, false);",
             "ret = msm_dp_ctrl_link_retrain(ctrl);",
+            "msm_dp_ctrl_mainlink_enable(ctrl);",
             "goto err_link_train;",
             "if (stream_clks_enabled_here)",
             "if (link_clks_enabled_here)",
         ):
             self.assertIn(snippet, text)
         # dp_display.c fixes: ensure DPU PHY mux before external DP AUX,
-        # ST_DISPLAY_OFF HPD plug recovery, atomic_enable error handling,
+        # ST_DISPLAY_OFF HPD plug recovery, atomic_enable error handling + deferred retrain,
         # ST_MAINLINK_READY post_disable cleanup, preserve ST_DISCONNECTED, external IRQ_HPD dispatch
         for snippet in (
+            "#define DP_LINK_RETRAIN_MAX_RETRIES",
             "static void msm_dp_display_ensure_kms_phy_sel(struct msm_dp_display_private *dp)",
             "if (pm_runtime_resume_and_get(kms_dev) == 0)",
             "pm_runtime_put_sync(kms_dev);",
             "msm_dp_display_send_hpd_event(&dp->msm_dp_display);",
             "rc = msm_dp_display_enable(msm_dp_display, force_link_train);",
+            "msm_dp_ctrl_retrain_active_link(dp->ctrl)",
+            "if (msm_dp_display->ctrl->link_needs_retrain)",
             "if (phy_initted)",
             "if (!dp->power_on && hpd_state == ST_MAINLINK_READY)",
             "if (hpd_state == ST_DISCONNECT_PENDING || hpd_state == ST_DISCONNECTED)",
@@ -175,6 +181,9 @@ class DpS2idleFixes(unittest.TestCase):
         self.assertIn("irq_hpd=!!b[10];", src)
         self.assertIn("if(hpd!=p->hpd_asserted || irq_hpd || force_hpd)", src)
         self.assertIn('MODULE_INFO(spx_boot_handoff,"1");', src)
+        self.assertIn("spx_wait_role_settled(", src)
+        self.assertIn("spx_apply_mux_only(", src)
+        self.assertIn("struct mutex role_lock;", src)
 
     def test_spx_ucsi_transport_driver_pm_ops(self):
         src = (ROOT / "probe/typec/spx-ucsi-transport.c").read_text()
@@ -386,6 +395,7 @@ class DpS2idleFixes(unittest.TestCase):
         kernel_relpaths = (
             "drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c",
             "drivers/gpu/drm/msm/dp/dp_aux.c",
+            "drivers/gpu/drm/msm/dp/dp_ctrl.h",
             "drivers/gpu/drm/msm/dp/dp_ctrl.c",
             "drivers/gpu/drm/msm/dp/dp_debug.c",
             "drivers/gpu/drm/msm/dp/dp_display.c",
@@ -398,6 +408,7 @@ class DpS2idleFixes(unittest.TestCase):
         edp_relpaths = (
             "drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c",
             "drivers/gpu/drm/msm/dp/dp_aux.c",
+            "drivers/gpu/drm/msm/dp/dp_ctrl.h",
             "drivers/gpu/drm/msm/dp/dp_ctrl.c",
             "drivers/gpu/drm/msm/dp/dp_debug.c",
             "drivers/gpu/drm/msm/dp/dp_display.c",
@@ -442,6 +453,10 @@ class DpS2idleFixes(unittest.TestCase):
             self.assertEqual(
                 (kt / "drivers/gpu/drm/msm/dp/dp_debug.c").read_bytes(),
                 (et / "drivers/gpu/drm/msm/dp/dp_debug.c").read_bytes(),
+            )
+            self.assertEqual(
+                (kt / "drivers/gpu/drm/msm/dp/dp_ctrl.h").read_bytes(),
+                (et / "drivers/gpu/drm/msm/dp/dp_ctrl.h").read_bytes(),
             )
             self.assertEqual(
                 (kt / "drivers/gpu/drm/msm/dp/dp_display.c").read_bytes(),
@@ -522,7 +537,7 @@ static void aux_on_timeout(struct aux_hw *a) {
         aux_reset(a);
 }
 
-/* 2. MSM DP atomic_enable + ST_DISPLAY_OFF HPD recovery + post_disable model */
+/* 2. MSM DP atomic_enable + ST_DISPLAY_OFF HPD recovery + deferred retrain + post_disable model */
 enum hpd_state { ST_DISCONNECTED = 0, ST_MAINLINK_READY = 1, ST_CONNECTED = 2, ST_DISPLAY_OFF = 3 };
 struct dp_fsm {
     enum hpd_state state;
@@ -531,13 +546,18 @@ struct dp_fsm {
     bool phy_initted;
     bool link_clks_on;
     bool stream_clks_on;
+    bool mainlink_tx_on;
+    bool link_needs_retrain;
+    unsigned int link_retrain_retries;
+    int retrain_events_queued;
     int pm_refs;
     int hpd_events;
     int irq_hpd_events;
 };
 
-static int dp_on_stream(struct dp_fsm *d, bool force_train, int train_rc) {
-    bool link_here = false, stream_here = false;
+static int dp_on_stream(struct dp_fsm *d, bool force_train, int aux_rc, int hw_rc) {
+    bool link_here = false, stream_here = false, link_train_failed = false;
+    d->link_needs_retrain = false;
     if (!d->link_clks_on) {
         d->link_clks_on = true;
         link_here = true;
@@ -546,15 +566,25 @@ static int dp_on_stream(struct dp_fsm *d, bool force_train, int train_rc) {
         d->stream_clks_on = true;
         stream_here = true;
     }
-    if (force_train && train_rc != 0) {
+    if (force_train && aux_rc != 0)
+        link_train_failed = true;
+    if (link_train_failed) {
+        d->mainlink_tx_on = true;
+        d->link_needs_retrain = true;
+    } else {
+        d->mainlink_tx_on = true;
+    }
+    if (hw_rc != 0) {
+        d->link_needs_retrain = false;
+        d->mainlink_tx_on = false;
         if (stream_here) d->stream_clks_on = false;
         if (link_here) d->link_clks_on = false;
-        return train_rc;
+        return hw_rc;
     }
     return 0;
 }
 
-static void dp_atomic_enable(struct dp_fsm *d, int train_rc) {
+static void dp_atomic_enable_ex(struct dp_fsm *d, int aux_rc, int hw_rc) {
     bool phy_here = false, force = false;
     d->pm_refs++;
     if (d->state != ST_DISPLAY_OFF && d->state != ST_MAINLINK_READY)
@@ -564,20 +594,31 @@ static void dp_atomic_enable(struct dp_fsm *d, int train_rc) {
         phy_here = true;
         force = true;
     }
-    int rc = dp_on_stream(d, force, train_rc);
+    int rc = dp_on_stream(d, force, aux_rc, hw_rc);
     if (rc) {
         if (phy_here) d->phy_initted = false;
         return;
     }
     d->power_on = true;
     d->state = ST_CONNECTED;
+    d->link_retrain_retries = 0;
+    if (d->link_needs_retrain)
+        d->retrain_events_queued++;
+}
+
+static void dp_atomic_enable(struct dp_fsm *d, int hw_rc) {
+    dp_atomic_enable_ex(d, 0, hw_rc);
 }
 
 static void dp_atomic_post_disable(struct dp_fsm *d) {
+    d->link_needs_retrain = false;
+    d->link_retrain_retries = 0;
+    d->retrain_events_queued = 0;
     if (!d->power_on && d->state == ST_MAINLINK_READY) {
         d->link_clks_on = false;
         d->phy_initted = false;
     } else if (d->power_on) {
+        d->mainlink_tx_on = false;
         d->stream_clks_on = false;
         d->link_clks_on = false;
         d->phy_initted = false;
@@ -588,6 +629,28 @@ static void dp_atomic_post_disable(struct dp_fsm *d) {
     else
         d->state = ST_DISPLAY_OFF;
     d->pm_refs--;
+}
+
+static void dp_irq_hpd_handle(struct dp_fsm *d, int retrain_rc) {
+    if (d->state == ST_DISPLAY_OFF || d->state == ST_DISCONNECTED)
+        return;
+    if (d->link_needs_retrain && d->power_on && d->state == ST_CONNECTED) {
+        assert(d->link_clks_on && d->stream_clks_on && d->mainlink_tx_on);
+        if (retrain_rc == 0) {
+            d->link_needs_retrain = false;
+            d->link_retrain_retries = 0;
+            d->retrain_events_queued = 0;
+        } else if (d->link_ready && d->link_retrain_retries < 8) {
+            d->link_retrain_retries++;
+            d->retrain_events_queued++;
+        } else {
+            d->link_needs_retrain = false;
+            d->link_retrain_retries = 0;
+            d->retrain_events_queued = 0;
+        }
+        return;
+    }
+    d->irq_hpd_events++;
 }
 
 static void dp_hpd_plug(struct dp_fsm *d, int train_rc) {
@@ -620,6 +683,9 @@ static void dp_hpd_plug(struct dp_fsm *d, int train_rc) {
 }
 
 static void dp_hpd_unplug(struct dp_fsm *d) {
+    d->link_needs_retrain = false;
+    d->link_retrain_retries = 0;
+    d->retrain_events_queued = 0;
     if (d->state == ST_MAINLINK_READY) {
         d->link_clks_on = false;
         d->phy_initted = false;
@@ -634,6 +700,12 @@ static void dp_hpd_unplug(struct dp_fsm *d) {
         d->pm_refs--;
         return;
     }
+    if (d->state == ST_CONNECTED) {
+        d->state = ST_DISCONNECTED;
+        d->link_ready = false;
+        d->pm_refs--;
+        return;
+    }
 }
 
 static void dp_hpd_notify(struct dp_fsm *d, bool connected, int train_rc) {
@@ -643,7 +715,7 @@ static void dp_hpd_notify(struct dp_fsm *d, bool connected, int train_rc) {
         if (d->state == ST_DISPLAY_OFF)
             dp_hpd_plug(d, train_rc);
         else
-            d->irq_hpd_events++;
+            dp_irq_hpd_handle(d, train_rc);
     } else if (d->link_ready && !connected) {
         dp_hpd_unplug(d);
     }
@@ -848,6 +920,35 @@ int main(void) {
     assert(dp3.state == ST_DISCONNECTED && dp3.pm_refs == 0);
     dp_hpd_notify(&dp3, true, 0);
     assert(dp3.state == ST_MAINLINK_READY && dp3.pm_refs == 1);
+
+    /* Verify 2d: Sink AUX/D0 timeout (-110) during s2idle atomic_enable keeps stream+mainlink active,
+     * queues deferred EV_IRQ_HPD_INT retrain, retries until sink wakes, and cleans up on unplug */
+    struct dp_fsm dp4 = { .state = ST_DISPLAY_OFF, .link_ready = true, .pm_refs = 1 };
+    dp_atomic_enable_ex(&dp4, -110, 0);
+    assert(dp4.state == ST_CONNECTED && dp4.power_on && dp4.phy_initted);
+    assert(dp4.link_clks_on && dp4.stream_clks_on && dp4.mainlink_tx_on);
+    assert(dp4.link_needs_retrain && dp4.link_retrain_retries == 0 && dp4.retrain_events_queued == 1);
+    assert(dp4.pm_refs == 2);
+    /* Initial IRQ_HPD while monitor still waking fails -> increments retry count and requeues */
+    dp_irq_hpd_handle(&dp4, -110);
+    assert(dp4.link_needs_retrain && dp4.link_retrain_retries == 1 && dp4.retrain_events_queued == 2);
+    /* Subsequent IRQ_HPD once monitor is awake succeeds -> clears retrain flag & queue */
+    dp_irq_hpd_handle(&dp4, 0);
+    assert(!dp4.link_needs_retrain && dp4.link_retrain_retries == 0 && dp4.retrain_events_queued == 0);
+    assert(dp4.power_on && dp4.mainlink_tx_on && dp4.irq_hpd_events == 0);
+    /* Next normal IRQ_HPD dispatches regular sink attention */
+    dp_irq_hpd_handle(&dp4, 0);
+    assert(dp4.irq_hpd_events == 1);
+
+    /* Verify 2e: Unplug / post_disable while deferred retrain pending clears state & balances refs */
+    struct dp_fsm dp5 = { .state = ST_DISPLAY_OFF, .link_ready = true, .pm_refs = 1 };
+    dp_atomic_enable_ex(&dp5, -110, 0);
+    assert(dp5.link_needs_retrain && dp5.retrain_events_queued == 1);
+    dp_hpd_notify(&dp5, false, 0);
+    assert(dp5.state == ST_DISCONNECTED && !dp5.link_needs_retrain && dp5.retrain_events_queued == 0);
+    assert(dp5.pm_refs == 1);
+    dp_atomic_post_disable(&dp5);
+    assert(dp5.state == ST_DISCONNECTED && !dp5.power_on && dp5.pm_refs == 0);
 
     /* Verify 3: spx-typec caches+ACKs USC seq=29 during suspend, replays on complete, respects boot_storage_ports */
     struct typec_ctx tc = { .routing_ready = true, .suspended = true, .boot_storage_ports = 1u << 0 };

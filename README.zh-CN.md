@@ -222,7 +222,6 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ├── docs/
 ├── patches/
 ├── probe/
-├── reference/
 ├── scripts/               # 构建流水线与开发脚本
 ├── source-dependencies/
 ├── tests/

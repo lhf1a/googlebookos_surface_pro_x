@@ -1,4 +1,4 @@
-"""Default two-port DP, native Settings tile and authenticated lower-port ADB.
+"""Default two-port DP, native Settings tile and automatic lower-port USB-C switching.
 
 Only shared platform inputs are loaded. Fresh kernels rebuild all five modules;
 prebuilt modules require exact Image pairing. No identity/authorization is copied.
@@ -8,23 +8,59 @@ import hashlib, json, os, shutil, struct, subprocess, sys, tempfile, zipfile
 from disk_image import module, require
 ROOT=Path(__file__).resolve().parents[1]
 NAMES=('spx-typec','spx-ucsi-transport','ucsi_surface_hid','phy-spx-qmp-combo','usb_f_fs')
+LOWER_USB_WATCH_SRC=ROOT/'probe/test2/spx-lower-usb-watch.c'
 sha=lambda b:hashlib.sha256(b).hexdigest()
 
 
+def build_lower_usb_watch(output=None):
+    def _compile(out_path):
+        out_path=Path(out_path)
+        out_path.parent.mkdir(parents=True,exist_ok=True)
+        cc=os.environ.get('SPX_TYPEC_CROSS_CC','aarch64-linux-gnu-gcc')
+        env=dict(os.environ,SOURCE_DATE_EPOCH='0')
+        subprocess.run([
+            cc,'-std=c11','-static','-Os','-Wall','-Wextra','-Werror',
+            '-Wl,--build-id=none','-frandom-seed=spx-lower-usb-watch',
+            f'-ffile-prefix-map={ROOT}=/src',
+            str(LOWER_USB_WATCH_SRC),'-o',str(out_path),
+        ],env=env,check=True)
+        return out_path.read_bytes()
+
+    if output is not None:
+        return _compile(output)
+    with tempfile.TemporaryDirectory(prefix='spx-lower-usb-watch-') as tmp:
+        return _compile(Path(tmp)/'spx-lower-usb-watch')
+
+
+def _find_sdk():
+    env_sdk=os.environ.get('SQ2_ANDROID_SDK')
+    if env_sdk:return Path(env_sdk)
+    for cand in (Path('/mnt/spx-workspace/toolchains/sq2-graphics/sdk'),Path('/root/.cache/sq2-graphics/sdk')):
+        if (cand/'android-35/android.jar').is_file() and (cand/'android-15/aapt2').is_file():return cand
+    return Path('/root/.cache/sq2-graphics/sdk')
+
+
 def settings_apk(output):
-    sdk=Path(os.environ.get('SQ2_ANDROID_SDK','/root/.cache/sq2-graphics/sdk'))
+    sdk=_find_sdk()
     tools=sdk/'android-15';platform=sdk/'android-35/android.jar'
+    output=Path(output);output.parent.mkdir(parents=True,exist_ok=True)
     # Local signing key is build identity, not a device authorization/key input.
     key=Path(os.environ.get('SQ2_TYPEC_KEYSTORE',str(ROOT/'private/touch-calibration/signing.keystore')))
     key.parent.mkdir(parents=True,exist_ok=True)
     if not key.exists():
         subprocess.run(['keytool','-genkeypair','-keystore',str(key),'-storepass','android','-keypass','android','-alias','settings','-keyalg','RSA','-keysize','2048','-validity','10000','-dname','CN=Surface Display Settings'],check=True,capture_output=True)
     src=ROOT/'probe/typec/settings-tile'
+    res_dir=src/'res'
     with tempfile.TemporaryDirectory() as tmp:
         w=Path(tmp);(w/'classes').mkdir();(w/'dex').mkdir()
         subprocess.run(['javac','--release','8','-encoding','UTF-8','-classpath',str(platform),'-d',str(w/'classes'),str(src/'NativeDisplayTile.java')],check=True)
         subprocess.run([str(tools/'d8'),'--min-api','26','--lib',str(platform),'--output',str(w/'dex'),str(w/'classes/org/surface/displaysettings/NativeDisplayTile.class')],check=True)
-        subprocess.run([str(tools/'aapt2'),'link','--manifest',str(src/'AndroidManifest.xml'),'-I',str(platform),'-o',str(w/'unsigned.apk')],check=True)
+        link_cmd=[str(tools/'aapt2'),'link','--manifest',str(src/'AndroidManifest.xml'),'-I',str(platform),'--auto-add-overlay','-o',str(w/'unsigned.apk')]
+        if res_dir.is_dir():
+            res_zip=w/'res.zip'
+            subprocess.run([str(tools/'aapt2'),'compile','--dir',str(res_dir),'-o',str(res_zip)],check=True)
+            link_cmd.append(str(res_zip))
+        subprocess.run(link_cmd,check=True)
         with zipfile.ZipFile(w/'unsigned.apk','a',zipfile.ZIP_DEFLATED) as z:z.write(w/'dex/classes.dex','classes.dex')
         subprocess.run([str(tools/'zipalign'),'-f','4',str(w/'unsigned.apk'),str(w/'aligned.apk')],check=True)
         subprocess.run([str(tools/'apksigner'),'sign','--ks',str(key),'--ks-pass','pass:android','--out',str(output),str(w/'aligned.apk')],check=True)
@@ -34,7 +70,7 @@ def settings_apk(output):
 def load(inputs, image, output, compiled=None):
     inputs,image,output=Path(inputs),Path(image),Path(output)
     output.mkdir(parents=True,exist_ok=False)
-    sdk=Path(os.environ.get('SQ2_ANDROID_SDK','/root/.cache/sq2-graphics/sdk'))
+    sdk=_find_sdk()
     env=dict(os.environ,PATH=str(sdk/'android-15')+os.pathsep+os.environ['PATH'])
     subprocess.run([sys.executable,str(ROOT/'scripts/patch-spx-unknown-lid.py'),str(inputs/'services.jar'),str(output/'services.jar')],check=True,env=env)
     if compiled:
@@ -126,12 +162,15 @@ insmod /etc/spx-typec/usb_f_fs.ko
 '''
 
 
-def install(records,bodies,files,new_record):
+def install(records,bodies,files,new_record,lower_usb_watch=None):
     service='etc/sq2-qti-system/root/bin/hw/vendor.qti.hardware.display.composer-service'
     require(service in bodies,'QTI composer input absent')
+    if lower_usb_watch is None:
+        lower_usb_watch=build_lower_usb_watch()
     composer=module('typec_composer','patch-spx-composer.py').patch(bodies[service])
     delta={service:(records[service][1][1],composer),'etc/spx-services-lid.jar':(0o100644,files['services']),
-           'bin/spx-typec-stage':(0o100755,STAGE)}
+           'bin/spx-typec-stage':(0o100755,STAGE),
+           'bin/spx-lower-usb-watch':(0o100755,lower_usb_watch)}
     for n,b in files['modules'].items():delta['etc/spx-typec/'+n]=(0o100644,b)
     for n in ('spx-lower-usb','spx-lower-usb-boot'):delta['bin/'+n]=(0o100755,(ROOT/'probe/test2'/n).read_bytes().replace(b'\r\n',b'\n'))
     app='app/SurfaceDisplaySettings/SurfaceDisplaySettings.apk';prefix='etc/sq2-qti-system/'
@@ -156,7 +195,7 @@ def install(records,bodies,files,new_record):
         for parent in Path(name).parents:
             key=parent.as_posix()
             if key!='.' and key not in bodies:bodies[key]=b'';records[key]=new_record(0o40755)
-    return {'enabled':True,'lower_usb_default':'adb','settings':'native topology/mirror/extend','module_sha256':{n:sha(b) for n,b in files['modules'].items()}}
+    return {'enabled':True,'lower_usb_default':'auto','settings':'native topology/mirror/extend','module_sha256':{n:sha(b) for n,b in files['modules'].items()}}
 
 
 if __name__=='__main__':

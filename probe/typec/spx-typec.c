@@ -10,6 +10,9 @@
 #include <linux/of.h>
 #include <linux/property.h>
 #include <linux/slab.h>
+#include <linux/wait.h>
+#include <linux/jiffies.h>
+#include <linux/delay.h>
 #include <linux/workqueue.h>
 #include <linux/unaligned.h>
 #include <linux/surface_aggregator/controller.h>
@@ -34,6 +37,7 @@ struct spx_port {
  struct usb_role_switch *role_sw;
  enum usb_role requested_role;
  bool dp_active;
+ bool dp_pending;
  bool hpd_asserted;
  bool state_valid;
  u8 state[11];
@@ -43,24 +47,79 @@ struct spx_typec {
  struct ssam_controller *ctrl;
  struct ssam_event_notifier notifier;
  struct workqueue_struct *queue;
+ struct mutex role_lock;
  struct mutex event_lock;
+ wait_queue_head_t role_wait;
  bool events_enabled;
  bool storage_ports_set;
  bool routing_ready;
  bool suspended;
+ bool removing;
+ bool lower_auto_dp;
+ bool waiting_for_host;
  struct spx_port ports[2];
 };
 struct spx_event {struct work_struct work;struct spx_typec *ctx;u8 bytes[11];};
 static void put_switch(void *p){typec_switch_put(p);}
 static void put_mux(void *p){typec_mux_put(p);}
 static void put_role(void *p){usb_role_switch_put(p);}
+static bool spx_state_is_dp(const u8 *b){return b[6]==2 || b[6]==3;}
+static void spx_emit_dp_uevent(struct spx_typec *ctx,const char *state)
+{
+ char env[32];
+ char *envp[]={env,NULL};
+ snprintf(env,sizeof(env),"SPX_LOWER_DP=%s",state);
+ kobject_uevent_env(&ctx->dev->kobj,KOBJ_CHANGE,envp);
+}
+static int spx_fill_dp_mux(struct spx_port *p,const u8 *b,enum typec_orientation *orientation,struct typec_mux_state *state,struct typec_displayport_data *dp)
+{
+ int pin;
+ if(b[5]>2 || b[6]>3 || b[9]>1 || b[10]>1)return -EPROTO;
+ *orientation=b[5]==0?TYPEC_ORIENTATION_NORMAL:b[5]==1?TYPEC_ORIENTATION_REVERSE:TYPEC_ORIENTATION_NONE;
+ if(b[6]!=2 && b[6]!=3)return -EINVAL;
+ pin=b[6]==2?DP_PIN_ASSIGN_C:DP_PIN_ASSIGN_D;
+ if(b[5]==2 || b[8]!=(pin+1+(b[5]==1?6:0)))return -EPROTO;
+ dp->status=DP_STATUS_ENABLED|(b[9]?DP_STATUS_HPD_STATE:0)|(b[10]?DP_STATUS_IRQ_HPD:0);
+ dp->conf=DP_CONF_SET_PIN_ASSIGN(BIT(pin));
+ state->alt=&p->alt;state->mode=TYPEC_MODAL_STATE(pin);state->data=dp;
+ return 0;
+}
+/* DWC3 role switch queues drd_work with a 100ms CORESOFTRESET sleep before
+ * flipping current_dr_role and running dwc3_host_init()/phy_set_mode(). */
+static void spx_wait_role_settled(struct spx_typec *ctx,struct spx_port *p,enum usb_role target)
+{
+ unsigned long deadline=jiffies+msecs_to_jiffies(1500);
+ if(!p->role_sw)return;
+ while(usb_role_switch_get_role(p->role_sw)!=target) {
+  if(READ_ONCE(ctx->suspended) || READ_ONCE(ctx->removing) || time_after(jiffies,deadline))
+   return;
+  msleep(10);
+ }
+ if(target==USB_ROLE_HOST && !READ_ONCE(ctx->suspended) && !READ_ONCE(ctx->removing))
+  msleep(60);
+}
+static int spx_apply_mux_only(struct spx_typec *ctx,const u8 *b)
+{
+ struct spx_port *p;
+ struct typec_mux_state state={};
+ struct typec_displayport_data dp={};
+ enum typec_orientation orientation;
+ int ret;
+ if(b[4]>=ARRAY_SIZE(ctx->ports))return -EPROTO;
+ p=&ctx->ports[b[4]];
+ if(!p->present || (boot_storage_ports & BIT(b[4])) || !spx_state_is_dp(b))return 0;
+ if(p->role_sw && READ_ONCE(p->requested_role)!=USB_ROLE_HOST)return 0;
+ ret=spx_fill_dp_mux(p,b,&orientation,&state,&dp);if(ret)return ret;
+ ret=typec_switch_set(p->sw,orientation);if(ret)return ret;
+ return typec_mux_set(p->mux,&state);
+}
 static int spx_apply(struct spx_typec *ctx,const u8 *b,bool force_hpd)
 {
  struct spx_port *p=&ctx->ports[b[4]];
  struct typec_mux_state state={};
  struct typec_displayport_data dp={};
  enum typec_orientation orientation;
- int pin,ret;
+ int attempt,ret;
  bool hpd,irq_hpd;
  if(!p->present)return -ENODEV;
  if(b[5]>2 || b[6]>3 || b[9]>1 || b[10]>1)return -EPROTO;
@@ -68,26 +127,30 @@ static int spx_apply(struct spx_typec *ctx,const u8 *b,bool force_hpd)
  if(boot_storage_ports & BIT(b[4]))return 0;
  orientation=b[5]==0?TYPEC_ORIENTATION_NORMAL:b[5]==1?TYPEC_ORIENTATION_REVERSE:TYPEC_ORIENTATION_NONE;
  if(b[6]==2 || b[6]==3) {
-  if(p->role_sw && p->requested_role!=USB_ROLE_HOST)return -EBUSY;
+  if(p->role_sw && READ_ONCE(p->requested_role)!=USB_ROLE_HOST){p->dp_pending=true;return -EBUSY;}
   /* SAM pin encodes C=3/D=4, with +6 for reversed cable. */
-  pin=b[6]==2?DP_PIN_ASSIGN_C:DP_PIN_ASSIGN_D;
-  if(b[5]==2 || b[8]!=(pin+1+(b[5]==1?6:0)))return -EPROTO;
-  dp.status=DP_STATUS_ENABLED|(b[9]?DP_STATUS_HPD_STATE:0)|(b[10]?DP_STATUS_IRQ_HPD:0);
-  dp.conf=DP_CONF_SET_PIN_ASSIGN(BIT(pin));
-  state.alt=&p->alt;state.mode=TYPEC_MODAL_STATE(pin);state.data=&dp;
+  ret=spx_fill_dp_mux(p,b,&orientation,&state,&dp);if(ret)return ret;
  } else {
   /* Withdraw HPD before disconnect/USB routing changes. */
   drm_aux_hpd_bridge_notify(&p->bridge->dev,connector_status_disconnected);
   p->hpd_asserted=false;
+  p->dp_pending=false;
   state.mode=TYPEC_STATE_USB;
  }
- ret=typec_switch_set(p->sw,orientation);if(ret)return ret;
- ret=typec_mux_set(p->mux,&state);if(ret)return ret;
- if(p->role_sw && usb_role_switch_get_role(p->role_sw)!=p->requested_role) {
-  ret=usb_role_switch_set_role(p->role_sw,p->requested_role);if(ret)return ret;
+ for(attempt=0;attempt<2;attempt++) {
+  ret=typec_switch_set(p->sw,orientation);
+  if(!ret)ret=typec_mux_set(p->mux,&state);
+  if(ret!=-ETIMEDOUT || !p->role_sw || READ_ONCE(ctx->suspended) || READ_ONCE(ctx->removing))
+   break;
+  msleep(60);
+ }
+ if(ret)return ret;
+ if(p->role_sw && usb_role_switch_get_role(p->role_sw)!=READ_ONCE(p->requested_role)) {
+  ret=usb_role_switch_set_role(p->role_sw,READ_ONCE(p->requested_role));if(ret)return ret;
  }
  p->dp_active=b[6]==2 || b[6]==3;
  if(p->dp_active) {
+  p->dp_pending=false;
   hpd=!!b[9];
   irq_hpd=!!b[10];
   if(hpd!=p->hpd_asserted || irq_hpd || force_hpd) {
@@ -104,18 +167,42 @@ static int spx_apply(struct spx_typec *ctx,const u8 *b,bool force_hpd)
  * until the boot connector mask and DRM consumers are ready. Never re-enable
  * the firmware event source merely to replay a state for a late consumer.
  */
-static int spx_handle_state(struct spx_typec *ctx,const u8 *b)
+static int spx_handle_state(struct spx_typec *ctx,const u8 *b,const char **uevent_state)
 {
  struct spx_port *p;
+ bool was_dp_active,was_dp_pending,waited=false;
  int ret;
  if(b[4]>=ARRAY_SIZE(ctx->ports))return -EPROTO;
  p=&ctx->ports[b[4]];
  if(!p->present)return -ENODEV;
  if(b[5]>2 || b[6]>3 || b[9]>1 || b[10]>1)return -EPROTO;
+ was_dp_active=b[4]==0 && p->dp_active;
+ was_dp_pending=b[4]==0 && p->dp_pending;
  memcpy(p->state,b,sizeof(p->state));p->state_valid=true;
+ if(b[4]==0)
+  p->dp_pending=spx_state_is_dp(b) && !(boot_storage_ports & BIT(0)) && p->role_sw && READ_ONCE(p->requested_role)!=USB_ROLE_HOST;
  if(!ctx->routing_ready || ctx->suspended)return 0;
- ret=spx_apply(ctx,b,false);
+ if(b[4]==0 && p->dp_pending && READ_ONCE(ctx->lower_auto_dp) && !READ_ONCE(ctx->removing)) {
+  ctx->waiting_for_host=true;
+  mutex_unlock(&ctx->event_lock);
+  spx_emit_dp_uevent(ctx,"pending");
+  wait_event_timeout(ctx->role_wait,
+   READ_ONCE(p->requested_role)==USB_ROLE_HOST ||
+   !READ_ONCE(ctx->lower_auto_dp) ||
+   READ_ONCE(ctx->suspended) ||
+   READ_ONCE(ctx->removing),
+   msecs_to_jiffies(3500));
+  mutex_lock(&ctx->event_lock);
+  ctx->waiting_for_host=false;
+  if(!ctx->routing_ready || ctx->suspended || READ_ONCE(ctx->removing))return 0;
+  waited=true;
+ }
+ ret=spx_apply(ctx,waited?p->state:b,waited);
  if(!ret)p->state[10]=0;
+ if(b[4]==0) {
+  if(!was_dp_active && p->dp_active)*uevent_state="active";
+  else if((was_dp_active || was_dp_pending) && !p->dp_active && !p->dp_pending)*uevent_state="none";
+ }
  return ret;
 }
 static int spx_set_storage_ports(struct spx_typec *ctx,unsigned int mask)
@@ -146,8 +233,10 @@ static void spx_process(struct work_struct *work)
  struct spx_typec *ctx=e->ctx;
  __le32 ack[3]={cpu_to_le32(get_unaligned_le32(e->bytes)),cpu_to_le32(e->bytes[4]),0};
  struct ssam_request req={.target_category=0x1b,.target_id=1,.instance_id=1,.command_id=3,.flags=0,.length=sizeof(ack),.payload=(u8*)ack};
+ const char *uevent_state=NULL;
  int result,ret;
- mutex_lock(&ctx->event_lock);result=spx_handle_state(ctx,e->bytes);mutex_unlock(&ctx->event_lock);
+ mutex_lock(&ctx->event_lock);result=spx_handle_state(ctx,e->bytes,&uevent_state);mutex_unlock(&ctx->event_lock);
+ if(uevent_state)spx_emit_dp_uevent(ctx,uevent_state);
  ack[2]=cpu_to_le32(result==0);
  ret=ssam_request_do_sync(ctx->ctrl,&req,NULL);
  /* Candidate-only state evidence, not a per-frame graphics logger. */
@@ -227,20 +316,87 @@ static ssize_t lower_data_role_show(struct device *dev,struct device_attribute *
 }
 static ssize_t lower_data_role_store(struct device *dev,struct device_attribute *attr,const char *buf,size_t count)
 {
- struct spx_typec *ctx=dev_get_drvdata(dev);struct spx_port *p=&ctx->ports[0];enum usb_role role;int ret;
+ struct spx_typec *ctx=dev_get_drvdata(dev);struct spx_port *p=&ctx->ports[0];
+ enum usb_role role;const char *uevent_state=NULL;bool wake=false;int ret;
  if(sysfs_streq(buf,"host"))role=USB_ROLE_HOST;
  else if(sysfs_streq(buf,"device"))role=USB_ROLE_DEVICE;
  else return -EINVAL;
  if(!p->role_sw)return -ENODEV;
+ mutex_lock(&ctx->role_lock);
  mutex_lock(&ctx->event_lock);
  if(boot_storage_ports & BIT(0))
   ret=usb_role_switch_get_role(p->role_sw)==role?0:-EBUSY;
  else if(p->dp_active && role!=USB_ROLE_HOST)ret=-EBUSY;
- else {ret=usb_role_switch_set_role(p->role_sw,role);if(!ret)p->requested_role=role;}
- mutex_unlock(&ctx->event_lock);return ret?ret:count;
+ else {
+  ret=usb_role_switch_set_role(p->role_sw,role);
+  if(!ret) {
+   if(role==USB_ROLE_HOST) {
+    if(usb_role_switch_get_role(p->role_sw)!=USB_ROLE_HOST) {
+     mutex_unlock(&ctx->event_lock);
+     spx_wait_role_settled(ctx,p,USB_ROLE_HOST);
+     mutex_lock(&ctx->event_lock);
+     if(READ_ONCE(ctx->removing)) {
+      mutex_unlock(&ctx->event_lock);
+      mutex_unlock(&ctx->role_lock);
+      return -ENODEV;
+     }
+    }
+    WRITE_ONCE(p->requested_role,role);
+    if(ctx->waiting_for_host) {
+     wake=true;
+    } else if(ctx->routing_ready && !ctx->suspended && p->state_valid && spx_state_is_dp(p->state)) {
+     bool was_dp_active=p->dp_active;
+     int replay=spx_apply(ctx,p->state,true);
+     if(!replay) {
+      p->state[10]=0;
+      if(!was_dp_active && p->dp_active)uevent_state="active";
+     } else if(replay!=-ENODEV) {
+      dev_err(ctx->dev,"USC host replay failed: %d\n",replay);
+     }
+    }
+   } else {
+    WRITE_ONCE(p->requested_role,role);
+    if(!p->state_valid || !spx_state_is_dp(p->state))
+     p->dp_pending=false;
+   }
+  }
+ }
+ mutex_unlock(&ctx->event_lock);
+ mutex_unlock(&ctx->role_lock);
+ if(wake)wake_up_all(&ctx->role_wait);
+ if(uevent_state)spx_emit_dp_uevent(ctx,uevent_state);
+ return ret?ret:count;
 }
 static DEVICE_ATTR_RW(lower_data_role);
-static struct attribute *spx_attrs[]={&dev_attr_events_enabled.attr,&dev_attr_storage_ports.attr,&dev_attr_routing_ready.attr,&dev_attr_lower_data_role.attr,NULL};
+static ssize_t lower_auto_dp_show(struct device *dev,struct device_attribute *attr,char *buf)
+{
+ struct spx_typec *ctx=dev_get_drvdata(dev);
+ return sysfs_emit(buf,"%u\n",READ_ONCE(ctx->lower_auto_dp));
+}
+static ssize_t lower_auto_dp_store(struct device *dev,struct device_attribute *attr,const char *buf,size_t count)
+{
+ struct spx_typec *ctx=dev_get_drvdata(dev);bool enable;int ret=kstrtobool(buf,&enable);
+ if(ret)return ret;
+ mutex_lock(&ctx->event_lock);
+ WRITE_ONCE(ctx->lower_auto_dp,enable);
+ mutex_unlock(&ctx->event_lock);
+ wake_up_all(&ctx->role_wait);
+ return count;
+}
+static DEVICE_ATTR_RW(lower_auto_dp);
+static ssize_t lower_dp_state_show(struct device *dev,struct device_attribute *attr,char *buf)
+{
+ struct spx_typec *ctx=dev_get_drvdata(dev);struct spx_port *p=&ctx->ports[0];
+ const char *state;
+ mutex_lock(&ctx->event_lock);
+ if(p->dp_active)state="active";
+ else if(p->dp_pending)state="pending";
+ else state="none";
+ mutex_unlock(&ctx->event_lock);
+ return sysfs_emit(buf,"%s\n",state);
+}
+static DEVICE_ATTR_RO(lower_dp_state);
+static struct attribute *spx_attrs[]={&dev_attr_events_enabled.attr,&dev_attr_storage_ports.attr,&dev_attr_routing_ready.attr,&dev_attr_lower_data_role.attr,&dev_attr_lower_auto_dp.attr,&dev_attr_lower_dp_state.attr,NULL};
 static const struct attribute_group spx_group={.attrs=spx_attrs};
 static int spx_probe(struct platform_device *pdev)
 {
@@ -254,7 +410,7 @@ static int spx_probe(struct platform_device *pdev)
   ret=fwnode_property_read_u32(node,"reg",&id);if(ret)return ret;
   if(id>=ARRAY_SIZE(ctx->ports) || ctx->ports[id].present)return -EINVAL;
   p=&ctx->ports[id];
-  p->requested_role=USB_ROLE_HOST;
+  WRITE_ONCE(p->requested_role,USB_ROLE_HOST);
   if(id==0) {
    p->role_sw=fwnode_usb_role_switch_get(node);
    if(IS_ERR(p->role_sw))return PTR_ERR(p->role_sw);
@@ -275,6 +431,8 @@ static int spx_probe(struct platform_device *pdev)
  ctx->notifier.event.reg=SSAM_EVENT_REGISTRY_SAM;
  ctx->notifier.event.id.target_category=0x1b;ctx->notifier.event.id.instance=1;
  ctx->notifier.event.mask=SSAM_EVENT_MASK_NONE;ctx->notifier.event.flags=SSAM_EVENT_SEQUENCED;
+ init_waitqueue_head(&ctx->role_wait);
+ mutex_init(&ctx->role_lock);
  mutex_init(&ctx->event_lock);platform_set_drvdata(pdev,ctx);
  ret=devm_device_add_group(dev,&spx_group);
  if(ret){destroy_workqueue(ctx->queue);return ret;}
@@ -284,6 +442,10 @@ static void spx_remove(struct platform_device *pdev)
 {
  struct spx_typec *ctx=platform_get_drvdata(pdev);
  if(ctx->events_enabled)ssam_notifier_unregister(ctx->ctrl,&ctx->notifier);
+ mutex_lock(&ctx->event_lock);
+ WRITE_ONCE(ctx->removing,true);
+ mutex_unlock(&ctx->event_lock);
+ wake_up_all(&ctx->role_wait);
  destroy_workqueue(ctx->queue);
  for(int i=0;i<ARRAY_SIZE(ctx->ports);i++)if(ctx->ports[i].present)
   drm_aux_hpd_bridge_notify(&ctx->ports[i].bridge->dev,connector_status_disconnected);
@@ -292,33 +454,63 @@ static int spx_suspend(struct device *dev)
 {
  struct spx_typec *ctx=dev_get_drvdata(dev);
  mutex_lock(&ctx->event_lock);
- ctx->suspended=true;
+ WRITE_ONCE(ctx->suspended,true);
  mutex_unlock(&ctx->event_lock);
+ wake_up_all(&ctx->role_wait);
  flush_workqueue(ctx->queue);
  return 0;
 }
 static int spx_resume(struct device *dev)
 {
- /* Keep hardware applies deferred until spx_complete() after SSAM display_on
-  * and DRM resume; spx_process() still caches and ACKs SAM USC events now. */
+ struct spx_typec *ctx=dev_get_drvdata(dev);
+ int i;
+ /* Keep HPD deferred until spx_complete() after SSAM display_on, while
+  * pre-syncing QMP Type-C DP routing before DRM resume() trains/enables DP. */
+ mutex_lock(&ctx->event_lock);
+ if(ctx->routing_ready) {
+  for(i=0;i<ARRAY_SIZE(ctx->ports);i++) {
+   int err;
+   if(!ctx->ports[i].present || !ctx->ports[i].state_valid)continue;
+   err=spx_apply_mux_only(ctx,ctx->ports[i].state);
+   if(err)dev_warn(ctx->dev,"USC resume mux sync failed port=%d: %d\n",i,err);
+  }
+ }
+ mutex_unlock(&ctx->event_lock);
  return 0;
 }
 static void spx_complete(struct device *dev)
 {
  struct spx_typec *ctx=dev_get_drvdata(dev);
  int i,ret=0;
+ bool emit_pending=false,emit_none=false;
  mutex_lock(&ctx->event_lock);
- ctx->suspended=false;
+ WRITE_ONCE(ctx->suspended,false);
  if(ctx->routing_ready) {
   for(i=0;i<ARRAY_SIZE(ctx->ports);i++) {
    int err;
+   bool was_active,was_pending;
    if(!ctx->ports[i].present || !ctx->ports[i].state_valid)continue;
+   was_active=i==0 && ctx->ports[0].dp_active;
+   was_pending=i==0 && ctx->ports[0].dp_pending;
+   if(i==0 && !(boot_storage_ports & BIT(0)) &&
+      spx_state_is_dp(ctx->ports[0].state) &&
+      ctx->ports[0].role_sw &&
+      READ_ONCE(ctx->ports[0].requested_role)!=USB_ROLE_HOST &&
+      READ_ONCE(ctx->lower_auto_dp)) {
+    ctx->ports[0].dp_pending=true;
+    emit_pending=true;
+    continue;
+   }
    err=spx_apply(ctx,ctx->ports[i].state,true);
    if(!err)ctx->ports[i].state[10]=0;
    else if(!ret)ret=err;
+   if(i==0 && (was_active || was_pending) && !ctx->ports[0].dp_active && !ctx->ports[0].dp_pending)
+    emit_none=true;
   }
  }
  mutex_unlock(&ctx->event_lock);
+ if(emit_pending)spx_emit_dp_uevent(ctx,"pending");
+ else if(emit_none)spx_emit_dp_uevent(ctx,"none");
  if(ret)dev_err(ctx->dev,"USC resume replay failed: %d\n",ret);
 }
 static const struct dev_pm_ops spx_pm_ops={

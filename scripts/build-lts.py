@@ -13,6 +13,7 @@ initramfs candidate, not a migration. No command deploys, reboots or writes disk
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -270,10 +271,11 @@ def compile_kernel(args, selected=None):
     return report
 
 
-def main(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or (argv[0].startswith('--') and argv[0] != '--help'):
-        argv.insert(0, 'full-image')
+def default_jobs():
+    return max(1, (os.cpu_count() or 2) - 1)
+
+
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='operation', required=True)
     from full_image import DEFAULT_PRIVATE
@@ -355,7 +357,7 @@ def main(argv=None):
     full.add_argument('--skip-ota', action='store_true',
                       help='skip generating the OTA update archive alongside the full disk image')
     full.add_argument('--output', type=Path, required=True)
-    full.add_argument('--jobs', type=int, default=8)
+    full.add_argument('--jobs', type=int, default=default_jobs())
     ota_cmd = commands.add_parser('ota', help='build an OTA update archive (.tar.gz + manifest) from a build output or ESP tree')
     ota_cmd.add_argument('--build-output', type=Path, help='completed full-image build directory')
     ota_cmd.add_argument('--esp-tree', type=Path, help='explicit assembled ESP directory')
@@ -388,7 +390,7 @@ def main(argv=None):
     disk.add_argument('--minimal-partitions', action='store_true',
                       help='slim output GPT to 5 actually used partitions and compact active _a super slices')
     disk.add_argument('--esp-mib', type=int, help='explicit ESP size in MiB when --minimal-partitions is enabled (default: 1024)')
-    disk.add_argument('--jobs', type=int, default=8)
+    disk.add_argument('--jobs', type=int, default=default_jobs())
     disk.add_argument('--boot-gnu-efi', type=Path)
     disk.add_argument('--build-only', action='store_true', help='construct only; omit postbuild filesystem/partition/gzip readback checks and whole-image checksums')
     disk.add_argument('--resume-build', action='store_true', help='reuse this explicitly selected build directory and its completed pristine recovery extraction')
@@ -398,12 +400,20 @@ def main(argv=None):
     build.add_argument('--build-dir', type=Path, required=True)
     build.add_argument('--output', type=Path, required=True)
     build.add_argument('--cross-compile', required=True, help='explicit compiler prefix, e.g. /tools/bin/aarch64-linux-gnu-')
-    build.add_argument('--jobs', type=int, default=4)
+    build.add_argument('--jobs', type=int, default=default_jobs())
     build.add_argument('--build-only', action='store_true', help='omit the final exported-file checksum inventory')
     build.add_argument('--resume-build', action='store_true', help='explicitly reuse an existing matching build directory/config')
     mode = build.add_mutually_exclusive_group()
     mode.add_argument('--core-only', action='store_true', help='explicit incomplete core compilation; excludes accepted external module overrides')
     mode.add_argument('--external-sources', type=Path, help='relocatable source root for the mandatory external module manifest')
+    return parser
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or (argv[0].startswith('--') and argv[0] != '--help'):
+        argv.insert(0, 'full-image')
+    parser = build_parser()
     args = parser.parse_args(argv)
     try:
         if args.operation == 'import-private':

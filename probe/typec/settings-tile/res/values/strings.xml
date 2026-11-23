@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Display arrangement &amp; mirroring</string>
+    <string name="settings_title">Display arrangement &amp; mirroring</string>
+    <string name="settings_summary">Use native multi-display arrangement, mirror/extend &amp; resolution settings</string>
+</resources>

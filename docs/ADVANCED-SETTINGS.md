@@ -62,12 +62,13 @@ Scans network interfaces, filtering out `lo`, `rmnet*`, `tun*`, etc.:
 - **LAN IP**: LAN IPv4 address on a physical USB NIC or Wi-Fi.
 - **VM IP**: Linux virtualization bridge (`avf_tap*`, `vmnic*`, `crosvm*`) addresses.
 
-#### Network ADB (Port `5555`)
-- One-tap toggle for TCP `5555` network ADB, persisted to `/data/vendor/spx-advanced-control/adb_tcp_enabled` with automatic firewall updates.
+#### Network ADB (Port `5555`) & Lower USB-C Mode
+- **Network ADB**: One-tap toggle for TCP `5555` network ADB, persisted to `/data/vendor/spx-advanced-control/adb_tcp_enabled` with automatic firewall updates.
 - With `ro.adb.secure=1` enabled, first connection requires RSA authorization on the tablet screen:
   ```sh
   adb connect <LAN_IP>:5555
   ```
+- **Lower USB-C Mode** (**Auto** / **ADB Only** / **Host Only**): Invokes `/bin/spx-lower-usb` and `/bin/spx-lower-usb-watch` to switch the lower port automatically or manually between wired ADB and DP/USB Host, persisted at `/data/vendor/surface-usb/lower-mode` (locked to Host when booted from lower-port USB storage).
 - **Lower-Port USB-C ADB Coexistence**: Lower-port USB-C forwards loopback ADB via `/vendor/bin/adb-usb-bridge`. When Network ADB is turned off, the bridge script narrows `service.adb.listen_addrs` to `tcp:localhost:5555` so lower-port USB ADB continues working.
 
 #### SSH Service (initramfs `root`, Port `22`)

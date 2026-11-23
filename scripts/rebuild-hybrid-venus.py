@@ -2,6 +2,7 @@
 """Rebuild only Venus against the exact kernel of an explicit reuse manifest."""
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -17,7 +18,7 @@ def main():
     for name in ('reuse-components','kernel-build','source','output'):
         p.add_argument('--'+name, type=Path, required=True)
     p.add_argument('--cross-compile', default='aarch64-linux-gnu-')
-    p.add_argument('--jobs', type=int, default=8)
+    p.add_argument('--jobs', type=int, default=max(1, (os.cpu_count() or 2) - 1))
     a = p.parse_args()
     roots, _, _, parent = load(a.reuse_components)
     kout = a.kernel_build.resolve()

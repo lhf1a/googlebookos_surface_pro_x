@@ -1,5 +1,6 @@
 """Build the small boot-origin EFI application from prepared GNU-EFI source."""
 from pathlib import Path
+import os
 import shutil
 import subprocess
 
@@ -27,7 +28,8 @@ def build(output, source, run):
     shutil.copytree(source, g, dirs_exist_ok=True,
                     ignore=lambda path, names: set(names) & {'.git', 'aarch64'}
                     if Path(path) == source else set())
-    run(['make', '-C', g, 'ARCH=aarch64', 'CROSS_COMPILE='+CROSS, '-j4'])
+    run(['make', '-C', g, 'ARCH=aarch64', 'CROSS_COMPILE='+CROSS,
+         '-j' + str(max(1, (os.cpu_count() or 2) - 1))])
     obj, elf, app = (output/p for p in ('Boot.o', 'Boot.so', 'Boot'))
     run([CROSS+'gcc', '-O2','-fpic','-fshort-wchar','-fno-stack-protector',
          '-ffreestanding','-mstrict-align','-DCONFIG_aarch64','-D__MAKEWITH_GNUEFI',

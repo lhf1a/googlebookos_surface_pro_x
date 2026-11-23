@@ -6,6 +6,7 @@ access, registry export, or implicit online donor fallback occurs here.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -22,7 +23,7 @@ def main():
     p.add_argument('--reuse-rpc', type=Path, help='explicit previously compiled static ARM64 hexagonrpcd')
     p.add_argument('--reuse-efi', type=Path, help='explicit previously compiled PAS12 EFI')
     p.add_argument('--cross-compile', default='aarch64-linux-gnu-')
-    p.add_argument('--jobs', type=int, default=8)
+    p.add_argument('--jobs', type=int, default=max(1, (os.cpu_count() or 2) - 1))
     a = p.parse_args()
     a.output = a.output.resolve(); a.output.mkdir(parents=True, exist_ok=False)
     report = {'commands':[], 'reused':{}, 'device_accessed':False}

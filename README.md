@@ -222,7 +222,6 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ├── docs/
 ├── patches/
 ├── probe/
-├── reference/
 ├── scripts/               # Build pipeline & developer scripts
 ├── source-dependencies/
 ├── tests/

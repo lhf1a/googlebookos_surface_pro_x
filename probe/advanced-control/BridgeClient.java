@@ -48,6 +48,12 @@ final class BridgeClient {
         boolean adbTcpEnabled;
         boolean adbTcpActive;
         String adbTcpPort = "";
+        boolean lowerUsbAvailable;
+        String lowerUsbMode = "auto";
+        String lowerUsbRole = "";
+        String lowerUsbDpState = "none";
+        boolean lowerUsbBootLocked;
+        boolean lowerUsbWatchRunning;
         boolean sshAvailable;
         boolean sshEnabled;
         boolean sshRunning;
@@ -207,6 +213,12 @@ final class BridgeClient {
         return loadState(false);
     }
 
+    BridgeState setLowerUsbMode(String mode) throws Exception {
+        String nonce = newNonce();
+        sendRequest(DriverPolicy.lowerUsbModeRequest(nonce, mode), 20000);
+        return loadState(false);
+    }
+
     BridgeState setSshEnabled(boolean enabled) throws Exception {
         String nonce = newNonce();
         sendRequest(DriverPolicy.sshEnabledRequest(nonce, enabled), 15000);
@@ -339,6 +351,14 @@ final class BridgeClient {
         state.adbTcpEnabled = "1".equals(map.get("adb_tcp_enabled"));
         state.adbTcpActive = "1".equals(map.get("adb_tcp_active"));
         state.adbTcpPort = map.getOrDefault("adb_tcp_port", "");
+        state.lowerUsbAvailable = "1".equals(map.get("lower_usb_available"));
+        String luMode = map.getOrDefault("lower_usb_mode", "auto");
+        state.lowerUsbMode = ("auto".equals(luMode) || "adb".equals(luMode) || "host".equals(luMode)) ? luMode : "auto";
+        state.lowerUsbRole = map.getOrDefault("lower_usb_role", "");
+        String luDp = map.getOrDefault("lower_usb_dp_state", "none");
+        state.lowerUsbDpState = ("active".equals(luDp) || "pending".equals(luDp)) ? luDp : "none";
+        state.lowerUsbBootLocked = "1".equals(map.get("lower_usb_boot_locked"));
+        state.lowerUsbWatchRunning = "1".equals(map.get("lower_usb_watch_running"));
         state.sshAvailable = "1".equals(map.get("ssh_available"));
         state.sshEnabled = "1".equals(map.get("ssh_enabled"));
         state.sshRunning = "1".equals(map.get("ssh_running"));

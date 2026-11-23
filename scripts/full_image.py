@@ -1335,7 +1335,7 @@ def build(args, compile_kernel):
         ota=ota_report,
         suspend_enabled=True,
         hall_lid_enabled=hall_lid_enabled,
-        typec_enabled=True, lower_usb_default='adb',
+        typec_enabled=True, lower_usb_default='auto',
         suspend_module_source=('matched-incremental-rebuild' if reuse else 'fresh-compiled') if compiled else 'image-paired-prebuilt',
         ksu_next=({k: str(v) if isinstance(v, Path) else v for k, v in ksu_next_info.items() if not k.endswith('_bytes')} if ksu_next_info else None),
         ksu_modules=ksu_modules_meta,

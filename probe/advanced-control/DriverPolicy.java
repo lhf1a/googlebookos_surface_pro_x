@@ -270,6 +270,17 @@ public final class DriverPolicy {
         return "set-adb-tcp\n" + normalizeNonce(nonce) + "\n" + (enabled ? "1" : "0") + "\n";
     }
 
+    public static String normalizeLowerUsbMode(String mode) {
+        if ("auto".equals(mode) || "adb".equals(mode) || "host".equals(mode)) {
+            return mode;
+        }
+        throw new IllegalArgumentException("invalid_lower_usb_mode");
+    }
+
+    public static String lowerUsbModeRequest(String nonce, String mode) {
+        return "set-lower-usb-mode\n" + normalizeNonce(nonce) + "\n" + normalizeLowerUsbMode(mode) + "\n";
+    }
+
     public static String sshEnabledRequest(String nonce, boolean enabled) {
         return "set-ssh-enabled\n" + normalizeNonce(nonce) + "\n" + (enabled ? "1" : "0") + "\n";
     }

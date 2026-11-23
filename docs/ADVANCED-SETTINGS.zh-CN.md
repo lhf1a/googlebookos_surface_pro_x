@@ -62,12 +62,13 @@ Surface Pro X 移植版内置 **高级设置（`SurfaceAdvancedControl.apk`，`o
 - **LAN IP**：物理 USB 网卡或 Wi-Fi 的局域网 IPv4 地址。
 - **VM IP**：Linux 虚拟化网桥（`avf_tap*`、`vmnic*`、`crosvm*`）地址。
 
-#### 网络 ADB（端口 `5555`）
-- 一键开关 TCP `5555` 网络 ADB，持久化至 `/data/vendor/spx-advanced-control/adb_tcp_enabled` 并同步更新防火墙规则。
+#### 网络 ADB（端口 `5555`）与下口 USB-C 模式
+- **网络 ADB**：一键开关 TCP `5555` 网络 ADB，持久化至 `/data/vendor/spx-advanced-control/adb_tcp_enabled` 并同步更新防火墙规则。
 - 镜像启用了 `ro.adb.secure=1`，首次连接需在屏幕确认 RSA 授权：
   ```sh
   adb connect <LAN_IP>:5555
   ```
+- **下口 USB-C 模式**（**自动** / **仅 ADB** / **仅主机**）：调用 `/bin/spx-lower-usb` 与 `/bin/spx-lower-usb-watch` 控制下口在有线 ADB 与 DP/USB 主机间自动或手动切换，持久化于 `/data/vendor/surface-usb/lower-mode`（下口承载启动盘时自动锁定为主机模式）。
 - **下口 USB-C ADB 共存**：下口通过 `/vendor/bin/adb-usb-bridge` 转发本地环回 ADB。关闭网络 ADB 时，桥接脚本将 `service.adb.listen_addrs` 收窄为 `tcp:localhost:5555`，不影响下口 USB ADB。
 
 #### SSH 服务（initramfs `root`，端口 `22`）

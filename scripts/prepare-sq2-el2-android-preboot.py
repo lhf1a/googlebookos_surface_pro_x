@@ -7,6 +7,7 @@ Matching payload hashes do not validate Wi-Fi, video, KSU or Terminal runtime.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -67,7 +68,8 @@ assert 'sq2.video=0' not in text and 'rdinit=/init' not in text
 assert 'sq2_progress_mark(0x31' in text and 'preboot prepare' in text
 source.write_text(text)
 with (out / 'build.log').open('w') as log:
-    subprocess.run(['make', '-s', '-C', str(out / 'efi-source'), '-j8'],
+    subprocess.run(['make', '-s', '-C', str(out / 'efi-source'),
+                    '-j' + str(max(1, (os.cpu_count() or 2) - 1))],
                    stdout=log, stderr=subprocess.STDOUT, check=True)
 shutil.copyfile(out / 'efi-source/out/slbounce.efi', out / 'el2launch.efi')
 names = ['Image', 'android-el2.dtb', 'initramfs.cpio.gz', 'qebspilaa64.efi',

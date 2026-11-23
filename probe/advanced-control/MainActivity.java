@@ -576,6 +576,13 @@ public final class MainActivity extends Activity {
         }, str::debugErrorMessage);
     }
 
+    private void saveLowerUsbMode(String mode) {
+        runBridgeCall("advanced-control-lower-usb", () -> {
+            bridgeState = bridge.setLowerUsbMode(mode);
+            return str.debugLowerUsbSavedMessage(mode);
+        }, str::debugErrorMessage);
+    }
+
     private void saveSshEnabled(boolean enabled) {
         runBridgeCall("advanced-control-ssh-toggle", () -> {
             bridgeState = bridge.setSshEnabled(enabled);
@@ -1800,6 +1807,16 @@ public final class MainActivity extends Activity {
                 canBridge,
                 () -> saveAdbTcp(!adbOn)), marginBottom(16));
 
+        TextView lowerUsbHeader = new TextView(this);
+        lowerUsbHeader.setText(str.debugLowerUsbSection());
+        lowerUsbHeader.setTextColor(theme.primary);
+        lowerUsbHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        lowerUsbHeader.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        lowerUsbHeader.setPadding(theme.dp(8), theme.dp(2), theme.dp(8), theme.dp(8));
+        container.addView(lowerUsbHeader);
+
+        container.addView(buildLowerUsbCard(canBridge), marginBottom(16));
+
         TextView sshHeader = new TextView(this);
         sshHeader.setText(str.debugSshSection());
         sshHeader.setTextColor(theme.primary);
@@ -1886,6 +1903,91 @@ public final class MainActivity extends Activity {
 
         scroll.addView(container);
         return scroll;
+    }
+
+    private View buildLowerUsbCard(boolean canBridge) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(theme.roundedRect(theme.card, 22));
+        card.setPadding(theme.dp(18), theme.dp(16), theme.dp(18), theme.dp(16));
+
+        boolean canLowerUsb = canBridge && bridgeState.lowerUsbAvailable;
+        if (!bridgeState.lowerUsbAvailable && bridgeState.bridgeReady && !busy) {
+            card.setAlpha(0.75f);
+        }
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView title = new TextView(this);
+        title.setText(str.debugLowerUsbTitle());
+        title.setTextColor(theme.textPrimary);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        TextView badge = new TextView(this);
+        badge.setText(str.debugLowerUsbBadge(
+                bridgeState.lowerUsbAvailable, bridgeState.lowerUsbBootLocked,
+                bridgeState.lowerUsbRole, bridgeState.lowerUsbDpState));
+        badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+        badge.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        badge.setPadding(theme.dp(9), theme.dp(3), theme.dp(9), theme.dp(3));
+        boolean badgeActive = bridgeState.lowerUsbAvailable
+                && !bridgeState.lowerUsbBootLocked
+                && ("host".equals(bridgeState.lowerUsbRole) || "device".equals(bridgeState.lowerUsbRole));
+        if (badgeActive) {
+            badge.setTextColor(theme.okFg);
+            badge.setBackground(theme.roundedRect(theme.okBg, 999));
+        } else {
+            badge.setTextColor(theme.neutralChipFg);
+            badge.setBackground(theme.roundedRect(theme.neutralChipBg, 999));
+        }
+        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(-2, -2);
+        badgeLp.leftMargin = theme.dp(10);
+        header.addView(badge, badgeLp);
+        card.addView(header);
+
+        LinearLayout segWrap = new LinearLayout(this);
+        segWrap.setOrientation(LinearLayout.HORIZONTAL);
+        segWrap.setBackground(theme.roundedRect(theme.cardAlt, 999));
+        segWrap.setPadding(theme.dp(4), theme.dp(4), theme.dp(4), theme.dp(4));
+        LinearLayout.LayoutParams segLp = new LinearLayout.LayoutParams(-1, -2);
+        segLp.topMargin = theme.dp(12);
+        segLp.bottomMargin = theme.dp(10);
+
+        segWrap.addView(buildSegmentButton(
+                str.debugLowerUsbModeAuto(),
+                "auto".equals(bridgeState.lowerUsbMode),
+                canLowerUsb,
+                () -> saveLowerUsbMode("auto")), new LinearLayout.LayoutParams(0, -2, 1f));
+        segWrap.addView(buildSegmentButton(
+                str.debugLowerUsbModeAdb(),
+                "adb".equals(bridgeState.lowerUsbMode),
+                canLowerUsb && !bridgeState.lowerUsbBootLocked,
+                () -> saveLowerUsbMode("adb")), new LinearLayout.LayoutParams(0, -2, 1f));
+        segWrap.addView(buildSegmentButton(
+                str.debugLowerUsbModeHost(),
+                "host".equals(bridgeState.lowerUsbMode),
+                canLowerUsb,
+                () -> saveLowerUsbMode("host")), new LinearLayout.LayoutParams(0, -2, 1f));
+        card.addView(segWrap, segLp);
+
+        TextView desc = new TextView(this);
+        desc.setText(str.debugLowerUsbSummary(
+                bridgeState.lowerUsbAvailable,
+                bridgeState.lowerUsbMode,
+                bridgeState.lowerUsbRole,
+                bridgeState.lowerUsbDpState,
+                bridgeState.lowerUsbBootLocked,
+                bridgeState.lowerUsbWatchRunning));
+        desc.setTextColor(theme.textSecondary);
+        desc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        desc.setLineSpacing(theme.dp(2), 1.0f);
+        card.addView(desc);
+
+        return card;
     }
 
     private View buildFaceLidPage() {

@@ -268,6 +268,25 @@ class LtsEntry(unittest.TestCase):
             result = build.compile_kernel(args, self.selected)
         self.assertTrue(result['external_runtime_overrides_integrated'])
 
+    def test_default_jobs_uses_cpu_count_minus_one(self):
+        with patch('os.cpu_count', return_value=64):
+            self.assertEqual(build.default_jobs(), 63)
+        with patch('os.cpu_count', return_value=1):
+            self.assertEqual(build.default_jobs(), 1)
+        with patch('os.cpu_count', return_value=None):
+            self.assertEqual(build.default_jobs(), 1)
+        with patch('os.cpu_count', return_value=16):
+            parser = build.build_parser()
+            self.assertEqual(parser.parse_args(['full-image', '--output', 'out']).jobs, 15)
+            self.assertEqual(
+                parser.parse_args(['disk-image', '--resources', 'r', '--single-user-initramfs', 'i', '--output', 'o']).jobs,
+                15,
+            )
+            self.assertEqual(
+                parser.parse_args(['compile', '--source', 's', '--build-dir', 'b', '--output', 'o', '--cross-compile', 'c']).jobs,
+                15,
+            )
+
 
 if __name__ == '__main__':
     unittest.main()

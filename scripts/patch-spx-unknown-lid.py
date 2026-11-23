@@ -1,14 +1,15 @@
 from pathlib import Path
-import re,subprocess,json,zipfile,hashlib,difflib,shutil
+import os,re,subprocess,json,zipfile,hashlib,difflib,shutil
 import argparse, tempfile
 parser=argparse.ArgumentParser(description='Preserve unknown initial SW_LID state; real lid callbacks unchanged')
 parser.add_argument('source',type=Path);parser.add_argument('output',type=Path)
 args=parser.parse_args()
+jobs=str(max(1,(os.cpu_count() or 2)-1))
 workspace=tempfile.TemporaryDirectory(prefix='spx-lid-')
 D=Path(workspace.name);P=D
 root=D/'smali';rebuilt=D/'reopened'
 with zipfile.ZipFile(args.source) as archive:(D/'classes2.dex').write_bytes(archive.read('classes2.dex'))
-subprocess.run(['baksmali','disassemble','-a','35','-j','4',str(D/'classes2.dex'),'-o',str(root)],check=True)
+subprocess.run(['baksmali','disassemble','-a','35','-j',jobs,str(D/'classes2.dex'),'-o',str(root)],check=True)
 target=root/'com/android/server/input/InputManagerService.smali'
 original=target.read_text()
 modified=original
@@ -28,9 +29,9 @@ for method in ['registerLidSwitchCallbackInternal','systemRunning']:
 (D/'InputManagerService.modified.smali').write_text(modified)
 (D/'input-lid.patch').write_text(''.join(difflib.unified_diff(original.splitlines(True),modified.splitlines(True),fromfile='a/InputManagerService.smali',tofile='b/InputManagerService.smali')))
 target.write_text(modified)
-cmd=['smali','assemble','-a','35','-j','4',str(root),'-o',str(D/'classes2.modified.dex')]
+cmd=['smali','assemble','-a','35','-j',jobs,str(root),'-o',str(D/'classes2.modified.dex')]
 r=subprocess.run(cmd,capture_output=True,text=True);assert r.returncode==0,r.stderr
-r=subprocess.run(['baksmali','disassemble','-a','35','-j','4',str(D/'classes2.modified.dex'),'-o',str(rebuilt)],capture_output=True,text=True);assert r.returncode==0,r.stderr
+r=subprocess.run(['baksmali','disassemble','-a','35','-j',jobs,str(D/'classes2.modified.dex'),'-o',str(rebuilt)],capture_output=True,text=True);assert r.returncode==0,r.stderr
 changed=[];encoding_only=[];count=0
 def normalize_default_booleans(text):
  return re.sub(r'(?m)^(\.field [^\n]*\bstatic\b[^\n]*:Z) = false$',r'\1',text)

@@ -655,6 +655,90 @@ public final class Strings {
                 : t("网络 ADB 已关闭", "Network ADB disabled");
     }
 
+    public String debugLowerUsbSection() {
+        return t("下口 USB-C", "Lower USB-C");
+    }
+
+    public String debugLowerUsbTitle() {
+        return t("下口 USB-C 模式", "Lower USB-C Mode");
+    }
+
+    public String debugLowerUsbModeAuto() {
+        return t("自动", "Auto");
+    }
+
+    public String debugLowerUsbModeAdb() {
+        return t("仅 ADB", "ADB Only");
+    }
+
+    public String debugLowerUsbModeHost() {
+        return t("仅主机", "Host Only");
+    }
+
+    public String debugLowerUsbBadge(boolean available, boolean bootLocked, String role, String dpState) {
+        if (!available) {
+            return t("不可用", "Unavailable");
+        }
+        if (bootLocked) {
+            return t("启动盘锁定", "Boot Locked");
+        }
+        if ("active".equals(dpState)) {
+            return t("DP 输出中", "DP Active");
+        }
+        if ("pending".equals(dpState)) {
+            return t("待切 DP", "DP Pending");
+        }
+        if ("host".equals(role)) {
+            return t("主机模式", "Host");
+        }
+        if ("device".equals(role)) {
+            return t("ADB 就绪", "ADB Ready");
+        }
+        return t("未知", "Unknown");
+    }
+
+    public String debugLowerUsbSummary(boolean available, String mode, String role,
+                                       String dpState, boolean bootLocked, boolean watchRunning) {
+        if (!available) {
+            return t("下口角色控制不可用", "Lower-port role control unavailable");
+        }
+        if (bootLocked) {
+            return t("当前从下口 USB 启动，已锁定为主机模式以保护系统盘。",
+                    "Booted from lower USB storage; locked to Host mode.");
+        }
+        String roleText;
+        if ("active".equals(dpState)) {
+            roleText = t("DP 显示输出", "DP Display");
+        } else if ("host".equals(role)) {
+            roleText = t("USB 主机（外设/DP）", "USB Host (Peripherals/DP)");
+        } else if ("device".equals(role)) {
+            roleText = t("有线 ADB（设备模式）", "Wired ADB (Device)");
+        } else {
+            roleText = t("未初始化", "Unknown");
+        }
+        if ("adb".equals(mode)) {
+            return t("当前状态：" + roleText + " · 下口固定用于有线 ADB 调试（DP/外设不可用）。",
+                    "Active: " + roleText + " · Lower port locked to wired ADB (DP/host disabled).");
+        }
+        if ("host".equals(mode)) {
+            return t("当前状态：" + roleText + " · 下口固定为主机模式（支持 DP 与外设，有线 ADB 关闭）。",
+                    "Active: " + roleText + " · Lower port locked to Host (DP/peripherals enabled, USB ADB off).");
+        }
+        String watchText = watchRunning ? t("监听中", "Watching") : t("未运行", "Stopped");
+        return t("当前状态：" + roleText + "（" + watchText + "）· 接入电脑或充电器保持 ADB，接入扩展坞或 DP 显示器自动切为主机模式。",
+                "Active: " + roleText + " (" + watchText + ") · Keeps ADB for PCs/chargers; switches to Host automatically for docks and DP displays.");
+    }
+
+    public String debugLowerUsbSavedMessage(String mode) {
+        if ("adb".equals(mode)) {
+            return t("下口模式已设为仅 ADB", "Lower USB-C mode set to ADB Only");
+        }
+        if ("host".equals(mode)) {
+            return t("下口模式已设为仅主机", "Lower USB-C mode set to Host Only");
+        }
+        return t("下口模式已设为自动切换", "Lower USB-C mode set to Auto");
+    }
+
     public String debugSshSection() {
         return "SSH";
     }
@@ -832,6 +916,20 @@ public final class Strings {
         }
         if ("avf_vpn_start_failed".equals(code)) {
             return t("启动 VM VPN 共享失败", "Failed to start VM VPN sharing");
+        }
+        if ("lower_usb_busy".equals(code)) {
+            return t("请先断开下口外设或显示器后再切换",
+                    "Disconnect lower-port peripherals or display before switching");
+        }
+        if ("lower_usb_boot_locked".equals(code)) {
+            return t("下口正在承载启动盘，无法切至 ADB",
+                    "Lower port carries the boot disk; cannot switch to ADB");
+        }
+        if ("lower_usb_unavailable".equals(code)) {
+            return t("下口模式控制接口不可用", "Lower USB-C control unavailable");
+        }
+        if ("lower_usb_failed".equals(code)) {
+            return t("切换下口 USB-C 模式失败", "Failed to switch Lower USB-C mode");
         }
         if ("mkpasswd_failed".equals(code)) {
             return t("密码加密失败", "Password hashing failed");

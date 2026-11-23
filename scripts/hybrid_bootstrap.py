@@ -320,7 +320,7 @@ def main():
     p.add_argument('--toolchains-root', type=Path, help='explicit toolchains root for isolated platform test')
     p.add_argument('--platform-files', type=Path, help='explicit extracted platform root for isolated test')
     p.add_argument('--quest-vendor', type=Path, help='explicit verified Quest vendor root for isolated platform test')
-    p.add_argument('--jobs', type=int, default=8)
+    p.add_argument('--jobs', type=int, default=max(1, (os.cpu_count() or 2) - 1))
     a = p.parse_args()
     if a.stage not in ('glue','assemble') and not a.imported: p.error('--imported required')
     if a.stage == 'assemble' and not (a.reuse_components and a.private_root):
