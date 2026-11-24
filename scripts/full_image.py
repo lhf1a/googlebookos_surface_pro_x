@@ -1031,6 +1031,10 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
         lte_boot = (ROOT / 'probe/lte/lte-framework-boot').read_bytes().replace(b'\r\n', b'\n')
         subprocess.run(['sh', '-n'], input=lte_boot, check=True, capture_output=True)
         bodies['bin/lte-framework-boot'] = lte_boot
+    if 'bin/power-input-boot' in bodies:
+        power_input_boot = (ROOT / 'probe/test2/power-input-boot').read_bytes().replace(b'\r\n', b'\n')
+        subprocess.run(['sh', '-n'], input=power_input_boot, check=True, capture_output=True)
+        bodies['bin/power-input-boot'] = power_input_boot
     # Take the current committed helper, while the accepted cumulative IPTSd
     # binary remains the fixed private runtime input (not the old touch cache).
     bodies['bin/touch-calibration-boot'] = (ROOT/'probe/test2/touch-calibration-boot').read_bytes().replace(b'\r\n',b'\n')

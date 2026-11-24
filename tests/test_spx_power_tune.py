@@ -157,5 +157,18 @@ class SpxPowerTuneTests(unittest.TestCase):
         self.assertIn("probe/lte/lte-framework-boot", fi_src)
 
 
+    def test_power_input_boot_preserves_ssam_wakeup_default_and_wired(self):
+        helper = ROOT / "probe/test2/power-input-boot"
+        raw = helper.read_bytes()
+        subprocess.run(["sh", "-n"], input=raw, check=True)
+        text = raw.decode("utf-8")
+        self.assertIn("surface_aggregator_tabletsw gpio_keys pm8941-pwrkey", text)
+        self.assertNotIn("power/wakeup", text)
+        self.assertNotIn("Csurface,aggregator", text)
+        import runtime_boot_policy
+        runtime_boot_policy.without_hash_checks("bin/power-input-boot", raw)
+        fi = (ROOT / "scripts/full_image.py").read_text(encoding="utf-8")
+        self.assertIn("bodies['bin/power-input-boot'] = power_input_boot", fi)
+
 if __name__ == "__main__":
     unittest.main()
