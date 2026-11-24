@@ -1703,6 +1703,7 @@ publish_state() {
     _t_psize="2.0"
     _t_noise_saved=0
     _t_noise_enabled=0
+    _t_noise_disabled=0
     _t_noise_info=""
     _t_tap_saved=0
     _t_tap_line=""
@@ -1733,6 +1734,9 @@ publish_state() {
         fi
 
         _nfile="$TOUCH_STORE/$TOUCH_DEVICE.noise"
+        if [ -e "$_nfile.disabled" ]; then
+            _t_noise_disabled=1
+        fi
         if [ -f "$_nfile" ] && [ ! -L "$_nfile" ]; then
             _t_noise_saved=1
             _t_noise_info="$(touch_noise_summary_line "$_nfile")"
@@ -1814,6 +1818,7 @@ touch_profile_top_end=$_t_pend
 touch_profile_size_max=$_t_psize
 touch_noise_saved=$_t_noise_saved
 touch_noise_enabled=$_t_noise_enabled
+touch_noise_disabled=$_t_noise_disabled
 touch_noise_info=$_t_noise_info
 touch_tap_saved=$_t_tap_saved
 touch_tap_line=$_t_tap_line

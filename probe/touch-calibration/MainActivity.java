@@ -26,6 +26,7 @@ public class MainActivity extends Activity {
   static final long NOISE_MS=45000;
   static final long SLIDE_MS=20000;
   boolean thumbRequested=false;
+  boolean firstBoot=false,inSkipConfirm=false,skipReturnToReview=false;
   boolean slideMode=false,slideAfter=false,slideEnough=false;SlideCapture slideCapture;
   String slideState="",slideRun="";
 
@@ -149,7 +150,8 @@ public class MainActivity extends Activity {
           if(done.equals("tap-apply"))tapPreview=true;
           if(done.equals("tap-save")||done.equals("tap-cancel")){tapPreview=false;tapLearning=false;}
           if(done.equals("noise-save")||done.equals("noise-cancel")){noisePreview=false;noiseNonce="";}
-          if(done.equals("save")||done.equals("cancel"))preview=false;
+          if(done.equals("save")||done.equals("cancel")||done.equals("complete"))preview=false;
+          if(done.equals("skip")){preview=false;noisePreview=false;noiseNonce="";tapPreview=false;tapLearning=false;}
           handler.post(thisActivityCancel);return;
         }
         if(done.equals("tap-begin")||done.equals("tap-retest")){if(tapAfter)tapDeadline=SystemClock.elapsedRealtime()+590000;collecting=true;applyImmersiveFullscreen();setContentView(new PointView());return;}
@@ -173,7 +175,8 @@ public class MainActivity extends Activity {
         if(done.equals("noise-cancel")){noiseAuto=false;noisePreview=false;flow.changedNoise();noiseIntro();return;}
         if(done.equals("preview")){preview=true;deadline=SystemClock.elapsedRealtime()+150000;if(thumbAfter)thumbIntro(true);else if(thumbRequested){thumbRequested=false;thumbIntro(false);}else review();return;}
         if(done.equals("save")){preview=false;savedDone=true;exportNotice="";calibrationSaved();return;}
-        if(done.equals("cancel")||done.equals("skip")){preview=false;finish();return;}
+        if(done.equals("cancel")||done.equals("complete")){preview=false;finish();return;}
+        if(done.equals("skip")){preview=false;noisePreview=false;noiseNonce="";tapPreview=false;tapLearning=false;finish();return;}
       }
     }catch(Exception ignored){}
     if(SystemClock.elapsedRealtime()>deadline){waiting=false;noiseCapturing=false;setMeta(-1,ThemeTokens.ICON_WARN,"连接超时","Connection timed out","触摸服务响应超时，请关闭后重新打开应用。");message("连接超时，请重新打开。\nConnection timed out. Reopen the app.","关闭 / Close",()->finish());return;}
@@ -269,6 +272,7 @@ public class MainActivity extends Activity {
 
   @Override public void onCreate(Bundle state){
     super.onCreate(state);
+    firstBoot=getIntent()!=null&&getIntent().getBooleanExtra("first_boot",false);
     ui=new ThemeTokens(this);
     dir=createDeviceProtectedStorageContext().getFilesDir();
     applyImmersiveFullscreen();
@@ -276,6 +280,12 @@ public class MainActivity extends Activity {
     setMeta(-1,ThemeTokens.ICON_LOADING,"正在连接本机触控服务","Loading touch calibration service…","请稍候，正在读取设备触控配置与传感器状态。");
     message("正在读取本机触摸服务…\nLoading touch service…");
     handler.postDelayed(this::load,450);
+  }
+
+  @Override protected void onNewIntent(Intent intent){
+    super.onNewIntent(intent);
+    setIntent(intent);
+    firstBoot=intent!=null&&intent.getBooleanExtra("first_boot",false);
   }
 
   @Override public void onAttachedToWindow(){
@@ -574,6 +584,20 @@ public class MainActivity extends Activity {
   void button(LinearLayout l,String text,Runnable action){
     boolean isPrimary=addedButtons==0&&!isDestructiveLabel(text);
     boolean isDestructive=isDestructiveLabel(text);
+    addStyledButton(l,text,action,isPrimary,isPrimary?0:(isDestructive?2:1));
+  }
+
+  void primaryButton(LinearLayout l,String text,Runnable action){
+    addStyledButton(l,text,action,true,0);
+  }
+
+  void tonalButton(LinearLayout l,String text,Runnable action){
+    addStyledButton(l,text,action,true,1);
+  }
+
+  void addStyledButton(LinearLayout l,String text,Runnable action,boolean fullWidth,int style){
+    boolean isPrimary=style==0;
+    boolean isDestructive=style==2;
     addedButtons++;
 
     TextView b=new TextView(this);
@@ -582,7 +606,7 @@ public class MainActivity extends Activity {
     b.setAllCaps(false);
     b.setTextSize(TypedValue.COMPLEX_UNIT_SP,isPrimary?15.5f:14.5f);
     b.setTypeface(Typeface.create("sans-serif-medium",isPrimary?Typeface.BOLD:Typeface.NORMAL));
-    b.setMinHeight(ui.dp(isPrimary?52:46));
+    b.setMinHeight(ui.dp(isPrimary?52:48));
     b.setPadding(ui.dp(18),ui.dp(11),ui.dp(18),ui.dp(11));
     b.setClickable(true);
     b.setFocusable(true);
@@ -595,10 +619,10 @@ public class MainActivity extends Activity {
       b.setBackground(ui.pillRipple(Color.TRANSPARENT,ui.divider));
     }else{
       b.setTextColor(ui.onPrimaryContainer);
-      b.setBackground(ui.pillRipple(ui.cardAlt,ui.divider));
+      b.setBackground(ui.pillRipple(fullWidth?ui.primaryContainer:ui.cardAlt,fullWidth?0:ui.divider));
     }
     b.setOnClickListener(v->{if(!waiting)action.run();});
-    addActionView(l,b,isPrimary);
+    addActionView(l,b,fullWidth);
   }
 
   void holdButton(LinearLayout l,String text,Runnable action){
@@ -681,16 +705,21 @@ public class MainActivity extends Activity {
   }
 
   void noiseIntro(){
+    inSkipConfirm=false;
     slideMode=slideAfter=false;slideCapture=null;noiseAuto=false;activeSwipeView=null;
     flow.changedNoise();patchAvailable=false;patch="";noiseBand=false;exportNotice="";
-    setMeta(0,ThemeTokens.ICON_IDLE,"准备开始静置检测","Step 1 of 4 · Static noise baseline","请将设备平放稳固，双手与触控笔完全离开屏幕。倒计时结束后自动开始 45 秒静置采样。");
-    LinearLayout l=layout("请放稳设备，移开手与触控笔。\n5 秒后自动开始 45 秒静置检测，请保持静置。\nPlace the device securely and remove hands and pen.\nStarts automatically in 5 seconds; keep still.");
+    setMeta(0,ThemeTokens.ICON_IDLE,
+      firstBoot?"首次启动触控校准":"准备开始静置检测",
+      firstBoot?"First-boot touch calibration · Step 1 of 4":"Step 1 of 4 · Static noise baseline",
+      "请将设备平放稳固，双手与触控笔完全离开屏幕。若屏幕完好、无幽灵触摸问题，可点击下方按钮一键跳过并自动关闭幽灵触控补丁。");
+    LinearLayout l=layout("请放稳设备，移开手与触控笔。\n5 秒后自动开始 45 秒静置检测，请保持静置。\n若屏幕完好、没有幽灵触摸问题，可点击下方按钮跳过校准。\nPlace the device securely and remove hands and pen.\nStarts automatically in 5 seconds, or skip if your screen has no ghost touch.");
     countdownRing=new CountdownRingView(this,ui,5,"秒后开始");
     LinearLayout.LayoutParams rLp=new LinearLayout.LayoutParams(ui.dp(120),ui.dp(120));
     rLp.gravity=Gravity.CENTER_HORIZONTAL;
     rLp.bottomMargin=ui.dp(10);
     l.addView(countdownRing,rLp);
     button(l,"立即开始 / Start",()->{cancelCountdown();send("noise-learn","");});
+    tonalButton(l,"屏幕完好，跳过校准 / Screen OK · Skip",()->{cancelCountdown();confirmSkipHealthyScreen(false);});
     button(l,"退出 / Exit",()->{cancelCountdown();finish();});
     idleArmed=true;idleAt=SystemClock.elapsedRealtime()+5000;handler.post(idleCountdown);
   }
@@ -699,10 +728,36 @@ public class MainActivity extends Activity {
     if(!idleArmed||isFinishing())return;long left=idleAt-SystemClock.elapsedRealtime();
     if(left<=0){idleArmed=false;send("noise-learn","");return;}
     long sec=(left+999)/1000;
-    status.setText("请放稳设备，移开手与触控笔。\n将在 "+sec+" 秒后自动开始静置检测。\nKeep device still; starting in "+sec+"s.");
+    status.setText("请放稳设备，移开手与触控笔。\n将在 "+sec+" 秒后自动开始静置检测；若屏幕完好无幽灵触摸，可点击下方跳过。\nKeep device still; starting in "+sec+"s, or skip if your screen has no ghost touch.");
     if(countdownRing!=null)countdownRing.update(left/5000f,(int)sec);
     handler.postDelayed(this,100);
   }};
+  void confirmSkipHealthyScreen(boolean fromReview){
+    cancelCountdown();
+    inSkipConfirm=true;
+    skipReturnToReview=fromReview;
+    setMeta(0,ThemeTokens.ICON_VERIFY,
+      "确认屏幕完好并跳过校准？",
+      "Confirm healthy screen · Disable ghost-touch patch",
+      "提示：如需恢复，可随时在「高级设置 → 触摸设置」中打开幽灵触控补丁或重新校准。");
+    LinearLayout l=layout(
+      "请再次确认当前屏幕完好，没有幽灵触摸问题。\n\n"
+      +"确认后将一键跳过校准、自动关闭幽灵触控补丁，且后续开机不再自动弹出校准。\n"
+      +"日后如出现误触，可随时在「高级设置 → 触摸设置」中重新打开幽灵触控补丁或重新校准。\n\n"
+      +"Confirm your screen is intact with no ghost-touch issues.\n"
+      +"This skips calibration, disables the ghost-touch patch, and will not prompt again on boot. "
+      +"You can re-enable the patch or recalibrate anytime in Advanced Settings → Touch.");
+    primaryButton(l,"确认跳过并关闭幽灵补丁 / Confirm skip & disable",()->{
+      inSkipConfirm=false;
+      setMeta(-1,ThemeTokens.ICON_LOADING,"正在跳过校准","Disabling ghost-touch patch…","正在关闭幽灵触控补丁并保存设置，后续开机不再弹出校准。");
+      message("正在跳过校准并关闭幽灵触控补丁…\nSkipping calibration and disabling ghost-touch patch…");
+      send("skip","");
+    });
+    tonalButton(l,"返回继续校准 / Back to calibration",()->{
+      inSkipConfirm=false;
+      if(skipReturnToReview)noiseReview();else noiseIntro();
+    });
+  }
   Map<String,String> details(String[] lines){Map<String,String> m=new HashMap<>();for(int i=1;i<lines.length;i++)for(String w:lines[i].trim().split("\\s+")){int k=w.indexOf('=');if(k>0)m.put(w.substring(0,k),w.substring(k+1));}return m;}
   String noiseSummary(String state,String frames,Map<String,String> info){
     return "Raw signal: "+state+" | frames: "+frames+" | abnormal_frames: "+info.getOrDefault("abnormal_frames","unknown")
@@ -838,6 +893,7 @@ public class MainActivity extends Activity {
     LinearLayout l=layout(noisePassed?"本轮未记录到意外触点。\nNo unexpected touches recorded.\n\n"+(noiseDetected?"仍有底层信号残留，接着检查正常单指滑动。\nSignal anomalies remain; check normal swiping next.":"接着进行 20 秒单指滑动检查。\nCheck single-finger swiping next."):noiseDetected?"本轮仍有异常。可手动再修复一次，或恢复原规则。\nAnomalies remain. Manually apply another fix or restore rules.":"数据不足，请重新检测。\nInsufficient data. Retry.");
     if(noisePassed){
       holdButton(l,"长按继续 / Hold: next",()->{if(!flow.retested)return;if(noisePreview){flow.confirmNoise();slideIntro();}else send("noise-resume","");});
+      if(!noisePreview&&!noiseDetected)tonalButton(l,"屏幕完好，跳过校准 / Screen OK · Skip",()->confirmSkipHealthyScreen(true));
     }
     if(!noisePassed&&patchAvailable)button(l,"再次修复 / Fix again",()->{noiseAuto=true;send("noise-export","");});
     if(!patch.isEmpty())button(l,"导出校准文件 / Export (.spkcal)…",this::exportPatch);
@@ -968,7 +1024,7 @@ public class MainActivity extends Activity {
     setMeta(3,ThemeTokens.ICON_VERIFY,"最后一步：手势验证与可选校准","Step 4 of 4 · Verify touch & optional calibration","在下方测试区试用轻点、双击、拖动与双指缩放。若落点准确即可长按完成；有边缘偏移再选“坐标校准”，拇指易断触可选“拇指检测”。");
     LinearLayout l=layout("请轻点、快速双击、拖动和双指缩放。\n位置准确即可完成；有偏移再校准，拇指异常可单独检测。\nCheck taps, double taps, dragging and pinch zoom.\nFinish if accurate; calibrate only for offset. Thumb check is optional.");
     addGesturePad(l);
-    holdButton(l,"长按完成 / Hold: done",()->finish());
+    holdButton(l,"长按完成 / Hold: done",()->send("complete",""));
     button(l,"坐标校准 / Calibrate",this::launchCoordinateTargets);
     button(l,"拇指检测 / Thumb test",()->{candidate=original;thumbAfter=false;thumbRequested=true;send("preview",candidate.encode(device));});
   }
@@ -1222,7 +1278,10 @@ public class MainActivity extends Activity {
   }
 
   @Override public boolean onKeyDown(int key,KeyEvent e){if(collecting&&activeTargets!=null&&activeTargets.isAttachedToWindow()){if(key==KeyEvent.KEYCODE_VOLUME_DOWN){if(e.getRepeatCount()==0)activeTargets.skipRegion();return true;}if(key==KeyEvent.KEYCODE_VOLUME_UP){if(e.getRepeatCount()==0)activeTargets.previous();return true;}}return super.onKeyDown(key,e);}
-  @Override public void onBackPressed(){finish();}
+  @Override public void onBackPressed(){
+    if(inSkipConfirm){inSkipConfirm=false;if(skipReturnToReview)noiseReview();else noiseIntro();return;}
+    finish();
+  }
   final Runnable thisActivityCancel=()->cancelOnLeave();
   @Override public void onPause(){
     super.onPause();

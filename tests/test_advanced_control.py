@@ -289,6 +289,18 @@ public class PolicyAndStringsTest {
     check("Touch".equals(en.touchTitle()), "en touch");
     check(zh.touchGhostTitle().contains("幽灵触控"), "zh ghost");
     check(en.touchGhostTitle().contains("Ghost-Touch"), "en ghost");
+    check(zh.touchHomeSubtitle(true, false, false, false, true, false).contains("幽灵补丁：关"), "zh skipped ghost off");
+    check(en.touchHomeSubtitle(true, false, false, false, true, false).contains("Ghost patch: Off"), "en skipped ghost off");
+    check("已停用".equals(zh.touchGhostBadge(false, false, true)), "zh skipped ghost badge");
+    check("Disabled".equals(en.touchGhostBadge(false, false, true)), "en skipped ghost badge");
+    check(zh.touchGhostDescription(false, false, true, "").contains("跳过校准"), "zh skipped ghost desc");
+    check(en.touchGhostDescription(false, false, true, "").contains("skipped"), "en skipped ghost desc");
+    check(zh.touchValueNoise(false, false, true, "").contains("已停用"), "zh skipped noise value");
+    check(en.touchValueNoise(false, false, true, "").contains("Disabled"), "en skipped noise value");
+    check(zh.touchNoPatchDialogTitle(true).contains("开启"), "zh skipped dialog title");
+    check(en.touchNoPatchDialogTitle(true).contains("Enable"), "en skipped dialog title");
+    check(zh.touchNoPatchDialogMessage(true).contains("首次校准"), "zh skipped dialog msg");
+    check(en.touchNoPatchDialogMessage(true).contains("skipped"), "en skipped dialog msg");
     check(en.touchValueCoords(true, "0.0:0.0 0.5:0.52 1.0:1.0", "0.0:0.0 1.0:1.0", "", "", "").contains("X 3 pts"), "en coords");
 
     // Debugging requests, key/certificate normalization & bilingual strings
@@ -748,6 +760,7 @@ with pathlib.Path({str(calls_log)!r}).open('a') as f:
             self.assertEqual(state['touch_profile_size_max'], '2.4')
             self.assertEqual(state['touch_noise_saved'], '1')
             self.assertEqual(state['touch_noise_enabled'], '1')
+            self.assertEqual(state['touch_noise_disabled'], '0')
             self.assertEqual(state['touch_noise_info'], f'SPXNOISE3 {dev_id} 1 1 56 84 nonzero=3/4704 max=255')
             self.assertEqual(state['touch_tap_saved'], '1')
             self.assertTrue(state['touch_tap_line'].startswith('SPXTAP1 '))
@@ -757,6 +770,7 @@ with pathlib.Path({str(calls_log)!r}).open('a') as f:
             self.assertEqual(reply[:2], ['tn-1', 'OK'])
             self.assertEqual(state['touch_noise_saved'], '1')
             self.assertEqual(state['touch_noise_enabled'], '0')
+            self.assertEqual(state['touch_noise_disabled'], '1')
             self.assertTrue((touch_store / f'{dev_id}.noise').is_file())
             self.assertTrue((touch_store / f'{dev_id}.noise.disabled').exists())
             self.assertFalse((ndir / 'active').exists())
@@ -826,13 +840,21 @@ with pathlib.Path({str(calls_log)!r}).open('a') as f:
             self.assertEqual(state['touch_profile_saved'], '0')
             self.assertEqual(state['touch_noise_saved'], '0')
             self.assertEqual(state['touch_noise_enabled'], '0')
+            self.assertEqual(state['touch_noise_disabled'], '0')
             self.assertEqual(state['touch_tap_saved'], '0')
             self.assertFalse((touch_store / f'{dev_id}.profile').exists())
             self.assertFalse((touch_store / f'{dev_id}.noise').exists())
             self.assertFalse((touch_store / f'{dev_id}.tap').exists())
 
+            # 6b. First-boot healthy-screen skip (.noise.disabled without .noise) reports touch_noise_disabled=1
+            (touch_store / f'{dev_id}.noise.disabled').touch()
+            state, _ = run_once()
+            self.assertEqual(state['touch_noise_saved'], '0')
+            self.assertEqual(state['touch_noise_enabled'], '0')
+            self.assertEqual(state['touch_noise_disabled'], '1')
             _, reply = run_once('set-touch-ghost-patch\ntn-9\n1\n')
             self.assertEqual(reply, ['tn-9', 'ERROR', 'no_noise_patch'])
+            (touch_store / f'{dev_id}.noise.disabled').unlink()
             _, reply = run_once('export-touch-calibration\ntn-10\n')
             self.assertEqual(reply, ['tn-10', 'ERROR', 'not_found'])
 

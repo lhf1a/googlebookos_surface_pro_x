@@ -219,6 +219,131 @@ elif a[:2]==['am','start']:pathlib.Path({str(w/'launched')!r}).touch()
                 self.assertTrue((w/'launched').exists())
                 self.assertFalse((store/(device+'.profile')).exists())
                 stop(p)
+
+                # 5. Legacy skip-with-disabled-noise (.noise.disabled without .noise) migrates cleanly.
+                for f in list(store.iterdir()):
+                    f.unlink()
+                (w/'launched').unlink(missing_ok=True)
+                (store/(legacy+'.noise.disabled')).touch()
+                p=start()
+                self.assertFalse((w/'launched').exists())
+                self.assertTrue((store/(device+'.noise.disabled')).exists())
+                self.assertTrue((store/(device+'.prompted')).exists())
+                stop(p)
+            finally:
+                for p,log in processes:
+                    if p.poll() is None:p.terminate();p.wait(timeout=8)
+                    log.close()
+
+    def test_skip_disables_ghost_patch_and_suppresses_future_prompts(self):
+        """Confirming healthy-screen skip disables ghost-touch patch, reloads iptsd, and stops re-prompting."""
+        with tempfile.TemporaryDirectory() as td:
+            w=pathlib.Path(td)
+            def put(path,body,mode=0o644):
+                p=w/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(body);p.chmod(mode);return p
+            put('sys/class/dmi/id/product_uuid','test-board\n')
+            put('sys/class/drm/card7-eDP-1/edid','x'*128)
+            put('sys/class/drm/card7-eDP-1/status','connected\n')
+            put('sys/class/hidraw/hidraw19/device/uevent','HID_ID=001C:0000045E:00000C21\n')
+            put('sys/class/hidraw/hidraw19/device/report_descriptor','test-hid')
+            put('logs/power-input-boot.txt','SQ2_COVER_AND_POWER_INPUT_READY\n')
+            put('etc/iptsd.conf','[Contacts]\nAspectMax = 2.0\n')
+            put('etc/sq2-touch-calibration/wizard.apk','apk')
+            put('run/iptsd-hidraw','/dev/hidraw19\n')
+            (w/'android/data/local/tmp').mkdir(parents=True)
+            files=w/'android/data/user_de/10/org.surface.touchcalibration.unified/files'
+            files.mkdir(parents=True)
+            put('bin/android',f'''#!/usr/bin/python3
+import sys,pathlib
+a=sys.argv[1:]
+if a[:1]==['getprop']:print('1')
+elif a[:2]==['cmd','activity']:print('10')
+elif a[:2]==['am','start']:pathlib.Path({str(w/'launched_args')!r}).write_text(' '.join(a)+'\\n')
+''',0o755)
+            put('bin/touch-framework-ready',f'#!/bin/sh\ncat "{w}/run/iptsd-calibrated.conf" > "{w}/applied"\n',0o755)
+            put('bin/touch-services','#!/bin/sh\nexit 0\n',0o755)
+            subprocess.run(['g++','-std=c++17','-O2',str(R/'probe/touch-calibration/profile-tool.cpp'),'-o',str(w/'bin/touch-calibration-profile')],check=True)
+            subprocess.run(['g++','-std=c++17','-O2',str(R/'probe/touch-calibration/noise-tool.cpp'),'-o',str(w/'bin/touch-noise-profile')],check=True)
+            script=(R/'probe/test2/touch-calibration-boot').read_text()
+            script=script.replace('android() { timeout "${ANDROID_COMMAND_TIMEOUT:-15}" nsenter -t 1 -m -r -- /system/bin/"$@"; }',f'android() {{ "{w}/bin/android" "$@"; }}')
+            for prefix in ('/proc/1/root','/sys','/run','/logs','/etc'):
+                script=script.replace(prefix,str(w/('android' if prefix=='/proc/1/root' else prefix[1:])))
+            script=script.replace('/bin/touch-',str(w/'bin/touch-')).replace('sleep 2','sleep 0.02').replace('+ 180','+ 2')
+            # Simulate iptsd reload ACK when noise/version exists.
+            script=script.replace('noise_reload() {', 'noise_reload() {\n    noise_cmd reload "$1"\n    printf \'%s applied 100 0\\n\' "$1" > "$noise/status"; return 0\n')
+            runner=put('runner',script,0o755)
+
+            device=hashlib.sha256(b'test-board\n'+b'x'*128+b'HID_ID=001C:0000045E:00000C21\n'+b'test-hid').hexdigest()
+            store=w/'android/data/vendor/sq2-touch-calibration'
+            noise=w/'run/iptsd-noise'
+            processes=[]
+            def wait_for(fn):
+                end=time.monotonic()+8
+                while time.monotonic()<end:
+                    if fn():return
+                    time.sleep(.025)
+                self.fail('Timed out; '+(w/'session.log').read_text())
+            def start():
+                log=(w/'session.log').open('w');p=subprocess.Popen(['sh',str(runner)],stdout=log,stderr=log);processes.append((p,log));wait_for(lambda:(files/'context').exists());return p
+            def stop(p):
+                p.terminate();p.wait(timeout=8)
+                (files/'context').unlink(missing_ok=True)
+            count=0
+            def request(command,body=''):
+                nonlocal count
+                count+=1;nonce=f'req-{count}';temp=files/'request.tmp';temp.write_text(command+'\n'+nonce+'\n'+body);temp.rename(files/'request')
+                wait_for(lambda:(files/'reply').exists() and (files/'reply').read_text().startswith(nonce+'\n'))
+                return (files/'reply').read_text().splitlines()[1]
+            try:
+                # 1. First boot auto-launches wizard with first_boot extra.
+                p=start()
+                self.assertTrue((w/'launched_args').exists())
+                self.assertIn('--ez first_boot true', (w/'launched_args').read_text())
+                (noise/'version').write_text('7\n')
+
+                # 2. User confirms healthy-screen skip: disables ghost patch, reloads iptsd, marks prompted.
+                self.assertEqual(request('skip'), 'OK')
+                self.assertTrue((store/(device+'.noise.disabled')).exists())
+                self.assertTrue((store/(device+'.prompted')).exists())
+                self.assertFalse((noise/'active').exists())
+                self.assertEqual((noise/'command').read_text().strip(), f'reload {device} req-1')
+                stop(p)
+
+                # 3. Subsequent reboot does NOT pop up calibration again.
+                (w/'launched_args').unlink()
+                p=start()
+                self.assertFalse((w/'launched_args').exists())
+                self.assertTrue((store/(device+'.noise.disabled')).exists())
+                stop(p)
+
+                # 4. If a saved .noise file existed before skip, skip disables it without deleting it,
+                #    clears active in RAM, and reboot keeps it disabled until re-enabled in Advanced Settings.
+                sample_noise=f'SPXNOISE1 {device} 1118 3105 32 48 1 10 0.25\n'
+                (store/(device+'.noise')).write_text(sample_noise)
+                (store/(device+'.noise.disabled')).unlink()
+                p=start()
+                self.assertTrue((noise/'active').is_file())
+                self.assertEqual(request('skip'), 'OK')
+                self.assertTrue((store/(device+'.noise')).is_file())
+                self.assertTrue((store/(device+'.noise.disabled')).exists())
+                self.assertFalse((noise/'active').exists())
+                stop(p)
+
+                p=start()
+                self.assertFalse((w/'launched_args').exists())
+                self.assertFalse((noise/'active').exists())
+
+                # 5. 'complete' marks prompted without disabling an active ghost-touch patch.
+                (store/(device+'.noise.disabled')).unlink()
+                (store/(device+'.prompted')).unlink()
+                stop(p)
+                p=start()
+                self.assertTrue((noise/'active').is_file())
+                self.assertEqual(request('complete'), 'OK')
+                self.assertTrue((store/(device+'.prompted')).exists())
+                self.assertFalse((store/(device+'.noise.disabled')).exists())
+                self.assertTrue((noise/'active').is_file())
+                stop(p)
             finally:
                 for p,log in processes:
                     if p.poll() is None:p.terminate();p.wait(timeout=8)

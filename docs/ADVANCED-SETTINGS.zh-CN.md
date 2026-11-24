@@ -47,7 +47,7 @@ Surface Pro X 移植版内置 **高级设置（`SurfaceAdvancedControl.apk`，`o
 ### 3.3 触控
 
 - **停用触控屏**：二次确认后停止 `iptsd` 并持久化停用标志，可在高级设置中重新开启（救援模式下自动忽略）。
-- **防误触补丁**：通过 `.noise.disabled` 标志开关噪声过滤补丁，切换时保留已采集的噪声样本。
+- **防误触补丁**：通过 `.noise.disabled` 标志开关噪声过滤补丁，切换时保留已采集的噪声样本；若首次启动校准时因屏幕完好一键跳过，此处将显示为已停用，点击可随时重新校准或导入 `.noise` 开启。
 - **实时校准摘要**：展示当前 `SPXNOISE1` / `SPXNOISE2` / `SPXNOISE3` / `SPXTAP1` 状态、`ContactSizeMax`、`iptsd` 运行状态及触控硬件 ID。
 - **校准与备份恢复**：
   - **重新校准**：拉起统一触控校准向导 `org.surface.touchcalibration.unified`。

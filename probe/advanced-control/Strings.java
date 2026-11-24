@@ -314,15 +314,25 @@ public final class Strings {
 
     public String touchHomeSubtitle(boolean available, boolean touchDisabled, boolean noiseSaved,
                                     boolean noiseEnabled, boolean profileSaved) {
+        return touchHomeSubtitle(available, touchDisabled, noiseSaved, noiseEnabled, false, profileSaved);
+    }
+
+    public String touchHomeSubtitle(boolean available, boolean touchDisabled, boolean noiseSaved,
+                                    boolean noiseEnabled, boolean noiseDisabled, boolean profileSaved) {
         if (touchDisabled) {
             return t("触摸屏已禁用", "Touchscreen disabled");
         }
         if (!available) {
             return t("未检测到触摸设备", "No touch device");
         }
-        String patchText = !noiseSaved
-                ? t("幽灵补丁：未配置", "Ghost patch: None")
-                : (noiseEnabled ? t("幽灵补丁：开", "Ghost patch: On") : t("幽灵补丁：关", "Ghost patch: Off"));
+        String patchText;
+        if (!noiseSaved) {
+            patchText = noiseDisabled
+                    ? t("幽灵补丁：关", "Ghost patch: Off")
+                    : t("幽灵补丁：未配置", "Ghost patch: None");
+        } else {
+            patchText = noiseEnabled ? t("幽灵补丁：开", "Ghost patch: On") : t("幽灵补丁：关", "Ghost patch: Off");
+        }
         String calText = profileSaved ? t("已校准", "Calibrated") : t("未校准", "Uncalibrated");
         return patchText + " · " + calText;
     }
@@ -371,15 +381,27 @@ public final class Strings {
     }
 
     public String touchGhostBadge(boolean noiseSaved, boolean noiseEnabled) {
+        return touchGhostBadge(noiseSaved, noiseEnabled, false);
+    }
+
+    public String touchGhostBadge(boolean noiseSaved, boolean noiseEnabled, boolean noiseDisabled) {
         if (!noiseSaved) {
-            return t("未配置", "None");
+            return noiseDisabled ? t("已停用", "Disabled") : t("未配置", "None");
         }
         return noiseEnabled ? t("已启用", "Active") : t("已停用", "Disabled");
     }
 
     public String touchGhostDescription(boolean noiseSaved, boolean noiseEnabled, String noiseInfo) {
+        return touchGhostDescription(noiseSaved, noiseEnabled, false, noiseInfo);
+    }
+
+    public String touchGhostDescription(boolean noiseSaved, boolean noiseEnabled,
+                                        boolean noiseDisabled, String noiseInfo) {
         if (!noiseSaved) {
-            return t("未保存补丁", "No patch saved");
+            return noiseDisabled
+                    ? t("已跳过校准并停用 · 点击可运行校准或导入补丁开启",
+                        "Disabled (calibration skipped) · Tap to calibrate or import a patch")
+                    : t("未保存补丁", "No patch saved");
         }
         DriverPolicy.NoiseSummary ns = DriverPolicy.parseNoiseSummary(noiseInfo);
         String modelDesc = formatNoiseDetail(ns);
@@ -390,8 +412,21 @@ public final class Strings {
         return t("未保存幽灵触控补丁", "No Ghost-Touch Patch");
     }
 
+    public String touchNoPatchDialogTitle(boolean noiseDisabled) {
+        return noiseDisabled
+                ? t("开启幽灵触控补丁", "Enable Ghost-Touch Patch")
+                : touchNoPatchDialogTitle();
+    }
+
     public String touchNoPatchDialogMessage() {
         return t("请先运行校准或导入 .noise 文件。", "Run calibration or import a .noise file first.");
+    }
+
+    public String touchNoPatchDialogMessage(boolean noiseDisabled) {
+        return noiseDisabled
+                ? t("已跳过首次校准并关闭幽灵触控补丁。请运行触摸校准以检测并开启补丁，或导入 .noise 文件。",
+                    "First-boot calibration was skipped and the ghost-touch patch is disabled. Run touch calibration to detect and enable it, or import a .noise file.")
+                : touchNoPatchDialogMessage();
     }
 
     public String touchGhostSavedMessage(boolean enabled) {
@@ -462,8 +497,15 @@ public final class Strings {
     }
 
     public String touchValueNoise(boolean noiseSaved, boolean noiseEnabled, String noiseInfo) {
+        return touchValueNoise(noiseSaved, noiseEnabled, false, noiseInfo);
+    }
+
+    public String touchValueNoise(boolean noiseSaved, boolean noiseEnabled,
+                                  boolean noiseDisabled, String noiseInfo) {
         if (!noiseSaved) {
-            return t("未配置", "Not configured");
+            return noiseDisabled
+                    ? t("已停用（已跳过首次校准）", "Disabled (first-boot calibration skipped)")
+                    : t("未配置", "Not configured");
         }
         String detail = formatNoiseDetail(DriverPolicy.parseNoiseSummary(noiseInfo));
         String state = noiseEnabled ? t("已启用", "Active") : t("已停用", "Disabled");

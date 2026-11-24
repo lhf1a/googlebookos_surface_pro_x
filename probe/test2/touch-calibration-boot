@@ -119,7 +119,7 @@ tap_saved=$store/$device.tap
 # One-time migration from the pre-HID_ID local key on the same board+EDID+descriptor.
 # Retain legacy files untouched for rollback; migrate each missing piece without overwriting existing new-key data.
 if [ "$device_legacy" != "$device" ] && [ ! -e "$store/$device.migrated-v2" ]; then
-    if [ -e "$store/$device_legacy.profile" ] || [ -e "$store/$device_legacy.noise" ] || [ -e "$store/$device_legacy.tap" ] || [ -e "$store/$device_legacy.prompted" ]; then
+    if [ -e "$store/$device_legacy.profile" ] || [ -e "$store/$device_legacy.noise" ] || [ -e "$store/$device_legacy.noise.disabled" ] || [ -e "$store/$device_legacy.tap" ] || [ -e "$store/$device_legacy.prompted" ]; then
         migrated_any=0
         legacy_saved=$store/$device_legacy.profile
         if [ ! -e "$saved" ] && [ -f "$legacy_saved" ] && [ ! -L "$legacy_saved" ] && "$tool" validate "$device_legacy" < "$legacy_saved" > /dev/null 2>&1; then
@@ -145,6 +145,11 @@ if [ "$device_legacy" != "$device" ] && [ ! -e "$store/$device.migrated-v2" ]; t
             else
                 rm -f "$noise_saved.new"
             fi
+        elif [ ! -e "$noise_saved" ] && [ ! -e "$noise_saved.disabled" ] && [ -e "$legacy_noise.disabled" ]; then
+            : > "$noise_saved.disabled"
+            chmod 600 "$noise_saved.disabled" 2>/dev/null || true
+            sync
+            migrated_any=1
         fi
         legacy_tap=$store/$device_legacy.tap
         if [ ! -e "$tap_saved" ] && [ -x /bin/touch-tap-profile ] && [ -f "$legacy_tap" ] && [ ! -L "$legacy_tap" ] && /bin/touch-tap-profile "$device_legacy" < "$legacy_tap" > /dev/null 2>&1; then
@@ -156,12 +161,12 @@ if [ "$device_legacy" != "$device" ] && [ ! -e "$store/$device.migrated-v2" ]; t
                 rm -f "$tap_saved.new"
             fi
         fi
-        if [ "$migrated_any" = 1 ] || [ -e "$store/$device_legacy.prompted" ] || [ -f "$saved" ] || [ -f "$noise_saved" ] || [ -f "$tap_saved" ]; then
+        if [ "$migrated_any" = 1 ] || [ -e "$store/$device_legacy.prompted" ] || [ -f "$saved" ] || [ -f "$noise_saved" ] || [ -e "$noise_saved.disabled" ] || [ -f "$tap_saved" ]; then
             touch "$store/$device.prompted"
         fi
         touch "$store/$device.migrated-v2"
         sync
-    elif [ -f "$saved" ] || [ -f "$noise_saved" ] || [ -f "$tap_saved" ]; then
+    elif [ -f "$saved" ] || [ -f "$noise_saved" ] || [ -e "$noise_saved.disabled" ] || [ -f "$tap_saved" ]; then
         touch "$store/$device.migrated-v2"
     fi
 fi
@@ -257,11 +262,11 @@ fi
 # Preserve the old signed package/data for rollback; expose only the merged UI.
 android pm disable-user --user "$user" org.surface.touchcalibration > /logs/touch-calibration-legacy-hidden.txt 2>&1 || true
 files=/proc/1/root/data/user_de/$user/$pkg/files
-if [ -d "$files" ] && [ ! -L "$files" ]; then rm -f "$files/request"; fi
-if [ "$valid" = 0 ] && [ ! -e "$store/$device.prompted" ] && [ ! -f "$noise_saved" ] && [ ! -f "$tap_saved" ] && [ ! -e /run/touch-disabled ]; then
+if [ -d "$files" ] && [ ! -L "$files" ]; then rm -f "$files/request" "$files"/.bridge-*; fi
+if [ "$valid" = 0 ] && [ ! -e "$store/$device.prompted" ] && [ ! -f "$noise_saved" ] && [ ! -e "$noise_saved.disabled" ] && [ ! -f "$tap_saved" ] && [ ! -e /run/touch-disabled ]; then
     # Nonblocking onboarding: never dismiss the lock screen or modify credentials.
-    android am start --user "$user" --windowingMode 1 -n "$pkg/org.surface.touchcalibration.MainActivity" > /dev/null 2>&1 ||
-        android am start --user "$user" -n "$pkg/org.surface.touchcalibration.MainActivity" > /dev/null
+    android am start --user "$user" --windowingMode 1 --ez first_boot true -n "$pkg/org.surface.touchcalibration.MainActivity" > /dev/null 2>&1 ||
+        android am start --user "$user" --ez first_boot true -n "$pkg/org.surface.touchcalibration.MainActivity" > /dev/null
 fi
 preview=0;until_time=0;context_sent=0;cycles=0
 reply() { printf '%s\n%s\n' "$nonce" "$1" | "$tool" publish "$files" reply; }
@@ -447,9 +452,41 @@ while true; do
                         preview=0;context_sent=0;touch "$store/$device.prompted";reply OK
                     else reply ERROR; fi
                     ;;
-                cancel|skip)
+                cancel)
                     if [ "$preview" = 1 ]; then restore; fi
-                    touch "$store/$device.prompted";reply OK
+                    touch "$store/$device.prompted";sync;reply OK
+                    ;;
+                complete)
+                    if [ "$preview" = 1 ]; then restore; fi
+                    touch "$store/$device.prompted";sync;reply OK
+                    ;;
+                skip)
+                    if [ "$tap_preview" = 1 ]; then tap_restore || true; fi
+                    if [ "$preview" = 1 ]; then restore || true; fi
+                    noise_preview=0
+                    rm -f "$noise/previous" "$noise/active" "$noise/candidate"
+                    : > "$noise_saved.disabled"
+                    chmod 600 "$noise_saved.disabled" 2>/dev/null || true
+                    if [ -s "$noise/version" ] && [ ! -e /run/touch-disabled ]; then
+                        _iptsd_alive=1
+                        if [ -r /run/iptsd.pid ]; then
+                            _ipid=$(tr -d '\r\n ' < /run/iptsd.pid 2>/dev/null || true)
+                            case "$_ipid" in
+                                ''|*[!0-9]*) _iptsd_alive=0 ;;
+                                *) kill -0 "$_ipid" 2>/dev/null || _iptsd_alive=0 ;;
+                            esac
+                        fi
+                        if [ "$_iptsd_alive" = 1 ]; then
+                            if ! noise_reload "$nonce"; then reply ERROR; continue; fi
+                        else
+                            noise_cmd reload "$nonce"
+                        fi
+                    else
+                        noise_cmd reload "$nonce"
+                    fi
+                    touch "$store/$device.prompted"
+                    sync
+                    reply OK
                     ;;
                 *) reply ERROR;;
             esac

@@ -42,6 +42,7 @@ final class BridgeClient {
         String touchProfileSizeMax = "";
         boolean touchNoiseSaved;
         boolean touchNoiseEnabled;
+        boolean touchNoiseDisabled;
         String touchNoiseInfo = "";
         boolean touchTapSaved;
         String touchTapLine = "";
@@ -345,6 +346,7 @@ final class BridgeClient {
         state.touchProfileSizeMax = map.getOrDefault("touch_profile_size_max", "");
         state.touchNoiseSaved = "1".equals(map.get("touch_noise_saved"));
         state.touchNoiseEnabled = "1".equals(map.get("touch_noise_enabled"));
+        state.touchNoiseDisabled = "1".equals(map.get("touch_noise_disabled"));
         state.touchNoiseInfo = map.getOrDefault("touch_noise_info", "");
         state.touchTapSaved = "1".equals(map.get("touch_tap_saved"));
         state.touchTapLine = map.getOrDefault("touch_tap_line", "");

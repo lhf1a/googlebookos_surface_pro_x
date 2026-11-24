@@ -19,7 +19,7 @@ Use a fresh output directory for components to avoid mixing versions. Compilatio
 
 ## Default Calibration Flow
 
-1. Automatically starts a 45-second idle detection 5 seconds after opening the app.
+1. Automatically starts a 45-second idle detection 5 seconds after opening the app. If the screen is intact with no ghost-touch issues, users can tap "Screen OK · Skip", confirm in the secondary prompt (which notes it can be re-enabled anytime in Advanced Settings → Touch) to skip calibration, automatically disable the ghost-touch patch via `.noise.disabled`, and write `.prompted` so calibration will not pop up on subsequent boots.
 2. After detecting idle anomalies, generates candidates from collected samples, displays "Fix generated" ("已生成修复方案"), and starts a 5-second countdown to retest upon tapping "Apply fix and retest" ("应用修复并复测").
 3. Performs a 20-second single-finger swipe to detect accompanying contacts, generate candidates, apply, and retest to confirm.
 4. Collects 15 single-finger taps, then proceeds to coordinate and thumb calibration.

@@ -1036,6 +1036,7 @@ public final class MainActivity extends Activity {
                         bridgeState.touchDisabled,
                         bridgeState.touchNoiseSaved,
                         bridgeState.touchNoiseEnabled,
+                        bridgeState.touchNoiseDisabled,
                         bridgeState.touchProfileSaved);
         View touchRow = buildCategoryRow(
                 SettingsTheme.ICON_TOUCH,
@@ -1642,7 +1643,8 @@ public final class MainActivity extends Activity {
                         bridgeState.touchProfileXTop, bridgeState.touchProfileTopStart, bridgeState.touchProfileTopEnd)},
                 {str.touchLabelThumb(), str.touchValueThumb(bridgeState.touchProfileSizeMax)},
                 {str.touchLabelNoise(), str.touchValueNoise(
-                        bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled, bridgeState.touchNoiseInfo)},
+                        bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled,
+                        bridgeState.touchNoiseDisabled, bridgeState.touchNoiseInfo)},
                 {str.touchLabelTap(), str.touchValueTap(
                         bridgeState.touchTapSaved, bridgeState.touchTapLine)},
         };
@@ -1752,10 +1754,12 @@ public final class MainActivity extends Activity {
     private View buildGhostPatchCard(boolean canControl) {
         return buildToggleCard(
                 str.touchGhostTitle(),
-                str.touchGhostBadge(bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled),
+                str.touchGhostBadge(
+                        bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled, bridgeState.touchNoiseDisabled),
                 bridgeState.touchNoiseEnabled,
                 str.touchGhostDescription(
-                        bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled, bridgeState.touchNoiseInfo),
+                        bridgeState.touchNoiseSaved, bridgeState.touchNoiseEnabled,
+                        bridgeState.touchNoiseDisabled, bridgeState.touchNoiseInfo),
                 bridgeState.touchNoiseEnabled,
                 canControl,
                 () -> {
@@ -2182,8 +2186,8 @@ public final class MainActivity extends Activity {
 
     private void showNoPatchDialog() {
         new AlertDialog.Builder(this, theme.dialogTheme())
-                .setTitle(str.touchNoPatchDialogTitle())
-                .setMessage(str.touchNoPatchDialogMessage())
+                .setTitle(str.touchNoPatchDialogTitle(bridgeState.touchNoiseDisabled))
+                .setMessage(str.touchNoPatchDialogMessage(bridgeState.touchNoiseDisabled))
                 .setNegativeButton(str.cancel(), null)
                 .setPositiveButton(str.touchRecalibrateTitle(), (d, w) -> openCalibrationApp())
                 .show();

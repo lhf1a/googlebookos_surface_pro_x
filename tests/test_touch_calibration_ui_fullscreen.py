@@ -65,6 +65,7 @@ class TouchCalibrationUiFullscreenTest(unittest.TestCase):
         helper = ROOT / "probe/test2/touch-calibration-boot"
         text = helper.read_text()
         self.assertIn("--windowingMode 1", text)
+        self.assertIn("--ez first_boot true", text)
         subprocess.run(["sh", "-n", str(helper)], check=True)
 
     def test_main_activity_has_modern_ui_and_fullscreen_lifecycle(self):
@@ -84,8 +85,27 @@ class TouchCalibrationUiFullscreenTest(unittest.TestCase):
             "class GesturePadView",
             "drawFloatingHud",
             "drawPrecisionTarget",
+            "confirmSkipHealthyScreen",
+            "屏幕完好，跳过校准",
+            "高级设置",
+            'send("skip","")',
+            'send("complete","")',
+            "first_boot",
         ):
             self.assertIn(token, src)
+
+    def test_skip_confirmation_flow_pauses_countdown_and_disables_patch(self):
+        src = (ROOT / "probe/touch-calibration/MainActivity.java").read_text()
+        start = src.index("  void confirmSkipHealthyScreen(boolean fromReview){")
+        end = src.index("  Map<String,String> details(", start)
+        confirm_block = src[start:end]
+        self.assertIn("cancelCountdown();", confirm_block)
+        self.assertIn("高级设置", confirm_block)
+        self.assertIn("Advanced Settings", confirm_block)
+        self.assertIn("不再", confirm_block)
+        self.assertIn('send("skip","")', confirm_block)
+        self.assertIn("primaryButton(", confirm_block)
+        self.assertIn("if(skipReturnToReview)noiseReview();else noiseIntro();", confirm_block)
 
     def test_apk_builds_and_verifies_when_sdk_present(self):
         sdk = _find_sdk()

@@ -47,7 +47,7 @@ The Surface Pro X port includes **Advanced Settings (`SurfaceAdvancedControl.apk
 ### 3.3 Touch
 
 - **Disable Touchscreen**: After confirmation, stops `iptsd` and persists the disabled flag; can be re-enabled in Advanced Settings (automatically ignored in Rescue Mode).
-- **Ghost-Touch Patch**: Toggles the noise-filtering patch via `.noise.disabled` while preserving collected noise calibration samples.
+- **Ghost-Touch Patch**: Toggles the noise-filtering patch via `.noise.disabled` while preserving collected noise calibration samples; if first-boot calibration was skipped on a healthy screen, this displays as disabled and lets the user recalibrate or import a `.noise` file to enable it anytime.
 - **Live Calibration Summary**: Displays active `SPXNOISE1` / `SPXNOISE2` / `SPXNOISE3` / `SPXTAP1` status, `ContactSizeMax`, `iptsd` running state, and touch hardware ID.
 - **Calibration & Backup/Restore**:
   - **Recalibrate**: Launches `org.surface.touchcalibration.unified`.
