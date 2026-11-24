@@ -343,12 +343,16 @@ def build_parser():
                       help='explicit image size in GiB when --minimal-partitions is enabled (default: 8)')
     full.add_argument('--esp-mib', type=int,
                       help='explicit ESP size in MiB when --minimal-partitions is enabled (default: 1024)')
+    full.add_argument('--super-mib', type=int,
+                      help='minimum GPT super partition size in MiB when --minimal-partitions is enabled (default: 4096 with --mica-ota-base)')
+    full.add_argument('--mica-ota-base', type=Path,
+                      help='prepared mica OTA base directory from scripts/prepare_mica_ota_base.py (provides upgraded target slices, JARs, and vendor build.prop)')
     full.add_argument('--boot-gnu-efi', type=Path,
                       help='GNU-EFI source for the boot-volume handoff; default PRIVATE_ROOT/kernel-6.18/gnu-efi')
     full.add_argument('--cross-compile', help='override the compiler; default extracts PRIVATE_ROOT/kernel-6.18/toolchain.tar.gz')
     full.add_argument('--build-dir', type=Path, help='fresh Linux filesystem kernel build directory')
-    full.add_argument('--ota-mode', choices=('auto', 'delta', 'esp', 'full'), default='auto',
-                      help='OTA package build mode during full-image: auto omits super when unchanged (default: auto)')
+    full.add_argument('--ota-mode', choices=('auto', 'delta', 'esp', 'full', 'super-delta'), default='auto',
+                      help='OTA package build mode during full-image: auto omits super when unchanged or builds super-delta when --mica-ota-base is set')
     full.add_argument('--ota-baseline', type=Path,
                       help='previous build directory or OTA-MANIFEST.json for delta ESP/super comparison')
     full.add_argument('--ota-previous-super-sha256',
@@ -365,7 +369,10 @@ def build_parser():
     ota_cmd.add_argument('--layout', type=Path, help='explicit LAYOUT.json matching --image')
     ota_cmd.add_argument('--previous-manifest', type=Path, help='previous OTA-MANIFEST.json, FULL-IMAGE.json, or build dir')
     ota_cmd.add_argument('--previous-super-sha256', help='explicit previous super SHA-256')
-    ota_cmd.add_argument('--mode', choices=('auto', 'delta', 'esp', 'full'), default='auto')
+    ota_cmd.add_argument('--mode', choices=('auto', 'delta', 'esp', 'full', 'super-delta'), default='auto')
+    ota_cmd.add_argument('--base-slices-dir', type=Path, help='base _a slices dir for --mode super-delta')
+    ota_cmd.add_argument('--target-slices-dir', type=Path, help='target _a slices dir for --mode super-delta')
+    ota_cmd.add_argument('--chain', type=Path, help='optional mica-ota-chain.json for source offset candidates')
     ota_cmd.add_argument('--super-unchanged', action='store_true', help='omit super when no previous manifest is given')
     ota_cmd.add_argument('--version', help='explicit release version string')
     ota_cmd.add_argument('--archive-name', help='explicit output archive filename')
@@ -390,6 +397,8 @@ def build_parser():
     disk.add_argument('--minimal-partitions', action='store_true',
                       help='slim output GPT to 5 actually used partitions and compact active _a super slices')
     disk.add_argument('--esp-mib', type=int, help='explicit ESP size in MiB when --minimal-partitions is enabled (default: 1024)')
+    disk.add_argument('--super-mib', type=int, help='minimum GPT super size in MiB when --minimal-partitions is enabled')
+    disk.add_argument('--super-slices-dir', type=Path, help='explicit upgraded _a EROFS slices directory for super')
     disk.add_argument('--jobs', type=int, default=default_jobs())
     disk.add_argument('--boot-gnu-efi', type=Path)
     disk.add_argument('--build-only', action='store_true', help='construct only; omit postbuild filesystem/partition/gzip readback checks and whole-image checksums')
@@ -436,6 +445,9 @@ def main(argv=None):
                 super_unchanged_hint=(True if args.super_unchanged else None),
                 version=args.version,
                 archive_name=args.archive_name,
+                base_slices_dir=args.base_slices_dir,
+                target_slices_dir=args.target_slices_dir,
+                chain_path=args.chain,
             )
         elif args.operation == 'verify':
             report = {'operation': 'verify', 'kernel_release': policy()['kernel_release'],

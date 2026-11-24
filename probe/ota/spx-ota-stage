@@ -10,6 +10,7 @@ ESP_DIR="${SPX_OTA_ESP:-/media/esp}"
 RUN_DIR="${SPX_OTA_RUN:-/run/spx-ota}"
 OTA_TOOL="${SPX_OTA_TOOL:-/bin/spx-ota-tool}"
 SUPER_DEV="${SPX_OTA_SUPER_DEV:-/dev/block/by-name/super}"
+SUPER_SLICES_FILE="${SPX_OTA_SUPER_SLICES:-/etc/sq2-ssd-super-slices}"
 DATA_DEV="${SPX_OTA_DATA_DEV:-/dev/block/by-name/userdata}"
 META_DEV="${SPX_OTA_META_DEV:-/dev/block/by-name/metadata}"
 MISC_DEV="${SPX_OTA_MISC_DEV:-/dev/block/by-name/misc}"
@@ -24,6 +25,7 @@ ESP_SRC_OVERRIDE="${SPX_OTA_ESP_SRC_DIR:-}"
 
 refresh_android_package_caches() {
     _root="$1"
+    _full_dalvik="${2:-0}"
     [ -n "$_root" ] && [ -d "$_root" ] && [ ! -L "$_root" ] || return 0
     _pcache="$_root/system/package_cache"
     if [ -d "$_pcache" ] && [ ! -L "$_pcache" ]; then
@@ -33,10 +35,14 @@ refresh_android_package_caches() {
         [ -d "$_dc" ] && [ ! -L "$_dc" ] || continue
         for _isa in "$_dc"/*; do
             [ -d "$_isa" ] && [ ! -L "$_isa" ] || continue
-            for _f in "$_isa"/vendor@app@* "$_isa"/vendor@overlay@*; do
-                [ -e "$_f" ] || [ -L "$_f" ] || continue
-                rm -rf "$_f" 2>/dev/null || true
-            done
+            if [ "$_full_dalvik" = "1" ]; then
+                find "$_isa" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+            else
+                for _f in "$_isa"/vendor@app@* "$_isa"/vendor@overlay@*; do
+                    [ -e "$_f" ] || [ -L "$_f" ] || continue
+                    rm -rf "$_f" 2>/dev/null || true
+                done
+            fi
         done
     done
     sync 2>/dev/null || true
@@ -211,7 +217,11 @@ write_result() {
 
 DATA_MOUNTED=0
 ESP_SRC_MOUNTED=0
+DATA_ROOT=""
 cleanup() {
+    if [ -n "$DATA_ROOT" ] && [ -d "$DATA_ROOT/ota/super-stage" ]; then
+        rm -rf "$DATA_ROOT/ota/super-stage" 2>/dev/null || true
+    fi
     if [ "$ESP_SRC_MOUNTED" = 1 ]; then
         umount "$RUN_DIR/esp-src" 2>/dev/null || true
         ESP_SRC_MOUNTED=0
@@ -296,6 +306,12 @@ copy_esp_file_atomic() {
         return 0
     fi
     _dst="$ESP_DIR/$_rel"
+    if [ -n "$_expected_sha" ] && [ -f "$_dst" ] && [ ! -L "$_dst" ]; then
+        _cur_sha="$("$OTA_TOOL" sha256 "$_dst" 2>>"$LOG_FILE" || true)"
+        if [ "$_cur_sha" = "$_expected_sha" ]; then
+            return 0
+        fi
+    fi
     _dir="${_dst%/*}"
     mkdir -p "$_dir" || fail_ota "esp_mkdir_failed"
     _tmp="$_dst.spxtmp"
@@ -310,14 +326,160 @@ copy_esp_file_atomic() {
     sync 2>/dev/null || true
 }
 
+is_uint() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+is_safe_slice_name() {
+    case "$1" in
+        ''|*[!A-Za-z0-9_-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+resolve_source_slice_offset() {
+    _rs_name="$1"
+    _rs_src_bytes="$2"
+    _rs_src_sha="$3"
+    _rs_cands_csv="$4"
+    _rs_super_max="$5"
+
+    _rs_list=""
+    if [ -r "$SUPER_SLICES_FILE" ]; then
+        _rs_etc_off="$(awk -v n="$_rs_name" -v sz="$_rs_src_bytes" '$1 == n && $3 == sz { print $2; exit }' "$SUPER_SLICES_FILE" 2>/dev/null || true)"
+        if is_uint "$_rs_etc_off"; then
+            _rs_list="$_rs_etc_off"
+        fi
+    fi
+    for _rs_c in $(printf '%s\n' "$_rs_cands_csv" | tr ',' ' '); do
+        is_uint "$_rs_c" || continue
+        case " $_rs_list " in
+            *" $_rs_c "*) ;;
+            *) _rs_list="$_rs_list $_rs_c" ;;
+        esac
+    done
+
+    for _rs_off in $_rs_list; do
+        _rs_end="$(awk -v o="$_rs_off" -v l="$_rs_src_bytes" 'BEGIN { printf "%.0f", o + l }')"
+        _rs_fits="$(awk -v e="$_rs_end" -v m="$_rs_super_max" 'BEGIN { print (e <= m) ? 1 : 0 }')"
+        [ "$_rs_fits" = "1" ] || continue
+        _rs_got="$("$OTA_TOOL" slice-sha256 "$SUPER_DEV" "$_rs_off" "$_rs_src_bytes" 2>>"$LOG_FILE" || true)"
+        if [ "$_rs_got" = "$_rs_src_sha" ]; then
+            printf '%s\n' "$_rs_off"
+            return 0
+        fi
+    done
+    return 1
+}
+
+extract_manifest_member_fast() {
+    _emf_dst="$1"
+    shift
+    # Manifest metadata files are packed first in the tar stream (<256 KiB);
+    # read only the archive prefix to avoid full-package gunzip passes.
+    ( gzip -dc "$PKG_PATH" 2>/dev/null | head -c 262144 | tar -xf - -C "$_emf_dst" "$@" 2>/dev/null ) || true
+    _emf_ok=1
+    for _emf_m in "$@"; do
+        [ -f "$_emf_dst/$_emf_m" ] && [ ! -L "$_emf_dst/$_emf_m" ] || { _emf_ok=0; break; }
+    done
+    [ "$_emf_ok" = "1" ] && return 0
+    tar -xzf "$PKG_PATH" -C "$_emf_dst" "$@" 2>>"$LOG_FILE"
+}
+
+apply_super_delta_manifest() {
+    _sd_tsv_rel="$1"
+    _sd_super_bytes="$2"
+    _sd_super_sha="$3"
+
+    is_safe_relpath "$_sd_tsv_rel" || fail_ota "invalid_super_delta_tsv_path"
+    is_hex64 "$_sd_super_sha" || fail_ota "invalid_manifest_super_sha256"
+    is_uint "$_sd_super_bytes" && [ "$_sd_super_bytes" -gt 0 ] 2>/dev/null || fail_ota "invalid_manifest_super_bytes"
+
+    _target_super_bytes="$(block_size_bytes "$SUPER_DEV")" || fail_ota "super_size_read_failed"
+    _super_fits="$(awk -v t="$_target_super_bytes" -v n="$_sd_super_bytes" 'BEGIN { print (t >= n) ? 1 : 0 }')"
+    [ "$_super_fits" = "1" ] || fail_ota "super_partition_too_small"
+
+    "$OTA_TOOL" capabilities 2>/dev/null | grep -qx 'apply-delta' || fail_ota "ota_tool_missing_apply_delta"
+
+    extract_manifest_member_fast "$RUN_DIR/work/meta" "$_sd_tsv_rel" || fail_ota "super_delta_tsv_extract_failed"
+    _sd_tsv="$RUN_DIR/work/meta/$_sd_tsv_rel"
+    [ -f "$_sd_tsv" ] && [ ! -L "$_sd_tsv" ] || fail_ota "super_delta_tsv_missing"
+
+    log "Phase A: Verifying source super slices read-only..."
+    _resolved_file="$RUN_DIR/work/resolved-super-delta.tsv"
+    : > "$_resolved_file"
+    _slice_count=0
+
+    while IFS='	' read -r _s_name _d_off _d_bytes _s_bytes _s_sha _d_sha _d_arc _s_cands; do
+        [ -n "$_s_name" ] || continue
+        is_safe_slice_name "$_s_name" || fail_ota "invalid_slice_name"
+        is_uint "$_d_off" && is_uint "$_d_bytes" && is_uint "$_s_bytes" || fail_ota "invalid_slice_bounds"
+        is_hex64 "$_s_sha" && is_hex64 "$_d_sha" || fail_ota "invalid_slice_sha256"
+        is_safe_relpath "$_d_arc" || fail_ota "invalid_delta_archive_path"
+        _src_off="$(resolve_source_slice_offset "$_s_name" "$_s_bytes" "$_s_sha" "$_s_cands" "$_target_super_bytes")" || fail_ota "super_delta_source_mismatch:$_s_name"
+        log "  source slice $_s_name verified at offset $_src_off ($_s_bytes B)"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$_s_name" "$_d_off" "$_d_bytes" "$_s_bytes" "$_s_sha" "$_d_sha" "$_d_arc" "$_src_off" >> "$_resolved_file"
+        _slice_count=$(( _slice_count + 1 ))
+    done < "$_sd_tsv"
+
+    [ "$_slice_count" -gt 0 ] || fail_ota "empty_super_delta_tsv"
+
+    _stage_dir="$DATA_ROOT/ota/super-stage"
+    _pkg_dir="$_stage_dir/pkg"
+    rm -rf "$_stage_dir" 2>/dev/null || true
+    mkdir -p "$_pkg_dir" || fail_ota "super_stage_mkdir_failed"
+
+    log "Phase B: Extracting super-delta and ESP payloads in single pass..."
+    tar -xzf "$PKG_PATH" -C "$_pkg_dir" payload/super-delta payload/esp 2>>"$LOG_FILE" || fail_ota "super_delta_extract_failed"
+    ESP_STAGE_DIR="$_pkg_dir"
+
+    log "Phase B: Reconstructing $_slice_count target slices into $_stage_dir..."
+    set --
+    while IFS='	' read -r _s_name _d_off _d_bytes _s_bytes _s_sha _d_sha _d_arc _src_off; do
+        [ -n "$_s_name" ] || continue
+        _out_img="$_stage_dir/$_s_name.img"
+        _delta_in="$_pkg_dir/$_d_arc"
+        [ -f "$_delta_in" ] && [ ! -L "$_delta_in" ] || fail_ota "super_delta_missing_file:$_s_name"
+        log "  applying delta for $_s_name ($_s_bytes -> $_d_bytes B)..."
+        _dout="$("$OTA_TOOL" apply-delta "$SUPER_DEV" "$_src_off" "$_s_bytes" "$_out_img" "$_delta_in" 2>>"$LOG_FILE")" || fail_ota "super_delta_apply_failed:$_s_name"
+        rm -f "$_delta_in" 2>/dev/null || true
+        _got_sha="$(printf '%s\n' "$_dout" | sed -n 's/^DELTA_DST_SHA256=//p' | head -n 1)"
+        _got_bytes="$(printf '%s\n' "$_dout" | sed -n 's/^DELTA_DST_BYTES=//p' | head -n 1)"
+        _got_ok="$(printf '%s\n' "$_dout" | sed -n 's/^DELTA_VERIFIED=//p' | head -n 1)"
+        [ "$_got_ok" = "1" ] && [ "$_got_sha" = "$_d_sha" ] && [ "$_got_bytes" = "$_d_bytes" ] || fail_ota "super_delta_verify_mismatch:$_s_name"
+        log "  reconstructed $_s_name verified: $_got_sha"
+        set -- "$@" "$_d_off" "$_out_img"
+    done < "$_resolved_file"
+
+    log "Phase C: Writing & readback-verifying assembled super ($_sd_super_bytes bytes)..."
+    _aout="$("$OTA_TOOL" assemble-super "$SUPER_DEV" "$_sd_super_bytes" "$_sd_super_sha" "$@" 2>>"$LOG_FILE")" || fail_ota "super_assemble_failed"
+    _written_sha="$(printf '%s\n' "$_aout" | sed -n 's/^SUPER_SHA256=//p' | head -n 1)"
+    _verified="$(printf '%s\n' "$_aout" | sed -n 's/^SUPER_VERIFIED=//p' | head -n 1)"
+    [ "$_verified" = "1" ] && [ "$_written_sha" = "$_sd_super_sha" ] || fail_ota "super_sha256_mismatch"
+
+    # Remove reconstructed slice images immediately; keep $_pkg_dir/payload/esp until ESP sync finishes.
+    for _img in "$_stage_dir"/*.img; do
+        [ -f "$_img" ] && rm -f "$_img" 2>/dev/null || true
+    done
+    rm -rf "$_pkg_dir/payload/super-delta" 2>/dev/null || true
+    log "Super partition delta applied and readback-verified: $_written_sha"
+}
+
 apply_manifest_package() {
     mkdir -p "$RUN_DIR/work/meta" "$RUN_DIR/esp-stage"
+    ESP_STAGE_DIR="$RUN_DIR/esp-stage"
     log "Extracting OTA manifest..."
-    tar -xzf "$PKG_PATH" -C "$RUN_DIR/work/meta" ota-manifest.kv ota-files.tsv 2>>"$LOG_FILE" || fail_ota "manifest_extract_failed"
+    extract_manifest_member_fast "$RUN_DIR/work/meta" ota-manifest.kv ota-files.tsv || fail_ota "manifest_extract_failed"
     [ -f "$RUN_DIR/work/meta/ota-manifest.kv" ] || fail_ota "manifest_kv_missing"
     [ -f "$RUN_DIR/work/meta/ota-files.tsv" ] || fail_ota "manifest_files_missing"
 
     M_SUPER_INCLUDED="0"
+    M_SUPER_MODE=""
+    M_SUPER_DELTA_TSV=""
     M_SUPER_ARCHIVE=""
     M_SUPER_SHA256=""
     M_SUPER_BYTES="0"
@@ -326,6 +488,8 @@ apply_manifest_package() {
         _v="$(printf '%s' "$_v" | tr -d '\r')"
         case "$_k" in
             SUPER_INCLUDED) M_SUPER_INCLUDED="$_v" ;;
+            SUPER_MODE) M_SUPER_MODE="$_v" ;;
+            SUPER_DELTA_TSV) M_SUPER_DELTA_TSV="$_v" ;;
             SUPER_ARCHIVE_PATH) M_SUPER_ARCHIVE="$_v" ;;
             SUPER_SHA256) M_SUPER_SHA256="$_v" ;;
             SUPER_BYTES) M_SUPER_BYTES="$_v" ;;
@@ -336,7 +500,10 @@ apply_manifest_package() {
         VERSION="$M_VERSION"
     fi
 
-    if [ "$M_SUPER_INCLUDED" = "1" ]; then
+    if [ "$M_SUPER_MODE" = "delta" ]; then
+        APPLY_SUPER="1"
+        apply_super_delta_manifest "$M_SUPER_DELTA_TSV" "$M_SUPER_BYTES" "$M_SUPER_SHA256"
+    elif [ "$M_SUPER_INCLUDED" = "1" ]; then
         is_safe_relpath "$M_SUPER_ARCHIVE" || fail_ota "invalid_super_archive_path"
         is_hex64 "$M_SUPER_SHA256" || fail_ota "invalid_manifest_super_sha256"
         [ "$M_SUPER_BYTES" -gt 0 ] 2>/dev/null || fail_ota "invalid_manifest_super_bytes"
@@ -349,8 +516,10 @@ apply_manifest_package() {
         log "Super partition updated and verified: $_written_sha"
     fi
 
-    log "Extracting ESP payload files..."
-    tar -xzf "$PKG_PATH" -C "$RUN_DIR/esp-stage" payload/esp 2>>"$LOG_FILE" || fail_ota "esp_payload_extract_failed"
+    if [ "$ESP_STAGE_DIR" = "$RUN_DIR/esp-stage" ]; then
+        log "Extracting ESP payload files..."
+        tar -xzf "$PKG_PATH" -C "$ESP_STAGE_DIR" payload/esp 2>>"$LOG_FILE" || fail_ota "esp_payload_extract_failed"
+    fi
 
     # Pre-verify every blob in ota-files.tsv before touching /media/esp.
     log "Verifying staged ESP file checksums..."
@@ -361,7 +530,7 @@ apply_manifest_package() {
                 is_safe_relpath "$_dst_rel" || fail_ota "unsafe_manifest_dst"
                 is_safe_relpath "$_blob_rel" || fail_ota "unsafe_manifest_blob"
                 is_hex64 "$_sha" || fail_ota "invalid_file_sha256"
-                _src="$RUN_DIR/esp-stage/$_blob_rel"
+                _src="$ESP_STAGE_DIR/$_blob_rel"
                 [ -f "$_src" ] && [ ! -L "$_src" ] || fail_ota "missing_staged_blob"
                 _got="$("$OTA_TOOL" sha256 "$_src" 2>>"$LOG_FILE")" || fail_ota "staged_hash_error"
                 [ "$_got" = "$_sha" ] || fail_ota "staged_sha256_mismatch"
@@ -380,7 +549,7 @@ apply_manifest_package() {
         [ -n "$_act" ] || continue
         case "$_act" in
             PUT)
-                copy_esp_file_atomic "$RUN_DIR/esp-stage/$_blob_rel" "$_dst_rel" "$_sha"
+                copy_esp_file_atomic "$ESP_STAGE_DIR/$_blob_rel" "$_dst_rel" "$_sha"
                 ;;
             DEL)
                 if ! is_preserved_esp_path "$_dst_rel"; then
@@ -389,7 +558,8 @@ apply_manifest_package() {
                 ;;
         esac
     done < "$RUN_DIR/work/meta/ota-files.tsv"
-    ensure_grub_boots_sq2nat "$ESP_DIR" "$RUN_DIR/esp-stage/payload/esp/EFI/BOOT/grub.cfg"
+    ensure_grub_boots_sq2nat "$ESP_DIR" "$ESP_STAGE_DIR/payload/esp/EFI/BOOT/grub.cfg"
+    rm -rf "$DATA_ROOT/ota/super-stage" 2>/dev/null || true
     sync 2>/dev/null || true
     log "Manifest OTA files applied cleanly."
 }
@@ -538,8 +708,16 @@ else
             rm -f "$PKG_PATH" 2>/dev/null || true
             ;;
     esac
-    log "Refreshing Android package_cache and vendor APK dalvik-cache..."
-    refresh_android_package_caches "$DATA_ROOT"
+    _full_dalvik="0"
+    if [ "${M_SUPER_MODE:-}" = "delta" ]; then
+        _full_dalvik="1"
+    fi
+    if [ "$_full_dalvik" = "1" ]; then
+        log "Super updated: refreshing full Android package_cache and dalvik-cache..."
+    else
+        log "Refreshing Android package_cache and vendor APK dalvik-cache..."
+    fi
+    refresh_android_package_caches "$DATA_ROOT" "$_full_dalvik"
     if [ "$DATA_MOUNTED" = 1 ]; then
         sync 2>/dev/null || true
         umount "$RUN_DIR/data" || true

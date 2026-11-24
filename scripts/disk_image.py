@@ -124,6 +124,60 @@ def compact_super_slices(slices_bytes, source, source_super_offset, source_super
     return total_super, plan, text
 
 
+def compact_super_slices_from_dir(slices_dir, slice_order=('system_a', 'vendor_a', 'product_a', 'system_ext_a', 'system_dlkm_a', 'vendor_dlkm_a')):
+    """Pack explicit _a EROFS partition image files tightly from offset 1 MiB inside super."""
+    slices_dir = Path(slices_dir).resolve()
+    require(slices_dir.is_dir(), 'Super slices directory not found: ' + str(slices_dir))
+    cursor = M
+    plan = []
+    for name in slice_order:
+        cand = slices_dir / f'{name}.img'
+        if not cand.is_file():
+            alt = slices_dir / f"{name.removesuffix('_a')}.img"
+            cand = alt if alt.is_file() else cand
+        require(cand.is_file(), f'Missing super slice image for {name} in {slices_dir}')
+        size = cand.stat().st_size
+        require(size > 2048, 'Super slice image too small: ' + str(cand))
+        with cand.open('rb') as f:
+            f.seek(1024)
+            require(f.read(4) == b'\xe2\xe1\xf5\xe0', 'Expected EROFS logical partition: ' + name)
+        new_off = align_up(cursor, M)
+        plan.append((name, cand.resolve(), new_off, size))
+        cursor = new_off + size
+    require(plan, 'No active super slices found')
+    total_super = align_up(cursor, M)
+    text = ''.join(f'{name} {new_off} {size}\n' for name, _, new_off, size in plan).encode()
+    return total_super, plan, text
+
+
+def compute_super_sha256_from_files(super_bytes, file_slice_plan):
+    """Compute exact SHA-256 of an assembled compacted super image from per-slice files."""
+    h = hashlib.sha256()
+    zeros = b'\0' * M
+    cursor = 0
+    for _, src_path, new_off, sz in sorted(file_slice_plan, key=lambda item: item[2]):
+        require(new_off >= cursor and new_off + sz <= super_bytes, 'Invalid super slice plan bounds')
+        gap = new_off - cursor
+        while gap > 0:
+            chunk = min(gap, len(zeros))
+            h.update(zeros[:chunk])
+            gap -= chunk
+        with Path(src_path).open('rb') as f:
+            left = sz
+            while left > 0:
+                data = f.read(min(left, 8 * M))
+                require(bool(data), 'Short read while hashing super slice file')
+                h.update(data)
+                left -= len(data)
+        cursor = new_off + sz
+    tail = super_bytes - cursor
+    while tail > 0:
+        chunk = min(tail, len(zeros))
+        h.update(zeros[:chunk])
+        tail -= chunk
+    return h.hexdigest()
+
+
 def compute_super_sha256(source, source_super_offset, super_bytes, slice_plan=None):
     """Compute the exact SHA-256 of the output super partition (compacted or verbatim)."""
     if slice_plan is None:
@@ -687,16 +741,31 @@ def build(args):
     base=candidate.read_bytes()
     c=cpio_module();before=c.entries(gzip.decompress(base))
     minimal_partitions=bool(getattr(args,'minimal_partitions',False))
+    super_slices_dir=getattr(args,'super_slices_dir',None)
+    super_mib=getattr(args,'super_mib',None)
     slice_plan=None
+    file_slice_plan=None
     super_slices_override=None
+    compacted_super=None
     if minimal_partitions:
-        compacted_super,slice_plan,super_slices_override=compact_super_slices(
-            before['etc/sq2-ssd-super-slices'][1],source,original_map['super']['offset'],original_map['super']['bytes'])
+        if super_slices_dir is not None:
+            slice_order = [line.split()[0] for line in before['etc/sq2-ssd-super-slices'][1].decode().splitlines() if line.strip()]
+            compacted_super, file_slice_plan, super_slices_override = compact_super_slices_from_dir(
+                super_slices_dir, slice_order=tuple(slice_order)
+            )
+            slice_plan = file_slice_plan
+            if super_mib is None:
+                super_mib = 4096
+        else:
+            compacted_super,slice_plan,super_slices_override=compact_super_slices(
+                before['etc/sq2-ssd-super-slices'][1],source,original_map['super']['offset'],original_map['super']['bytes'])
+        gpt_super_bytes = max(compacted_super, int(super_mib) * M) if super_mib else compacted_super
         image_bytes=(args.size_gib*G) if getattr(args,'size_gib',None) else 8*G
         esp_bytes=(args.esp_mib*M) if getattr(args,'esp_mib',None) else 1*G
-        parts=plan_minimal_layout(compacted_super,image_bytes=image_bytes,esp_bytes=esp_bytes)
+        parts=plan_minimal_layout(gpt_super_bytes,image_bytes=image_bytes,esp_bytes=esp_bytes)
         mapping={p['name']:p for p in parts}
     else:
+        require(super_slices_dir is None, '--super-slices-dir requires --minimal-partitions')
         image_bytes = original['image_bytes'] if template else args.size_gib*G
         parts = original['partitions'] if template else plan_layout(original,image_bytes)
         mapping={p['name']:p for p in parts}
@@ -706,8 +775,18 @@ def build(args):
             with source.open('rb') as f:
                 f.seek(original_map['super']['offset']+offset+1024)
                 require(f.read(4)==b'\xe2\xe1\xf5\xe0','Expected EROFS logical partition: '+name)
-    super_sha256 = compute_super_sha256(source, original_map['super']['offset'], mapping['super']['bytes'], slice_plan=slice_plan)
-    payload,audit,member=storage_payload(base,parts,anonymous=getattr(args, "anonymous", False),super_slices=super_slices_override,super_sha256=super_sha256)
+    super_payload_bytes = compacted_super if (minimal_partitions and compacted_super is not None) else mapping['super']['bytes']
+    if file_slice_plan is not None:
+        super_sha256 = compute_super_sha256_from_files(super_payload_bytes, file_slice_plan)
+    else:
+        super_sha256 = compute_super_sha256(source, original_map['super']['offset'], super_payload_bytes, slice_plan=slice_plan)
+    # Record minimum required super payload bytes in etc/sq2-ssd-partitions so a single
+    # universal initramfs boots on both legacy 3481 MiB super devices and padded >=4096 MiB disks.
+    storage_parts = [
+        (dict(p, bytes=super_payload_bytes) if p['name'] == 'super' else dict(p))
+        for p in parts
+    ]
+    payload,audit,member=storage_payload(base,storage_parts,anonymous=getattr(args, "anonymous", False),super_slices=super_slices_override,super_sha256=super_sha256)
     (output/'storage-layout-delta.cpio.gz').write_bytes(member)
     tree=work/'esp-tree';(tree/'EFI/BOOT').mkdir(parents=True,exist_ok=resume);(tree/'EFI/SQ2Nat').mkdir(exist_ok=resume)
     for name in selected['files']:
@@ -781,11 +860,16 @@ def build(args):
     with image.open('wb' if resume else 'xb') as stream:stream.truncate(image_bytes)
     partition_hashes={}
     if minimal_partitions:
-        src_super = original_map['super']['offset']
         dst_super = mapping['super']['offset']
-        for name, old_off, new_off, sz in slice_plan:
-            print('COPY_COMPACT_SUPER_SLICE', name, flush=True)
-            copy_region(source, image, src_super + old_off, sz, dst_super + new_off)
+        if file_slice_plan is not None:
+            for name, src_path, new_off, sz in file_slice_plan:
+                print('COPY_COMPACT_SUPER_SLICE', name, flush=True)
+                copy_region(src_path, image, 0, sz, dst_super + new_off)
+        else:
+            src_super = original_map['super']['offset']
+            for name, old_off, new_off, sz in slice_plan:
+                print('COPY_COMPACT_SUPER_SLICE', name, flush=True)
+                copy_region(source, image, src_super + old_off, sz, dst_super + new_off)
     else:
         for p in parts:
             if p['name'] in ('userdata','metadata','misc','SQ2PROBE'):continue

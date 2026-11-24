@@ -558,6 +558,8 @@ inspect_staged_package() {
         _krel="$(read_kv_file "$_work/ota-manifest.kv" "KERNEL_RELEASE")"
         _commit="$(read_kv_file "$_work/ota-manifest.kv" "BUILD_COMMIT")"
         _super_inc="$(read_kv_file "$_work/ota-manifest.kv" "SUPER_INCLUDED")"
+        _super_mode="$(read_kv_file "$_work/ota-manifest.kv" "SUPER_MODE")"
+        _super_delta_tsv="$(read_kv_file "$_work/ota-manifest.kv" "SUPER_DELTA_TSV")"
         _super_sha="$(read_kv_file "$_work/ota-manifest.kv" "SUPER_SHA256")"
         _super_sz="$(read_kv_file "$_work/ota-manifest.kv" "SUPER_BYTES")"
         _req_super="$(read_kv_file "$_work/ota-manifest.kv" "REQUIRED_SUPER_SHA256")"
@@ -565,17 +567,74 @@ inspect_staged_package() {
         _file_cnt="$(awk 'NF>0 {c++} END {print c+0}' "$_work/ota-files.tsv")"
         _esp_total_bytes="$(awk -F '\t' '$1=="PUT" {s+=$5} END {printf "%.0f", s+0}' "$_work/ota-files.tsv")"
 
-        [ "$_super_inc" = "1" ] || _super_inc="0"
+        if [ "$_super_mode" = "delta" ]; then
+            _super_inc="1"
+        else
+            [ "$_super_inc" = "1" ] || _super_inc="0"
+        fi
         [ -n "$_super_sz" ] || _super_sz="0"
-        if [ "$_super_inc" = "1" ] && [ "$_target_super_bytes" -gt 0 ] && [ "$_super_sz" -gt "$_target_super_bytes" ]; then
-            rm -rf "$_work" "$STAGED_PKG"
-            send_reply "$_dir" "$_nonce" "ERROR" "super_partition_too_small"
-            return 0
+        if [ "$_super_inc" = "1" ] && [ "$_target_super_bytes" -gt 0 ]; then
+            _super_fits="$(awk -v t="$_target_super_bytes" -v n="$_super_sz" 'BEGIN { print (t >= n) ? 1 : 0 }')"
+            if [ "$_super_fits" != "1" ]; then
+                rm -rf "$_work" "$STAGED_PKG"
+                send_reply "$_dir" "$_nonce" "ERROR" "super_partition_too_small"
+                return 0
+            fi
         fi
 
         _cur_super="$(read_kv_file "$ETC_DIR/spx-ota-info" "SPX_OTA_SUPER_SHA256")"
         _super_compat=1
-        if [ "$_super_inc" = "0" ] && [ -n "$_req_super" ] && [ -n "$_cur_super" ] && [ "$_req_super" != "$_cur_super" ]; then
+        if [ "$_super_mode" = "delta" ]; then
+            if ! "$OTA_TOOL" capabilities 2>/dev/null | grep -qx 'apply-delta'; then
+                rm -rf "$_work" "$STAGED_PKG"
+                send_reply "$_dir" "$_nonce" "ERROR" "unsupported_super_delta_runtime"
+                return 0
+            fi
+            if ! is_safe_relpath "$_super_delta_tsv" || ! tar -xzf "$STAGED_PKG" -C "$_work" "$_super_delta_tsv" 2>/dev/null; then
+                rm -rf "$_work" "$STAGED_PKG"
+                send_reply "$_dir" "$_nonce" "ERROR" "invalid_super_delta_manifest"
+                return 0
+            fi
+            _df_mb="$(df -Pk "$OTA_DATA_DIR" 2>/dev/null | awk 'NR==2 { printf "%.0f", $4 / 1024 }')"
+            _need_mb="$(awk -v s="$_super_sz" -v p="$_pkg_bytes" 'BEGIN { printf "%.0f", ((s + p) / 1048576) + 256 }')"
+            if [ -n "$_df_mb" ] && [ "$_df_mb" -lt "$_need_mb" ] 2>/dev/null; then
+                rm -rf "$_work" "$STAGED_PKG"
+                send_reply "$_dir" "$_nonce" "ERROR" "insufficient_data_space"
+                return 0
+            fi
+            _slices_file="$ETC_DIR/sq2-ssd-super-slices"
+            _delta_cnt=0
+            while IFS='	' read -r _sn _do _db _sb _ss _ds _da _sc; do
+                [ -n "$_sn" ] || continue
+                _delta_cnt=$(( _delta_cnt + 1 ))
+                _cand_list=""
+                if [ -r "$_slices_file" ]; then
+                    _eo="$(awk -v n="$_sn" -v sz="$_sb" '$1 == n && $3 == sz { print $2; exit }' "$_slices_file" 2>/dev/null || true)"
+                    [ -n "$_eo" ] && _cand_list="$_eo"
+                fi
+                for _c in $(printf '%s\n' "$_sc" | tr ',' ' '); do
+                    case "$_c" in ''|*[!0-9]*) continue ;; esac
+                    case " $_cand_list " in *" $_c "*) ;; *) _cand_list="$_cand_list $_c" ;; esac
+                done
+                _matched=0
+                for _co in $_cand_list; do
+                    if [ "$_target_super_bytes" -gt 0 ]; then
+                        _ok_rng="$(awk -v o="$_co" -v l="$_sb" -v m="$_target_super_bytes" 'BEGIN { print (o + l <= m) ? 1 : 0 }')"
+                        [ "$_ok_rng" = "1" ] || continue
+                    fi
+                    _got_s="$("$OTA_TOOL" slice-sha256 "$SUPER_DEV" "$_co" "$_sb" 2>/dev/null || true)"
+                    if [ "$_got_s" = "$_ss" ]; then
+                        _matched=1
+                        break
+                    fi
+                done
+                if [ "$_matched" != "1" ]; then
+                    _super_compat=0
+                    break
+                fi
+            done < "$_work/$_super_delta_tsv"
+            [ "$_delta_cnt" -gt 0 ] || _super_compat=0
+        elif [ "$_super_inc" = "0" ] && [ -n "$_req_super" ] && [ -n "$_cur_super" ] && [ "$_req_super" != "$_cur_super" ]; then
             _super_compat=0
         fi
         rm -rf "$_work"
@@ -588,6 +647,7 @@ version=$_ver
 kernel_release=$_krel
 build_commit=$_commit
 super_included=$_super_inc
+super_mode=$_super_mode
 super_sha256=$_super_sha
 super_bytes=$_super_sz
 super_compatible=$_super_compat
@@ -758,10 +818,11 @@ install_staged_package() {
     fi
     _kind="$(read_kv_file "$STAGED_META" "package_kind")"
     _super_inc="$(read_kv_file "$STAGED_META" "super_included")"
+    _super_mode="$(read_kv_file "$STAGED_META" "super_mode")"
     _ver="$(read_kv_file "$STAGED_META" "version")"
     _super_compat="$(read_kv_file "$STAGED_META" "super_compatible")"
 
-    if [ "$_kind" = "manifest" ] && [ "$_super_inc" = "0" ] && [ "$_super_compat" = "0" ]; then
+    if [ "$_kind" = "manifest" ] && [ "$_super_compat" = "0" ] && { [ "$_super_inc" = "0" ] || [ "$_super_mode" = "delta" ]; }; then
         send_reply "$_dir" "$_nonce" "ERROR" "super_baseline_mismatch"
         return 0
     fi

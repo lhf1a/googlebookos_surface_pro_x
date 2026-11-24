@@ -200,6 +200,8 @@ PKG_SHA256="$(sha256_file "$PACKAGE")"
 log "Package kind: $PKG_KIND | SHA-256: $PKG_SHA256"
 
 SUPER_INCLUDED=0
+SUPER_MODE=""
+SUPER_DELTA_TSV=""
 SUPER_OFF=0
 SUPER_BYTES=0
 ESP_OFF=0
@@ -217,12 +219,17 @@ if [ "$PKG_KIND" = "manifest" ]; then
             SCHEMA) [ "$_v" = "1" ] || die "Unsupported OTA manifest schema: $_v" ;;
             VERSION) PKG_VERSION="$_v" ;;
             SUPER_INCLUDED) SUPER_INCLUDED="$_v" ;;
+            SUPER_MODE) SUPER_MODE="$_v" ;;
+            SUPER_DELTA_TSV) SUPER_DELTA_TSV="$_v" ;;
             SUPER_BYTES) SUPER_BYTES="$_v" ;;
             REQUIRED_SUPER_SHA256) REQ_SUPER_SHA="$_v" ;;
             ESP_MODE) ESP_MODE="$_v" ;;
         esac
     done < "$WORK_DIR/meta/ota-manifest.kv"
-    log "Manifest parsed: version=${PKG_VERSION:-unknown} super_included=$SUPER_INCLUDED esp_mode=${ESP_MODE:-unknown}"
+    if [ "$SUPER_MODE" = "delta" ]; then
+        SUPER_INCLUDED=1
+    fi
+    log "Manifest parsed: version=${PKG_VERSION:-unknown} super_included=$SUPER_INCLUDED super_mode=${SUPER_MODE:-auto} esp_mode=${ESP_MODE:-unknown}"
 else
     SUPER_INCLUDED=1
     if [ "$PKG_KIND" = "full-img-gz" ]; then
@@ -548,6 +555,47 @@ case "$CMD" in
             fi
         fi
 
+        _m_super_mode="$(awk -F= '$1=="SUPER_MODE"{print $2; exit}' "$_stage/meta/ota-manifest.kv" | tr -d '\r')"
+        _m_delta_tsv="$(awk -F= '$1=="SUPER_DELTA_TSV"{print $2; exit}' "$_stage/meta/ota-manifest.kv" | tr -d '\r')"
+        if [ "$_m_super_mode" = "delta" ]; then
+            [ -n "$_initrd_blob" ] || { rm -rf "$_stage"; echo "ERR:delta_missing_initramfs" >&2; exit 1; }
+            if ! gzip -dc "$_stage/esp/$_initrd_blob" 2>/dev/null | tr '\0' '\n' | grep -Fq 'SPXDLT01'; then
+                rm -rf "$_stage"
+                echo "ERR:new_initramfs_missing_super_delta" >&2
+                exit 1
+            fi
+            tar -xzf /data/ota/pending.pkg -C "$_stage/meta" "$_m_delta_tsv" || { rm -rf "$_stage"; echo "ERR:delta_tsv_extract_failed" >&2; exit 1; }
+            _delta_tool=""
+            mkdir -p "$_stage/tool"
+            if ( cd "$_stage/tool" && gzip -dc "$_stage/esp/$_initrd_blob" 2>/dev/null | cpio -id bin/spx-ota-tool 2>/dev/null ) && [ -x "$_stage/tool/bin/spx-ota-tool" ]; then
+                _delta_tool="$_stage/tool/bin/spx-ota-tool"
+            elif [ -x /bin/spx-ota-tool ] && /bin/spx-ota-tool capabilities 2>/dev/null | grep -qx 'slice-sha256'; then
+                _delta_tool="/bin/spx-ota-tool"
+            fi
+            if [ -n "$_delta_tool" ]; then
+                _dev_super_sz="$(get_blk_bytes /dev/block/by-name/super)"
+                while IFS='	' read -r _sn _do _db _sb _ss _ds _da _sc; do
+                    [ -n "$_sn" ] || continue
+                    _cand_ok=0
+                    for _co in $(printf '%s\n' "$_sc" | tr ',' ' '); do
+                        case "$_co" in ''|*[!0-9]*) continue ;; esac
+                        _fits="$(awk -v o="$_co" -v l="$_sb" -v m="$_dev_super_sz" 'BEGIN { print (o + l <= m) ? 1 : 0 }')"
+                        [ "$_fits" = "1" ] || continue
+                        _gsha="$("$_delta_tool" slice-sha256 /dev/block/by-name/super "$_co" "$_sb" 2>/dev/null || true)"
+                        if [ "$_gsha" = "$_ss" ]; then
+                            _cand_ok=1
+                            break
+                        fi
+                    done
+                    if [ "$_cand_ok" != "1" ]; then
+                        rm -rf "$_stage"
+                        echo "ERR:super_delta_source_mismatch:$_sn" >&2
+                        exit 1
+                    fi
+                done < "$_stage/meta/$_m_delta_tsv"
+            fi
+        fi
+
         _esp="$(mount_esp)"
         trap 'umount_esp; rm -rf "$_stage"' EXIT
         backup_sq2nat_if_space "$_esp"
@@ -713,7 +761,11 @@ if [ "$PKG_KIND" = "manifest" ] && [ "$SUPER_INCLUDED" = "0" ] && [ "$FORCE_LEGA
     fi
 fi
 
-NEED_BYTES=$(( PKG_BYTES + ESP_BYTES + 268435456 ))
+if [ "$SUPER_MODE" = "delta" ]; then
+    NEED_BYTES=$(( PKG_BYTES * 2 + SUPER_BYTES + 268435456 ))
+else
+    NEED_BYTES=$(( PKG_BYTES + ESP_BYTES + 268435456 ))
+fi
 [ "$DEV_DATA_FREE" -ge "$NEED_BYTES" ] || die "Insufficient free space on /data (need $NEED_BYTES bytes, available $DEV_DATA_FREE bytes)"
 
 # ---- 5. Confirmation ----

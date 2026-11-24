@@ -1,9 +1,13 @@
 /* SPDX-License-Identifier: MIT
  * Zero-dependency OTA & internal-disk helper for Surface Pro X Googlebook OS:
+ *   - capabilities
  *   - sha256 <path-or-minus>
+ *   - slice-sha256 <path> <offset> <length>
  *   - detect <path-or-minus>
  *   - inspect-gpt <path-or-minus>
  *   - extract-stream <super_dst|-> <super_off> <super_len> <esp_dst|-> <esp_off> <esp_len>
+ *   - apply-delta <src_path> <src_offset> <src_bytes> <dst_path> <delta_path_or_minus>
+ *   - assemble-super <target> <total_bytes> <expected_sha256> <off1> <file1> [...]
  *   - write-gpt-5part <target> <super_bytes> <meta_bytes> <misc_bytes> <esp_bytes> [total_bytes]
  *   - copy-verify <src> <dst> <bytes> [progress_file]
  */
@@ -1034,13 +1038,538 @@ static int cmd_copy_verify(int argc, char **argv) {
     return 0;
 }
 
+static int pread_exact(int fd, uint8_t *buf, size_t len, uint64_t offset) {
+    size_t got = 0;
+    while (got < len) {
+        ssize_t n = pread(fd, buf + got, len - got, (off_t)(offset + got));
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (n == 0) return -1;
+        got += (size_t)n;
+    }
+    return 0;
+}
+
+static void sha256_bytes_to_hex(const uint8_t raw[32], char hex[65]) {
+    static const char digits[] = "0123456789abcdef";
+    for (int i = 0; i < 32; ++i) {
+        hex[i * 2] = digits[(raw[i] >> 4) & 0xf];
+        hex[i * 2 + 1] = digits[raw[i] & 0xf];
+    }
+    hex[64] = '\0';
+}
+
+static int hash_fd_region(int fd, uint64_t offset, uint64_t length, uint8_t *buf, char hex[65]) {
+    sha256_ctx ctx;
+    sha256_init(&ctx);
+    uint64_t done = 0;
+    while (done < length) {
+        size_t want = (length - done) > IO_CHUNK ? IO_CHUNK : (size_t)(length - done);
+        if (pread_exact(fd, buf, want, offset + done) != 0) {
+            return -1;
+        }
+        sha256_update(&ctx, buf, want);
+        done += want;
+    }
+    sha256_final_hex(&ctx, hex);
+    return 0;
+}
+
+static int cmd_capabilities(void) {
+    puts("sha256");
+    puts("slice-sha256");
+    puts("detect");
+    puts("inspect-gpt");
+    puts("extract-stream");
+    puts("apply-delta");
+    puts("assemble-super");
+    puts("write-gpt-5part");
+    puts("copy-verify");
+    return 0;
+}
+
+static int cmd_slice_sha256(int argc, char **argv) {
+    if (argc != 5) {
+        fprintf(stderr, "usage: spx-ota-tool slice-sha256 <path> <offset> <length>\n");
+        return 2;
+    }
+    uint64_t offset = 0, length = 0;
+    if (parse_u64(argv[3], &offset) != 0 || parse_u64(argv[4], &length) != 0) {
+        fprintf(stderr, "invalid offset or length\n");
+        return 2;
+    }
+    int fd = open(argv[2], O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        fprintf(stderr, "open %s: %s\n", argv[2], strerror(errno));
+        return 1;
+    }
+    uint8_t *buf = malloc(IO_CHUNK);
+    if (!buf) {
+        close(fd);
+        return 1;
+    }
+    char hex[65];
+    int rc = hash_fd_region(fd, offset, length, buf, hex);
+    free(buf);
+    close(fd);
+    if (rc != 0) {
+        fprintf(stderr, "short read hashing %s at %" PRIu64 "+%" PRIu64 "\n", argv[2], offset, length);
+        return 1;
+    }
+    puts(hex);
+    return 0;
+}
+
+/* SPXDLT01 header (92 bytes):
+ *   [0..8)   magic = "SPXDLT01"
+ *   [8..12)  block_size (le32, must be 4096)
+ *   [12..20) src_bytes (le64)
+ *   [20..52) src_sha256 (32 raw bytes)
+ *   [52..60) dst_bytes (le64)
+ *   [60..92) dst_sha256 (32 raw bytes)
+ * Opcodes:
+ *   0x00 EOF
+ *   0x01 COPY:    src_block_idx (le32), block_count (le32)
+ *   0x02 ZERO:    block_count (le32)
+ *   0x03 LITERAL: byte_len (le32), raw_bytes[byte_len]
+ */
+static int cmd_apply_delta(int argc, char **argv) {
+    if (argc != 7) {
+        fprintf(stderr, "usage: spx-ota-tool apply-delta <src_path> <src_offset> <src_bytes> <dst_path> <delta_path_or_minus>\n");
+        return 2;
+    }
+    const char *src_path = argv[2];
+    uint64_t src_offset = 0, src_bytes = 0;
+    if (parse_u64(argv[3], &src_offset) != 0 || parse_u64(argv[4], &src_bytes) != 0) {
+        fprintf(stderr, "invalid src_offset or src_bytes\n");
+        return 2;
+    }
+    const char *dst_path = argv[5];
+    const char *delta_path = argv[6];
+
+    bool close_delta = false;
+    int delta_fd = open_input(delta_path, &close_delta);
+    if (delta_fd < 0) return 1;
+
+    uint8_t hdr[92];
+    if (read_exact(delta_fd, hdr, sizeof(hdr)) != (ssize_t)sizeof(hdr)) {
+        fprintf(stderr, "short SPXDLT01 header\n");
+        if (close_delta) close(delta_fd);
+        return 1;
+    }
+    if (memcmp(hdr, "SPXDLT01", 8) != 0) {
+        fprintf(stderr, "invalid delta magic (expected SPXDLT01)\n");
+        if (close_delta) close(delta_fd);
+        return 1;
+    }
+    uint32_t block_size = le32(hdr + 8);
+    uint64_t hdr_src_bytes = le64(hdr + 12);
+    uint64_t hdr_dst_bytes = le64(hdr + 52);
+    if (block_size != 4096u || hdr_dst_bytes == 0 || hdr_src_bytes != src_bytes) {
+        fprintf(stderr, "delta header mismatch: block=%u src=%" PRIu64 " (cli %" PRIu64 ") dst=%" PRIu64 "\n",
+                block_size, hdr_src_bytes, src_bytes, hdr_dst_bytes);
+        if (close_delta) close(delta_fd);
+        return 1;
+    }
+    char expected_src_hex[65], expected_dst_hex[65];
+    sha256_bytes_to_hex(hdr + 20, expected_src_hex);
+    sha256_bytes_to_hex(hdr + 60, expected_dst_hex);
+
+    int src_fd = open(src_path, O_RDONLY | O_CLOEXEC);
+    if (src_fd < 0) {
+        fprintf(stderr, "open %s: %s\n", src_path, strerror(errno));
+        if (close_delta) close(delta_fd);
+        return 1;
+    }
+
+    uint8_t *buf = malloc(IO_CHUNK);
+    uint8_t *zeros = calloc(1, 1024u * 1024u);
+    if (!buf || !zeros) {
+        free(buf);
+        free(zeros);
+        close(src_fd);
+        if (close_delta) close(delta_fd);
+        return 1;
+    }
+
+    /* Verify source slice SHA-256 before writing any destination bytes. */
+    char actual_src_hex[65];
+    if (hash_fd_region(src_fd, src_offset, src_bytes, buf, actual_src_hex) != 0) {
+        fprintf(stderr, "failed reading source slice %s@%" PRIu64 "+%" PRIu64 "\n", src_path, src_offset, src_bytes);
+        free(buf);
+        free(zeros);
+        close(src_fd);
+        if (close_delta) close(delta_fd);
+        return 1;
+    }
+    if (strcmp(actual_src_hex, expected_src_hex) != 0) {
+        fprintf(stderr, "DELTA_SRC_SHA256_MISMATCH expected=%s actual=%s\n", expected_src_hex, actual_src_hex);
+        free(buf);
+        free(zeros);
+        close(src_fd);
+        if (close_delta) close(delta_fd);
+        return 1;
+    }
+
+    int dst_fd = open(dst_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (dst_fd < 0) {
+        fprintf(stderr, "open %s: %s\n", dst_path, strerror(errno));
+        free(buf);
+        free(zeros);
+        close(src_fd);
+        if (close_delta) close(delta_fd);
+        return 1;
+    }
+
+    sha256_ctx dst_sha;
+    sha256_init(&dst_sha);
+    uint64_t written = 0;
+    bool saw_eof = false;
+    int rc = 0;
+
+    while (rc == 0) {
+        uint8_t op = 0;
+        ssize_t n = read_exact(delta_fd, &op, 1);
+        if (n != 1) {
+            fprintf(stderr, "unexpected EOF reading delta opcode\n");
+            rc = 1;
+            break;
+        }
+        if (op == 0x00u) {
+            saw_eof = true;
+            break;
+        } else if (op == 0x01u) {
+            uint8_t args_buf[8];
+            if (read_exact(delta_fd, args_buf, 8) != 8) {
+                fprintf(stderr, "truncated COPY opcode\n");
+                rc = 1;
+                break;
+            }
+            uint64_t blk_idx = (uint64_t)le32(args_buf);
+            uint64_t blk_cnt = (uint64_t)le32(args_buf + 4);
+            uint64_t rel_off = blk_idx * (uint64_t)block_size;
+            uint64_t copy_len = blk_cnt * (uint64_t)block_size;
+            if (blk_cnt == 0 || rel_off > src_bytes || copy_len > src_bytes - rel_off ||
+                copy_len > hdr_dst_bytes - written) {
+                fprintf(stderr, "COPY out of bounds: idx=%" PRIu64 " cnt=%" PRIu64 "\n", blk_idx, blk_cnt);
+                rc = 1;
+                break;
+            }
+            uint64_t rem = copy_len;
+            uint64_t cur_off = src_offset + rel_off;
+            while (rem > 0) {
+                size_t chunk = rem > IO_CHUNK ? IO_CHUNK : (size_t)rem;
+                if (pread_exact(src_fd, buf, chunk, cur_off) != 0) {
+                    fprintf(stderr, "source pread failed at %" PRIu64 "\n", cur_off);
+                    rc = 1;
+                    break;
+                }
+                if (write_all(dst_fd, buf, chunk) != 0) {
+                    fprintf(stderr, "dst write failed: %s\n", strerror(errno));
+                    rc = 1;
+                    break;
+                }
+                sha256_update(&dst_sha, buf, chunk);
+                cur_off += chunk;
+                rem -= chunk;
+                written += chunk;
+            }
+        } else if (op == 0x02u) {
+            uint8_t args_buf[4];
+            if (read_exact(delta_fd, args_buf, 4) != 4) {
+                fprintf(stderr, "truncated ZERO opcode\n");
+                rc = 1;
+                break;
+            }
+            uint64_t blk_cnt = (uint64_t)le32(args_buf);
+            uint64_t zero_len = blk_cnt * (uint64_t)block_size;
+            if (blk_cnt == 0 || zero_len > hdr_dst_bytes - written) {
+                fprintf(stderr, "ZERO out of bounds: cnt=%" PRIu64 "\n", blk_cnt);
+                rc = 1;
+                break;
+            }
+            uint64_t rem = zero_len;
+            while (rem > 0) {
+                size_t chunk = rem > (1024u * 1024u) ? (1024u * 1024u) : (size_t)rem;
+                if (write_all(dst_fd, zeros, chunk) != 0) {
+                    fprintf(stderr, "dst zero write failed: %s\n", strerror(errno));
+                    rc = 1;
+                    break;
+                }
+                sha256_update(&dst_sha, zeros, chunk);
+                rem -= chunk;
+                written += chunk;
+            }
+        } else if (op == 0x03u) {
+            uint8_t args_buf[4];
+            if (read_exact(delta_fd, args_buf, 4) != 4) {
+                fprintf(stderr, "truncated LITERAL opcode\n");
+                rc = 1;
+                break;
+            }
+            uint64_t lit_len = (uint64_t)le32(args_buf);
+            if (lit_len == 0 || lit_len > hdr_dst_bytes - written) {
+                fprintf(stderr, "LITERAL out of bounds: len=%" PRIu64 "\n", lit_len);
+                rc = 1;
+                break;
+            }
+            uint64_t rem = lit_len;
+            while (rem > 0) {
+                size_t chunk = rem > IO_CHUNK ? IO_CHUNK : (size_t)rem;
+                if (read_exact(delta_fd, buf, chunk) != (ssize_t)chunk) {
+                    fprintf(stderr, "short read in LITERAL payload\n");
+                    rc = 1;
+                    break;
+                }
+                if (write_all(dst_fd, buf, chunk) != 0) {
+                    fprintf(stderr, "dst literal write failed: %s\n", strerror(errno));
+                    rc = 1;
+                    break;
+                }
+                sha256_update(&dst_sha, buf, chunk);
+                rem -= chunk;
+                written += chunk;
+            }
+        } else {
+            fprintf(stderr, "unknown delta opcode: 0x%02x\n", op);
+            rc = 1;
+            break;
+        }
+    }
+
+    if (rc == 0 && fsync(dst_fd) != 0) {
+        fprintf(stderr, "fsync %s: %s\n", dst_path, strerror(errno));
+        rc = 1;
+    }
+    if (close(dst_fd) != 0) rc = 1;
+    close(src_fd);
+    if (close_delta) close(delta_fd);
+    free(buf);
+    free(zeros);
+
+    if (rc != 0 || !saw_eof || written != hdr_dst_bytes) {
+        fprintf(stderr, "delta reconstruction incomplete: written=%" PRIu64 " expected=%" PRIu64 "\n",
+                written, hdr_dst_bytes);
+        (void)unlink(dst_path);
+        return 1;
+    }
+    char actual_dst_hex[65];
+    sha256_final_hex(&dst_sha, actual_dst_hex);
+    if (strcmp(actual_dst_hex, expected_dst_hex) != 0) {
+        fprintf(stderr, "DELTA_DST_SHA256_MISMATCH expected=%s actual=%s\n", expected_dst_hex, actual_dst_hex);
+        (void)unlink(dst_path);
+        return 1;
+    }
+    printf("DELTA_DST_SHA256=%s\n", actual_dst_hex);
+    printf("DELTA_DST_BYTES=%" PRIu64 "\n", written);
+    printf("DELTA_VERIFIED=1\n");
+    return 0;
+}
+
+typedef struct {
+    uint64_t offset;
+    uint64_t bytes;
+    const char *path;
+} super_slice_input;
+
+static int cmp_slice_input(const void *a, const void *b) {
+    const super_slice_input *sa = (const super_slice_input *)a;
+    const super_slice_input *sb = (const super_slice_input *)b;
+    if (sa->offset < sb->offset) return -1;
+    if (sa->offset > sb->offset) return 1;
+    return 0;
+}
+
+static int cmd_assemble_super(int argc, char **argv) {
+    if (argc < 7 || ((argc - 5) % 2) != 0) {
+        fprintf(stderr, "usage: spx-ota-tool assemble-super <target> <total_bytes> <expected_sha256> <off1> <file1> [...]\n");
+        return 2;
+    }
+    const char *target_path = argv[2];
+    uint64_t total_bytes = 0;
+    if (parse_u64(argv[3], &total_bytes) != 0 || total_bytes == 0) {
+        fprintf(stderr, "invalid total_bytes\n");
+        return 2;
+    }
+    const char *expected_sha = argv[4];
+    if (strlen(expected_sha) != 64) {
+        fprintf(stderr, "invalid expected_sha256\n");
+        return 2;
+    }
+
+    int count = (argc - 5) / 2;
+    super_slice_input *slices = calloc((size_t)count, sizeof(super_slice_input));
+    if (!slices) return 1;
+
+    for (int i = 0; i < count; ++i) {
+        if (parse_u64(argv[5 + i * 2], &slices[i].offset) != 0) {
+            fprintf(stderr, "invalid slice offset: %s\n", argv[5 + i * 2]);
+            free(slices);
+            return 2;
+        }
+        slices[i].path = argv[5 + i * 2 + 1];
+        struct stat st;
+        if (stat(slices[i].path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) {
+            fprintf(stderr, "invalid slice file: %s\n", slices[i].path);
+            free(slices);
+            return 1;
+        }
+        slices[i].bytes = (uint64_t)st.st_size;
+    }
+    qsort(slices, (size_t)count, sizeof(super_slice_input), cmp_slice_input);
+    uint64_t cursor_check = 0;
+    for (int i = 0; i < count; ++i) {
+        if (slices[i].offset < cursor_check || slices[i].bytes > total_bytes ||
+            slices[i].offset > total_bytes - slices[i].bytes) {
+            fprintf(stderr, "overlapping or out-of-bounds slice: %s\n", slices[i].path);
+            free(slices);
+            return 2;
+        }
+        cursor_check = slices[i].offset + slices[i].bytes;
+    }
+
+    struct stat dst_st;
+    bool dst_is_blk = false;
+    int dst_fd = -1;
+    if (stat(target_path, &dst_st) == 0) {
+        dst_is_blk = S_ISBLK(dst_st.st_mode);
+        dst_fd = open(target_path, O_RDWR | O_CLOEXEC);
+    } else {
+        dst_fd = open(target_path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    }
+    if (dst_fd < 0) {
+        fprintf(stderr, "open %s: %s\n", target_path, strerror(errno));
+        free(slices);
+        return 1;
+    }
+    if (dst_is_blk) {
+        uint64_t blk_sz = 0;
+        if (ioctl(dst_fd, BLKGETSIZE64, &blk_sz) != 0 || blk_sz < total_bytes) {
+            fprintf(stderr, "target block device too small: %" PRIu64 " < %" PRIu64 "\n", blk_sz, total_bytes);
+            close(dst_fd);
+            free(slices);
+            return 1;
+        }
+    }
+
+    uint8_t *buf = malloc(IO_CHUNK);
+    uint8_t *zeros = calloc(1, 1024u * 1024u);
+    if (!buf || !zeros) {
+        free(buf);
+        free(zeros);
+        close(dst_fd);
+        free(slices);
+        return 1;
+    }
+
+    sha256_ctx wr_sha;
+    sha256_init(&wr_sha);
+    uint64_t pos = 0;
+    int rc = 0;
+
+    for (int i = 0; i < count && rc == 0; ++i) {
+        while (pos < slices[i].offset && rc == 0) {
+            uint64_t gap = slices[i].offset - pos;
+            size_t chunk = gap > (1024u * 1024u) ? (1024u * 1024u) : (size_t)gap;
+            if (write_all(dst_fd, zeros, chunk) != 0) {
+                fprintf(stderr, "write gap failed: %s\n", strerror(errno));
+                rc = 1;
+                break;
+            }
+            sha256_update(&wr_sha, zeros, chunk);
+            pos += chunk;
+        }
+        int sfd = open(slices[i].path, O_RDONLY | O_CLOEXEC);
+        if (sfd < 0) {
+            fprintf(stderr, "open slice %s: %s\n", slices[i].path, strerror(errno));
+            rc = 1;
+            break;
+        }
+        uint64_t rem = slices[i].bytes;
+        while (rem > 0 && rc == 0) {
+            size_t chunk = rem > IO_CHUNK ? IO_CHUNK : (size_t)rem;
+            if (read_exact(sfd, buf, chunk) != (ssize_t)chunk) {
+                fprintf(stderr, "short read on slice %s\n", slices[i].path);
+                rc = 1;
+                break;
+            }
+            if (write_all(dst_fd, buf, chunk) != 0) {
+                fprintf(stderr, "write slice %s failed: %s\n", slices[i].path, strerror(errno));
+                rc = 1;
+                break;
+            }
+            sha256_update(&wr_sha, buf, chunk);
+            rem -= chunk;
+            pos += chunk;
+        }
+        close(sfd);
+    }
+
+    while (pos < total_bytes && rc == 0) {
+        uint64_t tail = total_bytes - pos;
+        size_t chunk = tail > (1024u * 1024u) ? (1024u * 1024u) : (size_t)tail;
+        if (write_all(dst_fd, zeros, chunk) != 0) {
+            fprintf(stderr, "write tail failed: %s\n", strerror(errno));
+            rc = 1;
+            break;
+        }
+        sha256_update(&wr_sha, zeros, chunk);
+        pos += chunk;
+    }
+
+    if (rc == 0 && fsync(dst_fd) != 0) {
+        fprintf(stderr, "fsync %s: %s\n", target_path, strerror(errno));
+        rc = 1;
+    }
+
+    char wr_hex[65], rb_hex[65];
+    sha256_final_hex(&wr_sha, wr_hex);
+    if (rc == 0 && strcmp(wr_hex, expected_sha) != 0) {
+        fprintf(stderr, "SUPER_WRITE_SHA256_MISMATCH expected=%s written=%s\n", expected_sha, wr_hex);
+        rc = 1;
+    }
+
+    if (rc == 0) {
+        if (dst_is_blk) {
+            (void)ioctl(dst_fd, BLKFLSBUF, 0);
+        }
+        (void)posix_fadvise(dst_fd, 0, (off_t)total_bytes, POSIX_FADV_DONTNEED);
+        if (hash_fd_region(dst_fd, 0, total_bytes, buf, rb_hex) != 0) {
+            fprintf(stderr, "super readback failed\n");
+            rc = 1;
+        } else if (strcmp(rb_hex, expected_sha) != 0) {
+            fprintf(stderr, "SUPER_READBACK_SHA256_MISMATCH expected=%s readback=%s\n", expected_sha, rb_hex);
+            rc = 1;
+        }
+    }
+
+    free(buf);
+    free(zeros);
+    free(slices);
+    if (close(dst_fd) != 0) rc = 1;
+    if (rc != 0) return 1;
+
+    printf("SUPER_SHA256=%s\n", rb_hex);
+    printf("SUPER_BYTES=%" PRIu64 "\n", total_bytes);
+    printf("SUPER_VERIFIED=1\n");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: spx-ota-tool <sha256|detect|inspect-gpt|extract-stream|write-gpt-5part|copy-verify> ...\n");
+        fprintf(stderr, "usage: spx-ota-tool <capabilities|sha256|slice-sha256|detect|inspect-gpt|extract-stream|apply-delta|assemble-super|write-gpt-5part|copy-verify> ...\n");
         return 2;
+    }
+    if (strcmp(argv[1], "capabilities") == 0 && argc == 2) {
+        return cmd_capabilities();
     }
     if (strcmp(argv[1], "sha256") == 0 && argc == 3) {
         return cmd_sha256(argv[2]);
+    }
+    if (strcmp(argv[1], "slice-sha256") == 0) {
+        return cmd_slice_sha256(argc, argv);
     }
     if (strcmp(argv[1], "detect") == 0 && argc == 3) {
         return cmd_detect(argv[2]);
@@ -1050,6 +1579,12 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "extract-stream") == 0) {
         return cmd_extract_stream(argc, argv);
+    }
+    if (strcmp(argv[1], "apply-delta") == 0) {
+        return cmd_apply_delta(argc, argv);
+    }
+    if (strcmp(argv[1], "assemble-super") == 0) {
+        return cmd_assemble_super(argc, argv);
     }
     if (strcmp(argv[1], "write-gpt-5part") == 0) {
         return cmd_write_gpt_5part(argc, argv);

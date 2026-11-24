@@ -964,11 +964,15 @@ def install_userdata_growth(records, bodies, compiled_resize=None):
 
 def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modules=None, camera=None, sensors=None, anonymous=False,
                      runtime_replacements=None, graphics_inputs=None, suspend=None, compiled_helpers=None, typec=None, gnss=None, face=None, ksu_userspace=None,
-                     ota_version=None, source_commit=None, super_sha256=''):
+                     ota_version=None, source_commit=None, super_sha256='', vendor_build_prop=None):
     runtime = private/'full-image-runtime'
     records = json.loads((runtime/'records.json').read_text())
     bodies = {name: b'' if rec[1][1] & 0o170000 == 0o040000 else (runtime/'files'/name).read_bytes()
               for name,rec in records.items()}
+    if vendor_build_prop is not None:
+        from spx_super_delta import adapt_vendor_build_prop
+        bodies['etc/googlebook-security/build.prop'] = adapt_vendor_build_prop(vendor_build_prop)
+        records.setdefault('etc/googlebook-security/build.prop', new_record(0o100644))
     if compiled:
         release = policy()['kernel_release']
         stage = compiled/'modules-stage'
@@ -1214,8 +1218,27 @@ def build(args, compile_kernel):
     boot_gnu_efi = check_inputs(getattr(args, 'boot_gnu_efi', None) or private/'kernel-6.18/gnu-efi')
     # Fail before the expensive kernel build if the reusable Android input is
     # missing; the image never silently falls back to the long donor wakelock.
-    regular(private/'suspend/desktop-services.jar')
-    regular(private/'typec/services.jar')
+    mica_ota_base_dir = getattr(args, 'mica_ota_base', None)
+    mica_ota_meta = None
+    mica_desktop_services_jar = None
+    mica_services_jar = None
+    mica_vendor_build_prop = None
+    mica_target_slices_dir = None
+    mica_base_slices_dir = None
+    if mica_ota_base_dir is not None:
+        mica_ota_base_dir = Path(mica_ota_base_dir).resolve()
+        mica_manifest_path = mica_ota_base_dir / 'MICA-OTA-BASE.json'
+        regular(mica_manifest_path)
+        mica_ota_meta = json.loads(mica_manifest_path.read_text(encoding='utf-8'))
+        mica_target_slices_dir = Path(mica_ota_meta['target_slices_dir']).resolve()
+        mica_base_slices_dir = Path(mica_ota_meta['base_slices_dir']).resolve()
+        android_inputs_dir = Path(mica_ota_meta['android_inputs_dir']).resolve()
+        mica_desktop_services_jar = regular(android_inputs_dir / 'desktop-services.jar')
+        mica_services_jar = regular(android_inputs_dir / 'services.jar')
+        mica_vendor_build_prop = regular(android_inputs_dir / 'vendor_build.prop').read_bytes()
+    else:
+        regular(private/'suspend/desktop-services.jar')
+        regular(private/'typec/services.jar')
     source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     template=regular(args.template or private/'template.img')
     require(args.jobs>0,'--jobs must be positive')
@@ -1395,9 +1418,15 @@ def build(args, compile_kernel):
     # Both prebuilt and source default builds must contain the accepted sleep
     # fix. Source mode selects this build's module, never a same-release donor.
     from full_image_suspend import load as load_suspend
-    suspend = load_suspend(private/'suspend', bundle/'Image', compiled)
+    if mica_desktop_services_jar is not None:
+        suspend = load_suspend(private/'suspend', bundle/'Image', compiled, desktop_services_jar=mica_desktop_services_jar)
+    else:
+        suspend = load_suspend(private/'suspend', bundle/'Image', compiled)
     from full_image_typec import load as load_typec, prepare_dtb as typec_dtb
-    typec = load_typec(private/'typec', bundle/'Image', args.output/'typec', compiled)
+    if mica_services_jar is not None:
+        typec = load_typec(private/'typec', bundle/'Image', args.output/'typec', compiled, services_jar=mica_services_jar)
+    else:
+        typec = load_typec(private/'typec', bundle/'Image', args.output/'typec', compiled)
     dt=bundle/'android-el2.dtb'
     dt.write_bytes(typec_dtb(dt.read_bytes()))
     dt.write_bytes(module('spx_backlight_dt', 'prepare-spx-backlight-dtb.py').prepare(dt.read_bytes()))
@@ -1441,6 +1470,7 @@ def build(args, compile_kernel):
         compiled_helpers=compiled_helpers,
         ota_version=getattr(args, 'ota_version', None),
         source_commit=source_commit,
+        vendor_build_prop=mica_vendor_build_prop,
     )
     esp_only = bool(getattr(args, 'esp_only', False))
     from disk_image import build as disk_build
@@ -1450,6 +1480,8 @@ def build(args, compile_kernel):
         expected_single_user_sha256=None,
         size_gib=getattr(args, 'size_gib', None),
         esp_mib=getattr(args, 'esp_mib', None),
+        super_mib=getattr(args, 'super_mib', None),
+        super_slices_dir=mica_target_slices_dir,
         minimal_partitions=bool(getattr(args, 'minimal_partitions', True)),
         jobs=args.jobs,build_only=False,resume_build=False,kernel_mode=args.kernel_mode,
         graphics_argument=graphics_token,esp_only=esp_only,anonymous=True,
@@ -1461,17 +1493,36 @@ def build(args, compile_kernel):
     ota_report = None
     if not getattr(args, 'skip_ota', False):
         from build_ota_package import build_ota_package
+        requested_ota_mode = getattr(args, 'ota_mode', 'auto')
+        effective_ota_mode = (
+            'super-delta'
+            if (mica_ota_meta is not None and requested_ota_mode in ('auto', 'super-delta'))
+            else requested_ota_mode
+        )
         ota_report = build_ota_package(
             output_dir=args.output / 'ota',
             build_output=args.output,
             previous_manifest=getattr(args, 'ota_baseline', None),
             previous_super_sha256=getattr(args, 'ota_previous_super_sha256', None),
-            mode=getattr(args, 'ota_mode', 'auto'),
-            super_unchanged_hint=True,
+            mode=effective_ota_mode,
+            super_unchanged_hint=(None if mica_ota_meta is not None else True),
             version=getattr(args, 'ota_version', None),
             source_commit=source_commit,
+            base_slices_dir=(mica_base_slices_dir if effective_ota_mode == 'super-delta' else None),
+            target_slices_dir=(mica_target_slices_dir if effective_ota_mode == 'super-delta' else None),
         )
     report.update(source_compiled=bool(compiled),private_root=str(private),
+        mica_ota_base=(
+            {
+                'base_build': mica_ota_meta['base_build'],
+                'target_build': mica_ota_meta['target_build'],
+                'target_build_id': mica_ota_meta['target_build_id'],
+                'security_patch': mica_ota_meta['security_patch'],
+                'vendor_trimmed': mica_ota_meta['vendor_trimmed'],
+                'compacted_super_bytes': mica_ota_meta['compacted_super_bytes'],
+            }
+            if mica_ota_meta is not None else None
+        ),
         source_commit=source_commit,
         build_time_parent_initramfs_used=False,postbuild_tests_performed=not esp_only,
         private_identity_present=False, first_setup_preserved=False, first_setup_skipped=True, target_models=["sq1", "sq2"],

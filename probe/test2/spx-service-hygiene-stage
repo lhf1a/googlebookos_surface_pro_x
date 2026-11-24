@@ -372,8 +372,10 @@ if [ -d "$ROOT/vendor/firmware/rtl_nic" ] && [ -d "$ROOT/debug_ramdisk/sq2-firmw
 fi
 
 # 11. Donor Dell OEM apps/services (Mica stubs: SupportAssist/Telemetry,
-#     Diagnostics, Repair). Preserves generic Dell USB soundbar audio profiles.
+#     Diagnostics, Repair, and Dell ota_recovery updater). Preserves generic
+#     Dell USB soundbar audio profiles.
 if ! is_dell_hardware; then
+    disable_service_rc vendor/etc/init/ota_recovery_updater.rc non_dell_hardware
     for _dell_dir in \
         product/priv-app/DellSupportAssistStub \
         product/priv-app/DellDiagnosticsStub \
@@ -392,6 +394,46 @@ if ! is_dell_hardware; then
         product/etc/sysconfig/preinstalled-packages-com.dell.luxsharerma.xml; do
         mask_empty_xml "$_dell_cfg" config non_dell_hardware
     done
+fi
+
+# 12. Sanitize vendor_file_contexts entries referencing Dell OTA recovery types
+#     absent from the active precompiled_sepolicy (prevents Android init
+#     selabel_open SELABEL_OPT_VALIDATE failure when upgrading vendor to 286.R2+).
+_vfc="$ROOT/vendor/etc/selinux/vendor_file_contexts"
+_vpol="$ROOT/vendor/etc/selinux/precompiled_sepolicy"
+if [ -f "$_vfc" ] && [ -f "$_vpol" ]; then
+    _missing_types=""
+    for _sel_t in vendor_ota_recovery_file ota_recovery_updater_exec; do
+        if grep -Fq ":${_sel_t}:" "$_vfc" 2>/dev/null; then
+            if ! tr '\0' '\n' < "$_vpol" 2>/dev/null | grep -Fq "$_sel_t"; then
+                _missing_types="${_missing_types} ${_sel_t}"
+            fi
+        fi
+    done
+    if [ -n "$_missing_types" ]; then
+        _vfc_out="$STAGE/vendor_file_contexts"
+        awk -v missing="$_missing_types" '
+            BEGIN {
+                n = split(missing, arr, " ")
+            }
+            {
+                drop = 0
+                for (i = 1; i <= n; i++) {
+                    if (arr[i] != "" && index($0, ":" arr[i] ":") > 0) {
+                        drop = 1
+                        break
+                    }
+                }
+                if (drop) {
+                    print "# spx-hygiene (missing_sepolicy_type): " $0
+                } else {
+                    print
+                }
+            }
+        ' "$_vfc" > "$_vfc_out"
+        bind_staged "$_vfc_out" "$_vfc"
+        echo "SPX_HYGIENE_SANITIZE_FILE_CONTEXTS=vendor/etc/selinux/vendor_file_contexts missing=${_missing_types# }"
+    fi
 fi
 
 echo "SPX_SERVICE_HYGIENE_READY"

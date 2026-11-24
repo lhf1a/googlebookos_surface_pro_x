@@ -8,10 +8,11 @@
   - `detect` (identifies `full-img` / `gzip` / `manifest`)
   - `inspect-gpt` (parses full disk image GPT for `super` and `SQ2PROBE` offsets and sizes)
   - `extract-stream` (single-pass streaming decompression/extraction with `super` and `esp.fat` SHA-256 calculation)
+  - `capabilities`, `slice-sha256`, `apply-delta` (`SPXDLT01` 4 KiB block-delta reconstruction), and `assemble-super` (multi-slice readback-verified `super` flashing)
 - `probe/ota/spx-ota-stage`: Early initramfs offline updater running after `prepare-native-ssd` discovers the disk and mounts `/media/esp`, before `sq2-loop-slice` mounts `super` (skipped in Rescue Mode `sq2.rescue=1`):
   - Consumes `/media/esp/SPX-OTA-PENDING` and atomically renames it to `SPX-OTA-INPROGRESS` to prevent reboot loops
-  - Supports incremental/full `manifest` `.tar.gz` and full `.img` / `.img.gz`
-  - Verifies package SHA-256, flashes `super` as needed, syncs ESP, and writes `SPX-OTA-RESULT.txt` and `SPX-OTA-LAST.log`
+  - Supports incremental/full `manifest` `.tar.gz` (including `SUPER_MODE=delta` per-slice block deltas) and full `.img` / `.img.gz`
+  - Verifies package and source slice SHA-256s, reconstructs slices safely under `/data/ota/super-stage/`, readback-verifies `super`, syncs ESP, refreshes full `dalvik-cache` + `package_cache` when `APPLY_SUPER=1`, and writes `SPX-OTA-RESULT.txt` and `SPX-OTA-LAST.log`
   - Supports `WIPE_DATA=0` (default, preserving `userdata` and touch calibration) or `WIPE_DATA=1` (clean install: wipes `userdata`, `metadata`, `misc`)
 - `probe/ota/spx-ota-boot`: Background root OTA bridge daemon after Android boots:
   - Takes over `android.settings.SYSTEM_UPDATE_SETTINGS`, enabling `org.surface.advancedcontrol/.SystemUpdateActivity` and disabling conflicting update pages
@@ -26,8 +27,9 @@
 - `probe/advanced-control/MainActivity.java`, `SettingsTheme.java`, `Strings.java`, `res/values*/strings.xml`: Adds System update entry, bilingual Chinese/English UI, and keep-data vs. clean-install selection with double confirmation.
 
 ### 1.3 Build and OTA Packaging Integration
-- `scripts/build_ota_package.py`: Supports `--mode auto|delta|full`. Full builds generate an OTA package automatically; when `super` is unchanged relative to baseline, only changed ESP files and manifest descriptions (`ota-manifest.kv` + `ota-files.tsv`) are packed; when `super` changes or `--mode full` is passed, `super` and checksum info are included.
-- `scripts/full_image.py` & `scripts/build-lts.py`: `build.py full-image` generates `ota/` artifacts by default, or run standalone via `python3 scripts/build.py ota ...`.
+- `scripts/build_ota_package.py`: Supports `--mode auto|delta|esp|full|super-delta`. Full builds generate an OTA package automatically; when `super` is unchanged, only changed ESP files and manifests are packed; `--mode super-delta` packs per-slice `SPXDLT01` block deltas (`ota-super-delta.tsv` + `payload/super-delta/*.spxdlt`) compatible with legacy 5-partition (`3,481 MiB`), padded 5-partition (`>= 4,096 MiB`), and 39-partition layouts.
+- `scripts/track_mica_ota.py`, `scripts/prepare_mica_ota_base.py`, and `configs/mica-ota-chain.json`: Track the official `mica` OTA chain (pinned `16471258/273.R1 -> 16693588/276.R5 -> 16833189/286.R2`), reconstruct and SHA-256-verify all 6 stock partitions, trim the Dell-only `/vendor/etc/recovery/ota_recovery.img` (119.42 MiB) so `286.R2` compacts to `3,460 MiB <= 3,481 MiB`, and export `desktop-services.jar`, `services.jar`, and `vendor_build.prop` for `scripts/build.py full-image --mica-ota-base <dir>`.
+- `scripts/full_image.py` & `scripts/build-lts.py`: `build.py full-image` generates `ota/` artifacts by default; passing `--mica-ota-base <dir>` automatically re-patches `286.R2` JARs/props, reserves `4,096 MiB` GPT `super` headroom on fresh images (while keeping `/etc/sq2-ssd-partitions` at the actual compacted `3,460 MiB` floor), and emits a `super-delta` OTA archive; standalone packaging runs via `python3 scripts/build.py ota --mode super-delta ...`.
 
 ### 1.4 PC Root ADB One-Click Upgrade Scripts
 - Windows PowerShell: `tools/Upgrade-GooglebookViaAdb.ps1` + launcher `tools/Upgrade-GooglebookViaAdb.cmd`

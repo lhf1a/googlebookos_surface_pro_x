@@ -67,12 +67,13 @@ def settings_apk(output):
         subprocess.run([str(tools/'apksigner'),'verify',str(output)],check=True)
 
 
-def load(inputs, image, output, compiled=None):
+def load(inputs, image, output, compiled=None, services_jar=None):
     inputs,image,output=Path(inputs),Path(image),Path(output)
     output.mkdir(parents=True,exist_ok=False)
     sdk=_find_sdk()
     env=dict(os.environ,PATH=str(sdk/'android-15')+os.pathsep+os.environ['PATH'])
-    subprocess.run([sys.executable,str(ROOT/'scripts/patch-spx-unknown-lid.py'),str(inputs/'services.jar'),str(output/'services.jar')],check=True,env=env)
+    jar_src = Path(services_jar) if services_jar is not None else (inputs/'services.jar')
+    subprocess.run([sys.executable,str(ROOT/'scripts/patch-spx-unknown-lid.py'),str(jar_src),str(output/'services.jar')],check=True,env=env)
     if compiled:
         compiled=Path(compiled)
         audit=json.loads((compiled/'build-audit.json').read_text())

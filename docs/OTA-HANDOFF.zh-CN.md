@@ -8,10 +8,11 @@
   - `detect`（识别 `full-img` / `gzip` / `manifest`）
   - `inspect-gpt`（解析完整磁盘镜像 GPT，`super` 与 `SQ2PROBE` 偏移与大小）
   - `extract-stream`（单遍流式解压/提取并计算 `super` 与 `esp.fat` 的 SHA-256）
+  - `capabilities`、`slice-sha256`、`apply-delta`（`SPXDLT01` 4 KiB 块增量还原）、`assemble-super`（多切片回读校验刷写 `super`）
 - `probe/ota/spx-ota-stage`：initramfs 早期离线升级器，在 `prepare-native-ssd` 发现磁盘与挂载 `/media/esp` 之后、`sq2-loop-slice` 挂载 `super` 之前执行，救援模式 `sq2.rescue=1` 下自动跳过：
   - 消费 `/media/esp/SPX-OTA-PENDING` 并原子重命名为 `SPX-OTA-INPROGRESS`，防止重启死循环
-  - 支持增量/全量 `manifest` `.tar.gz` 与完整 `.img` / `.img.gz`
-  - 校验包体 SHA-256、按需刷写 `super`、同步 ESP、写入 `SPX-OTA-RESULT.txt` 与 `SPX-OTA-LAST.log`
+  - 支持增量/全量 `manifest` `.tar.gz`（含 `SUPER_MODE=delta` 按切片块增量）与完整 `.img` / `.img.gz`
+  - 校验包体与源切片 SHA-256、在 `/data/ota/super-stage/` 安全重构并回读校验 `super`、同步 ESP、`APPLY_SUPER=1` 时刷新全量 `dalvik-cache` 与 `package_cache`、写入 `SPX-OTA-RESULT.txt` 与 `SPX-OTA-LAST.log`
   - 支持 `WIPE_DATA=0`（默认保留 `userdata` 与触控校准）或 `WIPE_DATA=1`（全新安装：清空 `userdata`、`metadata`、`misc`）
 - `probe/ota/spx-ota-boot`：Android 启动后后台 root OTA 桥接守护进程：
   - 接管 `android.settings.SYSTEM_UPDATE_SETTINGS`，启用 `org.surface.advancedcontrol/.SystemUpdateActivity` 并停用冲突更新页
@@ -26,8 +27,9 @@
 - `probe/advanced-control/MainActivity.java`、`SettingsTheme.java`、`Strings.java`、`res/values*/strings.xml`：提供系统更新入口、中英双语支持及保留数据/全新安装选择与二次确认。
 
 ### 1.3 构建与 OTA 打包集成
-- `scripts/build_ota_package.py`：支持 `--mode auto|delta|full`。全量构建自动生成 OTA 包；相对基线 `super` 未变化时仅打包变更的 ESP 文件与描述清单 `ota-manifest.kv` + `ota-files.tsv`；`super` 变化或 `--mode full` 时包含 `super` 镜像与校验信息。
-- `scripts/full_image.py` & `scripts/build-lts.py`：`build.py full-image` 默认生成 `ota/` 产物，也可单独执行 `python3 scripts/build.py ota ...`。
+- `scripts/build_ota_package.py`：支持 `--mode auto|delta|esp|full|super-delta`。全量构建自动生成 OTA 包；`super` 未变化时仅打包变更的 ESP 文件与清单；使用 `--mode super-delta` 时生成按 6 个 `_a` 分区切片的 `SPXDLT01` 块增量包（`ota-super-delta.tsv` + `payload/super-delta/*.spxdlt`），一套包同时兼容存量 5 分区（`3,481 MiB`）、新 5 分区（`>= 4,096 MiB`）与 39 分区布局。
+- `scripts/track_mica_ota.py` & `scripts/prepare_mica_ota_base.py` & `configs/mica-ota-chain.json`：追踪官方 `mica` OTA 链（当前锁定 `16471258/273.R1 → 16693588/276.R5 → 16833189/286.R2`），离线还原并校验原版 6 分区、裁剪 Dell 专属 `/vendor/etc/recovery/ota_recovery.img`（119.42 MiB）使 `286.R2` 紧缩 `super` 为 `3,460 MiB <= 3,481 MiB`，并导出 `desktop-services.jar`、`services.jar` 与 `vendor_build.prop` 供 `scripts/build.py full-image --mica-ota-base <dir>` 使用。
+- `scripts/full_image.py` & `scripts/build-lts.py`：`build.py full-image` 默认生成 `ota/` 产物，传入 `--mica-ota-base <dir>` 时自动重打 `286.R2` JAR/属性补丁、为新镜像预留 `4,096 MiB` `super`（同时保持 `/etc/sq2-ssd-partitions` 下界为实际紧缩大小 `3,460 MiB`）并生成 `super-delta` 增量 OTA 包；也可单独执行 `python3 scripts/build.py ota --mode super-delta ...`。
 
 ### 1.4 PC 端 Root ADB 一键升级脚本
 - Windows PowerShell：`tools/Upgrade-GooglebookViaAdb.ps1` + 启动器 `tools/Upgrade-GooglebookViaAdb.cmd`

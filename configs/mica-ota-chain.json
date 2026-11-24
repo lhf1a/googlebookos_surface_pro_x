@@ -1,0 +1,153 @@
+{
+  "schema": 1,
+  "board": "mica",
+  "product_name": "Dell XPS 13 Googlebook",
+  "tracker_api": "https://otachecker.com/api/ota/list?device=mica&limit=50",
+  "recovery_url_template": "https://dl.google.com/device/recovery/mica-user/{build}/recovery.zip",
+  "otatools": {
+    "build": "16373615",
+    "url": "https://ci.android.com/builds/submitted/16373615/aosp_cf_arm64_only_phone-userdebug/latest/otatools.zip",
+    "extractor_member": "bin/ota_extractor"
+  },
+  "dynamic_partitions": [
+    "system",
+    "vendor",
+    "product",
+    "system_ext",
+    "system_dlkm",
+    "vendor_dlkm"
+  ],
+  "base": {
+    "build": "16471258",
+    "build_id": "CL3B.260622.273.R1",
+    "fingerprint": "Dell/mica/mica:17/CL3B.260622.273.R1/16471258:user/release-keys",
+    "security_patch": "2026-09-01",
+    "timestamp": 1790701711,
+    "partitions": {
+      "system": {
+        "bytes": 1081446400,
+        "sha256": "9d855c83aa359a245d2141afbbdd655d69be38ab2b19b915216612661ae25c9a",
+        "candidate_offsets": [1048576]
+      },
+      "vendor": {
+        "bytes": 385949696,
+        "sha256": "261b2624770f1ded7b500b6d011456eebaddb4f233f7493db07f725f4c1ced91",
+        "candidate_offsets": [1083179008, 5471469568]
+      },
+      "product": {
+        "bytes": 1970008064,
+        "sha256": "6e3949328e88d59c3d7432c8b7ec4e4d9c817e38a3d4d2ca076d8b52576e0d0c",
+        "candidate_offsets": [1470103552, 5858394112]
+      },
+      "system_ext": {
+        "bytes": 182886400,
+        "sha256": "df541a73be9313a1d0290f4783cadb9e09866287da1944b258048132c0ce9d9e",
+        "candidate_offsets": [3440377856, 7828668416]
+      },
+      "system_dlkm": {
+        "bytes": 8482816,
+        "sha256": "8050b5a493d93805063d0da3fce68ffd045941e307177bad7f0548345282f811",
+        "candidate_offsets": [3623878656, 8012169216]
+      },
+      "vendor_dlkm": {
+        "bytes": 16740352,
+        "sha256": "9a3f14aeac5f6db3d72be76a8574eee55da152eee3b11b4219331811ec468949",
+        "candidate_offsets": [3633315840, 8021606400]
+      }
+    }
+  },
+  "hops": [
+    {
+      "name": "hop1_16471258_to_16693588",
+      "otachecker_id": 2851,
+      "from_build": "16471258",
+      "to_build": "16693588",
+      "to_build_id": "CL3B.260622.276.R5",
+      "to_fingerprint": "Dell/mica/mica:17/CL3B.260622.276.R5/16693588:user/release-keys",
+      "security_patch": "2026-10-01",
+      "timestamp": 1792685785,
+      "url": "https://ota.googlezip.net/packages/ota-api/package/1779f5e576cebe6b4c23a9628fcd5c62eb967c6d.zip",
+      "zip_bytes": 37946755,
+      "zip_sha256": "20360e8f8fdc76eca6e87d54145c5f6ccce47f99a187e10d54c52564a7b52868",
+      "payload_offset": 5223,
+      "payload_bytes": 37938731,
+      "partitions": {
+        "system": {
+          "bytes": 1081479168,
+          "sha256": "9cfaeb99137407f7a995e91cdac3e0ce27c6ef2891297445e6dbbc2e88d363d3"
+        },
+        "vendor": {
+          "bytes": 385953792,
+          "sha256": "efbb2a0e9fb808347259558276262bd5a519cd904c0627db083e29f29cfa6cd9"
+        },
+        "product": {
+          "bytes": 1970008064,
+          "sha256": "d1b40955110d9f6a92cf9f597d3b6ef370a2476487c2fc47b2e0d3bea9b48297"
+        },
+        "system_ext": {
+          "bytes": 182886400,
+          "sha256": "8001bfe664ab35d2b49056ff9906729cb80c70720f73f240bca085efe3f41a4d"
+        },
+        "system_dlkm": {
+          "bytes": 8482816,
+          "sha256": "22d835e6ec4be2bcb1217f8f18180c3212d9a02ea64b03534c8914348dd3cbbb"
+        },
+        "vendor_dlkm": {
+          "bytes": 16740352,
+          "sha256": "c6097ae8cba3da4ab1dc2193b64ef51144dfabadfdd3f86d1ec329b83baf3aec"
+        }
+      }
+    },
+    {
+      "name": "hop2_16693588_to_16833189",
+      "otachecker_id": 2927,
+      "from_build": "16693588",
+      "to_build": "16833189",
+      "to_build_id": "CL3B.260622.286.R2",
+      "to_fingerprint": "Dell/mica/mica:17/CL3B.260622.286.R2/16833189:user/release-keys",
+      "security_patch": "2026-11-01",
+      "timestamp": 1793827824,
+      "url": "https://ota.googlezip.net/packages/ota-api/package/ce9b569334fea5087a89bc1965b7c2e4714af31f.zip",
+      "zip_bytes": 180866017,
+      "zip_sha256": "905b2d5cf09d988b8347fe6c3ce8d53f2d22f2bacf68588d996ec386e41111ed",
+      "payload_offset": 5240,
+      "payload_bytes": 180857975,
+      "partitions": {
+        "system": {
+          "bytes": 1082404864,
+          "sha256": "753dbf864f167efa45d7f2ab3bc2ac55ffe3223771bafb5272542e0f1da49ac3"
+        },
+        "vendor": {
+          "bytes": 504889344,
+          "sha256": "75a0e46545042ffe69fa5e4ca946e365d8f93baf580a1d4f5e99a4f490c256a9"
+        },
+        "product": {
+          "bytes": 1970012160,
+          "sha256": "a1fe666b84a0b7331b4694c7a049ca15abed60df31ece3873b6fda5c44f9810f"
+        },
+        "system_ext": {
+          "bytes": 182898688,
+          "sha256": "d066dc3ac5d392184dc707c72a96f9470b081ae63330ce4c7008909226939d5f"
+        },
+        "system_dlkm": {
+          "bytes": 8482816,
+          "sha256": "820de76c9c8eb76730d6284173dfcf19900c6fe7c9c7f9b633bb71f920ed6f8e"
+        },
+        "vendor_dlkm": {
+          "bytes": 16744448,
+          "sha256": "4f797201c8e6f1800ea4a8856675f105dee04746bdafcb8c62ac844b97b3edcf"
+        }
+      }
+    }
+  ],
+  "vendor_trim_policy": {
+    "reason": "Remove Dell-only ota_recovery.img (+119.42 MiB) so 286.R2 compacted super fits within legacy 5-partition 3481 MiB super without repartitioning.",
+    "exclude_paths": [
+      "etc/recovery/ota_recovery.img"
+    ],
+    "compression": "lz4hc,12",
+    "pcluster_bytes": 65536,
+    "timestamp": 1230768000,
+    "uuid": "f913b765-0109-5ff7-b64d-e3b1011804cc"
+  }
+}

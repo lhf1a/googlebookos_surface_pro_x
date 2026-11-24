@@ -39,11 +39,12 @@ def validate_module(data):
             raise ValueError('Venus module lacks accepted sleep fix/ABI: '+repr(symbol))
 
 
-def load(inputs, image, compiled=None):
+def load(inputs, image, compiled=None, desktop_services_jar=None):
     inputs = Path(inputs)
+    jar_src = Path(desktop_services_jar) if desktop_services_jar is not None else (inputs/'desktop-services.jar')
     with tempfile.TemporaryDirectory() as tmp:
         output = Path(tmp)/'desktop-services.jar'
-        dex_tool().patch(inputs/'desktop-services.jar', output)
+        dex_tool().patch(jar_src, output)
         jar = output.read_bytes()
     if compiled is not None:
         candidates = list((Path(compiled)/'modules-stage/lib/modules').rglob('venus-core.ko'))

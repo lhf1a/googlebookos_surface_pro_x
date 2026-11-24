@@ -297,6 +297,36 @@ def _add_region_to_tar(tar, arcname, image_path, offset, length):
         tar.addfile(info, _BoundedReader(stream, length))
 
 
+def _resolve_slice_file(slices_dir, slice_name):
+    slices_dir = Path(slices_dir)
+    for cand in (slices_dir / f'{slice_name}.img', slices_dir / f"{slice_name.removesuffix('_a')}.img"):
+        if cand.is_file():
+            return cand.resolve()
+    raise ValueError(f'Missing slice image for {slice_name} in {slices_dir}')
+
+
+def _default_base_candidate_offsets(base_slices_dir, slice_order, chain_path=None):
+    """Build per-slice known source offset candidates (compacted 5-part + chain LP offsets)."""
+    M = 1048576
+    cands = {name: [] for name in slice_order}
+    cursor = M
+    for name in slice_order:
+        p = _resolve_slice_file(base_slices_dir, name)
+        off = ((cursor + M - 1) // M) * M
+        cands[name].append(off)
+        cursor = off + p.stat().st_size
+    if chain_path is not None and Path(chain_path).is_file():
+        chain = json.loads(Path(chain_path).read_text(encoding='utf-8'))
+        base_parts = (chain.get('base') or {}).get('partitions') or {}
+        for name in slice_order:
+            short = name.removesuffix('_a')
+            for off in (base_parts.get(short) or {}).get('candidate_offsets', []):
+                off_i = int(off)
+                if off_i not in cands[name]:
+                    cands[name].append(off_i)
+    return cands
+
+
 def build_ota_package(
     output_dir,
     esp_tree=None,
@@ -311,9 +341,12 @@ def build_ota_package(
     source_commit=None,
     archive_name=None,
     compresslevel=1,
+    base_slices_dir=None,
+    target_slices_dir=None,
+    chain_path=None,
 ):
     """Build an OTA .tar.gz package + OTA-MANIFEST.json + SHA256SUMS."""
-    if mode not in ('auto', 'delta', 'esp', 'full'):
+    if mode not in ('auto', 'delta', 'esp', 'full', 'super-delta'):
         raise ValueError(f'Unsupported OTA mode: {mode}')
 
     esp_tree, image_path, super_info = resolve_build_inputs(
@@ -327,182 +360,271 @@ def build_ota_package(
 
     super_sha256 = ''
     super_bytes = 0
-    if image_path is not None and super_info is not None:
-        super_bytes = int(super_info['bytes'])
-        super_sha256 = sha256_region(image_path, int(super_info['offset']), super_bytes)
+    super_delta_entries = []
+    super_delta_files = []  # (arcname, Path)
+    super_delta_tsv_bytes = None
+    super_delta_tmpdir = None
+    super_mode = 'none'
 
-    if mode == 'full':
+    if mode == 'super-delta':
+        import tempfile
+        from disk_image import compact_super_slices_from_dir, compute_super_sha256_from_files
+        from spx_super_delta import generate_slice_delta
+
+        if base_slices_dir is None or target_slices_dir is None:
+            raise ValueError('--mode super-delta requires both --base-slices-dir and --target-slices-dir')
+        base_slices_dir = Path(base_slices_dir).resolve()
+        target_slices_dir = Path(target_slices_dir).resolve()
+        slice_order = ('system_a', 'vendor_a', 'product_a', 'system_ext_a', 'system_dlkm_a', 'vendor_dlkm_a')
+        super_bytes, target_plan, _ = compact_super_slices_from_dir(target_slices_dir, slice_order=slice_order)
+        super_sha256 = compute_super_sha256_from_files(super_bytes, target_plan)
+        if chain_path is None and (ROOT / 'configs/mica-ota-chain.json').is_file():
+            chain_path = ROOT / 'configs/mica-ota-chain.json'
+        cand_map = _default_base_candidate_offsets(base_slices_dir, slice_order, chain_path=chain_path)
+
+        super_delta_tmpdir = tempfile.TemporaryDirectory(prefix='spx-super-delta-pkg-')
+        delta_work = Path(super_delta_tmpdir.name)
+        tsv_delta_lines = []
+        for slice_name, dst_path, dst_off, dst_bytes in target_plan:
+            src_path = _resolve_slice_file(base_slices_dir, slice_name)
+            delta_file = delta_work / f'{slice_name}.spxdlt'
+            stats = generate_slice_delta(src_path, dst_path, delta_file)
+            arcname = f'payload/super-delta/{slice_name}.spxdlt'
+            cands_csv = ','.join(str(x) for x in cand_map.get(slice_name, []))
+            tsv_delta_lines.append(
+                f"{slice_name}\t{dst_off}\t{dst_bytes}\t{stats['src_bytes']}\t"
+                f"{stats['src_sha256']}\t{stats['dst_sha256']}\t{arcname}\t{cands_csv}\n"
+            )
+            super_delta_entries.append({
+                'slice': slice_name,
+                'dst_offset': dst_off,
+                'dst_bytes': dst_bytes,
+                'src_bytes': stats['src_bytes'],
+                'src_sha256': stats['src_sha256'],
+                'dst_sha256': stats['dst_sha256'],
+                'archive_path': arcname,
+                'delta_bytes': stats['delta_bytes'],
+                'copy_blocks': stats['copy_blocks'],
+                'zero_blocks': stats['zero_blocks'],
+                'literal_bytes': stats['literal_bytes'],
+                'candidate_offsets': cand_map.get(slice_name, []),
+            })
+            super_delta_files.append((arcname, delta_file))
+        super_delta_tsv_bytes = ''.join(tsv_delta_lines).encode('utf-8')
         super_included = True
-    elif mode in ('delta', 'esp'):
-        super_included = False
+        super_mode = 'delta'
     else:
-        # auto mode
-        if prev_super and super_sha256:
-            super_included = (super_sha256 != prev_super)
-        elif super_unchanged_hint is not None:
-            super_included = not bool(super_unchanged_hint)
-        elif image_path is None or super_info is None:
+        if image_path is not None and super_info is not None:
+            super_bytes = int(super_info['bytes'])
+            super_sha256 = sha256_region(image_path, int(super_info['offset']), super_bytes)
+
+        if mode == 'full':
+            super_included = True
+        elif mode in ('delta', 'esp'):
             super_included = False
         else:
-            super_included = True
+            # auto mode
+            if prev_super and super_sha256:
+                super_included = (super_sha256 != prev_super)
+            elif super_unchanged_hint is not None:
+                super_included = not bool(super_unchanged_hint)
+            elif image_path is None or super_info is None:
+                super_included = False
+            else:
+                super_included = True
 
-    if super_included and (image_path is None or super_info is None):
-        raise ValueError('Full OTA mode requires a raw disk image containing a super partition')
+        if super_included and (image_path is None or super_info is None):
+            raise ValueError('Full OTA mode requires a raw disk image containing a super partition')
+        super_mode = 'full' if super_included else 'none'
 
-    # Determine changed/added and deleted ESP files.
-    if prev_esp is not None and mode in ('auto', 'delta'):
-        changed_rels = [
-            rel for rel, info in esp_inv.items()
-            if prev_esp.get(rel) != info['sha256']
+    try:
+        # Determine changed/added and deleted ESP files.
+        if prev_esp is not None and mode in ('auto', 'delta'):
+            changed_rels = [
+                rel for rel, info in esp_inv.items()
+                if prev_esp.get(rel) != info['sha256']
+            ]
+            deleted_rels = sorted(rel for rel in prev_esp if rel not in esp_inv and not is_preserved_esp_path(rel))
+            if not changed_rels and 'SPX-IMAGE.txt' in esp_inv:
+                changed_rels = ['SPX-IMAGE.txt']
+            esp_mode = 'delta'
+        else:
+            changed_rels = sorted(esp_inv.keys())
+            deleted_rels = []
+            esp_mode = 'sync'
+
+        # Content-deduplicate identical files (e.g. EFI/SQ2Nat & EFI/SQ2Res share Image + initramfs).
+        blob_by_sha = {}
+        blobs_to_pack = []  # list of (arcname, Path)
+        put_entries = []
+        for rel in changed_rels:
+            info = esp_inv[rel]
+            digest = info['sha256']
+            if digest not in blob_by_sha:
+                arcname = f'payload/esp/{rel}'
+                blob_by_sha[digest] = arcname
+                blobs_to_pack.append((arcname, info['path']))
+            put_entries.append({
+                'action': 'PUT',
+                'path': rel,
+                'archive_path': blob_by_sha[digest],
+                'sha256': digest,
+                'bytes': info['bytes'],
+            })
+
+        del_entries = [{'action': 'DEL', 'path': rel} for rel in deleted_rels]
+
+        commit = source_commit if source_commit is not None else detect_git_commit()
+        ver = version or detect_version(commit)
+        krel = policy()['kernel_release']
+        created_at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        if super_mode == 'delta':
+            # Sentinel path makes older v0.9.0-v0.9.3 runtimes fail cleanly before touching super/ESP.
+            super_archive_path = 'payload/super-delta/UNSUPPORTED_UPGRADE_OTA_RUNTIME_FIRST'
+            super_delta_tsv_name = 'ota-super-delta.tsv'
+            package_type = 'super-delta'
+        elif super_included:
+            super_archive_path = 'payload/super.img'
+            super_delta_tsv_name = ''
+            package_type = 'full'
+        else:
+            super_archive_path = ''
+            super_delta_tsv_name = ''
+            package_type = 'delta' if esp_mode == 'delta' else 'esp'
+
+        manifest = {
+            'schema': 1,
+            'package_type': package_type,
+            'version': ver,
+            'kernel_release': krel,
+            'build_commit': commit,
+            'created_at': created_at,
+            'super_included': super_included,
+            'super_mode': super_mode,
+            'super_delta_tsv': super_delta_tsv_name,
+            'super_archive_path': super_archive_path,
+            'super_sha256': super_sha256,
+            'super_bytes': super_bytes,
+            'required_super_sha256': ('' if super_included else super_sha256),
+            'esp_mode': esp_mode,
+            'esp_preserve': list(PRESERVED_ESP_PATHS),
+            'updates': put_entries + del_entries,
+            'esp_inventory': {
+                rel: {'sha256': info['sha256'], 'bytes': info['bytes']}
+                for rel, info in esp_inv.items()
+            },
+            'deduplicated_blob_count': len(blobs_to_pack),
+            'update_put_count': len(put_entries),
+            'update_del_count': len(del_entries),
+        }
+        if super_mode == 'delta':
+            manifest['super_delta_slices'] = super_delta_entries
+
+        manifest_json_bytes = (json.dumps(manifest, indent=2) + '\n').encode('utf-8')
+        kv_lines = [
+            'SCHEMA=1',
+            f'PACKAGE_TYPE={package_type}',
+            f'VERSION={ver}',
+            f'KERNEL_RELEASE={krel}',
+            f'BUILD_COMMIT={commit}',
+            f'SUPER_INCLUDED={1 if super_included else 0}',
+            f'SUPER_MODE={super_mode}',
         ]
-        deleted_rels = sorted(rel for rel in prev_esp if rel not in esp_inv and not is_preserved_esp_path(rel))
-        if not changed_rels and 'SPX-IMAGE.txt' in esp_inv:
-            changed_rels = ['SPX-IMAGE.txt']
-        esp_mode = 'delta'
-    else:
-        changed_rels = sorted(esp_inv.keys())
-        deleted_rels = []
-        esp_mode = 'sync'
+        if super_delta_tsv_name:
+            kv_lines.append(f'SUPER_DELTA_TSV={super_delta_tsv_name}')
+        kv_lines.extend([
+            f'SUPER_ARCHIVE_PATH={super_archive_path}',
+            f'SUPER_SHA256={super_sha256}',
+            f'SUPER_BYTES={super_bytes}',
+            f'REQUIRED_SUPER_SHA256={"" if super_included else super_sha256}',
+            f'ESP_MODE={esp_mode}',
+        ])
+        manifest_kv_bytes = ('\n'.join(kv_lines) + '\n').encode('utf-8')
 
-    # Content-deduplicate identical files (e.g. EFI/SQ2Nat & EFI/SQ2Res share Image + initramfs).
-    blob_by_sha = {}
-    blobs_to_pack = []  # list of (arcname, Path)
-    put_entries = []
-    for rel in changed_rels:
-        info = esp_inv[rel]
-        digest = info['sha256']
-        if digest not in blob_by_sha:
-            arcname = f'payload/esp/{rel}'
-            blob_by_sha[digest] = arcname
-            blobs_to_pack.append((arcname, info['path']))
-        put_entries.append({
-            'action': 'PUT',
-            'path': rel,
-            'archive_path': blob_by_sha[digest],
-            'sha256': digest,
-            'bytes': info['bytes'],
-        })
+        tsv_lines = []
+        for entry in put_entries:
+            tsv_lines.append(
+                f"PUT\t{entry['path']}\t{entry['archive_path']}\t{entry['sha256']}\t{entry['bytes']}\n"
+            )
+        for entry in del_entries:
+            tsv_lines.append(f"DEL\t{entry['path']}\n")
+        files_tsv_bytes = ''.join(tsv_lines).encode('utf-8')
 
-    del_entries = [{'action': 'DEL', 'path': rel} for rel in deleted_rels]
+        output_dir = Path(output_dir).resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if not archive_name:
+            suffix = 'super-delta' if super_mode == 'delta' else ('full' if super_included else ('delta' if esp_mode == 'delta' else 'esp'))
+            archive_name = f'surface-pro-x-6.18-hybrid-ota-{suffix}.tar.gz'
+        archive_path = output_dir / archive_name
 
-    commit = source_commit if source_commit is not None else detect_git_commit()
-    ver = version or detect_version(commit)
-    krel = policy()['kernel_release']
-    created_at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        # Write tar.gz with metadata members FIRST so inspection reads only the beginning of the stream.
+        with archive_path.open('wb') as raw_out:
+            with gzip.GzipFile(filename='', mode='wb', fileobj=raw_out, compresslevel=compresslevel, mtime=0) as gz:
+                with tarfile.open(fileobj=gz, mode='w', format=tarfile.USTAR_FORMAT) as tar:
+                    _add_bytes_to_tar(tar, 'ota-manifest.json', manifest_json_bytes)
+                    _add_bytes_to_tar(tar, 'ota-manifest.kv', manifest_kv_bytes)
+                    _add_bytes_to_tar(tar, 'ota-files.tsv', files_tsv_bytes)
+                    if super_delta_tsv_bytes is not None:
+                        _add_bytes_to_tar(tar, 'ota-super-delta.tsv', super_delta_tsv_bytes)
+                    dirs = ['payload', 'payload/esp']
+                    if super_mode == 'delta':
+                        dirs.append('payload/super-delta')
+                    for dname in dirs:
+                        dinfo = tarfile.TarInfo(name=dname)
+                        dinfo.type = tarfile.DIRTYPE
+                        dinfo.mode = 0o755
+                        dinfo.mtime = 0
+                        dinfo.uid = 0
+                        dinfo.gid = 0
+                        dinfo.uname = 'root'
+                        dinfo.gname = 'root'
+                        tar.addfile(dinfo)
+                    for arcname, src_path in blobs_to_pack:
+                        _add_file_to_tar(tar, arcname, src_path)
+                    if super_mode == 'delta':
+                        for arcname, delta_path in super_delta_files:
+                            _add_file_to_tar(tar, arcname, delta_path)
+                    elif super_included:
+                        _add_region_to_tar(tar, super_archive_path, image_path, int(super_info['offset']), super_bytes)
 
-    super_archive_path = 'payload/super.img' if super_included else ''
-    package_type = 'full' if super_included else ('delta' if esp_mode == 'delta' else 'esp')
+        archive_sha = sha256_file(archive_path)
+        archive_bytes = archive_path.stat().st_size
 
-    manifest = {
-        'schema': 1,
-        'package_type': package_type,
-        'version': ver,
-        'kernel_release': krel,
-        'build_commit': commit,
-        'created_at': created_at,
-        'super_included': super_included,
-        'super_archive_path': super_archive_path,
-        'super_sha256': super_sha256,
-        'super_bytes': super_bytes,
-        'required_super_sha256': ('' if super_included else super_sha256),
-        'esp_mode': esp_mode,
-        'esp_preserve': list(PRESERVED_ESP_PATHS),
-        'updates': put_entries + del_entries,
-        'esp_inventory': {
-            rel: {'sha256': info['sha256'], 'bytes': info['bytes']}
-            for rel, info in esp_inv.items()
-        },
-        'deduplicated_blob_count': len(blobs_to_pack),
-        'update_put_count': len(put_entries),
-        'update_del_count': len(del_entries),
-    }
+        manifest['archive'] = archive_name
+        manifest['archive_sha256'] = archive_sha
+        manifest['archive_bytes'] = archive_bytes
 
-    manifest_json_bytes = (json.dumps(manifest, indent=2) + '\n').encode('utf-8')
-    manifest_kv_bytes = (
-        f'SCHEMA=1\n'
-        f'PACKAGE_TYPE={package_type}\n'
-        f'VERSION={ver}\n'
-        f'KERNEL_RELEASE={krel}\n'
-        f'BUILD_COMMIT={commit}\n'
-        f'SUPER_INCLUDED={1 if super_included else 0}\n'
-        f'SUPER_ARCHIVE_PATH={super_archive_path}\n'
-        f'SUPER_SHA256={super_sha256}\n'
-        f'SUPER_BYTES={super_bytes}\n'
-        f'REQUIRED_SUPER_SHA256={"" if super_included else super_sha256}\n'
-        f'ESP_MODE={esp_mode}\n'
-    ).encode('utf-8')
+        manifest_out = output_dir / 'OTA-MANIFEST.json'
+        manifest_out.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
 
-    tsv_lines = []
-    for entry in put_entries:
-        tsv_lines.append(
-            f"PUT\t{entry['path']}\t{entry['archive_path']}\t{entry['sha256']}\t{entry['bytes']}\n"
-        )
-    for entry in del_entries:
-        tsv_lines.append(f"DEL\t{entry['path']}\n")
-    files_tsv_bytes = ''.join(tsv_lines).encode('utf-8')
+        sums_out = output_dir / 'SHA256SUMS'
+        sums_out.write_text(f'{archive_sha}  {archive_name}\n', encoding='utf-8')
 
-    output_dir = Path(output_dir).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    if not archive_name:
-        suffix = 'full' if super_included else ('delta' if esp_mode == 'delta' else 'esp')
-        archive_name = f'surface-pro-x-6.18-hybrid-ota-{suffix}.tar.gz'
-    archive_path = output_dir / archive_name
-
-    # Write tar.gz with metadata members FIRST so inspection reads only the beginning of the stream.
-    with archive_path.open('wb') as raw_out:
-        with gzip.GzipFile(filename='', mode='wb', fileobj=raw_out, compresslevel=compresslevel, mtime=0) as gz:
-            with tarfile.open(fileobj=gz, mode='w', format=tarfile.USTAR_FORMAT) as tar:
-                _add_bytes_to_tar(tar, 'ota-manifest.json', manifest_json_bytes)
-                _add_bytes_to_tar(tar, 'ota-manifest.kv', manifest_kv_bytes)
-                _add_bytes_to_tar(tar, 'ota-files.tsv', files_tsv_bytes)
-                for dname in ('payload', 'payload/esp'):
-                    dinfo = tarfile.TarInfo(name=dname)
-                    dinfo.type = tarfile.DIRTYPE
-                    dinfo.mode = 0o755
-                    dinfo.mtime = 0
-                    dinfo.uid = 0
-                    dinfo.gid = 0
-                    dinfo.uname = 'root'
-                    dinfo.gname = 'root'
-                    tar.addfile(dinfo)
-                for arcname, src_path in blobs_to_pack:
-                    _add_file_to_tar(tar, arcname, src_path)
-                if super_included:
-                    _add_region_to_tar(tar, super_archive_path, image_path, int(super_info['offset']), super_bytes)
-
-    archive_sha = sha256_file(archive_path)
-    archive_bytes = archive_path.stat().st_size
-
-    manifest['archive'] = archive_name
-    manifest['archive_sha256'] = archive_sha
-    manifest['archive_bytes'] = archive_bytes
-
-    manifest_out = output_dir / 'OTA-MANIFEST.json'
-    manifest_out.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
-
-    sums_out = output_dir / 'SHA256SUMS'
-    sums_out.write_text(f'{archive_sha}  {archive_name}\n', encoding='utf-8')
-
-    return {
-        'operation': 'ota-package',
-        'package_type': package_type,
-        'archive': str(archive_path),
-        'archive_name': archive_name,
-        'archive_bytes': archive_bytes,
-        'archive_sha256': archive_sha,
-        'manifest': str(manifest_out),
-        'sha256sums': str(sums_out),
-        'version': ver,
-        'kernel_release': krel,
-        'build_commit': commit,
-        'super_included': super_included,
-        'super_sha256': super_sha256,
-        'super_bytes': super_bytes,
-        'esp_mode': esp_mode,
-        'update_put_count': len(put_entries),
-        'update_del_count': len(del_entries),
-        'deduplicated_blob_count': len(blobs_to_pack),
-    }
+        return {
+            'operation': 'ota-package',
+            'package_type': package_type,
+            'archive': str(archive_path),
+            'archive_name': archive_name,
+            'archive_bytes': archive_bytes,
+            'archive_sha256': archive_sha,
+            'manifest': str(manifest_out),
+            'sha256sums': str(sums_out),
+            'version': ver,
+            'kernel_release': krel,
+            'build_commit': commit,
+            'super_included': super_included,
+            'super_mode': super_mode,
+            'super_sha256': super_sha256,
+            'super_bytes': super_bytes,
+            'esp_mode': esp_mode,
+            'update_put_count': len(put_entries),
+            'update_del_count': len(del_entries),
+            'deduplicated_blob_count': len(blobs_to_pack),
+        }
+    finally:
+        if super_delta_tmpdir is not None:
+            super_delta_tmpdir.cleanup()
 
 
 def main(argv=None):
@@ -516,8 +638,14 @@ def main(argv=None):
                         help='Previous OTA-MANIFEST.json, FULL-IMAGE.json, or build directory for delta/super comparison')
     parser.add_argument('--previous-super-sha256',
                         help='Explicit previous super SHA-256 to decide whether super changed')
-    parser.add_argument('--mode', choices=('auto', 'delta', 'esp', 'full'), default='auto',
-                        help='auto: omit super when unchanged; delta/esp: ESP files + manifest only; full: include super.img')
+    parser.add_argument('--mode', choices=('auto', 'delta', 'esp', 'full', 'super-delta'), default='auto',
+                        help='auto: omit super when unchanged; delta/esp: ESP files + manifest only; full: include super.img; super-delta: per-slice SPXDLT01 incremental super update')
+    parser.add_argument('--base-slices-dir', type=Path,
+                        help='Base _a EROFS slices directory for --mode super-delta (e.g. 16471258)')
+    parser.add_argument('--target-slices-dir', type=Path,
+                        help='Target _a EROFS slices directory for --mode super-delta (e.g. 286.R2)')
+    parser.add_argument('--chain', type=Path,
+                        help='Optional mica-ota-chain.json to populate candidate source slice offsets')
     parser.add_argument('--super-unchanged', action='store_true',
                         help='Hint that super is unchanged from baseline when no --previous-manifest is supplied')
     parser.add_argument('--version', help='Explicit release version string')
@@ -537,6 +665,9 @@ def main(argv=None):
         super_unchanged_hint=(True if args.super_unchanged else None),
         version=args.version,
         archive_name=args.archive_name,
+        base_slices_dir=args.base_slices_dir,
+        target_slices_dir=args.target_slices_dir,
+        chain_path=args.chain,
     )
     print(json.dumps(report, indent=2))
 
