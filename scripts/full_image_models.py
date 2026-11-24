@@ -41,8 +41,17 @@ def profile(fdt, device):
         except libfdt.FdtException as error:
             if error.err != -libfdt.NOTFOUND:
                 raise
-        require(set(props) == {'opp-hz', 'opp-level'}, 'Unsupported reference OPP fields')
-        require(len(props['opp-hz']) == 8 and len(props['opp-level']) == 4, 'Invalid OPP cells')
+        require(
+            {'opp-hz', 'opp-level'}.issubset(props)
+            and set(props) <= {'opp-hz', 'opp-level', 'opp-peak-kBps'},
+            'Unsupported reference OPP fields',
+        )
+        require(
+            len(props['opp-hz']) == 8
+            and len(props['opp-level']) == 4
+            and ('opp-peak-kBps' not in props or len(props['opp-peak-kBps']) == 4),
+            'Invalid OPP cells',
+        )
         entries[fdt.get_name(child)] = props
     require(entries, 'Empty OPP table')
     return table, entries
@@ -59,12 +68,15 @@ def sq1_dtb(current, reference):
     new, old = libfdt.Fdt(current), libfdt.Fdt(reference)
     new.resize(len(current) + 4096)
     changes = {}
+    gpu_bw_enabled = False
     for device in DEVICES:
         require(bytes(new.getprop(new.path_offset(device), 'compatible')) ==
                 bytes(old.getprop(old.path_offset(device), 'compatible')),
                 'Reference GPU/GMU identity does not match')
         _, desired = profile(old, device)
         table, previous = profile(new, device)
+        if device == '/soc@0/gpu@2c00000' and any('opp-peak-kBps' in v for v in previous.values()):
+            gpu_bw_enabled = True
         changes[device] = {'before': describe(previous), 'after': describe(desired)}
         # Resolve offsets again after each structural edit; preserve the 6.18
         # table phandle, power domains, clocks, IOMMU and thermal configuration.
@@ -77,9 +89,20 @@ def sq1_dtb(current, reference):
             for key, value in props.items():
                 new.setprop(child, key, value)
         _, actual = profile(new, device)
-        require(actual == desired, 'OPP transfer did not preserve the reference cells')
+        actual_core = {
+            k: {'opp-hz': v['opp-hz'], 'opp-level': v['opp-level']}
+            for k, v in actual.items()
+        }
+        desired_core = {
+            k: {'opp-hz': v['opp-hz'], 'opp-level': v['opp-level']}
+            for k, v in desired.items()
+        }
+        require(actual_core == desired_core, 'OPP transfer did not preserve the reference cells')
     new.pack()
-    return bytes(new.as_bytearray()), changes
+    result = bytes(new.as_bytearray())
+    if gpu_bw_enabled:
+        result = module('spx_gpu_bw_dt', 'prepare-spx-gpu-bw-dtb.py').prepare(result)
+    return result, changes
 
 
 def model_router(pristine, directory, graphics_argument='sq2.vulkan=qcom'):

@@ -26,6 +26,12 @@ def mesa(b, ndk=None, jobs=8):
     b.run('mesa-mapper5', ['patch','--batch','--fuzz=0','-p1','-d',src,'-i',mapper])
     b.run('mesa-multiplane', [sys.executable, ROOT/'scripts/patch-mesa-sq2-multiplane.py',
                              src/'src/util/u_gralloc/u_gralloc_vm_mapper5.cpp'])
+    for label, rel in (
+        ('mesa-msaa-zsbuf-gmem', 'patches/mesa-26.2.4-freedreno-msaa-zsbuf-gmem.patch'),
+        ('mesa-android-egl-ubwc', 'patches/mesa-26.2.4-android-egl-ubwc.patch'),
+        ('mesa-disk-cache-blob-get', 'patches/mesa-26.2.4-disk-cache-blob-get-two-step.patch'),
+    ):
+        b.run(label, ['patch', '--batch', '--fuzz=0', '-p1', '-d', src, '-i', ROOT/rel])
     host = out/'host-env'
     wheels = [b.input(x['id']) for x in b.spec['downloads'] if x['id'].startswith('host-python-')]
     b.run('mesa-host-venv', [sys.executable,'-m','venv',host])

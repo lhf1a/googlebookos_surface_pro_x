@@ -1,0 +1,26 @@
+diff --git a/src/gallium/drivers/freedreno/freedreno_gmem.c b/src/gallium/drivers/freedreno/freedreno_gmem.c
+index 2ee9b0b..d4cee96 100644
+--- a/src/gallium/drivers/freedreno/freedreno_gmem.c
++++ b/src/gallium/drivers/freedreno/freedreno_gmem.c
+@@ -462,9 +462,18 @@ gmem_key_init(struct fd_batch *batch, bool assume_zs, bool no_scis_opt)
+ 
+    if (has_zs || assume_zs) {
+       struct fd_resource *rsc = fd_resource(pfb->zsbuf.texture);
+-      key->zsbuf_cpp[0] = rsc->layout.cpp * pfb->samples;
+-      if (rsc->stencil)
+-         key->zsbuf_cpp[1] = rsc->stencil->layout.cpp * pfb->samples;
++      /* rsc->layout.cpp is already pre-multiplied by the resource sample count
++       * (fd_resource_layout_init / fdl6_layout_image). Divide out the resource
++       * sample count before multiplying by pfb->samples so MSAA Z/S buffers
++       * are not over-counted by samples^2 in GMEM while MSRTT still scales up.
++       */
++      key->zsbuf_cpp[0] =
++         (rsc->layout.cpp / fd_resource_nr_samples(&rsc->b.b)) * pfb->samples;
++      if (rsc->stencil) {
++         key->zsbuf_cpp[1] =
++            (rsc->stencil->layout.cpp / fd_resource_nr_samples(&rsc->stencil->b.b)) *
++            pfb->samples;
++      }
+ 
+       /* If we clear z or s but not both, and we are using z24s8 (ie.
+        * !separate_stencil) then we need to restore the other, even if

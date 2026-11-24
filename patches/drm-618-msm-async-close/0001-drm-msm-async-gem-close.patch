@@ -1,0 +1,388 @@
+From: Surface Pro X Android Maintainers
+Subject: [PATCH] drm/msm: defer active legacy GEM VMA teardown asynchronously
+
+Legacy (non-VM_BIND) contexts such as Mesa Freedreno GLES currently
+block inside msm_gem_close() on dma_resv_wait_timeout(obj->resv,
+DMA_RESV_USAGE_BOOKKEEP, false, MAX_SCHEDULE_TIMEOUT) before calling
+put_iova_spaces(). When userspace releases per-frame command/staging
+or imported GraphicBuffer handles immediately after submit, the
+DRM_IOCTL_GEM_CLOSE ioctl stalls the render thread for the entire GPU
+frame time (40-80 ms on heavy GMEM workloads).
+
+Keep the zero-allocation inline teardown fast path when the VMA is
+already idle (dma_resv_test_signaled). When active fences exist,
+snapshot them with dma_resv_get_singleton(), pin object and VM
+references, and arm a lightweight dma_fence_cb that dispatches VMA
+teardown onto a dedicated WQ_UNBOUND workqueue once those fences
+signal.
+
+Protect against shared dma-buf re-import / handle reuse races in the
+same legacy VM via per-VMA close_pending + monotonic close_seq
+generation checks canceled on msm_gem_open() and get_vma_locked(),
+flush queued teardowns in adreno_system_suspend() before runtime force
+suspend for clean s2idle transitions, and drain all pending closes in
+msm_drm_uninit(). Fall back to synchronous teardown on allocation
+failure.
+
+diff --git a/drivers/gpu/drm/msm/msm_drv.h b/drivers/gpu/drm/msm/msm_drv.h
+index d407938..40af7a4 100644
+--- a/drivers/gpu/drm/msm/msm_drv.h
++++ b/drivers/gpu/drm/msm/msm_drv.h
+@@ -25,6 +25,8 @@
+ #include <linux/of_device.h>
+ #include <linux/sizes.h>
+ #include <linux/kthread.h>
++#include <linux/wait.h>
++#include <linux/workqueue.h>
+ 
+ #include <drm/drm_atomic.h>
+ #include <drm/drm_atomic_helper.h>
+@@ -103,6 +105,21 @@ struct msm_drm_private {
+ 	struct list_head objects;
+ 	struct mutex obj_lock;
+ 
++	/**
++	 * @close_wq: Unbound workqueue for deferred legacy GEM VMA teardown
++	 * once active dma_resv fences have signaled.
++	 */
++	struct workqueue_struct *close_wq;
++
++	/**
++	 * @pending_closes: In-flight deferred GEM close operations (armed
++	 * fence callbacks plus queued close_wq items).
++	 */
++	atomic_t pending_closes;
++
++	/** @close_wait: Signaled when @pending_closes drops to zero. */
++	wait_queue_head_t close_wait;
++
+ 	/**
+ 	 * lru:
+ 	 *
+diff --git a/drivers/gpu/drm/msm/msm_drv.c b/drivers/gpu/drm/msm/msm_drv.c
+index c2a8aaa..aaa1f59 100644
+--- a/drivers/gpu/drm/msm/msm_drv.c
++++ b/drivers/gpu/drm/msm/msm_drv.c
+@@ -85,6 +85,13 @@ static int msm_drm_uninit(struct device *dev, const struct component_ops *gpu_op
+ 			msm_drm_kms_unregister(dev);
+ 	}
+ 
++	if (priv->close_wq) {
++		wait_event(priv->close_wait,
++			   atomic_read(&priv->pending_closes) == 0);
++		destroy_workqueue(priv->close_wq);
++		priv->close_wq = NULL;
++	}
++
+ 	msm_gem_shrinker_cleanup(ddev);
+ 
+ 	msm_perf_debugfs_cleanup(priv);
+@@ -125,6 +132,14 @@ static int msm_drm_init(struct device *dev, const struct drm_driver *drv,
+ 	INIT_LIST_HEAD(&priv->objects);
+ 	mutex_init(&priv->obj_lock);
+ 
++	atomic_set(&priv->pending_closes, 0);
++	init_waitqueue_head(&priv->close_wait);
++	priv->close_wq = alloc_workqueue("msm-gem-close", WQ_UNBOUND, 0);
++	if (!priv->close_wq) {
++		ret = -ENOMEM;
++		goto err_put_dev;
++	}
++
+ 	/*
+ 	 * Initialize the LRUs:
+ 	 */
+@@ -188,6 +203,10 @@ err_msm_uninit:
+ 	return ret;
+ 
+ err_put_dev:
++	if (priv->close_wq) {
++		destroy_workqueue(priv->close_wq);
++		priv->close_wq = NULL;
++	}
+ 	drm_dev_put(ddev);
+ 
+ 	return ret;
+diff --git a/drivers/gpu/drm/msm/msm_gem.h b/drivers/gpu/drm/msm/msm_gem.h
+index 1bf228d..48db1ce 100644
+--- a/drivers/gpu/drm/msm/msm_gem.h
++++ b/drivers/gpu/drm/msm/msm_gem.h
+@@ -185,6 +185,19 @@ struct msm_gem_vma {
+ 
+ 	/** @mapped: Is this VMA mapped? */
+ 	bool mapped;
++
++	/**
++	 * @close_pending: Deferred legacy handle-close teardown is pending.
++	 * Protected by VM and BO reservation locks.
++	 */
++	bool close_pending;
++
++	/**
++	 * @close_seq: Monotonic generation counter incremented whenever
++	 * deferred close is scheduled or canceled on re-open/reuse.
++	 * Protected by VM and BO reservation locks.
++	 */
++	u64 close_seq;
+ };
+ #define to_msm_vma(x) container_of(x, struct msm_gem_vma, base)
+ 
+@@ -259,6 +272,12 @@ struct msm_gem_object {
+ 	 * torn down.
+ 	 */
+ 	atomic_t vma_ref;
++
++	/**
++	 * @pending_closes: Number of in-flight deferred close works for
++	 * this BO (fast check to keep msm_gem_open() lock-free).
++	 */
++	atomic_t pending_closes;
+ };
+ #define to_msm_bo(x) container_of(x, struct msm_gem_object, base)
+ 
+diff --git a/drivers/gpu/drm/msm/msm_gem.c b/drivers/gpu/drm/msm/msm_gem.c
+index 92396a5..eb9230e 100644
+--- a/drivers/gpu/drm/msm/msm_gem.c
++++ b/drivers/gpu/drm/msm/msm_gem.c
+@@ -37,20 +37,118 @@ static void update_ctx_mem(struct drm_file *file, ssize_t size)
+ 
+ }
+ 
++static struct drm_gpuva *lookup_vma(struct drm_gem_object *obj,
++				    struct drm_gpuvm *vm);
++static void put_iova_spaces(struct drm_gem_object *obj, struct drm_gpuvm *vm,
++			    bool close, const char *reason);
++
++struct msm_gem_close_work {
++	struct work_struct work;
++	struct dma_fence_cb cb;
++	struct msm_drm_private *priv;
++	struct drm_gem_object *obj;
++	struct drm_gpuvm *vm;
++	struct dma_fence *fence;
++	u64 close_seq;
++};
++
++static void msm_gem_close_fence_cb(struct dma_fence *fence,
++				   struct dma_fence_cb *cb)
++{
++	struct msm_gem_close_work *close =
++		container_of(cb, struct msm_gem_close_work, cb);
++
++	queue_work(close->priv->close_wq, &close->work);
++}
++
++static void msm_gem_close_worker(struct work_struct *work)
++{
++	struct msm_gem_close_work *close =
++		container_of(work, struct msm_gem_close_work, work);
++	struct msm_drm_private *priv = close->priv;
++	struct drm_gem_object *obj = close->obj;
++	struct drm_gpuvm *vm = close->vm;
++	struct drm_gpuva *vma;
++	struct drm_exec exec;
++
++	msm_gem_lock_vm_and_obj(&exec, obj, vm);
++	vma = lookup_vma(obj, vm);
++	if (vma) {
++		struct msm_gem_vma *msm_vma = to_msm_vma(vma);
++
++		if (msm_vma->close_pending &&
++		    msm_vma->close_seq == close->close_seq) {
++			msm_vma->close_pending = false;
++			put_iova_spaces(obj, vm, true, "close");
++		}
++	}
++	drm_exec_fini(&exec);
++
++	dma_fence_put(close->fence);
++	drm_gpuvm_put(vm);
++	atomic_dec(&to_msm_bo(obj)->pending_closes);
++	drm_gem_object_put(obj);
++	kfree(close);
++
++	if (atomic_dec_and_test(&priv->pending_closes))
++		wake_up(&priv->close_wait);
++}
++
++static void msm_gem_close_sync(struct drm_gem_object *obj,
++			       struct drm_gpuvm *vm)
++{
++	struct drm_exec exec;
++
++	dma_resv_wait_timeout(obj->resv, DMA_RESV_USAGE_BOOKKEEP, false,
++			      MAX_SCHEDULE_TIMEOUT);
++
++	msm_gem_lock_vm_and_obj(&exec, obj, vm);
++	put_iova_spaces(obj, vm, true, "close");
++	drm_exec_fini(&exec);     /* drop locks */
++}
++
+ static int msm_gem_open(struct drm_gem_object *obj, struct drm_file *file)
+ {
++	struct msm_context *ctx = file->driver_priv;
++	struct drm_gpuvm *vm = READ_ONCE(ctx->vm);
++
+ 	msm_gem_vma_get(obj);
+ 	update_ctx_mem(file, obj->size);
++
++	/*
++	 * If a shared buffer is re-imported into the same legacy VM while
++	 * a deferred close from a prior handle is still in flight, cancel
++	 * the stale close so it cannot tear down the reactivated mapping.
++	 */
++	if (!IS_ERR_OR_NULL(vm) && !msm_context_is_vmbind(ctx) &&
++	    atomic_read(&to_msm_bo(obj)->pending_closes)) {
++		struct drm_gpuva *vma;
++		struct drm_exec exec;
++
++		msm_gem_lock_vm_and_obj(&exec, obj, vm);
++		vma = lookup_vma(obj, vm);
++		if (vma) {
++			struct msm_gem_vma *msm_vma = to_msm_vma(vma);
++
++			msm_vma->close_pending = false;
++			msm_vma->close_seq++;
++		}
++		drm_exec_fini(&exec);
++	}
++
+ 	return 0;
+ }
+ 
+-static void put_iova_spaces(struct drm_gem_object *obj, struct drm_gpuvm *vm,
+-			    bool close, const char *reason);
+-
+ static void msm_gem_close(struct drm_gem_object *obj, struct drm_file *file)
+ {
++	struct msm_drm_private *priv = obj->dev->dev_private;
+ 	struct msm_context *ctx = file->driver_priv;
++	struct drm_gpuvm *vm = READ_ONCE(ctx->vm);
++	struct msm_gem_close_work *close;
++	struct dma_fence *fence = NULL;
++	struct drm_gpuva *vma;
+ 	struct drm_exec exec;
++	int ret;
+ 
+ 	update_ctx_mem(file, -obj->size);
+ 	msm_gem_vma_put(obj);
+@@ -60,7 +158,7 @@ static void msm_gem_close(struct drm_gem_object *obj, struct drm_file *file)
+ 	 * put_iova_spaces() with vm=NULL would be bad, in that it will tear-
+ 	 * down the mappings of shared buffers in other contexts.
+ 	 */
+-	if (!ctx->vm)
++	if (IS_ERR_OR_NULL(vm))
+ 		return;
+ 
+ 	/*
+@@ -71,16 +169,70 @@ static void msm_gem_close(struct drm_gem_object *obj, struct drm_file *file)
+ 	if (msm_context_is_vmbind(ctx))
+ 		return;
+ 
++	msm_gem_lock_vm_and_obj(&exec, obj, vm);
++
++	vma = lookup_vma(obj, vm);
++	if (!vma) {
++		drm_exec_fini(&exec);
++		return;
++	}
++
++	/* Fast path: if all fences have already signaled, tear down inline. */
++	if (dma_resv_test_signaled(obj->resv, DMA_RESV_USAGE_BOOKKEEP)) {
++		put_iova_spaces(obj, vm, true, "close");
++		drm_exec_fini(&exec);
++		return;
++	}
++
++	if (!priv->close_wq) {
++		drm_exec_fini(&exec);
++		msm_gem_close_sync(obj, vm);
++		return;
++	}
++
+ 	/*
+-	 * TODO we might need to kick this to a queue to avoid blocking
+-	 * in CLOSE ioctl
++	 * Snapshot the active bookkeeping fences and defer VMA unmap/close
++	 * until they signal so DRM_IOCTL_GEM_CLOSE does not stall the
++	 * userspace render thread for an entire GPU frame.
+ 	 */
+-	dma_resv_wait_timeout(obj->resv, DMA_RESV_USAGE_BOOKKEEP, false,
+-			      MAX_SCHEDULE_TIMEOUT);
++	ret = dma_resv_get_singleton(obj->resv, DMA_RESV_USAGE_BOOKKEEP, &fence);
++	if (ret) {
++		drm_exec_fini(&exec);
++		msm_gem_close_sync(obj, vm);
++		return;
++	}
+ 
+-	msm_gem_lock_vm_and_obj(&exec, obj, ctx->vm);
+-	put_iova_spaces(obj, ctx->vm, true, "close");
+-	drm_exec_fini(&exec);     /* drop locks */
++	if (!fence) {
++		put_iova_spaces(obj, vm, true, "close");
++		drm_exec_fini(&exec);
++		return;
++	}
++
++	close = kzalloc(sizeof(*close), GFP_KERNEL);
++	if (!close) {
++		drm_exec_fini(&exec);
++		dma_fence_put(fence);
++		msm_gem_close_sync(obj, vm);
++		return;
++	}
++
++	to_msm_vma(vma)->close_pending = true;
++	close->close_seq = ++to_msm_vma(vma)->close_seq;
++	close->priv = priv;
++	close->obj = obj;
++	close->vm = vm;
++	close->fence = fence;
++	INIT_WORK(&close->work, msm_gem_close_worker);
++
++	drm_gem_object_get(obj);
++	drm_gpuvm_get(vm);
++	atomic_inc(&to_msm_bo(obj)->pending_closes);
++	atomic_inc(&priv->pending_closes);
++
++	drm_exec_fini(&exec);     /* drop locks before arming fence cb */
++
++	if (dma_fence_add_callback(fence, &close->cb, msm_gem_close_fence_cb))
++		queue_work(priv->close_wq, &close->work);
+ }
+ 
+ /*
+@@ -470,8 +622,14 @@ static struct drm_gpuva *get_vma_locked(struct drm_gem_object *obj,
+ 	if (!vma) {
+ 		vma = msm_gem_vma_new(vm, obj, 0, range_start, range_end);
+ 	} else {
++		struct msm_gem_vma *msm_vma = to_msm_vma(vma);
++
+ 		GEM_WARN_ON(vma->va.addr < range_start);
+ 		GEM_WARN_ON((vma->va.addr + obj->size) > range_end);
++		if (msm_vma->close_pending) {
++			msm_vma->close_pending = false;
++			msm_vma->close_seq++;
++		}
+ 	}
+ 
+ 	return vma;
+diff --git a/drivers/gpu/drm/msm/adreno/adreno_device.c b/drivers/gpu/drm/msm/adreno/adreno_device.c
+index 5d59881..581dd03 100644
+--- a/drivers/gpu/drm/msm/adreno/adreno_device.c
++++ b/drivers/gpu/drm/msm/adreno/adreno_device.c
+@@ -374,6 +374,13 @@ static int adreno_system_suspend(struct device *dev)
+ 		goto out;
+ 	}
+ 
++	if (gpu->dev) {
++		struct msm_drm_private *priv = gpu->dev->dev_private;
++
++		if (priv && priv->close_wq)
++			flush_workqueue(priv->close_wq);
++	}
++
+ 	ret = pm_runtime_force_suspend(dev);
+ out:
+ 	if (ret)

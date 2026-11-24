@@ -1,0 +1,63 @@
+From: Surface Pro X Android Maintainers
+Subject: [PATCH] arm64: dts: qcom: sc8180x: add opp-peak-kBps to gpu_opp_table
+
+gpu@2c00000 already binds the gfx-mem interconnect path (gem_noc
+MASTER_GRAPHICS_3D -> mc_virt SLAVE_EBI_CH0) and a6xx_gmu.c already
+invokes dev_pm_opp_set_opp() on GMU resume/DCVS transitions and clears
+the vote with dev_pm_opp_set_opp(dev, NULL) in a6xx_gmu_stop() on idle
+and s2idle suspend. Without opp-peak-kBps entries, drivers/opp/of.c
+never acquires the gfx-mem interconnect path and mas_qnm_gpu votes 0
+for DDR (MC0), LLCC (SH0), and ACV regardless of GPU load.
+
+Populate opp-peak-kBps using SC8180X's discrete LPDDR4X-4266 per-channel
+DDR tiers already defined in sc8180x.dtsi (cpu0/cpu4 OPP tables:
+1804000..8368000 kB/s, scaled 8x by bcm-voter across 8 channels).
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8180x.dtsi b/arch/arm64/boot/dts/qcom/sc8180x.dtsi
+index f88c5f4..0bfa35f 100644
+--- a/arch/arm64/boot/dts/qcom/sc8180x.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8180x.dtsi
+@@ -2282,36 +2282,43 @@
+ 				opp-514000000 {
+ 					opp-hz = /bits/ 64 <514000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_TURBO_L1>;
++					opp-peak-kBps = <8368000>;
+ 				};
+ 
+ 				opp-500000000 {
+ 					opp-hz = /bits/ 64 <500000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_TURBO>;
++					opp-peak-kBps = <7216000>;
+ 				};
+ 
+ 				opp-461000000 {
+ 					opp-hz = /bits/ 64 <461000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_NOM_L1>;
++					opp-peak-kBps = <6220000>;
+ 				};
+ 
+ 				opp-405000000 {
+ 					opp-hz = /bits/ 64 <405000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_NOM>;
++					opp-peak-kBps = <4068000>;
+ 				};
+ 
+ 				opp-315000000 {
+ 					opp-hz = /bits/ 64 <315000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
++					opp-peak-kBps = <3072000>;
+ 				};
+ 
+ 				opp-256000000 {
+ 					opp-hz = /bits/ 64 <256000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_SVS>;
++					opp-peak-kBps = <2188000>;
+ 				};
+ 
+ 				opp-177000000 {
+ 					opp-hz = /bits/ 64 <177000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
++					opp-peak-kBps = <1804000>;
+ 				};
+ 			};
+ 		};

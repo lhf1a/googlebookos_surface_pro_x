@@ -1,0 +1,93 @@
+diff --git a/src/egl/drivers/dri2/platform_android.c b/src/egl/drivers/dri2/platform_android.c
+index f80484f..683a581 100644
+--- a/src/egl/drivers/dri2/platform_android.c
++++ b/src/egl/drivers/dri2/platform_android.c
+@@ -227,6 +227,41 @@ droid_window_cancel_buffer(struct dri2_egl_surface *dri2_surf)
+    close_in_fence_fd(dri2_surf);
+ }
+ 
++#ifndef SQ2_GRALLOC_USAGE_PRIVATE_ALLOC_UBWC
++#define SQ2_GRALLOC_USAGE_PRIVATE_ALLOC_UBWC 0x10000000U
++#endif
++
++static bool
++droid_format_supports_qti_ubwc(int format)
++{
++   switch (format) {
++   case HAL_PIXEL_FORMAT_RGBA_8888:
++   case HAL_PIXEL_FORMAT_RGBX_8888:
++   case HAL_PIXEL_FORMAT_RGBA_FP16:
++   case HAL_PIXEL_FORMAT_RGBA_1010102:
++      return true;
++   default:
++      return false;
++   }
++}
++
++static bool
++droid_wants_qti_ubwc(const struct dri2_egl_display *dri2_dpy, int format)
++{
++   if (!dri2_dpy || !dri2_dpy->driver_name)
++      return false;
++   if (strcmp(dri2_dpy->driver_name, "msm") != 0 &&
++       strcmp(dri2_dpy->driver_name, "freedreno") != 0)
++      return false;
++   if (!droid_format_supports_qti_ubwc(format))
++      return false;
++   char val[PROP_VALUE_MAX] = "";
++   if (__system_property_get("vendor.gralloc.disable_ubwc", val) > 0 &&
++       strcmp(val, "1") == 0)
++      return false;
++   return true;
++}
++
+ static bool
+ droid_set_shared_buffer_mode(_EGLDisplay *disp, _EGLSurface *surf, bool mode)
+ {
+@@ -248,10 +283,14 @@ droid_set_shared_buffer_mode(_EGLDisplay *disp, _EGLSurface *surf, bool mode)
+       return false;
+    }
+ 
+-   if (mode)
++   if (mode) {
+       dri2_surf->gralloc_usage |= dri2_dpy->front_rendering_usage;
+-   else
++      dri2_surf->gralloc_usage &= ~SQ2_GRALLOC_USAGE_PRIVATE_ALLOC_UBWC;
++   } else {
+       dri2_surf->gralloc_usage &= ~dri2_dpy->front_rendering_usage;
++      if (droid_wants_qti_ubwc(dri2_dpy, ANativeWindow_getFormat(window)))
++         dri2_surf->gralloc_usage |= SQ2_GRALLOC_USAGE_PRIVATE_ALLOC_UBWC;
++   }
+ 
+    if (ANativeWindow_setUsage(window, dri2_surf->gralloc_usage)) {
+       _eglLog(_EGL_WARNING,
+@@ -338,8 +377,11 @@ droid_create_surface(_EGLDisplay *disp, EGLint type, _EGLConfig *conf,
+             ? GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN
+             : GRALLOC_USAGE_HW_RENDER;
+ 
+-      if (dri2_surf->base.ActiveRenderBuffer == EGL_SINGLE_BUFFER)
++      if (dri2_surf->base.ActiveRenderBuffer == EGL_SINGLE_BUFFER) {
+          dri2_surf->gralloc_usage |= dri2_dpy->front_rendering_usage;
++      } else if (droid_wants_qti_ubwc(dri2_dpy, format)) {
++         dri2_surf->gralloc_usage |= SQ2_GRALLOC_USAGE_PRIVATE_ALLOC_UBWC;
++      }
+ 
+       if (ANativeWindow_setUsage(window, dri2_surf->gralloc_usage)) {
+          _eglError(EGL_BAD_NATIVE_WINDOW, "droid_create_surface");
+diff --git a/src/gallium/drivers/freedreno/a6xx/fd6_resource.cc b/src/gallium/drivers/freedreno/a6xx/fd6_resource.cc
+index 8f9c8c4..ea87162 100644
+--- a/src/gallium/drivers/freedreno/a6xx/fd6_resource.cc
++++ b/src/gallium/drivers/freedreno/a6xx/fd6_resource.cc
+@@ -291,6 +291,12 @@ layout_resource_for_handle(struct fd_resource *rsc, struct winsys_handle *handle
+ 
+    struct fdl_image_params params = fd_image_params(prsc, ubwc,
+ 					tile_mode, handle->plane);
++   /* Match Turnip (tu_image.cc): an explicit DRM_FORMAT_MOD_QCOM_COMPRESSED
++    * import must not silently fall back to linear when width0 is below
++    * linear_fallback_threshold_texels.
++    */
++   if (ubwc)
++      params.force_ubwc = true;
+ 
+    if (!fdl6_layout_image(&rsc->layout, screen->info, &params, &l)) {
+       if (FD_DBG(LAYOUT))

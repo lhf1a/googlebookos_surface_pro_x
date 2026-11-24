@@ -25,6 +25,7 @@ DEFAULT_KERNEL_CONFIG = ROOT / 'configs/kernel-6.18-hybrid.config'
 DEFAULT_A6XX_PATCHES = ROOT / 'patches/drm-618-a6xx-upstream'
 DEFAULT_A6XX_MMIO_FIX_PATCHES = ROOT / 'patches/drm-618-a6xx-mmio-fix'
 DEFAULT_DPU_CRTC_KICKOFF_PATCHES = ROOT / 'patches/drm-618-dpu-crtc-kickoff'
+DEFAULT_MSM_ASYNC_CLOSE_PATCHES = ROOT / 'patches/drm-618-msm-async-close'
 # In-tree kernel/edp-618 s2idle patches applied unconditionally in source mode.
 # Out-of-tree Type-C module patches (spx-qmp-lifecycle.patch and
 # spx-dwc3-ffs-ep0-dequeue.patch) are applied by scripts/build-spx-typec.py onto
@@ -86,10 +87,15 @@ LEGACY_TURNIP_SYSMEM_MARKERS = (
 )
 DEFAULT_CLEAN_TURNIP_PATH = ROOT / 'out/sq2-turnip/runtime/vulkan.freedreno.so'
 DEFAULT_CLEAN_TURNIP_LIBDRM_PATH = ROOT / 'out/sq2-turnip/runtime/libdrm.so'
+DEFAULT_MESA_PERF_DIR = ROOT / 'out/sq2-mesa-perf/runtime'
+DEFAULT_SDM_PERF_PATH = ROOT / 'out/sq2-sdm-perf/libsdmcore.so'
 DEFAULT_VULKAN_POLICY_PATH = ROOT / 'configs/sq2-vulkan-policy.conf'
 HYBRID_REQUIRED_PROPS = ('ro.hardware.egl=freedreno', 'ro.hardware.vulkan=freedreno',
                          'vendor.gralloc.disable_ubwc=0', 'ro.surface_flinger.force_hole_punch=true')
 HYBRID_REMOVE_PROPS = {'ro.vendor.hwcomposer.mode=client', 'vendor.minigbm.debug=nocompression'}
+HYBRID_REPLACE_PROPS = {
+    'debug.sf.disable_client_composition_cache=1': 'debug.sf.disable_client_composition_cache=0',
+}
 MESA_REQUIRED_PROPS = ('ro.hardware.egl=freedreno', 'ro.hardware.vulkan=freedreno',
                        'ro.vendor.hwcomposer.mode=client')
 MESA_STAGE_LINES = (
@@ -149,6 +155,8 @@ def hybrid_runtime(
     turnip_bytes=None,
     vulkan_policy_bytes=None,
     qti_submit_payload=None,
+    mesa_runtime_dir=None,
+    sdmcore_bytes=None,
 ):
     """Combine Mesa Freedreno/Dual-Vulkan (Turnip + QTI) with QTI gralloc/mapper5/HWC/SDM + OMX.
 
@@ -214,6 +222,29 @@ def hybrid_runtime(
         from build_mesa_qti_gralloc import build_bytes
         gralloc_adapter_bytes = build_bytes()
 
+    mesa_perf_map = (
+        ('libEGL_freedreno.so', 'etc/googlebook-security/lib64/egl/libEGL_freedreno.so'),
+        ('libGLESv1_CM_freedreno.so', 'etc/googlebook-security/lib64/egl/libGLESv1_CM_freedreno.so'),
+        ('libGLESv2_freedreno.so', 'etc/googlebook-security/lib64/egl/libGLESv2_freedreno.so'),
+        ('libgallium_dri.so', 'etc/googlebook-security/lib64/libgallium_dri.so'),
+        ('libdrm.so', 'etc/googlebook-security/lib64/libdrm.so'),
+    )
+    mesa_dir = Path(mesa_runtime_dir) if mesa_runtime_dir is not None else DEFAULT_MESA_PERF_DIR
+    use_mesa_perf = mesa_runtime_dir is not None or (
+        bodies['etc/googlebook-security/lib64/libgallium_dri.so'].startswith(b'\x7fELF')
+        and all((mesa_dir / src_name).is_file() for src_name, _ in mesa_perf_map)
+        and (mesa_dir / 'vulkan.turnip.so').is_file()
+    )
+    if use_mesa_perf:
+        for src_name, dst_key in mesa_perf_map:
+            src_path = mesa_dir / src_name
+            require(src_path.is_file(), f'Mesa perf runtime missing: {src_path}')
+            bodies[dst_key] = src_path.read_bytes()
+        if turnip_bytes is None:
+            turnip_path = mesa_dir / 'vulkan.turnip.so'
+            require(turnip_path.is_file(), f'Mesa perf Turnip missing: {turnip_path}')
+            turnip_bytes = turnip_path.read_bytes()
+
     clean_turnip = resolve_clean_turnip_bytes(bodies, turnip_bytes=turnip_bytes)
     if vulkan_router_bytes is None:
         from build_hybrid_vulkan_router import build_bytes as build_router_bytes
@@ -274,11 +305,21 @@ def hybrid_runtime(
     if layout_payload is None:
         from build_mesa_qti_layout import build_payload
         layout_payload = build_payload(bodies[qti_prefix + '/root/lib64/libgrallocutils.so'])
+    sdmcore_key = qti_prefix + '/root/lib64/sq2-qti-display/libsdmcore.so'
+    use_sdm_perf = False
+    if sdmcore_bytes is not None:
+        bodies[sdmcore_key] = sdmcore_bytes
+        use_sdm_perf = True
+    elif (
+        backlight_payload is None
+        and bodies[sdmcore_key].startswith(b'\x7fELF')
+        and DEFAULT_SDM_PERF_PATH.is_file()
+    ):
+        bodies[sdmcore_key] = DEFAULT_SDM_PERF_PATH.read_bytes()
+        use_sdm_perf = True
     if backlight_payload is None:
         from build_sdm_backlight_shim import build_payload as build_backlight_payload
-        backlight_payload = build_backlight_payload(
-            bodies[qti_prefix + '/root/lib64/sq2-qti-display/libsdmcore.so']
-        )
+        backlight_payload = build_backlight_payload(bodies[sdmcore_key])
 
     overlay_specs = (
         (
@@ -364,11 +405,17 @@ def hybrid_runtime(
     all_sums = [f'{_sha256(bodies[root_prefix + rel])}  root/{rel}' for rel in install_rel_paths] + sorted(non_root_sums)
     bodies[qti_prefix + '/SHA256SUMS'] = ('\n'.join(all_sums) + '\n').encode()
 
-    # Remove minigbm/client-only overrides while retaining freedreno EGL/Vulkan and hole punch.
-    filtered_props = [
-        line for line in props_text.splitlines(keepends=True)
-        if line.strip() not in HYBRID_REMOVE_PROPS
-    ]
+    # Remove minigbm/client-only overrides and enable SF client composition caching.
+    filtered_props = []
+    for line in props_text.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped in HYBRID_REMOVE_PROPS:
+            continue
+        if stripped in HYBRID_REPLACE_PROPS:
+            eol = '\n' if line.endswith('\n') else ''
+            filtered_props.append(HYBRID_REPLACE_PROPS[stripped] + eol)
+            continue
+        filtered_props.append(line)
     bodies[prop_name] = ''.join(filtered_props).encode()
 
     init = init.replace(HYBRID_STAGE_LINE, b'')
@@ -391,6 +438,8 @@ def hybrid_runtime(
             'gralloc_adapter_sha256': _sha256(gralloc_adapter_bytes),
             'vulkan_router_sha256': _sha256(vulkan_router_bytes),
             'turnip_sha256': _sha256(clean_turnip),
+            'mesa_perf_applied': use_mesa_perf,
+            'sdm_perf_applied': use_sdm_perf,
             'marker': 'etc/sq2-graphics-mode',
             'video': omx_report,
             'hardware_validated': False}
@@ -1251,7 +1300,8 @@ def build(args, compile_kernel):
                 extra_patches = (DEFAULT_A6XX_MMIO_FIX_PATCHES,
                                  DEFAULT_DPU_CRTC_KICKOFF_PATCHES,
                                  ROOT / "patches/drm-618-msm-submit",
-                                 ROOT / "patches/drm-618-msm-vmbind-resv")
+                                 ROOT / "patches/drm-618-msm-vmbind-resv",
+                                 DEFAULT_MSM_ASYNC_CLOSE_PATCHES)
             patch_report = apply_kernel_patches(kernel_patches, extracted/'kernel', args.output, run,
                                                 external_source=extracted/'external',
                                                 extra_patch_dirs=extra_patches)
@@ -1329,6 +1379,7 @@ def build(args, compile_kernel):
     dt.write_bytes(module('spx_backlight_dt', 'prepare-spx-backlight-dtb.py').prepare(dt.read_bytes()))
     dt.write_bytes(module('spx_spmi_pdc_dt', 'prepare-spx-spmi-pdc-dtb.py').prepare(dt.read_bytes()))
     dt.write_bytes(module('spx_cpu_eas_dt', 'prepare-spx-cpu-eas-dtb.py').prepare(dt.read_bytes()))
+    dt.write_bytes(module('spx_gpu_bw_dt', 'prepare-spx-gpu-bw-dtb.py').prepare(dt.read_bytes()))
     lid_dt = module('spx_lid_dt', 'prepare-spx-lid-dtb.py')
     hall_lid_enabled = bool(
         (args.kernel_mode == 'source' or getattr(args, 'enable_hall_lid', False))

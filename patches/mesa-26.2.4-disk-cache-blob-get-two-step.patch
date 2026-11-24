@@ -1,0 +1,75 @@
+From: Surface Pro X SQ2 Perf <noreply@local>
+Subject: [PATCH] util/disk_cache: query exact EGL blob size before fetching compressed shader
+
+Android 15 libEGL MultifileBlobCache::get() compares header->valueSize
+for exact equality against the caller-supplied valueSize. Mesa's
+blob_get_compressed() previously passed a hardcoded 64 KiB buffer in a
+single call, causing every shader lookup on ro.egl.blobcache.multifile=true
+to fail with 'Mismatch on keySize/valueSize', evict the valid cached
+shader, and return 0 (100% disk shader cache miss).
+
+Perform the standard two-step EGL_ANDROID_blob_cache lookup instead:
+query the exact cached size with (NULL, 0), validate it against
+sizeof(struct blob_cache_entry) and a 64 MiB cap, allocate the exact
+size, and fetch with valueSize == entry_size. This eliminates all
+mismatch warnings/evictions, restores MultifileBlobCache hits, avoids
+wasted 64 KiB allocations on misses, and allows blobs > 64 KiB.
+---
+diff --git a/src/util/disk_cache.c b/src/util/disk_cache.c
+index 1f43388..2597230 100644
+--- a/src/util/disk_cache.c
++++ b/src/util/disk_cache.c
+@@ -517,22 +517,37 @@ blob_get_compressed(struct disk_cache *cache, const cache_key key,
+ {
+    MESA_TRACE_FUNC();
+ 
+-   /* This is what Android EGL defines as the maxValueSize in egl_cache_t
+-    * class implementation.
++   /* Query the exact cached blob size first per EGL_ANDROID_blob_cache:
++    * Android 15 MultifileBlobCache::get() validates header->valueSize ==
++    * caller valueSize, logging a mismatch warning, evicting the entry, and
++    * returning 0 when callers pass an oversized fixed buffer like 64 KiB.
++    * Passing (NULL, 0) queries the exact size in RAM without disk I/O and
++    * also supports compressed blobs larger than 64 KiB.
+     */
+-   const signed long max_blob_size = 64 * 1024;
+-   struct blob_cache_entry *entry = malloc(max_blob_size);
++   signed long entry_size;
++   // The curly brackets are here to only trace the blob_get_cb call
++   {
++      MESA_TRACE_SCOPE("blob_get_size");
++      entry_size = cache->blob_get_cb(key, CACHE_KEY_SIZE, NULL, 0);
++   }
++
++   const signed long max_blob_size = 64 * 1024 * 1024;
++   if (entry_size <= (signed long)sizeof(struct blob_cache_entry) ||
++       entry_size > max_blob_size)
++      return NULL;
++
++   struct blob_cache_entry *entry = malloc((size_t)entry_size);
+    if (!entry)
+       return NULL;
+ 
+-   signed long entry_size;
++   signed long read_size;
+    // The curly brackets are here to only trace the blob_get_cb call
+    {
+       MESA_TRACE_SCOPE("blob_get");
+-      entry_size = cache->blob_get_cb(key, CACHE_KEY_SIZE, entry, max_blob_size);
++      read_size = cache->blob_get_cb(key, CACHE_KEY_SIZE, entry, entry_size);
+    }
+ 
+-   if (!entry_size) {
++   if (read_size != entry_size || entry->uncompressed_size == 0) {
+       free(entry);
+       return NULL;
+    }
+@@ -543,7 +558,7 @@ blob_get_compressed(struct disk_cache *cache, const cache_key key,
+       return NULL;
+    }
+ 
+-   unsigned compressed_size = entry_size - sizeof(*entry);
++   size_t compressed_size = (size_t)read_size - sizeof(*entry);
+    bool ret = util_compress_inflate(entry->compressed_data, compressed_size,
+                                     data, entry->uncompressed_size);
+    if (!ret) {
