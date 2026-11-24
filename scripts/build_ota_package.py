@@ -366,6 +366,19 @@ def build_ota_package(
     super_delta_tmpdir = None
     super_mode = 'none'
 
+    embedded_super_sha = ''
+    if build_output is not None:
+        bo = Path(build_output).resolve()
+        for mf in (bo / 'FULL-IMAGE.json', bo / 'disk/IMAGE-MANIFEST.json'):
+            if mf.is_file():
+                try:
+                    raw_sha = str(json.loads(mf.read_text(encoding='utf-8')).get('super_sha256') or '').strip().lower()
+                    if len(raw_sha) == 64:
+                        embedded_super_sha = raw_sha
+                        break
+                except Exception:
+                    pass
+
     if mode == 'super-delta':
         import tempfile
         from disk_image import compact_super_slices_from_dir, compute_super_sha256_from_files
@@ -414,24 +427,35 @@ def build_ota_package(
         super_included = True
         super_mode = 'delta'
     else:
-        if image_path is not None and super_info is not None:
-            super_bytes = int(super_info['bytes'])
-            super_sha256 = sha256_region(image_path, int(super_info['offset']), super_bytes)
-
-        if mode == 'full':
-            super_included = True
-        elif mode in ('delta', 'esp'):
+        if mode in ('delta', 'esp'):
             super_included = False
+            if embedded_super_sha:
+                super_sha256 = embedded_super_sha
+            elif image_path is not None and super_info is not None:
+                super_bytes = int(super_info['bytes'])
+                super_sha256 = sha256_region(image_path, int(super_info['offset']), super_bytes)
         else:
-            # auto mode
-            if prev_super and super_sha256:
-                super_included = (super_sha256 != prev_super)
-            elif super_unchanged_hint is not None:
-                super_included = not bool(super_unchanged_hint)
-            elif image_path is None or super_info is None:
-                super_included = False
-            else:
+            if image_path is not None and super_info is not None:
+                super_bytes = int(super_info['bytes'])
+                super_sha256 = sha256_region(image_path, int(super_info['offset']), super_bytes)
+
+            if mode == 'full':
                 super_included = True
+            else:
+                # auto mode: compare against either embedded compacted super hash or full GPT hash
+                compare_sha = embedded_super_sha or super_sha256
+                if prev_super and compare_sha:
+                    super_included = (compare_sha != prev_super)
+                elif super_unchanged_hint is not None:
+                    super_included = not bool(super_unchanged_hint)
+                elif image_path is None or super_info is None:
+                    super_included = False
+                else:
+                    super_included = True
+
+            if not super_included and embedded_super_sha:
+                super_sha256 = embedded_super_sha
+                super_bytes = 0
 
         if super_included and (image_path is None or super_info is None):
             raise ValueError('Full OTA mode requires a raw disk image containing a super partition')
