@@ -8,7 +8,8 @@ cache=/run/sq2-cover-input
 mkdir -p "$cache"
 stage=$(mktemp -d /dev/sq2-cover-refresh.XXXXXX) || exit 1
 trap 'rmdir "$stage" 2>/dev/null || true' EXIT
-while true; do
+
+scan_once() {
     for d in /sys/class/input/event*; do
         name=$(cat "$d/device/name" 2>/dev/null) || continue
         case "$name" in 'Microsoft Surface 045E:09AE'*|'Microsoft Surface 045E:09AF'*|'Microsoft Surface 045E:09B0'*) ;; *) continue;; esac
@@ -38,6 +39,21 @@ while true; do
             echo "COVER_INPUT_RESTORE_FALLBACK=$event"
         fi
     done
-    [ "${1:-}" = --once ] && exit 0
+}
+
+if [ "${1:-}" = --once ]; then
+    scan_once
+    exit 0
+fi
+
+if command -v spx-event-wait >/dev/null 2>&1; then
+    spx-event-wait --stream --uevent input --debounce-ms 100 | while IFS= read -r _ev; do
+        scan_once
+    done
+    exit 0
+fi
+
+while true; do
+    scan_once
     sleep 1
 done

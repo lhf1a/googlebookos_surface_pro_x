@@ -775,6 +775,73 @@ def install_irq_balance(records, bodies):
     records['bin/spx-irq-balance-boot'] = new_record(0o100755)
 
 
+_EVENT_WAIT_CACHE = {}
+EVENT_WATCHER_HELPERS = (
+    'cover-input-watch',
+    'bluetooth-input-watch',
+    'usb-input-watch',
+    'usb-network-watch',
+    'lab-input-posture',
+    'touch-resume-watch',
+)
+
+
+def build_event_wait(output=None):
+    """Cross-compile static AArch64 probe/test2/spx-event-wait.c deterministically."""
+    src = ROOT / 'probe/test2/spx-event-wait.c'
+    cc = os.environ.get('SPX_EVENT_WAIT_CROSS_CC', os.environ.get('SPX_TYPEC_CROSS_CC', 'aarch64-linux-gnu-gcc'))
+    src_hash = hashlib.sha256(src.read_bytes()).hexdigest()
+    cache_key = (cc, src_hash)
+    if output is None and cache_key in _EVENT_WAIT_CACHE:
+        return _EVENT_WAIT_CACHE[cache_key]
+
+    def _compile(out_path):
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        env = dict(os.environ, SOURCE_DATE_EPOCH='0')
+        subprocess.run([
+            cc, '-std=c11', '-static', '-Os', '-Wall', '-Wextra', '-Werror',
+            '-Wl,--build-id=none', '-frandom-seed=spx-event-wait',
+            f'-ffile-prefix-map={ROOT}=/src',
+            str(src), '-o', str(out_path),
+        ], env=env, check=True)
+        return out_path.read_bytes()
+
+    if output is not None:
+        return _compile(output)
+    with tempfile.TemporaryDirectory(prefix='spx-event-wait-') as td:
+        built = _compile(Path(td) / 'spx-event-wait')
+    _EVENT_WAIT_CACHE[cache_key] = built
+    return built
+
+
+def install_powerhint(records, bodies):
+    """Install configs/powerhint.sq2.json into the vendor overlay powerhint path."""
+    raw = (ROOT / 'configs/powerhint.sq2.json').read_bytes().replace(b'\r\n', b'\n')
+    parsed = json.loads(raw.decode('utf-8'))
+    require(isinstance(parsed.get('Nodes'), list) and parsed['Nodes'], 'powerhint.sq2.json missing Nodes')
+    require(isinstance(parsed.get('Actions'), list) and parsed['Actions'], 'powerhint.sq2.json missing Actions')
+    records.setdefault('etc/googlebook-security', new_record(0o040755))
+    bodies.setdefault('etc/googlebook-security', b'')
+    records.setdefault('etc/googlebook-security/etc', new_record(0o040755))
+    bodies.setdefault('etc/googlebook-security/etc', b'')
+    bodies['etc/googlebook-security/etc/powerhint.json'] = raw
+    records['etc/googlebook-security/etc/powerhint.json'] = new_record(0o100644)
+
+
+def install_event_watchers(records, bodies, event_wait_bytes=None):
+    """Install event-driven spx-event-wait binary and updated watcher scripts."""
+    binary = event_wait_bytes if event_wait_bytes is not None else build_event_wait()
+    require(binary[:4] == b'\x7fELF', 'spx-event-wait must be an ELF binary')
+    bodies['bin/spx-event-wait'] = binary
+    records['bin/spx-event-wait'] = new_record(0o100755)
+    for name in EVENT_WATCHER_HELPERS:
+        helper = (ROOT / 'probe/test2' / name).read_bytes().replace(b'\r\n', b'\n')
+        subprocess.run(['sh', '-n'], input=helper, check=True, capture_output=True)
+        bodies['bin/' + name] = helper
+        records['bin/' + name] = new_record(0o100755)
+
+
 def install_ksu_userspace(records, bodies, ksu_userspace):
     """Replace bundled etc/sq2-ksu/{ksud,manager-verified.apk} and ksu-framework-boot for upgraded KSU kernels."""
     if not ksu_userspace:
@@ -893,6 +960,8 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
     bodies['bin/apply-device-info'] = (ROOT/'probe/test2/apply-device-info').read_bytes().replace(b'\r\n', b'\n')
     records['bin/apply-device-info'] = new_record(0o100755)
     install_irq_balance(records, bodies)
+    install_powerhint(records, bodies)
+    install_event_watchers(records, bodies, (compiled_helpers or {}).get('bin/spx-event-wait'))
     # Take the current committed helper, while the accepted cumulative IPTSd
     # binary remains the fixed private runtime input (not the old touch cache).
     bodies['bin/touch-calibration-boot'] = (ROOT/'probe/test2/touch-calibration-boot').read_bytes().replace(b'\r\n',b'\n')
@@ -1259,6 +1328,7 @@ def build(args, compile_kernel):
     dt.write_bytes(typec_dtb(dt.read_bytes()))
     dt.write_bytes(module('spx_backlight_dt', 'prepare-spx-backlight-dtb.py').prepare(dt.read_bytes()))
     dt.write_bytes(module('spx_spmi_pdc_dt', 'prepare-spx-spmi-pdc-dtb.py').prepare(dt.read_bytes()))
+    dt.write_bytes(module('spx_cpu_eas_dt', 'prepare-spx-cpu-eas-dtb.py').prepare(dt.read_bytes()))
     lid_dt = module('spx_lid_dt', 'prepare-spx-lid-dtb.py')
     hall_lid_enabled = bool(
         (args.kernel_mode == 'source' or getattr(args, 'enable_hall_lid', False))

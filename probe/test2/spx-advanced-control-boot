@@ -2763,11 +2763,21 @@ while true; do
         exit 0
     fi
 
-    user_check_ticks=$((user_check_ticks + 1))
-    if [ "$fast_ticks" -gt 0 ]; then
-        fast_ticks=$((fast_ticks - 1))
-        sleep 0.3
+    if [ -n "$active_user" ] && [ -d "$files" ] && [ ! -L "$files" ] &&
+       command -v spx-event-wait >/dev/null 2>&1; then
+        _ac_ev=$(spx-event-wait --oneshot --inotify "$files" --match request --check-exists "$files/request" --timeout-ms 15000 2>/dev/null || true)
+        if [ "$_ac_ev" = timeout ]; then
+            user_check_ticks=15
+        elif [ -z "$_ac_ev" ]; then
+            sleep 1
+        fi
     else
-        sleep 1
+        user_check_ticks=$((user_check_ticks + 1))
+        if [ "$fast_ticks" -gt 0 ]; then
+            fast_ticks=$((fast_ticks - 1))
+            sleep 0.3
+        else
+            sleep 1
+        fi
     fi
 done

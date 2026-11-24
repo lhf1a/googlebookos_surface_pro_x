@@ -235,6 +235,20 @@ int main(int argc, char **argv) {
     sq2_apply_egl_swap_interval(fake_eglSwapInterval, 0, NULL, 2);
     assert(g_last_egl_interval == 2);
 
+    /* Adaptive idle/screen-off sleep interval */
+    assert(sq2_compute_sleep_ms(&cfg, 1, 1) == 100);
+    assert(sq2_compute_sleep_ms(&cfg, 1, 0) == 1500);
+    assert(sq2_compute_sleep_ms(&cfg, 0, 0) == 5000);
+    assert(sq2_compute_sleep_ms(&cfg, 0, 1) == 5000);
+    struct sq2_opt_config cfg_def;
+    sq2_opt_config_init_default(&cfg_def);
+    assert(sq2_compute_sleep_ms(&cfg_def, 1, 1) == 250);
+    assert(sq2_compute_sleep_ms(&cfg_def, 1, 0) == 1500);
+    cfg_def.poll_interval_ms = 300;
+    assert(sq2_compute_sleep_ms(&cfg_def, 1, 0) == 1800);
+    cfg_def.enabled = 0;
+    assert(sq2_compute_sleep_ms(&cfg_def, 1, 1) == 5000);
+
     printf("ALL_HOST_TESTS_OK\n");
     return 0;
 }

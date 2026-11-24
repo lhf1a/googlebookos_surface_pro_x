@@ -98,6 +98,16 @@ for zip in "$mod_dir"/*.zip; do
                 break
             fi
         done
+        if [ "$need_install" = 0 ] && command -v cmp >/dev/null 2>&1; then
+            for bin_rel in $(unzip -l "$zip" 2>/dev/null | sed -n 's|.*[[:space:]]\(bin/[^[:space:]/]*\)$|\1|p'); do
+                [ -f "$target_dir/$bin_rel" ] || continue
+                if ! unzip -p "$zip" "$bin_rel" 2>/dev/null | cmp -s - "$target_dir/$bin_rel"; then
+                    need_install=1
+                    action=REINSTALLED_BIN
+                    break
+                fi
+            done
+        fi
     fi
     if [ "$need_install" = 0 ]; then
         rm -f "$data/adb/modules/$mod_id/disable" "$data/adb/modules_update/$mod_id/disable" 2>/dev/null || true

@@ -772,6 +772,23 @@ static int engage_gpu_boost(struct sq2_gpu_saved_state *gpu, const char *sysfs_r
     return 0;
 }
 
+
+int sq2_compute_sleep_ms(const struct sq2_opt_config *cfg, int screen_on, int game_active) {
+    int base = (cfg && cfg->poll_interval_ms > 0) ? cfg->poll_interval_ms : 250;
+    if (base < 100) base = 100;
+    if (base > 2000) base = 2000;
+    if (!cfg || !cfg->enabled || !screen_on) {
+        return 5000;
+    }
+    if (game_active) {
+        return base;
+    }
+    int idle_ms = base * 6;
+    if (idle_ms < 1500) idle_ms = 1500;
+    if (idle_ms > 5000) idle_ms = 5000;
+    return idle_ms;
+}
+
 int sq2_dvfs_boost_engage(
     struct sq2_dvfs_state *state,
     const char *sysfs_root,

@@ -6,10 +6,78 @@
       "Values": ["2048", "1024"],
       "DefaultIndex": 1,
       "ResetOnInit": true
+    },
+    {
+      "Name": "TopAppUclampMin",
+      "Path": "/dev/cpuctl/top-app/cpu.uclamp.min",
+      "Values": ["50", "30", "15", "0"],
+      "DefaultIndex": 3,
+      "ResetOnInit": true
+    },
+    {
+      "Name": "TopAppUclampMax",
+      "Path": "/dev/cpuctl/top-app/cpu.uclamp.max",
+      "Values": ["40", "50", "70", "max"],
+      "DefaultIndex": 3,
+      "ResetOnInit": true
+    },
+    {
+      "Name": "ForegroundUclampMax",
+      "Path": "/dev/cpuctl/foreground/cpu.uclamp.max",
+      "Values": ["40", "65", "max"],
+      "DefaultIndex": 2,
+      "ResetOnInit": true
+    },
+    {
+      "Name": "BackgroundUclampMax",
+      "Path": "/dev/cpuctl/background/cpu.uclamp.max",
+      "Values": ["20", "50", "35"],
+      "DefaultIndex": 2,
+      "ResetOnInit": true
+    },
+    {
+      "Name": "SystemBackgroundUclampMax",
+      "Path": "/dev/cpuctl/system-background/cpu.uclamp.max",
+      "Values": ["30", "60", "45"],
+      "DefaultIndex": 2,
+      "ResetOnInit": true
+    },
+    {
+      "Name": "Dex2oatUclampMax",
+      "Path": "/dev/cpuctl/dex2oat/cpu.uclamp.max",
+      "Values": ["30", "80", "50"],
+      "DefaultIndex": 2,
+      "ResetOnInit": true
     }
   ],
   "Actions": [
     {"PowerHint": "INTERACTION", "Node": "TopAppSchedulerWeight", "Duration": 150, "Value": "2048"},
-    {"PowerHint": "LAUNCH", "Node": "TopAppSchedulerWeight", "Duration": 3000, "Value": "2048"}
+    {"PowerHint": "INTERACTION", "Node": "TopAppUclampMin", "Duration": 150, "Value": "15"},
+    {"PowerHint": "LAUNCH", "Node": "TopAppSchedulerWeight", "Duration": 2000, "Value": "2048"},
+    {"PowerHint": "LAUNCH", "Node": "TopAppUclampMin", "Duration": 2000, "Value": "50"},
+    {"PowerHint": "CAMERA_LAUNCH", "Node": "TopAppUclampMin", "Duration": 1500, "Value": "50"},
+    {"PowerHint": "AUDIO_STREAMING_LOW_LATENCY", "Node": "TopAppUclampMin", "Duration": 0, "Value": "15"},
+    {"PowerHint": "EXPENSIVE_RENDERING", "Node": "TopAppUclampMin", "Duration": 0, "Value": "30"},
+    {"PowerHint": "GAME", "Node": "TopAppUclampMin", "Duration": 0, "Value": "30"},
+    {"PowerHint": "FIXED_PERFORMANCE", "Node": "TopAppUclampMin", "Duration": 0, "Value": "50"},
+    {"PowerHint": "LOW_POWER", "Node": "TopAppUclampMax", "Duration": 0, "Value": "70"},
+    {"PowerHint": "LOW_POWER", "Node": "ForegroundUclampMax", "Duration": 0, "Value": "65"},
+    {"PowerHint": "LOW_POWER", "Node": "BackgroundUclampMax", "Duration": 0, "Value": "20"},
+    {"PowerHint": "LOW_POWER", "Node": "SystemBackgroundUclampMax", "Duration": 0, "Value": "30"},
+    {"PowerHint": "LOW_POWER", "Node": "Dex2oatUclampMax", "Duration": 0, "Value": "30"},
+    {"PowerHint": "PROFILE_VIDEO_PLAYBACK", "Node": "TopAppUclampMax", "Duration": 0, "Value": "50"},
+    {"PowerHint": "PROFILE_VIDEO_PLAYBACK", "Node": "ForegroundUclampMax", "Duration": 0, "Value": "40"},
+    {"PowerHint": "PROFILE_VIDEO_PLAYBACK", "Node": "BackgroundUclampMax", "Duration": 0, "Value": "20"},
+    {"PowerHint": "DISPLAY_INACTIVE", "Node": "TopAppUclampMax", "Duration": 0, "Value": "50"},
+    {"PowerHint": "DISPLAY_INACTIVE", "Node": "ForegroundUclampMax", "Duration": 0, "Value": "40"},
+    {"PowerHint": "DISPLAY_INACTIVE", "Node": "BackgroundUclampMax", "Duration": 0, "Value": "20"},
+    {"PowerHint": "DISPLAY_INACTIVE", "Node": "SystemBackgroundUclampMax", "Duration": 0, "Value": "30"},
+    {"PowerHint": "DEVICE_IDLE", "Node": "TopAppUclampMax", "Duration": 0, "Value": "40"},
+    {"PowerHint": "DEVICE_IDLE", "Node": "ForegroundUclampMax", "Duration": 0, "Value": "40"},
+    {"PowerHint": "DEVICE_IDLE", "Node": "BackgroundUclampMax", "Duration": 0, "Value": "20"},
+    {"PowerHint": "DEVICE_IDLE", "Node": "SystemBackgroundUclampMax", "Duration": 0, "Value": "30"},
+    {"PowerHint": "PROFILE_AC_POLICY", "Node": "BackgroundUclampMax", "Duration": 0, "Value": "50"},
+    {"PowerHint": "PROFILE_AC_POLICY", "Node": "SystemBackgroundUclampMax", "Duration": 0, "Value": "60"},
+    {"PowerHint": "PROFILE_AC_POLICY", "Node": "Dex2oatUclampMax", "Duration": 0, "Value": "80"}
   ]
 }

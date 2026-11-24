@@ -174,5 +174,14 @@ while true; do
     if [ "$max_loops" -gt 0 ] && [ "$loops" -ge "$max_loops" ]; then
         exit 0
     fi
-    sleep "$poll_sleep"
+    if [ -n "$configured" ] && [ "$max_loops" = 0 ] && [ -z "${SPX_POSTURE_POLL_SLEEP:-}" ] && command -v spx-event-wait >/dev/null 2>&1; then
+        _ev=$(spx-event-wait --oneshot --evdev-watch "Microsoft Surface KIP Tablet Mode Switch,Lid Switch" --check-file-diff "$cover:$physical" --debounce-ms 100 --timeout-ms 30000 2>/dev/null || true)
+        if [ "$_ev" = timeout ]; then
+            prop_ticks=$prop_check_ticks
+        elif [ -z "$_ev" ]; then
+            sleep "$poll_sleep"
+        fi
+    else
+        sleep "$poll_sleep"
+    fi
 done

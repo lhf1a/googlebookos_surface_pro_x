@@ -500,5 +500,15 @@ while true; do
             cleanup;trap - EXIT TERM INT;exec /bin/touch-calibration-boot
         fi
     fi
-    sleep 2
+    if [ "$preview" = 0 ] && [ "$noise_preview" = 0 ] && [ "$tap_preview" = 0 ] &&
+       [ -d "$files" ] && [ ! -L "$files" ] && command -v spx-event-wait >/dev/null 2>&1; then
+        _tc_ev=$(spx-event-wait --oneshot --inotify "$files" --match request --check-exists "$files/request" --timeout-ms 20000 2>/dev/null || true)
+        if [ "$_tc_ev" = timeout ]; then
+            cycles=10
+        elif [ -z "$_tc_ev" ]; then
+            sleep 2
+        fi
+    else
+        sleep 2
+    fi
 done

@@ -1014,5 +1014,14 @@ while true; do
             fi
         fi
     fi
-    sleep "${SPX_OTA_POLL_SLEEP:-1}"
+    if [ -z "${SPX_OTA_POLL_SLEEP:-}" ] && [ -d "$APP_FILES" ] && [ ! -L "$APP_FILES" ] && command -v spx-event-wait >/dev/null 2>&1; then
+        _ota_ev=$(spx-event-wait --oneshot --inotify "$APP_FILES" --match ota-request,disk-request --check-exists "$APP_FILES/ota-request,$APP_FILES/disk-request" --timeout-ms 30000 2>/dev/null || true)
+        if [ "$_ota_ev" = timeout ]; then
+            CYCLES=30
+        elif [ -z "$_ota_ev" ]; then
+            sleep 1
+        fi
+    else
+        sleep "${SPX_OTA_POLL_SLEEP:-1}"
+    fi
 done

@@ -1,7 +1,7 @@
 #!/bin/busybox sh
 # Temporary Bluetooth UHID input-node watcher derived from cover-input-watch.
 # EventHub may see devtmpfs IN_CREATE before ueventd assigns the input group.
-# Republish each newly enumerated Surface cover node with permissions ready.
+# Republish each newly enumerated Bluetooth UHID node with permissions ready.
 # Track the sysfs input identity, not only eventN, which is reused on replug.
 set -u
 export PATH=/bin:/sbin
@@ -9,7 +9,8 @@ cache=/run/sq2-bt-input
 mkdir -p "$cache"
 stage=$(mktemp -d /dev/sq2-bt-refresh.XXXXXX) || exit 1
 trap 'rmdir "$stage" 2>/dev/null || true' EXIT
-while true; do
+
+scan_once() {
     for d in /sys/class/input/event*; do
         name=$(cat "$d/device/name" 2>/dev/null) || continue
         : # Select Bluetooth UHID by sysfs provenance, not device name.
@@ -40,6 +41,21 @@ while true; do
             echo "BT_INPUT_RESTORE_FALLBACK=$event"
         fi
     done
-    [ "${1:-}" = --once ] && exit 0
+}
+
+if [ "${1:-}" = --once ]; then
+    scan_once
+    exit 0
+fi
+
+if command -v spx-event-wait >/dev/null 2>&1; then
+    spx-event-wait --stream --uevent input --debounce-ms 100 | while IFS= read -r _ev; do
+        scan_once
+    done
+    exit 0
+fi
+
+while true; do
+    scan_once
     sleep 1
 done

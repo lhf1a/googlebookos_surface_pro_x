@@ -11,13 +11,8 @@ if [ "${1:-}" != --once ]; then
     if [ -r "$cache/pid" ] && kill -0 "$(cat "$cache/pid")" 2>/dev/null; then exit 0; fi
     echo $$ > "$cache/pid"
 fi
-while true; do
-    ready=$(nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null)
-    if [ "$ready" != 1 ]; then
-        [ "${1:-}" = --once ] && exit 1
-        sleep 2
-        continue
-    fi
+
+scan_once() {
     for d in /sys/bus/usb/devices/*:*; do
         [ -e "$d/driver" ] && continue
         alias=$(cat "$d/modalias" 2>/dev/null) || continue
@@ -51,6 +46,30 @@ while true; do
         done < /etc/sq2-usb-network.aliases
         printf '%s\n' "$identity" > "$cache/$id"
     done
-    [ "${1:-}" = --once ] && exit 0
+}
+
+while true; do
+    ready=$(nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null)
+    if [ "$ready" = 1 ]; then
+        break
+    fi
+    [ "${1:-}" = --once ] && exit 1
+    sleep 2
+done
+
+if [ "${1:-}" = --once ]; then
+    scan_once
+    exit 0
+fi
+
+if command -v spx-event-wait >/dev/null 2>&1; then
+    spx-event-wait --stream --uevent usb --debounce-ms 150 | while IFS= read -r _ev; do
+        scan_once
+    done
+    exit 0
+fi
+
+while true; do
+    scan_once
     sleep 2
 done

@@ -183,27 +183,41 @@ static void pin_game_threads(
     closedir(d);
 }
 
+#define SQ2_PID_CACHE_SLOTS 64
+#define SQ2_MAX_MAPS_SCANS 3
+
 struct pid_cls_cache {
     pid_t pid;
     char cmd[128];
     enum sq2_engine_type apk_eng;
     int scanned_apk;
-    int poll_count;
+    int maps_scans;
+    uint64_t last_seen_gen;
 };
 
-static struct pid_cls_cache g_cls_cache[8];
+static struct pid_cls_cache g_cls_cache[SQ2_PID_CACHE_SLOTS];
+static uint64_t g_cache_gen = 0;
 
 static struct pid_cls_cache *lookup_or_init_cache(pid_t pid, const char *cmd) {
-    for (size_t i = 0; i < sizeof(g_cls_cache) / sizeof(g_cls_cache[0]); i++) {
+    size_t victim = 0;
+    uint64_t oldest_gen = UINT64_MAX;
+    for (size_t i = 0; i < SQ2_PID_CACHE_SLOTS; i++) {
         if (g_cls_cache[i].pid == pid && strcmp(g_cls_cache[i].cmd, cmd) == 0) {
+            g_cls_cache[i].last_seen_gen = g_cache_gen;
             return &g_cls_cache[i];
         }
+        if (g_cls_cache[i].pid == 0 && oldest_gen != 0) {
+            oldest_gen = 0;
+            victim = i;
+        } else if (g_cls_cache[i].last_seen_gen < oldest_gen) {
+            oldest_gen = g_cls_cache[i].last_seen_gen;
+            victim = i;
+        }
     }
-    static size_t next_slot = 0;
-    struct pid_cls_cache *slot = &g_cls_cache[next_slot];
-    next_slot = (next_slot + 1) % (sizeof(g_cls_cache) / sizeof(g_cls_cache[0]));
+    struct pid_cls_cache *slot = &g_cls_cache[victim];
     memset(slot, 0, sizeof(*slot));
     slot->pid = pid;
+    slot->last_seen_gen = g_cache_gen;
     snprintf(slot->cmd, sizeof(slot->cmd), "%s", cmd);
     return slot;
 }
@@ -228,6 +242,7 @@ static int find_foreground_game(
         return 0;
     }
 
+    g_cache_gen++;
     static char maps_buf[512 * 1024];
     char *saveptr = NULL;
     for (char *tok = strtok_r(buf, "\r\n \t", &saveptr);
@@ -248,7 +263,7 @@ static int find_foreground_game(
 
         struct pid_cls_cache *c = lookup_or_init_cache(pid, cmd);
         enum sq2_engine_type eng = c->apk_eng;
-        if (!c->scanned_apk || (eng == SQ2_ENGINE_NONE && (c->poll_count % 8) == 0)) {
+        if (!c->scanned_apk || (eng == SQ2_ENGINE_NONE && c->maps_scans < SQ2_MAX_MAPS_SCANS)) {
             char maps_path[64];
             snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", (int)pid);
             maps_buf[0] = '\0';
@@ -257,8 +272,8 @@ static int find_foreground_game(
                 cfg, cmd, maps_buf, NULL, c->scanned_apk ? NULL : "/data/app");
             c->apk_eng = eng;
             c->scanned_apk = 1;
+            c->maps_scans++;
         }
-        c->poll_count++;
 
         if (eng != SQ2_ENGINE_NONE) {
             *out_pid = pid;
@@ -314,16 +329,26 @@ int main(void) {
     enum sq2_engine_type active_engine = SQ2_ENGINE_NONE;
     char active_pkg[128] = {0};
     int tick = 0;
+    uint64_t last_cfg_check_ms = 0;
 
     log_msg("sq2-game-optd started (pid=%d)", (int)getpid());
 
     while (!g_stop) {
-        if ((tick % 8) == 0 && stat(SQ2_CONFIG_PATH, &cfg_st) == 0 &&
-            cfg_st.st_mtime != last_cfg_mtime) {
-            last_cfg_mtime = cfg_st.st_mtime;
-            (void)sq2_opt_config_load_file(SQ2_CONFIG_PATH, &cfg);
-            log_msg("reloaded config (enabled=%d cpu=%d gpu=%d pin=%d)",
-                    cfg.enabled, cfg.boost_cpu, cfg.boost_gpu, cfg.pin_threads);
+        struct timespec mono_now;
+        uint64_t now_ms = 0;
+        if (clock_gettime(CLOCK_MONOTONIC, &mono_now) == 0) {
+            now_ms = (uint64_t)mono_now.tv_sec * 1000ULL +
+                     (uint64_t)(mono_now.tv_nsec / 1000000L);
+        }
+        if (last_cfg_check_ms == 0 || now_ms - last_cfg_check_ms >= 2000ULL) {
+            last_cfg_check_ms = now_ms;
+            if (stat(SQ2_CONFIG_PATH, &cfg_st) == 0 &&
+                cfg_st.st_mtime != last_cfg_mtime) {
+                last_cfg_mtime = cfg_st.st_mtime;
+                (void)sq2_opt_config_load_file(SQ2_CONFIG_PATH, &cfg);
+                log_msg("reloaded config (enabled=%d cpu=%d gpu=%d pin=%d)",
+                        cfg.enabled, cfg.boost_cpu, cfg.boost_gpu, cfg.pin_threads);
+            }
         }
 
         pid_t fg_pid = 0;
@@ -375,7 +400,7 @@ int main(void) {
         }
 
         tick++;
-        sleep_ms(cfg.poll_interval_ms);
+        sleep_ms(sq2_compute_sleep_ms(&cfg, screen_on, found));
     }
 
     (void)sq2_dvfs_boost_restore(&dvfs);

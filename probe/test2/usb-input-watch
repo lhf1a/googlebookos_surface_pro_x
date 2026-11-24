@@ -13,14 +13,8 @@ if [ "${1:-}" != --once ]; then
 fi
 stage=$(mktemp -d /dev/sq2-usb-refresh.XXXXXX) || exit 1
 trap 'rm -f "$stage"/event*; rmdir "$stage" 2>/dev/null || true' EXIT
-while true; do
-    # PID 1 is Android init after handoff; do not publish before EventHub starts.
-    ready=$(nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null)
-    if [ "$ready" != 1 ]; then
-        [ "${1:-}" = --once ] && exit 1
-        sleep 2
-        continue
-    fi
+
+scan_once() {
     for d in /sys/class/input/event*; do
         [ "$(cat "$d/device/id/bustype" 2>/dev/null)" = 0003 ] || continue
         name=$(cat "$d/device/name" 2>/dev/null) || continue
@@ -54,6 +48,31 @@ while true; do
             echo "USB_INPUT_RESTORE_FALLBACK=$event"
         fi
     done
-    [ "${1:-}" = --once ] && exit 0
+}
+
+# PID 1 is Android init after handoff; do not publish before EventHub starts.
+while true; do
+    ready=$(nsenter -t 1 -m -r -- /system/bin/getprop sys.boot_completed 2>/dev/null)
+    if [ "$ready" = 1 ]; then
+        break
+    fi
+    [ "${1:-}" = --once ] && exit 1
+    sleep 2
+done
+
+if [ "${1:-}" = --once ]; then
+    scan_once
+    exit 0
+fi
+
+if command -v spx-event-wait >/dev/null 2>&1; then
+    spx-event-wait --stream --uevent input --debounce-ms 100 | while IFS= read -r _ev; do
+        scan_once
+    done
+    exit 0
+fi
+
+while true; do
+    scan_once
     sleep 1
 done

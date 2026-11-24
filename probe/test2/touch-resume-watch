@@ -138,5 +138,9 @@ while :; do
     fi
     loops=$((loops + 1))
     if [ "$MAX_LOOPS" -gt 0 ] && [ "$loops" -ge "$MAX_LOOPS" ]; then exit 0; fi
-    sleep "$POLL_SLEEP"
+    if [ "$pending_reinit" = 0 ] && [ "$MAX_LOOPS" = 0 ] && [ -r "$ready_path" ] && command -v spx-event-wait >/dev/null 2>&1; then
+        spx-event-wait --oneshot --sysfs "$ready_path" --check-file-diff "$counter:$previous" --debounce-ms 100 --timeout-ms 30000 >/dev/null 2>&1 || sleep "$POLL_SLEEP"
+    else
+        sleep "$POLL_SLEEP"
+    fi
 done

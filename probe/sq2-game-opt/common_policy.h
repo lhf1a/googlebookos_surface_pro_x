@@ -89,6 +89,7 @@ int sq2_thread_should_pin_big(enum sq2_engine_type engine, const char *comm);
 
 int sq2_find_highest_freq_str(const char *avail_text, char *out, size_t out_sz);
 int sq2_is_screen_on(const char *sysfs_root);
+int sq2_compute_sleep_ms(const struct sq2_opt_config *cfg, int screen_on, int game_active);
 
 int sq2_dvfs_boost_engage(
     struct sq2_dvfs_state *state,
