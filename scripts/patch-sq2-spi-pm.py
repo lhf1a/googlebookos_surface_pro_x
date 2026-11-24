@@ -154,14 +154,239 @@ def repair_resume_input(source):
     return repair_pending_irq(source[:start] + body + source[end:])
 
 
+def repair_ready_watchdog(source, header):
+    # Recover if a short s2idle cycle resumes SPI-HID to D0 without ever
+    # reaching FW ready state, and clean up the delayed work across close/PM.
+    marker = 'SQ2_SPI_PM_READY_WATCHDOG_V4'
+    if marker in source and 'ready_work;' in header:
+        return source, header
+
+    if 'ready_work;' not in header:
+        h_anchor = '\tstruct work_struct error_work;\n'
+        assert header.count(h_anchor) == 1, 'spi-hid-core.h work_struct anchor changed'
+        header = header.replace(
+            h_anchor,
+            h_anchor + '\tu8 ready_retries;\n\tstruct delayed_work ready_work;\n',
+            1,
+        )
+
+    if marker not in source:
+        watchdog_fn = (
+            '\n/* ' + marker + ': recover if D0 resume never reaches ready. */\n'
+            'static void spi_hid_ready_watchdog_work(struct work_struct *work)\n'
+            '{\n'
+            '\tstruct spi_hid *shid = container_of(work, struct spi_hid,\n'
+            '\t\t\t\t\t    ready_work.work);\n'
+            '\tstruct device *dev = &shid->spi->dev;\n'
+            '\tunsigned long flags;\n'
+            '\tint ret;\n'
+            '\n'
+            '\tif (READ_ONCE(shid->pm_suspended) || shid->ready ||\n'
+            '\t    shid->refresh_in_progress || !shid->powered ||\n'
+            '\t    shid->power_state != SPI_HID_POWER_MODE_ACTIVE)\n'
+            '\t\treturn;\n'
+            '\n'
+            '\tif (shid->ready_retries >= 3) {\n'
+            '\t\tdev_warn(dev, "ready watchdog: exceeded retries without ready\\n");\n'
+            '\t\treturn;\n'
+            '\t}\n'
+            '\n'
+            '\tshid->ready_retries++;\n'
+            '\tdev_warn(dev, "ready watchdog: retry %u/3\\n", shid->ready_retries);\n'
+            '\n'
+            '\tmutex_lock(&shid->lock);\n'
+            '\tif (READ_ONCE(shid->pm_suspended) || shid->ready ||\n'
+            '\t    shid->refresh_in_progress || !shid->powered ||\n'
+            '\t    shid->power_state != SPI_HID_POWER_MODE_ACTIVE) {\n'
+            '\t\tmutex_unlock(&shid->lock);\n'
+            '\t\treturn;\n'
+            '\t}\n'
+            '\n'
+            '\tif (shid->irq_enabled) {\n'
+            '\t\tdisable_irq(shid->spi->irq);\n'
+            '\t\tshid->irq_enabled = false;\n'
+            '\t}\n'
+            '\n'
+            '\tshid->input_stage = SPI_HID_INPUT_STAGE_IDLE;\n'
+            '\tshid->input_transfer_pending = 0;\n'
+            '\n'
+            '\tret = spi_hid_power_down(shid);\n'
+            '\tif (ret) {\n'
+            '\t\tdev_err(dev, "ready watchdog: power down failed: %d\\n", ret);\n'
+            '\t\tgoto err_off;\n'
+            '\t}\n'
+            '\n'
+            '\tmsleep(100);\n'
+            '\tif (READ_ONCE(shid->pm_suspended))\n'
+            '\t\tgoto err_off;\n'
+            '\n'
+            '\tret = spi_hid_assert_reset(shid);\n'
+            '\tif (ret) {\n'
+            '\t\tdev_err(dev, "ready watchdog: assert reset failed: %d\\n", ret);\n'
+            '\t\tgoto err_off;\n'
+            '\t}\n'
+            '\n'
+            '\tret = spi_hid_power_up(shid);\n'
+            '\tif (ret) {\n'
+            '\t\tdev_err(dev, "ready watchdog: power up failed: %d\\n", ret);\n'
+            '\t\tgoto err_sleep;\n'
+            '\t}\n'
+            '\n'
+            '\tif (READ_ONCE(shid->pm_suspended)) {\n'
+            '\t\tspi_hid_power_down(shid);\n'
+            '\t\tgoto err_off;\n'
+            '\t}\n'
+            '\n'
+            '\tirq_set_irqchip_state(shid->spi->irq, IRQCHIP_STATE_PENDING, false);\n'
+            '\n'
+            '\tret = spi_hid_deassert_reset(shid);\n'
+            '\tif (ret) {\n'
+            '\t\tdev_err(dev, "ready watchdog: deassert reset failed: %d\\n", ret);\n'
+            '\t\tspi_hid_power_down(shid);\n'
+            '\t\tgoto err_off;\n'
+            '\t}\n'
+            '\n'
+            '\tenable_irq(shid->spi->irq);\n'
+            '\tshid->irq_enabled = true;\n'
+            '\tmutex_unlock(&shid->lock);\n'
+            '\n'
+            '\tspin_lock_irqsave(&shid->input_lock, flags);\n'
+            '\tif (!shid->pm_suspended && !shid->ready &&\n'
+            '\t    shid->power_state == SPI_HID_POWER_MODE_ACTIVE)\n'
+            '\t\tmod_delayed_work(system_wq, &shid->ready_work,\n'
+            '\t\t\t\t msecs_to_jiffies(1500));\n'
+            '\tspin_unlock_irqrestore(&shid->input_lock, flags);\n'
+            '\treturn;\n'
+            '\n'
+            'err_sleep:\n'
+            '\tpinctrl_select_state(shid->pinctrl, shid->pinctrl_sleep);\n'
+            'err_off:\n'
+            '\tspin_lock_irqsave(&shid->input_lock, flags);\n'
+            '\tshid->power_state = SPI_HID_POWER_MODE_OFF;\n'
+            '\tspin_unlock_irqrestore(&shid->input_lock, flags);\n'
+            '\tmutex_unlock(&shid->lock);\n'
+            '}\n\n'
+        )
+        pm_anchor = 'static int spi_hid_pm_suspend(struct device *dev)\n'
+        assert source.count(pm_anchor) == 1, 'SPI pm_suspend anchor changed'
+        source = source.replace(pm_anchor, watchdog_fn + pm_anchor, 1)
+
+        r_start = source.index('static void spi_hid_refresh_device_work(')
+        r_end = source.index('static void spi_hid_input_header_complete(', r_start)
+        r_body = source[r_start:r_end]
+        r_a = '\t\tshid->ready = true;\n\t\tsysfs_notify(&dev->kobj, NULL, "ready");\n\t\treturn;\n'
+        r_b = '\tshid->refresh_in_progress = false;\n\tshid->ready = true;\n\tsysfs_notify(&dev->kobj, NULL, "ready");\n'
+        assert r_body.count(r_a) == 1 and r_body.count(r_b) == 1, 'SPI refresh ready paths changed'
+        r_body = r_body.replace(
+            r_a,
+            '\t\tshid->ready = true;\n\t\tshid->ready_retries = 0;\n\t\tcancel_delayed_work(&shid->ready_work);\n\t\tsysfs_notify(&dev->kobj, NULL, "ready");\n\t\treturn;\n',
+            1,
+        )
+        r_body = r_body.replace(
+            r_b,
+            '\tshid->refresh_in_progress = false;\n\tshid->ready = true;\n\tshid->ready_retries = 0;\n\tcancel_delayed_work(&shid->ready_work);\n\tsysfs_notify(&dev->kobj, NULL, "ready");\n',
+            1,
+        )
+        source = source[:r_start] + r_body + source[r_end:]
+
+        o_start = source.index('static int spi_hid_ll_open(')
+        o_end = source.index('static void spi_hid_ll_close(', o_start)
+        o_body = source[o_start:o_end]
+        o_anchor = '\tdev_err(dev, "%s: %s -> %s\\n", __func__,\n\t\t\tspi_hid_power_mode_string(prev_state),\n\t\t\tspi_hid_power_mode_string(shid->power_state));\n\n\treturn 0;\n'
+        assert o_body.count(o_anchor) == 1, 'SPI ll_open return anchor changed'
+        o_body = o_body.replace(
+            o_anchor,
+            '\tshid->ready_retries = 0;\n\tmod_delayed_work(system_wq, &shid->ready_work,\n\t\t\t msecs_to_jiffies(1500));\n\n' + o_anchor,
+            1,
+        )
+        source = source[:o_start] + o_body + source[o_end:]
+
+        c_start = source.index('static void spi_hid_ll_close(')
+        c_end = source.index('static int spi_hid_ll_power(', c_start)
+        c_body = source[c_start:c_end]
+        c_var = '\tint ret;\n\n\tif (shid->refresh_in_progress'
+        assert c_body.count(c_var) == 1, 'SPI ll_close locals changed'
+        c_body = c_body.replace(c_var, '\tunsigned long flags;\n' + c_var, 1)
+        c_anchor = '\tif (shid->refresh_in_progress || prev_state == SPI_HID_POWER_MODE_OFF)\n\t\treturn;\n'
+        assert c_body.count(c_anchor) == 1, 'SPI ll_close anchor changed'
+        c_body = c_body.replace(
+            c_anchor,
+            c_anchor
+            + '\n\tspin_lock_irqsave(&shid->input_lock, flags);\n'
+            + '\tshid->power_state = SPI_HID_POWER_MODE_OFF;\n'
+            + '\tspin_unlock_irqrestore(&shid->input_lock, flags);\n'
+            + '\tshid->ready_retries = 0;\n'
+            + '\tcancel_delayed_work_sync(&shid->ready_work);\n',
+            1,
+        )
+        source = source[:c_start] + c_body + source[c_end:]
+
+        s_start = source.index('static int spi_hid_pm_suspend(')
+        s_end = source.index('static int spi_hid_pm_resume(', s_start)
+        s_body = source[s_start:s_end]
+        s_anchor = '\tspin_unlock_irqrestore(&shid->input_lock, flags);\n\tif (shid->irq_enabled) {'
+        assert s_body.count(s_anchor) == 1, 'SPI pm_suspend lock/irq anchor changed'
+        s_body = s_body.replace(
+            s_anchor,
+            '\tspin_unlock_irqrestore(&shid->input_lock, flags);\n\tcancel_delayed_work_sync(&shid->ready_work);\n\tif (shid->irq_enabled) {',
+            1,
+        )
+        source = source[:s_start] + s_body + source[s_end:]
+
+        res_start = source.index('static int spi_hid_pm_resume(')
+        res_end = source.index('static SIMPLE_DEV_PM_OPS(', res_start)
+        res_body = source[res_start:res_end]
+        res_anchor = '\tshid->attempts = 0;\n\tWRITE_ONCE(shid->pm_suspended, false);\n'
+        assert res_body.count(res_anchor) == 1, 'SPI pm_resume anchor changed'
+        res_body = res_body.replace(
+            res_anchor,
+            '\tshid->attempts = 0;\n\tshid->ready_retries = 0;\n\tWRITE_ONCE(shid->pm_suspended, false);\n',
+            1,
+        )
+        source = source[:res_start] + res_body + source[res_end:]
+
+        p_start = source.index('static int spi_hid_probe(')
+        p_end = source.index('static void spi_hid_remove(', p_start)
+        p_body = source[p_start:p_end]
+        p_anchor = '\tINIT_WORK(&shid->error_work, spi_hid_error_work);\n'
+        assert p_body.count(p_anchor) == 1, 'SPI probe INIT_WORK anchor changed'
+        p_body = p_body.replace(
+            p_anchor,
+            p_anchor + '\tINIT_DELAYED_WORK(&shid->ready_work, spi_hid_ready_watchdog_work);\n',
+            1,
+        )
+        source = source[:p_start] + p_body + source[p_end:]
+
+        rm_start = source.index('static void spi_hid_remove(')
+        rm_end = source.index('static const struct spi_device_id spi_hid_id_table[]', rm_start)
+        rm_body = source[rm_start:rm_end]
+        rm_anchor = '\tdev_info(dev, "%s\\n", __func__);\n\n\tspi_hid_power_down(shid);'
+        assert rm_body.count(rm_anchor) == 1, 'SPI remove anchor changed'
+        rm_body = rm_body.replace(
+            rm_anchor,
+            '\tdev_info(dev, "%s\\n", __func__);\n\n'
+            '\tWRITE_ONCE(shid->pm_suspended, true);\n'
+            '\tshid->power_state = SPI_HID_POWER_MODE_OFF;\n'
+            '\tcancel_delayed_work_sync(&shid->ready_work);\n'
+            '\tspi_hid_power_down(shid);',
+            1,
+        )
+        source = source[:rm_start] + rm_body + source[rm_end:]
+
+    return source, header
+
+
 base = Path(sys.argv[1])
 c = base / 'spi-hid-core.c'
 h = base / 'spi-hid-core.h'
 s = c.read_text()
-if 'SQ2_SPI_PM_V1' in s:
-    c.write_text(repair_resume_input(s))
-    raise SystemExit(0)
 hs = h.read_text()
+if 'SQ2_SPI_PM_V1' in s:
+    s = repair_resume_input(s)
+    s, hs = repair_ready_watchdog(s, hs)
+    h.write_text(hs)
+    c.write_text(s)
+    raise SystemExit(0)
 assert '\tbool irq_enabled;' in hs
 hs = hs.replace('\tbool irq_enabled;', '\tbool irq_enabled;\n\tbool pm_suspended;\n\tbool pm_restore;\n\tu32 pm_resumes;')
 assert s.count('if (!shid->powered)\n\t\tgoto out;') == 2
@@ -241,6 +466,7 @@ s = s.replace(marker, pm + marker)
 s = s.replace('\t&dev_attr_ready.attr,', '\t&dev_attr_ready.attr,\n\t&dev_attr_resume_count.attr,')
 s = s.replace('\t\t.name\t= "spi_hid",', '\t\t.name\t= "spi_hid",\n\t\t.pm\t= &spi_hid_pm_ops,')
 s = repair_resume_input(s)
+s, hs = repair_ready_watchdog(s, hs)
 h.write_text(hs)
 c.write_text(s)
 print('SPI-HID system sleep callbacks applied')

@@ -666,6 +666,92 @@ class S2IdleHygieneTests(unittest.TestCase):
                 if p.stderr:
                     p.stderr.close()
 
+    def test_touch_resume_watch_recovers_when_not_ready_and_defers_if_panel_turns_off(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_p = Path(td)
+            sysfs = td_p / 'sys'
+            run_dir = td_p / 'run'
+            data_root = td_p / 'android'
+            spi_dev = sysfs / 'devices/spi0.0'
+            _write(spi_dev / 'ready', 'not ready\n')
+            _write(spi_dev / 'resume_count', '0\n')
+            _write(run_dir / 'iptsd-hidraw', '/dev/hidraw0\n')
+            _write(run_dir / 'iptsd-ready', str(spi_dev / 'ready') + '\n')
+
+            edp_en = _write(sysfs / 'class/drm/card0-eDP-1/enabled', 'enabled\n')
+            _write(sysfs / 'class/drm/card0-eDP-1/dpms', 'On\n')
+            _write(sysfs / 'class/backlight/backlight/bl_power', '0\n')
+            _write(sysfs / 'class/backlight/backlight/brightness', '1200\n')
+
+            attempts_log = td_p / 'attempts.log'
+            # First touch-services attempt fails, second succeeds and sets ready.
+            touch_svc = _write(td_p / 'touch-services', textwrap.dedent(f"""\
+                #!/bin/sh
+                count=0
+                [ -r "{attempts_log}" ] && count=$(wc -l < "{attempts_log}")
+                count=$((count + 1))
+                echo "attempt=$count" >> "{attempts_log}"
+                if [ "$count" -eq 1 ]; then
+                    exit 1
+                fi
+                printf 'ready\\n' > "{spi_dev / 'ready'}"
+                exit 0
+            """), 0o755)
+
+            env = os.environ.copy()
+            env.update({
+                'SPX_TOUCH_SYSFS': str(sysfs),
+                'SPX_TOUCH_RUN': str(run_dir),
+                'SPX_TOUCH_ROOT': str(data_root),
+                'SPX_TOUCH_SERVICES': str(touch_svc),
+                'SPX_TOUCH_DISABLED': str(run_dir / 'touch-disabled'),
+                'SPX_TOUCH_POLL_SLEEP': '0.02',
+                'SPX_TOUCH_READY_POLLS': '3',
+                'SPX_TOUCH_READY_SLEEP': '0.01',
+                'SPX_TOUCH_RECOVERY_ATTEMPTS': '2',
+                'SPX_TOUCH_RECOVERY_SLEEP': '0.01',
+            })
+            log = td_p / 'watch.log'
+            with log.open('w') as lf:
+                p = subprocess.Popen(['sh', str(ROOT / 'probe/test2/touch-resume-watch')], env=env, stdout=lf, stderr=lf)
+            try:
+                time.sleep(0.06)
+                # Wake with stuck not ready -> must emit NOT_READY, retry, fail attempt 1, succeed attempt 2.
+                _write(spi_dev / 'resume_count', '1\n')
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if 'TOUCH_RESUME_RECOVERED count=1 attempt=2' in log.read_text():
+                        break
+                    time.sleep(0.02)
+                text = log.read_text()
+                self.assertIn('TOUCH_RESUME_NOT_READY count=1', text)
+                self.assertIn('TOUCH_RESUME_RECOVER_CYCLE count=1 attempt=1', text)
+                self.assertIn('TOUCH_RESUME_RECOVER_FAILED count=1 attempt=1', text)
+                self.assertIn('TOUCH_RESUME_RECOVER_CYCLE count=1 attempt=2', text)
+                self.assertIn('TOUCH_RESUME_RECOVERED count=1 attempt=2', text)
+
+                # If panel turns off right before retry, defer recovery cleanly without running touch-services.
+                _write(spi_dev / 'ready', 'not ready\n')
+                prev_attempts = attempts_log.read_text().splitlines()
+                _write(edp_en, 'disabled\n')
+                _write(spi_dev / 'resume_count', '2\n')
+                time.sleep(0.1)
+                self.assertEqual(attempts_log.read_text().splitlines(), prev_attempts)
+                _write(edp_en, 'enabled\n')
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if 'TOUCH_RESUME_RECOVERED count=2 attempt=1' in log.read_text():
+                        break
+                    time.sleep(0.02)
+                self.assertIn('TOUCH_RESUME_RECOVERED count=2 attempt=1', log.read_text())
+            finally:
+                p.terminate()
+                p.wait(timeout=5)
+                if p.stdout:
+                    p.stdout.close()
+                if p.stderr:
+                    p.stderr.close()
+
     def test_spx_lower_usb_host_mode_respects_vintf_declaration(self):
         for declared in (False, True):
             with self.subTest(vintf_declared=declared), tempfile.TemporaryDirectory() as td:

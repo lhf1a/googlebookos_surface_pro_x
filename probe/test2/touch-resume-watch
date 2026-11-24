@@ -10,7 +10,31 @@ DATA_ROOT="${SPX_TOUCH_ROOT:-/proc/1/root}"
 TOUCH_SERVICES="${SPX_TOUCH_SERVICES:-/bin/touch-services}"
 TOUCH_DISABLED="${SPX_TOUCH_DISABLED:-/run/touch-disabled}"
 POLL_SLEEP="${SPX_TOUCH_POLL_SLEEP:-0.5}"
+READY_POLLS="${SPX_TOUCH_READY_POLLS:-60}"
+READY_SLEEP="${SPX_TOUCH_READY_SLEEP:-0.1}"
+RECOVERY_ATTEMPTS="${SPX_TOUCH_RECOVERY_ATTEMPTS:-2}"
+RECOVERY_SLEEP="${SPX_TOUCH_RECOVERY_SLEEP:-0.5}"
 MAX_LOOPS="${SPX_TOUCH_MAX_LOOPS:-0}"
+
+is_touch_disabled() {
+    [ -e "$TOUCH_DISABLED" ] && return 0
+    [ -f "$DATA_ROOT/data/vendor/spx-advanced-control/touch_disabled" ] || return 1
+    [ "$(tr -d '\r\n ' < "$DATA_ROOT/data/vendor/spx-advanced-control/touch_disabled" 2>/dev/null || true)" = "1" ]
+}
+
+stop_iptsd() {
+    [ -r "$RUN_DIR/iptsd.pid" ] || return 0
+    pid=$(cat "$RUN_DIR/iptsd.pid")
+    case "$pid" in ''|*[!0-9]*) exit 1;; esac
+    if [ "$(cat "/proc/$pid/comm" 2>/dev/null)" = iptsd ]; then
+        kill "$pid" 2>/dev/null || true
+        for w in $(seq 1 10); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.1
+        done
+    fi
+    rm -f "$RUN_DIR/iptsd.pid"
+}
 
 panel_is_on() {
     for _pio_en in "$SYSFS"/class/drm/card*-eDP-*/enabled; do
@@ -68,26 +92,42 @@ while :; do
     if [ "$pending_reinit" = 1 ] && panel_is_on; then
         pending_reinit=0
         ready=0
-        for n in $(seq 1 60); do
+        for n in $(seq 1 "$READY_POLLS"); do
             if [ "$(cat "$ready_path" 2>/dev/null)" = ready ]; then ready=1; break; fi
-            sleep 0.1
+            sleep "$READY_SLEEP"
         done
         if [ "$ready" = 0 ]; then
             echo "TOUCH_RESUME_NOT_READY count=$pending_count"
-        else
-            if [ -r "$RUN_DIR/iptsd.pid" ]; then
-                pid=$(cat "$RUN_DIR/iptsd.pid")
-                case "$pid" in ''|*[!0-9]*) exit 1;; esac
-                if [ "$(cat "/proc/$pid/comm" 2>/dev/null)" = iptsd ]; then
-                    kill "$pid" 2>/dev/null || true
-                    for w in $(seq 1 10); do
-                        kill -0 "$pid" 2>/dev/null || break
-                        sleep 0.1
-                    done
-                fi
-                rm -f "$RUN_DIR/iptsd.pid"
+            if is_touch_disabled; then
+                stop_iptsd
+                : > "$TOUCH_DISABLED"
+                echo "TOUCH_RESUME_SKIPPED_DISABLED count=$pending_count"
+            else
+                attempt=1
+                while [ "$attempt" -le "$RECOVERY_ATTEMPTS" ]; do
+                    if ! panel_is_on; then
+                        pending_reinit=1
+                        break
+                    fi
+                    latest=$(cat "$counter" 2>/dev/null || true)
+                    if [ -n "$latest" ] && [ "$latest" != "$previous" ]; then
+                        previous=$latest
+                        pending_count=$latest
+                    fi
+                    stop_iptsd
+                    sleep "$RECOVERY_SLEEP"
+                    echo "TOUCH_RESUME_RECOVER_CYCLE count=$pending_count attempt=$attempt"
+                    if "$TOUCH_SERVICES"; then
+                        echo "TOUCH_RESUME_RECOVERED count=$pending_count attempt=$attempt"
+                        break
+                    fi
+                    echo "TOUCH_RESUME_RECOVER_FAILED count=$pending_count attempt=$attempt"
+                    attempt=$((attempt + 1))
+                done
             fi
-            if [ -e "$TOUCH_DISABLED" ] || { [ -f "$DATA_ROOT/data/vendor/spx-advanced-control/touch_disabled" ] && [ "$(tr -d '\r\n ' < "$DATA_ROOT/data/vendor/spx-advanced-control/touch_disabled" 2>/dev/null || true)" = "1" ]; }; then
+        else
+            stop_iptsd
+            if is_touch_disabled; then
                 : > "$TOUCH_DISABLED"
                 echo "TOUCH_RESUME_SKIPPED_DISABLED count=$pending_count"
             else

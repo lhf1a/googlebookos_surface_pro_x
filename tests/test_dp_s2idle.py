@@ -136,6 +136,9 @@ class DpS2idleFixes(unittest.TestCase):
         # ST_MAINLINK_READY post_disable cleanup, preserve ST_DISCONNECTED, external IRQ_HPD dispatch
         for snippet in (
             "#define DP_LINK_RETRAIN_MAX_RETRIES",
+            "static bool msm_dp_system_shutting_down(void)",
+            "if (!dp->msm_dp_display.is_edp && msm_dp_system_shutting_down())",
+            "if (msm_dp_system_shutting_down())",
             "static void msm_dp_display_ensure_kms_phy_sel(struct msm_dp_display_private *dp)",
             "if (pm_runtime_resume_and_get(kms_dev) == 0)",
             "pm_runtime_put_sync(kms_dev);",
@@ -151,8 +154,24 @@ class DpS2idleFixes(unittest.TestCase):
         ):
             self.assertIn(snippet, text)
         self.assertEqual(text.count("msm_dp_display_ensure_kms_phy_sel("), 4)
+        self.assertEqual(
+            text.count("if (!dp->msm_dp_display.is_edp && msm_dp_system_shutting_down())"),
+            2,
+        )
         # Ensure host_phy_exit rollback only occurs in enable() failure, not post_enable()
         self.assertEqual(text.count("if (phy_initted)"), 1)
+        # dp_panel.c fixes: serialize drm_edid replacement and readers to avoid shutdown UAF
+        for snippet in (
+            "struct mutex edid_lock;",
+            "mutex_init(&panel->edid_lock);",
+            "old_edid = msm_dp_panel->drm_edid;",
+            "drm_edid_free(old_edid);",
+            "mutex_lock(&panel->edid_lock);",
+            "mutex_unlock(&panel->edid_lock);",
+        ):
+            self.assertIn(snippet, text)
+        self.assertEqual(text.count("mutex_lock(&panel->edid_lock);"), 4)
+        self.assertEqual(text.count("mutex_unlock(&panel->edid_lock);"), 4)
 
     def test_qmp_lifecycle_patch_invariants(self):
         text = (PATCHES_DIR / "spx-qmp-lifecycle.patch").read_text()
@@ -399,6 +418,7 @@ class DpS2idleFixes(unittest.TestCase):
             "drivers/gpu/drm/msm/dp/dp_ctrl.c",
             "drivers/gpu/drm/msm/dp/dp_debug.c",
             "drivers/gpu/drm/msm/dp/dp_display.c",
+            "drivers/gpu/drm/msm/dp/dp_panel.c",
             "drivers/usb/dwc3/dwc3-qcom-legacy.c",
             "drivers/usb/dwc3/dwc3-qcom.c",
             "arch/arm64/boot/dts/qcom/sc8180x.dtsi",
@@ -412,6 +432,7 @@ class DpS2idleFixes(unittest.TestCase):
             "drivers/gpu/drm/msm/dp/dp_ctrl.c",
             "drivers/gpu/drm/msm/dp/dp_debug.c",
             "drivers/gpu/drm/msm/dp/dp_display.c",
+            "drivers/gpu/drm/msm/dp/dp_panel.c",
         )
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -469,6 +490,9 @@ class DpS2idleFixes(unittest.TestCase):
             self.assertIn("sq2_edp_rate_index", edp_ctrl)
             self.assertIn("msm_dp_aux_reconfig(ctrl->aux);", edp_ctrl)
             self.assertIn("msm_dp_link_psm_config(ctrl->link, &ctrl->panel->link_info, false);", edp_ctrl)
+            edp_panel = (et / "drivers/gpu/drm/msm/dp/dp_panel.c").read_text()
+            self.assertIn("sq2_lts_edp_read_rates", edp_panel)
+            self.assertIn("mutex_lock(&panel->edid_lock);", edp_panel)
 
             # Second invocation is strictly idempotent.
             calls.clear()

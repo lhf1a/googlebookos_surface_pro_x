@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -286,6 +287,54 @@ class LtsEntry(unittest.TestCase):
                 parser.parse_args(['compile', '--source', 's', '--build-dir', 'b', '--output', 'o', '--cross-compile', 'c']).jobs,
                 15,
             )
+
+    def test_patch_sq2_spi_pm_applies_watchdog_idempotently_to_external_spi_hid(self):
+        tar_path = ROOT / 'source-dependencies/kernel-6.18/external-sources.tar.gz'
+        if not tar_path.is_file():
+            self.skipTest('external-sources.tar.gz not present')
+        with tarfile.open(tar_path) as tf:
+            members = [m for m in tf.getmembers() if m.name.startswith('external/spi-hid/')]
+            tf.extractall(self.root, members=members, filter='data')
+
+        spi_dir = self.root / 'external/spi-hid'
+        script = ROOT / 'scripts/patch-sq2-spi-pm.py'
+        subprocess.run([sys.executable, str(script), str(spi_dir)], check=True)
+        first_c = (spi_dir / 'spi-hid-core.c').read_text()
+        first_h = (spi_dir / 'spi-hid-core.h').read_text()
+
+        # Re-running is strictly idempotent.
+        subprocess.run([sys.executable, str(script), str(spi_dir)], check=True)
+        self.assertEqual((spi_dir / 'spi-hid-core.c').read_text(), first_c)
+        self.assertEqual((spi_dir / 'spi-hid-core.h').read_text(), first_h)
+
+        for marker in (
+            'SQ2_SPI_PM_INPUT_RECOVERY_V2',
+            'SQ2_SPI_PM_CLEAR_PENDING_IRQ_V3',
+            'SQ2_SPI_PM_READY_WATCHDOG_V4',
+        ):
+            self.assertIn(marker, first_c)
+        self.assertIn('u8 ready_retries;', first_h)
+        self.assertIn('struct delayed_work ready_work;', first_h)
+
+        wd_start = first_c.index('static void spi_hid_ready_watchdog_work(')
+        wd_end = first_c.index('static int spi_hid_pm_suspend(', wd_start)
+        self.assertNotIn('spi_hid_stop_hid(', first_c[wd_start:wd_end])
+
+        close_body = first_c[
+            first_c.index('static void spi_hid_ll_close('):first_c.index('static int spi_hid_ll_power(')
+        ]
+        self.assertLess(
+            close_body.index('cancel_delayed_work_sync(&shid->ready_work);'),
+            close_body.index('if (shid->irq_enabled)'),
+        )
+
+        susp_body = first_c[
+            first_c.index('static int spi_hid_pm_suspend('):first_c.index('static int spi_hid_pm_resume(')
+        ]
+        self.assertLess(
+            susp_body.index('cancel_delayed_work_sync(&shid->ready_work);'),
+            susp_body.index('if (shid->irq_enabled)'),
+        )
 
 
 if __name__ == '__main__':

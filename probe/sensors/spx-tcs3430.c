@@ -33,6 +33,7 @@ struct spx_tcs3430 {
 	unsigned long expires;
 	unsigned int read_mask;
 	bool frame_valid;
+	bool shutting_down;
 };
 
 static int tcs_write(struct spx_tcs3430 *s, u8 reg, u8 value)
@@ -150,7 +151,10 @@ static int tcs_read_raw(struct iio_dev *indio,
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
 		mutex_lock(&s->lock);
-		ret = tcs_cached_sample(s, chan->address, val);
+		if (s->shutting_down)
+			ret = -ESHUTDOWN;
+		else
+			ret = tcs_cached_sample(s, chan->address, val);
 		mutex_unlock(&s->lock);
 		return ret;
 	case IIO_CHAN_INFO_HARDWAREGAIN:
@@ -188,7 +192,23 @@ static void tcs_power_off(void *data)
 {
 	struct spx_tcs3430 *s = data;
 
+	mutex_lock(&s->lock);
+	if (!s->shutting_down)
+		tcs_write(s, TCS_ENABLE, 0);
+	mutex_unlock(&s->lock);
+}
+
+static void tcs_shutdown(struct i2c_client *client)
+{
+	struct spx_tcs3430 *s = i2c_get_clientdata(client);
+
+	if (!s)
+		return;
+	mutex_lock(&s->lock);
+	s->shutting_down = true;
+	s->frame_valid = false;
 	tcs_write(s, TCS_ENABLE, 0);
+	mutex_unlock(&s->lock);
 }
 
 static int tcs_probe(struct i2c_client *client)
@@ -216,6 +236,7 @@ static int tcs_probe(struct i2c_client *client)
 		return -ENOMEM;
 	s = iio_priv(indio);
 	s->client = client;
+	i2c_set_clientdata(client, s);
 	s->gain_code = TCS_GAIN_DEFAULT_CODE;
 	s->frame_gain = tcs_gains[TCS_GAIN_DEFAULT_CODE];
 	mutex_init(&s->lock);
@@ -245,7 +266,7 @@ static const struct i2c_device_id tcs_ids[] = {
 MODULE_DEVICE_TABLE(i2c, tcs_ids);
 static struct i2c_driver tcs_driver = {
 	.driver = { .name = "spx-tcs3430", .of_match_table = tcs_of_match },
-	.probe = tcs_probe, .id_table = tcs_ids,
+	.probe = tcs_probe, .shutdown = tcs_shutdown, .id_table = tcs_ids,
 };
 module_i2c_driver(tcs_driver);
 MODULE_LICENSE("GPL");

@@ -220,6 +220,11 @@ int main(void) {
     init_sensor(&s); reset(); use_sim_y = 1; fail_cfg1 = 1;
     sim_y_by_gain[2] = 55000;
     assert(tcs_read_raw(&indio, &ch, &v, &v2, IIO_CHAN_INFO_RAW) == -EIO && !powered && s.gain_code == 2);
+
+    /* Shutdown rejects raw I2C reads without touching the bus. */
+    init_sensor(&s); reset(); s.shutting_down = true;
+    assert(tcs_read_raw(&indio, &ch, &v, &v2, IIO_CHAN_INFO_RAW) == -ESHUTDOWN);
+    assert(writes == 0 && conversions == 0);
 }
 """
         with tempfile.TemporaryDirectory() as tmp:
@@ -229,6 +234,9 @@ int main(void) {
             subprocess.run(["cc", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined",
                             "-fno-pie", "-no-pie", str(src), "-o", str(exe)], check=True)
             subprocess.run([str(exe)], check=True)
+
+        self.assertIn("i2c_set_clientdata(client, s);", source)
+        self.assertIn(".shutdown = tcs_shutdown", source)
 
 
 if __name__ == "__main__":
