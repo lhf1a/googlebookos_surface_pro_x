@@ -14,6 +14,7 @@
 #include <utility>
 namespace spx {
 using Bytes=std::vector<uint8_t>;
+static constexpr uint32_t kSscMsgStdFlushReq=2;
 static constexpr uint32_t kSscMsgClientDisableReq=10;
 static constexpr uint32_t kSscMsgSuidReq=512;
 static constexpr uint32_t kSscMsgStdSensorConfig=513;
@@ -104,12 +105,20 @@ static bool buildRatePayload(float hz,Bytes& payload){
  payload={13};le(payload,bits,4);
  return true;
 }
-static bool buildRequestPacket(const Bytes& targetUid,uint32_t msg,const Bytes& data,uint8_t deliveryType,uint16_t txn,Bytes& packet){
+static bool buildRequestPacket(const Bytes& targetUid,uint32_t msg,const Bytes& data,uint8_t deliveryType,uint16_t txn,Bytes& packet,uint32_t batchPeriodUs=0){
  if(targetUid.empty())return false;
  Bytes pb=blob(1,targetUid);
  pb.push_back(0x15);le(pb,msg,4);
  append(pb,blob(3,{8,1,16,deliveryType}));
- append(pb,data.empty()?blob(4,{}):blob(4,blob(2,data)));
+ Bytes req;
+ if(batchPeriodUs>0){
+  Bytes bs;
+  var(bs,1*8+0);var(bs,batchPeriodUs);
+  var(bs,2*8+0);var(bs,batchPeriodUs);
+  append(req,blob(1,bs));
+ }
+ if(!data.empty())append(req,blob(2,data));
+ append(pb,blob(4,req));
  Bytes body{1};le(body,pb.size()+2,2);le(body,pb.size(),2);append(body,pb);append(body,{16,1,0,1});
  if(body.size()>UINT16_MAX)return false;
  packet={0};le(packet,txn,2);le(packet,0x20,2);le(packet,body.size(),2);append(packet,body);
@@ -163,38 +172,27 @@ void SscSensor::drain(int quietMs){
  if(fd<0)return;
  for(int i=0;i<32;i++){
   int remaining=quietMs;
-  int64_t deadline=quietMs>0?now()+int64_t(quietMs)*1000000:0;
-  int pr=0;
-  while(true){
-   pollfd p{fd,POLLIN,0};
-   pr=poll(&p,1,remaining);
-   if(pr<0&&errno==EINTR){
-    if(quietMs<=0)continue;
-    int64_t left=(deadline-now()+999999)/1000000;
-    if(left<=0){pr=0;break;}
-    remaining=int(left);
-    continue;
-   }
-   if(pr==1&&(p.revents&(POLLERR|POLLHUP|POLLNVAL))){closeRaw();return;}
-   break;
-  }
+  pollfd p{fd,POLLIN,0};
+  int pr=poll(&p,1,remaining);
+  if(pr<0&&errno==EINTR)continue;
   if(pr!=1)break;
+  if(p.revents&(POLLERR|POLLHUP|POLLNVAL)){closeRaw();break;}
+  if(!(p.revents&POLLIN))break;
   uint8_t buf[65536];sockaddr_qrtr from{};socklen_t len=sizeof(from);
   ssize_t n=recvfrom(fd,buf,sizeof(buf),MSG_DONTWAIT|MSG_TRUNC,reinterpret_cast<sockaddr*>(&from),&len);
   if(n<=0)break;
-  if(n<=ssize_t(sizeof(buf))&&len==sizeof(from)&&port!=QRTR_PORT_CTRL&&from.sq_node==localNode&&from.sq_port==QRTR_PORT_CTRL){
+  if(port!=QRTR_PORT_CTRL&&len==sizeof(from)&&from.sq_node==localNode&&from.sq_port==QRTR_PORT_CTRL&&n<=ssize_t(sizeof(buf))){
    Bytes pkt(buf,buf+n);
-   if(isPeerDownCtrl(pkt,node,port)){closeRaw();return;}
+   if(isPeerDownCtrl(pkt,node,port)){closeRaw();break;}
   }
+  quietMs=0;
  }
 }
 bool SscSensor::disable(int timeoutMs){
- if(fd<0){streaming=false;pending.clear();timeSet=false;return false;}
- if(!streaming||uid.empty()){streaming=false;pending.clear();timeSet=false;drain(0);return true;}
+ if(fd<0||uid.empty()){streaming=false;pending.clear();timeSet=false;return false;}
+ uint16_t txn=transaction+1;
  if(!send(kSscMsgClientDisableReq,{},kSscDeliveryWakeup)){closeRaw();return false;}
- const uint16_t txn=transaction;
- bool acked=false;Bytes packet;
- const int64_t deadline=now()+int64_t(std::max(1,timeoutMs))*1000000;
+ Bytes packet;bool acked=false;int64_t deadline=now()+int64_t(std::max(1,timeoutMs))*1000000;
  while(now()<deadline&&fd>=0){
   int waitMs=int(std::min<int64_t>(50,std::max<int64_t>(1,(deadline-now()+999999)/1000000)));
   if(!receive(packet,waitMs))continue;
@@ -210,17 +208,19 @@ void SscSensor::close(bool quiesce){
  if(fd>=0)drain(0);
  closeRaw();
 }
-bool SscSensor::receive(Bytes& b,int timeoutMs){
+bool SscSensor::receive(Bytes& b,int timeoutMs,int wakeFd){
  if(fd<0)return false;
  int64_t deadline=timeoutMs>0?now()+int64_t(timeoutMs)*1000000:0;
  while(true){
   int wait=timeoutMs<=0?timeoutMs:int(std::max<int64_t>(1,(deadline-now()+999999)/1000000));
-  pollfd p{fd,POLLIN,0};
-  int pr=poll(&p,1,wait);
+  pollfd pfds[2]={{fd,POLLIN,0},{wakeFd,POLLIN,0}};
+  nfds_t nfds=wakeFd>=0?2:1;
+  int pr=poll(pfds,nfds,wait);
   if(pr<0&&errno==EINTR){if(timeoutMs>0&&now()>=deadline)return false;continue;}
-  if(pr!=1)return false;
-  if(p.revents&(POLLERR|POLLHUP|POLLNVAL)){closeRaw();return false;}
-  if(!(p.revents&POLLIN))return false;
+  if(pr<=0)return false;
+  if(wakeFd>=0&&(pfds[1].revents&(POLLIN|POLLERR|POLLHUP)))return false;
+  if(pfds[0].revents&(POLLERR|POLLHUP|POLLNVAL)){closeRaw();return false;}
+  if(!(pfds[0].revents&POLLIN))return false;
   break;
  }
  uint8_t buf[65536];sockaddr_qrtr from{};socklen_t len=sizeof(from);
@@ -234,9 +234,9 @@ bool SscSensor::receive(Bytes& b,int timeoutMs){
  if(from.sq_node!=node||from.sq_port!=port)return false;
  b=std::move(pkt);return true;
 }
-bool SscSensor::send(uint32_t msg,const Bytes&data,uint8_t deliveryType){
+bool SscSensor::send(uint32_t msg,const Bytes&data,uint8_t deliveryType,uint32_t batchPeriodUs){
  Bytes packet;
- if(fd<0||!buildRequestPacket(uid,msg,data,deliveryType,++transaction,packet))return false;
+ if(fd<0||!buildRequestPacket(uid,msg,data,deliveryType,++transaction,packet,batchPeriodUs))return false;
  sockaddr_qrtr dst{AF_QIPCRTR,node,port};
  return sendto(fd,packet.data(),packet.size(),0,reinterpret_cast<sockaddr*>(&dst),sizeof(dst))==ssize_t(packet.size());
 }
@@ -277,16 +277,28 @@ SscProbeResult SscSensor::openInternal(int timeoutMs){
 }
 bool SscSensor::open(int timeoutMs){return openInternal(timeoutMs)==SscProbeResult::Found;}
 SscProbeResult SscSensor::probe(int timeoutMs){SscProbeResult r=openInternal(timeoutMs);close();return r;}
-bool SscSensor::rate(float hz){
+bool SscSensor::configure(float hz,uint32_t batchPeriodUs){
  Bytes payload;
  if(fd<0||!buildRatePayload(hz,payload))return false;
- if(!send(kSscMsgStdSensorConfig,payload,kSscDeliveryNoWakeup))return false;
+ if(!send(kSscMsgStdSensorConfig,payload,kSscDeliveryNoWakeup,batchPeriodUs))return false;
  streaming=true;return true;
+}
+bool SscSensor::rate(float hz){return configure(hz,0);}
+bool SscSensor::flush(){
+ if(fd<0||!streaming||uid.empty())return false;
+ return send(kSscMsgStdFlushReq,{},kSscDeliveryWakeup,0);
 }
 int SscSensor::read(SscSample&out,int timeoutMs){
  if(!pending.empty()){out=pending.front();pending.erase(pending.begin());return 1;}
  Bytes packet;if(fd<0||!receive(packet,timeoutMs))return fd<0?-1:0;
  if(!parseSamplePacket(packet,uid,pending,timeOffset,timeSet,now()))return 0;
  out=pending.front();pending.erase(pending.begin());return 1;
+}
+int SscSensor::readBatch(std::vector<SscSample>&out,int timeoutMs,int wakeFd){
+ out.clear();
+ if(!pending.empty()){out.swap(pending);return int(out.size());}
+ Bytes packet;if(fd<0||!receive(packet,timeoutMs,wakeFd))return fd<0?-1:0;
+ if(!parseSamplePacket(packet,uid,out,timeOffset,timeSet,now()))return 0;
+ return int(out.size());
 }
 }

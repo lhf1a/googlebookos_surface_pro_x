@@ -191,6 +191,12 @@ def ensure_venus_source_hooks(directory):
         sleep_fix = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(sleep_fix)
         changed.extend(sleep_fix.apply(directory))
+        if (directory / 'core.c').is_file() and (directory / 'hfi.c').is_file():
+            rtpm_spec = importlib.util.spec_from_file_location(
+                'venus_runtime_pm', Path(__file__).with_name('patch-sq2-venus-runtime-pm.py'))
+            rtpm = importlib.util.module_from_spec(rtpm_spec)
+            rtpm_spec.loader.exec_module(rtpm)
+            changed.extend(rtpm.apply(directory))
     return {'directory': str(directory), 'updated_headers': changed}
 
 

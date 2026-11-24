@@ -9,8 +9,17 @@ static int sq2_avc_caps_get(char *buf, const struct kernel_param *kp)
  u32 codec = kp->arg ? *(const u32 *)kp->arg : HFI_VIDEO_CODEC_H264;
  if (!core) return -ENODATA;
  mutex_lock(&core->pm_lock);
+#ifdef SQ2_VENUS_SYSTEM_PM
+ mutex_lock(&core->sq2_pm_mutex);
+#endif
  mutex_lock(&core->lock);
- if (core->state != CORE_INIT || test_bit(0, &core->sys_error)) { n = -EIO; goto done; }
+ if (test_bit(0, &core->sys_error) ||
+#ifdef SQ2_VENUS_SYSTEM_PM
+     (core->state != CORE_INIT && core->sq2_system_pm.phase != SQ2_PM_OFF)
+#else
+     core->state != CORE_INIT
+#endif
+     ) { n = -EIO; goto done; }
  c = venus_caps_by_codec(core, codec, VIDC_SESSION_TYPE_DEC);
  if (!c || !c->num_pl || !c->num_caps) { n = -ENODATA; goto done; }
  #define EMIT(...) do { int k = snprintf(buf+n, PAGE_SIZE-n, __VA_ARGS__); \
@@ -24,6 +33,9 @@ static int sq2_avc_caps_get(char *buf, const struct kernel_param *kp)
  #undef EMIT
 done:
  mutex_unlock(&core->lock);
+#ifdef SQ2_VENUS_SYSTEM_PM
+ mutex_unlock(&core->sq2_pm_mutex);
+#endif
  mutex_unlock(&core->pm_lock);
  return n;
 }

@@ -53,6 +53,15 @@ class SpxPowerhintTests(unittest.TestCase):
             self.assertGreaterEqual(act["Duration"], 0)
             seen_hints.add(act["PowerHint"])
 
+        # EXPENSIVE_RENDERING fires continuously during desktop RenderEngine/blur composition;
+        # keep TopAppUclampMin below SC8180X Silver core 80% EAS misfit ceiling (~26% of 337 cap).
+        exp_min = [
+            act["Value"]
+            for act in cfg["Actions"]
+            if act["PowerHint"] == "EXPENSIVE_RENDERING" and act["Node"] == "TopAppUclampMin"
+        ]
+        self.assertEqual(exp_min, ["15"])
+
         for req_hint in (
             "INTERACTION",
             "LAUNCH",

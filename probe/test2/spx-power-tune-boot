@@ -1,0 +1,127 @@
+#!/bin/busybox sh
+# Portable one-shot power tuning helper for Surface Pro X (SQ1 / SQ2).
+# - Enables NVMe APST via pm_qos_latency_tolerance_us (default 25000 us = 25 ms,
+#   allowing PS3/PS4 autonomous idle states without changing EFI command-line baselines).
+# - Enables runtime PM ("auto") on host-only Qualcomm dwc3 USB3 controllers so idle
+#   USB host controllers and xHCI instances suspend cleanly without disturbing the
+#   dual-role OTG USB-C controller managed by spx-lower-usb-watch.
+set -eu
+export PATH="${SQ2_TEST_PATH:-/bin:/sbin}"
+cmdline_file="${SQ2_CMDLINE:-/proc/cmdline}"
+cmdline=" $(cat "$cmdline_file" 2>/dev/null || true) "
+case "$cmdline" in
+    *" sq2.rescue=1 "*) exit 0 ;;
+esac
+
+lock_dir="${SQ2_POWER_TUNE_LOCK:-/run/spx-power-tune-lock}"
+mkdir "$lock_dir" 2>/dev/null || exit 0
+trap "rmdir \"$lock_dir\"" EXIT
+
+android() { timeout 120 nsenter -t 1 -m -r -- /system/bin/"$@"; }
+if [ "${SQ2_POWER_TUNE_SKIP_BOOT_WAIT:-0}" != 1 ]; then
+    for n in $(seq 1 "${SQ2_BOOT_POLL_RETRIES:-300}"); do
+        [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = 1 ] && break
+        sleep "${SQ2_BOOT_POLL_SLEEP:-1}"
+    done
+    [ "$(android getprop sys.boot_completed 2>/dev/null || true)" = 1 ] || exit 1
+fi
+
+sys_root="${SQ2_SYS_ROOT:-/sys}"
+
+tune_nvme_apst() {
+    case "$cmdline" in
+        *" sq2.nvme_apst=0 "*)
+            echo "NVME_APST_DISABLED_BY_CMDLINE"
+            return 0
+            ;;
+    esac
+    target="${SQ2_NVME_APST_LATENCY_US:-25000}"
+    case "$target" in
+        ""|*[!0-9]*) return 0 ;;
+    esac
+    [ "$target" -gt 0 ] || return 0
+    for ctrl in "$sys_root"/class/nvme/nvme*; do
+        [ -d "$ctrl" ] || continue
+        qos="$ctrl/power/pm_qos_latency_tolerance_us"
+        [ -w "$qos" ] || continue
+        cur="$(tr -d "\r\n " < "$qos" 2>/dev/null || true)"
+        if [ "$cur" = "$target" ]; then
+            continue
+        fi
+        # Only raise from disabled (0 / n/a) so explicit runtime overrides are respected.
+        if [ -z "$cur" ] || [ "$cur" = 0 ] || [ "$cur" = "n/a" ]; then
+            if printf "%s\n" "$target" > "$qos" 2>/dev/null; then
+                echo "NVME_APST_ENABLED:${ctrl##*/}:${target}us"
+            else
+                echo "NVME_APST_SKIPPED:${ctrl##*/}"
+            fi
+        fi
+    done
+}
+
+set_ctrl_auto() {
+    _p="$1"
+    [ -w "$_p" ] || return 0
+    _cur="$(tr -d "\r\n " < "$_p" 2>/dev/null || true)"
+    [ "$_cur" = auto ] && return 0
+    printf "auto\n" > "$_p" 2>/dev/null || return 1
+    return 0
+}
+
+tune_usb_host_rpm() {
+    case "$cmdline" in
+        *" sq2.usb_rpm=0 "*)
+            echo "USB_RPM_DISABLED_BY_CMDLINE"
+            return 0
+            ;;
+    esac
+    for drv_dir in \
+        "$sys_root/bus/platform/drivers/dwc3-qcom-legacy" \
+        "$sys_root/bus/platform/drivers/dwc3-qcom"; do
+        [ -d "$drv_dir" ] || continue
+        for wrap in "$drv_dir"/*; do
+            [ -d "$wrap" ] || continue
+            wrap_name="${wrap##*/}"
+            case "$wrap_name" in
+                module|uevent|bind|unbind) continue ;;
+            esac
+            [ -f "$wrap/power/control" ] || continue
+            wrap_wake="$(tr -d "\r\n " < "$wrap/power/wakeup" 2>/dev/null || true)"
+            [ "$wrap_wake" = enabled ] || continue
+
+            # Inspect child dwc3 node(s): only touch host-only controllers (dr_mode=host)
+            # so dual-role OTG/ADB controllers (dr_mode=otg) stay untouched.
+            found_host=0
+            skip_otg=0
+            for child in "$wrap"/*; do
+                [ -d "$child/power" ] || continue
+                [ -f "$child/of_node/dr_mode" ] || continue
+                dr_mode="$(tr -d "\000\r\n " < "$child/of_node/dr_mode" 2>/dev/null || true)"
+                if [ "$dr_mode" = host ]; then
+                    found_host=1
+                else
+                    skip_otg=1
+                fi
+            done
+            [ "$found_host" = 1 ] && [ "$skip_otg" = 0 ] || continue
+
+            for child in "$wrap"/*; do
+                [ -d "$child/power" ] || continue
+                [ -f "$child/of_node/dr_mode" ] || continue
+                for xhci in "$child"/xhci-hcd.*.auto; do
+                    [ -d "$xhci/power" ] || continue
+                    set_ctrl_auto "$xhci/power/control" || true
+                done
+                set_ctrl_auto "$child/power/control" || true
+            done
+            if set_ctrl_auto "$wrap/power/control"; then
+                echo "USB_HOST_RPM_AUTO:${wrap_name}"
+            else
+                echo "USB_HOST_RPM_SKIPPED:${wrap_name}"
+            fi
+        done
+    done
+}
+
+tune_nvme_apst
+tune_usb_host_rpm

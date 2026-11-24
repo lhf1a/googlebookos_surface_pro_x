@@ -12,9 +12,15 @@
 static struct venus_core *sq2_pm_status_core;
 #include "venus-sq2-avc-export.h"
 static const char *sq2_pm_stage = "probe";
+static bool sq2_runtime_pm = true;
+module_param(sq2_runtime_pm, bool, 0644);
 static void venus_sq2_pm_publish(struct venus_core *core)
 {
  WRITE_ONCE(sq2_pm_status_core, core);
+ if (core && core->sq2_pm_enabled) {
+  pm_runtime_mark_last_busy(core->dev);
+  pm_runtime_autosuspend(core->dev);
+ }
 }
 static int venus_sq2_pm_status_get(char *buf, const struct kernel_param *kp)
 {
@@ -23,18 +29,22 @@ static int venus_sq2_pm_status_get(char *buf, const struct kernel_param *kp)
  (void)kp;
  if (!core) return scnprintf(buf, PAGE_SIZE, "unpublished\n");
  mutex_lock(&core->pm_lock);
+ mutex_lock(&core->sq2_pm_mutex);
  mutex_lock(&core->lock);
  mutex_lock(&core->sq2_retire_lock);
  n = scnprintf(buf, PAGE_SIZE,
-  "stage=%s phase=%u error=%d sys_error=%d core_state=%u hfi_error=%u fw_owner=%d secure=%d no_tz=%d hfi=%d dma_stopped=%d insts=%d vb2_bytes=%llu stops=%lu starts=%lu\n",
+  "stage=%s phase=%u error=%d sys_error=%d core_state=%u hfi_error=%u fw_owner=%d secure=%d no_tz=%d hfi=%d dma_stopped=%d insts=%d vb2_bytes=%llu stops=%lu starts=%lu rtpm=%d rt_sus=%d rt_stops=%lu rt_starts=%lu\n",
   READ_ONCE(sq2_pm_stage), core->sq2_system_pm.phase, core->sq2_system_pm.error,
   !!test_bit(0, &core->sys_error), core->state, core->error,
   !!core->sq2_fw_owner, core->sq2_secure_active, core->sq2_no_tz_active,
   !!core->priv, core->sq2_dma_stopped, atomic_read(&core->insts_count),
   (unsigned long long)core->sq2_vb2_bytes,
-  core->sq2_system_pm.stops, core->sq2_system_pm.starts);
+  core->sq2_system_pm.stops, core->sq2_system_pm.starts,
+  !!READ_ONCE(sq2_runtime_pm), core->sq2_runtime_suspended,
+  core->sq2_rt_stops, core->sq2_rt_starts);
  mutex_unlock(&core->sq2_retire_lock);
  mutex_unlock(&core->lock);
+ mutex_unlock(&core->sq2_pm_mutex);
  mutex_unlock(&core->pm_lock);
  return n;
 }
@@ -176,15 +186,103 @@ fail:
 static const struct sq2_system_pm_ops venus_sq2_system_ops = {
  .idle = venus_sq2_pm_idle, .stop = venus_sq2_pm_stop, .start = venus_sq2_pm_start,
 };
+/* Runtime PM callbacks serialize on sq2_pm_mutex (strictly inside pm_lock,
+ * outside core->lock/sq2_retire_lock) so child vdec_pm_get/venc_pm_get holding
+ * pm_lock can synchronously resume parent core->dev without self-deadlock. */
+static __maybe_unused int venus_sq2_runtime_suspend(struct device *dev)
+{
+ struct venus_core *core = dev_get_drvdata(dev);
+ int ret, pd_ret;
+ if (!READ_ONCE(sq2_runtime_pm))
+  return -EBUSY;
+ mutex_lock(&core->sq2_pm_mutex);
+ if (core->sq2_runtime_suspended) {
+  mutex_unlock(&core->sq2_pm_mutex);
+  return 0;
+ }
+ if (!core->sq2_no_tz_active && core->sq2_system_pm.phase == SQ2_PM_RUNNING) {
+  /* Keep TZ-mode boots resident cleanly without poisoning runtime_error. */
+  mutex_unlock(&core->sq2_pm_mutex);
+  return -EBUSY;
+ }
+ ret = sq2_system_pm_suspend(&core->sq2_system_pm, &venus_sq2_system_ops, core);
+ if (ret) {
+  if (core->sq2_system_pm.phase == SQ2_PM_BROKEN)
+   set_bit(0, &core->sys_error);
+  else if (ret == -EOPNOTSUPP)
+   ret = -EBUSY;
+  mutex_unlock(&core->sq2_pm_mutex);
+  return ret;
+ }
+ pd_ret = venus_sq2_pm_result(core, "rt:domains-put",
+  sq2_venus_platform_domains_put(core->sq2_platform));
+ if (pd_ret) {
+  core->sq2_system_pm.error = pd_ret;
+  core->sq2_system_pm.phase = SQ2_PM_BROKEN;
+  set_bit(0, &core->sys_error);
+  mutex_unlock(&core->sq2_pm_mutex);
+  return pd_ret;
+ }
+ core->sq2_runtime_suspended = true;
+ core->sq2_rt_stops++;
+ WRITE_ONCE(sq2_pm_stage, "rt:suspended");
+ mutex_unlock(&core->sq2_pm_mutex);
+ return 0;
+}
+static __maybe_unused int venus_sq2_runtime_resume(struct device *dev)
+{
+ struct venus_core *core = dev_get_drvdata(dev);
+ int ret;
+ mutex_lock(&core->sq2_pm_mutex);
+ if (test_bit(0, &core->sys_error) || core->sq2_system_pm.phase == SQ2_PM_BROKEN) {
+  ret = core->sq2_system_pm.error ? core->sq2_system_pm.error : -EIO;
+  mutex_unlock(&core->sq2_pm_mutex);
+  return ret;
+ }
+ if (!core->sq2_runtime_suspended) {
+  mutex_unlock(&core->sq2_pm_mutex);
+  return 0;
+ }
+ ret = venus_sq2_pm_result(core, "rt:domains-get",
+  sq2_venus_platform_domains_get(core->sq2_platform));
+ if (ret) {
+  core->sq2_system_pm.error = ret;
+  core->sq2_system_pm.phase = SQ2_PM_BROKEN;
+  set_bit(0, &core->sys_error);
+  mutex_unlock(&core->sq2_pm_mutex);
+  return ret;
+ }
+ ret = sq2_system_pm_resume(&core->sq2_system_pm, &venus_sq2_system_ops, core);
+ if (ret) {
+  if (core->sq2_system_pm.phase == SQ2_PM_BROKEN)
+   set_bit(0, &core->sys_error);
+  sq2_venus_platform_domains_put(core->sq2_platform);
+  mutex_unlock(&core->sq2_pm_mutex);
+  return ret;
+ }
+ core->sq2_runtime_suspended = false;
+ core->sq2_rt_starts++;
+ mutex_unlock(&core->sq2_pm_mutex);
+ return 0;
+}
 static __maybe_unused int venus_sq2_system_suspend(struct device *dev)
 {
  struct venus_core *core = dev_get_drvdata(dev);
  int ret;
  if (!IS_SQ2_HFI(core)) return pm_runtime_force_suspend(dev);
  mutex_lock(&core->pm_lock);
+ mutex_lock(&core->sq2_pm_mutex);
+ if (core->sq2_runtime_suspended) {
+  ret = core->sq2_system_pm.phase == SQ2_PM_BROKEN ?
+   core->sq2_system_pm.error : 0;
+  mutex_unlock(&core->sq2_pm_mutex);
+  mutex_unlock(&core->pm_lock);
+  return ret;
+ }
  ret = sq2_system_pm_suspend(&core->sq2_system_pm, &venus_sq2_system_ops, core);
  if (ret && core->sq2_system_pm.phase == SQ2_PM_BROKEN)
   set_bit(0, &core->sys_error);
+ mutex_unlock(&core->sq2_pm_mutex);
  mutex_unlock(&core->pm_lock);
  return ret;
 }
@@ -194,7 +292,17 @@ static __maybe_unused int venus_sq2_system_resume(struct device *dev)
  int ret;
  if (!IS_SQ2_HFI(core)) return pm_runtime_force_resume(dev);
  mutex_lock(&core->pm_lock);
+ mutex_lock(&core->sq2_pm_mutex);
+ if (core->sq2_runtime_suspended) {
+  /* Stay lazily SQ2_PM_OFF across s2idle wake; demand-resume on next open. */
+  ret = core->sq2_system_pm.phase == SQ2_PM_BROKEN ?
+   core->sq2_system_pm.error : 0;
+  mutex_unlock(&core->sq2_pm_mutex);
+  mutex_unlock(&core->pm_lock);
+  return ret;
+ }
  ret = sq2_system_pm_resume(&core->sq2_system_pm, &venus_sq2_system_ops, core);
+ mutex_unlock(&core->sq2_pm_mutex);
  mutex_unlock(&core->pm_lock);
  return ret;
 }

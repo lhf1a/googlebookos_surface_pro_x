@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <fstream>
 #include <mutex>
+#include <sys/eventfd.h>
 #include <thread>
 #include <time.h>
 #include <unistd.h>
@@ -34,9 +35,36 @@ static std::string findNamed(const char* root,const std::string& name){
  }
  closedir(d);return found;
 }
+static uint32_t computeSscBatchUs(int64_t periodNs,int64_t latencyNs,float minHz){
+ uint64_t latUs=latencyNs>0?uint64_t(std::min<int64_t>(latencyNs,5000000000LL)/1000):0;
+ int64_t minPeriodNs=int64_t(1e9/double(minHz));
+ uint64_t rateBatchUs=0;
+ if(periodNs>minPeriodNs+10000000LL){
+  rateBatchUs=uint64_t((periodNs-5000000LL)/1000);
+ }
+ return uint32_t(std::min<uint64_t>(std::max(latUs,rateBatchUs),5000000ULL));
+}
+static bool isLightSteady(float prevLux,float curLux){
+ if(!std::isfinite(prevLux)||!std::isfinite(curLux))return false;
+ float tol=std::max(1.0f,std::fabs(prevLux)*0.05f);
+ return std::fabs(curLux-prevLux)<=tol;
+}
+static int64_t computeLightPollDelayNs(int64_t periodNs,int steadyCount){
+ int64_t base=std::max<int64_t>(periodNs,500000000LL);
+ if(steadyCount>=6)return std::min<int64_t>(base*4,2000000000LL);
+ if(steadyCount>=3)return std::min<int64_t>(base*2,2000000000LL);
+ return base;
+}
 class SurfaceSensors final:public ISensorsSubHal {
  static constexpr int kSensorCount=4;
- struct State {bool available=false,enabled=false;int flushes=0;int64_t period=40000000;uint64_t generation=0;};
+ struct State {
+  bool available=false,enabled=false;
+  int flushes=0;
+  int64_t period=40000000;
+  int64_t latency=0;
+  uint64_t generation=0;
+  uint64_t configRev=0;
+ };
  struct SscConfig {const char* dataType;v2::SensorType type;float minHz;float maxHz;};
  static const SscConfig& sscConfig(int index){
   static constexpr SscConfig kAccel{"accel",v2::SensorType::ACCELEROMETER,26.f,52.f};
@@ -45,6 +73,7 @@ class SurfaceSensors final:public ISensorsSubHal {
   return index==2?kGyro:index==3?kMag:kAccel;
  }
  State state[kSensorCount];
+ int wakeFd[kSensorCount]{-1,-1,-1,-1};
  std::mutex mutex;
  std::condition_variable changed;
  sp<IHalProxyCallback> callback;
@@ -60,10 +89,26 @@ class SurfaceSensors final:public ISensorsSubHal {
   auto status=textFile(slpiPath+"/state");
   return status=="attached"||status=="running";
  }
- void postLocked(int index,const v2::Event* value){
+ void signalWorker(int index){
+  if(index>=0&&index<kSensorCount&&wakeFd[index]>=0){
+   uint64_t one=1;
+   ssize_t n=::write(wakeFd[index],&one,sizeof(one));
+   (void)n;
+  }
+ }
+ void signalAllWorkers(){
+  for(int i=0;i<kSensorCount;i++)signalWorker(i);
+ }
+ void drainWake(int index){
+  if(index>=0&&index<kSensorCount&&wakeFd[index]>=0){
+   uint64_t val=0;
+   while(::read(wakeFd[index],&val,sizeof(val))>0){}
+  }
+ }
+ void postBatchLocked(int index,std::vector<v2::Event>& events,int completeFlushes){
   if(!callback||!state[index].enabled)return;
-  std::vector<v2::Event> events;if(value)events.push_back(*value);
-  while(state[index].flushes){
+  int emit=std::min(state[index].flushes,std::max(0,completeFlushes));
+  for(int i=0;i<emit;i++){
    v2::Event e{};e.sensorHandle=index+1;e.sensorType=v2::SensorType::META_DATA;
    e.u.meta.what=v1::MetaDataEventType::META_DATA_FLUSH_COMPLETE;
    events.push_back(e);state[index].flushes--;
@@ -83,15 +128,23 @@ class SurfaceSensors final:public ISensorsSubHal {
   const bool isLight=index==1;
   const SscConfig& cfg=sscConfig(index);
   spx::SscSensor ssc(cfg.dataType);
-  bool connected=false,activeStream=false;int64_t configured=0,lastSent=0;
-  float lastLight=NAN;uint64_t generation=UINT64_MAX;
+  bool connected=false,activeStream=false;
+  int64_t configuredPeriod=0,lastSent=0;
+  uint32_t configuredBatchUs=UINT32_MAX;
+  float lastLight=NAN;
+  int lightSteadyCount=0;
+  uint64_t generation=UINT64_MAX;
+  uint64_t configRev=UINT64_MAX;
+  std::vector<spx::SscSample> batchSamples;
+  std::vector<v2::Event> outEvents;
   while(true){
-   int64_t period;
+   int64_t period,latency;
+   int pendingFlushes=0;
    {
     std::unique_lock lock(mutex);
     if(quitting)break;
     if(!state[index].enabled){
-     lastLight=NAN;lastSent=0;configured=0;
+     lastLight=NAN;lightSteadyCount=0;lastSent=0;configuredPeriod=0;configuredBatchUs=UINT32_MAX;
      if(!isLight&&activeStream){
       lock.unlock();
       if(slpiAlive())connected=ssc.disable(250);
@@ -101,10 +154,12 @@ class SurfaceSensors final:public ISensorsSubHal {
       continue;
      }
      changed.wait(lock,[&]{return quitting||state[index].enabled;});
+     drainWake(index);
      continue;
     }
     if(generation!=state[index].generation){
-     generation=state[index].generation;configured=0;lastLight=NAN;lastSent=0;
+     generation=state[index].generation;configuredPeriod=0;configuredBatchUs=UINT32_MAX;
+     lastLight=NAN;lightSteadyCount=0;lastSent=0;
      if(!isLight&&activeStream){
       lock.unlock();
       if(slpiAlive())connected=ssc.disable(250);
@@ -114,28 +169,48 @@ class SurfaceSensors final:public ISensorsSubHal {
       continue;
      }
     }
+    if(configRev!=state[index].configRev){
+     configRev=state[index].configRev;
+     lightSteadyCount=0;
+    }
     period=state[index].period;
+    latency=state[index].latency;
+    pendingFlushes=state[index].flushes;
+    drainWake(index);
    }
-   v2::Event event{};event.sensorHandle=index+1;bool valid=false;
+   outEvents.clear();
    if(!isLight){
     if(!slpiAlive()){
      if(connected||ssc.isOpen())ssc.close(false);
-     connected=false;activeStream=false;configured=0;
+     connected=false;activeStream=false;configuredPeriod=0;configuredBatchUs=UINT32_MAX;
     }else{
-     if(!connected){connected=ssc.open();configured=0;activeStream=false;}
-     if(connected&&configured!=period){
-      if(ssc.rate(std::clamp(1e9f/period,cfg.minHz,cfg.maxHz))){configured=period;activeStream=true;}
-      else{ssc.close(slpiAlive());connected=false;activeStream=false;configured=0;}
+     if(!connected){connected=ssc.open();configuredPeriod=0;configuredBatchUs=UINT32_MAX;activeStream=false;}
+     uint32_t wantBatchUs=computeSscBatchUs(period,latency,cfg.minHz);
+     if(connected&&(configuredPeriod!=period||configuredBatchUs!=wantBatchUs)){
+      if(ssc.configure(std::clamp(1e9f/period,cfg.minHz,cfg.maxHz),wantBatchUs)){
+       configuredPeriod=period;configuredBatchUs=wantBatchUs;activeStream=true;
+      }else{
+       ssc.close(slpiAlive());connected=false;activeStream=false;configuredPeriod=0;configuredBatchUs=UINT32_MAX;
+      }
+     }
+     if(connected&&pendingFlushes>0&&configuredBatchUs>0){
+      ssc.flush();
      }
      if(connected){
-      spx::SscSample sample{};
-      int result=ssc.read(sample,100);
-      if(result<0){ssc.close(slpiAlive());connected=false;activeStream=false;configured=0;}
+      int waitMs=configuredBatchUs>0?std::min<int>(int(configuredBatchUs/1000)+500,5000):2000;
+      if(pendingFlushes>0)waitMs=50;
+      int result=ssc.readBatch(batchSamples,waitMs,wakeFd[index]);
+      if(result<0){ssc.close(slpiAlive());connected=false;activeStream=false;configuredPeriod=0;configuredBatchUs=UINT32_MAX;}
       if(result>0){
-       if(!lastSent||sample.timestamp-lastSent>=period-1000000){
-        event.sensorType=cfg.type;event.timestamp=sample.timestamp;
-        event.u.vec3={sample.xyz[0],sample.xyz[1],sample.xyz[2],v1::SensorStatus(sample.accuracy)};
-        valid=true;lastSent=sample.timestamp;
+       for(const auto& sample:batchSamples){
+        if(!lastSent||sample.timestamp-lastSent>=period-1000000){
+         v2::Event event{};
+         event.sensorHandle=index+1;
+         event.sensorType=cfg.type;event.timestamp=sample.timestamp;
+         event.u.vec3={sample.xyz[0],sample.xyz[1],sample.xyz[2],v1::SensorStatus(sample.accuracy)};
+         outEvents.push_back(event);
+         lastSent=sample.timestamp;
+        }
        }
       }
      }
@@ -143,21 +218,37 @@ class SurfaceSensors final:public ISensorsSubHal {
    }else{
     float lux;
     if(light(lux)){
-     event.sensorType=v2::SensorType::LIGHT;event.timestamp=bootTime();event.u.scalar=lux;
-     valid=!std::isfinite(lastLight)||lux!=lastLight;lastLight=lux;
+     if(isLightSteady(lastLight,lux))lightSteadyCount=std::min(lightSteadyCount+1,16);
+     else lightSteadyCount=0;
+     if(!std::isfinite(lastLight)||lux!=lastLight){
+      v2::Event event{};
+      event.sensorHandle=index+1;
+      event.sensorType=v2::SensorType::LIGHT;event.timestamp=bootTime();event.u.scalar=lux;
+      outEvents.push_back(event);
+     }
+     lastLight=lux;
+    }else{
+     lightSteadyCount=0;
     }
    }
    std::unique_lock lock(mutex);
-   if(state[index].generation==generation)postLocked(index,valid?&event:nullptr);
+   if(state[index].generation==generation){
+    int completeFlushes=(isLight||!connected||configuredBatchUs==0)?state[index].flushes:pendingFlushes;
+    postBatchLocked(index,outEvents,completeFlushes);
+   }
    if(isLight||!connected){
-    int64_t delay=isLight?std::max<int64_t>(period,500000000):1000000000;
-    changed.wait_for(lock,std::chrono::nanoseconds(delay),[&]{return quitting||!state[index].enabled||state[index].generation!=generation;});
+    int64_t delay=isLight?computeLightPollDelayNs(period,lightSteadyCount):1000000000LL;
+    changed.wait_for(lock,std::chrono::nanoseconds(delay),[&]{
+     return quitting||!state[index].enabled||state[index].generation!=generation||
+            state[index].configRev!=configRev||state[index].flushes>0;
+    });
    }
   }
   if(!isLight&&ssc.isOpen())ssc.close(slpiAlive());
  }
  public:
  SurfaceSensors(){
+  for(int i=0;i<kSensorCount;i++)wakeFd[i]=eventfd(0,EFD_NONBLOCK|EFD_CLOEXEC);
   slpiPath=findNamed("/sys/class/remoteproc","slpi");
   const bool slpiReady=slpiAlive();
   state[0].available=slpiReady;
@@ -185,6 +276,7 @@ class SurfaceSensors final:public ISensorsSubHal {
     s.type=v2::SensorType::ACCELEROMETER;s.typeAsString="android.sensor.accelerometer";
     s.maxRange=78.4532f;s.resolution=0.0023941f;s.power=0.17f;
     s.minDelay=20000;s.maxDelay=1000000;s.flags=0;
+    s.fifoReservedEventCount=64;s.fifoMaxEventCount=256;
    }else if(i==1){
     s.name="Surface TCS3430 Light";s.vendor="ams OSRAM";
     s.type=v2::SensorType::LIGHT;s.typeAsString="android.sensor.light";
@@ -195,24 +287,30 @@ class SurfaceSensors final:public ISensorsSubHal {
     s.type=v2::SensorType::GYROSCOPE;s.typeAsString="android.sensor.gyroscope";
     s.maxRange=34.9066f;s.resolution=0.0010653f;s.power=0.55f;
     s.minDelay=20000;s.maxDelay=1000000;s.flags=0;
+    s.fifoReservedEventCount=64;s.fifoMaxEventCount=256;
    }else{
-    s.name="Surface AK0991x Magnetometer";s.vendor="AKM";
+    s.name="Surface AK0991X Magnetometer";s.vendor="AKM";
     s.type=v2::SensorType::MAGNETIC_FIELD;s.typeAsString="android.sensor.magnetic_field";
-    s.maxRange=4912.f;s.resolution=0.15f;s.power=0.28f;
+    s.maxRange=4912.f;s.resolution=0.15f;s.power=0.25f;
     s.minDelay=20000;s.maxDelay=1000000;s.flags=0;
+    s.fifoReservedEventCount=64;s.fifoMaxEventCount=256;
    }
-   sensors.push_back(s);
+   sensors.push_back(std::move(s));
+   workers[i]=std::thread(&SurfaceSensors::work,this,i);
   }
-  for(int i=0;i<kSensorCount;i++)if(state[i].available)workers[i]=std::thread(&SurfaceSensors::work,this,i);
  }
- ~SurfaceSensors() override{
-  {std::lock_guard lock(mutex);quitting=true;changed.notify_all();}
+ ~SurfaceSensors()override{
+  {std::lock_guard lock(mutex);quitting=true;}
+  signalAllWorkers();
+  changed.notify_all();
   for(auto&t:workers)if(t.joinable())t.join();
+  for(int i=0;i<kSensorCount;i++)if(wakeFd[i]>=0){::close(wakeFd[i]);wakeFd[i]=-1;}
  }
  Return<void> getSensorsList_2_1(getSensorsList_2_1_cb cb)override{cb(sensors);return Void();}
  Return<v1::Result> initialize(const sp<IHalProxyCallback>&cb)override{
   std::lock_guard lock(mutex);callback=cb;
-  for(auto&s:state){s.enabled=false;s.flushes=0;s.generation++;}
+  for(auto&s:state){s.enabled=false;s.flushes=0;s.generation++;s.configRev++;}
+  signalAllWorkers();
   changed.notify_all();return v1::Result::OK;
  }
  Return<v1::Result> setOperationMode(v1::OperationMode mode)override{
@@ -221,16 +319,26 @@ class SurfaceSensors final:public ISensorsSubHal {
  Return<v1::Result> activate(int32_t h,bool enabled)override{
   std::lock_guard lock(mutex);if(!known(h))return v1::Result::BAD_VALUE;
   auto&s=state[h-1];if(s.enabled!=enabled){s.enabled=enabled;s.flushes=0;s.generation++;}
+  signalWorker(h-1);
   changed.notify_all();return v1::Result::OK;
  }
  Return<v1::Result> batch(int32_t h,int64_t period,int64_t latency)override{
   std::lock_guard lock(mutex);if(!known(h)||period<0||latency<0)return v1::Result::BAD_VALUE;
-  state[h-1].period=std::clamp<int64_t>(period,h==2?500000000:20000000,1000000000);
-  changed.notify_all();return v1::Result::OK;
+  auto&s=state[h-1];
+  int64_t newPeriod=std::clamp<int64_t>(period,h==2?500000000:20000000,1000000000);
+  int64_t newLatency=h==2?0:std::clamp<int64_t>(latency,0,5000000000LL);
+  if(s.period!=newPeriod||s.latency!=newLatency){
+   s.period=newPeriod;s.latency=newLatency;s.configRev++;
+   signalWorker(h-1);
+   changed.notify_all();
+  }
+  return v1::Result::OK;
  }
  Return<v1::Result> flush(int32_t h)override{
   std::lock_guard lock(mutex);if(!known(h)||!state[h-1].enabled)return v1::Result::BAD_VALUE;
-  state[h-1].flushes++;changed.notify_all();return v1::Result::OK;
+  state[h-1].flushes++;
+  signalWorker(h-1);
+  changed.notify_all();return v1::Result::OK;
  }
  Return<v1::Result> injectSensorData_2_1(const v2::Event&)override{return v1::Result::INVALID_OPERATION;}
  Return<void> registerDirectChannel(const v1::SharedMemInfo&,registerDirectChannel_cb cb)override{cb(v1::Result::INVALID_OPERATION,-1);return Void();}

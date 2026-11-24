@@ -24,5 +24,24 @@ class BootSelection(unittest.TestCase):
             self.assertNotEqual(subprocess.run(['sh','-c',script]).returncode, 0)
 
 
+    def test_stages_ipa_firmware_into_persistent_firmware_dir(self):
+        text = (ROOT/'probe/lte/lte-framework-boot').read_text()
+        start = text.index('persist_fw=')
+        end = text.index('# The kernel resolves firmware', start)
+        block = text[start:end]
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            src = base/'src'
+            fw_src = src/'firmware/qcom/sc8180x/sq2/ipa_fws.elf'
+            fw_src.parent.mkdir(parents=True)
+            fw_src.write_bytes(b'IPA_FW_TEST_PAYLOAD')
+            persist = base/'sq2-firmware'
+            persist.mkdir()
+            script = f'set -eu\nsrc={src}\nSQ2_LTE_PERSIST_FW_DIR={persist}\n' + block
+            subprocess.run(['sh', '-c', script], check=True)
+            staged = persist/'qcom/sc8180x/sq2/ipa_fws.elf'
+            self.assertTrue(staged.is_file())
+            self.assertEqual(staged.read_bytes(), b'IPA_FW_TEST_PAYLOAD')
+
 if __name__ == '__main__':
     unittest.main()

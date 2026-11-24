@@ -39,15 +39,15 @@ static int venus_sq2_remove(struct platform_device *pdev)
 {
  struct venus_core *core = platform_get_drvdata(pdev);
  int ret;
+ if (core->sq2_pm_enabled) {
+  pm_runtime_disable(core->dev);
+  core->sq2_pm_enabled = false;
+ }
  cancel_delayed_work_sync(&core->work);
  ret = venus_sq2_stop_core(core);
  if (core->sq2_children) {
   of_platform_depopulate(core->dev);
   core->sq2_children = false;
- }
- if (core->sq2_pm_enabled) {
-  pm_runtime_disable(core->dev);
-  core->sq2_pm_enabled = false;
  }
  /* A published core may still be referenced by open V4L2 files. Keep core,
   * v4l2_device, HFI queues and module pin even after confirmed PAS stop.
@@ -72,6 +72,9 @@ static int venus_sq2_probe(struct platform_device *pdev,
  core->pm_ops = &sq2_resident_pm_ops;
  mutex_init(&core->lock);
  mutex_init(&core->pm_lock);
+#ifdef SQ2_VENUS_SYSTEM_PM
+ mutex_init(&core->sq2_pm_mutex);
+#endif
  sq2_venus_retire_init(core);
  INIT_LIST_HEAD(&core->instances);
  INIT_DELAYED_WORK(&core->work, venus_sq2_error);
@@ -99,6 +102,10 @@ static int venus_sq2_probe(struct platform_device *pdev,
   * while the real parent owner holds all seven clocks and three domains. */
  ret = pm_runtime_set_active(core->dev);
  if (ret) goto fail;
+#ifdef SQ2_VENUS_SYSTEM_PM
+ pm_runtime_set_autosuspend_delay(core->dev, SQ2_VENUS_AUTOSUSPEND_MS);
+ pm_runtime_use_autosuspend(core->dev);
+#endif
  pm_runtime_enable(core->dev);
  core->sq2_pm_enabled = true;
  core->sq2_children = true; /* also depopulate partial population on error */
@@ -122,6 +129,9 @@ fail:
  }
  if (core->priv) hfi_destroy(core);
  platform_set_drvdata(pdev, NULL);
+#ifdef SQ2_VENUS_SYSTEM_PM
+ mutex_destroy(&core->sq2_pm_mutex);
+#endif
  mutex_destroy(&core->pm_lock);
  mutex_destroy(&core->lock);
  stop = sq2_venus_platform_release(&owner);

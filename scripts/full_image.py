@@ -808,6 +808,7 @@ def install_default_wallpaper(private, records, bodies):
 
 KSU_MODULES_HOOK = b'    sq2-ksu-modules-boot > /logs/sq2-ksu-modules-boot.txt 2>&1 &\n'
 IRQ_BALANCE_HOOK = b'    spx-irq-balance-boot > /logs/spx-irq-balance.txt 2>&1 &\n'
+POWER_TUNE_HOOK = b'    spx-power-tune-boot > /logs/spx-power-tune.txt 2>&1 &\n'
 
 
 def install_irq_balance(records, bodies):
@@ -822,6 +823,20 @@ def install_irq_balance(records, bodies):
     subprocess.run(['sh', '-n'], input=helper, check=True, capture_output=True)
     bodies['bin/spx-irq-balance-boot'] = helper
     records['bin/spx-irq-balance-boot'] = new_record(0o100755)
+
+
+def install_power_tune(records, bodies):
+    """Install portable one-shot NVMe APST and idle host-only USB3 runtime PM helper."""
+    init = bodies['init']
+    require(init.count(ANCHOR) == 1 and init.count(POWER_TUNE_HOOK) <= 1,
+            'Unknown power tune boot handoff')
+    if POWER_TUNE_HOOK not in init:
+        init = init.replace(ANCHOR, POWER_TUNE_HOOK + ANCHOR)
+    bodies['init'] = init
+    helper = (ROOT / 'probe/test2/spx-power-tune-boot').read_bytes().replace(b'\r\n', b'\n')
+    subprocess.run(['sh', '-n'], input=helper, check=True, capture_output=True)
+    bodies['bin/spx-power-tune-boot'] = helper
+    records['bin/spx-power-tune-boot'] = new_record(0o100755)
 
 
 _EVENT_WAIT_CACHE = {}
@@ -1009,8 +1024,13 @@ def assemble_runtime(private, output, compiled=None, graphics='hybrid', ksu_modu
     bodies['bin/apply-device-info'] = (ROOT/'probe/test2/apply-device-info').read_bytes().replace(b'\r\n', b'\n')
     records['bin/apply-device-info'] = new_record(0o100755)
     install_irq_balance(records, bodies)
+    install_power_tune(records, bodies)
     install_powerhint(records, bodies)
     install_event_watchers(records, bodies, (compiled_helpers or {}).get('bin/spx-event-wait'))
+    if 'bin/lte-framework-boot' in bodies:
+        lte_boot = (ROOT / 'probe/lte/lte-framework-boot').read_bytes().replace(b'\r\n', b'\n')
+        subprocess.run(['sh', '-n'], input=lte_boot, check=True, capture_output=True)
+        bodies['bin/lte-framework-boot'] = lte_boot
     # Take the current committed helper, while the accepted cumulative IPTSd
     # binary remains the fixed private runtime input (not the old touch cache).
     bodies['bin/touch-calibration-boot'] = (ROOT/'probe/test2/touch-calibration-boot').read_bytes().replace(b'\r\n',b'\n')

@@ -23,6 +23,21 @@ src=/etc/sq2-lte
 (cd "$src"; sha256sum -c runtime.sha256 >/dev/null)
 test ! -d /sys/module/ipa_sq2_lab
 grep -q '9b000000-9b05ffff : reserved' /proc/iomem
+# Stage ipa_fws.elf into the persistent firmware_class search root (if mounted)
+# so kernel fw_cache finds it directly on PM_SUSPEND_PREPARE (s2idle) without
+# triggering ueventd fallback retries.
+persist_fw="${SQ2_LTE_PERSIST_FW_DIR:-/proc/1/root/debug_ramdisk/sq2-firmware}"
+if [ -d "$persist_fw" ] && [ ! -L "$persist_fw" ] && [ -f "$src/firmware/qcom/sc8180x/sq2/ipa_fws.elf" ]; then
+    if mkdir -p "$persist_fw/qcom/sc8180x/sq2" 2>/dev/null; then
+        _ipa_tmp="$persist_fw/qcom/sc8180x/sq2/.ipa_fws.elf.tmp.$$"
+        if cp "$src/firmware/qcom/sc8180x/sq2/ipa_fws.elf" "$_ipa_tmp" 2>/dev/null; then
+            chmod 644 "$_ipa_tmp" 2>/dev/null || true
+            mv -f "$_ipa_tmp" "$persist_fw/qcom/sc8180x/sq2/ipa_fws.elf" 2>/dev/null || rm -f "$_ipa_tmp" 2>/dev/null || true
+        else
+            rm -f "$_ipa_tmp" 2>/dev/null || true
+        fi
+    fi
+fi
 # The kernel resolves firmware in init's mount namespace. This helper retains
 # its original initramfs root; expose that exact immutable bundle via proc.
 path=/sys/module/firmware_class/parameters/path

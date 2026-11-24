@@ -501,8 +501,15 @@ while true; do
         fi
     fi
     if [ "$preview" = 0 ] && [ "$noise_preview" = 0 ] && [ "$tap_preview" = 0 ] &&
-       [ -d "$files" ] && [ ! -L "$files" ] && command -v spx-event-wait >/dev/null 2>&1; then
-        _tc_ev=$(spx-event-wait --oneshot --inotify "$files" --match request --check-exists "$files/request" --timeout-ms 20000 2>/dev/null || true)
+       command -v spx-event-wait >/dev/null 2>&1; then
+        _tc_parent="${files%/*}"
+        if [ -d "$files" ] && [ ! -L "$files" ]; then
+            _tc_ev=$(spx-event-wait --oneshot --inotify "$files" --match request --check-exists "$files/request" --timeout-ms 20000 2>/dev/null || true)
+        elif [ -d "$_tc_parent" ] && [ ! -L "$_tc_parent" ]; then
+            _tc_ev=$(spx-event-wait --oneshot --inotify "$_tc_parent" --match "${files##*/}" --check-exists "$files" --timeout-ms 20000 2>/dev/null || true)
+        else
+            _tc_ev=
+        fi
         if [ "$_tc_ev" = timeout ]; then
             cycles=10
         elif [ -z "$_tc_ev" ]; then

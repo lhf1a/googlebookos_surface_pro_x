@@ -20,7 +20,10 @@ class SscSensor {
   bool open(int timeoutMs = 1500);
   SscProbeResult probe(int timeoutMs = 250);
   bool rate(float hz);
+  bool configure(float hz, uint32_t batchPeriodUs = 0);
+  bool flush();
   int read(SscSample& sample, int timeoutMs);
+  int readBatch(std::vector<SscSample>& out, int timeoutMs, int wakeFd = -1);
   bool disable(int timeoutMs = 250);
   void close(bool quiesce = true);
   bool isOpen() const;
@@ -37,8 +40,8 @@ class SscSensor {
   SscProbeResult openInternal(int timeoutMs);
   void closeRaw();
   void drain(int quietMs = 0);
-  bool send(uint32_t id, const std::vector<uint8_t>& data, uint8_t deliveryType);
-  bool receive(std::vector<uint8_t>& packet, int timeoutMs);
+  bool send(uint32_t id, const std::vector<uint8_t>& data, uint8_t deliveryType, uint32_t batchPeriodUs = 0);
+  bool receive(std::vector<uint8_t>& packet, int timeoutMs, int wakeFd = -1);
 };
 class SscAccel : public SscSensor {
  public:

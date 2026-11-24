@@ -6,6 +6,7 @@
 /* Positive callback result: no firmware/DMA transition occurred and IRQ
  * delivery has been restored. Never use for a partial or failed stop. */
 #define SQ2_PM_STOP_UNCHANGED_BUSY 1
+#define SQ2_VENUS_AUTOSUSPEND_MS 5000
 enum sq2_system_pm_phase {
  SQ2_PM_RUNNING, SQ2_PM_OFF, SQ2_PM_BROKEN, SQ2_PM_STOPPING, SQ2_PM_STARTING
 };

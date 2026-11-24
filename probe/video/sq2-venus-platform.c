@@ -145,6 +145,18 @@ int sq2_venus_platform_release(struct sq2_venus_platform **owner)
 }
 
 #ifdef SQ2_VENUS_SYSTEM_PM
+int sq2_venus_platform_domains_put(struct sq2_venus_platform *o)
+{
+ if (!o || !sq2_venus_lifetime_releasable(&o->lifetime) ||
+     o->core.sq2_fw_owner || o->core.sq2_secure_active) return -EBUSY;
+ return sq2_venus_power_domains_put(o->power);
+}
+int sq2_venus_platform_domains_get(struct sq2_venus_platform *o)
+{
+ if (!o || !sq2_venus_lifetime_releasable(&o->lifetime) ||
+     o->core.sq2_fw_owner || o->core.sq2_secure_active) return -EBUSY;
+ return sq2_venus_power_domains_get(o->power);
+}
 int sq2_venus_platform_system_quiet(struct sq2_venus_platform *o)
 {
  if (!o || !sq2_venus_lifetime_releasable(&o->lifetime) ||

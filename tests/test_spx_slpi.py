@@ -262,6 +262,8 @@ struct SensorInfo {
   float power = 0;
   int32_t minDelay = 0;
   int32_t maxDelay = 0;
+  uint32_t fifoReservedEventCount = 0;
+  uint32_t fifoMaxEventCount = 0;
   uint32_t flags = 0;
 };
 struct Vec3 { float x, y, z; V1_0::SensorStatus status; };
@@ -356,6 +358,9 @@ std::map<std::string, int> closeCounts;
 std::map<std::string, int> quiesceCloseCounts;
 std::map<std::string, int> disableCounts;
 std::map<std::string, int> disableDelayMs;
+std::map<std::string, uint32_t> lastBatchUs;
+std::map<std::string, int> flushCounts;
+std::map<std::string, int> samplesPerBatch;
 std::atomic<bool> inDisable{false};
 }
 
@@ -406,9 +411,20 @@ bool SscSensor::open(int) {
   }
   return ok;
 }
-bool SscSensor::rate(float hz) {
+bool SscSensor::configure(float hz, uint32_t batchPeriodUs) {
   if (fd < 0 || hz <= 0.f) return false;
+  {
+    std::lock_guard lk(mock_ssc::mu);
+    mock_ssc::lastBatchUs[type] = batchPeriodUs;
+  }
   streaming = true;
+  return true;
+}
+bool SscSensor::rate(float hz) { return configure(hz, 0); }
+bool SscSensor::flush() {
+  if (fd < 0 || !streaming) return false;
+  std::lock_guard lk(mock_ssc::mu);
+  mock_ssc::flushCounts[type]++;
   return true;
 }
 int SscSensor::read(SscSample& sample, int) {
@@ -420,12 +436,30 @@ int SscSensor::read(SscSample& sample, int) {
   sample.timestamp = bootTime();
   return 1;
 }
+int SscSensor::readBatch(std::vector<SscSample>& out, int, int) {
+  out.clear();
+  if (fd < 0) return -1;
+  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  std::lock_guard lk(mock_ssc::mu);
+  int n = mock_ssc::samplesPerBatch[type];
+  if (n <= 0) n = 1;
+  int64_t baseTs = bootTime();
+  for (int i = 0; i < n; i++) {
+    SscSample sample{};
+    sample.xyz = mock_ssc::sampleValues[type];
+    sample.accuracy = 3;
+    sample.timestamp = baseTs + int64_t(i) * 40000000LL;
+    out.push_back(sample);
+  }
+  return int(out.size());
+}
 }
 
 class TestCallback final : public IHalProxyCallback {
  public:
   std::mutex mu;
   std::map<int, int> counts;
+  std::map<int, int> postCalls;
   std::map<int, int> flushes;
   std::map<int, v2::Event> last;
   Return<void> onDynamicSensorsConnected(const hidl_vec<v1::SensorInfo>&) override { return Void(); }
@@ -434,6 +468,7 @@ class TestCallback final : public IHalProxyCallback {
   void postEvents(const std::vector<v2::Event>& events, android::hardware::sensors::V2_0::implementation::ScopedWakelock w) override {
     assert(!w.isLocked());
     std::lock_guard lk(mu);
+    if (!events.empty()) postCalls[events.front().sensorHandle]++;
     for (const auto& e : events) {
       if (e.sensorType == v2::SensorType::META_DATA) flushes[e.sensorHandle]++;
       else { counts[e.sensorHandle]++; last[e.sensorHandle] = e; }
@@ -472,8 +507,20 @@ int main() {
     auto list = listSensors(hal);
     assert(list.size() == 3);
     assert(list[0].sensorHandle == 1 && list[0].type == v2::SensorType::ACCELEROMETER);
+    assert(list[0].fifoReservedEventCount == 64 && list[0].fifoMaxEventCount == 256);
     assert(list[1].sensorHandle == 3 && list[1].type == v2::SensorType::GYROSCOPE);
+    assert(list[1].fifoReservedEventCount == 64 && list[1].fifoMaxEventCount == 256);
     assert(list[2].sensorHandle == 4 && list[2].type == v2::SensorType::MAGNETIC_FIELD);
+    assert(list[2].fifoReservedEventCount == 64 && list[2].fifoMaxEventCount == 256);
+    // Pure helper checks for SLPI batching and ALS steady-light backoff.
+    assert(computeSscBatchUs(20000000, 0, 26.f) == 0);
+    assert(computeSscBatchUs(100000000, 0, 26.f) == 95000);
+    assert(computeSscBatchUs(66667000, 100000000, 26.f) == 100000);
+    assert(computeSscBatchUs(200000000, 2000000000, 26.f) == 2000000);
+    assert(computeLightPollDelayNs(250000000, 0) == 500000000);
+    assert(computeLightPollDelayNs(250000000, 3) == 1000000000);
+    assert(computeLightPollDelayNs(250000000, 6) == 2000000000);
+    assert(isLightSteady(100.f, 104.f) && !isLightSteady(100.f, 120.f));
 
     TestCallback cb;
     assert(hal.initialize(&cb) == v1::Result::OK);
@@ -609,6 +656,42 @@ int main() {
       assert(mock_ssc::openCounts["accel"] == opensAtCrash);
       assert(mock_ssc::disableCounts["accel"] == 0);
     }
+  }
+  // Case 5: Non-zero batch latency propagates to SLPI configure(), batches multiple samples in one postEvents(), and flush() invokes SLPI flush.
+  {
+    std::ofstream st(""" + json.dumps(str(rproc/"state")) + r""");
+    st << "attached\n";
+  }
+  {
+    std::lock_guard lk(mock_ssc::mu);
+    mock_ssc::probeResults = {{"gyro", spx::SscProbeResult::Missing}, {"mag", spx::SscProbeResult::Found}};
+    mock_ssc::openOk = {{"accel", true}, {"mag", true}};
+    mock_ssc::lastBatchUs.clear();
+    mock_ssc::flushCounts.clear();
+    mock_ssc::samplesPerBatch = {{"accel", 4}};
+  }
+  {
+    SurfaceSensors hal;
+    TestCallback cb;
+    assert(hal.initialize(&cb) == v1::Result::OK);
+    assert(hal.batch(1, 40000000, 2000000000) == v1::Result::OK);
+    assert(hal.activate(1, true) == v1::Result::OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    assert(hal.flush(1) == v1::Result::OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    {
+      std::lock_guard lk(mock_ssc::mu);
+      assert(mock_ssc::lastBatchUs["accel"] == 2000000);
+      assert(mock_ssc::flushCounts["accel"] >= 1);
+      mock_ssc::samplesPerBatch.clear();
+    }
+    {
+      std::lock_guard lk(cb.mu);
+      assert(cb.counts[1] >= 4);
+      assert(cb.counts[1] > cb.postCalls[1]);
+      assert(cb.flushes[1] == 1);
+    }
+    assert(hal.activate(1, false) == v1::Result::OK);
   }
   return 0;
 }

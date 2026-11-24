@@ -93,6 +93,35 @@ int main(void)
   fail=0;ti=0;assert(!sq2_venus_power_system_quiet(p));
   assert(!sq2_venus_power_off(&p,true));empty();
  }
+ /* Runtime PM domain put/get cycles retain genpd attachments and toggle powered 3<->0. */
+ reset();fail=0;assert(!sq2_venus_power_on(&dev,(void *)0x1000000,&p));
+ assert(sq2_venus_power_domains_put(p)==-EINVAL); /* clocks still enabled */
+ assert(sq2_venus_power_domains_get(p)==-EINVAL);
+ for(f=0;f<64;f++) {
+  ti=0;assert(!sq2_venus_power_system_quiet(p));
+  assert(!sq2_venus_power_domains_put(p));
+  assert(powered==0&&pds==3&&!enabled&&clock_refs==7&&resets_count==4);
+  assert(!sq2_venus_power_domains_put(p)); /* idempotent */
+  assert(!sq2_venus_power_domains_get(p));
+  assert(powered==3&&pds==3&&!enabled);
+  assert(!sq2_venus_power_system_restore(p));
+  assert(sq2_venus_power_ready(p)&&enabled==7&&powered==3&&pds==3);
+ }
+ ti=0;trace[0]=0;assert(!sq2_venus_power_off(&p,true));empty();
+ /* Partial domains_get failure unwinds cleanly back to powered==0 without detaching. */
+ for(f=1;f<=3;f++) {
+  reset();fail=0;assert(!sq2_venus_power_on(&dev,(void *)0x1000000,&p));
+  assert(!sq2_venus_power_system_quiet(p));
+  assert(!sq2_venus_power_domains_put(p)&&powered==0);
+  fail=step+f;
+  assert(sq2_venus_power_domains_get(p)==-EIO);
+  assert(powered==0&&pds==3&&!enabled);
+  fail=0;
+  /* Shutdown while runtime-suspended (system_quiet && powered==0) skips reset/MMIO cleanly. */
+  ti=0;trace[0]=0;assert(!sq2_venus_power_off(&p,true));
+  assert(strchr(trace,'A')==NULL&&strchr(trace,'D')==NULL&&strchr(trace,'R')==NULL);
+  empty();
+ }
  printf("SQ2_POWER_OWNER_PASS: actual C; %d acquisition/activation failure positions unwind; ICC/domain/reset/clock order; rate restore failure retains powered references; mock providers only\n",max);
  return 0;
 }

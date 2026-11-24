@@ -57,7 +57,7 @@
     {"PowerHint": "LAUNCH", "Node": "TopAppUclampMin", "Duration": 2000, "Value": "50"},
     {"PowerHint": "CAMERA_LAUNCH", "Node": "TopAppUclampMin", "Duration": 1500, "Value": "50"},
     {"PowerHint": "AUDIO_STREAMING_LOW_LATENCY", "Node": "TopAppUclampMin", "Duration": 0, "Value": "15"},
-    {"PowerHint": "EXPENSIVE_RENDERING", "Node": "TopAppUclampMin", "Duration": 0, "Value": "30"},
+    {"PowerHint": "EXPENSIVE_RENDERING", "Node": "TopAppUclampMin", "Duration": 0, "Value": "15"},
     {"PowerHint": "GAME", "Node": "TopAppUclampMin", "Duration": 0, "Value": "30"},
     {"PowerHint": "FIXED_PERFORMANCE", "Node": "TopAppUclampMin", "Duration": 0, "Value": "50"},
     {"PowerHint": "LOW_POWER", "Node": "TopAppUclampMax", "Duration": 0, "Value": "70"},

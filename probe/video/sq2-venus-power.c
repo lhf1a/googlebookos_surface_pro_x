@@ -173,17 +173,25 @@ int sq2_venus_power_off(struct sq2_venus_power **owner, bool firmware_attempted)
   p->rate_changed=false;
  }
  while(p->enabled) clk_disable_unprepare(p->clk[--p->enabled]);
- if(firmware_attempted && p->resets_changed && (p->version & ~0xffffU)==0x50100000) {
-  ret=pulse(p);
-  if(ret) return ret;
- }
- if(p->resets_changed) {
-  for(i=0;i<4;i++) {
-   ret=p->states[i] ? reset_control_assert(p->rst[i]) : reset_control_deassert(p->rst[i]);
+#ifdef SQ2_VENUS_SYSTEM_PM
+ if (!p->system_quiet) {
+#endif
+  if(firmware_attempted && p->resets_changed && (p->version & ~0xffffU)==0x50100000) {
+   ret=pulse(p);
    if(ret) return ret;
   }
+  if(p->resets_changed) {
+   for(i=0;i<4;i++) {
+    ret=p->states[i] ? reset_control_assert(p->rst[i]) : reset_control_deassert(p->rst[i]);
+    if(ret) return ret;
+   }
+   p->resets_changed=false;
+  }
+#ifdef SQ2_VENUS_SYSTEM_PM
+ } else {
   p->resets_changed=false;
  }
+#endif
  while(p->powered) {
   ret=pm_runtime_put_sync(p->pd[--p->powered]);
   if(ret<0 && !first) first=ret;
@@ -203,6 +211,37 @@ int sq2_venus_power_off(struct sq2_venus_power **owner, bool firmware_attempted)
 }
 
 #ifdef SQ2_VENUS_SYSTEM_PM
+/* Runtime PM only (never called during system sleep PM walks): drop and
+ * reacquire the 3 genpd usage references so venus_gdsc/vcodec*_gdsc power off
+ * while idle without detaching virtual genpd devices or freeing handles. */
+int sq2_venus_power_domains_put(struct sq2_venus_power *p)
+{
+ int ret, first = 0;
+ if (!p || !p->system_quiet || p->enabled || p->npd != 3 || p->powered > 3)
+  return -EINVAL;
+ while (p->powered) {
+  ret = pm_runtime_put_sync(p->pd[--p->powered]);
+  if (ret < 0 && !first)
+   first = ret;
+ }
+ return first;
+}
+int sq2_venus_power_domains_get(struct sq2_venus_power *p)
+{
+ int ret;
+ if (!p || !p->system_quiet || p->enabled || p->npd != 3 || p->powered > 3)
+  return -EINVAL;
+ while (p->powered < 3) {
+  ret = pm_runtime_resume_and_get(p->pd[p->powered]);
+  if (ret < 0) {
+   while (p->powered)
+    pm_runtime_put_sync(p->pd[--p->powered]);
+   return ret;
+  }
+  p->powered++;
+ }
+ return 0;
+}
 /* The genpd virtual devices/usage references stay owned. System noirq PM owns
  * domain transitions; detaching/reattaching devices during the PM walk is not
  * permitted here. Caller has already proven firmware/DMA stopped. */

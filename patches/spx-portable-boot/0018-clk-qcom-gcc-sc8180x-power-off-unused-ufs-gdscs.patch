@@ -1,0 +1,74 @@
+--- a/drivers/clk/qcom/gcc-sc8180x.c
++++ b/drivers/clk/qcom/gcc-sc8180x.c
+@@ -4701,6 +4701,62 @@
+ };
+ MODULE_DEVICE_TABLE(of, gcc_sc8180x_match_table);
+ 
++/*
++ * Collapse boot-enabled UFS GDSCs when no UFS host controller is enabled in DT
++ * (e.g., NVMe-based SC8180X platforms booting with pd_ignore_unused to keep
++ * unreferenced MMNOC SMMU TBUs alive). Runs before qcom_cc_really_probe() so
++ * gdsc_init() observes the real OFF state and initializes each domain as off-0.
++ */
++static void gcc_sc8180x_power_off_unused_ufs_gdscs(struct device *dev,
++						   struct regmap *regmap)
++{
++	static const struct gdsc * const ufs_gdscs[] = {
++		&ufs_phy_gdsc,
++		&ufs_card_gdsc,
++		&ufs_card_2_gdsc,
++	};
++	struct device_node *np;
++	unsigned int i, val;
++	int ret;
++
++	for_each_compatible_node(np, NULL, "qcom,sc8180x-ufshc") {
++		if (of_device_is_available(np)) {
++			of_node_put(np);
++			return;
++		}
++	}
++	for_each_compatible_node(np, NULL, "qcom,ufshc") {
++		if (of_device_is_available(np)) {
++			of_node_put(np);
++			return;
++		}
++	}
++
++	for (i = 0; i < ARRAY_SIZE(ufs_gdscs); i++) {
++		const struct gdsc *sc = ufs_gdscs[i];
++		unsigned int cfg = sc->gdscr + 0x4;
++
++		if (regmap_read(regmap, cfg, &val) || !(val & BIT(16)))
++			continue;
++
++		/* Clear HW_CONTROL/SW_OVERRIDE and assert SW_COLLAPSE. */
++		ret = regmap_update_bits(regmap, sc->gdscr,
++					 BIT(2) | BIT(1) | BIT(0), BIT(0));
++		if (ret) {
++			dev_warn(dev, "failed to collapse unused %s: %d\n",
++				 sc->pd.name, ret);
++			continue;
++		}
++		ret = regmap_read_poll_timeout(regmap, cfg, val,
++					       val & BIT(15), 50, 2000);
++		if (ret)
++			dev_warn(dev, "timed out collapsing unused %s (cfg=%#x)\n",
++				 sc->pd.name, val);
++		else
++			dev_info(dev, "collapsed unused %s\n", sc->pd.name);
++	}
++}
++
+ static int gcc_sc8180x_probe(struct platform_device *pdev)
+ {
+ 	struct regmap *regmap;
+@@ -4710,6 +4766,8 @@
+ 	if (IS_ERR(regmap))
+ 		return PTR_ERR(regmap);
+ 
++	gcc_sc8180x_power_off_unused_ufs_gdscs(&pdev->dev, regmap);
++
+ 	/* Keep some clocks always-on */
+ 	qcom_branch_set_clk_en(regmap, 0xb004); /* GCC_VIDEO_AHB_CLK */
+ 	qcom_branch_set_clk_en(regmap, 0xb008); /* GCC_CAMERA_AHB_CLK */
