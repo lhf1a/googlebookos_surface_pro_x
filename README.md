@@ -20,7 +20,7 @@
   <p>
     <img src="https://img.shields.io/badge/Target-Surface_Pro_X_SQ1%2FSQ2-0078D4?style=flat-square" alt="Target: Surface Pro X SQ1/SQ2" />
     <img src="https://img.shields.io/badge/Arch-ARM64-blueviolet?style=flat-square" alt="Arch: ARM64" />
-    <img src="https://img.shields.io/badge/Baseline-Android_17_mica_16471258-3DDC84?style=flat-square" alt="Baseline: Android 17 mica 16471258" />
+    <img src="https://img.shields.io/badge/Baseline-Android_17_mica_16833189_(286.R2)-3DDC84?style=flat-square" alt="Baseline: Android 17 mica 16833189 (286.R2)" />
     <img src="https://img.shields.io/badge/Kernel-Linux_6.18.60-FCC624?style=flat-square" alt="Kernel: Linux 6.18.60" />
     <img src="https://img.shields.io/badge/Graphics-Hybrid_Mesa_%2B_QTI-orange?style=flat-square" alt="Graphics: Hybrid Mesa + QTI" />
     <img src="https://img.shields.io/badge/License-MIT_%2F_Multi--SPDX-blue?style=flat-square" alt="License: MIT / Multi-SPDX" />
@@ -36,7 +36,7 @@
 
 ## Overview and Architecture
 
-**Googlebook OS on Surface Pro X** is an ARM64 port of Android 17 desktop Googlebook OS based on `mica 16471258` and Linux `6.18.60` for Microsoft Surface Pro X SQ1 and SQ2.
+**Googlebook OS on Surface Pro X** is an ARM64 port of Android 17 desktop Googlebook OS based on `mica 16833189` (`CL3B.260622.286.R2`) and Linux `6.18.60` for Microsoft Surface Pro X SQ1 and SQ2.
 
 The project maintains a single unified image shared across SQ1 and SQ2:
 
@@ -234,7 +234,7 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ## Documentation Index
 
 ### Build, Dependencies & Deployment
-- [RELEASE-NOTES](docs/RELEASE-NOTES.md) — Version history and changelogs (`v0.7.0`–`v0.9.3`)
+- [RELEASE-NOTES](docs/RELEASE-NOTES.md) — Version history and changelogs (`v0.7.0`–`v0.9.9`)
 - [BUILD](docs/BUILD.md)
 - [STANDARD-BUILD](docs/STANDARD-BUILD.md)
 - [DEPENDENCIES](docs/DEPENDENCIES.md)

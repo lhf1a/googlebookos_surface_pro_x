@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.surface.touchcalibration.unified">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.surface.touchcalibration.unified" android:versionCode="2" android:versionName="1.1">
   <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>
   <application android:label="触屏校准" android:allowBackup="false" android:supportsRtl="true" android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
     <property android:name="android.window.PROPERTY_COMPAT_ALLOW_USER_ASPECT_RATIO_FULLSCREEN_OVERRIDE" android:value="true"/>

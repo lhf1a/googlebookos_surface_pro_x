@@ -1,6 +1,16 @@
 # 更新日志
 
-预编译磁盘镜像（`*.img.gz`）、ESP OTA 升级包（`*-ota-esp-*.tar.gz`）与 `SHA256SUMS` 发布于 [GitHub Releases](https://github.com/lhf1a/googlebookos_surface_pro_x/releases)、[Google Drive](https://drive.google.com/drive/folders/1uVAA6UnydSyUHQAO8Y5rTm8SxZ62Zykr) 与 [百度网盘](https://pan.baidu.com/s/51GjLdmTGir0PelomZvboYw)。
+预编译磁盘镜像（`*.img.gz`）、跨底包增量 OTA 包（`*-ota-super-delta-*.tar.gz`）、ESP OTA 升级包（`*-ota-esp-*.tar.gz`）与 `SHA256SUMS` 发布于 [GitHub Releases](https://github.com/lhf1a/googlebookos_surface_pro_x/releases)、[Google Drive](https://drive.google.com/drive/folders/1uVAA6UnydSyUHQAO8Y5rTm8SxZ62Zykr) 与 [百度网盘](https://pan.baidu.com/s/51GjLdmTGir0PelomZvboYw)。
+
+---
+
+## v0.9.9 (2026-11-24)
+
+- **升级 Android 17 `mica 16833189`（`CL3B.260622.286.R2`）基线与 `SPXDLT01` 跨底包增量 OTA**：将 Android 17 底包由 `16471258`（`273.R1`）升级至 `16833189`（`286.R2`，安全补丁 `2026-11-01`，并继承蓝牙 HFP 软件数据通路与 A2DP offload 修复）。裁剪 `vendor` 时仅剔除 Dell 专用 `/vendor/etc/recovery/ota_recovery.img`（`119.42 MiB`）并无损保留全部原版 EROFS `uid/gid/mode` 与 SELinux/capability xattrs，使紧凑 `super`（`3,460 MiB`）可在既有 5 分区 `3,481 MiB` 与 39 分区 `12 GiB` 设备上不重分区、不清空数据原地升级，新 5 分区整盘镜像同步将 GPT `super` 预留提升至 `4,096 MiB`。新增零依赖 C11 `SPXDLT01` 4 KiB 块级增量引擎、`spx-ota-stage` 单次解包与同哈希跳过优化、全量 SHA-256 回读校验及非 Dell 硬件 `ota_recovery_updater.rc` 禁用（已在 SQ1 与 SQ2 两套实机完成端到端升级验证）。
+- **SC8180X CPU EAS、PowerHint 调优与事件驱动去轮询**：向 SQ1/SQ2 设备树注入 SC8180X 动态功耗系数（小核 `140` / 大核 `440`）激活 Linux EAS 能量感知调度（`sched_energy_aware=1`），调优 `powerhint.sq2.json`，新增静态 ARM64 `spx-event-wait`（inotify/sysfs/uevent）全面替换输入/USB/触控/OTA/高级设置守护进程的定时轮询，并为 `sq2-game-opt` 加入自适应空闲退避与 64 槽位 PID LRU 缓存。
+- **GPU、Mesa 与 DPU 性能优化**：合入异步 `msm_gem_close()`（`0001-drm-msm-async-gem-close.patch`）消除 RenderThread 同步等待卡顿、Adreno 680 GPU OPP 峰值 DDR 带宽投票（`0017` + `prepare-spx-gpu-bw-dtb.py`）、Mesa 26.2.4 UBWC/MSAA GMEM/二步式着色器缓存修复、安全 DPU RGB 硬件图层合成（`patches/sm8350-dpu-rgb-overlay.patch`），并启用 SurfaceFlinger 客户端合成缓存（`debug.sf.disable_client_composition_cache=0`）。
+- **整机深度空闲功耗优化与 `s2idle` 唤醒风暴修复**：为 Venus 增加 5 秒空闲自动挂起（空闲时关闭 `venus_gdsc`/`vcodec0_gdsc`/`vcodec1_gdsc` 与 `videocc` 时钟），新增未使用 UFS GDSC 断电（`0018`）、NVMe APST（`25ms`）、USB Host 运行时挂起及 SLPI 传感器批处理；移除 `power-input-boot` 强制开启 `surface_aggregator` `wakeup=enabled` 的旧逻辑，消除 `0.43s` 周期 `s2idle` 频繁唤醒风暴（SQ2 实测连续无中断休眠 23 分 52 秒、0 次 BAT1 异常唤醒）。
+- **首次触控校准一键跳过与关机/唤醒稳健性修复**：首次开机触控校准向导（`org.surface.touchcalibration.unified` v2/1.1）支持屏幕正常用户一键跳过并二次确认关闭防误触补丁，**高级设置**（`org.surface.advancedcontrol` v6/2.4）同步展示已停用状态及随时重开入口；修复关机外接 DP EDID 释放后使用竞争（`edid_lock` + 关机 HPD 保护）、`spx-tcs3430` 环境光传感器关机 `-ESHUTDOWN` 保护及 `spi-hid` 短休眠后触控自愈重试。
 
 ---
 

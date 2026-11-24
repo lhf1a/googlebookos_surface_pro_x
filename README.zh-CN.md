@@ -20,7 +20,7 @@
   <p>
     <img src="https://img.shields.io/badge/Target-Surface_Pro_X_SQ1%2FSQ2-0078D4?style=flat-square" alt="目标设备：Surface Pro X SQ1/SQ2" />
     <img src="https://img.shields.io/badge/Arch-ARM64-blueviolet?style=flat-square" alt="架构：ARM64" />
-    <img src="https://img.shields.io/badge/Baseline-Android_17_mica_16471258-3DDC84?style=flat-square" alt="系统基线：Android 17 mica 16471258" />
+    <img src="https://img.shields.io/badge/Baseline-Android_17_mica_16833189_(286.R2)-3DDC84?style=flat-square" alt="系统基线：Android 17 mica 16833189 (286.R2)" />
     <img src="https://img.shields.io/badge/Kernel-Linux_6.18.60-FCC624?style=flat-square" alt="内核：Linux 6.18.60" />
     <img src="https://img.shields.io/badge/Graphics-Hybrid_Mesa_%2B_QTI-orange?style=flat-square" alt="图形栈：Hybrid Mesa + QTI" />
     <img src="https://img.shields.io/badge/License-MIT_%2F_Multi--SPDX-blue?style=flat-square" alt="协议：MIT / 多协议 SPDX" />
@@ -36,7 +36,7 @@
 
 ## 架构与概览
 
-**Googlebook OS on Surface Pro X** 是面向 Microsoft Surface Pro X SQ1 与 SQ2 的 ARM64 Android 17 桌面系统移植，基于 `mica 16471258` 与 Linux `6.18.60` 内核构建。
+**Googlebook OS on Surface Pro X** 是面向 Microsoft Surface Pro X SQ1 与 SQ2 的 ARM64 Android 17 桌面系统移植，基于 `mica 16833189`（`CL3B.260622.286.R2`）与 Linux `6.18.60` 内核构建。
 
 项目维护一套统一镜像，同时覆盖 SQ1 与 SQ2：
 
@@ -234,7 +234,7 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ## 文档索引
 
 ### 构建、依赖与部署
-- [RELEASE-NOTES](docs/RELEASE-NOTES.zh-CN.md) — 版本发布与更新日志（`v0.7.0`–`v0.9.3`）
+- [RELEASE-NOTES](docs/RELEASE-NOTES.zh-CN.md) — 版本发布与更新日志（`v0.7.0`–`v0.9.9`）
 - [BUILD](docs/BUILD.zh-CN.md)
 - [STANDARD-BUILD](docs/STANDARD-BUILD.zh-CN.md)
 - [DEPENDENCIES](docs/DEPENDENCIES.zh-CN.md)
