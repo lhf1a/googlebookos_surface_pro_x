@@ -72,6 +72,36 @@ def sha256_region(path, offset, length):
     return h.hexdigest()
 
 
+def detect_compacted_super_bytes(path, offset, total_bytes, hinted_bytes=None):
+    """Trim 1 MiB-aligned all-zero padding at the end of a GPT super partition."""
+    if total_bytes <= 0:
+        return 0
+    last_nz_end = 0
+    with Path(path).open('rb') as stream:
+        rem = total_bytes
+        while rem > 0:
+            chunk_len = min(rem, CHUNK)
+            start = rem - chunk_len
+            stream.seek(offset + start)
+            buf = stream.read(chunk_len)
+            if len(buf) != chunk_len:
+                raise ValueError(f'Short read while scanning super tail of {path}')
+            stripped = buf.rstrip(b'\x00')
+            if stripped:
+                last_nz_end = start + len(stripped)
+                break
+            rem = start
+    if last_nz_end == 0:
+        return total_bytes
+    if hinted_bytes is not None:
+        hinted = int(hinted_bytes)
+        if last_nz_end <= hinted <= total_bytes:
+            return hinted
+    mib = 1024 * 1024
+    aligned = ((last_nz_end + mib - 1) // mib) * mib
+    return min(aligned, total_bytes)
+
+
 def inspect_gpt_partitions(image_path):
     """Parse primary GPT from a raw disk image and return {name: {offset, bytes}}."""
     image_path = Path(image_path)
@@ -367,14 +397,20 @@ def build_ota_package(
     super_mode = 'none'
 
     embedded_super_sha = ''
+    embedded_compacted_super_bytes = None
     if build_output is not None:
         bo = Path(build_output).resolve()
         for mf in (bo / 'FULL-IMAGE.json', bo / 'disk/IMAGE-MANIFEST.json'):
             if mf.is_file():
                 try:
-                    raw_sha = str(json.loads(mf.read_text(encoding='utf-8')).get('super_sha256') or '').strip().lower()
+                    mf_data = json.loads(mf.read_text(encoding='utf-8'))
+                    raw_sha = str(mf_data.get('super_sha256') or '').strip().lower()
                     if len(raw_sha) == 64:
                         embedded_super_sha = raw_sha
+                    mica_info = mf_data.get('mica_ota_base') or {}
+                    if isinstance(mica_info, dict) and mica_info.get('compacted_super_bytes'):
+                        embedded_compacted_super_bytes = int(mica_info['compacted_super_bytes'])
+                    if embedded_super_sha:
                         break
                 except Exception:
                     pass
@@ -436,7 +472,12 @@ def build_ota_package(
                 super_sha256 = sha256_region(image_path, int(super_info['offset']), super_bytes)
         else:
             if image_path is not None and super_info is not None:
-                super_bytes = int(super_info['bytes'])
+                super_bytes = detect_compacted_super_bytes(
+                    image_path,
+                    int(super_info['offset']),
+                    int(super_info['bytes']),
+                    hinted_bytes=embedded_compacted_super_bytes,
+                )
                 super_sha256 = sha256_region(image_path, int(super_info['offset']), super_bytes)
 
             if mode == 'full':

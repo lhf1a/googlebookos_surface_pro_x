@@ -506,9 +506,10 @@ apply_manifest_package() {
     elif [ "$M_SUPER_INCLUDED" = "1" ]; then
         is_safe_relpath "$M_SUPER_ARCHIVE" || fail_ota "invalid_super_archive_path"
         is_hex64 "$M_SUPER_SHA256" || fail_ota "invalid_manifest_super_sha256"
-        [ "$M_SUPER_BYTES" -gt 0 ] 2>/dev/null || fail_ota "invalid_manifest_super_bytes"
+        is_uint "$M_SUPER_BYTES" && [ "$M_SUPER_BYTES" -gt 0 ] 2>/dev/null || fail_ota "invalid_manifest_super_bytes"
         _target_super_bytes="$(block_size_bytes "$SUPER_DEV")" || fail_ota "super_size_read_failed"
-        [ "$_target_super_bytes" -ge "$M_SUPER_BYTES" ] || fail_ota "super_partition_too_small"
+        _super_fits="$(awk -v t="$_target_super_bytes" -v n="$M_SUPER_BYTES" 'BEGIN { print (t >= n) ? 1 : 0 }')"
+        [ "$_super_fits" = "1" ] || fail_ota "super_partition_too_small"
         log "Streaming super partition ($M_SUPER_BYTES bytes)..."
         _stream_out="$(tar -xzOf "$PKG_PATH" "$M_SUPER_ARCHIVE" 2>>"$LOG_FILE" | "$OTA_TOOL" extract-stream "$SUPER_DEV" 0 "$M_SUPER_BYTES" - 0 0 2>>"$LOG_FILE")" || fail_ota "super_write_failed"
         _written_sha="$(printf '%s\n' "$_stream_out" | sed -n 's/^SUPER_SHA256=//p' | head -n 1)"
@@ -583,7 +584,8 @@ sync_esp_tree_from_dir() {
         if is_preserved_esp_path "$_rel"; then
             continue
         fi
-        copy_esp_file_atomic "$_src_root/$_rel" "$_rel" ""
+        _src_sha="$("$OTA_TOOL" sha256 "$_src_root/$_rel" 2>>"$LOG_FILE")" || fail_ota "esp_src_hash_failed"
+        copy_esp_file_atomic "$_src_root/$_rel" "$_rel" "$_src_sha"
     done < "$RUN_DIR/esp-filelist.txt"
     ensure_grub_boots_sq2nat "$ESP_DIR" "$_src_root/EFI/BOOT/grub.cfg"
     sync 2>/dev/null || true
@@ -615,14 +617,40 @@ EOF
     [ -n "$_esp_off" ] && [ -n "$_esp_len" ] || fail_ota "image_missing_sq2probe"
 
     _target_super_bytes="$(block_size_bytes "$SUPER_DEV")" || fail_ota "super_size_read_failed"
-    [ "$_target_super_bytes" -ge "$_super_len" ] || fail_ota "super_partition_too_small"
+    _super_write_len="$_super_len"
+    _super_fits="$(awk -v t="$_target_super_bytes" -v n="$_super_len" 'BEGIN { print (t >= n) ? 1 : 0 }')"
+    if [ "$_super_fits" != "1" ]; then
+        "$OTA_TOOL" capabilities 2>/dev/null | grep -qx 'inspect-super-used' || fail_ota "super_partition_too_small"
+        "$OTA_TOOL" capabilities 2>/dev/null | grep -qx 'extract-stream-zero-tail' || fail_ota "super_partition_too_small"
+        log "Image GPT super ($_super_len B) exceeds target super ($_target_super_bytes B); verifying zero-padded tail read-only..."
+        if [ "$PACKAGE_KIND" = "full-img-gz" ]; then
+            _used_out="$(gzip -dc "$PKG_PATH" 2>>"$LOG_FILE" | "$OTA_TOOL" inspect-super-used - "$_super_off" "$_super_len" 2>>"$LOG_FILE")" || fail_ota "super_used_inspect_failed"
+        else
+            _used_out="$("$OTA_TOOL" inspect-super-used "$PKG_PATH" "$_super_off" "$_super_len" 2>>"$LOG_FILE")" || fail_ota "super_used_inspect_failed"
+        fi
+        _super_nz_end="$(printf '%s\n' "$_used_out" | sed -n 's/^SUPER_NONZERO_END=//p' | head -n 1)"
+        _super_used="$(printf '%s\n' "$_used_out" | sed -n 's/^SUPER_USED_BYTES=//p' | head -n 1)"
+        is_uint "$_super_nz_end" && is_uint "$_super_used" || fail_ota "super_used_inspect_failed"
+        _used_fits="$(awk -v t="$_target_super_bytes" -v nz="$_super_nz_end" 'BEGIN { print (t >= nz && t > 0) ? 1 : 0 }')"
+        [ "$_used_fits" = "1" ] || fail_ota "super_partition_too_small"
+        _super_write_len="$_target_super_bytes"
+        log "Verified super payload fits target (nonzero_end=${_super_nz_end}B used=${_super_used}B <= target=${_target_super_bytes}B); writing ${_super_write_len}B and verifying zero tail..."
+    fi
 
     _esp_fat="$RUN_DIR/esp.fat"
-    log "Streaming full image: super($_super_len bytes) + SQ2PROBE($_esp_len bytes)..."
+    log "Streaming full image: super($_super_write_len/$_super_len bytes) + SQ2PROBE($_esp_len bytes)..."
     if [ "$PACKAGE_KIND" = "full-img-gz" ]; then
-        _stream_out="$(gzip -dc "$PKG_PATH" 2>>"$LOG_FILE" | "$OTA_TOOL" extract-stream "$SUPER_DEV" "$_super_off" "$_super_len" "$_esp_fat" "$_esp_off" "$_esp_len" 2>>"$LOG_FILE")" || fail_ota "full_image_stream_failed"
+        if [ "$_super_write_len" != "$_super_len" ]; then
+            _stream_out="$(gzip -dc "$PKG_PATH" 2>>"$LOG_FILE" | "$OTA_TOOL" extract-stream "$SUPER_DEV" "$_super_off" "$_super_len" "$_esp_fat" "$_esp_off" "$_esp_len" "$_super_write_len" 2>>"$LOG_FILE")" || fail_ota "full_image_stream_failed"
+        else
+            _stream_out="$(gzip -dc "$PKG_PATH" 2>>"$LOG_FILE" | "$OTA_TOOL" extract-stream "$SUPER_DEV" "$_super_off" "$_super_len" "$_esp_fat" "$_esp_off" "$_esp_len" 2>>"$LOG_FILE")" || fail_ota "full_image_stream_failed"
+        fi
     else
-        _stream_out="$("$OTA_TOOL" extract-stream "$SUPER_DEV" "$_super_off" "$_super_len" "$_esp_fat" "$_esp_off" "$_esp_len" < "$PKG_PATH" 2>>"$LOG_FILE")" || fail_ota "full_image_stream_failed"
+        if [ "$_super_write_len" != "$_super_len" ]; then
+            _stream_out="$("$OTA_TOOL" extract-stream "$SUPER_DEV" "$_super_off" "$_super_len" "$_esp_fat" "$_esp_off" "$_esp_len" "$_super_write_len" < "$PKG_PATH" 2>>"$LOG_FILE")" || fail_ota "full_image_stream_failed"
+        else
+            _stream_out="$("$OTA_TOOL" extract-stream "$SUPER_DEV" "$_super_off" "$_super_len" "$_esp_fat" "$_esp_off" "$_esp_len" < "$PKG_PATH" 2>>"$LOG_FILE")" || fail_ota "full_image_stream_failed"
+        fi
     fi
     log "Stream extraction finished: $(printf '%s' "$_stream_out" | tr '\n' ' ')"
 
@@ -709,7 +737,7 @@ else
             ;;
     esac
     _full_dalvik="0"
-    if [ "${M_SUPER_MODE:-}" = "delta" ]; then
+    if [ "$APPLY_SUPER" = "1" ] || [ "${M_SUPER_INCLUDED:-0}" = "1" ] || [ "${M_SUPER_MODE:-}" = "delta" ] || [ "$PACKAGE_KIND" = "full-img" ] || [ "$PACKAGE_KIND" = "full-img-gz" ]; then
         _full_dalvik="1"
     fi
     if [ "$_full_dalvik" = "1" ]; then

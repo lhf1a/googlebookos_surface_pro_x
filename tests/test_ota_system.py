@@ -414,7 +414,7 @@ class OtaSystemTests(unittest.TestCase):
                     self.assertFalse((data_dir / 'dalvik-cache/arm64/vendor@overlay@spx-systemui-overlay.apk@classes.vdex').exists())
                     self.assertFalse((data_dir / 'misc/apexdata/com.android.art/dalvik-cache/arm64/vendor@app@SurfaceAdvancedControl@SurfaceAdvancedControl.apk@classes.odex').exists())
                     self.assertEqual((data_dir / 'system/packages.xml').read_text(), '<packages/>\n')
-                    self.assertEqual((data_dir / 'dalvik-cache/arm64/system@framework@boot.art').read_text(), 'keep-boot-art\n')
+                    self.assertFalse((data_dir / 'dalvik-cache/arm64/system@framework@boot.art').exists())
                     self.assertIn('STATUS=OK', (esp_dir / 'SPX-OTA-RESULT.txt').read_text())
 
                 elif scenario == 'full_img_gz_wipe':
@@ -967,6 +967,164 @@ esac
             self.assertIn('EFI/SPX/LTE/*', src)
             p = subprocess.run(['sh', '-n'], input=src, text=True, capture_output=True)
             self.assertEqual(p.returncode, 0, f'{rel} sh -n failed: {p.stderr}')
+
+    def test_full_image_zero_tail_truncation_dalvik_refresh_and_nonzero_rejection(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            mib = 1024 * 1024
+            payload_2m = b'S' * (2 * mib)
+            padded_super_4m = payload_2m + b'\x00' * (2 * mib)
+            esp_raw = b'E' * mib
+
+            img_zero_tail = td / 'padded-4m.img'
+            parts = make_synthetic_gpt_image(img_zero_tail, padded_super_4m, esp_raw)
+            img_zero_gz = td / 'padded-4m.img.gz'
+            img_zero_gz.write_bytes(gzip.compress(img_zero_tail.read_bytes(), compresslevel=1))
+            img_zero_sha = hashlib.sha256(img_zero_gz.read_bytes()).hexdigest()
+
+            # 1) spx-ota-tool capabilities & inspect-super-used
+            caps = subprocess.check_output([str(self.host_tool), 'capabilities'], text=True).splitlines()
+            self.assertIn('inspect-super-used', caps)
+            self.assertIn('extract-stream-zero-tail', caps)
+
+            used_out = subprocess.check_output(
+                f'gzip -dc "{img_zero_gz}" | "{self.host_tool}" inspect-super-used - {parts[0]["offset"]} {parts[0]["bytes"]}',
+                shell=True, text=True,
+            )
+            used_kv = dict(line.split('=', 1) for line in used_out.strip().splitlines())
+            self.assertEqual(int(used_kv['SUPER_TOTAL_BYTES']), 4 * mib)
+            self.assertEqual(int(used_kv['SUPER_NONZERO_END']), 2 * mib)
+            self.assertEqual(int(used_kv['SUPER_USED_BYTES']), 2 * mib)
+            self.assertEqual(int(used_kv['SUPER_TAIL_ZERO_BYTES']), 2 * mib)
+
+            # 2) build_ota_package --mode full trims zero-padded super to compacted size
+            esp_src = make_esp_tree(td / 'esp-src', kernel=b'K-FULL', initramfs=b'I-FULL', fw_extra=b'FW-FULL', release='v-full')
+            full_ota = ota_pkg.build_ota_package(
+                output_dir=td / 'ota-full',
+                esp_tree=esp_src,
+                image=img_zero_tail,
+                mode='full',
+                version='v-full',
+            )
+            self.assertTrue(full_ota['super_included'])
+            self.assertEqual(full_ota['super_bytes'], 2 * mib)
+            self.assertEqual(full_ota['super_sha256'], hashlib.sha256(payload_2m).hexdigest())
+            with tarfile.open(full_ota['archive'], 'r:gz') as tar:
+                self.assertEqual(tar.extractfile('payload/super.img').read(), payload_2m)
+
+            # 3) spx-ota-boot accepts 4 MiB zero-tail full-img-gz on 3 MiB super device
+            data_root = td / 'android-root'
+            app_files = data_root / 'data/user_de/0/org.surface.advancedcontrol/files'
+            app_files.mkdir(parents=True)
+            live_esp = make_esp_tree(td / 'live-esp', kernel=b'K-OLD', initramfs=b'I-OLD', fw_extra=b'FW-OLD', release='v-old')
+            etc_dir = td / 'etc'
+            etc_dir.mkdir()
+            (etc_dir / 'spx-ota-info').write_text('SPX_OTA_VERSION=v-old\nSPX_OTA_SUPER_SHA256=old\n')
+            super_dev = td / 'super-3m.dev'
+            orig_super = b'O' * (3 * mib)
+            super_dev.write_bytes(orig_super)
+
+            wrapper = td / 'android-wrap.sh'
+            wrapper.write_text('#!/bin/sh\nexit 0\n')
+            wrapper.chmod(0o755)
+            boot_env = dict(
+                os.environ,
+                SPX_OTA_BOOT_WAIT='0',
+                SPX_OTA_ONCE='1',
+                SPX_OTA_TEST_USER='0',
+                SPX_OTA_ROOT=str(data_root),
+                SPX_OTA_ESP=str(live_esp),
+                SPX_OTA_RUN=str(td / 'boot-run'),
+                SPX_OTA_ETC=str(etc_dir),
+                SPX_OTA_TOOL=str(self.host_tool),
+                SPX_OTA_SUPER_DEV=str(super_dev),
+                SPX_OTA_LOCK_DIR=str(td / 'boot-lock'),
+                SPX_OTA_TMP_REQ=str(td / 'boot-req'),
+                SPX_OTA_ANDROID_WRAPPER=str(wrapper),
+                SPX_OTA_NO_REBOOT='1',
+                SPX_OTA_CLAIM_INTENT='0',
+            )
+            (td / 'boot-run').mkdir()
+            (app_files / 'full.img.gz').write_bytes(img_zero_gz.read_bytes())
+            (app_files / 'ota-request').write_text('ota-inspect\nn-ok\nfull.img.gz\n')
+            p_boot = subprocess.run(['sh', str(ROOT / 'probe/ota/spx-ota-boot')], env=boot_env, text=True, capture_output=True)
+            self.assertEqual(p_boot.returncode, 0, p_boot.stderr)
+            reply_ok = (app_files / 'ota-reply').read_text()
+            self.assertTrue(reply_ok.startswith('n-ok\nOK\n'), reply_ok)
+            self.assertIn(f'super_bytes={2 * mib}\n', reply_ok)
+
+            # 4) spx-ota-stage applies 4 MiB zero-tail full-img-gz to 3 MiB super.dev + clears full dalvik-cache
+            stage_data = td / 'stage-userdata'
+            (stage_data / 'ota').mkdir(parents=True)
+            (stage_data / 'ota/pending.pkg').write_bytes(img_zero_gz.read_bytes())
+            (stage_data / 'user-keep.txt').write_text('KEEP-ME\n')
+            (stage_data / 'dalvik-cache/arm64').mkdir(parents=True)
+            (stage_data / 'dalvik-cache/arm64/system@framework@boot.art').write_text('stale-boot-art\n')
+            (live_esp / 'SPX-OTA-PENDING').write_text(
+                'PACKAGE_REL=ota/pending.pkg\n'
+                f'PACKAGE_SHA256={img_zero_sha}\n'
+                'PACKAGE_KIND=full-img-gz\n'
+                'APPLY_SUPER=1\n'
+                'WIPE_DATA=0\n'
+                'VERSION=v-full\n'
+            )
+            stage_env = dict(
+                os.environ,
+                SPX_OTA_ESP=str(live_esp),
+                SPX_OTA_RUN=str(td / 'stage-run'),
+                SPX_OTA_TOOL=str(self.host_tool),
+                SPX_OTA_SUPER_DEV=str(super_dev),
+                SPX_OTA_DATA_DIR=str(stage_data),
+                SPX_OTA_ESP_SRC_DIR=str(esp_src),
+                SPX_OTA_NO_REBOOT='1',
+            )
+            p_stage = subprocess.run(['sh', str(ROOT / 'probe/ota/spx-ota-stage')], env=stage_env, text=True, capture_output=True)
+            self.assertEqual(p_stage.returncode, 0, p_stage.stderr + p_stage.stdout)
+            self.assertIn('STATUS=OK\n', (live_esp / 'SPX-OTA-RESULT.txt').read_text())
+            self.assertEqual(super_dev.read_bytes(), payload_2m + b'\x00' * mib)
+            self.assertEqual((live_esp / 'EFI/SQ2Nat/initramfs.cpio.gz').read_bytes(), b'I-FULL')
+            self.assertEqual((stage_data / 'user-keep.txt').read_text(), 'KEEP-ME\n')
+            self.assertFalse((stage_data / 'dalvik-cache/arm64/system@framework@boot.art').exists())
+
+            # 5) Non-zero tail past 3 MiB must be rejected read-only without modifying super_dev
+            bad_super_4m = payload_2m + b'\x00' * (mib + 4096) + b'X' + b'\x00' * (mib - 4097)
+            img_bad = td / 'bad-4m.img'
+            bad_parts = make_synthetic_gpt_image(img_bad, bad_super_4m, esp_raw)
+            img_bad_gz = td / 'bad-4m.img.gz'
+            img_bad_gz.write_bytes(gzip.compress(img_bad.read_bytes(), compresslevel=1))
+            img_bad_sha = hashlib.sha256(img_bad_gz.read_bytes()).hexdigest()
+
+            (app_files / 'bad.img.gz').write_bytes(img_bad_gz.read_bytes())
+            (app_files / 'ota-request').write_text('ota-inspect\nn-bad\nbad.img.gz\n')
+            p_boot_bad = subprocess.run(['sh', str(ROOT / 'probe/ota/spx-ota-boot')], env=boot_env, text=True, capture_output=True)
+            self.assertEqual(p_boot_bad.returncode, 0, p_boot_bad.stderr)
+            reply_bad = (app_files / 'ota-reply').read_text()
+            self.assertTrue(reply_bad.startswith('n-bad\nERROR\nsuper_partition_too_small'), reply_bad)
+
+            sentinel_super = b'Z' * (3 * mib)
+            super_dev.write_bytes(sentinel_super)
+            (stage_data / 'ota/pending.pkg').write_bytes(img_bad_gz.read_bytes())
+            (live_esp / 'SPX-OTA-PENDING').write_text(
+                'PACKAGE_REL=ota/pending.pkg\n'
+                f'PACKAGE_SHA256={img_bad_sha}\n'
+                'PACKAGE_KIND=full-img-gz\n'
+                'APPLY_SUPER=1\n'
+                'WIPE_DATA=0\n'
+                'VERSION=v-bad\n'
+            )
+            p_stage_bad = subprocess.run(['sh', str(ROOT / 'probe/ota/spx-ota-stage')], env=stage_env, text=True, capture_output=True)
+            self.assertNotEqual(p_stage_bad.returncode, 0)
+            self.assertIn('ERROR=super_partition_too_small\n', (live_esp / 'SPX-OTA-RESULT.txt').read_text())
+            self.assertEqual(super_dev.read_bytes(), sentinel_super)
+
+            # Direct extract-stream also rejects non-zero tail
+            p_ext_bad = subprocess.run(
+                f'gzip -dc "{img_bad_gz}" | "{self.host_tool}" extract-stream "{td / "out-bad.bin"}" '
+                f'{bad_parts[0]["offset"]} {bad_parts[0]["bytes"]} - 0 0 {3 * mib}',
+                shell=True, text=True, capture_output=True,
+            )
+            self.assertNotEqual(p_ext_bad.returncode, 0)
+            self.assertIn('non-zero byte in truncated SUPER tail', p_ext_bad.stderr)
 
 
 if __name__ == '__main__':

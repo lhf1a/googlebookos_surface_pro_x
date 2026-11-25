@@ -87,6 +87,38 @@ class SpxEventWaitTests(unittest.TestCase):
             self.assertEqual(res.stdout.strip(), "exists")
             self.assertLess(time.monotonic() - t0, 1.0)
 
+    def test_inotify_extra_dir_wakes_immediately_on_secondary_status_rename(self):
+        with tempfile.TemporaryDirectory() as td:
+            d1 = Path(td) / "files"
+            d2 = Path(td) / "noise"
+            d1.mkdir()
+            d2.mkdir()
+
+            def writer():
+                time.sleep(0.08)
+                tmp = d2 / "status.new"
+                tmp.write_text("n1 ready 4505 0\n")
+                tmp.rename(d2 / "status")
+
+            t = threading.Thread(target=writer)
+            t.start()
+            t0 = time.monotonic()
+            res = subprocess.run(
+                [
+                    str(self.host_bin), "--oneshot",
+                    "--inotify", str(d1),
+                    "--inotify-extra", str(d2),
+                    "--match", "request,status,tap-status",
+                    "--debounce-ms", "20",
+                    "--timeout-ms", "10000",
+                ],
+                capture_output=True, text=True, check=True,
+            )
+            elapsed = time.monotonic() - t0
+            t.join()
+            self.assertEqual(res.stdout.strip(), "event")
+            self.assertLess(elapsed, 2.0)
+
     def test_inotify_timeout(self):
         with tempfile.TemporaryDirectory() as td:
             res = subprocess.run(

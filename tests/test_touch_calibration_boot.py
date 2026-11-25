@@ -349,4 +349,124 @@ elif a[:2]==['am','start']:pathlib.Path({str(w/'launched_args')!r}).write_text('
                     if p.poll() is None:p.terminate();p.wait(timeout=8)
                     log.close()
 
+    def test_noise_learn_publishes_learning_immediately_and_wakes_fast_with_event_wait(self):
+        """Regression: noise-learn must publish 'learning' before reply OK and propagate 'ready' promptly under spx-event-wait."""
+        with tempfile.TemporaryDirectory() as td:
+            w=pathlib.Path(td)
+            def put(path,body,mode=0o644):
+                p=w/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(body);p.chmod(mode);return p
+            put('sys/class/dmi/id/product_uuid','test-board\n')
+            put('sys/class/drm/card7-eDP-1/edid','x'*128)
+            put('sys/class/drm/card7-eDP-1/status','connected\n')
+            put('sys/class/hidraw/hidraw19/device/uevent','HID_ID=001C:0000045E:00000996\n')
+            put('sys/class/hidraw/hidraw19/device/report_descriptor','test-hid')
+            put('logs/power-input-boot.txt','SQ2_COVER_AND_POWER_INPUT_READY\n')
+            put('etc/iptsd.conf','[Contacts]\nAspectMax = 2.0\n')
+            put('etc/sq2-touch-calibration/wizard.apk','apk')
+            put('run/iptsd-hidraw','/dev/hidraw19\n')
+            put('run/iptsd-noise/version','7\n')
+            (w/'android/data/local/tmp').mkdir(parents=True)
+            files=w/'android/data/user_de/10/org.surface.touchcalibration.unified/files'
+            files.mkdir(parents=True)
+            noise=w/'run/iptsd-noise'
+            put('bin/android','''#!/usr/bin/python3
+import sys
+a=sys.argv[1:]
+if a[:1]==['getprop']:print('1')
+elif a[:2]==['cmd','activity']:print('10')
+''',0o755)
+            put('bin/touch-framework-ready','#!/bin/sh\nexit 0\n',0o755)
+            put('bin/touch-services','#!/bin/sh\nexit 0\n',0o755)
+            subprocess.run(['g++','-std=c++17','-O2',str(R/'probe/touch-calibration/profile-tool.cpp'),'-o',str(w/'bin/touch-calibration-profile')],check=True)
+            subprocess.run(['g++','-std=c++17','-O2',str(R/'probe/touch-calibration/noise-tool.cpp'),'-o',str(w/'bin/touch-noise-profile')],check=True)
+            subprocess.run(['gcc','-std=c11','-O2',str(R/'probe/test2/spx-event-wait.c'),'-o',str(w/'bin/spx-event-wait')],check=True)
+
+            script=(R/'probe/test2/touch-calibration-boot').read_text()
+            script=script.replace('export PATH=/bin:/sbin', f'export PATH="{w}/bin:/usr/bin:/bin:/sbin"')
+            script=script.replace('android() { timeout "${ANDROID_COMMAND_TIMEOUT:-15}" nsenter -t 1 -m -r -- /system/bin/"$@"; }',f'android() {{ "{w}/bin/android" "$@"; }}')
+            for prefix in ('/proc/1/root','/sys','/run','/logs','/etc'):
+                script=script.replace(prefix,str(w/('android' if prefix=='/proc/1/root' else prefix[1:])))
+            script=script.replace('/bin/touch-',str(w/'bin/touch-'))
+            runner=put('runner',script,0o755)
+
+            # Stub iptsd noise worker: responds to learn/reload commands and finishes learn after 0.6s.
+            stop_stub = {'flag': False}
+            import threading
+            def iptsd_stub():
+                last_cmd = ''
+                learn_nonce = None
+                learn_finish_at = 0.0
+                while not stop_stub['flag']:
+                    cmd_file = noise / 'command'
+                    if cmd_file.is_file():
+                        txt = cmd_file.read_text().strip()
+                        if txt and txt != last_cmd:
+                            last_cmd = txt
+                            parts = txt.split()
+                            if len(parts) == 3:
+                                op, _dev, n = parts
+                                if op == 'reload':
+                                    learn_nonce = None
+                                    tmp = noise / 'status.new'
+                                    tmp.write_text(f'{n} applied 0 0\n')
+                                    tmp.rename(noise / 'status')
+                                elif op == 'learn':
+                                    learn_nonce = n
+                                    learn_finish_at = time.monotonic() + 0.6
+                                    tmp = noise / 'status.new'
+                                    tmp.write_text(f'{n} learning 10 0\n')
+                                    tmp.rename(noise / 'status')
+                    if learn_nonce and time.monotonic() >= learn_finish_at:
+                        n = learn_nonce
+                        learn_nonce = None
+                        tmp = noise / 'status.new'
+                        tmp.write_text(f'{n} ready 4505 0\nabnormal_frames=12\n')
+                        tmp.rename(noise / 'status')
+                    time.sleep(0.05)
+
+            import signal, threading
+            stub_t = threading.Thread(target=iptsd_stub, daemon=True)
+            stub_t.start()
+            log = (w / 'session.log').open('w')
+            p = subprocess.Popen(['sh', str(runner)], stdout=log, stderr=log, start_new_session=True)
+            try:
+                end = time.monotonic() + 8
+                while time.monotonic() < end and not (files / 'context').exists():
+                    time.sleep(0.05)
+                self.assertTrue((files / 'context').exists(), (w / 'session.log').read_text())
+
+                # Send noise-learn request; MUST reply OK AND already have published '<nonce> learning' immediately!
+                nonce = 'learn-test-1'
+                t0 = time.monotonic()
+                tmp = files / 'request.tmp'
+                tmp.write_text(f'noise-learn\n{nonce}\n')
+                tmp.rename(files / 'request')
+                end = time.monotonic() + 5
+                while time.monotonic() < end:
+                    if (files / 'reply').exists() and (files / 'reply').read_text().startswith(nonce + '\n'):
+                        break
+                    time.sleep(0.02)
+                self.assertTrue((files / 'reply').exists() and (files / 'reply').read_text().startswith(nonce + '\nOK'))
+                # Immediately upon reply OK, noise-status MUST already reflect '<nonce> learning' (no 20s stall!)
+                ns_text = (files / 'noise-status').read_text()
+                self.assertTrue(ns_text.startswith(f'{nonce} learning '), f'Expected immediate learning status, got: {ns_text!r}')
+                self.assertLess(time.monotonic() - t0, 3.0)
+
+                # Once stub transitions to 'ready' (~0.6s later), noise-status MUST propagate within <2.5s (not 20s!)
+                t_ready_wait = time.monotonic()
+                while time.monotonic() - t_ready_wait < 3.0:
+                    ns_text = (files / 'noise-status').read_text()
+                    if ns_text.startswith(f'{nonce} ready 4505 0'):
+                        break
+                    time.sleep(0.05)
+                self.assertTrue(ns_text.startswith(f'{nonce} ready 4505 0'), f'Timed out waiting for ready status; last: {ns_text!r}')
+                self.assertLess(time.monotonic() - t_ready_wait, 2.5)
+            finally:
+                stop_stub['flag'] = True
+                if p.poll() is None:
+                    os.killpg(p.pid, signal.SIGTERM)
+                    p.wait(timeout=8)
+                stub_t.join(timeout=2)
+                log.close()
+
 if __name__=='__main__':unittest.main()

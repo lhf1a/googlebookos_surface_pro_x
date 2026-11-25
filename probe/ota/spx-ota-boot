@@ -669,17 +669,41 @@ EOF
         else
             _gpt="$("$OTA_TOOL" inspect-gpt "$STAGED_PKG" 2>/dev/null || true)"
         fi
+        _super_off="$(printf '%s\n' "$_gpt" | awk -F '\t' '$1=="super" {print $2; exit}')"
         _super_sz="$(printf '%s\n' "$_gpt" | awk -F '\t' '$1=="super" {print $3; exit}')"
         _esp_sz="$(printf '%s\n' "$_gpt" | awk -F '\t' '$1=="SQ2PROBE" {print $3; exit}')"
-        if [ -z "$_super_sz" ] || [ -z "$_esp_sz" ]; then
+        if [ -z "$_super_off" ] || [ -z "$_super_sz" ] || [ -z "$_esp_sz" ]; then
             rm -f "$STAGED_PKG"
             send_reply "$_dir" "$_nonce" "ERROR" "invalid_full_image_gpt"
             return 0
         fi
-        if [ "$_target_super_bytes" -gt 0 ] && [ "$_super_sz" -gt "$_target_super_bytes" ]; then
-            rm -f "$STAGED_PKG"
-            send_reply "$_dir" "$_nonce" "ERROR" "super_partition_too_small"
-            return 0
+        if [ "$_target_super_bytes" -gt 0 ]; then
+            _super_fits="$(awk -v t="$_target_super_bytes" -v n="$_super_sz" 'BEGIN { print (t >= n) ? 1 : 0 }')"
+            if [ "$_super_fits" != "1" ]; then
+                if "$OTA_TOOL" capabilities 2>/dev/null | grep -qx 'inspect-super-used' &&
+                   "$OTA_TOOL" capabilities 2>/dev/null | grep -qx 'extract-stream-zero-tail'; then
+                    publish_progress "$_dir" "inspecting" "75" "verifying_super_tail"
+                    if [ "$_kind" = "full-img-gz" ]; then
+                        _used_out="$(gzip -dc "$STAGED_PKG" 2>/dev/null | "$OTA_TOOL" inspect-super-used - "$_super_off" "$_super_sz" 2>/dev/null || true)"
+                    else
+                        _used_out="$("$OTA_TOOL" inspect-super-used "$STAGED_PKG" "$_super_off" "$_super_sz" 2>/dev/null || true)"
+                    fi
+                    _super_nz_end="$(printf '%s\n' "$_used_out" | sed -n 's/^SUPER_NONZERO_END=//p' | head -n 1)"
+                    _super_used="$(printf '%s\n' "$_used_out" | sed -n 's/^SUPER_USED_BYTES=//p' | head -n 1)"
+                    if [ -n "$_super_nz_end" ] && [ -n "$_super_used" ] &&
+                       [ "$(awk -v t="$_target_super_bytes" -v nz="$_super_nz_end" 'BEGIN { print (t >= nz) ? 1 : 0 }')" = "1" ]; then
+                        _super_sz="$_super_used"
+                    else
+                        rm -f "$STAGED_PKG"
+                        send_reply "$_dir" "$_nonce" "ERROR" "super_partition_too_small"
+                        return 0
+                    fi
+                else
+                    rm -f "$STAGED_PKG"
+                    send_reply "$_dir" "$_nonce" "ERROR" "super_partition_too_small"
+                    return 0
+                fi
+            fi
         fi
         _meta="$(cat <<EOF
 package_kind=$_kind

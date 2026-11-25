@@ -5,7 +5,8 @@
  *   - slice-sha256 <path> <offset> <length>
  *   - detect <path-or-minus>
  *   - inspect-gpt <path-or-minus>
- *   - extract-stream <super_dst|-> <super_off> <super_len> <esp_dst|-> <esp_off> <esp_len>
+ *   - inspect-super-used <path-or-minus> <super_off> <super_len>
+ *   - extract-stream <super_dst|-> <super_off> <super_len> <esp_dst|-> <esp_off> <esp_len> [super_write_len]
  *   - apply-delta <src_path> <src_offset> <src_bytes> <dst_path> <delta_path_or_minus>
  *   - assemble-super <target> <total_bytes> <expected_sha256> <off1> <file1> [...]
  *   - write-gpt-5part <target> <super_bytes> <meta_bytes> <misc_bytes> <esp_bytes> [total_bytes]
@@ -396,6 +397,7 @@ typedef struct {
     const char *dst;
     uint64_t offset;
     uint64_t length;
+    uint64_t write_len;
     int fd;
     sha256_ctx sha;
     bool active;
@@ -420,6 +422,110 @@ static int skip_bytes(int in_fd, uint8_t *buf, uint64_t count) {
     return 0;
 }
 
+static size_t find_first_nonzero(const uint8_t *buf, size_t len) {
+    size_t i = 0;
+    while (i + sizeof(uint64_t) <= len) {
+        uint64_t w;
+        memcpy(&w, buf + i, sizeof(w));
+        if (w != 0u) break;
+        i += sizeof(uint64_t);
+    }
+    while (i < len) {
+        if (buf[i] != 0u) return i;
+        ++i;
+    }
+    return len;
+}
+
+static size_t find_last_nonzero_end(const uint8_t *buf, size_t len) {
+    size_t i = len;
+    while (i >= sizeof(uint64_t)) {
+        uint64_t w;
+        memcpy(&w, buf + i - sizeof(uint64_t), sizeof(w));
+        if (w != 0u) break;
+        i -= sizeof(uint64_t);
+    }
+    while (i > 0) {
+        if (buf[i - 1] != 0u) return i;
+        --i;
+    }
+    return 0;
+}
+
+static int cmd_inspect_super_used(int argc, char **argv) {
+    if (argc != 5) {
+        fprintf(stderr, "usage: spx-ota-tool inspect-super-used <path-or-minus> <super_off> <super_len>\n");
+        return 2;
+    }
+    uint64_t super_off = 0, super_len = 0;
+    if (parse_u64(argv[3], &super_off) != 0 || parse_u64(argv[4], &super_len) != 0 || super_len == 0) {
+        fprintf(stderr, "invalid super offset or length\n");
+        return 2;
+    }
+    bool close_fd = false;
+    int fd = open_input(argv[2], &close_fd);
+    if (fd < 0) return 1;
+
+    uint8_t *buf = malloc(IO_CHUNK);
+    if (!buf) {
+        if (close_fd) close(fd);
+        return 1;
+    }
+
+    if (super_off > 0) {
+        bool seek_ok = false;
+        if (close_fd && lseek(fd, (off_t)super_off, SEEK_SET) == (off_t)super_off) {
+            seek_ok = true;
+        }
+        if (!seek_ok && skip_bytes(fd, buf, super_off) != 0) {
+            free(buf);
+            if (close_fd) close(fd);
+            return 1;
+        }
+    }
+
+    uint64_t pos = 0;
+    uint64_t max_nz_end = 0;
+    while (pos < super_len) {
+        uint64_t rem = super_len - pos;
+        size_t want = rem > IO_CHUNK ? IO_CHUNK : (size_t)rem;
+        ssize_t n = read(fd, buf, want);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            fprintf(stderr, "read error while inspecting super: %s\n", strerror(errno));
+            free(buf);
+            if (close_fd) close(fd);
+            return 1;
+        }
+        if (n == 0) {
+            fprintf(stderr, "unexpected EOF while inspecting super at %" PRIu64 "/%" PRIu64 "\n", pos, super_len);
+            free(buf);
+            if (close_fd) close(fd);
+            return 1;
+        }
+        size_t nz_end = find_last_nonzero_end(buf, (size_t)n);
+        if (nz_end > 0) {
+            max_nz_end = pos + (uint64_t)nz_end;
+        }
+        pos += (uint64_t)n;
+    }
+
+    free(buf);
+    if (close_fd) close(fd);
+
+    uint64_t used_aligned = 0;
+    if (max_nz_end > 0) {
+        const uint64_t MiB = 1048576u;
+        used_aligned = ((max_nz_end + MiB - 1u) / MiB) * MiB;
+        if (used_aligned > super_len) used_aligned = super_len;
+    }
+    printf("SUPER_TOTAL_BYTES=%" PRIu64 "\n", super_len);
+    printf("SUPER_NONZERO_END=%" PRIu64 "\n", max_nz_end);
+    printf("SUPER_USED_BYTES=%" PRIu64 "\n", used_aligned);
+    printf("SUPER_TAIL_ZERO_BYTES=%" PRIu64 "\n", super_len - used_aligned);
+    return 0;
+}
+
 static int copy_region_stream(int in_fd, uint8_t *buf, region_target *t) {
     uint64_t left = t->length;
     uint64_t done = 0;
@@ -436,13 +542,28 @@ static int copy_region_stream(int in_fd, uint8_t *buf, region_target *t) {
             fprintf(stderr, "unexpected EOF while writing %s\n", t->label);
             return -1;
         }
-        if (write_all(t->fd, buf, (size_t)n) != 0) {
-            fprintf(stderr, "write error for %s (%s): %s\n", t->label, t->dst, strerror(errno));
-            return -1;
+        size_t chunk_len = (size_t)n;
+        size_t write_part = 0;
+        if (done < t->write_len) {
+            uint64_t write_rem = t->write_len - done;
+            write_part = write_rem < (uint64_t)chunk_len ? (size_t)write_rem : chunk_len;
+            if (write_all(t->fd, buf, write_part) != 0) {
+                fprintf(stderr, "write error for %s (%s): %s\n", t->label, t->dst, strerror(errno));
+                return -1;
+            }
+            sha256_update(&t->sha, buf, write_part);
         }
-        sha256_update(&t->sha, buf, (size_t)n);
-        left -= (uint64_t)n;
-        done += (uint64_t)n;
+        if (write_part < chunk_len) {
+            size_t tail_len = chunk_len - write_part;
+            size_t nz = find_first_nonzero(buf + write_part, tail_len);
+            if (nz < tail_len) {
+                fprintf(stderr, "non-zero byte in truncated %s tail at offset %" PRIu64 "\n",
+                        t->label, done + (uint64_t)write_part + (uint64_t)nz);
+                return -1;
+            }
+        }
+        left -= (uint64_t)chunk_len;
+        done += (uint64_t)chunk_len;
         int pct = (int)((done * 100u) / t->length);
         if (pct / 10 != last_pct / 10 || pct == 100) {
             last_pct = pct;
@@ -467,8 +588,8 @@ static int open_output_target(const char *path) {
 }
 
 static int cmd_extract_stream(int argc, char **argv) {
-    if (argc != 8) {
-        fprintf(stderr, "usage: spx-ota-tool extract-stream <super_dst|-> <super_off> <super_len> <esp_dst|-> <esp_off> <esp_len>\n");
+    if (argc != 8 && argc != 9) {
+        fprintf(stderr, "usage: spx-ota-tool extract-stream <super_dst|-> <super_off> <super_len> <esp_dst|-> <esp_off> <esp_len> [super_write_len]\n");
         return 2;
     }
     region_target targets[2];
@@ -484,6 +605,16 @@ static int cmd_extract_stream(int argc, char **argv) {
         parse_u64(argv[7], &targets[1].length) != 0) {
         fprintf(stderr, "invalid numeric offset/length\n");
         return 2;
+    }
+    targets[0].write_len = targets[0].length;
+    targets[1].write_len = targets[1].length;
+    if (argc == 9) {
+        if (parse_u64(argv[8], &targets[0].write_len) != 0 ||
+            targets[0].write_len == 0 ||
+            targets[0].write_len > targets[0].length) {
+            fprintf(stderr, "invalid super_write_len\n");
+            return 2;
+        }
     }
     targets[0].active = strcmp(targets[0].dst, "-") != 0 && targets[0].length > 0;
     targets[1].active = strcmp(targets[1].dst, "-") != 0 && targets[1].length > 0;
@@ -516,6 +647,17 @@ static int cmd_extract_stream(int argc, char **argv) {
             if (targets[0].fd >= 0) close(targets[0].fd);
             if (targets[1].fd >= 0) close(targets[1].fd);
             return 1;
+        }
+        struct stat dst_st;
+        if (fstat(targets[i].fd, &dst_st) == 0 && S_ISBLK(dst_st.st_mode)) {
+            uint64_t blk_sz = 0;
+            if (ioctl(targets[i].fd, BLKGETSIZE64, &blk_sz) == 0 && blk_sz < targets[i].write_len) {
+                fprintf(stderr, "%s block device too small: %" PRIu64 " < %" PRIu64 "\n",
+                        targets[i].label, blk_sz, targets[i].write_len);
+                if (targets[0].fd >= 0) close(targets[0].fd);
+                if (targets[1].fd >= 0) close(targets[1].fd);
+                return 1;
+            }
         }
         sha256_init(&targets[i].sha);
     }
@@ -562,7 +704,11 @@ static int cmd_extract_stream(int argc, char **argv) {
         char hex[65];
         sha256_final_hex(&targets[i].sha, hex);
         printf("%s_SHA256=%s\n", targets[i].label, hex);
-        printf("%s_BYTES=%" PRIu64 "\n", targets[i].label, targets[i].length);
+        printf("%s_BYTES=%" PRIu64 "\n", targets[i].label, targets[i].write_len);
+        if (targets[i].write_len < targets[i].length) {
+            printf("%s_SOURCE_BYTES=%" PRIu64 "\n", targets[i].label, targets[i].length);
+            printf("%s_TAIL_ZERO_VERIFIED=1\n", targets[i].label);
+        }
     }
     return 0;
 }
@@ -1082,7 +1228,9 @@ static int cmd_capabilities(void) {
     puts("slice-sha256");
     puts("detect");
     puts("inspect-gpt");
+    puts("inspect-super-used");
     puts("extract-stream");
+    puts("extract-stream-zero-tail");
     puts("apply-delta");
     puts("assemble-super");
     puts("write-gpt-5part");
@@ -1559,7 +1707,7 @@ static int cmd_assemble_super(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: spx-ota-tool <capabilities|sha256|slice-sha256|detect|inspect-gpt|extract-stream|apply-delta|assemble-super|write-gpt-5part|copy-verify> ...\n");
+        fprintf(stderr, "usage: spx-ota-tool <capabilities|sha256|slice-sha256|detect|inspect-gpt|inspect-super-used|extract-stream|apply-delta|assemble-super|write-gpt-5part|copy-verify> ...\n");
         return 2;
     }
     if (strcmp(argv[1], "capabilities") == 0 && argc == 2) {
@@ -1576,6 +1724,9 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "inspect-gpt") == 0 && argc == 3) {
         return cmd_inspect_gpt(argv[2]);
+    }
+    if (strcmp(argv[1], "inspect-super-used") == 0) {
+        return cmd_inspect_super_used(argc, argv);
     }
     if (strcmp(argv[1], "extract-stream") == 0) {
         return cmd_extract_stream(argc, argv);

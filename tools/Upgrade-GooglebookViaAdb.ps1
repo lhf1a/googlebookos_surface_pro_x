@@ -321,6 +321,30 @@ public static class SpxAdbOtaNative
         return info;
     }
 
+    public static bool TestRegionAllZero(string path, bool isGzip, long offset, long length)
+    {
+        if (length <= 0) return true;
+        using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4 * 1024 * 1024))
+        using (Stream src = isGzip ? (Stream)new GZipStream(fs, CompressionMode.Decompress) : fs)
+        {
+            SkipExact(src, offset);
+            byte[] buf = new byte[4 * 1024 * 1024];
+            long left = length;
+            while (left > 0)
+            {
+                int want = (int)Math.Min(left, buf.Length);
+                int n = src.Read(buf, 0, want);
+                if (n <= 0) throw new EndOfStreamException("Unexpected EOF while verifying zero tail.");
+                for (int i = 0; i < n; i++)
+                {
+                    if (buf[i] != 0) return false;
+                }
+                left -= n;
+            }
+        }
+        return true;
+    }
+
     public static void ExtractRegion(string path, bool isGzip, long offset, long length, string outPath)
     {
         using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4 * 1024 * 1024))
@@ -564,7 +588,7 @@ backup_sq2nat_if_space() {
     _bk_esp="$1"
     [ -d "$_bk_esp/EFI/SQ2Nat" ] || return 0
     _bk_free_kb="$(df -k "$_bk_esp" | awk 'NR==2{print $4+0}')"
-    if [ "$_bk_free_kb" -ge 358400 ]; then
+    if [ "$_bk_free_kb" -ge 665600 ]; then
         rm -rf "$_bk_esp/EFI/SQ2Bak" 2>/dev/null || true
         cp -r "$_bk_esp/EFI/SQ2Nat" "$_bk_esp/EFI/SQ2Bak" 2>/dev/null || rm -rf "$_bk_esp/EFI/SQ2Bak" 2>/dev/null || true
         sync 2>/dev/null || true
@@ -840,6 +864,7 @@ case "$CMD" in
         _wipe_data="$3"
         _version="$4"
         _esp_src_fat="$5"
+        _need_zero_tail="${6:-0}"
         [ -f "$_esp_src_fat" ] || { echo "ERR:missing_esp_src_fat" >&2; exit 1; }
 
         _src_mp="/data/local/tmp/spx-adb-esp-src"
@@ -857,6 +882,12 @@ case "$CMD" in
         [ -f "$_src_mp/EFI/SQ2Nat/Boot" ] || { echo "ERR:new_esp_missing_boot_shim" >&2; exit 1; }
         [ -f "$_src_mp/EFI/SQ2Nat/Image" ] || { echo "ERR:new_esp_missing_kernel" >&2; exit 1; }
         verify_initramfs_has_ota "$_src_mp/EFI/SQ2Nat/initramfs.cpio.gz" || exit 1
+        if [ "$_need_zero_tail" = "1" ]; then
+            if ! gzip -dc "$_src_mp/EFI/SQ2Nat/initramfs.cpio.gz" 2>/dev/null | tr '\0' '\n' | grep -Fq 'extract-stream-zero-tail'; then
+                echo "ERR:new_initramfs_missing_zero_tail_support" >&2
+                exit 1
+            fi
+        fi
 
         backup_sq2nat_if_space "$_esp"
 
@@ -923,8 +954,20 @@ try {
 
     Write-Log "Device: kernel=$devKernel super=${devSuperBytes}B esp=${devEspBytes}B data_free=${devDataFree}B has_ota_info=$devHasOtaInfo"
 
+    $needZeroTail = '0'
     if ($pkg.SuperIncluded -and $pkg.SuperBytes -gt 0 -and $devSuperBytes -lt $pkg.SuperBytes) {
-        throw "Device super partition ($devSuperBytes B) is smaller than package super ($($pkg.SuperBytes) B)."
+        if ($pkg.Kind -eq 'full-img' -or $pkg.Kind -eq 'full-img-gz') {
+            $tailLen = $pkg.SuperBytes - $devSuperBytes
+            Write-Log "Device super ($devSuperBytes B) < GPT super ($($pkg.SuperBytes) B); verifying trailing $tailLen B are zero..."
+            $allZero = [SpxAdbOtaNative]::TestRegionAllZero($PackagePath, ($pkg.Kind -eq 'full-img-gz'), ($pkg.SuperOffset + $devSuperBytes), $tailLen)
+            if (-not $allZero) {
+                throw "Device super partition ($devSuperBytes B) is smaller than package super ($($pkg.SuperBytes) B) and trailing region contains non-zero data."
+            }
+            $needZeroTail = '1'
+            Write-Log "Verified trailing $tailLen B of package super are all zero; safe zero-tail truncation enabled."
+        } else {
+            throw "Device super partition ($devSuperBytes B) is smaller than package super ($($pkg.SuperBytes) B)."
+        }
     }
 
     if ($pkg.Kind -eq 'manifest' -and -not $pkg.SuperIncluded -and -not $Force) {
@@ -1000,7 +1043,7 @@ try {
         }
 
         Write-Log 'Updating SQ2PROBE boot payload & arming offline super installation...'
-        $applyOut = (Invoke-DeviceRoot "sh /data/local/tmp/spx-adb-helper.sh apply-full-esp-and-pending $($pkg.Sha256) $($pkg.Kind) $wipeFlag $($pkg.Version) $espSrcPath").Text.Trim()
+        $applyOut = (Invoke-DeviceRoot "sh /data/local/tmp/spx-adb-helper.sh apply-full-esp-and-pending $($pkg.Sha256) $($pkg.Kind) $wipeFlag $($pkg.Version) $espSrcPath $needZeroTail").Text.Trim()
         Write-Log $applyOut
     }
 

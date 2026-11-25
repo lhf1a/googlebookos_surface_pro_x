@@ -271,6 +271,16 @@ fi
 preview=0;until_time=0;context_sent=0;cycles=0
 reply() { printf '%s\n%s\n' "$nonce" "$1" | "$tool" publish "$files" reply; }
 context() { "$tool" publish "$files" context < /run/touch-calibration-current.profile; }
+publish_noise_status() {
+    if [ -f "$noise/status" ]; then
+        { head -c 512 "$noise/status"; [ ! -f "$noise/power" ] || cat "$noise/power"; } | "$tool" publish "$files" noise-status
+    fi
+}
+publish_tap_status() {
+    if [ -f "$noise/tap-status" ]; then
+        head -c 512 "$noise/tap-status" | "$tool" publish "$files" tap-status
+    fi
+}
 restore() {
     apply /run/touch-calibration-current.profile
     preview=0;context_sent=0
@@ -284,8 +294,8 @@ while true; do
     if [ "$preview" = 1 ] && [ "$(cut -d . -f1 /proc/uptime)" -ge "$until_time" ]; then restore; fi
     if [ -d "$files" ] && [ ! -L "$files" ]; then
         if [ "$context_sent" = 0 ]; then context; context_sent=1; fi
-        if [ -f "$noise/status" ]; then { head -c 512 "$noise/status"; [ ! -f "$noise/power" ] || cat "$noise/power"; } | "$tool" publish "$files" noise-status; fi
-        if [ -f "$noise/tap-status" ]; then head -c 512 "$noise/tap-status" | "$tool" publish "$files" tap-status; fi
+        publish_noise_status
+        publish_tap_status
         request=$files/request
         if [ -f "$request" ] && [ ! -L "$request" ] && [ "$(stat -c %s "$request")" -le 4096 ]; then
             cp "$request" /run/touch-calibration-request
@@ -304,7 +314,7 @@ while true; do
                     for i in $(seq 1 25); do
                         [ "$(head -n 1 "$noise/tap-status" 2>/dev/null | cut -d ' ' -f1,2)" = "$nonce learning" ] && { ok=1; break; };sleep .2
                     done
-                    if [ "$ok" = 1 ]; then reply OK;else reply ERROR;fi
+                    if [ "$ok" = 1 ]; then publish_tap_status;reply OK;else reply ERROR;fi
                     ;;
                 tap-finish)
                     noise_cmd tapfinish "$nonce";ok=0
@@ -312,7 +322,7 @@ while true; do
                         [ "$(head -n 1 "$noise/tap-status" 2>/dev/null | cut -d ' ' -f1,2)" = "$nonce ready" ] && { ok=1; break; };sleep .2
                     done
                     if [ "$ok" = 1 ] && /bin/touch-tap-profile "$device" < "$noise/tap-candidate" > /dev/null; then
-                        "$tool" publish "$files" tap-status < "$noise/tap-status";reply OK
+                        publish_tap_status;reply OK
                     else reply ERROR;fi
                     ;;
                 tap-apply)
@@ -321,7 +331,7 @@ while true; do
                     [ ! -f "$noise/tap-active" ] || cp "$noise/tap-active" "$noise/tap-previous"
                     mv "$noise/tap-active.new" "$noise/tap-active"
                     tap_preview=1;tap_until=$(( $(cut -d . -f1 /proc/uptime) + 600 ))
-                    if tap_reload "$nonce";then reply OK;else tap_restore;reply ERROR;fi
+                    if tap_reload "$nonce";then publish_tap_status;reply OK;else tap_restore;reply ERROR;fi
                     ;;
                 tap-retest)
                     if [ "$tap_preview" != 1 ];then reply ERROR;continue;fi
@@ -329,12 +339,12 @@ while true; do
                     ;;
                 tap-save)
                     if [ "$tap_preview" = 1 ] && /bin/touch-tap-profile "$device" < "$noise/tap-active" > "$tap_saved.new"; then
-                        chmod 600 "$tap_saved.new";sync;mv "$tap_saved.new" "$tap_saved";touch "$store/$device.prompted";sync;tap_preview=0;if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
+                        chmod 600 "$tap_saved.new";sync;mv "$tap_saved.new" "$tap_saved";touch "$store/$device.prompted";sync;tap_preview=0;if noise_reload "$nonce"; then publish_noise_status;publish_tap_status;reply OK;else reply ERROR;fi
                     else reply ERROR;fi
                     ;;
                 tap-cancel)
                     if [ "$tap_preview" = 1 ];then tap_restore;else tap_reload "$nonce";fi
-                    if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
+                    if noise_reload "$nonce"; then publish_noise_status;publish_tap_status;reply OK;else reply ERROR;fi
                     ;;
                 noise-learn)
                     case "$(cat "$noise/version" 2>/dev/null)" in 7) ;; *) reply ERROR;continue;; esac
@@ -344,7 +354,7 @@ while true; do
                     power=$(cat /sys/class/power_supply/ADP1/online 2>/dev/null || printf unknown)
                     case "$power" in 0|1) ;; *) power=unknown;; esac
                     printf 'power_online=%s\n' "$power" > "$noise/power"
-                    if noise_begin learn "$nonce"; then reply OK;else noise_reload "$nonce-cancel";reply ERROR;fi
+                    if noise_begin learn "$nonce"; then publish_noise_status;reply OK;else noise_reload "$nonce-cancel";reply ERROR;fi
                     ;;
                 noise-export)
                     state=$(head -n 1 "$noise/status" 2>/dev/null | cut -d ' ' -f2)
@@ -409,7 +419,7 @@ while true; do
                     case "$power" in 0|1) ;; *) power=unknown;; esac
                     printf 'power_online=%s\n' "$power" > "$noise/power"
                     op=learn-test; [ "$command" != noise-slide ] || op=slide-test
-                    if noise_begin "$op" "$nonce"; then reply OK;else noise_reload "$nonce-cancel";reply ERROR;fi
+                    if noise_begin "$op" "$nonce"; then publish_noise_status;reply OK;else noise_reload "$nonce-cancel";reply ERROR;fi
                     ;;
                 noise-apply)
                     state=$(head -n 1 "$noise/status" 2>/dev/null | cut -d ' ' -f2)
@@ -421,20 +431,21 @@ while true; do
                     fi
                     mv "$noise/active.new" "$noise/active"
                     noise_preview=1;noise_until=$(( $(cut -d . -f1 /proc/uptime) + 600 ))
-                    if noise_reload "$nonce"; then reply OK; else noise_restore;reply ERROR; fi
+                    if noise_reload "$nonce"; then publish_noise_status;reply OK; else noise_restore;reply ERROR; fi
                     ;;
                 noise-save)
                     if [ "$noise_preview" = 1 ] && /bin/touch-noise-profile "$device" < "$noise/active" > "$noise_saved.new"; then
                         chmod 600 "$noise_saved.new";sync;mv "$noise_saved.new" "$noise_saved";rm -f "$noise_saved.disabled";touch "$store/$device.prompted";sync
-                        noise_preview=0;if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
+                        noise_preview=0;if noise_reload "$nonce"; then publish_noise_status;reply OK;else reply ERROR;fi
                     else reply ERROR; fi
                     ;;
                 noise-resume)
                     if [ "$noise_preview" = 1 ]; then reply ERROR;continue;fi
-                    if noise_reload "$nonce"; then reply OK;else reply ERROR;fi
+                    if noise_reload "$nonce"; then publish_noise_status;reply OK;else reply ERROR;fi
                     ;;
                 noise-cancel)
                     if [ "$noise_preview" = 1 ]; then noise_restore; else noise_cmd reload "$nonce"; fi
+                    publish_noise_status
                     reply OK
                     ;;
                 preview)
@@ -486,6 +497,7 @@ while true; do
                     fi
                     touch "$store/$device.prompted"
                     sync
+                    publish_noise_status
                     reply OK
                     ;;
                 *) reply ERROR;;
@@ -500,17 +512,32 @@ while true; do
             cleanup;trap - EXIT TERM INT;exec /bin/touch-calibration-boot
         fi
     fi
-    if [ "$preview" = 0 ] && [ "$noise_preview" = 0 ] && [ "$tap_preview" = 0 ] &&
-       command -v spx-event-wait >/dev/null 2>&1; then
+    _tc_learning=0
+    case "$(head -n 1 "$noise/status" 2>/dev/null | cut -d ' ' -f2)" in
+        learning) _tc_learning=1 ;;
+    esac
+    case "$(head -n 1 "$noise/tap-status" 2>/dev/null | cut -d ' ' -f2)" in
+        learning) _tc_learning=1 ;;
+    esac
+    if command -v spx-event-wait >/dev/null 2>&1; then
         _tc_parent="${files%/*}"
         if [ -d "$files" ] && [ ! -L "$files" ]; then
-            _tc_ev=$(spx-event-wait --oneshot --inotify "$files" --match request --check-exists "$files/request" --timeout-ms 20000 2>/dev/null || true)
+            if [ "$_tc_learning" = 1 ]; then
+                _tc_ev=$(spx-event-wait --oneshot --inotify "$files" --inotify-extra "$noise" --match request,status,tap-status --check-exists "$files/request" --debounce-ms 20 --timeout-ms 1000 2>/dev/null || \
+                         spx-event-wait --oneshot --inotify "$files" --match request --check-exists "$files/request" --debounce-ms 20 --timeout-ms 500 2>/dev/null || true)
+            elif [ "$preview" = 0 ] && [ "$noise_preview" = 0 ] && [ "$tap_preview" = 0 ]; then
+                _tc_ev=$(spx-event-wait --oneshot --inotify "$files" --inotify-extra "$noise" --match request,status,tap-status --check-exists "$files/request" --timeout-ms 20000 2>/dev/null || \
+                         spx-event-wait --oneshot --inotify "$files" --match request --check-exists "$files/request" --timeout-ms 20000 2>/dev/null || true)
+            else
+                _tc_ev=$(spx-event-wait --oneshot --inotify "$files" --inotify-extra "$noise" --match request,status,tap-status --check-exists "$files/request" --debounce-ms 20 --timeout-ms 2000 2>/dev/null || \
+                         spx-event-wait --oneshot --inotify "$files" --match request --check-exists "$files/request" --debounce-ms 20 --timeout-ms 2000 2>/dev/null || true)
+            fi
         elif [ -d "$_tc_parent" ] && [ ! -L "$_tc_parent" ]; then
             _tc_ev=$(spx-event-wait --oneshot --inotify "$_tc_parent" --match "${files##*/}" --check-exists "$files" --timeout-ms 20000 2>/dev/null || true)
         else
             _tc_ev=
         fi
-        if [ "$_tc_ev" = timeout ]; then
+        if [ "$_tc_ev" = timeout ] && [ "$_tc_learning" = 0 ] && [ "$preview" = 0 ] && [ "$noise_preview" = 0 ] && [ "$tap_preview" = 0 ]; then
             cycles=10
         elif [ -z "$_tc_ev" ]; then
             sleep 2

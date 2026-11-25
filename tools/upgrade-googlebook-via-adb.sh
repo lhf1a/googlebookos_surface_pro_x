@@ -350,8 +350,8 @@ backup_sq2nat_if_space() {
     _bk_esp="$1"
     [ -d "$_bk_esp/EFI/SQ2Nat" ] || return 0
     _bk_free_kb="$(df -k "$_bk_esp" | awk 'NR==2{print $4+0}')"
-    # Require >= 350 MiB free on ESP before creating backup copy (v0.7.0 2 GiB ESP has > 1.3 GiB free)
-    if [ "$_bk_free_kb" -ge 358400 ]; then
+    # Require >= 650 MiB free on ESP before creating backup copy (leaves >= 350 MiB for atomic initramfs .spxtmp)
+    if [ "$_bk_free_kb" -ge 665600 ]; then
         rm -rf "$_bk_esp/EFI/SQ2Bak" 2>/dev/null || true
         cp -r "$_bk_esp/EFI/SQ2Nat" "$_bk_esp/EFI/SQ2Bak" 2>/dev/null || rm -rf "$_bk_esp/EFI/SQ2Bak" 2>/dev/null || true
         sync 2>/dev/null || true
@@ -668,6 +668,7 @@ case "$CMD" in
         _wipe_data="$3"
         _version="$4"
         _esp_src_fat="$5"
+        _need_zero_tail="${6:-0}"
         [ -f "$_esp_src_fat" ] || { echo "ERR:missing_esp_src_fat" >&2; exit 1; }
 
         _src_mp="/data/local/tmp/spx-adb-esp-src"
@@ -685,6 +686,12 @@ case "$CMD" in
         [ -f "$_src_mp/EFI/SQ2Nat/Boot" ] || { echo "ERR:new_esp_missing_boot_shim" >&2; exit 1; }
         [ -f "$_src_mp/EFI/SQ2Nat/Image" ] || { echo "ERR:new_esp_missing_kernel" >&2; exit 1; }
         verify_initramfs_has_ota "$_src_mp/EFI/SQ2Nat/initramfs.cpio.gz" || exit 1
+        if [ "$_need_zero_tail" = "1" ]; then
+            if ! gzip -dc "$_src_mp/EFI/SQ2Nat/initramfs.cpio.gz" 2>/dev/null | tr '\0' '\n' | grep -Fq 'extract-stream-zero-tail'; then
+                echo "ERR:new_initramfs_missing_zero_tail_support" >&2
+                exit 1
+            fi
+        fi
 
         backup_sq2nat_if_space "$_esp"
 
@@ -748,8 +755,26 @@ DEV_KERNEL="$(printf '%s\n' "$PROBE_OUT" | awk -F= '$1=="KERNEL"{print $2; exit}
 
 log "Device: kernel=$DEV_KERNEL super=${DEV_SUPER_BYTES}B esp=${DEV_ESP_BYTES}B data_free=${DEV_DATA_FREE}B has_ota_info=$DEV_HAS_OTA_INFO"
 
-if [ "$SUPER_INCLUDED" = "1" ] && [ "$SUPER_BYTES" -gt 0 ]; then
-    [ "$DEV_SUPER_BYTES" -ge "$SUPER_BYTES" ] || die "Device super partition ($DEV_SUPER_BYTES B) is smaller than package super ($SUPER_BYTES B)"
+NEED_ZERO_TAIL=0
+if [ "$SUPER_INCLUDED" = "1" ] && [ "$(awk -v s="$SUPER_BYTES" 'BEGIN { print (s > 0) ? 1 : 0 }')" = "1" ]; then
+    SUPER_FITS="$(awk -v d="$DEV_SUPER_BYTES" -v s="$SUPER_BYTES" 'BEGIN { print (d >= s) ? 1 : 0 }')"
+    if [ "$SUPER_FITS" != "1" ]; then
+        if [ "$PKG_KIND" = "full-img" ] || [ "$PKG_KIND" = "full-img-gz" ]; then
+            TAIL_START="$(awk -v o="$SUPER_OFF" -v d="$DEV_SUPER_BYTES" 'BEGIN { printf "%.0f", o + d + 1 }')"
+            TAIL_LEN="$(awk -v s="$SUPER_BYTES" -v d="$DEV_SUPER_BYTES" 'BEGIN { printf "%.0f", s - d }')"
+            log "Device super ($DEV_SUPER_BYTES B) < GPT super ($SUPER_BYTES B); verifying trailing $TAIL_LEN B are zero..."
+            if [ "$PKG_KIND" = "full-img-gz" ]; then
+                NZ_CNT="$( (gzip -dc "$PACKAGE" 2>/dev/null || true) | tail -c +"$TAIL_START" | head -c "$TAIL_LEN" | LC_ALL=C tr -d '\0' | head -c 1 | wc -c | tr -d ' ' )"
+            else
+                NZ_CNT="$( tail -c +"$TAIL_START" "$PACKAGE" | head -c "$TAIL_LEN" | LC_ALL=C tr -d '\0' | head -c 1 | wc -c | tr -d ' ' )"
+            fi
+            [ "$NZ_CNT" = "0" ] || die "Device super partition ($DEV_SUPER_BYTES B) is smaller than package super ($SUPER_BYTES B) and trailing region contains non-zero data"
+            NEED_ZERO_TAIL=1
+            log "Verified trailing $TAIL_LEN B of package super are all zero; safe zero-tail truncation enabled."
+        else
+            die "Device super partition ($DEV_SUPER_BYTES B) is smaller than package super ($SUPER_BYTES B)"
+        fi
+    fi
 fi
 
 if [ "$PKG_KIND" = "manifest" ] && [ "$SUPER_INCLUDED" = "0" ] && [ "$FORCE_LEGACY_DELTA" != "1" ]; then
@@ -832,7 +857,7 @@ else
     fi
 
     log "Updating SQ2PROBE boot payload & arming offline super installation..."
-    APPLY_OUT="$(run_root "sh /data/local/tmp/spx-adb-helper.sh apply-full-esp-and-pending $PKG_SHA256 $PKG_KIND $WIPE_DATA $PKG_VERSION $ESP_SRC_PATH" | tr -d '\r')" || die "Failed to bootstrap ESP & arm offline OTA"
+    APPLY_OUT="$(run_root "sh /data/local/tmp/spx-adb-helper.sh apply-full-esp-and-pending $PKG_SHA256 $PKG_KIND $WIPE_DATA $PKG_VERSION $ESP_SRC_PATH $NEED_ZERO_TAIL" | tr -d '\r')" || die "Failed to bootstrap ESP & arm offline OTA"
     log "$APPLY_OUT"
 fi
 

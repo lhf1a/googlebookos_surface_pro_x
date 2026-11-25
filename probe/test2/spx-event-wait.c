@@ -27,6 +27,7 @@
 #endif
 
 #define MAX_EVDEV_FDS 16
+#define MAX_INOTIFY_DIRS 8
 
 static volatile sig_atomic_t g_stop = 0;
 
@@ -286,7 +287,7 @@ static int run_uevent(const char *subsys_csv, int stream, int debounce_ms, int t
     return 0;
 }
 
-static int drain_inotify_fd(int fd, const char *match_csv, int *dir_removed) {
+static int drain_inotify_fd(int fd, int primary_wd, const char *match_csv, int *dir_removed) {
     char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
     int matched = 0;
     for (;;) {
@@ -304,7 +305,7 @@ static int drain_inotify_fd(int fd, const char *match_csv, int *dir_removed) {
         while (ptr < buf + n) {
             const struct inotify_event *ev = (const struct inotify_event *)ptr;
             if (ev->mask & (IN_DELETE_SELF | IN_MOVE_SELF | IN_IGNORED)) {
-                if (dir_removed) {
+                if (dir_removed && ev->wd == primary_wd) {
                     *dir_removed = 1;
                 }
             } else if (ev->mask & IN_Q_OVERFLOW) {
@@ -320,19 +321,31 @@ static int drain_inotify_fd(int fd, const char *match_csv, int *dir_removed) {
     return matched;
 }
 
-static int run_inotify(const char *dir_path, const char *match_csv, int stream,
+static int run_inotify(const char *const *dirs, size_t dir_count, const char *match_csv, int stream,
                        int debounce_ms, int timeout_ms, const char *check_exists,
                        const char *check_diff) {
+    if (dir_count == 0) {
+        return 1;
+    }
     int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
     if (fd < 0) {
         return 1;
     }
     uint32_t mask = IN_CREATE | IN_CLOSE_WRITE | IN_MOVED_TO | IN_ATTRIB |
                     IN_DELETE_SELF | IN_MOVE_SELF;
-    int wd = inotify_add_watch(fd, dir_path, mask);
-    if (wd < 0) {
-        close(fd);
-        return 1;
+    int primary_wd = -1;
+    for (size_t i = 0; i < dir_count; i++) {
+        int wd = inotify_add_watch(fd, dirs[i], mask);
+        if (wd < 0) {
+            if (i == 0) {
+                close(fd);
+                return 1;
+            }
+            continue;
+        }
+        if (i == 0) {
+            primary_wd = wd;
+        }
     }
 
     if (stream) {
@@ -378,7 +391,7 @@ static int run_inotify(const char *dir_path, const char *match_csv, int stream,
         }
         if (pfd.revents & POLLIN) {
             int dir_removed = 0;
-            int matched = drain_inotify_fd(fd, match_csv, &dir_removed);
+            int matched = drain_inotify_fd(fd, primary_wd, match_csv, &dir_removed);
             if (dir_removed) {
                 (void)emit_line("removed");
                 exit_code = 2;
@@ -395,7 +408,7 @@ static int run_inotify(const char *dir_path, const char *match_csv, int stream,
                         pfd.revents = 0;
                         int drc = poll(&pfd, 1, rem);
                         if (drc > 0 && (pfd.revents & POLLIN)) {
-                            (void)drain_inotify_fd(fd, match_csv, &dir_removed);
+                            (void)drain_inotify_fd(fd, primary_wd, match_csv, &dir_removed);
                         } else if (drc <= 0 && errno != EINTR) {
                             break;
                         }
@@ -675,6 +688,8 @@ static int run_evdev_watch(const char *names_csv, const char *dev_dir, int strea
 int main(int argc, char **argv) {
     enum { MODE_NONE = 0, MODE_UEVENT, MODE_INOTIFY, MODE_SYSFS, MODE_EVDEV } mode = MODE_NONE;
     const char *target = NULL;
+    const char *inotify_dirs[MAX_INOTIFY_DIRS];
+    size_t inotify_dir_count = 0;
     const char *match_csv = NULL;
     const char *check_exists = NULL;
     const char *check_diff = NULL;
@@ -687,9 +702,15 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "--uevent") == 0 && i + 1 < argc) {
             mode = MODE_UEVENT;
             target = argv[++i];
-        } else if (strcmp(argv[i], "--inotify") == 0 && i + 1 < argc) {
+        } else if ((strcmp(argv[i], "--inotify") == 0 || strcmp(argv[i], "--inotify-extra") == 0) && i + 1 < argc) {
             mode = MODE_INOTIFY;
-            target = argv[++i];
+            const char *dir = argv[++i];
+            if (!target) {
+                target = dir;
+            }
+            if (inotify_dir_count < MAX_INOTIFY_DIRS) {
+                inotify_dirs[inotify_dir_count++] = dir;
+            }
         } else if (strcmp(argv[i], "--sysfs") == 0 && i + 1 < argc) {
             mode = MODE_SYSFS;
             target = argv[++i];
@@ -736,7 +757,7 @@ int main(int argc, char **argv) {
         case MODE_UEVENT:
             return run_uevent(target, stream, debounce_ms, timeout_ms, check_exists, check_diff);
         case MODE_INOTIFY:
-            return run_inotify(target, match_csv, stream, debounce_ms, timeout_ms, check_exists, check_diff);
+            return run_inotify(inotify_dirs, inotify_dir_count, match_csv, stream, debounce_ms, timeout_ms, check_exists, check_diff);
         case MODE_SYSFS:
             return run_sysfs(target, stream, debounce_ms, timeout_ms, check_diff);
         case MODE_EVDEV:
