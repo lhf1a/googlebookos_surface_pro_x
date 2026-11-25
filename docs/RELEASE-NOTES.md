@@ -4,6 +4,13 @@ Prebuilt disk images (`*.img.gz`), super-delta OTA packages (`*-ota-super-delta-
 
 ---
 
+## v0.9.10 (2026-11-25) *(ESP-Only Hotfix OTA for `v0.9.9` / `286.R2`)*
+
+- **Touch Calibration Idle Scan & Multi-Directory `spx-event-wait` Fix**: Added repeatable `--inotify` / `--inotify-extra DIR` support to static AArch64 `spx-event-wait` (`probe/test2/spx-event-wait.c`) and updated `touch-calibration-boot` to publish `/run/iptsd-noise/{status,tap-status}` immediately before replying `OK` to `noise-learn`/`noise-retest`/`noise-slide`/`tap-begin` while watching both `$files/request` and `/run/iptsd-noise` during active calibration (zero idle polling preserved when inactive). Eliminates the ~17–20s frozen countdown startup (jumping to 28s) and post-0s "service not responding" timeout caused by the previous single-directory 20s `inotify` wait.
+- **Zero-Tail Full-Image OTA Compatibility & Full `dalvik-cache` Refresh**: Added `inspect-super-used` and zero-tail-verified `extract-stream` truncation to `spx-ota-tool`, `spx-ota-stage`, `spx-ota-boot`, and PC ADB scripts (`tools/upgrade-googlebook-via-adb.{sh,ps1}`), allowing `4,096 MiB` GPT full disk images whose trailing `super` padding is all zeros (`3,460 MiB` compacted payload) to upgrade legacy `3,481 MiB` 5-partition devices in-place after read-only zero-tail verification (hardware-verified on SQ1 `3,481 MiB` `super` keeping `/data`). Also clears full ART `dalvik-cache` on all `super`-updating full/manifest OTAs, trims trailing zero padding in `build_ota_package.py --mode full`, and raises the ADB ESP backup free-space gate from `350 MiB` to `650 MiB` to prevent 1 GiB ESP `ENOSPC` during atomic `.spxtmp` copies.
+
+---
+
 ## v0.9.9 (2026-11-24)
 
 - **Android 17 `mica 16833189` (`CL3B.260622.286.R2`) Base & `SPXDLT01` Incremental `super-delta` OTA**: Upgraded the Android 17 system baseline from `16471258` (`273.R1`) to `16833189` (`286.R2`, security patch `2026-11-01`, Bluetooth HFP software datapath & A2DP offload fixes). Trims only Dell-specific `/vendor/etc/recovery/ota_recovery.img` (`119.42 MiB`) while preserving exact stock EROFS `uid/gid/mode` and SELinux/capability xattrs so compacted `super` (`3,460 MiB`) upgrades existing 5-partition `3,481 MiB` and 39-partition `12 GiB` devices in-place without repartitioning or wiping data, while fresh 5-partition images reserve `4,096 MiB` GPT `super` headroom. Adds the zero-dependency C11 `SPXDLT01` 4 KiB block-delta engine with single-pass `spx-ota-stage` unpacking, SHA-256 readback verification, and non-Dell `ota_recovery_updater.rc` gating (hardware-verified end-to-end on both SQ1 and SQ2).

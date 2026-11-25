@@ -4,6 +4,13 @@
 
 ---
 
+## v0.9.10 (2026-11-25) *（面向 `v0.9.9` / `286.R2` 的 ESP 在线修复包）*
+
+- **修复触摸校准静置检测倒计时卡住与归零后“服务无响应”**：为静态 ARM64 事件工具 `spx-event-wait`（`probe/test2/spx-event-wait.c`）新增多目录 `inotify` 监听（`--inotify-extra DIR`，兼容旧二进制回退），并更新 `touch-calibration-boot`：在 `noise-learn`/`noise-retest`/`noise-slide`/`tap-begin` 等请求回复 `OK` **前**立即同步发布 `noise-status`/`tap-status`，学习期间同时监听 `$files/request` 与 `/run/iptsd-noise/{status,tap-status}`（毫秒级响应，平时空闲仍保持 20 秒零轮询休眠）。彻底消除静置检测前 ~17–20 秒倒计时不动（跳至 28s 开始）及归零后因 20 秒睡眠错过 60 秒超时阈值的问题。
+- **修复旧 5 分区（`3,481 MiB`）设备全量包升级兼容与全量更新 `dalvik-cache` 刷新**：为 `spx-ota-tool`、`spx-ota-stage`、`spx-ota-boot` 及双端 PC ADB 升级脚本（`tools/upgrade-googlebook-via-adb.{sh,ps1}`）新增 `inspect-super-used` 只读扫描与 `extract-stream` 尾部全零校验裁剪，允许有效载荷为 `3,460 MiB`、GPT 预留 `4,096 MiB`（尾部全 `0x00`）的全量镜像直接原地无损升级旧 `3,481 MiB` 5 分区设备（已在 SQ1 `3,481 MiB` 实机保留 `/data` 升级验收通过）；同步修复全量/manifest 刷写 `super` 时未清空完整 ART `dalvik-cache` 的问题、`build_ota_package.py --mode full` 紧凑裁剪尾部零填充，并将 ADB 脚本 ESP 备份门槛由 `350 MiB` 提升至 `650 MiB` 以避免 1 GiB ESP 原子复制空间不足。
+
+---
+
 ## v0.9.9 (2026-11-24)
 
 - **升级 Android 17 `mica 16833189`（`CL3B.260622.286.R2`）基线与 `SPXDLT01` 跨底包增量 OTA**：将 Android 17 底包由 `16471258`（`273.R1`）升级至 `16833189`（`286.R2`，安全补丁 `2026-11-01`，并继承蓝牙 HFP 软件数据通路与 A2DP offload 修复）。裁剪 `vendor` 时仅剔除 Dell 专用 `/vendor/etc/recovery/ota_recovery.img`（`119.42 MiB`）并无损保留全部原版 EROFS `uid/gid/mode` 与 SELinux/capability xattrs，使紧凑 `super`（`3,460 MiB`）可在既有 5 分区 `3,481 MiB` 与 39 分区 `12 GiB` 设备上不重分区、不清空数据原地升级，新 5 分区整盘镜像同步将 GPT `super` 预留提升至 `4,096 MiB`。新增零依赖 C11 `SPXDLT01` 4 KiB 块级增量引擎、`spx-ota-stage` 单次解包与同哈希跳过优化、全量 SHA-256 回读校验及非 Dell 硬件 `ota_recovery_updater.rc` 禁用（已在 SQ1 与 SQ2 两套实机完成端到端升级验证）。

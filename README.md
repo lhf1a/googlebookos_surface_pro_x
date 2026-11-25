@@ -234,7 +234,7 @@ python3 scripts/build.py --private-root PREPARED_INPUTS --output FRESH_LINUX_OUT
 ## Documentation Index
 
 ### Build, Dependencies & Deployment
-- [RELEASE-NOTES](docs/RELEASE-NOTES.md) — Version history and changelogs (`v0.7.0`–`v0.9.9`)
+- [RELEASE-NOTES](docs/RELEASE-NOTES.md) — Version history and changelogs (`v0.7.0`–`v0.9.10`)
 - [BUILD](docs/BUILD.md)
 - [STANDARD-BUILD](docs/STANDARD-BUILD.md)
 - [DEPENDENCIES](docs/DEPENDENCIES.md)
