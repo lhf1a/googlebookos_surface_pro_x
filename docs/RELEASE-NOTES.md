@@ -4,6 +4,13 @@ Prebuilt disk images (`*.img.gz`), super-delta OTA packages (`*-ota-super-delta-
 
 ---
 
+## v1.0.0 (2026-11-27)
+
+- **SC8180X `mmcx` `s2idle` Black-Screen Wake Fix (`0019-pmdomain-qcom-rpmhpd-skip-retention-mmcx.patch`)**: Set `.skip_retention_level = true` on `mmcx` and `mmcx_ao` in `drivers/pmdomain/qcom/rpmhpd.c` so `rpmhpd_update_level_mapping()` aligns `enable_corner` with hardware `mmcx.mol = 0x40 (LOW_SVS)` from `cmd-db` while retaining full power-off (`corner = 0`) when idle. Fixes the post-sleep black-screen / SystemUI ANR failure where all 7 MMCX GDSCs (`mdss_gdsc`, `titan_top_gdsc`, `ife_{0,1}_gdsc`, `venus_gdsc`, `vcodec{0,1}_gdsc`) timed out (`status stuck at 'off'`) and poisoned `ae00000.display-subsystem` (`runtime_status = error`) whenever display, Venus (5s autosuspend), and camera all runtime-suspended simultaneously with no external DP monitor attached.
+- **Verification & Documentation Hygiene**: Hardware-verified via source-built paired ESP OTA across 3 consecutive `s2idle` cycles on SQ2 with external DP disconnected (`mmcx` `off-0` 12 cycles / 85.6 s, `mdss_gdsc` `off-0` 10 cycles / 69.0 s, zero GDSC/display/HWC errors; SQ1 re-verification and multi-hour overnight standby remain to be observed); cleaned up stale `TODO` items and fixed `tests/test_development_portability_policy.py` for the bilingual `docs/` layout.
+
+---
+
 ## v0.9.10 (2026-11-25) *(ESP-Only Hotfix OTA for `v0.9.9` / `286.R2`)*
 
 - **Touch Calibration Idle Scan & Multi-Directory `spx-event-wait` Fix**: Added repeatable `--inotify` / `--inotify-extra DIR` support to static AArch64 `spx-event-wait` (`probe/test2/spx-event-wait.c`) and updated `touch-calibration-boot` to publish `/run/iptsd-noise/{status,tap-status}` immediately before replying `OK` to `noise-learn`/`noise-retest`/`noise-slide`/`tap-begin` while watching both `$files/request` and `/run/iptsd-noise` during active calibration (zero idle polling preserved when inactive). Eliminates the ~17–20s frozen countdown startup (jumping to 28s) and post-0s "service not responding" timeout caused by the previous single-directory 20s `inotify` wait.

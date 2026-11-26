@@ -4,6 +4,13 @@
 
 ---
 
+## v1.0.0 (2026-11-27)
+
+- **修复 SC8180X `mmcx` `s2idle` 唤醒黑屏问题（`0019-pmdomain-qcom-rpmhpd-skip-retention-mmcx.patch`）**：为 `drivers/pmdomain/qcom/rpmhpd.c` 中的 `mmcx` 与 `mmcx_ao` 启用 `.skip_retention_level = true`，使 `rpmhpd_update_level_mapping()` 将 `enable_corner` 对齐到 `cmd-db` 的硬件 `mmcx.mol = 0x40 (LOW_SVS)`（同时保留空闲时彻底掉电至 `corner = 0`）。彻底解决无外接 DP 时显示、Venus（5 秒自动释放）与相机同时 runtime-suspend 后，下次唤醒因向 `mmcx` 投出低于 `mmcx.mol` 的 `RETENTION (0x10)` 导致全部 7 个 MMCX GDSC 超时（`status stuck at 'off'`）、`ae00000.display-subsystem` 被永久置为 `runtime_status = error` 及唤醒黑屏/SystemUI ANR 的故障。
+- **实机验证与文档清理**：通过源码重编配套 ESP OTA 包在 SQ2 无外接 DP 条件下实测连续 3 轮 `s2idle` 唤醒通过（`mmcx` 下电 12 次 / 85.6 秒，`mdss_gdsc` 下电 10 次 / 69.0 秒，0 GDSC/显示/HWC 报错；SQ1 复测与整夜长时待机仍待观察）；同步清理 [TODO.zh-CN.md](TODO.zh-CN.md) 中已过时的历史条目并修复 `tests/test_development_portability_policy.py` 以匹配双语文档结构。
+
+---
+
 ## v0.9.10 (2026-11-25) *（面向 `v0.9.9` / `286.R2` 的 ESP 在线修复包）*
 
 - **修复触摸校准静置检测倒计时卡住与归零后“服务无响应”**：为静态 ARM64 事件工具 `spx-event-wait`（`probe/test2/spx-event-wait.c`）新增多目录 `inotify` 监听（`--inotify-extra DIR`，兼容旧二进制回退），并更新 `touch-calibration-boot`：在 `noise-learn`/`noise-retest`/`noise-slide`/`tap-begin` 等请求回复 `OK` **前**立即同步发布 `noise-status`/`tap-status`，学习期间同时监听 `$files/request` 与 `/run/iptsd-noise/{status,tap-status}`（毫秒级响应，平时空闲仍保持 20 秒零轮询休眠）。彻底消除静置检测前 ~17–20 秒倒计时不动（跳至 28s 开始）及归零后因 20 秒睡眠错过 60 秒超时阈值的问题。
