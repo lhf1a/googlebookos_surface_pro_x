@@ -25,6 +25,7 @@ KERNEL_PM_PATCHES = (
     "patches/spx-portable-boot/0014-clk-qcom-gcc-sc8180x-enable-rpm.patch",
     "patches/spx-portable-boot/0015-usb-typec-ucsi-cancel-resume-work-on-suspend.patch",
     "patches/spx-portable-boot/0016-arm64-dts-qcom-sc8180x-spmi-pdc-wake.patch",
+    "patches/spx-portable-boot/0019-pmdomain-qcom-rpmhpd-skip-retention-mmcx.patch",
 )
 CAMSS_UNWIND_PATCH = "patches/camera/0007-camss-balanced-s-stream-unwind.patch"
 DPU_VSYNC_DEDUP_PATCH = "patches/sm8350-dpu-vsync-dedup.patch"
@@ -516,6 +517,133 @@ class Sc8180xS2idleStabilityFixTests(unittest.TestCase):
         node = m.group(0)
         self.assertIn("interrupts-extended = <&pdc 1 IRQ_TYPE_LEVEL_HIGH>;", node)
         self.assertNotIn("interrupts = <GIC_SPI 481", node)
+
+    @unittest.skipUnless(KSRC.is_dir(), "requires local 6.18 reference kernel source")
+    def test_rpmhpd_mmcx_skip_retention_level_patch_and_behavior(self):
+        patched = apply_patch_to_temp_file(
+            "drivers/pmdomain/qcom/rpmhpd.c",
+            "patches/spx-portable-boot/0019-pmdomain-qcom-rpmhpd-skip-retention-mmcx.patch",
+        )
+        for name in ("mmcx", "mmcx_ao"):
+            m = re.search(rf"static struct rpmhpd {name} = \{{.*?\n\}};", patched, re.S)
+            self.assertIsNotNone(m, f"missing struct rpmhpd {name}")
+            self.assertIn(".skip_retention_level = true,", m.group(0))
+        # Verify SC8180X table maps MMCX/MMCX_AO to &mmcx/&mmcx_ao
+        sc8180x_m = re.search(
+            r"static struct rpmhpd \*sc8180x_rpmhpds\[\] = \{.*?\n\};", patched, re.S
+        )
+        self.assertIsNotNone(sc8180x_m)
+        self.assertIn("[SC8180X_MMCX] = &mmcx,", sc8180x_m.group(0))
+        self.assertIn("[SC8180X_MMCX_AO] = &mmcx_ao,", sc8180x_m.group(0))
+
+        # Compile and run the exact rpmhpd_update_level_mapping / enable_corner /
+        # power_on / power_off / set_performance_state transitions against the
+        # SC8180X cmd-db mmcx.lvl table (mmcx.mol = 0x40 = LOW_SVS).
+        fn_map = extract_c_function(patched, "rpmhpd_update_level_mapping")
+        harness = r"""
+#include <assert.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
+typedef uint16_t u16;
+typedef uint32_t u32;
+#define RPMH_ARC_MAX_LEVELS 16
+#define RPMH_REGULATOR_LEVEL_RETENTION 16
+#define IS_ERR(p) ((p) == NULL)
+#define PTR_ERR(p) (-ENOENT)
+#define pr_debug(...) do {} while (0)
+
+struct rpmhpd {
+    const char *res_name;
+    unsigned int corner;
+    unsigned int active_corner;
+    unsigned int enable_corner;
+    u32 level[RPMH_ARC_MAX_LEVELS];
+    size_t level_count;
+    bool enabled;
+    bool skip_retention_level;
+};
+
+static const u16 sc8180x_mmcx_aux[] = {
+    0x0000, 0x0010, 0x0040, 0x0080, 0x00c0, 0x0100, 0x0180,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000
+};
+
+static const u16 *cmd_db_read_aux_data(const char *name, size_t *len) {
+    (void)name;
+    *len = sizeof(sc8180x_mmcx_aux);
+    return sc8180x_mmcx_aux;
+}
+
+""" + fn_map + r"""
+
+static unsigned int resolve_level(const struct rpmhpd *pd, unsigned int level) {
+    unsigned int i;
+    for (i = 0; i < pd->level_count; i++)
+        if (level <= pd->level[i])
+            break;
+    if (i == pd->level_count)
+        i--;
+    if (pd->enabled && i < pd->enable_corner)
+        i = pd->enable_corner;
+    return i;
+}
+
+int main(void) {
+    struct rpmhpd unpatched = { .res_name = "mmcx.lvl", .skip_retention_level = false };
+    struct rpmhpd fixed = { .res_name = "mmcx.lvl", .skip_retention_level = true };
+    assert(rpmhpd_update_level_mapping(&unpatched) == 0);
+    assert(rpmhpd_update_level_mapping(&fixed) == 0);
+
+    /* Unpatched picks RETENTION (hlvl=1, vlvl=0x10 < mmcx.mol 0x40). */
+    assert(unpatched.enable_corner == 1);
+    assert(unpatched.level[unpatched.enable_corner] == 0x10);
+
+    /* Patched skips RETENTION and picks LOW_SVS (hlvl=2, vlvl=0x40 == mmcx.mol). */
+    assert(fixed.level_count == 7);
+    assert(fixed.level[0] == 0);
+    assert(fixed.level[1] == 0);
+    assert(fixed.enable_corner == 2);
+    assert(fixed.level[fixed.enable_corner] == 0x40);
+
+    /* Power-on from corner=0 votes LOW_SVS (hlvl=2), never RETENTION (hlvl=1). */
+    fixed.corner = 0;
+    unsigned int on_corner = fixed.corner > fixed.enable_corner ? fixed.corner : fixed.enable_corner;
+    assert(on_corner == 2);
+    assert(fixed.level[on_corner] == 0x40);
+
+    /* Active level lookup clamps 0/16/48/64 -> hlvl=2 and keeps higher OPPs exact. */
+    fixed.enabled = true;
+    assert(resolve_level(&fixed, 0) == 2);
+    assert(resolve_level(&fixed, 0x10) == 2);
+    assert(resolve_level(&fixed, 0x30) == 2);
+    assert(resolve_level(&fixed, 0x40) == 2);
+    assert(resolve_level(&fixed, 0x80) == 3);
+    assert(resolve_level(&fixed, 0x100) == 5);
+    assert(resolve_level(&fixed, 0x180) == 6);
+
+    /* Disabled lookup still drops corner to 0 (full OFF when idle). */
+    fixed.enabled = false;
+    assert(resolve_level(&fixed, 0) == 0);
+    puts("rpmhpd mmcx skip_retention_level passed");
+    return 0;
+}
+"""
+        with tempfile.TemporaryDirectory(prefix="spx-rpmhpd-test-") as td:
+            src = Path(td) / "test.c"
+            exe = Path(td) / "test"
+            src.write_text(harness)
+            subprocess.run(
+                ["cc", "-std=c11", "-Wall", "-Wextra", "-Wno-sign-compare", "-Werror", "-fsanitize=address,undefined", str(src), "-o", str(exe)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            run = subprocess.run([str(exe)], check=True, capture_output=True, text=True)
+            self.assertIn("rpmhpd mmcx skip_retention_level passed", run.stdout)
 
     def test_hybrid_kernel_config_enables_qcom_stats(self):
         text = (ROOT / "configs/kernel-6.18-hybrid.config").read_text()

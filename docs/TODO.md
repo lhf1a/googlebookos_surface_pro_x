@@ -6,22 +6,19 @@ Lists only unfinished and unverified items. See the corresponding feature docs f
 
 Rules: [DEVELOPMENT](DEVELOPMENT.md), and `SPX-PORTABLE-SQ1-SQ2` in root `AGENTS.md`.
 
-- Audit standard builds, active initramfs, EFI/DT, and runtime helpers to remove single-device admission/resource assumptions on serial numbers, fixed source disk UUID/ESP markers, addresses, user IDs, and one-time enumerated values.
-- Separate lab SSH private keys/host identities, passwords/shadow, saved Wi-Fi state, and target-unique data from runtime/donor so generic images do not inherit them.
-- Switch storage/ESP/user/audio/touch resources to dynamic discovery while keeping live target verification and write-safety guards for disk writes.
-- Complete representative cross-device regression on a single artifact across SQ1/SQ2 × default/fallback entries, covering different identities, capacities, valid resource numbers, and upgrades over existing data.
-- Spot-check remaining hardcoded device paths, phandles, event/card numbers, and single-device assumptions.
+- Complete representative cross-device regression on a single artifact across SQ1/SQ2 × default/fallback entries, covering varying SMBIOS identities, capacities, enumerated resource indices, and upgrades over existing data.
+- Spot-check remaining hardcoded device paths, phandles, event/card numbers, and single-device assumptions in boot/runtime scripts.
 
 ## Delivery Acceptance
 
 - [ ] Fresh boot the current Hybrid full image on SQ1 and SQ2 (each with fresh userdata), recording boot ID, first-boot policy, and launcher result.
-- [ ] Upgrade path over existing data: preserve user credentials, Wi-Fi, and launcher selection without re-overwriting settings.
-- [ ] SQ1 long-duration run and suspend/resume; SQ2 long-term power consumption and multi-cycle resume.
-- [ ] Anonymity review of public images (no SSH/Wi-Fi/account/FSG/NV residuals).
+- [ ] Upgrade path over existing data: verify the latest build preserves user credentials, Wi-Fi, and launcher selection without re-overwriting settings across SQ1/SQ2.
+- [ ] SQ1 long-duration run and suspend/resume (including the `mmcx` `skip_retention_level` fix); SQ2 overnight standby and long-term power consumption measurements.
+- [ ] Pre-release anonymity review of published `.img.gz` artifacts (confirm zero SSH/Wi-Fi/account/FSG/NV residuals).
 
 ## Camera
 
-- [ ] IR capture and Hello authentication.
+- [ ] SQ1 on-device acceptance for Class 2 IR Face Unlock (`ov7251` multi-orientation matching & liveness).
 - Known limitations: occasional CCI open/switch timeout; low HD software ISP framerate; image quality/exposure and rear AF need improvement.
 
 ## Sensors
@@ -31,16 +28,13 @@ Rules: [DEVELOPMENT](DEVELOPMENT.md), and `SPX-PORTABLE-SQ1-SQ2` in root `AGENTS
 
 ## LTE
 
-- [ ] SQ2 new collection entrypoint and full new image fresh-boot acceptance on both devices.
-- [ ] Preserve local FSG/UUID cache reuse path without embedding single-device calibration.
+- [ ] SQ2 new collection entrypoint and full new image fresh-boot acceptance on both SQ1 and SQ2.
 
 ## Graphics & Video
 
-- [ ] Wild Life GMEM root cause (currently a sysmem compatibility workaround scoped to A680.1 + 3DMark).
-- [ ] Internal panel HDR (currently SDR only, Main10 filtered).
+- [ ] Internal panel HDR (currently SDR only on panel; Main10/P010 decode is available on standard Surfaces).
 - [ ] Framerate/power under concurrent HD software ISP and video.
 
 ## Power
 
-- [ ] Investigate premature `timerfd` wakeups and freezer aborts in `s2idle` loops.
-- [ ] Long-term power and battery curve measurements.
+- [ ] Multi-hour / overnight `s2idle` wakeup audit and battery discharge curve measurements across SQ1 and SQ2 (post-`timerfd`/`SSAM`/`MMCX` fixes).

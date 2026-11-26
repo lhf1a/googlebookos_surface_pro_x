@@ -1,0 +1,36 @@
+From: Antigravity <dev@localhost>
+Subject: [PATCH] pmdomain: qcom: rpmhpd: skip retention level for MMCX
+
+On SC8180X, cmd-db defines mmcx.lvl as [0x0000, 0x0010 (RETENTION),
+0x0040 (LOW_SVS), ...] with mmcx.mol = 0x0040 (LOW_SVS), and all three
+multimedia clock controllers (dispcc, videocc, camcc) require at least
+LOW_SVS. When every MMCX consumer (display, Venus, camera) runtime-suspends
+simultaneously, mmcx->corner drops to 0 and mmcx powers off. Without
+skip_retention_level, the next child GDSC power-on (mdss_gdsc,
+titan_top_gdsc, venus_gdsc, vcodec*_gdsc) invokes rpmhpd_power_on() with
+enable_corner = 1 (RETENTION, below mmcx.mol), causing every MMCX GDSC to
+time out with "status stuck at 'off'" and permanently poisoning
+ae00000.display-subsystem with runtime_status = error.
+
+Set .skip_retention_level = true on mmcx and mmcx_ao (matching mxc/mxc_ao)
+so rpmhpd_update_level_mapping() sets enable_corner to LOW_SVS (0x40)
+while still allowing full power-off (corner 0) when idle.
+
+--- a/drivers/pmdomain/qcom/rpmhpd.c
++++ b/drivers/pmdomain/qcom/rpmhpd.c
+@@ -127,6 +127,7 @@
+ 	.pd = { .name = "mmcx", },
+ 	.peer = &mmcx_ao,
+ 	.res_name = "mmcx.lvl",
++	.skip_retention_level = true,
+ };
+ 
+ static struct rpmhpd mmcx_ao = {
+@@ -134,6 +135,7 @@
+ 	.active_only = true,
+ 	.peer = &mmcx,
+ 	.res_name = "mmcx.lvl",
++	.skip_retention_level = true,
+ };
+ 
+ static struct rpmhpd mmcx_ao_w_cx_parent;

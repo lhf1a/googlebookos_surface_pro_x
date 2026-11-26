@@ -15,21 +15,29 @@ class PortabilityPolicy(unittest.TestCase):
             self.assertIn(term, text)
 
     def test_development_contract_has_all_six_sections(self):
-        text = (DOCS / 'DEVELOPMENT.md').read_text()
+        en = (DOCS / 'DEVELOPMENT.md').read_text()
+        zh = (DOCS / 'DEVELOPMENT.zh-CN.md').read_text()
         for number in range(1, 7):
-            self.assertEqual(text.count('## PORT-%02d：' % number), 1)
+            self.assertEqual(en.count('## PORT-%02d:' % number), 1)
+            self.assertEqual(zh.count('## PORT-%02d：' % number), 1)
+        for term in ['single standard image', 'Serial numbers', 'MAC', 'IP/SSH', 'UUID/ESP', 'phandle',
+                     'FSG', "target's own storage", 'screen_only', 'prevent mis-writes', 'Untested']:
+            self.assertIn(term, en)
         for term in ['同一份镜像', '不允许', '序列号', 'MAC', 'IP/SSH', 'UUID/ESP', 'phandle',
-                     'FSG', '目标自身', 'screen_only/nohibernate', '防误写', '未测']:
-            self.assertIn(term, text)
+                     'FSG', '目标自身', 'screen_only', 'nohibernate', '防止误写', '未测']:
+            self.assertIn(term, zh)
 
     def test_build_guidance_references_portability_contract(self):
         for name in ['BUILD.md', 'STANDARD-BUILD.md']:
             self.assertIn('DEVELOPMENT.md', (DOCS / name).read_text())
 
     def test_todo_lists_open_portability_work(self):
-        todo = (DOCS / 'TODO.md').read_text()
-        self.assertIn('P0：任意 SQ1/SQ2 通用交付整改', todo)
-        self.assertIn('待审计/整改/验收', todo)
+        todo_en = (DOCS / 'TODO.md').read_text()
+        todo_zh = (DOCS / 'TODO.zh-CN.md').read_text()
+        self.assertIn('## P0: Generic SQ1/SQ2 Delivery Remediation', todo_en)
+        self.assertIn('## Delivery Acceptance', todo_en)
+        self.assertIn('## P0：任意 SQ1/SQ2 通用交付整改', todo_zh)
+        self.assertIn('## 交付验收', todo_zh)
 
     def test_historical_records_are_not_committed_documents(self):
         self.assertFalse((DOCS / 'HANDOFF.md').exists())
